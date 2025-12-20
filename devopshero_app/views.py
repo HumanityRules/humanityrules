@@ -1,7 +1,6 @@
 from django.shortcuts import render
-from django.http import HttpResponse
 
 
 def index(request):
-    return HttpResponse("Hello, world. You're at the devopshero index.")
+    return render(request, "devopshero_app/index.html")
 
