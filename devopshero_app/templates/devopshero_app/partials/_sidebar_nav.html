@@ -1,0 +1,43 @@
+{% comment %}
+Sidebar navigation content - shared between mobile and desktop sidebars.
+Expected context:
+  - navigation_items: List of nav items (name, url, icon, is_active)
+  - user_organizations: List of organizations (name, url, initial, is_active)
+  - settings_url: URL for settings page
+  - site_logo_url: URL for company logo
+{% endcomment %}
+<div class="flex h-16 shrink-0 items-center">
+  <img src="{{ site_logo_url|default:'https://tailwindcss.com/plus-assets/img/logos/mark.svg?color=indigo&shade=500' }}" alt="{{ site_name|default:'Your Company' }}" class="h-8 w-auto" />
+</div>
+<nav class="flex flex-1 flex-col">
+  <ul role="list" class="flex flex-1 flex-col gap-y-7">
+    <!-- Main navigation -->
+    <li>
+      <ul role="list" class="-mx-2 space-y-1">
+        {% for item in navigation_items %}
+          {% include "devopshero_app/partials/_navigation_item.html" with item=item %}
+        {% endfor %}
+      </ul>
+    </li>
+    
+    <!-- Organizations section -->
+    {% if user_organizations %}
+    <li>
+      <div class="text-xs/6 font-semibold text-gray-400">Your organizations</div>
+      <ul role="list" class="-mx-2 mt-2 space-y-1">
+        {% for organization in user_organizations %}
+          {% include "devopshero_app/partials/_organization_item.html" with organization=organization %}
+        {% endfor %}
+      </ul>
+    </li>
+    {% endif %}
+    
+    <!-- Settings link at bottom -->
+    <li class="mt-auto">
+      <a href="{{ settings_url|default:'#' }}" class="group -mx-2 flex gap-x-3 rounded-md p-2 text-sm/6 font-semibold text-gray-400 hover:bg-white/5 hover:text-white">
+        {% include "devopshero_app/partials/icons/settings.html" %}
+        Settings
+      </a>
+    </li>
+  </ul>
+</nav>
