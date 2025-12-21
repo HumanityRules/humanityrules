@@ -1,5 +1,4 @@
 .DS_Store
 .venv/
 __pycache__/
-
-
+.playwright-mcp/
