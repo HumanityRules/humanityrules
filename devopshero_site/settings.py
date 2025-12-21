@@ -37,11 +37,15 @@ INSTALLED_APPS = [
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
+    "tailwind",
+    "tailwindtheme_app",
     "django_browser_reload",
     "django_watchfiles",
     "django_htmx",
     "devopshero_app",
 ]
+
+TAILWIND_APP_NAME = "tailwindtheme_app"
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
