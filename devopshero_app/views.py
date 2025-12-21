@@ -50,9 +50,9 @@ def get_sidebar_context(current_page):
     }
 
 
-def index(request):
+def dashboard(request):
     context = get_sidebar_context(current_page="dashboard")
-    return render(request, "devopshero_app/index.html", context)
+    return render(request, "devopshero_app/dashboard.html", context)
 
 
 def random_quote(request):
