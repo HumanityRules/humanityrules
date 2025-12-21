@@ -55,6 +55,11 @@ def dashboard(request):
     return render(request, "devopshero_app/dashboard.html", context)
 
 
+def team(request):
+    context = get_sidebar_context(current_page="team")
+    return render(request, "devopshero_app/team.html", context)
+
+
 def random_quote(request):
     """Returns a partial HTML snippet with a random quote - for HTMX demo"""
     quotes = [
