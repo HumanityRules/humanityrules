@@ -1,3 +1,4 @@
+{% load static tailwind_tags %}
 {% load django_htmx %}
 <!DOCTYPE html>
 <html lang="en">
@@ -7,11 +8,19 @@
     <title>{% block title %}DevOps Hero{% endblock %}</title>
 
     {% htmx_script %}
+    {% tailwind_css %}
 
     {% block extra_head %}{% endblock %}    
 </head>
 <body hx-headers='{"x-csrftoken": "{{ csrf_token }}"}'>
     {% block content %}{% endblock %}
+
+    <div class="container mx-auto">
+        <section class="flex items-center justify-center h-screen">
+            <h1 class="text-5xl">Django + Tailwind = ❤️</h1>
+        </section>
+    </div>
+    
 </body>
 </html>
 
