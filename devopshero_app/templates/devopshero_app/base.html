@@ -1,7 +1,7 @@
 {% load static tailwind_tags %}
 {% load django_htmx %}
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" class="h-full bg-white dark:bg-gray-900">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -10,17 +10,13 @@
     {% htmx_script %}
     {% tailwind_css %}
 
+    <!-- Include Tailwind Plus Elements for the components from Tailwind Application UI that require javascript -->
+    <!-- like for example the profile dropdown menu -->
+    <script src="https://cdn.jsdelivr.net/npm/@tailwindplus/elements@1" type="module"></script>
+
     {% block extra_head %}{% endblock %}    
 </head>
-<body hx-headers='{"x-csrftoken": "{{ csrf_token }}"}'>
+<body hx-headers='{"x-csrftoken": "{{ csrf_token }}"}' class="h-full">
     {% block content %}{% endblock %}
-
-    <div class="container mx-auto">
-        <section class="flex items-center justify-center h-screen">
-            <h1 class="text-5xl">Django + Tailwind = ❤️</h1>
-        </section>
-    </div>
-    
 </body>
 </html>
-
