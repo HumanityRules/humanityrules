@@ -3,7 +3,7 @@ import random
 from datetime import datetime
 
 
-def get_sidebar_context(current_page):
+def get_app_shell_context(current_page):
     """
     Returns the common sidebar context used across all pages.
     
@@ -50,23 +50,24 @@ def get_sidebar_context(current_page):
     }
 
 
-def get_base_template(request):
-    """Returns the appropriate base template based on request type."""
-    if request.htmx:
-        return "devopshero_app/_htmx_base.html"
-    return "devopshero_app/_app_layout.html"
-
-
 def dashboard(request):
-    context = get_sidebar_context(current_page="dashboard")
-    context["base_template"] = get_base_template(request)
-    return render(request, "devopshero_app/dashboard.html", context)
+    if request.htmx:
+        return render(request, "devopshero_app/dashboard.html", context = {})
+
+    # Return app shell - content will be loaded via HTMX
+    context = get_app_shell_context(current_page="dashboard")
+    context["content_url"] = "/"
+    return render(request, "devopshero_app/app_shell.html", context = context)
 
 
 def team(request):
-    context = get_sidebar_context(current_page="team")
-    context["base_template"] = get_base_template(request)
-    return render(request, "devopshero_app/team.html", context)
+    if request.htmx:
+        return render(request, "devopshero_app/team.html", context = {})
+        
+    # Return app shell - content will be loaded via HTMX
+    context = get_app_shell_context(current_page="team")
+    context["content_url"] = "/team/"
+    return render(request, "devopshero_app/app_shell.html", context = context)
 
 
 def random_quote(request):
