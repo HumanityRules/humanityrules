@@ -50,13 +50,22 @@ def get_sidebar_context(current_page):
     }
 
 
+def get_base_template(request):
+    """Returns the appropriate base template based on request type."""
+    if request.htmx:
+        return "devopshero_app/_htmx_base.html"
+    return "devopshero_app/_app_layout.html"
+
+
 def dashboard(request):
     context = get_sidebar_context(current_page="dashboard")
+    context["base_template"] = get_base_template(request)
     return render(request, "devopshero_app/dashboard.html", context)
 
 
 def team(request):
     context = get_sidebar_context(current_page="team")
+    context["base_template"] = get_base_template(request)
     return render(request, "devopshero_app/team.html", context)
 
 
