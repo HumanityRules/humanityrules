@@ -79,10 +79,12 @@
 
   {# Main content #}
   <main class="py-10">
-    <div id="main-content" class="px-4 sm:px-6 lg:px-8">
-      {% block main_content %}
-      {# Override this block in child templates #}
-      {% endblock %}
+    <div id="main-content" 
+         hx-get="{{ content_url }}" 
+         hx-trigger="load"
+         hx-swap="innerHTML"
+         class="px-4 sm:px-6 lg:px-8">
+      {# Content will be loaded via HTMX #}
     </div>
   </main>
 </div>
