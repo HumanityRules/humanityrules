@@ -29,7 +29,7 @@ def get_app_shell_context(current_page):
     # User menu items
     profile_menu_items = [
         {"name": "Your profile", "url": "/profile/"},
-        {"name": "Sign out", "url": "/logout/"},
+        {"name": "Sign out", "url": "/auth/logout/"},
     ]
     
     # Current user info - in a real app, this would come from request.user

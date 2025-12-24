@@ -9,5 +9,7 @@ dependencies = [
     "django-browser-reload>=1.21.0",
     "django-htmx>=1.27.0",
     "django-tailwind[honcho, cookiecutter]>=4.4.2",
-    "django-watchfiles>=1.4.0"
+    "django-watchfiles>=1.4.0",
+    "python-dotenv>=1.1.0",
+    "workos>=5.37.0",
 ]

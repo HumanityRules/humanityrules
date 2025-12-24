@@ -10,10 +10,15 @@ For the full list of settings and their values, see
 https://docs.djangoproject.com/en/6.0/ref/settings/
 """
 
+import os
 from pathlib import Path
+from dotenv import load_dotenv
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
+
+# Load environment variables from .env file
+load_dotenv(BASE_DIR / ".env")
 
 
 # Quick-start development settings - unsuitable for production
@@ -128,3 +133,12 @@ STATIC_URL = 'static/'
 
 # Custom user model
 AUTH_USER_MODEL = 'devopshero_app.User'
+
+# WorkOS Configuration
+WORKOS_CLIENT_ID = os.environ.get("WORKOS_CLIENT_ID")
+WORKOS_API_KEY = os.environ.get("WORKOS_API_KEY")
+WORKOS_REDIRECT_URI = os.environ.get("WORKOS_REDIRECT_URI", "http://127.0.0.1:8000/auth/callback/")
+
+# Login URLs
+LOGIN_URL = "/auth/login/"  # Where Django redirects unauthenticated users when they try to access a protected view
+LOGIN_REDIRECT_URL = "/"    # Where Django redirects authenticated users after successful login
