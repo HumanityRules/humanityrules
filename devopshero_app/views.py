@@ -47,7 +47,7 @@ def get_app_shell_context(current_page):
         "current_user": current_user,
         "settings_url": "/settings/",
         "search_url": "/search/",
-        "site_logo_url": static('devopshero_app/devops-hero-logo.png'),
+        "site_logo_url": static('devopshero_app/devops-hero-logo-large.png'),
         "site_name": "DevOps Hero",
     }
 
