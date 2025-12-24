@@ -1,0 +1,48 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en" class="h-full">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DevOps Hero - Deploy Internal Tools with Ease</title>
+    <link rel="stylesheet" href="{% static 'css/dist/styles.css' %}">
+</head>
+<body class="h-full" style="background-color: #0f1623;">
+    <div class="flex min-h-full flex-col justify-center px-6 py-12 lg:px-8">
+        <div class="sm:mx-auto sm:w-full sm:max-w-md text-center">
+            <!-- Logo -->
+            <img class="mx-auto w-auto" src="{{ site_logo_url }}" alt="DevOps Hero">
+            
+            <p class="mt-3 text-lg text-white">
+                No tickets. No Terraform. Deploy internal tools in minutes.
+            </p>
+        </div>
+
+        <div class="mt-12 sm:mx-auto sm:w-full sm:max-w-sm">
+            {% if is_authenticated %}
+                <!-- Authenticated: Go to Dashboard -->
+                <a href="/dashboard/" 
+                   class="flex w-full justify-center rounded-md bg-indigo-500 px-4 py-3 text-sm font-semibold text-white shadow-sm hover:bg-indigo-400 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-500 transition-colors">
+                    Go to Dashboard
+                </a>
+            {% else %}
+                <!-- Not authenticated: Sign in / Sign up -->
+                <div class="space-y-4">
+                    <a href="/auth/login/" 
+                       class="flex w-full justify-center rounded-md bg-indigo-500 px-4 py-3 text-sm font-semibold text-white shadow-sm hover:bg-indigo-400 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-500 transition-colors">
+                        Sign in
+                    </a>
+                    <a href="/auth/login/" 
+                       class="flex w-full justify-center rounded-md bg-white/10 px-4 py-3 text-sm font-semibold text-white shadow-sm ring-1 ring-inset ring-white/20 hover:bg-white/20 transition-colors">
+                        Sign up
+                    </a>
+                </div>
+            {% endif %}
+        </div>
+
+        <p class="mt-16 text-center text-sm text-gray-500">
+            Enterprise-grade security. Zero infrastructure headaches.
+        </p>
+    </div>
+</body>
+</html>

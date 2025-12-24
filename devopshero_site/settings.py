@@ -138,7 +138,3 @@ AUTH_USER_MODEL = 'devopshero_app.User'
 WORKOS_CLIENT_ID = os.environ.get("WORKOS_CLIENT_ID")
 WORKOS_API_KEY = os.environ.get("WORKOS_API_KEY")
 WORKOS_REDIRECT_URI = os.environ.get("WORKOS_REDIRECT_URI", "http://127.0.0.1:8000/auth/callback/")
-
-# Login URLs
-LOGIN_URL = "/auth/login/"  # Where Django redirects unauthenticated users when they try to access a protected view
-LOGIN_REDIRECT_URL = "/"    # Where Django redirects authenticated users after successful login

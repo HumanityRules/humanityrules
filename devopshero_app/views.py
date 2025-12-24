@@ -51,6 +51,13 @@ def get_app_shell_context(current_page):
         "site_name": "DevOps Hero",
     }
 
+def landing(request):
+    context = {
+        "is_authenticated": request.user.is_authenticated,
+        "site_logo_url": static('devopshero_app/devops-hero-logo-large.png'),
+    }
+    return render(request, "devopshero_app/landing.html", context=context)
+    
 
 @login_required
 def dashboard(request):
@@ -59,7 +66,7 @@ def dashboard(request):
 
     # Return app shell - content will be loaded via HTMX
     context = get_app_shell_context(current_page="dashboard")
-    context["content_url"] = "/"
+    context["content_url"] = "/dashboard/"
     return render(request, "devopshero_app/app_shell.html", context = context)
 
 
