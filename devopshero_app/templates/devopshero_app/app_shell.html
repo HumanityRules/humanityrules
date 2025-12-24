@@ -80,13 +80,11 @@
   {# Main content #}
   <main class="py-10">
     <div id="main-content" 
-         {% if content_url %}hx-get="{{ content_url }}" hx-trigger="load" hx-swap="innerHTML"{% endif %}
+         hx-get="{{ content_url }}" 
+         hx-trigger="load"
+         hx-swap="innerHTML"
          class="px-4 sm:px-6 lg:px-8">
-      {% if error_content %}
-        {% include "devopshero_app/partials/_error.html" with error_code=error_content.error_code error_message=error_content.error_message %}
-      {% else %}
-        {# Content will be loaded via HTMX #}
-      {% endif %}
+      {# Content will be loaded via HTMX #}
     </div>
   </main>
 </div>

@@ -20,8 +20,5 @@
     {% block content %}{% endblock %}
 
     {% include "devopshero_app/partials/_debug_htmx_indicator.html" %}
-
-    <!-- HTMX is configured to handle error responses via the HtmxErrorMiddleware on the server side -->
-    <!-- The middleware returns a user-friendly error partial instead of the full Django debug page -->
 </body>
 </html>
