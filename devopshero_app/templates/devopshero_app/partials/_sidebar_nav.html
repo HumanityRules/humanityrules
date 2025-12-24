@@ -45,7 +45,13 @@ Expected context:
         
     <!-- Settings link at bottom -->
     <li class="mt-auto">
-      <a href="{{ settings_url|default:'#' }}" class="group -mx-2 flex gap-x-3 rounded-md p-2 text-sm/6 font-semibold text-gray-400 hover:bg-white/5 hover:text-white">
+      <a href="{{ settings_url|default:'#' }}"
+         hx-get="{{ settings_url|default:'#' }}"
+         hx-target="#main-content"
+         hx-swap="innerHTML"
+         hx-push-url="true"
+         class="nav-link group -mx-2 flex gap-x-3 rounded-md p-2 text-sm/6 font-semibold text-gray-400 hover:bg-white/5 hover:text-white"
+         data-nav-url="{{ settings_url|default:'#' }}">
         {% include "devopshero_app/partials/icons/settings.html" %}
         Settings
       </a>

@@ -6,6 +6,10 @@ urlpatterns = [
     path("", views.landing, name="landing"),
     path("dashboard/", views.dashboard, name="dashboard"),
     path("workspaces/", views.workspaces, name="workspaces"),
+    path("apps/", views.apps, name="apps"),
+    path("datastores/", views.datastores, name="datastores"),
+    path("security/", views.security, name="security"),
+    path("settings/", views.settings, name="settings"),
     path("random-quote/", views.random_quote, name="random_quote"),
     
     # Authentication
