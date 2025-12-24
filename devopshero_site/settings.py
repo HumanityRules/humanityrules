@@ -62,6 +62,7 @@ MIDDLEWARE = [
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
     "django_browser_reload.middleware.BrowserReloadMiddleware",
     "django_htmx.middleware.HtmxMiddleware",
+    "devopshero_app.middleware.HtmxErrorMiddleware",  # Handle HTMX error responses
 ]
 
 ROOT_URLCONF = 'devopshero_site.urls'
