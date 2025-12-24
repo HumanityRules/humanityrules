@@ -13,12 +13,11 @@ def get_app_shell_context(current_page):
         current_page: The name of the current page to mark as active (e.g., 'dashboard', 'workspaces')
     """
     navigation_items = [
-        {"name": "Dashboard", "url": "/", "icon": "dashboard", "is_active": current_page == "dashboard"},
+        {"name": "Dashboard", "url": "/dashboard/", "icon": "dashboard", "is_active": current_page == "dashboard"},
         {"name": "Workspaces", "url": "/workspaces/", "icon": "workspaces", "is_active": current_page == "workspaces"},
         {"name": "Apps", "url": "/apps/", "icon": "apps", "is_active": current_page == "apps"},
         {"name": "Datastores", "url": "/datastores/", "icon": "datastores", "is_active": current_page == "datastores"},
         {"name": "Security", "url": "/security/", "icon": "security", "is_active": current_page == "security"},
-        {"name": "Settings", "url": "/settings/", "icon": "settings", "is_active": current_page == "settings"},
     ]
     
     # Sample organizations - in a real app, this would come from the user's organizations
@@ -26,6 +25,13 @@ def get_app_shell_context(current_page):
         {"name": "Heroicons", "url": "/organizations/heroicons/", "initial": "H", "is_active": False},
         {"name": "Tailwind Labs", "url": "/organizations/tailwind-labs/", "initial": "T", "is_active": False},
         {"name": "Workcation", "url": "/organizations/workcation/", "initial": "W", "is_active": False},
+    ]
+    
+    # Fake organizations for the dropdown - testing purposes only
+    fake_organizations = [
+        {"id": "1", "name": "Acme Corporation"},
+        {"id": "2", "name": "Stark Industries"},
+        {"id": "3", "name": "Wayne Enterprises"},
     ]
     
     # User menu items
@@ -43,6 +49,7 @@ def get_app_shell_context(current_page):
     return {
         "navigation_items": navigation_items,
         "user_organizations": user_organizations,
+        "fake_organizations": fake_organizations,
         "profile_menu_items": profile_menu_items,
         "current_user": current_user,
         "settings_url": "/settings/",
