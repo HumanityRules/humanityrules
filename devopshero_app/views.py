@@ -89,6 +89,46 @@ def workspaces(request):
 
 
 @login_required
+def apps(request):
+    if request.htmx:
+        return render(request, "devopshero_app/apps.html", context = {})
+        
+    context = get_app_shell_context(current_page="apps")
+    context["content_url"] = "/apps/"
+    return render(request, "devopshero_app/app_shell.html", context = context)
+
+
+@login_required
+def datastores(request):
+    if request.htmx:
+        return render(request, "devopshero_app/datastores.html", context = {})
+        
+    context = get_app_shell_context(current_page="datastores")
+    context["content_url"] = "/datastores/"
+    return render(request, "devopshero_app/app_shell.html", context = context)
+
+
+@login_required
+def security(request):
+    if request.htmx:
+        return render(request, "devopshero_app/security.html", context = {})
+        
+    context = get_app_shell_context(current_page="security")
+    context["content_url"] = "/security/"
+    return render(request, "devopshero_app/app_shell.html", context = context)
+
+
+@login_required
+def settings(request):
+    if request.htmx:
+        return render(request, "devopshero_app/settings.html", context = {})
+        
+    context = get_app_shell_context(current_page="settings")
+    context["content_url"] = "/settings/"
+    return render(request, "devopshero_app/app_shell.html", context = context)
+
+
+@login_required
 def random_quote(request):
     """Returns a partial HTML snippet with a random quote - for HTMX demo"""
     quotes = [
