@@ -1,34 +1,8 @@
 from django.contrib.auth.decorators import login_required
 from django.shortcuts import render
 from django.templatetags.static import static
-from django.http import HttpResponseNotFound
 import random
 from datetime import datetime
-
-
-def custom_404_handler(request, exception):
-    """
-    Custom 404 handler that returns HTMX-compatible response for HTMX requests.
-    """
-    context = {
-        "error_code": "404 - Page Not Found",
-        "error_message": "The page you're looking for doesn't exist.",
-    }
-    
-    # Check if this is an HTMX request
-    if request.headers.get("HX-Request"):
-        # Return just the error partial for HTMX requests
-        response = render(request, "devopshero_app/partials/_error.html", context)
-        response.status_code = 404
-        return response
-    
-    # For non-HTMX requests, return full app shell with error
-    shell_context = get_app_shell_context(current_page="")
-    shell_context["content_url"] = None  # Don't auto-load content
-    shell_context["error_content"] = context
-    response = render(request, "devopshero_app/app_shell.html", shell_context)
-    response.status_code = 404
-    return response
 
 
 def get_app_shell_context(current_page):
