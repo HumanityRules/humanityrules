@@ -19,7 +19,7 @@ def auth_login(request):
     Redirects directly to WorkOS AuthKit for authentication.
     """
     if request.user.is_authenticated:
-        return redirect(settings.LOGIN_REDIRECT_URL)
+        return redirect("/dashboard/")
     
     authorization_url = workos_client.user_management.get_authorization_url(
         provider="authkit",
@@ -68,7 +68,7 @@ def auth_callback(request):
         # Log the user in
         login(request, user)
         
-        return redirect(settings.LOGIN_REDIRECT_URL)
+        return redirect("/dashboard/")
         
     except Exception as e:
         # Log the error in production
@@ -80,5 +80,5 @@ def auth_logout(request):
     Logs the user out of Django session.
     """
     logout(request)
-    return redirect(settings.LOGIN_URL)
+    return redirect("/")
 

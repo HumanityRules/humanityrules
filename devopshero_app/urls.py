@@ -3,7 +3,8 @@ from . import views
 from . import auth_views
 
 urlpatterns = [
-    path("", views.dashboard, name="dashboard"),
+    path("", views.landing, name="landing"),
+    path("dashboard/", views.dashboard, name="dashboard"),
     path("workspaces/", views.workspaces, name="workspaces"),
     path("random-quote/", views.random_quote, name="random_quote"),
     
