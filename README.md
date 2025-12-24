@@ -22,6 +22,18 @@ uv run manage.py migrate
 uv run manage.py runserver
 ```
 
+# Authentication
+
+Authentication is handled by [WorkOS AuthKit](https://workos.com/docs/user-management). The flow:
+
+1. User visits any page → redirected to `/auth/login/`
+2. User clicks "Continue with WorkOS" → redirected to WorkOS hosted auth
+3. WorkOS authenticates user → redirects back to `/auth/callback/`
+4. Callback exchanges code for user info, creates/updates Django user, logs them in
+
+**Configuration:** Set `WORKOS_CLIENT_ID` and `WORKOS_API_KEY` in `.env`
+
+
 # Python style guide
 
 ## Function Signatures & Calling Conventions

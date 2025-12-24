@@ -1,4 +1,6 @@
+from django.contrib.auth.decorators import login_required
 from django.shortcuts import render
+from django.templatetags.static import static
 import random
 from datetime import datetime
 
@@ -45,11 +47,12 @@ def get_app_shell_context(current_page):
         "current_user": current_user,
         "settings_url": "/settings/",
         "search_url": "/search/",
-        "site_logo_url": "https://tailwindcss.com/plus-assets/img/logos/mark.svg?color=indigo&shade=500",
+        "site_logo_url": static('devopshero_app/devops-hero-logo.png'),
         "site_name": "DevOps Hero",
     }
 
 
+@login_required
 def dashboard(request):
     if request.htmx:
         return render(request, "devopshero_app/dashboard.html", context = {})
@@ -60,6 +63,7 @@ def dashboard(request):
     return render(request, "devopshero_app/app_shell.html", context = context)
 
 
+@login_required
 def workspaces(request):
     if request.htmx:
         return render(request, "devopshero_app/workspaces.html", context = {})
@@ -70,6 +74,7 @@ def workspaces(request):
     return render(request, "devopshero_app/app_shell.html", context = context)
 
 
+@login_required
 def random_quote(request):
     """Returns a partial HTML snippet with a random quote - for HTMX demo"""
     quotes = [
