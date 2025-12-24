@@ -1,6 +1,6 @@
 from django.conf import settings
 from django.contrib.auth import login, logout
-from django.shortcuts import redirect, render
+from django.shortcuts import redirect
 from django.http import HttpResponseBadRequest
 from workos import WorkOSClient
 
@@ -16,16 +16,11 @@ workos_client = WorkOSClient(
 
 def auth_login(request):
     """
-    Initiates the WorkOS OAuth flow by redirecting to the authorization URL.
+    Redirects directly to WorkOS AuthKit for authentication.
     """
     if request.user.is_authenticated:
         return redirect(settings.LOGIN_REDIRECT_URL)
     
-    # Check if this is a direct navigation vs showing login page
-    if request.method == "GET" and not request.GET.get("start"):
-        return render(request, "devopshero_app/login.html")
-    
-    # Generate authorization URL and redirect
     authorization_url = workos_client.user_management.get_authorization_url(
         provider="authkit",
         redirect_uri=settings.WORKOS_REDIRECT_URI,
