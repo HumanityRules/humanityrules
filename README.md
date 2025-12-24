@@ -22,6 +22,14 @@ uv run manage.py migrate
 uv run manage.py runserver
 ```
 
+# Django 6.0 Template Partials
+
+**Prefer partials over plain `{% include %}`** — they're the modern Django 6.0 approach.
+
+- **Same template:** `{% partialdef name %}...{% endpartialdef %}` then `{% partial name %}`
+- **External template:** `{% include "path/to/template.html#partial_name" with foo=bar %}`
+
+
 # Authentication
 
 Authentication is handled by [WorkOS AuthKit](https://workos.com/docs/user-management). The flow:

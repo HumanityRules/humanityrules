@@ -2,7 +2,7 @@
 Sidebar navigation content - shared between mobile and desktop sidebars.
 Expected context:
   - navigation_items: List of nav items (name, url, icon, is_active)
-  - user_organizations: List of organizations (name, url, initial, is_active)
+  - fake_organizations: List of organizations for dropdown (id, name) - testing only
   - settings_url: URL for settings page
   - site_logo_url: URL for company logo
 {% endcomment %}
@@ -22,41 +22,27 @@ Expected context:
 </li>
 {% endpartialdef navigation_item %}
 
-{% partialdef organization_item %}
-<li>
-  <a href="{{ org.url }}" class="group flex gap-x-3 rounded-md p-2 text-sm/6 font-semibold {% if org.is_active %}bg-white/5 text-white{% else %}text-gray-400 hover:bg-white/5 hover:text-white{% endif %}">
-    <span class="flex size-6 shrink-0 items-center justify-center rounded-lg border border-white/10 bg-white/5 text-[0.625rem] font-medium text-gray-400 group-hover:border-white/20 group-hover:text-white">{{ org.initial|default:org.name|slice:":1"|upper }}</span>
-    <span class="truncate">{{ org.name }}</span>
-  </a>
-</li>
-{% endpartialdef organization_item %}
 
 <div class="flex h-16 shrink-0 items-center">
   <img src="{{ site_logo_url }}" alt="{{ site_name }}" class="mt-4 h-14 w-auto" />
 </div>
 <nav class="flex flex-1 flex-col">
   <ul role="list" class="flex flex-1 flex-col gap-y-7">
-    <!-- Main navigation -->
+    <!-- Organizations section -->
     <li>
+      <div class="text-xs/6 font-semibold text-gray-400">Your organizations</div>
+      {% include "devopshero_app/partials/_dropdown_select.html#dropdown_select" with dropdown_id="org-select" dropdown_name="organization" dropdown_value="1" dropdown_selected_label="Acme Corporation" dropdown_options=fake_organizations dropdown_class="mt-2 -mx-2" %}
+    </li>
+    
+    <!-- Main navigation -->
+    <li class="mt-2">
       <ul role="list" class="-mx-2 space-y-1">
         {% for item in navigation_items %}
           {% partial navigation_item %}
         {% endfor %}
       </ul>
     </li>
-    
-    <!-- Organizations section -->
-    {% if user_organizations %}
-    <li>
-      <div class="text-xs/6 font-semibold text-gray-400">Your organizations</div>
-      <ul role="list" class="-mx-2 mt-2 space-y-1">
-        {% for org in user_organizations %}
-          {% partial organization_item %}
-        {% endfor %}
-      </ul>
-    </li>
-    {% endif %}
-    
+        
     <!-- Settings link at bottom -->
     <li class="mt-auto">
       <a href="{{ settings_url|default:'#' }}" class="group -mx-2 flex gap-x-3 rounded-md p-2 text-sm/6 font-semibold text-gray-400 hover:bg-white/5 hover:text-white">
