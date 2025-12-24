@@ -8,11 +8,11 @@ def get_app_shell_context(current_page):
     Returns the common sidebar context used across all pages.
     
     Args:
-        current_page: The name of the current page to mark as active (e.g., 'dashboard', 'team')
+        current_page: The name of the current page to mark as active (e.g., 'dashboard', 'workspaces')
     """
     navigation_items = [
         {"name": "Dashboard", "url": "/", "icon": "dashboard", "is_active": current_page == "dashboard"},
-        {"name": "Team", "url": "/team/", "icon": "team", "is_active": current_page == "team"},
+        {"name": "Workspaces", "url": "/workspaces/", "icon": "workspaces", "is_active": current_page == "workspaces"},
         {"name": "Projects", "url": "/projects/", "icon": "projects", "is_active": current_page == "projects"},
         {"name": "Calendar", "url": "/calendar/", "icon": "calendar", "is_active": current_page == "calendar"},
         {"name": "Documents", "url": "/documents/", "icon": "documents", "is_active": current_page == "documents"},
@@ -60,13 +60,13 @@ def dashboard(request):
     return render(request, "devopshero_app/app_shell.html", context = context)
 
 
-def team(request):
+def workspaces(request):
     if request.htmx:
-        return render(request, "devopshero_app/team.html", context = {})
+        return render(request, "devopshero_app/workspaces.html", context = {})
         
     # Return app shell - content will be loaded via HTMX
-    context = get_app_shell_context(current_page="team")
-    context["content_url"] = "/team/"
+    context = get_app_shell_context(current_page="workspaces")
+    context["content_url"] = "/workspaces/"
     return render(request, "devopshero_app/app_shell.html", context = context)
 
 
