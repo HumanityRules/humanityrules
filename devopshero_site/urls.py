@@ -22,3 +22,6 @@ urlpatterns = [
     path('admin/', admin.site.urls),
     path("__reload__/", include("django_browser_reload.urls")),
 ]
+
+# Custom error handlers for HTMX-compatible responses
+handler404 = 'devopshero_app.views.custom_404_handler'
