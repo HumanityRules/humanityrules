@@ -15,10 +15,10 @@ def get_app_shell_context(current_page):
     navigation_items = [
         {"name": "Dashboard", "url": "/", "icon": "dashboard", "is_active": current_page == "dashboard"},
         {"name": "Workspaces", "url": "/workspaces/", "icon": "workspaces", "is_active": current_page == "workspaces"},
-        {"name": "Projects", "url": "/projects/", "icon": "projects", "is_active": current_page == "projects"},
-        {"name": "Calendar", "url": "/calendar/", "icon": "calendar", "is_active": current_page == "calendar"},
-        {"name": "Documents", "url": "/documents/", "icon": "documents", "is_active": current_page == "documents"},
-        {"name": "Reports", "url": "/reports/", "icon": "reports", "is_active": current_page == "reports"},
+        {"name": "Apps", "url": "/apps/", "icon": "apps", "is_active": current_page == "apps"},
+        {"name": "Datastores", "url": "/datastores/", "icon": "datastores", "is_active": current_page == "datastores"},
+        {"name": "Security", "url": "/security/", "icon": "security", "is_active": current_page == "security"},
+        {"name": "Settings", "url": "/settings/", "icon": "settings", "is_active": current_page == "settings"},
     ]
     
     # Sample organizations - in a real app, this would come from the user's organizations
