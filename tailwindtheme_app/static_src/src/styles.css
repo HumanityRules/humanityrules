@@ -8,3 +8,31 @@
   * the scope of this path.
   */
 @source "../../../**/*.{html,py,js}";
+
+/* ===== View Transitions for HTMX content swaps ===== */
+
+/* Define the main-content element for view transitions */
+#main-content {
+  view-transition-name: main-content;
+}
+
+/* Fade out old content first, then fade in new content */
+::view-transition-old(main-content) {
+  animation: fade-out 60ms ease-out forwards;
+}
+
+::view-transition-new(main-content) {
+  animation: fade-in 60ms ease-in forwards;
+  animation-delay: 60ms;
+  opacity: 0;
+}
+
+@keyframes fade-out {
+  from { opacity: 1; }
+  to { opacity: 0; }
+}
+
+@keyframes fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
