@@ -120,12 +120,67 @@ def security(request):
 
 @login_required
 def settings(request):
+    context = {"active_tab": "organization"}
+    
     if request.htmx:
-        return render(request, "devopshero_app/settings.html", context = {})
+        return render(request, "devopshero_app/settings/organization.html", context=context)
         
-    context = get_app_shell_context(current_page="settings")
-    context["content_url"] = "/settings/"
-    return render(request, "devopshero_app/app_shell.html", context = context)
+    shell_context = get_app_shell_context(current_page="settings")
+    shell_context["content_url"] = "/settings/"
+    shell_context.update(context)
+    return render(request, "devopshero_app/app_shell.html", context=shell_context)
+
+
+@login_required
+def settings_organization(request):
+    context = {"active_tab": "organization"}
+    
+    if request.htmx:
+        return render(request, "devopshero_app/settings/organization.html", context=context)
+    
+    shell_context = get_app_shell_context(current_page="settings")
+    shell_context["content_url"] = "/settings/organization/"
+    shell_context.update(context)
+    return render(request, "devopshero_app/app_shell.html", context=shell_context)
+
+
+@login_required
+def settings_members(request):
+    context = {"active_tab": "members"}
+    
+    if request.htmx:
+        return render(request, "devopshero_app/settings/members.html", context=context)
+    
+    shell_context = get_app_shell_context(current_page="settings")
+    shell_context["content_url"] = "/settings/members/"
+    shell_context.update(context)
+    return render(request, "devopshero_app/app_shell.html", context=shell_context)
+
+
+@login_required
+def settings_aws_accounts(request):
+    context = {"active_tab": "aws-accounts"}
+    
+    if request.htmx:
+        return render(request, "devopshero_app/settings/aws_accounts.html", context=context)
+    
+    shell_context = get_app_shell_context(current_page="settings")
+    shell_context["content_url"] = "/settings/aws-accounts/"
+    shell_context.update(context)
+    return render(request, "devopshero_app/app_shell.html", context=shell_context)
+
+
+@login_required
+def settings_billing(request):
+    context = {"active_tab": "billing"}
+    
+    if request.htmx:
+        return render(request, "devopshero_app/settings/billing.html", context=context)
+    
+    shell_context = get_app_shell_context(current_page="settings")
+    shell_context["content_url"] = "/settings/billing/"
+    shell_context.update(context)
+    return render(request, "devopshero_app/app_shell.html", context=shell_context)
 
 
 @login_required

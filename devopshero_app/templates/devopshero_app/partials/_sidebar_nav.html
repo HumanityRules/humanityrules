@@ -68,7 +68,8 @@ Expected context:
             const currentPath = window.location.pathname;
             document.querySelectorAll('.nav-link').forEach(function(link) {
                 const linkPath = link.getAttribute('data-nav-url');
-                const isActive = linkPath === currentPath;
+                // Use startsWith for nested routes (e.g., /settings/members/ matches /settings/)
+                const isActive = currentPath.startsWith(linkPath);
                 
                 link.classList.remove('bg-white/5', 'text-white', 'text-gray-400', 'hover:bg-white/5', 'hover:text-white');
                 if (isActive) {
