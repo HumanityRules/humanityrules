@@ -4,7 +4,7 @@ from django.shortcuts import redirect
 from django.http import HttpResponseBadRequest
 from workos import WorkOSClient
 
-from .models import User
+from ..models import User
 
 
 # Initialize WorkOS client
