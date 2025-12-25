@@ -4,6 +4,8 @@ from django.templatetags.static import static
 import random
 from datetime import datetime
 
+from .models import AWSAccount
+
 
 def get_app_shell_context(current_page):
     """
@@ -162,6 +164,9 @@ def settings_aws_accounts(request):
     context = get_app_shell_context(current_page="settings")
     context["active_tab"] = "aws-accounts"
     
+    # TODO: Filter by user's organization once org context is implemented
+    context["aws_accounts"] = AWSAccount.objects.all()
+    
     if request.htmx:
         return render(request, "devopshero_app/settings/aws_accounts.html", context=context)
     
@@ -179,6 +184,31 @@ def settings_billing(request):
     
     context["content_url"] = "/settings/billing/"
     return render(request, "devopshero_app/app_shell.html", context=context)
+
+
+@login_required
+def settings_aws_accounts_add(request):
+    """Render the Add AWS Account modal dialog."""
+    if request.method == "POST":
+        # Create a new AWS account with pending status
+        name = request.POST.get("name", "").strip()
+        if name:
+            # TODO: Get organization from user's current org context
+            from .models import Organization
+            org = Organization.objects.first()  # Temporary: use first org
+            
+            aws_account = AWSAccount.objects.create(
+                organization=org,
+                name=name,
+                created_by=request.user,
+            )
+            # Return the setup instructions step
+            return render(request, "devopshero_app/settings/aws_account_setup.html", {
+                "aws_account": aws_account,
+            })
+    
+    # GET: Render the initial form
+    return render(request, "devopshero_app/settings/aws_account_add_modal.html")
 
 
 @login_required
