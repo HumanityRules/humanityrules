@@ -11,7 +11,7 @@ Expected context:
   <a href="{{ item.url }}" 
      hx-get="{{ item.url }}"
      hx-target="#main-content"
-     hx-swap="innerHTML"
+     hx-swap="innerHTML transition:true"
      hx-push-url="true"
      class="nav-link group flex gap-x-3 rounded-md p-2 text-sm/6 font-semibold {% if item.is_active %}bg-white/5 text-white{% else %}text-gray-400 hover:bg-white/5 hover:text-white{% endif %}"
      data-nav-url="{{ item.url }}">
