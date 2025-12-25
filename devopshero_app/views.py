@@ -18,6 +18,7 @@ def get_app_shell_context(current_page):
         {"name": "Apps", "url": "/apps/", "icon": "apps", "is_active": current_page == "apps"},
         {"name": "Datastores", "url": "/datastores/", "icon": "datastores", "is_active": current_page == "datastores"},
         {"name": "Security", "url": "/security/", "icon": "security", "is_active": current_page == "security"},
+        {"name": "Settings", "url": "/settings/", "icon": "settings", "is_active": current_page == "settings"},
     ]
     
     # Sample organizations - in a real app, this would come from the user's organizations
@@ -52,7 +53,6 @@ def get_app_shell_context(current_page):
         "fake_organizations": fake_organizations,
         "profile_menu_items": profile_menu_items,
         "current_user": current_user,
-        "settings_url": "/settings/",
         "search_url": "/search/",
         "site_logo_url": static('devopshero_app/devops-hero-logo-large.png'),
         "site_name": "DevOps Hero",
@@ -68,119 +68,117 @@ def landing(request):
 
 @login_required
 def dashboard(request):
-    if request.htmx:
-        return render(request, "devopshero_app/dashboard.html", context = {})
-
-    # Return app shell - content will be loaded via HTMX
     context = get_app_shell_context(current_page="dashboard")
+    
+    if request.htmx:        
+        return render(request, "devopshero_app/dashboard.html", context=context)
+
     context["content_url"] = "/dashboard/"
-    return render(request, "devopshero_app/app_shell.html", context = context)
+    return render(request, "devopshero_app/app_shell.html", context=context)
 
 
 @login_required
 def workspaces(request):
-    if request.htmx:
-        return render(request, "devopshero_app/workspaces.html", context = {})
-        
-    # Return app shell - content will be loaded via HTMX
     context = get_app_shell_context(current_page="workspaces")
+    
+    if request.htmx:
+        return render(request, "devopshero_app/workspaces.html", context=context)
+
     context["content_url"] = "/workspaces/"
-    return render(request, "devopshero_app/app_shell.html", context = context)
+    return render(request, "devopshero_app/app_shell.html", context=context)
 
 
 @login_required
 def apps(request):
-    if request.htmx:
-        return render(request, "devopshero_app/apps.html", context = {})
-        
     context = get_app_shell_context(current_page="apps")
+    
+    if request.htmx:
+        return render(request, "devopshero_app/apps.html", context=context)
+
     context["content_url"] = "/apps/"
-    return render(request, "devopshero_app/app_shell.html", context = context)
+    return render(request, "devopshero_app/app_shell.html", context=context)
 
 
 @login_required
 def datastores(request):
-    if request.htmx:
-        return render(request, "devopshero_app/datastores.html", context = {})
-        
     context = get_app_shell_context(current_page="datastores")
+    
+    if request.htmx:
+        return render(request, "devopshero_app/datastores.html", context=context)
+
     context["content_url"] = "/datastores/"
-    return render(request, "devopshero_app/app_shell.html", context = context)
+    return render(request, "devopshero_app/app_shell.html", context=context)
 
 
 @login_required
 def security(request):
-    if request.htmx:
-        return render(request, "devopshero_app/security.html", context = {})
-        
     context = get_app_shell_context(current_page="security")
+    
+    if request.htmx:
+        return render(request, "devopshero_app/security.html", context=context)
+
     context["content_url"] = "/security/"
-    return render(request, "devopshero_app/app_shell.html", context = context)
+    return render(request, "devopshero_app/app_shell.html", context=context)
 
 
 @login_required
 def settings(request):
-    context = {"active_tab": "organization"}
+    context = get_app_shell_context(current_page="settings")
+    context["active_tab"] = "organization"
     
     if request.htmx:
         return render(request, "devopshero_app/settings/organization.html", context=context)
         
-    shell_context = get_app_shell_context(current_page="settings")
-    shell_context["content_url"] = "/settings/"
-    shell_context.update(context)
-    return render(request, "devopshero_app/app_shell.html", context=shell_context)
+    context["content_url"] = "/settings/"
+    return render(request, "devopshero_app/app_shell.html", context=context)
 
 
 @login_required
 def settings_organization(request):
-    context = {"active_tab": "organization"}
+    context = get_app_shell_context(current_page="settings")
+    context["active_tab"] = "organization"
     
     if request.htmx:
         return render(request, "devopshero_app/settings/organization.html", context=context)
     
-    shell_context = get_app_shell_context(current_page="settings")
-    shell_context["content_url"] = "/settings/organization/"
-    shell_context.update(context)
-    return render(request, "devopshero_app/app_shell.html", context=shell_context)
+    context["content_url"] = "/settings/organization/"
+    return render(request, "devopshero_app/app_shell.html", context=context)
 
 
 @login_required
 def settings_members(request):
-    context = {"active_tab": "members"}
+    context = get_app_shell_context(current_page="settings")
+    context["active_tab"] = "members"
     
     if request.htmx:
         return render(request, "devopshero_app/settings/members.html", context=context)
     
-    shell_context = get_app_shell_context(current_page="settings")
-    shell_context["content_url"] = "/settings/members/"
-    shell_context.update(context)
-    return render(request, "devopshero_app/app_shell.html", context=shell_context)
+    context["content_url"] = "/settings/members/"
+    return render(request, "devopshero_app/app_shell.html", context=context)
 
 
 @login_required
 def settings_aws_accounts(request):
-    context = {"active_tab": "aws-accounts"}
+    context = get_app_shell_context(current_page="settings")
+    context["active_tab"] = "aws-accounts"
     
     if request.htmx:
         return render(request, "devopshero_app/settings/aws_accounts.html", context=context)
     
-    shell_context = get_app_shell_context(current_page="settings")
-    shell_context["content_url"] = "/settings/aws-accounts/"
-    shell_context.update(context)
-    return render(request, "devopshero_app/app_shell.html", context=shell_context)
+    context["content_url"] = "/settings/aws-accounts/"
+    return render(request, "devopshero_app/app_shell.html", context=context)
 
 
 @login_required
 def settings_billing(request):
-    context = {"active_tab": "billing"}
+    context = get_app_shell_context(current_page="settings")
+    context["active_tab"] = "billing"
     
     if request.htmx:
         return render(request, "devopshero_app/settings/billing.html", context=context)
     
-    shell_context = get_app_shell_context(current_page="settings")
-    shell_context["content_url"] = "/settings/billing/"
-    shell_context.update(context)
-    return render(request, "devopshero_app/app_shell.html", context=shell_context)
+    context["content_url"] = "/settings/billing/"
+    return render(request, "devopshero_app/app_shell.html", context=context)
 
 
 @login_required
