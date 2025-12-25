@@ -10,6 +10,10 @@ urlpatterns = [
     path("datastores/", views.datastores, name="datastores"),
     path("security/", views.security, name="security"),
     path("settings/", views.settings, name="settings"),
+    path("settings/organization/", views.settings_organization, name="settings_organization"),
+    path("settings/members/", views.settings_members, name="settings_members"),
+    path("settings/aws-accounts/", views.settings_aws_accounts, name="settings_aws_accounts"),
+    path("settings/billing/", views.settings_billing, name="settings_billing"),
     path("random-quote/", views.random_quote, name="random_quote"),
     
     # Authentication
