@@ -3,7 +3,6 @@ Sidebar navigation content - shared between mobile and desktop sidebars.
 Expected context:
   - navigation_items: List of nav items (name, url, icon, is_active)
   - fake_organizations: List of organizations for dropdown (id, name) - testing only
-  - settings_url: URL for settings page
   - site_logo_url: URL for company logo
 {% endcomment %}
 
@@ -42,42 +41,6 @@ Expected context:
         {% endfor %}
       </ul>
     </li>
-        
-    <!-- Settings link at bottom -->
-    <li class="mt-auto">
-      <a href="{{ settings_url|default:'#' }}"
-         hx-get="{{ settings_url|default:'#' }}"
-         hx-target="#main-content"
-         hx-swap="innerHTML"
-         hx-push-url="true"
-         class="nav-link group -mx-2 flex gap-x-3 rounded-md p-2 text-sm/6 font-semibold text-gray-400 hover:bg-white/5 hover:text-white"
-         data-nav-url="{{ settings_url|default:'#' }}">
-        {% include "devopshero_app/partials/icons/settings.html" %}
-        Settings
-      </a>
-    </li>
   </ul>
 </nav>
 
-<script>
-    // Update sidebar active state after HTMX navigation.
-    // Guard prevents double registration when including this script multiple times for both dekstop and mobile.
-    if (!window._sidebarNavInitialized) {
-        window._sidebarNavInitialized = true;
-        document.body.addEventListener('htmx:pushedIntoHistory', function(event) {
-            const currentPath = window.location.pathname;
-            document.querySelectorAll('.nav-link').forEach(function(link) {
-                const linkPath = link.getAttribute('data-nav-url');
-                // Use startsWith for nested routes (e.g., /settings/members/ matches /settings/)
-                const isActive = currentPath.startsWith(linkPath);
-                
-                link.classList.remove('bg-white/5', 'text-white', 'text-gray-400', 'hover:bg-white/5', 'hover:text-white');
-                if (isActive) {
-                    link.classList.add('bg-white/5', 'text-white');
-                } else {
-                    link.classList.add('text-gray-400', 'hover:bg-white/5', 'hover:text-white');
-                }
-            });
-        });
-    }
-</script>

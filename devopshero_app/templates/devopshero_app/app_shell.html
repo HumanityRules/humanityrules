@@ -19,7 +19,7 @@
 
         {# Mobile sidebar content #}
         <div class="relative flex grow flex-col gap-y-5 overflow-y-auto bg-gray-900 px-6 pb-4 ring-1 ring-white/10 dark:before:pointer-events-none dark:before:absolute dark:before:inset-0 dark:before:bg-black/10">
-          <div class="relative">
+          <div id="sidebar-nav-mobile" class="relative">
             {% include "devopshero_app/partials/_sidebar_nav.html" %}
           </div>
         </div>
@@ -30,7 +30,7 @@
 
 {# Static sidebar for desktop #}
 <div class="hidden bg-gray-900 ring-1 ring-white/10 lg:fixed lg:inset-y-0 lg:z-50 lg:flex lg:w-72 lg:flex-col">
-  <div class="flex grow flex-col gap-y-5 overflow-y-auto bg-black/10 px-6 pb-4">
+  <div id="sidebar-nav-desktop" class="flex grow flex-col gap-y-5 overflow-y-auto bg-black/10 px-6 pb-4">
     {% include "devopshero_app/partials/_sidebar_nav.html" %}
   </div>
 </div>
