@@ -20,4 +20,7 @@ urlpatterns = [
     path("auth/login/", views.auth_login, name="login"),
     path("auth/callback/", views.auth_callback, name="auth_callback"),
     path("auth/logout/", views.auth_logout, name="logout"),
+    
+    # Onboarding
+    path("onboarding/", views.onboarding, name="onboarding"),
 ]

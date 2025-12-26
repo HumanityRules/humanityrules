@@ -14,6 +14,7 @@ from .settings import (
 )
 from .partials import random_quote
 from .auth import auth_login, auth_callback, auth_logout
+from .onboarding import onboarding
 
 __all__ = [
     "landing",
@@ -32,5 +33,6 @@ __all__ = [
     "auth_login",
     "auth_callback",
     "auth_logout",
+    "onboarding",
 ]
 
