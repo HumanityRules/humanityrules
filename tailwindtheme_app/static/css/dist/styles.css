@@ -495,9 +495,6 @@
   .w-32 {
     width: calc(var(--spacing) * 32);
   }
-  .w-64 {
-    width: calc(var(--spacing) * 64);
-  }
   .w-auto {
     width: auto;
   }
@@ -581,9 +578,6 @@
   }
   .gap-3 {
     gap: calc(var(--spacing) * 3);
-  }
-  .gap-4 {
-    gap: calc(var(--spacing) * 4);
   }
   .gap-6 {
     gap: calc(var(--spacing) * 6);

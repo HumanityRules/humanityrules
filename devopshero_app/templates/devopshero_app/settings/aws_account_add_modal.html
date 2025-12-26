@@ -1,3 +1,4 @@
+{% load static %}
 {# Modal backdrop and container #}
 <div id="aws-account-modal" class="relative z-50" aria-labelledby="modal-title" role="dialog" aria-modal="true">
     {# Backdrop #}
@@ -110,14 +111,9 @@
                                 <span class="flex-shrink-0 flex items-center justify-center w-6 h-6 rounded-full bg-indigo-100 dark:bg-indigo-500/20 text-indigo-600 dark:text-indigo-400 text-sm font-semibold">3</span>
                                 <div>
                                     <p class="text-sm text-gray-900 dark:text-white mb-3">Click "Create Stack" on that page</p>
-                                    <div class="rounded-md overflow-hidden border border-gray-200 dark:border-white/10 bg-gray-100 dark:bg-gray-900 p-2">
-                                        <div class="flex items-center justify-end gap-2 text-xs">
-                                            <span class="text-gray-500 dark:text-gray-400">with custom names.</span>
-                                            <span class="px-2 py-1 rounded border border-gray-300 dark:border-white/20 text-gray-600 dark:text-gray-400 bg-white dark:bg-gray-800">Cancel</span>
-                                            <span class="px-2 py-1 rounded border border-gray-300 dark:border-white/20 text-gray-600 dark:text-gray-400 bg-white dark:bg-gray-800">Create change set</span>
-                                            <span class="px-2 py-1 rounded bg-orange-500 text-white">Create stack</span>
-                                        </div>
-                                    </div>
+                                    <img src="{% static 'devopshero_app/cf-create-stack-small.png' %}" 
+                                         alt="AWS CloudFormation Create Stack button" 
+                                         class="rounded-md border border-gray-200 dark:border-white/10">
                                 </div>
                             </div>
                         </div>
@@ -194,22 +190,22 @@
                         <div class="space-y-4 text-sm">
                             <div>
                                 <p class="font-semibold text-gray-900 dark:text-white">Enterprise Security:</p>
-                                <p class="text-gray-500 dark:text-gray-400">creating this CloudFormation stack gives DevOpsHero secure cross-account <code class="text-xs bg-gray-100 dark:bg-white/10 px-1 py-0.5 rounded">AssumeRole</code> access.</p>
+                                <p class="text-gray-500 dark:text-gray-400">Creating this CloudFormation stack gives DevOpsHero secure cross-account <code class="text-xs bg-gray-100 dark:bg-white/10 px-1 py-0.5 rounded">AssumeRole</code> access.</p>
                             </div>
                             
                             <div>
                                 <p class="font-semibold text-gray-900 dark:text-white">Easily Revoke:</p>
-                                <p class="text-gray-500 dark:text-gray-400">revoke access in our dashboard or by manually deleting the CloudFormation stack.</p>
+                                <p class="text-gray-500 dark:text-gray-400">Revoke access in our dashboard or by manually deleting the CloudFormation stack.</p>
                             </div>
                             
                             <div>
                                 <p class="font-semibold text-gray-900 dark:text-white">Free:</p>
-                                <p class="text-gray-500 dark:text-gray-400">connecting your account is free. You won't incur AWS charges until creating a project.</p>
+                                <p class="text-gray-500 dark:text-gray-400">Connecting your account is free. You won't incur AWS charges until creating a project.</p>
                             </div>
                             
                             <div>
                                 <p class="font-semibold text-gray-900 dark:text-white">Regions:</p>
-                                <p class="text-gray-500 dark:text-gray-400">this stack must be created in <code class="text-xs bg-gray-100 dark:bg-white/10 px-1 py-0.5 rounded">us-east-1</code> but projects can be in any region.</p>
+                                <p class="text-gray-500 dark:text-gray-400">This stack must be created in <code class="text-xs bg-gray-100 dark:bg-white/10 px-1 py-0.5 rounded">us-east-1</code> but projects can be in any region.</p>
                             </div>
                         </div>
                     </div>
