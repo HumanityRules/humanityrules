@@ -58,7 +58,7 @@ def settings_aws_accounts(request):
 
 @login_required
 def settings_aws_accounts_add(request):
-    """Render the Add AWS Account modal dialog."""
+    """Render the Add AWS Account modal dialog and handle account creation."""
     if request.method == "POST":
         name = request.POST.get("name", "").strip()
         if name:
@@ -70,9 +70,12 @@ def settings_aws_accounts_add(request):
                 name=name,
                 created_by=request.user,
             )
-            return render(request, "devopshero_app/settings/aws_account_setup.html", {
-                "aws_account": aws_account,
-            })
+            
+            # Return empty response with HX-Trigger to open CloudFormation URL
+            from django.http import HttpResponse
+            response = HttpResponse("")
+            response["HX-Trigger"] = f'{{"openCloudFormation": "{aws_account.get_cloudformation_url()}"}}'
+            return response
     
     return render(request, "devopshero_app/settings/aws_account_add_modal.html")
 
