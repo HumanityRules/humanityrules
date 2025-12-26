@@ -144,6 +144,12 @@ class AWSAccount(models.Model):
         verbose_name = "AWS Account"
         verbose_name_plural = "AWS Accounts"
         ordering = ["-created_at"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["organization", "name"],
+                name="unique_aws_account_name_per_org",
+            )
+        ]
 
     def __str__(self):
         return f"{self.name} ({self.aws_account_id or 'pending'})"

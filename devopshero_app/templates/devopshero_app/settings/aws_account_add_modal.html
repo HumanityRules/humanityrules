@@ -26,7 +26,7 @@
                         You must have <code class="text-sm bg-gray-100 dark:bg-white/10 px-1 py-0.5 rounded">AdministratorAccess</code> (recommended) or be the root user (not recommended). 
                         If you need help, see our <a href="#" class="text-indigo-600 dark:text-indigo-400 hover:underline">AWS guide</a>.
                     </p>
-              ∫  </div>
+                </div>
 
                 <form id="aws-account-form"
                       hx-post="/settings/aws-accounts/add/"
@@ -47,6 +47,7 @@
                                required
                                placeholder="e.g., Production, Staging, Development"
                                class="block w-full rounded-md bg-white dark:bg-gray-900 px-3 py-2 text-base text-gray-900 dark:text-white outline-1 -outline-offset-1 outline-gray-300 dark:outline-white/10 placeholder:text-gray-400 dark:placeholder:text-gray-500 focus:outline-2 focus:-outline-offset-2 focus:outline-indigo-600 dark:focus:outline-indigo-500 sm:text-sm">
+                        <p id="name-error" class="text-sm text-red-600 dark:text-red-400 invisible mt-2">&nbsp;</p>
                     </div>
 
                     {# Connection method radio buttons #}
@@ -88,7 +89,7 @@
                         <div id="instructions-admin" class="space-y-6">
                             <div class="flex gap-3">
                                 <span class="flex-shrink-0 flex items-center justify-center w-6 h-6 rounded-full bg-indigo-100 dark:bg-indigo-500/20 text-indigo-600 dark:text-indigo-400 text-sm font-semibold">1</span>
-                                <p class="text-sm text-gray-900 dark:text-white">Log into the AWS account</p>
+                                <p class="text-sm text-gray-900 dark:text-white">Log into your AWS account</p>
                             </div>
                             
                             <div class="flex gap-3">
@@ -273,13 +274,48 @@ function toggleConnectionMethod(method) {
 document.getElementById('aws-account-form').addEventListener('htmx:beforeRequest', function(event) {
     document.getElementById('footer-cancel').classList.add('hidden');
     document.getElementById('footer-waiting').classList.remove('hidden');
-    // Disable the account name input
-    document.getElementById('aws-account-name').disabled = true;
-    document.getElementById('aws-account-name').classList.add('bg-gray-100', 'dark:bg-gray-800', 'cursor-not-allowed');
+    // Make the account name input readonly (still submits value, unlike disabled)
+    const input = document.getElementById('aws-account-name');
+    input.readOnly = true;
+    input.classList.add('bg-gray-100', 'dark:bg-gray-800', 'cursor-not-allowed');
 });
 
 // Handle the response to open CloudFormation URL
 document.body.addEventListener('openCloudFormation', function(event) {
     window.open(event.detail.value, '_blank');
+});
+
+// Handle validation errors
+document.body.addEventListener('validationError', function(event) {
+    const errorEl = document.getElementById('name-error');
+    const inputEl = document.getElementById('aws-account-name');
+    
+    // Show error message
+    errorEl.textContent = event.detail.value;
+    errorEl.classList.remove('invisible');
+    
+    // Add error styling to input
+    inputEl.classList.add('outline-red-500', 'dark:outline-red-500');
+    inputEl.classList.remove('outline-gray-300', 'dark:outline-white/10');
+    
+    // Reset footer state
+    document.getElementById('footer-cancel').classList.remove('hidden');
+    document.getElementById('footer-waiting').classList.add('hidden');
+    
+    // Re-enable input
+    inputEl.readOnly = false;
+    inputEl.classList.remove('bg-gray-100', 'dark:bg-gray-800', 'cursor-not-allowed');
+    inputEl.focus();
+});
+
+// Clear error when user starts typing
+document.getElementById('aws-account-name').addEventListener('input', function() {
+    const errorEl = document.getElementById('name-error');
+    const inputEl = this;
+    
+    errorEl.classList.add('invisible');
+    errorEl.innerHTML = '&nbsp;';
+    inputEl.classList.remove('outline-red-500', 'dark:outline-red-500');
+    inputEl.classList.add('outline-gray-300', 'dark:outline-white/10');
 });
 </script>
