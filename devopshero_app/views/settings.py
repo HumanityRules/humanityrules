@@ -59,23 +59,45 @@ def settings_aws_accounts(request):
 @login_required
 def settings_aws_accounts_add(request):
     """Render the Add AWS Account modal dialog and handle account creation."""
+    from django.http import HttpResponse
+    
     if request.method == "POST":
         name = request.POST.get("name", "").strip()
-        if name:
-            # TODO: Get organization from user's current org context
-            org = Organization.objects.first()  # Temporary: use first org
-            
-            aws_account = AWSAccount.objects.create(
-                organization=org,
-                name=name,
-                created_by=request.user,
-            )
-            
-            # Return empty response with HX-Trigger to open CloudFormation URL
-            from django.http import HttpResponse
+        
+        # Validate name is provided
+        if not name:
             response = HttpResponse("")
-            response["HX-Trigger"] = f'{{"openCloudFormation": "{aws_account.get_cloudformation_url()}"}}'
+            response["HX-Trigger"] = '{"validationError": "Please enter an AWS account name"}'
             return response
+        
+        # TODO: Get organization from user's current org context
+        org = Organization.objects.first()  # Temporary: use first org
+        
+        # Check if name already exists for this organization
+        existing = AWSAccount.objects.filter(organization=org, name=name).first()
+        if existing:
+            if existing.status in (AWSAccount.Status.PENDING, AWSAccount.Status.ERROR):
+                # Allow re-clicking for pending/error accounts
+                response = HttpResponse("")
+                response["HX-Trigger"] = f'{{"openCloudFormation": "{existing.get_cloudformation_url()}"}}'
+                return response
+            else:
+                # Account is already connected
+                response = HttpResponse("")
+                response["HX-Trigger"] = '{"validationError": "An AWS account with this name is already connected"}'
+                return response
+        
+        # Create new account
+        aws_account = AWSAccount.objects.create(
+            organization=org,
+            name=name,
+            created_by=request.user,
+        )
+        
+        # Return empty response with HX-Trigger to open CloudFormation URL
+        response = HttpResponse("")
+        response["HX-Trigger"] = f'{{"openCloudFormation": "{aws_account.get_cloudformation_url()}"}}'
+        return response
     
     return render(request, "devopshero_app/settings/aws_account_add_modal.html")
 

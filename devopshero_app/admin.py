@@ -1,7 +1,7 @@
 from django.contrib import admin
 from django.contrib.auth.admin import UserAdmin as BaseUserAdmin
 
-from devopshero_app.models import Organization, OrganizationMembership, User
+from devopshero_app.models import AWSAccount, Organization, OrganizationMembership, User
 
 
 @admin.register(User)
@@ -35,3 +35,25 @@ class OrganizationMembershipAdmin(admin.ModelAdmin):
     search_fields = ["user__email", "user__username", "organization__name"]
     readonly_fields = ["id", "created_at"]
     autocomplete_fields = ["user", "organization"]
+
+
+@admin.register(AWSAccount)
+class AWSAccountAdmin(admin.ModelAdmin):
+    list_display = ["name", "organization", "aws_account_id", "status", "created_at"]
+    list_filter = ["status", "organization"]
+    search_fields = ["name", "aws_account_id", "organization__name"]
+    readonly_fields = ["id", "external_id", "created_at", "updated_at"]
+    autocomplete_fields = ["organization", "created_by"]
+    
+    fieldsets = (
+        (None, {
+            "fields": ("name", "organization", "status", "status_message")
+        }),
+        ("AWS Details", {
+            "fields": ("aws_account_id", "role_arn", "external_id")
+        }),
+        ("Metadata", {
+            "fields": ("created_by", "created_at", "updated_at", "id"),
+            "classes": ("collapse",)
+        }),
+    )
