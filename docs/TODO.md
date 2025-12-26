@@ -36,3 +36,14 @@
 
 - [ ] **Add tests for onboarding flow** - Unit tests for `auth_callback` branching, `onboarding` view, and transaction atomicity
 
+
+
+# TODO: AWS Accounts
+
+- [ ] Webhook endpoint to receive CloudFormation stack creation events
+- [ ] Background job to verify AssumeRole works
+- [ ] "Send instructions" email flow
+- [ ] Create new AWS Account flow
+- [ ] Delete/disconnect flow with CloudFormation stack cleanup guidance
+- [ ] Support for AWS Organizations (multiple accounts under one root)
+
