@@ -68,14 +68,21 @@ def handler(event, context):
             "SUCCESS",
             {"Message": f"Account {aws_account} {request_type.lower()}d successfully"},
         )
+        return {"status": "success", "aws_account": aws_account}
 
     except Exception as e:
         print(f"Error: {str(e)}")
         send_cfn_response(response_url, event, "FAILED", {"Message": str(e)})
+        return {"status": "error", "message": str(e)}
 
 
 def send_cfn_response(url, event, status, data):
-    """Send response back to CloudFormation."""
+    """
+    Send response back to CloudFormation.
+    
+    CloudFormation Custom Resources wait for this response to know if the
+    operation succeeded or failed. Without it, the stack hangs for 1 hour.
+    """
     physical_id = event.get("PhysicalResourceId")
     if not physical_id:
         physical_id = f"devopshero-install-{event['ResourceProperties'].get('AwsAccount', 'unknown')}"
