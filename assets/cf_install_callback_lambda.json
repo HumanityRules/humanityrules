@@ -3,12 +3,12 @@
   "Description": "DevOpsHero Install Callback Lambda used to notify the DevOpsHero backend when customers deploy the AWS account",
   
   "Parameters": {
-    "DevOpsHeroApiEndpoint": {
+    "DohApiEndpoint": {
       "Type": "String",
       "Description": "The HTTPS endpoint of your DevOpsHero backend API (e.g., https://api.devopshero.io)",
       "Default": "https://api.devopshero.io"
     },
-    "ApiSecretKey": {
+    "DohApiSecretKey": {
       "Type": "String",
       "Description": "Secret key used to authenticate Lambda calls to your backend",
       "NoEcho": true
@@ -69,8 +69,8 @@
         "Role": { "Fn::GetAtt": ["InstallCallbackLambdaRole", "Arn"] },
         "Environment": {
           "Variables": {
-            "DEVOPSHERO_API_ENDPOINT": { "Ref": "DevOpsHeroApiEndpoint" },
-            "API_SECRET_KEY": { "Ref": "ApiSecretKey" }
+            "DOH_API_ENDPOINT": { "Ref": "DohApiEndpoint" },
+            "DOH_API_SECRET_KEY": { "Ref": "DohApiSecretKey" }
           }
         },
         "Code": {

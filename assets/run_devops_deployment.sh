@@ -26,9 +26,10 @@ aws cloudformation deploy \
 echo "Uploading S3 files..."
 ./upload_s3_files.sh
 
+
 echo "Deploying install callback lambda..."
 
-# Delete stack if it exists and is in a failed state
+# Delete lambda stack if it exists, let's make sure we redeploy it every time
 aws cloudformation delete-stack \
   --stack-name devopshero-install-callback-lambda \
   --region us-east-1 2>/dev/null || true
@@ -41,8 +42,8 @@ aws cloudformation deploy \
   --template-file cf_install_callback_lambda.json \
   --stack-name devopshero-install-callback-lambda \
   --parameter-overrides \
-    DevOpsHeroApiEndpoint="$DOH_API_ENDPOINT" \
-    ApiSecretKey="$DOH_API_SECRET_KEY" \
+    DohApiEndpoint="$DOH_API_ENDPOINT" \
+    DohApiSecretKey="$DOH_API_SECRET_KEY" \
     LambdaCodeS3Bucket=devopshero-private \
     LambdaCodeS3Key=install_callback_lambda.zip \
   --capabilities CAPABILITY_NAMED_IAM \
