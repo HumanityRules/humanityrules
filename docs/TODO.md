@@ -47,3 +47,6 @@
 - [ ] Delete/disconnect flow with CloudFormation stack cleanup guidance
 - [ ] Support for AWS Organizations (multiple accounts under one root)
 
+
+# Customer Installation
+- Least privilege of the role we create in the customer's account

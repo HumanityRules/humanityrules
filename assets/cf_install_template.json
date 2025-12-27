@@ -1,0 +1,69 @@
+{
+  "AWSTemplateFormatVersion": "2010-09-09",
+  "Description": "CloudFormation template to securely connect your AWS account to DevOpsHero.\n",
+  "Parameters": {
+    "ExternalId": {
+      "Type": "String",
+      "Description": "Do not modify! Used to prevent confused deputy attacks."
+    }
+  },
+  "Outputs": {
+    "RoleArn": {
+      "Description": "The ARN of the IAM role created for DevOpsHero",
+      "Value": { "Fn::GetAtt": ["DevOpsHeroRole", "Arn"] }
+    },
+    "AccountId": {
+      "Description": "Your AWS Account ID",
+      "Value": { "Ref": "AWS::AccountId" }
+    }
+  },
+  "Resources": {
+    "DevOpsHeroRole": {
+      "Type": "AWS::IAM::Role",
+      "Properties": {
+        "RoleName": {
+          "Fn::Join": [
+            "-",
+            [
+              "devopshero",
+              {
+                "Ref": "ExternalId"
+              }
+            ]
+          ]
+        },
+        "AssumeRolePolicyDocument": {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Effect": "Allow",
+              "Principal": {
+                "AWS": "arn:aws:iam::555553041615:root"
+              },
+              "Action": "sts:AssumeRole",
+              "Condition": {
+                "StringEquals": {
+                  "sts:ExternalId": {
+                    "Ref": "ExternalId"
+                  }
+                }
+              }
+            }
+          ]
+        },
+        "ManagedPolicyArns": ["arn:aws:iam::aws:policy/AdministratorAccess"]
+      }
+    },
+    "DevOpsHeroInstallCallback": {
+      "Type": "Custom::DevOpsHeroInstallCallback",
+      "DependsOn": "DevOpsHeroRole",
+      "Properties": {
+        "ServiceToken": "arn:aws:lambda:us-east-1:555553041615:function:devopshero-install-callback",
+        "AwsAccount": { "Ref": "AWS::AccountId" },
+        "StackRegion": { "Ref": "AWS::Region" },
+        "RoleArn": { "Fn::GetAtt": ["DevOpsHeroRole", "Arn"] },
+        "ExternalId": { "Ref": "ExternalId" }
+      }
+    }
+  }
+}

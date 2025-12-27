@@ -158,7 +158,7 @@ class AWSAccount(models.Model):
         """Generate the AWS CloudFormation quick-create URL for this account."""
         params = {
             "stackName": f"DevOpsHero-{self.id.hex[:8]}",
-            "templateURL": "https://devopshero-cf-templates.s3.amazonaws.com/cross-account-role.yaml",
+            "templateURL": "https://devopshero-public.s3.us-east-1.amazonaws.com/cf_install_template.json",
             "param_ExternalId": str(self.external_id),
         }
         base_url = "https://us-east-1.console.aws.amazon.com/cloudformation/home"

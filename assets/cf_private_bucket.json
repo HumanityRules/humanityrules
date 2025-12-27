@@ -1,0 +1,58 @@
+{
+  "AWSTemplateFormatVersion": "2010-09-09",
+  "Description": "DevOpsHero private S3 bucket for Lambda code and internal assets",
+
+  "Parameters": {
+    "BucketName": {
+      "Type": "String",
+      "Description": "Name of the S3 bucket",
+      "Default": "devopshero-private"
+    }
+  },
+
+  "Resources": {
+    "PrivateBucket": {
+      "Type": "AWS::S3::Bucket",
+      "Properties": {
+        "BucketName": { "Ref": "BucketName" },
+        "PublicAccessBlockConfiguration": {
+          "BlockPublicAcls": true,
+          "BlockPublicPolicy": true,
+          "IgnorePublicAcls": true,
+          "RestrictPublicBuckets": true
+        },
+        "OwnershipControls": {
+          "Rules": [
+            {
+              "ObjectOwnership": "BucketOwnerEnforced"
+            }
+          ]
+        },
+        "BucketEncryption": {
+          "ServerSideEncryptionConfiguration": [
+            {
+              "ServerSideEncryptionByDefault": {
+                "SSEAlgorithm": "AES256"
+              }
+            }
+          ]
+        },
+        "VersioningConfiguration": {
+          "Status": "Enabled"
+        }
+      }
+    }
+  },
+
+  "Outputs": {
+    "BucketName": {
+      "Description": "Name of the S3 bucket",
+      "Value": { "Ref": "PrivateBucket" }
+    },
+    "BucketArn": {
+      "Description": "ARN of the S3 bucket",
+      "Value": { "Fn::GetAtt": ["PrivateBucket", "Arn"] }
+    }
+  }
+}
+
