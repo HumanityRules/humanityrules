@@ -23,4 +23,8 @@ urlpatterns = [
     
     # Onboarding
     path("onboarding/", views.onboarding, name="onboarding"),
+    
+    # API endpoints
+    #  - aws_install_account_callback: called by Lambda after customer deploys the CloudFormation stack, not browsers
+    path("api/aws/install-account-callback", views.aws_install_account_callback, name="aws_install_account_callback"),
 ]

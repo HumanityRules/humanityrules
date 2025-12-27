@@ -30,7 +30,9 @@ SECRET_KEY = 'django-insecure-!@4vjx6%j+tp*4^s(a)93($b!79ky1#$9_xj!p**q-3pc!tw8j
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-ALLOWED_HOSTS = []
+ALLOWED_HOSTS = ['localhost', '127.0.0.1', 'zincoon.ngrok.io']
+
+CSRF_TRUSTED_ORIGINS = ['https://zincoon.ngrok.io']
 
 
 # Application definition
@@ -137,4 +139,6 @@ AUTH_USER_MODEL = 'devopshero_app.User'
 # WorkOS Configuration
 WORKOS_CLIENT_ID = os.environ.get("WORKOS_CLIENT_ID")
 WORKOS_API_KEY = os.environ.get("WORKOS_API_KEY")
-WORKOS_REDIRECT_URI = os.environ.get("WORKOS_REDIRECT_URI", "http://127.0.0.1:8000/auth/callback/")
+
+# DevOpsHero API Configuration
+DOH_API_SECRET_KEY = os.environ.get("DOH_API_SECRET_KEY")

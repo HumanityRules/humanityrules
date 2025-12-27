@@ -15,6 +15,7 @@ from .settings import (
 from .partials import random_quote
 from .auth import auth_login, auth_callback, auth_logout
 from .onboarding import onboarding
+from .api import aws_install_account_callback
 
 __all__ = [
     "landing",
@@ -34,5 +35,6 @@ __all__ = [
     "auth_callback",
     "auth_logout",
     "onboarding",
+    "aws_install_account_callback",
 ]
 

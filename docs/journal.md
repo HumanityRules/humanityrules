@@ -1,5 +1,39 @@
 # DevOpsHero Development Journal
 
+## 2025-12-27 - Backend Callback Endpoint & Infrastructure Refinements
+
+### Summary
+
+Completed the AWS account connection flow by implementing the backend API endpoint that receives callbacks from the Lambda. Also standardized naming conventions and improved Lambda logging.
+
+### What We Built
+
+#### Backend Callback Endpoint (`/api/aws/install-account-callback`)
+
+Created `devopshero_app/views/api.py` with the endpoint that:
+- Validates Bearer token authentication
+- Validates `external_id` is a proper UUID (prevents Django 500 errors)
+- Finds the `AWSAccount` record by `external_id`
+- Updates status to `CONNECTED` on Create, handles Update/Delete appropriately
+- Returns clean JSON responses for all error cases
+
+#### Lambda Logging Fix
+
+Replaced `print()` statements with Python's `logging` module. `print()` in Lambda can have buffering issues and doesn't reliably appear in CloudWatch. The logging module is the recommended approach.
+
+### ngrok for Local Testing
+
+Enabled ngrok tunneling (`https://zincoon.ngrok.io`) so the Lambda can call our local Django server:
+- Added to `ALLOWED_HOSTS` and `CSRF_TRUSTED_ORIGINS`
+- Made OAuth redirect URI dynamic (builds from request host)
+
+### Issues Encountered
+
+- **UUID validation**: Passing invalid UUIDs to the endpoint caused Django 500 errors. Added explicit UUID validation before the database query.
+- **WorkOS trailing slash**: WorkOS dashboard rejects redirect URIs with trailing slashes.
+
+---
+
 ## 2025-12-26 - AWS Infrastructure Setup for Cross-Account Access
 
 ### Summary
@@ -90,10 +124,10 @@ The Lambda needs its code in S3, but S3 must exist first. We solved this by orde
 
 ### TODO
 
-- Implement the backend API endpoint `/api/aws/account-callback` to receive Lambda callbacks
+- ~~Implement the backend API endpoint `/api/aws/account-callback` to receive Lambda callbacks~~ ✅ Done (2025-12-27)
 - Add error handling in the callback Lambda for network failures (retries?)
 - Consider adding SNS notifications for failed stack deployments
-- Test the full flow with code
+- Test the full flow end-to-end with a real CloudFormation deployment
 - Add CloudWatch alarms for Lambda errors (WE ARE MISSING CUSTOMERS!!!!)
 - Document the customer onboarding flow
 - Reduce IAM permissions from AdministratorAccess to least-privilege (later, once we know exactly what's needed)
