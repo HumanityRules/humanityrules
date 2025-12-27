@@ -94,7 +94,7 @@ The Lambda needs its code in S3, but S3 must exist first. We solved this by orde
 - Add error handling in the callback Lambda for network failures (retries?)
 - Consider adding SNS notifications for failed stack deployments
 - Test the full flow with code
-- Add CloudWatch alarms for Lambda errors
+- Add CloudWatch alarms for Lambda errors (WE ARE MISSING CUSTOMERS!!!!)
 - Document the customer onboarding flow
 - Reduce IAM permissions from AdministratorAccess to least-privilege (later, once we know exactly what's needed)
 - Rearchitecture DOH infra stack to use nested stacks, while solving the chicken and egg problem between S3 and 
