@@ -2,8 +2,6 @@
 
 ## High Priority
 
-- [ ] **Add middleware to protect authenticated routes** - Redirect users without organization memberships to `/onboarding/` as a safety net (handles edge cases like deleted orgs)
-
 - [ ] **Form validation and error handling** - Display validation errors on the onboarding page (empty org name, slug conflicts, etc.)
 
 - [ ] **Handle session expiration** - If the user closes the browser mid-onboarding and returns later, the session data is lost. Consider:
