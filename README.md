@@ -217,6 +217,11 @@ Authentication is handled by [WorkOS AuthKit](https://workos.com/docs/user-manag
 **Configuration:** Set `WORKOS_CLIENT_ID` and `WORKOS_API_KEY` in `.env`
 
 
+## Browser Debugging Login for LLMs
+
+When using browser tools to debug, log in via Django admin (`/admin/`) instead of the main login flow. WorkOS auth requires external redirects that don't work well with automated browser testing. Once authenticated through admin, click "View site" to access the app with an active session.
+
+
 # Python style guide
 
 ## Function Signatures & Calling Conventions
