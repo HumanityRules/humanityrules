@@ -2053,6 +2053,14 @@
     opacity: 1;
   }
 }
+el-select {
+  anchor-name: --select-anchor;
+}
+el-options[popover] {
+  position-anchor: --select-anchor;
+  width: 15rem;
+  width: anchor-size(width);
+}
 @property --tw-rotate-x {
   syntax: "*";
   inherits: false;

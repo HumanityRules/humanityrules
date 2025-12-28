@@ -36,3 +36,15 @@
   from { opacity: 0; }
   to { opacity: 1; }
 }
+
+/* Fix el-options popover width to match the anchor button */
+el-select {
+  anchor-name: --select-anchor;
+}
+
+el-options[popover] {
+  position-anchor: --select-anchor;
+  /* Use anchor-size where supported, with fallback */
+  width: 15rem;
+  width: anchor-size(width);
+}

@@ -1,5 +1,41 @@
 # DevOpsHero Development Journal
 
+## 2025-12-28 - Fixed Dropdown Popover Width Issue
+
+### Summary
+
+Fixed a visual bug where the organization dropdown's options list was rendering full-width instead of matching the button width.
+
+### The Problem
+
+The `el-options` popover element was using `w-(--button-width)` to match the button width, but the `--button-width` CSS variable was never being set by the Tailwind Plus Elements library. Since popover elements render in the browser's "top layer" (outside normal document flow), they don't inherit width from parent containers.
+
+### The Fix
+
+Added CSS Anchor Positioning rules in `styles.css`:
+
+```css
+el-select {
+  anchor-name: --select-anchor;
+}
+
+el-options[popover] {
+  position-anchor: --select-anchor;
+  width: 15rem;                /* fallback for older browsers */
+  width: anchor-size(width);   /* uses anchor's width in modern browsers */
+}
+```
+
+Also removed the broken `w-(--button-width)` class from `_dropdown_select.html` since the width is now handled via CSS.
+
+### Why This Approach
+
+- **CSS Anchor Positioning** is the modern way to link a popover's dimensions to its anchor element
+- The **fallback width** (`15rem`) ensures reasonable behavior in browsers without full anchor positioning support
+- By moving this to CSS rather than relying on the Tailwind Plus Elements library to set a CSS variable, we have direct control over the behavior
+
+---
+
 ## 2025-12-27 (evening) - Real User/Org Context & Organization Switcher
 
 ### Summary
