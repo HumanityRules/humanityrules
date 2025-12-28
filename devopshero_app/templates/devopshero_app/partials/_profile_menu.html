@@ -2,14 +2,14 @@
 Profile dropdown menu.
 Expected context:
   - current_user.name: User's display name
-  - current_user.avatar_url: URL to user's avatar image
+  - current_user.initials: User's initials (e.g., "VT")
   - profile_menu_items: List of menu items (name, url)
 {% endcomment %}
 <el-dropdown class="relative">
   <button class="relative flex items-center">
     <span class="absolute -inset-1.5"></span>
     <span class="sr-only">Open profile menu</span>
-    <img src="{{ current_user.avatar_url|default:'https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?ixlib=rb-1.2.1&ixid=eyJhcHBfaWQiOjEyMDd9&auto=format&fit=facearea&facepad=2&w=256&h=256&q=80' }}" alt="" class="size-8 rounded-full bg-gray-50 outline -outline-offset-1 outline-black/5 dark:bg-gray-800 dark:outline-white/10" />
+    <span class="flex size-8 items-center justify-center rounded-full bg-indigo-600 text-sm font-medium text-white">{{ current_user.initials|default:'?' }}</span>
     <span class="hidden lg:flex lg:items-center">
       <span aria-hidden="true" class="ml-4 text-sm/6 font-semibold text-gray-900 dark:text-white">{{ current_user.name|default:'Guest' }}</span>
       <svg viewBox="0 0 20 20" fill="currentColor" data-slot="icon" aria-hidden="true" class="ml-2 size-5 text-gray-400 dark:text-gray-500">

@@ -22,6 +22,12 @@ class User(AbstractUser):
         blank=True,
         help_text="The user ID from WorkOS",
     )
+    current_organization = models.ForeignKey(
+        "Organization",
+        on_delete=models.PROTECT,
+        related_name="current_users",
+        help_text="The organization the user is currently working in",
+    )
 
     def __str__(self):
         return self.email or self.username

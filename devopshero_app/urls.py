@@ -15,6 +15,7 @@ urlpatterns = [
     path("settings/aws-accounts/add/", views.settings_aws_accounts_add, name="settings_aws_accounts_add"),
     path("settings/billing/", views.settings_billing, name="settings_billing"),
     path("random-quote/", views.random_quote, name="random_quote"),
+    path("switch-organization/", views.switch_organization, name="switch_organization"),
     
     # Authentication
     path("auth/login/", views.auth_login, name="login"),

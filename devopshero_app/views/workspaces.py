@@ -6,7 +6,7 @@ from .base import get_app_shell_context
 
 @login_required
 def workspaces(request):
-    context = get_app_shell_context(current_page="workspaces")
+    context = get_app_shell_context(request=request, current_page="workspaces")
     
     if request.htmx:
         return render(request, "devopshero_app/workspaces.html", context=context)

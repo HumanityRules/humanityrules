@@ -6,7 +6,7 @@ from .base import get_app_shell_context
 
 @login_required
 def datastores(request):
-    context = get_app_shell_context(current_page="datastores")
+    context = get_app_shell_context(request=request, current_page="datastores")
     
     if request.htmx:
         return render(request, "devopshero_app/datastores.html", context=context)
