@@ -30,9 +30,9 @@ SECRET_KEY = 'django-insecure-!@4vjx6%j+tp*4^s(a)93($b!79ky1#$9_xj!p**q-3pc!tw8j
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-ALLOWED_HOSTS = ['localhost', '127.0.0.1', 'zincoon.ngrok.io']
+ALLOWED_HOSTS = ['localhost', '127.0.0.1', 'devopshero.ngrok.io']
 
-CSRF_TRUSTED_ORIGINS = ['https://zincoon.ngrok.io']
+CSRF_TRUSTED_ORIGINS = ['https://devopshero.ngrok.io']
 
 
 # Application definition

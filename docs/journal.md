@@ -80,7 +80,7 @@ Replaced `print()` statements with Python's `logging` module. `print()` in Lambd
 
 ### ngrok for Local Testing
 
-Enabled ngrok tunneling (`https://zincoon.ngrok.io`) so the Lambda can call our local Django server:
+Enabled ngrok tunneling (`https://devopshero.ngrok.io`) so the Lambda can call our local Django server:
 - Added to `ALLOWED_HOSTS` and `CSRF_TRUSTED_ORIGINS`
 - Made OAuth redirect URI dynamic (builds from request host)
 
