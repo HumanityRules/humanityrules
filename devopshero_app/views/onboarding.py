@@ -34,15 +34,16 @@ def onboarding(request):
             
             # Create everything in a single transaction
             with transaction.atomic():
+                org = Organization.objects.create(name=org_name, slug=slug)
+                
                 user = User.objects.create(
                     workos_user_id=pending_user["workos_user_id"],
                     email=pending_user["email"],
                     username=pending_user["email"],
                     first_name=pending_user["first_name"],
                     last_name=pending_user["last_name"],
+                    current_organization=org,
                 )
-                
-                org = Organization.objects.create(name=org_name, slug=slug)
                 
                 OrganizationMembership.objects.create(
                     user=user,

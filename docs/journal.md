@@ -1,5 +1,26 @@
 # DevOpsHero Development Journal
 
+## 2025-12-27 (evening) - Real User/Org Context & Organization Switcher
+
+### Summary
+
+Replaced all hardcoded fake data in the app shell with real user and organization data from the database. Added working organization switcher.
+
+### Changes
+
+- **`get_app_shell_context()`**: Now takes `request` param and pulls real data (user name, email, initials, organizations)
+- **Organization switcher**: Dropdown in sidebar now actually switches organizations via `/switch-organization/` endpoint
+- **`current_organization` on User model**: Moved from session storage to a FK on User. Made it NOT NULL with `on_delete=PROTECT`
+- **Removed avatar**: Replaced profile image with user initials in colored circle
+- **Removed `get_current_organization()`**: Was just `return request.user.current_organization`
+
+### Migrations
+
+- `0005_add_current_organization_to_user.py`
+- `0006_make_current_organization_required.py` (data migration + NOT NULL)
+
+---
+
 ## 2025-12-27 - Backend Callback Endpoint & Infrastructure Refinements
 
 ### Summary

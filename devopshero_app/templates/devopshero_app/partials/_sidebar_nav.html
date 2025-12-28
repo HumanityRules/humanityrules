@@ -2,7 +2,8 @@
 Sidebar navigation content - shared between mobile and desktop sidebars.
 Expected context:
   - navigation_items: List of nav items (name, url, icon, is_active)
-  - fake_organizations: List of organizations for dropdown (id, name) - testing only
+  - user_organizations: List of user's organizations (id, name)
+  - current_organization: Currently selected organization (id, name) - always set
   - site_logo_url: URL for company logo
 {% endcomment %}
 
@@ -30,7 +31,10 @@ Expected context:
     <!-- Organizations section -->
     <li>
       <div class="text-xs/6 font-semibold text-gray-400">Your organizations</div>
-      {% include "devopshero_app/partials/_dropdown_select.html#dropdown_select" with dropdown_id="org-select" dropdown_name="organization" dropdown_value="1" dropdown_selected_label="Acme Corporation" dropdown_options=fake_organizations dropdown_class="mt-2 -mx-2" %}
+      <form hx-post="{% url 'switch_organization' %}" hx-trigger="change from:#org-select">
+        {% csrf_token %}
+        {% include "devopshero_app/partials/_dropdown_select.html#dropdown_select" with dropdown_id="org-select" dropdown_name="organization" dropdown_value=current_organization.id dropdown_selected_label=current_organization.name dropdown_options=user_organizations dropdown_class="mt-2 -mx-2" %}
+      </form>
     </li>
     
     <!-- Main navigation -->

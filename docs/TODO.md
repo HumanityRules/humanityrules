@@ -39,8 +39,6 @@
 
 
 # TODO: AWS Accounts
-
-- [ ] Webhook endpoint to receive CloudFormation stack creation events
 - [ ] Background job to verify AssumeRole works
 - [ ] "Send instructions" email flow
 - [ ] Create new AWS Account flow

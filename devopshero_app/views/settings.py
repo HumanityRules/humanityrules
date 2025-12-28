@@ -1,13 +1,13 @@
 from django.contrib.auth.decorators import login_required
 from django.shortcuts import render
 
-from ..models import AWSAccount, Organization
+from ..models import AWSAccount
 from .base import get_app_shell_context
 
 
 @login_required
 def settings(request):
-    context = get_app_shell_context(current_page="settings")
+    context = get_app_shell_context(request=request, current_page="settings")
     context["active_tab"] = "organization"
     
     if request.htmx:
@@ -19,7 +19,7 @@ def settings(request):
 
 @login_required
 def settings_organization(request):
-    context = get_app_shell_context(current_page="settings")
+    context = get_app_shell_context(request=request, current_page="settings")
     context["active_tab"] = "organization"
     
     if request.htmx:
@@ -31,7 +31,7 @@ def settings_organization(request):
 
 @login_required
 def settings_members(request):
-    context = get_app_shell_context(current_page="settings")
+    context = get_app_shell_context(request=request, current_page="settings")
     context["active_tab"] = "members"
     
     if request.htmx:
@@ -43,11 +43,12 @@ def settings_members(request):
 
 @login_required
 def settings_aws_accounts(request):
-    context = get_app_shell_context(current_page="settings")
+    context = get_app_shell_context(request=request, current_page="settings")
     context["active_tab"] = "aws-accounts"
     
-    # TODO: Filter by user's organization once org context is implemented
-    context["aws_accounts"] = AWSAccount.objects.all()
+    # Filter AWS accounts by user's current organization
+    org = request.user.current_organization
+    context["aws_accounts"] = AWSAccount.objects.filter(organization=org)
     
     if request.htmx:
         return render(request, "devopshero_app/settings/aws_accounts.html", context=context)
@@ -70,10 +71,9 @@ def settings_aws_accounts_add(request):
             response["HX-Trigger"] = '{"validationError": "Please enter an AWS account name"}'
             return response
         
-        # TODO: Get organization from user's current org context
-        org = Organization.objects.first()  # Temporary: use first org
+        org = request.user.current_organization
         
-        # Check if name already exists for this organization
+        # Check if the AWS account name already exists for this organization
         existing = AWSAccount.objects.filter(organization=org, name=name).first()
         if existing:
             if existing.status in (AWSAccount.Status.PENDING, AWSAccount.Status.ERROR):
@@ -104,7 +104,7 @@ def settings_aws_accounts_add(request):
 
 @login_required
 def settings_billing(request):
-    context = get_app_shell_context(current_page="settings")
+    context = get_app_shell_context(request=request, current_page="settings")
     context["active_tab"] = "billing"
     
     if request.htmx:
