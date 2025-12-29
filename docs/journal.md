@@ -1,5 +1,104 @@
 # DevOpsHero Development Journal
 
+## 2025-12-29 - Customer Account Infrastructure Templates (VPC + ECS Cluster)
+
+### Summary
+
+Created CloudFormation templates and a Python deployment script to initialize customer AWS accounts with the infrastructure needed to run Fargate apps. Successfully deployed to test account `266117665083`.
+
+### Files Created
+
+```
+infra_customer/
+├── cf_vpc.json              # VPC with 2 public subnets
+├── cf_ecs_cluster.json      # ECS cluster, security group, IAM roles
+└── test_deploy_infra.py     # Python script to deploy via cross-account role
+```
+
+### Architecture Decision: Private Apps with Public Subnets
+
+Apps are private (accessible only from VPC via VPN), but Fargate tasks run in **public subnets with public IPs**. This avoids NAT Gateway costs (~$32/month) while still allowing tasks to pull images from ECR.
+
+```
+┌─────────────────────────────────────────┐
+│              VPC (172.20.0.0/20)        │
+│  ┌───────────────────────────────────┐  │
+│  │  Public Subnet 1 (172.20.0.0/24)  │  │
+│  │  Public Subnet 2 (172.20.1.0/24)  │  │
+│  │  └── Fargate Tasks (public IP)    │◄── VPN access only
+│  └───────────────────────────────────┘  │
+│  └── Internet Gateway                   │
+└─────────────────────────────────────────┘
+```
+
+Security group restricts inbound to VPC CIDR only.
+
+### CIDR Range Selection: 172.x.x.x with Auto-Conflict Avoidance
+
+**Why 172.16-31.x.x instead of 10.x.x.x or 192.168.x.x:**
+- `10.x.x.x` — Most commonly used by enterprises, higher conflict risk
+- `192.168.x.x` — Used by home networks, causes VPN routing issues for developers
+- `172.16-31.x.x` — Rarely used, VPN-friendly, good middle ground
+
+**Automatic CIDR selection:** The Python script scans existing VPCs in the customer account and picks the first available `/20` block in `172.20-31.x.x` that doesn't overlap.
+
+```python
+def find_available_vpc_cidr(ec2_client) -> dict:
+    # Gets all existing VPC CIDRs
+    # Tries 172.20.0.0/20, 172.20.16.0/20, etc.
+    # Returns first non-conflicting CIDR with subnet allocations
+```
+
+### CloudFormation Exports & Cross-Stack Dependencies
+
+The VPC stack exports values that the ECS cluster stack imports:
+- `devopshero-vpc-id`
+- `devopshero-vpc-cidr`
+- `devopshero-public-subnet-1`, `devopshero-public-subnet-2`
+
+**Lesson learned:** CloudFormation prevents modifying exported values if another stack imports them. When we tried to change the VPC CIDR after ECS cluster was deployed:
+
+```
+Cannot update export devopshero-vpc-cidr as it is in use by devopshero-ecs-cluster
+```
+
+**Solution:** Delete stacks in reverse dependency order, then recreate. This is fine because VPC CIDRs are effectively immutable anyway.
+
+**Considered nested stacks** but decided against for now — adds complexity (S3 hosting, harder debugging) for minimal benefit with just 2 stacks.
+
+### Cross-Account Deployment via AssumeRole
+
+The Python script:
+1. Loads DOH control plane credentials from `.env`
+2. Assumes the `devopshero-{external_id}` role in the target account
+3. Deploys CloudFormation stacks with the assumed credentials
+
+```python
+session = get_assumed_role_session(
+    access_key=os.getenv("DOH_AWS_ACCESS_KEY"),
+    secret_key=os.getenv("DOH_AWS_SECRET_KEY"),
+    account_id="266117665083",
+    external_id="9e62c988-09dd-4f96-b5a7-a67646dd285b",
+    region="us-east-1",
+)
+```
+
+### What Got Deployed
+
+| Stack | Resources |
+|-------|-----------|
+| `devopshero-vpc` | VPC, 2 public subnets, Internet Gateway, route table |
+| `devopshero-ecs-cluster` | ECS cluster, security group, Task Execution Role, Task Role, CloudWatch log group |
+
+### Next Steps
+
+1. Create per-app CloudFormation template (ECR repo + Task Definition + ECS Service)
+2. Add Docker build & push to ECR in the Python script
+3. Deploy `simple_dashboard` end-to-end
+4. Get a working URL accessible via VPN
+
+---
+
 ## 2025-12-28 - Created Simple Dashboard (Track 1 MVP App)
 
 ### Summary

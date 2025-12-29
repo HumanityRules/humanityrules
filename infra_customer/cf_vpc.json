@@ -1,0 +1,144 @@
+{
+  "AWSTemplateFormatVersion": "2010-09-09",
+  "Description": "DevOpsHero VPC - Public subnets for Fargate deployments (MVP - no NAT Gateway)",
+
+  "Parameters": {
+    "VpcCidr": {
+      "Type": "String",
+      "Default": "172.20.0.0/20",
+      "Description": "CIDR block for the VPC (uses 172.16-31.x.x range to avoid conflicts)"
+    },
+    "PublicSubnet1Cidr": {
+      "Type": "String",
+      "Default": "172.20.0.0/24",
+      "Description": "CIDR block for public subnet 1"
+    },
+    "PublicSubnet2Cidr": {
+      "Type": "String",
+      "Default": "172.20.1.0/24",
+      "Description": "CIDR block for public subnet 2"
+    }
+  },
+
+  "Resources": {
+    "VPC": {
+      "Type": "AWS::EC2::VPC",
+      "Properties": {
+        "CidrBlock": { "Ref": "VpcCidr" },
+        "EnableDnsSupport": true,
+        "EnableDnsHostnames": true,
+        "Tags": [
+          { "Key": "Name", "Value": "devopshero-vpc" }
+        ]
+      }
+    },
+
+    "InternetGateway": {
+      "Type": "AWS::EC2::InternetGateway",
+      "Properties": {
+        "Tags": [
+          { "Key": "Name", "Value": "devopshero-igw" }
+        ]
+      }
+    },
+
+    "InternetGatewayAttachment": {
+      "Type": "AWS::EC2::VPCGatewayAttachment",
+      "Properties": {
+        "VpcId": { "Ref": "VPC" },
+        "InternetGatewayId": { "Ref": "InternetGateway" }
+      }
+    },
+
+    "PublicSubnet1": {
+      "Type": "AWS::EC2::Subnet",
+      "Properties": {
+        "VpcId": { "Ref": "VPC" },
+        "CidrBlock": { "Ref": "PublicSubnet1Cidr" },
+        "AvailabilityZone": { "Fn::Select": ["0", { "Fn::GetAZs": "" }] },
+        "MapPublicIpOnLaunch": true,
+        "Tags": [
+          { "Key": "Name", "Value": "devopshero-public-1" }
+        ]
+      }
+    },
+
+    "PublicSubnet2": {
+      "Type": "AWS::EC2::Subnet",
+      "Properties": {
+        "VpcId": { "Ref": "VPC" },
+        "CidrBlock": { "Ref": "PublicSubnet2Cidr" },
+        "AvailabilityZone": { "Fn::Select": ["1", { "Fn::GetAZs": "" }] },
+        "MapPublicIpOnLaunch": true,
+        "Tags": [
+          { "Key": "Name", "Value": "devopshero-public-2" }
+        ]
+      }
+    },
+
+    "PublicRouteTable": {
+      "Type": "AWS::EC2::RouteTable",
+      "Properties": {
+        "VpcId": { "Ref": "VPC" },
+        "Tags": [
+          { "Key": "Name", "Value": "devopshero-public-rt" }
+        ]
+      }
+    },
+
+    "PublicRoute": {
+      "Type": "AWS::EC2::Route",
+      "DependsOn": "InternetGatewayAttachment",
+      "Properties": {
+        "RouteTableId": { "Ref": "PublicRouteTable" },
+        "DestinationCidrBlock": "0.0.0.0/0",
+        "GatewayId": { "Ref": "InternetGateway" }
+      }
+    },
+
+    "PublicSubnet1RouteTableAssociation": {
+      "Type": "AWS::EC2::SubnetRouteTableAssociation",
+      "Properties": {
+        "SubnetId": { "Ref": "PublicSubnet1" },
+        "RouteTableId": { "Ref": "PublicRouteTable" }
+      }
+    },
+
+    "PublicSubnet2RouteTableAssociation": {
+      "Type": "AWS::EC2::SubnetRouteTableAssociation",
+      "Properties": {
+        "SubnetId": { "Ref": "PublicSubnet2" },
+        "RouteTableId": { "Ref": "PublicRouteTable" }
+      }
+    }
+  },
+
+  "Outputs": {
+    "VpcId": {
+      "Description": "VPC ID",
+      "Value": { "Ref": "VPC" },
+      "Export": { "Name": "devopshero-vpc-id" }
+    },
+    "VpcCidr": {
+      "Description": "VPC CIDR block",
+      "Value": { "Fn::GetAtt": ["VPC", "CidrBlock"] },
+      "Export": { "Name": "devopshero-vpc-cidr" }
+    },
+    "PublicSubnet1Id": {
+      "Description": "Public Subnet 1 ID",
+      "Value": { "Ref": "PublicSubnet1" },
+      "Export": { "Name": "devopshero-public-subnet-1" }
+    },
+    "PublicSubnet2Id": {
+      "Description": "Public Subnet 2 ID",
+      "Value": { "Ref": "PublicSubnet2" },
+      "Export": { "Name": "devopshero-public-subnet-2" }
+    },
+    "PublicSubnetIds": {
+      "Description": "Comma-separated list of public subnet IDs",
+      "Value": { "Fn::Join": [",", [{ "Ref": "PublicSubnet1" }, { "Ref": "PublicSubnet2" }]] },
+      "Export": { "Name": "devopshero-public-subnets" }
+    }
+  }
+}
+

@@ -46,3 +46,4 @@
 
 # Customer Installation
 - Least privilege of the role we create in the customer's account
+- All our resources must be tagged: doh:awsAccountId, doh:createdBy, doh:environmentId, doh:id, doh:organizationId, doh:projectId, doh:purpose
