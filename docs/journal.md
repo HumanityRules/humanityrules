@@ -1,5 +1,125 @@
 # DevOpsHero Development Journal
 
+## 2025-12-28 - Created Simple Dashboard (Track 1 MVP App)
+
+### Summary
+
+Created `deployable_repos/simple_dashboard/` — a minimal Streamlit app to test the deployment pipeline.
+
+### Files Created
+
+```
+simple_dashboard/
+├── app.py                      # Streamlit dashboard with fake metrics
+├── pyproject.toml              # For local dev with uv
+├── requirements.txt            # For Dockerfile
+├── Dockerfile                  # Uses uv for fast installs
+├── README.md
+└── .streamlit/
+    ├── credentials.toml        # Skips email prompt
+    └── config.toml             # Disables telemetry
+```
+
+### Streamlit First-Run Prompt Skip
+
+Streamlit shows an email collection prompt on first run. To skip it, create `.streamlit/credentials.toml`:
+
+```toml
+[general]
+email = ""
+```
+
+And `.streamlit/config.toml` to disable telemetry:
+
+```toml
+[browser]
+gatherUsageStats = false
+
+[server]
+headless = true
+```
+
+### Local Development
+
+```bash
+cd deployable_repos/simple_dashboard
+uv run streamlit run app.py
+```
+
+`uv run` automatically creates an isolated `.venv`, installs deps from `pyproject.toml`, and runs the app.
+
+---
+
+## 2025-12-28 - Strategic Direction: Dual-Track MVP Approach
+
+### Summary
+
+Defined the strategic approach for finding product market fit: build a simple deployment pipeline first, then incrementally add features toward deploying complex enterprise apps.
+
+### The Problem
+
+We had built solid infrastructure (auth, org management, AWS account connection) but zero core product functionality. The gap between "connected AWS account" and "deployed app" was undefined.
+
+### The Decision: Dual-Track Approach
+
+Rather than attempting to deploy a complex app immediately, we'll pursue two parallel tracks:
+
+**Track 1: Simple Dashboard → Working Deployment**
+- Create a minimal Streamlit app with no dependencies
+- Build the core deployment pipeline: Build → ECR → Fargate → URL
+- Prove the loop closes end-to-end
+- Target: days, not weeks
+
+**Track 2: Feature Roadmap → db_portal**
+- Use `db_portal` (existing Phoenix/Elixir internal tool) as the north star
+- Each milestone adds one capability that enterprise apps need
+- Eventually deploy db_portal as proof of enterprise readiness
+
+### Feature Milestones (Track 2)
+
+| Milestone    | Feature                    | db_portal Requirement                            |
+|--------------|----------------------------|--------------------------------------------------|
+| **M1**       | Basic deploy (Streamlit)   | N/A (foundation)                                 |
+| **M2**       | Environment variables      | `RUN_SAMPLER`, `SSLCERT_MODE`, `LE_MODE`         |
+| **M3**       | Secrets injection          | `secret_key_base`, `signing_salt`, `db_password` |
+| **M4**       | Managed RDS/Aurora         | MySQL database dependency                        |
+| **M5**       | Custom domain + TLS        | `dataengr.humanityrules.io` with certs              |
+| **M6**       | SSO integration            | Okta SAML                                        |
+| **M7**       | Private VPC networking     | Aurora connectivity, no public internet          |
+| **M8**       | Background workers         | Sampler scheduler process                        |
+
+### Why This Approach
+
+1. **Faster learning** — Get a working deployment in days, not weeks
+2. **Avoid scope creep** — Don't get lost in db_portal-specific issues
+3. **Incremental value** — Each milestone is independently demoable
+4. **Clear north star** — db_portal keeps us honest about enterprise requirements
+
+### Target Persona
+
+Data Scientists / ML Engineers who can build apps but struggle with deployment. They represent:
+- Maximum pain (deployment is mystical to them)
+- Growing market (vibe coding trend)
+- Simpler initial scope (stateless web UIs)
+- Clear success metric ("I have a URL")
+
+### Folder Structure
+
+```
+deployable_repos/
+├── db_portal/           # Track 2 goal (complex Phoenix app)
+└── simple_dashboard/    # Track 1 MVP (minimal Streamlit app)
+```
+
+### Next Steps
+
+1. Create `simple_dashboard/` with Streamlit app + Dockerfile
+2. Manually deploy to Fargate to understand the AWS plumbing
+3. Automate the pipeline in DevOps Hero
+4. Wire to UI: App model + "Deploy" button + status page
+
+---
+
 ## 2025-12-28 - Fixed Dropdown Popover Width Issue
 
 ### Summary

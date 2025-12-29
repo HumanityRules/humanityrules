@@ -9,6 +9,8 @@ export AWS_ACCESS_KEY_ID="$DOH_AWS_ACCESS_KEY"
 export AWS_SECRET_ACCESS_KEY="$DOH_AWS_SECRET_KEY"
 export AWS_DEFAULT_REGION="us-east-1"
 
+
+#- S3 buckets ---------------------------------------
 echo "Deploying public bucket..."
 aws cloudformation deploy \
   --template-file cf_public_bucket.json \
@@ -23,20 +25,32 @@ aws cloudformation deploy \
   --parameter-overrides BucketName=devopshero-private \
   --region us-east-1
 
-echo "Uploading S3 files..."
-./upload_s3_files.sh
-
+#- Install callback lambda --------------------------
+echo "Uploading install callback lambda code before deploying the lambda stack..."
+zip install_callback_lambda.zip install_callback_lambda.py
+aws s3 cp install_callback_lambda.zip s3://devopshero-private/
+rm install_callback_lambda.zip
 
 echo "Deploying install callback lambda..."
-
-# Delete lambda stack if it exists, let's make sure we redeploy it every time
-aws cloudformation delete-stack \
+# Delete lambda stack only if it's in an error state
+STACK_STATUS=$(aws cloudformation describe-stacks \
   --stack-name devopshero-install-callback-lambda \
-  --region us-east-1 2>/dev/null || true
+  --region us-east-1 \
+  --query 'Stacks[0].StackStatus' \
+  --output text 2>/dev/null || echo "DOES_NOT_EXIST")
 
-aws cloudformation wait stack-delete-complete \
-  --stack-name devopshero-install-callback-lambda \
-  --region us-east-1 2>/dev/null || true
+if [[ "$STACK_STATUS" == *"FAILED"* ]] || [[ "$STACK_STATUS" == *"ROLLBACK"* ]]; then
+  echo "Stack is in error state ($STACK_STATUS), deleting..."
+  aws cloudformation delete-stack \
+    --stack-name devopshero-install-callback-lambda \
+    --region us-east-1
+
+  aws cloudformation wait stack-delete-complete \
+    --stack-name devopshero-install-callback-lambda \
+    --region us-east-1
+else
+  echo "Stack status: $STACK_STATUS (no deletion needed)"
+fi
 
 aws cloudformation deploy \
   --template-file cf_install_callback_lambda.json \
