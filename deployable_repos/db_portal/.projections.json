@@ -1,0 +1,47 @@
+{
+  "*_live.ex": {
+    "alternate": ["{}_live.html.heex", "{}_live.html.leex"]
+    "type": "live",
+    "related": [
+      "{dirname|dirname}/views/{basename}_view.ex"
+    ],
+    "template": [
+      "# {basename}_live.ex",
+      "defmodule XXX do",
+      "end"
+    ]
+  },
+  "*.html.heex": {
+    "alternate": "{}.ex",
+    "type": "live",
+    "related": [
+      "{dirname|dirname}/views/{basename}_view.ex"
+    ],
+  },
+  "*.html.leex": {
+    "alternate": "{}.ex",
+    "type": "live",
+    "related": [
+      "{dirname|dirname}/views/{basename}_view.ex"
+    ],
+  },
+  "lib/*.ex": {
+    "alternate": "test/{}_test.exs",
+    "type": "source",
+    "template": [
+      "defmodule {camelcase|capitalize|dot} do",
+      "end"
+    ]
+  },
+  "test/*_test.exs": {
+    "alternate": "lib/{}.ex",
+    "type": "test",
+    "template": [
+      "defmodule {camelcase|capitalize|dot}Test do",
+      "  use ExUnit.Case, async: true",
+      "",
+      "  alias {camelcase|capitalize|dot}",
+      "end"
+    ]
+  },
+}

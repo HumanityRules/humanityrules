@@ -1,0 +1,14 @@
+[project]
+name = "simple-dashboard"
+version = "0.1.0"
+description = "A minimal Streamlit dashboard for testing the DevOps Hero deployment pipeline"
+requires-python = ">=3.12"
+dependencies = [
+    "streamlit>=1.40.2",
+    "pandas>=2.2.3",
+    "numpy>=2.2.1",
+]
+
+[project.scripts]
+dashboard = "streamlit:run"
+

@@ -1,0 +1,88 @@
+<!-- outer container -->
+<div class="mx-auto bg-white rounded-lg">
+
+  <div class="grid grid-cols-1">
+    <!-- menus (prod/dev, schema) -->
+    <.live_component
+          module= {DbPortalWeb.ReadOnlySchemaSelectorComponent}
+          id= {1}
+          envs= {~w(dev prod)}
+          env= {@env}
+          permitted_schema_ids= {:all}
+          schema= {@schema}
+    />
+
+    <div class="border border-blue h-auto">
+      <div class="m-2 rounded-md p-3">
+        <h2 class="">
+          <div class="flex">
+            <span class="flex-initial text-2xl text-ch-blue">Unused Indexes (<%= @count.result %>)</span>
+            <%= if @count.result > 0 do %>
+              <span class="flex-auto px-8 text-xl">Table Filter:
+                <form phx-change="filter" class="inline-flex">
+                  <input type="text" class="form-control" name="filter" value={@filter} phx-debounce="500"
+                    placeholder="Filter..." phx-change="filter"/>
+                </form>
+              </span>
+            <% end %>
+            <span class="flex-none"><%= pagination_helper(@count.result, @page )%></span>
+          </div>
+        </h2>
+        <.async_result :let={disp_unused} assign={@disp_unused}>
+          <:loading>Loading...</:loading>
+
+          <div class="table w-full">
+            <div class="table-row font-bold text-blue-700 bg-blue-100">
+                <%= for h <- ~w(table index insert update delete write)a do %>
+                  <div class="table-cell pl-2">
+                    <button phx-click="sort_by" value={h} class="w-full h-full text-left">
+                      <span class="">
+                        <%= h %>
+                      </span>
+                      <span class="">
+                        <%= if h==@sort_by do %>
+                          <%= if @sort_dir == :asc do %>
+                            <svg class="h-5 w-5 inline" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor">
+                              <path fill-rule="evenodd" d="M14.707 12.707a1 1 0 01-1.414 0L10 9.414l-3.293 3.293a1 1 0 01-1.414-1.414l4-4a1 1 0 011.414 0l4 4a1 1 0 010 1.414z" clip-rule="evenodd" />
+                            </svg>
+                          <% else %>
+                            <svg class="h-5 w-5 inline" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor">
+                              <path fill-rule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clip-rule="evenodd" />
+                            </svg>
+
+                          <% end %>
+                        <% end %>
+                      </span>
+                    </button>
+                  </div>
+                <% end %>
+            </div>
+            <div class="table-row-group">
+              <%= for t <- disp_unused do %>
+                <div class="table-row" >
+                  <div class="table-cell pl-2"><%= t.table %></div>
+                  <div class="table-cell pl-2 relative tooltip" id={t.table <> ":" <> t.index} phx-hook="tooltip"><%= t.index %>
+                    <div class="tooltip-text left-0 top-1">
+                      <pre>
+                        <%= @index_tooltip %>
+                      </pre>
+                    </div>
+                  </div>
+
+                  <div class="table-cell pl-2"><%= t.insert %></div>
+                  <div class="table-cell pl-2"><%= t.update %></div>
+                  <div class="table-cell pl-2"><%= t.delete %></div>
+                  <div class="table-cell pl-2"><%= t.write %></div>
+                </div>
+              <% end %>
+            </div>
+          </div>
+        </.async_result>
+
+      </div>
+    </div>
+
+
+
+  </div>
+</div>

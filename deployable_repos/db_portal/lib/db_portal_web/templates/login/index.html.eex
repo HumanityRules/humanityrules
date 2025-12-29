@@ -1,0 +1,64 @@
+<section class="row">
+  <div class="column">
+    <%= if @uid do %>
+      <a class="inline-flex items-center px-4 py-2 text-base font-medium text-white border border-transparent bg-dodgerblue-600 rounded-md shadow-sm hover:bg-dodgerblue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-dodgerblue-500" style="width: 100%;"
+        href="<%= URI.encode(@signout_uri) %>">Sign out</a>
+    <% else %>
+      <a class="inline-flex items-center px-4 py-2 text-base font-medium text-white border border-transparent bg-dodgerblue-600 rounded-md shadow-sm hover:bg-dodgerblue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-dodgerblue-500"
+        href="<%= URI.encode(@signin_uri) %>">Sign in</a>
+    <% end %>
+  </div>
+  <div class="column">
+    <a class="button button-outline" style="width: 100%;"
+      href="<%= URI.encode(@metadata_uri) %>">SP Metadata</a>
+  </div>
+</section>
+<section class="row">
+  <div class="column">
+    <div class="signin-status">
+      <%= if @uid do %>
+        <strong>Signed in as <%= Plug.HTML.html_escape(@uid) %></strong>
+      <% else %>
+        Not signed in
+      <% end %>
+      <%= if @idp_id do %>
+        <small>(IdP: <%= Plug.HTML.html_escape(@idp_id) %>)</small>
+      <% end %>
+    </div>
+  </div>
+</section>
+
+
+<%= if @attributes do %>
+  <strong>Assertions in SAML Response</strong>
+  <table class="table attribute-table">
+    <thead>
+      <tr><th>Attribute</th><th>Value</th></tr>
+    </thead>
+    <tbody>
+      <%= for {k, v} <- @attributes do %>
+        <tr>
+          <td><%= Plug.HTML.html_escape(k) %></td>
+          <td><%= Plug.HTML.html_escape([v] |> List.flatten() |> Enum.join(", ")) %></td>
+        </tr>
+      <% end %>
+    </tbody>
+  </table>
+<% end %>
+
+<%= if @computed do %>
+  <strong>Computed Attributes</strong>
+  <table class="table attribute-table">
+    <thead>
+      <tr><th>Attribute</th><th>Value</th></tr>
+    </thead>
+    <tbody>
+      <%= for {k, v} <- @computed do %>
+        <tr>
+          <td><%= Plug.HTML.html_escape(k) %></td>
+          <td><%= Plug.HTML.html_escape([v] |> List.flatten() |> Enum.join(", ")) %></td>
+        </tr>
+      <% end %>
+    </tbody>
+  </table>
+<% end %>

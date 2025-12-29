@@ -1,0 +1,111 @@
+<!-- outer container -->
+<div class="mx-auto bg-white rounded-lg">
+
+  <div class="grid grid-cols-1">
+    <!-- menus (prod/dev, schema) -->
+    <.live_component
+          module= {DbPortalWeb.ReadOnlySchemaSelectorComponent}
+          id= {1}
+          envs= {~w(dev prod)}
+          env= {@env}
+          permitted_schema_ids= {:all}
+          schema= {@schema}
+    />
+
+    <div class="h-auto border border-blue">
+      <div class="p-3 m-2 rounded-md">
+        <h2 class="text-2xl text-ch-blue">
+          Top
+        </h2>
+
+        <div class="mt-2">
+          <div class="">
+            <form phx-change="toggle_relative" class="flex items-center">
+              <label class="inline-flex items-center">
+                <input type="radio" class="form-radio" name="abs_rel" value="abs" checked={@show_absolute}>
+                <span class="ml-2">Absolute </span>
+              </label>
+              <label class="inline-flex items-center ml-6">
+                <input type="radio" class="form-radio" name="abs_rel" value="rel" checked={!@show_absolute}  >
+                <span class="ml-2">Relative </span>
+              </label>
+              <button type="button" class={"form-button " <> (if @show_absolute, do: "hidden") } <> " ml-3 px-3 py-1 rounded-full bg-dodgerblue-300 border border-transparent shadow-sm hover:bg-dodgerblue-400 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-dodgerblue-300" phx-click="refresh_relative">
+                Refresh
+              </button>
+            </form>
+          </div>
+
+          <div class="mt-3">
+            <div class="sm:hidden">
+              <label for="view" class="sr-only">Select a view</label>
+              <select id="view" name="view" class="block w-full border-gray-300 focus:ring-indigo-500 focus:border-indigo-500 rounded-md">
+                <%= for v <- @views do %>
+                  <option selected={v==@current_view} ><%=v%></option>
+                <% end %>
+              </select>
+            </div>
+            <div class="hidden sm:block">
+              <nav class="flex " aria-label="Views">
+
+                <%= for v <- @views do %>
+                  <%
+                    bg_and_text = if v==@current_view,
+                                    do: "font-bold bg-dodgerblue-100 text-dodgerblue-700",
+                                    else: "text-gray-500 hover:text-gray-700"
+                  %>
+                  <a href="#" class={"px-3 py-2 text-md border-t border-l border-r border-dodgerblue-200 rounded-t-md " <> bg_and_text } phx-click="set_view" phx-value-view={v}>
+                    <%= v %>
+                  </a>
+                <% end %>
+
+                <!-- Current: "bg-indigo-100 text-indigo-700", Default: "text-gray-500 hover:text-gray-700" -->
+              </nav>
+            </div>
+          </div>
+          <div class="p-1 border-b border-l border-r bg-dodgerblue-100 border-dodgerblue-200 ">
+            <div class="table w-full">
+              <div class="table-row font-semibold text-blue-700 bg-dodgerblue-100">
+                  <%= for h <- @cols do %>
+                    <div class="table-cell">
+                      <button phx-click="sort_by" value={h} class="w-full h-full text-right">
+                        <span class="">
+                          <%= h %>
+                        </span>
+                        <span class="">
+                          <%= if h==@sort_by do %>
+                            <%= if @sort_dir == :asc do %>
+                              <svg class="inline w-5 h-5" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor">
+                                <path fill-rule="evenodd" d="M14.707 12.707a1 1 0 01-1.414 0L10 9.414l-3.293 3.293a1 1 0 01-1.414-1.414l4-4a1 1 0 011.414 0l4 4a1 1 0 010 1.414z" clip-rule="evenodd" />
+                              </svg>
+                            <% else %>
+                              <svg class="inline w-5 h-5" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor">
+                                <path fill-rule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clip-rule="evenodd" />
+                              </svg>
+
+                            <% end %>
+                          <% end %>
+                        </span>
+                      </button>
+                    </div>
+                  <% end %>
+              </div>
+              <div class="table-row-group">
+                <%= for t <- @rows do %>
+                  <div class="table-row">
+                    <%= for c <- @cols do %>
+                      <div class="table-cell text-right"><%= Enum.at(t, @col_index[c]) |> format_cell(c) %></div>
+                    <% end %>
+                  </div>
+                <% end %>
+              </div>
+            </div>
+          </div>
+
+        </div>
+      </div>
+    </div>
+
+
+
+  </div>
+</div>

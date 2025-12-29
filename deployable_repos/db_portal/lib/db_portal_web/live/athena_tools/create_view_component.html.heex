@@ -1,0 +1,37 @@
+<div class="p-3 m-2 rounded-md">
+  <h2 class="inline-block text-xl font-semibold">Create View</h2>
+<form phx-submit="on_create_view_submit" phx-change="on_create_view_form_change" phx-target={@myself}>
+    <div class="justify-self-end">Database: (select one from the menu)</div>
+    <input type="text" name="database-name" placeholder="Database Name" class={"w-full h-8 mb-4 " <> if @selected_db == nil, do: "bg-red-100", else: ""}
+           value={ @selected_db } readonly/>
+    <div class="justify-self-end">View Name:</div>
+    <input type="text" name="view-name" autocomplete="off" autocapitalize="off" spellcheck="false"
+          placeholder="View Name"
+          class={"w-full h-8 mb-4 " <> if @view_name_error, do: "bg-red-100", else: "" }
+          value={ @view_name} />
+    <div class="justify-self-end">Select Query:</div>
+    <textarea
+        class={"w-full p-3 mb-4 " <> if @view_select_query_error, do: "bg-red-100", else: "bg-dodgerblue-50" }
+        name="select-query" rows="8"
+        placeholder="Select query that will be used to create your view here...">
+      <%= @view_select_query %>
+    </textarea>
+    <button type="submit" class={"px-4 py-2 text-white rounded " <> if @disable_create_view_btn, do: "bg-gray-200 text-gray-500 cursor-not-allowed", else: "bg-ch-blue text-white hover:bg-dodgerblue-600"}
+            disabled={@disable_create_view_btn}>
+      Create View
+      <%= if @create_view_in_progress do %>
+      <div class="pl-2 inline-flex items-center text-blue-500">
+        <svg class="animate-spin h-5 w-5" viewBox="0 0 24 24">
+          <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" fill="blue" stroke-width="4"></circle>
+          <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+        </svg>
+      </div>
+      <% end %>
+    </button>
+    <button type="button" class={"px-4 py-2 rounded " <> if @create_view_in_progress, do: "bg-gray-200 text-gray-500 cursor-not-allowed", else: "bg-ch-blue text-white hover:bg-dodgerblue-600"}
+            disabled={@create_view_in_progress}
+            phx-click="on_close_create_view_click">
+      Close
+    </button>
+  </form>
+</div>

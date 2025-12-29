@@ -1,0 +1,11 @@
+<%# index.html. eex template %>
+
+
+<ul>
+  <li>
+    <%= button("Explore DB Load", to: "/load", method: :get) %>
+  </li>
+  <li>
+    <%= button("ReadOnly DB Access", to: "/readonly", method: :get, class: "rounded-lg") %>
+  </li>
+</ul>

@@ -1,0 +1,57 @@
+<section class="phx-hero">
+
+  <div  data-cdata="<%= @bundle_time_data %>" data-chart_id="bundle_time" phx-hook="chartHook"></div>
+  <div  data-cdata="<%= @bundle_tput_data %>" data-chart_id="bundle_tput" phx-hook="chartHook"></div>
+
+  <article phx-update="ignore" id="overall_charts">
+
+    <%= raw Chartkick.line_chart @time_data, ytitle: "Total Time (secs per second)", title: "Total Time", legend: "bottom", height: "500px", library: %{ steppedLine: true} %>
+    <%= raw Chartkick.line_chart @tput_data, ytitle: "QPS", title: "Throughput", legend: "bottom", height: "500px", library: %{ steppedLine: true} %>
+    <%= raw Chartkick.line_chart @rows_ex_data, ytitle: "Million Rows Examined/second", title: "Rows Examined", legend: "bottom", height: "500px", library: %{ steppedLine: true} %>
+
+  </article>
+
+  <hr/>
+
+  <article>
+  <h3>By Bundle </h3>
+
+  <div style="height: 150px">
+    <button phx-click="select_all_bundles">Select All</button>
+    <button phx-click="clear_all_bundles">Clear All</button>
+    <button phx-click="invert_bundles">Invert</button>
+
+  </div>
+
+  <div style="display: flex">
+    <div style="width: 130px">
+      <ul>
+        <%= for {bundle, is_checked} <-@bundles do %>
+          <li style="list-style-type:none" ><%= checkbox :bundle, :"#{bundle}", value: is_checked, phx_value_id: bundle, phx_click: :toggle_bundle %>
+            <label for="<%= ~s(bundle_#{bundle})%>" style="display: inline"><%= bundle %></label></li>
+        <% end %>
+      </ul>
+    </div>
+
+    <div phx-update="ignore" id="bundle_charts" style="width: 100%" >
+
+      <%= raw Chartkick.line_chart @bundle_time_data, id: "bundle_time", ytitle: "Total Time (secs per second)", title: "Total Time by Bundle", legend: false, height: "750px", library: %{ steppedLine: true} %>
+      <%= raw Chartkick.line_chart @bundle_tput_data, id: "bundle_tput", ytitle: "QPS", title: "Throughput by Bundle", legend: "bottom", height: "500px", library: %{ steppedLine: true} %>
+    </div>
+  </div>
+
+  <hr/>
+
+  <div  data-cdata="<%= @drilldown_time_data %>" data-chart_id="drilldown_time" phx-hook="chartHook"></div>
+
+  <h3>Drilldown</h3>
+  <%= select :drilldown, :key, [{"Bundle", "symfony_entrypoint"},{"Repo","repo"}, {"Path","PATH"}], prompt: "Choose bundle...", phx_click: "drilldown_key", selected: @key %>
+  <% drilldown_tag_values = Enum.map(@drilldown_tag_values, fn {v,_}-> v end) %>
+  <%= select :drilldown, :tag_value, drilldown_tag_values, prompt: "Choose...", phx_click: "drilldown", phx_value_key: @key %>
+
+  <article phx-update="ignore" id="drilldown_charts">
+
+    <%= raw Chartkick.line_chart "[]", id: "drilldown_time", ytitle: "Total Time (secs per second)", title: "Total Time", legend: "bottom", height: "1500px", library: %{ steppedLine: true} %>
+    <%= raw Chartkick.line_chart "[]", id: "drilldown_tput", ytitle: "QPS", title: "Throughput", legend: "bottom", height: "1500px", library: %{ steppedLine: true} %>
+  </article>
+</section>

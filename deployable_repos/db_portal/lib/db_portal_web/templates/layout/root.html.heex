@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8"/>
+    <meta http-equiv="X-UA-Compatible" content="IE=edge"/>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+    <%= csrf_meta_tag() %>
+    <.live_title  suffix= " · Phoenix Framework" >
+      <%= assigns[:page_title] || "DbPortal" %>
+    </.live_title>
+    <link phx-track-static rel="stylesheet" href={ Routes.static_path(@conn, "/assets/app.css")}/>
+    <link href="https://assets-global.website-files.com/63f8af5313455948ec74231c/6407530b42c59dc491fcee4e_favicon.png" rel="shortcut icon" type="image/x-icon">
+    <script phx-track-static type="text/javascript" src={ Routes.static_path(@conn, "/assets/app.js")}></script>
+    <script src="https://cdn.jsdelivr.net/gh/alpinejs/alpine@v2.6.0/dist/alpine.min.js" defer></script>
+
+  </head>
+  <body>
+    <header class="bg-white shadow">
+      <section class="">
+        <%= render "_nav.html", conn: @conn %>
+      </section>
+    </header>
+
+    <div class="max-w-full py-4 mx-auto sm:px-2 lg:px-4 bg-ch-gray">
+      <%= @inner_content %>
+    </div>
+
+  </body>
+</html>
