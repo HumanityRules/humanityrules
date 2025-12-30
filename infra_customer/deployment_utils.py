@@ -1,19 +1,5 @@
-#!/usr/bin/env python3
 """
-Test script to deploy DevOpsHero infrastructure to a customer account.
-
-This script:
-1. Assumes the cross-account role into the target AWS account
-2. Deploys the VPC CloudFormation stack
-3. Deploys the ECS Cluster CloudFormation stack
-
-Usage:
-    cd infra_customer
-    uv run python test_deploy_infra.py
-
-Required environment variables (from ../.env):
-    DOH_AWS_ACCESS_KEY - DevOpsHero control plane AWS access key
-    DOH_AWS_SECRET_KEY - DevOpsHero control plane AWS secret key
+Utility functions for deploying DevOpsHero infrastructure to customer accounts.
 """
 
 import ipaddress
@@ -24,15 +10,6 @@ from pathlib import Path
 import boto3
 from botocore.exceptions import ClientError
 from dotenv import load_dotenv
-
-# Configuration
-TARGET_ACCOUNT_ID = "266117665083"
-TARGET_EXTERNAL_ID = "9e62c988-09dd-4f96-b5a7-a67646dd285b"
-TARGET_REGION = "us-east-1"
-
-# Stack names
-VPC_STACK_NAME = "devopshero-vpc"
-ECS_STACK_NAME = "devopshero-ecs-cluster"
 
 
 def cidrs_overlap(cidr1: str, cidr2: str) -> bool:
@@ -232,7 +209,7 @@ def deploy_cloudformation_stack(
             waiter = cf_client.get_waiter("stack_create_complete")
         
         print(f"   ⏳ Waiting for stack operation to complete...")
-        waiter.wait(StackName=stack_name, WaiterConfig={"Delay": 10, "MaxAttempts": 60})
+        waiter.wait(StackName=stack_name, WaiterConfig={"Delay": 10, "MaxAttempts": 180})   # 180 * 10 seconds = 30 minutes
         
         # Get stack outputs
         response = cf_client.describe_stacks(StackName=stack_name)
@@ -263,79 +240,4 @@ def deploy_cloudformation_stack(
             except:
                 pass
             return False
-
-
-def main():
-    print("🚀 DevOpsHero Infrastructure Deployment Test")
-    print("=" * 60)
-    
-    # Load environment
-    load_env()
-        
-    # Assume role into target account
-    session = get_assumed_role_session(
-        access_key=os.getenv("DOH_AWS_ACCESS_KEY"),
-        secret_key=os.getenv("DOH_AWS_SECRET_KEY"),
-        account_id=TARGET_ACCOUNT_ID,
-        external_id=TARGET_EXTERNAL_ID,
-        region=TARGET_REGION,
-    )
-    
-    # Create AWS clients
-    cf_client = session.client("cloudformation")
-    ec2_client = session.client("ec2")
-    
-    # Get template paths
-    template_dir = Path(__file__).parent
-    vpc_template = template_dir / "cf_vpc.json"
-    ecs_template = template_dir / "cf_ecs_cluster.json"
-    
-    # Verify templates exist
-    for template in [vpc_template, ecs_template]:
-        if not template.exists():
-            print(f"❌ Template not found: {template}")
-            sys.exit(1)
-    
-    # Find available CIDR range (avoids conflicts with existing VPCs)
-    vpc_params = find_available_vpc_cidr(ec2_client)
-    
-    # Deploy VPC first (ECS cluster depends on it)
-    success = deploy_cloudformation_stack(
-        cf_client=cf_client,
-        stack_name=VPC_STACK_NAME,
-        template_path=vpc_template,
-        parameters=vpc_params,
-    )
-    
-    if not success:
-        print("\n❌ VPC deployment failed. Stopping.")
-        sys.exit(1)
-    
-    # Deploy ECS Cluster (depends on VPC exports)
-    success = deploy_cloudformation_stack(
-        cf_client=cf_client,
-        stack_name=ECS_STACK_NAME,
-        template_path=ecs_template,
-        capabilities=["CAPABILITY_NAMED_IAM"],
-    )
-    
-    if not success:
-        print("\n❌ ECS Cluster deployment failed.")
-        sys.exit(1)
-    
-    print("\n" + "=" * 60)
-    print("🎉 Infrastructure deployment complete!")
-    print("=" * 60)
-    print(f"\nAccount: {TARGET_ACCOUNT_ID}")
-    print(f"Region:  {TARGET_REGION}")
-    print(f"VPC CIDR: {vpc_params['VpcCidr']}")
-    print(f"  Public subnets:  {vpc_params['PublicSubnet1Cidr']}, {vpc_params['PublicSubnet2Cidr']}")
-    print(f"  Private subnets: {vpc_params['PrivateSubnet1Cidr']}, {vpc_params['PrivateSubnet2Cidr']}")
-    print(f"\nNext steps:")
-    print("  1. Build and push your Docker image to ECR")
-    print("  2. Deploy an app using the ECS cluster (uses private subnets via NAT Gateway)")
-
-
-if __name__ == "__main__":
-    main()
 

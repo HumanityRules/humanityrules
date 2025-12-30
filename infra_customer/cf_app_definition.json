@@ -1,0 +1,115 @@
+{
+  "AWSTemplateFormatVersion": "2010-09-09",
+  "Description": "DevOpsHero App - Deploy ECR and Task Definition",
+
+  "Parameters": {
+    "ImageTag": {
+      "Type": "String",
+      "Default": "latest",
+      "Description": "Docker image tag to deploy"
+    }
+  },
+
+  "Resources": {
+    "EcrRepository": {
+      "Type": "AWS::ECR::Repository",
+      "Properties": {
+        "RepositoryName": "devopshero/simple-dashboard",
+        "ImageScanningConfiguration": {
+          "ScanOnPush": true
+        },
+        "LifecyclePolicy": {
+          "LifecyclePolicyText": "{\"rules\":[{\"rulePriority\":1,\"description\":\"Keep last 10 images\",\"selection\":{\"tagStatus\":\"any\",\"countType\":\"imageCountMoreThan\",\"countNumber\":10},\"action\":{\"type\":\"expire\"}}]}"
+        },
+        "Tags": [
+          { "Key": "Name", "Value": "devopshero-simple-dashboard" },
+          { "Key": "App", "Value": "simple-dashboard" }
+        ]
+      }
+    },
+
+    "TaskDefinition": {
+      "Type": "AWS::ECS::TaskDefinition",
+      "Properties": {
+        "Family": "devopshero-simple-dashboard",
+        "NetworkMode": "awsvpc",
+        "RequiresCompatibilities": ["FARGATE"],
+        "Cpu": "256",
+        "Memory": "512",
+        "ExecutionRoleArn": { "Fn::ImportValue": "devopshero-task-execution-role-arn" },
+        "TaskRoleArn": { "Fn::ImportValue": "devopshero-task-role-arn" },
+        "ContainerDefinitions": [
+          {
+            "Name": "simple-dashboard",
+            "Image": {
+              "Fn::Sub": "${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/devopshero/simple-dashboard:${ImageTag}"
+            },
+            "Essential": true,
+            "PortMappings": [
+              {
+                "ContainerPort": 8501,
+                "Protocol": "tcp"
+              }
+            ],
+            "HealthCheck": {
+              "Command": ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8501/_stcore/health', timeout=5)\" || exit 1"],
+              "Interval": 30,
+              "Timeout": 10,
+              "Retries": 3,
+              "StartPeriod": 60
+            },
+            "LogConfiguration": {
+              "LogDriver": "awslogs",
+              "Options": {
+                "awslogs-group": { "Fn::ImportValue": "devopshero-ecs-log-group" },
+                "awslogs-region": { "Ref": "AWS::Region" },
+                "awslogs-stream-prefix": "simple-dashboard"
+              }
+            },
+            "Environment": [
+              {
+                "Name": "STREAMLIT_SERVER_PORT",
+                "Value": "8501"
+              },
+              {
+                "Name": "STREAMLIT_SERVER_ADDRESS",
+                "Value": "0.0.0.0"
+              },
+              {
+                "Name": "STREAMLIT_SERVER_HEADLESS",
+                "Value": "true"
+              },
+              {
+                "Name": "STREAMLIT_BROWSER_GATHER_USAGE_STATS",
+                "Value": "false"
+              }
+            ]
+          }
+        ],
+        "Tags": [
+          { "Key": "Name", "Value": "devopshero-simple-dashboard-task" },
+          { "Key": "App", "Value": "simple-dashboard" }
+        ]
+      }
+    }
+  },
+
+  "Outputs": {
+    "EcrRepositoryUri": {
+      "Description": "ECR Repository URI",
+      "Value": { "Fn::GetAtt": ["EcrRepository", "RepositoryUri"] },
+      "Export": { "Name": "devopshero-simple-dashboard-ecr-uri" }
+    },
+    "EcrRepositoryArn": {
+      "Description": "ECR Repository ARN",
+      "Value": { "Fn::GetAtt": ["EcrRepository", "Arn"] },
+      "Export": { "Name": "devopshero-simple-dashboard-ecr-arn" }
+    },
+    "TaskDefinitionArn": {
+      "Description": "ECS Task Definition ARN",
+      "Value": { "Ref": "TaskDefinition" },
+      "Export": { "Name": "devopshero-simple-dashboard-task-def-arn" }
+    }
+  }
+}
+
