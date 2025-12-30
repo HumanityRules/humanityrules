@@ -175,7 +175,7 @@ with col_left:
         background='transparent'
     )
     
-    st.altair_chart(bar_chart_time, width="stretch")
+    st.altair_chart(bar_chart_time, use_container_width=True)
 
 with col_right:
     st.markdown("### 🌍 Traffic by Region")
@@ -201,7 +201,7 @@ with col_right:
         background='transparent'
     )
     
-    st.altair_chart(bar_chart, width="stretch")
+    st.altair_chart(bar_chart, use_container_width=True)
 
 # Status table
 st.markdown("---")
@@ -217,7 +217,7 @@ services = pd.DataFrame({
 
 st.dataframe(
     services,
-    width="stretch",
+    use_container_width=True,
     hide_index=True,
     column_config={
         'Service': st.column_config.TextColumn('Service', width='medium'),
