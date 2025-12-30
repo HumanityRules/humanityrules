@@ -47,7 +47,8 @@ def find_available_vpc_cidr(ec2_client) -> dict:
     Find an available /20 CIDR in the 172.16-31.x.x range that doesn't 
     conflict with existing VPCs.
     
-    Returns a dict with VpcCidr, PublicSubnet1Cidr, PublicSubnet2Cidr.
+    Returns a dict with VpcCidr, PublicSubnet1Cidr, PublicSubnet2Cidr,
+    PrivateSubnet1Cidr, PrivateSubnet2Cidr.
     """
     print("\n🔍 Scanning for available CIDR range...")
     
@@ -82,14 +83,18 @@ def find_available_vpc_cidr(ec2_client) -> dict:
             
             if not has_conflict:
                 # Found a good one! Calculate subnet CIDRs
-                # /20 gives us 4096 IPs, we'll carve out two /24 subnets
+                # /20 gives us 4096 IPs, we'll carve out four /24 subnets:
+                # - 2 public (for NAT Gateway and potential ALB)
+                # - 2 private (for Fargate tasks)
                 vpc_net = ipaddress.ip_network(candidate)
                 subnets = list(vpc_net.subnets(new_prefix=24))
                 
                 result = {
                     "VpcCidr": candidate,
-                    "PublicSubnet1Cidr": str(subnets[0]),
-                    "PublicSubnet2Cidr": str(subnets[1]),
+                    "PublicSubnet1Cidr": str(subnets[0]),   # .0.0/24
+                    "PublicSubnet2Cidr": str(subnets[1]),   # .1.0/24
+                    "PrivateSubnet1Cidr": str(subnets[2]),  # .2.0/24
+                    "PrivateSubnet2Cidr": str(subnets[3]),  # .3.0/24
                 }
                 print(f"   ✅ Selected: {candidate}")
                 return result
@@ -324,9 +329,11 @@ def main():
     print(f"\nAccount: {TARGET_ACCOUNT_ID}")
     print(f"Region:  {TARGET_REGION}")
     print(f"VPC CIDR: {vpc_params['VpcCidr']}")
+    print(f"  Public subnets:  {vpc_params['PublicSubnet1Cidr']}, {vpc_params['PublicSubnet2Cidr']}")
+    print(f"  Private subnets: {vpc_params['PrivateSubnet1Cidr']}, {vpc_params['PrivateSubnet2Cidr']}")
     print(f"\nNext steps:")
     print("  1. Build and push your Docker image to ECR")
-    print("  2. Deploy an app using the ECS cluster")
+    print("  2. Deploy an app using the ECS cluster (uses private subnets via NAT Gateway)")
 
 
 if __name__ == "__main__":

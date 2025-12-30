@@ -19,32 +19,6 @@
       }
     },
 
-    "EcsSecurityGroup": {
-      "Type": "AWS::EC2::SecurityGroup",
-      "Properties": {
-        "GroupName": "devopshero-ecs-tasks-sg",
-        "GroupDescription": "Security group for DevOpsHero ECS Fargate tasks",
-        "VpcId": { "Fn::ImportValue": "devopshero-vpc-id" },
-        "SecurityGroupIngress": [
-          {
-            "Description": "Allow all traffic from within VPC",
-            "IpProtocol": "-1",
-            "CidrIp": { "Fn::ImportValue": "devopshero-vpc-cidr" }
-          }
-        ],
-        "SecurityGroupEgress": [
-          {
-            "Description": "Allow all outbound traffic",
-            "IpProtocol": "-1",
-            "CidrIp": "0.0.0.0/0"
-          }
-        ],
-        "Tags": [
-          { "Key": "Name", "Value": "devopshero-ecs-tasks-sg" }
-        ]
-      }
-    },
-
     "EcsTaskExecutionRole": {
       "Type": "AWS::IAM::Role",
       "Properties": {
@@ -117,11 +91,6 @@
       "Value": { "Ref": "EcsCluster" },
       "Export": { "Name": "devopshero-cluster-name" }
     },
-    "SecurityGroupId": {
-      "Description": "Security Group ID for ECS tasks",
-      "Value": { "Ref": "EcsSecurityGroup" },
-      "Export": { "Name": "devopshero-ecs-sg-id" }
-    },
     "TaskExecutionRoleArn": {
       "Description": "ECS Task Execution Role ARN",
       "Value": { "Fn::GetAtt": ["EcsTaskExecutionRole", "Arn"] },
@@ -139,4 +108,3 @@
     }
   }
 }
-

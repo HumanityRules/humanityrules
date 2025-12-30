@@ -1,5 +1,24 @@
 # DevOpsHero Development Journal
 
+> **Convention:** Entries are in reverse chronological order (latest on top). Use format: `## YYYY-MM-DD HH:MM - Title`
+
+## 2025-12-29 - Decoupled ECS Cluster Stack from VPC Stack
+
+Moved the default security group from `cf_ecs_cluster.json` to `cf_vpc.json`. The ECS cluster stack now has zero VPC dependencies, avoiding CloudFormation's "export in use" lock when updating the VPC stack.
+
+## 2025-12-29 - VPC Architecture Change: NAT Gateway for ECS Tasks
+
+Changed the customer VPC from public-subnet-with-public-IP to private-subnet-behind-NAT-Gateway.
+
+**Before:** Fargate tasks ran in public subnets and acquired public IPs to reach ECR/internet.  
+**After:** Fargate tasks run in private subnets; outbound traffic goes through a NAT Gateway.
+
+**Rationale:** Cleaner security posture—tasks have no public IPs. The ~$32/month NAT cost is acceptable.
+
+**Future:** Plan to support multiple networking models based on customer preference (e.g., NAT Gateway, public IP, VPC endpoints only).
+
+---
+
 ## 2025-12-29 - Customer Account Infrastructure Templates (VPC + ECS Cluster)
 
 ### Summary
