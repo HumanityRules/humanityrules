@@ -1,0 +1,167 @@
+{
+  "AWSTemplateFormatVersion": "2010-09-09",
+  "Description": "DevOpsHero ALB - Application Load Balancer for simple_dashboard app",
+
+  "Resources": {
+    "AlbSecurityGroup": {
+      "Type": "AWS::EC2::SecurityGroup",
+      "Properties": {
+        "GroupName": "devopshero-alb-sg",
+        "GroupDescription": "Security group for ALB - allows HTTP from internet",
+        "VpcId": { "Fn::ImportValue": "devopshero-vpc-id" },
+        "SecurityGroupIngress": [
+          {
+            "Description": "Allow HTTP from anywhere",
+            "IpProtocol": "tcp",
+            "FromPort": 80,
+            "ToPort": 80,
+            "CidrIp": "0.0.0.0/0"
+          }
+        ],
+        "SecurityGroupEgress": [
+          {
+            "Description": "Allow all outbound traffic",
+            "IpProtocol": "-1",
+            "CidrIp": "0.0.0.0/0"
+          }
+        ],
+        "Tags": [
+          { "Key": "Name", "Value": "devopshero-alb-sg" }
+        ]
+      }
+    },
+
+    "ApplicationLoadBalancer": {
+      "Type": "AWS::ElasticLoadBalancingV2::LoadBalancer",
+      "Properties": {
+        "Name": "devopshero-alb",
+        "Type": "application",
+        "Scheme": "internet-facing",
+        "IpAddressType": "ipv4",
+        "Subnets": [
+          { "Fn::ImportValue": "devopshero-public-subnet-1" },
+          { "Fn::ImportValue": "devopshero-public-subnet-2" }
+        ],
+        "SecurityGroups": [
+          { "Ref": "AlbSecurityGroup" }
+        ],
+        "Tags": [
+          { "Key": "Name", "Value": "devopshero-alb" }
+        ]
+      }
+    },
+
+    "TargetGroup": {
+      "Type": "AWS::ElasticLoadBalancingV2::TargetGroup",
+      "Properties": {
+        "Name": "devopshero-simple-dashboard-tg",
+        "VpcId": { "Fn::ImportValue": "devopshero-vpc-id" },
+        "Protocol": "HTTP",
+        "Port": 8501,
+        "TargetType": "ip",
+        "HealthCheckEnabled": true,
+        "HealthCheckPath": "/_stcore/health",
+        "HealthCheckProtocol": "HTTP",
+        "HealthCheckIntervalSeconds": 30,
+        "HealthCheckTimeoutSeconds": 10,
+        "HealthyThresholdCount": 2,
+        "UnhealthyThresholdCount": 3,
+        "Matcher": {
+          "HttpCode": "200"
+        },
+        "Tags": [
+          { "Key": "Name", "Value": "devopshero-simple-dashboard-tg" }
+        ]
+      }
+    },
+
+    "HttpListener": {
+      "Type": "AWS::ElasticLoadBalancingV2::Listener",
+      "Properties": {
+        "LoadBalancerArn": { "Ref": "ApplicationLoadBalancer" },
+        "Port": 80,
+        "Protocol": "HTTP",
+        "DefaultActions": [
+          {
+            "Type": "forward",
+            "TargetGroupArn": { "Ref": "TargetGroup" }
+          }
+        ]
+      }
+    },
+
+    "EcsService": {
+      "Type": "AWS::ECS::Service",
+      "DependsOn": "HttpListener",
+      "Properties": {
+        "ServiceName": "simple-dashboard",
+        "Cluster": { "Fn::ImportValue": "devopshero-cluster-arn" },
+        "TaskDefinition": { "Fn::ImportValue": "devopshero-simple-dashboard-task-def-arn" },
+        "DesiredCount": 0,
+        "LaunchType": "FARGATE",
+        "NetworkConfiguration": {
+          "AwsvpcConfiguration": {
+            "AssignPublicIp": "DISABLED",
+            "Subnets": [
+              { "Fn::ImportValue": "devopshero-private-subnet-1" },
+              { "Fn::ImportValue": "devopshero-private-subnet-2" }
+            ],
+            "SecurityGroups": [
+              { "Fn::ImportValue": "devopshero-default-sg-id" }
+            ]
+          }
+        },
+        "LoadBalancers": [
+          {
+            "TargetGroupArn": { "Ref": "TargetGroup" },
+            "ContainerName": "simple-dashboard",
+            "ContainerPort": 8501
+          }
+        ],
+        "DeploymentConfiguration": {
+          "MaximumPercent": 200,
+          "MinimumHealthyPercent": 100
+        },
+        "EnableExecuteCommand": true,
+        "Tags": [
+          { "Key": "Name", "Value": "devopshero-simple-dashboard-service" },
+          { "Key": "App", "Value": "simple-dashboard" }
+        ]
+      }
+    }
+  },
+
+  "Outputs": {
+    "AlbDnsName": {
+      "Description": "ALB DNS Name - use this to access the app",
+      "Value": { "Fn::GetAtt": ["ApplicationLoadBalancer", "DNSName"] },
+      "Export": { "Name": "devopshero-alb-dns" }
+    },
+    "AlbUrl": {
+      "Description": "Full URL to access the app",
+      "Value": { "Fn::Sub": "http://${ApplicationLoadBalancer.DNSName}" },
+      "Export": { "Name": "devopshero-alb-url" }
+    },
+    "AlbArn": {
+      "Description": "ALB ARN",
+      "Value": { "Ref": "ApplicationLoadBalancer" },
+      "Export": { "Name": "devopshero-alb-arn" }
+    },
+    "TargetGroupArn": {
+      "Description": "Target Group ARN",
+      "Value": { "Ref": "TargetGroup" },
+      "Export": { "Name": "devopshero-simple-dashboard-tg-arn" }
+    },
+    "ServiceArn": {
+      "Description": "ECS Service ARN",
+      "Value": { "Ref": "EcsService" },
+      "Export": { "Name": "devopshero-simple-dashboard-service-arn" }
+    },
+    "ServiceName": {
+      "Description": "ECS Service Name",
+      "Value": "simple-dashboard",
+      "Export": { "Name": "devopshero-simple-dashboard-service-name" }
+    }
+  }
+}
+
