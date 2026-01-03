@@ -33,8 +33,8 @@ infra_customer/
 ├── deploy_app.py           # Main script + AppConfig dataclass
 ├── vpc_utils.py            # CIDR overlap detection, available range finder
 ├── ecs_service_stable.py   # Service stabilization with failure diagnostics
-├── cf_app_definition.json  # Jinja2: ECR repo + Task Definition
-└── cf_app_with_alb.json    # Jinja2: ALB + ECS Service
+├── cf_ecr.json             # Jinja2: ECR repository
+└── cf_app_with_alb.json    # Jinja2: Task Definition + ALB + ECS Service
 ```
 
 ### AppConfig Dataclass

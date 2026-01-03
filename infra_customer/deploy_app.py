@@ -32,25 +32,16 @@ from dataclasses import dataclass, field
 import boto3
 from botocore.exceptions import ClientError
 
-from deployment_utils import (
-    AppConfig,
-    deploy_cloudformation_stack,
-    get_assumed_role_session,
-    load_env,
-    render_jinja2_template,
-)
-from vpc_utils import find_available_vpc_cidr
-from ecs_service_stable import wait_for_service_stable
+import cloudformation_utils
+import ecs_service_stable
+import iam_utils
+import vpc_utils
 
 
 # Configuration
 TARGET_ACCOUNT_ID = "266117665083"
 TARGET_EXTERNAL_ID = "9e62c988-09dd-4f96-b5a7-a67646dd285b"
 TARGET_REGION = "us-east-1"
-
-# Stack names (infrastructure - shared across all apps)
-VPC_STACK_NAME = "devopshero-vpc"
-ECS_STACK_NAME = "devopshero-ecs-cluster"
 
 
 
@@ -120,7 +111,7 @@ def build_and_push_docker_image(
     
     Returns the full image URI.
     """
-    print(f"\n{'='*60}")
+    print(f"{'='*60}")
     print(f"🐳 Building and pushing Docker image")
     print(f"   App: {app_config.app_name}")
     print(f"   Source: {app_config.app_source_path}")
@@ -130,22 +121,7 @@ def build_and_push_docker_image(
     if not app_config.app_source_path:
         print(f"   ❌ No app source path configured")
         return None
-    
-    # Get ECR login credentials
-    ecr_client = session.client("ecr")
-    
-    try:
-        auth_response = ecr_client.get_authorization_token()
-        auth_data = auth_response["authorizationData"][0]
-        token = base64.b64decode(auth_data["authorizationToken"]).decode("utf-8")
-        username, password = token.split(":")
-        registry_url = auth_data["proxyEndpoint"]
         
-        print(f"   ✅ Got ECR authorization token")
-    except ClientError as e:
-        print(f"   ❌ Failed to get ECR auth token: {e}")
-        return None
-    
     # Full image URI
     image_uri = f"{account_id}.dkr.ecr.{region}.amazonaws.com/{app_config.ecr_repo_name}:{image_tag}"
     
@@ -165,6 +141,21 @@ def build_and_push_docker_image(
     
     print(f"   ✅ Docker image built: {image_uri}")
     
+    # Get ECR login credentials
+    ecr_client = session.client("ecr")
+    
+    try:
+        auth_response = ecr_client.get_authorization_token()
+        auth_data = auth_response["authorizationData"][0]
+        token = base64.b64decode(auth_data["authorizationToken"]).decode("utf-8")
+        username, password = token.split(":")
+        registry_url = auth_data["proxyEndpoint"]
+        
+        print(f"   ✅ Got ECR authorization token")
+    except ClientError as e:
+        print(f"   ❌ Failed to get ECR auth token: {e}")
+        return None
+
     # Login to ECR
     print(f"   ⏳ Logging into ECR...")
     login_result = subprocess.run(
@@ -204,28 +195,38 @@ def deploy_infrastructure(
     cf_client,
     ec2_client,
     template_dir: Path,
-) -> dict:
+) -> bool:
     """
     Deploy VPC and ECS cluster stacks.
     
-    Returns VPC params dict on success, None on failure.
+    Returns True on success, False on failure.
     """
+    print(f"\n\n{'='*60}")
+    print(f"🚀 Deploying infrastructure")
+    print(f"{'='*60}")
+    
+    vpc_stack_name = "devopshero-vpc"
+    ecs_stack_name = "devopshero-ecs-cluster"
+    
     vpc_template = template_dir / "cf_vpc.json"
     ecs_template = template_dir / "cf_ecs_cluster.json"
     
-    # Verify templates exist
-    for template in [vpc_template, ecs_template]:
-        if not template.exists():
-            print(f"❌ Template not found: {template}")
-            return None
+    # Check if VPC stack already exists (CIDRs are immutable, can't change them on update)
+    vpc_stack_exists = cloudformation_utils.stack_exists(cf_client, vpc_stack_name)
     
-    # Find available CIDR range (avoids conflicts with existing VPCs)
-    vpc_params = find_available_vpc_cidr(ec2_client)
+    if vpc_stack_exists:
+        # Stack exists - don't pass new CIDR params, CloudFormation will use existing values
+        vpc_params = None
+        print(f"\n📦 VPC stack '{vpc_stack_name}' already exists, updating if needed...")
+    else:
+        print(f"VPC stack '{vpc_stack_name}' does not exist, creating new stack...")
+        # New stack - find available CIDR range
+        vpc_params = vpc_utils.find_available_vpc_cidr(ec2_client)
     
-    # Deploy VPC first (ECS cluster depends on it)
-    success = deploy_cloudformation_stack(
+    # Deploy VPC (independent of ECS cluster, but app stacks need both)
+    success = cloudformation_utils.deploy_cloudformation_stack(
         cf_client=cf_client,
-        stack_name=VPC_STACK_NAME,
+        stack_name=vpc_stack_name,
         template_path=vpc_template,
         template_body=None,
         capabilities=None,
@@ -234,12 +235,12 @@ def deploy_infrastructure(
     
     if not success:
         print("\n❌ VPC deployment failed. Stopping.")
-        return None
+        return False
     
-    # Deploy ECS Cluster (depends on VPC exports)
-    success = deploy_cloudformation_stack(
+    # Deploy ECS Cluster (independent of VPC, but app stacks need both)
+    success = cloudformation_utils.deploy_cloudformation_stack(
         cf_client=cf_client,
-        stack_name=ECS_STACK_NAME,
+        stack_name=ecs_stack_name,
         template_path=ecs_template,
         template_body=None,
         capabilities=["CAPABILITY_NAMED_IAM"],
@@ -248,9 +249,9 @@ def deploy_infrastructure(
     
     if not success:
         print("\n❌ ECS Cluster deployment failed.")
-        return None
+        return False
     
-    return vpc_params
+    return True
 
 
 
@@ -294,59 +295,51 @@ def deploy_app(
     
     Returns True on success.
     """
-    app_stack_name = f"devopshero-app-{app_config.app_name}"
-    alb_stack_name = f"devopshero-alb-{app_config.app_name}"
+    print(f"\n\n{'='*60}")
+    print(f"🚀 Deploying app: {app_config.app_name}")
+    print(f"{'='*60}")
+    
+    ecr_stack_name = f"devopshero-ecr-{app_config.app_name}"
+    app_stack_name = f"devopshero-app-with-alb-{app_config.app_name}"
+
+    print(f"   ECR stack: {ecr_stack_name}")
+    print(f"   App stack: {app_stack_name}")
     
     # Jinja2 template paths
-    app_template_j2 = template_dir / "cf_app_definition.json"
-    alb_template_j2 = template_dir / "cf_app_with_alb.json"
-    
-    
-    # Check if ECR repo exists outside CloudFormation (orphaned from deleted stack)
-    try:
-        cf_client.describe_stacks(StackName=app_stack_name)
-        app_stack_exists = True
-    except ClientError:
-        app_stack_exists = False
-    
-    if not app_stack_exists and check_ecr_repo_exists(session, app_config.ecr_repo_name):
-        print(f"\n❌ ECR repository '{app_config.ecr_repo_name}' already exists outside CloudFormation.")
-        print(f"   This happens when a previous stack was deleted but the ECR repo was retained.")
-        print(f"   To fix, delete the orphaned ECR repo:")
-        print(f"   aws ecr delete-repository --repository-name {app_config.ecr_repo_name} --force --region {region}")
-        return False
+    ecr_template_j2 = template_dir / "cf_ecr.json"
+    app_template_j2 = template_dir / "cf_app_with_alb.json"
     
     # Render templates with app config
     template_vars = app_config.to_template_vars()
     
-    # Step 1: Deploy the app CloudFormation stack (creates ECR repo + task definition)
-    print("\n📦 Step 1: Deploy app CloudFormation stack (ECR + Task Definition)...")
-    app_template_body = render_jinja2_template(app_template_j2, template_vars)
+    # Step 1: Deploy ECR repository stack
+    print("\n📦 Step 1: Deploy ECR repository stack...")
+    ecr_template_body = cloudformation_utils.render_jinja2_template(template_path=ecr_template_j2, variables=template_vars)
     
-    success = deploy_cloudformation_stack(
+    success = cloudformation_utils.deploy_cloudformation_stack(
+        cf_client=cf_client,
+        stack_name=ecr_stack_name,
+        template_path=None,
+        template_body=ecr_template_body,
+        capabilities=None,
+        parameters=None,
+    )
+    
+    if not success:
+        print("\n❌ ECR stack deployment failed.")
+        return False
+    
+    # Step 2: Deploy App stack (Task Definition + ALB + Service)
+    print("\n📦 Step 2: Deploy App stack (Task Definition + ALB + Service)...")
+    app_template_body = cloudformation_utils.render_jinja2_template(template_path=app_template_j2, variables=template_vars)
+    
+    success = cloudformation_utils.deploy_cloudformation_stack(
         cf_client=cf_client,
         stack_name=app_stack_name,
         template_path=None,
         template_body=app_template_body,
         capabilities=None,
         parameters={"ImageTag": image_tag},
-    )
-    
-    if not success:
-        print("\n❌ App stack deployment failed.")
-        return False
-    
-    # Step 2: Deploy ALB stack
-    print("\n📦 Step 2: Deploy ALB + Service stack...")
-    alb_template_body = render_jinja2_template(alb_template_j2, template_vars)
-    
-    success = deploy_cloudformation_stack(
-        cf_client=cf_client,
-        stack_name=alb_stack_name,
-        template_path=None,
-        template_body=alb_template_body,
-        capabilities=None,
-        parameters=None,
     )
     
     if not success:
@@ -384,7 +377,7 @@ def deploy_app(
         return False
     
     # Step 5: Wait for service to stabilize
-    stable = wait_for_service_stable(
+    stable = ecs_service_stable.wait_for_service_stable(
         ecs_client=ecs_client,
         cluster="devopshero-cluster",
         service=app_config.app_name,
@@ -401,9 +394,9 @@ def deploy_app(
 
 def get_alb_url(cf_client, app_name: str) -> str | None:
     """Get the ALB URL from the stack outputs."""
-    alb_stack_name = f"devopshero-alb-{app_name}"
+    app_stack_name = f"devopshero-app-with-alb-{app_name}"
     try:
-        response = cf_client.describe_stacks(StackName=alb_stack_name)
+        response = cf_client.describe_stacks(StackName=app_stack_name)
         stack = response["Stacks"][0]
         for output in stack.get("Outputs", []):
             if output["OutputKey"] == "AlbUrl":
@@ -421,10 +414,7 @@ def main():
     parser.add_argument("--app-only", action="store_true", help="Deploy only the app (assumes infra exists)")
     parser.add_argument("--image-tag", default="latest", help="Docker image tag (default: latest)")
     args = parser.parse_args()
-    
-    print("🚀 DevOpsHero Infrastructure Deployment")
-    print("=" * 60)
-    
+        
     # Load environment
     load_env()
     
@@ -451,7 +441,7 @@ def main():
     # =========================================================================
         
     # Assume role into target account
-    session = get_assumed_role_session(
+    session = iam_utils.get_assumed_role_session(
         access_key=os.getenv("DOH_AWS_ACCESS_KEY"),
         secret_key=os.getenv("DOH_AWS_SECRET_KEY"),
         account_id=TARGET_ACCOUNT_ID,
@@ -466,17 +456,15 @@ def main():
     # Get template paths
     template_dir = Path(__file__).parent
     
-    vpc_params = None
-    
     # Deploy infrastructure if not --app-only
     if not args.app_only:
-        vpc_params = deploy_infrastructure(
+        success = deploy_infrastructure(
             cf_client=cf_client,
             ec2_client=ec2_client,
             template_dir=template_dir,
         )
         
-        if vpc_params is None:
+        if not success:
             sys.exit(1)
     
     # Deploy app if not --infra-only
@@ -501,11 +489,6 @@ def main():
     print("=" * 60)
     print(f"\nAccount: {TARGET_ACCOUNT_ID}")
     print(f"Region:  {TARGET_REGION}")
-    
-    if vpc_params:
-        print(f"\nVPC CIDR: {vpc_params['VpcCidr']}")
-        print(f"  Public subnets:  {vpc_params['PublicSubnet1Cidr']}, {vpc_params['PublicSubnet2Cidr']}")
-        print(f"  Private subnets: {vpc_params['PrivateSubnet1Cidr']}, {vpc_params['PrivateSubnet2Cidr']}")
     
     if not args.infra_only:
         print(f"\n📊 App: {app_config.app_name}")

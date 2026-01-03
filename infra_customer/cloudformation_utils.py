@@ -4,11 +4,24 @@ CloudFormation utility functions for deploying DevOpsHero infrastructure to cust
 
 from pathlib import Path
 
-from botocore.exceptions import ClientError
+from botocore.exceptions import ClientError, WaiterError
 from jinja2 import Environment, FileSystemLoader
 
 
-
+def stack_exists(cf_client, stack_name: str) -> bool:
+    """Check if a CloudFormation stack exists."""
+    try:
+        print(f"Checking if stack {stack_name} exists...")
+        cf_client.describe_stacks(StackName=stack_name)
+        print(f"Stack {stack_name} exists.")
+        return True
+    except ClientError as e:
+        if e.response["Error"]["Code"] == "ValidationError":
+            print(f"Stack {stack_name} does not exist.")
+            return False
+        raise
+    
+    
 def render_jinja2_template(template_path: Path, variables: dict) -> str:
     """Render a Jinja2 template with the given variables."""
     env = Environment(
@@ -46,7 +59,7 @@ def deploy_cloudformation_stack(
     if not template_path and not template_body:
         raise ValueError("Must specify either template_path or template_body")
     
-    print(f"\n{'='*60}")
+    print(f"{'='*60}")
     print(f"📦 Deploying stack: {stack_name}")
     
     if template_path:
@@ -55,18 +68,7 @@ def deploy_cloudformation_stack(
             template_body = f.read()
     else:
         print(f"   Template: (rendered from Jinja2)")
-    
-    stack_exists = False
-    try:
-        cf_client.describe_stacks(StackName=stack_name)
-        stack_exists = True
-        print(f"   Stack exists, will update")
-    except ClientError as e:
-        if "does not exist" in str(e):
-            print(f"   Stack doesn't exist, will create")
-        else:
-            raise
-    
+        
     cf_parameters = []
     if parameters:
         for key, value in parameters.items():
@@ -74,8 +76,16 @@ def deploy_cloudformation_stack(
     
     cf_capabilities = capabilities or []
     
+    print(f"   Validating template...")
     try:
-        if stack_exists:
+        cf_client.validate_template(TemplateBody=template_body)
+    except ClientError as e:
+        print(f"   ❌ Template validation failed: {e.response['Error']['Message']}")
+        return False
+    
+    try:
+        if stack_exists(cf_client=cf_client, stack_name=stack_name):
+            print(f"   Stack exists, updating...")
             cf_client.update_stack(
                 StackName=stack_name,
                 TemplateBody=template_body,
@@ -84,17 +94,18 @@ def deploy_cloudformation_stack(
             )
             waiter = cf_client.get_waiter("stack_update_complete")
         else:
+            print(f"   Stack does not exist, creating...")
             cf_client.create_stack(
                 StackName=stack_name,
                 TemplateBody=template_body,
                 Parameters=cf_parameters,
                 Capabilities=cf_capabilities,
-                OnFailure="DELETE",  # Clean up on failure
+                OnFailure="ROLLBACK",  # Keep stack around so we can see failure events
             )
             waiter = cf_client.get_waiter("stack_create_complete")
         
         print(f"   ⏳ Waiting for stack operation to complete...")
-        waiter.wait(StackName=stack_name, WaiterConfig={"Delay": 10, "MaxAttempts": 180})   # 180 * 10 seconds = 30 minutes
+        waiter.wait(StackName=stack_name, WaiterConfig={"Delay": 10, "MaxAttempts": 60})   # 60 * 10 seconds = 10 minutes
         
         # Get stack outputs just to print them
         response = cf_client.describe_stacks(StackName=stack_name)
@@ -116,13 +127,37 @@ def deploy_cloudformation_stack(
             return True
         else:
             print(f"   ❌ Failed: {e}")
-            # Try to get failure reason
-            try:
-                events = cf_client.describe_stack_events(StackName=stack_name)
-                for event in events["StackEvents"][:5]:
-                    if "FAILED" in event.get("ResourceStatus", ""):
-                        print(f"      {event['LogicalResourceId']}: {event.get('ResourceStatusReason', 'Unknown')}")
-            except:
-                pass
+            _print_stack_failure_events(cf_client=cf_client, stack_name=stack_name)
             return False
+    except WaiterError:
+        # Stack failed - get status and events
+        try:
+            response = cf_client.describe_stacks(StackName=stack_name)
+            stack_status = response["Stacks"][0]["StackStatus"]
+            print(f"   ❌ Stack failed with status: {stack_status}")
+        except ClientError:
+            print(f"   ❌ Stack creation failed (stack was deleted)")
+            return False
+        
+        _print_stack_failure_events(cf_client=cf_client, stack_name=stack_name)
+        
+        if stack_status in ["ROLLBACK_COMPLETE", "CREATE_FAILED"]:
+            print(f"\n   💡 To retry, first delete the failed stack:")
+            print(f"      aws cloudformation delete-stack --stack-name {stack_name}")
+        
+        return False
+
+
+def _print_stack_failure_events(cf_client, stack_name: str) -> None:
+    """Print recent failure events from a CloudFormation stack."""
+    try:
+        events = cf_client.describe_stack_events(StackName=stack_name)
+        print(f"   Recent failure events:")
+        for event in events["StackEvents"][:10]:
+            status = event.get("ResourceStatus", "")
+            if "FAILED" in status or "ROLLBACK" in status:
+                reason = event.get("ResourceStatusReason", "")
+                print(f"      {event['LogicalResourceId']} ({status}): {reason}")
+    except ClientError:
+        print(f"   (Could not retrieve stack events - stack may have been deleted)")
 
