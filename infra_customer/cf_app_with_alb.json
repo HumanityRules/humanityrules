@@ -129,8 +129,8 @@
         "HealthCheckEnabled": true,
         "HealthCheckPath": "{{ health_check_path }}",
         "HealthCheckProtocol": "HTTP",
-        "HealthCheckIntervalSeconds": 30,
-        "HealthCheckTimeoutSeconds": 10,
+        "HealthCheckIntervalSeconds": 15,
+        "HealthCheckTimeoutSeconds": 5,
         "HealthyThresholdCount": 2,
         "UnhealthyThresholdCount": 3,
         "Matcher": {
