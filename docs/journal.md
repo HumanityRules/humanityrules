@@ -2,6 +2,64 @@
 
 > **Convention:** Entries are in reverse chronological order (latest on top). Use format: `## YYYY-MM-DD HH:MM - Title`
 
+## 2026-01-03 - Parameterized App Deployment with Jinja2 Templates
+
+Refactored the deployment script to support deploying any app, not just `simple-dashboard`.
+
+
+### Hybrid Templating Strategy
+
+The key distinction is **when** values get resolved:
+
+**Jinja2 (render time)** — values baked into JSON before CloudFormation sees it:
+- `app_name` in resource names and export names (CF can't parameterize these)
+- `environment_variables` as a proper JSON array (CF can't loop)
+- Conditional sections like health checks
+- Anything structural that doesn't change between deployments of the same app
+
+**CloudFormation Parameters (deploy time)** — resolved by CloudFormation:
+- `ImageTag` — changes frequently, visible in AWS Console, can redeploy same template with new value
+- Simple string/number substitutions where you want AWS Console visibility
+
+Example: `ImageTag` is a CF Parameter because you deploy the same app repeatedly with different tags. You want to see "what tag is deployed?" in the Console, and CF can detect "no changes needed" if you redeploy with the same tag.
+
+
+### Code Organization
+
+Split `infra_customer/` into focused modules:
+
+```
+infra_customer/
+├── deploy_app.py           # Main script + AppConfig dataclass
+├── vpc_utils.py            # CIDR overlap detection, available range finder
+├── ecs_service_stable.py   # Service stabilization with failure diagnostics
+├── cf_app_definition.json  # Jinja2: ECR repo + Task Definition
+└── cf_app_with_alb.json    # Jinja2: ALB + ECS Service
+```
+
+### AppConfig Dataclass
+
+All app-specific settings in one place, passed down through functions:
+
+```python
+AppConfig(
+    app_name="simple-dashboard",
+    ecr_repo_name="devopshero/simple-dashboard",
+    container_port=8501,
+    health_check_path="/_stcore/health",
+    health_check_command="...",
+    environment_variables=[...],
+    app_source_path=Path(...),
+)
+```
+
+### Simplifications
+
+- Removed no-ALB deployment path (all apps get ALB)
+- Removed default function parameters per project style guide
+
+---
+
 ## 2025-12-29 - Decoupled ECS Cluster Stack from VPC Stack
 
 Moved the default security group from `cf_ecs_cluster.json` to `cf_vpc.json`. The ECS cluster stack now has zero VPC dependencies, avoiding CloudFormation's "export in use" lock when updating the VPC stack.
