@@ -1,12 +1,12 @@
 {
   "AWSTemplateFormatVersion": "2010-09-09",
-  "Description": "DevOpsHero ALB - Application Load Balancer for simple_dashboard app",
+  "Description": "DevOpsHero ALB - Application Load Balancer for {{ app_name }}",
 
   "Resources": {
     "AlbSecurityGroup": {
       "Type": "AWS::EC2::SecurityGroup",
       "Properties": {
-        "GroupName": "devopshero-alb-sg",
+        "GroupName": "devopshero-{{ app_name }}-alb-sg",
         "GroupDescription": "Security group for ALB - allows HTTP from internet",
         "VpcId": { "Fn::ImportValue": "devopshero-vpc-id" },
         "SecurityGroupIngress": [
@@ -26,7 +26,7 @@
           }
         ],
         "Tags": [
-          { "Key": "Name", "Value": "devopshero-alb-sg" }
+          { "Key": "Name", "Value": "devopshero-{{ app_name }}-alb-sg" }
         ]
       }
     },
@@ -34,7 +34,7 @@
     "ApplicationLoadBalancer": {
       "Type": "AWS::ElasticLoadBalancingV2::LoadBalancer",
       "Properties": {
-        "Name": "devopshero-alb",
+        "Name": "devopshero-{{ app_name }}-alb",
         "Type": "application",
         "Scheme": "internet-facing",
         "IpAddressType": "ipv4",
@@ -46,7 +46,7 @@
           { "Ref": "AlbSecurityGroup" }
         ],
         "Tags": [
-          { "Key": "Name", "Value": "devopshero-alb" }
+          { "Key": "Name", "Value": "devopshero-{{ app_name }}-alb" }
         ]
       }
     },
@@ -54,13 +54,13 @@
     "TargetGroup": {
       "Type": "AWS::ElasticLoadBalancingV2::TargetGroup",
       "Properties": {
-        "Name": "devopshero-simple-dashboard-tg",
+        "Name": "devopshero-{{ app_name }}-tg",
         "VpcId": { "Fn::ImportValue": "devopshero-vpc-id" },
         "Protocol": "HTTP",
-        "Port": 8501,
+        "Port": {{ container_port }},
         "TargetType": "ip",
         "HealthCheckEnabled": true,
-        "HealthCheckPath": "/_stcore/health",
+        "HealthCheckPath": "{{ health_check_path }}",
         "HealthCheckProtocol": "HTTP",
         "HealthCheckIntervalSeconds": 30,
         "HealthCheckTimeoutSeconds": 10,
@@ -70,7 +70,7 @@
           "HttpCode": "200"
         },
         "Tags": [
-          { "Key": "Name", "Value": "devopshero-simple-dashboard-tg" }
+          { "Key": "Name", "Value": "devopshero-{{ app_name }}-tg" }
         ]
       }
     },
@@ -94,9 +94,9 @@
       "Type": "AWS::ECS::Service",
       "DependsOn": "HttpListener",
       "Properties": {
-        "ServiceName": "simple-dashboard",
+        "ServiceName": "{{ app_name }}",
         "Cluster": { "Fn::ImportValue": "devopshero-cluster-arn" },
-        "TaskDefinition": { "Fn::ImportValue": "devopshero-simple-dashboard-task-def-arn" },
+        "TaskDefinition": { "Fn::ImportValue": "devopshero-{{ app_name }}-task-def-arn" },
         "DesiredCount": 0,
         "LaunchType": "FARGATE",
         "NetworkConfiguration": {
@@ -114,8 +114,8 @@
         "LoadBalancers": [
           {
             "TargetGroupArn": { "Ref": "TargetGroup" },
-            "ContainerName": "simple-dashboard",
-            "ContainerPort": 8501
+            "ContainerName": "{{ app_name }}",
+            "ContainerPort": {{ container_port }}
           }
         ],
         "DeploymentConfiguration": {
@@ -124,8 +124,8 @@
         },
         "EnableExecuteCommand": true,
         "Tags": [
-          { "Key": "Name", "Value": "devopshero-simple-dashboard-service" },
-          { "Key": "App", "Value": "simple-dashboard" }
+          { "Key": "Name", "Value": "devopshero-{{ app_name }}-service" },
+          { "Key": "App", "Value": "{{ app_name }}" }
         ]
       }
     }
@@ -135,32 +135,32 @@
     "AlbDnsName": {
       "Description": "ALB DNS Name - use this to access the app",
       "Value": { "Fn::GetAtt": ["ApplicationLoadBalancer", "DNSName"] },
-      "Export": { "Name": "devopshero-alb-dns" }
+      "Export": { "Name": "devopshero-{{ app_name }}-alb-dns" }
     },
     "AlbUrl": {
       "Description": "Full URL to access the app",
       "Value": { "Fn::Sub": "http://${ApplicationLoadBalancer.DNSName}" },
-      "Export": { "Name": "devopshero-alb-url" }
+      "Export": { "Name": "devopshero-{{ app_name }}-alb-url" }
     },
     "AlbArn": {
       "Description": "ALB ARN",
       "Value": { "Ref": "ApplicationLoadBalancer" },
-      "Export": { "Name": "devopshero-alb-arn" }
+      "Export": { "Name": "devopshero-{{ app_name }}-alb-arn" }
     },
     "TargetGroupArn": {
       "Description": "Target Group ARN",
       "Value": { "Ref": "TargetGroup" },
-      "Export": { "Name": "devopshero-simple-dashboard-tg-arn" }
+      "Export": { "Name": "devopshero-{{ app_name }}-tg-arn" }
     },
     "ServiceArn": {
       "Description": "ECS Service ARN",
       "Value": { "Ref": "EcsService" },
-      "Export": { "Name": "devopshero-simple-dashboard-service-arn" }
+      "Export": { "Name": "devopshero-{{ app_name }}-service-arn" }
     },
     "ServiceName": {
       "Description": "ECS Service Name",
-      "Value": "simple-dashboard",
-      "Export": { "Name": "devopshero-simple-dashboard-service-name" }
+      "Value": "{{ app_name }}",
+      "Export": { "Name": "devopshero-{{ app_name }}-service-name" }
     }
   }
 }
