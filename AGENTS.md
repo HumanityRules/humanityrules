@@ -273,6 +273,33 @@ connect_to_db(url="db://localhost", retries=None, timeout=None)
 create_user(username="jdoe", is_admin=True, send_email=False)
 ```
 
+### 3. Prefer Module-Qualified Imports for Local Modules
+* **Directive:** For local/project modules, use `import module` rather than `from module import function`. Then call functions with the module prefix.
+* **Reasoning:** Explicit module prefixes make dependencies visible at every call site. The reader instantly knows where a function comes from without scrolling to imports.
+* **Implementation:** Import the module, then use `module.function()` syntax.
+
+**Bad (Ambiguous Origin):**
+```python
+from iam_utils import get_assumed_role_session
+from vpc_utils import find_available_vpc_cidr
+
+# Reader can't tell where these come from without checking imports
+session = get_assumed_role_session(...)
+cidr = find_available_vpc_cidr(...)
+```
+
+**Good (Explicit Module):**
+```python
+import iam_utils
+import vpc_utils
+
+# Origin is immediately clear at the call site
+session = iam_utils.get_assumed_role_session(...)
+cidr = vpc_utils.find_available_vpc_cidr(...)
+```
+
+**Note:** This applies to local project modules. Standard library and well-known third-party packages (e.g., `from pathlib import Path`, `from dataclasses import dataclass`) are fine to import directly since their origin is universally understood.
+
 # Specification
 
 ### Naming and core concepts

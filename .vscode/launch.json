@@ -5,6 +5,15 @@
     "version": "0.2.0",
     "configurations": [
         {
+            "name": "Python Debugger: Deploy App",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/infra_customer/deploy_app.py",
+            "args": [
+            ],
+            "console": "integratedTerminal"
+        },
+        {
             "name": "Python Debugger: Django",
             "type": "debugpy",
             "request": "launch",
