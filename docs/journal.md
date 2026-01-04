@@ -2,6 +2,21 @@
 
 > **Convention:** Entries are in reverse chronological order (latest on top). Use format: `## YYYY-MM-DD HH:MM - Title`
 
+## 2026-01-03 - ECS Health Checks: Two Different Mechanisms
+
+There are **two separate health check systems** in an ECS/ALB setup:
+
+| Health Check | Who Runs It | On Failure |
+|--------------|-------------|------------|
+| **Target Group** (ALB) | Load balancer pings HTTP endpoint | Stops routing traffic to task (task keeps running) |
+| **Container** (ECS) | ECS agent runs shell command inside container | Kills and replaces the entire task |
+
+**For deployments**, only the Target Group health check matters. ECS considers a task ready for traffic when the ALB marks it healthy. The container health check is optional—useful as a "liveness probe" to catch deadlocked processes, but not involved in deployment rollouts.
+
+**Rolling deployment behavior:** With `MinimumHealthyPercent: 100` and `MaximumPercent: 200`, ECS spins up a new task first, waits for ALB health checks to pass, then drains the old task. This causes 2 tasks to run temporarily—expected behavior for zero-downtime deploys.
+
+---
+
 ## 2026-01-03 - Parameterized App Deployment with Jinja2 Templates
 
 Refactored the deployment script to support deploying any app, not just `simple-dashboard`.
