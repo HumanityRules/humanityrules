@@ -31,7 +31,7 @@ Expected context:
     <!-- Organizations section -->
     <li>
       <div class="text-xs/6 font-semibold text-gray-400">Your organizations</div>
-      <form hx-post="{% url 'switch_organization' %}" hx-trigger="change from:#org-select">
+      <form hx-post="{% url 'switch_organization' %}" hx-trigger="change from:#org-select" hx-swap="none">
         {% csrf_token %}
         {% include "devopshero_app/partials/_dropdown_select.html#dropdown_select" with dropdown_id="org-select" dropdown_name="organization" dropdown_value=current_organization.id dropdown_selected_label=current_organization.name dropdown_options=user_organizations dropdown_class="mt-2 -mx-2" %}
       </form>
