@@ -18,6 +18,9 @@ from botocore.exceptions import ClientError
 
 from appconfig import AppConfig
 
+# CDK output directory (inside infra_customer/)
+CDK_OUT_DIR = Path(__file__).parent / "cdk.out"
+
 # AWS CDK imports
 from aws_cdk import (
     App,
@@ -1023,8 +1026,8 @@ def deploy(
         else:
             print(f"   ⚠️  Could not find hosted zone, HTTPS will not be configured")
 
-    # Create CDK App
-    cdk_app = App()
+    # Create CDK App with explicit output directory
+    cdk_app = App(outdir=str(CDK_OUT_DIR))
 
     # VPC CIDR - for simplicity using a fixed CIDR (in production, would check for conflicts)
     vpc_cidr = "172.21.0.0/20"
