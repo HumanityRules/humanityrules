@@ -295,7 +295,7 @@ def deploy(
     ec2_client = session.client("ec2")
     
     # Get template paths
-    template_dir = Path(__file__).parent
+    template_dir = Path(__file__).parent / "cf_templates"
     
     # Deploy infrastructure
     success = deploy_infrastructure(
