@@ -216,6 +216,57 @@ def deploy_app(
     return True
 
 
+def teardown(
+    session: boto3.Session,
+    app_config: AppConfig,
+) -> bool:
+    """
+    Delete all CloudFormation stacks in reverse dependency order.
+    
+    Args:
+        session: Boto3 session with assumed role credentials
+        app_config: Application configuration (needed for app-specific stack names)
+    
+    Returns:
+        True on success, False on failure
+    """
+    cf_client = session.client("cloudformation")
+    
+    # Stack names in reverse dependency order
+    stacks_to_delete = [
+        f"devopshero-app-with-alb-{app_config.app_name}",
+        f"devopshero-ecr-{app_config.app_name}",
+        "devopshero-ecs-cluster",
+        "devopshero-vpc",
+    ]
+    
+    print(f"\n{'='*60}")
+    print(f"🗑️  Tearing down CloudFormation stacks")
+    print(f"{'='*60}")
+    print(f"\nStacks to delete (in order):")
+    for stack in stacks_to_delete:
+        print(f"   - {stack}")
+    print()
+    
+    all_success = True
+    for stack_name in stacks_to_delete:
+        success = cloudformation_utils.delete_stack_and_wait(cf_client, stack_name=stack_name)
+        if not success:
+            all_success = False
+            # Continue trying to delete remaining stacks
+    
+    if all_success:
+        print(f"\n{'='*60}")
+        print("✅ All stacks deleted successfully")
+        print(f"{'='*60}")
+    else:
+        print(f"\n{'='*60}")
+        print("⚠️  Some stacks failed to delete")
+        print(f"{'='*60}")
+    
+    return all_success
+
+
 def deploy(
     session: boto3.Session,
     account_id: str,

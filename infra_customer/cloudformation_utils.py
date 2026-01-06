@@ -162,6 +162,33 @@ def _print_stack_failure_events(cf_client, stack_name: str) -> None:
         print(f"   (Could not retrieve stack events - stack may have been deleted)")
 
 
+def delete_stack_and_wait(cf_client, stack_name: str) -> bool:
+    """
+    Delete a CloudFormation stack and wait for completion.
+    
+    Returns True on success, False on failure.
+    """
+    if not stack_exists(cf_client, stack_name):
+        print(f"   ⏭️  Stack '{stack_name}' does not exist, skipping")
+        return True
+    
+    print(f"   🗑️  Deleting stack '{stack_name}'...")
+    try:
+        cf_client.delete_stack(StackName=stack_name)
+        
+        # Wait for deletion
+        waiter = cf_client.get_waiter("stack_delete_complete")
+        waiter.wait(
+            StackName=stack_name,
+            WaiterConfig={"Delay": 10, "MaxAttempts": 60},  # 10 minutes max
+        )
+        print(f"   ✅ Stack '{stack_name}' deleted")
+        return True
+    except ClientError as e:
+        print(f"   ❌ Failed to delete stack '{stack_name}': {e}")
+        return False
+
+
 def get_stack_output(cf_client, stack_name: str, output_key: str) -> str | None:
     """Get a specific output value from a CloudFormation stack."""
     try:

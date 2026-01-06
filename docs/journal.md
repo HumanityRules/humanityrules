@@ -44,6 +44,14 @@ Split common functionality into focused modules:
 - `deploy_app.py` → `deploy_app_cf.py` (CloudFormation engine)
 - `docker_utils.py` → `ecr_utils.py`
 
+### Teardown Support
+
+Added `--teardown` flag to delete all stacks in reverse dependency order:
+
+```bash
+uv run python deploy_app_simple_dashboard.py --teardown
+```
+
 ### Code Style Changes
 
 - `load_env()` renamed to `load_credentials_from_env()` and now raises `RuntimeError` instead of `sys.exit(1)`

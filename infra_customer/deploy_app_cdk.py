@@ -270,7 +270,8 @@ class EcrStack(Stack):
             "EcrRepository",
             repository_name=app_config.ecr_repo_name,
             image_scan_on_push=True,
-            removal_policy=RemovalPolicy.RETAIN,  # Don't delete images on stack deletion
+            removal_policy=RemovalPolicy.DESTROY,
+            empty_on_delete=True,
             lifecycle_rules=[
                 ecr.LifecycleRule(
                     description="Keep last 10 images",
