@@ -2,6 +2,56 @@
 
 > **Convention:** Entries are in reverse chronological order (latest on top). Use format: `## YYYY-MM-DD HH:MM - Title`
 
+## 2026-01-05 - Deployment Script Refactoring & CDK Alternative
+
+Refactored the deployment codebase for better modularity and added AWS CDK as an alternative to CloudFormation templates.
+
+### New CDK Deployment Option
+
+Created `deploy_app_cdk.py` — a CDK-based equivalent of the CloudFormation deployment. Same infrastructure (VPC, ECS cluster, ECR, ALB, ECS service), but defined in Python using CDK constructs instead of JSON templates.
+
+**Why CDK?** Exploring whether CDK's type safety and IDE support improve maintainability over Jinja2-templated JSON. Both approaches coexist for comparison.
+
+### Unified Entry Point
+
+Created `deploy_app_simple_dashboard.py` as the single entry point for deployments:
+
+```bash
+uv run python deploy_app_simple_dashboard.py                     # Deploy with CF (default)
+uv run python deploy_app_simple_dashboard.py --engine cdk        # Deploy with CDK
+uv run python deploy_app_simple_dashboard.py --image-tag v1.2.3  # Specific tag
+uv run python deploy_app_simple_dashboard.py --engine cdk --synth-only  # CDK synth only
+```
+
+The entry point handles:
+- App configuration (`AppConfig` for simple-dashboard)
+- Credential loading from `.env`
+- Cross-account role assumption
+- Dispatching to CF or CDK engine
+
+### Extracted Utility Modules
+
+Split common functionality into focused modules:
+
+- `appconfig.py` — `AppConfig` dataclass (unified, `cpu`/`memory` as `int`)
+- `ecr_utils.py` — `build_and_push_docker_image()`
+- `route53_utils.py` — `get_hosted_zone_id()`
+- `iam_utils.py` — `load_credentials_from_env()`, `get_assumed_role_session()`
+- `cloudformation_utils.py` — `get_stack_output()`, `get_app_urls()`, stack operations
+
+### File Renames
+
+- `deploy_app.py` → `deploy_app_cf.py` (CloudFormation engine)
+- `docker_utils.py` → `ecr_utils.py`
+
+### Code Style Changes
+
+- `load_env()` renamed to `load_credentials_from_env()` and now raises `RuntimeError` instead of `sys.exit(1)`
+- `AppConfig.to_template_vars()` converts `int` fields to `str` for CloudFormation compatibility
+- Removed `--infra-only` and `--app-only` flags (always deploy everything)
+
+---
+
 ## 2026-01-05 - HTTPS & Custom Domain Support (Milestone M5)
 
 Added HTTPS support with custom domains via ACM and Route53.

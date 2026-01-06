@@ -161,3 +161,30 @@ def _print_stack_failure_events(cf_client, stack_name: str) -> None:
     except ClientError:
         print(f"   (Could not retrieve stack events - stack may have been deleted)")
 
+
+def get_stack_output(cf_client, stack_name: str, output_key: str) -> str | None:
+    """Get a specific output value from a CloudFormation stack."""
+    try:
+        response = cf_client.describe_stacks(StackName=stack_name)
+        stack = response["Stacks"][0]
+        for output in stack.get("Outputs", []):
+            if output["OutputKey"] == output_key:
+                return output["OutputValue"]
+    except ClientError:
+        pass
+    return None
+
+
+def get_app_urls(cf_client, app_name: str, has_domain: bool) -> dict[str, str | None]:
+    """Get the app URLs from CloudFormation stack outputs."""
+    stack_name = f"devopshero-app-with-alb-{app_name}"
+
+    urls = {
+        "alb_url": get_stack_output(cf_client, stack_name=stack_name, output_key="AlbUrl"),
+    }
+
+    if has_domain:
+        urls["https_url"] = get_stack_output(cf_client, stack_name=stack_name, output_key="HttpsUrl")
+
+    return urls
+
