@@ -248,6 +248,9 @@ def teardown(
         print(f"   - {stack}")
     print()
     
+    # Empty ECR repository first (CloudFormation can't delete non-empty repos)
+    ecr_utils.delete_all_ecr_images(session=session, ecr_repo_name=app_config.ecr_repo_name)
+    
     all_success = True
     for stack_name in stacks_to_delete:
         success = cloudformation_utils.delete_stack_and_wait(cf_client, stack_name=stack_name)

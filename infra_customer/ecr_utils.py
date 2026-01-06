@@ -10,6 +10,52 @@ import boto3
 from botocore.exceptions import ClientError
 
 
+def delete_all_ecr_images(session: boto3.Session, ecr_repo_name: str) -> bool:
+    """
+    Delete all images from an ECR repository.
+    
+    This is needed before deleting an ECR CloudFormation stack,
+    as CloudFormation cannot delete a non-empty repository.
+    
+    Returns True on success, False on failure.
+    """
+    ecr_client = session.client("ecr")
+    
+    print(f"   🗑️  Emptying ECR repository '{ecr_repo_name}'...")
+    
+    try:
+        # List all images in the repository
+        paginator = ecr_client.get_paginator("list_images")
+        image_ids = []
+        
+        for page in paginator.paginate(repositoryName=ecr_repo_name):
+            image_ids.extend(page.get("imageIds", []))
+        
+        if not image_ids:
+            print(f"   ✅ Repository is already empty")
+            return True
+        
+        print(f"   🗑️  Deleting {len(image_ids)} images...")
+        
+        # Delete images in batches of 100 (AWS limit)
+        for i in range(0, len(image_ids), 100):
+            batch = image_ids[i:i + 100]
+            ecr_client.batch_delete_image(
+                repositoryName=ecr_repo_name,
+                imageIds=batch,
+            )
+        
+        print(f"   ✅ Deleted {len(image_ids)} images from '{ecr_repo_name}'")
+        return True
+        
+    except ClientError as e:
+        if e.response["Error"]["Code"] == "RepositoryNotFoundException":
+            print(f"   ⏭️  Repository '{ecr_repo_name}' does not exist, skipping")
+            return True
+        print(f"   ❌ Failed to empty repository: {e}")
+        return False
+
+
 def build_and_push_docker_image(
     session: boto3.Session,
     account_id: str,

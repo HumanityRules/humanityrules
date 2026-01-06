@@ -52,6 +52,8 @@ Added `--teardown` flag to delete all stacks in reverse dependency order:
 uv run python deploy_app_simple_dashboard.py --teardown
 ```
 
+**Gotcha: ECR repositories must be empty before deletion.** CloudFormation can't delete an ECR repo containing images. CDK has `empty_on_delete=True`, but raw CloudFormation doesn't. Solution: `ecr_utils.delete_all_ecr_images()` empties the repo before stack deletion.
+
 ### Code Style Changes
 
 - `load_env()` renamed to `load_credentials_from_env()` and now raises `RuntimeError` instead of `sys.exit(1)`
