@@ -2,6 +2,105 @@
 
 > **Convention:** Entries are in reverse chronological order (latest on top). Use format: `## YYYY-MM-DD HH:MM - Title`
 
+## 2026-01-06 - CDK Bootstrap & cdk.out Exploration
+
+Explored the CDK output folder structure and bootstrapped the customer AWS account for CDK deployments.
+
+### cdk.out Folder Structure
+
+Each CDK stack generates two files:
+
+| File | Purpose |
+|------|---------|
+| `*.template.json` | The CloudFormation template to deploy |
+| `*.assets.json` | Manifest of assets (files, Docker images) to publish before deployment |
+
+Plus shared files: `manifest.json` (app manifest), `tree.json` (construct tree), `cdk.out` (version marker).
+
+The `.assets.json` files reference IAM roles created by CDK bootstrap (e.g., `cdk-hnb659fds-file-publishing-role-...`).
+
+### CDK Bootstrap
+
+Ran `npx cdk bootstrap aws://266117665083/us-east-1` to create the **CDKToolkit** CloudFormation stack. This provisions:
+- S3 bucket for file assets
+- ECR repository for Docker images
+- IAM roles (FilePublishing, ImagePublishing, CloudFormationExecution, Deployment, Lookup)
+- SSM parameter storing bootstrap version
+
+**Note:** DevOps Hero's existing customer bootstrap (CloudFormation template creating cross-account IAM role) is separate from CDK bootstrap. CDK bootstrap is specifically for CDK's asset publishing pipeline.
+
+### What `cdk deploy` Actually Does
+
+```
+1. SYNTH → Runs CDK app, generates *.template.json + *.assets.json to cdk.out/
+
+2. PUBLISH ASSETS (reads *.assets.json)
+   → File assets: zip & upload to S3 bootstrap bucket (uses FilePublishingRole)
+   → Docker assets: build & push to ECR bootstrap repo (uses ImagePublishingRole)
+
+3. DEPLOY (for each stack, in dependency order from manifest.json)
+   → Upload template to S3 (if >51KB)
+   → Call CloudFormation CreateStack/UpdateStack
+   → Uses DeploymentActionRole to call CF
+   → CF uses CloudFormationExecutionRole to create resources
+```
+
+### Bootstrap Roles Explained
+
+| Role | Purpose |
+|------|---------|
+| FilePublishingRole | Upload file assets (Lambda code, etc.) to S3 |
+| ImagePublishingRole | Push Docker images to ECR |
+| DeploymentActionRole | Call CloudFormation APIs |
+| CloudFormationExecutionRole | Used by CF to create/modify AWS resources |
+| LookupRole | Read-only queries during synth (e.g., `Vpc.from_lookup()`) |
+
+### Attempted: Bypassing CDK Bootstrap
+
+Explored deploying CDK-generated templates directly via boto3 CloudFormation to avoid the bootstrap requirement:
+
+```python
+# Instead of: npx cdk deploy
+# We tried: cloudformation_utils.deploy_cloudformation_stack(template_path=...)
+```
+
+**Pros:** No bootstrap needed, simpler for asset-free stacks.
+
+**Cons:**
+- Must manually maintain stack deployment order (CDK reads this from `manifest.json`)
+- No asset support (Lambda code, Docker images via `from_asset()`)
+- Reinventing what CDK CLI already does well
+- 51KB template limit without S3 upload
+
+**Decision:** Reverted to using `npx cdk deploy`. The bootstrap overhead is worth the reliability.
+
+### Future: Customer Onboarding Options
+
+When a customer connects their AWS account, we need CDK bootstrap in their account. Options:
+
+1. **Run `cdk bootstrap` programmatically** — After customer creates our cross-account role, we assume it and run bootstrap via CLI or SDK.
+
+2. **Include bootstrap in customer's CloudFormation** — The bootstrap template is available:
+   ```bash
+   npx cdk bootstrap --show-template > bootstrap-template.yaml
+   ```
+   Could merge with or deploy alongside `cf_install_template.json`.
+
+3. **Two-stack customer setup** — Customer clicks "Connect AWS Account" and we deploy:
+   - Stack 1: DevOps Hero cross-account role (existing)
+   - Stack 2: CDKToolkit bootstrap stack
+
+**TODO:** Decide which approach is cleanest for customers. For now, manually ran bootstrap on test account.
+
+### Project CDK Setup
+
+This project doesn't use `cdk.json`. Instead, CDK is used programmatically:
+- Python `aws-cdk-lib` defines stacks in `deploy_app_cdk.py`
+- `App().synth()` generates templates to `cdk.out/`
+- `npx cdk` fetches the CLI on-demand (not installed as a project dependency)
+
+---
+
 ## 2026-01-05 - Deployment Script Refactoring & CDK Alternative
 
 Refactored the deployment codebase for better modularity and added AWS CDK as an alternative to CloudFormation templates.

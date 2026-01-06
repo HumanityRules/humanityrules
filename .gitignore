@@ -3,3 +3,4 @@
 __pycache__/
 .playwright-mcp/
 .env
+infra_customer/cdk.out/

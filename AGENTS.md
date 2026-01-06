@@ -23,6 +23,9 @@ uv run manage.py migrate
 uv run manage.py runserver
 ```
 
+The main developer documentation lives in the docs/ subdirectory.
+
+
 # Django 6.0 Template Partials
 
 **Prefer partials over plain `{% include %}`** — they're the modern Django 6.0 approach.
@@ -299,6 +302,8 @@ cidr = vpc_utils.find_available_vpc_cidr(...)
 ```
 
 **Note:** This applies to local project modules. Standard library and well-known third-party packages (e.g., `from pathlib import Path`, `from dataclasses import dataclass`) are fine to import directly since their origin is universally understood.
+
+
 
 # Specification
 
