@@ -11,6 +11,7 @@ Usage:
     uv run python deploy_app_simple_dashboard.py --engine cdk        # Deploy with CDK
     uv run python deploy_app_simple_dashboard.py --image-tag v1.2.3  # Deploy with specific image tag
     uv run python deploy_app_simple_dashboard.py --engine cdk --synth-only  # Only synthesize CDK templates
+    uv run python deploy_app_simple_dashboard.py --teardown          # Delete all stacks
 
 Required environment variables (from ../.env):
     DOH_AWS_ACCESS_KEY - DevOpsHero control plane AWS access key
@@ -75,11 +76,20 @@ def main():
         action="store_true",
         help="(CDK only) Only synthesize templates, don't deploy",
     )
+    parser.add_argument(
+        "--teardown",
+        action="store_true",
+        help="Delete all stacks instead of deploying",
+    )
     args = parser.parse_args()
 
     # Validate args
     if args.synth_only and args.engine != "cdk":
         print("❌ --synth-only is only valid with --engine cdk")
+        sys.exit(1)
+    
+    if args.teardown and args.engine != "cf":
+        print("❌ --teardown is only supported with --engine cf")
         sys.exit(1)
 
     # Load credentials from .env
@@ -98,7 +108,13 @@ def main():
     app_config = get_simple_dashboard_config()
 
     # Dispatch to the appropriate engine (lazy import to avoid loading CDK when not needed)
-    if args.engine == "cf":
+    if args.teardown:
+        import deploy_app_cf
+        success = deploy_app_cf.teardown(
+            session=session,
+            app_config=app_config,
+        )
+    elif args.engine == "cf":
         import deploy_app_cf
         success = deploy_app_cf.deploy(
             session=session,
