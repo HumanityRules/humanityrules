@@ -2,6 +2,35 @@
 
 > **Convention:** Entries are in reverse chronological order (latest on top). Use format: `## YYYY-MM-DD HH:MM - Title`
 
+## 2026-01-05 - HTTPS & Custom Domain Support (Milestone M5)
+
+Added HTTPS support with custom domains via ACM and Route53.
+
+### Changes
+
+**`AppConfig` dataclass** — Added two new fields:
+- `domain_name`: Full domain (e.g., `"simple-dashboard.chsandbox.com"`)
+- `hosted_zone_name`: Route53 zone (e.g., `"chsandbox.com"`)
+
+**`cf_app_with_alb.json`** — When domain is configured, creates:
+- ACM certificate with DNS validation (auto-validated via Route53)
+- HTTPS listener on port 443 with TLS 1.3 policy
+- HTTP→HTTPS redirect (301) on port 80
+- Route53 A record (alias to ALB)
+- Security group rule for port 443
+
+**`deploy_app.py`** — Added `get_hosted_zone_id()` to look up existing Route53 zone at deploy time, passing the zone ID as a CloudFormation parameter.
+
+### Gotcha: Security Group Names
+
+Removed explicit `GroupName` from the security group. CloudFormation can't replace resources with explicit names (name collision during create-before-delete). Let CF generate names like `{StackName}-{LogicalId}-{Random}`.
+
+### Result
+
+App now accessible at `https://simple-dashboard.chsandbox.com` with valid SSL.
+
+---
+
 ## 2026-01-03 - ECS Health Checks: Two Different Mechanisms
 
 There are **two separate health check systems** in an ECS/ALB setup:
