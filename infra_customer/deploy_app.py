@@ -55,18 +55,22 @@ class AppConfig:
     
     # Container configuration
     container_port: int
-    cpu: str = "256"  # Fargate CPU units
-    memory: str = "512"  # Fargate memory in MB
+    cpu: str
+    memory: str
     
     # Health checks
-    health_check_path: str = "/"  # For ALB health checks
-    health_check_command: str | None = None  # For container health checks (CMD-SHELL)
+    health_check_path: str  # For ALB health checks
+    health_check_command: str | None  # For container health checks (CMD-SHELL)
     
     # Environment variables as list of {"name": str, "value": str}
-    environment_variables: list[dict[str, str]] = field(default_factory=list)
+    environment_variables: list[dict[str, str]]
     
     # Local paths
-    app_source_path: Path | None = None  # Path to app source for Docker build
+    app_source_path: Path | None  # Path to app source for Docker build
+    
+    # Domain configuration (for HTTPS and Route53)
+    domain_name: str | None  # e.g., "simple-dashboard.chsandbox.com"
+    hosted_zone_name: str | None  # e.g., "chsandbox.com" (must end with dot internally)
     
     def to_template_vars(self) -> dict:
         """Convert to dict for Jinja2 template rendering."""
@@ -79,6 +83,8 @@ class AppConfig:
             "health_check_path": self.health_check_path,
             "health_check_command": self.health_check_command,
             "environment_variables": self.environment_variables,
+            "domain_name": self.domain_name,
+            "hosted_zone_name": self.hosted_zone_name,
         }
 
 
@@ -255,6 +261,40 @@ def deploy_infrastructure(
 
 
 
+def get_hosted_zone_id(session: boto3.Session, hosted_zone_name: str) -> str | None:
+    """
+    Look up the Route53 hosted zone ID by name.
+    
+    Args:
+        hosted_zone_name: The domain name (e.g., "chsandbox.com")
+        
+    Returns:
+        The hosted zone ID if found, None otherwise.
+    """
+    route53_client = session.client("route53")
+    
+    # Ensure the name ends with a dot (Route53 convention)
+    if not hosted_zone_name.endswith("."):
+        hosted_zone_name = hosted_zone_name + "."
+    
+    try:
+        response = route53_client.list_hosted_zones_by_name(
+            DNSName=hosted_zone_name,
+            MaxItems="1",
+        )
+        
+        for zone in response.get("HostedZones", []):
+            if zone["Name"] == hosted_zone_name:
+                # Zone ID comes as "/hostedzone/XXXXX", extract just the ID
+                zone_id = zone["Id"].replace("/hostedzone/", "")
+                return zone_id
+                
+    except ClientError as e:
+        print(f"   ❌ Failed to look up hosted zone: {e}")
+    
+    return None
+
+
 def check_ecr_repo_exists(session: boto3.Session, repo_name: str) -> bool:
     """
     Check if an ECR repository exists outside of CloudFormation.
@@ -333,13 +373,28 @@ def deploy_app(
     print("\n📦 Step 2: Deploy App stack (Task Definition + ALB + Service)...")
     app_template_body = cloudformation_utils.render_jinja2_template(template_path=app_template_j2, variables=template_vars)
     
+    # Build parameters for the app stack
+    app_stack_params = {"ImageTag": image_tag}
+    
+    # If domain is configured, look up the hosted zone ID
+    if app_config.domain_name and app_config.hosted_zone_name:
+        print(f"   🔍 Looking up hosted zone for {app_config.hosted_zone_name}...")
+        hosted_zone_id = get_hosted_zone_id(session=session, hosted_zone_name=app_config.hosted_zone_name)
+        
+        if not hosted_zone_id:
+            print(f"   ❌ Could not find hosted zone for {app_config.hosted_zone_name}")
+            return False
+        
+        print(f"   ✅ Found hosted zone: {hosted_zone_id}")
+        app_stack_params["HostedZoneId"] = hosted_zone_id
+    
     success = cloudformation_utils.deploy_cloudformation_stack(
         cf_client=cf_client,
         stack_name=app_stack_name,
         template_path=None,
         template_body=app_template_body,
         capabilities=None,
-        parameters={"ImageTag": image_tag},
+        parameters=app_stack_params,
     )
     
     if not success:
@@ -392,18 +447,31 @@ def deploy_app(
 
 
 
-def get_alb_url(cf_client, app_name: str) -> str | None:
-    """Get the ALB URL from the stack outputs."""
-    app_stack_name = f"devopshero-app-with-alb-{app_name}"
+def get_stack_output(cf_client, stack_name: str, output_key: str) -> str | None:
+    """Get a specific output value from a CloudFormation stack."""
     try:
-        response = cf_client.describe_stacks(StackName=app_stack_name)
+        response = cf_client.describe_stacks(StackName=stack_name)
         stack = response["Stacks"][0]
         for output in stack.get("Outputs", []):
-            if output["OutputKey"] == "AlbUrl":
+            if output["OutputKey"] == output_key:
                 return output["OutputValue"]
     except ClientError:
         pass
     return None
+
+
+def get_app_urls(cf_client, app_config: AppConfig) -> dict[str, str | None]:
+    """Get the app URLs from stack outputs."""
+    stack_name = f"devopshero-app-with-alb-{app_config.app_name}"
+    
+    urls = {
+        "alb_url": get_stack_output(cf_client, stack_name=stack_name, output_key="AlbUrl"),
+    }
+    
+    if app_config.domain_name:
+        urls["https_url"] = get_stack_output(cf_client, stack_name=stack_name, output_key="HttpsUrl")
+    
+    return urls
 
 
 
@@ -437,6 +505,8 @@ def main():
             {"name": "STREAMLIT_BROWSER_GATHER_USAGE_STATS", "value": "false"},
         ],
         app_source_path=Path(__file__).parent.parent / "deployable_repos" / "simple_dashboard",
+        domain_name="simple-dashboard.chsandbox.com",
+        hosted_zone_name="chsandbox.com",
     )
     # =========================================================================
         
@@ -494,12 +564,16 @@ def main():
         print(f"\n📊 App: {app_config.app_name}")
         print(f"   Image tag: {args.image_tag}")
         
-        # Show ALB URL
-        alb_url = get_alb_url(cf_client, app_config.app_name)
-        if alb_url:
-            print(f"\n🌐 App URL: {alb_url}")
+        # Show app URLs
+        urls = get_app_urls(cf_client, app_config=app_config)
+        
+        if urls.get("https_url"):
+            print(f"\n🔒 App URL (HTTPS): {urls['https_url']}")
+        
+        if urls.get("alb_url"):
+            print(f"🌐 App URL (ALB):   {urls['alb_url']}")
         else:
-            print("\n   ALB URL: (waiting for ALB to be ready...)")
+            print("\n   URLs: (waiting for ALB to be ready...)")
         
         print(f"\n   Or use ECS Exec to connect to the container:")
         print(f"   aws ecs execute-command --cluster devopshero-cluster \\")
