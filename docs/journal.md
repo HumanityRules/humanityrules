@@ -1,6 +1,8 @@
 # DevOpsHero Development Journal
 
-> **Convention:** Entries are in reverse chronological order (latest on top). Use format: `## YYYY-MM-DD HH:MM - Title`
+> **Conventions:**
+> - Entries are in reverse chronological order (latest on top). Use format: `## YYYY-MM-DD HH:MM - Title`
+> - Avoid markdown tables — they render poorly. Use bulleted lists with bold labels instead.
 
 ## 2026-01-06 - CDK Bootstrap & cdk.out Exploration
 
@@ -47,13 +49,11 @@ Ran `npx cdk bootstrap aws://266117665083/us-east-1` to create the **CDKToolkit*
 
 ### Bootstrap Roles Explained
 
-| Role | Purpose |
-|------|---------|
-| FilePublishingRole | Upload file assets (Lambda code, etc.) to S3 |
-| ImagePublishingRole | Push Docker images to ECR |
-| DeploymentActionRole | Call CloudFormation APIs |
-| CloudFormationExecutionRole | Used by CF to create/modify AWS resources |
-| LookupRole | Read-only queries during synth (e.g., `Vpc.from_lookup()`) |
+- **FilePublishingRole** — Upload file assets (Lambda code, etc.) to S3
+- **ImagePublishingRole** — Push Docker images to ECR
+- **DeploymentActionRole** — Call CloudFormation APIs
+- **CloudFormationExecutionRole** — Used by CF to create/modify AWS resources
+- **LookupRole** — Read-only queries during synth (e.g., `Vpc.from_lookup()`)
 
 ### Attempted: Bypassing CDK Bootstrap
 
