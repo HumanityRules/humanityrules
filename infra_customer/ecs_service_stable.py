@@ -11,8 +11,18 @@ def check_stopped_tasks(ecs_client, cluster: str, service: str) -> list[str]:
     """
     Check if tasks are failing and return the reasons.
     
+    Only returns failures for tasks that stopped unexpectedly (crashed, failed to start, etc.).
+    Tasks stopped due to normal deployment/scaling activities are ignored.
+    
     Returns a list of failure reasons (empty if no failures).
     """
+    # Stop codes that indicate intentional stops (not failures)
+    INTENTIONAL_STOP_CODES = {
+        "ServiceSchedulerInitiated",  # Normal deployment/scaling rotation
+        "UserInitiated",              # User manually stopped the task
+        "SpotInterruption",           # Spot instance interrupted (not app's fault)
+    }
+    
     reasons = []
     
     try:
@@ -33,6 +43,12 @@ def check_stopped_tasks(ecs_client, cluster: str, service: str) -> list[str]:
         )
         
         for task in details["tasks"]:
+            stop_code = task.get("stopCode", "")
+            
+            # Skip tasks that were intentionally stopped (not failures)
+            if stop_code in INTENTIONAL_STOP_CODES:
+                continue
+            
             reason = task.get("stoppedReason", "Unknown")
             reasons.append(reason)
             

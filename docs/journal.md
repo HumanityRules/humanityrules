@@ -4,28 +4,50 @@
 > - Entries are in reverse chronological order (latest on top). Use format: `## YYYY-MM-DD HH:MM - Title`
 > - Avoid markdown tables — they render poorly. Use bulleted lists with bold labels instead.
 
-## 2026-01-06 - Suppressed CDK Subnet Route Table Warnings
+## 2026-01-06 - Fixed False Failures in ECS Service Stability Check
 
-When importing a VPC via `Vpc.from_vpc_attributes()` without providing route table IDs, CDK emits warnings:
+The `wait_for_service_stable` function was incorrectly reporting task failures during successful deployments.
+
+**Symptom:** Service would reach stable state (1/1 running, 0 pending) but then fail with:
+```
+⚠️  Tasks are failing:
+   ❌ Scaling activity initiated by (deployment ecs-svc/...)
+❌ Too many task failures, aborting
+```
+
+**Root Cause:** The `check_stopped_tasks` function was treating **all** stopped tasks as failures. During normal deployments, ECS stops old tasks with `stopCode: ServiceSchedulerInitiated` — this is expected behavior (old tasks being rotated out), not a failure.
+
+**Fix:** Updated `check_stopped_tasks` to check the `stopCode` field and ignore intentional stops:
+
+```python
+INTENTIONAL_STOP_CODES = {
+    "ServiceSchedulerInitiated",  # Normal deployment/scaling rotation
+    "UserInitiated",              # User manually stopped the task
+    "SpotInterruption",           # Spot instance interrupted (not app's fault)
+}
+
+# Skip tasks that were intentionally stopped (not failures)
+if stop_code in INTENTIONAL_STOP_CODES:
+    continue
+```
+
+Now only genuine failures (`EssentialContainerExited`, `TaskFailedToStart`, etc.) are reported.
+
+---
+
+## 2026-01-06 - CDK Subnet Route Table Warnings (Won't Fix)
+
+CDK emits warnings when importing a VPC without route table IDs:
 
 ```
 [Warning at .../ImportedVpc/PublicSubnet1] No routeTableId was provided to the subnet...
 ```
 
-These warnings are harmless in our case — we only use the imported VPC for ALB and ECS service placement (subnet selection by type), which doesn't require route table access. The route tables exist and work correctly from `VpcStack`.
+**Attempted fixes:**
+- `@aws-cdk/aws-ec2:noSubnetRouteTableId` context flag — only *acknowledges* the warning, doesn't suppress output
+- Filtering stderr — works but feels hacky
 
-**Fix:** Added context flag to suppress the warnings in the CDK App constructor:
-
-```python
-cdk_app = App(
-    outdir=str(CDK_OUT_DIR),
-    context={
-        "@aws-cdk/aws-ec2:noSubnetRouteTableId": True,
-    },
-)
-```
-
-**Alternative (not implemented):** Export route table IDs from `VpcStack` and provide them in `from_vpc_attributes()`. This is complex because CDK creates one route table for public subnets but separate tables for private subnets with NAT.
+**Decision:** Live with the warnings. They're harmless (we only use subnets for ALB/ECS placement, not routing). The proper fix would be exporting route table IDs from `VpcStack`, but that's complex and not worth it for cosmetic noise.
 
 ---
 
