@@ -99,6 +99,9 @@ class VpcStack(Stack):
         CfnOutput(self, "PrivateSubnet1Id", value=self.vpc.private_subnets[0].subnet_id, export_name="devopshero-private-subnet-1")
         CfnOutput(self, "PrivateSubnet2Id", value=self.vpc.private_subnets[1].subnet_id, export_name="devopshero-private-subnet-2")
         CfnOutput(self, "DefaultSecurityGroupId", value=self.default_security_group.security_group_id, export_name="devopshero-default-sg-id")
+        # Route tables: with nat_gateways=1, all public subnets share one RT, all private subnets share one RT
+        CfnOutput(self, "PublicRouteTableId", value=self.vpc.public_subnets[0].route_table.route_table_id, export_name="devopshero-public-rt")
+        CfnOutput(self, "PrivateRouteTableId", value=self.vpc.private_subnets[0].route_table.route_table_id, export_name="devopshero-private-rt")
 
 
 class EcsClusterStack(Stack):
@@ -186,12 +189,16 @@ class AppWithAlbStack(Stack):
     ) -> None:
         super().__init__(scope, construct_id, **kwargs)
 
+        public_rt = Fn.import_value("devopshero-public-rt")
+        private_rt = Fn.import_value("devopshero-private-rt")
         vpc = ec2.Vpc.from_vpc_attributes(
             self, "ImportedVpc",
             vpc_id=Fn.import_value("devopshero-vpc-id"),
             availability_zones=self.availability_zones,
             public_subnet_ids=[Fn.import_value("devopshero-public-subnet-1"), Fn.import_value("devopshero-public-subnet-2")],
+            public_subnet_route_table_ids=[public_rt, public_rt],
             private_subnet_ids=[Fn.import_value("devopshero-private-subnet-1"), Fn.import_value("devopshero-private-subnet-2")],
+            private_subnet_route_table_ids=[private_rt, private_rt],
         )
 
         cluster = ecs.Cluster.from_cluster_attributes(
