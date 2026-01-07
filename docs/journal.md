@@ -4,6 +4,31 @@
 > - Entries are in reverse chronological order (latest on top). Use format: `## YYYY-MM-DD HH:MM - Title`
 > - Avoid markdown tables — they render poorly. Use bulleted lists with bold labels instead.
 
+## 2026-01-06 - Suppressed CDK Subnet Route Table Warnings
+
+When importing a VPC via `Vpc.from_vpc_attributes()` without providing route table IDs, CDK emits warnings:
+
+```
+[Warning at .../ImportedVpc/PublicSubnet1] No routeTableId was provided to the subnet...
+```
+
+These warnings are harmless in our case — we only use the imported VPC for ALB and ECS service placement (subnet selection by type), which doesn't require route table access. The route tables exist and work correctly from `VpcStack`.
+
+**Fix:** Added context flag to suppress the warnings in the CDK App constructor:
+
+```python
+cdk_app = App(
+    outdir=str(CDK_OUT_DIR),
+    context={
+        "@aws-cdk/aws-ec2:noSubnetRouteTableId": True,
+    },
+)
+```
+
+**Alternative (not implemented):** Export route table IDs from `VpcStack` and provide them in `from_vpc_attributes()`. This is complex because CDK creates one route table for public subnets but separate tables for private subnets with NAT.
+
+---
+
 ## 2026-01-06 - CDK Deployment Fixes (AZs, CIDR Selection, Output Directory)
 
 Fixed several issues preventing CDK deployments from working correctly.
