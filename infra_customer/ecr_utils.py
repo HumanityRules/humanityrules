@@ -94,10 +94,10 @@ def build_and_push_docker_image(
     # Full image URI
     image_uri = f"{account_id}.dkr.ecr.{region}.amazonaws.com/{ecr_repo_name}:{image_tag}"
 
-    # Build Docker image for AMD64 (Fargate runs on x86_64, not ARM)
-    print(f"   ⏳ Building Docker image (platform: linux/amd64)...")
+    # Build Docker image for ARM64 (Fargate supports ARM, avoids QEMU emulation issues on Apple Silicon)
+    print(f"   ⏳ Building Docker image (platform: linux/arm64)...")
     build_result = subprocess.run(
-        ["docker", "build", "--platform", "linux/amd64", "-t", image_uri, "."],
+        ["docker", "build", "--platform", "linux/arm64", "-t", image_uri, "."],
         cwd=app_source_path,
         capture_output=True,
         text=True,

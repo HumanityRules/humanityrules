@@ -154,6 +154,11 @@ defmodule DbPortalWeb.Router do
     forward "/", Samly.Router
   end
 
+  # Health check endpoint for ALB (no authentication required)
+  scope "/health", DbPortalWeb do
+    get "/", HealthController, :index
+  end
+
   scope "/login", DbPortalWeb do
     pipe_through :browser
 

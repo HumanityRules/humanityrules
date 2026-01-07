@@ -26,7 +26,14 @@ end
   :test -> {"samly_entity_id", ConfigHelper.priv_path("okta/okta_metadata.xml"),  "http://dataengr.local:15000/",  "http://dataengr.local:15000/sso"}
 end
 
-config :db_portal, :use_okta_auth, Application.get_env(:db_portal, :env)==:prod || System.get_env("MY_OKTA")!=nil
+# DISABLE_AUTH=true bypasses Okta authentication (for running behind ALB without SSO)
+use_okta_auth = cond do
+  System.get_env("DISABLE_AUTH") == "true" -> false
+  Application.get_env(:db_portal, :env) == :prod -> true
+  System.get_env("MY_OKTA") != nil -> true
+  true -> false
+end
+config :db_portal, :use_okta_auth, use_okta_auth
 
 config :samly, Samly.State,
   store: Samly.State.ETS,
@@ -78,4 +85,50 @@ config :ex_aws,
   finch_process_name: ExAwsFinch,
   access_key_id: [{:system, "AWS_ACCESS_KEY_ID"}, {:awscli,default_aws_profile, 30}, :instance_role],
   secret_access_key: [{:system, "AWS_SECRET_ACCESS_KEY"}, {:awscli, default_aws_profile, 30}, :instance_role]
+
+# NO_SECRETS_MGR=true skips AWS Secrets Manager and uses env vars for secrets
+# This is for running in ECS/Fargate where we inject secrets via environment variables
+if System.get_env("NO_SECRETS_MGR") == "true" do
+  config :db_portal, :no_secrets_mgr,
+    slack_token: System.get_env("SLACK_TOKEN", "disabled"),
+    signing_salt: System.get_env("SIGNING_SALT", "default-signing-salt-change-me"),
+    secret_key_base: System.get_env("SECRET_KEY_BASE", "default-secret-key-base-must-be-at-least-64-bytes-long-for-security")
+end
+
+# Database configuration - supports either DATABASE_URL or individual components
+# Individual components are used when ECS injects secrets (DATABASE_PASSWORD, DATABASE_USERNAME)
+cond do
+  # Option 1: Full DATABASE_URL provided
+  database_url = System.get_env("DATABASE_URL") ->
+    config :db_portal, DbPortal.Repo,
+      url: database_url,
+      pool_size: String.to_integer(System.get_env("POOL_SIZE", "10"))
+
+  # Option 2: Individual components (from ECS secrets injection)
+  System.get_env("DATABASE_HOST") ->
+    config :db_portal, DbPortal.Repo,
+      hostname: System.get_env("DATABASE_HOST"),
+      port: String.to_integer(System.get_env("DATABASE_PORT", "3306")),
+      database: System.get_env("DATABASE_NAME", "db_portal_prod"),
+      username: System.get_env("DATABASE_USERNAME", "dbadmin"),
+      password: System.get_env("DATABASE_PASSWORD", ""),
+      pool_size: String.to_integer(System.get_env("POOL_SIZE", "10"))
+
+  # Option 3: No external database configured (use defaults from dev.exs/prod.exs)
+  true ->
+    :ok
+end
+
+# HTTP-only endpoint configuration for running behind ALB (TLS terminated at load balancer)
+if System.get_env("DISABLE_HTTPS") == "true" do
+  http_port = String.to_integer(System.get_env("PORT", "4000"))
+  host = System.get_env("PHX_HOST", "localhost")
+
+  config :db_portal, DbPortalWeb.Endpoint,
+    url: [host: host, port: 443],  # External URL uses 443 (ALB terminates TLS)
+    http: [port: http_port],        # Internal port for ALB health checks
+    https: false,                   # Disable HTTPS - ALB handles TLS
+    server: true,
+    check_origin: false
+end
 
