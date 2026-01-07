@@ -4,6 +4,105 @@
 > - Entries are in reverse chronological order (latest on top). Use format: `## YYYY-MM-DD HH:MM - Title`
 > - Avoid markdown tables — they render poorly. Use bulleted lists with bold labels instead.
 
+## 2026-01-06 - CDK Deployment Fixes (AZs, CIDR Selection, Output Directory)
+
+Fixed several issues preventing CDK deployments from working correctly.
+
+### Issue 1: Dummy Availability Zones
+
+**Problem:** CDK was using `dummy1a` and `dummy1b` instead of real availability zones like `us-east-1a`. This caused CloudFormation to fail with "Value (dummy1a) for parameter availabilityZone is invalid."
+
+**Root Cause:** When CDK synthesizes stacks for cross-account deployment, it doesn't have context about the target account's AZs and falls back to dummy values.
+
+**Fix:** Added explicit `availability_zones` parameter to `VpcStack`:
+
+```python
+class VpcStack(Stack):
+    def __init__(self, ..., availability_zones: list[str], ...):
+        self.vpc = ec2.Vpc(
+            self, "Vpc",
+            availability_zones=availability_zones,  # Explicit AZs
+            ...
+        )
+
+# In deploy():
+availability_zones = [f"{region}a", f"{region}b"]
+vpc_stack = VpcStack(..., availability_zones=availability_zones, ...)
+```
+
+### Issue 2: EcsClusterStack Creating Its Own VPC
+
+**Problem:** `ecs.Cluster()` creates a default VPC if none is provided, which also had the dummy AZ problem.
+
+**Fix:** Modified `EcsClusterStack` to accept a VPC parameter:
+
+```python
+class EcsClusterStack(Stack):
+    def __init__(self, ..., vpc: ec2.IVpc, ...):
+        self.cluster = ecs.Cluster(
+            self, "EcsCluster",
+            vpc=vpc,  # Use provided VPC instead of creating one
+            ...
+        )
+
+# In deploy():
+ecs_cluster_stack = EcsClusterStack(..., vpc=vpc_stack.vpc, ...)
+ecs_cluster_stack.add_dependency(vpc_stack)
+```
+
+### Issue 3: Hardcoded VPC CIDR
+
+**Problem:** VPC CIDR was hardcoded as `172.21.0.0/20`, which could conflict with existing VPCs.
+
+**Fix:** Reused the CloudFormation approach — check if VPC stack exists, otherwise find available CIDR:
+
+```python
+vpc_stack_exists = cloudformation_utils.stack_exists(cf_client, vpc_stack_name)
+
+if vpc_stack_exists:
+    vpc_cidr = cloudformation_utils.get_stack_output(cf_client, stack_name=vpc_stack_name, output_key="VpcCidr")
+else:
+    cidr_config = vpc_utils.find_available_vpc_cidr(ec2_client)
+    vpc_cidr = cidr_config["VpcCidr"]
+```
+
+### Issue 4: CDK Output Directory
+
+**Problem:** `app.synth()` was writing to `cdk.out/` in whatever directory the script ran from.
+
+**Fix:** Configured explicit output directory in `infra_customer/cdk.out/`:
+
+```python
+CDK_OUT_DIR = Path(__file__).parent / "cdk.out"
+cdk_app = App(outdir=str(CDK_OUT_DIR))
+```
+
+Added `infra_customer/cdk.out/` to `.gitignore`.
+
+### CDK Context Cache (`cdk.context.json`)
+
+CDK creates `cdk.context.json` to cache AWS lookups (like availability zones) so subsequent synths don't need API calls. Example content:
+
+```json
+{
+  "availability-zones:account=266117665083:region=us-east-1": [
+    "us-east-1a", "us-east-1b", "us-east-1c", "us-east-1d", "us-east-1e", "us-east-1f"
+  ]
+}
+```
+
+Since we pass explicit AZs rather than using CDK lookups, this file isn't required. Added to `.gitignore` along with `cdk.out/`.
+
+### Result
+
+All 4 CDK stacks now deploy successfully:
+- `devopshero-vpc-cdk` — VPC with proper AZs and auto-selected CIDR
+- `devopshero-ecs-cluster-cdk` — ECS cluster using the VPC
+- `devopshero-ecr-simple-dashboard` — ECR repository
+- `devopshero-app-with-alb-simple-dashboard` — ALB, ECS service, ACM cert, Route53
+
+---
+
 ## 2026-01-06 - CDK Bootstrap & cdk.out Exploration
 
 Explored the CDK output folder structure and bootstrapped the customer AWS account for CDK deployments.
