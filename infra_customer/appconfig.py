@@ -33,6 +33,10 @@ class AppConfig:
     domain_name: str | None  # e.g., "simple-dashboard.chsandbox.com"
     hosted_zone_name: str | None  # e.g., "chsandbox.com"
 
+    # Database configuration (optional - for apps that need Aurora)
+    needs_database: bool = False  # If True, creates Aurora Serverless v2
+    database_name: str | None = None  # e.g., "db_portal_prod"
+
     def to_template_vars(self) -> dict:
         """Convert to dict for Jinja2 template rendering (CloudFormation)."""
         return {

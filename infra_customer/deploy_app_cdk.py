@@ -22,6 +22,7 @@ CDK_OUT_DIR = Path(__file__).parent / "cdk.out"
 
 from aws_cdk import (
     App,
+    Aws,
     CfnOutput,
     Duration,
     Fn,
@@ -36,8 +37,10 @@ from aws_cdk import aws_ecs as ecs
 from aws_cdk import aws_elasticloadbalancingv2 as elbv2
 from aws_cdk import aws_iam as iam
 from aws_cdk import aws_logs as logs
+from aws_cdk import aws_rds as rds
 from aws_cdk import aws_route53 as route53
 from aws_cdk import aws_route53_targets as targets
+from aws_cdk import aws_secretsmanager as secretsmanager
 from constructs import Construct
 
 import cloudformation_utils
@@ -126,6 +129,11 @@ class EcsClusterStack(Stack):
             assumed_by=iam.ServicePrincipal("ecs-tasks.amazonaws.com"),
             managed_policies=[iam.ManagedPolicy.from_aws_managed_policy_name("service-role/AmazonECSTaskExecutionRolePolicy")],
         )
+        # Allow reading DevOpsHero secrets (e.g., Aurora credentials)
+        self.task_execution_role.add_to_policy(iam.PolicyStatement(
+            actions=["secretsmanager:GetSecretValue"],
+            resources=[f"arn:aws:secretsmanager:{Aws.REGION}:{Aws.ACCOUNT_ID}:secret:devopshero/*"],
+        ))
 
         self.task_role = iam.Role(
             self, "TaskRole",
@@ -172,6 +180,76 @@ class EcrStack(Stack):
         CfnOutput(self, "EcrRepositoryArn", value=self.repository.repository_arn, export_name=f"devopshero-{app_config.app_name}-ecr-arn")
 
 
+class AuroraServerlessStack(Stack):
+    """
+    Aurora Serverless v2 MySQL cluster for apps that need a database.
+    Creates the cluster with auto-generated credentials stored in Secrets Manager.
+    """
+
+    def __init__(
+        self,
+        scope: Construct,
+        construct_id: str,
+        vpc: ec2.IVpc,
+        default_security_group: ec2.ISecurityGroup,
+        database_name: str,
+        **kwargs,
+    ) -> None:
+        super().__init__(scope, construct_id, **kwargs)
+
+        # Security group for Aurora - allows MySQL access from VPC
+        self.security_group = ec2.SecurityGroup(
+            self, "AuroraSecurityGroup",
+            vpc=vpc,
+            description="Security group for Aurora Serverless - allows MySQL from VPC",
+            allow_all_outbound=True,
+        )
+        # Allow MySQL access from the default security group (used by ECS tasks)
+        self.security_group.add_ingress_rule(
+            peer=default_security_group, connection=ec2.Port.tcp(3306), description="Allow MySQL from ECS tasks",
+        )
+
+        # Subnet group for Aurora (private subnets)
+        subnet_group = rds.SubnetGroup(
+            self, "AuroraSubnetGroup",
+            description="Subnet group for Aurora Serverless",
+            vpc=vpc,
+            vpc_subnets=ec2.SubnetSelection(subnet_type=ec2.SubnetType.PRIVATE_WITH_EGRESS),
+            removal_policy=RemovalPolicy.DESTROY,
+        )
+
+        # Aurora Serverless v2 cluster
+        self.cluster = rds.DatabaseCluster(
+            self, "AuroraCluster",
+            engine=rds.DatabaseClusterEngine.aurora_mysql(version=rds.AuroraMysqlEngineVersion.VER_3_04_0),
+            cluster_identifier=f"devopshero-aurora",
+            default_database_name=database_name,
+            credentials=rds.Credentials.from_generated_secret("dbadmin", secret_name="devopshero/aurora/credentials"),
+            vpc=vpc,
+            subnet_group=subnet_group,
+            security_groups=[self.security_group],
+            serverless_v2_min_capacity=0.5,  # Minimum ACUs (scales to 0.5 when idle)
+            serverless_v2_max_capacity=2,    # Maximum ACUs
+            writer=rds.ClusterInstance.serverless_v2("writer"),
+            readers=[],  # No readers for now, can add later for read replicas
+            storage_encrypted=True,
+            backup=rds.BackupProps(retention=Duration.days(7)),
+            removal_policy=RemovalPolicy.DESTROY,  # For dev/test - change to RETAIN for prod
+        )
+
+        # Build the DATABASE_URL for the app
+        # Format: mysql2://username:password@hostname:port/database
+        # The password will be fetched from Secrets Manager at runtime by the app
+        self.endpoint = self.cluster.cluster_endpoint.hostname
+        self.port = str(self.cluster.cluster_endpoint.port)
+        self.secret_arn = self.cluster.secret.secret_arn
+
+        CfnOutput(self, "ClusterEndpoint", value=self.endpoint, export_name="devopshero-aurora-endpoint")
+        CfnOutput(self, "ClusterPort", value=self.port, export_name="devopshero-aurora-port")
+        CfnOutput(self, "DatabaseName", value=database_name, export_name="devopshero-aurora-database")
+        CfnOutput(self, "SecretArn", value=self.secret_arn, export_name="devopshero-aurora-secret-arn")
+
+
 class AppWithAlbStack(Stack):
     """
     DevOpsHero App Stack - ECS Service with ALB.
@@ -185,6 +263,7 @@ class AppWithAlbStack(Stack):
         app_config: AppConfig,
         image_tag: str,
         hosted_zone_id: str | None,
+        aurora_cluster: rds.DatabaseCluster | None,
         **kwargs,
     ) -> None:
         super().__init__(scope, construct_id, **kwargs)
@@ -205,12 +284,23 @@ class AppWithAlbStack(Stack):
             self, "ImportedCluster", cluster_name=Fn.import_value("devopshero-cluster-name"), vpc=vpc, security_groups=[],
         )
 
-        task_execution_role = iam.Role.from_role_arn(self, "ImportedTaskExecutionRole", Fn.import_value("devopshero-task-execution-role-arn"))
-        task_role = iam.Role.from_role_arn(self, "ImportedTaskRole", Fn.import_value("devopshero-task-role-arn"))
+        task_execution_role = iam.Role.from_role_arn(self, "ImportedTaskExecutionRole", Fn.import_value("devopshero-task-execution-role-arn"), mutable=False)
+        task_role = iam.Role.from_role_arn(self, "ImportedTaskRole", Fn.import_value("devopshero-task-role-arn"), mutable=False)
         log_group = logs.LogGroup.from_log_group_name(self, "ImportedLogGroup", Fn.import_value("devopshero-ecs-log-group"))
         default_sg = ec2.SecurityGroup.from_security_group_id(self, "ImportedDefaultSg", Fn.import_value("devopshero-default-sg-id"))
 
         environment = {env["name"]: env["value"] for env in app_config.environment_variables}
+
+        # If Aurora cluster is provided, inject DATABASE_URL via secrets
+        secrets = {}
+        if aurora_cluster:
+            # Construct DATABASE_URL from secret - format: ecto://user:password@host:port/database
+            # We pass individual components and let the app construct the URL if needed
+            secrets["DATABASE_PASSWORD"] = ecs.Secret.from_secrets_manager(aurora_cluster.secret, field="password")
+            secrets["DATABASE_USERNAME"] = ecs.Secret.from_secrets_manager(aurora_cluster.secret, field="username")
+            environment["DATABASE_HOST"] = aurora_cluster.cluster_endpoint.hostname
+            environment["DATABASE_PORT"] = str(aurora_cluster.cluster_endpoint.port)
+            environment["DATABASE_NAME"] = app_config.database_name or "app"
 
         task_definition = ecs.FargateTaskDefinition(
             self, "TaskDefinition",
@@ -219,6 +309,10 @@ class AppWithAlbStack(Stack):
             memory_limit_mib=app_config.memory,
             execution_role=task_execution_role,
             task_role=task_role,
+            runtime_platform=ecs.RuntimePlatform(
+                cpu_architecture=ecs.CpuArchitecture.ARM64,
+                operating_system_family=ecs.OperatingSystemFamily.LINUX,
+            ),
         )
 
         container = task_definition.add_container(
@@ -227,6 +321,7 @@ class AppWithAlbStack(Stack):
             image=ecs.ContainerImage.from_registry(f"{self.account}.dkr.ecr.{self.region}.amazonaws.com/{app_config.ecr_repo_name}:{image_tag}"),
             logging=ecs.LogDrivers.aws_logs(stream_prefix=app_config.app_name, log_group=log_group),
             environment=environment,
+            secrets=secrets if secrets else None,
             health_check=ecs.HealthCheck(
                 command=["CMD-SHELL", app_config.health_check_command],
                 interval=Duration.seconds(30),
@@ -377,9 +472,16 @@ def teardown(
     stacks_to_delete = [
         f"devopshero-app-with-alb-{app_config.app_name}",
         f"devopshero-ecr-{app_config.app_name}",
+    ]
+    
+    # Add Aurora stack if the app uses a database
+    if app_config.needs_database:
+        stacks_to_delete.append("devopshero-aurora")
+    
+    stacks_to_delete.extend([
         "devopshero-ecs-cluster",
         "devopshero-vpc",
-    ]
+    ])
     
     print(f"\n{'='*60}")
     print(f"🗑️  Tearing down CDK stacks")
@@ -482,7 +584,6 @@ def deploy(
         vpc_cidr = vpc_utils.find_available_vpc_cidr(ec2_client)["VpcCidr"]
 
     # Stacks are environment-agnostic: AZs resolve to Fn::GetAZs at deploy time
-    # Stacks are environment-agnostic: AZs resolve to Fn::GetAZs at deploy time
     cdk_app = App(outdir=str(CDK_OUT_DIR))
 
     vpc_stack = VpcStack(cdk_app, vpc_stack_name, vpc_cidr=vpc_cidr)
@@ -491,16 +592,33 @@ def deploy(
 
     ecr_stack = EcrStack(cdk_app, f"devopshero-ecr-{app_config.app_name}", app_config=app_config)
 
+    # Optionally create Aurora Serverless v2 cluster
+    aurora_stack = None
+    aurora_cluster = None
+    if app_config.needs_database:
+        aurora_stack = AuroraServerlessStack(
+            scope=cdk_app,
+            construct_id="devopshero-aurora",
+            vpc=vpc_stack.vpc,
+            default_security_group=vpc_stack.default_security_group,
+            database_name=app_config.database_name or "app",
+        )
+        aurora_stack.add_dependency(vpc_stack)
+        aurora_cluster = aurora_stack.cluster
+
     app_stack = AppWithAlbStack(
         scope=cdk_app,
         construct_id=f"devopshero-app-with-alb-{app_config.app_name}",
         app_config=app_config,
         image_tag=image_tag,
         hosted_zone_id=hosted_zone_id,
+        aurora_cluster=aurora_cluster,
     )
     app_stack.add_dependency(vpc_stack)
     app_stack.add_dependency(ecs_cluster_stack)
     app_stack.add_dependency(ecr_stack)
+    if aurora_stack:
+        app_stack.add_dependency(aurora_stack)
 
     if synth_only:
         cloud_assembly = cdk_app.synth()

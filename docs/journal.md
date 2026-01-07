@@ -4,6 +4,172 @@
 > - Entries are in reverse chronological order (latest on top). Use format: `## YYYY-MM-DD HH:MM - Title`
 > - Avoid markdown tables — they render poorly. Use bulleted lists with bold labels instead.
 
+## 2026-01-07 - ARM64 Docker Builds: Avoiding QEMU Emulation Bug with Elixir 1.18
+
+When building Docker images for ECS/Fargate on Apple Silicon Macs, we encountered a critical build failure with Elixir 1.18.
+
+**The Error:**
+```
+Error while loading project :configparser_ex at /app/deps/configparser_ex
+** (ArgumentError) could not call Module.put_attribute/3 because the module DbPortal.MixProject is already compiled
+```
+
+**Root Cause:** Building with `--platform linux/amd64` on an ARM Mac forces Docker to use QEMU emulation. QEMU has subtle timing/behavior differences that expose a bug in Elixir 1.18's module loading during `mix deps.compile`. The error occurs because Mix tries to put an attribute on a module that's already been compiled — a race condition that only manifests under emulation.
+
+**Solution:** Build for ARM64 and run on Graviton (ARM) Fargate instances:
+
+```python
+# ecr_utils.py - build_and_push_docker_image()
+build_result = subprocess.run(
+    ["docker", "build", "--platform", "linux/arm64", "-t", image_uri, "."],
+    ...
+)
+
+# deploy_app_cdk.py - FargateTaskDefinition
+runtime_platform=ecs.RuntimePlatform(
+    cpu_architecture=ecs.CpuArchitecture.ARM64,
+    operating_system_family=ecs.OperatingSystemFamily.LINUX,
+),
+```
+
+**Why ARM64 is Better:**
+- **Native builds on Apple Silicon** — no QEMU emulation, no timing bugs
+- **20% cheaper** — Graviton instances cost less than x86
+- **Better performance** — Graviton2/3 processors are fast
+
+If amd64 builds are ever needed (e.g., for x86 Fargate), consider:
+- Downgrading to Elixir 1.17.x or earlier
+- Using a CI/CD system with native x86 runners (GitHub Actions, etc.)
+- Building on an x86 machine or EC2 instance
+
+---
+
+## 2026-01-07 - db_portal Changes for ECS/Fargate Deployment
+
+Made several modifications to `db_portal` (Elixir/Phoenix app) to run in ECS/Fargate behind an ALB. The app was originally designed to run on EC2 with direct HTTPS and Okta SSO.
+
+### 1. Health Check Endpoint
+
+**Files:** `lib/db_portal_web/router.ex`, `lib/db_portal_web/controllers/health_controller.ex`
+
+Added a dedicated `/health` endpoint for ALB health checks that bypasses authentication:
+
+```elixir
+# router.ex - Add before authenticated routes
+scope "/health", DbPortalWeb do
+  get "/", HealthController, :index
+end
+
+# health_controller.ex - New file
+defmodule DbPortalWeb.HealthController do
+  use DbPortalWeb, :controller
+  def index(conn, _params) do
+    send_resp(conn, 200, "OK")
+  end
+end
+```
+
+### 2. HTTP-Only Mode (DISABLE_HTTPS)
+
+**File:** `config/runtime.exs`
+
+The app originally ran its own HTTPS server with SiteEncrypt/ACME. Behind ALB (which terminates TLS), we need HTTP-only mode:
+
+```elixir
+if System.get_env("DISABLE_HTTPS") == "true" do
+  http_port = String.to_integer(System.get_env("PORT", "4000"))
+  host = System.get_env("PHX_HOST", "localhost")
+
+  config :db_portal, DbPortalWeb.Endpoint,
+    url: [host: host, port: 443],  # External URL (ALB terminates TLS)
+    http: [port: http_port],        # Internal port for ALB health checks
+    server: true,
+    check_origin: false
+end
+```
+
+### 3. Authentication Bypass (DISABLE_AUTH)
+
+**File:** `config/runtime.exs`
+
+The app uses Okta SAML for production auth. For ECS deployment without Okta configured, we can bypass:
+
+```elixir
+use_okta_auth = cond do
+  System.get_env("DISABLE_AUTH") == "true" -> false  # NEW: Explicit bypass
+  Application.get_env(:db_portal, :env) == :prod -> true
+  System.get_env("MY_OKTA") != nil -> true
+  true -> false
+end
+```
+
+When disabled, the app uses `do_fake_verify` which creates a session for `dev@example.com`.
+
+### 4. Secrets Manager Bypass (NO_SECRETS_MGR)
+
+**Files:** `config/runtime.exs`, `lib/db_portal/application.ex`
+
+The app reads secrets (Slack token, signing salt, secret key base) from AWS Secrets Manager. For ECS, we inject these via environment variables:
+
+```elixir
+# runtime.exs
+if System.get_env("NO_SECRETS_MGR") == "true" do
+  config :db_portal, :no_secrets_mgr,
+    slack_token: System.get_env("SLACK_TOKEN", "disabled"),
+    signing_salt: System.get_env("SIGNING_SALT", "default-signing-salt-change-me"),
+    secret_key_base: System.get_env("SECRET_KEY_BASE", "...")
+end
+
+# application.ex - configuration/1 function
+case Application.get_env(:db_portal, :no_secrets_mgr) do
+  nil -> # Use Secrets Manager (original behavior)
+  conf -> # Use env vars from :no_secrets_mgr config
+end
+```
+
+### 5. Flexible Database Configuration
+
+**File:** `config/runtime.exs`
+
+Support both `DATABASE_URL` (traditional) and individual components (for ECS secrets injection):
+
+```elixir
+cond do
+  database_url = System.get_env("DATABASE_URL") ->
+    config :db_portal, DbPortal.Repo, url: database_url, pool_size: ...
+
+  System.get_env("DATABASE_HOST") ->
+    config :db_portal, DbPortal.Repo,
+      hostname: System.get_env("DATABASE_HOST"),
+      port: String.to_integer(System.get_env("DATABASE_PORT", "3306")),
+      database: System.get_env("DATABASE_NAME", "db_portal_prod"),
+      username: System.get_env("DATABASE_USERNAME", "dbadmin"),
+      password: System.get_env("DATABASE_PASSWORD", ""),
+      pool_size: ...
+
+  true -> :ok  # Use defaults from dev.exs/prod.exs
+end
+```
+
+### Environment Variables Summary
+
+| Variable | Purpose | Example Value |
+|----------|---------|---------------|
+| `DISABLE_HTTPS` | Run HTTP-only (ALB terminates TLS) | `true` |
+| `DISABLE_AUTH` | Bypass Okta SSO | `true` |
+| `NO_SECRETS_MGR` | Use env vars instead of Secrets Manager | `true` |
+| `PORT` | HTTP listen port | `4000` |
+| `PHX_HOST` | External hostname | `dataengr.chsandbox.com` |
+| `DATABASE_HOST` | Aurora endpoint | `devopshero-aurora.cluster-xxx.rds.amazonaws.com` |
+| `DATABASE_PORT` | MySQL port | `3306` |
+| `DATABASE_NAME` | Database name | `db_portal_prod` |
+| `DATABASE_USERNAME` | DB user (from Secrets Manager) | Injected by ECS |
+| `DATABASE_PASSWORD` | DB password (from Secrets Manager) | Injected by ECS |
+| `SECRET_KEY_BASE` | Phoenix secret key | 64+ char string |
+| `SIGNING_SALT` | Cookie signing salt | Random string |
+
+---
+
 ## 2026-01-06 - Fixed False Failures in ECS Service Stability Check
 
 The `wait_for_service_stable` function was incorrectly reporting task failures during successful deployments.
