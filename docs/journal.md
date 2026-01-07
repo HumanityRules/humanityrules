@@ -35,7 +35,7 @@ Now only genuine failures (`EssentialContainerExited`, `TaskFailedToStart`, etc.
 
 ---
 
-## 2026-01-06 - CDK Subnet Route Table Warnings (Won't Fix)
+## 2026-01-06 - Fixed CDK Subnet Route Table Warnings
 
 CDK emits warnings when importing a VPC without route table IDs:
 
@@ -43,11 +43,24 @@ CDK emits warnings when importing a VPC without route table IDs:
 [Warning at .../ImportedVpc/PublicSubnet1] No routeTableId was provided to the subnet...
 ```
 
-**Attempted fixes:**
+**Attempted workarounds (rejected):**
 - `@aws-cdk/aws-ec2:noSubnetRouteTableId` context flag — only *acknowledges* the warning, doesn't suppress output
 - Filtering stderr — works but feels hacky
 
-**Decision:** Live with the warnings. They're harmless (we only use subnets for ALB/ECS placement, not routing). The proper fix would be exporting route table IDs from `VpcStack`, but that's complex and not worth it for cosmetic noise.
+**Fix:** Export route table IDs from `VpcStack` and import them in `AppWithAlbStack`. With `nat_gateways=1`, all public subnets share one route table and all private subnets share one route table, so we only need two exports:
+
+```python
+# VpcStack exports
+CfnOutput(self, "PublicRouteTableId", value=self.vpc.public_subnets[0].route_table.route_table_id, ...)
+CfnOutput(self, "PrivateRouteTableId", value=self.vpc.private_subnets[0].route_table.route_table_id, ...)
+
+# AppWithAlbStack imports (same RT repeated for each subnet)
+vpc = ec2.Vpc.from_vpc_attributes(
+    ...,
+    public_subnet_route_table_ids=[public_rt, public_rt],
+    private_subnet_route_table_ids=[private_rt, private_rt],
+)
+```
 
 ---
 
