@@ -46,6 +46,7 @@ import cloudformation_utils
 import ecr_utils
 import ecs_service_stable
 import route53_utils
+import vpc_utils
 
 
 # =============================================================================
@@ -56,7 +57,7 @@ import route53_utils
 class VpcStack(Stack):
     """
     DevOpsHero VPC Stack - Public subnets for NAT Gateway, private subnets for Fargate tasks.
-    
+
     Equivalent to cf_vpc.json
     """
 
@@ -65,17 +66,19 @@ class VpcStack(Stack):
         scope: Construct,
         construct_id: str,
         vpc_cidr: str,
+        availability_zones: list[str],
         **kwargs,
     ) -> None:
         super().__init__(scope, construct_id, **kwargs)
 
         # Create VPC with public and private subnets
+        # We specify explicit AZs to avoid CDK using dummy values during cross-account synthesis
         self.vpc = ec2.Vpc(
             self,
             "Vpc",
             vpc_name="devopshero-vpc",
             ip_addresses=ec2.IpAddresses.cidr(vpc_cidr),
-            max_azs=2,
+            availability_zones=availability_zones,
             nat_gateways=1,
             subnet_configuration=[
                 ec2.SubnetConfiguration(
@@ -161,7 +164,7 @@ class VpcStack(Stack):
 class EcsClusterStack(Stack):
     """
     DevOpsHero ECS Cluster Stack - Fargate cluster with IAM roles for app deployments.
-    
+
     Equivalent to cf_ecs_cluster.json
     """
 
@@ -169,15 +172,17 @@ class EcsClusterStack(Stack):
         self,
         scope: Construct,
         construct_id: str,
+        vpc: ec2.IVpc,
         **kwargs,
     ) -> None:
         super().__init__(scope, construct_id, **kwargs)
 
-        # ECS Cluster with Container Insights
+        # ECS Cluster with Container Insights (using the provided VPC)
         self.cluster = ecs.Cluster(
             self,
             "EcsCluster",
             cluster_name="devopshero-cluster",
+            vpc=vpc,
             container_insights=True,
         )
 
@@ -1026,25 +1031,50 @@ def deploy(
         else:
             print(f"   ⚠️  Could not find hosted zone, HTTPS will not be configured")
 
+    # Create AWS clients for VPC CIDR lookup
+    cf_client = session.client("cloudformation")
+    ec2_client = session.client("ec2")
+
+    # Check if VPC stack already exists (CIDRs are immutable, can't change them on update)
+    vpc_stack_name = "devopshero-vpc-cdk"
+    vpc_stack_exists = cloudformation_utils.stack_exists(cf_client, vpc_stack_name)
+
+    if vpc_stack_exists:
+        # Stack exists - get existing CIDR from stack outputs
+        print(f"\n📦 VPC stack '{vpc_stack_name}' already exists, getting existing CIDR...")
+        vpc_cidr = cloudformation_utils.get_stack_output(cf_client, stack_name=vpc_stack_name, output_key="VpcCidr")
+        if not vpc_cidr:
+            print("   ❌ Could not get VPC CIDR from existing stack")
+            return False
+        print(f"   ✅ Using existing VPC CIDR: {vpc_cidr}")
+    else:
+        # New stack - find available CIDR range
+        print(f"\n📦 VPC stack '{vpc_stack_name}' does not exist, finding available CIDR...")
+        cidr_config = vpc_utils.find_available_vpc_cidr(ec2_client)
+        vpc_cidr = cidr_config["VpcCidr"]
+
+    # Availability zones - use first two AZs in the region
+    availability_zones = [f"{region}a", f"{region}b"]
+
     # Create CDK App with explicit output directory
     cdk_app = App(outdir=str(CDK_OUT_DIR))
-
-    # VPC CIDR - for simplicity using a fixed CIDR (in production, would check for conflicts)
-    vpc_cidr = "172.21.0.0/20"
 
     # Infrastructure stacks
     vpc_stack = VpcStack(
         cdk_app,
-        "devopshero-vpc-cdk",
+        vpc_stack_name,
         vpc_cidr=vpc_cidr,
+        availability_zones=availability_zones,
         env={"account": account_id, "region": region},
     )
 
     ecs_cluster_stack = EcsClusterStack(
         cdk_app,
         "devopshero-ecs-cluster-cdk",
+        vpc=vpc_stack.vpc,
         env={"account": account_id, "region": region},
     )
+    ecs_cluster_stack.add_dependency(vpc_stack)
 
     # App stacks
     ecr_stack = EcrStack(

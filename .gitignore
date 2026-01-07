@@ -4,3 +4,4 @@ __pycache__/
 .playwright-mcp/
 .env
 infra_customer/cdk.out/
+infra_customer/cdk.context.json
