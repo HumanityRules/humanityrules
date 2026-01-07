@@ -357,6 +357,53 @@ def deploy_cdk_stacks(app: App, session: boto3.Session) -> bool:
     return True
 
 
+def teardown(
+    session: boto3.Session,
+    app_config: AppConfig,
+) -> bool:
+    """
+    Delete all CDK-deployed CloudFormation stacks in reverse dependency order.
+    """
+    cf_client = session.client("cloudformation")
+    
+    # Stack names in reverse dependency order
+    stacks_to_delete = [
+        f"devopshero-app-with-alb-{app_config.app_name}",
+        f"devopshero-ecr-{app_config.app_name}",
+        "devopshero-ecs-cluster",
+        "devopshero-vpc",
+    ]
+    
+    print(f"\n{'='*60}")
+    print(f"🗑️  Tearing down CDK stacks")
+    print(f"{'='*60}")
+    print(f"\nStacks to delete (in order):")
+    for stack in stacks_to_delete:
+        print(f"   - {stack}")
+    print()
+    
+    # Empty ECR repository first (CloudFormation can't delete non-empty repos)
+    ecr_utils.delete_all_ecr_images(session=session, ecr_repo_name=app_config.ecr_repo_name)
+    
+    all_success = True
+    for stack_name in stacks_to_delete:
+        success = cloudformation_utils.delete_stack_and_wait(cf_client, stack_name=stack_name)
+        if not success:
+            all_success = False
+            # Continue trying to delete remaining stacks
+    
+    if all_success:
+        print(f"\n{'='*60}")
+        print("✅ All CDK stacks deleted successfully")
+        print(f"{'='*60}")
+    else:
+        print(f"\n{'='*60}")
+        print("⚠️  Some stacks failed to delete")
+        print(f"{'='*60}")
+    
+    return all_success
+
+
 def start_ecs_service(session: boto3.Session, app_config: AppConfig) -> bool:
     """Start the ECS service (set desiredCount to 1) and wait for stabilization."""
     print("\n📦 Starting ECS service (desiredCount=1)...")
@@ -401,9 +448,6 @@ def deploy(
         app_config: Application configuration
         image_tag: Docker image tag to deploy
         synth_only: If True, only synthesize templates, don't deploy
-    
-    Returns:
-        True on success, False on failure
     """
     hosted_zone_id = None
     if app_config.domain_name and app_config.hosted_zone_name:
@@ -418,7 +462,7 @@ def deploy(
     ec2_client = session.client("ec2")
 
     # CIDRs are immutable - if stack exists, use existing CIDR
-    vpc_stack_name = "devopshero-vpc-cdk"
+    vpc_stack_name = "devopshero-vpc"
     if cloudformation_utils.stack_exists(cf_client, vpc_stack_name):
         print(f"\n📦 VPC stack '{vpc_stack_name}' already exists, getting existing CIDR...")
         vpc_cidr = cloudformation_utils.get_stack_output(cf_client, vpc_stack_name, "VpcCidr")
@@ -434,7 +478,7 @@ def deploy(
     cdk_app = App(outdir=str(CDK_OUT_DIR))
 
     vpc_stack = VpcStack(cdk_app, vpc_stack_name, vpc_cidr=vpc_cidr)
-    ecs_cluster_stack = EcsClusterStack(cdk_app, "devopshero-ecs-cluster-cdk", vpc=vpc_stack.vpc)
+    ecs_cluster_stack = EcsClusterStack(cdk_app, "devopshero-ecs-cluster", vpc=vpc_stack.vpc)
     ecs_cluster_stack.add_dependency(vpc_stack)
 
     ecr_stack = EcrStack(cdk_app, f"devopshero-ecr-{app_config.app_name}", app_config=app_config)
@@ -468,8 +512,6 @@ def deploy(
         app_name=app_config.app_name, 
         ecr_repo_name=app_config.ecr_repo_name, 
         app_source_path=app_config.app_source_path, 
-        ecr_repo_name=app_config.ecr_repo_name, 
-        app_source_path=app_config.app_source_path, 
         image_tag=image_tag,
     )
     if not image_uri:
@@ -479,33 +521,15 @@ def deploy(
     if not start_ecs_service(session, app_config):
         return False
 
-    print("\n" + "=" * 60)
-    print("🎉 CDK Deployment complete!")
-    print("=" * 60)
-    print(f"\nAccount: {account_id}")
-    print(f"Region:  {region}")
-
     cf_client = session.client("cloudformation")
-    print(f"\n📊 App: {app_config.app_name}")
-    print(f"   Image tag: {image_tag}")
-
-    urls = cloudformation_utils.get_app_urls(
-        cf_client=cf_client, 
-        app_name=app_config.app_name, 
+    cloudformation_utils.print_deployment_summary(
+        cf_client=cf_client,
+        account_id=account_id,
+        region=region,
+        app_name=app_config.app_name,
+        image_tag=image_tag,
         has_domain=bool(app_config.domain_name),
+        cluster_name="devopshero-cluster",
     )
-
-    if urls.get("https_url"):
-        print(f"\n🔒 App URL (HTTPS): {urls['https_url']}")
-
-    if urls.get("alb_url"):
-        print(f"🌐 App URL (ALB):   {urls['alb_url']}")
-    else:
-        print("\n   URLs: (waiting for ALB to be ready...)")
-
-    print(f"\n   Or use ECS Exec to connect to the container:")
-    print(f"   aws ecs execute-command --cluster devopshero-cluster \\")
-    print(f"       --task <task-id> --container {app_config.app_name} \\")
-    print(f"       --interactive --command /bin/sh")
 
     return True

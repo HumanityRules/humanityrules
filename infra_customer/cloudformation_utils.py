@@ -215,3 +215,42 @@ def get_app_urls(cf_client, app_name: str, has_domain: bool) -> dict[str, str | 
 
     return urls
 
+
+def print_deployment_summary(
+    cf_client,
+    account_id: str,
+    region: str,
+    app_name: str,
+    image_tag: str,
+    has_domain: bool,
+    cluster_name: str,
+) -> None:
+    """Print a deployment summary with app URLs and ECS exec instructions."""
+    print("\n" + "=" * 60)
+    print("🎉 Deployment complete!")
+    print("=" * 60)
+    print(f"\nAccount: {account_id}")
+    print(f"Region:  {region}")
+
+    print(f"\n📊 App: {app_name}")
+    print(f"   Image tag: {image_tag}")
+
+    urls = get_app_urls(
+        cf_client=cf_client,
+        app_name=app_name,
+        has_domain=has_domain,
+    )
+
+    if urls.get("https_url"):
+        print(f"\n🔒 App URL (HTTPS): {urls['https_url']}")
+
+    if urls.get("alb_url"):
+        print(f"🌐 App URL (ALB):   {urls['alb_url']}")
+    else:
+        print("\n   URLs: (waiting for ALB to be ready...)")
+
+    print(f"\n   Or use ECS Exec to connect to the container:")
+    print(f"   aws ecs execute-command --cluster {cluster_name} \\")
+    print(f"       --task <task-id> --container {app_name} \\")
+    print(f"       --interactive --command /bin/sh")
+
