@@ -88,10 +88,6 @@ def main():
         print("❌ --synth-only is only valid with --engine cdk")
         sys.exit(1)
     
-    if args.teardown and args.engine != "cf":
-        print("❌ --teardown is only supported with --engine cf")
-        sys.exit(1)
-
     # Load credentials from .env
     iam_utils.load_credentials_from_env()
 
@@ -109,11 +105,12 @@ def main():
 
     # Dispatch to the appropriate engine (lazy import to avoid loading CDK when not needed)
     if args.teardown:
-        import deploy_app_cf
-        success = deploy_app_cf.teardown(
-            session=session,
-            app_config=app_config,
-        )
+        if args.engine == "cf":
+            import deploy_app_cf
+            success = deploy_app_cf.teardown(session=session, app_config=app_config)
+        else:
+            import deploy_app_cdk
+            success = deploy_app_cdk.teardown(session=session, app_config=app_config)
     elif args.engine == "cf":
         import deploy_app_cf
         success = deploy_app_cf.deploy(

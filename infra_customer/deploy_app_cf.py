@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """
 Deploy DevOpsHero infrastructure and apps using CloudFormation templates.
 
@@ -323,33 +322,14 @@ def deploy(
         return False
     
     # Print summary
-    print("\n" + "=" * 60)
-    print("🎉 CloudFormation deployment complete!")
-    print("=" * 60)
-    print(f"\nAccount: {account_id}")
-    print(f"Region:  {region}")
-    
-    print(f"\n📊 App: {app_config.app_name}")
-    print(f"   Image tag: {image_tag}")
-    
-    # Show app URLs
-    urls = cloudformation_utils.get_app_urls(
-        cf_client,
+    cloudformation_utils.print_deployment_summary(
+        cf_client=cf_client,
+        account_id=account_id,
+        region=region,
         app_name=app_config.app_name,
+        image_tag=image_tag,
         has_domain=bool(app_config.domain_name),
+        cluster_name="devopshero-cluster",
     )
-    
-    if urls.get("https_url"):
-        print(f"\n🔒 App URL (HTTPS): {urls['https_url']}")
-    
-    if urls.get("alb_url"):
-        print(f"🌐 App URL (ALB):   {urls['alb_url']}")
-    else:
-        print("\n   URLs: (waiting for ALB to be ready...)")
-    
-    print(f"\n   Or use ECS Exec to connect to the container:")
-    print(f"   aws ecs execute-command --cluster devopshero-cluster \\")
-    print(f"       --task <task-id> --container {app_config.app_name} \\")
-    print(f"       --interactive --command /bin/sh")
     
     return True
