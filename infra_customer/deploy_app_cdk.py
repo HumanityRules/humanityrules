@@ -475,15 +475,8 @@ def deploy(
         vpc_cidr = vpc_utils.find_available_vpc_cidr(ec2_client)["VpcCidr"]
 
     # Stacks are environment-agnostic: AZs resolve to Fn::GetAZs at deploy time
-    cdk_app = App(
-        outdir=str(CDK_OUT_DIR),
-        context={
-            # Suppress warnings about missing route table IDs on imported subnets.
-            # We only use the VPC for subnet selection by type (for ALB/ECS placement),
-            # which doesn't require route table access.
-            "@aws-cdk/aws-ec2:noSubnetRouteTableId": True,
-        },
-    )
+    # Stacks are environment-agnostic: AZs resolve to Fn::GetAZs at deploy time
+    cdk_app = App(outdir=str(CDK_OUT_DIR))
 
     vpc_stack = VpcStack(cdk_app, vpc_stack_name, vpc_cidr=vpc_cidr)
     ecs_cluster_stack = EcsClusterStack(cdk_app, "devopshero-ecs-cluster", vpc=vpc_stack.vpc)
