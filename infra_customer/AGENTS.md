@@ -6,7 +6,7 @@ Prefer single-line function calls unless they exceed ~140 characters:
 
 ```python
 # Good - fits on one line
-self.cluster = ecs.Cluster(self, "EcsCluster", cluster_name="devopshero-cluster", vpc=vpc, container_insights=True)
+self.cluster = ecs.Cluster(self, "EcsCluster", cluster_name="devopshero-cluster", vpc=vpc, container_insights_v2=ecs.ContainerInsights.ENABLED)
 
 # Good - too long, use multi-line
 self.task_execution_role = iam.Role(
