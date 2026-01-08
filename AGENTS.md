@@ -26,9 +26,15 @@ uv run manage.py runserver
 
 # Documentation
 
-The main developer documentation lives in the docs/ subdirectory.
+The main developer documentation lives in the docs/ subdirectory. **When creating a new document in `docs/`, always add a reference to it here.**
 
-**Development Journal:** When trying to understand what, when, and why decisions were made, consult `docs/journal.md`. It contains chronological entries documenting the reasoning behind architectural choices, implementation decisions, and lessons learned.
+- **`docs/journal.md`** — Development journal with chronological entries. Consult this when trying to understand what, when, and why decisions were made. Contains reasoning behind architectural choices, implementation decisions, and lessons learned.
+
+- **`docs/aws_account.md`** — Detailed documentation of the AWS account connection flow, including the data model, security considerations (external ID for confused deputy prevention), user flow, and validation logic.
+
+- **`docs/TODO.md`** — Active task list organized by priority. Covers onboarding flow improvements, AWS account features, and technical debt items.
+
+- **`docs/bolt_prompt.md`** — The original prompt used to generate the landing page design. Contains the product concept, target personas, and landing page section specifications.
 
 
 # Django 6.0 Template Partials
