@@ -84,3 +84,16 @@ self.vpc = ec2.Vpc(...)
 # Task Definition
 task_definition = ecs.FargateTaskDefinition(...)
 ```
+
+## Naming: Field Names Should Reflect Their Types
+
+Field names should hint at their type to avoid ambiguity:
+
+```python
+# Good - field name correlates with the type
+database_config: DatabaseConfig | None = None
+user_settings: UserSettings | None = None
+
+# Bad - "database" could be a connection, a name, a config...
+database: DatabaseConfig | None = None
+```
