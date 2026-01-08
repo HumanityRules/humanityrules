@@ -4,6 +4,27 @@
 > - Entries are in reverse chronological order (latest on top). Use format: `## YYYY-MM-DD HH:MM - Title`
 > - Avoid markdown tables — they render poorly. Use bulleted lists with bold labels instead.
 
+## 2026-01-07 - Deprecated CloudFormation Deployment Engine
+
+Moved all CloudFormation-based deployment code to `infra_customer/_old_cf/`:
+- `deploy_app_cf.py` — CloudFormation deployment module
+- `cf_templates/` — All CloudFormation JSON templates
+
+**Changes:**
+- Removed `--engine` parameter from `deploy_app_simple_dashboard.py`
+- CDK is now the only deployment engine
+- `cloudformation_utils.py` stays in place (still used by CDK for stack operations)
+
+**New usage:**
+```bash
+uv run python deploy_app_simple_dashboard.py                     # Deploy with CDK
+uv run python deploy_app_simple_dashboard.py --image-tag v1.2.3  # Specific tag
+uv run python deploy_app_simple_dashboard.py --synth-only        # CDK synth only
+uv run python deploy_app_simple_dashboard.py --teardown          # Delete all stacks
+```
+
+---
+
 ## 2026-01-08 - Aurora Credentials via ECS Secret Injection
 
 All 5 database fields now come from Aurora's managed secret via ECS secret injection:

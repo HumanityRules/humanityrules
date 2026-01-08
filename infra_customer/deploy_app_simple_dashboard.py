@@ -2,15 +2,13 @@
 """
 Deploy the simple-dashboard app to a customer AWS account.
 
-This is the unified entry point for deploying simple-dashboard using either
-CloudFormation templates (cf) or AWS CDK (cdk).
+This is the entry point for deploying simple-dashboard using AWS CDK.
 
 Usage:
     cd infra_customer
-    uv run python deploy_app_simple_dashboard.py                     # Deploy with CF (default)
-    uv run python deploy_app_simple_dashboard.py --engine cdk        # Deploy with CDK
+    uv run python deploy_app_simple_dashboard.py                     # Deploy with CDK
     uv run python deploy_app_simple_dashboard.py --image-tag v1.2.3  # Deploy with specific image tag
-    uv run python deploy_app_simple_dashboard.py --engine cdk --synth-only  # Only synthesize CDK templates
+    uv run python deploy_app_simple_dashboard.py --synth-only        # Only synthesize CDK templates
     uv run python deploy_app_simple_dashboard.py --teardown          # Delete all stacks
 
 Required environment variables (from ../.env):
@@ -61,12 +59,6 @@ def main():
         description="Deploy simple-dashboard to AWS"
     )
     parser.add_argument(
-        "--engine",
-        choices=["cf", "cdk"],
-        default="cf",
-        help="Deployment engine: cf (CloudFormation) or cdk (AWS CDK). Default: cf",
-    )
-    parser.add_argument(
         "--image-tag",
         default="latest",
         help="Docker image tag (default: latest)",
@@ -74,7 +66,7 @@ def main():
     parser.add_argument(
         "--synth-only",
         action="store_true",
-        help="(CDK only) Only synthesize templates, don't deploy",
+        help="Only synthesize CDK templates, don't deploy",
     )
     parser.add_argument(
         "--teardown",
@@ -82,11 +74,6 @@ def main():
         help="Delete all stacks instead of deploying",
     )
     args = parser.parse_args()
-
-    # Validate args
-    if args.synth_only and args.engine != "cdk":
-        print("❌ --synth-only is only valid with --engine cdk")
-        sys.exit(1)
     
     # Load credentials from .env
     iam_utils.load_credentials_from_env()
@@ -103,25 +90,12 @@ def main():
     # Get app configuration
     app_config = get_simple_dashboard_config()
 
-    # Dispatch to the appropriate engine (lazy import to avoid loading CDK when not needed)
+    # Always use CDK for deployment
+    import deploy_app_cdk
+
     if args.teardown:
-        if args.engine == "cf":
-            import deploy_app_cf
-            success = deploy_app_cf.teardown(session=session, app_config=app_config)
-        else:
-            import deploy_app_cdk
-            success = deploy_app_cdk.teardown(session=session, app_config=app_config)
-    elif args.engine == "cf":
-        import deploy_app_cf
-        success = deploy_app_cf.deploy(
-            session=session,
-            account_id=TARGET_ACCOUNT_ID,
-            region=TARGET_REGION,
-            app_config=app_config,
-            image_tag=args.image_tag,
-        )
+        success = deploy_app_cdk.teardown(session=session, app_config=app_config)
     else:
-        import deploy_app_cdk
         success = deploy_app_cdk.deploy(
             session=session,
             account_id=TARGET_ACCOUNT_ID,
