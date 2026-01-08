@@ -2,10 +2,7 @@
 """
 Deploy DevOpsHero infrastructure and apps using AWS CDK.
 
-This is a CDK equivalent of deploy_app_cf.py, using Python CDK constructs instead
-of CloudFormation JSON templates.
-
-This module provides deployment functions for CDK-based deployments.
+This module provides deployment functions using Python CDK constructs.
 """
 
 import os
