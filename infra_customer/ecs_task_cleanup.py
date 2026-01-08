@@ -46,7 +46,7 @@ from dotenv import load_dotenv
 import iam_utils
 
 
-# Default configuration (same as deploy_app_cdk.py)
+# Default configuration (same as deploy_app.py)
 TARGET_ACCOUNT_ID = "266117665083"
 TARGET_EXTERNAL_ID = "9e62c988-09dd-4f96-b5a7-a67646dd285b"
 TARGET_REGION = "us-east-1"

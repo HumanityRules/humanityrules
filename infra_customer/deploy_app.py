@@ -1,31 +1,9 @@
-#!/usr/bin/env python3
 """
-Deploy DevOpsHero infrastructure and apps using AWS CDK.
-
-This module provides deployment functions using Python CDK constructs.
+Deploy DevOpsHero apps (ECR, ALB, ECS service) using AWS CDK.
 """
-
-import os
-import subprocess
-from pathlib import Path
 
 import boto3
-
-from appconfig import AppConfig
-import secrets_utils
-
-CDK_OUT_DIR = Path(__file__).parent / "cdk.out"
-
-from aws_cdk import (
-    App,
-    Aws,
-    CfnOutput,
-    Duration,
-    Fn,
-    RemovalPolicy,
-    Stack,
-    Tags,
-)
+from aws_cdk import App, Aws, CfnOutput, Duration, Fn, RemovalPolicy, Stack, Tags
 from aws_cdk import aws_certificatemanager as acm
 from aws_cdk import aws_ec2 as ec2
 from aws_cdk import aws_ecr as ecr
@@ -36,109 +14,22 @@ from aws_cdk import aws_logs as logs
 from aws_cdk import aws_rds as rds
 from aws_cdk import aws_route53 as route53
 from aws_cdk import aws_route53_targets as targets
-from aws_cdk import aws_secretsmanager as secretsmanager
+from botocore.exceptions import ClientError
 from constructs import Construct
 
+from appconfig import AppConfig
+import cdk_utils
 import cloudformation_utils
+import deploy_base
 import ecr_utils
 import ecs_service_stable
 import route53_utils
-import vpc_utils
+import secrets_utils
 
 
 # =============================================================================
 # CDK STACKS
 # =============================================================================
-
-
-class VpcStack(Stack):
-    """
-    DevOpsHero VPC Stack - Public subnets for NAT Gateway, private subnets for Fargate tasks.
-    """
-
-    def __init__(
-        self,
-        scope: Construct,
-        construct_id: str,
-        vpc_cidr: str,
-        **kwargs,
-    ) -> None:
-        super().__init__(scope, construct_id, **kwargs)
-
-        # Create VPC with public and private subnets
-        # We specify explicit AZs to avoid CDK using dummy values during cross-account synthesis
-        self.vpc = ec2.Vpc(
-            self,
-            "Vpc",
-            vpc_name="devopshero-vpc",
-            ip_addresses=ec2.IpAddresses.cidr(vpc_cidr),
-            max_azs=2,
-            nat_gateways=1,
-            subnet_configuration=[
-                ec2.SubnetConfiguration(name="Public", subnet_type=ec2.SubnetType.PUBLIC, cidr_mask=24),
-                ec2.SubnetConfiguration(name="Private", subnet_type=ec2.SubnetType.PRIVATE_WITH_EGRESS, cidr_mask=24),
-            ],
-        )
-
-        self.default_security_group = ec2.SecurityGroup(
-            self, "DefaultSecurityGroup",
-            vpc=self.vpc,
-            security_group_name="devopshero-default-sg",
-            description="Default security group - allows VPC inbound and all outbound",
-            allow_all_outbound=True,
-        )
-        self.default_security_group.add_ingress_rule(
-            peer=ec2.Peer.ipv4(vpc_cidr), connection=ec2.Port.all_traffic(), description="Allow all traffic from within VPC",
-        )
-
-        CfnOutput(self, "VpcId", value=self.vpc.vpc_id, export_name="devopshero-vpc-id")
-        CfnOutput(self, "VpcCidr", value=self.vpc.vpc_cidr_block, export_name="devopshero-vpc-cidr")
-        CfnOutput(self, "PublicSubnet1Id", value=self.vpc.public_subnets[0].subnet_id, export_name="devopshero-public-subnet-1")
-        CfnOutput(self, "PublicSubnet2Id", value=self.vpc.public_subnets[1].subnet_id, export_name="devopshero-public-subnet-2")
-        CfnOutput(self, "PrivateSubnet1Id", value=self.vpc.private_subnets[0].subnet_id, export_name="devopshero-private-subnet-1")
-        CfnOutput(self, "PrivateSubnet2Id", value=self.vpc.private_subnets[1].subnet_id, export_name="devopshero-private-subnet-2")
-        CfnOutput(self, "DefaultSecurityGroupId", value=self.default_security_group.security_group_id, export_name="devopshero-default-sg-id")
-        # Route tables: with nat_gateways=1, all public subnets share one RT, all private subnets share one RT
-        CfnOutput(self, "PublicRouteTableId", value=self.vpc.public_subnets[0].route_table.route_table_id, export_name="devopshero-public-rt")
-        CfnOutput(self, "PrivateRouteTableId", value=self.vpc.private_subnets[0].route_table.route_table_id, export_name="devopshero-private-rt")
-
-
-class EcsClusterStack(Stack):
-    """
-    DevOpsHero ECS Cluster Stack - Fargate cluster with IAM roles for app deployments.
-    """
-
-    def __init__(
-        self,
-        scope: Construct,
-        construct_id: str,
-        vpc: ec2.IVpc,
-        **kwargs,
-    ) -> None:
-        super().__init__(scope, construct_id, **kwargs)
-
-        self.cluster = ecs.Cluster(self, "EcsCluster", cluster_name="devopshero-cluster", vpc=vpc, container_insights=True)
-
-        self.task_execution_role = iam.Role(
-            self, "TaskExecutionRole",
-            role_name="devopshero-ecs-task-execution-role",
-            assumed_by=iam.ServicePrincipal("ecs-tasks.amazonaws.com"),
-            managed_policies=[iam.ManagedPolicy.from_aws_managed_policy_name("service-role/AmazonECSTaskExecutionRolePolicy")],
-        )
-        # Allow ECS to inject secrets as env vars (e.g., Aurora credentials)
-        self.task_execution_role.add_to_policy(iam.PolicyStatement(
-            actions=["secretsmanager:GetSecretValue"],
-            resources=[f"arn:aws:secretsmanager:{Aws.REGION}:{Aws.ACCOUNT_ID}:secret:devopshero/*"],
-        ))
-
-        self.log_group = logs.LogGroup(
-            self, "EcsLogGroup", log_group_name="/devopshero/ecs", retention=logs.RetentionDays.ONE_MONTH, removal_policy=RemovalPolicy.DESTROY,
-        )
-
-        CfnOutput(self, "ClusterArn", value=self.cluster.cluster_arn, export_name="devopshero-cluster-arn")
-        CfnOutput(self, "ClusterName", value=self.cluster.cluster_name, export_name="devopshero-cluster-name")
-        CfnOutput(self, "TaskExecutionRoleArn", value=self.task_execution_role.role_arn, export_name="devopshero-task-execution-role-arn")
-        CfnOutput(self, "LogGroupName", value=self.log_group.log_group_name, export_name="devopshero-ecs-log-group")
 
 
 class EcrStack(Stack):
@@ -427,94 +318,7 @@ class AppWithAlbStack(Stack):
 # =============================================================================
 
 
-def deploy_cdk_stacks(app: App, session: boto3.Session) -> bool:
-    """Synthesize and deploy CDK stacks using the CDK CLI."""
-    print(f"\n{'='*60}")
-    print(f"📦 Synthesizing CDK stacks...")
-
-    credentials = session.get_credentials()
-    frozen_credentials = credentials.get_frozen_credentials()
-
-    cdk_env = os.environ.copy()
-    cdk_env["AWS_ACCESS_KEY_ID"] = frozen_credentials.access_key
-    cdk_env["AWS_SECRET_ACCESS_KEY"] = frozen_credentials.secret_key
-    if frozen_credentials.token:
-        cdk_env["AWS_SESSION_TOKEN"] = frozen_credentials.token
-
-    cloud_assembly = app.synth()
-
-    print(f"\n{'='*60}")
-    print(f"🚀 Deploying CDK stacks...")
-
-    deploy_result = subprocess.run(
-        ["npx", "cdk", "deploy", "--all", "--require-approval", "never", "--app", cloud_assembly.directory],
-        env=cdk_env,
-        capture_output=False,  # Show output in real-time
-    )
-
-    if deploy_result.returncode != 0:
-        print(f"\n❌ CDK deployment failed")
-        return False
-
-    print(f"\n✅ CDK deployment complete")
-    return True
-
-
-def teardown(
-    session: boto3.Session,
-    app_config: AppConfig,
-) -> bool:
-    """
-    Delete all CDK-deployed CloudFormation stacks in reverse dependency order.
-    """
-    cf_client = session.client("cloudformation")
-    
-    # Stack names in reverse dependency order
-    stacks_to_delete = [
-        f"devopshero-app-with-alb-{app_config.app_name}",
-        f"devopshero-ecr-{app_config.app_name}",
-    ]
-    
-    # Add Aurora stack if the app uses a database
-    if app_config.database_config:
-        stacks_to_delete.append("devopshero-aurora")
-    
-    stacks_to_delete.extend([
-        "devopshero-ecs-cluster",
-        "devopshero-vpc",
-    ])
-    
-    print(f"\n{'='*60}")
-    print(f"🗑️  Tearing down CDK stacks")
-    print(f"{'='*60}")
-    print(f"\nStacks to delete (in order):")
-    for stack in stacks_to_delete:
-        print(f"   - {stack}")
-    print()
-    
-    # Empty ECR repository first (CloudFormation can't delete non-empty repos)
-    ecr_utils.delete_all_ecr_images(session=session, ecr_repo_name=app_config.ecr_repo_name)
-    
-    all_success = True
-    for stack_name in stacks_to_delete:
-        success = cloudformation_utils.delete_stack_and_wait(cf_client, stack_name=stack_name)
-        if not success:
-            all_success = False
-            # Continue trying to delete remaining stacks
-    
-    if all_success:
-        print(f"\n{'='*60}")
-        print("✅ All CDK stacks deleted successfully")
-        print(f"{'='*60}")
-    else:
-        print(f"\n{'='*60}")
-        print("⚠️  Some stacks failed to delete")
-        print(f"{'='*60}")
-    
-    return all_success
-
-
-def start_ecs_service(session: boto3.Session, app_config: AppConfig) -> bool:
+def _start_ecs_service(session: boto3.Session, app_config: AppConfig) -> bool:
     """Start the ECS service (set desiredCount to 1) and wait for stabilization."""
     print("\n📦 Starting ECS service (desiredCount=1)...")
     ecs_client = session.client("ecs")
@@ -536,7 +340,7 @@ def start_ecs_service(session: boto3.Session, app_config: AppConfig) -> bool:
 
 
 # =============================================================================
-# MAIN DEPLOY FUNCTION
+# DEPLOYMENT FUNCTIONS
 # =============================================================================
 
 
@@ -549,7 +353,9 @@ def deploy(
     synth_only: bool,
 ) -> bool:
     """
-    Main deployment function for CDK-based deployments.
+    Deploy an app to existing infrastructure.
+    
+    Assumes VPC and ECS cluster are already deployed (run deploy_base first).
     
     Args:
         session: Boto3 session with assumed role credentials
@@ -558,7 +364,23 @@ def deploy(
         app_config: Application configuration
         image_tag: Docker image tag to deploy
         synth_only: If True, only synthesize templates, don't deploy
+    
+    Returns:
+        True on success, False on failure
     """
+    print(f"\n{'='*60}")
+    print(f"🚀 Deploying app: {app_config.app_name}")
+    print(f"{'='*60}")
+    
+    # Verify infrastructure exists
+    cf_client = session.client("cloudformation")
+    if not cloudformation_utils.stack_exists(cf_client, "devopshero-vpc"):
+        print("\n❌ Infrastructure not deployed. Run with --infra first.")
+        return False
+    if not cloudformation_utils.stack_exists(cf_client, "devopshero-ecs-cluster"):
+        print("\n❌ ECS cluster not deployed. Run with --infra first.")
+        return False
+    
     hosted_zone_id = None
     if app_config.domain_name and app_config.hosted_zone_name:
         print(f"\n🔍 Looking up hosted zone for {app_config.hosted_zone_name}...")
@@ -573,29 +395,16 @@ def deploy(
         print(f"\n🔐 Ensuring app secrets exist...")
         secrets_utils.ensure_app_secrets_exist(session=session, app_config=app_config)
 
-    cf_client = session.client("cloudformation")
-    ec2_client = session.client("ec2")
+    # Get VPC CIDR for Aurora security group (if needed)
+    vpc_cidr = deploy_base.get_or_create_vpc_cidr(session)
 
-    # CIDRs are immutable - if stack exists, use existing CIDR
-    vpc_stack_name = "devopshero-vpc"
-    if cloudformation_utils.stack_exists(cf_client, vpc_stack_name):
-        print(f"\n📦 VPC stack '{vpc_stack_name}' already exists, getting existing CIDR...")
-        vpc_cidr = cloudformation_utils.get_stack_output(cf_client, vpc_stack_name, "VpcCidr")
-        if not vpc_cidr:
-            print("   ❌ Could not get VPC CIDR from existing stack")
-            return False
-        print(f"   ✅ Using existing VPC CIDR: {vpc_cidr}")
-    else:
-        print(f"\n📦 VPC stack '{vpc_stack_name}' does not exist, finding available CIDR...")
-        vpc_cidr = vpc_utils.find_available_vpc_cidr(ec2_client)["VpcCidr"]
-
-    # Stacks are environment-agnostic: AZs resolve to Fn::GetAZs at deploy time
-    cdk_app = App(outdir=str(CDK_OUT_DIR))
-
-    vpc_stack = VpcStack(cdk_app, vpc_stack_name, vpc_cidr=vpc_cidr)
-    ecs_cluster_stack = EcsClusterStack(cdk_app, "devopshero-ecs-cluster", vpc=vpc_stack.vpc)
-    ecs_cluster_stack.add_dependency(vpc_stack)
-
+    # Build CDK app with only app-specific stacks
+    # We still need to reference the VPC stack for Aurora, but it won't be deployed (already exists)
+    cdk_app = App(outdir=str(cdk_utils.CDK_OUT_DIR))
+    
+    # Create VPC stack reference (needed for Aurora if app has database)
+    vpc_stack = deploy_base.VpcStack(cdk_app, "devopshero-vpc", vpc_cidr=vpc_cidr)
+    
     ecr_stack = EcrStack(cdk_app, f"devopshero-ecr-{app_config.app_name}", app_config=app_config)
 
     # Optionally create Aurora Serverless v2 cluster
@@ -620,8 +429,6 @@ def deploy(
         hosted_zone_id=hosted_zone_id,
         aurora_cluster=aurora_cluster,
     )
-    app_stack.add_dependency(vpc_stack)
-    app_stack.add_dependency(ecs_cluster_stack)
     app_stack.add_dependency(ecr_stack)
     if aurora_stack:
         app_stack.add_dependency(aurora_stack)
@@ -631,7 +438,7 @@ def deploy(
         print(f"\n✅ CDK templates synthesized to: {cloud_assembly.directory}")
         return True
 
-    success = deploy_cdk_stacks(cdk_app, session)
+    success = cdk_utils.deploy_cdk_stacks(cdk_app, session)
 
     if not success:
         return False
@@ -650,10 +457,9 @@ def deploy(
         print("\n❌ Docker build/push failed.")
         return False
 
-    if not start_ecs_service(session, app_config):
+    if not _start_ecs_service(session, app_config):
         return False
 
-    cf_client = session.client("cloudformation")
     cloudformation_utils.print_deployment_summary(
         cf_client=cf_client,
         account_id=account_id,
@@ -665,3 +471,53 @@ def deploy(
     )
 
     return True
+
+
+def teardown(
+    session: boto3.Session,
+    app_config: AppConfig,
+) -> bool:
+    """
+    Delete app-specific CDK stacks (ECR, ALB, ECS service, Aurora if applicable).
+    Does NOT delete shared infrastructure (VPC, ECS cluster).
+    """
+    cf_client = session.client("cloudformation")
+    
+    # App-specific stacks in reverse dependency order
+    stacks_to_delete = [
+        f"devopshero-app-with-alb-{app_config.app_name}",
+    ]
+    
+    # Add Aurora stack if the app uses a database
+    if app_config.database_config:
+        stacks_to_delete.append("devopshero-aurora")
+    
+    stacks_to_delete.append(f"devopshero-ecr-{app_config.app_name}")
+    
+    print(f"\n{'='*60}")
+    print(f"🗑️  Tearing down app: {app_config.app_name}")
+    print(f"{'='*60}")
+    print(f"\nStacks to delete (in order):")
+    for stack in stacks_to_delete:
+        print(f"   - {stack}")
+    print()
+    
+    # Empty ECR repository first (CloudFormation can't delete non-empty repos)
+    ecr_utils.delete_all_ecr_images(session=session, ecr_repo_name=app_config.ecr_repo_name)
+    
+    all_success = True
+    for stack_name in stacks_to_delete:
+        success = cloudformation_utils.delete_stack_and_wait(cf_client, stack_name=stack_name)
+        if not success:
+            all_success = False
+    
+    if all_success:
+        print(f"\n{'='*60}")
+        print(f"✅ App '{app_config.app_name}' stacks deleted successfully")
+        print(f"{'='*60}")
+    else:
+        print(f"\n{'='*60}")
+        print("⚠️  Some stacks failed to delete")
+        print(f"{'='*60}")
+    
+    return all_success
