@@ -4,6 +4,22 @@
 > - Entries are in reverse chronological order (latest on top). Use format: `## YYYY-MM-DD HH:MM - Title`
 > - Avoid markdown tables — they render poorly. Use bulleted lists with bold labels instead.
 
+## 2026-01-08 - Aurora Credentials via ECS Secret Injection
+
+All 5 database fields now come from Aurora's managed secret via ECS secret injection:
+
+```python
+secrets["DATABASE_HOST"] = ecs.Secret.from_secrets_manager(aurora_cluster.secret, field="host")
+secrets["DATABASE_PORT"] = ecs.Secret.from_secrets_manager(aurora_cluster.secret, field="port")
+secrets["DATABASE_NAME"] = ecs.Secret.from_secrets_manager(aurora_cluster.secret, field="dbname")
+secrets["DATABASE_USERNAME"] = ecs.Secret.from_secrets_manager(aurora_cluster.secret, field="username")
+secrets["DATABASE_PASSWORD"] = ecs.Secret.from_secrets_manager(aurora_cluster.secret, field="password")
+```
+
+Previously `host`, `port`, `dbname` were plain env vars. Now all DB credentials stay in Secrets Manager.
+
+---
+
 ## 2026-01-07 - App Secrets Architecture: Per-App Isolation with boto3
 
 Implemented a secrets management system that provides per-app isolation and flexible secret structures.
