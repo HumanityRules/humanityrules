@@ -479,7 +479,7 @@ def teardown(
     ]
     
     # Add Aurora stack if the app uses a database
-    if app_config.needs_database:
+    if app_config.database_config:
         stacks_to_delete.append("devopshero-aurora")
     
     stacks_to_delete.extend([
@@ -604,13 +604,13 @@ def deploy(
     # Optionally create Aurora Serverless v2 cluster
     aurora_stack = None
     aurora_cluster = None
-    if app_config.needs_database:
+    if app_config.database_config:
         aurora_stack = AuroraServerlessStack(
             scope=cdk_app,
             construct_id="devopshero-aurora",
             vpc=vpc_stack.vpc,
             default_security_group=vpc_stack.default_security_group,
-            database_name=app_config.database_name or "app",
+            database_name=app_config.database_config.name,
         )
         aurora_stack.add_dependency(vpc_stack)
         aurora_cluster = aurora_stack.cluster

@@ -7,6 +7,12 @@ from pathlib import Path
 
 
 @dataclass
+class DatabaseConfig:
+    """Configuration for Aurora Serverless v2 database."""
+    name: str  # Database name, e.g., "db_portal_prod"
+
+
+@dataclass
 class AppConfig:
     """Configuration for deploying an app to ECS."""
 
@@ -33,9 +39,8 @@ class AppConfig:
     domain_name: str | None  # e.g., "simple-dashboard.chsandbox.com"
     hosted_zone_name: str | None  # e.g., "chsandbox.com"
 
-    # Database configuration (optional - for apps that need Aurora)
-    needs_database: bool = False  # If True, creates Aurora Serverless v2
-    database_name: str | None = None  # e.g., "db_portal_prod"
+    # Database configuration (None = no database, DatabaseConfig = creates Aurora Serverless v2)
+    database_config: DatabaseConfig | None = None
 
     # App secrets configuration (optional - for apps that read secrets from Secrets Manager)
     # Keys are secret field names, values are either:

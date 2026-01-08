@@ -26,7 +26,7 @@ import sys
 from pathlib import Path
 
 import iam_utils
-from appconfig import AppConfig
+from appconfig import AppConfig, DatabaseConfig
 
 
 # Target account configuration
@@ -60,9 +60,7 @@ def get_db_portal_config() -> AppConfig:
         app_source_path=Path(__file__).parent.parent / "deployable_repos" / "db_portal",
         domain_name="dataengr.chsandbox.com",
         hosted_zone_name="chsandbox.com",
-        # Database configuration
-        needs_database=True,
-        database_name="db_portal_prod",
+        database_config=DatabaseConfig(name="db_portal_prod"),
         # App secrets (read directly from Secrets Manager at runtime)
         # None values will be auto-generated as random 64-char strings
         app_secrets={
