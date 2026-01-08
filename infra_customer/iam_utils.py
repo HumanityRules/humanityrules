@@ -57,7 +57,7 @@ def get_assumed_role_session(
 
     response = sts_client.assume_role(
         RoleArn=role_arn,
-        RoleSessionName="devopshero-infra-deployment",
+        RoleSessionName="devopshero-deployment",
         ExternalId=external_id,
         DurationSeconds=3600,  # 1 hour
     )
