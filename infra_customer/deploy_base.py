@@ -86,7 +86,7 @@ class EcsClusterStack(Stack):
     ) -> None:
         super().__init__(scope, construct_id, **kwargs)
 
-        self.cluster = ecs.Cluster(self, "EcsCluster", cluster_name="devopshero-cluster", vpc=vpc, container_insights=True)
+        self.cluster = ecs.Cluster(self, "EcsCluster", cluster_name="devopshero-cluster", vpc=vpc, container_insights_v2=ecs.ContainerInsights.ENABLED)
 
         self.task_execution_role = iam.Role(
             self, "TaskExecutionRole",

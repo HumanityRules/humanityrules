@@ -4,6 +4,14 @@
 > - Entries are in reverse chronological order (latest on top). Use format: `## YYYY-MM-DD HH:MM - Title`
 > - Avoid markdown tables — they render poorly. Use bulleted lists with bold labels instead.
 
+## 2026-01-07 - CDK Cleanup: Deprecation Warning and Notices
+
+Fixed two CDK CLI annoyances:
+- **Deprecation warning:** Replaced `container_insights=True` with `container_insights_v2=ecs.ContainerInsights.ENABLED` in `deploy_base.py`
+- **Telemetry notice:** Added `--no-notices` flag to CDK deploy command in `cdk_utils.py`
+
+---
+
 ## 2026-01-07 - Unified Deployment Entry Point
 
 Refactored deployment to separate base layer from app deployment, with a single entry point.

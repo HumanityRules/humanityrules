@@ -15,7 +15,8 @@ CDK_OUT_DIR = Path(__file__).parent / "cdk.out"
 def deploy_cdk_stacks(app: App, session: boto3.Session) -> bool:
     """Synthesize and deploy CDK stacks using the CDK CLI."""
     print(f"\n{'='*60}")
-    print(f"📦 Synthesizing CDK stacks...")
+    print(f"📦 Synthesizing and deploying CDK stacks...")
+    print(f"{'='*60}")
 
     credentials = session.get_credentials()
     frozen_credentials = credentials.get_frozen_credentials()
@@ -28,11 +29,11 @@ def deploy_cdk_stacks(app: App, session: boto3.Session) -> bool:
 
     cloud_assembly = app.synth()
 
-    print(f"\n{'='*60}")
-    print(f"🚀 Deploying CDK stacks...")
+    print(f"   Synthesized CDK stacks to: {cloud_assembly.directory}")
+    print(f"   Deploying CDK stacks using the CDK CLI...")
 
     deploy_result = subprocess.run(
-        ["npx", "cdk", "deploy", "--all", "--require-approval", "never", "--app", cloud_assembly.directory],
+        ["npx", "cdk", "deploy", "--all", "--require-approval", "never", "--no-notices", "--app", cloud_assembly.directory],
         env=cdk_env,
         capture_output=False,  # Show output in real-time
     )
