@@ -3,6 +3,7 @@ ECS utility functions for monitoring and managing ECS services.
 """
 
 import time
+from datetime import datetime, timezone
 
 import boto3
 from botocore.exceptions import ClientError
@@ -10,11 +11,19 @@ from botocore.exceptions import ClientError
 from appconfig import AppConfig
 
 
-def check_stopped_tasks(ecs_client, cluster: str, service: str) -> list[str]:
+def check_stopped_tasks(
+    ecs_client,
+    cluster: str,
+    service: str,
+    deployment_start_time: datetime,
+) -> list[str]:
     """
     Check if tasks are failing and return the reasons.
     
-    Only returns failures for tasks that stopped unexpectedly (crashed, failed to start, etc.).
+    Only returns failures for tasks that:
+    - Were started AFTER deployment_start_time (ignores old failed tasks)
+    - Stopped unexpectedly (crashed, failed to start, etc.)
+    
     Tasks stopped due to normal deployment/scaling activities are ignored.
     
     Returns a list of failure reasons (empty if no failures).
@@ -39,13 +48,18 @@ def check_stopped_tasks(ecs_client, cluster: str, service: str) -> list[str]:
         if not stopped["taskArns"]:
             return reasons
         
-        # Get details on why they stopped (check up to 3 recent tasks)
+        # Get details on why they stopped (check up to 5 recent tasks)
         details = ecs_client.describe_tasks(
             cluster=cluster,
-            tasks=stopped["taskArns"][:3],
+            tasks=stopped["taskArns"][:5],
         )
         
         for task in details["tasks"]:
+            # Skip tasks that started before our deployment (old failures)
+            task_started_at = task.get("startedAt")
+            if task_started_at and task_started_at < deployment_start_time:
+                continue
+            
             stop_code = task.get("stopCode", "")
             
             # Skip tasks that were intentionally stopped (not failures)
@@ -71,12 +85,17 @@ def wait_for_service_stable(
     cluster: str,
     service: str,
     timeout_seconds: int,
+    deployment_start_time: datetime,
 ) -> bool:
     """
     Wait for ECS service to stabilize, with diagnostics on failure.
     
     Requires multiple consecutive stable checks to confirm the service isn't
     just briefly running before crashing.
+    
+    Args:
+        deployment_start_time: Only check for failures in tasks started after this time.
+                              This prevents old failed tasks from triggering false alarms.
     
     Returns True if service is stable, False if timed out or tasks failing.
     """
@@ -113,8 +132,13 @@ def wait_for_service_stable(
             else:
                 consecutive_stable = 0
             
-            # Check for task failures
-            failure_reasons = check_stopped_tasks(ecs_client, cluster, service)
+            # Check for task failures (only tasks started after deployment)
+            failure_reasons = check_stopped_tasks(
+                ecs_client=ecs_client,
+                cluster=cluster,
+                service=service,
+                deployment_start_time=deployment_start_time,
+            )
             if failure_reasons:
                 consecutive_failures += 1
                 consecutive_stable = 0  # Reset stability on failures
@@ -144,6 +168,9 @@ def start_ecs_service(session: boto3.Session, app_config: AppConfig) -> bool:
     print("\n📦 Starting ECS service (desiredCount=1)...")
     ecs_client = session.client("ecs")
 
+    # Record deployment start time to filter out old failed tasks
+    deployment_start_time = datetime.now(timezone.utc)
+
     try:
         ecs_client.update_service(cluster="devopshero-cluster", service=app_config.app_name, desiredCount=1, forceNewDeployment=True)
         print("   ✅ Deployment triggered (desiredCount=1)")
@@ -151,7 +178,13 @@ def start_ecs_service(session: boto3.Session, app_config: AppConfig) -> bool:
         print(f"   ❌ Failed to trigger deployment: {e}")
         return False
 
-    stable = wait_for_service_stable(ecs_client=ecs_client, cluster="devopshero-cluster", service=app_config.app_name, timeout_seconds=180)
+    stable = wait_for_service_stable(
+        ecs_client=ecs_client,
+        cluster="devopshero-cluster",
+        service=app_config.app_name,
+        timeout_seconds=180,
+        deployment_start_time=deployment_start_time,
+    )
 
     if not stable:
         print("\n❌ Service failed to stabilize. Check ECS console for details.")

@@ -4,6 +4,106 @@
 > - Entries are in reverse chronological order (latest on top). Use format: `## YYYY-MM-DD HH:MM - Title`
 > - Avoid markdown tables — they render poorly. Use bulleted lists with bold labels instead.
 
+## 2026-01-08 - db-portal Deployment Fix: Migrations & Monitoring
+
+### The Problem
+
+db-portal deployment started failing with tasks crashing immediately:
+
+```
+Tasks: 1/1 running, 0 pending
+⏳ Confirming stability (2 more checks)...
+Tasks: 0/1 running, 0 pending
+⚠️  Tasks are failing:
+   ❌ Essential container in task exited
+```
+
+### Diagnosis
+
+Used AWS CLI to investigate:
+
+```bash
+# Check service status
+aws ecs describe-services --cluster devopshero-cluster --services db-portal
+
+# List stopped tasks
+aws ecs list-tasks --cluster devopshero-cluster --service-name db-portal --desired-status STOPPED
+
+# Describe task to get stop reason
+aws ecs describe-tasks --cluster devopshero-cluster --tasks <task-id>
+
+# Get CloudWatch logs
+aws logs get-log-events --log-group-name /devopshero/ecs --log-stream-name db-portal/db-portal/<task-id>
+```
+
+**Root cause from logs:**
+
+```
+** (MyXQL.Error) (1146) (ER_NO_SUCH_TABLE) Table 'db_portal_prod.digests' doesn't exist
+```
+
+The Aurora database was freshly provisioned but **no migrations had ever been run**. The app crashed on startup trying to query the `digests` table.
+
+### Fix 1: Run Migrations on Container Start
+
+Modified `Dockerfile` to run migrations before starting the app:
+
+```dockerfile
+# Before
+CMD ["bin/db_portal", "start"]
+
+# After
+CMD ["sh", "-c", "bin/db_portal eval 'DbPortal.Release.migrate()' && bin/db_portal start"]
+```
+
+This uses Elixir's release eval to run the `DbPortal.Release.migrate/0` function (which calls `Ecto.Migrator.run/3`) before starting the Phoenix server.
+
+### Fix 2: Monitoring Was Reporting Old Failures
+
+After fixing migrations, the deployment still reported failures—but the service was actually running fine! The monitoring code had a bug.
+
+**Problem:** `check_stopped_tasks()` in `ecs_utils.py` was querying ALL stopped tasks for the service, including old failed tasks from previous deployment attempts. With 15+ old crashed tasks sitting around, it kept reporting them as current failures.
+
+**Fix:** Added `deployment_start_time` parameter to filter out old tasks:
+
+```python
+def check_stopped_tasks(ecs_client, cluster, service, deployment_start_time):
+    # ...
+    for task in details["tasks"]:
+        # Skip tasks that started before our deployment (old failures)
+        task_started_at = task.get("startedAt")
+        if task_started_at and task_started_at < deployment_start_time:
+            continue
+        # ... rest of failure checking
+```
+
+The deployment start time is recorded in `start_ecs_service()` before triggering the deployment, and passed through to the monitoring functions.
+
+### Resetting the Database for Testing
+
+Needed to drop all tables to test migrations from scratch. Multiple approaches failed before finding what works.
+
+**Success: DROP DATABASE + CREATE DATABASE**
+```bash
+aws ecs run-task --cluster devopshero-cluster --task-definition devopshero-db-portal \
+  --launch-type FARGATE \
+  --network-configuration 'awsvpcConfiguration={subnets=[...],securityGroups=[...],assignPublicIp=DISABLED}' \
+  --overrides '{
+    "containerOverrides": [{
+      "name": "db-portal",
+      "command": ["sh", "-c", "bin/db_portal eval '\''Application.load(:db_portal); {:ok, _, _} = Ecto.Migrator.with_repo(DbPortal.Repo, fn repo -> repo.query!(\"DROP DATABASE db_portal_prod\"); repo.query!(\"CREATE DATABASE db_portal_prod\"); IO.puts(\"Database dropped and recreated\") end)'\''"]
+    }]
+  }'
+```
+
+This worked because:
+- `Ecto.Migrator.with_repo/2` properly starts the Repo with all config
+- `DROP DATABASE` + `CREATE DATABASE` is atomic and bypasses FK issues
+- The brief connection error mid-execution (when DB is dropped) is harmless
+
+
+---
+
 ## 2026-01-07 - CDK Cleanup: Deprecation Warning and Notices
 
 Fixed two CDK CLI annoyances:

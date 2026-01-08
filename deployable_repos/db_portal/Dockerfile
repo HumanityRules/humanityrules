@@ -52,4 +52,4 @@ COPY --from=build --chown=nobody:nobody /app/_build/prod/rel/db_portal ./
 
 ENV HOME=/app
 
-CMD ["bin/db_portal", "start"]
+CMD ["sh", "-c", "bin/db_portal eval 'DbPortal.Release.migrate()' && bin/db_portal start"]
