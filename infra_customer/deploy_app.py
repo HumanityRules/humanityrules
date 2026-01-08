@@ -14,7 +14,6 @@ from aws_cdk import aws_logs as logs
 from aws_cdk import aws_rds as rds
 from aws_cdk import aws_route53 as route53
 from aws_cdk import aws_route53_targets as targets
-from botocore.exceptions import ClientError
 from constructs import Construct
 
 from appconfig import AppConfig
@@ -22,7 +21,7 @@ import cdk_utils
 import cloudformation_utils
 import deploy_base
 import ecr_utils
-import ecs_service_stable
+import ecs_utils
 import route53_utils
 import secrets_utils
 
@@ -313,31 +312,6 @@ class AppWithAlbStack(Stack):
         CfnOutput(self, "ServiceName", value=app_config.app_name, export_name=f"devopshero-{app_config.app_name}-service-name")
 
 
-# =============================================================================
-# HELPER FUNCTIONS
-# =============================================================================
-
-
-def _start_ecs_service(session: boto3.Session, app_config: AppConfig) -> bool:
-    """Start the ECS service (set desiredCount to 1) and wait for stabilization."""
-    print("\n📦 Starting ECS service (desiredCount=1)...")
-    ecs_client = session.client("ecs")
-
-    try:
-        ecs_client.update_service(cluster="devopshero-cluster", service=app_config.app_name, desiredCount=1, forceNewDeployment=True)
-        print("   ✅ Deployment triggered (desiredCount=1)")
-    except ClientError as e:
-        print(f"   ❌ Failed to trigger deployment: {e}")
-        return False
-
-    stable = ecs_service_stable.wait_for_service_stable(ecs_client, "devopshero-cluster", app_config.app_name, timeout_seconds=180)
-
-    if not stable:
-        print("\n❌ Service failed to stabilize. Check ECS console for details.")
-        return False
-
-    return True
-
 
 # =============================================================================
 # DEPLOYMENT FUNCTIONS
@@ -457,7 +431,7 @@ def deploy(
         print("\n❌ Docker build/push failed.")
         return False
 
-    if not _start_ecs_service(session, app_config):
+    if not ecs_utils.start_ecs_service(session=session, app_config=app_config):
         return False
 
     cloudformation_utils.print_deployment_summary(
@@ -479,7 +453,6 @@ def teardown(
 ) -> bool:
     """
     Delete app-specific CDK stacks (ECR, ALB, ECS service, Aurora if applicable).
-    Does NOT delete shared infrastructure (VPC, ECS cluster).
     """
     cf_client = session.client("cloudformation")
     

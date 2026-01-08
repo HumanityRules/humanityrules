@@ -12,7 +12,7 @@ from botocore.exceptions import ClientError
 
 import cloudformation_utils
 import ecr_utils
-import ecs_service_stable
+import ecs_utils
 import route53_utils
 import vpc_utils
 from appconfig import AppConfig
@@ -201,7 +201,7 @@ def deploy_app(
         return False
     
     # Step 5: Wait for service to stabilize
-    stable = ecs_service_stable.wait_for_service_stable(
+    stable = ecs_utils.wait_for_service_stable(
         ecs_client=ecs_client,
         cluster="devopshero-cluster",
         service=app_config.app_name,
