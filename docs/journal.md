@@ -4,6 +4,39 @@
 > - Entries are in reverse chronological order (latest on top). Use format: `## YYYY-MM-DD HH:MM - Title`
 > - Avoid markdown tables — they render poorly. Use bulleted lists with bold labels instead.
 
+## 2026-01-07 - Unified Deployment Entry Point
+
+Refactored deployment to separate infrastructure from app deployment, with a single entry point.
+
+**Key changes:**
+- Created `deploy.py` — unified entry point for all deployments
+- Created `app_configs.py` — registry of all app configurations
+- Split deployment into separate modules: `deploy_base.py`, `deploy_app.py`, `cdk_utils.py`
+- Deleted `deploy_app_simple_dashboard.py` and `deploy_app_db_portal.py`
+- Infrastructure (VPC + ECS cluster) is now deployed explicitly, not as part of app deployment
+
+**New file structure:**
+- `deploy.py` — CLI entry point
+- `app_configs.py` — app configuration registry
+- `deploy_base.py` — VPC/ECS cluster stacks and deployment
+- `deploy_app.py` — app stacks (ECR, ALB, ECS service, Aurora)
+- `cdk_utils.py` — shared CDK deployment utilities
+
+**New usage:**
+```bash
+# Infrastructure
+uv run python deploy.py --infra                      # Deploy VPC + ECS cluster
+uv run python deploy.py --infra --teardown           # Teardown infrastructure
+
+# Apps
+uv run python deploy.py --app simple-dashboard       # Deploy app
+uv run python deploy.py --app db-portal              # Deploy another app
+uv run python deploy.py --app simple-dashboard --image-tag v1.2.3  # Specific tag
+uv run python deploy.py --app simple-dashboard --teardown          # Teardown app only
+```
+
+---
+
 ## 2026-01-07 - Deprecated CloudFormation Deployment Engine
 
 Moved all CloudFormation-based deployment code to `infra_customer/_old_cf/`:
@@ -11,17 +44,8 @@ Moved all CloudFormation-based deployment code to `infra_customer/_old_cf/`:
 - `cf_templates/` — All CloudFormation JSON templates
 
 **Changes:**
-- Removed `--engine` parameter from `deploy_app_simple_dashboard.py`
 - CDK is now the only deployment engine
 - `cloudformation_utils.py` stays in place (still used by CDK for stack operations)
-
-**New usage:**
-```bash
-uv run python deploy_app_simple_dashboard.py                     # Deploy with CDK
-uv run python deploy_app_simple_dashboard.py --image-tag v1.2.3  # Specific tag
-uv run python deploy_app_simple_dashboard.py --synth-only        # CDK synth only
-uv run python deploy_app_simple_dashboard.py --teardown          # Delete all stacks
-```
 
 ---
 
