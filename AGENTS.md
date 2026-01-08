@@ -36,6 +36,8 @@ The main developer documentation lives in the docs/ subdirectory. **When creatin
 
 - **`docs/bolt_prompt.md`** — The original prompt used to generate the landing page design. Contains the product concept, target personas, and landing page section specifications.
 
+- **`docs/database_config_spec/database_config_spec.md`** — OpenSpec for database configuration options, engines, sizing, storage, and lifecycle controls.
+
 
 # Django 6.0 Template Partials
 
@@ -417,5 +419,4 @@ An Environment defines the runtime fabric (ECS/Fargate) and capabilities.
 * datastore_id
 * environment_id
 * outputs: endpoint identifiers, ARNs, connection metadata references
-
 
