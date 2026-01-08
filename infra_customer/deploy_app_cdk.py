@@ -296,16 +296,15 @@ class AppWithAlbStack(Stack):
 
         environment = {env["name"]: env["value"] for env in app_config.environment_variables}
 
-        # If Aurora cluster is provided, inject DATABASE_URL via secrets
+        # If Aurora cluster is provided, inject all DB credentials from Secrets Manager
         secrets = {}
         if aurora_cluster:
-            # Construct DATABASE_URL from secret - format: ecto://user:password@host:port/database
-            # We pass individual components and let the app construct the URL if needed
-            secrets["DATABASE_PASSWORD"] = ecs.Secret.from_secrets_manager(aurora_cluster.secret, field="password")
+            # All DB fields come from the Aurora-managed secret (keeps credentials out of CloudFormation)
+            secrets["DATABASE_HOST"] = ecs.Secret.from_secrets_manager(aurora_cluster.secret, field="host")
+            secrets["DATABASE_PORT"] = ecs.Secret.from_secrets_manager(aurora_cluster.secret, field="port")
+            secrets["DATABASE_NAME"] = ecs.Secret.from_secrets_manager(aurora_cluster.secret, field="dbname")
             secrets["DATABASE_USERNAME"] = ecs.Secret.from_secrets_manager(aurora_cluster.secret, field="username")
-            environment["DATABASE_HOST"] = aurora_cluster.cluster_endpoint.hostname
-            environment["DATABASE_PORT"] = str(aurora_cluster.cluster_endpoint.port)
-            environment["DATABASE_NAME"] = app_config.database_name or "app"
+            secrets["DATABASE_PASSWORD"] = ecs.Secret.from_secrets_manager(aurora_cluster.secret, field="password")
 
         task_definition = ecs.FargateTaskDefinition(
             self, "TaskDefinition",
