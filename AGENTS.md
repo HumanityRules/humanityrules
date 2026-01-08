@@ -23,7 +23,12 @@ uv run manage.py migrate
 uv run manage.py runserver
 ```
 
+
+# Documentation
+
 The main developer documentation lives in the docs/ subdirectory.
+
+**Development Journal:** When trying to understand what, when, and why decisions were made, consult `docs/journal.md`. It contains chronological entries documenting the reasoning behind architectural choices, implementation decisions, and lessons learned.
 
 
 # Django 6.0 Template Partials
