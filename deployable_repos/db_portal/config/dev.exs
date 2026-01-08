@@ -26,8 +26,11 @@ config :db_portal, DbPortalWeb.Endpoint,
     tailwind: {Tailwind, :install_and_run, [:default, ~w(--watch)]}
   ]
 
-# in dev, let's not force use of secrets mgr
-### config :db_portal, :no_secrets_mgr, slack_token: "foobar", signing_salt: "gFTHjOPy7N7OK8V0OhcJcYfQKLecQlb9", secret_key_base: "J6lmV9W2YCjXj7MyKeYvl++KkgPqahm+ZZvOg2V2SKhEGyrKOI3vl2UQUox0PAWa"
+# In dev, skip AWS Secrets Manager and use local dev secrets
+config :db_portal, :no_secrets_mgr,
+  slack_token: "dev-slack-token",
+  signing_salt: "gFTHjOPy7N7OK8V0OhcJcYfQKLecQlb9",
+  secret_key_base: "J6lmV9W2YCjXj7MyKeYvl++KkgPqahm+ZZvOg2V2SKhEGyrKOI3vl2UQUox0PAWa"
 
 # ## SSL Support
 #

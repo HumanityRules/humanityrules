@@ -1,54 +1,50 @@
 defmodule DbPortal.SecretsManagerConfigProvider do
   @moduledoc """
-  the `key` and `value` will be fetched from AWS SecretsManager
-  The value will be decrypted using the key, and is expected to be
-  a JSON structure that will be returned
+  Fetches application secrets from AWS Secrets Manager.
+  
+  The secret (devopshero/{app_name}/secrets) is a JSON object with keys:
+  - secret_key_base: Phoenix secret key base
+  - signing_salt: Phoenix signing salt for cookies/sessions
+  - slack_token: Slack API token (optional, can be "disabled")
   """
   alias __MODULE__
   alias DbPortal.DbMetadata.Aws
 
+  # Secret name in AWS Secrets Manager (created by DevOpsHero CDK)
+  # Stored in struct so it's accessible in the protocol implementation
+  @default_secret_name "devopshero/db-portal/secrets"
 
-  defstruct [key: nil, value: nil, finch_name: nil, slack_token: nil]
+  defstruct [finch_name: nil, secret_name: @default_secret_name]
 
   defimpl Vapor.Provider do
-    def load(%SecretsManagerConfigProvider{}=p) do
+    def load(%SecretsManagerConfigProvider{secret_name: secret_name} = p) do
       # we want Finch running temporarily to load secrets.  We want to stop it
       # so that we can later start it as part of the normal application supervisor
       # in application.ex
       {:ok, finch_pid} = Finch.start_link(name: p.finch_name)
       try do
-        load_secrets(p)
+        load_secrets(secret_name)
       after
         Process.exit(finch_pid, :normal) # note the pid is the Finch supervisor
       end
     end
 
-    defp load_secrets(p) do
-      # careful about failures so we don't leak secrets
-      with {:ok, %{"SecretString"=>decoding_key}, _} <-
-             Aws.get_secret_value(p.key),
-
-           {:ok, %{"SecretString"=>vals}, _} <-
-             Aws.get_secret_value(p.value),
-
-           {:ok, %{"SecretString"=>slack_token}, _} <-
-             Aws.get_secret_value(p.slack_token),
-
-           # do NOT use `decode!` to help ensure no secrets leak if the
-           # decode fails
-           slack_decoded <- slack_token
-                           |> Encrypt.decrypt(decoding_key),
-
-           {:ok, results} <- vals
-                           |> Encrypt.decrypt(decoding_key)
-                           |> Jason.decode
-      do
-        {:ok, Map.put(results, :slack_token, slack_decoded)}
+    defp load_secrets(secret_name) do
+      with {:ok, %{"SecretString" => secret_json}, _} <- Aws.get_secret_value(secret_name),
+           {:ok, secrets} <- Jason.decode(secret_json) do
+        
+        # Return the secrets in the format expected by application.ex
+        {:ok, %{
+          "signing_salt" => Map.get(secrets, "signing_salt", ""),
+          "secret_key_base" => Map.get(secrets, "secret_key_base", ""),
+          :slack_token => Map.get(secrets, "slack_token", "disabled")
+        }}
       else
-        {:error, {:http_error,_,e}} -> {:error, "Failed retrieving secrets needed for config: #{Map.get(e, "message")}"}
-        {:error, e} -> {:error, "Failed retrieving secrets needed for config: #{inspect e}"}
+        {:error, {:http_error, _, e}} -> 
+          {:error, "Failed retrieving secrets from #{secret_name}: #{Map.get(e, "message")}"}
+        {:error, e} -> 
+          {:error, "Failed retrieving secrets from #{secret_name}: #{inspect(e)}"}
       end
     end
   end
-
 end

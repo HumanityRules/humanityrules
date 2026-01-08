@@ -37,6 +37,13 @@ class AppConfig:
     needs_database: bool = False  # If True, creates Aurora Serverless v2
     database_name: str | None = None  # e.g., "db_portal_prod"
 
+    # App secrets configuration (optional - for apps that read secrets from Secrets Manager)
+    # Keys are secret field names, values are either:
+    #   - str: use this literal value
+    #   - None: generate a random 64-char alphanumeric value
+    # Example: {"slack_token": "disabled", "secret_key_base": None, "signing_salt": None}
+    app_secrets: dict[str, str | None] | None = None
+
     def to_template_vars(self) -> dict:
         """Convert to dict for Jinja2 template rendering (CloudFormation)."""
         return {

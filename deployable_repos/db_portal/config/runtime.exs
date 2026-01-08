@@ -86,15 +86,6 @@ config :ex_aws,
   access_key_id: [{:system, "AWS_ACCESS_KEY_ID"}, {:awscli,default_aws_profile, 30}, :instance_role],
   secret_access_key: [{:system, "AWS_SECRET_ACCESS_KEY"}, {:awscli, default_aws_profile, 30}, :instance_role]
 
-# NO_SECRETS_MGR=true skips AWS Secrets Manager and uses env vars for secrets
-# This is for running in ECS/Fargate where we inject secrets via environment variables
-if System.get_env("NO_SECRETS_MGR") == "true" do
-  config :db_portal, :no_secrets_mgr,
-    slack_token: System.get_env("SLACK_TOKEN", "disabled"),
-    signing_salt: System.get_env("SIGNING_SALT", "default-signing-salt-change-me"),
-    secret_key_base: System.get_env("SECRET_KEY_BASE", "default-secret-key-base-must-be-at-least-64-bytes-long-for-security")
-end
-
 # Database configuration - supports either DATABASE_URL or individual components
 # Individual components are used when ECS injects secrets (DATABASE_PASSWORD, DATABASE_USERNAME)
 cond do

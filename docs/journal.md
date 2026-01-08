@@ -4,6 +4,100 @@
 > - Entries are in reverse chronological order (latest on top). Use format: `## YYYY-MM-DD HH:MM - Title`
 > - Avoid markdown tables — they render poorly. Use bulleted lists with bold labels instead.
 
+## 2026-01-07 - App Secrets Architecture: Per-App Isolation with boto3
+
+Implemented a secrets management system that provides per-app isolation and flexible secret structures.
+
+### Why Not CloudFormation for Secrets?
+
+CloudFormation's `GenerateSecretString` can only auto-generate **ONE** random field per secret (the parameter is `generate_string_key: str`, not a list). This was too limiting for apps like db_portal that need multiple generated fields:
+
+- `secret_key_base` — Phoenix secret key base (needs to be random)
+- `signing_salt` — Phoenix signing salt (needs to be random)
+- `slack_token` — Slack API token (literal value)
+
+### Solution: boto3 Secret Creation Before CDK
+
+Secrets are created via boto3 **before** CDK runs, allowing:
+- Multiple randomly-generated fields per secret
+- Custom JSON structure per app
+- Secrets persist across stack deletions (feature, not bug)
+
+**Flow:**
+1. `deploy()` calls `secrets_utils.ensure_app_secrets_exist()`
+2. If `devopshero/{app_name}/secrets` doesn't exist → generate values for `None` fields → create via boto3
+3. If it exists → leave it alone (values are stable)
+4. CDK only grants IAM permissions to read the secret (no secret creation in CloudFormation)
+
+### Per-App Task Role Isolation
+
+Each app gets its own ECS task role with permissions scoped to only its secrets:
+
+```python
+# AppWithAlbStack creates per-app task role
+task_role = iam.Role(self, "TaskRole", role_name=f"devopshero-{app_name}-task-role", ...)
+task_role.add_to_policy(iam.PolicyStatement(
+    actions=["secretsmanager:GetSecretValue"],
+    resources=[f"arn:aws:secretsmanager:{region}:{account}:secret:devopshero/{app_name}/*"],
+))
+```
+
+This ensures `db-portal` cannot read `simple-dashboard` secrets, and vice versa.
+
+### AppConfig Secret Definition
+
+Apps define their secret structure in `AppConfig`:
+
+```python
+app_secrets={
+    "slack_token": "disabled",   # Literal value
+    "secret_key_base": None,     # Generate random 64-char
+    "signing_salt": None,        # Generate random 64-char
+}
+```
+
+- `str` value → use literally
+- `None` → generate random 64-char alphanumeric string
+
+### App-Side: SecretsManagerConfigProvider
+
+The Elixir app reads secrets from `devopshero/{app_name}/secrets`:
+
+```elixir
+# lib/db_portal/secrets_manager_config_provider.ex
+defp load_secrets(secret_name) do
+  with {:ok, %{"SecretString" => json}, _} <- Aws.get_secret_value(secret_name),
+       {:ok, secrets} <- Jason.decode(json) do
+    {:ok, %{
+      "signing_salt" => Map.get(secrets, "signing_salt", ""),
+      "secret_key_base" => Map.get(secrets, "secret_key_base", ""),
+      :slack_token => Map.get(secrets, "slack_token", "disabled")
+    }}
+  end
+end
+```
+
+### Dev Mode Bypass
+
+In dev, set `:no_secrets_mgr` in `config/dev.exs` to skip AWS:
+
+```elixir
+config :db_portal, :no_secrets_mgr,
+  slack_token: "dev-slack-token",
+  signing_salt: "dev-signing-salt",
+  secret_key_base: "dev-secret-key-base-64-chars..."
+```
+
+### Key Files
+
+- `infra_customer/secrets_utils.py` — `ensure_app_secrets_exist()` function
+- `infra_customer/appconfig.py` — `app_secrets` field definition
+- `infra_customer/deploy_app_cdk.py` — Per-app task role with scoped IAM
+- `db_portal/lib/db_portal/secrets_manager_config_provider.ex` — App-side secret loading
+- `db_portal/lib/db_portal/application.ex` — Dev/prod branching via `:no_secrets_mgr`
+
+---
+
 ## 2026-01-07 - ARM64 Docker Builds: Avoiding QEMU Emulation Bug with Elixir 1.18
 
 When building Docker images for ECS/Fargate on Apple Silicon Macs, we encountered a critical build failure with Elixir 1.18.

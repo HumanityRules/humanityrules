@@ -90,24 +90,15 @@ defmodule DbPortal.Application do
   end
 
   defp configuration(finch_name) do
+    # In dev, :no_secrets_mgr can be set in dev.exs to skip AWS Secrets Manager
+    # In prod (ECS), the app reads from devopshero/{app_name}/secrets
     case Application.get_env(:db_portal, :no_secrets_mgr) do
       nil ->
-        providers = [
-          # NOTE: these secrets must be tagged with application=db_portal for the IAM policy to grant it read access
-          %SecretsManagerConfigProvider{
-            key: "dbportal_k",
-            value: "dbportal_secret",
-            slack_token: "dbportal_slack",
-            finch_name: finch_name
-          }
-        ]
-
+        providers = [%SecretsManagerConfigProvider{finch_name: finch_name}]
         Vapor.load!(providers)
 
       conf ->
-        %{slack_token: slack_token, signing_salt: signing_salt, secret_key_base: secret_key_base} =
-          Map.new(conf)
-
+        %{slack_token: slack_token, signing_salt: signing_salt, secret_key_base: secret_key_base} = Map.new(conf)
         %{
           :slack_token => slack_token,
           "signing_salt" => signing_salt,
