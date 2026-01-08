@@ -6,14 +6,14 @@
 
 ## 2026-01-07 - Unified Deployment Entry Point
 
-Refactored deployment to separate infrastructure from app deployment, with a single entry point.
+Refactored deployment to separate base layer from app deployment, with a single entry point.
 
 **Key changes:**
 - Created `deploy.py` — unified entry point for all deployments
 - Created `app_configs.py` — registry of all app configurations
 - Split deployment into separate modules: `deploy_base.py`, `deploy_app.py`, `cdk_utils.py`
 - Deleted `deploy_app_simple_dashboard.py` and `deploy_app_db_portal.py`
-- Infrastructure (VPC + ECS cluster) is now deployed explicitly, not as part of app deployment
+- Base layer (VPC + ECS cluster) is now deployed explicitly, not as part of app deployment
 
 **New file structure:**
 - `deploy.py` — CLI entry point
@@ -24,9 +24,9 @@ Refactored deployment to separate infrastructure from app deployment, with a sin
 
 **New usage:**
 ```bash
-# Infrastructure
-uv run python deploy.py --infra                      # Deploy VPC + ECS cluster
-uv run python deploy.py --infra --teardown           # Teardown infrastructure
+# Base layer
+uv run python deploy.py --base                       # Deploy VPC + ECS cluster
+uv run python deploy.py --base --teardown            # Teardown base layer
 
 # Apps
 uv run python deploy.py --app simple-dashboard       # Deploy app

@@ -5,10 +5,10 @@ Unified deployment entry point for DevOpsHero infrastructure and apps.
 Usage:
     cd infra_customer
 
-    # Infrastructure (VPC + ECS cluster)
-    uv run python deploy.py --infra                      # Deploy shared infrastructure
-    uv run python deploy.py --infra --teardown           # Teardown shared infrastructure
-    uv run python deploy.py --infra --synth-only         # Synth only
+    # Base layer (VPC + ECS cluster)
+    uv run python deploy.py --base                       # Deploy base layer
+    uv run python deploy.py --base --teardown            # Teardown base layer
+    uv run python deploy.py --base --synth-only          # Synth only
 
     # Apps
     uv run python deploy.py --app simple-dashboard       # Deploy simple-dashboard
@@ -43,12 +43,12 @@ def main():
         description="Deploy DevOpsHero infrastructure and apps"
     )
     
-    # Mutually exclusive: --infra or --app
+    # Mutually exclusive: --base or --app
     group = parser.add_mutually_exclusive_group(required=True)
     group.add_argument(
-        "--infra",
+        "--base",
         action="store_true",
-        help="Deploy/teardown shared infrastructure (VPC + ECS cluster)",
+        help="Deploy/teardown base layer (VPC + ECS cluster)",
     )
     group.add_argument(
         "--app",
@@ -78,7 +78,7 @@ def main():
     args = parser.parse_args()
     
     # Validate args
-    if args.image_tag != "latest" and args.infra:
+    if args.image_tag != "latest" and args.base:
         print("❌ --image-tag is only valid with --app")
         sys.exit(1)
     
@@ -99,7 +99,7 @@ def main():
     )
     
     # Dispatch
-    if args.infra:
+    if args.base:
         if args.teardown:
             success = deploy_base.teardown(session=session)
         else:

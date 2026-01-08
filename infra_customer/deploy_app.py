@@ -349,10 +349,10 @@ def deploy(
     # Verify infrastructure exists
     cf_client = session.client("cloudformation")
     if not cloudformation_utils.stack_exists(cf_client, "devopshero-vpc"):
-        print("\n❌ Infrastructure not deployed. Run with --infra first.")
+        print("\n❌ Base layer not deployed. Run with --base first.")
         return False
     if not cloudformation_utils.stack_exists(cf_client, "devopshero-ecs-cluster"):
-        print("\n❌ ECS cluster not deployed. Run with --infra first.")
+        print("\n❌ ECS cluster not deployed. Run with --base first.")
         return False
     
     hosted_zone_id = None
