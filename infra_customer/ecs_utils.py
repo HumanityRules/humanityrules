@@ -4,7 +4,10 @@ ECS utility functions for monitoring and managing ECS services.
 
 import time
 
+import boto3
 from botocore.exceptions import ClientError
+
+from appconfig import AppConfig
 
 
 def check_stopped_tasks(ecs_client, cluster: str, service: str) -> list[str]:
@@ -135,3 +138,23 @@ def wait_for_service_stable(
     print(f"   ❌ Timed out after {timeout_seconds}s waiting for service")
     return False
 
+
+def start_ecs_service(session: boto3.Session, app_config: AppConfig) -> bool:
+    """Start the ECS service (set desiredCount to 1) and wait for stabilization."""
+    print("\n📦 Starting ECS service (desiredCount=1)...")
+    ecs_client = session.client("ecs")
+
+    try:
+        ecs_client.update_service(cluster="devopshero-cluster", service=app_config.app_name, desiredCount=1, forceNewDeployment=True)
+        print("   ✅ Deployment triggered (desiredCount=1)")
+    except ClientError as e:
+        print(f"   ❌ Failed to trigger deployment: {e}")
+        return False
+
+    stable = wait_for_service_stable(ecs_client=ecs_client, cluster="devopshero-cluster", service=app_config.app_name, timeout_seconds=180)
+
+    if not stable:
+        print("\n❌ Service failed to stabilize. Check ECS console for details.")
+        return False
+
+    return True
