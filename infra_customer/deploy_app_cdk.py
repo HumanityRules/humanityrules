@@ -6,7 +6,6 @@ This is a CDK equivalent of deploy_app_cf.py, using Python CDK constructs instea
 of CloudFormation JSON templates.
 
 This module provides deployment functions for CDK-based deployments.
-Use deploy_app_simple_dashboard.py as the entry point.
 """
 
 import os
@@ -14,9 +13,9 @@ import subprocess
 from pathlib import Path
 
 import boto3
-from botocore.exceptions import ClientError
 
 from appconfig import AppConfig
+import secrets_utils
 
 CDK_OUT_DIR = Path(__file__).parent / "cdk.out"
 
@@ -129,17 +128,11 @@ class EcsClusterStack(Stack):
             assumed_by=iam.ServicePrincipal("ecs-tasks.amazonaws.com"),
             managed_policies=[iam.ManagedPolicy.from_aws_managed_policy_name("service-role/AmazonECSTaskExecutionRolePolicy")],
         )
-        # Allow reading DevOpsHero secrets (e.g., Aurora credentials)
+        # Allow ECS to inject secrets as env vars (e.g., Aurora credentials)
         self.task_execution_role.add_to_policy(iam.PolicyStatement(
             actions=["secretsmanager:GetSecretValue"],
             resources=[f"arn:aws:secretsmanager:{Aws.REGION}:{Aws.ACCOUNT_ID}:secret:devopshero/*"],
         ))
-
-        self.task_role = iam.Role(
-            self, "TaskRole",
-            role_name="devopshero-ecs-task-role",
-            assumed_by=iam.ServicePrincipal("ecs-tasks.amazonaws.com"),
-        )
 
         self.log_group = logs.LogGroup(
             self, "EcsLogGroup", log_group_name="/devopshero/ecs", retention=logs.RetentionDays.ONE_MONTH, removal_policy=RemovalPolicy.DESTROY,
@@ -148,7 +141,6 @@ class EcsClusterStack(Stack):
         CfnOutput(self, "ClusterArn", value=self.cluster.cluster_arn, export_name="devopshero-cluster-arn")
         CfnOutput(self, "ClusterName", value=self.cluster.cluster_name, export_name="devopshero-cluster-name")
         CfnOutput(self, "TaskExecutionRoleArn", value=self.task_execution_role.role_arn, export_name="devopshero-task-execution-role-arn")
-        CfnOutput(self, "TaskRoleArn", value=self.task_role.role_arn, export_name="devopshero-task-role-arn")
         CfnOutput(self, "LogGroupName", value=self.log_group.log_group_name, export_name="devopshero-ecs-log-group")
 
 
@@ -285,8 +277,21 @@ class AppWithAlbStack(Stack):
         )
 
         task_execution_role = iam.Role.from_role_arn(self, "ImportedTaskExecutionRole", Fn.import_value("devopshero-task-execution-role-arn"), mutable=False)
-        task_role = iam.Role.from_role_arn(self, "ImportedTaskRole", Fn.import_value("devopshero-task-role-arn"), mutable=False)
         log_group = logs.LogGroup.from_log_group_name(self, "ImportedLogGroup", Fn.import_value("devopshero-ecs-log-group"))
+
+        # Per-app task role for secret isolation - each app can only read its own secrets
+        task_role = iam.Role(
+            self, "TaskRole",
+            role_name=f"devopshero-{app_config.app_name}-task-role",
+            assumed_by=iam.ServicePrincipal("ecs-tasks.amazonaws.com"),
+        )
+        # Grant access to this app's secrets (created outside CDK via ensure_app_secrets_exist)
+        if app_config.app_secrets:
+            task_role.add_to_policy(iam.PolicyStatement(
+                actions=["secretsmanager:GetSecretValue"],
+                resources=[f"arn:aws:secretsmanager:{Aws.REGION}:{Aws.ACCOUNT_ID}:secret:devopshero/{app_config.app_name}/*"],
+            ))
+
         default_sg = ec2.SecurityGroup.from_security_group_id(self, "ImportedDefaultSg", Fn.import_value("devopshero-default-sg-id"))
 
         environment = {env["name"]: env["value"] for env in app_config.environment_variables}
@@ -566,6 +571,11 @@ def deploy(
             print(f"   ✅ Found hosted zone: {hosted_zone_id}")
         else:
             print(f"   ⚠️  Could not find hosted zone, HTTPS will not be configured")
+
+    # Ensure app secrets exist in Secrets Manager (created outside CDK for security)
+    if app_config.app_secrets:
+        print(f"\n🔐 Ensuring app secrets exist...")
+        secrets_utils.ensure_app_secrets_exist(session=session, app_config=app_config)
 
     cf_client = session.client("cloudformation")
     ec2_client = session.client("ec2")

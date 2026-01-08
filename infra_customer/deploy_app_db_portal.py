@@ -54,12 +54,8 @@ def get_db_portal_config() -> AppConfig:
             # DevOpsHero ECS mode flags
             {"name": "DISABLE_HTTPS", "value": "true"},  # TLS terminated at ALB
             {"name": "DISABLE_AUTH", "value": "true"},   # Skip Okta for now
-            {"name": "NO_SECRETS_MGR", "value": "true"}, # Use env vars instead of AWS Secrets Manager
             {"name": "RUN_SAMPLER", "value": "N"},       # Don't run sampler scheduler
-            # Secrets (normally would come from Secrets Manager, but using env vars for now)
-            {"name": "SECRET_KEY_BASE", "value": "devopshero-generated-secret-key-base-must-be-at-least-64-bytes-long-for-security-purposes"},
-            {"name": "SIGNING_SALT", "value": "devopshero-signing-salt"},
-            {"name": "SLACK_TOKEN", "value": "disabled"},
+            # App reads secrets directly from Secrets Manager (devopshero/db-portal/secrets)
         ],
         app_source_path=Path(__file__).parent.parent / "deployable_repos" / "db_portal",
         domain_name="dataengr.chsandbox.com",
@@ -67,6 +63,13 @@ def get_db_portal_config() -> AppConfig:
         # Database configuration
         needs_database=True,
         database_name="db_portal_prod",
+        # App secrets (read directly from Secrets Manager at runtime)
+        # None values will be auto-generated as random 64-char strings
+        app_secrets={
+            "slack_token": "disabled",
+            "secret_key_base": None,  # Will be generated
+            "signing_salt": None,     # Will be generated
+        },
     )
 
 
