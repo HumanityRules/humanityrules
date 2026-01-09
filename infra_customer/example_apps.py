@@ -6,12 +6,12 @@ Each function returns an AppConfig for a specific app.
 
 from pathlib import Path
 
-from appconfig import AppConfig, DatabaseConfig
+import appconfig
 
 
-def get_simple_dashboard_config() -> AppConfig:
+def get_simple_dashboard_config() -> appconfig.AppConfig:
     """Return the AppConfig for simple-dashboard."""
-    return AppConfig(
+    return appconfig.AppConfig(
         app_name="simple-dashboard",
         ecr_repo_name="devopshero/simple-dashboard",
         container_port=8501,
@@ -31,9 +31,9 @@ def get_simple_dashboard_config() -> AppConfig:
     )
 
 
-def get_db_portal_config() -> AppConfig:
+def get_db_portal_config() -> appconfig.AppConfig:
     """Return the AppConfig for db_portal."""
-    return AppConfig(
+    return appconfig.AppConfig(
         app_name="db-portal",
         ecr_repo_name="devopshero/db-portal",
         container_port=4000,
@@ -53,7 +53,22 @@ def get_db_portal_config() -> AppConfig:
         app_source_path=Path(__file__).parent.parent / "deployable_repos" / "db_portal",
         domain_name="dataengr.chsandbox.com",
         hosted_zone_name="chsandbox.com",
-        database_config=DatabaseConfig(name="db_portal_prod"),
+        database_config=appconfig.DatabaseConfig(
+            name="db_portal_prod",
+            engine=appconfig.EngineConfig(
+                family="aurora-mysql",
+                version=None,
+                auto_minor_version_upgrade=True,
+            ),
+            deployment=appconfig.DeploymentConfig(
+                mode="aurora_serverless_v2",
+                serverless_v2=appconfig.ServerlessV2Config(min_acu=0.5, max_acu=2.0),
+                provisioned=None,
+            ),
+            backups=appconfig.BackupConfig(retention_days=7, copy_tags_to_snapshot=True),
+            security=appconfig.SecurityConfig(storage_encrypted=True, deletion_protection=False),
+            connection=appconfig.ConnectionConfig(env_var_name="DATABASE_URL"),
+        ),
         app_secrets={
             "slack_token": "disabled",
             "secret_key_base": None,
@@ -69,7 +84,7 @@ APP_CONFIGS = {
 }
 
 
-def get_app_config(app_name: str) -> AppConfig:
+def get_app_config(app_name: str) -> appconfig.AppConfig:
     """Get the AppConfig for a named app."""
     if app_name not in APP_CONFIGS:
         available = ", ".join(APP_CONFIGS.keys())

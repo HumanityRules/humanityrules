@@ -26,7 +26,7 @@ import argparse
 import os
 import sys
 
-import app_configs
+import example_apps
 import deploy_app
 import deploy_base
 import iam_utils
@@ -52,7 +52,7 @@ def main():
     )
     group.add_argument(
         "--app",
-        choices=list(app_configs.APP_CONFIGS.keys()),
+        choices=list(example_apps.APP_CONFIGS.keys()),
         help="Deploy/teardown a specific app",
     )
     
@@ -108,7 +108,7 @@ def main():
                 synth_only=args.synth_only,
             )
     else:
-        app_config = app_configs.get_app_config(args.app)
+        app_config = example_apps.get_app_config(args.app)
         
         if args.teardown:
             success = deploy_app.teardown(session=session, app_config=app_config)

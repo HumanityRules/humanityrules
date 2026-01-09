@@ -7,9 +7,63 @@ from pathlib import Path
 
 
 @dataclass
+class EngineConfig:
+    """Aurora engine configuration."""
+    family: str  # "aurora-mysql" or "aurora-postgresql"
+    version: str | None  # Version catalog key, None = default
+    auto_minor_version_upgrade: bool
+
+
+@dataclass
+class ServerlessV2Config:
+    """Aurora Serverless v2 scaling configuration."""
+    min_acu: float
+    max_acu: float
+
+
+@dataclass
+class ProvisionedConfig:
+    """Aurora provisioned instance configuration."""
+    instance_class: str  # e.g., "db.r6g.large"
+
+
+@dataclass
+class DeploymentConfig:
+    """Aurora deployment mode configuration."""
+    mode: str  # "aurora_serverless_v2" or "aurora_provisioned"
+    serverless_v2: ServerlessV2Config | None
+    provisioned: ProvisionedConfig | None
+
+
+@dataclass
+class BackupConfig:
+    """Backup configuration."""
+    retention_days: int
+    copy_tags_to_snapshot: bool
+
+
+@dataclass
+class SecurityConfig:
+    """Security settings."""
+    storage_encrypted: bool
+    deletion_protection: bool
+
+
+@dataclass
+class ConnectionConfig:
+    """Connection injection settings."""
+    env_var_name: str | None
+
+
+@dataclass
 class DatabaseConfig:
-    """Configuration for Aurora Serverless v2 database."""
+    """Configuration for an Aurora database."""
     name: str  # Database name, e.g., "db_portal_prod"
+    engine: EngineConfig
+    deployment: DeploymentConfig
+    backups: BackupConfig
+    security: SecurityConfig
+    connection: ConnectionConfig
 
 
 @dataclass
@@ -39,7 +93,7 @@ class AppConfig:
     domain_name: str | None  # e.g., "simple-dashboard.chsandbox.com"
     hosted_zone_name: str | None  # e.g., "chsandbox.com"
 
-    # Database configuration (None = no database, DatabaseConfig = creates Aurora Serverless v2)
+    # Database configuration (None = no database)
     database_config: DatabaseConfig | None = None
 
     # App secrets configuration (optional - for apps that read secrets from Secrets Manager)
@@ -63,4 +117,3 @@ class AppConfig:
             "domain_name": self.domain_name,
             "hosted_zone_name": self.hosted_zone_name,
         }
-
