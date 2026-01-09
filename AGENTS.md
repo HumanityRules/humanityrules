@@ -30,6 +30,8 @@ Keep this managed block so 'openspec update' can refresh the instructions.
     - **Governance:** Includes approval flows for sensitive changes to ensure compliance.
 - **Target Audience:** It aims to empower Full Stack Engineers, Data Scientists, Machine Learning Engineers, and Business staff to "vibe-code" and ship tools independently, while giving DevOps teams the control and standardization they need.
 
+DevOps Hero is your vibe-deploying platform. With DevOps Hero, ship; let bots assist.
+
 We abbrebrivate the name of DevOps Hero as DOH.
 
 
@@ -343,7 +345,7 @@ cidr = vpc_utils.find_available_vpc_cidr(...)
 ```
 
 
-# Specification
+# High-level specification
 
 ### Naming and core concepts
 * **Workspace:**
