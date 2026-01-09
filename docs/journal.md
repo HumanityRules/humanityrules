@@ -4,6 +4,13 @@
 > - Entries are in reverse chronological order (latest on top). Use format: `## YYYY-MM-DD HH:MM - Title`
 > - Avoid markdown tables — they render poorly. Use bulleted lists with bold labels instead.
 
+## 2026-01-08 22:14 - Aurora DatabaseConfig Implementation
+
+- **Scope:** Implemented the Aurora-only `DatabaseConfig` spec in `infra_customer/`.
+- **Key changes:** Added nested config dataclasses, engine/version helpers, and per-app Aurora stack/secret naming.
+- **Secrets:** Added derived connection secret with `DATABASE_URL` plus individual fields, injected via ECS Secrets Manager.
+- **Deployment:** Supports serverless v2 and provisioned modes with orthogonal config validation.
+
 ## 2026-01-08 - db-portal Deployment Fix: Migrations & Monitoring
 
 ### The Problem
