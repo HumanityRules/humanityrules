@@ -2,7 +2,41 @@
 
 AI-powered deployment platform for internal tools. See `AGENTS.md` for full project documentation.
 
-## Bootstrap
+## Setup
+
+```bash
+# Clone and install
+uv sync
+
+# Copy environment variables
+cp .env.example .env
+# Edit .env with your WorkOS and AWS credentials
+
+# Run migrations
+uv run manage.py migrate
+```
+
+## Development
+
+```bash
+# Start Django + Tailwind (recommended)
+uv run manage.py tailwind dev
+
+# Or just Django (no live CSS rebuilding)
+uv run manage.py runserver
+
+# Migrations
+uv run manage.py makemigrations
+uv run manage.py migrate
+
+# Django admin (useful for debugging auth)
+uv run manage.py createsuperuser
+# Then visit /admin/
+```
+
+## Bootstrap (historical)
+
+How this project was created:
 
 ```bash
 uv init .
@@ -10,7 +44,6 @@ uv add django==6.0
 uv run django-admin startproject devopshero_site .
 uv run manage.py startapp devopshero_app
 uv run manage.py migrate
-uv run manage.py runserver
 ```
 
 ## OpenSpec
