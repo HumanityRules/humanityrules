@@ -33,11 +33,12 @@
 - **AWS CDK (aws-cdk-lib)** — Infrastructure as code
 - **boto3** — AWS SDK for Python
 - **ECS Fargate** — Container orchestration
-- **Aurora Serverless v2** — Managed databases
+- **Aurora** — Managed databases
 - **ALB** — Load balancing with HTTPS
 - **Route53** — DNS management
 - **ACM** — TLS certificates
 - **Secrets Manager** — Credential storage
+- And any other AWS technology that we might need.
 
 ### Infrastructure (DOH Platform)
 - **CloudFormation** — DOH's own AWS resources
@@ -216,7 +217,6 @@ All infrastructure deployed via AWS CDK from DOH control plane.
 | `AGENTS.md` | Project synopsis, documentation index, conventions |
 | `docs/journal.md` | Development journal (reverse chronological) |
 | `docs/TODO.md` | Active task list |
-| `docs/agent_spec/agent_spec.md` | AI agent specification |
 | `docs/database_config_spec/` | Aurora configuration spec |
 | `docs/aws_account.md` | AWS account connection flow |
 | `devopshero_app/` | Django application |
