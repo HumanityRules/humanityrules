@@ -45,9 +45,7 @@ The main developer documentation lives in the docs/ subdirectory. **When creatin
 
 - **`docs/bolt_prompt.md`** — The original prompt used to generate the landing page design. Contains the product concept, target personas, and landing page section specifications.
 
-- **`docs/database_config_spec/database_config_spec.md`** — OpenSpec for database configuration options, engines, sizing, storage, and lifecycle controls.
-
-- **`docs/agent_spec/agent_spec.md`** — OpenSpec for the AI deployment agent. Covers Claude Agents SDK integration, chat interface design (HTMX), agent tools, data models (Workspace, App, Datastore, Deployment, Conversation), user flows, and implementation phases.
+**OpenSpec specifications** live in `openspec/specs/`. Run `openspec list --specs` to see all capabilities. Pending changes (including design docs) are in `openspec/changes/`.
 
 
 # Django 6.0 Template Partials
