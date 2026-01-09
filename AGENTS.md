@@ -1,3 +1,22 @@
+<!-- OPENSPEC:START -->
+# OpenSpec Instructions
+
+These instructions are for AI assistants working in this project.
+
+Always open `@/openspec/AGENTS.md` when the request:
+- Mentions planning or proposals (words like proposal, spec, change, plan)
+- Introduces new capabilities, breaking changes, architecture shifts, or big performance/security work
+- Sounds ambiguous and you need the authoritative spec before coding
+
+Use `@/openspec/AGENTS.md` to learn:
+- How to create and apply change proposals
+- Spec format and conventions
+- Project structure and guidelines
+
+Keep this managed block so 'openspec update' can refresh the instructions.
+
+<!-- OPENSPEC:END -->
+
 # Project synopsis
 
 **DevOps Hero** is a platform designed to make deploying internal tools to a company's private cloud (VPC) as easy as using Heroku, Render, or Railway, while maintaining enterprise security and compliance.
@@ -13,16 +32,6 @@
 
 We abbrebrivate the name of DevOps Hero as DOH.
 
-# What I did to boostrap the project
-```
-uv init .
-uv add django==6.0
-uv run django-admin startproject devopshero_site .
-uv run manage.py startapp devopshero_app
-uv run manage.py migrate
-uv run manage.py runserver
-```
-
 
 # Documentation
 
@@ -37,6 +46,8 @@ The main developer documentation lives in the docs/ subdirectory. **When creatin
 - **`docs/bolt_prompt.md`** — The original prompt used to generate the landing page design. Contains the product concept, target personas, and landing page section specifications.
 
 - **`docs/database_config_spec/database_config_spec.md`** — OpenSpec for database configuration options, engines, sizing, storage, and lifecycle controls.
+
+- **`docs/agent_spec/agent_spec.md`** — OpenSpec for the AI deployment agent. Covers Claude Agents SDK integration, chat interface design (HTMX), agent tools, data models (Workspace, App, Datastore, Deployment, Conversation), user flows, and implementation phases.
 
 
 # Django 6.0 Template Partials
