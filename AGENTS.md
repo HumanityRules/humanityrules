@@ -324,6 +324,24 @@ cidr = vpc_utils.find_available_vpc_cidr(...)
 **Note:** This applies to local project modules. Standard library and well-known third-party packages (e.g., `from pathlib import Path`, `from dataclasses import dataclass`) are fine to import directly since their origin is universally understood.
 
 
+# Markdown formatting
+
+**Avoid markdown tables.** They render poorly in terminals and diffs. Use bulleted lists with bold labels instead.
+
+**Bad:**
+```markdown
+| Command | Description |
+|---------|-------------|
+| list | Show items |
+| add | Create item |
+```
+
+**Good:**
+```markdown
+- **list** — Show items
+- **add** — Create item
+```
+
 
 # Specification
 
