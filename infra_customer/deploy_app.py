@@ -128,6 +128,20 @@ class AuroraClusterStack(Stack):
         if not database_config:
             raise ValueError("DatabaseConfig is required for Aurora cluster creation")
 
+        # Validate database name: alphanumeric and underscores, 1-64 chars, must start with letter
+        db_name = database_config.name
+        if not db_name or len(db_name) > 64:
+            raise ValueError("Database name must be 1-64 characters")
+        if not db_name[0].isalpha():
+            raise ValueError("Database name must start with a letter")
+        if not all(c.isalnum() or c == "_" for c in db_name):
+            raise ValueError("Database name must contain only alphanumeric characters and underscores")
+
+        # Validate backup retention: Aurora limits are 1-35 days
+        retention_days = database_config.backups.retention_days
+        if retention_days < 1 or retention_days > 35:
+            raise ValueError("Backup retention days must be between 1 and 35")
+
         engine = get_engine_version(database_config.engine)
         engine_port = get_engine_port(database_config.engine.family)
 
@@ -167,6 +181,10 @@ class AuroraClusterStack(Stack):
                 raise ValueError("Serverless v2 min_acu must be in 0.5 increments")
             if round(serverless_max_capacity * 2) != serverless_max_capacity * 2:
                 raise ValueError("Serverless v2 max_acu must be in 0.5 increments")
+            if serverless_min_capacity < 0.5 or serverless_min_capacity > 128:
+                raise ValueError("Serverless v2 min_acu must be between 0.5 and 128")
+            if serverless_max_capacity < 0.5 or serverless_max_capacity > 128:
+                raise ValueError("Serverless v2 max_acu must be between 0.5 and 128")
         elif deployment.mode == "aurora_provisioned":
             if not deployment.provisioned:
                 raise ValueError("Provisioned config is required for aurora_provisioned")
