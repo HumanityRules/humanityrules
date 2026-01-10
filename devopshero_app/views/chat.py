@@ -1,6 +1,8 @@
 import json
+import logging
 import time
 
+from django.conf import settings
 from django.contrib.auth.decorators import login_required
 from django.http import HttpResponse, StreamingHttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
@@ -8,7 +10,10 @@ from django.template.loader import render_to_string
 from django.views.decorators.http import require_POST
 
 from ..models import Conversation, Message
+from ..services.agent import process_conversation
 from .base import get_app_shell_context
+
+logger = logging.getLogger(__name__)
 
 
 @login_required
@@ -66,7 +71,7 @@ def chat_view(request, conversation_id):
 @login_required
 @require_POST
 def chat_send(request, conversation_id):
-    """Send a message in a conversation."""
+    """Send a message in a conversation and get agent response."""
     conversation = get_object_or_404(
         Conversation,
         id=conversation_id,
@@ -92,15 +97,44 @@ def chat_send(request, conversation_id):
     # Update conversation timestamp
     conversation.save()  # Triggers updated_at
 
-    # Render and return the user message partial
+    # Render the user message
     context = {"message": user_message, "conversation_id": conversation_id}
-    html = render_to_string(
+    user_html = render_to_string(
         "devopshero_app/partials/chat/_message.html",
         context=context,
         request=request,
     )
 
-    return HttpResponse(html)
+    # Process with agent (if API key is configured)
+    agent_html = ""
+    if settings.ANTHROPIC_API_KEY:
+        try:
+            agent_message = process_conversation(conversation)
+            context["message"] = agent_message
+            agent_html = render_to_string(
+                "devopshero_app/partials/chat/_message.html",
+                context=context,
+                request=request,
+            )
+        except Exception as e:
+            logger.exception("Agent processing failed")
+            # Create error message
+            error_message = Message.objects.create(
+                conversation=conversation,
+                role=Message.Role.SYSTEM,
+                content_type=Message.ContentType.ERROR,
+                content=f"Agent error: {str(e)}",
+                metadata={"error_type": type(e).__name__},
+            )
+            context["message"] = error_message
+            agent_html = render_to_string(
+                "devopshero_app/partials/chat/_message.html",
+                context=context,
+                request=request,
+            )
+
+    # Return both user message and agent response
+    return HttpResponse(user_html + agent_html)
 
 
 @login_required
