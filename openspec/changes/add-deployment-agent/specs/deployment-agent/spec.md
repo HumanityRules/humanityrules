@@ -28,11 +28,11 @@ The system SHALL provide conversation management for user-agent interactions.
 
 ### Requirement: Repository Inspection Tool
 
-The system SHALL provide an `inspect_repository` tool that analyzes git repositories.
+The system SHALL provide an `inspect_repository` tool that analyzes repositories via URL.
 
 #### Scenario: Analyze repository contents
-- **WHEN** the agent calls `inspect_repository` with a git URL
-- **THEN** the repository is cloned to a temporary directory
+- **WHEN** the agent calls `inspect_repository` with a file:// URL
+- **THEN** the tool reads the repository from the filesystem
 - **AND** the tool detects framework (flask, django, fastapi, nextjs, etc.)
 - **AND** the tool detects language (python, javascript, go, etc.)
 - **AND** the tool identifies if a Dockerfile is present
@@ -47,9 +47,13 @@ The system SHALL provide an `inspect_repository` tool that analyzes git reposito
 - **THEN** the tool identifies required environment variables
 - **AND** the tool detects database dependencies (postgres, mysql, etc.)
 
-#### Scenario: Cleanup after analysis
-- **WHEN** repository analysis completes or fails
-- **THEN** the temporary clone directory is deleted
+#### Scenario: URL validation
+- **WHEN** an unsupported URL scheme is provided (e.g., https://, git://)
+- **THEN** the tool returns an error indicating only file:// URLs are supported in v1
+
+#### Scenario: Invalid path
+- **WHEN** a file:// URL points to a non-existent path
+- **THEN** the tool returns an error with a clear message
 
 ---
 
@@ -221,10 +225,10 @@ The system SHALL protect sensitive data from exposure in conversations.
 - **THEN** database credentials are stored only in Secrets Manager
 - **AND** credentials are never shown in the chat interface
 
-#### Scenario: Repository clone cleanup
+#### Scenario: Repository access
 - **WHEN** repository inspection completes
-- **THEN** the cloned repository is deleted from the temporary directory
-- **AND** no repository contents are persisted beyond analysis results
+- **THEN** only the analysis results are stored
+- **AND** no repository file contents are persisted in the database
 
 #### Scenario: Environment variable masking
 - **WHEN** displaying app configuration in chat

@@ -13,7 +13,7 @@
 
 - [ ] 2.1 Integrate Claude Agents SDK as dependency
 - [ ] 2.2 Implement agent service with conversation context management
-- [ ] 2.3 Implement `inspect_repository` tool (clone and analyze git repos)
+- [ ] 2.3 Implement `inspect_repository` tool (file:// URLs only in v1)
 - [ ] 2.4 Implement `list_aws_accounts` tool
 - [ ] 2.5 Implement `ask_user` tool for interactive prompts
 - [ ] 2.6 Connect agent to chat view with typing indicator

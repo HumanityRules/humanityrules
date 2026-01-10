@@ -1,6 +1,8 @@
 # Project Context
 
-Project-specific constraints for writing specs. For OpenSpec syntax, see `openspec/AGENTS.md`. For code conventions and architecture, see the root `AGENTS.md`.
+Project-specific constraints for writing specs. For OpenSpec syntax, see `openspec/AGENTS.md`. 
+
+Make sure to always read the root `AGENTS.md`.
 
 This file will grow as the project grows.
 

@@ -45,7 +45,7 @@ This specification defines the AI-powered deployment agent that sits at the cent
 │  │                     Chat Interface (HTMX)                          │ │
 │  │  ┌──────────────────────────────────────────────────────────────┐  │ │
 │  │  │ Agent: What would you like to deploy today?                  │  │ │
-│  │  │ User: I have a Python Flask app at github.com/user/myapp     │  │ │
+│  │  │ User: I have a Python Flask app at deployable_repos/myapp    │  │ │
 │  │  │ Agent: I found a Flask app with requirements.txt...          │  │ │
 │  │  │ [Progress: Deploying to us-east-1...]                        │  │ │
 │  │  └──────────────────────────────────────────────────────────────┘  │ │
@@ -86,7 +86,7 @@ This specification defines the AI-powered deployment agent that sits at the cent
 - FR-1.3: Users can view conversation history organized by workspace
 
 ### FR-2: Agent Capabilities
-- FR-2.1: Agent can inspect git repositories to detect app type and configuration
+- FR-2.1: Agent can inspect local repositories to detect app type and configuration
 - FR-2.2: Agent can ask clarifying questions when information is ambiguous
 - FR-2.3: Agent can propose infrastructure configurations based on app analysis
 - FR-2.4: Agent can execute deployments via the existing infra_customer engine
@@ -178,7 +178,7 @@ class Workspace(models.Model):
     name: CharField
     slug: SlugField (unique per organization)
     description: TextField
-    primary_repo_url: URLField (nullable)  # Git repository URL
+    primary_repo_url: URLField (nullable)  # Only file:// URLs in v1
     aws_account: ForeignKey(AWSAccount)  # Which AWS account to deploy to
     aws_region: CharField  # Target region for deployments
     created_by: ForeignKey(User)
@@ -212,8 +212,8 @@ class App(models.Model):
     app_type: CharField(choices=AppType)
     build_strategy: CharField(choices=BuildStrategy)
 
-    # Git source
-    repo_url: URLField
+    # Source
+    repo_url: URLField  # Only file:// URLs supported in v1; git URLs in future
     branch: CharField (default="main")
     dockerfile_path: CharField (default="Dockerfile", nullable)
 
@@ -392,13 +392,19 @@ The agent is built using the Claude Agents SDK, which provides:
 The agent has access to the following tools:
 
 #### `inspect_repository`
-Clones and analyzes a git repository to detect app characteristics.
+Analyzes a local repository to detect app characteristics.
 
 ```python
 @tool
-def inspect_repository(repo_url: str, branch: str = "main") -> RepositoryAnalysis:
+def inspect_repository(repo_url: str, branch: str) -> RepositoryAnalysis:
     """
-    Clone a git repository and analyze its contents.
+    Analyze a repository's contents.
+
+    Args:
+        repo_url: Repository URL. Only file:// URLs supported in v1.
+                  Example: file:///app/deployable_repos/flask-app
+                  Test repositories available in deployable_repos/
+        branch: Branch to analyze.
 
     Returns:
         RepositoryAnalysis containing:
@@ -412,6 +418,8 @@ def inspect_repository(repo_url: str, branch: str = "main") -> RepositoryAnalysi
         - suggested_health_path: str
         - environment_variables: list[str]  # Required env vars detected
         - detected_database: str | None  # postgres, mysql, etc.
+
+    Note: Only file:// URLs supported in v1. Git URLs (https://, git://) out of scope.
     """
 ```
 
@@ -424,8 +432,8 @@ def create_workspace(
     name: str,
     aws_account_id: str,
     aws_region: str,
-    description: str = "",
-    primary_repo_url: str | None = None,
+    description: str,
+    primary_repo_url: str | None,  # Only file:// URLs in v1
 ) -> Workspace:
     """Create a new workspace for deploying applications."""
 ```
@@ -438,7 +446,7 @@ Creates an app configuration within a workspace.
 def create_app(
     workspace_id: str,
     name: str,
-    repo_url: str,
+    repo_url: str,  # Only file:// URLs in v1
     branch: str,
     app_type: str,
     build_strategy: str,
@@ -447,7 +455,7 @@ def create_app(
     memory: int,
     health_check_path: str,
     environment_variables: list[dict],
-    domain_name: str | None = None,
+    domain_name: str | None,
 ) -> App:
     """Create an app configuration in a workspace."""
 ```
@@ -462,9 +470,9 @@ def create_datastore(
     name: str,
     engine: str,
     database_name: str,
-    deployment_mode: str = "aurora_serverless_v2",
-    serverless_min_acu: float = 0.5,
-    serverless_max_acu: float = 2.0,
+    deployment_mode: str,
+    serverless_min_acu: float,
+    serverless_max_acu: float,
 ) -> Datastore:
     """Create a managed database in the workspace."""
 ```
@@ -476,7 +484,7 @@ Creates a deployment record (stubbed in v1, does not trigger real infrastructure
 @tool
 def deploy_app(
     app_id: str,
-    git_ref: str = "main",
+    git_ref: str,
 ) -> Deployment:
     """
     Create a deployment record for an app.
@@ -531,8 +539,8 @@ Presents a question to the user with optional choices.
 @tool
 def ask_user(
     question: str,
-    choices: list[str] | None = None,
-    allow_free_text: bool = True,
+    choices: list[str] | None,
+    allow_free_text: bool,
 ) -> str:
     """
     Ask the user a question and wait for their response.
@@ -557,7 +565,7 @@ applications to their AWS infrastructure with minimal friction.
 - Celebrate successes warmly
 
 ## Your Capabilities
-- Analyze git repositories to understand application structure
+- Analyze code repositories to understand application structure
 - Recommend infrastructure configurations based on app requirements
 - Create workspaces, apps, and databases
 - Execute and monitor deployments
@@ -567,7 +575,7 @@ applications to their AWS infrastructure with minimal friction.
 
 ### For New Users
 1. Greet them and ask what they'd like to deploy
-2. If they provide a git URL, analyze it immediately
+2. If they provide a repository URL, analyze it immediately
 3. Present your findings and recommendations concisely
 4. Ask only necessary questions - use sensible defaults
 5. Confirm before deploying
@@ -823,9 +831,9 @@ def message_stream(request, conversation_id):
    → Redirects to /chat/{conversation_id}/
 
 2. Agent: "Hi! I'm here to help you deploy. What would you like to deploy today?
-           You can paste a GitHub URL or describe your application."
+           You can provide a path to your application or describe it."
 
-3. User: "https://github.com/user/flask-app"
+3. User: "file:///app/deployable_repos/flask-app"
 
 4. Agent: [Calls inspect_repository tool]
    "I found a Flask application! Here's what I detected:
