@@ -4,6 +4,43 @@
 > - Entries are in reverse chronological order (latest on top). Use format: `## YYYY-MM-DD HH:MM - Title`
 > - Avoid markdown tables — they render poorly. Use bulleted lists with bold labels instead.
 
+## 2026-01-10 - Phase 1: Deployment Agent Foundation
+
+Implemented the foundation layer for the AI deployment agent—a conversational interface that will guide users through deploying their applications.
+
+### What We Built
+
+**Django Models:**
+- **Workspace, App, Datastore** — Core entities representing deployed resources
+- **Deployment, DeploymentLog** — Track deployment attempts and their progress
+- **Conversation, Message** — Chat history between user and agent
+
+**Chat Interface:**
+- `chat_list`, `chat_view`, `chat_new` — Navigation and conversation management
+- `chat_send` — POST endpoint for user messages
+- `chat_stream` — SSE endpoint for real-time agent responses
+- `chat_messages`, `chat_close` — Pagination and conversation lifecycle
+
+**Message Partials:**
+- 10 templates for different content types: text, markdown, code, progress bars, choice buttons, deployment logs, errors
+- Typing indicator for agent "thinking" state
+
+### Why
+
+The deployment agent will be a chat-based interface where users describe what they want to deploy, and the agent analyzes their repository, suggests configurations, and orchestrates the deployment. Phase 1 provides:
+
+1. **Persistence** — Conversations survive page refreshes and server restarts
+2. **Real-time updates** — SSE allows the agent to stream responses without polling
+3. **Rich content** — Different message types enable progress indicators, code blocks, and interactive choices
+
+### What's Next
+
+- Phase 2: Agent core (system prompt, LLM integration, tool definitions)
+- Phase 3: Stubbed tool implementations (analyze repos, create deployments)
+- Phase 4: UI integration (dashboard button, full chat layout)
+
+---
+
 ## 2026-01-08 22:14 - Aurora DatabaseConfig Implementation
 
 - **Scope:** Implemented the Aurora-only `DatabaseConfig` spec in `infra_customer/`.
