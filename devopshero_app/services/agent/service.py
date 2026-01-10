@@ -22,8 +22,8 @@ from . import client
 from .tools import ask_user, inspect_repository, list_aws_accounts
 
 
-# Default model to use for agent conversations
-DEFAULT_MODEL = "claude-sonnet-4-20250514"
+# Default model to use for agent conversations (Bedrock model ID)
+DEFAULT_MODEL = "anthropic.claude-opus-4-5-20251101-v1:0"
 
 # Tool definitions for Claude API
 TOOLS = [
