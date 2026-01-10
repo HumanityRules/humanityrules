@@ -22,9 +22,6 @@ from . import client
 from .tools import ask_user, inspect_repository, list_aws_accounts
 
 
-# Default model to use for agent conversations (Bedrock model ID)
-DEFAULT_MODEL = "anthropic.claude-opus-4-5-20251101-v1:0"
-
 # Tool definitions for Claude API
 TOOLS = [
     {
@@ -253,8 +250,9 @@ def process_conversation(conversation: Conversation) -> Message:
     if not messages:
         raise ValueError("Conversation has no messages to process")
 
-    # Get Claude client
+    # Get Claude client and model ID
     anthropic_client = client.get_client()
+    model_id = client.get_model_id()
 
     # Load system prompt
     system_prompt = _load_system_prompt()
@@ -272,7 +270,7 @@ def process_conversation(conversation: Conversation) -> Message:
 
         # Call Claude with tools
         response = anthropic_client.messages.create(
-            model=DEFAULT_MODEL,
+            model=model_id,
             max_tokens=4096,
             system=system_prompt,
             messages=messages,
@@ -344,7 +342,7 @@ def process_conversation(conversation: Conversation) -> Message:
         content_type=content_type,
         content=response_text,
         metadata={
-            "model": DEFAULT_MODEL,
+            "model": model_id,
             "usage": {
                 "input_tokens": total_input_tokens,
                 "output_tokens": total_output_tokens,
