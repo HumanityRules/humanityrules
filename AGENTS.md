@@ -325,6 +325,35 @@ cidr = vpc_utils.find_available_vpc_cidr(...)
 
 **Note:** This applies to local project modules. Standard library and well-known third-party packages (e.g., `from pathlib import Path`, `from dataclasses import dataclass`) are fine to import directly since their origin is universally understood.
 
+### 4. Prefer Direct Imports Over TYPE_CHECKING
+* **Directive:** Use regular imports for type hints. Only use `TYPE_CHECKING` when actually needed to resolve circular imports.
+* **Reasoning:** `TYPE_CHECKING` adds complexity (conditional imports, string annotations) for a problem that may not exist. Solve circular dependencies when they occur, not preemptively.
+* **Implementation:** Import types directly and use them in annotations.
+
+**Bad (Premature Optimization):**
+```python
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from myapp.models import User
+
+def get_user(id: int) -> "User":  # String annotation required
+    ...
+```
+
+**Good (Direct Import):**
+```python
+from myapp.models import User
+
+def get_user(id: int) -> User:
+    ...
+```
+
+**When TYPE_CHECKING is appropriate:**
+- Actual circular import errors occur
+- Heavy imports cause measurable startup delays
+- Imports have side effects you need to avoid
+
 
 # Markdown formatting
 

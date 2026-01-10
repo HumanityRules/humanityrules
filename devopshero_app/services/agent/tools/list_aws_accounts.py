@@ -6,10 +6,8 @@ for deploying applications.
 """
 
 from dataclasses import dataclass, asdict
-from typing import TYPE_CHECKING
 
-if TYPE_CHECKING:
-    from devopshero_app.models import Organization
+from devopshero_app.models import AWSAccount, Organization
 
 
 @dataclass
@@ -27,7 +25,7 @@ class AWSAccountSummary:
         return asdict(self)
 
 
-def list_aws_accounts(organization: "Organization") -> list[AWSAccountSummary]:
+def list_aws_accounts(organization: Organization) -> list[AWSAccountSummary]:
     """
     List AWS accounts connected to the organization.
 
@@ -37,9 +35,6 @@ def list_aws_accounts(organization: "Organization") -> list[AWSAccountSummary]:
     Returns:
         List of AWSAccountSummary objects.
     """
-    # Import here to avoid circular imports
-    from devopshero_app.models import AWSAccount
-
     accounts = AWSAccount.objects.filter(organization=organization)
 
     return [

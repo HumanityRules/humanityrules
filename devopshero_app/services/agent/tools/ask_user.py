@@ -6,11 +6,9 @@ presents choices to the user and waits for their response.
 """
 
 import uuid
-from dataclasses import dataclass, asdict, field
-from typing import TYPE_CHECKING
+from dataclasses import dataclass, asdict
 
-if TYPE_CHECKING:
-    from devopshero_app.models import Conversation
+from devopshero_app.models import Conversation, Message
 
 
 @dataclass
@@ -41,8 +39,8 @@ class AskUserResult:
 def ask_user(
     question: str,
     choices: list[dict],
-    conversation: "Conversation",
-    allow_text_input: bool = True,
+    conversation: Conversation,
+    allow_text_input: bool,
 ) -> AskUserResult:
     """
     Present a question to the user with choices.
@@ -55,14 +53,11 @@ def ask_user(
         question: The question to ask the user.
         choices: List of choice dicts with 'id', 'label', and optional 'primary'.
         conversation: The Conversation context.
-        allow_text_input: Whether to allow free text input (default True).
+        allow_text_input: Whether to allow free text input.
 
     Returns:
         AskUserResult indicating the question was presented.
     """
-    # Import here to avoid circular imports
-    from devopshero_app.models import Message
-
     # Ensure each choice has an ID
     processed_choices = []
     for i, choice in enumerate(choices):

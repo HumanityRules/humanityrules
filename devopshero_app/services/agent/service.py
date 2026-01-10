@@ -11,17 +11,15 @@ This module provides the core agent service that:
 
 import json
 from pathlib import Path
-from typing import TYPE_CHECKING
 
 from django.conf import settings
 
 import anthropic
 
+from devopshero_app.models import Conversation, Message
+
 from . import client
 from .tools import ask_user, inspect_repository, list_aws_accounts
-
-if TYPE_CHECKING:
-    from devopshero_app.models import Conversation, Message
 
 
 # Default model to use for agent conversations
@@ -122,7 +120,7 @@ TOOLS = [
 def _execute_tool(
     tool_name: str,
     tool_input: dict,
-    conversation: "Conversation",
+    conversation: Conversation,
 ) -> str:
     """
     Execute a tool and return the result as a string.
@@ -177,7 +175,7 @@ def _load_system_prompt() -> str:
     return prompt_path.read_text()
 
 
-def _convert_message_to_claude_format(message: "Message") -> dict | None:
+def _convert_message_to_claude_format(message: Message) -> dict | None:
     """
     Convert a database Message to Claude API format.
 
@@ -208,7 +206,7 @@ def _convert_message_to_claude_format(message: "Message") -> dict | None:
     }
 
 
-def _load_conversation_history(conversation: "Conversation") -> list[dict]:
+def _load_conversation_history(conversation: Conversation) -> list[dict]:
     """
     Load conversation history in Claude API format.
 
@@ -229,7 +227,7 @@ def _load_conversation_history(conversation: "Conversation") -> list[dict]:
     return claude_messages
 
 
-def process_conversation(conversation: "Conversation") -> "Message":
+def process_conversation(conversation: Conversation) -> Message:
     """
     Process a conversation and generate an agent response.
 
@@ -249,9 +247,6 @@ def process_conversation(conversation: "Conversation") -> "Message":
     Raises:
         ValueError: If the conversation has no user messages.
     """
-    # Import here to avoid circular imports
-    from devopshero_app.models import Message
-
     # Load conversation history
     messages = _load_conversation_history(conversation)
 
