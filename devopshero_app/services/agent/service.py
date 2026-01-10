@@ -18,7 +18,7 @@ from django.conf import settings
 import anthropic
 
 from . import client
-from .tools import inspect_repository, list_aws_accounts
+from .tools import ask_user, inspect_repository, list_aws_accounts
 
 if TYPE_CHECKING:
     from devopshero_app.models import Conversation, Message
@@ -68,6 +68,54 @@ TOOLS = [
             "required": [],
         },
     },
+    {
+        "name": "ask_user",
+        "description": (
+            "Ask the user a question with interactive choice buttons. "
+            "Use this when you need user input to proceed, such as selecting "
+            "an AWS account, confirming a deployment, or choosing between options. "
+            "The question will be displayed with clickable buttons for each choice."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "question": {
+                    "type": "string",
+                    "description": "The question to ask the user.",
+                },
+                "choices": {
+                    "type": "array",
+                    "description": "List of choices for the user.",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "id": {
+                                "type": "string",
+                                "description": "Unique identifier for this choice.",
+                            },
+                            "label": {
+                                "type": "string",
+                                "description": "Display label for this choice.",
+                            },
+                            "primary": {
+                                "type": "boolean",
+                                "description": "Whether this is the recommended choice.",
+                            },
+                        },
+                        "required": ["label"],
+                    },
+                },
+                "allow_text_input": {
+                    "type": "boolean",
+                    "description": (
+                        "Whether to allow the user to type a custom response. "
+                        "Default is true."
+                    ),
+                },
+            },
+            "required": ["question", "choices"],
+        },
+    },
 ]
 
 
@@ -100,6 +148,24 @@ def _execute_tool(
     elif tool_name == "list_aws_accounts":
         accounts = list_aws_accounts(organization=conversation.organization)
         return json.dumps([a.to_dict() for a in accounts], indent=2)
+
+    elif tool_name == "ask_user":
+        result = ask_user(
+            question=tool_input["question"],
+            choices=tool_input["choices"],
+            conversation=conversation,
+            allow_text_input=tool_input.get("allow_text_input", True),
+        )
+        return json.dumps(
+            {
+                **result.to_dict(),
+                "note": (
+                    "Question has been presented to the user. "
+                    "Wait for their response before proceeding."
+                ),
+            },
+            indent=2,
+        )
 
     else:
         raise ValueError(f"Unknown tool: {tool_name}")
