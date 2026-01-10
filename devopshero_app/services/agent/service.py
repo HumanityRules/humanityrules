@@ -18,7 +18,7 @@ from django.conf import settings
 import anthropic
 
 from . import client
-from .tools import inspect_repository
+from .tools import inspect_repository, list_aws_accounts
 
 if TYPE_CHECKING:
     from devopshero_app.models import Conversation, Message
@@ -55,16 +55,34 @@ TOOLS = [
             "required": ["repo_url", "branch"],
         },
     },
+    {
+        "name": "list_aws_accounts",
+        "description": (
+            "List AWS accounts connected to the user's organization. "
+            "Use this to find available deployment targets. "
+            "Returns account ID, name, status, and region for each account."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {},
+            "required": [],
+        },
+    },
 ]
 
 
-def _execute_tool(tool_name: str, tool_input: dict) -> str:
+def _execute_tool(
+    tool_name: str,
+    tool_input: dict,
+    conversation: "Conversation",
+) -> str:
     """
     Execute a tool and return the result as a string.
 
     Args:
         tool_name: Name of the tool to execute.
         tool_input: Input parameters for the tool.
+        conversation: The conversation context (for accessing user/org).
 
     Returns:
         JSON string with the tool result.
@@ -78,6 +96,11 @@ def _execute_tool(tool_name: str, tool_input: dict) -> str:
             branch=tool_input["branch"],
         )
         return json.dumps(result.to_dict(), indent=2)
+
+    elif tool_name == "list_aws_accounts":
+        accounts = list_aws_accounts(organization=conversation.organization)
+        return json.dumps([a.to_dict() for a in accounts], indent=2)
+
     else:
         raise ValueError(f"Unknown tool: {tool_name}")
 
@@ -212,7 +235,7 @@ def process_conversation(conversation: "Conversation") -> "Message":
 
                     # Execute the tool
                     try:
-                        result = _execute_tool(tool_name, tool_input)
+                        result = _execute_tool(tool_name, tool_input, conversation)
                         tool_results.append({
                             "type": "tool_result",
                             "tool_use_id": tool_id,
