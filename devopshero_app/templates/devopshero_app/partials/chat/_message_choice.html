@@ -1,0 +1,26 @@
+{# Interactive choice buttons #}
+<div>
+    <p class="text-sm text-gray-900 dark:text-gray-100 mb-3">{{ message.content }}</p>
+
+    <div class="flex flex-wrap gap-2">
+        {% for choice in message.metadata.choices %}
+        <button type="button"
+                hx-post="{% url 'chat_send' conversation_id=message.conversation_id %}"
+                hx-vals='{"message": "{{ choice.label }}", "choice_id": "{{ choice.id }}"}'
+                hx-target="#messages"
+                hx-swap="beforeend"
+                class="px-4 py-2 text-sm font-medium rounded-lg transition-colors
+                       {% if choice.primary %}
+                       bg-indigo-600 text-white hover:bg-indigo-500
+                       {% else %}
+                       bg-gray-200 dark:bg-gray-700 text-gray-900 dark:text-gray-100 hover:bg-gray-300 dark:hover:bg-gray-600
+                       {% endif %}">
+            {{ choice.label }}
+        </button>
+        {% endfor %}
+    </div>
+
+    {% if message.metadata.allow_text %}
+    <p class="text-xs text-gray-500 dark:text-gray-400 mt-2">Or type your own response below</p>
+    {% endif %}
+</div>

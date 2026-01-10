@@ -16,6 +16,15 @@ from .partials import random_quote, switch_organization
 from .auth import auth_login, auth_callback, auth_logout
 from .onboarding import onboarding
 from .api import aws_install_account_callback
+from .chat import (
+    chat_list,
+    chat_new,
+    chat_view,
+    chat_send,
+    chat_stream,
+    chat_messages,
+    chat_close,
+)
 
 __all__ = [
     "landing",
@@ -37,5 +46,12 @@ __all__ = [
     "auth_logout",
     "onboarding",
     "aws_install_account_callback",
+    "chat_list",
+    "chat_new",
+    "chat_view",
+    "chat_send",
+    "chat_stream",
+    "chat_messages",
+    "chat_close",
 ]
 
