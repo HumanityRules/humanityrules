@@ -27,6 +27,10 @@ def get_client() -> anthropic.Anthropic | anthropic.AnthropicBedrock:
     Uses direct Anthropic API if ANTHROPIC_API_KEY is set,
     otherwise uses AWS Bedrock if AWS_BEDROCK_REGION is set.
 
+    Bedrock credentials priority:
+    1. AWS_BEDROCK_ACCESS_KEY_ID + AWS_BEDROCK_SECRET_ACCESS_KEY (if set)
+    2. Default boto3 credential chain (AWS CLI, env vars, IAM role, etc.)
+
     Returns:
         Configured Anthropic or AnthropicBedrock client.
 
@@ -37,7 +41,22 @@ def get_client() -> anthropic.Anthropic | anthropic.AnthropicBedrock:
         return anthropic.Anthropic(api_key=settings.ANTHROPIC_API_KEY)
 
     if _use_bedrock():
-        return anthropic.AnthropicBedrock(aws_region=settings.AWS_BEDROCK_REGION)
+        # Check for Bedrock-specific credentials
+        access_key = getattr(settings, "AWS_BEDROCK_ACCESS_KEY_ID", None)
+        secret_key = getattr(settings, "AWS_BEDROCK_SECRET_ACCESS_KEY", None)
+
+        if access_key and secret_key:
+            # Use Bedrock-specific credentials
+            return anthropic.AnthropicBedrock(
+                aws_region=settings.AWS_BEDROCK_REGION,
+                aws_access_key=access_key,
+                aws_secret_key=secret_key,
+            )
+
+        # Fall back to default boto3 credential chain
+        return anthropic.AnthropicBedrock(
+            aws_region=settings.AWS_BEDROCK_REGION,
+        )
 
     raise ValueError(
         "No Claude backend configured. "
@@ -55,7 +74,8 @@ def get_model_id() -> str:
     if _use_anthropic_api():
         return "claude-opus-4-5-20251101"
 
-    return "anthropic.claude-opus-4-5-20251101-v1:0"
+    # Bedrock requires inference profile ID (us. prefix) for on-demand throughput
+    return "us.anthropic.claude-opus-4-5-20251101-v1:0"
 
 
 def is_available() -> bool:
