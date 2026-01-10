@@ -145,5 +145,8 @@ DOH_API_SECRET_KEY = os.environ.get("DOH_API_SECRET_KEY")
 
 # Claude Agent Configuration
 # Priority: ANTHROPIC_API_KEY > AWS_BEDROCK_REGION
+# Bedrock credentials: AWS_BEDROCK_ACCESS_KEY_ID + AWS_BEDROCK_SECRET_ACCESS_KEY (optional, falls back to boto3 chain)
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY")
 AWS_BEDROCK_REGION = os.environ.get("AWS_BEDROCK_REGION")
+AWS_BEDROCK_ACCESS_KEY_ID = os.environ.get("AWS_BEDROCK_ACCESS_KEY_ID")
+AWS_BEDROCK_SECRET_ACCESS_KEY = os.environ.get("AWS_BEDROCK_SECRET_ACCESS_KEY")
