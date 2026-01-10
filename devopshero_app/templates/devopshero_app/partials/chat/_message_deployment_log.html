@@ -1,0 +1,19 @@
+{# Deployment log entry #}
+{% with level=message.metadata.level|default:'info' %}
+<div class="font-mono text-xs px-3 py-1 rounded
+            {% if level == 'error' %}
+            bg-red-100 dark:bg-red-900/20 text-red-800 dark:text-red-200
+            {% elif level == 'warning' %}
+            bg-yellow-100 dark:bg-yellow-900/20 text-yellow-800 dark:text-yellow-200
+            {% elif level == 'debug' %}
+            bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400
+            {% else %}
+            bg-green-100 dark:bg-green-900/20 text-green-800 dark:text-green-200
+            {% endif %}">
+    <span class="opacity-60">[{{ message.metadata.phase|default:'log' }}]</span>
+    {{ message.content }}
+    {% if message.metadata.resource %}
+    <span class="opacity-60 ml-2">({{ message.metadata.resource }})</span>
+    {% endif %}
+</div>
+{% endwith %}

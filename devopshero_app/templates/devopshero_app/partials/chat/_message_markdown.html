@@ -1,0 +1,5 @@
+{# Markdown message - rendered server-side #}
+{# Note: message.content should be pre-rendered HTML from the view #}
+<div class="prose prose-sm dark:prose-invert max-w-none">
+    {{ message.content|safe }}
+</div>

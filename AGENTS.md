@@ -480,3 +480,13 @@ An Environment defines the runtime fabric (ECS/Fargate) and capabilities.
 ## Task tracking
 
 - Use 'bd' for task tracking
+
+### Task Completion
+
+After closing each beads task, immediately commit the related changes:
+
+1. `bd close <id>` - Close the task
+2. `git add <files>` - Stage related changes
+3. `git commit -m "<id>: <description>"` - Commit with task ID
+
+This ensures atomic, traceable commits linked to specific work items.

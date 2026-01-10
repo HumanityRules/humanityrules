@@ -28,4 +28,13 @@ urlpatterns = [
     # API endpoints
     #  - aws_install_account_callback: called by Lambda after customer deploys the CloudFormation stack, not browsers
     path("api/aws/install-account-callback", views.aws_install_account_callback, name="aws_install_account_callback"),
+
+    # Chat / Agent
+    path("chat/", views.chat_list, name="chat_list"),
+    path("chat/new/", views.chat_new, name="chat_new"),
+    path("chat/<uuid:conversation_id>/", views.chat_view, name="chat_view"),
+    path("chat/<uuid:conversation_id>/send/", views.chat_send, name="chat_send"),
+    path("chat/<uuid:conversation_id>/stream/", views.chat_stream, name="chat_stream"),
+    path("chat/<uuid:conversation_id>/messages/", views.chat_messages, name="chat_messages"),
+    path("chat/<uuid:conversation_id>/close/", views.chat_close, name="chat_close"),
 ]
