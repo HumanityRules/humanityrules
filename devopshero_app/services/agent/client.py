@@ -1,7 +1,7 @@
 """
-Anthropic API client for the deployment agent.
+Anthropic Bedrock client for the deployment agent.
 
-This module provides access to the Anthropic Claude API.
+This module provides access to Claude via AWS Bedrock.
 """
 
 from django.conf import settings
@@ -9,28 +9,23 @@ from django.conf import settings
 import anthropic
 
 
-def get_client() -> anthropic.Anthropic:
+def get_client() -> anthropic.AnthropicBedrock:
     """
-    Get an Anthropic client instance.
+    Get an Anthropic Bedrock client instance.
+
+    Uses AWS credentials from environment/CLI automatically.
 
     Returns:
-        Configured Anthropic client.
-
-    Raises:
-        ValueError: If ANTHROPIC_API_KEY is not configured.
+        Configured AnthropicBedrock client.
     """
-    api_key = settings.ANTHROPIC_API_KEY
-    if not api_key:
-        raise ValueError(
-            "ANTHROPIC_API_KEY is not configured. "
-            "Please set it in your .env file."
-        )
-    return anthropic.Anthropic(api_key=api_key)
+    return anthropic.AnthropicBedrock(
+        aws_region=settings.AWS_BEDROCK_REGION,
+    )
 
 
 def verify_connection() -> bool:
     """
-    Verify that the Anthropic API connection works.
+    Verify that the Bedrock API connection works.
 
     Makes a minimal API call to verify credentials are valid.
 
@@ -38,14 +33,13 @@ def verify_connection() -> bool:
         True if connection is successful.
 
     Raises:
-        anthropic.AuthenticationError: If API key is invalid.
-        anthropic.APIConnectionError: If connection fails.
+        botocore.exceptions.ClientError: If AWS credentials are invalid.
     """
     client = get_client()
-    # Make a minimal request to verify the API key works
+    # Make a minimal request to verify the connection works
     # Using a tiny max_tokens to minimize cost
     response = client.messages.create(
-        model="claude-sonnet-4-20250514",
+        model="anthropic.claude-opus-4-5-20251101-v1:0",
         max_tokens=10,
         messages=[{"role": "user", "content": "Hi"}],
     )

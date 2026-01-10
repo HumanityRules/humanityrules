@@ -136,8 +136,8 @@ def chat_send(request, conversation_id):
         request=request,
     )
 
-    # Start agent processing in background (if API key is configured)
-    if settings.ANTHROPIC_API_KEY:
+    # Start agent processing in background (if Bedrock is configured)
+    if settings.AWS_BEDROCK_REGION:
         thread = threading.Thread(
             target=_process_agent_in_background,
             args=(str(conversation_id),),
