@@ -33,7 +33,7 @@ This specification defines the AI-powered deployment agent that sits at the cent
 - Supporting non-AWS cloud providers in v1
 - Multi-agent collaboration in v1
 - Voice interface
-- Mobile-native experience (responsive web is sufficient)
+- Mobile experience (desktop-first in v1)
 - **Connecting to existing `infra_customer/` deployment engine in v1** (tools create records but don't trigger real infrastructure)
 
 ## Architecture Overview
@@ -89,10 +89,8 @@ This specification defines the AI-powered deployment agent that sits at the cent
 - FR-2.1: Agent can inspect local repositories to detect app type and configuration
 - FR-2.2: Agent can ask clarifying questions when information is ambiguous
 - FR-2.3: Agent can propose infrastructure configurations based on app analysis
-- FR-2.4: Agent can execute deployments via the existing infra_customer engine
-- FR-2.5: Agent can stream deployment progress back to the user
-- FR-2.6: Agent can troubleshoot failed deployments by analyzing logs
-- FR-2.7: Agent can modify existing deployments (scale, update env vars, etc.)
+- FR-2.4: Agent can create deployment records (stubbed in v1, no real infrastructure)
+- FR-2.5: Agent can stream simulated deployment progress back to the user
 
 ### FR-3: Chat Interface
 - FR-3.1: Messages appear in real-time using HTMX streaming
@@ -100,7 +98,6 @@ This specification defines the AI-powered deployment agent that sits at the cent
 - FR-3.3: Agent can present interactive choices (buttons, selects) inline
 - FR-3.4: User can type messages or click suggested actions
 - FR-3.5: Interface shows typing indicators during agent processing
-- FR-3.6: Interface gracefully handles network interruptions
 
 ### FR-4: Workspace and App Creation
 - FR-4.1: Agent can create workspaces through conversation
@@ -108,12 +105,11 @@ This specification defines the AI-powered deployment agent that sits at the cent
 - FR-4.3: Agent validates AWS account connectivity before deployment
 - FR-4.4: Agent guides users to connect AWS account if none available
 
-### FR-5: Deployment Execution
-- FR-5.1: Agent converts conversation context into AppConfig
-- FR-5.2: Agent invokes deployment engine as background task
-- FR-5.3: Deployment logs stream to chat in real-time
+### FR-5: Deployment Execution (stubbed in v1)
+- FR-5.1: Agent converts conversation context into App record
+- FR-5.2: Agent creates Deployment record and simulates progress
+- FR-5.3: Simulated progress updates stream to chat
 - FR-5.4: Agent summarizes deployment outcome with actionable next steps
-- FR-5.5: Failed deployments trigger agent analysis and recovery suggestions
 
 ## Data Models
 
@@ -379,6 +375,24 @@ class DeploymentLog(models.Model):
 
 ## Agent Design
 
+### Data Types
+
+```python
+@dataclass
+class RepositoryAnalysis:
+    """Result of analyzing a repository."""
+    detected_framework: str | None  # flask, django, fastapi, nextjs, etc.
+    detected_language: str | None  # python, javascript, go, etc.
+    has_dockerfile: bool
+    dockerfile_path: str | None
+    has_requirements: bool
+    has_package_json: bool
+    suggested_port: int | None
+    suggested_health_path: str | None
+    environment_variables: list[str]  # Required env vars detected
+    detected_database: str | None  # postgres, mysql, etc.
+```
+
 ### Claude Agents SDK Integration
 
 The agent is built using the Claude Agents SDK, which provides:
@@ -407,17 +421,7 @@ def inspect_repository(repo_url: str, branch: str) -> RepositoryAnalysis:
         branch: Branch to analyze.
 
     Returns:
-        RepositoryAnalysis containing:
-        - detected_framework: str (flask, django, fastapi, nextjs, etc.)
-        - detected_language: str (python, javascript, go, etc.)
-        - has_dockerfile: bool
-        - dockerfile_path: str | None
-        - has_requirements: bool
-        - has_package_json: bool
-        - suggested_port: int
-        - suggested_health_path: str
-        - environment_variables: list[str]  # Required env vars detected
-        - detected_database: str | None  # postgres, mysql, etc.
+        RepositoryAnalysis (see Data Types section)
 
     Note: Only file:// URLs supported in v1. Git URLs (https://, git://) out of scope.
     """
@@ -974,13 +978,6 @@ GET  /chat/{id}/messages/            # Get messages (pagination, HTMX partial)
 POST /chat/{id}/close/               # Mark conversation as completed
 ```
 
-### Agent Webhook Endpoints
-
-```
-POST /agent/webhook/deployment/      # Deployment status callbacks
-POST /agent/webhook/repository/      # Repository analysis complete
-```
-
 ## Security Considerations
 
 ### Agent Tool Permissions
@@ -1023,19 +1020,12 @@ POST /agent/webhook/repository/      # Repository analysis complete
 - [ ] Error handling and recovery suggestions
 - [ ] Conversation history and resume
 - [ ] Interactive choice buttons
-- [ ] Mobile responsive chat UI
-- [ ] End-to-end testing
 
-## Open Questions
+## Design Decisions
 
-- Q1: Should conversations auto-close after successful deployment?
-  - Proposed: No, keep open for follow-up (scaling, troubleshooting)
-
-- Q2: Should we support multiple concurrent deployments in one conversation?
-  - Proposed: Yes, agent can track multiple deployments
-
-- Q3: How to handle long-running deployments when user closes browser?
-  - Proposed: Deployment continues, status shows when user returns
+- Conversations do NOT auto-close after successful deployment (users can continue for follow-up, scaling, troubleshooting)
+- One deployment at a time per conversation (no concurrent deployments)
+- Deployments continue server-side regardless of client state; status is shown when user returns
 
 ## Appendix A: Message Partial Templates
 

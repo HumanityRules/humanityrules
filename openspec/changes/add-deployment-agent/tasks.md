@@ -3,7 +3,7 @@
 ## Phase 1: Foundation
 
 - [ ] 1.1 Add Django models: Workspace, App, Datastore, Deployment, DeploymentLog
-- [ ] 1.2 Add Django models: Conversation, Message
+- [ ] 1.2 Add Django models: Conversation, Message (title field is placeholder - no auto-generation in v1)
 - [ ] 1.3 Create database migrations for all new models
 - [ ] 1.4 Create basic chat view with HTMX message sending
 - [ ] 1.5 Implement SSE endpoint for message streaming
@@ -32,6 +32,4 @@
 
 - [ ] 4.1 Add error handling and agent recovery suggestions
 - [ ] 4.2 Implement conversation history view and resume functionality
-- [ ] 4.3 Add interactive choice buttons with HTMX actions
-- [ ] 4.4 Make chat UI mobile responsive
-- [ ] 4.5 Write end-to-end tests for critical flows
+- [ ] 4.3 Wire up interactive choice buttons to agent (1.6 creates visuals, this integrates with agent flow)
