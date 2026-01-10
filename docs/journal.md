@@ -4,6 +4,22 @@
 > - Entries are in reverse chronological order (latest on top). Use format: `## YYYY-MM-DD HH:MM - Title`
 > - Avoid markdown tables — they render poorly. Use bulleted lists with bold labels instead.
 
+## 2026-01-10 - Claude Agent Backend Configuration
+
+The deployment agent supports two Claude backends with automatic selection:
+
+**Priority:** `ANTHROPIC_API_KEY` > `AWS_BEDROCK_REGION`
+
+- If `ANTHROPIC_API_KEY` is set → direct Anthropic API (model: `claude-opus-4-5-20251101`)
+- Else if `AWS_BEDROCK_REGION` is set → AWS Bedrock (model: `anthropic.claude-opus-4-5-20251101-v1:0`)
+- Else → agent unavailable (`is_available()` returns `False`)
+
+Bedrock auto-discovers AWS credentials from CLI/environment. No default region—must be explicitly configured.
+
+**Key files:** `devopshero_app/services/agent/client.py`
+
+---
+
 ## 2026-01-10 - Phase 1: Deployment Agent Foundation
 
 Implemented the foundation layer for the AI deployment agent—a conversational interface that will guide users through deploying their applications.
