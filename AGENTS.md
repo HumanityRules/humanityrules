@@ -477,9 +477,9 @@ An Environment defines the runtime fabric (ECS/Fargate) and capabilities.
 
 
 
-## Task tracking
+## Tasks
 
-- Use 'bd' for task tracking
+Use 'bd' for task tracking.
 
 ### Task Completion
 
