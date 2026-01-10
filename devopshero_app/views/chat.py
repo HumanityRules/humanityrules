@@ -23,7 +23,7 @@ def chat_list(request):
     context["conversations"] = conversations
 
     if request.htmx:
-        return render(request, "devopshero_app/chat_list.html", context=context)
+        return render(request, "devopshero_app/chat/list.html", context=context)
 
     context["content_url"] = "/chat/"
     return render(request, "devopshero_app/app_shell.html", context=context)
@@ -57,7 +57,7 @@ def chat_view(request, conversation_id):
     context["messages"] = messages
 
     if request.htmx:
-        return render(request, "devopshero_app/chat.html", context=context)
+        return render(request, "devopshero_app/chat/view.html", context=context)
 
     context["content_url"] = f"/chat/{conversation_id}/"
     return render(request, "devopshero_app/app_shell.html", context=context)
