@@ -7,7 +7,6 @@ The system SHALL provide conversation management for user-agent interactions.
 #### Scenario: Create new conversation
 - **WHEN** user clicks "New Deployment" on the dashboard
 - **THEN** a new Conversation is created with the user's organization
-- **AND** the conversation has a purpose (deploy_app, add_database, troubleshoot, modify_app, general)
 - **AND** the user is redirected to the chat interface
 
 #### Scenario: Resume existing conversation
@@ -109,22 +108,22 @@ The system SHALL provide a `create_datastore` tool for provisioning managed data
 
 ### Requirement: Deployment Execution Tool
 
-The system SHALL provide a `deploy_app` tool that triggers deployments.
+The system SHALL provide a `deploy_app` tool that creates deployment records (stubbed in v1).
 
 #### Scenario: Trigger deployment
 - **WHEN** the agent calls `deploy_app` with an app ID
 - **THEN** a Deployment record is created with status "pending"
-- **AND** a background task is started for the deployment
+- **AND** the deployment simulates progress through phases (no real infrastructure in v1)
 
-#### Scenario: Deployment phases
+#### Scenario: Deployment phases (simulated)
 - **WHEN** a deployment executes
-- **THEN** it progresses through phases: build, push, deploy, health check
+- **THEN** it progresses through simulated phases: build, push, deploy, health check
 - **AND** each phase transition updates the Deployment status
 
 #### Scenario: Link deployment to conversation
 - **WHEN** a deployment is triggered from a conversation
 - **THEN** the Deployment is linked to that Conversation
-- **AND** deployment logs appear in the chat
+- **AND** simulated deployment progress appears in the chat
 
 ---
 
@@ -159,10 +158,10 @@ The system SHALL stream messages to the chat interface in real-time.
 - **THEN** the response streams to the chat as it is produced
 - **AND** a typing indicator is shown while the agent is processing
 
-#### Scenario: Deployment log streaming
+#### Scenario: Deployment progress streaming
 - **WHEN** a deployment is in progress
-- **THEN** log entries stream to the chat in real-time
-- **AND** logs are rendered with appropriate level styling (info, warning, error)
+- **THEN** simulated progress updates stream to the chat
+- **AND** progress is rendered with appropriate phase styling
 
 ---
 
@@ -206,10 +205,10 @@ The system SHALL enforce per-user permissions on agent tool operations.
 - **THEN** only resources in the user's current organization are accessible
 - **AND** cross-organization access is denied
 
-#### Scenario: AWS account verification
-- **WHEN** deploying to an AWS account
+#### Scenario: AWS account association
+- **WHEN** creating a workspace with an AWS account
 - **THEN** the account must belong to the user's organization
-- **AND** the account must have status "connected"
+- **AND** the workspace records the target AWS account for future deployment
 
 ---
 
