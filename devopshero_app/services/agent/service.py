@@ -5,9 +5,11 @@ This module provides the core agent service that:
 - Loads conversation context from the database
 - Converts messages to Claude API format
 - Sends messages to Claude and handles responses
+- Executes tools when requested by Claude
 - Saves agent responses back to the database
 """
 
+import json
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -16,6 +18,7 @@ from django.conf import settings
 import anthropic
 
 from . import client
+from .tools import inspect_repository
 
 if TYPE_CHECKING:
     from devopshero_app.models import Conversation, Message
@@ -23,6 +26,60 @@ if TYPE_CHECKING:
 
 # Default model to use for agent conversations
 DEFAULT_MODEL = "claude-sonnet-4-20250514"
+
+# Tool definitions for Claude API
+TOOLS = [
+    {
+        "name": "inspect_repository",
+        "description": (
+            "Analyze a repository's contents to detect application characteristics. "
+            "Only file:// URLs are supported (e.g., file:///path/to/repo). "
+            "Returns framework, language, Dockerfile info, suggested port, health path, "
+            "detected database, and required environment variables."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "repo_url": {
+                    "type": "string",
+                    "description": (
+                        "Repository URL. Only file:// URLs supported. "
+                        "Example: file:///app/deployable_repos/flask-app"
+                    ),
+                },
+                "branch": {
+                    "type": "string",
+                    "description": "Branch to analyze (currently ignored for file:// URLs)",
+                },
+            },
+            "required": ["repo_url", "branch"],
+        },
+    },
+]
+
+
+def _execute_tool(tool_name: str, tool_input: dict) -> str:
+    """
+    Execute a tool and return the result as a string.
+
+    Args:
+        tool_name: Name of the tool to execute.
+        tool_input: Input parameters for the tool.
+
+    Returns:
+        JSON string with the tool result.
+
+    Raises:
+        ValueError: If tool is unknown.
+    """
+    if tool_name == "inspect_repository":
+        result = inspect_repository(
+            repo_url=tool_input["repo_url"],
+            branch=tool_input["branch"],
+        )
+        return json.dumps(result.to_dict(), indent=2)
+    else:
+        raise ValueError(f"Unknown tool: {tool_name}")
 
 
 def _load_system_prompt() -> str:
@@ -89,8 +146,8 @@ def process_conversation(conversation: "Conversation") -> "Message":
 
     This is the main entry point for the agent. It:
     1. Loads the conversation history
-    2. Sends it to Claude with the system prompt
-    3. Handles the response (including any tool calls)
+    2. Sends it to Claude with the system prompt and tools
+    3. Handles tool calls in a loop until Claude gives a final response
     4. Saves the agent response to the database
     5. Returns the created Message
 
@@ -98,7 +155,7 @@ def process_conversation(conversation: "Conversation") -> "Message":
         conversation: The Conversation to process.
 
     Returns:
-        The Message created by the agent.
+        The final Message created by the agent.
 
     Raises:
         ValueError: If the conversation has no user messages.
@@ -107,9 +164,9 @@ def process_conversation(conversation: "Conversation") -> "Message":
     from devopshero_app.models import Message
 
     # Load conversation history
-    history = _load_conversation_history(conversation)
+    messages = _load_conversation_history(conversation)
 
-    if not history:
+    if not messages:
         raise ValueError("Conversation has no messages to process")
 
     # Get Claude client
@@ -118,23 +175,82 @@ def process_conversation(conversation: "Conversation") -> "Message":
     # Load system prompt
     system_prompt = _load_system_prompt()
 
-    # Call Claude
-    response = anthropic_client.messages.create(
-        model=DEFAULT_MODEL,
-        max_tokens=4096,
-        system=system_prompt,
-        messages=history,
-    )
+    # Track total usage across turns
+    total_input_tokens = 0
+    total_output_tokens = 0
+
+    # Tool execution loop
+    max_iterations = 10  # Prevent infinite loops
+    iteration = 0
+
+    while iteration < max_iterations:
+        iteration += 1
+
+        # Call Claude with tools
+        response = anthropic_client.messages.create(
+            model=DEFAULT_MODEL,
+            max_tokens=4096,
+            system=system_prompt,
+            messages=messages,
+            tools=TOOLS,
+        )
+
+        # Track usage
+        total_input_tokens += response.usage.input_tokens
+        total_output_tokens += response.usage.output_tokens
+
+        # Check if Claude wants to use tools
+        if response.stop_reason == "tool_use":
+            # Process tool calls
+            tool_results = []
+
+            for block in response.content:
+                if block.type == "tool_use":
+                    tool_name = block.name
+                    tool_input = block.input
+                    tool_id = block.id
+
+                    # Execute the tool
+                    try:
+                        result = _execute_tool(tool_name, tool_input)
+                        tool_results.append({
+                            "type": "tool_result",
+                            "tool_use_id": tool_id,
+                            "content": result,
+                        })
+                    except Exception as e:
+                        tool_results.append({
+                            "type": "tool_result",
+                            "tool_use_id": tool_id,
+                            "content": f"Error executing tool: {str(e)}",
+                            "is_error": True,
+                        })
+
+            # Add assistant message with tool use to history
+            messages.append({
+                "role": "assistant",
+                "content": response.content,
+            })
+
+            # Add tool results to history
+            messages.append({
+                "role": "user",
+                "content": tool_results,
+            })
+
+            # Continue the loop to get Claude's response to the tool results
+            continue
+
+        # No more tool calls - extract the final response
+        break
 
     # Extract the text response
-    # For now, we assume a simple text response (no tool calls yet)
     response_text = ""
     for block in response.content:
         if block.type == "text":
             response_text += block.text
 
     # Determine content type based on response
-    # For now, default to markdown since Claude often uses formatting
     content_type = Message.ContentType.MARKDOWN
 
     # Save agent response to database
@@ -146,10 +262,11 @@ def process_conversation(conversation: "Conversation") -> "Message":
         metadata={
             "model": DEFAULT_MODEL,
             "usage": {
-                "input_tokens": response.usage.input_tokens,
-                "output_tokens": response.usage.output_tokens,
+                "input_tokens": total_input_tokens,
+                "output_tokens": total_output_tokens,
             },
             "stop_reason": response.stop_reason,
+            "tool_iterations": iteration,
         },
     )
 
