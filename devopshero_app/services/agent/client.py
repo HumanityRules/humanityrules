@@ -1,7 +1,8 @@
 """
-Anthropic Bedrock client for the deployment agent.
+Claude client for the deployment agent.
 
-This module provides access to Claude via AWS Bedrock.
+Supports both direct Anthropic API and AWS Bedrock.
+Priority: ANTHROPIC_API_KEY > Bedrock (us-east-1 default)
 """
 
 from django.conf import settings
@@ -9,38 +10,48 @@ from django.conf import settings
 import anthropic
 
 
-def get_client() -> anthropic.AnthropicBedrock:
-    """
-    Get an Anthropic Bedrock client instance.
+def _use_anthropic_api() -> bool:
+    """Check if we should use the direct Anthropic API."""
+    return bool(getattr(settings, "ANTHROPIC_API_KEY", None))
 
-    Uses AWS credentials from environment/CLI automatically.
+
+def get_client() -> anthropic.Anthropic | anthropic.AnthropicBedrock:
+    """
+    Get a Claude client instance.
+
+    Uses direct Anthropic API if ANTHROPIC_API_KEY is set,
+    otherwise falls back to AWS Bedrock.
 
     Returns:
-        Configured AnthropicBedrock client.
+        Configured Anthropic or AnthropicBedrock client.
     """
-    return anthropic.AnthropicBedrock(
-        aws_region=settings.AWS_BEDROCK_REGION,
-    )
+    if _use_anthropic_api():
+        return anthropic.Anthropic(api_key=settings.ANTHROPIC_API_KEY)
+
+    # Fall back to Bedrock
+    region = getattr(settings, "AWS_BEDROCK_REGION", "us-east-1")
+    return anthropic.AnthropicBedrock(aws_region=region)
 
 
-def verify_connection() -> bool:
+def get_model_id() -> str:
     """
-    Verify that the Bedrock API connection works.
-
-    Makes a minimal API call to verify credentials are valid.
+    Get the appropriate model ID for the current backend.
 
     Returns:
-        True if connection is successful.
-
-    Raises:
-        botocore.exceptions.ClientError: If AWS credentials are invalid.
+        Model ID string (different format for API vs Bedrock).
     """
-    client = get_client()
-    # Make a minimal request to verify the connection works
-    # Using a tiny max_tokens to minimize cost
-    response = client.messages.create(
-        model="anthropic.claude-opus-4-5-20251101-v1:0",
-        max_tokens=10,
-        messages=[{"role": "user", "content": "Hi"}],
-    )
-    return response.content is not None
+    if _use_anthropic_api():
+        return "claude-opus-4-5-20251101"
+
+    return "anthropic.claude-opus-4-5-20251101-v1:0"
+
+
+def is_available() -> bool:
+    """
+    Check if the agent is available (either API key or Bedrock configured).
+
+    Returns:
+        True if agent can be used.
+    """
+    # Always available - Bedrock is the fallback with default region
+    return True

@@ -1,9 +1,7 @@
-import json
 import logging
 import threading
 import time
 
-from django.conf import settings
 from django.contrib.auth.decorators import login_required
 from django.db import close_old_connections
 from django.http import HttpResponse, StreamingHttpResponse
@@ -12,6 +10,7 @@ from django.template.loader import render_to_string
 from django.views.decorators.http import require_POST
 
 from ..models import Conversation, Message
+from ..services.agent import client as agent_client
 from ..services.agent import process_conversation
 from .base import get_app_shell_context
 
@@ -136,8 +135,8 @@ def chat_send(request, conversation_id):
         request=request,
     )
 
-    # Start agent processing in background (if Bedrock is configured)
-    if settings.AWS_BEDROCK_REGION:
+    # Start agent processing in background
+    if agent_client.is_available():
         thread = threading.Thread(
             target=_process_agent_in_background,
             args=(str(conversation_id),),

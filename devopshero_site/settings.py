@@ -143,5 +143,7 @@ WORKOS_API_KEY = os.environ.get("WORKOS_API_KEY")
 # DevOpsHero API Configuration
 DOH_API_SECRET_KEY = os.environ.get("DOH_API_SECRET_KEY")
 
-# AWS Bedrock Configuration (for Claude agent)
+# Claude Agent Configuration
+# Priority: ANTHROPIC_API_KEY (if set) > AWS Bedrock (fallback)
+ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY")
 AWS_BEDROCK_REGION = os.environ.get("AWS_BEDROCK_REGION", "us-east-1")
