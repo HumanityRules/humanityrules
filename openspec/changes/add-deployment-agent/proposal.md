@@ -14,7 +14,8 @@ DevOps Hero has a working deployment engine (`infra_customer/`) but no way for u
 
 **Out of Scope (v1):**
 - Connecting agent to existing `infra_customer/` deployment engine (tools will create records but not trigger real infrastructure)
-- Git URL support (cloning from GitHub, etc.) - only local `file:///` paths supported
+- Git URL support (cloning from GitHub, etc.) - only local `file://` URLs supported
+- Mobile responsive chat UI
 
 ## Impact
 
