@@ -24,8 +24,7 @@ This specification defines the AI-powered deployment agent that sits at the cent
 - Create an AI agent that guides users through the deployment process via natural conversation
 - Integrate with Claude Agents SDK for robust agent orchestration
 - Provide a beautiful, real-time chat interface using HTMX
-- Connect the agent to the existing deployment infrastructure
-- Enable end-to-end deployment from git URL to live application in minutes
+- Build the data model and agent tools for deployment workflows
 - Support progressive disclosure: simple deployments are simple, complex configs are available when needed
 
 ## Non-Goals
@@ -35,6 +34,7 @@ This specification defines the AI-powered deployment agent that sits at the cent
 - Multi-agent collaboration in v1
 - Voice interface
 - Mobile-native experience (responsive web is sufficient)
+- **Connecting to existing `infra_customer/` deployment engine in v1** (tools create records but don't trigger real infrastructure)
 
 ## Architecture Overview
 
@@ -57,8 +57,8 @@ This specification defines the AI-powered deployment agent that sits at the cent
 ┌─────────────────────────────────────────────────────────────────────────┐
 │                         Django Backend                                   │
 │  ┌─────────────────┐    ┌─────────────────┐    ┌─────────────────────┐  │
-│  │   Chat Views    │───▶│  Agent Service  │───▶│  Deployment Engine  │  │
-│  │   (HTMX)        │    │  (Claude SDK)   │    │  (infra_customer/)  │  │
+│  │   Chat Views    │───▶│  Agent Service  │    │  Deployment Engine  │  │
+│  │   (HTMX)        │    │  (Claude SDK)   │    │  (future v2)        │  │
 │  └─────────────────┘    └─────────────────┘    └─────────────────────┘  │
 │           │                     │                        │              │
 │           ▼                     ▼                        ▼              │
@@ -83,8 +83,7 @@ This specification defines the AI-powered deployment agent that sits at the cent
 ### FR-1: Conversation Management
 - FR-1.1: Users can start new conversations from the dashboard
 - FR-1.2: Conversations persist across sessions and can be resumed
-- FR-1.3: Each conversation has a clear purpose (deploy app, add database, troubleshoot, etc.)
-- FR-1.4: Users can view conversation history organized by workspace
+- FR-1.3: Users can view conversation history organized by workspace
 
 ### FR-2: Agent Capabilities
 - FR-2.1: Agent can inspect git repositories to detect app type and configuration
@@ -124,13 +123,6 @@ This specification defines the AI-powered deployment agent that sits at the cent
 class Conversation(models.Model):
     """A conversation between a user and the agent."""
 
-    class Purpose(models.TextChoices):
-        DEPLOY_APP = "deploy_app", "Deploy Application"
-        ADD_DATABASE = "add_database", "Add Database"
-        TROUBLESHOOT = "troubleshoot", "Troubleshoot"
-        MODIFY_APP = "modify_app", "Modify Application"
-        GENERAL = "general", "General Inquiry"
-
     class Status(models.TextChoices):
         ACTIVE = "active", "Active"
         COMPLETED = "completed", "Completed"
@@ -140,7 +132,6 @@ class Conversation(models.Model):
     user: ForeignKey(User)
     organization: ForeignKey(Organization)
     workspace: ForeignKey(Workspace, nullable)  # Set once workspace is determined
-    purpose: CharField(choices=Purpose)
     status: CharField(choices=Status)
     title: CharField  # Auto-generated from first message or agent summary
     created_at: DateTimeField
@@ -479,7 +470,7 @@ def create_datastore(
 ```
 
 #### `deploy_app`
-Triggers a deployment of an app.
+Creates a deployment record (stubbed in v1, does not trigger real infrastructure).
 
 ```python
 @tool
@@ -488,9 +479,14 @@ def deploy_app(
     git_ref: str = "main",
 ) -> Deployment:
     """
-    Deploy an app to its workspace's infrastructure.
+    Create a deployment record for an app.
 
-    This triggers:
+    In v1 (stubbed):
+    - Creates Deployment record with status "pending"
+    - Simulates progress for demo purposes
+    - Does NOT trigger real infrastructure
+
+    Future v2 will trigger:
     1. Docker image build
     2. ECR push
     3. CDK infrastructure deployment
@@ -547,6 +543,8 @@ def ask_user(
 ```
 
 ### Agent System Prompt
+
+The system prompt is loaded from disk (`devopshero_app/services/agent/system_prompt.md`) to allow easy iteration during development.
 
 ```
 You are the DevOps Hero deployment assistant. Your role is to help users deploy
@@ -821,7 +819,7 @@ def message_stream(request, conversation_id):
 
 ```
 1. User clicks "New Deployment" on dashboard
-   → Creates new Conversation(purpose=DEPLOY_APP)
+   → Creates new Conversation
    → Redirects to /chat/{conversation_id}/
 
 2. Agent: "Hi! I'm here to help you deploy. What would you like to deploy today?

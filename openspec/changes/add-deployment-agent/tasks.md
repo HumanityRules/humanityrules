@@ -24,10 +24,9 @@
 - [ ] 3.1 Implement `create_workspace` tool
 - [ ] 3.2 Implement `create_app` tool
 - [ ] 3.3 Implement `create_datastore` tool
-- [ ] 3.4 Implement `deploy_app` tool with background task execution
+- [ ] 3.4 Implement `deploy_app` tool (stubbed - creates records, simulates progress, no real infrastructure)
 - [ ] 3.5 Implement `get_deployment_status` tool
-- [ ] 3.6 Create deployment log streaming to chat via SSE
-- [ ] 3.7 Build progress indicator rendering with phase tracking
+- [ ] 3.6 Build progress indicator rendering with phase tracking
 
 ## Phase 4: Polish
 
@@ -36,4 +35,3 @@
 - [ ] 4.3 Add interactive choice buttons with HTMX actions
 - [ ] 4.4 Make chat UI mobile responsive
 - [ ] 4.5 Write end-to-end tests for critical flows
-- [ ] 4.6 Add agent webhook endpoints for deployment callbacks
