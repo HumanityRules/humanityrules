@@ -1,9 +1,11 @@
 import json
 import logging
+import threading
 import time
 
 from django.conf import settings
 from django.contrib.auth.decorators import login_required
+from django.db import close_old_connections
 from django.http import HttpResponse, StreamingHttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.template.loader import render_to_string
@@ -14,6 +16,35 @@ from ..services.agent import process_conversation
 from .base import get_app_shell_context
 
 logger = logging.getLogger(__name__)
+
+
+def _process_agent_in_background(conversation_id: str):
+    """
+    Process agent response in a background thread.
+
+    This function runs in a separate thread to avoid blocking the request.
+    The agent response is saved to the database and picked up by SSE.
+    """
+    try:
+        # Need to close old connections when running in a new thread
+        close_old_connections()
+
+        conversation = Conversation.objects.get(id=conversation_id)
+        process_conversation(conversation)
+    except Exception as e:
+        logger.exception("Background agent processing failed")
+        try:
+            # Try to save an error message
+            conversation = Conversation.objects.get(id=conversation_id)
+            Message.objects.create(
+                conversation=conversation,
+                role=Message.Role.SYSTEM,
+                content_type=Message.ContentType.ERROR,
+                content=f"Agent error: {str(e)}",
+                metadata={"error_type": type(e).__name__},
+            )
+        except Exception:
+            logger.exception("Failed to save error message")
 
 
 @login_required
@@ -71,7 +102,7 @@ def chat_view(request, conversation_id):
 @login_required
 @require_POST
 def chat_send(request, conversation_id):
-    """Send a message in a conversation and get agent response."""
+    """Send a message in a conversation and trigger agent response."""
     conversation = get_object_or_404(
         Conversation,
         id=conversation_id,
@@ -105,36 +136,25 @@ def chat_send(request, conversation_id):
         request=request,
     )
 
-    # Process with agent (if API key is configured)
-    agent_html = ""
+    # Start agent processing in background (if API key is configured)
     if settings.ANTHROPIC_API_KEY:
-        try:
-            agent_message = process_conversation(conversation)
-            context["message"] = agent_message
-            agent_html = render_to_string(
-                "devopshero_app/partials/chat/_message.html",
-                context=context,
-                request=request,
-            )
-        except Exception as e:
-            logger.exception("Agent processing failed")
-            # Create error message
-            error_message = Message.objects.create(
-                conversation=conversation,
-                role=Message.Role.SYSTEM,
-                content_type=Message.ContentType.ERROR,
-                content=f"Agent error: {str(e)}",
-                metadata={"error_type": type(e).__name__},
-            )
-            context["message"] = error_message
-            agent_html = render_to_string(
-                "devopshero_app/partials/chat/_message.html",
-                context=context,
-                request=request,
-            )
+        thread = threading.Thread(
+            target=_process_agent_in_background,
+            args=(str(conversation_id),),
+            daemon=True,
+        )
+        thread.start()
 
-    # Return both user message and agent response
-    return HttpResponse(user_html + agent_html)
+        # Include typing indicator that will be shown until agent responds
+        typing_html = render_to_string(
+            "devopshero_app/partials/chat/_typing_indicator.html",
+            context={"conversation_id": conversation_id},
+            request=request,
+        )
+        return HttpResponse(user_html + typing_html)
+
+    # No API key configured - just return user message
+    return HttpResponse(user_html)
 
 
 @login_required
@@ -149,14 +169,15 @@ def chat_stream(request, conversation_id):
 
     def event_generator():
         """Generate SSE events for new messages."""
-        last_message_id = request.GET.get("last_id")
-
         # Get initial set of message IDs to track what's new
         seen_ids = set(
             conversation.messages.values_list("id", flat=True)
         )
 
         while True:
+            # Refresh from database
+            conversation.refresh_from_db()
+
             # Check for new messages
             new_messages = conversation.messages.exclude(
                 id__in=seen_ids
@@ -173,8 +194,14 @@ def chat_stream(request, conversation_id):
                     request=request,
                 )
 
-                # Send SSE event
-                yield f"event: message\ndata: {html}\n\n"
+                # If this is an agent or system message, also remove the typing indicator
+                # We do this by wrapping the message with an OOB swap to remove typing-indicator
+                if message.role in (Message.Role.AGENT, Message.Role.SYSTEM):
+                    # Send event to remove typing indicator and add message
+                    remove_typing = '<div id="typing-indicator" hx-swap-oob="delete"></div>'
+                    yield f"event: message\ndata: {html}{remove_typing}\n\n"
+                else:
+                    yield f"event: message\ndata: {html}\n\n"
 
             # Sleep before checking again
             time.sleep(1)
