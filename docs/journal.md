@@ -4,6 +4,71 @@
 > - Entries are in reverse chronological order (latest on top). Use format: `## YYYY-MM-DD HH:MM - Title`
 > - Avoid markdown tables — they render poorly. Use bulleted lists with bold labels instead.
 
+## 2026-01-10 - HTMX Sidebar Optimization & History Navigation Fix
+
+Fixed two issues with the HTMX-based SPA navigation.
+
+### Problem 1: Wasteful Sidebar OOB Updates
+
+Every page navigation was sending the **entire sidebar HTML twice** (mobile + desktop) via HTMX out-of-band swaps — roughly 2-3KB per click — just to update which nav item has the "active" highlight class.
+
+**Before:** Each page template included `_sidebar_oob.html`:
+```html
+<div id="sidebar-nav-desktop" hx-swap-oob="true">{% include "_sidebar_nav.html" %}</div>
+<div id="sidebar-nav-mobile" hx-swap-oob="true">{% include "_sidebar_nav.html" %}</div>
+```
+
+**After:** Removed all OOB includes. Added 10 lines of client-side JS that updates nav highlighting based on `location.pathname`:
+```javascript
+function updateNavHighlight() {
+    document.querySelectorAll('.nav-link').forEach(link => {
+        const isActive = location.pathname.startsWith(link.dataset.navUrl);
+        link.classList.toggle('bg-white/5', isActive);
+        link.classList.toggle('text-white', isActive);
+        link.classList.toggle('text-gray-400', !isActive);
+    });
+}
+document.body.addEventListener('htmx:pushedIntoHistory', updateNavHighlight);
+window.addEventListener('popstate', updateNavHighlight);
+```
+
+The server-side `is_active` logic remains for the initial page render; JS only handles subsequent HTMX navigations.
+
+### Problem 2: Browser Back/Forward Didn't Work
+
+Clicking links worked, but the browser back/forward buttons did nothing — content didn't restore and nav highlighting didn't update.
+
+**Root cause:** This is an SPA-style app where only `#main-content` changes. By default, HTMX tries to snapshot/restore the entire `<body>` for history navigation, which doesn't work well for shell-based layouts.
+
+**Fix:** Added `hx-history-elt` to the main content div:
+```html
+<div id="main-content"
+     hx-history-elt
+     hx-get="{{ content_url }}"
+     hx-trigger="load"
+     hx-swap="innerHTML">
+```
+
+This tells HTMX: "This element is the page content. Snapshot and restore just this element for history navigation."
+
+Also added `popstate` listener (see JS above) so nav highlighting updates on back/forward.
+
+### Key Insight
+
+HTMX history has two parts:
+- **`hx-push-url`** — pushes URL to browser history (we had this)
+- **`hx-history-elt`** — tells HTMX which element to snapshot/restore (we were missing this)
+
+Without `hx-history-elt`, HTMX doesn't know what content represents the "page" in a shell-based SPA.
+
+**Files changed:**
+- `app_shell.html` — added `hx-history-elt` to `#main-content`
+- `partials/_sidebar_nav.html` — added client-side nav highlighting JS
+- Removed `partials/_sidebar_oob.html`
+- Removed `{% include "_sidebar_oob.html" %}` from 8 page templates
+
+---
+
 ## 2026-01-10 - Claude Agent Backend Configuration
 
 The deployment agent supports two Claude backends with automatic selection:
