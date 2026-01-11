@@ -501,6 +501,9 @@
   .h-16 {
     height: calc(var(--spacing) * 16);
   }
+  .h-\[calc\(100vh-9rem\)\] {
+    height: calc(100vh - 9rem);
+  }
   .h-full {
     height: 100%;
   }
@@ -509,9 +512,6 @@
   }
   .max-h-60 {
     max-height: calc(var(--spacing) * 60);
-  }
-  .max-h-\[calc\(100vh-8rem\)\] {
-    max-height: calc(100vh - 8rem);
   }
   .min-h-full {
     min-height: 100%;
@@ -2382,11 +2382,11 @@
   view-transition-name: main-content;
 }
 ::view-transition-old(main-content) {
-  animation: fade-out 60ms ease-out forwards;
+  animation: fade-out 20ms ease-out forwards;
 }
 ::view-transition-new(main-content) {
-  animation: fade-in 60ms ease-in forwards;
-  animation-delay: 60ms;
+  animation: fade-in 20ms ease-in forwards;
+  animation-delay: 20ms;
   opacity: 0;
 }
 @keyframes fade-out {
@@ -2412,6 +2412,20 @@ el-options[popover] {
   position-anchor: --select-anchor;
   width: 15rem;
   width: anchor-size(width);
+}
+#messages-container {
+  scrollbar-width: auto;
+  scrollbar-color: rgb(55 65 81) transparent;
+}
+#messages-container::-webkit-scrollbar {
+  width: 12px;
+}
+#messages-container::-webkit-scrollbar-track {
+  background: transparent;
+}
+#messages-container::-webkit-scrollbar-thumb {
+  background-color: rgb(55 65 81);
+  border-radius: 6px;
 }
 @property --tw-rotate-x {
   syntax: "*";

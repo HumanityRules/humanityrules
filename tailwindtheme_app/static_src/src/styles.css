@@ -18,12 +18,12 @@
 
 /* Fade out old content first, then fade in new content */
 ::view-transition-old(main-content) {
-  animation: fade-out 60ms ease-out forwards;
+  animation: fade-out 20ms ease-out forwards;
 }
 
 ::view-transition-new(main-content) {
-  animation: fade-in 60ms ease-in forwards;
-  animation-delay: 60ms;
+  animation: fade-in 20ms ease-in forwards;
+  animation-delay: 20ms;
   opacity: 0;
 }
 
@@ -47,4 +47,23 @@ el-options[popover] {
   /* Use anchor-size where supported, with fallback */
   width: 15rem;
   width: anchor-size(width);
+}
+
+/* Dark scrollbar for chat messages container */
+#messages-container {
+  scrollbar-width: auto; /* 'thin' or 'auto' (auto = wider) */
+  scrollbar-color: rgb(55 65 81) transparent; /* gray-700 thumb, transparent track */
+}
+
+#messages-container::-webkit-scrollbar {
+  width: 12px;
+}
+
+#messages-container::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+#messages-container::-webkit-scrollbar-thumb {
+  background-color: rgb(55 65 81); /* gray-700 */
+  border-radius: 6px;
 }
