@@ -198,9 +198,9 @@ def chat_stream(request, conversation_id):
                 if message.role in (Message.Role.AGENT, Message.Role.SYSTEM):
                     # Send event to remove typing indicator and add message
                     remove_typing = '<div id="typing-indicator" hx-swap-oob="delete"></div>'
-                    yield f"event: message\ndata: {html}{remove_typing}\n\n"
+                    yield f"event: new-chat-message\ndata: {html}{remove_typing}\n\n"
                 else:
-                    yield f"event: message\ndata: {html}\n\n"
+                    yield f"event: new-chat-message\ndata: {html}\n\n"
 
             # Sleep before checking again
             time.sleep(1)

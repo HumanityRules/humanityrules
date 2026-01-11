@@ -29,7 +29,7 @@
          class="flex-1 overflow-y-auto p-4 space-y-4"
          hx-ext="sse"
          sse-connect="{% url 'chat_stream' conversation_id=conversation.id %}"
-         sse-swap="message"
+         sse-swap="new-chat-message"
          hx-swap="beforeend">
 
         {# Existing messages #}
