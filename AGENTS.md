@@ -47,6 +47,9 @@ The main developer documentation lives in the docs/ subdirectory. **When creatin
 
 **OpenSpec specifications** live in `openspec/specs/`. Run `openspec list --specs` to see all capabilities. Pending changes (including design docs) are in `openspec/changes/`.
 
+**Subsystem AGENTS.md files:**
+- **`devopshero_app/views/AGENTS.md`** — HTMX navigation paradigm, view patterns, adding pages
+
 
 # Django 6.0 Template Partials
 
@@ -56,193 +59,38 @@ The main developer documentation lives in the docs/ subdirectory. **When creatin
 - **External template:** `{% include "path/to/template.html#partial_name" with foo=bar %}`
 
 
-# HTMX Navigation Paradigm
+# Django 6.0 Async ORM
 
-We use htmx for SPA-like navigation without writing JavaScript. The server owns all UI state.
+**Use native async ORM methods instead of `sync_to_async`.** Django 6.0 has full async ORM support — don't wrap sync methods.
 
-## Architecture Overview
+- **Queries:** Use `await queryset.afirst()`, `await queryset.aget()`, `await queryset.acount()`, etc.
+- **Create/Update:** Use `await Model.objects.acreate(...)`, `await instance.asave()`, `await instance.adelete()`
+- **Iteration:** Use `async for obj in queryset:` instead of wrapping sync iteration
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│  app_shell.html (static frame)                              │
-│  ┌──────────────┐  ┌─────────────────────────────────────┐  │
-│  │ Sidebar      │  │ #main-content                       │  │
-│  │ (nav links)  │  │                                     │  │
-│  │              │  │  ← htmx swaps content here          │  │
-│  │ #sidebar-nav │  │                                     │  │
-│  │ -desktop     │  │                                     │  │
-│  │ -mobile      │  │                                     │  │
-│  └──────────────┘  └─────────────────────────────────────┘  │
-└─────────────────────────────────────────────────────────────┘
-```
-
-## Key Concepts
-
-1. **App Shell Pattern**: `app_shell.html` is the outer frame with sidebar and header. Content loads into `#main-content` via htmx.
-
-2. **Out-of-Band Swaps**: When navigating, the server returns both the page content AND updated sidebar elements with `hx-swap-oob="true"`. This keeps the sidebar active state in sync without JavaScript.
-
-3. **Server-Owned State**: Active nav states are determined by Django template conditionals (`{% if item.is_active %}`), not client-side JavaScript.
-
-## Adding a New Top-Level Page
-
-### Step 1: Add to navigation_items in `views.py`
-
+**Bad (outdated pattern):**
 ```python
-# In get_app_shell_context()
-navigation_items = [
-    {"name": "Dashboard", "url": "/dashboard/", "icon": "dashboard", "is_active": current_page == "dashboard"},
-    # ... existing items ...
-    {"name": "NewPage", "url": "/newpage/", "icon": "newpage", "is_active": current_page == "newpage"},
-]
+from asgiref.sync import sync_to_async
+
+async def get_user(user_id):
+    return await sync_to_async(User.objects.get)(id=user_id)
+
+async def save_item(item):
+    await sync_to_async(item.save)()
 ```
 
-### Step 2: Create the view in `views.py`
-
+**Good (Django 6.0):**
 ```python
-@login_required
-def newpage(request):
-    if request.htmx:
-        context = get_app_shell_context(current_page="newpage")
-        return render(request, "devopshero_app/newpage.html", context=context)
+async def get_user(user_id):
+    return await User.objects.aget(id=user_id)
 
-    context = get_app_shell_context(current_page="newpage")
-    context["content_url"] = "/newpage/"
-    return render(request, "devopshero_app/app_shell.html", context=context)
+async def save_item(item):
+    await item.asave()
 ```
 
-### Step 3: Create the template `templates/devopshero_app/newpage.html`
-
-```html
-<div class="max-w-2xl">
-    <h1 class="text-2xl font-bold text-gray-900 dark:text-white mb-4">New Page</h1>
-    <p class="text-gray-600 dark:text-gray-400">Content here.</p>
-</div>
-
-{% include "devopshero_app/partials/_sidebar_oob.html" %}
-```
-
-**Important**: Always include `_sidebar_oob.html` at the end — this enables the out-of-band sidebar update.
-
-### Step 4: Add the icon `templates/devopshero_app/partials/icons/newpage.html`
-
-Create an SVG icon file for the sidebar.
-
-### Step 5: Add URL route in `urls.py`
-
-```python
-path("newpage/", views.newpage, name="newpage"),
-```
-
-## Adding Nested Pages (like Settings subsections)
-
-For pages with their own sub-navigation (tabs):
-
-### Step 1: Create base template with tab nav (e.g., `settings.html`)
-
-```html
-<div class="max-w-4xl">
-    <h1 class="text-2xl font-bold mb-6">Settings</h1>
-    
-    <!-- Tab Navigation -->
-    <div class="flex h-12 border-b border-gray-200 dark:border-white/10">
-        <div class="flex space-x-8">
-            <a href="/settings/organization/"
-               hx-get="/settings/organization/"
-               hx-target="#main-content"
-               hx-swap="innerHTML"
-               hx-push-url="true"
-               class="inline-flex items-center border-b-2 px-1 pt-1 text-sm font-medium
-                      {% if active_tab == 'organization' %}border-indigo-600 text-gray-900{% else %}border-transparent text-gray-500 hover:border-gray-300{% endif %}">
-                Organization
-            </a>
-            <!-- More tabs... -->
-        </div>
-    </div>
-
-    <!-- Content block for subsections -->
-    <div class="mt-6">
-        {% block settings_content %}{% endblock %}
-    </div>
-</div>
-
-{% include "devopshero_app/partials/_sidebar_oob.html" %}
-```
-
-### Step 2: Create subsection templates that extend the base
-
-```html
-{% extends "devopshero_app/settings.html" %}
-
-{% block settings_content %}
-<div>
-    <h2 class="text-lg font-semibold">Organization Settings</h2>
-    <!-- Subsection content -->
-</div>
-{% endblock %}
-```
-
-### Step 3: Create views for each subsection
-
-```python
-@login_required
-def settings_organization(request):
-    context = get_app_shell_context(current_page="settings")
-    context["active_tab"] = "organization"
-    
-    if request.htmx:
-        return render(request, "devopshero_app/settings/organization.html", context=context)
-    
-    context["content_url"] = "/settings/organization/"
-    return render(request, "devopshero_app/app_shell.html", context=context)
-```
-
-**Key points:**
-- `current_page="settings"` keeps the sidebar Settings item active
-- `active_tab="organization"` controls which tab is highlighted
-- Subsection templates extend the parent, so the whole settings section (nav + content) is returned
-- `hx-target="#main-content"` means tab clicks replace the entire settings section, re-rendering the tab nav with correct active states
-
-## File Structure
-
-```
-templates/devopshero_app/
-├── app_shell.html              # Main layout with sidebar
-├── dashboard.html              # Top-level page
-├── workspaces.html             # Top-level page
-├── settings.html               # Page with sub-navigation
-├── settings/                   # Subsection templates
-│   ├── organization.html       # Extends settings.html
-│   ├── members.html
-│   ├── aws_accounts.html
-│   └── billing.html
-└── partials/
-    ├── _sidebar_nav.html       # Sidebar navigation content
-    ├── _sidebar_oob.html       # OOB wrapper for htmx updates
-    └── icons/                  # SVG icons for nav items
-```
-
-## Why This Works
-
-1. **No JavaScript for nav state**: The server renders the correct active states every time.
-2. **Browser history works**: `hx-push-url="true"` updates the URL, so back/forward work correctly.
-3. **Direct URL access works**: Views handle both htmx requests (return partial) and full page loads (return app_shell with content_url).
-4. **DRY**: Subsection templates extend their parent, so tab navigation is defined once.
+The `a`-prefixed methods are native async and don't require `sync_to_async` wrappers.
 
 
-# Authentication
-
-Authentication is handled by [WorkOS AuthKit](https://workos.com/docs/user-management). The flow:
-
-1. User visits any page → redirected to `/auth/login/`
-2. User clicks "Continue with WorkOS" → redirected to WorkOS hosted auth
-3. WorkOS authenticates user → redirects back to `/auth/callback/`
-4. Callback exchanges code for user info, creates/updates Django user, logs them in
-
-**Configuration:** Set `WORKOS_CLIENT_ID` and `WORKOS_API_KEY` in `.env`
-
-
-## Browser Debugging Login for LLMs
+## Browser Debugging Login for Agents
 
 When using browser tools to debug, log in via Django admin (`/admin/`) instead of the main login flow. WorkOS auth requires external redirects that don't work well with automated browser testing. Once authenticated through admin, click "View site" to access the app with an active session.
 
