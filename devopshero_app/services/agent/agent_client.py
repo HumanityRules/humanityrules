@@ -1,88 +1,21 @@
 """
-Claude client for the deployment agent.
+Configuration for the Claude Agent SDK.
 
-Supports both direct Anthropic API and AWS Bedrock.
-Priority: ANTHROPIC_API_KEY > AWS_BEDROCK_REGION
+The Claude Agent SDK uses the Claude Code CLI which handles
+authentication via the ANTHROPIC_API_KEY environment variable.
 """
 
-from django.conf import settings
-
-import anthropic
-
-
-def _use_anthropic_api() -> bool:
-    """Check if we should use the direct Anthropic API."""
-    return bool(getattr(settings, "ANTHROPIC_API_KEY", None))
-
-
-def _use_bedrock() -> bool:
-    """Check if we should use AWS Bedrock."""
-    return bool(getattr(settings, "AWS_BEDROCK_REGION", None))
-
-
-def get_client() -> anthropic.Anthropic | anthropic.AnthropicBedrock:
-    """
-    Get a Claude client instance.
-
-    Uses direct Anthropic API if ANTHROPIC_API_KEY is set,
-    otherwise uses AWS Bedrock if AWS_BEDROCK_REGION is set.
-
-    Bedrock credentials priority:
-    1. AWS_BEDROCK_ACCESS_KEY_ID + AWS_BEDROCK_SECRET_ACCESS_KEY (if set)
-    2. Default boto3 credential chain (AWS CLI, env vars, IAM role, etc.)
-
-    Returns:
-        Configured Anthropic or AnthropicBedrock client.
-
-    Raises:
-        ValueError: If neither backend is configured.
-    """
-    if _use_anthropic_api():
-        return anthropic.Anthropic(api_key=settings.ANTHROPIC_API_KEY)
-
-    if _use_bedrock():
-        # Check for Bedrock-specific credentials
-        access_key = getattr(settings, "AWS_BEDROCK_ACCESS_KEY_ID", None)
-        secret_key = getattr(settings, "AWS_BEDROCK_SECRET_ACCESS_KEY", None)
-
-        if access_key and secret_key:
-            # Use Bedrock-specific credentials
-            return anthropic.AnthropicBedrock(
-                aws_region=settings.AWS_BEDROCK_REGION,
-                aws_access_key=access_key,
-                aws_secret_key=secret_key,
-            )
-
-        # Fall back to default boto3 credential chain
-        return anthropic.AnthropicBedrock(
-            aws_region=settings.AWS_BEDROCK_REGION,
-        )
-
-    raise ValueError(
-        "No Claude backend configured. "
-        "Set ANTHROPIC_API_KEY or AWS_BEDROCK_REGION."
-    )
-
-
-def get_model_id() -> str:
-    """
-    Get the appropriate model ID for the current backend.
-
-    Returns:
-        Model ID string (different format for API vs Bedrock).
-    """
-    if _use_anthropic_api():
-        return "claude-sonnet-4-20250514"
-
-    # Bedrock requires inference profile ID (us. prefix) for on-demand throughput
-    return "us.anthropic.claude-sonnet-4-20250514-v1:0"
+import os
 
 
 def is_available() -> bool:
     """
-    Check if the agent is available (either API key or Bedrock configured).
+    Check if the Claude Agent SDK is available.
+
+    The SDK requires ANTHROPIC_API_KEY to be set in the environment.
+    The Claude Code CLI handles authentication automatically.
 
     Returns:
-        True if agent can be used.
+        True if agent can be used (API key is configured).
     """
-    return _use_anthropic_api() or _use_bedrock()
+    return bool(os.environ.get("ANTHROPIC_API_KEY"))
