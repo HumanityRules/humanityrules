@@ -355,6 +355,31 @@ def get_user(id: int) -> User:
 - Imports have side effects you need to avoid
 
 
+# File Naming Conventions
+
+**Avoid generic file names** like `service.py`, `client.py`, `list.html`, `view.html`. Use descriptive names that include the domain context.
+
+**Reasoning:** Generic names become ambiguous as the project grows. With 20 modules, having multiple `service.py` files makes navigation and searching difficult.
+
+**Bad:**
+```
+services/agent/service.py
+services/agent/client.py
+templates/chat/list.html
+templates/chat/view.html
+```
+
+**Good:**
+```
+services/agent/agent_service.py
+services/agent/agent_client.py
+templates/chat/chat_list.html
+templates/chat/chat_view.html
+```
+
+The prefix should match the containing folder or domain. This makes file names unique and self-documenting even when viewed in isolation (e.g., in editor tabs, search results, or stack traces).
+
+
 # Markdown formatting
 
 **Avoid markdown tables.** They render poorly in terminals and diffs. Use bulleted lists with bold labels instead.
