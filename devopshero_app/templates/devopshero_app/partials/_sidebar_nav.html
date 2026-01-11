@@ -48,3 +48,18 @@ Expected context:
   </ul>
 </nav>
 
+<script>
+// Guard: this template is included twice (mobile + desktop), but we only need one listener
+if (!window._navHighlightInit) {
+    window._navHighlightInit = true;
+    document.body.addEventListener('htmx:pushedIntoHistory', () => {
+        document.querySelectorAll('.nav-link').forEach(link => {
+            const isActive = location.pathname.startsWith(link.dataset.navUrl);
+            link.classList.toggle('bg-white/5', isActive);
+            link.classList.toggle('text-white', isActive);
+            link.classList.toggle('text-gray-400', !isActive);
+        });
+    });
+}
+</script>
+
