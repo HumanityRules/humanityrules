@@ -1,25 +1,25 @@
 {# Dispatches to appropriate content type partial based on message.content_type #}
 
 {% if message.content_type == 'text' %}
-    {% include "devopshero_app/partials/chat/_message_text.html" %}
+    {% include "devopshero_app/chat/_message_text.html" %}
 
 {% elif message.content_type == 'markdown' %}
-    {% include "devopshero_app/partials/chat/_message_markdown.html" %}
+    {% include "devopshero_app/chat/_message_markdown.html" %}
 
 {% elif message.content_type == 'code' %}
-    {% include "devopshero_app/partials/chat/_message_code.html" %}
+    {% include "devopshero_app/chat/_message_code.html" %}
 
 {% elif message.content_type == 'progress' %}
-    {% include "devopshero_app/partials/chat/_message_progress.html" %}
+    {% include "devopshero_app/chat/_message_progress.html" %}
 
 {% elif message.content_type == 'choice' %}
-    {% include "devopshero_app/partials/chat/_message_choice.html" %}
+    {% include "devopshero_app/chat/_message_choice.html" %}
 
 {% elif message.content_type == 'deployment_log' %}
-    {% include "devopshero_app/partials/chat/_message_deployment_log.html" %}
+    {% include "devopshero_app/chat/_message_deployment_log.html" %}
 
 {% elif message.content_type == 'error' %}
-    {% include "devopshero_app/partials/chat/_message_error.html" %}
+    {% include "devopshero_app/chat/_message_error.html" %}
 
 {% else %}
     {# Fallback for unknown content types #}

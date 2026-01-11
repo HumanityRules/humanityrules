@@ -130,7 +130,7 @@ def chat_send(request, conversation_id):
     # Render the user message
     context = {"message": user_message, "conversation_id": conversation_id}
     user_html = render_to_string(
-        "devopshero_app/partials/chat/_message.html",
+        "devopshero_app/chat/_message.html",
         context=context,
         request=request,
     )
@@ -146,7 +146,7 @@ def chat_send(request, conversation_id):
 
         # Include typing indicator that will be shown until agent responds
         typing_html = render_to_string(
-            "devopshero_app/partials/chat/_typing_indicator.html",
+            "devopshero_app/chat/_typing_indicator.html",
             context={"conversation_id": conversation_id},
             request=request,
         )
@@ -188,7 +188,7 @@ def chat_stream(request, conversation_id):
                 # Render message partial
                 context = {"message": message, "conversation_id": conversation_id}
                 html = render_to_string(
-                    "devopshero_app/partials/chat/_message.html",
+                    "devopshero_app/chat/_message.html",
                     context=context,
                     request=request,
                 )
@@ -238,7 +238,7 @@ def chat_messages(request, conversation_id):
         context["message"] = message
         html_parts.append(
             render_to_string(
-                "devopshero_app/partials/chat/_message.html",
+                "devopshero_app/chat/_message.html",
                 context=context,
                 request=request,
             )
