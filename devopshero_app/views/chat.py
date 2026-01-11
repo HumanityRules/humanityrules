@@ -135,6 +135,9 @@ def chat_send(request, conversation_id):
         request=request,
     )
 
+    # OOB delete the empty chat placeholder (if present)
+    remove_placeholder = '<div id="empty-chat-placeholder" hx-swap-oob="delete"></div>'
+
     # Start agent processing in background
     if agent_client.is_available():
         thread = threading.Thread(
@@ -150,10 +153,10 @@ def chat_send(request, conversation_id):
             context={"conversation_id": conversation_id},
             request=request,
         )
-        return HttpResponse(user_html + typing_html)
+        return HttpResponse(user_html + typing_html + remove_placeholder)
 
     # No API key configured - just return user message
-    return HttpResponse(user_html)
+    return HttpResponse(user_html + remove_placeholder)
 
 
 @login_required
@@ -185,6 +188,10 @@ def chat_stream(request, conversation_id):
             for message in new_messages:
                 seen_ids.add(message.id)
 
+                # Skip user messages - they're already added by form submission
+                if message.role == Message.Role.USER:
+                    continue
+
                 # Render message partial
                 context = {"message": message, "conversation_id": conversation_id}
                 html = render_to_string(
@@ -192,15 +199,12 @@ def chat_stream(request, conversation_id):
                     context=context,
                     request=request,
                 )
+                # SSE requires single-line data, collapse newlines
+                html = html.replace("\n", "").strip()
 
-                # If this is an agent or system message, also remove the typing indicator
-                # We do this by wrapping the message with an OOB swap to remove typing-indicator
-                if message.role in (Message.Role.AGENT, Message.Role.SYSTEM):
-                    # Send event to remove typing indicator and add message
-                    remove_typing = '<div id="typing-indicator" hx-swap-oob="delete"></div>'
-                    yield f"event: new-chat-message\ndata: {html}{remove_typing}\n\n"
-                else:
-                    yield f"event: new-chat-message\ndata: {html}\n\n"
+                # Clear the typing indicator (keep element as empty placeholder for next time)
+                remove_typing = '<div id="typing-indicator" hx-swap-oob="outerHTML"></div>'
+                yield f"event: new-chat-message\ndata: {html}{remove_typing}\n\n"
 
             # Sleep before checking again
             time.sleep(1)

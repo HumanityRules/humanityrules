@@ -4,6 +4,44 @@
 > - Entries are in reverse chronological order (latest on top). Use format: `## YYYY-MM-DD HH:MM - Title`
 > - Avoid markdown tables — they render poorly. Use bulleted lists with bold labels instead.
 
+## 2026-01-10 - SSE Chat Streaming Implementation
+
+Implemented real-time chat message streaming using HTMX SSE extension.
+
+### Key Changes
+
+**SSE Extension Setup (`base.html`):**
+- Added `htmx-ext-sse@2.2.4` from CDN with `defer` attribute (must load after HTMX)
+- Initial bug: extension loaded before HTMX causing "htmx is not defined" error
+
+**SSE Event Format (`chat.py`):**
+- Event name: `new-chat-message` (more descriptive than generic "message")
+- HTML must be single-line for SSE: `html.replace("\n", "").strip()`
+- Only stream agent/system messages; user messages handled by form submission
+
+**Typing Indicator (`_typing_indicator.html`, `view.html`):**
+- Uses OOB swap with `hx-swap-oob="outerHTML"` to replace a placeholder div
+- On agent response, placeholder is restored (not deleted) for reuse: `<div id="typing-indicator" hx-swap-oob="outerHTML"></div>`
+- Positioned outside `#messages` div but inside `#messages-container` so it always appears at bottom
+
+**Empty Chat Placeholder:**
+- Given ID `empty-chat-placeholder`
+- Deleted via OOB swap on first message sent
+
+**Layout (`view.html`):**
+- ChatGPT-style layout: `h-[calc(100vh-9rem)]` fills viewport minus header/padding
+- Messages container uses `flex-1` with `overflow-y-auto`
+- Input fixed at bottom
+
+### Gotchas
+
+- **Script load order:** SSE extension needs `defer` to load after HTMX
+- **Multi-line SSE data:** Each line needs `data:` prefix, or collapse to single line
+- **OOB delete vs clear:** Using `delete` removes element entirely; subsequent OOB swaps fail. Use `outerHTML` with empty div to preserve placeholder.
+- **Duplicate messages:** Form submission + SSE both showed user messages. Fixed by skipping USER role in SSE stream.
+
+---
+
 ## 2026-01-10 - HTMX Sidebar Optimization & History Navigation Fix
 
 Fixed two issues with the HTMX-based SPA navigation.
