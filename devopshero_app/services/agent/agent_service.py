@@ -23,7 +23,6 @@ from claude_agent_sdk import (
     ResultMessage,
 )
 from claude_agent_sdk.types import TextBlock
-from django.conf import settings
 
 from devopshero_app.models import Conversation, Message
 
@@ -44,32 +43,43 @@ def _get_claude_env() -> dict[str, str]:
     """
     Build environment variables for the Claude Code subprocess.
 
-    This allows configuring AWS credentials specifically for Claude Code
-    without affecting the main Django app's AWS configuration.
+    Maps AWS_BEDROCK_* env vars to the AWS_* vars that Claude Code expects.
+    This allows using separate credentials for Claude Code vs the main app.
 
-    Supports:
-    - CLAUDE_AWS_PROFILE: AWS profile name for Claude Code
-    - CLAUDE_AWS_REGION: AWS region for Bedrock (enables Bedrock if set)
+    Env var mapping:
+    - AWS_BEDROCK_REGION -> AWS_REGION
+    - AWS_BEDROCK_ACCESS_KEY_ID -> AWS_ACCESS_KEY_ID
+    - AWS_BEDROCK_SECRET_ACCESS_KEY -> AWS_SECRET_ACCESS_KEY
+    - CLAUDE_CODE_USE_BEDROCK -> CLAUDE_CODE_USE_BEDROCK (passed through)
 
     Returns:
         Dict of environment variables to pass to Claude Code.
     """
     env: dict[str, str] = {}
 
-    # Check for Claude-specific AWS profile
-    aws_profile = getattr(settings, "CLAUDE_AWS_PROFILE", None) or os.environ.get(
-        "CLAUDE_AWS_PROFILE"
+    # Check if Bedrock is enabled
+    use_bedrock = os.environ.get("CLAUDE_CODE_USE_BEDROCK", "").lower() in (
+        "1",
+        "true",
     )
-    if aws_profile:
-        env["AWS_PROFILE"] = aws_profile
 
-    # Check for Claude-specific AWS region (enables Bedrock)
-    aws_region = getattr(settings, "CLAUDE_AWS_REGION", None) or os.environ.get(
-        "CLAUDE_AWS_REGION"
-    )
-    if aws_region:
-        env["AWS_REGION"] = aws_region
+    if use_bedrock:
         env["CLAUDE_CODE_USE_BEDROCK"] = "1"
+
+        # Map AWS_BEDROCK_REGION -> AWS_REGION
+        region = os.environ.get("AWS_BEDROCK_REGION")
+        if region:
+            env["AWS_REGION"] = region
+
+        # Map AWS_BEDROCK_ACCESS_KEY_ID -> AWS_ACCESS_KEY_ID
+        access_key = os.environ.get("AWS_BEDROCK_ACCESS_KEY_ID")
+        if access_key:
+            env["AWS_ACCESS_KEY_ID"] = access_key
+
+        # Map AWS_BEDROCK_SECRET_ACCESS_KEY -> AWS_SECRET_ACCESS_KEY
+        secret_key = os.environ.get("AWS_BEDROCK_SECRET_ACCESS_KEY")
+        if secret_key:
+            env["AWS_SECRET_ACCESS_KEY"] = secret_key
 
     return env
 
