@@ -14,7 +14,6 @@ structured tool calling, conversation memory, and streaming responses.
 import asyncio
 from pathlib import Path
 
-from asgiref.sync import sync_to_async
 from claude_agent_sdk import (
     ClaudeSDKClient,
     ClaudeAgentOptions,
@@ -39,7 +38,7 @@ def _load_system_prompt() -> str:
     return prompt_path.read_text()
 
 
-def _get_last_user_message(conversation: Conversation) -> str:
+async def _aget_last_user_message(conversation: Conversation) -> str:
     """
     Get the last user message from a conversation.
 
@@ -52,8 +51,7 @@ def _get_last_user_message(conversation: Conversation) -> str:
     Raises:
         ValueError: If no user messages found.
     """
-    messages = conversation.messages.filter(role="user").order_by("-created_at")
-    last_message = messages.first()
+    last_message = await conversation.messages.filter(role="user").order_by("-created_at").afirst()
 
     if not last_message:
         raise ValueError("Conversation has no user messages to process")
@@ -82,7 +80,7 @@ async def _process_conversation_async(conversation: Conversation) -> Message:
     conversation_context.set(conversation)
 
     # Get the last user message to send
-    user_message = await sync_to_async(_get_last_user_message)(conversation)
+    user_message = await _aget_last_user_message(conversation)
 
     # Load system prompt
     system_prompt = _load_system_prompt()
@@ -128,7 +126,7 @@ async def _process_conversation_async(conversation: Conversation) -> Message:
                 session_id = message.session_id
 
     # Save agent response to database
-    agent_message = await sync_to_async(Message.objects.create)(
+    agent_message = await Message.objects.acreate(
         conversation=conversation,
         role=Message.Role.AGENT,
         content_type=Message.ContentType.TEXT,
@@ -143,7 +141,7 @@ async def _process_conversation_async(conversation: Conversation) -> Message:
     )
 
     # Update conversation timestamp
-    await sync_to_async(conversation.save)()
+    await conversation.asave()
 
     return agent_message
 
