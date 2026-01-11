@@ -1,5 +1,6 @@
 {# Typing indicator shown while agent is processing #}
-<div id="typing-indicator" class="flex justify-start mb-4">
+{# Uses OOB swap to replace the placeholder in view.html #}
+<div id="typing-indicator" hx-swap-oob="outerHTML" class="flex justify-start mb-4">
     <div class="flex items-start space-x-3 max-w-[80%]">
         <div class="flex-shrink-0 w-8 h-8 bg-indigo-100 dark:bg-indigo-900 rounded-full flex items-center justify-center">
             <svg class="w-5 h-5 text-indigo-600 dark:text-indigo-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
