@@ -12,6 +12,7 @@ structured tool calling, conversation memory, and streaming responses.
 """
 
 import asyncio
+import os
 from pathlib import Path
 
 from asgiref.sync import sync_to_async
@@ -22,6 +23,7 @@ from claude_agent_sdk import (
     ResultMessage,
 )
 from claude_agent_sdk.types import TextBlock
+from django.conf import settings
 
 from devopshero_app.models import Conversation, Message
 
@@ -36,6 +38,40 @@ def _load_system_prompt() -> str:
     """Load the system prompt from the markdown file."""
     prompt_path = Path(__file__).parent / "system_prompt.md"
     return prompt_path.read_text()
+
+
+def _get_claude_env() -> dict[str, str]:
+    """
+    Build environment variables for the Claude Code subprocess.
+
+    This allows configuring AWS credentials specifically for Claude Code
+    without affecting the main Django app's AWS configuration.
+
+    Supports:
+    - CLAUDE_AWS_PROFILE: AWS profile name for Claude Code
+    - CLAUDE_AWS_REGION: AWS region for Bedrock (enables Bedrock if set)
+
+    Returns:
+        Dict of environment variables to pass to Claude Code.
+    """
+    env: dict[str, str] = {}
+
+    # Check for Claude-specific AWS profile
+    aws_profile = getattr(settings, "CLAUDE_AWS_PROFILE", None) or os.environ.get(
+        "CLAUDE_AWS_PROFILE"
+    )
+    if aws_profile:
+        env["AWS_PROFILE"] = aws_profile
+
+    # Check for Claude-specific AWS region (enables Bedrock)
+    aws_region = getattr(settings, "CLAUDE_AWS_REGION", None) or os.environ.get(
+        "CLAUDE_AWS_REGION"
+    )
+    if aws_region:
+        env["AWS_REGION"] = aws_region
+        env["CLAUDE_CODE_USE_BEDROCK"] = "1"
+
+    return env
 
 
 def _get_last_user_message(conversation: Conversation) -> str:
@@ -93,6 +129,8 @@ async def _process_conversation_async(conversation: Conversation) -> Message:
         allowed_tools=TOOL_NAMES,
         # Accept tool usage automatically (tools handle their own side effects)
         permission_mode="bypassPermissions",
+        # Pass Claude-specific AWS credentials to the subprocess
+        env=_get_claude_env(),
     )
 
     # Track response content and metadata
