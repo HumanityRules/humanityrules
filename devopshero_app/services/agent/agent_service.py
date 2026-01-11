@@ -18,7 +18,7 @@ import anthropic
 
 from devopshero_app.models import Conversation, Message
 
-from . import client
+from . import agent_client as client
 from .tools import ask_user, inspect_repository, list_aws_accounts
 
 
