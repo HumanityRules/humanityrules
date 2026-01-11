@@ -8,8 +8,8 @@
     <link rel="stylesheet" href="{% static 'css/dist/styles.css' %}">
 </head>
 <body class="h-full" style="background-color: #0f1623;">
-    <div class="flex min-h-full flex-col justify-center px-6 py-12 lg:px-8">
-        <div class="sm:mx-auto sm:w-full sm:max-w-md text-center">
+    <div class="flex min-h-full flex-col justify-center px-8 py-12">
+        <div class="mx-auto w-full max-w-md text-center">
             <!-- Logo -->
             <img class="mx-auto w-auto" src="{{ site_logo_url }}" alt="DevOps Hero">
             
@@ -18,7 +18,7 @@
             </p>
         </div>
 
-        <div class="mt-12 sm:mx-auto sm:w-full sm:max-w-sm">
+        <div class="mt-12 mx-auto w-full max-w-sm">
             {% if is_authenticated %}
                 <!-- Authenticated: Go to Dashboard -->
                 <a href="/dashboard/" 

@@ -1,14 +1,14 @@
 {% extends "devopshero_app/settings.html" %}
 
 {% block settings_content %}
-<div class="px-4 sm:px-6 lg:px-8">
-    <div class="sm:flex sm:items-center">
-        <div class="sm:flex-auto">
+<div class="px-8">
+    <div class="flex items-center">
+        <div class="flex-auto">
             <h1 class="text-base font-semibold text-gray-900 dark:text-white">AWS Accounts</h1>
             <p class="mt-2 text-sm text-gray-700 dark:text-gray-300">Manage the AWS accounts where DevOpsHero will deploy your applications.</p>
         </div>
         {% if aws_accounts %}
-        <div class="mt-4 sm:mt-0 sm:ml-16 sm:flex-none">
+        <div class="ml-16 flex-none">
             <button type="button" 
                     hx-get="/settings/aws-accounts/add/"
                     hx-target="#modal-container"
@@ -20,17 +20,17 @@
         {% endif %}
     </div>
     <div class="mt-8 flow-root">
-        <div class="-mx-4 -my-2 overflow-x-auto sm:-mx-6 lg:-mx-8">
-            <div class="inline-block min-w-full py-2 align-middle sm:px-6 lg:px-8">
+        <div class="-mx-8 -my-2 overflow-x-auto">
+            <div class="inline-block min-w-full py-2 align-middle px-8">
                 {% if aws_accounts %}
                 <table class="relative min-w-full divide-y divide-gray-300 dark:divide-white/15">
                     <thead>
                         <tr>
-                            <th scope="col" class="py-3.5 pr-3 pl-4 text-left text-sm font-semibold text-gray-900 sm:pl-0 dark:text-white">Name</th>
+                            <th scope="col" class="py-3.5 pr-3 text-left text-sm font-semibold text-gray-900 dark:text-white">Name</th>
                             <th scope="col" class="px-3 py-3.5 text-left text-sm font-semibold text-gray-900 dark:text-white">AWS Account ID</th>
                             <th scope="col" class="px-3 py-3.5 text-left text-sm font-semibold text-gray-900 dark:text-white">Status</th>
                             <th scope="col" class="px-3 py-3.5 text-left text-sm font-semibold text-gray-900 dark:text-white">Created</th>
-                            <th scope="col" class="py-3.5 pr-4 pl-3 sm:pr-0">
+                            <th scope="col" class="py-3.5 pl-3">
                                 <span class="sr-only">Actions</span>
                             </th>
                         </tr>
@@ -38,7 +38,7 @@
                     <tbody class="divide-y divide-gray-200 dark:divide-white/10">
                         {% for account in aws_accounts %}
                         <tr>
-                            <td class="py-4 pr-3 pl-4 text-sm font-medium whitespace-nowrap text-gray-900 sm:pl-0 dark:text-white">{{ account.name }}</td>
+                            <td class="py-4 pr-3 text-sm font-medium whitespace-nowrap text-gray-900 dark:text-white">{{ account.name }}</td>
                             <td class="px-3 py-4 text-sm whitespace-nowrap text-gray-500 dark:text-gray-400">
                                 {% if account.aws_account_id %}
                                     <code class="text-xs bg-gray-100 dark:bg-white/10 px-1.5 py-0.5 rounded">{{ account.aws_account_id }}</code>
@@ -65,7 +65,7 @@
                                 {% endif %}
                             </td>
                             <td class="px-3 py-4 text-sm whitespace-nowrap text-gray-500 dark:text-gray-400">{{ account.created_at|date:"M d, Y" }}</td>
-                            <td class="py-4 pr-4 pl-3 text-right text-sm font-medium whitespace-nowrap sm:pr-0">
+                            <td class="py-4 pl-3 text-right text-sm font-medium whitespace-nowrap">
                                 <a href="#" class="text-indigo-600 hover:text-indigo-900 dark:text-indigo-400 dark:hover:text-indigo-300">Edit<span class="sr-only">, {{ account.name }}</span></a>
                             </td>
                         </tr>

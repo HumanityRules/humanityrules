@@ -1,65 +1,27 @@
 {% extends "devopshero_app/base.html" %}
 
 {% block content %}
-{# Mobile sidebar dialog #}
-<el-dialog>
-  <dialog id="sidebar" class="backdrop:bg-transparent lg:hidden">
-    <el-dialog-backdrop class="fixed inset-0 bg-gray-900/80 transition-opacity duration-300 ease-linear data-closed:opacity-0"></el-dialog-backdrop>
-
-    <div tabindex="0" class="fixed inset-0 flex focus:outline-none">
-      <el-dialog-panel class="group/dialog-panel relative mr-16 flex w-full max-w-xs flex-1 transform transition duration-300 ease-in-out data-closed:-translate-x-full">
-        <div class="absolute top-0 left-full flex w-16 justify-center pt-5 duration-300 ease-in-out group-data-closed/dialog-panel:opacity-0">
-          <button type="button" command="close" commandfor="sidebar" class="-m-2.5 p-2.5">
-            <span class="sr-only">Close sidebar</span>
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" data-slot="icon" aria-hidden="true" class="size-6 text-white">
-              <path d="M6 18 18 6M6 6l12 12" stroke-linecap="round" stroke-linejoin="round" />
-            </svg>
-          </button>
-        </div>
-
-        {# Mobile sidebar content #}
-        <div class="relative flex grow flex-col gap-y-5 overflow-y-auto bg-gray-900 px-6 pb-4 ring-1 ring-white/10 dark:before:pointer-events-none dark:before:absolute dark:before:inset-0 dark:before:bg-black/10">
-          <div id="sidebar-nav-mobile" class="relative">
-            {% include "devopshero_app/partials/_sidebar_nav.html" %}
-          </div>
-        </div>
-      </el-dialog-panel>
-    </div>
-  </dialog>
-</el-dialog>
-
-{# Static sidebar for desktop #}
-<div class="hidden bg-gray-900 ring-1 ring-white/10 lg:fixed lg:inset-y-0 lg:z-50 lg:flex lg:w-72 lg:flex-col">
-  <div id="sidebar-nav-desktop" class="flex grow flex-col gap-y-5 overflow-y-auto bg-black/10 px-6 pb-4">
+{# Sidebar #}
+<div class="fixed inset-y-0 z-50 flex w-72 flex-col bg-gray-900 ring-1 ring-white/10">
+  <div id="sidebar-nav" class="flex grow flex-col gap-y-5 overflow-y-auto bg-black/10 px-6 pb-4">
     {% include "devopshero_app/partials/_sidebar_nav.html" %}
   </div>
 </div>
 
 {# Main content area #}
-<div class="lg:pl-72">
+<div class="pl-72">
   {# Top header bar #}
-  <div class="sticky top-0 z-40 flex h-16 shrink-0 items-center gap-x-4 border-b border-gray-200 bg-white px-4 shadow-xs sm:gap-x-6 sm:px-6 lg:px-8 dark:border-white/10 dark:bg-gray-900">
-    {# Mobile menu button #}
-    <button type="button" command="show-modal" commandfor="sidebar" class="-m-2.5 p-2.5 text-gray-700 hover:text-gray-900 lg:hidden dark:text-gray-400 dark:hover:text-white">
-      <span class="sr-only">Open sidebar</span>
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" data-slot="icon" aria-hidden="true" class="size-6">
-        <path d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25h16.5" stroke-linecap="round" stroke-linejoin="round" />
-      </svg>
-    </button>
-
-    {# Separator #}
-    <div aria-hidden="true" class="h-6 w-px bg-gray-900/10 lg:hidden dark:bg-white/10"></div>
-
-    <div class="flex flex-1 gap-x-4 self-stretch lg:gap-x-6">
+  <div class="sticky top-0 z-40 flex h-16 shrink-0 items-center gap-x-6 border-b border-gray-200 bg-white px-8 shadow-xs dark:border-white/10 dark:bg-gray-900">
+    <div class="flex flex-1 gap-x-6 self-stretch">
       {# Search form #}
       <form action="{{ search_url|default:'#' }}" method="GET" class="grid flex-1 grid-cols-1">
-        <input name="search" placeholder="Search" aria-label="Search" class="col-start-1 row-start-1 block size-full bg-white pl-8 text-base text-gray-900 outline-hidden placeholder:text-gray-400 sm:text-sm/6 dark:bg-gray-900 dark:text-white dark:placeholder:text-gray-500" />
+        <input name="search" placeholder="Search" aria-label="Search" class="col-start-1 row-start-1 block size-full bg-white pl-8 text-sm/6 text-gray-900 outline-hidden placeholder:text-gray-400 dark:bg-gray-900 dark:text-white dark:placeholder:text-gray-500" />
         <svg viewBox="0 0 20 20" fill="currentColor" data-slot="icon" aria-hidden="true" class="pointer-events-none col-start-1 row-start-1 size-5 self-center text-gray-400">
           <path d="M9 3.5a5.5 5.5 0 1 0 0 11 5.5 5.5 0 0 0 0-11ZM2 9a7 7 0 1 1 12.452 4.391l3.328 3.329a.75.75 0 1 1-1.06 1.06l-3.329-3.328A7 7 0 0 1 2 9Z" clip-rule="evenodd" fill-rule="evenodd" />
         </svg>
       </form>
 
-      <div class="flex items-center gap-x-4 lg:gap-x-6">
+      <div class="flex items-center gap-x-6">
         {# Notifications button #}
         <button type="button" class="-m-2.5 p-2.5 text-gray-400 hover:text-gray-500 dark:text-gray-400 dark:hover:text-gray-300">
           <span class="sr-only">View notifications</span>
@@ -69,7 +31,7 @@
         </button>
 
         {# Separator #}
-        <div aria-hidden="true" class="hidden lg:block lg:h-6 lg:w-px lg:bg-gray-900/10 dark:lg:bg-gray-100/10"></div>
+        <div aria-hidden="true" class="h-6 w-px bg-gray-900/10 dark:bg-gray-100/10"></div>
 
         {# Profile dropdown #}
         {% include "devopshero_app/partials/_profile_menu.html" %}
@@ -84,7 +46,7 @@
          hx-get="{{ content_url }}"
          hx-trigger="load"
          hx-swap="innerHTML"
-         class="px-4 sm:px-6 lg:px-8">
+         class="px-8">
       {# Content will be loaded via HTMX #}
     </div>
   </main>
