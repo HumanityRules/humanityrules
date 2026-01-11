@@ -41,3 +41,43 @@ def is_available() -> bool:
         True if agent can be used (either backend is configured).
     """
     return _use_anthropic_api() or _use_bedrock()
+
+
+def get_claude_env() -> dict[str, str]:
+    """
+    Build environment variables for the Claude Code subprocess.
+
+    Maps AWS_BEDROCK_* env vars to the AWS_* vars that Claude Code expects.
+    This allows using separate credentials for Claude Code vs the main app.
+
+    Env var mapping:
+    - AWS_BEDROCK_REGION -> AWS_REGION
+    - AWS_BEDROCK_ACCESS_KEY_ID -> AWS_ACCESS_KEY_ID
+    - AWS_BEDROCK_SECRET_ACCESS_KEY -> AWS_SECRET_ACCESS_KEY
+    - CLAUDE_CODE_USE_BEDROCK -> CLAUDE_CODE_USE_BEDROCK (passed through)
+
+    Returns:
+        Dict of environment variables to pass to Claude Code.
+    """
+    env: dict[str, str] = {}
+
+    # Check if Bedrock is enabled
+    if _use_bedrock():
+        env["CLAUDE_CODE_USE_BEDROCK"] = "1"
+
+        # Map AWS_BEDROCK_REGION -> AWS_REGION
+        region = os.environ.get("AWS_BEDROCK_REGION")
+        if region:
+            env["AWS_REGION"] = region
+
+        # Map AWS_BEDROCK_ACCESS_KEY_ID -> AWS_ACCESS_KEY_ID
+        access_key = os.environ.get("AWS_BEDROCK_ACCESS_KEY_ID")
+        if access_key:
+            env["AWS_ACCESS_KEY_ID"] = access_key
+
+        # Map AWS_BEDROCK_SECRET_ACCESS_KEY -> AWS_SECRET_ACCESS_KEY
+        secret_key = os.environ.get("AWS_BEDROCK_SECRET_ACCESS_KEY")
+        if secret_key:
+            env["AWS_SECRET_ACCESS_KEY"] = secret_key
+
+    return env

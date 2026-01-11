@@ -12,7 +12,6 @@ structured tool calling, conversation memory, and streaming responses.
 """
 
 import asyncio
-import os
 from pathlib import Path
 
 from asgiref.sync import sync_to_async
@@ -26,6 +25,7 @@ from claude_agent_sdk.types import TextBlock
 
 from devopshero_app.models import Conversation, Message
 
+from .agent_client import get_claude_env
 from .mcp_tools import (
     conversation_context,
     devopshero_mcp_server,
@@ -37,51 +37,6 @@ def _load_system_prompt() -> str:
     """Load the system prompt from the markdown file."""
     prompt_path = Path(__file__).parent / "system_prompt.md"
     return prompt_path.read_text()
-
-
-def _get_claude_env() -> dict[str, str]:
-    """
-    Build environment variables for the Claude Code subprocess.
-
-    Maps AWS_BEDROCK_* env vars to the AWS_* vars that Claude Code expects.
-    This allows using separate credentials for Claude Code vs the main app.
-
-    Env var mapping:
-    - AWS_BEDROCK_REGION -> AWS_REGION
-    - AWS_BEDROCK_ACCESS_KEY_ID -> AWS_ACCESS_KEY_ID
-    - AWS_BEDROCK_SECRET_ACCESS_KEY -> AWS_SECRET_ACCESS_KEY
-    - CLAUDE_CODE_USE_BEDROCK -> CLAUDE_CODE_USE_BEDROCK (passed through)
-
-    Returns:
-        Dict of environment variables to pass to Claude Code.
-    """
-    env: dict[str, str] = {}
-
-    # Check if Bedrock is enabled
-    use_bedrock = os.environ.get("CLAUDE_CODE_USE_BEDROCK", "").lower() in (
-        "1",
-        "true",
-    )
-
-    if use_bedrock:
-        env["CLAUDE_CODE_USE_BEDROCK"] = "1"
-
-        # Map AWS_BEDROCK_REGION -> AWS_REGION
-        region = os.environ.get("AWS_BEDROCK_REGION")
-        if region:
-            env["AWS_REGION"] = region
-
-        # Map AWS_BEDROCK_ACCESS_KEY_ID -> AWS_ACCESS_KEY_ID
-        access_key = os.environ.get("AWS_BEDROCK_ACCESS_KEY_ID")
-        if access_key:
-            env["AWS_ACCESS_KEY_ID"] = access_key
-
-        # Map AWS_BEDROCK_SECRET_ACCESS_KEY -> AWS_SECRET_ACCESS_KEY
-        secret_key = os.environ.get("AWS_BEDROCK_SECRET_ACCESS_KEY")
-        if secret_key:
-            env["AWS_SECRET_ACCESS_KEY"] = secret_key
-
-    return env
 
 
 def _get_last_user_message(conversation: Conversation) -> str:
@@ -134,13 +89,16 @@ async def _process_conversation_async(conversation: Conversation) -> Message:
 
     # Configure the SDK client
     options = ClaudeAgentOptions(
+        # model="us.anthropic.claude-opus-4-5-20251101-v1:0",
+        model="us.anthropic.claude-sonnet-4-5-20250929-v1:0",
+        # model="us.anthropic.claude-3-7-sonnet-20250219-v1:0",
         system_prompt=system_prompt,
         mcp_servers={"devopshero": devopshero_mcp_server},
         allowed_tools=TOOL_NAMES,
         # Accept tool usage automatically (tools handle their own side effects)
         permission_mode="bypassPermissions",
         # Pass Claude-specific AWS credentials to the subprocess
-        env=_get_claude_env(),
+        env=get_claude_env(),
     )
 
     # Track response content and metadata
