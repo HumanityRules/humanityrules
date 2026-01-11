@@ -1029,7 +1029,7 @@ POST /chat/{id}/close/               # Mark conversation as completed
 
 ## Appendix A: Message Partial Templates
 
-See `templates/devopshero_app/partials/chat/` for implementation.
+See `templates/devopshero_app/chat/` for implementation.
 
 ## Appendix B: Agent Tool Schemas
 

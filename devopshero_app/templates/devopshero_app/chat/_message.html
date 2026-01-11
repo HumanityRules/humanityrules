@@ -18,14 +18,14 @@
             </svg>
         </div>
         <div class="bg-gray-100 dark:bg-gray-800 rounded-2xl rounded-tl-md px-4 py-3">
-            {% include "devopshero_app/partials/chat/_message_content.html" %}
+            {% include "devopshero_app/chat/_message_content.html" %}
         </div>
     </div>
 
     {% elif message.role == 'system' %}
     {# System message - centered, subtle styling #}
     <div class="w-full">
-        {% include "devopshero_app/partials/chat/_message_content.html" %}
+        {% include "devopshero_app/chat/_message_content.html" %}
     </div>
     {% endif %}
 </div>
