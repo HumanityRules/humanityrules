@@ -1,18 +1,56 @@
 {# Progress indicator with phase and percentage #}
+{% load tz %}
 <div class="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-4">
+    {# Phase indicators #}
+    {% if message.metadata.phase %}
+    <div class="flex items-center space-x-2 mb-3">
+        {% with phases="init,build,push,deploy,health,complete" %}
+        {% for phase in phases|make_list:","|slice:"::1" %}
+        {% endfor %}
+        {% endwith %}
+        {# Phase steps #}
+        <div class="flex items-center space-x-1 text-xs">
+            <span class="{% if message.metadata.phase == 'init' or message.metadata.phase == 'build' or message.metadata.phase == 'push' or message.metadata.phase == 'deploy' or message.metadata.phase == 'health' or message.metadata.phase == 'complete' %}text-blue-600 dark:text-blue-400{% else %}text-gray-400{% endif %}">Init</span>
+            <span class="text-gray-300 dark:text-gray-600">&rarr;</span>
+            <span class="{% if message.metadata.phase == 'build' or message.metadata.phase == 'push' or message.metadata.phase == 'deploy' or message.metadata.phase == 'health' or message.metadata.phase == 'complete' %}text-blue-600 dark:text-blue-400{% else %}text-gray-400{% endif %}">Build</span>
+            <span class="text-gray-300 dark:text-gray-600">&rarr;</span>
+            <span class="{% if message.metadata.phase == 'push' or message.metadata.phase == 'deploy' or message.metadata.phase == 'health' or message.metadata.phase == 'complete' %}text-blue-600 dark:text-blue-400{% else %}text-gray-400{% endif %}">Push</span>
+            <span class="text-gray-300 dark:text-gray-600">&rarr;</span>
+            <span class="{% if message.metadata.phase == 'deploy' or message.metadata.phase == 'health' or message.metadata.phase == 'complete' %}text-blue-600 dark:text-blue-400{% else %}text-gray-400{% endif %}">Deploy</span>
+            <span class="text-gray-300 dark:text-gray-600">&rarr;</span>
+            <span class="{% if message.metadata.phase == 'health' or message.metadata.phase == 'complete' %}text-blue-600 dark:text-blue-400{% else %}text-gray-400{% endif %}">Health</span>
+            <span class="text-gray-300 dark:text-gray-600">&rarr;</span>
+            <span class="{% if message.metadata.phase == 'complete' %}text-green-600 dark:text-green-400 font-medium{% else %}text-gray-400{% endif %}">Done</span>
+        </div>
+    </div>
+    {% endif %}
+
     <div class="flex items-center space-x-3 mb-2">
+        {% if message.metadata.phase == 'complete' %}
+        <svg class="w-5 h-5 text-green-600 dark:text-green-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
+        </svg>
+        {% else %}
         <svg class="w-5 h-5 text-blue-600 dark:text-blue-400 animate-spin" fill="none" viewBox="0 0 24 24">
             <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
             <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
         </svg>
-        <span class="text-sm font-medium text-blue-800 dark:text-blue-200">{{ message.content }}</span>
+        {% endif %}
+        <span class="text-sm font-medium {% if message.metadata.phase == 'complete' %}text-green-800 dark:text-green-200{% else %}text-blue-800 dark:text-blue-200{% endif %}">{{ message.content }}</span>
     </div>
 
     {% if message.metadata.percentage is not None %}
     <div class="w-full bg-blue-200 dark:bg-blue-800 rounded-full h-2">
-        <div class="bg-blue-600 dark:bg-blue-400 h-2 rounded-full transition-all duration-300"
+        <div class="{% if message.metadata.phase == 'complete' %}bg-green-600 dark:bg-green-400{% else %}bg-blue-600 dark:bg-blue-400{% endif %} h-2 rounded-full transition-all duration-300"
              style="width: {{ message.metadata.percentage }}%"></div>
     </div>
-    <p class="text-xs text-blue-600 dark:text-blue-400 mt-1">{{ message.metadata.percentage }}% complete</p>
+    <div class="flex justify-between mt-1">
+        <p class="text-xs {% if message.metadata.phase == 'complete' %}text-green-600 dark:text-green-400{% else %}text-blue-600 dark:text-blue-400{% endif %}">{{ message.metadata.percentage }}% complete</p>
+        {% if message.metadata.started_at %}
+        <p class="text-xs text-gray-500 dark:text-gray-400" data-started-at="{{ message.metadata.started_at }}">
+            Started {{ message.metadata.started_at|date:"H:i" }}
+        </p>
+        {% endif %}
+    </div>
     {% endif %}
 </div>
