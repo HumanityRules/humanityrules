@@ -10,7 +10,7 @@ from django.template.loader import render_to_string
 from django.views.decorators.http import require_POST
 
 from ..models import Conversation, Message
-from ..services.agent import client as agent_client
+from ..services.agent import agent_client
 from ..services.agent import process_conversation
 from .base import get_app_shell_context
 
