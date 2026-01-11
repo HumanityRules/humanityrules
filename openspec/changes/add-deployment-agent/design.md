@@ -751,7 +751,7 @@ New messages stream in via Server-Sent Events (SSE):
 <div id="messages"
      hx-ext="sse"
      sse-connect="/chat/{{ conversation.id }}/stream/"
-     sse-swap="message">
+     sse-swap="new-chat-message">
   <!-- Messages rendered here -->
 </div>
 ```
@@ -764,7 +764,7 @@ def message_stream(request, conversation_id):
     def event_generator():
         for message in get_new_messages(conversation_id, last_id):
             html = render_to_string("partials/_message.html", {"message": message})
-            yield f"event: message\ndata: {html}\n\n"
+            yield f"event: new-chat-message\ndata: {html}\n\n"
 
     return StreamingHttpResponse(
         event_generator(),
