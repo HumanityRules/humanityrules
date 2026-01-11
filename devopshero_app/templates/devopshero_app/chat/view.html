@@ -1,82 +1,107 @@
 {# Chat interface for agent conversations #}
-{# Height: viewport - top header (4rem) - main padding (5rem) #}
-<div class="flex flex-col h-[calc(100vh-9rem)]">
-    {# Header #}
-    <div class="flex items-center justify-between px-4 py-3 border-b border-gray-200 dark:border-gray-700">
-        <div>
-            <h1 class="text-lg font-semibold text-gray-900 dark:text-white">
-                {{ conversation.title|default:"New Conversation" }}
-            </h1>
-            {% if conversation.workspace %}
-            <p class="text-sm text-gray-500 dark:text-gray-400">{{ conversation.workspace.name }}</p>
-            {% endif %}
-        </div>
-        <div class="flex items-center space-x-2">
-            <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium
-                         {% if conversation.status == 'active' %}
-                         bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200
-                         {% elif conversation.status == 'completed' %}
-                         bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-200
-                         {% else %}
-                         bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200
-                         {% endif %}">
-                {{ conversation.get_status_display }}
-            </span>
-        </div>
-    </div>
-
-    {# Messages container #}
-    <div id="messages-container"
-         class="flex-1 overflow-y-auto p-4 space-y-4">
-
-        {# Messages - both form submissions and SSE append here #}
-        <div id="messages"
-             hx-ext="sse"
-             sse-connect="{% url 'chat_stream' conversation_id=conversation.id %}"
-             sse-swap="new-chat-message"
-             hx-swap="beforeend">
-            {% for message in messages %}
-                {% include "devopshero_app/chat/_message.html" %}
-            {% empty %}
-                <div id="empty-chat-placeholder" class="text-center py-8 text-gray-500 dark:text-gray-400">
-                    <svg class="w-12 h-12 mx-auto mb-4 opacity-50" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
-                    </svg>
-                    <p>Start a conversation with the deployment agent.</p>
+{# Outer container extends full width for scrollbar at edge #}
+{# Inner content is constrained and centered #}
+<div class="flex flex-col h-[calc(100vh-9rem)] -mx-4 sm:-mx-6 lg:-mx-8">
+    {# Header - centered content #}
+    <div class="border-b border-gray-200 dark:border-gray-700">
+        <div class="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="flex items-center justify-between py-3">
+                <div>
+                    <h1 class="text-lg font-semibold text-gray-900 dark:text-white">
+                        {{ conversation.title|default:"New Conversation" }}
+                    </h1>
+                    {% if conversation.workspace %}
+                    <p class="text-sm text-gray-500 dark:text-gray-400">{{ conversation.workspace.name }}</p>
+                    {% endif %}
                 </div>
-            {% endfor %}
+                <div class="flex items-center space-x-2">
+                    <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium
+                                 {% if conversation.status == 'active' %}
+                                 bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200
+                                 {% elif conversation.status == 'completed' %}
+                                 bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-200
+                                 {% else %}
+                                 bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200
+                                 {% endif %}">
+                        {{ conversation.get_status_display }}
+                    </span>
+                </div>
+            </div>
         </div>
-
-        {# Typing indicator - managed via OOB swap #}
-        <div id="typing-indicator"></div>
     </div>
 
-    {# Message input #}
-    <div class="border-t border-gray-200 dark:border-gray-700 p-4">
-        <form hx-post="{% url 'chat_send' conversation_id=conversation.id %}"
-              hx-target="#messages"
-              hx-swap="beforeend"
-              hx-on::after-request="this.reset(); this.querySelector('input').focus();"
-              class="flex items-center space-x-3">
-            <input type="text"
-                   name="message"
-                   placeholder="Type a message..."
-                   autocomplete="off"
-                   class="flex-1 rounded-lg border border-gray-300 dark:border-gray-600
-                          bg-white dark:bg-gray-800
-                          text-gray-900 dark:text-gray-100
-                          px-4 py-2.5 text-sm
-                          focus:ring-2 focus:ring-indigo-500 focus:border-transparent
-                          placeholder-gray-400 dark:placeholder-gray-500">
-            <button type="submit"
-                    class="px-4 py-2.5 bg-indigo-600 text-white text-sm font-medium rounded-lg
-                           hover:bg-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2
-                           transition-colors">
-                <span class="hidden sm:inline">Send</span>
-                <svg class="w-5 h-5 sm:hidden" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
-                </svg>
-            </button>
-        </form>
+    {# Messages container - full width scroll, centered content #}
+    <div id="messages-container"
+         class="flex-1 overflow-y-auto">
+        <div class="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-4 space-y-4">
+            {# Messages - both form submissions and SSE append here #}
+            <div id="messages"
+                 hx-ext="sse"
+                 sse-connect="{% url 'chat_stream' conversation_id=conversation.id %}"
+                 sse-swap="new-chat-message"
+                 hx-swap="beforeend">
+                {% for message in messages %}
+                    {% include "devopshero_app/chat/_message.html" %}
+                {% empty %}
+                    <div id="empty-chat-placeholder" class="text-center py-8 text-gray-500 dark:text-gray-400">
+                        <svg class="w-12 h-12 mx-auto mb-4 opacity-50" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
+                        </svg>
+                        <p>Start a conversation with the deployment agent.</p>
+                    </div>
+                {% endfor %}
+            </div>
+
+            {# Typing indicator - managed via OOB swap #}
+            <div id="typing-indicator"></div>
+        </div>
+    </div>
+
+    {# Message input - centered content #}
+    <div class="border-t border-gray-200 dark:border-gray-700">
+        <div class="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
+            <form hx-post="{% url 'chat_send' conversation_id=conversation.id %}"
+                  hx-target="#messages"
+                  hx-swap="beforeend"
+                  hx-on::after-request="this.reset(); this.querySelector('input').focus();"
+                  class="flex items-center space-x-3">
+                <input type="text"
+                       name="message"
+                       placeholder="Type a message..."
+                       autocomplete="off"
+                       class="flex-1 rounded-lg border border-gray-300 dark:border-gray-600
+                              bg-white dark:bg-gray-800
+                              text-gray-900 dark:text-gray-100
+                              px-4 py-2.5 text-sm
+                              focus:ring-2 focus:ring-indigo-500 focus:border-transparent
+                              placeholder-gray-400 dark:placeholder-gray-500">
+                <button type="submit"
+                        class="px-4 py-2.5 bg-indigo-600 text-white text-sm font-medium rounded-lg
+                               hover:bg-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2
+                               transition-colors">
+                    <span class="hidden sm:inline">Send</span>
+                    <svg class="w-5 h-5 sm:hidden" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
+                    </svg>
+                </button>
+            </form>
+        </div>
     </div>
 </div>
+
+<script>
+(function() {
+    const container = document.getElementById('messages-container');
+
+    function scrollToBottom() {
+        container.scrollTop = container.scrollHeight;
+    }
+
+    // Scroll on initial load
+    scrollToBottom();
+
+    // Scroll when new content is added (form submission or SSE)
+    container.addEventListener('htmx:afterSwap', scrollToBottom);
+    container.addEventListener('htmx:sseMessage', scrollToBottom);
+})();
+</script>

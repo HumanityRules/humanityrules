@@ -72,10 +72,10 @@ def get_model_id() -> str:
         Model ID string (different format for API vs Bedrock).
     """
     if _use_anthropic_api():
-        return "claude-opus-4-5-20251101"
+        return "claude-sonnet-4-20250514"
 
     # Bedrock requires inference profile ID (us. prefix) for on-demand throughput
-    return "us.anthropic.claude-opus-4-5-20251101-v1:0"
+    return "us.anthropic.claude-sonnet-4-20250514-v1:0"
 
 
 def is_available() -> bool:

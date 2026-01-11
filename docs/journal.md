@@ -4,6 +4,29 @@
 > - Entries are in reverse chronological order (latest on top). Use format: `## YYYY-MM-DD HH:MM - Title`
 > - Avoid markdown tables — they render poorly. Use bulleted lists with bold labels instead.
 
+## 2026-01-10 - Chat UI Polish: Scrollbar & Layout
+
+Refined the chat interface to match ChatGPT/Claude patterns.
+
+**Scrollbar Styling:**
+- Dark scrollbar (`gray-700`) with transparent track
+- 12px width for visibility
+- Uses both `scrollbar-color` (Firefox) and `::-webkit-scrollbar` (Chrome/Safari)
+
+**Layout - Full-width scroll, centered content:**
+- Outer container extends full width (negative margins) so scrollbar is at viewport edge
+- Inner content constrained to `max-w-4xl` (896px) and centered
+- Header, messages, and input all follow same pattern
+
+**Auto-scroll:**
+- Scrolls to bottom on page load
+- Scrolls on `htmx:afterSwap` (form submission) and `htmx:sseMessage` (SSE)
+
+**Model Change:**
+- Switched from Opus 4.5 to Sonnet 4 for faster responses
+
+---
+
 ## 2026-01-10 - SSE Chat Streaming Implementation
 
 Implemented real-time chat message streaming using HTMX SSE extension.
