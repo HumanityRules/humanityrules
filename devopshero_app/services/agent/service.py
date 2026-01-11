@@ -332,8 +332,8 @@ def process_conversation(conversation: Conversation) -> Message:
         if block.type == "text":
             response_text += block.text
 
-    # Determine content type based on response
-    content_type = Message.ContentType.MARKDOWN
+    # Use TEXT for now (MARKDOWN would require rendering to HTML)
+    content_type = Message.ContentType.TEXT
 
     # Save agent response to database
     agent_message = Message.objects.create(

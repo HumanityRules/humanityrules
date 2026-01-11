@@ -4,6 +4,23 @@
 > - Entries are in reverse chronological order (latest on top). Use format: `## YYYY-MM-DD HH:MM - Title`
 > - Avoid markdown tables — they render poorly. Use bulleted lists with bold labels instead.
 
+## 2026-01-10 - Fix Newlines in Chat Messages
+
+**Problem:** Newlines in agent responses weren't displaying - everything appeared on one line.
+
+**Root causes:**
+1. SSE was collapsing newlines with `.replace("\n", "")` for single-line format
+2. Agent messages used MARKDOWN content type, which expected pre-rendered HTML
+3. User messages lacked `whitespace-pre-wrap`
+
+**Fixes:**
+- SSE now uses proper multi-line format: each line prefixed with `data:`
+- Agent messages use TEXT content type (has `whitespace-pre-wrap`)
+- Added `whitespace-pre-wrap` to user messages and fallback
+- Increased font size (removed `text-sm`)
+
+---
+
 ## 2026-01-10 - Chat UI Polish: Scrollbar & Layout
 
 Refined the chat interface to match ChatGPT/Claude patterns.

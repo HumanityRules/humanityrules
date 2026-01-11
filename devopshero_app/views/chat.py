@@ -199,12 +199,14 @@ def chat_stream(request, conversation_id):
                     context=context,
                     request=request,
                 )
-                # SSE requires single-line data, collapse newlines
-                html = html.replace("\n", "").strip()
 
                 # Clear the typing indicator (keep element as empty placeholder for next time)
                 remove_typing = '<div id="typing-indicator" hx-swap-oob="outerHTML"></div>'
-                yield f"event: new-chat-message\ndata: {html}{remove_typing}\n\n"
+                full_html = html + remove_typing
+
+                # SSE multi-line format: prefix each line with "data: "
+                sse_data = "\n".join(f"data: {line}" for line in full_html.split("\n"))
+                yield f"event: new-chat-message\n{sse_data}\n\n"
 
             # Sleep before checking again
             time.sleep(1)

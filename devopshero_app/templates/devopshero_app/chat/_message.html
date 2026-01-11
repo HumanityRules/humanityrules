@@ -6,7 +6,7 @@
     {% if message.role == 'user' %}
     {# User message - right aligned #}
     <div class="max-w-[80%] bg-indigo-600 text-white rounded-2xl rounded-br-md px-4 py-3">
-        <p class="text-sm">{{ message.content }}</p>
+        <p class="whitespace-pre-wrap">{{ message.content }}</p>
     </div>
 
     {% elif message.role == 'agent' %}
