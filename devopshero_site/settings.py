@@ -150,3 +150,29 @@ ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY")
 AWS_BEDROCK_REGION = os.environ.get("AWS_BEDROCK_REGION")
 AWS_BEDROCK_ACCESS_KEY_ID = os.environ.get("AWS_BEDROCK_ACCESS_KEY_ID")
 AWS_BEDROCK_SECRET_ACCESS_KEY = os.environ.get("AWS_BEDROCK_SECRET_ACCESS_KEY")
+
+# Logging configuration
+LOGGING = {
+    "version": 1,
+    "disable_existing_loggers": False,
+    "formatters": {
+        "verbose": {
+            "format": "[{asctime}][{levelname}] {message}",
+            "style": "{",
+            "datefmt": "%d-%m %H:%M:%S",
+        },
+    },
+    "handlers": {
+        "console": {
+            "class": "logging.StreamHandler",
+            "formatter": "verbose",
+        },
+    },
+    "loggers": {
+        "devopshero_app": {
+            "handlers": ["console"],
+            "level": "INFO",
+            "propagate": False,
+        },
+    },
+}
