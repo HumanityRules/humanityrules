@@ -7,5 +7,9 @@
 			"path": "../pulumi-first"
 		}
 	],
-	"settings": {}
+	"settings": {
+		"files.exclude": {
+			".*/": true
+		}
+	}
 }
