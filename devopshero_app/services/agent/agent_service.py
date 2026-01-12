@@ -14,10 +14,13 @@ structured tool calling, conversation memory, and streaming responses.
 
 import asyncio
 import json
+import logging
 import time
 import uuid
 from pathlib import Path
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 from claude_agent_sdk import (
     ClaudeSDKClient,
@@ -26,7 +29,13 @@ from claude_agent_sdk import (
     ResultMessage,
     UserMessage,
 )
-from claude_agent_sdk.types import TextBlock, ToolUseBlock, ToolResultBlock
+from claude_agent_sdk.types import (
+    TextBlock,
+    ToolUseBlock,
+    ToolResultBlock,
+    SystemMessage,
+    StreamEvent,
+)
 
 from devopshero_app.models import Conversation, Message
 
@@ -306,6 +315,18 @@ async def _process_conversation_async(conversation: Conversation) -> Message:
                 usage = message.usage
                 num_turns = message.num_turns
                 session_id = message.session_id
+
+            elif isinstance(message, SystemMessage):
+                # SDK-level control messages (session init, MCP status, etc.)
+                logger.info("[SDK] SystemMessage: subtype=%s, data=%s", message.subtype, message.data)
+
+            elif isinstance(message, StreamEvent):
+                # Partial streaming events (when include_partial_messages=True)
+                logger.info("[SDK] StreamEvent: uuid=%s, event_type=%s", message.uuid, message.event.get("type", "unknown"))
+
+            else:
+                # Catch any unexpected message types
+                logger.info("[SDK] Unknown message type: %s = %s", type(message).__name__, message)
 
     # Create tool messages first (TOOL_CALL, CHOICE), then TEXT last
     for msg_data in tool_messages:
