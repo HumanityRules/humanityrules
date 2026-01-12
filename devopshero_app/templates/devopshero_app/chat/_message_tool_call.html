@@ -1,7 +1,7 @@
 {% load chat_filters %}
 {# Tool call display - shows tool name, parameters, and result #}
 
-<div class="border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden my-2">
+<div class="border border-gray-200 dark:border-gray-700 overflow-hidden rounded-lg my-2 w-full min-w-0">
     {# Header with tool name and status #}
     <div class="flex items-center justify-between px-3 py-2 bg-gray-50 dark:bg-gray-700">
         <div class="flex items-center space-x-2">
@@ -20,19 +20,19 @@
     </div>
 
     {# Parameters and Result - always visible #}
-    <div class="p-3 text-sm space-y-3">
-        <div>
+    <div class="p-3 text-sm space-y-3 min-w-0">
+        <div class="min-w-0">
             <div class="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">Parameters</div>
-            <pre class="bg-gray-100 dark:bg-gray-900 p-2 rounded text-xs overflow-x-auto font-mono text-gray-800 dark:text-gray-200">{{ message.metadata.parameters|json_pretty }}</pre>
+            <pre class="bg-gray-100 dark:bg-gray-900 p-2 rounded text-xs overflow-x-auto font-mono text-gray-800 dark:text-gray-200 whitespace-pre-wrap break-all">{{ message.metadata.parameters|json_pretty }}</pre>
         </div>
-        <div>
+        <div class="min-w-0">
             <div class="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">Result</div>
-            <pre class="bg-gray-100 dark:bg-gray-900 p-2 rounded text-xs overflow-x-auto max-h-64 overflow-y-auto font-mono text-gray-800 dark:text-gray-200">{{ message.metadata.result|json_pretty }}</pre>
+            <pre class="bg-gray-100 dark:bg-gray-900 p-2 rounded text-xs overflow-x-auto max-h-64 overflow-y-auto font-mono text-gray-800 dark:text-gray-200 whitespace-pre-wrap break-all">{{ message.metadata.result|json_pretty }}</pre>
         </div>
         {% if message.metadata.error_message %}
-        <div>
+        <div class="min-w-0">
             <div class="text-xs font-medium text-red-500 mb-1">Error</div>
-            <pre class="bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-300 p-2 rounded text-xs overflow-x-auto font-mono">{{ message.metadata.error_message }}</pre>
+            <pre class="bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-300 p-2 rounded text-xs overflow-x-auto font-mono whitespace-pre-wrap break-all">{{ message.metadata.error_message }}</pre>
         </div>
         {% endif %}
     </div>
