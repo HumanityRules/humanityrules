@@ -4,6 +4,26 @@
 > - Entries are in reverse chronological order (latest on top). Use format: `## YYYY-MM-DD HH:MM - Title`
 > - Avoid markdown tables — they render poorly. Use bulleted lists with bold labels instead.
 
+## 2026-01-11 - Phase 3: Deployment Flow Agent Tools
+
+Implemented the deployment flow tools for the AI agent (OpenSpec add-deployment-agent Phase 3).
+
+**New tools (5):**
+- `create_workspace` — Creates workspaces with AWS account/region config
+- `create_app` — Creates app configs with container/build settings
+- `create_datastore` — Creates Aurora Serverless v2 database configs
+- `deploy_app` — Creates deployment records (stubbed in v1, no real infra)
+- `get_deployment_status` — Returns deployment status, phase, and logs
+
+**Progress indicator enhanced:**
+- Phase step visualization: Init → Build → Push → Deploy → Health → Done
+- Green checkmark and styling when complete
+- Started timestamp display
+
+**Process note:** Initially wrote tools as sync functions using `sync_to_async` wrapper, but AGENTS.md specifies using Django's native async ORM methods (`aget`, `acreate`, `aexists`, etc.). Fixed CLAUDE.md by symlinking it to AGENTS.md so patterns are always in context.
+
+---
+
 ## 2026-01-10 - Fix Newlines in Chat Messages
 
 **Problem:** Newlines in agent responses weren't displaying - everything appeared on one line.
