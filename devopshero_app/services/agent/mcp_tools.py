@@ -60,11 +60,7 @@ def _get_conversation() -> Conversation:
 async def inspect_repository(args: dict[str, Any]) -> dict[str, Any]:
     """
     Analyze a repository's contents.
-
-    This tool wraps the synchronous inspect_repository function
-    and returns the result as MCP tool output.
     """
-    # inspect_repository is synchronous and doesn't need Django ORM
     result = _inspect_repository(
         repo_url=args["repo_url"],
         branch=args["branch"],

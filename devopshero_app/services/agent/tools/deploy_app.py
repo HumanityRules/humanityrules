@@ -77,11 +77,7 @@ async def deploy_app(
     - Creates initial log entries
     - Does NOT trigger real infrastructure deployment
 
-    Future v2 will:
-    1. Build Docker image
-    2. Push to ECR
-    3. Deploy CDK infrastructure
-    4. Update ECS service
+    Future v2 will trigger real infrastructure deployment.
 
     Args:
         app_id: UUID of the App to deploy.
