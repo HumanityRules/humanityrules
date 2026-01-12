@@ -4,6 +4,28 @@
 > - Entries are in reverse chronological order (latest on top). Use format: `## YYYY-MM-DD HH:MM - Title`
 > - Avoid markdown tables — they render poorly. Use bulleted lists with bold labels instead.
 
+## 2026-01-11 - Remove ask_user Tool and AskUserQuestion Handling
+
+**Decision:** Removed the `ask_user` MCP tool and related `AskUserQuestion` handling to simplify the codebase before adding new features.
+
+**What was removed:**
+- `devopshero_app/services/agent/tools/ask_user.py` — The tool implementation (128 lines)
+- `_convert_ask_user_question_to_choice()` in agent_service.py — Converted Claude Code's built-in AskUserQuestion to CHOICE messages
+- `_extract_deferred_choice()` in agent_service.py — Extracted deferred choice data from tool results
+- All special-case handling for ask_user in the message processing loop
+
+**Why:** The ask_user tool added significant complexity:
+- Required special handling to create CHOICE messages with correct ordering
+- Had input normalization bugs (JSON strings vs dicts)
+- Needed deferred_choice pattern to fix message ordering issues
+- Created maintenance burden with two code paths for user questions (our tool + Claude's built-in)
+
+**Current state:** The agent can no longer programmatically present interactive choice buttons to users. If the model needs user input, it must ask in natural language and wait for a text response. The CHOICE message type and `_message_choice.html` template remain in the codebase but are currently unused.
+
+**Future consideration:** If interactive choices are needed again, consider a simpler approach or rely on Claude Code's built-in `AskUserQuestion` tool (which would appear as a TOOL_CALL card rather than custom UI).
+
+---
+
 ## 2026-01-11 - Fix Chat Message Ordering for ask_user Tool
 
 **Problem:** When Claude called the `ask_user` tool, messages appeared in wrong order: CHOICE buttons first, then TOOL_CALL, then TEXT. The model's past-tense response ("I've asked...") appeared before the actual question.

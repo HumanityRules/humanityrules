@@ -13,10 +13,8 @@ structured tool calling, conversation memory, and streaming responses.
 """
 
 import asyncio
-import json
 import logging
 import time
-import uuid
 from pathlib import Path
 from typing import Any
 
@@ -51,118 +49,6 @@ def _load_system_prompt() -> str:
     """Load the system prompt from the markdown file."""
     prompt_path = Path(__file__).parent / "system_prompt.md"
     return prompt_path.read_text()
-
-
-def _extract_deferred_choice(block_content: Any) -> dict[str, Any] | None:
-    """
-    Extract deferred_choice data from a tool result block.
-
-    The ask_user MCP tool returns deferred_choice data so we can create
-    the CHOICE message at the right time for correct ordering.
-
-    Args:
-        block_content: The ToolResultBlock.content (str, list, or dict).
-
-    Returns:
-        The deferred_choice dict if present, None otherwise.
-    """
-    try:
-        # block.content format varies:
-        # - String: JSON text
-        # - List: MCP content blocks [{"type": "text", "text": "..."}]
-        # - Dict: Already parsed JSON
-        if isinstance(block_content, str):
-            result_data = json.loads(block_content)
-        elif isinstance(block_content, list) and block_content:
-            first_block = block_content[0]
-            if isinstance(first_block, dict):
-                text = first_block.get("text", "")
-                result_data = json.loads(text) if text else {}
-            else:
-                return None
-        elif isinstance(block_content, dict):
-            result_data = block_content
-        else:
-            return None
-
-        return result_data.get("deferred_choice")
-    except (json.JSONDecodeError, KeyError, TypeError, AttributeError):
-        return None
-
-
-def _convert_ask_user_question_to_choice(tool_input: dict[str, Any]) -> tuple[str, dict[str, Any]]:
-    """
-    Convert Claude Code's AskUserQuestion tool input to CHOICE message format.
-
-    AskUserQuestion format:
-    {
-        "questions": [
-            {
-                "question": "Which library should we use?",
-                "header": "Library Selection",
-                "options": [
-                    {"label": "React", "description": "Popular UI library"},
-                    {"label": "Vue", "description": "Progressive framework"}
-                ],
-                "multiSelect": false
-            }
-        ]
-    }
-
-    CHOICE format:
-    - content: question text
-    - metadata.choices: list of {id, label, primary}
-    - metadata.allow_text: boolean
-
-    Args:
-        tool_input: The parameters passed to AskUserQuestion tool.
-
-    Returns:
-        Tuple of (content, metadata) for creating a CHOICE message.
-    """
-    questions = tool_input.get("questions", [])
-    if not questions:
-        return ("Please respond:", {"choices": [], "allow_text": True})
-
-    # Handle first question (v1 limitation: only support single question)
-    first_question = questions[0]
-    question_text = first_question.get("question", "")
-    header = first_question.get("header", "")
-    options = first_question.get("options", [])
-    multi_select = first_question.get("multiSelect", False)
-
-    # Build content - include header if present and different from question
-    if header and header != question_text:
-        content = f"**{header}**\n\n{question_text}"
-    else:
-        content = question_text or "Please select an option:"
-
-    # Convert options to choices
-    choices = []
-    for i, option in enumerate(options):
-        label = option.get("label", f"Option {i + 1}")
-        description = option.get("description", "")
-
-        # Include description in display if present
-        if description:
-            display_label = f"{label} - {description}"
-        else:
-            display_label = label
-
-        choices.append({
-            "id": str(uuid.uuid4()),
-            "label": display_label,
-            "primary": i == 0,
-        })
-
-    metadata = {
-        "choices": choices,
-        "allow_text": True,
-        "multi_select": multi_select,
-        "original_format": "AskUserQuestion",
-    }
-
-    return (content, metadata)
 
 
 async def _aget_last_user_message(conversation: Conversation) -> str:
@@ -273,19 +159,7 @@ async def _process_conversation_async(conversation: Conversation) -> None:
                     tool_name = call_info["name"]
                     duration_ms = int((time.time() - call_info["start_time"]) * 1000)
 
-                    # Claude Code's AskUserQuestion: only CHOICE, no TOOL_CALL
-                    if tool_name == "AskUserQuestion":
-                        content, metadata = _convert_ask_user_question_to_choice(tool_input=call_info["input"])
-                        await Message.objects.acreate(
-                            conversation=conversation,
-                            role=Message.Role.AGENT,
-                            content_type=Message.ContentType.CHOICE,
-                            content=content,
-                            metadata=metadata,
-                        )
-                        continue
-
-                    # All other tools get a TOOL_CALL message
+                    # Create TOOL_CALL message
                     await Message.objects.acreate(
                         conversation=conversation,
                         role=Message.Role.AGENT,
@@ -299,18 +173,6 @@ async def _process_conversation_async(conversation: Conversation) -> None:
                             "duration_ms": duration_ms,
                         },
                     )
-
-                    # For ask_user, also add a CHOICE message
-                    if tool_name == "mcp__devopshero__ask_user":
-                        deferred_choice = _extract_deferred_choice(block.content)
-                        if deferred_choice:
-                            await Message.objects.acreate(
-                                conversation=conversation,
-                                role=Message.Role.AGENT,
-                                content_type=Message.ContentType.CHOICE,
-                                content=deferred_choice["content"],
-                                metadata=deferred_choice["metadata"],
-                            )
 
             elif isinstance(message, ResultMessage):
                 # Final result with usage/cost metadata (logged for observability)
