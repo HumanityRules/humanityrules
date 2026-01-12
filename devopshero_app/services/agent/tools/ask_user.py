@@ -57,10 +57,18 @@ class Choice:
 
 @dataclass
 class AskUserResult:
-    """Result of presenting a question to the user."""
+    """
+    Result of preparing a question for the user.
+
+    Note: The CHOICE message is NOT created by this tool. Instead, the
+    prepared data is returned so that agent_service can create the message
+    at the right time for proper ordering (after TEXT, before response).
+    """
 
     message_id: str
     status: str = "awaiting_response"
+    # Deferred message data - agent_service will create the actual message
+    deferred_choice: dict | None = None
 
     def to_dict(self) -> dict:
         """Convert to dictionary for JSON serialization."""
@@ -74,20 +82,20 @@ async def ask_user(
     allow_text_input: bool,
 ) -> AskUserResult:
     """
-    Present a question to the user with choices.
+    Prepare a question for the user with choices.
 
-    This creates a CHOICE message in the conversation that renders
-    as interactive buttons in the UI. The user can click a choice
-    or type a custom response (if allow_text_input is True).
+    This does NOT create the CHOICE message directly. Instead, it returns
+    the prepared data so agent_service can create the message at the right
+    time for proper ordering (TEXT before TOOL_CALL before CHOICE).
 
     Args:
         question: The question to ask the user.
         choices: List of choice dicts, list of strings, or JSON string.
-        conversation: The Conversation context.
+        conversation: The Conversation context (unused, kept for API compat).
         allow_text_input: Whether to allow free text input.
 
     Returns:
-        AskUserResult indicating the question was presented.
+        AskUserResult with deferred_choice data for agent_service to create.
     """
     # Normalize choices to list of dicts
     normalized_choices = normalize_choices(choices)
@@ -102,19 +110,18 @@ async def ask_user(
         }
         processed_choices.append(processed_choice)
 
-    # Create the CHOICE message
-    message = await Message.objects.acreate(
-        conversation=conversation,
-        role=Message.Role.AGENT,
-        content_type=Message.ContentType.CHOICE,
-        content=question,
-        metadata={
-            "choices": processed_choices,
-            "allow_text": allow_text_input,
-        },
-    )
+    # Pre-generate message ID (message will be created by agent_service)
+    message_id = str(uuid.uuid4())
 
+    # Return deferred choice data - agent_service will create the actual message
     return AskUserResult(
-        message_id=str(message.id),
+        message_id=message_id,
         status="awaiting_response",
+        deferred_choice={
+            "content": question,
+            "metadata": {
+                "choices": processed_choices,
+                "allow_text": allow_text_input,
+            },
+        },
     )
