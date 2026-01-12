@@ -15,7 +15,6 @@ from claude_agent_sdk import tool, create_sdk_mcp_server
 from devopshero_app.models import Conversation
 
 from .tools import (
-    ask_user as _ask_user,
     create_app as _create_app,
     create_datastore as _create_datastore,
     create_workspace as _create_workspace,
@@ -98,56 +97,6 @@ async def list_aws_accounts(args: dict[str, Any]) -> dict[str, Any]:
             {
                 "type": "text",
                 "text": json.dumps([a.to_dict() for a in accounts], indent=2),
-            }
-        ]
-    }
-
-
-@tool(
-    "ask_user",
-    (
-        "Ask the user a question with interactive choice buttons. "
-        "Use this when you need user input to proceed, such as selecting "
-        "an AWS account, confirming a deployment, or choosing between options. "
-        "The question will be displayed with clickable buttons for each choice."
-    ),
-    {
-        "question": str,
-        "choices": list,
-        "allow_text_input": bool,
-    },
-)
-async def ask_user(args: dict[str, Any]) -> dict[str, Any]:
-    """
-    Ask the user a question with choices.
-
-    This tool creates a CHOICE message in the conversation that
-    renders as interactive buttons in the UI. The agent should
-    wait for the user's response before proceeding.
-    """
-    conversation = _get_conversation()
-
-    result = await _ask_user(
-        question=args["question"],
-        choices=args["choices"],
-        conversation=conversation,
-        allow_text_input=args.get("allow_text_input", True),
-    )
-
-    return {
-        "content": [
-            {
-                "type": "text",
-                "text": json.dumps(
-                    {
-                        **result.to_dict(),
-                        "note": (
-                            "Question has been presented to the user. "
-                            "Wait for their response before proceeding."
-                        ),
-                    },
-                    indent=2,
-                ),
             }
         ]
     }
@@ -397,7 +346,6 @@ devopshero_mcp_server = create_sdk_mcp_server(
     name="devopshero",
     version="1.0.0",
     tools=[
-        ask_user,
         create_app,
         create_datastore,
         create_workspace,
@@ -410,7 +358,6 @@ devopshero_mcp_server = create_sdk_mcp_server(
 
 # Tool names for use in allowed_tools configuration
 TOOL_NAMES = [
-    "mcp__devopshero__ask_user",
     "mcp__devopshero__create_app",
     "mcp__devopshero__create_datastore",
     "mcp__devopshero__create_workspace",
