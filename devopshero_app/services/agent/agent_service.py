@@ -14,6 +14,7 @@ structured tool calling, conversation memory, and streaming responses.
 
 import asyncio
 import time
+import uuid
 from pathlib import Path
 from typing import Any
 
@@ -40,6 +41,81 @@ def _load_system_prompt() -> str:
     """Load the system prompt from the markdown file."""
     prompt_path = Path(__file__).parent / "system_prompt.md"
     return prompt_path.read_text()
+
+
+def _convert_ask_user_question_to_choice(tool_input: dict[str, Any]) -> tuple[str, dict[str, Any]]:
+    """
+    Convert Claude Code's AskUserQuestion tool input to CHOICE message format.
+
+    AskUserQuestion format:
+    {
+        "questions": [
+            {
+                "question": "Which library should we use?",
+                "header": "Library Selection",
+                "options": [
+                    {"label": "React", "description": "Popular UI library"},
+                    {"label": "Vue", "description": "Progressive framework"}
+                ],
+                "multiSelect": false
+            }
+        ]
+    }
+
+    CHOICE format:
+    - content: question text
+    - metadata.choices: list of {id, label, primary}
+    - metadata.allow_text: boolean
+
+    Args:
+        tool_input: The parameters passed to AskUserQuestion tool.
+
+    Returns:
+        Tuple of (content, metadata) for creating a CHOICE message.
+    """
+    questions = tool_input.get("questions", [])
+    if not questions:
+        return ("Please respond:", {"choices": [], "allow_text": True})
+
+    # Handle first question (v1 limitation: only support single question)
+    first_question = questions[0]
+    question_text = first_question.get("question", "")
+    header = first_question.get("header", "")
+    options = first_question.get("options", [])
+    multi_select = first_question.get("multiSelect", False)
+
+    # Build content - include header if present and different from question
+    if header and header != question_text:
+        content = f"**{header}**\n\n{question_text}"
+    else:
+        content = question_text or "Please select an option:"
+
+    # Convert options to choices
+    choices = []
+    for i, option in enumerate(options):
+        label = option.get("label", f"Option {i + 1}")
+        description = option.get("description", "")
+
+        # Include description in display if present
+        if description:
+            display_label = f"{label} - {description}"
+        else:
+            display_label = label
+
+        choices.append({
+            "id": str(uuid.uuid4()),
+            "label": display_label,
+            "primary": i == 0,
+        })
+
+    metadata = {
+        "choices": choices,
+        "allow_text": True,
+        "multi_select": multi_select,
+        "original_format": "AskUserQuestion",
+    }
+
+    return (content, metadata)
 
 
 async def _aget_last_user_message(conversation: Conversation) -> str:
@@ -141,20 +217,36 @@ async def _process_conversation_async(conversation: Conversation) -> Message:
                             # Match with pending tool call and save
                             call_info = pending_tool_calls.pop(block.tool_use_id, None)
                             if call_info:
-                                duration_ms = int((time.time() - call_info["start_time"]) * 1000)
-                                await Message.objects.acreate(
-                                    conversation=conversation,
-                                    role=Message.Role.AGENT,
-                                    content_type=Message.ContentType.TOOL_CALL,
-                                    content=call_info["name"],
-                                    metadata={
-                                        "tool_name": call_info["name"],
-                                        "parameters": call_info["input"],
-                                        "result": block.content,
-                                        "status": "error" if block.is_error else "success",
-                                        "duration_ms": duration_ms,
-                                    },
-                                )
+                                tool_name = call_info["name"]
+
+                                # Special handling for Claude Code's AskUserQuestion
+                                if tool_name == "AskUserQuestion":
+                                    content, metadata = _convert_ask_user_question_to_choice(
+                                        tool_input=call_info["input"],
+                                    )
+                                    await Message.objects.acreate(
+                                        conversation=conversation,
+                                        role=Message.Role.AGENT,
+                                        content_type=Message.ContentType.CHOICE,
+                                        content=content,
+                                        metadata=metadata,
+                                    )
+                                else:
+                                    # Regular tool call handling
+                                    duration_ms = int((time.time() - call_info["start_time"]) * 1000)
+                                    await Message.objects.acreate(
+                                        conversation=conversation,
+                                        role=Message.Role.AGENT,
+                                        content_type=Message.ContentType.TOOL_CALL,
+                                        content=tool_name,
+                                        metadata={
+                                            "tool_name": tool_name,
+                                            "parameters": call_info["input"],
+                                            "result": block.content,
+                                            "status": "error" if block.is_error else "success",
+                                            "duration_ms": duration_ms,
+                                        },
+                                    )
 
             elif isinstance(message, ResultMessage):
                 # Capture final metadata
