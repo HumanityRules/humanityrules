@@ -100,12 +100,12 @@ async def get_deployment_status(
         ("unknown", 0),
     )
 
-    # Get recent logs
+    # Get recent logs (fetched newest first, then reversed to show oldest first)
     recent_logs_qs = DeploymentLog.objects.filter(
         deployment=deployment,
     ).order_by("-created_at")[:log_limit]
 
-    recent_logs_list = await recent_logs_qs.alist()
+    recent_logs_list = [log async for log in recent_logs_qs]
 
     recent_logs = [
         DeploymentLogEntry(

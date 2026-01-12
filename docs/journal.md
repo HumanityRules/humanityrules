@@ -4,6 +4,23 @@
 > - Entries are in reverse chronological order (latest on top). Use format: `## YYYY-MM-DD HH:MM - Title`
 > - Avoid markdown tables — they render poorly. Use bulleted lists with bold labels instead.
 
+## 2026-01-11 - Display Tool Calls in Conversation UI
+
+Added visibility into agent tool calls. Previously, users only saw final text responses with no indication of what tools were called or what they returned.
+
+**Implementation:**
+- Added `TOOL_CALL` content type to Message model
+- Capture `ToolUseBlock` and `ToolResultBlock` from Claude SDK response stream
+- Match tool invocations to results by `tool_use_id`, calculate duration
+- New `_message_tool_call.html` template with expanded display (tool name, params, result, duration)
+- `json_pretty` filter that extracts JSON from MCP content blocks `[{"type": "text", "text": "..."}]`
+
+**Bug fixes:**
+- `select_related('organization')` on conversation fetch to avoid lazy load in async context
+- Replace `.alist()` with `async for` iteration — `alist()` doesn't exist in Django 6.0 (confirmed via docs)
+
+---
+
 ## 2026-01-11 - Phase 3: Deployment Flow Agent Tools
 
 Implemented the deployment flow tools for the AI agent (OpenSpec add-deployment-agent Phase 3).

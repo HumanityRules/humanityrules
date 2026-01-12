@@ -35,8 +35,6 @@ async def list_aws_accounts(organization: Organization) -> list[AWSAccountSummar
     Returns:
         List of AWSAccountSummary objects.
     """
-    accounts = await AWSAccount.objects.filter(organization=organization).alist()
-
     return [
         AWSAccountSummary(
             id=str(account.id),
@@ -45,5 +43,5 @@ async def list_aws_accounts(organization: Organization) -> list[AWSAccountSummar
             status=account.status,
             region=None,  # TODO: Add default region to AWSAccount model
         )
-        for account in accounts
+        async for account in AWSAccount.objects.filter(organization=organization)
     ]

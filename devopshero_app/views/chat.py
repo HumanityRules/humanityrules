@@ -28,7 +28,7 @@ def _process_agent_in_background(conversation_id: str):
         # Need to close old connections when running in a new thread
         close_old_connections()
 
-        conversation = Conversation.objects.get(id=conversation_id)
+        conversation = Conversation.objects.select_related('organization').get(id=conversation_id)
         process_conversation(conversation)
     except Exception as e:
         logger.exception("Background agent processing failed")
