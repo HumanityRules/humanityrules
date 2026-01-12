@@ -483,6 +483,7 @@ class Message(models.Model):
         CHOICE = "choice", "Interactive Choice"
         DEPLOYMENT_LOG = "deployment_log", "Deployment Log"
         ERROR = "error", "Error"
+        TOOL_CALL = "tool_call", "Tool Call"
 
     id = models.UUIDField(
         primary_key=True,

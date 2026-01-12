@@ -1,0 +1,39 @@
+{% load chat_filters %}
+{# Tool call display - shows tool name, parameters, and result #}
+
+<div class="border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden my-2">
+    {# Header with tool name and status #}
+    <div class="flex items-center justify-between px-3 py-2 bg-gray-50 dark:bg-gray-700">
+        <div class="flex items-center space-x-2">
+            {% if message.metadata.status == 'success' %}
+            <svg class="w-4 h-4 text-green-500" fill="currentColor" viewBox="0 0 20 20">
+                <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"/>
+            </svg>
+            {% else %}
+            <svg class="w-4 h-4 text-red-500" fill="currentColor" viewBox="0 0 20 20">
+                <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clip-rule="evenodd"/>
+            </svg>
+            {% endif %}
+            <span class="font-mono text-sm font-medium text-gray-900 dark:text-gray-100">{{ message.metadata.tool_name }}</span>
+        </div>
+        <span class="text-xs text-gray-500">{{ message.metadata.duration_ms }}ms</span>
+    </div>
+
+    {# Parameters and Result - always visible #}
+    <div class="p-3 text-sm space-y-3">
+        <div>
+            <div class="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">Parameters</div>
+            <pre class="bg-gray-100 dark:bg-gray-900 p-2 rounded text-xs overflow-x-auto font-mono text-gray-800 dark:text-gray-200">{{ message.metadata.parameters|json_pretty }}</pre>
+        </div>
+        <div>
+            <div class="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">Result</div>
+            <pre class="bg-gray-100 dark:bg-gray-900 p-2 rounded text-xs overflow-x-auto max-h-64 overflow-y-auto font-mono text-gray-800 dark:text-gray-200">{{ message.metadata.result|json_pretty }}</pre>
+        </div>
+        {% if message.metadata.error_message %}
+        <div>
+            <div class="text-xs font-medium text-red-500 mb-1">Error</div>
+            <pre class="bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-300 p-2 rounded text-xs overflow-x-auto font-mono">{{ message.metadata.error_message }}</pre>
+        </div>
+        {% endif %}
+    </div>
+</div>

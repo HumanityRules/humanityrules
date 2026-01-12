@@ -6,21 +6,25 @@ This module provides the core agent service that:
 - Sends messages to Claude using the Claude Agent SDK
 - Handles tool calls automatically via MCP tools
 - Saves agent responses back to the database
+- Records tool calls as visible messages in the conversation
 
 Built on the Claude Agent SDK for robust agent orchestration with
 structured tool calling, conversation memory, and streaming responses.
 """
 
 import asyncio
+import time
 from pathlib import Path
+from typing import Any
 
 from claude_agent_sdk import (
     ClaudeSDKClient,
     ClaudeAgentOptions,
     AssistantMessage,
     ResultMessage,
+    UserMessage,
 )
-from claude_agent_sdk.types import TextBlock
+from claude_agent_sdk.types import TextBlock, ToolUseBlock, ToolResultBlock
 
 from devopshero_app.models import Conversation, Message
 
@@ -106,6 +110,10 @@ async def _process_conversation_async(conversation: Conversation) -> Message:
     num_turns = 0
     session_id = None
 
+    # Track pending tool calls by tool_use_id
+    # Maps tool_use_id -> {name, input, start_time}
+    pending_tool_calls: dict[str, dict[str, Any]] = {}
+
     async with ClaudeSDKClient(options=options) as client:
         # Send the user's message
         await client.query(user_message)
@@ -113,10 +121,40 @@ async def _process_conversation_async(conversation: Conversation) -> Message:
         # Process the response stream
         async for message in client.receive_response():
             if isinstance(message, AssistantMessage):
-                # Extract text content from the assistant's response
+                # Process content blocks from assistant's response
                 for block in message.content:
                     if isinstance(block, TextBlock):
                         response_text += block.text
+                    elif isinstance(block, ToolUseBlock):
+                        # Record pending tool call (tool invocation)
+                        pending_tool_calls[block.id] = {
+                            "name": block.name,
+                            "input": block.input,
+                            "start_time": time.time(),
+                        }
+
+            elif isinstance(message, UserMessage):
+                # Process tool results from synthetic user messages
+                if isinstance(message.content, list):
+                    for block in message.content:
+                        if isinstance(block, ToolResultBlock):
+                            # Match with pending tool call and save
+                            call_info = pending_tool_calls.pop(block.tool_use_id, None)
+                            if call_info:
+                                duration_ms = int((time.time() - call_info["start_time"]) * 1000)
+                                await Message.objects.acreate(
+                                    conversation=conversation,
+                                    role=Message.Role.AGENT,
+                                    content_type=Message.ContentType.TOOL_CALL,
+                                    content=call_info["name"],
+                                    metadata={
+                                        "tool_name": call_info["name"],
+                                        "parameters": call_info["input"],
+                                        "result": block.content,
+                                        "status": "error" if block.is_error else "success",
+                                        "duration_ms": duration_ms,
+                                    },
+                                )
 
             elif isinstance(message, ResultMessage):
                 # Capture final metadata

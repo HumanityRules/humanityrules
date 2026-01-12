@@ -21,6 +21,9 @@
 {% elif message.content_type == 'error' %}
     {% include "devopshero_app/chat/_message_error.html" %}
 
+{% elif message.content_type == 'tool_call' %}
+    {% include "devopshero_app/chat/_message_tool_call.html" %}
+
 {% else %}
     {# Fallback for unknown content types #}
     <p class="text-gray-900 dark:text-gray-100 whitespace-pre-wrap">{{ message.content }}</p>
