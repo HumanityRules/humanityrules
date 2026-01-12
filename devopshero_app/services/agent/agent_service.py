@@ -186,7 +186,7 @@ async def _aget_last_user_message(conversation: Conversation) -> str:
     return last_message.content
 
 
-async def _process_conversation_async(conversation: Conversation) -> Message:
+async def _process_conversation_async(conversation: Conversation) -> None:
     """
     Process a conversation asynchronously using the Claude Agent SDK.
 
@@ -194,14 +194,10 @@ async def _process_conversation_async(conversation: Conversation) -> Message:
     1. Sets the conversation context for tools
     2. Creates a ClaudeSDKClient with our MCP tools
     3. Sends the user's message
-    4. Collects the agent's response
-    5. Saves and returns the agent message
+    4. Creates messages in the database as they arrive from the SDK
 
     Args:
         conversation: The Conversation to process.
-
-    Returns:
-        The final Message created by the agent.
     """
     # Set the conversation context for tools to access
     conversation_context.set(conversation)
@@ -226,51 +222,52 @@ async def _process_conversation_async(conversation: Conversation) -> Message:
         env=get_claude_env(),
     )
 
-    # Track response content and metadata
-    response_text = ""
-    total_cost_usd = None
-    usage = None
-    num_turns = 0
-    session_id = None
-
     # Track pending tool calls by tool_use_id
     # Maps tool_use_id -> {name, input, start_time}
     pending_tool_calls: dict[str, dict[str, Any]] = {}
-
-    # Collected tool messages to create before TEXT (for correct display order)
-    # Order: TOOL_CALL -> CHOICE -> TEXT (model commentary comes last)
-    tool_messages: list[dict[str, Any]] = []
 
     async with ClaudeSDKClient(options=options) as client:
         # Send the user's message
         await client.query(user_message)
 
-        # Process the response stream
+        # Process the response stream - create messages immediately as they arrive
         async for message in client.receive_response():
             if isinstance(message, AssistantMessage):
-                # Process content blocks from assistant's response
+                # Extract text and tool calls from this message
+                text_content = ""
                 for block in message.content:
                     if isinstance(block, TextBlock):
-                        response_text += block.text
+                        text_content += block.text
                     elif isinstance(block, ToolUseBlock):
-                        # Record pending tool call (tool invocation)
+                        # Record pending tool call for tool invocations
                         pending_tool_calls[block.id] = {
                             "name": block.name,
                             "input": block.input,
                             "start_time": time.time(),
                         }
 
+                if text_content:
+                    await Message.objects.acreate(
+                        conversation=conversation,
+                        role=Message.Role.AGENT,
+                        content_type=Message.ContentType.TEXT,
+                        content=text_content,
+                    )
+
             elif isinstance(message, UserMessage):
                 # Process tool results from synthetic user messages
                 if not isinstance(message.content, list):
+                    logger.info("[SDK] UserMessage: content is not a list: %s", type(message.content).__name__)
                     continue
 
                 for block in message.content:
                     if not isinstance(block, ToolResultBlock):
+                        logger.info("[SDK] UserMessage: block is not a ToolResultBlock: %s", type(block).__name__)
                         continue
 
                     call_info = pending_tool_calls.pop(block.tool_use_id, None)
                     if not call_info:
+                        logger.info("[SDK] UserMessage: call_info not found for block.tool_use_id: %s", block.tool_use_id)
                         continue
 
                     tool_name = call_info["name"]
@@ -279,42 +276,49 @@ async def _process_conversation_async(conversation: Conversation) -> Message:
                     # Claude Code's AskUserQuestion: only CHOICE, no TOOL_CALL
                     if tool_name == "AskUserQuestion":
                         content, metadata = _convert_ask_user_question_to_choice(tool_input=call_info["input"])
-                        tool_messages.append({
-                            "content_type": Message.ContentType.CHOICE,
-                            "content": content,
-                            "metadata": metadata,
-                        })
+                        await Message.objects.acreate(
+                            conversation=conversation,
+                            role=Message.Role.AGENT,
+                            content_type=Message.ContentType.CHOICE,
+                            content=content,
+                            metadata=metadata,
+                        )
                         continue
 
                     # All other tools get a TOOL_CALL message
-                    tool_messages.append({
-                        "content_type": Message.ContentType.TOOL_CALL,
-                        "content": tool_name,
-                        "metadata": {
+                    await Message.objects.acreate(
+                        conversation=conversation,
+                        role=Message.Role.AGENT,
+                        content_type=Message.ContentType.TOOL_CALL,
+                        content=tool_name,
+                        metadata={
                             "tool_name": tool_name,
                             "parameters": call_info["input"],
                             "result": block.content,
                             "status": "error" if block.is_error else "success",
                             "duration_ms": duration_ms,
                         },
-                    })
+                    )
 
                     # For ask_user, also add a CHOICE message
                     if tool_name == "mcp__devopshero__ask_user":
                         deferred_choice = _extract_deferred_choice(block.content)
                         if deferred_choice:
-                            tool_messages.append({
-                                "content_type": Message.ContentType.CHOICE,
-                                "content": deferred_choice["content"],
-                                "metadata": deferred_choice["metadata"],
-                            })
+                            await Message.objects.acreate(
+                                conversation=conversation,
+                                role=Message.Role.AGENT,
+                                content_type=Message.ContentType.CHOICE,
+                                content=deferred_choice["content"],
+                                metadata=deferred_choice["metadata"],
+                            )
 
             elif isinstance(message, ResultMessage):
-                # Capture final metadata
-                total_cost_usd = message.total_cost_usd
-                usage = message.usage
-                num_turns = message.num_turns
-                session_id = message.session_id
+                # Final result with usage/cost metadata (logged for observability)
+                logger.info(
+                    "[SDK] ResultMessage: turns=%s, cost=$%.4f",
+                    message.num_turns,
+                    message.total_cost_usd or 0,
+                )
 
             elif isinstance(message, SystemMessage):
                 # SDK-level control messages (session init, MCP status, etc.)
@@ -328,36 +332,11 @@ async def _process_conversation_async(conversation: Conversation) -> Message:
                 # Catch any unexpected message types
                 logger.info("[SDK] Unknown message type: %s = %s", type(message).__name__, message)
 
-    # Create tool messages first (TOOL_CALL, CHOICE), then TEXT last
-    for msg_data in tool_messages:
-        await Message.objects.acreate(
-            conversation=conversation,
-            role=Message.Role.AGENT,
-            **msg_data,
-        )
-
-    # Save agent TEXT response last (model's commentary after tool results)
-    agent_message = await Message.objects.acreate(
-        conversation=conversation,
-        role=Message.Role.AGENT,
-        content_type=Message.ContentType.TEXT,
-        content=response_text,
-        metadata={
-            "sdk": "claude-agent-sdk",
-            "session_id": session_id,
-            "usage": usage,
-            "total_cost_usd": total_cost_usd,
-            "num_turns": num_turns,
-        },
-    )
-
     # Update conversation timestamp
     await conversation.asave()
 
-    return agent_message
 
-
-def process_conversation(conversation: Conversation) -> Message:
+def process_conversation(conversation: Conversation) -> None:
     """
     Process a conversation and generate an agent response.
 
@@ -365,16 +344,12 @@ def process_conversation(conversation: Conversation) -> Message:
     1. Sets up the conversation context for MCP tools
     2. Sends the latest user message to Claude via the Agent SDK
     3. Handles tool calls automatically through the SDK
-    4. Saves the agent response to the database
-    5. Returns the created Message
+    4. Creates messages in the database as they arrive from the SDK
 
     Args:
         conversation: The Conversation to process.
 
-    Returns:
-        The final Message created by the agent.
-
     Raises:
         ValueError: If the conversation has no user messages.
     """
-    return asyncio.run(_process_conversation_async(conversation))
+    asyncio.run(_process_conversation_async(conversation))
