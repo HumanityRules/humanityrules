@@ -4,6 +4,24 @@
 > - Entries are in reverse chronological order (latest on top). Use format: `## YYYY-MM-DD HH:MM - Title`
 > - Avoid markdown tables — they render poorly. Use bulleted lists with bold labels instead.
 
+## 2026-01-11 - Fix Chat Message Ordering for ask_user Tool
+
+**Problem:** When Claude called the `ask_user` tool, messages appeared in wrong order: CHOICE buttons first, then TOOL_CALL, then TEXT. The model's past-tense response ("I've asked...") appeared before the actual question.
+
+**Root cause:** Messages ordered by `created_at`. The `ask_user` tool created CHOICE messages during tool execution (early timestamp), while TEXT was created after stream completed (late timestamp).
+
+**Solution:**
+- Moved CHOICE creation out of `ask_user` tool — now returns `deferred_choice` data
+- `agent_service` collects all tool messages during stream, creates them in correct order after stream ends
+- Final order: TOOL_CALL → CHOICE → TEXT (model commentary last)
+
+**Refactoring:**
+- Extracted `_extract_deferred_choice()` helper for parsing tool results
+- Renamed `deferred_messages` → `tool_messages`
+- Reduced indentation via early `continue` statements
+
+---
+
 ## 2026-01-11 - Display Tool Calls in Conversation UI
 
 Added visibility into agent tool calls. Previously, users only saw final text responses with no indication of what tools were called or what they returned.

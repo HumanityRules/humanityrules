@@ -13,6 +13,7 @@ structured tool calling, conversation memory, and streaming responses.
 """
 
 import asyncio
+import json
 import time
 import uuid
 from pathlib import Path
@@ -41,6 +42,43 @@ def _load_system_prompt() -> str:
     """Load the system prompt from the markdown file."""
     prompt_path = Path(__file__).parent / "system_prompt.md"
     return prompt_path.read_text()
+
+
+def _extract_deferred_choice(block_content: Any) -> dict[str, Any] | None:
+    """
+    Extract deferred_choice data from a tool result block.
+
+    The ask_user MCP tool returns deferred_choice data so we can create
+    the CHOICE message at the right time for correct ordering.
+
+    Args:
+        block_content: The ToolResultBlock.content (str, list, or dict).
+
+    Returns:
+        The deferred_choice dict if present, None otherwise.
+    """
+    try:
+        # block.content format varies:
+        # - String: JSON text
+        # - List: MCP content blocks [{"type": "text", "text": "..."}]
+        # - Dict: Already parsed JSON
+        if isinstance(block_content, str):
+            result_data = json.loads(block_content)
+        elif isinstance(block_content, list) and block_content:
+            first_block = block_content[0]
+            if isinstance(first_block, dict):
+                text = first_block.get("text", "")
+                result_data = json.loads(text) if text else {}
+            else:
+                return None
+        elif isinstance(block_content, dict):
+            result_data = block_content
+        else:
+            return None
+
+        return result_data.get("deferred_choice")
+    except (json.JSONDecodeError, KeyError, TypeError, AttributeError):
+        return None
 
 
 def _convert_ask_user_question_to_choice(tool_input: dict[str, Any]) -> tuple[str, dict[str, Any]]:
@@ -190,6 +228,10 @@ async def _process_conversation_async(conversation: Conversation) -> Message:
     # Maps tool_use_id -> {name, input, start_time}
     pending_tool_calls: dict[str, dict[str, Any]] = {}
 
+    # Collected tool messages to create before TEXT (for correct display order)
+    # Order: TOOL_CALL -> CHOICE -> TEXT (model commentary comes last)
+    tool_messages: list[dict[str, Any]] = []
+
     async with ClaudeSDKClient(options=options) as client:
         # Send the user's message
         await client.query(user_message)
@@ -211,42 +253,52 @@ async def _process_conversation_async(conversation: Conversation) -> Message:
 
             elif isinstance(message, UserMessage):
                 # Process tool results from synthetic user messages
-                if isinstance(message.content, list):
-                    for block in message.content:
-                        if isinstance(block, ToolResultBlock):
-                            # Match with pending tool call and save
-                            call_info = pending_tool_calls.pop(block.tool_use_id, None)
-                            if call_info:
-                                tool_name = call_info["name"]
+                if not isinstance(message.content, list):
+                    continue
 
-                                # Special handling for Claude Code's AskUserQuestion
-                                if tool_name == "AskUserQuestion":
-                                    content, metadata = _convert_ask_user_question_to_choice(
-                                        tool_input=call_info["input"],
-                                    )
-                                    await Message.objects.acreate(
-                                        conversation=conversation,
-                                        role=Message.Role.AGENT,
-                                        content_type=Message.ContentType.CHOICE,
-                                        content=content,
-                                        metadata=metadata,
-                                    )
-                                else:
-                                    # Regular tool call handling
-                                    duration_ms = int((time.time() - call_info["start_time"]) * 1000)
-                                    await Message.objects.acreate(
-                                        conversation=conversation,
-                                        role=Message.Role.AGENT,
-                                        content_type=Message.ContentType.TOOL_CALL,
-                                        content=tool_name,
-                                        metadata={
-                                            "tool_name": tool_name,
-                                            "parameters": call_info["input"],
-                                            "result": block.content,
-                                            "status": "error" if block.is_error else "success",
-                                            "duration_ms": duration_ms,
-                                        },
-                                    )
+                for block in message.content:
+                    if not isinstance(block, ToolResultBlock):
+                        continue
+
+                    call_info = pending_tool_calls.pop(block.tool_use_id, None)
+                    if not call_info:
+                        continue
+
+                    tool_name = call_info["name"]
+                    duration_ms = int((time.time() - call_info["start_time"]) * 1000)
+
+                    # Claude Code's AskUserQuestion: only CHOICE, no TOOL_CALL
+                    if tool_name == "AskUserQuestion":
+                        content, metadata = _convert_ask_user_question_to_choice(tool_input=call_info["input"])
+                        tool_messages.append({
+                            "content_type": Message.ContentType.CHOICE,
+                            "content": content,
+                            "metadata": metadata,
+                        })
+                        continue
+
+                    # All other tools get a TOOL_CALL message
+                    tool_messages.append({
+                        "content_type": Message.ContentType.TOOL_CALL,
+                        "content": tool_name,
+                        "metadata": {
+                            "tool_name": tool_name,
+                            "parameters": call_info["input"],
+                            "result": block.content,
+                            "status": "error" if block.is_error else "success",
+                            "duration_ms": duration_ms,
+                        },
+                    })
+
+                    # For ask_user, also add a CHOICE message
+                    if tool_name == "mcp__devopshero__ask_user":
+                        deferred_choice = _extract_deferred_choice(block.content)
+                        if deferred_choice:
+                            tool_messages.append({
+                                "content_type": Message.ContentType.CHOICE,
+                                "content": deferred_choice["content"],
+                                "metadata": deferred_choice["metadata"],
+                            })
 
             elif isinstance(message, ResultMessage):
                 # Capture final metadata
@@ -255,7 +307,15 @@ async def _process_conversation_async(conversation: Conversation) -> Message:
                 num_turns = message.num_turns
                 session_id = message.session_id
 
-    # Save agent response to database
+    # Create tool messages first (TOOL_CALL, CHOICE), then TEXT last
+    for msg_data in tool_messages:
+        await Message.objects.acreate(
+            conversation=conversation,
+            role=Message.Role.AGENT,
+            **msg_data,
+        )
+
+    # Save agent TEXT response last (model's commentary after tool results)
     agent_message = await Message.objects.acreate(
         conversation=conversation,
         role=Message.Role.AGENT,
