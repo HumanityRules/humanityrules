@@ -36,7 +36,7 @@ class AskUserResult:
         return asdict(self)
 
 
-def ask_user(
+async def ask_user(
     question: str,
     choices: list[dict],
     conversation: Conversation,
@@ -69,7 +69,7 @@ def ask_user(
         processed_choices.append(processed_choice)
 
     # Create the CHOICE message
-    message = Message.objects.create(
+    message = await Message.objects.acreate(
         conversation=conversation,
         role=Message.Role.AGENT,
         content_type=Message.ContentType.CHOICE,

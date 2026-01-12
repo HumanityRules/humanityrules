@@ -37,7 +37,7 @@ class AppSummary:
         return asdict(self)
 
 
-def create_app(
+async def create_app(
     workspace_id: str,
     name: str,
     repo_url: str,
@@ -50,10 +50,10 @@ def create_app(
     health_check_path: str,
     organization: Organization,
     user: User,
-    environment_variables: list[dict] | None = None,
-    domain_name: str | None = None,
-    datastore_id: str | None = None,
-    dockerfile_path: str = "",
+    environment_variables: list[dict] | None,
+    domain_name: str | None,
+    datastore_id: str | None,
+    dockerfile_path: str,
 ) -> AppSummary:
     """
     Create an application configuration in a workspace.
@@ -72,8 +72,8 @@ def create_app(
         organization: The Organization this app belongs to.
         user: The User creating the app.
         environment_variables: List of {name, value} dicts for env vars.
-        domain_name: Optional custom domain.
-        datastore_id: Optional UUID of datastore to bind.
+        domain_name: Custom domain.
+        datastore_id: UUID of datastore to bind.
         dockerfile_path: Path to Dockerfile if using dockerfile strategy.
 
     Returns:
@@ -85,7 +85,7 @@ def create_app(
     """
     # Validate workspace exists and belongs to organization
     try:
-        workspace = Workspace.objects.get(
+        workspace = await Workspace.objects.aget(
             id=workspace_id,
             organization=organization,
         )
@@ -112,7 +112,7 @@ def create_app(
     datastore = None
     if datastore_id:
         try:
-            datastore = Datastore.objects.get(
+            datastore = await Datastore.objects.aget(
                 id=datastore_id,
                 workspace=workspace,
             )
@@ -125,12 +125,12 @@ def create_app(
     base_slug = slugify(name)
     slug = base_slug
     counter = 1
-    while App.objects.filter(workspace=workspace, slug=slug).exists():
+    while await App.objects.filter(workspace=workspace, slug=slug).aexists():
         slug = f"{base_slug}-{counter}"
         counter += 1
 
     # Create the app
-    app = App.objects.create(
+    app = await App.objects.acreate(
         workspace=workspace,
         name=name,
         slug=slug,
@@ -138,7 +138,7 @@ def create_app(
         build_strategy=build_strategy,
         repo_url=repo_url,
         branch=branch,
-        dockerfile_path=dockerfile_path,
+        dockerfile_path=dockerfile_path or "",
         container_port=container_port,
         cpu=cpu,
         memory=memory,

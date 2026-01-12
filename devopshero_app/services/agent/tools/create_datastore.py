@@ -33,16 +33,16 @@ class DatastoreSummary:
         return asdict(self)
 
 
-def create_datastore(
+async def create_datastore(
     workspace_id: str,
     name: str,
     engine: str,
     database_name: str,
     organization: Organization,
     user: User,
-    deployment_mode: str = "aurora_serverless_v2",
-    serverless_min_acu: float = 0.5,
-    serverless_max_acu: float = 2.0,
+    deployment_mode: str,
+    serverless_min_acu: float,
+    serverless_max_acu: float,
 ) -> DatastoreSummary:
     """
     Create a managed database in a workspace.
@@ -55,8 +55,8 @@ def create_datastore(
         organization: The Organization this datastore belongs to.
         user: The User creating the datastore.
         deployment_mode: Deployment mode (aurora_serverless_v2, aurora_provisioned).
-        serverless_min_acu: Minimum ACUs for serverless mode (default 0.5).
-        serverless_max_acu: Maximum ACUs for serverless mode (default 2.0).
+        serverless_min_acu: Minimum ACUs for serverless mode.
+        serverless_max_acu: Maximum ACUs for serverless mode.
 
     Returns:
         DatastoreSummary with the created datastore details.
@@ -67,7 +67,7 @@ def create_datastore(
     """
     # Validate workspace exists and belongs to organization
     try:
-        workspace = Workspace.objects.get(
+        workspace = await Workspace.objects.aget(
             id=workspace_id,
             organization=organization,
         )
@@ -103,12 +103,12 @@ def create_datastore(
     base_slug = slugify(name)
     slug = base_slug
     counter = 1
-    while Datastore.objects.filter(workspace=workspace, slug=slug).exists():
+    while await Datastore.objects.filter(workspace=workspace, slug=slug).aexists():
         slug = f"{base_slug}-{counter}"
         counter += 1
 
     # Create the datastore
-    datastore = Datastore.objects.create(
+    datastore = await Datastore.objects.acreate(
         workspace=workspace,
         name=name,
         slug=slug,
