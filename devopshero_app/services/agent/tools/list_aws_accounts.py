@@ -25,7 +25,7 @@ class AWSAccountSummary:
         return asdict(self)
 
 
-def list_aws_accounts(organization: Organization) -> list[AWSAccountSummary]:
+async def list_aws_accounts(organization: Organization) -> list[AWSAccountSummary]:
     """
     List AWS accounts connected to the organization.
 
@@ -35,7 +35,7 @@ def list_aws_accounts(organization: Organization) -> list[AWSAccountSummary]:
     Returns:
         List of AWSAccountSummary objects.
     """
-    accounts = AWSAccount.objects.filter(organization=organization)
+    accounts = await AWSAccount.objects.filter(organization=organization).alist()
 
     return [
         AWSAccountSummary(

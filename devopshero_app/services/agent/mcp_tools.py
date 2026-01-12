@@ -10,7 +10,6 @@ import json
 from contextvars import ContextVar
 from typing import Any
 
-from asgiref.sync import sync_to_async
 from claude_agent_sdk import tool, create_sdk_mcp_server
 
 from devopshero_app.models import Conversation
@@ -93,16 +92,10 @@ async def inspect_repository(args: dict[str, Any]) -> dict[str, Any]:
 async def list_aws_accounts(args: dict[str, Any]) -> dict[str, Any]:
     """
     List AWS accounts connected to the organization.
-
-    This tool accesses the Django ORM via sync_to_async to get
-    accounts for the current conversation's organization.
     """
     conversation = _get_conversation()
 
-    # Wrap the synchronous Django ORM call
-    accounts = await sync_to_async(_list_aws_accounts)(
-        organization=conversation.organization
-    )
+    accounts = await _list_aws_accounts(organization=conversation.organization)
 
     return {
         "content": [
@@ -138,8 +131,7 @@ async def ask_user(args: dict[str, Any]) -> dict[str, Any]:
     """
     conversation = _get_conversation()
 
-    # Wrap the synchronous Django ORM call
-    result = await sync_to_async(_ask_user)(
+    result = await _ask_user(
         question=args["question"],
         choices=args["choices"],
         conversation=conversation,
@@ -190,7 +182,7 @@ async def create_workspace(args: dict[str, Any]) -> dict[str, Any]:
     """
     conversation = _get_conversation()
 
-    result = await sync_to_async(_create_workspace)(
+    result = await _create_workspace(
         name=args["name"],
         aws_account_id=args["aws_account_id"],
         aws_region=args["aws_region"],
@@ -242,7 +234,7 @@ async def create_app(args: dict[str, Any]) -> dict[str, Any]:
     """
     conversation = _get_conversation()
 
-    result = await sync_to_async(_create_app)(
+    result = await _create_app(
         workspace_id=args["workspace_id"],
         name=args["name"],
         repo_url=args["repo_url"],
@@ -258,6 +250,7 @@ async def create_app(args: dict[str, Any]) -> dict[str, Any]:
         environment_variables=args.get("environment_variables"),
         domain_name=args.get("domain_name"),
         datastore_id=args.get("datastore_id"),
+        dockerfile_path=args.get("dockerfile_path", ""),
     )
 
     return {
@@ -295,7 +288,7 @@ async def create_datastore(args: dict[str, Any]) -> dict[str, Any]:
     """
     conversation = _get_conversation()
 
-    result = await sync_to_async(_create_datastore)(
+    result = await _create_datastore(
         workspace_id=args["workspace_id"],
         name=args["name"],
         engine=args["engine"],
@@ -339,7 +332,7 @@ async def deploy_app(args: dict[str, Any]) -> dict[str, Any]:
     """
     conversation = _get_conversation()
 
-    result = await sync_to_async(_deploy_app)(
+    result = await _deploy_app(
         app_id=args["app_id"],
         git_ref=args["git_ref"],
         organization=conversation.organization,
@@ -387,9 +380,10 @@ async def get_deployment_status(args: dict[str, Any]) -> dict[str, Any]:
     """
     conversation = _get_conversation()
 
-    result = await sync_to_async(_get_deployment_status)(
+    result = await _get_deployment_status(
         deployment_id=args["deployment_id"],
         organization=conversation.organization,
+        log_limit=10,
     )
 
     return {

@@ -29,14 +29,14 @@ class WorkspaceSummary:
         return asdict(self)
 
 
-def create_workspace(
+async def create_workspace(
     name: str,
     aws_account_id: str,
     aws_region: str,
     organization: Organization,
     user: User,
-    description: str = "",
-    primary_repo_url: str = "",
+    description: str,
+    primary_repo_url: str,
 ) -> WorkspaceSummary:
     """
     Create a new workspace in the organization.
@@ -47,8 +47,8 @@ def create_workspace(
         aws_region: AWS region for deployments (e.g., us-east-1).
         organization: The Organization this workspace belongs to.
         user: The User creating the workspace.
-        description: Optional description of the workspace.
-        primary_repo_url: Optional primary repository URL (file:// only in v1).
+        description: Description of the workspace.
+        primary_repo_url: Primary repository URL (file:// only in v1).
 
     Returns:
         WorkspaceSummary with the created workspace details.
@@ -58,7 +58,7 @@ def create_workspace(
     """
     # Validate AWS account exists and belongs to the organization
     try:
-        aws_account = AWSAccount.objects.get(
+        aws_account = await AWSAccount.objects.aget(
             id=aws_account_id,
             organization=organization,
         )
@@ -78,12 +78,12 @@ def create_workspace(
     base_slug = slugify(name)
     slug = base_slug
     counter = 1
-    while Workspace.objects.filter(organization=organization, slug=slug).exists():
+    while await Workspace.objects.filter(organization=organization, slug=slug).aexists():
         slug = f"{base_slug}-{counter}"
         counter += 1
 
     # Create the workspace
-    workspace = Workspace.objects.create(
+    workspace = await Workspace.objects.acreate(
         organization=organization,
         name=name,
         slug=slug,

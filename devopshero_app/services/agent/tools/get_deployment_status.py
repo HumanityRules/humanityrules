@@ -61,10 +61,10 @@ STATUS_PROGRESS_MAP = {
 }
 
 
-def get_deployment_status(
+async def get_deployment_status(
     deployment_id: str,
     organization: Organization,
-    log_limit: int = 10,
+    log_limit: int,
 ) -> DeploymentStatus:
     """
     Get current deployment status and recent logs.
@@ -72,7 +72,7 @@ def get_deployment_status(
     Args:
         deployment_id: UUID of the deployment to check.
         organization: The Organization to validate access.
-        log_limit: Maximum number of recent logs to return (default 10).
+        log_limit: Maximum number of recent logs to return.
 
     Returns:
         DeploymentStatus with current status and recent logs.
@@ -82,10 +82,10 @@ def get_deployment_status(
     """
     # Validate deployment exists and belongs to organization
     try:
-        deployment = Deployment.objects.select_related(
+        deployment = await Deployment.objects.select_related(
             "app",
             "app__workspace",
-        ).get(
+        ).aget(
             id=deployment_id,
             app__workspace__organization=organization,
         )
@@ -105,6 +105,8 @@ def get_deployment_status(
         deployment=deployment,
     ).order_by("-created_at")[:log_limit]
 
+    recent_logs_list = await recent_logs_qs.alist()
+
     recent_logs = [
         DeploymentLogEntry(
             phase=log.phase,
@@ -112,7 +114,7 @@ def get_deployment_status(
             message=log.message,
             created_at=log.created_at.isoformat(),
         )
-        for log in reversed(list(recent_logs_qs))  # Reverse to show oldest first
+        for log in reversed(recent_logs_list)  # Reverse to show oldest first
     ]
 
     return DeploymentStatus(

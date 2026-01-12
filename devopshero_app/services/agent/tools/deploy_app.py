@@ -47,9 +47,9 @@ def _generate_image_tag(app: App, git_ref: str) -> str:
     return f"{app.slug}-{short_ref}-{timestamp}"
 
 
-def _create_initial_logs(deployment: Deployment) -> None:
+async def _create_initial_logs(deployment: Deployment) -> None:
     """Create initial deployment log entries."""
-    DeploymentLog.objects.create(
+    await DeploymentLog.objects.acreate(
         deployment=deployment,
         phase=DeploymentLog.Phase.INIT,
         level=DeploymentLog.Level.INFO,
@@ -62,12 +62,12 @@ def _create_initial_logs(deployment: Deployment) -> None:
     )
 
 
-def deploy_app(
+async def deploy_app(
     app_id: str,
     git_ref: str,
     organization: Organization,
     user: User,
-    conversation: Conversation | None = None,
+    conversation: Conversation | None,
 ) -> DeploymentSummary:
     """
     Create a deployment for an application.
@@ -88,7 +88,7 @@ def deploy_app(
         git_ref: Git reference (branch, tag, or commit SHA) to deploy.
         organization: The Organization this deployment belongs to.
         user: The User initiating the deployment.
-        conversation: Optional Conversation that triggered this deployment.
+        conversation: Conversation that triggered this deployment.
 
     Returns:
         DeploymentSummary with the created deployment details.
@@ -98,7 +98,7 @@ def deploy_app(
     """
     # Validate app exists and belongs to organization
     try:
-        app = App.objects.select_related("workspace").get(
+        app = await App.objects.select_related("workspace").aget(
             id=app_id,
             workspace__organization=organization,
         )
@@ -115,10 +115,10 @@ def deploy_app(
         Deployment.Status.DEPLOYING,
         Deployment.Status.STARTING,
     ]
-    active_deployment = Deployment.objects.filter(
+    active_deployment = await Deployment.objects.filter(
         app=app,
         status__in=active_statuses,
-    ).first()
+    ).afirst()
 
     if active_deployment:
         raise ValueError(
@@ -130,7 +130,7 @@ def deploy_app(
     image_tag = _generate_image_tag(app, git_ref)
 
     # Create deployment record
-    deployment = Deployment.objects.create(
+    deployment = await Deployment.objects.acreate(
         app=app,
         conversation=conversation,
         git_ref=git_ref,
@@ -143,7 +143,7 @@ def deploy_app(
     )
 
     # Create initial log entries
-    _create_initial_logs(deployment)
+    await _create_initial_logs(deployment)
 
     return DeploymentSummary(
         id=str(deployment.id),
