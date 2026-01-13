@@ -22,6 +22,7 @@ from .tools import (
     get_deployment_status as _get_deployment_status,
     inspect_repository as _inspect_repository,
     list_aws_accounts as _list_aws_accounts,
+    list_deployable_repos as _list_deployable_repos,
 )
 
 
@@ -93,6 +94,21 @@ async def list_aws_accounts(args: dict[str, Any]) -> dict[str, Any]:
 
     accounts = await _list_aws_accounts(organization=conversation.organization)
     return _mcp_response(accounts)
+
+
+@tool(
+    "list_deployable_repos",
+    (
+        "List available repositories for deployment. "
+        "Returns repository names and file:// URLs that can be used with inspect_repository. "
+        "Use this to discover what apps are available to deploy."
+    ),
+    {},
+)
+async def list_deployable_repos(args: dict[str, Any]) -> dict[str, Any]:
+    """List available repositories for deployment."""
+    repos = _list_deployable_repos()
+    return _mcp_response(repos)
 
 
 @tool(
@@ -303,6 +319,7 @@ devopshero_mcp_server = create_sdk_mcp_server(
         get_deployment_status,
         inspect_repository,
         list_aws_accounts,
+        list_deployable_repos,
     ],
 )
 
@@ -315,4 +332,5 @@ TOOL_NAMES = [
     "mcp__devopshero__get_deployment_status",
     "mcp__devopshero__inspect_repository",
     "mcp__devopshero__list_aws_accounts",
+    "mcp__devopshero__list_deployable_repos",
 ]

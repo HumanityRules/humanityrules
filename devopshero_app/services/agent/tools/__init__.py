@@ -12,6 +12,7 @@ from .deploy_app import deploy_app, DeploymentSummary, simulate_deployment_progr
 from .get_deployment_status import get_deployment_status, DeploymentStatus, DeploymentLogEntry
 from .inspect_repository import inspect_repository, RepositoryAnalysis
 from .list_aws_accounts import list_aws_accounts, AWSAccountSummary
+from .list_deployable_repos import list_deployable_repos, DeployableRepoSummary
 
 __all__ = [
     "create_app",
@@ -30,4 +31,6 @@ __all__ = [
     "RepositoryAnalysis",
     "list_aws_accounts",
     "AWSAccountSummary",
+    "list_deployable_repos",
+    "DeployableRepoSummary",
 ]
