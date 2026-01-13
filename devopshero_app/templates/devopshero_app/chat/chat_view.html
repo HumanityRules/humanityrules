@@ -31,8 +31,10 @@
     </div>
 
     {# Messages container - full width scroll, centered content #}
+    {# scrollbar-gutter reserves space for scrollbar to prevent layout shift #}
     <div id="messages-container"
-         class="flex-1 overflow-y-auto">
+         class="flex-1 overflow-y-auto"
+         style="scrollbar-gutter: stable;">
         <div class="max-w-4xl mx-auto px-8 py-4 space-y-4">
             {# Messages - both form submissions and SSE append here #}
             <div id="messages"
