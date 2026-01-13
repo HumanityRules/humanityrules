@@ -18,5 +18,5 @@ dependencies = [
     "workos>=5.37.0",
     "claude-agent-sdk>=0.1.0",
     "uvicorn>=0.32.0",
-    "whitenoise>=6.11.0"
+    "whitenoise>=6.11.0",
 ]

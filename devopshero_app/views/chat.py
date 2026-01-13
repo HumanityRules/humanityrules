@@ -352,7 +352,9 @@ def _render_thinking() -> str:
 def _render_streaming_start() -> str:
     """Render HTML for streaming message container."""
     # Styling matches _message.html agent message structure
-    html = '<div id="streaming-message" class="flex items-start space-x-3 max-w-[80%] mb-4 streaming-active"><div class="flex-shrink-0 w-8 h-8 bg-indigo-100 dark:bg-indigo-900 rounded-full flex items-center justify-center"><svg class="w-5 h-5 text-indigo-600 dark:text-indigo-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"></path></svg></div><div class="bg-gray-100 dark:bg-gray-800 rounded-2xl rounded-tl-md px-4 py-3 min-w-0 flex-1"><p id="streaming-text" class="text-gray-900 dark:text-gray-100 whitespace-pre-wrap"><span class="streaming-cursor"></span></p></div></div>'
+    # Uses <div> instead of <p> because markdown can contain block elements
+    # Markdown styling is applied via #streaming-text CSS in styles.css
+    html = '<div id="streaming-message" class="flex items-start space-x-3 max-w-[95%] mb-4 streaming-active"><div class="flex-shrink-0 w-8 h-8 bg-indigo-100 dark:bg-indigo-900 rounded-full flex items-center justify-center"><svg class="w-5 h-5 text-indigo-600 dark:text-indigo-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"></path></svg></div><div class="bg-gray-100 dark:bg-gray-800 rounded-2xl rounded-tl-md px-4 py-3 min-w-0 flex-1"><div id="streaming-text" class="markdown-content text-gray-900 dark:text-gray-100"></div></div></div>'
     # Reset thinking indicator to empty placeholder via OOB (so it can be reused)
     html += '<div id="thinking-indicator" hx-swap-oob="outerHTML"></div>'
     return html

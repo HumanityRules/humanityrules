@@ -75,11 +75,11 @@ async def _aget_last_user_message(conversation: Conversation) -> str:
 
 
 async def _persist_text_message(conversation: Conversation, content: str) -> None:
-    """Persist an agent text message to the database."""
+    """Persist an agent text message to the database as markdown."""
     await Message.objects.acreate(
         conversation=conversation,
         role=Message.Role.AGENT,
-        content_type=Message.ContentType.TEXT,
+        content_type=Message.ContentType.MARKDOWN,
         content=content,
     )
 

@@ -1,5 +1,4 @@
-{# Markdown message - rendered server-side #}
-{# Note: message.content should be pre-rendered HTML from the view #}
-<div class="prose prose-sm dark:prose-invert max-w-none">
-    {{ message.content|safe }}
+{# Markdown message - rendered client-side using streaming-markdown for consistency #}
+<div class="markdown-content" data-markdown-content>
+    <script type="text/markdown">{{ message.content }}</script>
 </div>
