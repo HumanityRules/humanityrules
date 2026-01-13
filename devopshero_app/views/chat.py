@@ -2,14 +2,13 @@ import asyncio
 import json
 import logging
 
-from asgiref.sync import sync_to_async
 from django.contrib.auth.decorators import login_required
 from django.http import HttpResponse, StreamingHttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.template.loader import render_to_string
 from django.views.decorators.http import require_POST
 
-from ..models import Conversation, Message
+from ..models import Conversation, Message, User
 from ..services.agent import agent_client
 from ..services.agent import agent_service
 from ..services.streaming_service import StreamEvent
@@ -144,8 +143,8 @@ async def chat_stream(request, conversation_id):
         return response
 
     # Verify conversation access (raises DoesNotExist if unauthorized)
-    current_org = await sync_to_async(lambda: request.user.current_organization)()
-    user = request.user
+    user = await User.objects.select_related('current_organization').aget(pk=request.user.pk)
+    current_org = user.current_organization
 
     async def event_generator():
         """Generate SSE events by running agent directly when needed."""
