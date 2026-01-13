@@ -41,8 +41,6 @@ The main developer documentation lives in the docs/ subdirectory. **When creatin
 
 - **`docs/journal.md`** — Development journal with chronological entries. Consult this when trying to understand what, when, and why decisions were made. Contains reasoning behind architectural choices, implementation decisions, and lessons learned.
 
-- **`docs/TODO.md`** — Active task list organized by priority. Covers onboarding flow improvements, AWS account features, and technical debt items.
-
 - **`docs/bolt_prompt.md`** — The original prompt used to generate the landing page design. Contains the product concept, target personas, and landing page section specifications.
 
 **OpenSpec specifications** live in `openspec/specs/`. Run `openspec list --specs` to see all capabilities. Pending changes (including design docs) are in `openspec/changes/`.
