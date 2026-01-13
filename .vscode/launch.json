@@ -14,7 +14,7 @@
             "console": "integratedTerminal"
         },
         {
-            "name": "Python Debugger: Django",
+            "name": "Python Debugger: Django WSGI",
             "type": "debugpy",
             "request": "launch",
             "args": [
@@ -23,6 +23,21 @@
             "django": true,
             "autoStartBrowser": false,
             "program": "${workspaceFolder}/manage.py"
+        },
+        {
+            "name": "Python Debugger: Django ASGI (Uvicorn)",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "uvicorn",
+            "args": [
+                "devopshero_site.asgi:application",
+                "--host", "127.0.0.1",
+                "--port", "8000",
+                "--timeout-graceful-shutdown", "0"
+            ],
+            "django": true,
+            "autoStartBrowser": false,
+            "console": "integratedTerminal"
         }
     ]
 }

@@ -38,7 +38,7 @@
             <div id="messages"
                  hx-ext="sse"
                  sse-connect="{% url 'chat_stream' conversation_id=conversation.id %}"
-                 sse-swap="new-chat-message"
+                 sse-swap="sse-start,sse-text-delta,sse-text-flush,sse-tool-start,sse-tool-result,sse-complete,sse-error"
                  hx-swap="beforeend">
                 {% for message in messages %}
                     {% include "devopshero_app/chat/_message.html" %}
@@ -86,9 +86,27 @@
     </div>
 </div>
 
+<style>
+.streaming-cursor {
+    display: inline-block;
+    width: 2px;
+    height: 1em;
+    background-color: #9ca3af;
+    margin-left: 2px;
+    animation: blink 1s step-end infinite;
+}
+.dark .streaming-cursor {
+    background-color: #d1d5db;
+}
+@keyframes blink {
+    50% { opacity: 0; }
+}
+</style>
+
 <script>
 (function() {
     const container = document.getElementById('messages-container');
+    const messages = document.getElementById('messages');
 
     function scrollToBottom() {
         container.scrollTop = container.scrollHeight;
@@ -100,5 +118,60 @@
     // Scroll when new content is added (form submission or SSE)
     container.addEventListener('htmx:afterSwap', scrollToBottom);
     container.addEventListener('htmx:sseMessage', scrollToBottom);
+
+    // Handle custom SSE events that need JavaScript processing
+    messages.addEventListener('htmx:sseBeforeMessage', function(event) {
+        const eventType = event.detail.type;
+
+        // Handle sse-text-delta events (streaming text chunks)
+        if (eventType === 'sse-text-delta') {
+            event.preventDefault();
+            try {
+                const data = JSON.parse(event.detail.data);
+                const streamingText = document.getElementById('streaming-text');
+                if (streamingText && data.text) {
+                    streamingText.textContent += data.text;
+                    scrollToBottom();
+                }
+            } catch (e) {
+                console.error('Failed to parse sse-text-delta:', e);
+            }
+            return;
+        }
+
+        // Handle sse-text-flush events (finalize streaming before tool call)
+        if (eventType === 'sse-text-flush') {
+            event.preventDefault();
+            const streamingMessage = document.getElementById('streaming-message');
+            if (streamingMessage) {
+                // Remove the cursor
+                const cursor = streamingMessage.querySelector('.streaming-cursor');
+                if (cursor) cursor.remove();
+                // Remove ids so new streaming-message can be created
+                streamingMessage.removeAttribute('id');
+                const streamingText = streamingMessage.querySelector('#streaming-text');
+                if (streamingText) streamingText.removeAttribute('id');
+            }
+            return;
+        }
+
+        // Handle sse-complete events (finalize final streaming message)
+        if (eventType === 'sse-complete') {
+            event.preventDefault();
+            const streamingMessage = document.getElementById('streaming-message');
+            if (streamingMessage) {
+                // Remove the cursor
+                const cursor = streamingMessage.querySelector('.streaming-cursor');
+                if (cursor) cursor.remove();
+                // Remove streaming class
+                streamingMessage.classList.remove('streaming-active');
+                // Remove ids
+                streamingMessage.removeAttribute('id');
+                const streamingText = streamingMessage.querySelector('#streaming-text');
+                if (streamingText) streamingText.removeAttribute('id');
+            }
+            return;
+        }
+    });
 })();
 </script>
