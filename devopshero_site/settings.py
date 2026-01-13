@@ -149,6 +149,11 @@ DOH_API_SECRET_KEY = os.environ.get("DOH_API_SECRET_KEY")
 # Bedrock credentials: AWS_BEDROCK_ACCESS_KEY_ID + AWS_BEDROCK_SECRET_ACCESS_KEY (optional, falls back to boto3 chain)
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY")
 AWS_BEDROCK_REGION = os.environ.get("AWS_BEDROCK_REGION")
+# CLAUDE_MODEL options:
+# - us.anthropic.claude-opus-4-5-20251101-v1:0
+# - us.anthropic.claude-sonnet-4-5-20250929-v1:0
+# - us.anthropic.claude-3-7-sonnet-20250219-v1:0
+CLAUDE_MODEL = os.environ.get("CLAUDE_MODEL", "us.anthropic.claude-sonnet-4-5-20250929-v1:0")
 AWS_BEDROCK_ACCESS_KEY_ID = os.environ.get("AWS_BEDROCK_ACCESS_KEY_ID")
 AWS_BEDROCK_SECRET_ACCESS_KEY = os.environ.get("AWS_BEDROCK_SECRET_ACCESS_KEY")
 

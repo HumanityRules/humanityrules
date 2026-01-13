@@ -15,6 +15,7 @@ structured tool calling, conversation memory, and streaming responses.
 import logging
 import time
 from collections.abc import AsyncGenerator
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -38,11 +39,22 @@ from devopshero_app.models import Conversation, Message
 from devopshero_app.services.streaming_service import StreamEvent
 
 from .agent_client import get_claude_env
+from django.conf import settings
+
 from .mcp_tools import (
     conversation_context,
     devopshero_mcp_server,
     TOOL_NAMES,
 )
+
+
+@dataclass
+class StreamingContext:
+    """Mutable state for streaming response processing."""
+
+    conversation: Conversation
+    pending_tool_calls: dict[str, dict[str, Any]] = field(default_factory=dict)
+    accumulated_content: str = ""
 
 
 def _load_system_prompt() -> str:
@@ -52,24 +64,116 @@ def _load_system_prompt() -> str:
 
 
 async def _aget_last_user_message(conversation: Conversation) -> str:
-    """
-    Get the last user message from a conversation.
-
-    Args:
-        conversation: The Conversation model instance.
-
-    Returns:
-        The content of the last user message.
-
-    Raises:
-        ValueError: If no user messages found.
-    """
+    """Get the content of the most recent user message."""
     last_message = await conversation.messages.filter(role="user").order_by("-created_at").afirst()
 
     if not last_message:
         raise ValueError("Conversation has no user messages to process")
 
     return last_message.content
+
+
+async def _handle_stream_event(message: SDKStreamEvent, ctx: StreamingContext) -> AsyncGenerator[StreamEvent, None]:
+    """Handle token-level streaming events."""
+    event_type = message.event.get("type")
+
+    if event_type == "content_block_delta":
+        delta = message.event.get("delta", {})
+        if delta.get("type") == "text_delta":
+            text_chunk = delta.get("text", "")
+            if text_chunk:
+                ctx.accumulated_content += text_chunk
+                yield StreamEvent(type="text_delta", data={"text": text_chunk})
+
+
+async def _handle_assistant_message(message: AssistantMessage, ctx: StreamingContext) -> AsyncGenerator[StreamEvent, None]:
+    """Handle assistant messages containing tool use blocks."""
+    for block in message.content:
+        if isinstance(block, ToolUseBlock):
+            # Persist any accumulated text before tool call
+            if ctx.accumulated_content:
+                await Message.objects.acreate(
+                    conversation=ctx.conversation,
+                    role=Message.Role.AGENT,
+                    content_type=Message.ContentType.TEXT,
+                    content=ctx.accumulated_content,
+                )
+                ctx.accumulated_content = ""
+                yield StreamEvent(type="text_flush")
+
+            # Record pending tool call
+            ctx.pending_tool_calls[block.id] = {
+                "name": block.name,
+                "input": block.input,
+                "start_time": time.time(),
+            }
+
+            yield StreamEvent(
+                type="tool_start",
+                data={
+                    "tool_use_id": block.id,
+                    "name": block.name,
+                    "input": block.input,
+                },
+            )
+
+
+async def _handle_tool_results(message: UserMessage, ctx: StreamingContext) -> AsyncGenerator[StreamEvent, None]:
+    """Handle tool results from synthetic user messages."""
+    if not isinstance(message.content, list):
+        return
+
+    for block in message.content:
+        if not isinstance(block, ToolResultBlock):
+            continue
+
+        call_info = ctx.pending_tool_calls.pop(block.tool_use_id, None)
+        if not call_info:
+            continue
+
+        tool_name = call_info["name"]
+        duration_ms = int((time.time() - call_info["start_time"]) * 1000)
+
+        await Message.objects.acreate(
+            conversation=ctx.conversation,
+            role=Message.Role.AGENT,
+            content_type=Message.ContentType.TOOL_CALL,
+            content=tool_name,
+            metadata={
+                "tool_name": tool_name,
+                "parameters": call_info["input"],
+                "result": block.content,
+                "status": "error" if block.is_error else "success",
+                "duration_ms": duration_ms,
+            },
+        )
+
+        yield StreamEvent(
+            type="tool_result",
+            data={
+                "tool_use_id": block.tool_use_id,
+                "name": tool_name,
+                "result": block.content,
+                "status": "error" if block.is_error else "success",
+                "duration_ms": duration_ms,
+            },
+        )
+
+    # After processing all tool results, start new streaming container
+    yield StreamEvent(type="start")
+
+
+def _create_agent_options(system_prompt: str) -> ClaudeAgentOptions:
+    """Create SDK client options with standard configuration."""
+    return ClaudeAgentOptions(
+        model=settings.CLAUDE_MODEL,
+        system_prompt=system_prompt,
+        mcp_servers={"devopshero": devopshero_mcp_server},
+        allowed_tools=TOOL_NAMES,
+        permission_mode="bypassPermissions",
+        env=get_claude_env(),
+        include_partial_messages=True,
+    )
 
 
 async def stream_response(conversation: Conversation) -> AsyncGenerator[StreamEvent, None]:
@@ -92,140 +196,28 @@ async def stream_response(conversation: Conversation) -> AsyncGenerator[StreamEv
     Raises:
         ValueError: If the conversation has no user messages.
     """
-    # Set the conversation context for tools to access
     conversation_context.set(conversation)
-
-    # Get the last user message to send
     user_message = await _aget_last_user_message(conversation)
-
-    # Load system prompt
-    system_prompt = _load_system_prompt()
-
-    # Configure the SDK client with streaming enabled
-    options = ClaudeAgentOptions(
-        # model="us.anthropic.claude-opus-4-5-20251101-v1:0",
-        model="us.anthropic.claude-sonnet-4-5-20250929-v1:0",
-        # model="us.anthropic.claude-3-7-sonnet-20250219-v1:0",
-        system_prompt=system_prompt,
-        mcp_servers={"devopshero": devopshero_mcp_server},
-        allowed_tools=TOOL_NAMES,
-        permission_mode="bypassPermissions",
-        env=get_claude_env(),
-        include_partial_messages=True,  # Enable token-level streaming
-    )
-
-    # Track pending tool calls by tool_use_id
-    # Maps tool_use_id -> {name, input, start_time}
-    pending_tool_calls: dict[str, dict[str, Any]] = {}
-
-    # Accumulate text content for DB persistence
-    accumulated_content: str = ""
-
-    # Signal streaming start
+    options = _create_agent_options(system_prompt=_load_system_prompt())
+    ctx = StreamingContext(conversation=conversation)
     yield StreamEvent(type="start")
 
     try:
         async with ClaudeSDKClient(options=options) as client:
-            # Send the user's message
             await client.query(user_message)
 
-            # Process the response stream
             async for message in client.receive_response():
                 if isinstance(message, SDKStreamEvent):
-                    # Handle token-level streaming events
-                    event_type = message.event.get("type")
-
-                    if event_type == "content_block_delta":
-                        delta = message.event.get("delta", {})
-                        if delta.get("type") == "text_delta":
-                            text_chunk = delta.get("text", "")
-                            if text_chunk:
-                                # Accumulate for persistence and yield to frontend
-                                accumulated_content += text_chunk
-                                yield StreamEvent(
-                                    type="text_delta",
-                                    data={"text": text_chunk},
-                                )
+                    async for event in _handle_stream_event(message, ctx):
+                        yield event
 
                 elif isinstance(message, AssistantMessage):
-                    # Full message received - handle tool use blocks
-                    for block in message.content:
-                        if isinstance(block, ToolUseBlock):
-                            # First, persist any accumulated text before tool call
-                            if accumulated_content:
-                                await Message.objects.acreate(
-                                    conversation=conversation,
-                                    role=Message.Role.AGENT,
-                                    content_type=Message.ContentType.TEXT,
-                                    content=accumulated_content,
-                                )
-                                accumulated_content = ""
-                                # Tell frontend to finalize current streaming text
-                                yield StreamEvent(type="text_flush")
-
-                            # Record pending tool call
-                            pending_tool_calls[block.id] = {
-                                "name": block.name,
-                                "input": block.input,
-                                "start_time": time.time(),
-                            }
-
-                            # Signal tool start to frontend
-                            yield StreamEvent(
-                                type="tool_start",
-                                data={
-                                    "tool_use_id": block.id,
-                                    "name": block.name,
-                                    "input": block.input,
-                                },
-                            )
+                    async for event in _handle_assistant_message(message, ctx):
+                        yield event
 
                 elif isinstance(message, UserMessage):
-                    # Process tool results from synthetic user messages
-                    if not isinstance(message.content, list):
-                        continue
-
-                    for block in message.content:
-                        if not isinstance(block, ToolResultBlock):
-                            continue
-
-                        call_info = pending_tool_calls.pop(block.tool_use_id, None)
-                        if not call_info:
-                            continue
-
-                        tool_name = call_info["name"]
-                        duration_ms = int((time.time() - call_info["start_time"]) * 1000)
-
-                        # Create TOOL_CALL message in DB
-                        await Message.objects.acreate(
-                            conversation=conversation,
-                            role=Message.Role.AGENT,
-                            content_type=Message.ContentType.TOOL_CALL,
-                            content=tool_name,
-                            metadata={
-                                "tool_name": tool_name,
-                                "parameters": call_info["input"],
-                                "result": block.content,
-                                "status": "error" if block.is_error else "success",
-                                "duration_ms": duration_ms,
-                            },
-                        )
-
-                        # Signal tool result to frontend
-                        yield StreamEvent(
-                            type="tool_result",
-                            data={
-                                "tool_use_id": block.tool_use_id,
-                                "name": tool_name,
-                                "result": block.content,
-                                "status": "error" if block.is_error else "success",
-                                "duration_ms": duration_ms,
-                            },
-                        )
-
-                    # After processing all tool results, start new streaming container
-                    # for any text that follows
-                    yield StreamEvent(type="start")
+                    async for event in _handle_tool_results(message, ctx):
+                        yield event
 
                 elif isinstance(message, ResultMessage):
                     logger.info(
@@ -238,23 +230,19 @@ async def stream_response(conversation: Conversation) -> AsyncGenerator[StreamEv
                     logger.debug("[SDK] SystemMessage: subtype=%s", message.subtype)
 
         # Persist any remaining accumulated text
-        if accumulated_content:
+        if ctx.accumulated_content:
             await Message.objects.acreate(
                 conversation=conversation,
                 role=Message.Role.AGENT,
                 content_type=Message.ContentType.TEXT,
-                content=accumulated_content,
+                content=ctx.accumulated_content,
             )
 
-        # Update conversation timestamp
         await conversation.asave()
-
-        # Signal completion
         yield StreamEvent(type="complete")
 
     except Exception as e:
         logger.exception("Error during streaming conversation processing")
-        # Persist error message to database
         try:
             await Message.objects.acreate(
                 conversation=conversation,
@@ -265,5 +253,4 @@ async def stream_response(conversation: Conversation) -> AsyncGenerator[StreamEv
             )
         except Exception:
             logger.exception("Failed to save error message to database")
-        # Yield error event to frontend
         yield StreamEvent(type="error", data={"error": str(e)})
