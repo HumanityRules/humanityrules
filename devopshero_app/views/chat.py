@@ -12,7 +12,7 @@ from ..models import Conversation, Message, User
 from ..services.agent import agent_client
 from ..services.agent import agent_service
 from ..services.streaming_service import StreamEvent
-from ..templatetags.chat_filters import _extract_mcp_text_content
+from ..templatetags.chat_filters import extract_mcp_text_content
 from .base import get_app_shell_context
 
 logger = logging.getLogger(__name__)
@@ -213,7 +213,7 @@ def _render_tool_result(data: dict) -> str:
     # Parse result, extract MCP text content, and pretty-print
     try:
         result_parsed = json.loads(result) if isinstance(result, str) else result
-        result_parsed = _extract_mcp_text_content(result_parsed)
+        result_parsed = extract_mcp_text_content(result_parsed)
         if isinstance(result_parsed, str):
             result_json = result_parsed
         else:

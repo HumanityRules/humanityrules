@@ -8,7 +8,7 @@ from django import template
 register = template.Library()
 
 
-def _extract_mcp_text_content(value: Any) -> Any:
+def extract_mcp_text_content(value: Any) -> Any:
     """Extract text content from MCP content block structure.
 
     MCP tool results come as: [{"type": "text", "text": "..."}]
@@ -64,7 +64,7 @@ def json_pretty(value: Any) -> str:
             return value
 
     # Try to extract MCP text content
-    value = _extract_mcp_text_content(value)
+    value = extract_mcp_text_content(value)
 
     # If it's now a string (extracted from MCP), return as-is
     if isinstance(value, str):
