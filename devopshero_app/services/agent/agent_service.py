@@ -73,7 +73,45 @@ async def _aget_last_user_message(conversation: Conversation) -> str:
     return last_message.content
 
 
-async def _handle_stream_event(message: SDKStreamEvent, ctx: StreamingContext) -> AsyncGenerator[StreamEvent, None]:
+async def _persist_text_message(conversation: Conversation, content: str) -> None:
+    """Persist an agent text message to the database."""
+    await Message.objects.acreate(
+        conversation=conversation,
+        role=Message.Role.AGENT,
+        content_type=Message.ContentType.TEXT,
+        content=content,
+    )
+
+
+async def _persist_tool_call(conversation: Conversation, tool_name: str, parameters: Any, result: str, status: str, duration_ms: int) -> None:
+    """Persist a tool call message to the database."""
+    await Message.objects.acreate(
+        conversation=conversation,
+        role=Message.Role.AGENT,
+        content_type=Message.ContentType.TOOL_CALL,
+        content=tool_name,
+        metadata={
+            "tool_name": tool_name,
+            "parameters": parameters,
+            "result": result,
+            "status": status,
+            "duration_ms": duration_ms,
+        },
+    )
+
+
+async def _persist_error(conversation: Conversation, error: Exception) -> None:
+    """Persist an error message to the database."""
+    await Message.objects.acreate(
+        conversation=conversation,
+        role=Message.Role.SYSTEM,
+        content_type=Message.ContentType.ERROR,
+        content=f"Agent error: {str(error)}",
+        metadata={"error_type": type(error).__name__},
+    )
+
+
+async def _handle_sdk_stream_event(message: SDKStreamEvent, ctx: StreamingContext) -> AsyncGenerator[StreamEvent, None]:
     """Handle token-level streaming events."""
     event_type = message.event.get("type")
 
@@ -92,12 +130,7 @@ async def _handle_assistant_message(message: AssistantMessage, ctx: StreamingCon
         if isinstance(block, ToolUseBlock):
             # Persist any accumulated text before tool call
             if ctx.accumulated_content:
-                await Message.objects.acreate(
-                    conversation=ctx.conversation,
-                    role=Message.Role.AGENT,
-                    content_type=Message.ContentType.TEXT,
-                    content=ctx.accumulated_content,
-                )
+                await _persist_text_message(conversation=ctx.conversation, content=ctx.accumulated_content)
                 ctx.accumulated_content = ""
                 yield StreamEvent(type="text_flush")
 
@@ -133,19 +166,15 @@ async def _handle_tool_results(message: UserMessage, ctx: StreamingContext) -> A
 
         tool_name = call_info["name"]
         duration_ms = int((time.time() - call_info["start_time"]) * 1000)
+        status = "error" if block.is_error else "success"
 
-        await Message.objects.acreate(
+        await _persist_tool_call(
             conversation=ctx.conversation,
-            role=Message.Role.AGENT,
-            content_type=Message.ContentType.TOOL_CALL,
-            content=tool_name,
-            metadata={
-                "tool_name": tool_name,
-                "parameters": call_info["input"],
-                "result": block.content,
-                "status": "error" if block.is_error else "success",
-                "duration_ms": duration_ms,
-            },
+            tool_name=tool_name,
+            parameters=call_info["input"],
+            result=block.content,
+            status=status,
+            duration_ms=duration_ms,
         )
 
         yield StreamEvent(
@@ -154,7 +183,7 @@ async def _handle_tool_results(message: UserMessage, ctx: StreamingContext) -> A
                 "tool_use_id": block.tool_use_id,
                 "name": tool_name,
                 "result": block.content,
-                "status": "error" if block.is_error else "success",
+                "status": status,
                 "duration_ms": duration_ms,
             },
         )
@@ -199,7 +228,11 @@ async def stream_response(conversation: Conversation) -> AsyncGenerator[StreamEv
     conversation_context.set(conversation)
     user_message = await _aget_last_user_message(conversation)
     options = _create_agent_options(system_prompt=_load_system_prompt())
+    
+    # The streaming context is used to store the accumulated content and the pending tool calls, and is passed 
+    # around and mutated by the event handlers
     ctx = StreamingContext(conversation=conversation)
+    
     yield StreamEvent(type="start")
 
     try:
@@ -208,7 +241,7 @@ async def stream_response(conversation: Conversation) -> AsyncGenerator[StreamEv
 
             async for message in client.receive_response():
                 if isinstance(message, SDKStreamEvent):
-                    async for event in _handle_stream_event(message, ctx):
+                    async for event in _handle_sdk_stream_event(message, ctx):
                         yield event
 
                 elif isinstance(message, AssistantMessage):
@@ -220,23 +253,13 @@ async def stream_response(conversation: Conversation) -> AsyncGenerator[StreamEv
                         yield event
 
                 elif isinstance(message, ResultMessage):
-                    logger.info(
-                        "[SDK] ResultMessage: turns=%s, cost=$%.4f",
-                        message.num_turns,
-                        message.total_cost_usd or 0,
-                    )
+                    logger.info(f"[SDK] ResultMessage: turns={message.num_turns}, cost=${message.total_cost_usd or 0:.4f}")
 
                 elif isinstance(message, SystemMessage):
-                    logger.debug("[SDK] SystemMessage: subtype=%s", message.subtype)
+                    logger.debug(f"[SDK] SystemMessage: subtype={message.subtype}")
 
-        # Persist any remaining accumulated text
         if ctx.accumulated_content:
-            await Message.objects.acreate(
-                conversation=conversation,
-                role=Message.Role.AGENT,
-                content_type=Message.ContentType.TEXT,
-                content=ctx.accumulated_content,
-            )
+            await _persist_text_message(conversation=conversation, content=ctx.accumulated_content)
 
         await conversation.asave()
         yield StreamEvent(type="complete")
@@ -244,13 +267,7 @@ async def stream_response(conversation: Conversation) -> AsyncGenerator[StreamEv
     except Exception as e:
         logger.exception("Error during streaming conversation processing")
         try:
-            await Message.objects.acreate(
-                conversation=conversation,
-                role=Message.Role.SYSTEM,
-                content_type=Message.ContentType.ERROR,
-                content=f"Agent error: {str(e)}",
-                metadata={"error_type": type(e).__name__},
-            )
+            await _persist_error(conversation=conversation, error=e)
         except Exception:
             logger.exception("Failed to save error message to database")
         yield StreamEvent(type="error", data={"error": str(e)})
