@@ -123,6 +123,30 @@
     messages.addEventListener('htmx:sseBeforeMessage', function(event) {
         const eventType = event.detail.type;
 
+        // Handle sse-thinking events (show thinking indicator)
+        // 
+        // Why JS instead of HTMX? The thinking indicator HTML is entirely OOB
+        // (hx-swap-oob="outerHTML" on root element). HTMX processes OOB AFTER
+        // the default swap, so it briefly appends the content to #messages,
+        // then moves it to #thinking-indicator. This causes a visible flash.
+        // By handling in JS, we skip the default swap and apply OOB directly.
+        if (eventType === 'sse-thinking') {
+            event.preventDefault();
+            const template = document.createElement('template');
+            template.innerHTML = event.detail.data;
+            const oobElement = template.content.firstElementChild;
+            if (oobElement && oobElement.id === 'thinking-indicator') {
+                const target = document.getElementById('thinking-indicator');
+                if (target) {
+                    // Remove hx-swap-oob attribute and replace
+                    oobElement.removeAttribute('hx-swap-oob');
+                    target.outerHTML = oobElement.outerHTML;
+                }
+            }
+            scrollToBottom();
+            return;
+        }
+
         // Handle sse-text-delta events (streaming text chunks)
         if (eventType === 'sse-text-delta') {
             event.preventDefault();
