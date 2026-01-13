@@ -1,2 +1,3 @@
-django: python manage.py runserver
+django: uvicorn devopshero_site.asgi:application --reload --host 127.0.0.1 --port 8000 --timeout-graceful-shutdown 0
 tailwind: python manage.py tailwind start
+
