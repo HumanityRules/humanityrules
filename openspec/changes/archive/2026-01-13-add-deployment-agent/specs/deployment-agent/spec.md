@@ -57,6 +57,28 @@ The system SHALL provide an `inspect_repository` tool that analyzes repositories
 
 ---
 
+### Requirement: Repository Discovery Tool
+
+The system SHALL provide a `list_deployable_repos` tool for discovering available repositories.
+
+#### Scenario: List available repositories
+- **WHEN** the agent calls `list_deployable_repos`
+- **THEN** the tool returns repository names and file:// URLs
+- **AND** the URLs can be passed to `inspect_repository`
+
+---
+
+### Requirement: AWS Account Discovery Tool
+
+The system SHALL provide a `list_aws_accounts` tool for discovering available AWS accounts.
+
+#### Scenario: List connected accounts
+- **WHEN** the agent calls `list_aws_accounts`
+- **THEN** the tool returns all AWS accounts connected to the user's organization
+- **AND** each account includes ID, name, status, and region
+
+---
+
 ### Requirement: Workspace Creation Tool
 
 The system SHALL provide a `create_workspace` tool for organizing deployments.
@@ -121,7 +143,7 @@ The system SHALL provide a `deploy_app` tool that creates deployment records (st
 
 #### Scenario: Deployment phases (simulated)
 - **WHEN** a deployment executes
-- **THEN** it progresses through simulated phases: build, push, deploy, health check
+- **THEN** it progresses through simulated phases: init, build, push, synth, deploy, health, complete
 - **AND** each phase transition updates the Deployment status
 
 #### Scenario: Link deployment to conversation
@@ -183,15 +205,20 @@ The system SHALL render messages with appropriate formatting based on content ty
 - **THEN** it displays a progress bar with percentage
 - **AND** it shows the current phase label
 
-#### Scenario: Render interactive choices
+#### Scenario: Render interactive choices (visual only)
 - **WHEN** a message has content_type "choice"
 - **THEN** buttons are rendered for each choice
-- **AND** clicking a button sends a message on behalf of the user
+- **NOTE** Full agent integration for choice responses is planned for a future iteration
 
 #### Scenario: Render error messages
 - **WHEN** a message has content_type "error"
 - **THEN** it is rendered with error styling
 - **AND** suggested actions are highlighted if provided
+
+#### Scenario: Render tool call
+- **WHEN** a message has content_type "tool_call"
+- **THEN** it displays the tool name, parameters, and result
+- **AND** execution status and duration are shown
 
 ---
 

@@ -30,6 +30,6 @@
 
 ## Phase 4: Polish
 
-- [ ] 4.1 Add error handling and agent recovery suggestions
-- [ ] 4.2 Implement conversation history view and resume functionality
-- [ ] 4.3 Wire up interactive choice buttons to agent (1.6 creates visuals, this integrates with agent flow)
+- [~] 4.1 Add error handling and agent recovery suggestions — **Deferred**: Basic error handling exists; advanced recovery suggestions moved to future work
+- [~] 4.2 Implement conversation history view and resume functionality — **Deferred**: Conversation persistence works; history UI deferred
+- [~] 4.3 Wire up interactive choice buttons to agent — **Deferred**: Visuals exist (1.6), agent integration moved to separate proposal
