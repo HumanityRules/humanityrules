@@ -11,7 +11,7 @@ from django.views.decorators.http import require_POST
 from ..models import Conversation, Message, User
 from ..services.agent import agent_client
 from ..services.agent import agent_service
-from ..services.streaming_service import StreamEvent
+from ..services.agent.agent_service import AgentStreamEvent
 from ..templatetags.chat_filters import extract_mcp_text_content
 from .base import get_app_shell_context
 
@@ -248,8 +248,8 @@ def _render_streaming_error(error_msg: str) -> str:
     })
 
 
-def _format_sse_event(event: StreamEvent) -> str:
-    """Convert StreamEvent to SSE format."""
+def _format_sse_event(event: AgentStreamEvent) -> str:
+    """Convert AgentStreamEvent to SSE format."""
     if event.type == "thinking":
         return _format_sse(event_name="sse-thinking", data=_render_thinking())
     elif event.type == "start":

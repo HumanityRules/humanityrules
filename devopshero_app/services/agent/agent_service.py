@@ -17,9 +17,7 @@ import time
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
-
-logger = logging.getLogger(__name__)
+from typing import Any, Literal
 
 from claude_agent_sdk import (
     ClaudeSDKClient,
@@ -34,18 +32,38 @@ from claude_agent_sdk.types import (
     SystemMessage,
     StreamEvent as SDKStreamEvent,
 )
-
-from devopshero_app.models import Conversation, Message
-from devopshero_app.services.streaming_service import StreamEvent
-
-from .agent_client import get_claude_env
 from django.conf import settings
 
+from devopshero_app.models import Conversation, Message
+
+from .agent_client import get_claude_env
 from .mcp_tools import (
     conversation_context,
     devopshero_mcp_server,
     TOOL_NAMES,
 )
+
+logger = logging.getLogger(__name__)
+
+
+AgentEventType = Literal[
+    "thinking",     # Agent is thinking (before text or between tools)
+    "start",        # Streaming started, create message container
+    "text_delta",   # Text chunk to append
+    "text_flush",   # Finalize current streaming text (before tool call)
+    "tool_start",   # Tool execution starting
+    "tool_result",  # Tool execution completed
+    "complete",     # Streaming finished
+    "error",        # Error occurred
+]
+
+
+@dataclass
+class AgentStreamEvent:
+    """Event yielded during agent response streaming."""
+
+    type: AgentEventType
+    data: Any = None
 
 
 @dataclass
@@ -112,7 +130,7 @@ async def _persist_error(conversation: Conversation, error: Exception) -> None:
     )
 
 
-async def _handle_sdk_stream_event(message: SDKStreamEvent, ctx: StreamingContext) -> AsyncGenerator[StreamEvent, None]:
+async def _handle_sdk_stream_event(message: SDKStreamEvent, ctx: StreamingContext) -> AsyncGenerator[AgentStreamEvent, None]:
     """Handle token-level streaming events."""
     event_type = message.event.get("type")
 
@@ -123,13 +141,13 @@ async def _handle_sdk_stream_event(message: SDKStreamEvent, ctx: StreamingContex
             if text_chunk:
                 # Create streaming container on first text (replaces thinking indicator)
                 if not ctx.has_started_streaming:
-                    yield StreamEvent(type="start")
+                    yield AgentStreamEvent(type="start")
                     ctx.has_started_streaming = True
                 ctx.accumulated_content += text_chunk
-                yield StreamEvent(type="text_delta", data={"text": text_chunk})
+                yield AgentStreamEvent(type="text_delta", data={"text": text_chunk})
 
 
-async def _handle_assistant_message(message: AssistantMessage, ctx: StreamingContext) -> AsyncGenerator[StreamEvent, None]:
+async def _handle_assistant_message(message: AssistantMessage, ctx: StreamingContext) -> AsyncGenerator[AgentStreamEvent, None]:
     """Handle assistant messages containing tool use blocks."""
     for block in message.content:
         if isinstance(block, ToolUseBlock):
@@ -139,7 +157,7 @@ async def _handle_assistant_message(message: AssistantMessage, ctx: StreamingCon
                 ctx.accumulated_content = ""
             # Flush to release streaming element IDs (only if we were streaming text)
             if ctx.has_started_streaming:
-                yield StreamEvent(type="text_flush")
+                yield AgentStreamEvent(type="text_flush")
                 ctx.has_started_streaming = False
 
             # Record pending tool call
@@ -149,7 +167,7 @@ async def _handle_assistant_message(message: AssistantMessage, ctx: StreamingCon
                 "start_time": time.time(),
             }
 
-            yield StreamEvent(
+            yield AgentStreamEvent(
                 type="tool_start",
                 data={
                     "tool_use_id": block.id,
@@ -159,7 +177,7 @@ async def _handle_assistant_message(message: AssistantMessage, ctx: StreamingCon
             )
 
 
-async def _handle_tool_results(message: UserMessage, ctx: StreamingContext) -> AsyncGenerator[StreamEvent, None]:
+async def _handle_tool_results(message: UserMessage, ctx: StreamingContext) -> AsyncGenerator[AgentStreamEvent, None]:
     """Handle tool results from synthetic user messages."""
     if not isinstance(message.content, list):
         return
@@ -185,7 +203,7 @@ async def _handle_tool_results(message: UserMessage, ctx: StreamingContext) -> A
             duration_ms=duration_ms,
         )
 
-        yield StreamEvent(
+        yield AgentStreamEvent(
             type="tool_result",
             data={
                 "tool_use_id": block.tool_use_id,
@@ -199,7 +217,7 @@ async def _handle_tool_results(message: UserMessage, ctx: StreamingContext) -> A
 
     # Show thinking indicator while waiting for next response (text or another tool)
     ctx.has_started_streaming = False
-    yield StreamEvent(type="thinking")
+    yield AgentStreamEvent(type="thinking")
 
 
 def _create_agent_options(system_prompt: str) -> ClaudeAgentOptions:
@@ -215,7 +233,7 @@ def _create_agent_options(system_prompt: str) -> ClaudeAgentOptions:
     )
 
 
-async def stream_response(conversation: Conversation) -> AsyncGenerator[StreamEvent, None]:
+async def stream_response(conversation: Conversation) -> AsyncGenerator[AgentStreamEvent, None]:
     """
     Stream agent response for a conversation.
 
@@ -230,7 +248,7 @@ async def stream_response(conversation: Conversation) -> AsyncGenerator[StreamEv
         conversation: The Conversation to process.
 
     Yields:
-        StreamEvent objects for each streaming event.
+        AgentStreamEvent objects for each streaming event.
 
     Raises:
         ValueError: If the conversation has no user messages.
@@ -244,7 +262,7 @@ async def stream_response(conversation: Conversation) -> AsyncGenerator[StreamEv
     ctx = StreamingContext(conversation=conversation)
     
     # Start with thinking indicator (will be replaced by streaming container on first text)
-    yield StreamEvent(type="thinking")
+    yield AgentStreamEvent(type="thinking")
 
     try:
         async with ClaudeSDKClient(options=options) as client:
@@ -273,7 +291,7 @@ async def stream_response(conversation: Conversation) -> AsyncGenerator[StreamEv
             await _persist_text_message(conversation=conversation, content=ctx.accumulated_content)
 
         await conversation.asave()
-        yield StreamEvent(type="complete")
+        yield AgentStreamEvent(type="complete")
 
     except Exception as e:
         logger.exception("Error during streaming conversation processing")
@@ -281,4 +299,4 @@ async def stream_response(conversation: Conversation) -> AsyncGenerator[StreamEv
             await _persist_error(conversation=conversation, error=e)
         except Exception:
             logger.exception("Failed to save error message to database")
-        yield StreamEvent(type="error", data={"error": str(e)})
+        yield AgentStreamEvent(type="error", data={"error": str(e)})
