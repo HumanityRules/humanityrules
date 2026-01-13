@@ -108,18 +108,12 @@ def chat_send(request, conversation_id):
         request=request,
     )
 
-    # OOB delete the empty chat placeholder (if present)
+    # OOB delete the 'empty chat' placeholder (if present)
     remove_placeholder = '<div id="empty-chat-placeholder" hx-swap-oob="delete"></div>'
 
-    # Include typing indicator if agent is available
-    # The SSE connection (chat_stream) will run the agent when it detects the new message
+    # The SSE connection (chat_stream) will run the agent and show the thinking indicator
     if agent_client.is_available():
-        typing_html = render_to_string(
-            "devopshero_app/chat/_typing_indicator.html",
-            context={"conversation_id": conversation_id},
-            request=request,
-        )
-        return HttpResponse(user_html + typing_html + remove_placeholder)
+        return HttpResponse(user_html + remove_placeholder)
 
     # Agent unavailable - log error and inform user
     logger.error("Agent client unavailable")
@@ -213,6 +207,8 @@ def _render_tool_start(data: dict) -> str:
     """Render HTML for tool execution start."""
     tool_name = data.get("name", "unknown")
     tool_use_id = data.get("tool_use_id", "")
+    # Reset thinking indicator to empty placeholder via OOB (so it can be reused)
+    oob_reset = '<div id="thinking-indicator" hx-swap-oob="outerHTML"></div>'
     return f'''<div id="tool-{tool_use_id}">
 <div class="flex items-start space-x-3 max-w-[95%] mb-4">
     <div class="flex-shrink-0 w-8 h-8 bg-indigo-100 dark:bg-indigo-900 rounded-full flex items-center justify-center">
@@ -234,7 +230,8 @@ def _render_tool_start(data: dict) -> str:
         </div>
     </div>
 </div>
-</div>'''
+</div>
+{oob_reset}'''
 
 
 def _extract_mcp_text_content(value):
@@ -329,12 +326,35 @@ def _render_tool_result(data: dict) -> str:
 </div>'''
 
 
+def _render_thinking() -> str:
+    """Render HTML for 'agent is thinking' indicator (OOB swap into placeholder)."""
+    # Use OOB swap to replace the thinking-indicator placeholder (avoids duplicates)
+    return '''<div id="thinking-indicator" hx-swap-oob="outerHTML" class="flex items-start space-x-3 max-w-[80%] mb-4">
+<div class="flex-shrink-0 w-8 h-8 bg-indigo-100 dark:bg-indigo-900 rounded-full flex items-center justify-center">
+    <svg class="w-5 h-5 text-indigo-600 dark:text-indigo-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"></path>
+    </svg>
+</div>
+<div class="bg-gray-100 dark:bg-gray-800 rounded-2xl rounded-tl-md px-4 py-3">
+    <div class="flex items-center space-x-2">
+        <div class="flex space-x-1">
+            <span class="w-2 h-2 bg-gray-400 dark:bg-gray-500 rounded-full animate-bounce" style="animation-delay: 0ms;"></span>
+            <span class="w-2 h-2 bg-gray-400 dark:bg-gray-500 rounded-full animate-bounce" style="animation-delay: 150ms;"></span>
+            <span class="w-2 h-2 bg-gray-400 dark:bg-gray-500 rounded-full animate-bounce" style="animation-delay: 300ms;"></span>
+        </div>
+        <span class="text-sm text-gray-500 dark:text-gray-400">Thinking...</span>
+    </div>
+</div>
+</div>
+'''
+
+
 def _render_streaming_start() -> str:
     """Render HTML for streaming message container."""
     # Styling matches _message.html agent message structure
     html = '<div id="streaming-message" class="flex items-start space-x-3 max-w-[80%] mb-4 streaming-active"><div class="flex-shrink-0 w-8 h-8 bg-indigo-100 dark:bg-indigo-900 rounded-full flex items-center justify-center"><svg class="w-5 h-5 text-indigo-600 dark:text-indigo-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"></path></svg></div><div class="bg-gray-100 dark:bg-gray-800 rounded-2xl rounded-tl-md px-4 py-3 min-w-0 flex-1"><p id="streaming-text" class="text-gray-900 dark:text-gray-100 whitespace-pre-wrap"></p><span class="streaming-cursor"></span></div></div>'
-    # Remove typing indicator
-    html += '<div id="typing-indicator" hx-swap-oob="outerHTML"></div>'
+    # Reset thinking indicator to empty placeholder via OOB (so it can be reused)
+    html += '<div id="thinking-indicator" hx-swap-oob="outerHTML"></div>'
     return html
 
 
@@ -345,7 +365,9 @@ def _render_streaming_error(error_msg: str) -> str:
 
 def _format_sse_event(event: StreamEvent) -> str:
     """Convert StreamEvent to SSE format."""
-    if event.type == "start":
+    if event.type == "thinking":
+        return _format_sse(event_name="sse-thinking", data=_render_thinking())
+    elif event.type == "start":
         return _format_sse(event_name="sse-start", data=_render_streaming_start())
     elif event.type == "text_delta":
         return _format_sse(event_name="sse-text-delta", data=json.dumps(event.data))

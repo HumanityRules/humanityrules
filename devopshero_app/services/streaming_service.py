@@ -8,6 +8,7 @@ from typing import Literal
 
 
 EventType = Literal[
+    "thinking",     # Agent is thinking (before text or between tools)
     "start",        # Streaming started, create message container
     "text_delta",   # Text chunk to append
     "text_flush",   # Finalize current streaming text (before tool call)

@@ -38,7 +38,7 @@
             <div id="messages"
                  hx-ext="sse"
                  sse-connect="{% url 'chat_stream' conversation_id=conversation.id %}"
-                 sse-swap="sse-start,sse-text-delta,sse-text-flush,sse-tool-start,sse-tool-result,sse-complete,sse-error"
+                 sse-swap="sse-thinking,sse-start,sse-text-delta,sse-text-flush,sse-tool-start,sse-tool-result,sse-complete,sse-error"
                  hx-swap="beforeend">
                 {% for message in messages %}
                     {% include "devopshero_app/chat/_message.html" %}
@@ -52,8 +52,8 @@
                 {% endfor %}
             </div>
 
-            {# Typing indicator - managed via OOB swap #}
-            <div id="typing-indicator"></div>
+            {# Thinking indicator - managed via OOB swap #}
+            <div id="thinking-indicator"></div>
         </div>
     </div>
 
@@ -162,6 +162,10 @@
         // Handle sse-complete events (finalize final streaming message)
         if (eventType === 'sse-complete') {
             event.preventDefault();
+            // Reset thinking indicator to empty placeholder (so it can be reused)
+            const thinkingIndicator = document.getElementById('thinking-indicator');
+            if (thinkingIndicator) thinkingIndicator.outerHTML = '<div id="thinking-indicator"></div>';
+            // Finalize streaming message if present
             const streamingMessage = document.getElementById('streaming-message');
             if (streamingMessage) {
                 // Remove the cursor

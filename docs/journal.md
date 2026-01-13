@@ -4,6 +4,55 @@
 > - Entries are in reverse chronological order (latest on top). Use format: `## YYYY-MM-DD HH:MM - Title`
 > - Avoid markdown tables — they render poorly. Use bulleted lists with bold labels instead.
 
+## 2026-01-13 - Fix Streaming Message Order and Tool Rendering
+
+Fixed multiple issues with how messages appear during streaming vs after page reload.
+
+### Problem 1: Messages Out of Order During Streaming
+
+When the agent called a tool without producing text first, messages appeared in wrong order during streaming (text above tool box) but correct after reload (tool box above text).
+
+**Root cause:** The initial `start` event created `#streaming-message` immediately. If the agent called a tool without text, this empty container sat above the tool box. After tool completion, a second `start` created another element with duplicate IDs. JavaScript's `getElementById` found the first (wrong) one, so text went to the container above the tool box.
+
+**Fix:** 
+- Only yield `start` when the first `text_delta` arrives (lazy creation)
+- Added `has_started_streaming` flag to `StreamingContext`
+- Yield `text_flush` only when there was actual streaming to flush
+
+### Problem 2: Tool Results Not Rendered Fully
+
+During streaming, tool boxes showed minimal status bars. After reload, they showed full details (Parameters + Result sections).
+
+**Fix:** Updated `_render_tool_start()` and `_render_tool_result()` in `chat.py` to render the same rich HTML as `_message_tool_call.html` template, including:
+- Agent avatar icon
+- Parameters section with pretty-printed JSON
+- Result section with pretty-printed JSON
+
+### Problem 3: MCP Result Not Unwrapped
+
+Tool results showed raw MCP wrapper `[{"type": "text", "text": "..."}]` during streaming but parsed content after reload.
+
+**Fix:** Added `_extract_mcp_text_content()` helper in `chat.py` (mirrors `chat_filters.py`'s `json_pretty` logic) to unwrap MCP content blocks before display.
+
+### Problem 4: Multiple "Thinking..." Indicators
+
+When multiple tools ran back-to-back, empty streaming placeholders appeared between them.
+
+**Fix:** Introduced `thinking` event type:
+- Shows animated "Thinking..." indicator while waiting for agent response
+- Uses dedicated `#thinking-indicator` placeholder with OOB swap (prevents duplicates)
+- `start` event replaces thinking indicator when text begins
+- `tool_start` event replaces thinking indicator when tool begins
+- After each tool completes, thinking indicator reappears
+
+### Problem 5: Redundant Typing Indicator
+
+Had both "typing indicator" (shown on message send) and "thinking indicator" (shown during streaming).
+
+**Fix:** Removed typing indicator entirely. The thinking indicator now serves as the single unified "waiting for agent" state.
+
+---
+
 ## 2026-01-12 - Chat Streaming Architecture
 
 Simplified the streaming architecture by eliminating the queue-based indirection. The SSE endpoint now runs the agent directly.
