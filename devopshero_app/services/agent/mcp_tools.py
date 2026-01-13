@@ -6,6 +6,7 @@ This module wraps our domain-specific tools as MCP tools using the
 via contextvars to maintain request isolation.
 """
 
+import asyncio
 import json
 from contextvars import ContextVar
 from typing import Any
@@ -307,6 +308,18 @@ async def get_deployment_status(args: dict[str, Any]) -> dict[str, Any]:
     return _mcp_response(result)
 
 
+@tool(
+    "wait",
+    "Wait for a specified number of seconds. Useful for debugging streaming UI.",
+    {"seconds": int},
+)
+async def wait(args: dict[str, Any]) -> dict[str, Any]:
+    """Wait for n seconds (default 2)."""
+    seconds = args.get("seconds", 2)
+    await asyncio.sleep(seconds)
+    return _mcp_response({"waited": seconds})
+
+
 # Create the MCP server with all tools
 devopshero_mcp_server = create_sdk_mcp_server(
     name="devopshero",
@@ -320,6 +333,7 @@ devopshero_mcp_server = create_sdk_mcp_server(
         inspect_repository,
         list_aws_accounts,
         list_deployable_repos,
+        wait,
     ],
 )
 
@@ -333,4 +347,5 @@ TOOL_NAMES = [
     "mcp__devopshero__inspect_repository",
     "mcp__devopshero__list_aws_accounts",
     "mcp__devopshero__list_deployable_repos",
+    "mcp__devopshero__wait",
 ]
