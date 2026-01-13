@@ -132,7 +132,8 @@ async def _handle_assistant_message(message: AssistantMessage, ctx: StreamingCon
             if ctx.accumulated_content:
                 await _persist_text_message(conversation=ctx.conversation, content=ctx.accumulated_content)
                 ctx.accumulated_content = ""
-                yield StreamEvent(type="text_flush")
+            # Always flush to release streaming element IDs before tool box is inserted
+            yield StreamEvent(type="text_flush")
 
             # Record pending tool call
             ctx.pending_tool_calls[block.id] = {
@@ -182,6 +183,7 @@ async def _handle_tool_results(message: UserMessage, ctx: StreamingContext) -> A
             data={
                 "tool_use_id": block.tool_use_id,
                 "name": tool_name,
+                "input": call_info["input"],
                 "result": block.content,
                 "status": status,
                 "duration_ms": duration_ms,

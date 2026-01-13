@@ -213,15 +213,55 @@ def _render_tool_start(data: dict) -> str:
     """Render HTML for tool execution start."""
     tool_name = data.get("name", "unknown")
     tool_use_id = data.get("tool_use_id", "")
-    return f'''<div id="tool-{tool_use_id}" class="my-2 border border-gray-200 rounded-lg p-3 bg-gray-50">
-        <div class="flex items-center gap-2">
-            <svg class="w-4 h-4 text-blue-500 animate-spin" fill="none" viewBox="0 0 24 24">
-                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
-            </svg>
-            <span class="text-sm font-medium text-gray-700">Running {tool_name}...</span>
+    return f'''<div id="tool-{tool_use_id}">
+<div class="flex items-start space-x-3 max-w-[95%] mb-4">
+    <div class="flex-shrink-0 w-8 h-8 bg-indigo-100 dark:bg-indigo-900 rounded-full flex items-center justify-center">
+        <svg class="w-5 h-5 text-indigo-600 dark:text-indigo-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"></path>
+        </svg>
+    </div>
+    <div class="min-w-0 flex-1">
+        <div class="border border-gray-200 dark:border-gray-700 overflow-hidden rounded-lg w-full min-w-0">
+            <div class="flex items-center justify-between px-3 py-2 bg-gray-50 dark:bg-gray-700">
+                <div class="flex items-center space-x-2">
+                    <svg class="w-4 h-4 text-blue-500 animate-spin" fill="none" viewBox="0 0 24 24">
+                        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+                    </svg>
+                    <span class="font-mono text-sm font-medium text-gray-900 dark:text-gray-100">{tool_name}</span>
+                </div>
+            </div>
         </div>
-    </div>'''
+    </div>
+</div>
+</div>'''
+
+
+def _extract_mcp_text_content(value):
+    """Extract text content from MCP content block structure.
+
+    MCP tool results come as: [{"type": "text", "text": "..."}]
+    This extracts the text and tries to parse it as JSON.
+    """
+    if not isinstance(value, list) or len(value) == 0:
+        return value
+
+    # Extract text from all text blocks
+    texts = []
+    for block in value:
+        if isinstance(block, dict) and block.get("type") == "text" and "text" in block:
+            texts.append(block["text"])
+
+    if not texts:
+        return value
+
+    combined_text = "\n".join(texts)
+
+    # Try to parse as JSON
+    try:
+        return json.loads(combined_text)
+    except json.JSONDecodeError:
+        return combined_text
 
 
 def _render_tool_result(data: dict) -> str:
@@ -230,19 +270,63 @@ def _render_tool_result(data: dict) -> str:
     tool_use_id = data.get("tool_use_id", "")
     status = data.get("status", "success")
     duration_ms = data.get("duration_ms", 0)
+    parameters = data.get("input", {})
+    result = data.get("result", "")
 
-    icon = "✓" if status == "success" else "✗"
-    color = "text-green-600" if status == "success" else "text-red-600"
+    # Format JSON for display
+    params_json = json.dumps(parameters, indent=2) if parameters else "{}"
+
+    # Parse result, extract MCP text content, and pretty-print
+    try:
+        result_parsed = json.loads(result) if isinstance(result, str) else result
+        result_parsed = _extract_mcp_text_content(result_parsed)
+        if isinstance(result_parsed, str):
+            result_json = result_parsed
+        else:
+            result_json = json.dumps(result_parsed, indent=2)
+    except (json.JSONDecodeError, TypeError):
+        result_json = str(result)
+
+    status_icon = (
+        '<svg class="w-4 h-4 text-green-500" fill="currentColor" viewBox="0 0 20 20">'
+        '<path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"/>'
+        '</svg>'
+        if status == "success"
+        else '<svg class="w-4 h-4 text-red-500" fill="currentColor" viewBox="0 0 20 20">'
+        '<path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clip-rule="evenodd"/>'
+        '</svg>'
+    )
 
     return f'''<div id="tool-{tool_use_id}" hx-swap-oob="outerHTML">
-        <div class="my-2 border border-gray-200 rounded-lg p-3 bg-gray-50">
-            <div class="flex items-center gap-2">
-                <span class="{color}">{icon}</span>
-                <span class="text-sm font-medium text-gray-700">{tool_name}</span>
+<div class="flex items-start space-x-3 max-w-[95%] mb-4">
+    <div class="flex-shrink-0 w-8 h-8 bg-indigo-100 dark:bg-indigo-900 rounded-full flex items-center justify-center">
+        <svg class="w-5 h-5 text-indigo-600 dark:text-indigo-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"></path>
+        </svg>
+    </div>
+    <div class="min-w-0 flex-1">
+        <div class="border border-gray-200 dark:border-gray-700 overflow-hidden rounded-lg w-full min-w-0">
+            <div class="flex items-center justify-between px-3 py-2 bg-gray-50 dark:bg-gray-700">
+                <div class="flex items-center space-x-2">
+                    {status_icon}
+                    <span class="font-mono text-sm font-medium text-gray-900 dark:text-gray-100">{tool_name}</span>
+                </div>
                 <span class="text-xs text-gray-500">{duration_ms}ms</span>
             </div>
+            <div class="p-3 text-sm space-y-3 min-w-0">
+                <div class="min-w-0">
+                    <div class="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">Parameters</div>
+                    <pre class="bg-gray-100 dark:bg-gray-900 p-2 rounded text-xs overflow-x-auto font-mono text-gray-800 dark:text-gray-200 whitespace-pre-wrap break-all">{params_json}</pre>
+                </div>
+                <div class="min-w-0">
+                    <div class="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">Result</div>
+                    <pre class="bg-gray-100 dark:bg-gray-900 p-2 rounded text-xs overflow-x-auto max-h-64 overflow-y-auto font-mono text-gray-800 dark:text-gray-200 whitespace-pre-wrap break-all">{result_json}</pre>
+                </div>
+            </div>
         </div>
-    </div>'''
+    </div>
+</div>
+</div>'''
 
 
 def _render_streaming_start() -> str:
