@@ -154,7 +154,13 @@
                 const data = JSON.parse(event.detail.data);
                 const streamingText = document.getElementById('streaming-text');
                 if (streamingText && data.text) {
-                    streamingText.textContent += data.text;
+                    // Insert text before the cursor so the cursor stays at the end
+                    const cursor = streamingText.querySelector('.streaming-cursor');
+                    if (cursor) {
+                        cursor.insertAdjacentText('beforebegin', data.text);
+                    } else {
+                        streamingText.textContent += data.text;
+                    }
                     scrollToBottom();
                 }
             } catch (e) {
