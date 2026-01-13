@@ -55,6 +55,7 @@ class StreamingContext:
     conversation: Conversation
     pending_tool_calls: dict[str, dict[str, Any]] = field(default_factory=dict)
     accumulated_content: str = ""
+    has_started_streaming: bool = False
 
 
 def _load_system_prompt() -> str:
@@ -120,6 +121,10 @@ async def _handle_sdk_stream_event(message: SDKStreamEvent, ctx: StreamingContex
         if delta.get("type") == "text_delta":
             text_chunk = delta.get("text", "")
             if text_chunk:
+                # Create streaming container on first text (replaces thinking indicator)
+                if not ctx.has_started_streaming:
+                    yield StreamEvent(type="start")
+                    ctx.has_started_streaming = True
                 ctx.accumulated_content += text_chunk
                 yield StreamEvent(type="text_delta", data={"text": text_chunk})
 
@@ -132,8 +137,10 @@ async def _handle_assistant_message(message: AssistantMessage, ctx: StreamingCon
             if ctx.accumulated_content:
                 await _persist_text_message(conversation=ctx.conversation, content=ctx.accumulated_content)
                 ctx.accumulated_content = ""
-            # Always flush to release streaming element IDs before tool box is inserted
-            yield StreamEvent(type="text_flush")
+            # Flush to release streaming element IDs (only if we were streaming text)
+            if ctx.has_started_streaming:
+                yield StreamEvent(type="text_flush")
+                ctx.has_started_streaming = False
 
             # Record pending tool call
             ctx.pending_tool_calls[block.id] = {
@@ -190,8 +197,9 @@ async def _handle_tool_results(message: UserMessage, ctx: StreamingContext) -> A
             },
         )
 
-    # After processing all tool results, start new streaming container
-    yield StreamEvent(type="start")
+    # Show thinking indicator while waiting for next response (text or another tool)
+    ctx.has_started_streaming = False
+    yield StreamEvent(type="thinking")
 
 
 def _create_agent_options(system_prompt: str) -> ClaudeAgentOptions:
@@ -235,7 +243,8 @@ async def stream_response(conversation: Conversation) -> AsyncGenerator[StreamEv
     # around and mutated by the event handlers
     ctx = StreamingContext(conversation=conversation)
     
-    yield StreamEvent(type="start")
+    # Start with thinking indicator (will be replaced by streaming container on first text)
+    yield StreamEvent(type="thinking")
 
     try:
         async with ClaudeSDKClient(options=options) as client:
