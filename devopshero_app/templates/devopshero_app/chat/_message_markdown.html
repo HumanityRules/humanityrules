@@ -1,13 +1,8 @@
-{# Markdown message - rendered client-side using streaming-markdown for consistency #}
-{#
-    Why |safe? Django auto-escapes content (e.g., ' -> &#x27;), but browsers don't decode
-    HTML entities inside <script> tags - they treat them as literal text. So without |safe,
-    apostrophes render as "&#x27;" after page reload.
-
-    Why is this safe? The script tag has type="text/markdown", not "text/javascript", so
-    the browser treats its content as inert data, not executable code. The content is read
-    via scriptEl.textContent and fed to a markdown parser - never executed as JS.
-#}
+{% comment %}
+Markdown message - rendered client-side using streaming-markdown for consistency.
+Uses |safe because browsers don't decode HTML entities inside <script> tags.
+Safe because type="text/markdown" is inert data, not executable JS.
+{% endcomment %}
 <div class="markdown-content" data-markdown-content>
     <script type="text/markdown">{{ message.content|safe }}</script>
 </div>

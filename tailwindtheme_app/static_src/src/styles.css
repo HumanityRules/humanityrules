@@ -153,3 +153,46 @@ el-options[popover] {
   background-color: rgb(55 65 81); /* gray-700 */
   border-radius: 6px;
 }
+
+/* ===== Shimmer/shine animation for thinking indicator ===== */
+@keyframes shimmer {
+  0% {
+    background-position: 200% center;
+  }
+  100% {
+    background-position: -200% center;
+  }
+}
+
+.text-shimmer {
+  background: linear-gradient(
+    90deg,
+    rgb(107 114 128) 0%,        /* gray-500 - base color */
+    rgb(107 114 128) 40%,       /* gray-500 - hold before shine */
+    rgb(209 213 219) 50%,       /* gray-300 - bright shine */
+    rgb(107 114 128) 60%,       /* gray-500 - hold after shine */
+    rgb(107 114 128) 100%       /* gray-500 - base color */
+  );
+  background-size: 200% 100%;
+  background-clip: text;
+  -webkit-background-clip: text;
+  color: transparent;
+  animation: shimmer 2s ease-in-out infinite;
+}
+
+/* Dark mode variant */
+.dark .text-shimmer {
+  background: linear-gradient(
+    90deg,
+    rgb(156 163 175) 0%,        /* gray-400 - base color */
+    rgb(156 163 175) 40%,       /* gray-400 - hold before shine */
+    rgb(243 244 246) 50%,       /* gray-100 - bright shine */
+    rgb(156 163 175) 60%,       /* gray-400 - hold after shine */
+    rgb(156 163 175) 100%       /* gray-400 - base color */
+  );
+  background-size: 200% 100%;
+  background-clip: text;
+  -webkit-background-clip: text;
+  color: transparent;
+  animation: shimmer 2s ease-in-out infinite;
+}
