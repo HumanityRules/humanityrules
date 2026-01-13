@@ -4,6 +4,10 @@
 > - Entries are in reverse chronological order (latest on top). Use format: `## YYYY-MM-DD HH:MM - Title`
 > - Avoid markdown tables — they render poorly. Use bulleted lists with bold labels instead.
 
+## 2026-01-13 - Chat Input History
+
+Added up arrow key support to recall the last sent message, similar to terminal/shell behavior. Press up arrow when the input is empty to restore the previous message.
+
 ## 2026-01-13 - Streaming Markdown Rendering
 
 Added real-time markdown rendering for chat messages using the `streaming-markdown` library (12KB, CDN).

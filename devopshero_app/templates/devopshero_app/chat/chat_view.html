@@ -68,6 +68,7 @@
                   hx-on::after-request="this.reset(); this.querySelector('input').focus();"
                   class="flex items-center space-x-3">
                 <input type="text"
+                       id="message-input"
                        name="message"
                        placeholder="Type a message..."
                        autocomplete="off"
@@ -295,6 +296,28 @@ messages.addEventListener('htmx:sseBeforeMessage', function(event) {
         event.preventDefault();
         handleComplete();
         return;
+    }
+});
+
+// Up arrow message history
+const messageInput = document.getElementById('message-input');
+let lastMessage = '';
+
+// Capture message before form resets
+messageInput.form.addEventListener('submit', function() {
+    const value = messageInput.value.trim();
+    if (value) {
+        lastMessage = value;
+    }
+});
+
+// Restore last message on up arrow
+messageInput.addEventListener('keydown', function(event) {
+    if (event.key === 'ArrowUp' && lastMessage && !messageInput.value) {
+        event.preventDefault();
+        messageInput.value = lastMessage;
+        // Move cursor to end
+        messageInput.setSelectionRange(lastMessage.length, lastMessage.length);
     }
 });
 </script>
