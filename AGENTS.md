@@ -43,6 +43,8 @@ The main developer documentation lives in the docs/ subdirectory. **When creatin
 
 - **`docs/bolt_prompt.md`** — The original prompt used to generate the landing page design. Contains the product concept, target personas, and landing page section specifications.
 
+- **`docs/current_state.md`** — Comprehensive project state overview for agents/developers without codebase access. Covers architecture, implementation status, paradigms, and strategic considerations.
+
 **OpenSpec specifications** live in `openspec/specs/`. Run `openspec list --specs` to see all capabilities. Pending changes (including design docs) are in `openspec/changes/`.
 
 **Subsystem AGENTS.md files:**
