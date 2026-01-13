@@ -10,32 +10,12 @@ from django.template.loader import render_to_string
 from django.views.decorators.http import require_POST
 
 from ..models import Conversation, Message
-from ..services import streaming_service
 from ..services.agent import agent_client
 from ..services.agent import agent_service
+from ..services.streaming_service import StreamEvent
 from .base import get_app_shell_context
 
 logger = logging.getLogger(__name__)
-
-
-async def _process_agent_task(
-    conversation_id: str,
-    session: streaming_service.StreamingSession,
-) -> None:
-    """
-    Process agent response as a background asyncio task.
-
-    Note: agent_service.process_conversation_streaming handles all exceptions
-    internally and sends error events to the queue, so no try/except needed here.
-    """
-    conversation = await Conversation.objects.select_related(
-        'organization', 'user'
-    ).aget(id=conversation_id)
-
-    await agent_service.process_conversation_streaming(
-        conversation=conversation,
-        session=session,
-    )
 
 
 @login_required
@@ -92,15 +72,14 @@ def chat_view(request, conversation_id):
 
 @login_required
 @require_POST
-async def chat_send(request, conversation_id):
+def chat_send(request, conversation_id):
     """Send a message in a conversation and trigger agent response."""
-    current_org = await sync_to_async(lambda: request.user.current_organization)()
-    conversation = await Conversation.objects.select_related(
+    conversation = Conversation.objects.select_related(
         'organization', 'user'
-    ).aget(
+    ).get(
         id=conversation_id,
         user=request.user,
-        organization=current_org,
+        organization=request.user.current_organization,
     )
 
     message_text = request.POST.get("message", "").strip()
@@ -110,7 +89,7 @@ async def chat_send(request, conversation_id):
         return HttpResponse(status=400)
 
     # Create user message
-    user_message = await Message.objects.acreate(
+    user_message = Message.objects.create(
         conversation=conversation,
         role=Message.Role.USER,
         content_type=Message.ContentType.TEXT,
@@ -119,11 +98,11 @@ async def chat_send(request, conversation_id):
     )
 
     # Update conversation timestamp
-    await conversation.asave()
+    conversation.save()
 
-    # Render the user message (sync operation, wrap it)
+    # Render the user message
     context = {"message": user_message, "conversation_id": conversation_id}
-    user_html = await sync_to_async(render_to_string)(
+    user_html = render_to_string(
         "devopshero_app/chat/_message.html",
         context=context,
         request=request,
@@ -132,18 +111,10 @@ async def chat_send(request, conversation_id):
     # OOB delete the empty chat placeholder (if present)
     remove_placeholder = '<div id="empty-chat-placeholder" hx-swap-oob="delete"></div>'
 
-    # Start agent processing as background task
+    # Include typing indicator if agent is available
+    # The SSE connection (chat_stream) will run the agent when it detects the new message
     if agent_client.is_available():
-        logger.info(f"Created streaming session for conversation {conversation_id}")
-        session = streaming_service.create_session(str(conversation_id))
-
-        # Launch agent processing as asyncio background task
-        asyncio.create_task(
-            _process_agent_task(str(conversation_id), session)
-        )
-
-        # Include typing indicator that will be shown until agent responds
-        typing_html = await sync_to_async(render_to_string)(
+        typing_html = render_to_string(
             "devopshero_app/chat/_typing_indicator.html",
             context={"conversation_id": conversation_id},
             request=request,
@@ -159,32 +130,34 @@ async def chat_stream(request, conversation_id):
     """SSE endpoint for streaming agent responses."""
     # Verify conversation access (raises DoesNotExist if unauthorized)
     current_org = await sync_to_async(lambda: request.user.current_organization)()
-    await Conversation.objects.aget(
-        id=conversation_id,
-        user=request.user,
-        organization=current_org,
-    )
+    user = request.user
 
     async def event_generator():
-        """Generate SSE events from the streaming queue."""
-        conversation_id_str = str(conversation_id)
-        logger.info("SSE event_generator started for conversation %s", conversation_id_str)
+        """Generate SSE events by running agent directly when needed."""
+        logger.info("SSE event_generator started for conversation %s", conversation_id)
 
         while True:
-            # Check if a streaming session exists
-            session = streaming_service.get_session(conversation_id_str)
+            # Load conversation fresh each iteration
+            conversation = await Conversation.objects.select_related(
+                'organization', 'user'
+            ).aget(
+                id=conversation_id,
+                user=user,
+                organization=current_org,
+            )
 
-            if session:
-                logger.info("Found streaming session for conversation %s", conversation_id_str)
-                # Stream from queue until completion
-                async for event in _stream_from_queue(session=session):
-                    yield event
-                # After streaming completes, continue waiting for next session
-                logger.info("Streaming completed for conversation %s", conversation_id_str)
+            # Check if response needed: last message is from user
+            if await _needs_response(conversation=conversation):
+                logger.info(f"Running agent for conversation {conversation_id}")
+                async for event in agent_service.stream_response(conversation=conversation):
+                    yield _format_sse_event(event=event)
+                logger.info(f"Agent completed for conversation {conversation_id}")
                 continue
 
-            # No session - wait before checking again
+            # No pending message - wait before checking again
             await asyncio.sleep(1)
+            # Send keepalive to prevent connection timeout
+            yield ": keepalive\n\n"
 
     response = StreamingHttpResponse(
         event_generator(),
@@ -193,6 +166,12 @@ async def chat_stream(request, conversation_id):
     response["Cache-Control"] = "no-cache"
     response["X-Accel-Buffering"] = "no"
     return response
+
+
+async def _needs_response(conversation: Conversation) -> bool:
+    """Check if conversation has an unanswered user message."""
+    last_message = await conversation.messages.order_by("-created_at").afirst()
+    return last_message is not None and last_message.role == Message.Role.USER
 
 
 def _format_sse(event_name: str, data: str) -> str:
@@ -251,53 +230,24 @@ def _render_streaming_error(error_msg: str) -> str:
     return f'<div id="streaming-message" hx-swap-oob="outerHTML"><div class="text-red-600 p-3 bg-red-50 rounded-lg">Error: {error_msg}</div></div>'
 
 
-async def _stream_from_queue(session):
-    """
-    Stream events from a streaming session queue.
-
-    Yields SSE events for each event in the queue until completion or error.
-    """
-    logger.info("Starting to stream from queue for session %s", session.conversation_id)
-    while session.is_active:
-        try:
-            event = await asyncio.wait_for(session.queue.get(), timeout=30.0)
-            logger.info(f"Got event from queue: type={event.type}")
-
-            if event.type == "start":
-                html = _render_streaming_start()
-                yield _format_sse(event_name="sse-start", data=html)
-
-            elif event.type == "text_delta":
-                yield _format_sse(event_name="sse-text-delta", data=json.dumps(event.data))
-
-            elif event.type == "text_flush":
-                yield _format_sse(event_name="sse-text-flush", data="{}")
-
-            elif event.type == "tool_start":
-                tool_html = _render_tool_start(event.data)
-                yield _format_sse(event_name="sse-tool-start", data=tool_html)
-
-            elif event.type == "tool_result":
-                tool_html = _render_tool_result(event.data)
-                yield _format_sse(event_name="sse-tool-result", data=tool_html)
-
-            elif event.type == "complete":
-                # Finalize the streaming message - remove cursor via JS
-                # The streamed content stays visible as-is
-                yield _format_sse(event_name="sse-complete", data="{}")
-                return  # Exit the generator
-
-            elif event.type == "error":
-                error_msg = event.data.get("error", "Unknown error") if event.data else "Unknown error"
-                html = _render_streaming_error(error_msg=error_msg)
-                yield _format_sse(event_name="sse-error", data=html)
-                return
-
-        except asyncio.TimeoutError:
-            if not session.is_active:
-                return  # Session ended during timeout
-            # Send keepalive comment to prevent connection timeout
-            yield ": keepalive\n\n"
+def _format_sse_event(event: StreamEvent) -> str:
+    """Convert StreamEvent to SSE format."""
+    if event.type == "start":
+        return _format_sse(event_name="sse-start", data=_render_streaming_start())
+    elif event.type == "text_delta":
+        return _format_sse(event_name="sse-text-delta", data=json.dumps(event.data))
+    elif event.type == "text_flush":
+        return _format_sse(event_name="sse-text-flush", data="{}")
+    elif event.type == "tool_start":
+        return _format_sse(event_name="sse-tool-start", data=_render_tool_start(event.data))
+    elif event.type == "tool_result":
+        return _format_sse(event_name="sse-tool-result", data=_render_tool_result(event.data))
+    elif event.type == "complete":
+        return _format_sse(event_name="sse-complete", data="{}")
+    elif event.type == "error":
+        error_msg = event.data.get("error", "Unknown error") if event.data else "Unknown error"
+        return _format_sse(event_name="sse-error", data=_render_streaming_error(error_msg=error_msg))
+    return ""
 
 
 @login_required

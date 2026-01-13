@@ -14,6 +14,7 @@ structured tool calling, conversation memory, and streaming responses.
 
 import logging
 import time
+from collections.abc import AsyncGenerator
 from pathlib import Path
 from typing import Any
 
@@ -34,9 +35,7 @@ from claude_agent_sdk.types import (
 )
 
 from devopshero_app.models import Conversation, Message
-from devopshero_app.services import streaming_service
 from devopshero_app.services.streaming_service import StreamEvent
-from devopshero_app.services.streaming_service import StreamingSession
 
 from .agent_client import get_claude_env
 from .mcp_tools import (
@@ -73,29 +72,26 @@ async def _aget_last_user_message(conversation: Conversation) -> str:
     return last_message.content
 
 
-async def process_conversation_streaming(
-    conversation: Conversation,
-    session: StreamingSession,
-) -> None:
+async def stream_response(conversation: Conversation) -> AsyncGenerator[StreamEvent, None]:
     """
-    Process a conversation with streaming support.
+    Stream agent response for a conversation.
 
     This is the main entry point for streaming agent processing. It:
     1. Sets up the conversation context for MCP tools
     2. Sends the latest user message to Claude via the Agent SDK
-    3. Streams text deltas to the session queue for real-time frontend updates
-    4. Handles tool calls and streams tool events
+    3. Yields text deltas for real-time frontend updates
+    4. Handles tool calls and yields tool events
     5. Persists final messages to the database on completion
 
     Args:
         conversation: The Conversation to process.
-        session: The StreamingSession for sending events to the frontend.
+
+    Yields:
+        StreamEvent objects for each streaming event.
 
     Raises:
         ValueError: If the conversation has no user messages.
     """
-    queue = session.queue
-
     # Set the conversation context for tools to access
     conversation_context.set(conversation)
 
@@ -122,8 +118,11 @@ async def process_conversation_streaming(
     # Maps tool_use_id -> {name, input, start_time}
     pending_tool_calls: dict[str, dict[str, Any]] = {}
 
+    # Accumulate text content for DB persistence
+    accumulated_content: str = ""
+
     # Signal streaming start
-    await queue.put(StreamEvent(type="start"))
+    yield StreamEvent(type="start")
 
     try:
         async with ClaudeSDKClient(options=options) as client:
@@ -141,28 +140,28 @@ async def process_conversation_streaming(
                         if delta.get("type") == "text_delta":
                             text_chunk = delta.get("text", "")
                             if text_chunk:
-                                # Accumulate for persistence and send to frontend
-                                session.append_text(text_chunk)
-                                await queue.put(StreamEvent(
+                                # Accumulate for persistence and yield to frontend
+                                accumulated_content += text_chunk
+                                yield StreamEvent(
                                     type="text_delta",
                                     data={"text": text_chunk},
-                                ))
+                                )
 
                 elif isinstance(message, AssistantMessage):
                     # Full message received - handle tool use blocks
                     for block in message.content:
                         if isinstance(block, ToolUseBlock):
                             # First, persist any accumulated text before tool call
-                            accumulated = session.reset_content()
-                            if accumulated:
+                            if accumulated_content:
                                 await Message.objects.acreate(
                                     conversation=conversation,
                                     role=Message.Role.AGENT,
                                     content_type=Message.ContentType.TEXT,
-                                    content=accumulated,
+                                    content=accumulated_content,
                                 )
+                                accumulated_content = ""
                                 # Tell frontend to finalize current streaming text
-                                await queue.put(StreamEvent(type="text_flush"))
+                                yield StreamEvent(type="text_flush")
 
                             # Record pending tool call
                             pending_tool_calls[block.id] = {
@@ -172,14 +171,14 @@ async def process_conversation_streaming(
                             }
 
                             # Signal tool start to frontend
-                            await queue.put(StreamEvent(
+                            yield StreamEvent(
                                 type="tool_start",
                                 data={
                                     "tool_use_id": block.id,
                                     "name": block.name,
                                     "input": block.input,
                                 },
-                            ))
+                            )
 
                 elif isinstance(message, UserMessage):
                     # Process tool results from synthetic user messages
@@ -213,7 +212,7 @@ async def process_conversation_streaming(
                         )
 
                         # Signal tool result to frontend
-                        await queue.put(StreamEvent(
+                        yield StreamEvent(
                             type="tool_result",
                             data={
                                 "tool_use_id": block.tool_use_id,
@@ -222,11 +221,11 @@ async def process_conversation_streaming(
                                 "status": "error" if block.is_error else "success",
                                 "duration_ms": duration_ms,
                             },
-                        ))
+                        )
 
                     # After processing all tool results, start new streaming container
                     # for any text that follows
-                    await queue.put(StreamEvent(type="start"))
+                    yield StreamEvent(type="start")
 
                 elif isinstance(message, ResultMessage):
                     logger.info(
@@ -239,20 +238,19 @@ async def process_conversation_streaming(
                     logger.debug("[SDK] SystemMessage: subtype=%s", message.subtype)
 
         # Persist any remaining accumulated text
-        accumulated = session.reset_content()
-        if accumulated:
+        if accumulated_content:
             await Message.objects.acreate(
                 conversation=conversation,
                 role=Message.Role.AGENT,
                 content_type=Message.ContentType.TEXT,
-                content=accumulated,
+                content=accumulated_content,
             )
 
         # Update conversation timestamp
         await conversation.asave()
 
         # Signal completion
-        await queue.put(StreamEvent(type="complete"))
+        yield StreamEvent(type="complete")
 
     except Exception as e:
         logger.exception("Error during streaming conversation processing")
@@ -267,9 +265,5 @@ async def process_conversation_streaming(
             )
         except Exception:
             logger.exception("Failed to save error message to database")
-        # Send error event to frontend (don't re-raise - caller expects no exceptions)
-        await queue.put(StreamEvent(type="error", data={"error": str(e)}))
-
-    finally:
-        # Clean up the streaming session
-        streaming_service.remove_session(str(conversation.id))
+        # Yield error event to frontend
+        yield StreamEvent(type="error", data={"error": str(e)})
