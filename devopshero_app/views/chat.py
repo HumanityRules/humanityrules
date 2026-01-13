@@ -13,6 +13,7 @@ from ..models import Conversation, Message
 from ..services.agent import agent_client
 from ..services.agent import agent_service
 from ..services.streaming_service import StreamEvent
+from ..templatetags.chat_filters import _extract_mcp_text_content
 from .base import get_app_shell_context
 
 logger = logging.getLogger(__name__)
@@ -117,16 +118,7 @@ def chat_send(request, conversation_id):
 
     # Agent unavailable - log error and inform user
     logger.error("Agent client unavailable")
-    unavailable_html = '''<div class="flex items-start space-x-3 max-w-[80%] mb-4">
-        <div class="flex-shrink-0 w-8 h-8 bg-amber-100 dark:bg-amber-900 rounded-full flex items-center justify-center">
-            <svg class="w-5 h-5 text-amber-600 dark:text-amber-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path>
-            </svg>
-        </div>
-        <div class="bg-amber-50 dark:bg-amber-900/30 border border-amber-200 dark:border-amber-800 rounded-2xl rounded-tl-md px-4 py-3">
-            <p class="text-amber-800 dark:text-amber-200">AI assistant is currently unavailable. Please contact your administrator.</p>
-        </div>
-    </div>'''
+    unavailable_html = render_to_string("devopshero_app/chat/_streaming_unavailable.html")
     return HttpResponse(user_html + unavailable_html + remove_placeholder)
 
 
@@ -205,68 +197,14 @@ def _format_sse(event_name: str, data: str) -> str:
 
 def _render_tool_start(data: dict) -> str:
     """Render HTML for tool execution start."""
-    tool_name = data.get("name", "unknown")
-    tool_use_id = data.get("tool_use_id", "")
-    # Reset thinking indicator to empty placeholder via OOB (so it can be reused)
-    oob_reset = '<div id="thinking-indicator" hx-swap-oob="outerHTML"></div>'
-    return f'''<div id="tool-{tool_use_id}">
-<div class="flex items-start space-x-3 max-w-[95%] mb-4">
-    <div class="flex-shrink-0 w-8 h-8 bg-indigo-100 dark:bg-indigo-900 rounded-full flex items-center justify-center">
-        <svg class="w-5 h-5 text-indigo-600 dark:text-indigo-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"></path>
-        </svg>
-    </div>
-    <div class="min-w-0 flex-1">
-        <div class="border border-gray-200 dark:border-gray-700 overflow-hidden rounded-lg w-full min-w-0">
-            <div class="flex items-center justify-between px-3 py-2 bg-gray-50 dark:bg-gray-700">
-                <div class="flex items-center space-x-2">
-                    <svg class="w-4 h-4 text-blue-500 animate-spin" fill="none" viewBox="0 0 24 24">
-                        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-                        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
-                    </svg>
-                    <span class="font-mono text-sm font-medium text-gray-900 dark:text-gray-100">{tool_name}</span>
-                </div>
-            </div>
-        </div>
-    </div>
-</div>
-</div>
-{oob_reset}'''
-
-
-def _extract_mcp_text_content(value):
-    """Extract text content from MCP content block structure.
-
-    MCP tool results come as: [{"type": "text", "text": "..."}]
-    This extracts the text and tries to parse it as JSON.
-    """
-    if not isinstance(value, list) or len(value) == 0:
-        return value
-
-    # Extract text from all text blocks
-    texts = []
-    for block in value:
-        if isinstance(block, dict) and block.get("type") == "text" and "text" in block:
-            texts.append(block["text"])
-
-    if not texts:
-        return value
-
-    combined_text = "\n".join(texts)
-
-    # Try to parse as JSON
-    try:
-        return json.loads(combined_text)
-    except json.JSONDecodeError:
-        return combined_text
+    return render_to_string("devopshero_app/chat/_streaming_tool_start.html", context={
+        "tool_name": data.get("name", "unknown"),
+        "tool_use_id": data.get("tool_use_id", ""),
+    })
 
 
 def _render_tool_result(data: dict) -> str:
     """Render HTML for tool execution result (OOB swap)."""
-    tool_name = data.get("name", "unknown")
-    tool_use_id = data.get("tool_use_id", "")
-    status = data.get("status", "success")
-    duration_ms = data.get("duration_ms", 0)
     parameters = data.get("input", {})
     result = data.get("result", "")
 
@@ -284,85 +222,31 @@ def _render_tool_result(data: dict) -> str:
     except (json.JSONDecodeError, TypeError):
         result_json = str(result)
 
-    status_icon = (
-        '<svg class="w-4 h-4 text-green-500" fill="currentColor" viewBox="0 0 20 20">'
-        '<path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"/>'
-        '</svg>'
-        if status == "success"
-        else '<svg class="w-4 h-4 text-red-500" fill="currentColor" viewBox="0 0 20 20">'
-        '<path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clip-rule="evenodd"/>'
-        '</svg>'
-    )
-
-    return f'''<div id="tool-{tool_use_id}" hx-swap-oob="outerHTML">
-<div class="flex items-start space-x-3 max-w-[95%] mb-4">
-    <div class="flex-shrink-0 w-8 h-8 bg-indigo-100 dark:bg-indigo-900 rounded-full flex items-center justify-center">
-        <svg class="w-5 h-5 text-indigo-600 dark:text-indigo-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"></path>
-        </svg>
-    </div>
-    <div class="min-w-0 flex-1">
-        <div class="border border-gray-200 dark:border-gray-700 overflow-hidden rounded-lg w-full min-w-0">
-            <div class="flex items-center justify-between px-3 py-2 bg-gray-50 dark:bg-gray-700">
-                <div class="flex items-center space-x-2">
-                    {status_icon}
-                    <span class="font-mono text-sm font-medium text-gray-900 dark:text-gray-100">{tool_name}</span>
-                </div>
-                <span class="text-xs text-gray-500">{duration_ms}ms</span>
-            </div>
-            <div class="p-3 text-sm space-y-3 min-w-0">
-                <div class="min-w-0">
-                    <div class="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">Parameters</div>
-                    <pre class="bg-gray-100 dark:bg-gray-900 p-2 rounded text-xs overflow-x-auto font-mono text-gray-800 dark:text-gray-200 whitespace-pre-wrap break-all">{params_json}</pre>
-                </div>
-                <div class="min-w-0">
-                    <div class="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">Result</div>
-                    <pre class="bg-gray-100 dark:bg-gray-900 p-2 rounded text-xs overflow-x-auto max-h-64 overflow-y-auto font-mono text-gray-800 dark:text-gray-200 whitespace-pre-wrap break-all">{result_json}</pre>
-                </div>
-            </div>
-        </div>
-    </div>
-</div>
-</div>'''
+    return render_to_string("devopshero_app/chat/_streaming_tool_result.html", context={
+        "tool_name": data.get("name", "unknown"),
+        "tool_use_id": data.get("tool_use_id", ""),
+        "status": data.get("status", "success"),
+        "duration_ms": data.get("duration_ms", 0),
+        "params_json": params_json,
+        "result_json": result_json,
+    })
 
 
 def _render_thinking() -> str:
     """Render HTML for 'agent is thinking' indicator (OOB swap into placeholder)."""
-    # Use OOB swap to replace the thinking-indicator placeholder (avoids duplicates)
-    return '''<div id="thinking-indicator" hx-swap-oob="outerHTML" class="flex items-start space-x-3 max-w-[80%] mb-4">
-<div class="flex-shrink-0 w-8 h-8 bg-indigo-100 dark:bg-indigo-900 rounded-full flex items-center justify-center">
-    <svg class="w-5 h-5 text-indigo-600 dark:text-indigo-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"></path>
-    </svg>
-</div>
-<div class="bg-gray-100 dark:bg-gray-800 rounded-2xl rounded-tl-md px-4 py-3">
-    <div class="flex items-center space-x-2">
-        <div class="flex space-x-1">
-            <span class="w-2 h-2 bg-gray-400 dark:bg-gray-500 rounded-full animate-bounce" style="animation-delay: 0ms;"></span>
-            <span class="w-2 h-2 bg-gray-400 dark:bg-gray-500 rounded-full animate-bounce" style="animation-delay: 150ms;"></span>
-            <span class="w-2 h-2 bg-gray-400 dark:bg-gray-500 rounded-full animate-bounce" style="animation-delay: 300ms;"></span>
-        </div>
-        <span class="text-sm text-gray-500 dark:text-gray-400">Thinking...</span>
-    </div>
-</div>
-</div>
-'''
+    return render_to_string("devopshero_app/chat/_streaming_thinking.html")
 
 
 def _render_streaming_start() -> str:
     """Render HTML for streaming message container."""
-    # Styling matches _message.html agent message structure
-    # Uses <div> instead of <p> because markdown can contain block elements
-    # Markdown styling is applied via #streaming-text CSS in styles.css
-    html = '<div id="streaming-message" class="flex items-start space-x-3 max-w-[95%] mb-4 streaming-active"><div class="flex-shrink-0 w-8 h-8 bg-indigo-100 dark:bg-indigo-900 rounded-full flex items-center justify-center"><svg class="w-5 h-5 text-indigo-600 dark:text-indigo-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"></path></svg></div><div class="bg-gray-100 dark:bg-gray-800 rounded-2xl rounded-tl-md px-4 py-3 min-w-0 flex-1"><div id="streaming-text" class="markdown-content text-gray-900 dark:text-gray-100"></div></div></div>'
-    # Reset thinking indicator to empty placeholder via OOB (so it can be reused)
-    html += '<div id="thinking-indicator" hx-swap-oob="outerHTML"></div>'
-    return html
+    return render_to_string("devopshero_app/chat/_streaming_start.html")
 
 
 def _render_streaming_error(error_msg: str) -> str:
     """Render HTML for streaming error message."""
-    return f'<div id="streaming-message" hx-swap-oob="outerHTML"><div class="text-red-600 p-3 bg-red-50 rounded-lg">Error: {error_msg}</div></div>'
+    return render_to_string("devopshero_app/chat/_streaming_error.html", context={
+        "error_msg": error_msg,
+    })
 
 
 def _format_sse_event(event: StreamEvent) -> str:

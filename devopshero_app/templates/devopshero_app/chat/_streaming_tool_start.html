@@ -1,0 +1,25 @@
+{# Tool execution start - shows spinner while tool runs #}
+<div id="tool-{{ tool_use_id }}">
+    <div class="flex items-start space-x-3 max-w-[95%] mb-4">
+        <div class="flex-shrink-0 w-8 h-8 bg-indigo-100 dark:bg-indigo-900 rounded-full flex items-center justify-center">
+            <svg class="w-5 h-5 text-indigo-600 dark:text-indigo-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+            </svg>
+        </div>
+        <div class="min-w-0 flex-1">
+            <div class="border border-gray-200 dark:border-gray-700 overflow-hidden rounded-lg w-full min-w-0">
+                <div class="flex items-center justify-between px-3 py-2 bg-gray-50 dark:bg-gray-700">
+                    <div class="flex items-center space-x-2">
+                        <svg class="w-4 h-4 text-blue-500 animate-spin" fill="none" viewBox="0 0 24 24">
+                            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+                        </svg>
+                        <span class="font-mono text-sm font-medium text-gray-900 dark:text-gray-100">{{ tool_name }}</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{# Reset thinking indicator via OOB #}
+<div id="thinking-indicator" hx-swap-oob="outerHTML"></div>
