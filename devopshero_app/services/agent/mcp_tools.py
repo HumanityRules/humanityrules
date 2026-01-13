@@ -43,6 +43,15 @@ def _get_conversation() -> Conversation:
     return conversation
 
 
+def _mcp_response(data: Any) -> dict[str, Any]:
+    """Format data as MCP tool response."""
+    if hasattr(data, "to_dict"):
+        data = data.to_dict()
+    elif isinstance(data, list):
+        data = [item.to_dict() if hasattr(item, "to_dict") else item for item in data]
+    return {"content": [{"type": "text", "text": json.dumps(data, indent=2)}]}
+
+
 @tool(
     "inspect_repository",
     (
@@ -64,15 +73,7 @@ async def inspect_repository(args: dict[str, Any]) -> dict[str, Any]:
         repo_url=args["repo_url"],
         branch=args["branch"],
     )
-
-    return {
-        "content": [
-            {
-                "type": "text",
-                "text": json.dumps(result.to_dict(), indent=2),
-            }
-        ]
-    }
+    return _mcp_response(result)
 
 
 @tool(
@@ -91,15 +92,7 @@ async def list_aws_accounts(args: dict[str, Any]) -> dict[str, Any]:
     conversation = _get_conversation()
 
     accounts = await _list_aws_accounts(organization=conversation.organization)
-
-    return {
-        "content": [
-            {
-                "type": "text",
-                "text": json.dumps([a.to_dict() for a in accounts], indent=2),
-            }
-        ]
-    }
+    return _mcp_response(accounts)
 
 
 @tool(
@@ -136,15 +129,7 @@ async def create_workspace(args: dict[str, Any]) -> dict[str, Any]:
         description=args.get("description", ""),
         primary_repo_url=args.get("primary_repo_url", ""),
     )
-
-    return {
-        "content": [
-            {
-                "type": "text",
-                "text": json.dumps(result.to_dict(), indent=2),
-            }
-        ]
-    }
+    return _mcp_response(result)
 
 
 @tool(
@@ -197,15 +182,7 @@ async def create_app(args: dict[str, Any]) -> dict[str, Any]:
         datastore_id=args.get("datastore_id"),
         dockerfile_path=args.get("dockerfile_path", ""),
     )
-
-    return {
-        "content": [
-            {
-                "type": "text",
-                "text": json.dumps(result.to_dict(), indent=2),
-            }
-        ]
-    }
+    return _mcp_response(result)
 
 
 @tool(
@@ -244,15 +221,7 @@ async def create_datastore(args: dict[str, Any]) -> dict[str, Any]:
         serverless_min_acu=args.get("serverless_min_acu", 0.5),
         serverless_max_acu=args.get("serverless_max_acu", 2.0),
     )
-
-    return {
-        "content": [
-            {
-                "type": "text",
-                "text": json.dumps(result.to_dict(), indent=2),
-            }
-        ]
-    }
+    return _mcp_response(result)
 
 
 @tool(
@@ -284,25 +253,14 @@ async def deploy_app(args: dict[str, Any]) -> dict[str, Any]:
         user=conversation.user,
         conversation=conversation,
     )
-
-    return {
-        "content": [
-            {
-                "type": "text",
-                "text": json.dumps(
-                    {
-                        **result.to_dict(),
-                        "note": (
-                            "Deployment created. In v1, this is stubbed and does not "
-                            "trigger real infrastructure. Use get_deployment_status "
-                            "to check progress."
-                        ),
-                    },
-                    indent=2,
-                ),
-            }
-        ]
-    }
+    return _mcp_response({
+        **result.to_dict(),
+        "note": (
+            "Deployment created. In v1, this is stubbed and does not "
+            "trigger real infrastructure. Use get_deployment_status "
+            "to check progress."
+        ),
+    })
 
 
 @tool(
@@ -330,15 +288,7 @@ async def get_deployment_status(args: dict[str, Any]) -> dict[str, Any]:
         organization=conversation.organization,
         log_limit=10,
     )
-
-    return {
-        "content": [
-            {
-                "type": "text",
-                "text": json.dumps(result.to_dict(), indent=2),
-            }
-        ]
-    }
+    return _mcp_response(result)
 
 
 # Create the MCP server with all tools
