@@ -144,12 +144,16 @@
             event.preventDefault();
             const streamingMessage = document.getElementById('streaming-message');
             if (streamingMessage) {
-                // Remove the cursor
+                const streamingText = streamingMessage.querySelector('#streaming-text');
+                // If empty (no text before tool call), remove the container entirely
+                if (streamingText && !streamingText.textContent.trim()) {
+                    streamingMessage.remove();
+                    return;
+                }
+                // Otherwise finalize: remove cursor and release IDs
                 const cursor = streamingMessage.querySelector('.streaming-cursor');
                 if (cursor) cursor.remove();
-                // Remove ids so new streaming-message can be created
                 streamingMessage.removeAttribute('id');
-                const streamingText = streamingMessage.querySelector('#streaming-text');
                 if (streamingText) streamingText.removeAttribute('id');
             }
             return;
