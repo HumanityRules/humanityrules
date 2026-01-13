@@ -202,6 +202,64 @@ def get_user(id: int) -> User:
 - Heavy imports cause measurable startup delays
 - Imports have side effects you need to avoid
 
+### 5. Single-Line Function Signatures When Under 140 Characters
+* **Directive:** Write function and method definitions on a single line when the total length (including `def`, parameters, return type, and trailing colon) is under 140 characters. Use multi-line formatting only when the signature exceeds this limit.
+* **Reasoning:** Single-line signatures are easier to scan and search. Multi-line formatting adds vertical noise for short signatures that fit comfortably on one line.
+* **Implementation:** Measure the full signature length. If under 140 characters, keep it on one line.
+
+**Bad (unnecessary multi-line):**
+```python
+async def _handle_stream_event(
+    message: SDKStreamEvent,
+    ctx: StreamingContext,
+) -> AsyncGenerator[StreamEvent, None]:
+    ...
+```
+
+**Good (118 characters, fits on one line):**
+```python
+async def _handle_stream_event(message: SDKStreamEvent, ctx: StreamingContext) -> AsyncGenerator[StreamEvent, None]:
+    ...
+```
+
+**When multi-line is appropriate:**
+- Signature exceeds 140 characters
+- Complex default values or annotations that benefit from vertical alignment (though we avoid defaults per rule 1)
+
+### 6. Prefer Single-Line Docstrings for Simple Functions
+* **Directive:** Use a brief single-line docstring for functions. Reserve multi-line docstrings (with Args/Returns/Raises sections) for complex functions where the signature alone doesn't convey important details.
+* **Reasoning:** Verbose docstrings that restate what the function name and types already communicate add noise. A concise one-liner maintains consistency while avoiding redundancy.
+* **Implementation:** Write a single-line docstring that adds context beyond the function name, or simply summarizes intent.
+
+**Bad (overly verbose):**
+```python
+async def _aget_last_user_message(conversation: Conversation) -> str:
+    """
+    Get the last user message from a conversation.
+
+    Args:
+        conversation: The Conversation model instance.
+
+    Returns:
+        The content of the last user message.
+
+    Raises:
+        ValueError: If no user messages found.
+    """
+```
+
+**Good (concise single-line):**
+```python
+async def _aget_last_user_message(conversation: Conversation) -> str:
+    """Get the content of the most recent user message."""
+```
+
+**When multi-line docstrings are valuable:**
+- Non-obvious behavior or side effects
+- Complex algorithms that need explanation
+- Public API functions where discoverability matters
+- Unusual parameter constraints not captured by types
+
 
 # File Naming Conventions
 
