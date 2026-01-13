@@ -129,26 +129,29 @@ async def chat_stream(request, conversation_id):
         logger.error("Agent client unavailable")
 
         async def unavailable_generator():
-            yield _format_sse(
-                event_name="sse-error",
-                data=_render_streaming_error(error_msg="AI assistant is currently unavailable"),
-            )
+            yield _format_sse(event_name="sse-error", data=_render_streaming_error(error_msg="AI assistant is currently unavailable"))
 
-        response = StreamingHttpResponse(
-            unavailable_generator(),
-            content_type="text/event-stream",
-        )
+        response = StreamingHttpResponse(unavailable_generator(), content_type="text/event-stream")
         response["Cache-Control"] = "no-cache"
         response["X-Accel-Buffering"] = "no"
         return response
 
-    # Verify conversation access (raises DoesNotExist if unauthorized)
-    user = await User.objects.select_related('current_organization').aget(pk=request.user.pk)
+    # Verify conversation access upfront (before returning streaming response)
+    user_pk = request.session.get('_auth_user_id')
+    user = await User.objects.select_related('current_organization').aget(pk=user_pk)
     current_org = user.current_organization
+
+    conversation_exists = await Conversation.objects.filter(
+        id=conversation_id,
+        user=user,
+        organization=current_org,
+    ).aexists()
+    if not conversation_exists:
+        return HttpResponse(status=404)
 
     async def event_generator():
         """Generate SSE events by running agent directly when needed."""
-        logger.info("SSE event_generator started for conversation %s", conversation_id)
+        logger.info(f"SSE event_generator started for conversation {conversation_id}")
 
         while True:
             # Load conversation fresh each iteration
@@ -169,14 +172,11 @@ async def chat_stream(request, conversation_id):
                 continue
 
             # No pending message - wait before checking again
-            await asyncio.sleep(1)
+            await asyncio.sleep(0.5)
             # Send keepalive to prevent connection timeout
             yield ": keepalive\n\n"
 
-    response = StreamingHttpResponse(
-        event_generator(),
-        content_type="text/event-stream",
-    )
+    response = StreamingHttpResponse(event_generator(), content_type="text/event-stream")
     response["Cache-Control"] = "no-cache"
     response["X-Accel-Buffering"] = "no"
     return response
