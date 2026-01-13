@@ -5,3 +5,4 @@ __pycache__/
 .env
 infra_customer/cdk.out/
 infra_customer/cdk.context.json
+db.sqlite3
