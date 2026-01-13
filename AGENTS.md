@@ -419,6 +419,23 @@ An Environment defines the runtime fabric (ECS/Fargate) and capabilities.
 
 Use 'bd' for task tracking.
 
+### Task Categories
+
+Prefix beads task titles with a category to make the domain clear at a glance. Format: `Category: Description`
+
+- **Onboarding** — User registration, organization creation, session handling
+- **AgentChat** — AI conversation interface, streaming, message rendering, tool calls
+- **AWSAccounts** — AWS account connection wizard, verification, AssumeRole
+- **CustomerInstall** — Infrastructure deployed to customer accounts (CDK stacks, IAM roles, tagging)
+- **Deployment** — Build pipeline, ECR push, ECS deployment, health checks
+- **Workspaces** — Workspace CRUD, apps, datastores, environments
+- **Dashboard** — Main dashboard UI, navigation, layouts
+
+**Examples:**
+- `AgentChat: Fix markdown underscore rendering`
+- `Onboarding: Form validation and session expiration handling`
+- `CustomerInstall: Least privilege role and resource tagging`
+
 ### Task Completion
 
 After closing each beads task, immediately commit the related changes:

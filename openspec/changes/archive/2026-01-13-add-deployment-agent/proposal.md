@@ -8,7 +8,8 @@ DevOps Hero has a working deployment engine (`infra_customer/`) but no way for u
 
 - Add Django models for conversations, messages, workspaces, apps, datastores, and deployments
 - Integrate Claude Agents SDK for agent orchestration with structured tool calling
-- Implement agent tools: `inspect_repository`, `create_workspace`, `create_app`, `create_datastore`, `deploy_app`, `get_deployment_status`, `list_aws_accounts`, `ask_user`
+- Implement agent tools: `inspect_repository`, `list_deployable_repos`, `list_aws_accounts`, `create_workspace`, `create_app`, `create_datastore`, `deploy_app`, `get_deployment_status`
+- **Note:** `ask_user` tool was planned but deferred to the interactive choice system proposal
 - Build HTMX-based chat interface with SSE streaming for real-time updates
 - Support multiple message types: text, markdown, code, progress indicators, interactive choices, deployment logs
 
