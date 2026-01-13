@@ -4,6 +4,23 @@
 > - Entries are in reverse chronological order (latest on top). Use format: `## YYYY-MM-DD HH:MM - Title`
 > - Avoid markdown tables — they render poorly. Use bulleted lists with bold labels instead.
 
+## 2026-01-13 - Streaming Markdown Rendering
+
+Added real-time markdown rendering for chat messages using the `streaming-markdown` library (12KB, CDN).
+
+**How it works:**
+- **During streaming:** Text chunks are fed to `parser_write()` which renders markdown incrementally with append-only DOM updates
+- **On page reload:** Messages stored as `ContentType.MARKDOWN` are rendered client-side using the same library for consistency
+
+**Key files:**
+- `chat_view.html` — Imports streaming-markdown, handles SSE events, renders stored markdown on load
+- `_message_markdown.html` — Outputs raw markdown in `<script type="text/markdown">` for client-side rendering
+- `styles.css` — Custom `.markdown-content` styles (headers, lists, code blocks, etc.) since `@tailwindcss/typography` not installed
+- `agent_service.py` — Messages saved as `ContentType.MARKDOWN`
+- `chat.py` — Streaming container uses `<div>` with `markdown-content` class
+
+**Why not server-side rendering:** Considered `mistune` but using the same library client-side ensures identical output for streaming and page reload.
+
 ## 2026-01-13 - Fix Streaming Message Order and Tool Rendering
 
 Fixed multiple issues with how messages appear during streaming vs after page reload.
