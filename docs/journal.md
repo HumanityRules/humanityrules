@@ -4,6 +4,72 @@
 > - Entries are in reverse chronological order (latest on top). Use format: `## YYYY-MM-DD HH:MM - Title`
 > - Avoid markdown tables — they render poorly. Use bulleted lists with bold labels instead.
 
+## 2026-01-12 - Chat Streaming Architecture
+
+Simplified the streaming architecture by eliminating the queue-based indirection. The SSE endpoint now runs the agent directly.
+
+### Server Side
+
+**Endpoints:**
+
+- **`chat_send` (POST, sync)** — Creates user message in DB, returns user bubble HTML + typing indicator. Does not wait for agent.
+
+- **`chat_stream` (GET, async)** — SSE endpoint. Runs forever in a loop:
+  1. Load conversation from DB
+  2. If last message is from user → run agent directly via `agent_service.stream_response()`
+  3. Yield SSE events as they come from the generator
+  4. Sleep 1s, send keepalive, repeat
+
+**Agent streaming (`agent_service.stream_response`):**
+
+An async generator that yields `StreamEvent` objects. Each event has a `type` and optional `data`:
+
+- **`start`** — Begin new message container
+- **`text_delta`** — Chunk of text to append (`{"text": "..."}`)
+- **`text_flush`** — Finalize current text before tool execution
+- **`tool_start`** — Tool execution beginning (`{tool_use_id, name, input}`)
+- **`tool_result`** — Tool completed (`{tool_use_id, name, result, status, duration_ms}`)
+- **`complete`** — Agent finished responding
+- **`error`** — Something went wrong
+
+Text accumulates in a local variable. On tool call or completion, accumulated text is persisted to DB as a Message.
+
+### Client Side
+
+**SSE connection** — HTMX SSE extension connects on page load:
+```html
+<div id="messages" hx-ext="sse"
+     sse-connect="{% url 'chat_stream' ... %}"
+     sse-swap="sse-start,sse-text-delta,...">
+```
+
+**Event handling** — Most events use HTMX's default swap (append HTML to `#messages`). Three events need JavaScript interception via `htmx:sseBeforeMessage`:
+
+- **`sse-text-delta`** — Parsed as JSON, text appended to `#streaming-text` element (no DOM swap, just `textContent +=`)
+- **`sse-text-flush`** — Removes cursor, clears `id` attributes so next `start` can create fresh elements
+- **`sse-complete`** — Same as flush, plus removes `streaming-active` class
+
+**UI element lifecycle:**
+
+1. **`sse-start`** → Inserts `<div id="streaming-message">` with `<p id="streaming-text">` and blinking cursor. Also OOB-removes typing indicator.
+2. **`sse-text-delta`** (repeated) → JS appends text to `#streaming-text`
+3. **`sse-text-flush`** (optional, before tool) → Cursor removed, IDs cleared
+4. **`sse-tool-start`** → Appends spinner HTML with `id="tool-{id}"`
+5. **`sse-tool-result`** → OOB replaces `#tool-{id}` with completion status
+6. **`sse-start`** (after tool) → Creates new streaming container for post-tool text
+7. **`sse-complete`** → Final cleanup, cursor removed
+
+**OOB (Out-of-Band) swaps** — Used for targeted replacements outside the main append flow:
+- Typing indicator removal: `<div id="typing-indicator" hx-swap-oob="outerHTML"></div>` (replaces with empty div)
+- Tool result: `<div id="tool-{id}" hx-swap-oob="outerHTML">...</div>` (replaces spinner with result)
+
+**Key files:**
+- `devopshero_app/views/chat.py` — Endpoints + SSE formatting
+- `devopshero_app/services/agent/agent_service.py` — Agent generator
+- `devopshero_app/templates/devopshero_app/chat/chat_view.html` — Client JS
+
+---
+
 ## 2026-01-11 - Remove ask_user Tool and AskUserQuestion Handling
 
 **Decision:** Removed the `ask_user` MCP tool and related `AskUserQuestion` handling to simplify the codebase before adding new features.

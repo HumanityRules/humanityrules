@@ -4,6 +4,6 @@ Deployment agent service.
 This module provides the AI agent that guides users through deployments.
 """
 
-from .agent_service import process_conversation_streaming
+from .agent_service import stream_response
 
-__all__ = ["process_conversation_streaming"]
+__all__ = ["stream_response"]
