@@ -121,13 +121,42 @@ def chat_send(request, conversation_id):
         )
         return HttpResponse(user_html + typing_html + remove_placeholder)
 
-    # No API key configured - just return user message
-    return HttpResponse(user_html + remove_placeholder)
+    # Agent unavailable - log error and inform user
+    logger.error("Agent client unavailable")
+    unavailable_html = '''<div class="flex items-start space-x-3 max-w-[80%] mb-4">
+        <div class="flex-shrink-0 w-8 h-8 bg-amber-100 dark:bg-amber-900 rounded-full flex items-center justify-center">
+            <svg class="w-5 h-5 text-amber-600 dark:text-amber-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path>
+            </svg>
+        </div>
+        <div class="bg-amber-50 dark:bg-amber-900/30 border border-amber-200 dark:border-amber-800 rounded-2xl rounded-tl-md px-4 py-3">
+            <p class="text-amber-800 dark:text-amber-200">AI assistant is currently unavailable. Please contact your administrator.</p>
+        </div>
+    </div>'''
+    return HttpResponse(user_html + unavailable_html + remove_placeholder)
 
 
 @login_required
 async def chat_stream(request, conversation_id):
     """SSE endpoint for streaming agent responses."""
+    # Check agent availability before starting stream
+    if not agent_client.is_available():
+        logger.error("Agent client unavailable")
+
+        async def unavailable_generator():
+            yield _format_sse(
+                event_name="sse-error",
+                data=_render_streaming_error(error_msg="AI assistant is currently unavailable"),
+            )
+
+        response = StreamingHttpResponse(
+            unavailable_generator(),
+            content_type="text/event-stream",
+        )
+        response["Cache-Control"] = "no-cache"
+        response["X-Accel-Buffering"] = "no"
+        return response
+
     # Verify conversation access (raises DoesNotExist if unauthorized)
     current_org = await sync_to_async(lambda: request.user.current_organization)()
     user = request.user
