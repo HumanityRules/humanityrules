@@ -1,0 +1,14 @@
+.ts-wrapper.multi {
+  .ts-control {
+    padding: 7px 7px 3px 7px;
+    div {
+      margin: 0 4px 4px 0;
+    }
+  }
+}
+
+// Replicate styling of tom-selected <select> fields tagged with .is-invalid to
+// their corresponding TomSelect dropdowns
+select.tomselected.is-invalid + div.ts-wrapper {
+  @extend .is-invalid;
+}

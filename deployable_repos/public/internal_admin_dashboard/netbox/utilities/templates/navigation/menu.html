@@ -1,0 +1,63 @@
+{% load helpers %}
+{% load i18n %}
+{% load navigation %}
+
+<ul class="navbar-nav pt-lg-2">
+  <li class="nav-item d-block d-lg-none">
+    <form action="{% url 'search' %}" method="get" autocomplete="off" novalidate>
+      <div class="input-group mb-1 mt-2">
+        <div class="input-group-prepend">
+          <span class="input-group-text">
+            <i class="mdi mdi-magnify"></i>
+          </span>
+        </div>
+        <input type="text" name="q" value="" class="form-control" placeholder="{% trans "Search…" %}" aria-label="{% trans "Search NetBox" %}">
+        <div class="input-group-append">
+          <button type="submit" class="form-control">{% trans "Search" %}</button>
+        </div>
+      </div>
+    </form>
+  </li>
+  {% for menu, groups in nav_items %}
+    <li class="nav-item dropdown">
+
+      {# Menu heading #}
+      <a class="nav-link dropdown-toggle" href="#" data-bs-toggle="dropdown" data-bs-auto-close="false" role="button" aria-expanded="false" >
+        <span class="nav-link-icon d-md-none d-lg-inline-block">
+          <i class="{{ menu.icon_class }}"></i>
+        </span>
+        <span class="nav-link-title">
+          {{ menu.label }}
+        </span>
+      </a>
+
+      {# Menu groups #}
+      <div class="dropdown-menu">
+        <div class="dropdown-menu-columns">
+          <div class="dropdown-menu-column pb-2">
+            {% for group, items in groups %}
+              <div class="text-uppercase text-secondary fw-bold fs-5 ps-3 pt-3 pb-1">
+                {{ group.label }}
+              </div>
+              {% for item, buttons in items %}
+                <div class="dropdown-item d-flex justify-content-between ps-3 py-0">
+                  <a href="{{ item.url }}" class="d-inline-flex flex-fill py-1">{{ item.link_text }}</a>
+                  {% if buttons %}
+                    <div class="btn-group ms-1">
+                      {% for button in buttons %}
+                        <a href="{{ button.url }}" class="btn btn-sm btn-{{ button.color|default:"outline" }} lh-2 px-2" title="{{ button.title }}">
+                          <i class="{{ button.icon_class }}"></i>
+                        </a>
+                      {% endfor %}
+                    </div>
+                  {% endif %}
+                </div>
+              {% endfor %}
+            {% endfor %}
+          </div>
+        </div>
+      </div>
+
+    </li>
+  {% endfor %}
+</ul>

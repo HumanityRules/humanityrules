@@ -1,0 +1,22 @@
+{% extends 'base/layout.html' %}
+{% load i18n %}
+
+{% block title %}{% endblock %}
+
+{% block content %}
+<div class="row my-5">
+    <div class="col-6 offset-3">
+        <div class="card">
+            <h2 class="card-header text-danger">
+                {{ request_path }}
+            </h2>
+            <div class="card-body">
+                {% block message %}{% endblock %}
+            </div>
+            <div class="card-footer text-end">
+                <a href="{% url 'home' %}" class="btn btn-primary">{% trans "Home Page" %}</a>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

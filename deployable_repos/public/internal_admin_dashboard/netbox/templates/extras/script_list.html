@@ -1,0 +1,23 @@
+{% extends 'generic/_base.html' %}
+{% load buttons %}
+{% load helpers %}
+{% load perms %}
+{% load i18n %}
+
+{% block title %}{% trans "Scripts" %}{% endblock %}
+
+{% block tabs %}
+  <ul class="nav nav-tabs">
+    <li class="nav-item" role="presentation">
+      <a class="nav-link active" role="tab">{% trans "Scripts" %}</a>
+    </li>
+  </ul>
+{% endblock tabs %}
+
+{% block controls %}
+  {% add_button model %}
+{% endblock controls %}
+
+{% block content %}
+  {% include 'extras/inc/script_list_content.html' with embedded=False %}
+{% endblock content %}

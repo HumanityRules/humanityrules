@@ -1,0 +1,71 @@
+{% extends 'generic/object.html' %}
+{% load helpers %}
+{% load buttons %}
+{% load perms %}
+{% load static %}
+{% load i18n %}
+
+{% block title %}{% trans "Restore" %}: {{ object }}{% endblock %}
+
+{% block subtitle %}
+  <div class="text-secondary fs-5">
+    {% trans "Created" %} {{ object.created|isodatetime }}
+  </div>
+{% endblock %}
+
+{% block control-buttons %}
+  {% if request.user|can_delete:job %}
+    {% delete_button job %}
+  {% endif %}
+{% endblock control-buttons %}
+
+{% block tabs %}
+  <ul class="nav nav-tabs" role="tablist">
+    <li class="nav-item" role="presentation">
+      <a href="#log" role="tab" data-bs-toggle="tab" class="nav-link active">{% trans "Restore" %}</a>
+    </li>
+  </ul>
+{% endblock %}
+
+{% block content %}
+  <div class="row">
+    <div class="col-12">
+      <table class="table table-striped table-hover">
+        <thead>
+          <tr>
+            <th scope="col">{% trans "Parameter" %}</th>
+            <th scope="col">{% trans "Current Value" %}</th>
+            <th scope="col">{% trans "New Value" %}</th>
+            <th scope="col"></th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for param, current, new in params %}
+            <tr{% if current != new %} class="table-warning"{% endif %}>
+              <td>{{ param }}</td>
+              <td>{{ current }}</td>
+              <td>{{ new }}</td>
+              <td>
+                {% if current != new %}
+                  <i class="mdi mdi-pencil text-warning" title="{% trans "Changed" %}"></i>
+                {% endif %}
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <form method="post">
+    {% csrf_token %}
+    <div class="text-end my-3">
+      <a href="{% url 'core:configrevision_list' %}" id="cancel" name="cancel" class="btn btn-outline-secondary">{% trans "Cancel" %}</a>
+      <button type="submit" name="restore" class="btn btn-primary">{% trans "Restore" %}</button>
+    </div>
+  </form>
+
+{% endblock content %}
+
+{% block modals %}
+{% endblock modals %}

@@ -1,0 +1,35 @@
+{% extends 'generic/object_edit.html' %}
+{% load static %}
+{% load form_helpers %}
+{% load i18n %}
+
+{% render_errors form %}
+
+{% block title %}
+  {% blocktrans trimmed %}
+    Add Device to Cluster {{ cluster }}
+  {% endblocktrans %}
+{% endblock %}
+
+{% block content %}
+    <form action="." method="post">
+        {% csrf_token %}
+        {% for field in form.hidden_fields %}
+            {{ field }}
+        {% endfor %}
+        <div class="row">
+            <div class="col col-md-6 offset-md-3">
+                <div class="field-group">
+                    <h5 class="text-center">{% trans "Device Selection" %}</h5>
+                    {% render_form form %}
+                </div>
+            </div>
+        </div>
+        <div class="row">
+            <div class="col col-md-6 offset-md-3 text-end d-print-none">
+                <a href="{{ return_url }}" class="btn btn-outline-secondary">{% trans "Cancel" %}</a>
+                <button type="submit" name="_add" class="btn btn-primary">{% trans "Add Devices" %}</button>
+            </div>
+        </div>
+    </form>
+{% endblock %}

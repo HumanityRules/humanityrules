@@ -1,0 +1,18 @@
+# Reference: https://help.github.com/en/github/building-a-strong-community/configuring-issue-templates-for-your-repository#configuring-the-template-chooser
+blank_issues_enabled: false
+contact_links:
+  - name: 📖 Contributing Policy
+    url: https://github.com/netbox-community/netbox/blob/main/CONTRIBUTING.md
+    about: "Please read through our contributing policy before opening an issue or pull request."
+  - name: ❓ Discussion
+    url: https://github.com/netbox-community/netbox/discussions
+    about: "If you're just looking for help, try starting a discussion instead."
+  - name: 👔 Professional Support
+    url: https://netboxlabs.com/netbox-enterprise/
+    about: "Professional support is available for NetBox Enterprise or Cloud."
+  - name: 🌎 Correct a Translation
+    url: https://explore.transifex.com/netbox-community/netbox/
+    about: "Spot an incorrect translation? You can propose a fix on Transifex."
+  - name: 💬 Community Slack
+    url: https://netdev.chat
+    about: "Join #netbox on the NetDev Community Slack for assistance with installation issues and other problems."
