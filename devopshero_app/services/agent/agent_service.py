@@ -42,6 +42,7 @@ from .mcp_tools import (
     devopshero_mcp_server,
     TOOL_NAMES,
 )
+from .repo_analysis.repo_analyzer_config import get_repo_analyzer_agent
 
 logger = logging.getLogger(__name__)
 
@@ -225,6 +226,7 @@ def _create_agent_options(system_prompt: str) -> ClaudeAgentOptions:
     return ClaudeAgentOptions(
         model=settings.CLAUDE_MODEL,
         system_prompt=system_prompt,
+        agents={"repo-analyzer": get_repo_analyzer_agent()},
         mcp_servers={"devopshero": devopshero_mcp_server},
         allowed_tools=TOOL_NAMES,
         permission_mode="bypassPermissions",
