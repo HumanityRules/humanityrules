@@ -1,0 +1,77 @@
+{% load helpers %}
+{% load i18n %}
+{% if terminations.0 %}
+  <table class="table table-hover attr-table">
+    {% if terminations.0.device %}
+      {# Device component #}
+      <tr>
+        <th scope="row">{% trans "Site" %}</th>
+        <td>{{ terminations.0.device.site|linkify }}</td>
+      </tr>
+      <tr>
+        <th scope="row">{% trans "Location" %}</th>
+        <td>{{ terminations.0.device.location|linkify|placeholder }}</td>
+      </tr>
+      <tr>
+        <th scope="row">{% trans "Rack" %}</th>
+        <td>{{ terminations.0.device.rack|linkify|placeholder }}</td>
+      </tr>
+      <tr>
+        <th scope="row">{{ terminations.0|meta:"verbose_name"|capfirst }}</th>
+        <td>
+          {% for term in terminations %}
+            {{ term.device|linkify }}
+            <i class="mdi mdi-chevron-right" aria-hidden="true"></i>
+            {{ term|linkify }}
+            <a href="{% action_url term 'trace' pk=term.pk %}" class="btn btn-sm btn-primary" title="{% trans "Trace" %}">
+              <i class="mdi mdi-transit-connection-variant" aria-hidden="true"></i>
+            </a>
+            {% if not forloop.last %}<br/>{% endif %}
+          {% endfor %}
+        </td>
+      </tr>
+    {% elif terminations.0.power_panel %}
+      {# Power feed #}
+      <tr>
+        <th scope="row">{% trans "Site" %}</th>
+        <td>{{ terminations.0.power_panel.site|linkify }}</td>
+      </tr>
+      <tr>
+        <th scope="row">{% trans "Power Panel" %}</th>
+        <td>{{ terminations.0.power_panel|linkify }}</td>
+      </tr>
+      <tr>
+        <th scope="row">{{ terminations.0|meta:"verbose_name"|capfirst }}</th>
+        <td>
+          {% for term in terminations %}
+            {{ term|linkify }}
+            <a href="{% action_url term 'trace' pk=term.pk %}" class="btn btn-sm btn-primary" title="{% trans "Trace" %}">
+              <i class="mdi mdi-transit-connection-variant" aria-hidden="true"></i>
+            </a>
+            {% if not forloop.last %}<br/>{% endif %}
+          {% endfor %}
+        </td>
+      </tr>
+    {% elif terminations.0.circuit %}
+      {# Circuit termination #}
+      <tr>
+        <th scope="row">{% trans "Provider" %}</th>
+        <td>{{ terminations.0.circuit.provider|linkify }}</td>
+      </tr>
+      <tr>
+        <th scope="row">{% trans "Circuit" %}</th>
+        <td>
+          {% for term in terminations %}
+            {{ term.circuit|linkify }} ({{ term }})
+            <a href="{% action_url term 'trace' pk=term.pk %}" class="btn btn-sm btn-primary" title="{% trans "Trace" %}">
+              <i class="mdi mdi-transit-connection-variant" aria-hidden="true"></i>
+            </a>
+            {% if not forloop.last %}<br/>{% endif %}
+          {% endfor %}
+        </td>
+      </tr>
+    {% endif %}
+  </table>
+{% else %}
+  <span class="text-muted">{% trans "No termination" %}</span>
+{% endif %}

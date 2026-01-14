@@ -1,0 +1,17 @@
+{% extends 'generic/confirmation_form.html' %}
+{% load i18n %}
+
+{% block title %}{% trans "Reset Dashboard" %}?{% endblock %}
+
+{% block message %}
+  <p>
+    {% blocktrans trimmed %}
+      This will remove <strong>all</strong> configured widgets and restore the default dashboard configuration.
+    {% endblocktrans %}
+  </p>
+  <p>
+    {% blocktrans trimmed %}
+      This change affects only <i>your</i> dashboard, and will not impact other users.
+    {% endblocktrans %}
+  </p>
+{% endblock %}

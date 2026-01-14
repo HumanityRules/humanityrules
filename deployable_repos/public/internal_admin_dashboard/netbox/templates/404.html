@@ -1,0 +1,10 @@
+{% extends 'base/40x.html' %}
+{% load i18n %}
+
+{% block title %}{% trans "Page Not Found" %}{% endblock %}
+
+{% block icon %}<i class="mdi mdi-alert"></i>{% endblock %}
+
+{% block message %}
+    {% trans "The requested page does not exist" %}.
+{% endblock %}
