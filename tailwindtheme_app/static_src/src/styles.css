@@ -167,26 +167,9 @@ el-options[popover] {
 .text-shimmer {
   background: linear-gradient(
     90deg,
-    rgb(107 114 128) 0%,        /* gray-500 - base color */
-    rgb(107 114 128) 40%,       /* gray-500 - hold before shine */
-    rgb(209 213 219) 50%,       /* gray-300 - bright shine */
-    rgb(107 114 128) 60%,       /* gray-500 - hold after shine */
-    rgb(107 114 128) 100%       /* gray-500 - base color */
-  );
-  background-size: 200% 100%;
-  background-clip: text;
-  -webkit-background-clip: text;
-  color: transparent;
-  animation: shimmer 2s ease-in-out infinite;
-}
-
-/* Dark mode variant */
-.dark .text-shimmer {
-  background: linear-gradient(
-    90deg,
-    rgb(156 163 175) 0%,        /* gray-400 - base color */
+    rgb(156 163 175) 0%,        /* gray-400 - base color (brighter) */
     rgb(156 163 175) 40%,       /* gray-400 - hold before shine */
-    rgb(243 244 246) 50%,       /* gray-100 - bright shine */
+    rgb(229 231 235) 50%,       /* gray-200 - bright shine */
     rgb(156 163 175) 60%,       /* gray-400 - hold after shine */
     rgb(156 163 175) 100%       /* gray-400 - base color */
   );
@@ -195,4 +178,23 @@ el-options[popover] {
   -webkit-background-clip: text;
   color: transparent;
   animation: shimmer 2s ease-in-out infinite;
+  text-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
+}
+
+/* Dark mode variant */
+.dark .text-shimmer {
+  background: linear-gradient(
+    90deg,
+    rgb(209 213 219) 0%,        /* gray-300 - base color (brighter) */
+    rgb(209 213 219) 40%,       /* gray-300 - hold before shine */
+    rgb(255 255 255) 50%,       /* white - bright shine */
+    rgb(209 213 219) 60%,       /* gray-300 - hold after shine */
+    rgb(209 213 219) 100%       /* gray-300 - base color */
+  );
+  background-size: 200% 100%;
+  background-clip: text;
+  -webkit-background-clip: text;
+  color: transparent;
+  animation: shimmer 2s ease-in-out infinite;
+  text-shadow: 0 2px 6px rgba(0, 0, 0, 0.5);
 }

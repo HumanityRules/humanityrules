@@ -97,7 +97,6 @@
     --ease-in: cubic-bezier(0.4, 0, 1, 1);
     --ease-out: cubic-bezier(0, 0, 0.2, 1);
     --animate-spin: spin 1s linear infinite;
-    --animate-bounce: bounce 1s infinite;
     --default-transition-duration: 150ms;
     --default-transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
     --default-font-family: var(--font-sans);
@@ -536,9 +535,6 @@
   .w-1\.5 {
     width: calc(var(--spacing) * 1.5);
   }
-  .w-2 {
-    width: calc(var(--spacing) * 2);
-  }
   .w-4 {
     width: calc(var(--spacing) * 4);
   }
@@ -622,9 +618,6 @@
   }
   .transform {
     transform: var(--tw-rotate-x,) var(--tw-rotate-y,) var(--tw-rotate-z,) var(--tw-skew-x,) var(--tw-skew-y,);
-  }
-  .animate-bounce {
-    animation: var(--animate-bounce);
   }
   .animate-spin {
     animation: var(--animate-spin);
@@ -908,9 +901,6 @@
   }
   .bg-gray-200 {
     background-color: var(--color-gray-200);
-  }
-  .bg-gray-400 {
-    background-color: var(--color-gray-400);
   }
   .bg-gray-500\/75 {
     background-color: color-mix(in srgb, oklch(55.1% 0.027 264.364) 75%, transparent);
@@ -1814,11 +1804,6 @@
       }
     }
   }
-  .dark\:bg-gray-500 {
-    @media (prefers-color-scheme: dark) {
-      background-color: var(--color-gray-500);
-    }
-  }
   .dark\:bg-gray-700 {
     @media (prefers-color-scheme: dark) {
       background-color: var(--color-gray-700);
@@ -2359,20 +2344,22 @@ el-options[popover] {
   }
 }
 .text-shimmer {
-  background: linear-gradient( 90deg, rgb(107 114 128) 0%,  rgb(107 114 128) 40%,  rgb(209 213 219) 50%,  rgb(107 114 128) 60%,  rgb(107 114 128) 100%  );
+  background: linear-gradient( 90deg, rgb(156 163 175) 0%,  rgb(156 163 175) 40%,  rgb(229 231 235) 50%,  rgb(156 163 175) 60%,  rgb(156 163 175) 100%  );
   background-size: 200% 100%;
   background-clip: text;
   -webkit-background-clip: text;
   color: transparent;
   animation: shimmer 2s ease-in-out infinite;
+  text-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
 }
 .dark .text-shimmer {
-  background: linear-gradient( 90deg, rgb(156 163 175) 0%,  rgb(156 163 175) 40%,  rgb(243 244 246) 50%,  rgb(156 163 175) 60%,  rgb(156 163 175) 100%  );
+  background: linear-gradient( 90deg, rgb(209 213 219) 0%,  rgb(209 213 219) 40%,  rgb(255 255 255) 50%,  rgb(209 213 219) 60%,  rgb(209 213 219) 100%  );
   background-size: 200% 100%;
   background-clip: text;
   -webkit-background-clip: text;
   color: transparent;
   animation: shimmer 2s ease-in-out infinite;
+  text-shadow: 0 2px 6px rgba(0, 0, 0, 0.5);
 }
 @property --tw-rotate-x {
   syntax: "*";
@@ -2575,16 +2562,6 @@ el-options[popover] {
 @keyframes spin {
   to {
     transform: rotate(360deg);
-  }
-}
-@keyframes bounce {
-  0%, 100% {
-    transform: translateY(-25%);
-    animation-timing-function: cubic-bezier(0.8, 0, 1, 1);
-  }
-  50% {
-    transform: none;
-    animation-timing-function: cubic-bezier(0, 0, 0.2, 1);
   }
 }
 @layer properties {
