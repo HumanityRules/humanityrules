@@ -1,0 +1,15 @@
+generates:
+  src/resolvers.generated.ts:
+    schema: src/schema.generated.graphql
+    plugins:
+      - "typescript"
+      - "typescript-resolvers"
+    config:
+      useIndexSignature: true
+      typesPrefix: Gql
+      mappers:
+        User: ./modules/account/api#UserDto
+        Account: ./modules/account/api#AccountDto
+hooks:
+  afterOneFileWrite:
+    - prettier --write
