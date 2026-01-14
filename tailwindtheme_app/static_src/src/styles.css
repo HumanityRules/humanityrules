@@ -135,21 +135,21 @@ el-options[popover] {
   margin-bottom: 1.5em;
 }
 
-/* Dark scrollbar for chat messages container */
-#messages-container {
+/* Dark scrollbar style - reusable for any scrollable container */
+.dark-scrollbar {
   scrollbar-width: auto; /* 'thin' or 'auto' (auto = wider) */
   scrollbar-color: rgb(55 65 81) transparent; /* gray-700 thumb, transparent track */
 }
 
-#messages-container::-webkit-scrollbar {
+.dark-scrollbar::-webkit-scrollbar {
   width: 12px;
 }
 
-#messages-container::-webkit-scrollbar-track {
+.dark-scrollbar::-webkit-scrollbar-track {
   background: transparent;
 }
 
-#messages-container::-webkit-scrollbar-thumb {
+.dark-scrollbar::-webkit-scrollbar-thumb {
   background-color: rgb(55 65 81); /* gray-700 */
   border-radius: 6px;
 }

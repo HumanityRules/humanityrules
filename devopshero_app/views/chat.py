@@ -18,19 +18,26 @@ from .base import get_app_shell_context
 logger = logging.getLogger(__name__)
 
 
+def _get_conversations(user):
+    """Get all conversations for a user in their current organization."""
+    return Conversation.objects.filter(
+        user=user,
+        organization=user.current_organization,
+    ).select_related("workspace").order_by("-updated_at")
+
+
 @login_required
 def chat_list(request):
-    """List all conversations for the current user."""
-    conversations = Conversation.objects.filter(
-        user=request.user,
-        organization=request.user.current_organization,
-    ).select_related("workspace").order_by("-updated_at")
+    """Show unified chat interface with no conversation selected."""
+    conversations = _get_conversations(user=request.user)
 
     context = get_app_shell_context(request=request, current_page="chat")
     context["conversations"] = conversations
+    context["conversation"] = None
+    context["messages"] = []
 
     if request.htmx:
-        return render(request, "devopshero_app/chat/chat_list.html", context=context)
+        return render(request, "devopshero_app/chat/chat.html", context=context)
 
     context["content_url"] = "/chat/"
     return render(request, "devopshero_app/app_shell.html", context=context)
@@ -49,7 +56,7 @@ def chat_new(request):
 
 @login_required
 def chat_view(request, conversation_id):
-    """View a specific conversation."""
+    """View a specific conversation in the unified chat interface."""
     conversation = get_object_or_404(
         Conversation,
         id=conversation_id,
@@ -63,8 +70,15 @@ def chat_view(request, conversation_id):
     context["conversation"] = conversation
     context["messages"] = messages
 
+    # HTMX request targeting the chat panel - return just the panel content
+    if request.htmx and request.htmx.target == "chat-panel":
+        return render(request, "devopshero_app/chat/_chat_panel.html", context=context)
+
+    # Full HTMX navigation or direct page load - need full unified template
+    context["conversations"] = _get_conversations(user=request.user)
+
     if request.htmx:
-        return render(request, "devopshero_app/chat/chat_view.html", context=context)
+        return render(request, "devopshero_app/chat/chat.html", context=context)
 
     context["content_url"] = f"/chat/{conversation_id}/"
     return render(request, "devopshero_app/app_shell.html", context=context)
