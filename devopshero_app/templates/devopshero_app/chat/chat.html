@@ -1,0 +1,97 @@
+{# Unified chat interface with conversation list sidebar #}
+<div class="flex h-[calc(100vh-9rem)] -mx-8">
+    {# Left panel: Chat interface #}
+    <div id="chat-panel" class="flex-1 flex flex-col border-r border-gray-200 dark:border-gray-700">
+        {% include "devopshero_app/chat/_chat_panel.html" %}
+    </div>
+
+    {# Right panel: Conversation list #}
+    <div class="w-96 flex flex-col bg-gray-50 dark:bg-gray-800/50">
+        {# Header with New Conversation button #}
+        <div class="p-4 border-b border-gray-200 dark:border-gray-700">
+            <a href="{% url 'chat_new' %}"
+               class="w-full flex items-center justify-center px-4 py-2 bg-indigo-600 text-white text-sm font-medium rounded-lg
+                      hover:bg-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2
+                      transition-colors">
+                <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
+                </svg>
+                New Conversation
+            </a>
+        </div>
+
+        {# Conversation list #}
+        <div class="flex-1 overflow-y-auto dark-scrollbar" style="scrollbar-gutter: stable;">
+            {% if conversations %}
+            <div class="divide-y divide-gray-200 dark:divide-gray-700">
+                {% for conv in conversations %}
+                <a href="{% url 'chat_view' conversation_id=conv.id %}"
+                   hx-get="{% url 'chat_view' conversation_id=conv.id %}"
+                   hx-target="#chat-panel"
+                   hx-select="#chat-panel-content"
+                   hx-swap="innerHTML"
+                   hx-push-url="true"
+                   data-conversation-id="{{ conv.id }}"
+                   class="conversation-item block px-4 py-3 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors
+                          {% if conversation and conversation.id == conv.id %}bg-gray-100 dark:bg-gray-700{% endif %}">
+                    <div class="flex items-center justify-between">
+                        <div class="flex-1 min-w-0">
+                            <h3 class="text-sm font-medium text-gray-900 dark:text-white truncate">
+                                {{ conv.title|default:"New Conversation" }}
+                            </h3>
+                            <div class="flex items-center mt-1 space-x-2">
+                                {% if conv.workspace %}
+                                <span class="text-xs text-gray-500 dark:text-gray-400 truncate">
+                                    {{ conv.workspace.name }}
+                                </span>
+                                {% endif %}
+                                <span class="text-xs text-gray-400 dark:text-gray-500">
+                                    {{ conv.updated_at|timesince }} ago
+                                </span>
+                            </div>
+                        </div>
+                        <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ml-2 shrink-0
+                                     {% if conv.status == 'active' %}
+                                     bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200
+                                     {% elif conv.status == 'completed' %}
+                                     bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-200
+                                     {% else %}
+                                     bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200
+                                     {% endif %}">
+                            {{ conv.get_status_display }}
+                        </span>
+                    </div>
+                </a>
+                {% endfor %}
+            </div>
+            {% else %}
+            <div class="text-center py-8 px-4 text-gray-500 dark:text-gray-400">
+                <svg class="mx-auto h-8 w-8 mb-2 opacity-50" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
+                </svg>
+                <p class="text-sm">No conversations yet</p>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+</div>
+
+<script type="module">
+/**
+ * Conversation list highlighting based on URL.
+ * Updates active state when navigating via HTMX or browser back/forward.
+ */
+function updateActiveConversation() {
+    const match = window.location.pathname.match(/\/chat\/([^/]+)\//);
+    const activeId = match ? match[1] : null;
+
+    document.querySelectorAll('[data-conversation-id]').forEach(el => {
+        const isActive = el.dataset.conversationId === activeId;
+        el.classList.toggle('bg-gray-100', isActive);
+        el.classList.toggle('dark:bg-gray-700', isActive);
+    });
+}
+
+document.addEventListener('htmx:pushedIntoHistory', updateActiveConversation);
+window.addEventListener('popstate', updateActiveConversation);
+</script>

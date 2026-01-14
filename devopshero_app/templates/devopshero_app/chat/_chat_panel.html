@@ -1,41 +1,38 @@
-{# Chat interface for agent conversations #}
-{# Outer container extends full width for scrollbar at edge #}
-{# Inner content is constrained and centered #}
-<div class="flex flex-col h-[calc(100vh-9rem)] -mx-8">
-    {# Header - centered content #}
-    <div class="border-b border-gray-200 dark:border-gray-700">
-        <div class="max-w-4xl mx-auto px-8">
-            <div class="flex items-center justify-between py-3">
-                <div>
-                    <h1 class="text-lg font-semibold text-gray-900 dark:text-white">
-                        {{ conversation.title|default:"New Conversation" }}
-                    </h1>
-                    {% if conversation.workspace %}
-                    <p class="text-sm text-gray-500 dark:text-gray-400">{{ conversation.workspace.name }}</p>
-                    {% endif %}
-                </div>
-                <div class="flex items-center space-x-2">
-                    <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium
-                                 {% if conversation.status == 'active' %}
-                                 bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200
-                                 {% elif conversation.status == 'completed' %}
-                                 bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-200
-                                 {% else %}
-                                 bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200
-                                 {% endif %}">
-                        {{ conversation.get_status_display }}
-                    </span>
-                </div>
+{# Chat panel content - can be swapped via HTMX #}
+{# Wrapped in div for hx-select targeting #}
+<div id="chat-panel-content" class="flex flex-col h-full">
+{% if conversation %}
+    {# Header #}
+    <div class="border-b border-gray-200 dark:border-gray-700 px-6">
+        <div class="flex items-center justify-between py-3">
+            <div>
+                <h1 class="text-lg font-semibold text-gray-900 dark:text-white">
+                    {{ conversation.title|default:"New Conversation" }}
+                </h1>
+                {% if conversation.workspace %}
+                <p class="text-sm text-gray-500 dark:text-gray-400">{{ conversation.workspace.name }}</p>
+                {% endif %}
+            </div>
+            <div class="flex items-center space-x-2">
+                <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium
+                             {% if conversation.status == 'active' %}
+                             bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200
+                             {% elif conversation.status == 'completed' %}
+                             bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-200
+                             {% else %}
+                             bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200
+                             {% endif %}">
+                    {{ conversation.get_status_display }}
+                </span>
             </div>
         </div>
     </div>
 
-    {# Messages container - full width scroll, centered content #}
-    {# scrollbar-gutter reserves space for scrollbar to prevent layout shift #}
+    {# Messages container #}
     <div id="messages-container"
-         class="flex-1 overflow-y-auto"
+         class="flex-1 overflow-y-auto dark-scrollbar"
          style="scrollbar-gutter: stable;">
-        <div class="max-w-4xl mx-auto px-8 py-4 space-y-4">
+        <div class="px-6 py-4 space-y-4">
             {# Messages - both form submissions and SSE append here #}
             <div id="messages"
                  hx-ext="sse"
@@ -59,45 +56,37 @@
         </div>
     </div>
 
-    {# Message input - centered content #}
-    <div class="border-t border-gray-200 dark:border-gray-700">
-        <div class="max-w-4xl mx-auto px-8 py-4">
-            <form hx-post="{% url 'chat_send' conversation_id=conversation.id %}"
-                  hx-target="#messages"
-                  hx-swap="beforeend"
-                  hx-on::after-request="this.reset(); this.querySelector('input').focus();"
-                  class="flex items-center space-x-3">
-                <input type="text"
-                       id="message-input"
-                       name="message"
-                       placeholder="Type a message..."
-                       autocomplete="off"
-                       class="flex-1 rounded-lg border border-gray-300 dark:border-gray-600
-                              bg-white dark:bg-gray-800
-                              text-gray-900 dark:text-gray-100
-                              px-4 py-2.5 text-sm
-                              focus:ring-2 focus:ring-indigo-500 focus:border-transparent
-                              placeholder-gray-400 dark:placeholder-gray-500">
-                <button type="submit"
-                        class="px-4 py-2.5 bg-indigo-600 text-white text-sm font-medium rounded-lg
-                               hover:bg-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2
-                               transition-colors">
-                    Send
-                </button>
-            </form>
-        </div>
+    {# Message input #}
+    <div class="border-t border-gray-200 dark:border-gray-700 px-6 py-4">
+        <form hx-post="{% url 'chat_send' conversation_id=conversation.id %}"
+              hx-target="#messages"
+              hx-swap="beforeend"
+              hx-on::after-request="this.reset(); this.querySelector('input').focus();"
+              class="flex items-center space-x-3">
+            <input type="text"
+                   id="message-input"
+                   name="message"
+                   placeholder="Type a message..."
+                   autocomplete="off"
+                   class="flex-1 rounded-lg border border-gray-300 dark:border-gray-600
+                          bg-white dark:bg-gray-800
+                          text-gray-900 dark:text-gray-100
+                          px-4 py-2.5 text-sm
+                          focus:ring-2 focus:ring-indigo-500 focus:border-transparent
+                          placeholder-gray-400 dark:placeholder-gray-500">
+            <button type="submit"
+                    class="px-4 py-2.5 bg-indigo-600 text-white text-sm font-medium rounded-lg
+                           hover:bg-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2
+                           transition-colors">
+                Send
+            </button>
+        </form>
     </div>
-</div>
 
 <script type="module">
 /**
  * Chat streaming functionality using SSE and streaming-markdown.
  * Handles real-time message streaming, markdown rendering, and tool execution display.
- *
- * Why type="module"? Required for ES module import syntax. Also provides:
- * - Deferred by default (doesn't block HTML parsing)
- * - Strict mode automatically enabled
- * - Top-level variables scoped to module (don't pollute window)
  */
 import { parser, parser_write, parser_end, default_renderer } from 'https://cdn.jsdelivr.net/npm/streaming-markdown@0.2.15/smd.min.js';
 
@@ -110,7 +99,6 @@ function scrollToBottom() {
 
 /**
  * Render markdown content on page load (for messages loaded from database).
- * Uses streaming-markdown library for consistency with live streaming.
  */
 function renderStoredMarkdown() {
     document.querySelectorAll('[data-markdown-content]').forEach(el => {
@@ -128,7 +116,6 @@ function renderStoredMarkdown() {
 
 /**
  * Process OOB (out-of-band) elements from HTML string.
- * These elements have hx-swap-oob attribute and should replace elements by ID.
  */
 function processOobElements(fragment) {
     const oobElements = fragment.querySelectorAll('[hx-swap-oob]');
@@ -145,11 +132,6 @@ function processOobElements(fragment) {
 
 /**
  * Handle sse-thinking events (show thinking indicator).
- * Why JS instead of HTMX? The thinking indicator HTML is entirely OOB
- * (hx-swap-oob="outerHTML" on root element). HTMX processes OOB AFTER
- * the default swap, so it briefly appends the content to #messages,
- * then moves it to #thinking-indicator. This causes a visible flash.
- * By handling in JS, we skip the default swap and apply OOB directly.
  */
 function handleThinking(data) {
     const template = document.createElement('template');
@@ -167,23 +149,19 @@ function handleThinking(data) {
 
 /**
  * Handle sse-start events (initialize streaming markdown parser).
- * Creates the streaming message container and sets up the markdown parser.
  */
 function handleStart(data) {
     const template = document.createElement('template');
     template.innerHTML = data;
     const fragment = template.content;
 
-    // Handle OOB elements (thinking indicator reset)
     processOobElements(fragment);
 
-    // Append the main streaming message
     const streamingMessage = fragment.firstElementChild;
     if (streamingMessage) {
         messages.appendChild(streamingMessage);
     }
 
-    // Initialize streaming-markdown parser
     const streamingText = document.getElementById('streaming-text');
     if (streamingText) {
         window.smdRenderer = default_renderer(streamingText);
@@ -209,10 +187,8 @@ function handleTextDelta(data) {
 
 /**
  * Handle sse-text-flush events (finalize streaming before tool call).
- * Completes the current markdown section so a tool can be displayed.
  */
 function handleTextFlush() {
-    // Finalize markdown parser
     if (window.smdParser) {
         parser_end(window.smdParser);
         window.smdParser = null;
@@ -221,12 +197,10 @@ function handleTextFlush() {
     const streamingMessage = document.getElementById('streaming-message');
     if (streamingMessage) {
         const streamingText = streamingMessage.querySelector('#streaming-text');
-        // If empty (no text before tool call), remove the container entirely
         if (streamingText && !streamingText.textContent.trim()) {
             streamingMessage.remove();
             return;
         }
-        // Otherwise finalize: release IDs
         streamingMessage.removeAttribute('id');
         if (streamingText) streamingText.removeAttribute('id');
     }
@@ -234,19 +208,15 @@ function handleTextFlush() {
 
 /**
  * Handle sse-complete events (finalize final streaming message).
- * Cleans up the streaming state and releases DOM IDs.
  */
 function handleComplete() {
-    // Finalize markdown parser
     if (window.smdParser) {
         parser_end(window.smdParser);
         window.smdParser = null;
         window.smdRenderer = null;
     }
-    // Reset thinking indicator to empty placeholder (so it can be reused)
     const thinkingIndicator = document.getElementById('thinking-indicator');
     if (thinkingIndicator) thinkingIndicator.outerHTML = '<div id="thinking-indicator"></div>';
-    // Finalize streaming message if present
     const streamingMessage = document.getElementById('streaming-message');
     if (streamingMessage) {
         streamingMessage.classList.remove('streaming-active');
@@ -260,11 +230,11 @@ function handleComplete() {
 renderStoredMarkdown();
 scrollToBottom();
 
-// Scroll when new content is added (form submission or SSE)
+// Scroll when new content is added
 container.addEventListener('htmx:afterSwap', scrollToBottom);
 container.addEventListener('htmx:sseMessage', scrollToBottom);
 
-// Handle custom SSE events that need JavaScript processing
+// Handle custom SSE events
 messages.addEventListener('htmx:sseBeforeMessage', function(event) {
     const eventType = event.detail.type;
 
@@ -303,7 +273,6 @@ messages.addEventListener('htmx:sseBeforeMessage', function(event) {
 const messageInput = document.getElementById('message-input');
 let lastMessage = '';
 
-// Capture message before form resets
 messageInput.form.addEventListener('submit', function() {
     const value = messageInput.value.trim();
     if (value) {
@@ -311,13 +280,25 @@ messageInput.form.addEventListener('submit', function() {
     }
 });
 
-// Restore last message on up arrow
 messageInput.addEventListener('keydown', function(event) {
     if (event.key === 'ArrowUp' && lastMessage && !messageInput.value) {
         event.preventDefault();
         messageInput.value = lastMessage;
-        // Move cursor to end
         messageInput.setSelectionRange(lastMessage.length, lastMessage.length);
     }
 });
 </script>
+
+{% else %}
+    {# Empty state when no conversation is selected #}
+    <div class="flex-1 flex items-center justify-center">
+        <div class="text-center text-gray-500 dark:text-gray-400">
+            <svg class="w-16 h-16 mx-auto mb-4 opacity-50" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
+            </svg>
+            <h2 class="text-lg font-medium mb-2">Select a conversation</h2>
+            <p class="text-sm">Choose a conversation from the list or start a new one.</p>
+        </div>
+    </div>
+{% endif %}
+</div>
