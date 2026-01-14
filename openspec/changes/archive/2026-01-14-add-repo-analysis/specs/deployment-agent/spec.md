@@ -23,6 +23,11 @@ This sub-agent is a new capability and does not replace the existing `inspect_re
 - **AND** it does not perform chat streaming or message persistence
 - **AND** it returns results directly to the caller (test harness or main agent)
 
+#### Scenario: Sub-agent is invoked via SDK native sub-agent mechanism
+- **WHEN** repository analysis is executed
+- **THEN** the caller invokes the sub-agent via the Claude Agent SDK's native sub-agent support (agents + Task tool)
+- **AND** the sub-agent produces the final structured JSON result
+
 #### Scenario: Detect framework and language
 - **WHEN** the sub-agent analyzes a repository
 - **THEN** it detects the primary language (python, node, elixir, go, etc.)
