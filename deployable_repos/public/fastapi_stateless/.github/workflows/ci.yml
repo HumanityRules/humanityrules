@@ -1,0 +1,73 @@
+name: CI
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+
+permissions:
+  contents: read
+
+jobs:
+  unit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: astral-sh/setup-uv@v3
+        with:
+          enable-cache: true
+      - run: uv sync --frozen --extra dev
+      - run: uv run ruff check app/ tests/
+      - run: uv run ruff format --check app/ tests/
+      - run: uv run pytest tests/ -v --cov=app --cov-report=html --cov-report=term
+
+  integration_postgres:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Gate integration tests
+        id: gate
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: |
+          if [ -n "${DATABASE_URL}" ]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "No DATABASE_URL; skipping integration tests."
+          fi
+
+      - uses: actions/checkout@v4
+        if: steps.gate.outputs.enabled == 'true'
+
+      - uses: actions/setup-python@v5
+        if: steps.gate.outputs.enabled == 'true'
+        with:
+          python-version: '3.12'
+
+      - uses: astral-sh/setup-uv@v3
+        if: steps.gate.outputs.enabled == 'true'
+        with:
+          enable-cache: true
+
+      - run: uv sync --frozen --extra dev
+        if: steps.gate.outputs.enabled == 'true'
+
+      - name: Run integration tests
+        if: steps.gate.outputs.enabled == 'true'
+        run: |
+          @if [ -z "$$DATABASE_URL" ]; then \
+            echo "Skipping integration tests: DATABASE_URL is not set."; \
+          else \
+            uv run pytest tests/ -v -m integration --cov=app --cov-report=term; \
+            rc=$$?; \
+            if [ $$rc -eq 5 ]; then \
+              echo "No integration tests collected; treating as success."; \
+              exit 0; \
+            else \
+              exit $$rc; \
+            fi; \
+          fi
