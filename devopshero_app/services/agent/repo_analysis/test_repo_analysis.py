@@ -15,7 +15,8 @@ Usage:
     uv run python -m devopshero_app.services.agent.repo_analysis.test_repo_analysis --app django_postgres_app --quiet
 """
 
-# Set up Django FIRST, before any other imports that might trigger Django model loading
+# Set up Django FIRST so we can reuse existing app configuration (e.g. settings.CLAUDE_MODEL).
+# This harness does NOT use Django models, streaming, or persistence — it only needs settings.
 import os
 import django
 
