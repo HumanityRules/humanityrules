@@ -1,0 +1,292 @@
+from django import forms
+from django.utils.translation import gettext_lazy as _
+
+from dcim.choices import *
+from dcim.models import Device, DeviceRole, Location, Platform, Region, Site, SiteGroup
+from extras.forms import LocalConfigContextFilterForm
+from extras.models import ConfigTemplate
+from ipam.models import VRF, VLANTranslationPolicy
+from netbox.forms import NetBoxModelFilterSetForm, OrganizationalModelFilterSetForm, PrimaryModelFilterSetForm
+from tenancy.forms import ContactModelFilterForm, TenancyFilterForm
+from users.models import Owner
+from utilities.forms import BOOLEAN_WITH_BLANK_CHOICES
+from utilities.forms.fields import DynamicModelChoiceField, DynamicModelMultipleChoiceField, TagFilterField
+from utilities.forms.rendering import FieldSet
+from virtualization.choices import *
+from virtualization.models import *
+from vpn.models import L2VPN
+
+__all__ = (
+    'ClusterFilterForm',
+    'ClusterGroupFilterForm',
+    'ClusterTypeFilterForm',
+    'VirtualDiskFilterForm',
+    'VirtualMachineFilterForm',
+    'VMInterfaceFilterForm',
+)
+
+
+class ClusterTypeFilterForm(OrganizationalModelFilterSetForm):
+    model = ClusterType
+    fieldsets = (
+        FieldSet('q', 'filter_id', 'tag', 'owner_id'),
+    )
+    tag = TagFilterField(model)
+
+
+class ClusterGroupFilterForm(ContactModelFilterForm, OrganizationalModelFilterSetForm):
+    model = ClusterGroup
+    tag = TagFilterField(model)
+    fieldsets = (
+        FieldSet('q', 'filter_id', 'tag', 'owner_id'),
+        FieldSet('contact', 'contact_role', 'contact_group', name=_('Contacts')),
+    )
+
+
+class ClusterFilterForm(TenancyFilterForm, ContactModelFilterForm, PrimaryModelFilterSetForm):
+    model = Cluster
+    fieldsets = (
+        FieldSet('q', 'filter_id', 'tag', 'owner_id'),
+        FieldSet('group_id', 'type_id', 'status', name=_('Attributes')),
+        FieldSet('region_id', 'site_group_id', 'site_id', 'location_id', name=_('Scope')),
+        FieldSet('tenant_group_id', 'tenant_id', name=_('Tenant')),
+        FieldSet('contact', 'contact_role', 'contact_group', name=_('Contacts')),
+    )
+    selector_fields = ('filter_id', 'q', 'group_id')
+    type_id = DynamicModelMultipleChoiceField(
+        queryset=ClusterType.objects.all(),
+        required=False,
+        label=_('Type')
+    )
+    region_id = DynamicModelMultipleChoiceField(
+        queryset=Region.objects.all(),
+        required=False,
+        label=_('Region')
+    )
+    site_group_id = DynamicModelMultipleChoiceField(
+        queryset=SiteGroup.objects.all(),
+        required=False,
+        label=_('Site group')
+    )
+    site_id = DynamicModelMultipleChoiceField(
+        queryset=Site.objects.all(),
+        required=False,
+        null_option='None',
+        query_params={
+            'region_id': '$region_id',
+            'site_group_id': '$site_group_id',
+        },
+        label=_('Site')
+    )
+    location_id = DynamicModelMultipleChoiceField(
+        queryset=Location.objects.all(),
+        required=False,
+        label=_('Location')
+    )
+    status = forms.MultipleChoiceField(
+        label=_('Status'),
+        choices=ClusterStatusChoices,
+        required=False
+    )
+    group_id = DynamicModelMultipleChoiceField(
+        queryset=ClusterGroup.objects.all(),
+        required=False,
+        null_option='None',
+        label=_('Group')
+    )
+    tag = TagFilterField(model)
+
+
+class VirtualMachineFilterForm(
+    LocalConfigContextFilterForm,
+    TenancyFilterForm,
+    ContactModelFilterForm,
+    PrimaryModelFilterSetForm
+):
+    model = VirtualMachine
+    fieldsets = (
+        FieldSet('q', 'filter_id', 'tag', 'owner_id'),
+        FieldSet('cluster_group_id', 'cluster_type_id', 'cluster_id', 'device_id', name=_('Cluster')),
+        FieldSet('region_id', 'site_group_id', 'site_id', name=_('Location')),
+        FieldSet(
+            'status', 'start_on_boot', 'role_id', 'platform_id', 'mac_address', 'has_primary_ip', 'config_template_id',
+            'local_context_data', 'serial', name=_('Attributes')
+        ),
+        FieldSet('tenant_group_id', 'tenant_id', name=_('Tenant')),
+        FieldSet('contact', 'contact_role', 'contact_group', name=_('Contacts')),
+    )
+    cluster_group_id = DynamicModelMultipleChoiceField(
+        queryset=ClusterGroup.objects.all(),
+        required=False,
+        null_option='None',
+        label=_('Cluster group')
+    )
+    cluster_type_id = DynamicModelMultipleChoiceField(
+        queryset=ClusterType.objects.all(),
+        required=False,
+        null_option='None',
+        label=_('Cluster type')
+    )
+    cluster_id = DynamicModelMultipleChoiceField(
+        queryset=Cluster.objects.all(),
+        required=False,
+        label=_('Cluster')
+    )
+    device_id = DynamicModelMultipleChoiceField(
+        queryset=Device.objects.all(),
+        required=False,
+        label=_('Device')
+    )
+    region_id = DynamicModelMultipleChoiceField(
+        queryset=Region.objects.all(),
+        required=False,
+        label=_('Region')
+    )
+    site_group_id = DynamicModelMultipleChoiceField(
+        queryset=SiteGroup.objects.all(),
+        required=False,
+        label=_('Site group')
+    )
+    site_id = DynamicModelMultipleChoiceField(
+        queryset=Site.objects.all(),
+        required=False,
+        null_option='None',
+        query_params={
+            'region_id': '$region_id',
+            'group_id': '$site_group_id',
+        },
+        label=_('Site')
+    )
+    role_id = DynamicModelMultipleChoiceField(
+        queryset=DeviceRole.objects.all(),
+        required=False,
+        null_option='None',
+        query_params={
+            'vm_role': "True"
+        },
+        label=_('Role')
+    )
+    status = forms.MultipleChoiceField(
+        label=_('Status'),
+        choices=VirtualMachineStatusChoices,
+        required=False
+    )
+    start_on_boot = forms.MultipleChoiceField(
+        label=_('Start on boot'),
+        choices=VirtualMachineStartOnBootChoices,
+        required=False
+    )
+    platform_id = DynamicModelMultipleChoiceField(
+        queryset=Platform.objects.all(),
+        required=False,
+        null_option='None',
+        label=_('Platform')
+    )
+    mac_address = forms.CharField(
+        required=False,
+        label=_('MAC address')
+    )
+    has_primary_ip = forms.NullBooleanField(
+        required=False,
+        label=_('Has a primary IP'),
+        widget=forms.Select(
+            choices=BOOLEAN_WITH_BLANK_CHOICES
+        )
+    )
+    serial = forms.CharField(
+        required=False,
+        label=_('Serial number')
+    )
+    config_template_id = DynamicModelMultipleChoiceField(
+        queryset=ConfigTemplate.objects.all(),
+        required=False,
+        label=_('Config template')
+    )
+    tag = TagFilterField(model)
+
+
+class VMInterfaceFilterForm(NetBoxModelFilterSetForm):
+    model = VMInterface
+    fieldsets = (
+        FieldSet('q', 'filter_id', 'tag', 'owner_id'),
+        FieldSet('cluster_id', 'virtual_machine_id', name=_('Virtual Machine')),
+        FieldSet('enabled', name=_('Attributes')),
+        FieldSet('vrf_id', 'l2vpn_id', 'mac_address', name=_('Addressing')),
+        FieldSet('mode', 'vlan_translation_policy_id', name=_('802.1Q Switching')),
+    )
+    selector_fields = ('filter_id', 'q', 'virtual_machine_id')
+    cluster_id = DynamicModelMultipleChoiceField(
+        queryset=Cluster.objects.all(),
+        required=False,
+        label=_('Cluster')
+    )
+    virtual_machine_id = DynamicModelMultipleChoiceField(
+        queryset=VirtualMachine.objects.all(),
+        required=False,
+        query_params={
+            'cluster_id': '$cluster_id'
+        },
+        label=_('Virtual machine')
+    )
+    enabled = forms.NullBooleanField(
+        label=_('Enabled'),
+        required=False,
+        widget=forms.Select(
+            choices=BOOLEAN_WITH_BLANK_CHOICES
+        )
+    )
+    mac_address = forms.CharField(
+        required=False,
+        label=_('MAC address')
+    )
+    vrf_id = DynamicModelMultipleChoiceField(
+        queryset=VRF.objects.all(),
+        required=False,
+        label=_('VRF')
+    )
+    l2vpn_id = DynamicModelMultipleChoiceField(
+        queryset=L2VPN.objects.all(),
+        required=False,
+        label=_('L2VPN')
+    )
+    mode = forms.MultipleChoiceField(
+        choices=InterfaceModeChoices,
+        required=False,
+        label=_('802.1Q mode')
+    )
+    vlan_translation_policy_id = DynamicModelMultipleChoiceField(
+        queryset=VLANTranslationPolicy.objects.all(),
+        required=False,
+        label=_('VLAN Translation Policy')
+    )
+    owner_id = DynamicModelChoiceField(
+        queryset=Owner.objects.all(),
+        required=False,
+        label=_('Owner'),
+    )
+    tag = TagFilterField(model)
+
+
+class VirtualDiskFilterForm(NetBoxModelFilterSetForm):
+    model = VirtualDisk
+    fieldsets = (
+        FieldSet('q', 'filter_id', 'tag', 'owner_id'),
+        FieldSet('virtual_machine_id', name=_('Virtual Machine')),
+        FieldSet('size', name=_('Attributes')),
+    )
+    virtual_machine_id = DynamicModelMultipleChoiceField(
+        queryset=VirtualMachine.objects.all(),
+        required=False,
+        label=_('Virtual machine')
+    )
+    size = forms.IntegerField(
+        label=_('Size (MB)'),
+        required=False,
+        min_value=1
+    )
+    owner_id = DynamicModelChoiceField(
+        queryset=Owner.objects.all(),
+        required=False,
+        label=_('Owner'),
+    )
+    tag = TagFilterField(model)

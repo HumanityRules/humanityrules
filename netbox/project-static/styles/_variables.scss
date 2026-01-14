@@ -1,0 +1,32 @@
+// Global variables
+
+// Set base fonts
+$font-family-sans-serif: 'Inter', system-ui, sans-serif;
+$font-family-monospace: 'Roboto Mono';
+
+// Set the navigation sidebar width
+$sidebar-width: 18rem;
+
+// Reduce the default button padding
+$btn-padding-x: 0.5rem;
+$btn-padding-y: 0.25rem;
+
+// Reduce the default table cell padding
+$table-cell-padding-x: 0.5rem;
+$table-cell-padding-y: 0.5rem;
+
+// Ensure active nav-pill has a background color in dark mode
+$nav-pills-link-active-bg: rgba(var(--tblr-secondary-rgb), 0.15);
+
+// Brand colors
+$rich-black: #001423;
+$rich-black-light: #081B2A;
+$rich-black-lighter: #0D202E;
+$rich-black-lightest: #1A2C39;
+$bright-teal: #00F2D4;
+$dark-teal: #00857D;
+
+$primary: $dark-teal;
+
+// Navbar active dropdown border color
+$navbar-active-border-color: $dark-teal;

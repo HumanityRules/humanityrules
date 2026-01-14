@@ -1,0 +1,18 @@
+{% extends 'generic/confirmation_form.html' %}
+{% load helpers %}
+{% load i18n %}
+
+{% block title %}{% trans "Disconnect" %} {{ obj_type_plural|bettertitle }}{% endblock %}
+
+{% block message %}
+    <p>
+      {% blocktrans trimmed with count=selected_objects|length %}
+        Are you sure you want to disconnect these {{ count }} {{ obj_type_plural }}?
+      {% endblocktrans %}
+    </p>
+    <ul>
+        {% for obj in selected_objects %}
+            <li>{{ obj }}</li>
+        {% endfor %}
+    </ul>
+{% endblock %}

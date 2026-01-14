@@ -1,0 +1,142 @@
+{% extends 'generic/_base.html' %}
+{% load buttons %}
+{% load custom_links %}
+{% load helpers %}
+{% load perms %}
+{% load plugins %}
+{% load tabs %}
+{% load i18n %}
+
+{% comment %}
+Blocks:
+  - page-header:          Content displayed above the primary page content
+    - breadcrumbs:        Breadcrumb list items (HTML <li> elements)
+    - object_identifier:  Unique identifier for the object
+  - title:                Page title
+  - subtitle:             Additional context displayed below the title
+  - controls:             Control elements displayed between the header and content
+    - control-buttons:    Action buttons (add/edit/delete/etc.)
+      - extra_controls:   Any additional action buttons to display
+  - tabs:                 Page tabs
+  - content:              Primary page content
+  - modals:               Any pre-loaded modals
+
+Context:
+  - object: The object being viewed
+{% endcomment %}
+
+{% block page-header %}
+  <div class="container-fluid">
+    <div class="d-flex justify-content-between align-items-center mt-2">
+
+      {# Breadcrumbs #}
+      <ol class="breadcrumb" aria-label="breadcrumbs">
+        {% block breadcrumbs %}
+          <li class="breadcrumb-item">
+            <a href="{% action_url object 'list' %}">{{ object|meta:'verbose_name_plural'|bettertitle }}</a>
+          </li>
+        {% endblock breadcrumbs %}
+      </ol>
+
+      {# Object identifier #}
+      <code class="d-block text-muted bg-transparent px-0">
+        {% block object_identifier %}
+          {{ object|meta:"app_label" }}.{{ object|meta:"model_name" }}:{{ object.pk }}
+          {% if object.slug %}({{ object.slug }}){% endif %}
+        {% endblock object_identifier %}
+      </code>
+
+    </div>
+  </div>
+  {{ block.super }}
+{% endblock page-header %}
+
+{% block title %}{{ object }}{% endblock %}
+
+{% block subtitle %}
+  <div class="text-secondary fs-5">
+    <ul class="list-inline">
+      {% if object.owner %}
+        <li class="list-inline-item">
+          <i class="mdi mdi-account-outline" title="{% trans "Owner" %}"></i> {{ object.owner|linkify }}
+        </li>
+      {% endif %}
+      <li class="list-inline-item">
+        <i class="mdi mdi-calendar-plus" title="{% trans "Created" %}"></i>
+        {{ object.created|isodatetime:"minutes" }}
+      </li>
+      {% if object.last_updated %}
+        <li class="list-inline-item">
+          <i class="mdi mdi-calendar-edit" title="{% trans "Last updated" %}"></i>
+          {{ object.last_updated|isodatetime:"minutes" }}
+        </li>
+      {% endif %}
+    </ul>
+  </div>
+{% endblock subtitle %}
+
+{% block controls %}
+  <div class="btn-list justify-content-end mb-2">
+    {% plugin_buttons object %}
+
+    {# Add/edit/delete/etc. buttons #}
+    {% block control-buttons %}
+
+      {# Extra buttons #}
+      {% block extra_controls %}{% endblock %}
+
+      {# Default buttons #}
+      {% if perms.extras.add_bookmark and object.bookmarks %}
+        {% bookmark_button object %}
+      {% endif %}
+      {% if perms.extras.add_subscription and object.subscriptions %}
+        {% subscribe_button object %}
+      {% endif %}
+      {% action_buttons actions object %}
+    {% endblock control-buttons %}
+  </div>
+
+  {# Custom links #}
+  <div class="d-flex justify-content-end">
+    <div class="btn-list">
+      {% block custom-links %}
+        {% custom_links object %}
+      {% endblock custom-links %}
+    </div>
+  </div>
+{% endblock controls %}
+
+{% block tabs %}
+  <ul class="nav nav-tabs" role="presentation">
+    {# Primary tab #}
+    <li class="nav-item">
+      <a class="nav-link{% if not tab %} active{% endif %}" href="{{ object.get_absolute_url }}">{{ object|meta:"verbose_name"|bettertitle }}</a>
+    </li>
+
+    {# Include tabs for registered model views #}
+    {% model_view_tabs object %}
+  </ul>
+{% endblock tabs %}
+
+{% block alerts %}
+  {% plugin_alerts object %}
+{% endblock alerts %}
+
+{% block content %}
+  {# Render panel layout declared on view class #}
+  {% for row in layout.rows %}
+    <div class="row">
+      {% for column in row.columns %}
+        <div class="col">
+          {% for panel in column.panels %}
+            {% render panel %}
+          {% endfor %}
+        </div>
+      {% endfor %}
+    </div>
+  {% endfor %}
+{% endblock %}
+
+{% block modals %}
+  {% include 'inc/htmx_modal.html' %}
+{% endblock modals %}

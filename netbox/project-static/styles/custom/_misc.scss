@@ -1,0 +1,97 @@
+@use 'sass:map';
+
+// Color labels
+span.color-label {
+  display: inline-block;
+  width: 5rem;
+  height: 1rem;
+  padding: $badge-padding-y $badge-padding-x;
+  border: 1px solid #303030;
+  border-radius: $border-radius;
+}
+
+// Object hierarchy depth indicators
+.record-depth {
+  display: inline;
+  user-select: none;
+  opacity: 33%;
+
+  // Add spacing to the last or only dot.
+  span:only-of-type,
+  span:last-of-type {
+    margin-right: map.get($spacers, 1);
+  }
+}
+
+// Hides the last child of an element
+.hide-last-child :last-child {
+  visibility: hidden;
+  opacity: 0;
+}
+
+// NetBox edition text
+.netbox-edition {
+  letter-spacing: .15rem;
+}
+
+// A floating div for form buttons
+.btn-float-group {
+  position: sticky;
+  bottom: 10px;
+  z-index: 4;
+}
+
+.btn-float-group-left {
+  @extend .btn-float-group;
+  float: left;  
+}
+
+.btn-float-group-right {
+  @extend .btn-float-group;
+  float: right;
+}
+
+// Override a transparent background
+.btn-float {
+  --tblr-btn-bg: var(--#{$prefix}bg-surface-tertiary) !important;
+}
+
+.logo {
+  height: 80px;
+}
+
+.sso-icon {
+  height: 24px;
+}
+
+.btn-white {
+  @extend .btn-light;
+}
+
+.btn-black {
+  @extend .btn-dark;
+}
+
+.btn-grey, .btn-gray {
+  @extend .btn-secondary;
+}
+
+img.plugin-icon {
+  max-width: 1.4285em;
+  height: auto;
+}
+
+// Image attachment thumbnails
+.thumbnail {
+  max-width: 200px;
+  img {
+    border: 1px solid #606060;
+  }
+}
+
+body[data-bs-theme=dark] {
+  // Assuming icon is black/white line art, invert it and tone down brightness
+  img.plugin-icon {
+    filter: grayscale(100%) invert(100%) brightness(80%);
+  }
+}

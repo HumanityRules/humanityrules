@@ -1,0 +1,46 @@
+// Serialized data from change records
+pre.change-data {
+  border-radius: 0;
+  padding: 0;
+
+  // Display each line individually for highlighting
+  > span {
+    display: block;
+    padding-right: $spacer;
+    padding-left: $spacer;
+    width: 100%;
+    min-width: fit-content;
+
+    &.added {
+      color: var(--tblr-dark);
+      background-color: $green-300;
+    }
+
+    &.removed {
+      color: var(--tblr-dark);
+      background-color: $red-300;
+    }
+  }
+}
+
+// Change data diff w/added & removed data
+pre.change-diff {
+  border-color: transparent;
+
+  &.change-added {
+    color: var(--tblr-dark);
+    background-color: $green-300;
+  }
+
+  &.change-removed {
+    color: var(--tblr-dark);
+    background-color: $red-300;
+  }
+}
+
+// <pre> elements displayed with a border
+pre.block {
+  padding: $spacer;
+  border: 1px solid $border-color;
+  border-radius: $border-radius;
+}

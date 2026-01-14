@@ -1,0 +1,13 @@
+{% load helpers %}
+{% load i18n %}
+
+{% if title %}
+  <h2 class="card-header d-flex justify-content-between">
+    {% trans title %}
+    <div>
+      {% if copyid %}{% copy_content copyid %}{% endif %}
+      {% include 'extras/inc/format_toggle.html' %}
+    </div>
+  </h2>
+{% endif %}
+<pre class="card-body rendered-context-data m-0" {% if copyid %}id="{{ copyid }}{% endif %}">{% if format == 'json' %}{{ data|json }}{% elif format == 'yaml' %}{{ data|yaml }}{% else %}{{ data }}{% endif %}</pre>

@@ -1,0 +1,11 @@
+<div class="node">
+    <strong>{{ device|linkify }}</strong><br />
+    {{ device.device_type.manufacturer }} {{ device.device_type }}<br />
+    {{ device.site|linkify }}
+    {% if device.location %}
+        / {{ device.location|linkify }}
+    {% endif %}
+    {% if device.rack %}
+        / {{ device.rack|linkify }}
+    {% endif %}
+</div>
