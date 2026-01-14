@@ -38,6 +38,17 @@
             "django": true,
             "autoStartBrowser": false,
             "console": "integratedTerminal"
-        }
+        },
+        {
+            "name": "Test: Repo Analysis",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "devopshero_app.services.agent.repo_analysis.test_repo_analysis",
+            "args": ["--app", "fastapi_app"],
+            "env": {
+                "DJANGO_SETTINGS_MODULE": "devopshero_site.settings"
+            },
+            "console": "integratedTerminal"
+        },
     ]
 }

@@ -79,28 +79,6 @@ async def inspect_repository(args: dict[str, Any]) -> dict[str, Any]:
 
 
 @tool(
-    "analyze_repository",
-    (
-        "Analyze a repository using AI to detect language, framework, dependencies, "
-        "service configuration, and required environment variables. "
-        "Only file:// URLs are supported (e.g., file:///path/to/repo). "
-        "Returns structured findings with evidence for each claim. "
-        "This is a more thorough analysis than inspect_repository."
-    ),
-    {"repo_url": str},
-)
-async def analyze_repository(args: dict[str, Any]) -> dict[str, Any]:
-    """Spawn the repo analysis sub-agent and return its findings."""
-    from .repo_analysis import repo_analysis_agent
-
-    result = await repo_analysis_agent.analyze_repository(
-        repo_file_url=args["repo_url"],
-        verbose=True,  # Log to server console for debugging
-    )
-    return _mcp_response(result.model_dump())
-
-
-@tool(
     "list_aws_accounts",
     (
         "List AWS accounts connected to the user's organization. "
@@ -347,7 +325,6 @@ devopshero_mcp_server = create_sdk_mcp_server(
     name="devopshero",
     version="1.0.0",
     tools=[
-        analyze_repository,
         create_app,
         create_datastore,
         create_workspace,
@@ -362,7 +339,6 @@ devopshero_mcp_server = create_sdk_mcp_server(
 
 # Tool names for use in allowed_tools configuration
 TOOL_NAMES = [
-    "mcp__devopshero__analyze_repository",
     "mcp__devopshero__create_app",
     "mcp__devopshero__create_datastore",
     "mcp__devopshero__create_workspace",

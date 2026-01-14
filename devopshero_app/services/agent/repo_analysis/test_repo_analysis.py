@@ -2,7 +2,7 @@
 Test harness for the repository analysis sub-agent.
 
 This module provides a CLI tool for testing the repo analysis agent against
-reference apps. It runs the agent and validates the output against expected results.
+reference apps using the SDK's native sub-agent invocation.
 
 Usage:
     # Single app (verbose by default)
@@ -25,9 +25,19 @@ django.setup()
 import argparse
 import asyncio
 import json
+import re
 import sys
 from dataclasses import dataclass
 from pathlib import Path
+
+from claude_agent_sdk import query, ClaudeAgentOptions, AssistantMessage, UserMessage, ResultMessage
+from claude_agent_sdk.types import ToolUseBlock, ToolResultBlock, TextBlock
+from django.conf import settings
+from pydantic import ValidationError
+
+from devopshero_app.services.agent.agent_client import get_claude_env
+from devopshero_app.services.agent.repo_analysis.repo_analyzer_config import get_repo_analyzer_agent
+from devopshero_app.services.agent.repo_analysis.repo_analysis_schema import RepoAnalysisOutput
 
 
 # Reference app expectations
@@ -118,12 +128,36 @@ def get_deployable_repos_path() -> Path:
     return deployable_repos
 
 
-def validate_result(app_name: str, result: "RepoAnalysisOutput", expectation: AppExpectation) -> list[str]:
-    """
-    Validate analysis result against expectations.
 
-    Returns a list of validation errors (empty if all checks pass).
-    """
+
+def _extract_json_from_response(text: str) -> dict:
+    """Extract JSON from the agent's response text."""
+    # Try to find JSON in a code block first
+    json_block_pattern = r"```(?:json)?\s*\n([\s\S]*?)\n```"
+    matches = re.findall(json_block_pattern, text)
+
+    if matches:
+        # Use the last JSON block (most likely to be the final output)
+        json_str = matches[-1].strip()
+        return json.loads(json_str)
+
+    # If no code block, try to parse the entire text as JSON
+    try:
+        return json.loads(text.strip())
+    except json.JSONDecodeError:
+        pass
+
+    # Try to find JSON object pattern in the text
+    json_obj_pattern = r"\{[\s\S]*\}"
+    match = re.search(json_obj_pattern, text)
+    if match:
+        return json.loads(match.group())
+
+    raise ValueError("Could not extract JSON from agent response")
+
+
+def validate_result(app_name: str, result: RepoAnalysisOutput, expectation: AppExpectation) -> list[str]:
+    """Validate analysis result against expectations."""
     errors = []
 
     # Check language (normalize to lowercase for comparison)
@@ -169,16 +203,122 @@ def validate_result(app_name: str, result: "RepoAnalysisOutput", expectation: Ap
     return errors
 
 
+async def analyze_repository(repo_file_url: str, verbose: bool) -> RepoAnalysisOutput:
+    """Analyze a repository using the SDK's native sub-agent invocation."""
+    options = ClaudeAgentOptions(
+        model=settings.CLAUDE_MODEL,
+        system_prompt="You are a test orchestrator. When asked to analyze a repository, use the repo-analyzer agent.",
+        agents={"repo-analyzer": get_repo_analyzer_agent()},
+        permission_mode="bypassPermissions",
+        env=get_claude_env(),
+    )
+
+    if verbose:
+        print(f"\n{'=' * 60}")
+        print(f"Analyzing repository: {repo_file_url}")
+        print(f"{'=' * 60}\n")
+
+    # Collect all messages from the query
+    messages: list = []
+    async for message in query(
+        prompt=f"Use repo-analyzer to analyze the repository at {repo_file_url}",
+        options=options,
+    ):
+        messages.append(message)
+        if verbose:
+            print(f"[{type(message).__name__}] {_summarize_message(message)}")
+
+    # Extract sub-agent result from Task tool result
+    task_result_text = _extract_task_result(messages)
+    
+    # Fall back to accumulated assistant text if no Task result
+    if not task_result_text:
+        task_result_text = _extract_assistant_text(messages)
+
+    if verbose:
+        print(f"\n{'=' * 60}")
+        print("Extracting JSON from response...")
+        print(f"{'=' * 60}\n")
+
+    try:
+        json_data = _extract_json_from_response(task_result_text)
+        result = RepoAnalysisOutput.model_validate(json_data)
+        if verbose:
+            print("[SUCCESS] JSON validated successfully\n")
+            print(json.dumps(result.model_dump(), indent=2))
+        return result
+    except json.JSONDecodeError as e:
+        if verbose:
+            print(f"[ERROR] Failed to parse JSON: {e}")
+            print(f"Response text:\n{task_result_text[:1000]}...")
+        raise ValueError(f"Failed to parse JSON from agent response: {e}") from e
+    except ValidationError as e:
+        if verbose:
+            print(f"[ERROR] Schema validation failed: {e}")
+        raise ValueError(f"Agent response failed schema validation: {e}") from e
+
+
+def _summarize_message(message) -> str:
+    """Return a one-line summary of a message for verbose logging."""
+    if isinstance(message, AssistantMessage):
+        tools = [b.name for b in message.content if isinstance(b, ToolUseBlock)]
+        texts = [b.text[:50] for b in message.content if isinstance(b, TextBlock) and b.text]
+        parts = []
+        if tools:
+            parts.append(f"tools={tools}")
+        if texts:
+            parts.append(f"text={texts}")
+        return " ".join(parts) or "(empty)"
+    elif isinstance(message, UserMessage):
+        if isinstance(message.content, list):
+            tool_results = [b.tool_use_id[:8] for b in message.content if isinstance(b, ToolResultBlock)]
+            if tool_results:
+                return f"tool_results={tool_results}"
+        return str(message.content)[:100]
+    elif isinstance(message, ResultMessage):
+        cost = f"${message.total_cost_usd:.4f}" if message.total_cost_usd else "N/A"
+        return f"turns={message.num_turns}, cost={cost}"
+    return str(message)[:100]
+
+
+def _extract_task_result(messages: list) -> str:
+    """Extract the Task tool result (sub-agent output) from messages."""
+    # Find Task tool use IDs from AssistantMessages
+    task_tool_ids = set()
+    for msg in messages:
+        if isinstance(msg, AssistantMessage):
+            for block in msg.content:
+                if isinstance(block, ToolUseBlock) and block.name == "Task":
+                    task_tool_ids.add(block.id)
+
+    # Find corresponding tool results
+    result_text = ""
+    for msg in messages:
+        if isinstance(msg, UserMessage) and isinstance(msg.content, list):
+            for block in msg.content:
+                if isinstance(block, ToolResultBlock) and block.tool_use_id in task_tool_ids:
+                    if isinstance(block.content, list):
+                        for content_block in block.content:
+                            if isinstance(content_block, dict) and content_block.get("type") == "text":
+                                result_text += content_block.get("text", "")
+                    elif isinstance(block.content, str):
+                        result_text += block.content
+    return result_text
+
+
+def _extract_assistant_text(messages: list) -> str:
+    """Extract all text from AssistantMessages as fallback."""
+    text = ""
+    for msg in messages:
+        if isinstance(msg, AssistantMessage):
+            for block in msg.content:
+                if isinstance(block, TextBlock) and block.text:
+                    text += block.text
+    return text
+
+
 async def test_app(app_name: str, verbose: bool) -> tuple[bool, str]:
-    """
-    Test the repo analysis agent against a single reference app.
-
-    Returns (success, message).
-    """
-    # Import here to avoid Django setup issues when just parsing args
-    from devopshero_app.services.agent.repo_analysis.repo_analysis_agent import analyze_repository
-    from devopshero_app.services.agent.repo_analysis.repo_analysis_schema import RepoAnalysisOutput
-
+    """Test the repo analysis agent against a single reference app."""
     deployable_repos = get_deployable_repos_path()
     app_path = deployable_repos / app_name
 
