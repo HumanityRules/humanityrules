@@ -98,13 +98,18 @@ def get_tool_display_name(full_name: str) -> str:
 # Mapping from tool names to their "main" parameter for display in titles.
 TOOL_MAIN_PARAMS = {
     "mcp__devopshero__create_workspace": "name",
+    "mcp__devopshero__select_workspace": "workspace_name",
     "mcp__devopshero__initiate_aws_connection": "account_name",
     "mcp__devopshero__scan_repository": "repo_url",
     "mcp__devopshero__create_app": "name",
     "mcp__devopshero__create_datastore": "name",
-    "mcp__devopshero__deploy_app": "app_id",
+    "mcp__devopshero__deploy_app": "app_name",
     "mcp__devopshero__get_deployment_status": "deployment_id",
     "mcp__devopshero__wait": "seconds",
+    # External/Claude Agent SDK tools
+    "Read": "file_path",
+    "Shell": "description",
+    "Bash": "description",
 }
 
 

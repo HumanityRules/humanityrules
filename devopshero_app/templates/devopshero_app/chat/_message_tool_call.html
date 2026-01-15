@@ -1,7 +1,8 @@
 {% load chat_filters %}
 {# Tool call display - shows tool name, parameters, and result #}
+{# Note: Parent _message.html provides the flex wrapper with avatar icon #}
 
-<div class="border border-gray-200 dark:border-gray-700 overflow-hidden rounded-lg my-2 w-full min-w-0">
+<div class="border border-gray-200 dark:border-gray-700 overflow-hidden rounded-lg w-full min-w-0">
     {# Header with tool name and status #}
     <div class="flex items-center justify-between px-3 py-2 bg-gray-50 dark:bg-gray-700">
         <div class="flex items-center space-x-2">

@@ -34,7 +34,7 @@ from claude_agent_sdk.types import (
 )
 from django.conf import settings
 
-from devopshero_app.models import Conversation, Message
+from devopshero_app.models import App, Conversation, Message, Workspace
 
 from .agent_client import get_claude_env
 from .mcp_tools import (
@@ -148,6 +148,29 @@ async def _handle_sdk_stream_event(message: SDKStreamEvent, ctx: StreamingContex
                 yield AgentStreamEvent(type="text_delta", data={"text": text_chunk})
 
 
+async def _enrich_tool_input(tool_name: str, tool_input: dict) -> dict:
+    """Enrich tool input with display-friendly data looked up from the database."""
+    enriched = tool_input
+
+    # For deploy_app, add app_name from app_id for UI display
+    if tool_name == "mcp__devopshero__deploy_app" and "app_id" in tool_input:
+        try:
+            app = await App.objects.only("name").aget(id=tool_input["app_id"])
+            enriched = {**enriched, "app_name": app.name}
+        except App.DoesNotExist:
+            pass
+
+    # For select_workspace, add workspace_name from workspace_id for UI display
+    if tool_name == "mcp__devopshero__select_workspace" and "workspace_id" in tool_input:
+        try:
+            workspace = await Workspace.objects.only("name").aget(id=tool_input["workspace_id"])
+            enriched = {**enriched, "workspace_name": workspace.name}
+        except Workspace.DoesNotExist:
+            pass
+
+    return enriched
+
+
 async def _handle_assistant_message(message: AssistantMessage, ctx: StreamingContext) -> AsyncGenerator[AgentStreamEvent, None]:
     """Handle assistant messages containing tool use blocks."""
     
@@ -166,10 +189,13 @@ async def _handle_assistant_message(message: AssistantMessage, ctx: StreamingCon
             logger.error(f"Unexpected block type: {type(block)}")
             continue
 
+        # Enrich input with display-friendly data (e.g., app_name from app_id)
+        enriched_input = await _enrich_tool_input(block.name, block.input)
+
         # Record pending tool call
         ctx.pending_tool_calls[block.id] = {
             "name": block.name,
-            "input": block.input,
+            "input": enriched_input,
             "start_time": time.time(),
         }
 
@@ -178,7 +204,7 @@ async def _handle_assistant_message(message: AssistantMessage, ctx: StreamingCon
             data={
                 "tool_use_id": block.id,
                 "name": block.name,
-                "input": block.input,
+                "input": enriched_input,
             },
         )
         
@@ -228,11 +254,12 @@ async def _handle_tool_results(message: UserMessage, ctx: StreamingContext) -> A
     yield AgentStreamEvent(type="thinking")
 
 
-def _create_agent_options(system_prompt: str) -> ClaudeAgentOptions:
+def _create_agent_options(system_prompt: str, resume_session_id: str | None) -> ClaudeAgentOptions:
     """Create SDK client options with standard configuration."""
     return ClaudeAgentOptions(
         model=settings.CLAUDE_MODEL,
         system_prompt=system_prompt,
+        resume=resume_session_id,
         agents={"analyze-repository": get_analyze_repository_agent()},
         mcp_servers={"devopshero": devopshero_mcp_server},
         allowed_tools=TOOL_NAMES,
@@ -264,7 +291,10 @@ async def stream_response(conversation: Conversation) -> AsyncGenerator[AgentStr
     """
     conversation_context.set(conversation)
     user_message = await _aget_last_user_message(conversation)
-    options = _create_agent_options(system_prompt=_load_system_prompt())
+    options = _create_agent_options(
+        system_prompt=_load_system_prompt(),
+        resume_session_id=conversation.session_id,
+    )
     
     # The streaming context is used to store the accumulated content and the pending tool calls, and is passed 
     # around and mutated by the event handlers
@@ -292,6 +322,9 @@ async def stream_response(conversation: Conversation) -> AsyncGenerator[AgentStr
 
                 elif isinstance(message, ResultMessage):
                     logger.info(f"[SDK] ResultMessage: turns={message.num_turns}, cost=${message.total_cost_usd or 0:.4f}")
+                    # Capture session_id for conversation continuity
+                    if message.session_id and not conversation.session_id:
+                        conversation.session_id = message.session_id
 
                 elif isinstance(message, SystemMessage):
                     logger.debug(f"[SDK] SystemMessage: subtype={message.subtype}")
