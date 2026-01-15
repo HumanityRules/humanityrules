@@ -454,6 +454,12 @@ class Conversation(models.Model):
     )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+    session_id = models.CharField(
+        max_length=255,
+        blank=True,
+        null=True,
+        help_text="Claude Agent SDK session ID for conversation continuity",
+    )
 
     class Meta:
         ordering = ["-updated_at"]
