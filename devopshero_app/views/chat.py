@@ -12,6 +12,7 @@ from ..models import Conversation, Message, User
 from ..services.agent import agent_client
 from ..services.agent import agent_service
 from ..services.agent.agent_service import AgentStreamEvent
+from ..services.agent.mcp_tools import get_tool_display_name
 from ..templatetags.chat_filters import extract_mcp_text_content
 from .base import get_app_shell_context
 
@@ -211,7 +212,7 @@ def _format_sse(event_name: str, data: str) -> str:
 def _render_tool_start(data: dict) -> str:
     """Render HTML for tool execution start."""
     return render_to_string("devopshero_app/chat/_streaming_tool_start.html", context={
-        "tool_name": data.get("name", "unknown"),
+        "tool_name": get_tool_display_name(data.get("name", "unknown")),
         "tool_use_id": data.get("tool_use_id", ""),
     })
 
@@ -236,7 +237,7 @@ def _render_tool_result(data: dict) -> str:
         result_json = str(result)
 
     return render_to_string("devopshero_app/chat/_streaming_tool_result.html", context={
-        "tool_name": data.get("name", "unknown"),
+        "tool_name": get_tool_display_name(data.get("name", "unknown")),
         "tool_use_id": data.get("tool_use_id", ""),
         "status": data.get("status", "success"),
         "duration_ms": data.get("duration_ms", 0),

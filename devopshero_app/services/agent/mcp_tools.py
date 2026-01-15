@@ -68,6 +68,33 @@ def _mcp_response(data: Any) -> dict[str, Any]:
     return {"content": [{"type": "text", "text": json.dumps(data, indent=2)}]}
 
 
+# Mapping from full MCP tool names to human-friendly display names.
+# MCP tools are namespaced (e.g., 'mcp__devopshero__list_aws_accounts') to avoid
+# collisions between servers, but we want clean names for UI display.
+TOOL_DISPLAY_NAMES = {
+    # Platform tools
+    "mcp__devopshero__list_aws_accounts": "List AWS Accounts",
+    "mcp__devopshero__initiate_aws_connection": "Initiate AWS Connection",
+    "mcp__devopshero__list_workspaces": "List Workspaces",
+    "mcp__devopshero__select_workspace": "Select Workspace",
+    "mcp__devopshero__create_workspace": "Create Workspace",
+    "mcp__devopshero__list_deployable_repos": "List Deployable Repos",
+    "mcp__devopshero__scan_repository": "Scan Repository",
+    # Workspace tools
+    "mcp__devopshero__create_app": "Create App",
+    "mcp__devopshero__create_datastore": "Create Datastore",
+    "mcp__devopshero__deploy_app": "Deploy App",
+    "mcp__devopshero__get_deployment_status": "Get Deployment Status",
+    # Utility
+    "mcp__devopshero__wait": "Wait",
+}
+
+
+def get_tool_display_name(full_name: str) -> str:
+    """Get the human-friendly display name for an MCP tool."""
+    return TOOL_DISPLAY_NAMES.get(full_name, full_name)
+
+
 # =============================================================================
 # Platform Tools (always available, no workspace required)
 # =============================================================================
