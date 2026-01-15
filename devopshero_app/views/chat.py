@@ -217,10 +217,12 @@ def _render_tool_start(data: dict) -> str:
     tool_main_param = get_tool_main_param(tool_full_name, parameters)
     if tool_main_param:
         tool_name = f"{tool_name}: "
+    params_json = json.dumps(parameters, indent=2) if parameters else "{}"
     return render_to_string("devopshero_app/chat/_streaming_tool_start.html", context={
         "tool_name": tool_name,
         "tool_main_param": tool_main_param,
         "tool_use_id": data.get("tool_use_id", ""),
+        "params_json": params_json,
     })
 
 

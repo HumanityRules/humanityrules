@@ -24,11 +24,11 @@
     <div class="p-3 text-sm space-y-3 min-w-0">
         <div class="min-w-0">
             <div class="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">Parameters</div>
-            <pre class="bg-gray-100 dark:bg-gray-900 p-2 rounded text-xs overflow-x-auto font-mono text-gray-800 dark:text-gray-200 whitespace-pre-wrap break-all">{{ message.metadata.parameters|json_pretty }}</pre>
+            <pre class="bg-gray-100 dark:bg-gray-900 p-2 rounded text-xs overflow-x-auto max-h-96 overflow-y-auto font-mono text-gray-800 dark:text-gray-200 whitespace-pre-wrap break-all">{{ message.metadata.parameters|json_pretty }}</pre>
         </div>
         <div class="min-w-0">
             <div class="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">Result</div>
-            <pre class="bg-gray-100 dark:bg-gray-900 p-2 rounded text-xs overflow-x-auto max-h-64 overflow-y-auto font-mono text-gray-800 dark:text-gray-200 whitespace-pre-wrap break-all">{{ message.metadata.result|json_pretty }}</pre>
+            <pre class="bg-gray-100 dark:bg-gray-900 p-2 rounded text-xs overflow-x-auto max-h-[32rem] overflow-y-auto font-mono text-gray-800 dark:text-gray-200 whitespace-pre-wrap break-all">{{ message.metadata.result|json_pretty }}</pre>
         </div>
         {% if message.metadata.error_message %}
         <div class="min-w-0">
