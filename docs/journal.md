@@ -4,6 +4,21 @@
 > - Entries are in reverse chronological order (latest on top). Use format: `## YYYY-MM-DD HH:MM - Title`
 > - Avoid markdown tables — they render poorly. Use bulleted lists with bold labels instead.
 
+## 2026-01-15 - Tool Call Parameters Visible During Execution
+
+Enhanced tool call display to show parameters immediately when a tool starts executing, rather than waiting for completion. Also added consistent max-height constraints with scroll.
+
+**Changes:**
+- `_streaming_tool_start.html`: Now displays parameters section (was only showing tool name/spinner)
+- `chat.py`: `_render_tool_start()` now passes `params_json` to the template
+- All tool templates: Added max-height with overflow scroll to prevent long outputs from dominating the chat
+  - Parameters: `max-h-96` (384px)
+  - Results: `max-h-[32rem]` (512px)
+
+**Files updated:** `_streaming_tool_start.html`, `_streaming_tool_result.html`, `_message_tool_call.html`, `chat.py`
+
+---
+
 ## 2026-01-15 - Dynamic Conversation Title on Workspace Selection
 
 When the agent selects a workspace, the conversation title now updates to "Working on {workspace_name}" in real-time.
