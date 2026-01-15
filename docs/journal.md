@@ -4,6 +4,23 @@
 > - Entries are in reverse chronological order (latest on top). Use format: `## YYYY-MM-DD HH:MM - Title`
 > - Avoid markdown tables — they render poorly. Use bulleted lists with bold labels instead.
 
+## 2026-01-15 - Tool Title Main Parameter Display
+
+Enhanced tool call rendering to show the "main parameter" in the title for better scannability. For example, "Create Workspace: django-postgres-app" instead of just "Create Workspace".
+
+**Implementation:**
+- Added `TOOL_MAIN_PARAMS` mapping in `mcp_tools.py` linking tools to their primary parameter
+- Added `get_tool_main_param()` to extract and format values (handles file URLs, UUIDs, seconds)
+- Updated streaming templates and `chat.py` to pass both `tool_name` and `tool_main_param`
+- Added `tool_display_name` and `tool_main_param` template filters for page-refresh rendering
+- Main param rendered with lighter styling (`font-normal text-gray-500`) for visual hierarchy
+
+**Tools with main params:** create_workspace (name), initiate_aws_connection (account_name), scan_repository (repo_url), create_app (name), create_datastore (name), wait (seconds)
+
+**Tools without:** list_* tools (no params), select_workspace/deploy_app/get_deployment_status (only have UUIDs)
+
+---
+
 ## 2026-01-15 - Replace whitenoise with servestatic
 
 Fixed the Django ASGI warning about synchronous iterators in streaming responses.

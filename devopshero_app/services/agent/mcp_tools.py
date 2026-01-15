@@ -95,6 +95,48 @@ def get_tool_display_name(full_name: str) -> str:
     return TOOL_DISPLAY_NAMES.get(full_name, full_name)
 
 
+# Mapping from tool names to their "main" parameter for display in titles.
+TOOL_MAIN_PARAMS = {
+    "mcp__devopshero__create_workspace": "name",
+    "mcp__devopshero__initiate_aws_connection": "account_name",
+    "mcp__devopshero__scan_repository": "repo_url",
+    "mcp__devopshero__create_app": "name",
+    "mcp__devopshero__create_datastore": "name",
+    "mcp__devopshero__deploy_app": "app_id",
+    "mcp__devopshero__get_deployment_status": "deployment_id",
+    "mcp__devopshero__wait": "seconds",
+}
+
+
+def get_tool_main_param(full_name: str, parameters: dict) -> str | None:
+    """Extract and format the main parameter value for display."""
+    main_param = TOOL_MAIN_PARAMS.get(full_name)
+    if not main_param or not parameters or main_param not in parameters:
+        return None
+
+    value = parameters[main_param]
+    return _format_param_value(full_name, value)
+
+
+def _format_param_value(tool_name: str, value: Any) -> str:
+    """Format parameter value for display (extract repo names, truncate UUIDs)."""
+    value_str = str(value)
+
+    # Extract repo name from file:// URLs
+    if "scan_repository" in tool_name and value_str.startswith("file://"):
+        return value_str.rstrip("/").split("/")[-1]
+
+    # Truncate UUIDs (36 chars with dashes)
+    if len(value_str) == 36 and value_str.count("-") == 4:
+        return value_str[:8]
+
+    # Format seconds
+    if "wait" in tool_name:
+        return f"{value}s"
+
+    return value_str
+
+
 # =============================================================================
 # Platform Tools (always available, no workspace required)
 # =============================================================================
