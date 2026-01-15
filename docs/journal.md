@@ -4,6 +4,16 @@
 > - Entries are in reverse chronological order (latest on top). Use format: `## YYYY-MM-DD HH:MM - Title`
 > - Avoid markdown tables — they render poorly. Use bulleted lists with bold labels instead.
 
+## 2026-01-15 - Friendly Tool Display Names
+
+Added human-readable display names for MCP tools in the chat UI. Previously, tool calls showed the full MCP-namespaced names like `mcp__devopshero__list_aws_accounts`, which is an implementation detail users don't need to see.
+
+**Solution:** Created a `TOOL_DISPLAY_NAMES` mapping in `mcp_tools.py` that maps full MCP names to properly capitalized labels (e.g., "List AWS Accounts", "Deploy App"). The `get_tool_display_name()` function performs the lookup and falls back to the full name for unknown tools.
+
+**Why a mapping instead of string manipulation:** Using `removeprefix()` would just give `list_aws_accounts`, which is still technical. An explicit mapping allows proper capitalization and the flexibility to choose better names (e.g., "Initiate AWS Connection" vs "initiate_aws_connection").
+
+---
+
 ## 2026-01-15 - Workspace Pinning and Repository Model Simplification
 
 Redesigned the agent's workspace and repository handling to provide a cleaner mental model and prevent cross-workspace errors.
