@@ -6,7 +6,7 @@
     <div class="border-b border-gray-200 dark:border-gray-700 px-6">
         <div class="flex items-center justify-between py-3">
             <div>
-                <h1 class="text-lg font-semibold text-gray-900 dark:text-white">
+                <h1 id="conversation-title" class="text-lg font-semibold text-gray-900 dark:text-white">
                     {{ conversation.title|default:"New Conversation" }}
                 </h1>
                 {% if conversation.workspace %}
@@ -125,9 +125,28 @@ function processOobElements(fragment) {
         if (target) {
             oob.removeAttribute('hx-swap-oob');
             target.outerHTML = oob.outerHTML;
+
+            // Also update sidebar title when main title changes
+            if (targetId === 'conversation-title') {
+                updateSidebarTitle(oob.textContent.trim());
+            }
         }
         oob.remove();
     });
+}
+
+/**
+ * Update the conversation title in the sidebar list.
+ */
+function updateSidebarTitle(newTitle) {
+    const match = window.location.pathname.match(/\/chat\/([^/]+)\//);
+    if (match) {
+        const conversationId = match[1];
+        const sidebarTitle = document.getElementById('sidebar-title-' + conversationId);
+        if (sidebarTitle) {
+            sidebarTitle.textContent = newTitle;
+        }
+    }
 }
 
 /**
@@ -267,7 +286,31 @@ messages.addEventListener('htmx:sseBeforeMessage', function(event) {
         handleComplete();
         return;
     }
+
+    if (eventType === 'sse-tool-result') {
+        event.preventDefault();
+        handleToolResult(event.detail.data);
+        return;
+    }
 });
+
+/**
+ * Handle sse-tool-result events (process OOB swaps and append tool result).
+ */
+function handleToolResult(data) {
+    const template = document.createElement('template');
+    template.innerHTML = data;
+    const fragment = template.content;
+
+    // Process any OOB elements (e.g., conversation title update)
+    processOobElements(fragment);
+
+    // Append remaining content to messages
+    while (fragment.firstChild) {
+        messages.appendChild(fragment.firstChild);
+    }
+    scrollToBottom();
+}
 
 // Up arrow message history
 const messageInput = document.getElementById('message-input');

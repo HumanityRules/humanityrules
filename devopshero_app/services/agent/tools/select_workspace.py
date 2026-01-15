@@ -64,8 +64,9 @@ async def select_workspace(workspace_id: str, conversation: Conversation, organi
             f"Workspace {workspace_id} not found or doesn't belong to your organization."
         )
 
-    # Pin the workspace to the conversation
+    # Pin the workspace to the conversation and update title
     conversation.workspace = workspace
+    conversation.title = f"Working on {workspace.name}"
     await conversation.asave()
 
     return SelectedWorkspaceSummary(

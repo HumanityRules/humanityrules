@@ -249,7 +249,7 @@ def _render_tool_result(data: dict) -> str:
     if tool_main_param:
         tool_name = f"{tool_name}: "
 
-    return render_to_string("devopshero_app/chat/_streaming_tool_result.html", context={
+    html = render_to_string("devopshero_app/chat/_streaming_tool_result.html", context={
         "tool_name": tool_name,
         "tool_main_param": tool_main_param,
         "tool_use_id": data.get("tool_use_id", ""),
@@ -258,6 +258,31 @@ def _render_tool_result(data: dict) -> str:
         "params_json": params_json,
         "result_json": result_json,
     })
+
+    # Add OOB swap for conversation title when workspace is selected
+    if tool_full_name == "mcp__devopshero__select_workspace" and data.get("status") == "success":
+        html += _render_title_oob_swap(result=result)
+
+    return html
+
+
+def _render_title_oob_swap(result: str) -> str:
+    """Render OOB swap HTML to update conversation title after workspace selection."""
+    try:
+        result_data = json.loads(result) if isinstance(result, str) else result
+        # Handle MCP content wrapper format: [{"type": "text", "text": "..."}]
+        if isinstance(result_data, list) and result_data and "text" in result_data[0]:
+            result_data = json.loads(result_data[0]["text"])
+        workspace_name = result_data.get("name", "")
+        if workspace_name:
+            title = f"Working on {workspace_name}"
+            return (
+                f'<h1 id="conversation-title" hx-swap-oob="true" '
+                f'class="text-lg font-semibold text-gray-900 dark:text-white">{title}</h1>'
+            )
+    except (json.JSONDecodeError, TypeError, KeyError, IndexError):
+        pass
+    return ""
 
 
 def _render_thinking() -> str:

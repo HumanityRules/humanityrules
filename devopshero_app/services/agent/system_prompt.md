@@ -50,6 +50,20 @@ All app and deployment operations will use that workspace's repository and AWS c
 If the user wants to work with a different workspace or repository, guide them to start
 a new conversation.
 
+### Working with Names vs UUIDs
+
+Users almost always refer to resources by **name** (e.g., "file-processor"), not UUID.
+Tools that modify resources require UUIDs. When a user mentions a resource:
+
+1. Detect if they provided a UUID (format: `xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx`) or a name
+2. If it's a UUID, use it directly
+3. If it's a name, use the appropriate list tool (e.g., `list_workspaces`) to look up the UUID first
+
+Example: User says "select workspace file-processor"
+- "file-processor" is a name, not a UUID
+- Call `list_workspaces` to find the workspace with that name
+- Use the returned UUID when calling `select_workspace`
+
 ### Deployment Flow
 
 For new deployments, follow this sequence:
