@@ -5,7 +5,29 @@ from typing import Any
 
 from django import template
 
+from devopshero_app.services.agent import mcp_tools
+
 register = template.Library()
+
+
+@register.filter
+def tool_display_name(metadata: dict) -> str:
+    """Get display name with colon suffix if main param exists."""
+    tool_name = metadata.get("tool_name", "")
+    parameters = metadata.get("parameters", {})
+    display_name = mcp_tools.get_tool_display_name(tool_name)
+    main_param = mcp_tools.get_tool_main_param(tool_name, parameters)
+    if main_param:
+        return f"{display_name}: "
+    return display_name
+
+
+@register.filter
+def tool_main_param(metadata: dict) -> str | None:
+    """Extract and format the main parameter from tool call metadata."""
+    tool_name = metadata.get("tool_name", "")
+    parameters = metadata.get("parameters", {})
+    return mcp_tools.get_tool_main_param(tool_name, parameters)
 
 
 def extract_mcp_text_content(value: Any) -> Any:
