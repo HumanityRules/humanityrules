@@ -1,5 +1,5 @@
 """
-Shared configuration for the repo-analyzer sub-agent.
+Configuration for the analyze-repository sub-agent.
 
 This configuration is used by both the main agent and the test harness
 to ensure consistent sub-agent behavior.
@@ -16,18 +16,18 @@ def _load_system_prompt() -> str:
     return prompt_path.read_text()
 
 
-def get_repo_analyzer_agent() -> AgentDefinition:
+def get_analyze_repository_agent() -> AgentDefinition:
     """
-    Get the repo-analyzer sub-agent configuration.
+    Get the analyze-repository sub-agent configuration.
 
     Returns an AgentDefinition suitable for the `agents` parameter in ClaudeAgentOptions.
     Called as a function to ensure the system prompt is loaded fresh.
     """
     return AgentDefinition(
         description=(
-            "Expert repository analyzer. Use when you need to analyze a repository "
-            "to understand its language, framework, dependencies, service type, "
-            "and deployment requirements. Returns structured JSON with evidence."
+            "Deep repository analyzer. Use to analyze a repository and understand "
+            "its architecture, dependencies, deployment requirements, potential issues, "
+            "and questions to ask the user. Returns structured JSON with evidence."
         ),
         prompt=_load_system_prompt(),
         tools=["Bash", "Read", "LS", "Glob", "Grep"],

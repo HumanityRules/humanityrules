@@ -9,7 +9,7 @@ from dataclasses import dataclass, asdict
 
 from django.utils.text import slugify
 
-from devopshero_app.models import App, Datastore, Organization, User, Workspace
+from devopshero_app.models import App, Datastore, User, Workspace
 
 
 @dataclass
@@ -23,7 +23,6 @@ class AppSummary:
     workspace_name: str
     app_type: str
     build_strategy: str
-    repo_url: str
     branch: str
     container_port: int
     cpu: int
@@ -38,9 +37,8 @@ class AppSummary:
 
 
 async def create_app(
-    workspace_id: str,
+    workspace: Workspace,
     name: str,
-    repo_url: str,
     branch: str,
     app_type: str,
     build_strategy: str,
@@ -48,7 +46,6 @@ async def create_app(
     cpu: int,
     memory: int,
     health_check_path: str,
-    organization: Organization,
     user: User,
     environment_variables: list[dict] | None,
     domain_name: str | None,
@@ -58,10 +55,11 @@ async def create_app(
     """
     Create an application configuration in a workspace.
 
+    The repository URL is inherited from workspace.primary_repo_url.
+
     Args:
-        workspace_id: UUID of the workspace to create the app in.
+        workspace: The Workspace to create the app in (from conversation context).
         name: Human-readable name for the app.
-        repo_url: Repository URL (file:// URLs only in v1).
         branch: Git branch to deploy from.
         app_type: Type of app (web, worker, scheduled).
         build_strategy: How to build (dockerfile, nixpacks, buildpack).
@@ -69,7 +67,6 @@ async def create_app(
         cpu: Fargate CPU units (256, 512, 1024, etc.).
         memory: Fargate memory in MiB.
         health_check_path: HTTP path for health checks.
-        organization: The Organization this app belongs to.
         user: The User creating the app.
         environment_variables: List of {name, value} dicts for env vars.
         domain_name: Custom domain.
@@ -80,20 +77,8 @@ async def create_app(
         AppSummary with the created app details.
 
     Raises:
-        ValueError: If workspace doesn't exist, doesn't belong to org,
-                    or other validation fails.
+        ValueError: If validation fails.
     """
-    # Validate workspace exists and belongs to organization
-    try:
-        workspace = await Workspace.objects.aget(
-            id=workspace_id,
-            organization=organization,
-        )
-    except Workspace.DoesNotExist:
-        raise ValueError(
-            f"Workspace {workspace_id} not found or doesn't belong to your organization."
-        )
-
     # Validate app_type
     valid_app_types = [choice[0] for choice in App.AppType.choices]
     if app_type not in valid_app_types:
@@ -136,7 +121,6 @@ async def create_app(
         slug=slug,
         app_type=app_type,
         build_strategy=build_strategy,
-        repo_url=repo_url,
         branch=branch,
         dockerfile_path=dockerfile_path or "",
         container_port=container_port,
@@ -157,7 +141,6 @@ async def create_app(
         workspace_name=workspace.name,
         app_type=app.app_type,
         build_strategy=app.build_strategy,
-        repo_url=app.repo_url,
         branch=app.branch,
         container_port=app.container_port,
         cpu=app.cpu,

@@ -4,6 +4,67 @@
 > - Entries are in reverse chronological order (latest on top). Use format: `## YYYY-MM-DD HH:MM - Title`
 > - Avoid markdown tables — they render poorly. Use bulleted lists with bold labels instead.
 
+## 2026-01-15 - Workspace Pinning and Repository Model Simplification
+
+Redesigned the agent's workspace and repository handling to provide a cleaner mental model and prevent cross-workspace errors.
+
+### The Problem
+
+The existing design had several issues:
+- Both `Workspace` and `App` had `repo_url` fields, creating ambiguity about which was the source of truth
+- Tools like `create_app` required explicit `workspace_id` parameters, which could lead to mismatches
+- No mechanism to "lock" a conversation to a workspace, risking accidental cross-workspace operations
+- Two repository analysis tools (`inspect_repository` and the `repo-analyzer` sub-agent) with unclear differentiation
+
+### Design Decisions
+
+**One Workspace = One Repository = One App (v1)**
+- Simplified the model: a workspace binds exactly one repository to an AWS account/region
+- Removed `App.repo_url` — apps inherit from `workspace.primary_repo_url`
+- Made `Workspace.primary_repo_url` required
+- Future: add `repo_path` field for monorepo support
+
+**Workspace Pinning**
+- Once a workspace is selected for a conversation, it's immutable
+- New `select_workspace` tool pins the workspace to `Conversation.workspace`
+- Workspace-scoped tools (`create_app`, `create_datastore`) get workspace from conversation context, not parameters
+- Platform tools (AWS connection, workspace creation) remain available in any conversation
+
+**Repository Analysis Clarification**
+- Renamed `inspect_repository` → `scan_repository` (quick, pattern-based)
+- Renamed `repo-analyzer` sub-agent → `analyze-repository` (deep, LLM-powered)
+- System prompt only mentions `analyze-repository`, biasing the agent toward thorough analysis
+- Agent should analyze repository BEFORE creating workspace, to inform naming and configuration
+
+### New Tools
+
+- **`initiate_aws_connection`** — Creates pending AWS account, returns CloudFormation URL
+- **`select_workspace`** — Pins workspace to conversation (fails if already pinned)
+- **`list_workspaces`** — Lists all workspaces in organization
+
+### Tool Changes
+
+- **`create_app`** — Removed `workspace_id` and `repo_url` params; gets workspace from conversation
+- **`create_datastore`** — Removed `workspace_id` param; gets workspace from conversation
+- **`create_workspace`** — Now requires `primary_repo_url`, validates it's a `file://` URL
+
+### Deployment Flow
+
+The agent now follows this sequence:
+1. `list_deployable_repos` — Show available repos
+2. User selects a repo
+3. `analyze-repository` sub-agent — Deep analysis before any decisions
+4. Ask clarifying questions based on analysis
+5. `list_aws_accounts` — Check connected accounts
+6. `create_workspace` — Bind repo to AWS account/region
+7. `select_workspace` — Pin to conversation
+8. `create_app` — Configure build/runtime (no repo_url needed)
+9. `create_datastore` — If analysis detected database needs
+10. `deploy_app` — Initiate deployment
+
+
+---
+
 ## 2026-01-14 - Repository Analysis Sub-Agent
 
 Built an LLM-powered sub-agent that analyzes repositories to detect language, framework, service type, dependencies, and environment variables. Produces structured JSON with evidence for all claims.

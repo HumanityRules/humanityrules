@@ -37,7 +37,7 @@ from django.conf import settings
 from pydantic import ValidationError
 
 from devopshero_app.services.agent.agent_client import get_claude_env
-from devopshero_app.services.agent.repo_analysis.repo_analyzer_config import get_repo_analyzer_agent
+from devopshero_app.services.agent.repo_analysis.repo_analyzer_config import get_analyze_repository_agent
 from devopshero_app.services.agent.repo_analysis.repo_analysis_schema import RepoAnalysisOutput
 
 
@@ -208,8 +208,8 @@ async def analyze_repository(repo_file_url: str, verbose: bool) -> RepoAnalysisO
     """Analyze a repository using the SDK's native sub-agent invocation."""
     options = ClaudeAgentOptions(
         model=settings.CLAUDE_MODEL,
-        system_prompt="You are a test orchestrator. When asked to analyze a repository, use the repo-analyzer agent.",
-        agents={"repo-analyzer": get_repo_analyzer_agent()},
+        system_prompt="You are a test orchestrator. When asked to analyze a repository, use the analyze-repository agent.",
+        agents={"analyze-repository": get_analyze_repository_agent()},
         permission_mode="bypassPermissions",
         env=get_claude_env(),
     )
@@ -222,7 +222,7 @@ async def analyze_repository(repo_file_url: str, verbose: bool) -> RepoAnalysisO
     # Collect all messages from the query
     messages: list = []
     async for message in query(
-        prompt=f"Use repo-analyzer to analyze the repository at {repo_file_url}",
+        prompt=f"Use analyze-repository to analyze the repository at {repo_file_url}",
         options=options,
     ):
         messages.append(message)

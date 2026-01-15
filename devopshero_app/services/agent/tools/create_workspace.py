@@ -20,6 +20,7 @@ class WorkspaceSummary:
     name: str
     slug: str
     description: str
+    primary_repo_url: str
     aws_account_id: str
     aws_account_name: str
     aws_region: str
@@ -48,14 +49,25 @@ async def create_workspace(
         organization: The Organization this workspace belongs to.
         user: The User creating the workspace.
         description: Description of the workspace.
-        primary_repo_url: Primary repository URL (file:// only in v1).
+        primary_repo_url: Primary repository URL (file:// only in v1). Required.
 
     Returns:
         WorkspaceSummary with the created workspace details.
 
     Raises:
-        ValueError: If AWS account doesn't exist or doesn't belong to org.
+        ValueError: If AWS account doesn't exist, doesn't belong to org,
+                    or primary_repo_url is invalid.
     """
+    # Validate primary_repo_url is provided and valid
+    if not primary_repo_url:
+        raise ValueError(
+            "primary_repo_url is required. Provide a file:// URL to the repository."
+        )
+    if not primary_repo_url.startswith("file://"):
+        raise ValueError(
+            f"Only file:// URLs are supported in v1. Got: {primary_repo_url}"
+        )
+
     # Validate AWS account exists and belongs to the organization
     try:
         aws_account = await AWSAccount.objects.aget(
@@ -99,6 +111,7 @@ async def create_workspace(
         name=workspace.name,
         slug=workspace.slug,
         description=workspace.description,
+        primary_repo_url=workspace.primary_repo_url,
         aws_account_id=str(aws_account.id),
         aws_account_name=aws_account.name,
         aws_region=workspace.aws_region,
