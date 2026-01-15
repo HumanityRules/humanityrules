@@ -150,33 +150,38 @@ async def _handle_sdk_stream_event(message: SDKStreamEvent, ctx: StreamingContex
 
 async def _handle_assistant_message(message: AssistantMessage, ctx: StreamingContext) -> AsyncGenerator[AgentStreamEvent, None]:
     """Handle assistant messages containing tool use blocks."""
-    for block in message.content:
-        if isinstance(block, ToolUseBlock):
-            # Persist any accumulated text before tool call
-            if ctx.accumulated_content:
-                await _persist_text_message(conversation=ctx.conversation, content=ctx.accumulated_content)
-                ctx.accumulated_content = ""
-            # Flush to release streaming element IDs (only if we were streaming text)
-            if ctx.has_started_streaming:
-                yield AgentStreamEvent(type="text_flush")
-                ctx.has_started_streaming = False
+    
+    # Persist any accumulated text before tool calls
+    if ctx.accumulated_content:
+        await _persist_text_message(conversation=ctx.conversation, content=ctx.accumulated_content)
+        ctx.accumulated_content = ""
 
-            # Record pending tool call
-            ctx.pending_tool_calls[block.id] = {
+    # Flush to release streaming element IDs (only if we were streaming text)
+    if ctx.has_started_streaming:
+        yield AgentStreamEvent(type="text_flush")
+        ctx.has_started_streaming = False
+
+    for block in message.content:
+        if not isinstance(block, ToolUseBlock):
+            logger.error(f"Unexpected block type: {type(block)}")
+            continue
+
+        # Record pending tool call
+        ctx.pending_tool_calls[block.id] = {
+            "name": block.name,
+            "input": block.input,
+            "start_time": time.time(),
+        }
+
+        yield AgentStreamEvent(
+            type="tool_start",
+            data={
+                "tool_use_id": block.id,
                 "name": block.name,
                 "input": block.input,
-                "start_time": time.time(),
-            }
-
-            yield AgentStreamEvent(
-                type="tool_start",
-                data={
-                    "tool_use_id": block.id,
-                    "name": block.name,
-                    "input": block.input,
-                },
-            )
-
+            },
+        )
+        
 
 async def _handle_tool_results(message: UserMessage, ctx: StreamingContext) -> AsyncGenerator[AgentStreamEvent, None]:
     """Handle tool results from synthetic user messages."""
@@ -185,10 +190,12 @@ async def _handle_tool_results(message: UserMessage, ctx: StreamingContext) -> A
 
     for block in message.content:
         if not isinstance(block, ToolResultBlock):
+            logger.error(f"Unexpected block type: {type(block)}")
             continue
 
         call_info = ctx.pending_tool_calls.pop(block.tool_use_id, None)
         if not call_info:
+            logger.error(f"No call info found for tool use ID: {block.tool_use_id}")
             continue
 
         tool_name = call_info["name"]
