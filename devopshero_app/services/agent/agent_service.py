@@ -157,16 +157,16 @@ async def _enrich_tool_input(tool_name: str, tool_input: dict) -> dict:
         try:
             app = await App.objects.only("name").aget(id=tool_input["app_id"])
             enriched = {**enriched, "app_name": app.name}
-        except App.DoesNotExist:
-            pass
+        except Exception as e:
+            logger.error(f"Failed to enrich deploy_app tool input: {e}")
 
     # For select_workspace, add workspace_name from workspace_id for UI display
     if tool_name == "mcp__devopshero__select_workspace" and "workspace_id" in tool_input:
         try:
             workspace = await Workspace.objects.only("name").aget(id=tool_input["workspace_id"])
             enriched = {**enriched, "workspace_name": workspace.name}
-        except Workspace.DoesNotExist:
-            pass
+        except Exception as e:
+            logger.error(f"Failed to enrich select_workspace tool input: {e}")
 
     return enriched
 

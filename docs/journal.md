@@ -4,6 +4,22 @@
 > - Entries are in reverse chronological order (latest on top). Use format: `## YYYY-MM-DD HH:MM - Title`
 > - Avoid markdown tables — they render poorly. Use bulleted lists with bold labels instead.
 
+## 2026-01-15 - Dynamic Conversation Title on Workspace Selection
+
+When the agent selects a workspace, the conversation title now updates to "Working on {workspace_name}" in real-time.
+
+**Implementation:**
+- `select_workspace.py`: Sets `conversation.title` when pinning workspace
+- `chat.py`: Added `_render_title_oob_swap()` to generate OOB swap HTML for title update when `select_workspace` succeeds
+- `_chat_panel.html`: Added `id="conversation-title"` to header, plus `handleToolResult()` JS handler to process OOB swaps from tool results
+- `chat.html`: Added `id="sidebar-title-{conv.id}"` to sidebar entries, plus `updateSidebarTitle()` JS to sync sidebar when main title changes
+
+**Bug fixes:**
+- `_enrich_tool_input()` now catches all exceptions (not just DoesNotExist) to handle invalid UUIDs gracefully
+- Added system prompt guidance explaining that users refer to resources by name, and the agent should detect name vs UUID and look up UUIDs via list tools
+
+---
+
 ## 2026-01-15 - Tool UI Improvements
 
 Enhanced tool call display with DB-backed name resolution and consistent width.

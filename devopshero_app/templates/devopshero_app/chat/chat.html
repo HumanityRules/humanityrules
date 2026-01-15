@@ -36,7 +36,7 @@
                           {% if conversation and conversation.id == conv.id %}bg-gray-100 dark:bg-gray-700{% endif %}">
                     <div class="flex items-center justify-between">
                         <div class="flex-1 min-w-0">
-                            <h3 class="text-sm font-medium text-gray-900 dark:text-white truncate">
+                            <h3 id="sidebar-title-{{ conv.id }}" class="text-sm font-medium text-gray-900 dark:text-white truncate">
                                 {{ conv.title|default:"New Conversation" }}
                             </h3>
                             <div class="flex items-center mt-1 space-x-2">
