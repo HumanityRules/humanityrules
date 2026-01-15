@@ -10,27 +10,42 @@ from .create_datastore import create_datastore, DatastoreSummary
 from .create_workspace import create_workspace, WorkspaceSummary
 from .deploy_app import deploy_app, DeploymentSummary, simulate_deployment_progress
 from .get_deployment_status import get_deployment_status, DeploymentStatus, DeploymentLogEntry
-from .inspect_repository import inspect_repository, RepositoryAnalysis
+from .initiate_aws_connection import initiate_aws_connection, AWSConnectionInfo
 from .list_aws_accounts import list_aws_accounts, AWSAccountSummary
 from .list_deployable_repos import list_deployable_repos, DeployableRepoSummary
+from .list_workspaces import list_workspaces, WorkspaceListItem
+from .scan_repository import scan_repository, RepositoryScan
+from .select_workspace import select_workspace, SelectedWorkspaceSummary
 
 __all__ = [
+    # App management
     "create_app",
     "AppSummary",
+    # Datastore management
     "create_datastore",
     "DatastoreSummary",
+    # Workspace management
     "create_workspace",
     "WorkspaceSummary",
+    "list_workspaces",
+    "WorkspaceListItem",
+    "select_workspace",
+    "SelectedWorkspaceSummary",
+    # Deployment
     "deploy_app",
     "DeploymentSummary",
     "simulate_deployment_progress",
     "get_deployment_status",
     "DeploymentStatus",
     "DeploymentLogEntry",
-    "inspect_repository",
-    "RepositoryAnalysis",
+    # AWS accounts
+    "initiate_aws_connection",
+    "AWSConnectionInfo",
     "list_aws_accounts",
     "AWSAccountSummary",
+    # Repository
+    "scan_repository",
+    "RepositoryScan",
     "list_deployable_repos",
     "DeployableRepoSummary",
 ]

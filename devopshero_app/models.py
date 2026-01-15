@@ -189,7 +189,6 @@ class Workspace(models.Model):
     description = models.TextField(blank=True)
     primary_repo_url = models.URLField(
         max_length=2048,
-        blank=True,
         help_text="Primary repository URL (only file:// URLs supported in v1)",
     )
     aws_account = models.ForeignKey(
@@ -354,11 +353,7 @@ class App(models.Model):
         choices=BuildStrategy.choices,
     )
 
-    # Source
-    repo_url = models.URLField(
-        max_length=2048,
-        help_text="Repository URL (only file:// URLs supported in v1)",
-    )
+    # Source (inherited from workspace.primary_repo_url)
     branch = models.CharField(max_length=255)
     dockerfile_path = models.CharField(
         max_length=500,

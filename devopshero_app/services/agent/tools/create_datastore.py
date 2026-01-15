@@ -9,7 +9,7 @@ from dataclasses import dataclass, asdict
 
 from django.utils.text import slugify
 
-from devopshero_app.models import Datastore, Organization, User, Workspace
+from devopshero_app.models import Datastore, User, Workspace
 
 
 @dataclass
@@ -34,11 +34,10 @@ class DatastoreSummary:
 
 
 async def create_datastore(
-    workspace_id: str,
+    workspace: Workspace,
     name: str,
     engine: str,
     database_name: str,
-    organization: Organization,
     user: User,
     deployment_mode: str,
     serverless_min_acu: float,
@@ -48,11 +47,10 @@ async def create_datastore(
     Create a managed database in a workspace.
 
     Args:
-        workspace_id: UUID of the workspace to create the datastore in.
+        workspace: The Workspace to create the datastore in (from conversation context).
         name: Human-readable name for the datastore.
         engine: Database engine (aurora-mysql, aurora-postgresql).
         database_name: Name of the database to create.
-        organization: The Organization this datastore belongs to.
         user: The User creating the datastore.
         deployment_mode: Deployment mode (aurora_serverless_v2, aurora_provisioned).
         serverless_min_acu: Minimum ACUs for serverless mode.
@@ -62,20 +60,8 @@ async def create_datastore(
         DatastoreSummary with the created datastore details.
 
     Raises:
-        ValueError: If workspace doesn't exist, doesn't belong to org,
-                    or other validation fails.
+        ValueError: If validation fails.
     """
-    # Validate workspace exists and belongs to organization
-    try:
-        workspace = await Workspace.objects.aget(
-            id=workspace_id,
-            organization=organization,
-        )
-    except Workspace.DoesNotExist:
-        raise ValueError(
-            f"Workspace {workspace_id} not found or doesn't belong to your organization."
-        )
-
     # Validate engine
     valid_engines = [choice[0] for choice in Datastore.Engine.choices]
     if engine not in valid_engines:

@@ -1,8 +1,9 @@
 """
-Repository inspection tool for analyzing application repositories.
+Repository scanning tool for quick detection of application characteristics.
 
-This tool analyzes local repositories to detect application characteristics
-like framework, language, build strategy, and configuration.
+This tool performs fast, pattern-based detection of framework, language,
+build strategy, and configuration. For deep LLM-powered analysis, use
+the analyze-repository sub-agent instead.
 """
 
 import json
@@ -13,8 +14,8 @@ from urllib.parse import urlparse
 
 
 @dataclass
-class RepositoryAnalysis:
-    """Result of analyzing a repository."""
+class RepositoryScan:
+    """Result of scanning a repository (quick, pattern-based detection)."""
 
     detected_framework: str | None  # flask, django, fastapi, nextjs, express, etc.
     detected_language: str | None  # python, javascript, go, elixir, etc.
@@ -325,9 +326,12 @@ def _detect_env_vars(repo_path: Path) -> list[str]:
     return sorted(env_vars)
 
 
-def inspect_repository(repo_url: str, branch: str) -> RepositoryAnalysis:
+def scan_repository(repo_url: str, branch: str) -> RepositoryScan:
     """
-    Analyze a repository's contents.
+    Quick scan of a repository to detect basic characteristics.
+
+    This is a fast, pattern-based scan. For deep analysis with LLM,
+    use the analyze-repository sub-agent instead.
 
     Args:
         repo_url: Repository URL. Only file:// URLs supported in v1.
@@ -335,14 +339,10 @@ def inspect_repository(repo_url: str, branch: str) -> RepositoryAnalysis:
         branch: Branch to analyze (currently ignored for file:// URLs).
 
     Returns:
-        RepositoryAnalysis with detected characteristics.
+        RepositoryScan with detected characteristics.
 
     Raises:
         ValueError: If URL is not a valid file:// URL or path doesn't exist.
-
-    Note:
-        Only file:// URLs are supported in v1.
-        Git URLs (https://, git://) are out of scope.
     """
     # Parse the file URL
     repo_path = _parse_file_url(repo_url)
@@ -371,7 +371,7 @@ def inspect_repository(repo_url: str, branch: str) -> RepositoryAnalysis:
     detected_database = _detect_database(repo_path)
     environment_variables = _detect_env_vars(repo_path)
 
-    return RepositoryAnalysis(
+    return RepositoryScan(
         detected_framework=framework,
         detected_language=language,
         has_dockerfile=dockerfile_path is not None,
