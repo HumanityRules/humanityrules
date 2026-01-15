@@ -4,6 +4,30 @@
 > - Entries are in reverse chronological order (latest on top). Use format: `## YYYY-MM-DD HH:MM - Title`
 > - Avoid markdown tables — they render poorly. Use bulleted lists with bold labels instead.
 
+## 2026-01-14 - Repository Analysis Sub-Agent
+
+Built an LLM-powered sub-agent that analyzes repositories to detect language, framework, service type, dependencies, and environment variables. Produces structured JSON with evidence for all claims.
+
+**Key files created:**
+- `repo_analysis/repo_analysis_schema.py` — Pydantic models for structured output (RepoAnalysisOutput, ServiceConfig, DependenciesConfig, EnvConfig, EvidenceItem)
+- `repo_analysis/system_prompt.md` — Sub-agent prompt defining investigation strategy, evidence discipline, and output format
+- `repo_analysis/repo_analyzer_config.py` — AgentDefinition with description, prompt, and allowed tools (Bash, Read, LS, Glob, Grep)
+- `repo_analysis/test_repo_analysis.py` — CLI test harness with reference app expectations
+
+**Integration:** Added sub-agent to main agent via `agents` parameter in `agent_service.py`. The main agent can invoke it via the SDK's native "Task" tool.
+
+**Design decisions:**
+- Uses SDK native sub-agents (not MCP tools) — cleaner invocation, automatic Task tool handling
+- Sub-agent has restricted toolset (no Django models, no streaming, no clarifying questions)
+- Evidence required for all major claims (file path + excerpt)
+- One repo = one app (no monorepo support in v1)
+
+**Test harness:** Validates against 8 reference apps (django_postgres_app, fastapi_app, nextjs_app, phoenix_app, etc.). Uses `query()` function for simple single-shot invocation.
+
+```bash
+uv run python -m devopshero_app.services.agent.repo_analysis.test_repo_analysis --app fastapi_app
+```
+
 ## 2026-01-13 - Chat Input History
 
 Added up arrow key support to recall the last sent message, similar to terminal/shell behavior. Press up arrow when the input is empty to restore the previous message.
