@@ -4,6 +4,24 @@
 > - Entries are in reverse chronological order (latest on top). Use format: `## YYYY-MM-DD HH:MM - Title`
 > - Avoid markdown tables — they render poorly. Use bulleted lists with bold labels instead.
 
+## 2026-01-15 - Stable Message Input During Conversation Switch
+
+Fixed the message input flickering when switching between conversations. Previously, the entire chat panel content was swapped via HTMX, causing the input field to disappear and reappear.
+
+**Solution:** Used CSS View Transitions with named transition groups. Elements with the same `view-transition-name` on both sides of a transition morph smoothly instead of fading out/in with the rest.
+
+**Changes:**
+- `chat.html`: Added `transition:true` to the HTMX swap (`hx-swap="innerHTML transition:true"`)
+- `_chat_panel.html`: Added `view-transition-name: chat-panel-content;` to the main container
+- `_chat_panel.html`: Added `view-transition-name: message-input;` to the message input div
+- `styles.css`: Added view transition animations (fast fade-out, slower fade-in)
+
+**Bonus:** Changed scroll behavior from instant (`scrollToBottom`) to smooth (`scrollToBottomSmooth`) during SSE streaming events for a more polished feel.
+
+**Why this works:** View Transitions match elements by their `view-transition-name`, not content. Even though the form's `hx-post` URL changes between conversations, the input appears stable because both old and new DOM have an element with `view-transition-name: message-input`.
+
+---
+
 ## 2026-01-15 - Tool Call Parameters Visible During Execution
 
 Enhanced tool call display to show parameters immediately when a tool starts executing, rather than waiting for completion. Also added consistent max-height constraints with scroll.
