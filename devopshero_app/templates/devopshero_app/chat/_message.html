@@ -19,14 +19,45 @@
             </svg>
         </div>
         <div class="{% if message.content_type == 'tool_call' %}w-full{% else %}bg-gray-100 dark:bg-gray-800 rounded-2xl rounded-tl-md px-4 py-3{% endif %} min-w-0 flex-1">
-            {% include "devopshero_app/chat/_message_content.html" %}
+            {% partial message_dispatcher %}
         </div>
     </div>
 
     {% elif message.role == 'system' %}
     {# System message - centered, subtle styling #}
     <div class="w-full">
-        {% include "devopshero_app/chat/_message_content.html" %}
+        {% partial message_dispatcher %}
     </div>
     {% endif %}
 </div>
+
+{% partialdef message_dispatcher %}
+{% if message.content_type == 'text' %}
+    {% include "devopshero_app/chat/_message_text.html" %}
+
+{% elif message.content_type == 'markdown' %}
+    {% include "devopshero_app/chat/_message_markdown.html" %}
+
+{% elif message.content_type == 'code' %}
+    {% include "devopshero_app/chat/_message_code.html" %}
+
+{% elif message.content_type == 'progress' %}
+    {% include "devopshero_app/chat/_message_progress.html" %}
+
+{% elif message.content_type == 'choice' %}
+    {% include "devopshero_app/chat/_message_choice.html" %}
+
+{% elif message.content_type == 'deployment_log' %}
+    {% include "devopshero_app/chat/_message_deployment_log.html" %}
+
+{% elif message.content_type == 'error' %}
+    {% include "devopshero_app/chat/_message_error.html" %}
+
+{% elif message.content_type == 'tool_call' %}
+    {% include "devopshero_app/chat/_message_tool_call.html" %}
+
+{% else %}
+    {# Fallback for unknown content types #}
+    <p class="text-gray-900 dark:text-gray-100 whitespace-pre-wrap">{{ message.content }}</p>
+{% endif %}
+{% endpartialdef %}
