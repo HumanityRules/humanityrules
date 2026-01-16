@@ -1,9 +1,5 @@
 # DevOpsHero Development Journal
 
-> **Conventions:**
-> - Entries are in reverse chronological order (latest on top). Use format: `## YYYY-MM-DD HH:MM - Title`
-> - Avoid markdown tables — they render poorly. Use bulleted lists with bold labels instead.
-
 ## 2026-01-16 - Collapsible Tool Messages in Chat UI
 
 Made tool call messages collapsible using native HTML `<details>`/`<summary>` elements.
@@ -16,7 +12,6 @@ Made tool call messages collapsible using native HTML `<details>`/`<summary>` el
 - Hidden default marker with `list-none [&::-webkit-details-marker]:hidden`
 - Tool start (spinner) opens expanded; completed tools collapse by default
 
-**Files Changed:** `_message_tool_call.html`, `_streaming_tool_start.html`, `_streaming_tool_result.html`
 
 ---
 

@@ -53,6 +53,17 @@ The main developer documentation lives in the docs/ subdirectory. **When creatin
 - **`devopshero_app/views/AGENTS.md`** — HTMX navigation paradigm, view patterns, adding pages
 
 
+# Journal Writing
+
+When adding entries to `docs/journal.md`:
+
+- **Format** — Reverse chronological order (latest on top). Use `## YYYY-MM-DD HH:MM - Title`
+- **Be concise** — One or two sentences per point. Avoid verbose explanations.
+- **Explain decisions** — Document what was decided and the reasoning behind it, not just what changed.
+- **Capture learnings** — Document mistakes, corrections, and insights gained, especially when implementation required iteration or user feedback.
+- **No "Files Changed" sections** — The git history tracks file changes; the journal captures intent and context.
+
+
 # Django 6.0 Template Partials
 
 **Prefer partials over plain `{% include %}`** — they're the modern Django 6.0 approach.
