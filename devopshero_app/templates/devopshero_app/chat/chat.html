@@ -29,7 +29,7 @@
                    hx-get="{% url 'chat_view' conversation_id=conv.id %}"
                    hx-target="#chat-panel"
                    hx-select="#chat-panel-content"
-                   hx-swap="innerHTML"
+                   hx-swap="innerHTML transition:true"
                    hx-push-url="true"
                    data-conversation-id="{{ conv.id }}"
                    class="conversation-item block px-4 py-3 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors

@@ -1,6 +1,6 @@
 {# Chat panel content - can be swapped via HTMX #}
 {# Wrapped in div for hx-select targeting #}
-<div id="chat-panel-content" class="flex flex-col h-full">
+<div id="chat-panel-content" class="flex flex-col h-full" style="view-transition-name: chat-panel-content;">
 {% if conversation %}
     {# Header #}
     <div class="border-b border-gray-200 dark:border-gray-700 px-6">
@@ -57,7 +57,8 @@
     </div>
 
     {# Message input #}
-    <div class="border-t border-gray-200 dark:border-gray-700 px-6 py-4">
+    <div class="border-t border-gray-200 dark:border-gray-700 px-6 py-4"
+         style="view-transition-name: message-input;">
         <form hx-post="{% url 'chat_send' conversation_id=conversation.id %}"
               hx-target="#messages"
               hx-swap="beforeend"
@@ -95,6 +96,10 @@ const messages = document.getElementById('messages');
 
 function scrollToBottom() {
     container.scrollTop = container.scrollHeight;
+}
+
+function scrollToBottomSmooth() {
+    container.scrollTo({ top: container.scrollHeight, behavior: 'smooth' });
 }
 
 /**
@@ -163,7 +168,7 @@ function handleThinking(data) {
             target.outerHTML = oobElement.outerHTML;
         }
     }
-    scrollToBottom();
+    scrollToBottomSmooth();
 }
 
 /**
@@ -186,7 +191,7 @@ function handleStart(data) {
         window.smdRenderer = default_renderer(streamingText);
         window.smdParser = parser(window.smdRenderer);
     }
-    scrollToBottom();
+    scrollToBottomSmooth();
 }
 
 /**
@@ -197,7 +202,7 @@ function handleTextDelta(data) {
         const parsed = JSON.parse(data);
         if (parsed.text && window.smdParser) {
             parser_write(window.smdParser, parsed.text);
-            scrollToBottom();
+            scrollToBottomSmooth();
         }
     } catch (e) {
         console.error('Failed to parse sse-text-delta:', e);
@@ -249,9 +254,9 @@ function handleComplete() {
 renderStoredMarkdown();
 scrollToBottom();
 
-// Scroll when new content is added
-container.addEventListener('htmx:afterSwap', scrollToBottom);
-container.addEventListener('htmx:sseMessage', scrollToBottom);
+// Scroll smoothly when new content is added
+// container.addEventListener('htmx:afterSwap', scrollToBottomSmooth);
+
 
 // Handle custom SSE events
 messages.addEventListener('htmx:sseBeforeMessage', function(event) {
@@ -309,7 +314,7 @@ function handleToolResult(data) {
     while (fragment.firstChild) {
         messages.appendChild(fragment.firstChild);
     }
-    scrollToBottom();
+    scrollToBottomSmooth();
 }
 
 // Up arrow message history

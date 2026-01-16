@@ -623,8 +623,11 @@
   .max-h-60 {
     max-height: calc(var(--spacing) * 60);
   }
-  .max-h-64 {
-    max-height: calc(var(--spacing) * 64);
+  .max-h-96 {
+    max-height: calc(var(--spacing) * 96);
+  }
+  .max-h-\[32rem\] {
+    max-height: 32rem;
   }
   .min-h-full {
     min-height: 100%;
@@ -2455,6 +2458,14 @@
   to {
     opacity: 1;
   }
+}
+::view-transition-old(chat-panel-content) {
+  animation: fade-out 20ms ease-out forwards;
+}
+::view-transition-new(chat-panel-content) {
+  animation: fade-in 150ms ease-in forwards;
+  animation-delay: 0ms;
+  opacity: 0;
 }
 el-select {
   anchor-name: --select-anchor;
