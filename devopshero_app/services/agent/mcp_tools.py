@@ -110,6 +110,7 @@ TOOL_MAIN_PARAMS = {
     "Read": "file_path",
     "Shell": "description",
     "Bash": "description",
+    "Glob": "pattern",
 }
 
 
