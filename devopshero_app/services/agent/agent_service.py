@@ -186,7 +186,7 @@ async def _handle_assistant_message(message: AssistantMessage, ctx: StreamingCon
 
     for block in message.content:
         if not isinstance(block, ToolUseBlock):
-            logger.error(f"Unexpected block type: {type(block)}")
+            logger.error(f"ToolUseBlock expected, got: {type(block)}, message content: {message.content}")
             continue
 
         # Enrich input with display-friendly data (e.g., app_name from app_id)
@@ -216,7 +216,8 @@ async def _handle_tool_results(message: UserMessage, ctx: StreamingContext) -> A
 
     for block in message.content:
         if not isinstance(block, ToolResultBlock):
-            logger.error(f"Unexpected block type: {type(block)}")
+            # Print the entire message content for debugging
+            logger.error(f"ToolResultBlock expected, got: {type(block)}, message content: {message.content}")
             continue
 
         call_info = ctx.pending_tool_calls.pop(block.tool_use_id, None)
