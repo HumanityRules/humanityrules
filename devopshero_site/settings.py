@@ -89,11 +89,12 @@ WSGI_APPLICATION = 'devopshero_site.wsgi.application'
 
 # Database
 # https://docs.djangoproject.com/en/6.0/ref/settings/#databases
+DB_PATH = os.environ.get("DOH_DB_PATH")
 
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.sqlite3',
-        'NAME': BASE_DIR / 'db.sqlite3',
+        'NAME': DB_PATH if DB_PATH else BASE_DIR / 'db.sqlite3',
     }
 }
 

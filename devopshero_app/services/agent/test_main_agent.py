@@ -1,0 +1,376 @@
+"""
+CLI harness for the main DevOps Hero agent.
+
+Usage:
+  # Start a fresh conversation
+  uv run python -m devopshero_app.services.agent.test_main_agent --prompt "Hello"
+
+  # Fork from a conversation (default when --conversation-id provided)
+  uv run python -m devopshero_app.services.agent.test_main_agent --conversation-id <uuid> --prompt "Try this"
+
+  # Resume a conversation in place
+  uv run python -m devopshero_app.services.agent.test_main_agent --conversation-id <uuid> --no-fork --prompt "Continue"
+
+  # Interactive REPL mode
+  uv run python -m devopshero_app.services.agent.test_main_agent --repl
+
+Database snapshotting:
+  - The harness copies a base SQLite DB to a per-run DB file.
+  - Use --db-base to point at the base DB (default: ./db.sqlite3).
+  - Use --db-run to choose the run DB path (default: timestamped copy in test_db/).
+  - Use --no-copy to skip the copy and use --db-run (or --db-base) directly.
+"""
+
+import argparse
+import asyncio
+import json
+import os
+import sqlite3
+import sys
+from dataclasses import dataclass
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any
+
+
+
+def _get_project_root() -> Path:
+    current = Path(__file__).resolve()
+    return current.parent.parent.parent.parent
+
+
+def _build_run_db_path(base_path: Path, run_path_arg: str | None) -> Path:
+    if run_path_arg:
+        return Path(run_path_arg)
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+    suffix = base_path.suffix or ".sqlite3"
+    return Path("test_db") / f"{base_path.stem}.harness-{timestamp}{suffix}"
+
+
+def _copy_sqlite_db(base_path: Path, run_path: Path) -> None:
+    if not base_path.exists():
+        raise RuntimeError(f"Base DB not found: {base_path}")
+    if base_path.resolve() == run_path.resolve():
+        raise RuntimeError("Run DB path must differ from base DB path.")
+    run_path.parent.mkdir(parents=True, exist_ok=True)
+    if run_path.exists():
+        run_path.unlink()
+
+    source = sqlite3.connect(str(base_path))
+    dest = sqlite3.connect(str(run_path))
+    try:
+        source.backup(dest)
+    finally:
+        dest.close()
+        source.close()
+
+
+def _setup_django(db_path: Path) -> None:
+    os.environ.setdefault("DJANGO_SETTINGS_MODULE", "devopshero_site.settings")
+    os.environ["DOH_DB_PATH"] = str(db_path)
+    import django
+
+    django.setup()
+
+
+def _parse_args(project_root: Path) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="CLI harness for the DevOps Hero main agent."
+    )
+    parser.add_argument(
+        "--conversation-id",
+        type=str,
+        help="Source conversation UUID to fork from or resume. If omitted, starts fresh.",
+    )
+    parser.add_argument(
+        "--fork",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Fork to a new conversation (default). Use --no-fork to resume in place.",
+    )
+
+    input_group = parser.add_mutually_exclusive_group(required=True)
+    input_group.add_argument(
+        "--prompt",
+        type=str,
+        help="Single prompt to run and exit.",
+    )
+    input_group.add_argument(
+        "--repl",
+        action="store_true",
+        help="Interactive prompt loop.",
+    )
+
+    parser.add_argument(
+        "--user-email",
+        type=str,
+        help="User email to run the agent as (defaults to first user).",
+    )
+    parser.add_argument(
+        "--user-id",
+        type=str,
+        help="User ID to run the agent as (overrides --user-email).",
+    )
+    parser.add_argument(
+        "--db-base",
+        type=str,
+        default=str(project_root / "db.sqlite3"),
+        help="Base SQLite DB path to copy from.",
+    )
+    parser.add_argument(
+        "--db-run",
+        type=str,
+        help="Run DB path to use (defaults to timestamped copy in test_db/).",
+    )
+    parser.add_argument(
+        "--no-copy",
+        action="store_true",
+        help="Skip DB copy; use --db-run path directly (keeps state across runs).",
+    )
+    parser.add_argument(
+        "--show-tool-io",
+        action="store_true",
+        help="Show tool parameters and results in full.",
+    )
+
+    return parser.parse_args()
+
+
+@dataclass
+class PrintState:
+    in_text_stream: bool
+
+
+def _format_tool_label(tool_name: str, parameters: dict[str, Any]) -> str:
+    import devopshero_app.services.agent.mcp_tools as mcp_tools
+
+    display_name = mcp_tools.get_tool_display_name(tool_name)
+    main_param = mcp_tools.get_tool_main_param(tool_name, parameters)
+    if main_param:
+        return f"{display_name}: {main_param}"
+    return display_name
+
+
+def _render_tool_payload(value: Any) -> str:
+    import devopshero_app.templatetags.chat_filters as chat_filters
+
+    extracted = chat_filters.extract_mcp_text_content(value)
+    if isinstance(extracted, str):
+        return extracted
+    return json.dumps(extracted, indent=2, default=str)
+
+
+def _print_event(event: Any, state: PrintState, show_tool_io: bool) -> None:
+    if event.type == "text_delta":
+        sys.stdout.write(event.data.get("text", ""))
+        sys.stdout.flush()
+        state.in_text_stream = True
+        return
+
+    if event.type in {"text_flush", "complete"}:
+        if state.in_text_stream:
+            sys.stdout.write("\n")
+            sys.stdout.flush()
+        state.in_text_stream = False
+        return
+
+    if event.type == "tool_start":
+        if state.in_text_stream:
+            sys.stdout.write("\n")
+            sys.stdout.flush()
+        state.in_text_stream = False
+        tool_name = event.data.get("name", "unknown")
+        parameters = event.data.get("input", {})
+        label = _format_tool_label(tool_name=tool_name, parameters=parameters)
+        print(f"[tool:start] {label}")
+        if show_tool_io:
+            print(_render_tool_payload(parameters))
+        return
+
+    if event.type == "tool_result":
+        if state.in_text_stream:
+            sys.stdout.write("\n")
+            sys.stdout.flush()
+        state.in_text_stream = False
+        tool_name = event.data.get("name", "unknown")
+        parameters = event.data.get("input", {})
+        status = event.data.get("status", "success")
+        duration_ms = event.data.get("duration_ms", 0)
+        label = _format_tool_label(tool_name=tool_name, parameters=parameters)
+        print(f"[tool:done] {label} status={status} duration_ms={duration_ms}")
+        if show_tool_io:
+            result = event.data.get("result", "")
+            print(_render_tool_payload(result))
+        return
+
+    if event.type == "error":
+        error_text = event.data.get("error", "Unknown error") if event.data else "Unknown error"
+        print(f"[error] {error_text}", file=sys.stderr)
+        state.in_text_stream = False
+
+
+async def _aget_user(user_email: str | None, user_id: str | None):
+    from devopshero_app.models import User
+
+    query = User.objects.select_related("current_organization")
+    if user_id:
+        return await query.aget(id=user_id)
+    if user_email:
+        return await query.aget(email=user_email)
+    user = await query.order_by("date_joined").afirst()
+    if not user:
+        raise RuntimeError("No users found in the database.")
+    return user
+
+
+async def _resolve_conversation_for_fork(user, source_id: str):
+    """Fork from a source conversation (creates new conversation, branches session)."""
+    from devopshero_app.models import Conversation
+
+    source = await Conversation.objects.select_related("organization").aget(
+        id=source_id,
+        user=user,
+        organization=user.current_organization,
+    )
+    if not source.session_id:
+        raise RuntimeError("Cannot fork: source conversation has no session_id yet.")
+    else:
+        print(f"Forking from source conversation: {source.id} session_id={source.session_id}")
+
+    conversation = await Conversation.objects.acreate(
+        user=user,
+        organization=user.current_organization,
+        status=Conversation.Status.ACTIVE,
+    )
+    conversation.session_id = source.session_id 
+    return conversation, True
+
+
+async def _resolve_conversation_for_resume(user, conversation_id: str):
+    """Resume an existing conversation in place."""
+    from devopshero_app.models import Conversation
+
+    conversation = await Conversation.objects.select_related("organization").aget(
+        id=conversation_id,
+        user=user,
+        organization=user.current_organization,
+    )
+    return conversation, False
+
+
+async def _create_new_conversation(user):
+    """Create a fresh conversation with no prior session."""
+    from devopshero_app.models import Conversation
+
+    conversation = await Conversation.objects.acreate(
+        user=user,
+        organization=user.current_organization,
+        status=Conversation.Status.ACTIVE,
+    )
+    return conversation, False
+
+
+async def _create_user_message(conversation, content: str) -> None:
+    from devopshero_app.models import Message
+
+    await Message.objects.acreate(
+        conversation=conversation,
+        role=Message.Role.USER,
+        content_type=Message.ContentType.TEXT,
+        content=content,
+        metadata={},
+    )
+    await conversation.asave()
+
+
+async def _run_agent_once(conversation, fork_session: bool, prompt: str, show_tool_io: bool) -> None:
+    from devopshero_app.services.agent import agent_service
+
+    await _create_user_message(conversation=conversation, content=prompt)
+    state = PrintState(in_text_stream=False)
+    async for event in agent_service.stream_response(
+        conversation=conversation,
+        fork_session=fork_session,
+    ):
+        _print_event(event=event, state=state, show_tool_io=show_tool_io)
+
+
+async def _run_repl(conversation, fork_session: bool, show_tool_io: bool) -> None:
+    while True:
+        try:
+            prompt = input("you> ").strip()
+        except EOFError:
+            print()
+            break
+        if not prompt:
+            continue
+        if prompt.lower() in {"exit", "quit"}:
+            break
+        await _run_agent_once(
+            conversation=conversation,
+            fork_session=fork_session,
+            prompt=prompt,
+            show_tool_io=show_tool_io,
+        )
+        fork_session = False
+
+
+async def _run(args: argparse.Namespace, run_db_path: Path) -> int:
+    user = await _aget_user(user_email=args.user_email, user_id=args.user_id)
+    if not args.conversation_id:
+        conversation, fork_session = await _create_new_conversation(user=user)
+    elif args.fork:
+        conversation, fork_session = await _resolve_conversation_for_fork(
+            user=user,
+            source_id=args.conversation_id,
+        )
+    else:
+        conversation, fork_session = await _resolve_conversation_for_resume(
+            user=user,
+            conversation_id=args.conversation_id,
+        )
+
+    print(f"DB: {run_db_path}")
+    print(f"User: {user.email or user.username}")
+    print(f"Conversation: {conversation.id}")
+    if conversation.session_id:
+        print(f"Resume session: {conversation.session_id} fork={fork_session}")
+
+    if args.prompt:
+        await _run_agent_once(
+            conversation=conversation,
+            fork_session=fork_session,
+            prompt=args.prompt,
+            show_tool_io=args.show_tool_io,
+        )
+        return 0
+
+    await _run_repl(
+        conversation=conversation,
+        fork_session=fork_session,
+        show_tool_io=args.show_tool_io,
+    )
+    return 0
+
+
+def main() -> int:
+    project_root = _get_project_root()
+    args = _parse_args(project_root=project_root)
+    base_path = Path(args.db_base).expanduser()
+
+    if args.no_copy:
+        run_db_path = Path(args.db_run) if args.db_run else base_path
+    else:
+        run_db_path = _build_run_db_path(base_path=base_path, run_path_arg=args.db_run)
+        _copy_sqlite_db(base_path=base_path, run_path=run_db_path)
+
+    _setup_django(db_path=run_db_path)
+    try:
+        return asyncio.run(_run(args=args, run_db_path=run_db_path))
+    except KeyboardInterrupt:
+        print("\nInterrupted.", file=sys.stderr)
+        return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())
