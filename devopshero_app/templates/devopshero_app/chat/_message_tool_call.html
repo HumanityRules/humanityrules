@@ -2,10 +2,14 @@
 {# Tool call display - shows tool name, parameters, and result #}
 {# Note: Parent _message.html provides the flex wrapper with avatar icon #}
 
-<div class="border border-gray-200 dark:border-gray-700 overflow-hidden rounded-lg w-full min-w-0">
-    {# Header with tool name and status #}
-    <div class="flex items-center justify-between px-3 py-2 bg-gray-50 dark:bg-gray-700">
+<details class="border border-gray-200 dark:border-gray-700 overflow-hidden rounded-lg w-full min-w-0 group">
+    {# Header with tool name and status - clickable to expand/collapse #}
+    <summary class="flex items-center justify-between px-3 py-2 bg-gray-50 dark:bg-gray-700 cursor-pointer list-none [&::-webkit-details-marker]:hidden">
         <div class="flex items-center space-x-2">
+            {# Chevron arrow - rotates when open #}
+            <svg class="w-4 h-4 text-gray-400 transition-transform duration-200 group-open:rotate-90" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
+            </svg>
             {% if message.metadata.status == 'success' %}
             <svg class="w-4 h-4 text-green-500" fill="currentColor" viewBox="0 0 20 20">
                 <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"/>
@@ -18,9 +22,9 @@
             <span class="font-mono text-sm font-medium text-gray-900 dark:text-gray-100">{{ message.metadata|tool_display_name }}</span>{% with message.metadata|tool_main_param as main_param %}{% if main_param %}<span class="font-mono text-sm font-normal text-gray-500 dark:text-gray-400">{{ main_param }}</span>{% endif %}{% endwith %}
         </div>
         <span class="text-xs text-gray-500">{{ message.metadata.duration_ms }}ms</span>
-    </div>
+    </summary>
 
-    {# Parameters and Result - always visible #}
+    {# Parameters and Result - collapsible content #}
     <div class="p-3 text-sm space-y-3 min-w-0">
         <div class="min-w-0">
             <div class="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">Parameters</div>
@@ -37,4 +41,4 @@
         </div>
         {% endif %}
     </div>
-</div>
+</details>

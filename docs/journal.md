@@ -4,6 +4,22 @@
 > - Entries are in reverse chronological order (latest on top). Use format: `## YYYY-MM-DD HH:MM - Title`
 > - Avoid markdown tables — they render poorly. Use bulleted lists with bold labels instead.
 
+## 2026-01-16 - Collapsible Tool Messages in Chat UI
+
+Made tool call messages collapsible using native HTML `<details>`/`<summary>` elements.
+
+**Why:** Tool messages show parameters and results which can be verbose. Collapsing them reduces visual clutter while keeping the info accessible.
+
+**Implementation:**
+- Used `<details>` with Tailwind's `group` class for state-based styling
+- Chevron arrow rotates via `group-open:rotate-90` with smooth transition
+- Hidden default marker with `list-none [&::-webkit-details-marker]:hidden`
+- Tool start (spinner) opens expanded; completed tools collapse by default
+
+**Files Changed:** `_message_tool_call.html`, `_streaming_tool_start.html`, `_streaming_tool_result.html`
+
+---
+
 ## 2026-01-16 - CLI Test Harness for Main Agent
 
 Built a CLI harness (`test_main_agent.py`) for fast agent iteration without the web UI.
