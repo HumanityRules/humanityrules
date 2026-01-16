@@ -1,7 +1,19 @@
 from django.contrib import admin
 from django.contrib.auth.admin import UserAdmin as BaseUserAdmin
 
-from devopshero_app.models import AWSAccount, Organization, OrganizationMembership, User
+from devopshero_app.models import (
+    AWSAccount,
+    App,
+    Conversation,
+    Datastore,
+    Deployment,
+    DeploymentLog,
+    Message,
+    Organization,
+    OrganizationMembership,
+    User,
+    Workspace,
+)
 
 
 @admin.register(User)
@@ -57,3 +69,88 @@ class AWSAccountAdmin(admin.ModelAdmin):
             "classes": ("collapse",)
         }),
     )
+
+
+@admin.register(Workspace)
+class WorkspaceAdmin(admin.ModelAdmin):
+    list_display = ["name", "slug", "organization", "aws_account", "aws_region", "created_at", "updated_at"]
+    list_filter = ["organization", "aws_region", "aws_account"]
+    search_fields = ["name", "slug", "organization__name", "primary_repo_url", "aws_account__aws_account_id"]
+    prepopulated_fields = {"slug": ("name",)}
+    readonly_fields = ["id", "created_at", "updated_at"]
+    autocomplete_fields = ["organization", "aws_account", "created_by"]
+
+
+@admin.register(App)
+class AppAdmin(admin.ModelAdmin):
+    list_display = ["name", "slug", "workspace", "app_type", "build_strategy", "branch", "container_port", "updated_at"]
+    list_filter = ["app_type", "build_strategy", "workspace__organization"]
+    search_fields = ["name", "slug", "workspace__name", "workspace__organization__name", "branch", "domain_name"]
+    prepopulated_fields = {"slug": ("name",)}
+    readonly_fields = ["id", "created_at", "updated_at"]
+    autocomplete_fields = ["workspace", "datastore", "created_by"]
+
+
+@admin.register(Datastore)
+class DatastoreAdmin(admin.ModelAdmin):
+    list_display = ["name", "slug", "workspace", "engine", "deployment_mode", "status", "updated_at"]
+    list_filter = ["engine", "deployment_mode", "status", "workspace__organization"]
+    search_fields = ["name", "slug", "workspace__name", "workspace__organization__name", "database_name"]
+    prepopulated_fields = {"slug": ("name",)}
+    readonly_fields = ["id", "created_at", "updated_at"]
+    autocomplete_fields = ["workspace", "created_by"]
+
+
+@admin.register(Conversation)
+class ConversationAdmin(admin.ModelAdmin):
+    list_display = ["title", "status", "user", "organization", "workspace", "updated_at"]
+    list_filter = ["status", "organization", "workspace"]
+    search_fields = ["title", "user__email", "user__username", "organization__name", "workspace__name", "session_id"]
+    readonly_fields = ["id", "created_at", "updated_at"]
+    autocomplete_fields = ["user", "organization", "workspace"]
+
+
+@admin.register(Message)
+class MessageAdmin(admin.ModelAdmin):
+    list_display = ["created_at", "conversation", "role", "content_type", "short_content"]
+    list_filter = ["role", "content_type"]
+    search_fields = ["conversation__title", "conversation__user__email", "content"]
+    readonly_fields = ["id", "created_at"]
+    autocomplete_fields = ["conversation"]
+
+    @admin.display(description="Content")
+    def short_content(self, obj):
+        if not obj.content:
+            return ""
+        return obj.content[:120]
+
+
+@admin.register(Deployment)
+class DeploymentAdmin(admin.ModelAdmin):
+    list_display = ["app", "git_ref", "status", "created_at", "completed_at", "service_url"]
+    list_filter = ["status", "app__workspace__organization"]
+    search_fields = [
+        "app__name",
+        "app__workspace__name",
+        "app__workspace__organization__name",
+        "git_ref",
+        "git_commit_sha",
+        "image_uri",
+    ]
+    readonly_fields = ["id", "created_at", "updated_at"]
+    autocomplete_fields = ["app", "conversation", "created_by"]
+
+
+@admin.register(DeploymentLog)
+class DeploymentLogAdmin(admin.ModelAdmin):
+    list_display = ["created_at", "deployment", "phase", "level", "short_message"]
+    list_filter = ["phase", "level"]
+    search_fields = ["deployment__app__name", "message"]
+    readonly_fields = ["id", "created_at"]
+    autocomplete_fields = ["deployment"]
+
+    @admin.display(description="Message")
+    def short_message(self, obj):
+        if not obj.message:
+            return ""
+        return obj.message[:120]
