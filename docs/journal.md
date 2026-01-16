@@ -4,6 +4,38 @@
 > - Entries are in reverse chronological order (latest on top). Use format: `## YYYY-MM-DD HH:MM - Title`
 > - Avoid markdown tables — they render poorly. Use bulleted lists with bold labels instead.
 
+## 2026-01-16 - Fixed Spurious Error Logs for Non-Tool Blocks in Agent Service
+
+Removed misleading error logs that fired when Claude responded with text only (no tool calls).
+
+**The Issue:** `_handle_assistant_message` and `_handle_tool_results` in `agent_service.py` were logging errors when encountering `TextBlock` or non-`ToolResultBlock` content. These logs made it seem like something was wrong, but this is actually expected behavior.
+
+**Why It's Expected:**
+- Text is streamed via `SDKStreamEvent` objects during the response
+- After streaming completes, an `AssistantMessage` arrives containing the full message (including `TextBlock`s)
+- The `TextBlock` in `AssistantMessage` is redundant — text was already processed during streaming
+- Similarly, `UserMessage` can contain non-tool-result blocks in certain SDK scenarios
+
+**The Fix:** Replaced error logs with silent skips and explanatory comments:
+
+```python
+# In _handle_assistant_message:
+if not isinstance(block, ToolUseBlock):
+    # TextBlocks are expected here when Claude responds with text only.
+    # The text has already been streamed via SDKStreamEvent, so we skip it.
+    continue
+
+# In _handle_tool_results:
+if not isinstance(block, ToolResultBlock):
+    # Non-ToolResultBlock content (e.g., TextBlock) can appear in synthetic
+    # UserMessages from the SDK. These are informational and can be skipped.
+    continue
+```
+
+**Learning:** When working with streaming SDKs, the final "complete" message often contains content that was already processed incrementally. Don't treat this as an error — it's just the SDK providing the assembled result.
+
+---
+
 ## 2026-01-15 - Stable Message Input During Conversation Switch
 
 Fixed the message input flickering when switching between conversations. Previously, the entire chat panel content was swapped via HTMX, causing the input field to disappear and reappear.
