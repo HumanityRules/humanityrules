@@ -186,7 +186,8 @@ async def _handle_assistant_message(message: AssistantMessage, ctx: StreamingCon
 
     for block in message.content:
         if not isinstance(block, ToolUseBlock):
-            logger.error(f"ToolUseBlock expected, got: {type(block)}, message content: {message.content}")
+            # TextBlocks are expected here when Claude responds with text only.
+            # The text has already been streamed via SDKStreamEvent, so we skip it.
             continue
 
         # Enrich input with display-friendly data (e.g., app_name from app_id)
@@ -216,8 +217,8 @@ async def _handle_tool_results(message: UserMessage, ctx: StreamingContext) -> A
 
     for block in message.content:
         if not isinstance(block, ToolResultBlock):
-            # Print the entire message content for debugging
-            logger.error(f"ToolResultBlock expected, got: {type(block)}, message content: {message.content}")
+            # Non-ToolResultBlock content (e.g., TextBlock) can appear in synthetic
+            # UserMessages from the SDK. These are informational and can be skipped.
             continue
 
         call_info = ctx.pending_tool_calls.pop(block.tool_use_id, None)
@@ -255,12 +256,13 @@ async def _handle_tool_results(message: UserMessage, ctx: StreamingContext) -> A
     yield AgentStreamEvent(type="thinking")
 
 
-def _create_agent_options(system_prompt: str, resume_session_id: str | None) -> ClaudeAgentOptions:
+def _create_agent_options(system_prompt: str, resume_session_id: str | None, fork_session: bool) -> ClaudeAgentOptions:
     """Create SDK client options with standard configuration."""
     return ClaudeAgentOptions(
         model=settings.CLAUDE_MODEL,
         system_prompt=system_prompt,
         resume=resume_session_id,
+        fork_session=fork_session,
         agents={"analyze-repository": get_analyze_repository_agent()},
         mcp_servers={"devopshero": devopshero_mcp_server},
         allowed_tools=TOOL_NAMES,
@@ -270,7 +272,7 @@ def _create_agent_options(system_prompt: str, resume_session_id: str | None) -> 
     )
 
 
-async def stream_response(conversation: Conversation) -> AsyncGenerator[AgentStreamEvent, None]:
+async def stream_response(conversation: Conversation, fork_session: bool) -> AsyncGenerator[AgentStreamEvent, None]:
     """
     Stream agent response for a conversation.
 
@@ -282,7 +284,8 @@ async def stream_response(conversation: Conversation) -> AsyncGenerator[AgentStr
     5. Persists final messages to the database on completion
 
     Args:
-        conversation: The Conversation to process.
+        conversation: The Conversation to process. Its session_id is used to resume or fork.
+        fork_session: Whether to fork a resumed session into a new session ID.
 
     Yields:
         AgentStreamEvent objects for each streaming event.
@@ -295,6 +298,7 @@ async def stream_response(conversation: Conversation) -> AsyncGenerator[AgentStr
     options = _create_agent_options(
         system_prompt=_load_system_prompt(),
         resume_session_id=conversation.session_id,
+        fork_session=fork_session,
     )
     
     # The streaming context is used to store the accumulated content and the pending tool calls, and is passed 
