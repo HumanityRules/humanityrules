@@ -181,7 +181,10 @@ async def chat_stream(request, conversation_id):
             # Check if response needed: last message is from user
             if await _needs_response(conversation=conversation):
                 logger.info(f"Running agent for conversation {conversation_id}")
-                async for event in agent_service.stream_response(conversation=conversation):
+                async for event in agent_service.stream_response(
+                    conversation=conversation,
+                    fork_session=False,
+                ):
                     yield _format_sse_event(event=event)
                 logger.info(f"Agent completed for conversation {conversation_id}")
                 continue

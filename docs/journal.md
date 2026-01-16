@@ -4,6 +4,25 @@
 > - Entries are in reverse chronological order (latest on top). Use format: `## YYYY-MM-DD HH:MM - Title`
 > - Avoid markdown tables — they render poorly. Use bulleted lists with bold labels instead.
 
+## 2026-01-16 - CLI Test Harness for Main Agent
+
+Built a CLI harness (`test_main_agent.py`) for fast agent iteration without the web UI.
+
+**Why:** Going through the web page for every agent test is slow. Need to iterate quickly on prompts, resume from specific points, and branch conversations.
+
+**Key Features:**
+- **Session fork/resume:** Uses Claude Agent SDK's session management. `--conversation-id <uuid>` with `--fork` (default) branches the session; `--no-fork` resumes in place.
+- **DB snapshotting:** Copies `db.sqlite3` to `test_db/` by default, so experiments don't pollute the main DB. Use `--no-copy` to persist state across runs.
+- **REPL mode:** `--repl` for interactive back-and-forth.
+
+**Design Decision — Parameter Clarity:** Initially had `resume_session_id` as a separate parameter flowing through `stream_response`. Refactored to use `conversation.session_id` as a carrier (set temporarily for fork scenarios). This eliminated redundant parameters:
+- `stream_response(conversation, fork_session)` — uses `conversation.session_id` internally
+- Fork case: new conversation gets source's `session_id` assigned (not saved) before calling `stream_response`
+
+**Learning:** When forking, you create a NEW conversation but resume from the SOURCE's session. The conversation object can carry the session_id temporarily without persisting it — the agent will assign the new forked session_id after the response.
+
+---
+
 ## 2026-01-16 - Fixed Spurious Error Logs for Non-Tool Blocks in Agent Service
 
 Removed misleading error logs that fired when Claude responded with text only (no tool calls).
