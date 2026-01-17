@@ -20,7 +20,6 @@ from constructs import Construct
 import appconfig
 import cdk_utils
 import cloudformation_utils
-import deploy_base
 import ecr_utils
 import ecs_utils
 import route53_utils
@@ -111,6 +110,8 @@ class AuroraClusterStack(Stack):
     """
     Aurora cluster for apps that need a database.
     Creates a connection secret derived from the Aurora-managed secret.
+    
+    Imports VPC and security group from devopshero-vpc stack exports.
     """
 
     def __init__(
@@ -118,8 +119,6 @@ class AuroraClusterStack(Stack):
         scope: Construct,
         construct_id: str,
         app_config: appconfig.AppConfig,
-        vpc: ec2.IVpc,
-        default_security_group: ec2.ISecurityGroup,
         **kwargs,
     ) -> None:
         super().__init__(scope, construct_id, **kwargs)
@@ -127,6 +126,17 @@ class AuroraClusterStack(Stack):
         database_config = app_config.database_config
         if not database_config:
             raise ValueError("DatabaseConfig is required for Aurora cluster creation")
+
+        # Import VPC from devopshero-vpc stack exports
+        vpc = ec2.Vpc.from_vpc_attributes(
+            self, "ImportedVpc",
+            vpc_id=Fn.import_value("devopshero-vpc-id"),
+            availability_zones=[Fn.import_value("devopshero-az-1"), Fn.import_value("devopshero-az-2")],
+            private_subnet_ids=[Fn.import_value("devopshero-private-subnet-1"), Fn.import_value("devopshero-private-subnet-2")],
+        )
+        default_security_group = ec2.SecurityGroup.from_security_group_id(
+            self, "ImportedDefaultSg", Fn.import_value("devopshero-default-sg-id"),
+        )
 
         # Validate database name: alphanumeric and underscores, 1-64 chars, must start with letter
         db_name = database_config.name
@@ -526,19 +536,11 @@ def deploy(
         print(f"\n🔐 Ensuring app secrets exist...")
         secrets_utils.ensure_app_secrets_exist(session=session, app_config=app_config)
 
-    # Get VPC CIDR for Aurora security group (if needed)
-    vpc_cidr = deploy_base.get_or_create_vpc_cidr(session)
-
-    # Build CDK app with only app-specific stacks
-    # We still need to reference the VPC stack for Aurora, but it won't be deployed (already exists)
     cdk_app = App(outdir=str(cdk_utils.CDK_OUT_DIR))
-    
-    # Create VPC stack reference (needed for Aurora if app has database)
-    vpc_stack = deploy_base.VpcStack(cdk_app, "devopshero-vpc", vpc_cidr=vpc_cidr)
-    
+
     ecr_stack = EcrStack(cdk_app, f"devopshero-ecr-{app_config.app_name}", app_config=app_config)
 
-    # Optionally create Aurora cluster
+    # Optionally create Aurora cluster (imports VPC from devopshero-vpc stack exports)
     aurora_stack = None
     aurora_connection_secret = None
     if app_config.database_config:
@@ -546,10 +548,7 @@ def deploy(
             scope=cdk_app,
             construct_id=f"devopshero-aurora-{app_config.app_name}",
             app_config=app_config,
-            vpc=vpc_stack.vpc,
-            default_security_group=vpc_stack.default_security_group,
         )
-        aurora_stack.add_dependency(vpc_stack)
         aurora_connection_secret = aurora_stack.connection_secret
 
     app_stack = AppWithAlbStack(

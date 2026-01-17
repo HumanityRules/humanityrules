@@ -1,5 +1,26 @@
 # DevOpsHero Development Journal
 
+## 2026-01-16 - Refactored AuroraClusterStack to Use Fn.importValue
+
+Changed how AuroraClusterStack references the VPC from the base infrastructure.
+
+**Problem:** The previous approach instantiated `VpcStack` inside the app deployment, which risked accidentally creating/updating the VPC when deploying an app. The comment said "it won't be deployed (already exists)" but CDK's `--all` flag would deploy it if it didn't exist.
+
+**Initial fix:** Used `Vpc.from_lookup()` which does AWS API calls at synth time. This worked but created an extra `devopshero-vpc-lookup` CloudFormation stack and required `cdk.context.json` caching.
+
+**Final solution:** Use CloudFormation's native `Fn.importValue` to reference exports from the VPC stack:
+- Added AZ exports (`devopshero-az-1`, `devopshero-az-2`) to VpcStack in `deploy_base.py`
+- AuroraClusterStack now imports VPC internally using `Vpc.from_vpc_attributes()` with `Fn.import_value()`
+- Removed `vpc` and `default_security_group` parameters from AuroraClusterStack constructor
+
+**Why this is better:**
+- No extra CloudFormation stack
+- No synth-time API calls
+- Pure CloudFormation cross-stack references (battle-tested pattern)
+- AuroraClusterStack is self-contained
+
+---
+
 ## 2026-01-16 - Collapsible Tool Messages in Chat UI
 
 Made tool call messages collapsible using native HTML `<details>`/`<summary>` elements.

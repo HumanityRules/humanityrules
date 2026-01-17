@@ -70,6 +70,9 @@ class VpcStack(Stack):
         # Route tables: with nat_gateways=1, all public subnets share one RT, all private subnets share one RT
         CfnOutput(self, "PublicRouteTableId", value=self.vpc.public_subnets[0].route_table.route_table_id, export_name="devopshero-public-rt")
         CfnOutput(self, "PrivateRouteTableId", value=self.vpc.private_subnets[0].route_table.route_table_id, export_name="devopshero-private-rt")
+        # Availability zones (needed for cross-stack VPC references)
+        CfnOutput(self, "AvailabilityZone1", value=self.vpc.availability_zones[0], export_name="devopshero-az-1")
+        CfnOutput(self, "AvailabilityZone2", value=self.vpc.availability_zones[1], export_name="devopshero-az-2")
 
 
 class EcsClusterStack(Stack):
