@@ -1,5 +1,29 @@
 # DevOpsHero Development Journal
 
+## 2026-01-17 - Environment is Account-Scoped, Not Workspace-Scoped
+
+Changed the domain model so Environments belong to AWS Accounts rather than Workspaces.
+
+**Previous model:** Workspace has many Environments. Each workspace has its own isolated "prod", "staging", etc. This meant N workspaces × M environments = N×M VPCs and clusters.
+
+**New model:** AWS Account has many Environments. Multiple workspaces can deploy to the same environment (e.g., "prod"). Apps from different workspaces share VPC and ECS cluster but have isolated app resources (ECR, ALB, Aurora).
+
+**Why this is better:**
+- "prod" means something org-wide — same network, same security posture, same compliance boundary
+- Cost efficiency — shared VPC and cluster instead of per-workspace duplication
+- Networking — apps in the same environment can communicate (same VPC)
+- Simpler mental model — "deploy to prod" vs "deploy to workspace-X's prod"
+
+**Implementation:**
+- Environment model has `aws_account` FK (not `workspace` FK)
+- A "default" environment is auto-created when an AWS account is connected
+- Deployment references both `app` (which belongs to Workspace) and `environment` (which belongs to AWSAccount)
+- Stack naming includes environment slug: `devopshero-{env}-{workspace}-{app}-*`
+
+Updated `docs/domain_model.md` to reflect this decision.
+
+---
+
 ## 2026-01-16 - Refactored AuroraClusterStack to Use Fn.importValue
 
 Changed how AuroraClusterStack references the VPC from the base infrastructure.

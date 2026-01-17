@@ -8,8 +8,5 @@
 		}
 	],
 	"settings": {
-		"files.exclude": {
-			".*/": true
-		}
 	}
 }
