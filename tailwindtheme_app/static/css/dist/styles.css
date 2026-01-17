@@ -722,9 +722,6 @@
   .flex-shrink-0 {
     flex-shrink: 0;
   }
-  .shrink {
-    flex-shrink: 1;
-  }
   .shrink-0 {
     flex-shrink: 0;
   }
@@ -757,6 +754,9 @@
   }
   .resize {
     resize: both;
+  }
+  .list-none {
+    list-style-type: none;
   }
   .grid-cols-1 {
     grid-template-columns: repeat(1, minmax(0, 1fr));
@@ -1576,8 +1576,17 @@
     transition-timing-function: var(--tw-ease, var(--default-transition-timing-function));
     transition-duration: var(--tw-duration, var(--default-transition-duration));
   }
+  .transition-transform {
+    transition-property: transform, translate, scale, rotate;
+    transition-timing-function: var(--tw-ease, var(--default-transition-timing-function));
+    transition-duration: var(--tw-duration, var(--default-transition-duration));
+  }
   .transition-discrete {
     transition-behavior: allow-discrete;
+  }
+  .duration-200 {
+    --tw-duration: 200ms;
+    transition-duration: 200ms;
   }
   .duration-300 {
     --tw-duration: 300ms;
@@ -1609,12 +1618,23 @@
   .\[--anchor-gap\:--spacing\(2\.5\)\] {
     --anchor-gap: calc(var(--spacing) * 2.5);
   }
+  .\[tool\:done\] {
+    tool: done;
+  }
+  .\[tool\:start\] {
+    tool: start;
+  }
   .ring-inset {
     --tw-ring-inset: inset;
   }
   .group-not-aria-selected\/option\:hidden {
     &:is(:where(.group\/option):not(*[aria-selected="true"]) *) {
       display: none;
+    }
+  }
+  .group-open\:rotate-90 {
+    &:is(:where(.group):is([open], :popover-open, :open) *) {
+      rotate: 90deg;
     }
   }
   .group-focus\/option\:text-white {
@@ -2432,6 +2452,11 @@
       &:focus-visible {
         outline-color: var(--color-indigo-500);
       }
+    }
+  }
+  .\[\&\:\:-webkit-details-marker\]\:hidden {
+    &::-webkit-details-marker {
+      display: none;
     }
   }
 }

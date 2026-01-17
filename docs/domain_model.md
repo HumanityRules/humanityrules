@@ -4,15 +4,17 @@
 * **Workspace:**
   * Primary unit of ownership, configuration, and governance.
   * Each Workspace has a primary Git repo (additional repos can be added later in v2).
+  * Workspaces contain Apps and Datastores.
 * **Apps:**
   * Compute workloads users deploy.
 * **Datastores:**
   * Stateful dependencies the platform provisions and manages (Aurora, DynamoDB in v1).
 * **Environments:**
-  * Deployment targets that are independent of any app.
-  * Many apps can deploy into the same environment.
-  * Branch/tag/commit selection occurs when creating a Deployment (binding an App to an Environment), along with deploy triggers.
-  * v1 Environments are workspace-scoped (default and only scope in v1). There are no "shared environments across workspaces" (membership model) yet.
+  * Deployment targets that are independent of any app or workspace.
+  * Environments are **account-scoped**: they belong to an AWS Account, not a Workspace.
+  * Multiple workspaces can deploy apps to the same environment (e.g., "prod").
+  * A "default" environment is auto-created when an AWS account is connected.
+  * Branch/tag/commit selection occurs when creating a Deployment (binding an App to an Environment).
   * v1 supports two modes for Environment networking:
     * Managed networking: the platform creates a new VPC for the environment.
     * Existing VPC attachment.
@@ -25,10 +27,13 @@
 
 
 ## High-level mental model
-* Workspace contains definitions (Apps, Datastores) and owns Environments.
-* Environment is where things run (AWS account + region + VPC + ECS baseline).
-* Deployment binds an App to an Environment and selects the git source and triggers.
-* Datastore provisioning creates datastore instances into an Environment (or into that environment's network context).
+* Organization has AWS Accounts.
+* AWS Account has Environments (shared infrastructure: VPC, ECS cluster).
+* Workspace contains definitions (Apps, Datastores) — the "what" to deploy.
+* Environment is where things run (AWS account + region + VPC + ECS baseline) — the "where".
+* Deployment binds an App to an Environment and selects the git source.
+* Multiple workspaces can deploy to the same environment, sharing VPC and cluster while having isolated app resources (ECR, ALB, Aurora).
+* Datastore provisioning creates datastore instances into an Environment's network context.
 * Binding explicitly attaches Apps to Datastore instances with specific permissions.
   
 
@@ -36,41 +41,43 @@
 
 ### Organization
 * A user can belong to many organizations.
-* An organization can have many AWS accounts
+* An organization can have many AWS accounts.
   
 ### AWS Account
 * Associated to a particular organization through a wizard flow.
-* Cloudformation template that the customer has to execute on their account.
+* CloudFormation template that the customer executes on their account.
+* Has many Environments (default, prod, staging, etc.).
 
+### Environment
+An Environment defines the runtime fabric (VPC, ECS/Fargate) and is **account-scoped**.
+* environment_id
+* aws_account_id (FK to AWS Account)
+* name (default/staging/prod, or any user-chosen label)
+* slug
+* status (pending, provisioning, ready, error)
+* VPC and ECS cluster (one of each per environment)
+* baseline security groups and defaults
+* logging/metrics plumbing configuration
+
+A "default" environment is auto-created when an AWS account is connected. Users can create additional environments (prod, staging) as needed.
 
 ### Workspace
 * workspace_id
+* organization_id
+* aws_account_id (target account for deployments)
+* aws_region
 * primary_repo
 * RBAC policies (workspace admins, developers, viewers)
-* Collections
+* Collections:
   * Apps
   * Datastores
-  * Environments
 
 ### Network configuration
-A first-class concept representing the network a given Environment uses, implemented with a reusable NetworkProfile object.
-* AWS Account reference
-* Region
+A first-class concept representing the network a given Environment uses.
 * VPC
-* Subnet
-  * private subnets for Fargate tasks
-  * datastore subnet group inputs (Aurora needs subnets)
-  
-### Environment
-An Environment defines the runtime fabric (ECS/Fargate) and capabilities.
-* environment_id
-* workspace_id
-* name (dev/staging/prod, or any user-chosen label)
-* network configuration reference (created VPC or existing VPC + selected subnets)
-* ECS cluster (one per environment in v1 for clarity)
-* baseline security groups and defaults
-* logging/metrics plumbing configuration
-* ingress baseline (ALB conventions if applicable)
+* Subnets:
+  * Private subnets for Fargate tasks
+  * Datastore subnet group inputs (Aurora needs subnets)
 
 ### App
 * app_id
