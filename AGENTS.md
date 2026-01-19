@@ -274,6 +274,11 @@ async def _aget_last_user_message(conversation: Conversation) -> str:
 - Unusual parameter constraints not captured by types
 
 
+# Logging
+
+**Use `logger.error()` instead of `logger.warning()`.** We don't use the warning level — if something is worth logging as abnormal, log it as an error.
+
+
 # File Naming Conventions
 
 **Avoid generic file names** like `service.py`, `client.py`, `list.html`, `view.html`. Use descriptive names that include the domain context.
