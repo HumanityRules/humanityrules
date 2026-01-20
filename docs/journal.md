@@ -1,5 +1,14 @@
 # DevOpsHero Development Journal
 
+## 2026-01-20 22:03 - Secrets Manager CLI tools
+
+Added CLI commands to `secrets_utils.py` for managing secrets in customer AWS accounts:
+- `--list` — List all secrets (with optional `--include-deleted` for those in retention)
+- `--purge-deleted` — Permanently delete secrets scheduled for deletion (bypasses retention period)
+- `--account` — Explicit account selection by name or ID (defaults to 266117665083)
+
+Core functions (`list_secrets`, `purge_deleted_secrets`) take a boto3 session parameter for reuse. The CLI handles Django setup and role assumption via `iam_utils`.
+
 ## 2026-01-20 14:09 - Fix markdown underscore rendering
 
 - Switched chat markdown rendering to marked.js for both stored and streaming paths so intraword underscores display correctly.
