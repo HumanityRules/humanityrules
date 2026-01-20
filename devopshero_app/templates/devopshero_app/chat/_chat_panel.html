@@ -62,19 +62,20 @@
         <form hx-post="{% url 'chat_send' conversation_id=conversation.id %}"
               hx-target="#messages"
               hx-swap="beforeend"
-              hx-on::after-request="this.reset(); this.querySelector('input').focus();"
+              hx-on::after-request="this.reset(); this.querySelector('textarea').focus();"
               class="flex items-center space-x-3">
-            <input type="text"
-                   id="message-input"
-                   name="message"
-                   placeholder="Type a message..."
-                   autocomplete="off"
-                   class="flex-1 rounded-lg border border-gray-300 dark:border-gray-600
-                          bg-white dark:bg-gray-800
-                          text-gray-900 dark:text-gray-100
-                          px-4 py-2.5 text-sm
-                          focus:ring-2 focus:ring-indigo-500 focus:border-transparent
-                          placeholder-gray-400 dark:placeholder-gray-500">
+            <textarea id="message-input"
+                      name="message"
+                      rows="1"
+                      placeholder="Type a message..."
+                      autocomplete="off"
+                      class="flex-1 rounded-lg border border-gray-300 dark:border-gray-600
+                             bg-white dark:bg-gray-800
+                             text-gray-900 dark:text-gray-100
+                             px-4 py-2.5 text-sm
+                             focus:ring-2 focus:ring-indigo-500 focus:border-transparent
+                             placeholder-gray-400 dark:placeholder-gray-500
+                             resize-none"></textarea>
             <button type="submit"
                     class="px-4 py-2.5 bg-indigo-600 text-white text-sm font-medium rounded-lg
                            hover:bg-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2
@@ -93,12 +94,54 @@ import { marked } from 'https://cdn.jsdelivr.net/npm/marked@12.0.2/+esm';
 
 const container = document.getElementById('messages-container');
 const messages = document.getElementById('messages');
+const scrollBottomThreshold = 10;
+let shouldStickToBottom = true;
+let lastKnownScrollTop = 0;
+let userScrollIntent = false;
+let userScrollResetId = null;
+const userScrollResetDelayMs = 150;
+
+function markUserScrollIntent() {
+    userScrollIntent = true;
+    shouldStickToBottom = false;
+    if (userScrollResetId) {
+        clearTimeout(userScrollResetId);
+    }
+    userScrollResetId = window.setTimeout(() => {
+        userScrollIntent = false;
+    }, userScrollResetDelayMs);
+}
+
+function isNearBottom() {
+    return container.scrollHeight - container.scrollTop - container.clientHeight <= scrollBottomThreshold;
+}
+
+function updateAutoScrollState() {
+    const currentScrollTop = container.scrollTop;
+    const isScrollingUp = currentScrollTop < lastKnownScrollTop;
+    lastKnownScrollTop = currentScrollTop;
+
+    if (userScrollIntent && isScrollingUp) {
+        shouldStickToBottom = false;
+        return;
+    }
+
+    if (isNearBottom() && !isScrollingUp) {
+        shouldStickToBottom = true;
+    }
+}
 
 function scrollToBottom() {
+    if (!shouldStickToBottom) {
+        return;
+    }
     container.scrollTop = container.scrollHeight;
 }
 
 function scrollToBottomSmooth() {
+    if (!shouldStickToBottom) {
+        return;
+    }
     container.scrollTo({ top: container.scrollHeight, behavior: 'smooth' });
 }
 
@@ -285,6 +328,11 @@ function handleComplete() {
 // Initialize on page load
 renderStoredMarkdown();
 scrollToBottom();
+lastKnownScrollTop = container.scrollTop;
+container.addEventListener('scroll', updateAutoScrollState, { passive: true });
+['wheel', 'touchstart', 'touchmove', 'pointerdown', 'mousedown'].forEach(eventName => {
+    container.addEventListener(eventName, markUserScrollIntent, { passive: true });
+});
 
 // Scroll smoothly when new content is added
 // container.addEventListener('htmx:afterSwap', scrollToBottomSmooth);
@@ -375,7 +423,34 @@ function handleToolResult(data) {
 
 // Up arrow message history
 const messageInput = document.getElementById('message-input');
+const maxMessageLines = 5;
 let lastMessage = '';
+
+function getLineHeightPx(inputEl) {
+    const styles = window.getComputedStyle(inputEl);
+    const lineHeight = parseFloat(styles.lineHeight);
+    if (!Number.isNaN(lineHeight)) {
+        return lineHeight;
+    }
+    const fontSize = parseFloat(styles.fontSize);
+    if (!Number.isNaN(fontSize)) {
+        return fontSize * 1.2;
+    }
+    return 20;
+}
+
+function adjustMessageInputHeight() {
+    const styles = window.getComputedStyle(messageInput);
+    const paddingTop = parseFloat(styles.paddingTop) || 0;
+    const paddingBottom = parseFloat(styles.paddingBottom) || 0;
+    const lineHeight = getLineHeightPx(messageInput);
+    const maxHeight = Math.ceil(lineHeight * maxMessageLines + paddingTop + paddingBottom);
+
+    messageInput.style.height = 'auto';
+    const nextHeight = Math.min(messageInput.scrollHeight, maxHeight);
+    messageInput.style.height = `${nextHeight}px`;
+    messageInput.style.overflowY = messageInput.scrollHeight > maxHeight ? 'auto' : 'hidden';
+}
 
 messageInput.form.addEventListener('submit', function() {
     const value = messageInput.value.trim();
@@ -384,13 +459,28 @@ messageInput.form.addEventListener('submit', function() {
     }
 });
 
+messageInput.form.addEventListener('reset', function() {
+    requestAnimationFrame(adjustMessageInputHeight);
+});
+
+messageInput.addEventListener('input', adjustMessageInputHeight);
+
 messageInput.addEventListener('keydown', function(event) {
+    if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) {
+        event.preventDefault();
+        messageInput.form.requestSubmit();
+        return;
+    }
+
     if (event.key === 'ArrowUp' && lastMessage && !messageInput.value) {
         event.preventDefault();
         messageInput.value = lastMessage;
         messageInput.setSelectionRange(lastMessage.length, lastMessage.length);
+        adjustMessageInputHeight();
     }
 });
+
+adjustMessageInputHeight();
 </script>
 
 {% else %}

@@ -1,5 +1,9 @@
 # DevOpsHero Development Journal
 
+## 2026-01-20 14:42 - Chat auto-scroll behavior
+
+- Updated chat auto-scroll to unlock on user-initiated scrolling while reattaching immediately when the scrollbar reaches the bottom during streaming.
+
 ## 2026-01-20 22:03 - Secrets Manager CLI tools
 
 Added CLI commands to `secrets_utils.py` for managing secrets in customer AWS accounts:
