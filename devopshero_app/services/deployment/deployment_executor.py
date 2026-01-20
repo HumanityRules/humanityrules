@@ -11,11 +11,8 @@ import traceback
 from django.conf import settings
 from django.utils import timezone
 
-import deploy_app as deploy_app_module
-import deploy_base as deploy_base_module
-import iam_utils
-
 from devopshero_app.models import Deployment, DeploymentLog, Environment
+from devopshero_app.services import infra_customer
 
 from . import app_config_builder
 
@@ -49,7 +46,7 @@ def _get_aws_session(deployment: Deployment):
     """Get an AWS session with assumed role credentials for the target account."""
     aws_account = deployment.environment.aws_account
 
-    return iam_utils.get_assumed_role_session(
+    return infra_customer.iam_utils.get_assumed_role_session(
         access_key=settings.DOH_AWS_ACCESS_KEY,
         secret_key=settings.DOH_AWS_SECRET_KEY,
         account_id=aws_account.aws_account_id,
@@ -77,7 +74,7 @@ def _provision_environment(deployment: Deployment, session) -> bool:
     environment.save()
 
     try:
-        success = deploy_base_module.deploy(
+        success = infra_customer.deploy_base.deploy(
             session=session,
             env_slug=env_slug,
             synth_only=False,
@@ -195,7 +192,7 @@ def run_deployment(deployment_id: str) -> bool:
         deployment.status = Deployment.Status.DEPLOYING
         deployment.save()
 
-        success = deploy_app_module.deploy(
+        success = infra_customer.deploy_app.deploy(
             session=session,
             account_id=environment.aws_account.aws_account_id,
             region=workspace.aws_region,

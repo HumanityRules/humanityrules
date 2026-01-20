@@ -8,7 +8,7 @@ import secrets
 import boto3
 from botocore.exceptions import ClientError
 
-from appconfig import AppConfig
+from .appconfig import AppConfig
 
 
 def ensure_app_secrets_exist(session: boto3.Session, app_config: AppConfig) -> None:

@@ -13,9 +13,9 @@ from aws_cdk import aws_iam as iam
 from aws_cdk import aws_logs as logs
 from constructs import Construct
 
-import cdk_utils
-import cloudformation_utils
-import vpc_utils
+from . import cdk_utils
+from . import cloudformation_utils
+from . import vpc_utils
 
 
 # Type alias for log callback: (phase, level, message) -> None

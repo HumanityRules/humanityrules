@@ -6,7 +6,7 @@ Each function returns an AppConfig for a specific app.
 
 from pathlib import Path
 
-import appconfig
+from . import appconfig
 
 
 def get_simple_dashboard_config(env_slug: str) -> appconfig.AppConfig:

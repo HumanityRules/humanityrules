@@ -43,7 +43,7 @@ import boto3
 from botocore.exceptions import ClientError
 from dotenv import load_dotenv
 
-import iam_utils
+from . import iam_utils
 
 
 # Default configuration (same as deploy_app.py)

@@ -10,9 +10,7 @@ from asgiref.sync import sync_to_async
 from django.conf import settings
 
 from devopshero_app.models import AWSAccount, Organization
-
-import iam_utils
-import route53_utils
+from devopshero_app.services import infra_customer
 
 
 @dataclass
@@ -30,14 +28,14 @@ class HostedZoneSummary:
 
 def _get_hosted_zones_sync(aws_account: AWSAccount) -> list[dict]:
     """Synchronous function to get hosted zones from AWS."""
-    session = iam_utils.get_assumed_role_session(
+    session = infra_customer.iam_utils.get_assumed_role_session(
         access_key=settings.DOH_AWS_ACCESS_KEY,
         secret_key=settings.DOH_AWS_SECRET_KEY,
         account_id=aws_account.aws_account_id,
         external_id=str(aws_account.external_id),
         region="us-east-1",  # Route53 is a global service
     )
-    return route53_utils.list_hosted_zones(session=session)
+    return infra_customer.route53_utils.list_hosted_zones(session=session)
 
 
 async def list_hosted_zones(aws_account_uuid: str, organization: Organization) -> list[HostedZoneSummary]:

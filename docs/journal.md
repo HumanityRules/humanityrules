@@ -1,5 +1,11 @@
 # DevOpsHero Development Journal
 
+## 2026-01-20 - Moved infra_customer Inside Django App
+
+Moved `infra_customer/` from project root to `devopshero_app/services/infra_customer/`. This eliminates the `sys.path.insert()` hack that was documented in the previous "sys.path Manipulation: Why It's Needed" entry.
+
+The infrastructure code is now a proper Python package importable as `from devopshero_app.services import infra_customer`. Internal imports within the package use relative imports (`from . import deploy_app`).
+
 ## 2026-01-20 - Improved Tool Display Titles for Grep/Glob
 
 Enhanced agent chat UI to show more context in tool call titles. Grep and Glob now display both the search pattern and target path (e.g., "Grep — foo.*bar in utils.py"). Also added special handling for Task tool to derive display name from sub-agent type.

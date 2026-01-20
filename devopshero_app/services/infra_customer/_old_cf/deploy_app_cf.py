@@ -10,12 +10,12 @@ from pathlib import Path
 import boto3
 from botocore.exceptions import ClientError
 
-import cloudformation_utils
-import ecr_utils
-import ecs_utils
-import route53_utils
-import vpc_utils
-from appconfig import AppConfig
+from .. import cloudformation_utils
+from .. import ecr_utils
+from .. import ecs_utils
+from .. import route53_utils
+from .. import vpc_utils
+from ..appconfig import AppConfig
 
 
 def deploy_infrastructure(

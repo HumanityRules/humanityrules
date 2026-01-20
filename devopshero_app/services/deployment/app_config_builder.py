@@ -7,9 +7,8 @@ into an appconfig.AppConfig suitable for CDK deployment.
 
 from pathlib import Path
 
-import appconfig
-
 from devopshero_app.models import App, Datastore, Environment
+from devopshero_app.services import infra_customer
 
 
 def derive_hosted_zone_name(domain_name: str | None) -> str | None:
@@ -29,10 +28,10 @@ def extract_repo_path(repo_url: str) -> Path | None:
     return None
 
 
-def build_database_config(datastore: Datastore) -> appconfig.DatabaseConfig:
+def build_database_config(datastore: Datastore) -> infra_customer.appconfig.DatabaseConfig:
     """Build DatabaseConfig from Django Datastore model."""
     # Engine config
-    engine = appconfig.EngineConfig(
+    engine = infra_customer.appconfig.EngineConfig(
         family=datastore.engine,
         version=datastore.engine_version or None,
         auto_minor_version_upgrade=True,
@@ -40,42 +39,42 @@ def build_database_config(datastore: Datastore) -> appconfig.DatabaseConfig:
 
     # Deployment config
     if datastore.deployment_mode == Datastore.DeploymentMode.SERVERLESS_V2:
-        deployment = appconfig.DeploymentConfig(
+        deployment = infra_customer.appconfig.DeploymentConfig(
             mode="aurora_serverless_v2",
-            serverless_v2=appconfig.ServerlessV2Config(
+            serverless_v2=infra_customer.appconfig.ServerlessV2Config(
                 min_acu=datastore.serverless_min_acu or 0.5,
                 max_acu=datastore.serverless_max_acu or 2.0,
             ),
             provisioned=None,
         )
     else:
-        deployment = appconfig.DeploymentConfig(
+        deployment = infra_customer.appconfig.DeploymentConfig(
             mode="aurora_provisioned",
             serverless_v2=None,
-            provisioned=appconfig.ProvisionedConfig(
+            provisioned=infra_customer.appconfig.ProvisionedConfig(
                 instance_class=datastore.provisioned_instance_class or "db.r6g.large",
             ),
         )
 
-    return appconfig.DatabaseConfig(
+    return infra_customer.appconfig.DatabaseConfig(
         name=datastore.database_name,
         engine=engine,
         deployment=deployment,
-        backups=appconfig.BackupConfig(
+        backups=infra_customer.appconfig.BackupConfig(
             retention_days=datastore.backup_retention_days,
             copy_tags_to_snapshot=True,
         ),
-        security=appconfig.SecurityConfig(
+        security=infra_customer.appconfig.SecurityConfig(
             storage_encrypted=datastore.storage_encrypted,
             deletion_protection=datastore.deletion_protection,
         ),
-        connection=appconfig.ConnectionConfig(
+        connection=infra_customer.appconfig.ConnectionConfig(
             env_var_name="DATABASE_URL",
         ),
     )
 
 
-def build_app_config(app: App, environment: Environment) -> appconfig.AppConfig:
+def build_app_config(app: App, environment: Environment) -> infra_customer.appconfig.AppConfig:
     """
     Build an AppConfig from Django App model.
 
@@ -102,7 +101,7 @@ def build_app_config(app: App, environment: Environment) -> appconfig.AppConfig:
     if app.datastore:
         database_config = build_database_config(app.datastore)
 
-    return appconfig.AppConfig(
+    return infra_customer.appconfig.AppConfig(
         app_name=app.slug,
         ecr_repo_name=ecr_repo_name,
         container_port=app.container_port,
