@@ -220,7 +220,7 @@ class AuroraClusterStack(Stack):
             raise ValueError(f"Unsupported deployment mode: {deployment.mode}")
 
         cluster_identifier = f"{resource_prefix}-aurora"[:63]
-        secret_name = f"doh/{app_config.app_name}/aurora/credentials"
+        secret_name = f"devopshero/{app_config.app_name}/aurora/credentials"
 
         self.cluster = rds.DatabaseCluster(
             self, "AuroraCluster",
@@ -247,7 +247,7 @@ class AuroraClusterStack(Stack):
         self.port = str(self.cluster.cluster_endpoint.port)
         self.secret_arn = self.cluster.secret.secret_arn
 
-        connection_secret_name = f"doh/{app_config.app_name}/aurora/connection"
+        connection_secret_name = f"devopshero/{app_config.app_name}/aurora/connection"
         self.connection_secret = self._create_connection_secret(
             connection_secret_name=connection_secret_name,
             engine_family=database_config.engine.family,
@@ -329,7 +329,7 @@ class AppWithAlbStack(Stack):
         if app_config.app_secrets:
             task_role.add_to_policy(iam.PolicyStatement(
                 actions=["secretsmanager:GetSecretValue"],
-                resources=[f"arn:aws:secretsmanager:{Aws.REGION}:{Aws.ACCOUNT_ID}:secret:doh/{app_config.app_name}/*"],
+                resources=[f"arn:aws:secretsmanager:{Aws.REGION}:{Aws.ACCOUNT_ID}:secret:devopshero/{app_config.app_name}/*"],
             ))
         if database_connection_secret:
             task_role.add_to_policy(iam.PolicyStatement(

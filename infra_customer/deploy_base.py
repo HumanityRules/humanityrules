@@ -201,7 +201,7 @@ class EcsClusterStack(Stack):
         # Allow ECS to inject secrets as env vars (e.g., Aurora credentials)
         self.task_execution_role.add_to_policy(iam.PolicyStatement(
             actions=["secretsmanager:GetSecretValue"],
-            resources=[f"arn:aws:secretsmanager:{Aws.REGION}:{Aws.ACCOUNT_ID}:secret:doh/*"],
+            resources=[f"arn:aws:secretsmanager:{Aws.REGION}:{Aws.ACCOUNT_ID}:secret:devopshero/*"],
         ))
 
         self.log_group = logs.LogGroup(

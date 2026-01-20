@@ -34,10 +34,10 @@ The `env_slug` remains because the same app can deploy to multiple environments 
 4. **CLI**: Removed `--workspace` argument from `deploy.py`
 5. **AWS Resources**: Changed app-specific resource naming from `devopshero-*` to `doh-*`:
    - ALB, target groups, ECS services, task roles
-   - Secrets Manager paths (`doh/{app}/...`)
-
+   
 **Not changed**:
 - Base infrastructure (VPC, cluster, task execution role, log groups) — looks more aesthetic with full "devopshero", but decision might change in the future.
+- Secrets Manager paths (`devopshero/{app}/...`)
 - Cross-account AssumeRole name (`devopshero-{external_id}`) — installed in customer accounts via CloudFormation
 
 ### Naming Convention Decision: app_name vs app_slug in AppConfig
