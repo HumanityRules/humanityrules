@@ -12,6 +12,7 @@ from .deploy_app import deploy_app, DeploymentSummary
 from .get_deployment_status import get_deployment_status, DeploymentStatus, DeploymentLogEntry
 from .initiate_aws_connection import initiate_aws_connection, AWSConnectionInfo
 from .list_aws_accounts import list_aws_accounts, AWSAccountSummary
+from .list_hosted_zones import list_hosted_zones, HostedZoneSummary
 from .list_deployable_repos import list_deployable_repos, DeployableRepoSummary
 from .list_workspaces import list_workspaces, WorkspaceListItem
 from .scan_repository import scan_repository, RepositoryScan
@@ -42,6 +43,8 @@ __all__ = [
     "AWSConnectionInfo",
     "list_aws_accounts",
     "AWSAccountSummary",
+    "list_hosted_zones",
+    "HostedZoneSummary",
     # Repository
     "scan_repository",
     "RepositoryScan",

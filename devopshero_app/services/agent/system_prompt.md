@@ -75,16 +75,32 @@ For new deployments, follow this sequence:
 5. **Check AWS accounts** - Use list_aws_accounts to see connected accounts
 6. **Create workspace** - Bind the repo to an AWS account and region
 7. **Select workspace** - Pin it to this conversation
-8. **Create app** - Configure build and runtime settings
-9. **Create datastore** - If the analysis detected database needs
-10. **Deploy** - Initiate the deployment
+8. **Check domains** - Use list_hosted_zones to discover available Route53 zones
+9. **Create app** - Configure build, runtime, and domain settings
+10. **Create datastore** - If the analysis detected database needs
+11. **Confirm and deploy** - Summarize configuration and initiate deployment
 
 ### For Infrastructure Decisions
 - **CPU/Memory**: Start small (256 CPU, 512 MB) unless app indicates otherwise
 - **Database**: Aurora Serverless v2 with 0.5-2 ACU for most cases
 - **Region**: Default to us-east-1 unless user specifies otherwise
 
+### Domain Configuration
+
+Before creating an app, check available domains with list_hosted_zones:
+
+- **Single domain found**: Use it as default (e.g., `{app-slug}.{domain}`)
+- **Multiple domains found**: Ask user which to use
+- **No domains found**: Deploy without custom domain (ALB DNS only)
+
+When auto-selecting a single domain, clearly state it in the deployment confirmation.
+
 ### For Deployments
+- **Before deploying**, summarize the configuration and ask for confirmation:
+  - App name and workspace
+  - Domain (if configured) - clearly show the full URL (e.g., "myapp.example.com")
+  - Database (if any)
+  - CPU/memory settings
 - Stream progress updates to keep users informed
 - If deployment fails, analyze logs and suggest fixes
 - After success, provide the URL and suggest next steps

@@ -40,3 +40,34 @@ def get_hosted_zone_id(session: boto3.Session, hosted_zone_name: str) -> str | N
 
     return None
 
+
+def list_hosted_zones(session: boto3.Session) -> list[dict]:
+    """
+    List all public hosted zones in the account.
+
+    Args:
+        session: Boto3 session with credentials
+
+    Returns:
+        List of dicts with id, name, and record_count for each public hosted zone.
+    """
+    route53_client = session.client("route53")
+    zones = []
+
+    try:
+        paginator = route53_client.get_paginator("list_hosted_zones")
+        for page in paginator.paginate():
+            for zone in page["HostedZones"]:
+                # Skip private hosted zones
+                if zone.get("Config", {}).get("PrivateZone", False):
+                    continue
+                zones.append({
+                    "id": zone["Id"].replace("/hostedzone/", ""),
+                    "name": zone["Name"].rstrip("."),
+                    "record_count": zone["ResourceRecordSetCount"],
+                })
+    except ClientError as e:
+        print(f"   ❌ Failed to list hosted zones: {e}")
+
+    return zones
+

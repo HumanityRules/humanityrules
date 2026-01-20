@@ -1,5 +1,36 @@
 # DevOpsHero Development Journal
 
+## 2026-01-20 - Route53 Domain Discovery Agent Tool
+
+Added `list_hosted_zones` agent tool to discover available Route53 domains in customer AWS accounts. This enables the agent to configure custom domains during deployment conversations.
+
+### Design Decision: Agent-First Approach
+
+Originally considered adding domain discovery to the AWS account connection UI flow with model changes (adding `default_domain` to AWSAccount, `domain` to Workspace). Instead, chose to let the agent handle domain discovery during conversation:
+
+- **No model changes** — domain stays on App where it already is
+- **No UI changes** — agent discovers domains on-demand via tool
+- **Flexible** — agent can ask contextual questions about which domain to use
+- **Fits the product vision** — "AI co-pilot" handles the complexity
+
+### Agent Guidance
+
+Updated system prompt with domain configuration rules:
+- Single domain found → auto-select as default (e.g., `myapp.example.com`)
+- Multiple domains → ask user which to use
+- No domains → deploy with ALB DNS only
+
+Also added requirement for deployment confirmation before proceeding, showing domain and other config clearly.
+
+### Private Zones: Deferred
+
+Filtering to public zones only for now. Private zones require either:
+- Internal ALB (not implemented yet)
+- Wildcard certificates already validated (workaround)
+- Private CA support
+
+Created bead `devopshero-3yg` for wildcard certificate reuse, which would also unlock private zone support.
+
 ## 2026-01-20 - Globally Unique App Names
 
 Discovered a naming mismatch: ECS services were created with `{env_slug}-{app_name}` but started with just `app_name`. Investigation revealed deeper issues with the resource naming strategy.
