@@ -40,12 +40,12 @@ def _get_hosted_zones_sync(aws_account: AWSAccount) -> list[dict]:
     return route53_utils.list_hosted_zones(session=session)
 
 
-async def list_hosted_zones(aws_account_id: str, organization: Organization) -> list[HostedZoneSummary]:
+async def list_hosted_zones(aws_account_uuid: str, organization: Organization) -> list[HostedZoneSummary]:
     """
     List Route53 hosted zones in a connected AWS account.
 
     Args:
-        aws_account_id: UUID of the AWSAccount to query.
+        aws_account_uuid: Internal UUID of the AWSAccount record (not the 12-digit AWS account number).
         organization: The Organization (for access validation).
 
     Returns:
@@ -57,12 +57,12 @@ async def list_hosted_zones(aws_account_id: str, organization: Organization) -> 
     # Validate AWS account exists and belongs to organization
     try:
         aws_account = await AWSAccount.objects.aget(
-            id=aws_account_id,
+            id=aws_account_uuid,
             organization=organization,
         )
     except AWSAccount.DoesNotExist:
         raise ValueError(
-            f"AWS account {aws_account_id} not found or doesn't belong to your organization."
+            f"AWS account {aws_account_uuid} not found or doesn't belong to your organization."
         )
 
     # Check account is connected
