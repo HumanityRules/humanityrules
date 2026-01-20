@@ -14,9 +14,7 @@ CDK_OUT_DIR = Path(__file__).parent / "cdk.out"
 
 def deploy_cdk_stacks(app: App, session: boto3.Session) -> bool:
     """Synthesize and deploy CDK stacks using the CDK CLI."""
-    print(f"\n{'='*60}")
-    print(f"📦 Synthesizing and deploying CDK stacks...")
-    print(f"{'='*60}")
+    print(f"\n{'='*60}\n📦 Synthesizing and deploying CDK stacks...\n{'='*60}")
 
     credentials = session.get_credentials()
     frozen_credentials = credentials.get_frozen_credentials()
@@ -42,5 +40,5 @@ def deploy_cdk_stacks(app: App, session: boto3.Session) -> bool:
         print(f"\n❌ CDK deployment failed")
         return False
 
-    print(f"\n✅ CDK deployment complete")
+    print(f"\n{'='*60}\n✅ CDK deployment complete\n{'='*60}")
     return True

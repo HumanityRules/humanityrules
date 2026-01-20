@@ -9,11 +9,11 @@ from pathlib import Path
 import appconfig
 
 
-def get_simple_dashboard_config() -> appconfig.AppConfig:
+def get_simple_dashboard_config(env_slug: str, workspace_slug: str) -> appconfig.AppConfig:
     """Return the AppConfig for simple-dashboard."""
     return appconfig.AppConfig(
         app_name="simple-dashboard",
-        ecr_repo_name="devopshero/simple-dashboard",
+        ecr_repo_name=_build_ecr_repo_name("simple-dashboard", env_slug, workspace_slug),
         container_port=8501,
         cpu=256,
         memory=512,
@@ -31,11 +31,11 @@ def get_simple_dashboard_config() -> appconfig.AppConfig:
     )
 
 
-def get_db_portal_config() -> appconfig.AppConfig:
+def get_db_portal_config(env_slug: str, workspace_slug: str) -> appconfig.AppConfig:
     """Return the AppConfig for db_portal."""
     return appconfig.AppConfig(
         app_name="db-portal",
-        ecr_repo_name="devopshero/db-portal",
+        ecr_repo_name=_build_ecr_repo_name("db-portal", env_slug, workspace_slug),
         container_port=4000,
         cpu=512,
         memory=1024,
@@ -84,9 +84,16 @@ APP_CONFIGS = {
 }
 
 
-def get_app_config(app_name: str) -> appconfig.AppConfig:
+
+def _build_ecr_repo_name(app_slug: str, env_slug: str, workspace_slug: str) -> str:
+    """Build ECR repository name with environment and workspace context."""
+    return f"devopshero/{env_slug}/{workspace_slug}/{app_slug}"
+
+
+
+def get_app_config(app_name: str, env_slug: str, workspace_slug: str) -> appconfig.AppConfig:
     """Get the AppConfig for a named app."""
     if app_name not in APP_CONFIGS:
         available = ", ".join(APP_CONFIGS.keys())
         raise ValueError(f"Unknown app: {app_name}. Available apps: {available}")
-    return APP_CONFIGS[app_name]()
+    return APP_CONFIGS[app_name](env_slug=env_slug, workspace_slug=workspace_slug)

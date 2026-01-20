@@ -2,6 +2,8 @@
 Deploy DevOpsHero apps (ECR, ALB, ECS service) using AWS CDK.
 """
 
+from typing import Callable
+
 import boto3
 from aws_cdk import App, Aws, CfnOutput, Duration, Fn, RemovalPolicy, SecretValue, Stack, Tags
 from aws_cdk import aws_certificatemanager as acm
@@ -20,10 +22,22 @@ from constructs import Construct
 import appconfig
 import cdk_utils
 import cloudformation_utils
+import deploy_base
 import ecr_utils
 import ecs_utils
 import route53_utils
 import secrets_utils
+
+
+# Type alias for log callback: (phase, level, message) -> None
+LogCallback = Callable[[str, str, str], None] | None
+
+
+def _log(phase: str, level: str, message: str, log_callback: LogCallback) -> None:
+    """Log a message and optionally call the callback."""
+    print(message)
+    if log_callback:
+        log_callback(phase, level, message)
 
 
 # =============================================================================
@@ -88,6 +102,7 @@ class EcrStack(Stack):
         scope: Construct,
         construct_id: str,
         app_config: appconfig.AppConfig,
+        resource_prefix: str,
         **kwargs,
     ) -> None:
         super().__init__(scope, construct_id, **kwargs)
@@ -102,16 +117,14 @@ class EcrStack(Stack):
         )
         Tags.of(self.repository).add("App", app_config.app_name)
 
-        CfnOutput(self, "EcrRepositoryUri", value=self.repository.repository_uri, export_name=f"devopshero-{app_config.app_name}-ecr-uri")
-        CfnOutput(self, "EcrRepositoryArn", value=self.repository.repository_arn, export_name=f"devopshero-{app_config.app_name}-ecr-arn")
+        CfnOutput(self, "EcrRepositoryUri", value=self.repository.repository_uri, export_name=f"{resource_prefix}-ecr-uri")
+        CfnOutput(self, "EcrRepositoryArn", value=self.repository.repository_arn, export_name=f"{resource_prefix}-ecr-arn")
 
 
 class AuroraClusterStack(Stack):
     """
     Aurora cluster for apps that need a database.
     Creates a connection secret derived from the Aurora-managed secret.
-    
-    Imports VPC and security group from devopshero-vpc stack exports.
     """
 
     def __init__(
@@ -119,6 +132,8 @@ class AuroraClusterStack(Stack):
         scope: Construct,
         construct_id: str,
         app_config: appconfig.AppConfig,
+        env_slug: str,
+        resource_prefix: str,
         **kwargs,
     ) -> None:
         super().__init__(scope, construct_id, **kwargs)
@@ -127,16 +142,8 @@ class AuroraClusterStack(Stack):
         if not database_config:
             raise ValueError("DatabaseConfig is required for Aurora cluster creation")
 
-        # Import VPC from devopshero-vpc stack exports
-        vpc = ec2.Vpc.from_vpc_attributes(
-            self, "ImportedVpc",
-            vpc_id=Fn.import_value("devopshero-vpc-id"),
-            availability_zones=[Fn.import_value("devopshero-az-1"), Fn.import_value("devopshero-az-2")],
-            private_subnet_ids=[Fn.import_value("devopshero-private-subnet-1"), Fn.import_value("devopshero-private-subnet-2")],
-        )
-        default_security_group = ec2.SecurityGroup.from_security_group_id(
-            self, "ImportedDefaultSg", Fn.import_value("devopshero-default-sg-id"),
-        )
+        # Import environment infrastructure
+        self.environment_infra = deploy_base.import_environment_infrastructure(self, env_slug)
 
         # Validate database name: alphanumeric and underscores, 1-64 chars, must start with letter
         db_name = database_config.name
@@ -158,20 +165,20 @@ class AuroraClusterStack(Stack):
         # Security group for Aurora - allows MySQL access from VPC
         self.security_group = ec2.SecurityGroup(
             self, "AuroraSecurityGroup",
-            vpc=vpc,
+            vpc=self.environment_infra.vpc,
             description="Security group for Aurora - allows database access from VPC",
             allow_all_outbound=True,
         )
         # Allow database access from the default security group (used by ECS tasks)
         self.security_group.add_ingress_rule(
-            peer=default_security_group, connection=ec2.Port.tcp(engine_port), description="Allow database access from ECS tasks",
+            peer=self.environment_infra.default_security_group, connection=ec2.Port.tcp(engine_port), description="Allow database access from ECS tasks",
         )
 
         # Subnet group for Aurora (private subnets)
         subnet_group = rds.SubnetGroup(
             self, "AuroraSubnetGroup",
             description="Subnet group for Aurora",
-            vpc=vpc,
+            vpc=self.environment_infra.vpc,
             vpc_subnets=ec2.SubnetSelection(subnet_type=ec2.SubnetType.PRIVATE_WITH_EGRESS),
             removal_policy=RemovalPolicy.DESTROY,
         )
@@ -212,7 +219,7 @@ class AuroraClusterStack(Stack):
         else:
             raise ValueError(f"Unsupported deployment mode: {deployment.mode}")
 
-        cluster_identifier = f"devopshero-{app_config.app_name}-aurora"
+        cluster_identifier = f"{resource_prefix}-aurora"[:63]
         secret_name = f"devopshero/{app_config.app_name}/aurora/credentials"
 
         self.cluster = rds.DatabaseCluster(
@@ -221,7 +228,7 @@ class AuroraClusterStack(Stack):
             cluster_identifier=cluster_identifier,
             default_database_name=database_config.name,
             credentials=rds.Credentials.from_generated_secret("dbadmin", secret_name=secret_name),
-            vpc=vpc,
+            vpc=self.environment_infra.vpc,
             subnet_group=subnet_group,
             security_groups=[self.security_group],
             serverless_v2_min_capacity=serverless_min_capacity,
@@ -250,11 +257,11 @@ class AuroraClusterStack(Stack):
         Tags.of(self.cluster).add("App", app_config.app_name)
         Tags.of(self.connection_secret).add("App", app_config.app_name)
 
-        CfnOutput(self, "ClusterEndpoint", value=self.endpoint, export_name=f"devopshero-{app_config.app_name}-aurora-endpoint")
-        CfnOutput(self, "ClusterPort", value=self.port, export_name=f"devopshero-{app_config.app_name}-aurora-port")
-        CfnOutput(self, "DatabaseName", value=database_config.name, export_name=f"devopshero-{app_config.app_name}-aurora-database")
-        CfnOutput(self, "SecretArn", value=self.secret_arn, export_name=f"devopshero-{app_config.app_name}-aurora-secret-arn")
-        CfnOutput(self, "ConnectionSecretArn", value=self.connection_secret.secret_arn, export_name=f"devopshero-{app_config.app_name}-aurora-connection-secret-arn")
+        CfnOutput(self, "ClusterEndpoint", value=self.endpoint, export_name=f"{resource_prefix}-aurora-endpoint")
+        CfnOutput(self, "ClusterPort", value=self.port, export_name=f"{resource_prefix}-aurora-port")
+        CfnOutput(self, "DatabaseName", value=database_config.name, export_name=f"{resource_prefix}-aurora-database")
+        CfnOutput(self, "SecretArn", value=self.secret_arn, export_name=f"{resource_prefix}-aurora-secret-arn")
+        CfnOutput(self, "ConnectionSecretArn", value=self.connection_secret.secret_arn, export_name=f"{resource_prefix}-aurora-connection-secret-arn")
 
     def _create_connection_secret(
         self,
@@ -293,7 +300,6 @@ class AuroraClusterStack(Stack):
 class AppWithAlbStack(Stack):
     """
     DevOpsHero App Stack - ECS Service with ALB.
-    Imports shared infrastructure (VPC, cluster, IAM roles) via CloudFormation exports.
     """
 
     def __init__(
@@ -302,35 +308,21 @@ class AppWithAlbStack(Stack):
         construct_id: str,
         app_config: appconfig.AppConfig,
         image_tag: str,
+        env_slug: str,
+        resource_prefix: str,
         hosted_zone_id: str | None,
         database_connection_secret: secretsmanager.ISecret | None,
         **kwargs,
     ) -> None:
         super().__init__(scope, construct_id, **kwargs)
 
-        public_rt = Fn.import_value("devopshero-public-rt")
-        private_rt = Fn.import_value("devopshero-private-rt")
-        vpc = ec2.Vpc.from_vpc_attributes(
-            self, "ImportedVpc",
-            vpc_id=Fn.import_value("devopshero-vpc-id"),
-            availability_zones=self.availability_zones,
-            public_subnet_ids=[Fn.import_value("devopshero-public-subnet-1"), Fn.import_value("devopshero-public-subnet-2")],
-            public_subnet_route_table_ids=[public_rt, public_rt],
-            private_subnet_ids=[Fn.import_value("devopshero-private-subnet-1"), Fn.import_value("devopshero-private-subnet-2")],
-            private_subnet_route_table_ids=[private_rt, private_rt],
-        )
-
-        cluster = ecs.Cluster.from_cluster_attributes(
-            self, "ImportedCluster", cluster_name=Fn.import_value("devopshero-cluster-name"), vpc=vpc, security_groups=[],
-        )
-
-        task_execution_role = iam.Role.from_role_arn(self, "ImportedTaskExecutionRole", Fn.import_value("devopshero-task-execution-role-arn"), mutable=False)
-        log_group = logs.LogGroup.from_log_group_name(self, "ImportedLogGroup", Fn.import_value("devopshero-ecs-log-group"))
+        # Import environment infrastructure
+        self.environment_infra = deploy_base.import_environment_infrastructure(self, env_slug)
 
         # Per-app task role for secret isolation - each app can only read its own secrets
         task_role = iam.Role(
             self, "TaskRole",
-            role_name=f"devopshero-{app_config.app_name}-task-role",
+            role_name=f"{resource_prefix}-task-role"[:64],
             assumed_by=iam.ServicePrincipal("ecs-tasks.amazonaws.com"),
         )
         # Grant access to this app's secrets (created outside CDK via ensure_app_secrets_exist)
@@ -344,8 +336,6 @@ class AppWithAlbStack(Stack):
                 actions=["secretsmanager:GetSecretValue"],
                 resources=[database_connection_secret.secret_arn],
             ))
-
-        default_sg = ec2.SecurityGroup.from_security_group_id(self, "ImportedDefaultSg", Fn.import_value("devopshero-default-sg-id"))
 
         environment = {env["name"]: env["value"] for env in app_config.environment_variables}
 
@@ -362,10 +352,10 @@ class AppWithAlbStack(Stack):
 
         task_definition = ecs.FargateTaskDefinition(
             self, "TaskDefinition",
-            family=f"devopshero-{app_config.app_name}",
+            family=resource_prefix[:255],
             cpu=app_config.cpu,
             memory_limit_mib=app_config.memory,
-            execution_role=task_execution_role,
+            execution_role=self.environment_infra.task_execution_role,
             task_role=task_role,
             runtime_platform=ecs.RuntimePlatform(
                 cpu_architecture=ecs.CpuArchitecture.ARM64,
@@ -377,7 +367,7 @@ class AppWithAlbStack(Stack):
             "AppContainer",
             container_name=app_config.app_name,
             image=ecs.ContainerImage.from_registry(f"{self.account}.dkr.ecr.{self.region}.amazonaws.com/{app_config.ecr_repo_name}:{image_tag}"),
-            logging=ecs.LogDrivers.aws_logs(stream_prefix=app_config.app_name, log_group=log_group),
+            logging=ecs.LogDrivers.aws_logs(stream_prefix=app_config.app_name, log_group=self.environment_infra.log_group),
             environment=environment,
             secrets=secrets if secrets else None,
             health_check=ecs.HealthCheck(
@@ -392,8 +382,8 @@ class AppWithAlbStack(Stack):
 
         alb_security_group = ec2.SecurityGroup(
             self, "AlbSecurityGroup",
-            vpc=vpc,
-            security_group_name=f"devopshero-{app_config.app_name}-alb-sg",
+            vpc=self.environment_infra.vpc,
+            security_group_name=f"{resource_prefix}-alb-sg"[:255],
             description="Security group for ALB - allows HTTP and HTTPS from internet",
             allow_all_outbound=True,
         )
@@ -403,8 +393,8 @@ class AppWithAlbStack(Stack):
 
         alb = elbv2.ApplicationLoadBalancer(
             self, "ApplicationLoadBalancer",
-            load_balancer_name=f"doh-{app_config.app_name}-alb"[:32],
-            vpc=vpc,
+            load_balancer_name=f"devopshero-{env_slug}-{app_config.app_name}"[:32],
+            vpc=self.environment_infra.vpc,
             internet_facing=True,
             security_group=alb_security_group,
             vpc_subnets=ec2.SubnetSelection(subnet_type=ec2.SubnetType.PUBLIC),
@@ -412,8 +402,8 @@ class AppWithAlbStack(Stack):
 
         target_group = elbv2.ApplicationTargetGroup(
             self, "TargetGroup",
-            target_group_name=f"doh-{app_config.app_name}-tg"[:32],
-            vpc=vpc,
+            target_group_name=f"devopshero-{env_slug}-{app_config.app_name}"[:32],
+            vpc=self.environment_infra.vpc,
             port=app_config.container_port,
             protocol=elbv2.ApplicationProtocol.HTTP,
             target_type=elbv2.TargetType.IP,
@@ -432,7 +422,7 @@ class AppWithAlbStack(Stack):
             certificate = acm.Certificate(
                 self, "Certificate", domain_name=app_config.domain_name, validation=acm.CertificateValidation.from_dns(hosted_zone),
             )
-            Tags.of(certificate).add("Name", f"devopshero-{app_config.app_name}-cert")
+            Tags.of(certificate).add("Name", f"{resource_prefix}-cert")
 
             alb.add_listener(
                 "HttpsListener", port=443, protocol=elbv2.ApplicationProtocol.HTTPS,
@@ -449,20 +439,20 @@ class AppWithAlbStack(Stack):
                 target=route53.RecordTarget.from_alias(targets.LoadBalancerTarget(alb)),
             )
 
-            CfnOutput(self, "HttpsUrl", value=f"https://{app_config.domain_name}", export_name=f"devopshero-{app_config.app_name}-https-url")
-            CfnOutput(self, "CertificateArn", value=certificate.certificate_arn, export_name=f"devopshero-{app_config.app_name}-cert-arn")
+            CfnOutput(self, "HttpsUrl", value=f"https://{app_config.domain_name}", export_name=f"{resource_prefix}-https-url")
+            CfnOutput(self, "CertificateArn", value=certificate.certificate_arn, export_name=f"{resource_prefix}-cert-arn")
         else:
             alb.add_listener("HttpListener", port=80, protocol=elbv2.ApplicationProtocol.HTTP, default_target_groups=[target_group])
 
         service = ecs.FargateService(
             self, "EcsService",
-            service_name=app_config.app_name,
-            cluster=cluster,
+            service_name=resource_prefix[:255],
+            cluster=self.environment_infra.cluster,
             task_definition=task_definition,
             desired_count=0,  # Start at 0, scaled up after image push
             assign_public_ip=False,
             vpc_subnets=ec2.SubnetSelection(subnet_type=ec2.SubnetType.PRIVATE_WITH_EGRESS),
-            security_groups=[default_sg],
+            security_groups=[self.environment_infra.default_security_group],
             enable_execute_command=True,
             min_healthy_percent=100,
             max_healthy_percent=200,
@@ -471,13 +461,12 @@ class AppWithAlbStack(Stack):
 
         Tags.of(service).add("App", app_config.app_name)
         Tags.of(task_definition).add("App", app_config.app_name)
-        
-        CfnOutput(self, "TaskDefinitionArn", value=task_definition.task_definition_arn, export_name=f"devopshero-{app_config.app_name}-task-def-arn")
-        CfnOutput(self, "AlbDnsName", value=alb.load_balancer_dns_name, export_name=f"devopshero-{app_config.app_name}-alb-dns")
-        CfnOutput(self, "AlbUrl", value=f"http://{alb.load_balancer_dns_name}", export_name=f"devopshero-{app_config.app_name}-alb-url")
-        CfnOutput(self, "ServiceArn", value=service.service_arn, export_name=f"devopshero-{app_config.app_name}-service-arn")
-        CfnOutput(self, "ServiceName", value=app_config.app_name, export_name=f"devopshero-{app_config.app_name}-service-name")
 
+        CfnOutput(self, "TaskDefinitionArn", value=task_definition.task_definition_arn, export_name=f"{resource_prefix}-task-def-arn")
+        CfnOutput(self, "AlbDnsName", value=alb.load_balancer_dns_name, export_name=f"{resource_prefix}-alb-dns")
+        CfnOutput(self, "AlbUrl", value=f"http://{alb.load_balancer_dns_name}", export_name=f"{resource_prefix}-alb-url")
+        CfnOutput(self, "ServiceArn", value=service.service_arn, export_name=f"{resource_prefix}-service-arn")
+        CfnOutput(self, "ServiceName", value=service.service_name, export_name=f"{resource_prefix}-service-name")
 
 
 # =============================================================================
@@ -491,71 +480,90 @@ def deploy(
     region: str,
     app_config: appconfig.AppConfig,
     image_tag: str,
+    env_slug: str,
+    workspace_slug: str,
     synth_only: bool,
+    log_callback: LogCallback,
 ) -> bool:
     """
     Deploy an app to existing infrastructure.
-    
+
     Assumes VPC and ECS cluster are already deployed (run deploy_base first).
-    
+
     Args:
-        session: Boto3 session with assumed role credentials
-        account_id: Target AWS account ID
-        region: Target AWS region
-        app_config: Application configuration
-        image_tag: Docker image tag to deploy
-        synth_only: If True, only synthesize templates, don't deploy
-    
+        session: Boto3 session with assumed role credentials.
+        account_id: Target AWS account ID.
+        region: Target AWS region.
+        app_config: Application configuration.
+        image_tag: Docker image tag to deploy.
+        env_slug: Environment slug (e.g., "default", "prod").
+        workspace_slug: Workspace slug for resource naming.
+        synth_only: If True, only synthesize templates, don't deploy.
+        log_callback: Optional callback for logging progress.
+
     Returns:
-        True on success, False on failure
+        True on success, False on failure.
     """
-    print(f"\n{'='*60}")
-    print(f"🚀 Deploying app: {app_config.app_name}")
-    print(f"{'='*60}")
-    
+    _log("deploy", "info", f"Deploying app: {app_config.app_name} to environment: {env_slug}", log_callback)
+
+    # Resource prefix for consistent naming: devopshero-{env}-{workspace}-{app}
+    resource_prefix = f"devopshero-{env_slug}-{workspace_slug}-{app_config.app_name}"
+
     # Verify infrastructure exists
     cf_client = session.client("cloudformation")
-    if not cloudformation_utils.stack_exists(cf_client, "devopshero-vpc"):
-        print("\n❌ Base layer not deployed. Run with --base first.")
+    vpc_stack_name = f"devopshero-{env_slug}-vpc"
+    cluster_stack_name = f"devopshero-{env_slug}-cluster"
+
+    if not cloudformation_utils.stack_exists(cf_client, vpc_stack_name):
+        _log("deploy", "error", f"Base layer not deployed. VPC stack '{vpc_stack_name}' not found.", log_callback)
         return False
-    if not cloudformation_utils.stack_exists(cf_client, "devopshero-ecs-cluster"):
-        print("\n❌ ECS cluster not deployed. Run with --base first.")
+    if not cloudformation_utils.stack_exists(cf_client, cluster_stack_name):
+        _log("deploy", "error", f"ECS cluster not deployed. Cluster stack '{cluster_stack_name}' not found.", log_callback)
         return False
-    
+
     hosted_zone_id = None
     if app_config.domain_name and app_config.hosted_zone_name:
-        print(f"\n🔍 Looking up hosted zone for {app_config.hosted_zone_name}...")
+        _log("deploy", "info", f"Looking up hosted zone for {app_config.hosted_zone_name}...", log_callback)
         hosted_zone_id = route53_utils.get_hosted_zone_id(session, app_config.hosted_zone_name)
         if hosted_zone_id:
-            print(f"   ✅ Found hosted zone: {hosted_zone_id}")
+            _log("deploy", "info", f"Found hosted zone: {hosted_zone_id}", log_callback)
         else:
-            print(f"   ⚠️  Could not find hosted zone, HTTPS will not be configured")
+            _log("deploy", "warning", "Could not find hosted zone, HTTPS will not be configured", log_callback)
 
     # Ensure app secrets exist in Secrets Manager (created outside CDK for security)
     if app_config.app_secrets:
-        print(f"\n🔐 Ensuring app secrets exist...")
+        _log("deploy", "info", "Ensuring app secrets exist...", log_callback)
         secrets_utils.ensure_app_secrets_exist(session=session, app_config=app_config)
 
     cdk_app = App(outdir=str(cdk_utils.CDK_OUT_DIR))
 
-    ecr_stack = EcrStack(cdk_app, f"devopshero-ecr-{app_config.app_name}", app_config=app_config)
+    ecr_stack = EcrStack(
+        cdk_app,
+        f"{resource_prefix}-ecr",
+        app_config=app_config,
+        resource_prefix=resource_prefix,
+    )
 
-    # Optionally create Aurora cluster (imports VPC from devopshero-vpc stack exports)
+    # Optionally create Aurora cluster (imports VPC from environment's VPC stack exports)
     aurora_stack = None
     aurora_connection_secret = None
     if app_config.database_config:
         aurora_stack = AuroraClusterStack(
             scope=cdk_app,
-            construct_id=f"devopshero-aurora-{app_config.app_name}",
+            construct_id=f"{resource_prefix}-aurora",
             app_config=app_config,
+            env_slug=env_slug,
+            resource_prefix=resource_prefix,
         )
         aurora_connection_secret = aurora_stack.connection_secret
 
     app_stack = AppWithAlbStack(
         scope=cdk_app,
-        construct_id=f"devopshero-app-with-alb-{app_config.app_name}",
+        construct_id=f"{resource_prefix}-app",
         app_config=app_config,
         image_tag=image_tag,
+        env_slug=env_slug,
+        resource_prefix=resource_prefix,
         hosted_zone_id=hosted_zone_id,
         database_connection_secret=aurora_connection_secret,
     )
@@ -565,30 +573,40 @@ def deploy(
 
     if synth_only:
         cloud_assembly = cdk_app.synth()
-        print(f"\n✅ CDK templates synthesized to: {cloud_assembly.directory}")
+        _log("deploy", "info", f"CDK templates synthesized to: {cloud_assembly.directory}", log_callback)
         return True
 
+    _log("deploy", "info", "Deploying CDK stacks...", log_callback)
     success = cdk_utils.deploy_cdk_stacks(cdk_app, session)
 
     if not success:
+        _log("deploy", "error", "CDK deployment failed", log_callback)
         return False
 
-    print("\n📦 Building and pushing Docker image...")
+    _log("build", "info", "Building and pushing Docker image...", log_callback)
     image_uri = ecr_utils.build_and_push_docker_image(
-        session=session, 
-        account_id=account_id, 
-        region=region, 
-        app_name=app_config.app_name, 
-        ecr_repo_name=app_config.ecr_repo_name, 
-        app_source_path=app_config.app_source_path, 
+        session=session,
+        account_id=account_id,
+        region=region,
+        app_name=app_config.app_name,
+        ecr_repo_name=app_config.ecr_repo_name,
+        app_source_path=app_config.app_source_path,
         image_tag=image_tag,
     )
     if not image_uri:
-        print("\n❌ Docker build/push failed.")
+        _log("build", "error", "Docker build/push failed", log_callback)
         return False
 
-    if not ecs_utils.start_ecs_service(session=session, app_config=app_config):
+    _log("deploy", "info", "Starting ECS service...", log_callback)
+    if not ecs_utils.start_ecs_service(
+        session=session,
+        service_name=resource_prefix,
+        cluster_name=app_stack.environment_infra.cluster_name,
+    ):
+        _log("deploy", "error", "Failed to start ECS service", log_callback)
         return False
+
+    _log("complete", "info", f"Deployment of {app_config.app_name} completed successfully", log_callback)
 
     cloudformation_utils.print_deployment_summary(
         cf_client=cf_client,
@@ -597,7 +615,7 @@ def deploy(
         app_name=app_config.app_name,
         image_tag=image_tag,
         has_domain=bool(app_config.domain_name),
-        cluster_name="devopshero-cluster",
+        cluster_name=app_stack.environment_infra.cluster_name,
     )
 
     return True
@@ -606,47 +624,51 @@ def deploy(
 def teardown(
     session: boto3.Session,
     app_config: appconfig.AppConfig,
+    env_slug: str,
+    workspace_slug: str,
 ) -> bool:
     """
     Delete app-specific CDK stacks (ECR, ALB, ECS service, Aurora if applicable).
     """
     cf_client = session.client("cloudformation")
-    
+
+    resource_prefix = f"devopshero-{env_slug}-{workspace_slug}-{app_config.app_name}"
+
     # App-specific stacks in reverse dependency order
     stacks_to_delete = [
-        f"devopshero-app-with-alb-{app_config.app_name}",
+        f"{resource_prefix}-app",
     ]
-    
+
     # Add Aurora stack if the app uses a database
     if app_config.database_config:
-        stacks_to_delete.append(f"devopshero-aurora-{app_config.app_name}")
-    
-    stacks_to_delete.append(f"devopshero-ecr-{app_config.app_name}")
-    
+        stacks_to_delete.append(f"{resource_prefix}-aurora")
+
+    stacks_to_delete.append(f"{resource_prefix}-ecr")
+
     print(f"\n{'='*60}")
-    print(f"🗑️  Tearing down app: {app_config.app_name}")
+    print(f"Tearing down app: {app_config.app_name}")
     print(f"{'='*60}")
     print(f"\nStacks to delete (in order):")
     for stack in stacks_to_delete:
         print(f"   - {stack}")
     print()
-    
+
     # Empty ECR repository first (CloudFormation can't delete non-empty repos)
     ecr_utils.delete_all_ecr_images(session=session, ecr_repo_name=app_config.ecr_repo_name)
-    
+
     all_success = True
     for stack_name in stacks_to_delete:
         success = cloudformation_utils.delete_stack_and_wait(cf_client, stack_name=stack_name)
         if not success:
             all_success = False
-    
+
     if all_success:
         print(f"\n{'='*60}")
-        print(f"✅ App '{app_config.app_name}' stacks deleted successfully")
+        print(f"App '{app_config.app_name}' stacks deleted successfully")
         print(f"{'='*60}")
     else:
         print(f"\n{'='*60}")
-        print("⚠️  Some stacks failed to delete")
+        print("Some stacks failed to delete")
         print(f"{'='*60}")
-    
+
     return all_success

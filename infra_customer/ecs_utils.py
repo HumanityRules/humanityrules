@@ -8,8 +8,6 @@ from datetime import datetime, timezone
 import boto3
 from botocore.exceptions import ClientError
 
-from appconfig import AppConfig
-
 
 def check_stopped_tasks(
     ecs_client,
@@ -163,16 +161,16 @@ def wait_for_service_stable(
     return False
 
 
-def start_ecs_service(session: boto3.Session, app_config: AppConfig) -> bool:
+def start_ecs_service(session: boto3.Session, service_name: str, cluster_name: str) -> bool:
     """Start the ECS service (set desiredCount to 1) and wait for stabilization."""
-    print("\n📦 Starting ECS service (desiredCount=1)...")
+    print(f"\n📦 Starting ECS service (cluster={cluster_name}, service={service_name}, desiredCount=1)...")
     ecs_client = session.client("ecs")
 
     # Record deployment start time to filter out old failed tasks
     deployment_start_time = datetime.now(timezone.utc)
 
     try:
-        ecs_client.update_service(cluster="devopshero-cluster", service=app_config.app_name, desiredCount=1, forceNewDeployment=True)
+        ecs_client.update_service(cluster=cluster_name, service=service_name, desiredCount=1, forceNewDeployment=True)
         print("   ✅ Deployment triggered (desiredCount=1)")
     except ClientError as e:
         print(f"   ❌ Failed to trigger deployment: {e}")
@@ -180,8 +178,8 @@ def start_ecs_service(session: boto3.Session, app_config: AppConfig) -> bool:
 
     stable = wait_for_service_stable(
         ecs_client=ecs_client,
-        cluster="devopshero-cluster",
-        service=app_config.app_name,
+        cluster=cluster_name,
+        service=service_name,
         timeout_seconds=180,
         deployment_start_time=deployment_start_time,
     )

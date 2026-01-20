@@ -9,6 +9,7 @@ Usage:
     uv run python deploy.py --base                       # Deploy base layer
     uv run python deploy.py --base --teardown            # Teardown base layer
     uv run python deploy.py --base --synth-only          # Synth only
+    uv run python deploy.py --base --env prod            # Deploy to prod environment
 
     # Apps
     uv run python deploy.py --app simple-dashboard       # Deploy simple-dashboard
@@ -16,6 +17,7 @@ Usage:
     uv run python deploy.py --app simple-dashboard --image-tag v1.2.3  # Specific tag
     uv run python deploy.py --app simple-dashboard --synth-only        # Synth only
     uv run python deploy.py --app simple-dashboard --teardown          # Teardown app
+    uv run python deploy.py --app simple-dashboard --env prod          # Deploy to prod
 
 Required environment variables (from ../.env):
     DOH_AWS_ACCESS_KEY - DevOpsHero control plane AWS access key
@@ -26,9 +28,9 @@ import argparse
 import os
 import sys
 
-import example_apps
 import deploy_app
 import deploy_base
+import example_apps
 import iam_utils
 
 
@@ -37,12 +39,15 @@ TARGET_ACCOUNT_ID = "266117665083"
 TARGET_EXTERNAL_ID = "9e62c988-09dd-4f96-b5a7-a67646dd285b"
 TARGET_REGION = "us-east-1"
 
+# Default workspace slug for CLI deployments
+DEFAULT_WORKSPACE_SLUG = "cli"
+
 
 def main():
     parser = argparse.ArgumentParser(
         description="Deploy DevOpsHero infrastructure and apps"
     )
-    
+
     # Mutually exclusive: --base or --app
     group = parser.add_mutually_exclusive_group(required=True)
     group.add_argument(
@@ -55,7 +60,7 @@ def main():
         choices=list(example_apps.APP_CONFIGS.keys()),
         help="Deploy/teardown a specific app",
     )
-    
+
     # Common options
     parser.add_argument(
         "--teardown",
@@ -67,28 +72,42 @@ def main():
         action="store_true",
         help="Only synthesize CDK templates, don't deploy",
     )
-    
+    parser.add_argument(
+        "--env",
+        default="default",
+        help="Environment slug (default: 'default'). Controls resource naming and isolation.",
+    )
+
     # App-specific options
     parser.add_argument(
         "--image-tag",
         default="latest",
         help="Docker image tag (default: latest). Only used with --app",
     )
-    
+    parser.add_argument(
+        "--workspace",
+        default=DEFAULT_WORKSPACE_SLUG,
+        help=f"Workspace slug (default: '{DEFAULT_WORKSPACE_SLUG}'). Only used with --app",
+    )
+
     args = parser.parse_args()
-    
+
     # Validate args
     if args.image_tag != "latest" and args.base:
-        print("❌ --image-tag is only valid with --app")
+        print("--image-tag is only valid with --app")
         sys.exit(1)
-    
+
+    if args.workspace != DEFAULT_WORKSPACE_SLUG and args.base:
+        print("--workspace is only valid with --app")
+        sys.exit(1)
+
     if args.synth_only and args.teardown:
-        print("❌ --synth-only and --teardown are mutually exclusive")
+        print("--synth-only and --teardown are mutually exclusive")
         sys.exit(1)
-    
+
     # Load credentials from .env
     iam_utils.load_credentials_from_env()
-    
+
     # Get assumed role session into target account
     session = iam_utils.get_assumed_role_session(
         access_key=os.getenv("DOH_AWS_ACCESS_KEY"),
@@ -97,21 +116,32 @@ def main():
         external_id=TARGET_EXTERNAL_ID,
         region=TARGET_REGION,
     )
-    
+
     # Dispatch
     if args.base:
         if args.teardown:
-            success = deploy_base.teardown(session=session)
+            success = deploy_base.teardown(session=session, env_slug=args.env)
         else:
             success = deploy_base.deploy(
                 session=session,
+                env_slug=args.env,
                 synth_only=args.synth_only,
+                log_callback=None,
             )
     else:
-        app_config = example_apps.get_app_config(args.app)
-        
+        app_config = example_apps.get_app_config(
+            app_name=args.app,
+            env_slug=args.env,
+            workspace_slug=args.workspace,
+        )
+
         if args.teardown:
-            success = deploy_app.teardown(session=session, app_config=app_config)
+            success = deploy_app.teardown(
+                session=session,
+                app_config=app_config,
+                env_slug=args.env,
+                workspace_slug=args.workspace,
+            )
         else:
             success = deploy_app.deploy(
                 session=session,
@@ -119,9 +149,12 @@ def main():
                 region=TARGET_REGION,
                 app_config=app_config,
                 image_tag=args.image_tag,
+                env_slug=args.env,
+                workspace_slug=args.workspace,
                 synth_only=args.synth_only,
+                log_callback=None,
             )
-    
+
     if not success:
         sys.exit(1)
 

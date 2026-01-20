@@ -8,7 +8,7 @@ repositories, AWS accounts, and the deployment system.
 from .create_app import create_app, AppSummary
 from .create_datastore import create_datastore, DatastoreSummary
 from .create_workspace import create_workspace, WorkspaceSummary
-from .deploy_app import deploy_app, DeploymentSummary, simulate_deployment_progress
+from .deploy_app import deploy_app, DeploymentSummary
 from .get_deployment_status import get_deployment_status, DeploymentStatus, DeploymentLogEntry
 from .initiate_aws_connection import initiate_aws_connection, AWSConnectionInfo
 from .list_aws_accounts import list_aws_accounts, AWSAccountSummary
@@ -34,7 +34,6 @@ __all__ = [
     # Deployment
     "deploy_app",
     "DeploymentSummary",
-    "simulate_deployment_progress",
     "get_deployment_status",
     "DeploymentStatus",
     "DeploymentLogEntry",

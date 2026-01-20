@@ -5,11 +5,49 @@ This tool allows the agent to create app configurations that define
 how an application should be built and deployed.
 """
 
+import json
 from dataclasses import dataclass, asdict
+from typing import Any
 
 from django.utils.text import slugify
 
 from devopshero_app.models import App, Datastore, User, Workspace
+
+
+def _normalize_environment_variables(value: Any) -> list[dict[str, str]]:
+    """
+    Normalize environment_variables input to the expected list format.
+
+    Handles common LLM mistakes like sending strings instead of objects.
+    Expected format: [{"name": "FOO", "value": "bar"}, ...]
+
+    Returns empty list for invalid/empty inputs.
+    """
+    # Handle None or empty
+    if value is None:
+        return []
+
+    # Handle string input (LLM might send "{}" or "[]" as string)
+    if isinstance(value, str):
+        value = value.strip()
+        if not value:
+            return []
+        try:
+            value = json.loads(value)
+        except json.JSONDecodeError:
+            return []
+
+    # Must be a list at this point
+    if not isinstance(value, list):
+        return []
+
+    # Validate each item is a dict with name/value keys
+    result = []
+    for item in value:
+        if isinstance(item, dict) and "name" in item and "value" in item:
+            result.append({"name": str(item["name"]), "value": str(item["value"])})
+
+    return result
 
 
 @dataclass
@@ -127,7 +165,7 @@ async def create_app(
         cpu=cpu,
         memory=memory,
         health_check_path=health_check_path,
-        environment_variables=environment_variables or [],
+        environment_variables=_normalize_environment_variables(environment_variables),
         domain_name=domain_name or "",
         datastore=datastore,
         created_by=user,

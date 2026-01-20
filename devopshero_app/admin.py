@@ -8,6 +8,7 @@ from devopshero_app.models import (
     Datastore,
     Deployment,
     DeploymentLog,
+    Environment,
     Message,
     Organization,
     OrganizationMembership,
@@ -71,6 +72,34 @@ class AWSAccountAdmin(admin.ModelAdmin):
     )
 
 
+@admin.register(Environment)
+class EnvironmentAdmin(admin.ModelAdmin):
+    list_display = ["name", "slug", "aws_account", "status", "vpc_id", "cluster_arn", "created_at"]
+    list_filter = ["status", "aws_account__organization"]
+    search_fields = ["name", "slug", "aws_account__name", "aws_account__aws_account_id", "vpc_id"]
+    prepopulated_fields = {"slug": ("name",)}
+    readonly_fields = ["id", "created_at", "updated_at"]
+    autocomplete_fields = ["aws_account"]
+
+    fieldsets = (
+        (None, {
+            "fields": ("name", "slug", "aws_account", "status", "status_message")
+        }),
+        ("Stack Names", {
+            "fields": ("vpc_stack_name", "cluster_stack_name"),
+            "classes": ("collapse",)
+        }),
+        ("AWS Outputs", {
+            "fields": ("vpc_id", "cluster_arn"),
+            "classes": ("collapse",)
+        }),
+        ("Metadata", {
+            "fields": ("created_at", "updated_at", "id"),
+            "classes": ("collapse",)
+        }),
+    )
+
+
 @admin.register(Workspace)
 class WorkspaceAdmin(admin.ModelAdmin):
     list_display = ["name", "slug", "organization", "aws_account", "aws_region", "created_at", "updated_at"]
@@ -108,6 +137,7 @@ class ConversationAdmin(admin.ModelAdmin):
     search_fields = ["title", "user__email", "user__username", "organization__name", "workspace__name", "session_id"]
     readonly_fields = ["id", "created_at", "updated_at"]
     autocomplete_fields = ["user", "organization", "workspace"]
+    filter_horizontal = ["deployments"]
 
 
 @admin.register(Message)
@@ -127,18 +157,19 @@ class MessageAdmin(admin.ModelAdmin):
 
 @admin.register(Deployment)
 class DeploymentAdmin(admin.ModelAdmin):
-    list_display = ["app", "git_ref", "status", "created_at", "completed_at", "service_url"]
-    list_filter = ["status", "app__workspace__organization"]
+    list_display = ["app", "environment", "git_ref", "status", "created_at", "completed_at", "service_url"]
+    list_filter = ["status", "environment", "app__workspace__organization"]
     search_fields = [
         "app__name",
         "app__workspace__name",
         "app__workspace__organization__name",
+        "environment__name",
         "git_ref",
         "git_commit_sha",
         "image_uri",
     ]
     readonly_fields = ["id", "created_at", "updated_at"]
-    autocomplete_fields = ["app", "conversation", "created_by"]
+    autocomplete_fields = ["app", "environment", "created_by"]
 
 
 @admin.register(DeploymentLog)
