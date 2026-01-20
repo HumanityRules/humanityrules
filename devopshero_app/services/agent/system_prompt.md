@@ -40,6 +40,37 @@ Use this information to:
 
 Always analyze the repository after the user selects it, before creating the workspace.
 
+### App Secrets
+
+Some applications read runtime secrets from AWS Secrets Manager instead of environment 
+variables. When creating an app, use the `app_secrets` parameter if the repository 
+analysis reveals Secrets Manager access patterns.
+
+**Detection**: Look for code that:
+- Calls AWS Secrets Manager APIs (GetSecretValue, etc.)
+- Has config providers that load secrets at startup
+- References paths like `devopshero/{app}/secrets`
+
+**Format**: A dict where keys are secret field names the app expects:
+- `null` = auto-generate a random 64-character value at deployment
+- String = use this literal value
+
+**Example**:
+```json
+{
+  "secret_key_base": null,
+  "signing_salt": null,
+  "api_token": "disabled"
+}
+```
+
+The secrets are stored in AWS Secrets Manager at `devopshero/{app_slug}/secrets` 
+and the app's task role is granted read access.
+
+**Important**: When the analysis includes a `secrets` field, use ALL listed fields 
+in `app_secrets` with `null` for auto-generation. The word "optional" in source code 
+comments means the feature can be disabled, NOT that the field should be omitted.
+
 ### Workspace Context
 
 A workspace binds a repository to an AWS account and region. One workspace = one repository.

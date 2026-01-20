@@ -114,4 +114,5 @@ def build_app_config(app: App, environment: Environment) -> infra_customer.appco
         domain_name=app.domain_name or None,
         hosted_zone_name=hosted_zone_name,
         database_config=database_config,
+        app_secrets=app.app_secrets,
     )

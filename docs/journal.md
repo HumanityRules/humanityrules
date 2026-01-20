@@ -1,5 +1,26 @@
 # DevOpsHero Development Journal
 
+## 2026-01-20 - App Secrets Support in Agent Flow
+
+Fixed `AccessDeniedException` when apps tried to read secrets from AWS Secrets Manager. The `app_secrets` field was defined in `AppConfig` but never populated through the agent flow.
+
+### Root Cause
+
+The `create_app` agent tool and Django `App` model didn't have an `app_secrets` field. When `app_config_builder.build_app_config()` built the config, `app_secrets` defaulted to `None`. This caused the CDK to skip adding the IAM policy for `secretsmanager:GetSecretValue`.
+
+### Fix
+
+Added `app_secrets` support through the full chain:
+- Django `App` model — new JSONField for storing secret configuration
+- `create_app` tool — new parameter with normalizer for LLM input quirks
+- MCP tool schema — exposed parameter to agent
+- `app_config_builder` — passes `app.app_secrets` to `AppConfig`
+- System prompt — guidance for agent on detecting and configuring secrets
+
+### Detection Pattern
+
+The agent looks for Secrets Manager access patterns during repository analysis (GetSecretValue calls, config providers, `devopshero/{app}/secrets` paths) and populates `app_secrets` accordingly.
+
 ## 2026-01-20 - Moved infra_customer Inside Django App
 
 Moved `infra_customer/` from project root to `devopshero_app/services/infra_customer/`. This eliminates the `sys.path.insert()` hack that was documented in the previous "sys.path Manipulation: Why It's Needed" entry.
