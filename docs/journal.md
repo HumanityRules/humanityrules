@@ -6,13 +6,29 @@ Hit an issue where `cluster.cluster_name` returned `${Token[TOKEN.42]}` instead 
 
 **The problem:** When importing resources with `Fn.import_value()`, CDK returns tokens — placeholders resolved by CloudFormation during deployment, not by Python at runtime. The `ecs.Cluster.from_cluster_attributes()` call receives a token, and accessing `.cluster_name` just gives you that token back.
 
-**Current fix:** Added `cluster_name: str` to `EnvironmentInfrastructure` dataclass, populated with the known pattern `f"devopshero-{env_slug}-cluster"`. CDK constructs keep their tokens for cross-stack refs, runtime code uses the string.
+**Key insight:** CDK tokens are fundamentally unresolvable at Python runtime. There's no `Token.resolve()` method — that's by design. But you don't need `Fn.import_value` for values you already know.
 
-**TODO: Investigate further.** There should be a cleaner way to resolve CDK tokens or get actual values from imported constructs. The current approach duplicates the naming pattern in two places (stack creation and import). Look into:
-- `cdk.Token.as_string()` or similar resolution methods
-- Whether `from_cluster_attributes` with a literal string (not `Fn.import_value`) would work
-- CloudFormation export queries post-deployment
-- CDK context or runtime context patterns
+**The fix:** Use a literal string for `cluster_name` in `from_cluster_attributes()` instead of `Fn.import_value()`:
+
+```python
+# Before (returns token)
+cluster = ecs.Cluster.from_cluster_attributes(
+    scope, "ImportedCluster",
+    cluster_name=Fn.import_value(f"{prefix}-cluster-name"),  # Token!
+    vpc=vpc,
+)
+
+# After (returns actual string)
+cluster = ecs.Cluster.from_cluster_attributes(
+    scope, "ImportedCluster",
+    cluster_name=f"{prefix}-cluster",  # Literal string
+    vpc=vpc,
+)
+```
+
+Now `cluster.cluster_name` returns `"devopshero-default-cluster"` instead of `"${Token[TOKEN.42]}"`.
+
+**Why this works:** The cluster name is deterministic (we define it), unlike VPC/subnet IDs which are AWS-generated. VPC attributes still need `Fn.import_value`, but cluster name doesn't. No separate `cluster_name: str` field needed in `EnvironmentInfrastructure`.
 
 ## 2026-01-19 - CDK Stack Refactor: Expose Environment Infrastructure
 

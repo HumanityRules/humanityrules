@@ -601,7 +601,7 @@ def deploy(
     if not ecs_utils.start_ecs_service(
         session=session,
         service_name=resource_prefix,
-        cluster_name=app_stack.environment_infra.cluster_name,
+        cluster_name=app_stack.environment_infra.cluster.cluster_name,
     ):
         _log("deploy", "error", "Failed to start ECS service", log_callback)
         return False
@@ -615,7 +615,7 @@ def deploy(
         app_name=app_config.app_name,
         image_tag=image_tag,
         has_domain=bool(app_config.domain_name),
-        cluster_name=app_stack.environment_infra.cluster_name,
+        cluster_name=app_stack.environment_infra.cluster.cluster_name,
     )
 
     return True

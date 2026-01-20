@@ -40,11 +40,7 @@ class EnvironmentInfrastructure:
 
     vpc: ec2.IVpc
     default_security_group: ec2.ISecurityGroup
-
-    cluster: ecs.ICluster   
-    cluster_name: str       # I need to investigate more, but so far it looks like cluster.cluster_name is a CDK token, 
-                            # and all the CDK objects are opaque proxies that CloudFormation resolves at deployment time
-
+    cluster: ecs.ICluster
     task_execution_role: iam.IRole
     log_group: logs.ILogGroup
 
@@ -82,10 +78,11 @@ def import_environment_infrastructure(scope: Construct, env_slug: str) -> Enviro
         Fn.import_value(f"{prefix}-default-sg-id"),
     )
 
-    cluster_name = f"devopshero-{env_slug}-cluster"
+    # Use literal string for cluster_name so .cluster_name returns actual value, not a CDK token.
+    # VPC/subnet IDs must use Fn.import_value (AWS-generated), but cluster name is deterministic.
     cluster = ecs.Cluster.from_cluster_attributes(
         scope, "ImportedCluster",
-        cluster_name=Fn.import_value(f"{prefix}-cluster-name"),  # Token for CDK cross-stack refs
+        cluster_name=f"{prefix}-cluster",
         vpc=vpc,
         security_groups=[],
     )
@@ -105,7 +102,6 @@ def import_environment_infrastructure(scope: Construct, env_slug: str) -> Enviro
         vpc=vpc,
         default_security_group=default_security_group,
         cluster=cluster,
-        cluster_name=cluster_name,
         task_execution_role=task_execution_role,
         log_group=log_group,
     )
