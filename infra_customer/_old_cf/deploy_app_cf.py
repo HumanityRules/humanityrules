@@ -327,6 +327,7 @@ def deploy(
         account_id=account_id,
         region=region,
         app_name=app_config.app_name,
+        env_slug="default",
         image_tag=image_tag,
         has_domain=bool(app_config.domain_name),
         cluster_name="devopshero-cluster",

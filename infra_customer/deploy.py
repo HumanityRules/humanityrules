@@ -39,9 +39,6 @@ TARGET_ACCOUNT_ID = "266117665083"
 TARGET_EXTERNAL_ID = "9e62c988-09dd-4f96-b5a7-a67646dd285b"
 TARGET_REGION = "us-east-1"
 
-# Default workspace slug for CLI deployments
-DEFAULT_WORKSPACE_SLUG = "cli"
-
 
 def main():
     parser = argparse.ArgumentParser(
@@ -84,21 +81,12 @@ def main():
         default="latest",
         help="Docker image tag (default: latest). Only used with --app",
     )
-    parser.add_argument(
-        "--workspace",
-        default=DEFAULT_WORKSPACE_SLUG,
-        help=f"Workspace slug (default: '{DEFAULT_WORKSPACE_SLUG}'). Only used with --app",
-    )
 
     args = parser.parse_args()
 
     # Validate args
     if args.image_tag != "latest" and args.base:
         print("--image-tag is only valid with --app")
-        sys.exit(1)
-
-    if args.workspace != DEFAULT_WORKSPACE_SLUG and args.base:
-        print("--workspace is only valid with --app")
         sys.exit(1)
 
     if args.synth_only and args.teardown:
@@ -132,7 +120,6 @@ def main():
         app_config = example_apps.get_app_config(
             app_name=args.app,
             env_slug=args.env,
-            workspace_slug=args.workspace,
         )
 
         if args.teardown:
@@ -140,7 +127,6 @@ def main():
                 session=session,
                 app_config=app_config,
                 env_slug=args.env,
-                workspace_slug=args.workspace,
             )
         else:
             success = deploy_app.deploy(
@@ -150,7 +136,6 @@ def main():
                 app_config=app_config,
                 image_tag=args.image_tag,
                 env_slug=args.env,
-                workspace_slug=args.workspace,
                 synth_only=args.synth_only,
                 log_callback=None,
             )

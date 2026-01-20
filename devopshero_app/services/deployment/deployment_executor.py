@@ -202,7 +202,6 @@ def run_deployment(deployment_id: str) -> bool:
             app_config=app_config,
             image_tag=deployment.image_tag,
             env_slug=environment.slug,
-            workspace_slug=workspace.slug,
             synth_only=False,
             log_callback=_make_log_callback(deployment),
         )

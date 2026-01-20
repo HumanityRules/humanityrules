@@ -72,7 +72,7 @@ class AppConfig:
 
     # Core identifiers
     app_name: str  # e.g., "simple-dashboard" - used in resource names
-    ecr_repo_name: str  # e.g., "devopshero/simple-dashboard"
+    ecr_repo_name: str  # e.g., "doh/default/simple-dashboard"
 
     # Container configuration
     container_port: int

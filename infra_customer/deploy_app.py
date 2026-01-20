@@ -220,7 +220,7 @@ class AuroraClusterStack(Stack):
             raise ValueError(f"Unsupported deployment mode: {deployment.mode}")
 
         cluster_identifier = f"{resource_prefix}-aurora"[:63]
-        secret_name = f"devopshero/{app_config.app_name}/aurora/credentials"
+        secret_name = f"doh/{app_config.app_name}/aurora/credentials"
 
         self.cluster = rds.DatabaseCluster(
             self, "AuroraCluster",
@@ -247,7 +247,7 @@ class AuroraClusterStack(Stack):
         self.port = str(self.cluster.cluster_endpoint.port)
         self.secret_arn = self.cluster.secret.secret_arn
 
-        connection_secret_name = f"devopshero/{app_config.app_name}/aurora/connection"
+        connection_secret_name = f"doh/{app_config.app_name}/aurora/connection"
         self.connection_secret = self._create_connection_secret(
             connection_secret_name=connection_secret_name,
             engine_family=database_config.engine.family,
@@ -329,7 +329,7 @@ class AppWithAlbStack(Stack):
         if app_config.app_secrets:
             task_role.add_to_policy(iam.PolicyStatement(
                 actions=["secretsmanager:GetSecretValue"],
-                resources=[f"arn:aws:secretsmanager:{Aws.REGION}:{Aws.ACCOUNT_ID}:secret:devopshero/{app_config.app_name}/*"],
+                resources=[f"arn:aws:secretsmanager:{Aws.REGION}:{Aws.ACCOUNT_ID}:secret:doh/{app_config.app_name}/*"],
             ))
         if database_connection_secret:
             task_role.add_to_policy(iam.PolicyStatement(
@@ -393,7 +393,7 @@ class AppWithAlbStack(Stack):
 
         alb = elbv2.ApplicationLoadBalancer(
             self, "ApplicationLoadBalancer",
-            load_balancer_name=f"devopshero-{env_slug}-{app_config.app_name}"[:32],
+            load_balancer_name=f"doh-{env_slug}-{app_config.app_name}"[:32],
             vpc=self.environment_infra.vpc,
             internet_facing=True,
             security_group=alb_security_group,
@@ -402,7 +402,7 @@ class AppWithAlbStack(Stack):
 
         target_group = elbv2.ApplicationTargetGroup(
             self, "TargetGroup",
-            target_group_name=f"devopshero-{env_slug}-{app_config.app_name}"[:32],
+            target_group_name=f"doh-{env_slug}-{app_config.app_name}"[:32],
             vpc=self.environment_infra.vpc,
             port=app_config.container_port,
             protocol=elbv2.ApplicationProtocol.HTTP,
@@ -481,7 +481,6 @@ def deploy(
     app_config: appconfig.AppConfig,
     image_tag: str,
     env_slug: str,
-    workspace_slug: str,
     synth_only: bool,
     log_callback: LogCallback,
 ) -> bool:
@@ -497,7 +496,6 @@ def deploy(
         app_config: Application configuration.
         image_tag: Docker image tag to deploy.
         env_slug: Environment slug (e.g., "default", "prod").
-        workspace_slug: Workspace slug for resource naming.
         synth_only: If True, only synthesize templates, don't deploy.
         log_callback: Optional callback for logging progress.
 
@@ -506,8 +504,8 @@ def deploy(
     """
     _log("deploy", "info", f"Deploying app: {app_config.app_name} to environment: {env_slug}", log_callback)
 
-    # Resource prefix for consistent naming: devopshero-{env}-{workspace}-{app}
-    resource_prefix = f"devopshero-{env_slug}-{workspace_slug}-{app_config.app_name}"
+    # Resource prefix for consistent naming: doh-{env}-{app} (app slugs are globally unique)
+    resource_prefix = f"doh-{env_slug}-{app_config.app_name}"
 
     # Verify infrastructure exists
     cf_client = session.client("cloudformation")
@@ -625,14 +623,13 @@ def teardown(
     session: boto3.Session,
     app_config: appconfig.AppConfig,
     env_slug: str,
-    workspace_slug: str,
 ) -> bool:
     """
     Delete app-specific CDK stacks (ECR, ALB, ECS service, Aurora if applicable).
     """
     cf_client = session.client("cloudformation")
 
-    resource_prefix = f"devopshero-{env_slug}-{workspace_slug}-{app_config.app_name}"
+    resource_prefix = f"doh-{env_slug}-{app_config.app_name}"
 
     # App-specific stacks in reverse dependency order
     stacks_to_delete = [

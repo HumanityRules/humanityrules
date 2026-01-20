@@ -88,8 +88,8 @@ def build_app_config(app: App, environment: Environment) -> appconfig.AppConfig:
     """
     workspace = app.workspace
 
-    # Build ECR repo name with environment and workspace context
-    ecr_repo_name = f"devopshero/{environment.slug}/{workspace.slug}/{app.slug}"
+    # Build ECR repo name (app slugs are globally unique, so no workspace prefix needed)
+    ecr_repo_name = f"doh/{environment.slug}/{app.slug}"
 
     # Extract app source path from workspace repo URL
     app_source_path = extract_repo_path(workspace.primary_repo_url)

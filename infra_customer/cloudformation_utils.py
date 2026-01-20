@@ -204,7 +204,7 @@ def get_stack_output(cf_client, stack_name: str, output_key: str) -> str | None:
 
 def get_app_urls(cf_client, app_name: str, has_domain: bool) -> dict[str, str | None]:
     """Get the app URLs from CloudFormation stack outputs."""
-    stack_name = f"devopshero-app-with-alb-{app_name}"
+    stack_name = f"doh-app-with-alb-{app_name}"
 
     urls = {
         "alb_url": get_stack_output(cf_client, stack_name=stack_name, output_key="AlbUrl"),

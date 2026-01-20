@@ -144,11 +144,11 @@ async def create_app(
                 f"Datastore {datastore_id} not found or doesn't belong to workspace."
             )
 
-    # Generate unique slug within workspace
+    # Generate globally unique slug (app names must be unique across all workspaces)
     base_slug = slugify(name)
     slug = base_slug
     counter = 1
-    while await App.objects.filter(workspace=workspace, slug=slug).aexists():
+    while await App.objects.filter(slug=slug).aexists():
         slug = f"{base_slug}-{counter}"
         counter += 1
 

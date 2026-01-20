@@ -1,5 +1,55 @@
 # DevOpsHero Development Journal
 
+## 2026-01-20 - Globally Unique App Names
+
+Discovered a naming mismatch: ECS services were created with `{env_slug}-{app_name}` but started with just `app_name`. Investigation revealed deeper issues with the resource naming strategy.
+
+### The Problem
+
+The `resource_prefix` pattern was `devopshero-{env_slug}-{workspace_slug}-{app_name}`, producing names like `devopshero-default-acme-corp-simple-dashboard` (45+ chars). This caused several problems:
+
+- **ALB/TG limits**: AWS limits these to 32 characters, forcing truncation that could cause collisions
+- **Inconsistent naming**: Some resources used full prefix, others used shorter variants
+- **Workspace collision risk**: The domain model says "multiple workspaces can deploy to the same environment" — if two workspaces had apps with the same name, they'd collide on resources that didn't include workspace_slug
+
+### The Decision: Globally Unique App Names
+
+Adopted the same constraint as Heroku, Render, and Railway: **app slugs must be globally unique across all workspaces**. This simplifies everything:
+
+- **New resource prefix**: `doh-{env_slug}-{app_slug}` (e.g., `doh-default-simple-dashboard` = 26 chars)
+- **New ECR path**: `doh/{env_slug}/{app_slug}`
+- **Removed workspace_slug**: No longer needed in any resource naming
+
+The `env_slug` remains because the same app can deploy to multiple environments (dev/staging/prod), each needing separate AWS resources.
+
+### Why "doh" Instead of "devopshero"
+
+"DevOps Hero" abbreviates to "DOH" (already in AGENTS.md). Using `doh-` instead of `devopshero-` saves 7 characters per resource name, keeping us well under AWS limits.
+
+### Implementation
+
+1. **Model**: Changed `App.slug` from `unique_together = [["workspace", "slug"]]` to `unique=True`
+2. **Validation**: `create_app` now checks global uniqueness, not workspace-scoped
+3. **Infrastructure**: Removed `workspace_slug` parameter from `deploy()` and `teardown()`
+4. **CLI**: Removed `--workspace` argument from `deploy.py`
+5. **AWS Resources**: Changed app-specific resource naming from `devopshero-*` to `doh-*`:
+   - ALB, target groups, ECS services, task roles
+   - Secrets Manager paths (`doh/{app}/...`)
+
+**Not changed**:
+- Base infrastructure (VPC, cluster, task execution role, log groups) — looks more aesthetic with full "devopshero", but decision might change in the future.
+- Cross-account AssumeRole name (`devopshero-{external_id}`) — installed in customer accounts via CloudFormation
+
+### Naming Convention Decision: app_name vs app_slug in AppConfig
+
+The `AppConfig` dataclass (infra layer) uses `app_name` but receives `app.slug` from Django. Considered renaming to `app_slug` for consistency but decided against it:
+
+- **Bounded context translation**: Django uses "slug" as the canonical identifier; infrastructure uses "name" when creating AWS resources. The `app_config_builder` translates between these contexts.
+- **Natural infra terminology**: `container_name=app_config.app_name` reads better than `container_name=app_config.app_slug`
+- **Semantic accuracy**: The slug IS the name used for resources — the comment "used in resource names" is correct
+
+This is acceptable translation between bounded contexts, not a naming inconsistency.
+
 ## 2026-01-20 - CDK Tokens: Runtime vs Synthesis Values
 
 Hit an issue where `cluster.cluster_name` returned `${Token[TOKEN.42]}` instead of the actual cluster name when calling AWS SDK at runtime. The ECS service start failed with "Cluster not found."

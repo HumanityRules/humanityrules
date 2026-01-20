@@ -73,7 +73,7 @@ def build_and_push_docker_image(
         account_id: AWS account ID
         region: AWS region
         app_name: Application name (for logging)
-        ecr_repo_name: ECR repository name (e.g., "devopshero/simple-dashboard")
+        ecr_repo_name: ECR repository name (e.g., "doh/default/simple-dashboard")
         app_source_path: Path to the app source directory containing Dockerfile
         image_tag: Docker image tag (e.g., "latest", "v1.0.0")
 
