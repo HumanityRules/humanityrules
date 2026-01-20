@@ -86,10 +86,10 @@
 
 <script type="module">
 /**
- * Chat streaming functionality using SSE and streaming-markdown.
+ * Chat streaming functionality using SSE and marked.js.
  * Handles real-time message streaming, markdown rendering, and tool execution display.
  */
-import { parser, parser_write, parser_end, default_renderer } from 'https://cdn.jsdelivr.net/npm/streaming-markdown@0.2.15/smd.min.js';
+import { marked } from 'https://cdn.jsdelivr.net/npm/marked@12.0.2/+esm';
 
 const container = document.getElementById('messages-container');
 const messages = document.getElementById('messages');
@@ -102,6 +102,21 @@ function scrollToBottomSmooth() {
     container.scrollTo({ top: container.scrollHeight, behavior: 'smooth' });
 }
 
+marked.setOptions({ gfm: true, breaks: false });
+
+function renderMarkdown(targetEl, markdownText) {
+    if (!targetEl) {
+        return;
+    }
+    targetEl.innerHTML = marked.parse(markdownText);
+}
+
+function resetStreamingState() {
+    window.markdownStreamBuffer = '';
+    window.markdownPendingBuffer = '';
+    window.markdownTargetEl = null;
+}
+
 /**
  * Render markdown content on page load (for messages loaded from database).
  */
@@ -111,10 +126,7 @@ function renderStoredMarkdown() {
         if (scriptEl) {
             const markdown = scriptEl.textContent;
             scriptEl.remove();
-            const renderer = default_renderer(el);
-            const p = parser(renderer);
-            parser_write(p, markdown);
-            parser_end(p);
+            renderMarkdown(el, markdown);
         }
     });
 }
@@ -172,7 +184,7 @@ function handleThinking(data) {
 }
 
 /**
- * Handle sse-start events (initialize streaming markdown parser).
+ * Handle sse-start events (initialize streaming markdown buffers).
  */
 function handleStart(data) {
     const template = document.createElement('template');
@@ -188,36 +200,59 @@ function handleStart(data) {
 
     const streamingText = document.getElementById('streaming-text');
     if (streamingText) {
-        window.smdRenderer = default_renderer(streamingText);
-        window.smdParser = parser(window.smdRenderer);
+        window.markdownStreamBuffer = '';
+        window.markdownPendingBuffer = '';
+        window.markdownTargetEl = streamingText;
     }
     scrollToBottomSmooth();
 }
 
 /**
- * Handle sse-text-delta events (streaming text chunks via markdown parser).
+ * Handle sse-text-delta events (streaming text chunks via line buffering).
  */
 function handleTextDelta(data) {
     try {
         const parsed = JSON.parse(data);
-        if (parsed.text && window.smdParser) {
-            parser_write(window.smdParser, parsed.text);
-            scrollToBottomSmooth();
+        if (!parsed.text || !window.markdownTargetEl) {
+            return;
         }
+        let pendingBuffer = window.markdownPendingBuffer || '';
+        let streamBuffer = window.markdownStreamBuffer || '';
+        pendingBuffer += parsed.text;
+        if (!pendingBuffer.includes('\n')) {
+            window.markdownPendingBuffer = pendingBuffer;
+            return;
+        }
+        const parts = pendingBuffer.split('\n');
+        pendingBuffer = parts.pop() ?? '';
+        streamBuffer += `${parts.join('\n')}\n`;
+        window.markdownPendingBuffer = pendingBuffer;
+        window.markdownStreamBuffer = streamBuffer;
+        renderMarkdown(window.markdownTargetEl, streamBuffer + pendingBuffer);
+        scrollToBottomSmooth();
     } catch (e) {
         console.error('Failed to parse sse-text-delta:', e);
     }
+}
+
+function finalizeStreamingRender() {
+    if (!window.markdownTargetEl) {
+        return;
+    }
+    const streamBuffer = window.markdownStreamBuffer || '';
+    const pendingBuffer = window.markdownPendingBuffer || '';
+    const combinedBuffer = streamBuffer + pendingBuffer;
+    window.markdownStreamBuffer = combinedBuffer;
+    window.markdownPendingBuffer = '';
+    renderMarkdown(window.markdownTargetEl, combinedBuffer);
 }
 
 /**
  * Handle sse-text-flush events (finalize streaming before tool call).
  */
 function handleTextFlush() {
-    if (window.smdParser) {
-        parser_end(window.smdParser);
-        window.smdParser = null;
-        window.smdRenderer = null;
-    }
+    finalizeStreamingRender();
+    resetStreamingState();
     const streamingMessage = document.getElementById('streaming-message');
     if (streamingMessage) {
         const streamingText = streamingMessage.querySelector('#streaming-text');
@@ -234,11 +269,8 @@ function handleTextFlush() {
  * Handle sse-complete events (finalize final streaming message).
  */
 function handleComplete() {
-    if (window.smdParser) {
-        parser_end(window.smdParser);
-        window.smdParser = null;
-        window.smdRenderer = null;
-    }
+    finalizeStreamingRender();
+    resetStreamingState();
     const thinkingIndicator = document.getElementById('thinking-indicator');
     if (thinkingIndicator) thinkingIndicator.outerHTML = '<div id="thinking-indicator"></div>';
     const streamingMessage = document.getElementById('streaming-message');

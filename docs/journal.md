@@ -1,5 +1,10 @@
 # DevOpsHero Development Journal
 
+## 2026-01-20 14:09 - Fix markdown underscore rendering
+
+- Switched chat markdown rendering to marked.js for both stored and streaming paths so intraword underscores display correctly.
+- Updated streaming to buffer by line and re-render on newline/flush using the same renderer for a single codepath.
+
 ## 2026-01-20 - App Secrets Support in Agent Flow
 
 Fixed `AccessDeniedException` when apps tried to read secrets from AWS Secrets Manager. The `app_secrets` field was defined in `AppConfig` but never populated through the agent flow.
