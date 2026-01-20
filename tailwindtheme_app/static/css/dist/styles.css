@@ -749,6 +749,9 @@
   .resize {
     resize: both;
   }
+  .resize-none {
+    resize: none;
+  }
   .list-none {
     list-style-type: none;
   }
