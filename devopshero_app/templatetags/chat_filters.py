@@ -15,7 +15,7 @@ def tool_display_name(metadata: dict) -> str:
     """Get display name with colon suffix if main param exists."""
     tool_name = metadata.get("tool_name", "")
     parameters = metadata.get("parameters", {})
-    display_name = mcp_tools.get_tool_display_name(tool_name)
+    display_name = mcp_tools.get_tool_display_name(tool_name, parameters)
     main_param = mcp_tools.get_tool_main_param(tool_name, parameters)
     if main_param:
         return f"{display_name}: "

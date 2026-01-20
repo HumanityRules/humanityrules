@@ -94,8 +94,13 @@ TOOL_DISPLAY_NAMES = {
 }
 
 
-def get_tool_display_name(full_name: str) -> str:
+def get_tool_display_name(full_name: str, parameters: dict | None) -> str:
     """Get the human-friendly display name for an MCP tool."""
+    # Special handling for Task tool - derive display name from sub-agent type
+    if full_name == "Task" and parameters:
+        subagent_type = parameters.get("subagent_type", "Task")
+        return subagent_type.replace("-", " ").title()
+
     return TOOL_DISPLAY_NAMES.get(full_name, full_name)
 
 
@@ -115,18 +120,65 @@ TOOL_MAIN_PARAMS = {
     "Read": "file_path",
     "Shell": "description",
     "Bash": "description",
-    "Glob": "pattern",
+    # Glob and Grep have special handling in get_tool_main_param
 }
 
 
 def get_tool_main_param(full_name: str, parameters: dict) -> str | None:
     """Extract and format the main parameter value for display."""
+    if not parameters:
+        return None
+
+    # Special handling for search tools: show pattern and optionally path/directory
+    if full_name == "Grep":
+        return _format_grep_params(parameters)
+    if full_name == "Glob":
+        return _format_glob_params(parameters)
+
     main_param = TOOL_MAIN_PARAMS.get(full_name)
-    if not main_param or not parameters or main_param not in parameters:
+    if not main_param or main_param not in parameters:
         return None
 
     value = parameters[main_param]
     return _format_param_value(full_name, value)
+
+
+def _format_grep_params(parameters: dict) -> str | None:
+    """Format Grep tool parameters for display."""
+    pattern = parameters.get("pattern")
+    if not pattern:
+        return None
+
+    # Truncate long patterns
+    if len(pattern) > 30:
+        pattern = pattern[:27] + "..."
+
+    path = parameters.get("path")
+    if path:
+        # Extract just the filename or last path component
+        path_display = path.rstrip("/").split("/")[-1]
+        return f"{pattern} in {path_display}"
+
+    return pattern
+
+
+def _format_glob_params(parameters: dict) -> str | None:
+    """Format Glob tool parameters for display."""
+    pattern = parameters.get("pattern")
+    if not pattern:
+        return None
+
+    # Truncate long patterns
+    if len(pattern) > 30:
+        pattern = pattern[:27] + "..."
+
+    directory = parameters.get("path")
+    if directory:
+        # Extract just the last path component
+        dir_display = directory.rstrip("/").split("/")[-1]
+        return f"{pattern} in {dir_display}"
+
+    return pattern
 
 
 def _format_param_value(tool_name: str, value: Any) -> str:

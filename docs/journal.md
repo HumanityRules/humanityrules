@@ -1,5 +1,9 @@
 # DevOpsHero Development Journal
 
+## 2026-01-20 - Improved Tool Display Titles for Grep/Glob
+
+Enhanced agent chat UI to show more context in tool call titles. Grep and Glob now display both the search pattern and target path (e.g., "Grep — foo.*bar in utils.py"). Also added special handling for Task tool to derive display name from sub-agent type.
+
 ## 2026-01-20 - Route53 Domain Discovery Agent Tool
 
 Added `list_hosted_zones` agent tool to discover available Route53 domains in customer AWS accounts. This enables the agent to configure custom domains during deployment conversations.

@@ -216,7 +216,7 @@ def _render_tool_start(data: dict) -> str:
     """Render HTML for tool execution start."""
     tool_full_name = data.get("name", "unknown")
     parameters = data.get("input", {})
-    tool_name = get_tool_display_name(tool_full_name)
+    tool_name = get_tool_display_name(tool_full_name, parameters)
     tool_main_param = get_tool_main_param(tool_full_name, parameters)
     if tool_main_param:
         tool_name = f"{tool_name}: "
@@ -249,7 +249,7 @@ def _render_tool_result(data: dict) -> str:
     except (json.JSONDecodeError, TypeError):
         result_json = str(result)
 
-    tool_name = get_tool_display_name(tool_full_name)
+    tool_name = get_tool_display_name(tool_full_name, parameters)
     tool_main_param = get_tool_main_param(tool_full_name, parameters)
     if tool_main_param:
         tool_name = f"{tool_name}: "

@@ -144,7 +144,7 @@ class PrintState:
 def _format_tool_label(tool_name: str, parameters: dict[str, Any]) -> str:
     import devopshero_app.services.agent.mcp_tools as mcp_tools
 
-    display_name = mcp_tools.get_tool_display_name(tool_name)
+    display_name = mcp_tools.get_tool_display_name(tool_name, parameters)
     main_param = mcp_tools.get_tool_main_param(tool_name, parameters)
     if main_param:
         return f"{display_name}: {main_param}"
