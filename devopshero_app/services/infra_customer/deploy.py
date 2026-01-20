@@ -28,10 +28,10 @@ import argparse
 import os
 import sys
 
-import deploy_app
-import deploy_base
-import example_apps
-import iam_utils
+from . import deploy_app
+from . import deploy_base
+from . import example_apps
+from . import iam_utils
 
 
 # Target account configuration

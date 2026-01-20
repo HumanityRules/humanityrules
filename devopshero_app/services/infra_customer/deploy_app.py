@@ -19,14 +19,14 @@ from aws_cdk import aws_route53_targets as targets
 from aws_cdk import aws_secretsmanager as secretsmanager
 from constructs import Construct
 
-import appconfig
-import cdk_utils
-import cloudformation_utils
-import deploy_base
-import ecr_utils
-import ecs_utils
-import route53_utils
-import secrets_utils
+from . import appconfig
+from . import cdk_utils
+from . import cloudformation_utils
+from . import deploy_base
+from . import ecr_utils
+from . import ecs_utils
+from . import route53_utils
+from . import secrets_utils
 
 
 # Type alias for log callback: (phase, level, message) -> None
