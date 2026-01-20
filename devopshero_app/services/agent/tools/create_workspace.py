@@ -32,7 +32,7 @@ class WorkspaceSummary:
 
 async def create_workspace(
     name: str,
-    aws_account_id: str,
+    aws_account_uuid: str,
     aws_region: str,
     organization: Organization,
     user: User,
@@ -44,7 +44,7 @@ async def create_workspace(
 
     Args:
         name: Human-readable name for the workspace.
-        aws_account_id: UUID of the AWSAccount to use for deployments.
+        aws_account_uuid: Internal UUID of the AWSAccount record (not the 12-digit AWS account number).
         aws_region: AWS region for deployments (e.g., us-east-1).
         organization: The Organization this workspace belongs to.
         user: The User creating the workspace.
@@ -71,12 +71,12 @@ async def create_workspace(
     # Validate AWS account exists and belongs to the organization
     try:
         aws_account = await AWSAccount.objects.aget(
-            id=aws_account_id,
+            id=aws_account_uuid,
             organization=organization,
         )
     except AWSAccount.DoesNotExist:
         raise ValueError(
-            f"AWS account {aws_account_id} not found or doesn't belong to your organization."
+            f"AWS account {aws_account_uuid} not found or doesn't belong to your organization."
         )
 
     # Check account is connected

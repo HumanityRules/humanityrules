@@ -104,7 +104,7 @@ TOOL_MAIN_PARAMS = {
     "mcp__devopshero__create_workspace": "name",
     "mcp__devopshero__select_workspace": "workspace_name",
     "mcp__devopshero__initiate_aws_connection": "account_name",
-    "mcp__devopshero__list_hosted_zones": "aws_account_id",
+    "mcp__devopshero__list_hosted_zones": "aws_account_uuid",
     "mcp__devopshero__scan_repository": "repo_url",
     "mcp__devopshero__create_app": "name",
     "mcp__devopshero__create_datastore": "name",
@@ -174,17 +174,19 @@ async def list_aws_accounts(args: dict[str, Any]) -> dict[str, Any]:
     (
         "List Route53 hosted zones (domains) in a connected AWS account. "
         "Use this to discover available domains for app configuration. "
-        "Returns zone ID, domain name, and record count for each public hosted zone."
+        "Returns zone ID, domain name, and record count for each public hosted zone. "
+        "The aws_account_uuid parameter is the internal UUID from list_aws_accounts (the 'id' field), "
+        "not the 12-digit AWS account number."
     ),
     {
-        "aws_account_id": str,
+        "aws_account_uuid": str,
     },
 )
 async def list_hosted_zones(args: dict[str, Any]) -> dict[str, Any]:
     """List Route53 hosted zones in an AWS account."""
     conversation = _get_conversation()
     zones = await _list_hosted_zones(
-        aws_account_id=args["aws_account_id"],
+        aws_account_uuid=args["aws_account_uuid"],
         organization=conversation.organization,
     )
     return _mcp_response(zones)
@@ -256,11 +258,13 @@ async def select_workspace(args: dict[str, Any]) -> dict[str, Any]:
         "Create a new workspace for organizing applications and deployments. "
         "A workspace binds a repository to an AWS account and region. "
         "You must have at least one connected AWS account to create a workspace. "
-        "The primary_repo_url is required and must be a file:// URL."
+        "The primary_repo_url is required and must be a file:// URL. "
+        "The aws_account_uuid parameter is the internal UUID from list_aws_accounts (the 'id' field), "
+        "not the 12-digit AWS account number."
     ),
     {
         "name": str,
-        "aws_account_id": str,
+        "aws_account_uuid": str,
         "aws_region": str,
         "primary_repo_url": str,
         "description": str,
@@ -271,7 +275,7 @@ async def create_workspace(args: dict[str, Any]) -> dict[str, Any]:
     conversation = _get_conversation()
     result = await _create_workspace(
         name=args["name"],
-        aws_account_id=args["aws_account_id"],
+        aws_account_uuid=args["aws_account_uuid"],
         aws_region=args["aws_region"],
         organization=conversation.organization,
         user=conversation.user,
