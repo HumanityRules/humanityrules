@@ -412,7 +412,7 @@ class App(models.Model):
         related_name="apps",
     )
     name = models.CharField(max_length=255)
-    slug = models.SlugField(max_length=255)
+    slug = models.SlugField(max_length=255, unique=True)
     app_type = models.CharField(
         max_length=20,
         choices=AppType.choices,
@@ -473,7 +473,6 @@ class App(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
-        unique_together = [["workspace", "slug"]]
         ordering = ["-created_at"]
 
     def __str__(self):
