@@ -171,6 +171,75 @@ class AWSAccount(models.Model):
         return f"{base_url}?region=us-east-1#/stacks/quickcreate?{urllib.parse.urlencode(params)}"
 
 
+class Environment(models.Model):
+    """
+    An environment within an AWS account (e.g., default, prod, staging).
+    Environments are account-scoped: multiple workspaces can deploy to the same environment.
+    Each environment has its own VPC and ECS cluster.
+    """
+
+    class Status(models.TextChoices):
+        PENDING = "pending", "Pending"  # Created, no infra yet
+        PROVISIONING = "provisioning", "Provisioning"  # Base infra deploying
+        READY = "ready", "Ready"  # VPC + cluster exist
+        ERROR = "error", "Error"  # Provisioning failed
+
+    id = models.UUIDField(
+        primary_key=True,
+        default=uuid.uuid7,
+        editable=False,
+    )
+    aws_account = models.ForeignKey(
+        AWSAccount,
+        on_delete=models.CASCADE,
+        related_name="environments",
+    )
+    name = models.CharField(max_length=255)
+    slug = models.SlugField(max_length=255)
+    status = models.CharField(
+        max_length=20,
+        choices=Status.choices,
+        default=Status.PENDING,
+    )
+    status_message = models.TextField(blank=True)
+
+    # Stack names (set when provisioning starts)
+    vpc_stack_name = models.CharField(
+        max_length=255,
+        blank=True,
+        help_text="CloudFormation stack name for VPC",
+    )
+    cluster_stack_name = models.CharField(
+        max_length=255,
+        blank=True,
+        help_text="CloudFormation stack name for ECS cluster",
+    )
+
+    # AWS outputs (populated after provisioning)
+    vpc_id = models.CharField(
+        max_length=255,
+        blank=True,
+        help_text="VPC ID after provisioning",
+    )
+    cluster_arn = models.CharField(
+        max_length=2048,
+        blank=True,
+        help_text="ECS cluster ARN after provisioning",
+    )
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "Environment"
+        verbose_name_plural = "Environments"
+        ordering = ["name"]
+        unique_together = [["aws_account", "slug"]]
+
+    def __str__(self):
+        return f"{self.name} ({self.aws_account.name})"
+
+
 class Workspace(models.Model):
     """A workspace containing apps and configuration."""
 
@@ -460,6 +529,12 @@ class Conversation(models.Model):
         null=True,
         help_text="Claude Agent SDK session ID for conversation continuity",
     )
+    deployments = models.ManyToManyField(
+        "Deployment",
+        blank=True,
+        related_name="conversations",
+        help_text="Deployments triggered from this conversation",
+    )
 
     class Meta:
         ordering = ["-updated_at"]
@@ -543,13 +618,13 @@ class Deployment(models.Model):
         on_delete=models.CASCADE,
         related_name="deployments",
     )
-    conversation = models.ForeignKey(
-        Conversation,
-        on_delete=models.SET_NULL,
+    environment = models.ForeignKey(
+        Environment,
+        on_delete=models.PROTECT,
+        related_name="deployments",
         null=True,
         blank=True,
-        related_name="deployments",
-        help_text="The conversation that triggered this deployment",
+        help_text="The environment this deployment targets",
     )
 
     # Source

@@ -12,7 +12,7 @@ from django.http import JsonResponse
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_POST
 
-from ..models import AWSAccount
+from ..models import AWSAccount, Environment
 
 logger = logging.getLogger(__name__)
 
@@ -36,7 +36,7 @@ def aws_install_account_callback(request):
     expected_token = f"Bearer {settings.DOH_API_SECRET_KEY}"
     
     if auth_header != expected_token:
-        logger.warning("AWS callback received with invalid authorization")
+        logger.error("AWS callback received with invalid authorization")
         return JsonResponse(
             {"error": "Invalid authorization"},
             status=401,
@@ -69,7 +69,7 @@ def aws_install_account_callback(request):
     try:
         uuid.UUID(external_id)
     except (ValueError, TypeError):
-        logger.warning(f"AWS callback received with invalid UUID: {external_id}")
+        logger.error(f"AWS callback received with invalid UUID: {external_id}")
         return JsonResponse(
             {"error": f"Invalid external_id format: must be a valid UUID"},
             status=400,
@@ -79,7 +79,7 @@ def aws_install_account_callback(request):
     try:
         aws_account = AWSAccount.objects.get(external_id=external_id)
     except AWSAccount.DoesNotExist:
-        logger.warning(f"AWS callback received for unknown external_id: {external_id}")
+        logger.error(f"AWS callback received for unknown external_id: {external_id}")
         return JsonResponse(
             {"error": "Unknown external_id"},
             status=404,
@@ -92,6 +92,16 @@ def aws_install_account_callback(request):
         aws_account.status = AWSAccount.Status.CONNECTED
         aws_account.status_message = f"Connected from {stack_region}"
         aws_account.save()
+        
+        # Auto-create default environment for this account
+        Environment.objects.get_or_create(
+            aws_account=aws_account,
+            slug="default",
+            defaults={
+                "name": "default",
+                "status": Environment.Status.PENDING,
+            },
+        )
         
         logger.info(
             f"AWS account connected: {aws_account.name} "

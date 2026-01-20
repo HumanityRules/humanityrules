@@ -86,7 +86,7 @@ def build_and_push_docker_image(
     print(f"   Source: {app_source_path}")
     print(f"   Repository: {ecr_repo_name}")
     print(f"   Tag: {image_tag}")
-
+    
     if not app_source_path:
         print(f"   ❌ No app source path configured")
         return None
@@ -154,7 +154,7 @@ def build_and_push_docker_image(
         print(push_result.stderr)
         return None
 
-    print(f"   ✅ Image pushed to ECR: {image_uri}")
+    print(f"   ✅ Image pushed to ECR: {image_uri}\n{'='*60}\n")
 
     return image_uri
 

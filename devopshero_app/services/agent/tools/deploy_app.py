@@ -1,22 +1,18 @@
 """
 Tool for deploying applications.
 
-This tool creates deployment records and simulates deployment progress.
-In v1, this is stubbed - it does NOT trigger real infrastructure.
-Future v2 will connect to the infra_customer/ deployment engine.
+Creates a Deployment record with PENDING status. The deployment worker
+picks up pending deployments and executes them via the CDK infrastructure.
 """
 
-import uuid
-from dataclasses import dataclass, asdict
+from dataclasses import asdict, dataclass
 from datetime import datetime
-
-from django.utils import timezone
 
 from devopshero_app.models import (
     App,
-    Conversation,
     Deployment,
     DeploymentLog,
+    Environment,
     Organization,
     User,
 )
@@ -29,6 +25,7 @@ class DeploymentSummary:
     id: str
     app_id: str
     app_name: str
+    environment_name: str
     git_ref: str
     status: str
     status_message: str
@@ -53,11 +50,12 @@ async def _create_initial_logs(deployment: Deployment) -> None:
         deployment=deployment,
         phase=DeploymentLog.Phase.INIT,
         level=DeploymentLog.Level.INFO,
-        message="Deployment initiated",
+        message="Deployment queued",
         details={
             "app_name": deployment.app.name,
             "git_ref": deployment.git_ref,
             "image_tag": deployment.image_tag,
+            "environment": deployment.environment.name,
         },
     )
 
@@ -67,40 +65,50 @@ async def deploy_app(
     git_ref: str,
     organization: Organization,
     user: User,
-    conversation: Conversation | None,
+    environment_slug: str,
 ) -> DeploymentSummary:
     """
     Create a deployment for an application.
 
-    In v1 (stubbed):
-    - Creates a Deployment record with status "pending"
-    - Creates initial log entries
-    - Does NOT trigger real infrastructure deployment
-
-    Future v2 will trigger real infrastructure deployment.
+    Creates a Deployment record with status PENDING. The deployment worker
+    picks it up and executes the actual CDK deployment.
 
     Args:
         app_id: UUID of the App to deploy.
         git_ref: Git reference (branch, tag, or commit SHA) to deploy.
         organization: The Organization this deployment belongs to.
         user: The User initiating the deployment.
-        conversation: Conversation that triggered this deployment.
+        environment_slug: Target environment slug (e.g., "default").
 
     Returns:
         DeploymentSummary with the created deployment details.
 
     Raises:
-        ValueError: If app doesn't exist or doesn't belong to organization.
+        ValueError: If app doesn't exist, doesn't belong to organization,
+                    or environment not found.
     """
     # Validate app exists and belongs to organization
     try:
-        app = await App.objects.select_related("workspace").aget(
+        app = await App.objects.select_related(
+            "workspace",
+            "workspace__aws_account",
+        ).aget(
             id=app_id,
             workspace__organization=organization,
         )
     except App.DoesNotExist:
         raise ValueError(
             f"App {app_id} not found or doesn't belong to your organization."
+        )
+
+    # Get target environment
+    environment = await Environment.objects.filter(
+        aws_account=app.workspace.aws_account,
+        slug=environment_slug,
+    ).afirst()
+    if not environment:
+        raise ValueError(
+            f"Environment '{environment_slug}' not found for this workspace's AWS account."
         )
 
     # Check for existing active deployments
@@ -128,10 +136,10 @@ async def deploy_app(
     # Create deployment record
     deployment = await Deployment.objects.acreate(
         app=app,
-        conversation=conversation,
+        environment=environment,
         git_ref=git_ref,
-        git_commit_sha="",  # Would be resolved in v2
-        git_commit_message="",  # Would be fetched in v2
+        git_commit_sha="",  # Would be resolved from git
+        git_commit_message="",  # Would be fetched from git
         image_tag=image_tag,
         status=Deployment.Status.PENDING,
         status_message="Deployment queued",
@@ -145,71 +153,10 @@ async def deploy_app(
         id=str(deployment.id),
         app_id=str(app.id),
         app_name=app.name,
+        environment_name=environment.name,
         git_ref=deployment.git_ref,
         status=deployment.status,
         status_message=deployment.status_message,
         image_tag=deployment.image_tag,
         created_at=deployment.created_at.isoformat(),
-    )
-
-
-def simulate_deployment_progress(deployment_id: str) -> None:
-    """
-    Simulate deployment progress for demo purposes.
-
-    This is a helper function that advances a deployment through
-    its phases. In v1, this is called to simulate progress.
-    In v2, real deployment would update these statuses.
-
-    Args:
-        deployment_id: UUID of the deployment to advance.
-    """
-    try:
-        deployment = Deployment.objects.get(id=deployment_id)
-    except Deployment.DoesNotExist:
-        return
-
-    # Define the progression of phases
-    phase_progression = [
-        (Deployment.Status.BUILDING, DeploymentLog.Phase.BUILD, "Building Docker image..."),
-        (Deployment.Status.PUSHING, DeploymentLog.Phase.PUSH, "Pushing image to ECR..."),
-        (Deployment.Status.DEPLOYING, DeploymentLog.Phase.DEPLOY, "Deploying infrastructure..."),
-        (Deployment.Status.STARTING, DeploymentLog.Phase.HEALTH, "Starting service and running health checks..."),
-        (Deployment.Status.RUNNING, DeploymentLog.Phase.COMPLETE, "Deployment completed successfully"),
-    ]
-
-    # Find current position and advance to next
-    current_statuses = [p[0] for p in phase_progression]
-    try:
-        current_idx = current_statuses.index(deployment.status)
-        if current_idx < len(phase_progression) - 1:
-            next_status, next_phase, next_message = phase_progression[current_idx + 1]
-        else:
-            return  # Already at final state
-    except ValueError:
-        # Start from beginning if status is PENDING
-        if deployment.status == Deployment.Status.PENDING:
-            next_status, next_phase, next_message = phase_progression[0]
-            deployment.started_at = timezone.now()
-        else:
-            return
-
-    # Update deployment status
-    deployment.status = next_status
-    deployment.status_message = next_message
-
-    if next_status == Deployment.Status.RUNNING:
-        deployment.completed_at = timezone.now()
-        # Set simulated service URL
-        deployment.service_url = f"https://{deployment.app.slug}.devopshero.app"
-        deployment.alb_dns = f"{deployment.app.slug}-alb-123456.us-east-1.elb.amazonaws.com"
-
-    deployment.save()
-
-    # Create log entry
-    DeploymentLog.objects.create(
-        deployment=deployment,
-        phase=next_phase,
-        level=DeploymentLog.Level.INFO,
-        message=next_message,
     )

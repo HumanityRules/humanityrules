@@ -303,7 +303,9 @@ async def scan_repository(args: dict[str, Any]) -> dict[str, Any]:
         "Create an application configuration in the selected workspace. "
         "This defines how an app will be built and deployed. "
         "Requires a workspace to be selected first with select_workspace. "
-        "The repository URL is inherited from the workspace."
+        "The repository URL is inherited from the workspace. "
+        "For environment_variables, pass an array of objects with 'name' and 'value' keys, "
+        "e.g., [{\"name\": \"API_KEY\", \"value\": \"secret\"}]. Pass [] if no env vars needed."
     ),
     {
         "name": str,
@@ -382,13 +384,15 @@ async def create_datastore(args: dict[str, Any]) -> dict[str, Any]:
     "deploy_app",
     (
         "Deploy an application to AWS infrastructure. "
-        "Creates a deployment record and initiates the deployment process. "
-        "In v1, this creates records but does not trigger real infrastructure. "
-        "Use get_deployment_status to check progress."
+        "Creates a deployment record and triggers the deployment process. "
+        "The deployment worker will build the Docker image, push to ECR, "
+        "and deploy via CDK. Use get_deployment_status to check progress. "
+        "For environment_slug, always use 'default'."
     ),
     {
         "app_id": str,
         "git_ref": str,
+        "environment_slug": str,
     },
 )
 async def deploy_app(args: dict[str, Any]) -> dict[str, Any]:
@@ -400,14 +404,20 @@ async def deploy_app(args: dict[str, Any]) -> dict[str, Any]:
         git_ref=args["git_ref"],
         organization=conversation.organization,
         user=conversation.user,
-        conversation=conversation,
+        environment_slug=args["environment_slug"],
     )
+
+    # Link deployment to conversation via M2M
+    from devopshero_app.models import Deployment
+    deployment = await Deployment.objects.aget(id=result.id)
+    await conversation.deployments.aadd(deployment)
+
     return _mcp_response({
         **result.to_dict(),
         "note": (
-            "Deployment created. In v1, this is stubbed and does not "
-            "trigger real infrastructure. Use get_deployment_status "
-            "to check progress."
+            "Deployment created. The deployment worker will pick it up "
+            "and execute the build/push/deploy pipeline. "
+            "Use get_deployment_status to check progress."
         ),
     })
 

@@ -145,6 +145,13 @@ WORKOS_API_KEY = os.environ.get("WORKOS_API_KEY")
 # DevOpsHero API Configuration
 DOH_API_SECRET_KEY = os.environ.get("DOH_API_SECRET_KEY")
 
+# DevOpsHero AWS Control Plane Credentials (for assuming roles in customer accounts)
+DOH_AWS_ACCESS_KEY = os.environ.get("DOH_AWS_ACCESS_KEY")
+DOH_AWS_SECRET_KEY = os.environ.get("DOH_AWS_SECRET_KEY")
+
+# Deployment Worker - enable with DOH_RUN_DEPLOYMENT_WORKER=1
+DOH_RUN_DEPLOYMENT_WORKER = os.environ.get("DOH_RUN_DEPLOYMENT_WORKER") == "1"
+
 # Claude Agent Configuration
 # Priority: ANTHROPIC_API_KEY > AWS_BEDROCK_REGION
 # Bedrock credentials: AWS_BEDROCK_ACCESS_KEY_ID + AWS_BEDROCK_SECRET_ACCESS_KEY (optional, falls back to boto3 chain)

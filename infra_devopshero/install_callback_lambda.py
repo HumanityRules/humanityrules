@@ -66,7 +66,7 @@ def handler(event, context):
             if response.status >= 400:
                 raise Exception(f"Backend API returned {response.status}")
         else:
-            logger.warning("No DOH_API_ENDPOINT configured, skipping backend callback")
+            logger.error("No DOH_API_ENDPOINT configured, skipping backend callback")
 
         # Send SUCCESS response back to CloudFormation
         send_cfn_response(

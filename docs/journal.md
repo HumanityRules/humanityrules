@@ -1,26 +1,206 @@
 # DevOpsHero Development Journal
 
-## 2026-01-17 - Environment is Account-Scoped, Not Workspace-Scoped
+## 2026-01-20 - CDK Tokens: Runtime vs Synthesis Values
 
-Changed the domain model so Environments belong to AWS Accounts rather than Workspaces.
+Hit an issue where `cluster.cluster_name` returned `${Token[TOKEN.42]}` instead of the actual cluster name when calling AWS SDK at runtime. The ECS service start failed with "Cluster not found."
 
-**Previous model:** Workspace has many Environments. Each workspace has its own isolated "prod", "staging", etc. This meant N workspaces × M environments = N×M VPCs and clusters.
+**The problem:** When importing resources with `Fn.import_value()`, CDK returns tokens — placeholders resolved by CloudFormation during deployment, not by Python at runtime. The `ecs.Cluster.from_cluster_attributes()` call receives a token, and accessing `.cluster_name` just gives you that token back.
 
-**New model:** AWS Account has many Environments. Multiple workspaces can deploy to the same environment (e.g., "prod"). Apps from different workspaces share VPC and ECS cluster but have isolated app resources (ECR, ALB, Aurora).
+**Current fix:** Added `cluster_name: str` to `EnvironmentInfrastructure` dataclass, populated with the known pattern `f"devopshero-{env_slug}-cluster"`. CDK constructs keep their tokens for cross-stack refs, runtime code uses the string.
 
-**Why this is better:**
+**TODO: Investigate further.** There should be a cleaner way to resolve CDK tokens or get actual values from imported constructs. The current approach duplicates the naming pattern in two places (stack creation and import). Look into:
+- `cdk.Token.as_string()` or similar resolution methods
+- Whether `from_cluster_attributes` with a literal string (not `Fn.import_value`) would work
+- CloudFormation export queries post-deployment
+- CDK context or runtime context patterns
+
+## 2026-01-19 - CDK Stack Refactor: Expose Environment Infrastructure
+
+Exposed `environment_infra` as instance attribute on `AuroraClusterStack` and `AppWithAlbStack`. Previously a local variable, now accessible via `stack.environment_infra` after construction. Needed for external callers to access cluster name, VPC, etc.
+
+Also standardized ECS service naming to use `resource_prefix` consistently (`devopshero-{env}-{workspace}-{app}`) instead of the shorter `{env}-{app}` pattern. This aligns service names with other resources and avoids potential collisions across workspaces.
+
+## 2026-01-19 - LLM Tool Input Sanitization: The String-vs-Object Trap
+
+Deployment crashed at `deploy_app.py:340` when iterating over `environment_variables`. The Django admin showed `"{}"` stored in the JSONField. Root cause analysis revealed a subtle but important lesson about LLM tool calls.
+
+### The Bug
+
+The `App.environment_variables` field expects `[{"name": "FOO", "value": "bar"}, ...]`. The code had:
+
+```python
+environment_variables=environment_variables or [],
+```
+
+This handles `None` and empty containers (falsy values), but Claude sent `"environment_variables": "{}"` — a **string** containing braces, not an empty object. Non-empty strings are truthy, so `"{}" or []` returns `"{}"`, which gets saved to the database.
+
+### Why Claude Did This
+
+The tool schema just said `"environment_variables": list` with no format guidance. Claude interpreted "no env vars needed" as the string `"{}"` rather than an empty array `[]`. This is a common LLM pattern — they sometimes stringify values when uncertain about the expected structure.
+
+### The Fix
+
+Two-part solution:
+
+1. **Better documentation** — Updated tool description to explicitly show the expected format with an example: `[{"name": "API_KEY", "value": "secret"}]`. Pass `[]` if none needed.
+
+2. **Defensive normalization** — Added `_normalize_environment_variables()` that handles all malformed inputs:
+   - `None` → `[]`
+   - String `"{}"` → parsed, rejected as non-list → `[]`
+   - Dict `{}` → `[]`
+   - Validates each item has `name`/`value` keys
+
+### Lesson
+
+When accepting structured data from LLMs, don't trust type hints alone. LLMs can send strings that look like the right type but aren't. Always validate and normalize inputs, especially for nested structures like `list[dict]`. The `x or default` pattern only catches falsy values — it won't save you from a truthy string that happens to contain JSON-like text.
+
+## 2026-01-18 - Deployment Bridge: Closing the Loop from Django to AWS
+
+Long planning session to implement the "deployment bridge" — making the agent actually deploy apps to AWS. Started with a blank slate: the `infra_customer/` CDK code worked from CLI, the agent could create `App` records, but nothing connected them.
+
+### The Core Decision: Bridge vs. Code Generation
+
+The design doc had two interpretations:
+
+- **Option A: Agent generates CDK code** — Maximum flexibility, agent writes Python, system validates via `cdk synth`, errors fed back for retry. Requires sandbox execution.
+- **Option B: Agent populates config, fixed CDK deploys** — Keep existing CDK stacks, agent transforms `RepoAnalysisOutput` → `AppConfig`. Safer, faster to ship.
+
+**Decision: Option B (Bridge).** The existing CDK stacks work. The agent's job is configuration, not code generation. We can always add code generation later if patterns emerge that don't fit the templates.
+
+### Worker Design: Polling Thread vs Asyncio
+
+Considered in-process asyncio (`create_task` fire-and-forget) vs polling thread.
+
+**Why polling thread wins:**
+
+- **Natural decoupling** — The `deploy_app` tool just creates a DB record. Worker is a separate concern. If web process restarts between tool call and deployment starting, nothing is lost.
+- **Blocking CDK code stays blocking** — No need to wrap `deploy_app.deploy()` in `run_in_executor`. Just call it.
+- **Recovery** — On startup, worker can find deployments stuck in `BUILDING` (from a crash) and mark them failed.
+- **Testable in isolation** — Run worker standalone, point it at DB, test without web layer.
+- **1-second latency is meaningless** — Deployments take minutes. Who cares about 1 second?
+
+The asyncio approach would require `run_in_executor` for CPU-bound CDK operations and has no recovery if the process dies mid-deployment.
+
+**Migration cost is minimal** — When we add Celery/Django-Q later, only `worker.py` changes. The `run_deployment()` function stays identical.
+
+### sys.path Manipulation: Why It's Needed
+
+The `infra_customer/` directory is a **sibling** of `devopshero_app/`, not a child:
+
+```
+devopshero/
+├── devopshero_app/          ← Django app, in INSTALLED_APPS, on sys.path
+│   └── services/deployment/ ← Needs to import from infra_customer
+├── infra_customer/          ← NOT a Django app, NOT on sys.path
+│   ├── deploy_app.py
+│   └── appconfig.py
+```
+
+Django puts the project root on `sys.path`, making `devopshero_app` and its children importable. But `infra_customer` is a sibling — Python doesn't search sibling directories. Adding `__init__.py` to `infra_customer` doesn't help because the directory itself isn't discoverable.
+
+The `sys.path.insert(0, infra_customer_path)` hack makes it work. Alternatives (documented in code):
+1. Make `infra_customer` a proper package (`pyproject.toml` + `uv pip install -e`)
+2. Move `infra_customer` inside `devopshero_app`
+
+For now, the hack is contained in one place and works. Revisit if it causes problems.
+
+### The Bridge Architecture
+
+Three-layer design:
+
+```
+Django Models (App, Workspace, Environment, Datastore)
+        ↓
+app_config_builder.py → appconfig.AppConfig
+        ↓
+deploy_app.py / deploy_base.py → CDK Stacks → CloudFormation
+```
+
+- **`app_config_builder.py`** — Converts Django `App` to `appconfig.AppConfig`. Builds ECR repo name with full context: `devopshero/{env}/{workspace}/{app}`. This naming ensures isolation.
+- **`deployment_executor.py`** — Orchestrates the full deployment: get AWS session via AssumeRole, provision environment if PENDING, build AppConfig, call CDK, create logs.
+- **`deployment_worker.py`** — Polling loop with atomic claiming via `select_for_update(skip_locked=True)`.
+
+### Log Callback for Real-Time Progress
+
+Added `log_callback: Callable[[str, str, str], None]` to CDK functions. The executor passes a callback that creates `DeploymentLog` entries:
+
+```python
+def log_callback(phase, level, message):
+    DeploymentLog.objects.create(deployment=deployment, phase=phase, level=level, message=message)
+```
+
+Important while developing — we need to see what's happening. The agent can poll `get_deployment_status` to report progress to users.
+
+### Environment Infrastructure Import Centralization
+
+Created `EnvironmentInfrastructure` dataclass and `import_environment_infrastructure()` helper in `deploy_base.py`.
+
+**Why centralize but each stack still imports?** CDK constraint: `Fn.import_value()` creates constructs scoped to a Stack. You can't import in Stack A and pass the construct to Stack B — they're separate CloudFormation templates. The helper centralizes the *logic*; each stack still calls it.
+
+Named it `environment_infra` (not `env_infra`) and used directly (`environment_infra.vpc`) without extracting to local variables. Explicit is better.
+
+### Lazy Environment Provisioning — The Key Insight
+
+The flow handles base infrastructure provisioning correctly:
+
+1. AWS account connects → API callback creates Environment in `PENDING` state
+2. User deploys app → Creates Deployment in `PENDING` state
+3. Worker picks up deployment
+4. `run_deployment()` checks if environment is `PENDING` → provisions base infra first
+5. Only then proceeds to `deploy_app.deploy()`
+
+**Why this works:** `Fn.import_value()` is a CloudFormation intrinsic function. During CDK synthesis, it doesn't validate exports exist — it just generates `Fn::ImportValue` JSON. Resolution happens at CloudFormation deploy time. So base stacks can be deployed first, creating exports, then app stacks deploy and resolve the imports.
+
+### Conversation-Deployment: FK → M2M
+
+Changed from `Deployment.conversation` (FK) to `Conversation.deployments` (M2M).
+
+**Why M2M?**
+- Deployment becomes a cleaner domain entity, not coupled to chat
+- Semantically, conversation "owns" the relationship — "this conversation triggered these deployments"
+- More flexible if deployment is referenced from multiple conversations later
+
+**Why not ArrayField/JSONField?** Denormalized, no referential integrity. M2M creates a proper join table with FKs and indexes.
+
+After creating deployment, `mcp_tools.py` links it: `await conversation.deployments.aadd(deployment)`
+
+### Environment Slug: Required, Not Optional
+
+Made `environment_slug` required. Tool description tells LLM: "For environment_slug, always use 'default'."
+
+**Why:** YAGNI. We only have one environment. Optional parameter + fallback code for unused feature = unnecessary complexity. When we support multiple environments, update the tool and let LLM ask users.
+
+### Stack Naming Convention
+
+All resource names now include environment and workspace:
+
+- **Base stacks:** `devopshero-{env}-vpc`, `devopshero-{env}-cluster`
+- **App stacks:** `devopshero-{env}-{workspace}-{app}-ecr`, etc.
+- **ECR repos:** `devopshero/{env}/{workspace}/{app}`
+
+Prevents collisions when multiple workspaces deploy apps with the same slug.
+
+### Worker Startup
+
+Moved `RUN_DEPLOYMENT_WORKER` check to `settings.py` as `DOH_RUN_DEPLOYMENT_WORKER`. Django pattern: env → settings → code.
+
+Import must be inside `ready()` because `deployment_worker` imports models, and models aren't ready at module load time. Django's `AppConfig.ready()` runs after all apps are loaded.
+
+### Account-Scoped Environments (not Workspace-Scoped)
+
+Initially considered Workspace-scoped environments (Workspace has many Environments). Changed the model during planning:
+
+**Problems with workspace-scoped:**
+- N workspaces × M environments = N×M VPCs and clusters (expensive, fragmented)
+- "prod" would mean different things for each workspace
+
+**Account-scoped is better:**
 - "prod" means something org-wide — same network, same security posture, same compliance boundary
-- Cost efficiency — shared VPC and cluster instead of per-workspace duplication
-- Networking — apps in the same environment can communicate (same VPC)
+- Cost efficiency — shared VPC and cluster
+- Networking — apps in same environment can communicate (same VPC)
 - Simpler mental model — "deploy to prod" vs "deploy to workspace-X's prod"
 
-**Implementation:**
-- Environment model has `aws_account` FK (not `workspace` FK)
-- A "default" environment is auto-created when an AWS account is connected
-- Deployment references both `app` (which belongs to Workspace) and `environment` (which belongs to AWSAccount)
-- Stack naming includes environment slug: `devopshero-{env}-{workspace}-{app}-*`
-
-Updated `docs/domain_model.md` to reflect this decision.
+**Implementation:** Environment has `aws_account` FK. Deployment references both `app` (→ Workspace) and `environment` (→ AWSAccount). See `docs/domain_model.md`.
 
 ---
 
