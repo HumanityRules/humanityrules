@@ -271,7 +271,7 @@ function handleTextDelta(data) {
         streamBuffer += `${parts.join('\n')}\n`;
         window.markdownPendingBuffer = pendingBuffer;
         window.markdownStreamBuffer = streamBuffer;
-        renderMarkdown(window.markdownTargetEl, streamBuffer + pendingBuffer);
+        renderMarkdown(window.markdownTargetEl, streamBuffer);
         scrollToBottomSmooth();
     } catch (e) {
         console.error('Failed to parse sse-text-delta:', e);
