@@ -292,12 +292,36 @@ messages.addEventListener('htmx:sseBeforeMessage', function(event) {
         return;
     }
 
+    if (eventType === 'sse-tool-start') {
+        event.preventDefault();
+        handleToolStart(event.detail.data);
+        return;
+    }
+
     if (eventType === 'sse-tool-result') {
         event.preventDefault();
         handleToolResult(event.detail.data);
         return;
     }
 });
+
+/**
+ * Handle sse-tool-start events (append tool start and scroll).
+ */
+function handleToolStart(data) {
+    const template = document.createElement('template');
+    template.innerHTML = data;
+    const fragment = template.content;
+
+    // Process any OOB elements (e.g., thinking indicator reset)
+    processOobElements(fragment);
+
+    // Append remaining content to messages
+    while (fragment.firstChild) {
+        messages.appendChild(fragment.firstChild);
+    }
+    scrollToBottomSmooth();
+}
 
 /**
  * Handle sse-tool-result events (process OOB swaps and append tool result).
