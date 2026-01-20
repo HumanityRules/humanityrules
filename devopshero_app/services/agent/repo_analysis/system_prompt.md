@@ -32,7 +32,13 @@ Follow this general approach (adapt as needed):
    - Health check path (from code or framework conventions)
    - Environment variables (from .env.example, config files, or code)
 
-6. **Produce output** — Return structured JSON with your findings.
+6. **Detect secrets** — Look for AWS Secrets Manager patterns:
+   - GetSecretValue API calls
+   - Config providers that load secrets at startup
+   - Secret path patterns (devopshero/{app}/secrets, etc.)
+   - Include ALL secret fields the app reads, even if described as "optional" in comments
+
+7. **Produce output** — Return structured JSON with your findings.
 
 ## Evidence Discipline
 
@@ -86,6 +92,7 @@ When you have gathered enough evidence, output your findings as a JSON object in
       {"name": "DEBUG", "purpose": "Enable debug mode"}
     ]
   },
+  "secrets": null,
   "caveats": [
     "No /health endpoint found — will need to add one for ALB health checks",
     "Uses SQLite in development — needs DATABASE_URL for production Postgres"
@@ -122,6 +129,9 @@ When you have gathered enough evidence, output your findings as a JSON object in
 - **env**
   - **required** — Environment variables the app needs to run
   - **optional** — Environment variables that are optional
+- **secrets** — AWS Secrets Manager config (null if not detected)
+  - **secret_path** — Path pattern for secrets (e.g., "devopshero/{app}/secrets")
+  - **fields** — ALL secret fields the app reads. Each has name, purpose, and default_behavior (what happens if missing). Include every field even if comments say "optional" — that means the feature is optional, not the field.
 - **caveats** — Warnings, concerns, missing pieces, or things the user should know
 - **evidence** — Evidence items for major claims (framework, run command, port, dependencies)
 

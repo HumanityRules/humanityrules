@@ -50,6 +50,48 @@ def _normalize_environment_variables(value: Any) -> list[dict[str, str]]:
     return result
 
 
+def _normalize_app_secrets(value: Any) -> dict[str, str | None] | None:
+    """
+    Normalize app_secrets input from LLM.
+
+    Expected format: {"field_name": "value" or null, ...}
+    - None/empty -> None
+    - Empty dict -> None
+    - String "null" values -> Python None (auto-generate)
+    """
+    # Handle None or empty
+    if value is None:
+        return None
+
+    # Handle string input (LLM might send "{}" as string)
+    if isinstance(value, str):
+        value = value.strip()
+        if not value:
+            return None
+        try:
+            value = json.loads(value)
+        except json.JSONDecodeError:
+            return None
+
+    # Must be a dict at this point
+    if not isinstance(value, dict):
+        return None
+
+    # Empty dict -> None
+    if not value:
+        return None
+
+    # Normalize values: string "null" -> Python None
+    result = {}
+    for key, val in value.items():
+        if val is None or val == "null":
+            result[str(key)] = None
+        else:
+            result[str(key)] = str(val)
+
+    return result if result else None
+
+
 @dataclass
 class AppSummary:
     """Summary of a created application."""
@@ -68,6 +110,7 @@ class AppSummary:
     health_check_path: str
     domain_name: str | None
     datastore_id: str | None
+    app_secrets: dict[str, str | None] | None
 
     def to_dict(self) -> dict:
         """Convert to dictionary for JSON serialization."""
@@ -89,6 +132,7 @@ async def create_app(
     domain_name: str | None,
     datastore_id: str | None,
     dockerfile_path: str,
+    app_secrets: dict | None,
 ) -> AppSummary:
     """
     Create an application configuration in a workspace.
@@ -110,6 +154,7 @@ async def create_app(
         domain_name: Custom domain.
         datastore_id: UUID of datastore to bind.
         dockerfile_path: Path to Dockerfile if using dockerfile strategy.
+        app_secrets: Dict mapping secret field names to values. Use null to auto-generate.
 
     Returns:
         AppSummary with the created app details.
@@ -152,6 +197,9 @@ async def create_app(
         slug = f"{base_slug}-{counter}"
         counter += 1
 
+    # Normalize app_secrets
+    normalized_app_secrets = _normalize_app_secrets(app_secrets)
+
     # Create the app
     app = await App.objects.acreate(
         workspace=workspace,
@@ -168,6 +216,7 @@ async def create_app(
         environment_variables=_normalize_environment_variables(environment_variables),
         domain_name=domain_name or "",
         datastore=datastore,
+        app_secrets=normalized_app_secrets,
         created_by=user,
     )
 
@@ -186,4 +235,5 @@ async def create_app(
         health_check_path=app.health_check_path,
         domain_name=app.domain_name or None,
         datastore_id=str(datastore.id) if datastore else None,
+        app_secrets=app.app_secrets,
     )

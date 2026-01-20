@@ -387,7 +387,9 @@ async def scan_repository(args: dict[str, Any]) -> dict[str, Any]:
         "Requires a workspace to be selected first with select_workspace. "
         "The repository URL is inherited from the workspace. "
         "For environment_variables, pass an array of objects with 'name' and 'value' keys, "
-        "e.g., [{\"name\": \"API_KEY\", \"value\": \"secret\"}]. Pass [] if no env vars needed."
+        "e.g., [{\"name\": \"API_KEY\", \"value\": \"secret\"}]. Pass [] if no env vars needed. "
+        "For app_secrets, pass a dict mapping secret field names to values. "
+        "Use null for auto-generated secrets, e.g., {\"secret_key_base\": null, \"api_token\": \"disabled\"}."
     ),
     {
         "name": str,
@@ -402,6 +404,7 @@ async def scan_repository(args: dict[str, Any]) -> dict[str, Any]:
         "domain_name": str,
         "datastore_id": str,
         "dockerfile_path": str,
+        "app_secrets": dict,
     },
 )
 async def create_app(args: dict[str, Any]) -> dict[str, Any]:
@@ -424,6 +427,7 @@ async def create_app(args: dict[str, Any]) -> dict[str, Any]:
         domain_name=args.get("domain_name"),
         datastore_id=args.get("datastore_id"),
         dockerfile_path=args.get("dockerfile_path", ""),
+        app_secrets=args.get("app_secrets"),
     )
     return _mcp_response(result)
 

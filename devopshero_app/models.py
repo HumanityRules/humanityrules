@@ -463,6 +463,13 @@ class App(models.Model):
         related_name="apps",
     )
 
+    # App secrets for AWS Secrets Manager
+    app_secrets = models.JSONField(
+        null=True,
+        blank=True,
+        help_text="Dict mapping secret field names to values. Use null value to auto-generate.",
+    )
+
     created_by = models.ForeignKey(
         User,
         on_delete=models.SET_NULL,
