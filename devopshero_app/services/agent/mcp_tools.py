@@ -24,6 +24,7 @@ from .tools import (
     initiate_aws_connection as _initiate_aws_connection,
     list_aws_accounts as _list_aws_accounts,
     list_deployable_repos as _list_deployable_repos,
+    list_hosted_zones as _list_hosted_zones,
     list_workspaces as _list_workspaces,
     scan_repository as _scan_repository,
     select_workspace as _select_workspace,
@@ -48,15 +49,17 @@ def _get_conversation() -> Conversation:
     return conversation
 
 
-def _require_workspace(conversation: Conversation) -> Workspace:
+async def _require_workspace(conversation: Conversation) -> Workspace:
     """Get workspace from conversation or raise helpful error."""
-    if conversation.workspace is None:
+    # Check workspace_id (just an integer field, no DB query) to see if set
+    if conversation.workspace_id is None:
         raise ValueError(
             "No workspace selected for this conversation. "
             "Use select_workspace to choose a workspace first, "
             "or create_workspace if you don't have one yet."
         )
-    return conversation.workspace
+    # Use async ORM to fetch the related workspace
+    return await Workspace.objects.aget(id=conversation.workspace_id)
 
 
 def _mcp_response(data: Any) -> dict[str, Any]:
@@ -74,6 +77,7 @@ def _mcp_response(data: Any) -> dict[str, Any]:
 TOOL_DISPLAY_NAMES = {
     # Platform tools
     "mcp__devopshero__list_aws_accounts": "List AWS Accounts",
+    "mcp__devopshero__list_hosted_zones": "List Hosted Zones",
     "mcp__devopshero__initiate_aws_connection": "Initiate AWS Connection",
     "mcp__devopshero__list_workspaces": "List Workspaces",
     "mcp__devopshero__select_workspace": "Select Workspace",
@@ -100,6 +104,7 @@ TOOL_MAIN_PARAMS = {
     "mcp__devopshero__create_workspace": "name",
     "mcp__devopshero__select_workspace": "workspace_name",
     "mcp__devopshero__initiate_aws_connection": "account_name",
+    "mcp__devopshero__list_hosted_zones": "aws_account_id",
     "mcp__devopshero__scan_repository": "repo_url",
     "mcp__devopshero__create_app": "name",
     "mcp__devopshero__create_datastore": "name",
@@ -162,6 +167,27 @@ async def list_aws_accounts(args: dict[str, Any]) -> dict[str, Any]:
     conversation = _get_conversation()
     accounts = await _list_aws_accounts(organization=conversation.organization)
     return _mcp_response(accounts)
+
+
+@tool(
+    "list_hosted_zones",
+    (
+        "List Route53 hosted zones (domains) in a connected AWS account. "
+        "Use this to discover available domains for app configuration. "
+        "Returns zone ID, domain name, and record count for each public hosted zone."
+    ),
+    {
+        "aws_account_id": str,
+    },
+)
+async def list_hosted_zones(args: dict[str, Any]) -> dict[str, Any]:
+    """List Route53 hosted zones in an AWS account."""
+    conversation = _get_conversation()
+    zones = await _list_hosted_zones(
+        aws_account_id=args["aws_account_id"],
+        organization=conversation.organization,
+    )
+    return _mcp_response(zones)
 
 
 @tool(
@@ -325,7 +351,7 @@ async def scan_repository(args: dict[str, Any]) -> dict[str, Any]:
 async def create_app(args: dict[str, Any]) -> dict[str, Any]:
     """Create an application configuration in the selected workspace."""
     conversation = _get_conversation()
-    workspace = _require_workspace(conversation)
+    workspace = await _require_workspace(conversation)
 
     result = await _create_app(
         workspace=workspace,
@@ -365,7 +391,7 @@ async def create_app(args: dict[str, Any]) -> dict[str, Any]:
 async def create_datastore(args: dict[str, Any]) -> dict[str, Any]:
     """Create a managed database in the selected workspace."""
     conversation = _get_conversation()
-    workspace = _require_workspace(conversation)
+    workspace = await _require_workspace(conversation)
 
     result = await _create_datastore(
         workspace=workspace,
@@ -474,6 +500,7 @@ devopshero_mcp_server = create_sdk_mcp_server(
     tools=[
         # Platform tools
         list_aws_accounts,
+        list_hosted_zones,
         initiate_aws_connection,
         list_workspaces,
         select_workspace,
@@ -494,6 +521,7 @@ devopshero_mcp_server = create_sdk_mcp_server(
 TOOL_NAMES = [
     # Platform tools
     "mcp__devopshero__list_aws_accounts",
+    "mcp__devopshero__list_hosted_zones",
     "mcp__devopshero__initiate_aws_connection",
     "mcp__devopshero__list_workspaces",
     "mcp__devopshero__select_workspace",
