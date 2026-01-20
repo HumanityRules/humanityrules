@@ -689,14 +689,8 @@
   .max-w-4xl {
     max-width: var(--container-4xl);
   }
-  .max-w-\[70\%\] {
-    max-width: 70%;
-  }
   .max-w-\[80\%\] {
     max-width: 80%;
-  }
-  .max-w-\[95\%\] {
-    max-width: 95%;
   }
   .max-w-md {
     max-width: var(--container-md);
