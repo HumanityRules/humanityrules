@@ -26,7 +26,7 @@ def ensure_app_secrets_exist(session: boto3.Session, app_config: AppConfig) -> N
     if not app_config.app_secrets:
         return
     
-    secret_name = f"doh/{app_config.app_name}/secrets"
+    secret_name = f"devopshero/{app_config.app_name}/secrets"
     sm_client = session.client("secretsmanager")
     
     # Check if secret already exists
