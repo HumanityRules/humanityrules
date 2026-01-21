@@ -87,7 +87,7 @@ def build_app_config(app: App, environment: Environment) -> infra_customer.appco
     """
     workspace = app.workspace
 
-    # Build ECR repo name (app slugs are globally unique, so no workspace prefix needed)
+    # Build ECR repo name (app slugs are unique per org, environments are per-account, no collision)
     ecr_repo_name = f"doh/{environment.slug}/{app.slug}"
 
     # Extract app source path from workspace repo URL
@@ -102,13 +102,7 @@ def build_app_config(app: App, environment: Environment) -> infra_customer.appco
         database_config = build_database_config(app.datastore)
 
     return infra_customer.appconfig.AppConfig(
-        app_name=app.slug,  # This is a huge decision. For example, app_name is used to derive the secrets path in
-                            # secrets_utils.py (e.g., "devopshero/{app_name}/secrets"). But apps may have
-                            # hardcoded expectations about their secret path. If the slug doesn't match
-                            # (e.g., agent creates "db-portal" twice → second gets "db-portal-1"), the app
-                            # can't find its secrets. Consider separating app_name (for resource naming) from secrets_path,
-                            # and the agent repository-analyzer determines the secret path by reading the code.
-                            # beads: devopshero-bxr
+        app_name=app.slug,  # bead: devopshero-bxr
         ecr_repo_name=ecr_repo_name,
         container_port=app.container_port,
         cpu=app.cpu,

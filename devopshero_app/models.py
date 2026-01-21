@@ -406,13 +406,19 @@ class App(models.Model):
         default=uuid.uuid7,
         editable=False,
     )
+    organization = models.ForeignKey(
+        Organization,
+        on_delete=models.CASCADE,
+        related_name="apps",
+        help_text="Denormalized from workspace for unique constraint on (organization, slug)",
+    )
     workspace = models.ForeignKey(
         Workspace,
         on_delete=models.CASCADE,
         related_name="apps",
     )
     name = models.CharField(max_length=255)
-    slug = models.SlugField(max_length=255, unique=True)
+    slug = models.SlugField(max_length=255)
     app_type = models.CharField(
         max_length=20,
         choices=AppType.choices,
@@ -481,6 +487,12 @@ class App(models.Model):
 
     class Meta:
         ordering = ["-created_at"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["organization", "slug"],
+                name="unique_app_slug_per_org",
+            )
+        ]
 
     def __str__(self):
         return self.name
