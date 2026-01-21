@@ -94,54 +94,12 @@ import { marked } from 'https://cdn.jsdelivr.net/npm/marked@12.0.2/+esm';
 
 const container = document.getElementById('messages-container');
 const messages = document.getElementById('messages');
-const scrollBottomThreshold = 10;
-let shouldStickToBottom = true;
-let lastKnownScrollTop = 0;
-let userScrollIntent = false;
-let userScrollResetId = null;
-const userScrollResetDelayMs = 150;
-
-function markUserScrollIntent() {
-    userScrollIntent = true;
-    shouldStickToBottom = false;
-    if (userScrollResetId) {
-        clearTimeout(userScrollResetId);
-    }
-    userScrollResetId = window.setTimeout(() => {
-        userScrollIntent = false;
-    }, userScrollResetDelayMs);
-}
-
-function isNearBottom() {
-    return container.scrollHeight - container.scrollTop - container.clientHeight <= scrollBottomThreshold;
-}
-
-function updateAutoScrollState() {
-    const currentScrollTop = container.scrollTop;
-    const isScrollingUp = currentScrollTop < lastKnownScrollTop;
-    lastKnownScrollTop = currentScrollTop;
-
-    if (userScrollIntent && isScrollingUp) {
-        shouldStickToBottom = false;
-        return;
-    }
-
-    if (isNearBottom() && !isScrollingUp) {
-        shouldStickToBottom = true;
-    }
-}
 
 function scrollToBottom() {
-    if (!shouldStickToBottom) {
-        return;
-    }
     container.scrollTop = container.scrollHeight;
 }
 
 function scrollToBottomSmooth() {
-    if (!shouldStickToBottom) {
-        return;
-    }
     container.scrollTo({ top: container.scrollHeight, behavior: 'smooth' });
 }
 
@@ -328,15 +286,6 @@ function handleComplete() {
 // Initialize on page load
 renderStoredMarkdown();
 scrollToBottom();
-lastKnownScrollTop = container.scrollTop;
-container.addEventListener('scroll', updateAutoScrollState, { passive: true });
-['wheel', 'touchstart', 'touchmove', 'pointerdown', 'mousedown'].forEach(eventName => {
-    container.addEventListener(eventName, markUserScrollIntent, { passive: true });
-});
-
-// Scroll smoothly when new content is added
-// container.addEventListener('htmx:afterSwap', scrollToBottomSmooth);
-
 
 // Handle custom SSE events
 messages.addEventListener('htmx:sseBeforeMessage', function(event) {
