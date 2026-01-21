@@ -1,13 +1,10 @@
 """Deployment log handler utilities."""
 
-import asyncio
 import logging
 import traceback
 from datetime import datetime
 from pathlib import Path
 import uuid
-
-from asgiref.sync import sync_to_async
 
 from devopshero_app import models
 
@@ -55,16 +52,6 @@ class DeploymentLogHandler(logging.Handler):
         self._source_default = source_default
         self.addFilter(logging.Filter("devopshero_app"))
 
-    def _create_log(self, source: str, level: str, message: str, details: dict[str, object]) -> None:
-        """Sync DB write - called directly or via sync_to_async."""
-        models.DeploymentLog.objects.create(
-            deployment=self._deployment,
-            source=source,
-            level=level,
-            message=message,
-            details=details,
-        )
-
     def emit(self, record: logging.LogRecord) -> None:
         try:
             source = record.__dict__.get("source") or self._source_default
@@ -92,28 +79,13 @@ class DeploymentLogHandler(logging.Handler):
             if record.exc_info:
                 details["traceback"] = "".join(traceback.format_exception(*record.exc_info))
 
-            try:
-                loop = asyncio.get_running_loop()
-            except RuntimeError:
-                loop = None
-
-            if loop is not None:
-                # Async context: offload sync DB call to thread pool
-                coro = sync_to_async(self._create_log, thread_sensitive=False)(
-                    source=source,
-                    level=_map_level(record.levelno),
-                    message=rendered_message,
-                    details=details,
-                )
-                asyncio.ensure_future(coro)
-            else:
-                # Sync context: call directly
-                self._create_log(
-                    source=source,
-                    level=_map_level(record.levelno),
-                    message=rendered_message,
-                    details=details,
-                )
+            models.DeploymentLog.objects.create(
+                deployment=self._deployment,
+                source=source,
+                level=_map_level(record.levelno),
+                message=rendered_message,
+                details=details,
+            )
         except Exception:
             self.handleError(record)
 

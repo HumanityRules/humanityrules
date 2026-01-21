@@ -46,10 +46,10 @@ async def select_workspace(workspace_id: str, conversation: Conversation, organi
     Raises:
         ValueError: If workspace is already pinned or doesn't exist.
     """
-    # Check if workspace is already pinned (use workspace_id to avoid lazy load)
-    if conversation.workspace_id is not None:
+    # Check if workspace is already pinned
+    if conversation.workspace is not None:
         raise ValueError(
-            "This conversation is already pinned to a workspace. "
+            f"This conversation is already pinned to workspace '{conversation.workspace.name}'. "
             "Start a new conversation to work with a different workspace."
         )
 
