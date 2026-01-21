@@ -207,9 +207,9 @@ def get_stack_output(cf_client, stack_name: str, output_key: str) -> str | None:
     return None
 
 
-def get_app_urls(cf_client, app_name: str, has_domain: bool) -> dict[str, str | None]:
+def get_app_urls(cf_client, app_name: str, env_slug: str, has_domain: bool) -> dict[str, str | None]:
     """Get the app URLs from CloudFormation stack outputs."""
-    stack_name = f"doh-app-with-alb-{app_name}"
+    stack_name = f"doh-{env_slug}-{app_name}-app"
 
     urls = {
         "alb_url": get_stack_output(cf_client, stack_name=stack_name, output_key="AlbUrl"),
@@ -226,6 +226,7 @@ def print_deployment_summary(
     account_id: str,
     region: str,
     app_name: str,
+    env_slug: str,
     image_tag: str,
     has_domain: bool,
     cluster_name: str,
@@ -243,6 +244,7 @@ def print_deployment_summary(
     urls = get_app_urls(
         cf_client=cf_client,
         app_name=app_name,
+        env_slug=env_slug,
         has_domain=has_domain,
     )
 
@@ -253,9 +255,4 @@ def print_deployment_summary(
         logger.info("App URL (ALB):   %(alb_url)s", {"alb_url": urls["alb_url"]})
     else:
         logger.info("URLs: (waiting for ALB to be ready...)")
-
-    logger.info("Or use ECS Exec to connect to the container:")
-    logger.info("aws ecs execute-command --cluster %(cluster_name)s \\", {"cluster_name": cluster_name})
-    logger.info("    --task <task-id> --container %(app_name)s \\", {"app_name": app_name})
-    logger.info("    --interactive --command /bin/sh")
 
