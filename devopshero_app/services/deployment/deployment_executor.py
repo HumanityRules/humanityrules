@@ -6,43 +6,20 @@ This is the main entry point called by the deployment worker.
 """
 
 import logging
-import traceback
 
 from django.conf import settings
 from django.utils import timezone
 
-from devopshero_app.models import Deployment, DeploymentLog, Environment
+from devopshero_app import models
 from devopshero_app.services import infra_customer
 
 from . import app_config_builder
+from . import deployment_logging
 
 logger = logging.getLogger(__name__)
 
 
-def _create_log(deployment: Deployment, phase: str, level: str, message: str, details: dict | None = None) -> None:
-    """Create a deployment log entry."""
-    DeploymentLog.objects.create(
-        deployment=deployment,
-        phase=phase,
-        level=level,
-        message=message,
-        details=details,
-    )
-
-
-def _make_log_callback(deployment: Deployment):
-    """Create a log callback function for CDK operations."""
-    def log_callback(phase: str, level: str, message: str) -> None:
-        _create_log(
-            deployment=deployment,
-            phase=phase,
-            level=level,
-            message=message,
-        )
-    return log_callback
-
-
-def _get_aws_session(deployment: Deployment):
+def _get_aws_session(deployment: models.Deployment):
     """Get an AWS session with assumed role credentials for the target account."""
     aws_account = deployment.environment.aws_account
 
@@ -55,20 +32,15 @@ def _get_aws_session(deployment: Deployment):
     )
 
 
-def _provision_environment(deployment: Deployment, session) -> bool:
+def _provision_environment(deployment: models.Deployment, session) -> bool:
     """Provision base infrastructure for an environment if needed."""
     environment = deployment.environment
     env_slug = environment.slug
 
-    _create_log(
-        deployment=deployment,
-        phase=DeploymentLog.Phase.DEPLOY,
-        level=DeploymentLog.Level.INFO,
-        message=f"Provisioning base infrastructure for environment '{env_slug}'",
-    )
+    logger.info("Provisioning base infrastructure for environment '%(env_slug)s'", {"env_slug": env_slug})
 
     # Update environment status
-    environment.status = Environment.Status.PROVISIONING
+    environment.status = models.Environment.Status.PROVISIONING
     environment.vpc_stack_name = f"devopshero-{env_slug}-vpc"
     environment.cluster_stack_name = f"devopshero-{env_slug}-cluster"
     environment.save()
@@ -78,27 +50,22 @@ def _provision_environment(deployment: Deployment, session) -> bool:
             session=session,
             env_slug=env_slug,
             synth_only=False,
-            log_callback=_make_log_callback(deployment),
         )
 
         if success:
-            environment.status = Environment.Status.READY
+            environment.status = models.Environment.Status.READY
             environment.save()
-            _create_log(
-                deployment=deployment,
-                phase=DeploymentLog.Phase.DEPLOY,
-                level=DeploymentLog.Level.INFO,
-                message=f"Base infrastructure ready for environment '{env_slug}'",
-            )
+            logger.info("Base infrastructure ready for environment '%(env_slug)s'", {"env_slug": env_slug})
             return True
-        else:
-            environment.status = Environment.Status.ERROR
-            environment.status_message = "Base infrastructure deployment failed"
-            environment.save()
-            return False
+
+        environment.status = models.Environment.Status.ERROR
+        environment.status_message = "Base infrastructure deployment failed"
+        environment.save()
+        logger.error("Base infrastructure deployment failed for environment '%(env_slug)s'", {"env_slug": env_slug})
+        return False
 
     except Exception as e:
-        environment.status = Environment.Status.ERROR
+        environment.status = models.Environment.Status.ERROR
         environment.status_message = str(e)
         environment.save()
         raise
@@ -124,7 +91,7 @@ def run_deployment(deployment_id: str) -> bool:
         True if deployment succeeded, False otherwise.
     """
     try:
-        deployment = Deployment.objects.select_related(
+        deployment = models.Deployment.objects.select_related(
             "app",
             "app__workspace",
             "app__workspace__aws_account",
@@ -132,121 +99,94 @@ def run_deployment(deployment_id: str) -> bool:
             "environment",
             "environment__aws_account",
         ).get(id=deployment_id)
-    except Deployment.DoesNotExist:
-        logger.error(f"Deployment {deployment_id} not found")
+    except models.Deployment.DoesNotExist:
+        logger.error("Deployment %(deployment_id)s not found", {"deployment_id": deployment_id})
         return False
 
     environment = deployment.environment
     app = deployment.app
     workspace = app.workspace
 
-    logger.info(f"Starting deployment {deployment_id} for app '{app.name}' to environment '{environment.name}'")
-
-    # Update status to BUILDING
-    deployment.status = Deployment.Status.BUILDING
-    deployment.status_message = "Deployment started"
-    deployment.started_at = timezone.now()
-    deployment.save()
-
-    _create_log(
+    with deployment_logging.DeploymentLogContext(
         deployment=deployment,
-        phase=DeploymentLog.Phase.INIT,
-        level=DeploymentLog.Level.INFO,
-        message=f"Starting deployment of '{app.name}' to '{environment.name}'",
-        details={
-            "app_slug": app.slug,
-            "workspace_slug": workspace.slug,
-            "environment_slug": environment.slug,
-            "git_ref": deployment.git_ref,
-            "image_tag": deployment.image_tag,
-        },
-    )
-
-    try:
-        # Get AWS session
-        session = _get_aws_session(deployment)
-
-        # Provision environment if needed
-        if environment.status == Environment.Status.PENDING:
-            if not _provision_environment(deployment, session):
-                deployment.status = Deployment.Status.FAILED
-                deployment.status_message = "Environment provisioning failed"
-                deployment.completed_at = timezone.now()
-                deployment.save()
-                return False
-
-        # Build AppConfig
-        app_config = app_config_builder.build_app_config(
-            app=app,
-            environment=environment,
+        source_default=models.DeploymentLog.Source.APP,
+    ):
+        logger.info(
+            "Starting deployment %(deployment_id)s for app '%(app_name)s' to environment '%(environment_name)s'",
+            {"deployment_id": str(deployment_id), "app_name": app.name, "environment_name": environment.name},
         )
 
-        # Execute deployment
-        _create_log(
-            deployment=deployment,
-            phase=DeploymentLog.Phase.DEPLOY,
-            level=DeploymentLog.Level.INFO,
-            message=f"Deploying app '{app.name}'",
-        )
-
-        deployment.status = Deployment.Status.DEPLOYING
+        # Update status to BUILDING
+        deployment.status = models.Deployment.Status.BUILDING
+        deployment.status_message = "Deployment started"
+        deployment.started_at = timezone.now()
         deployment.save()
 
-        success = infra_customer.deploy_app.deploy(
-            session=session,
-            account_id=environment.aws_account.aws_account_id,
-            region=workspace.aws_region,
-            app_config=app_config,
-            image_tag=deployment.image_tag,
-            env_slug=environment.slug,
-            synth_only=False,
-            log_callback=_make_log_callback(deployment),
+        logger.info(
+            "Starting deployment of '%(app_name)s' to '%(environment_name)s' (git_ref=%(git_ref)s, image_tag=%(image_tag)s)",
+            {"app_name": app.name, "environment_name": environment.name, "git_ref": deployment.git_ref, "image_tag": deployment.image_tag},
         )
 
-        if success:
-            deployment.status = Deployment.Status.RUNNING
-            deployment.status_message = "Deployment completed successfully"
-            deployment.completed_at = timezone.now()
-            # TODO: Extract service_url and alb_dns from CDK outputs
+        try:
+            # Get AWS session
+            session = _get_aws_session(deployment)
+
+            # Provision environment if needed
+            if environment.status == models.Environment.Status.PENDING:
+                if not _provision_environment(deployment, session):
+                    deployment.status = models.Deployment.Status.FAILED
+                    deployment.status_message = "Environment provisioning failed"
+                    deployment.completed_at = timezone.now()
+                    deployment.save()
+                    return False
+
+            # Build AppConfig
+            app_config = app_config_builder.build_app_config(
+                app=app,
+                environment=environment,
+            )
+
+            # Execute deployment
+            logger.info("Deploying app '%(app_name)s'", {"app_name": app.name})
+
+            deployment.status = models.Deployment.Status.DEPLOYING
             deployment.save()
 
-            _create_log(
-                deployment=deployment,
-                phase=DeploymentLog.Phase.COMPLETE,
-                level=DeploymentLog.Level.INFO,
-                message="Deployment completed successfully",
+            success = infra_customer.deploy_app.deploy(
+                session=session,
+                account_id=environment.aws_account.aws_account_id,
+                region=workspace.aws_region,
+                app_config=app_config,
+                image_tag=deployment.image_tag,
+                env_slug=environment.slug,
+                synth_only=False,
             )
-            logger.info(f"Deployment {deployment_id} completed successfully")
-            return True
-        else:
-            deployment.status = Deployment.Status.FAILED
+
+            if success:
+                deployment.status = models.Deployment.Status.RUNNING
+                deployment.status_message = "Deployment completed successfully"
+                deployment.completed_at = timezone.now()
+                # TODO: Extract service_url and alb_dns from CDK outputs
+                deployment.save()
+
+                logger.info("Deployment completed successfully")
+                logger.info("Deployment %(deployment_id)s completed successfully", {"deployment_id": str(deployment_id)})
+                return True
+
+            deployment.status = models.Deployment.Status.FAILED
             deployment.status_message = "CDK deployment failed"
             deployment.completed_at = timezone.now()
             deployment.save()
 
-            _create_log(
-                deployment=deployment,
-                phase=DeploymentLog.Phase.COMPLETE,
-                level=DeploymentLog.Level.ERROR,
-                message="Deployment failed",
-            )
-            logger.error(f"Deployment {deployment_id} failed")
+            logger.error("Deployment failed")
+            logger.error("Deployment %(deployment_id)s failed", {"deployment_id": str(deployment_id)})
             return False
 
-    except Exception as e:
-        error_msg = f"Deployment error: {e}"
-        logger.exception(error_msg)
+        except Exception as e:
+            logger.exception("Deployment error: %(error)s", {"error": str(e)})
 
-        deployment.status = Deployment.Status.FAILED
-        deployment.status_message = error_msg
-        deployment.completed_at = timezone.now()
-        deployment.save()
-
-        _create_log(
-            deployment=deployment,
-            phase=DeploymentLog.Phase.COMPLETE,
-            level=DeploymentLog.Level.ERROR,
-            message=error_msg,
-            details={"traceback": traceback.format_exc()},
-        )
-        return False
+            deployment.status = models.Deployment.Status.FAILED
+            deployment.status_message = f"Deployment error: {e}"
+            deployment.completed_at = timezone.now()
+            deployment.save()
+            return False

@@ -174,8 +174,8 @@ class DeploymentAdmin(admin.ModelAdmin):
 
 @admin.register(DeploymentLog)
 class DeploymentLogAdmin(admin.ModelAdmin):
-    list_display = ["created_at", "deployment", "phase", "level", "short_message"]
-    list_filter = ["phase", "level"]
+    list_display = ["created_at", "deployment", "source", "level", "short_message"]
+    list_filter = ["source", "level"]
     search_fields = ["deployment__app__name", "message"]
     readonly_fields = ["id", "created_at"]
     autocomplete_fields = ["deployment"]

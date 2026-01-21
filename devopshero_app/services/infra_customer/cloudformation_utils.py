@@ -2,22 +2,25 @@
 CloudFormation utility functions for deploying DevOpsHero infrastructure to customer accounts.
 """
 
+import logging
 from pathlib import Path
 
 from botocore.exceptions import ClientError, WaiterError
 from jinja2 import Environment, FileSystemLoader
 
+logger = logging.getLogger(__name__)
+
 
 def stack_exists(cf_client, stack_name: str) -> bool:
     """Check if a CloudFormation stack exists."""
     try:
-        print(f"Checking if stack {stack_name} exists...")
+        logger.info("Checking if stack %(stack_name)s exists", {"stack_name": stack_name})
         cf_client.describe_stacks(StackName=stack_name)
-        print(f"Stack {stack_name} exists.")
+        logger.info("Stack %(stack_name)s exists", {"stack_name": stack_name})
         return True
     except ClientError as e:
         if e.response["Error"]["Code"] == "ValidationError":
-            print(f"Stack {stack_name} does not exist.")
+            logger.info("Stack %(stack_name)s does not exist", {"stack_name": stack_name})
             return False
         raise
     
@@ -59,15 +62,15 @@ def deploy_cloudformation_stack(
     if not template_path and not template_body:
         raise ValueError("Must specify either template_path or template_body")
     
-    print(f"{'='*60}")
-    print(f"📦 Deploying stack: {stack_name}")
+    logger.info("%(separator)s", {"separator": "=" * 60})
+    logger.info("Deploying stack: %(stack_name)s", {"stack_name": stack_name})
     
     if template_path:
-        print(f"   Template: {template_path.name}")
+        logger.info("   Template: %(template_name)s", {"template_name": template_path.name})
         with open(template_path) as f:
             template_body = f.read()
     else:
-        print(f"   Template: (rendered from Jinja2)")
+        logger.info("   Template: (rendered from Jinja2)")
         
     cf_parameters = []
     if parameters:
@@ -76,16 +79,16 @@ def deploy_cloudformation_stack(
     
     cf_capabilities = capabilities or []
     
-    print(f"   Validating template...")
+    logger.info("   Validating template")
     try:
         cf_client.validate_template(TemplateBody=template_body)
     except ClientError as e:
-        print(f"   ❌ Template validation failed: {e.response['Error']['Message']}")
+        logger.error("   Template validation failed: %(error)s", {"error": e.response["Error"]["Message"]})
         return False
     
     try:
         if stack_exists(cf_client=cf_client, stack_name=stack_name):
-            print(f"   Stack exists, updating...")
+            logger.info("   Stack exists, updating")
             cf_client.update_stack(
                 StackName=stack_name,
                 TemplateBody=template_body,
@@ -94,7 +97,7 @@ def deploy_cloudformation_stack(
             )
             waiter = cf_client.get_waiter("stack_update_complete")
         else:
-            print(f"   Stack does not exist, creating...")
+            logger.info("   Stack does not exist, creating")
             cf_client.create_stack(
                 StackName=stack_name,
                 TemplateBody=template_body,
@@ -104,46 +107,45 @@ def deploy_cloudformation_stack(
             )
             waiter = cf_client.get_waiter("stack_create_complete")
         
-        print(f"   ⏳ Waiting for stack operation to complete...")
+        logger.info("   Waiting for stack operation to complete")
         waiter.wait(StackName=stack_name, WaiterConfig={"Delay": 10, "MaxAttempts": 60})   # 60 * 10 seconds = 10 minutes
         
         # Get stack outputs just to print them
         response = cf_client.describe_stacks(StackName=stack_name)
         stack = response["Stacks"][0]
         
-        print(f"   ✅ Stack {stack['StackStatus']}")
+        logger.info("   Stack %(stack_status)s", {"stack_status": stack["StackStatus"]})
         
         if stack.get("Outputs"):
-            print(f"   Outputs:")
+            logger.info("   Outputs:")
             for output in stack["Outputs"]:
-                print(f"      {output['OutputKey']}: {output['OutputValue']}")
+                logger.info("      %(output_key)s: %(output_value)s", {"output_key": output["OutputKey"], "output_value": output["OutputValue"]})
         
         return True
         
     except ClientError as e:
         error_message = str(e)
         if "No updates are to be performed" in error_message:
-            print(f"   ℹ️  No updates needed")
+            logger.info("   No updates needed")
             return True
-        else:
-            print(f"   ❌ Failed: {e}")
-            _print_stack_failure_events(cf_client=cf_client, stack_name=stack_name)
-            return False
+        logger.error("   Failed: %(error)s", {"error": str(e)})
+        _print_stack_failure_events(cf_client=cf_client, stack_name=stack_name)
+        return False
     except WaiterError:
         # Stack failed - get status and events
         try:
             response = cf_client.describe_stacks(StackName=stack_name)
             stack_status = response["Stacks"][0]["StackStatus"]
-            print(f"   ❌ Stack failed with status: {stack_status}")
+            logger.error("   Stack failed with status: %(stack_status)s", {"stack_status": stack_status})
         except ClientError:
-            print(f"   ❌ Stack creation failed (stack was deleted)")
+            logger.error("   Stack creation failed (stack was deleted)")
             return False
         
         _print_stack_failure_events(cf_client=cf_client, stack_name=stack_name)
         
         if stack_status in ["ROLLBACK_COMPLETE", "CREATE_FAILED"]:
-            print(f"\n   💡 To retry, first delete the failed stack:")
-            print(f"      aws cloudformation delete-stack --stack-name {stack_name}")
+            logger.info("\n   To retry, first delete the failed stack:")
+            logger.info("      aws cloudformation delete-stack --stack-name %(stack_name)s", {"stack_name": stack_name})
         
         return False
 
@@ -152,14 +154,17 @@ def _print_stack_failure_events(cf_client, stack_name: str) -> None:
     """Print recent failure events from a CloudFormation stack."""
     try:
         events = cf_client.describe_stack_events(StackName=stack_name)
-        print(f"   Recent failure events:")
+        logger.error("   Recent failure events:")
         for event in events["StackEvents"][:10]:
             status = event.get("ResourceStatus", "")
             if "FAILED" in status or "ROLLBACK" in status:
                 reason = event.get("ResourceStatusReason", "")
-                print(f"      {event['LogicalResourceId']} ({status}): {reason}")
+                logger.error(
+                    "      %(logical_id)s (%(status)s): %(reason)s",
+                    {"logical_id": event["LogicalResourceId"], "status": status, "reason": reason},
+                )
     except ClientError:
-        print(f"   (Could not retrieve stack events - stack may have been deleted)")
+        logger.error("   (Could not retrieve stack events - stack may have been deleted)")
 
 
 def delete_stack_and_wait(cf_client, stack_name: str) -> bool:
@@ -169,10 +174,10 @@ def delete_stack_and_wait(cf_client, stack_name: str) -> bool:
     Returns True on success, False on failure.
     """
     if not stack_exists(cf_client, stack_name):
-        print(f"   ⏭️  Stack '{stack_name}' does not exist, skipping")
+        logger.info("   Stack '%(stack_name)s' does not exist, skipping", {"stack_name": stack_name})
         return True
     
-    print(f"   🗑️  Deleting stack '{stack_name}'...")
+    logger.info("   Deleting stack '%(stack_name)s'", {"stack_name": stack_name})
     try:
         cf_client.delete_stack(StackName=stack_name)
         
@@ -182,10 +187,10 @@ def delete_stack_and_wait(cf_client, stack_name: str) -> bool:
             StackName=stack_name,
             WaiterConfig={"Delay": 10, "MaxAttempts": 60},  # 10 minutes max
         )
-        print(f"   ✅ Stack '{stack_name}' deleted")
+        logger.info("   Stack '%(stack_name)s' deleted", {"stack_name": stack_name})
         return True
     except ClientError as e:
-        print(f"   ❌ Failed to delete stack '{stack_name}': {e}")
+        logger.error("   Failed to delete stack '%(stack_name)s': %(error)s", {"stack_name": stack_name, "error": str(e)})
         return False
 
 
@@ -226,14 +231,14 @@ def print_deployment_summary(
     cluster_name: str,
 ) -> None:
     """Print a deployment summary with app URLs and ECS exec instructions."""
-    print("\n" + "=" * 60)
-    print("🎉 Deployment complete!")
-    print("=" * 60)
-    print(f"\nAccount: {account_id}")
-    print(f"Region:  {region}")
+    logger.info("%(separator)s", {"separator": "\n" + "=" * 60})
+    logger.info("Deployment complete")
+    logger.info("%(separator)s", {"separator": "=" * 60})
+    logger.info("Account: %(account_id)s", {"account_id": account_id})
+    logger.info("Region:  %(region)s", {"region": region})
 
-    print(f"\n📊 App: {app_name}")
-    print(f"   Image tag: {image_tag}")
+    logger.info("App: %(app_name)s", {"app_name": app_name})
+    logger.info("   Image tag: %(image_tag)s", {"image_tag": image_tag})
 
     urls = get_app_urls(
         cf_client=cf_client,
@@ -242,15 +247,15 @@ def print_deployment_summary(
     )
 
     if urls.get("https_url"):
-        print(f"\n🔒 App URL (HTTPS): {urls['https_url']}")
+        logger.info("App URL (HTTPS): %(https_url)s", {"https_url": urls["https_url"]})
 
     if urls.get("alb_url"):
-        print(f"🌐 App URL (ALB):   {urls['alb_url']}")
+        logger.info("App URL (ALB):   %(alb_url)s", {"alb_url": urls["alb_url"]})
     else:
-        print("\n   URLs: (waiting for ALB to be ready...)")
+        logger.info("URLs: (waiting for ALB to be ready...)")
 
-    print(f"\n   Or use ECS Exec to connect to the container:")
-    print(f"   aws ecs execute-command --cluster {cluster_name} \\")
-    print(f"       --task <task-id> --container {app_name} \\")
-    print(f"       --interactive --command /bin/sh")
+    logger.info("Or use ECS Exec to connect to the container:")
+    logger.info("aws ecs execute-command --cluster %(cluster_name)s \\", {"cluster_name": cluster_name})
+    logger.info("    --task <task-id> --container %(app_name)s \\", {"app_name": app_name})
+    logger.info("    --interactive --command /bin/sh")
 

@@ -46,16 +46,20 @@ def _generate_image_tag(app: App, git_ref: str) -> str:
 
 async def _create_initial_logs(deployment: Deployment) -> None:
     """Create initial deployment log entries."""
+    params = {
+        "app_name": deployment.app.name,
+        "git_ref": deployment.git_ref,
+        "image_tag": deployment.image_tag,
+        "environment_name": deployment.environment.name,
+    }
+    template = "Deployment queued for %(app_name)s in %(environment_name)s (git_ref=%(git_ref)s, image_tag=%(image_tag)s)"
     await DeploymentLog.objects.acreate(
         deployment=deployment,
-        phase=DeploymentLog.Phase.INIT,
         level=DeploymentLog.Level.INFO,
-        message="Deployment queued",
+        message=template % params,
         details={
-            "app_name": deployment.app.name,
-            "git_ref": deployment.git_ref,
-            "image_tag": deployment.image_tag,
-            "environment": deployment.environment.name,
+            "template": template,
+            "params": params,
         },
     )
 
