@@ -2,7 +2,7 @@
 Deploy DevOpsHero apps (ECR, ALB, ECS service) using AWS CDK.
 """
 
-from typing import Callable
+import logging
 
 import boto3
 from aws_cdk import App, Aws, CfnOutput, Duration, Fn, RemovalPolicy, SecretValue, Stack, Tags
@@ -28,16 +28,7 @@ from . import ecs_utils
 from . import route53_utils
 from . import secrets_utils
 
-
-# Type alias for log callback: (phase, level, message) -> None
-LogCallback = Callable[[str, str, str], None] | None
-
-
-def _log(phase: str, level: str, message: str, log_callback: LogCallback) -> None:
-    """Log a message and optionally call the callback."""
-    print(message)
-    if log_callback:
-        log_callback(phase, level, message)
+logger = logging.getLogger(__name__)
 
 
 # =============================================================================
@@ -400,6 +391,8 @@ class AppWithAlbStack(Stack):
             vpc_subnets=ec2.SubnetSelection(subnet_type=ec2.SubnetType.PUBLIC),
         )
 
+        # TODO(production): Increase deregistration_delay for graceful connection draining.
+        # 10 seconds is aggressive but speeds up service removal during DOH development.
         target_group = elbv2.ApplicationTargetGroup(
             self, "TargetGroup",
             target_group_name=f"doh-{env_slug}-{app_config.app_name}"[:32],
@@ -407,6 +400,7 @@ class AppWithAlbStack(Stack):
             port=app_config.container_port,
             protocol=elbv2.ApplicationProtocol.HTTP,
             target_type=elbv2.TargetType.IP,
+            deregistration_delay=Duration.seconds(10),
             health_check=elbv2.HealthCheck(
                 enabled=True, path=app_config.health_check_path, protocol=elbv2.Protocol.HTTP,
                 interval=Duration.seconds(15), timeout=Duration.seconds(5),
@@ -482,7 +476,6 @@ def deploy(
     image_tag: str,
     env_slug: str,
     synth_only: bool,
-    log_callback: LogCallback,
 ) -> bool:
     """
     Deploy an app to existing infrastructure.
@@ -497,12 +490,10 @@ def deploy(
         image_tag: Docker image tag to deploy.
         env_slug: Environment slug (e.g., "default", "prod").
         synth_only: If True, only synthesize templates, don't deploy.
-        log_callback: Optional callback for logging progress.
-
     Returns:
         True on success, False on failure.
     """
-    _log("deploy", "info", f"Deploying app: {app_config.app_name} to environment: {env_slug}", log_callback)
+    logger.info("Deploying app '%(app_name)s' to environment '%(env_slug)s'", {"app_name": app_config.app_name, "env_slug": env_slug})
 
     # Resource prefix for consistent naming: doh-{env}-{app} (app slugs are globally unique)
     resource_prefix = f"doh-{env_slug}-{app_config.app_name}"
@@ -513,24 +504,24 @@ def deploy(
     cluster_stack_name = f"devopshero-{env_slug}-cluster"
 
     if not cloudformation_utils.stack_exists(cf_client, vpc_stack_name):
-        _log("deploy", "error", f"Base layer not deployed. VPC stack '{vpc_stack_name}' not found.", log_callback)
+        logger.error("Base layer not deployed. VPC stack '%(stack_name)s' not found", {"stack_name": vpc_stack_name})
         return False
     if not cloudformation_utils.stack_exists(cf_client, cluster_stack_name):
-        _log("deploy", "error", f"ECS cluster not deployed. Cluster stack '{cluster_stack_name}' not found.", log_callback)
+        logger.error("ECS cluster not deployed. Cluster stack '%(stack_name)s' not found", {"stack_name": cluster_stack_name})
         return False
 
     hosted_zone_id = None
     if app_config.domain_name and app_config.hosted_zone_name:
-        _log("deploy", "info", f"Looking up hosted zone for {app_config.hosted_zone_name}...", log_callback)
+        logger.info("Looking up hosted zone for %(hosted_zone_name)s", {"hosted_zone_name": app_config.hosted_zone_name})
         hosted_zone_id = route53_utils.get_hosted_zone_id(session, app_config.hosted_zone_name)
         if hosted_zone_id:
-            _log("deploy", "info", f"Found hosted zone: {hosted_zone_id}", log_callback)
+            logger.info("Found hosted zone: %(hosted_zone_id)s", {"hosted_zone_id": hosted_zone_id})
         else:
-            _log("deploy", "warning", "Could not find hosted zone, HTTPS will not be configured", log_callback)
+            logger.error("Could not find hosted zone, HTTPS will not be configured")
 
     # Ensure app secrets exist in Secrets Manager (created outside CDK for security)
     if app_config.app_secrets:
-        _log("deploy", "info", "Ensuring app secrets exist...", log_callback)
+        logger.info("Ensuring app secrets exist")
         secrets_utils.ensure_app_secrets_exist(session=session, app_config=app_config)
 
     cdk_app = App(outdir=str(cdk_utils.CDK_OUT_DIR))
@@ -571,17 +562,17 @@ def deploy(
 
     if synth_only:
         cloud_assembly = cdk_app.synth()
-        _log("deploy", "info", f"CDK templates synthesized to: {cloud_assembly.directory}", log_callback)
+        logger.info("CDK templates synthesized to: %(directory)s", {"directory": cloud_assembly.directory})
         return True
 
-    _log("deploy", "info", "Deploying CDK stacks...", log_callback)
+    logger.info("Deploying CDK stacks")
     success = cdk_utils.deploy_cdk_stacks(cdk_app, session)
 
     if not success:
-        _log("deploy", "error", "CDK deployment failed", log_callback)
+        logger.error("CDK deployment failed")
         return False
 
-    _log("build", "info", "Building and pushing Docker image...", log_callback)
+    logger.info("Building and pushing Docker image")
     image_uri = ecr_utils.build_and_push_docker_image(
         session=session,
         account_id=account_id,
@@ -592,19 +583,19 @@ def deploy(
         image_tag=image_tag,
     )
     if not image_uri:
-        _log("build", "error", "Docker build/push failed", log_callback)
+        logger.error("Docker build/push failed")
         return False
 
-    _log("deploy", "info", "Starting ECS service...", log_callback)
+    logger.info("Starting ECS service")
     if not ecs_utils.start_ecs_service(
         session=session,
         service_name=resource_prefix,
         cluster_name=app_stack.environment_infra.cluster.cluster_name,
     ):
-        _log("deploy", "error", "Failed to start ECS service", log_callback)
+        logger.error("Failed to start ECS service")
         return False
 
-    _log("complete", "info", f"Deployment of {app_config.app_name} completed successfully", log_callback)
+    logger.info("Deployment of %(app_name)s completed successfully", {"app_name": app_config.app_name})
 
     cloudformation_utils.print_deployment_summary(
         cf_client=cf_client,
@@ -642,13 +633,10 @@ def teardown(
 
     stacks_to_delete.append(f"{resource_prefix}-ecr")
 
-    print(f"\n{'='*60}")
-    print(f"Tearing down app: {app_config.app_name}")
-    print(f"{'='*60}")
-    print(f"\nStacks to delete (in order):")
+    logger.info("Tearing down app: %(app_name)s", {"app_name": app_config.app_name})
+    logger.info("Stacks to delete (in order):")
     for stack in stacks_to_delete:
-        print(f"   - {stack}")
-    print()
+        logger.info("   - %(stack_name)s", {"stack_name": stack})
 
     # Empty ECR repository first (CloudFormation can't delete non-empty repos)
     ecr_utils.delete_all_ecr_images(session=session, ecr_repo_name=app_config.ecr_repo_name)
@@ -660,12 +648,9 @@ def teardown(
             all_success = False
 
     if all_success:
-        print(f"\n{'='*60}")
-        print(f"App '{app_config.app_name}' stacks deleted successfully")
-        print(f"{'='*60}")
-    else:
-        print(f"\n{'='*60}")
-        print("Some stacks failed to delete")
-        print(f"{'='*60}")
+        logger.info("App '%(app_name)s' stacks deleted successfully", {"app_name": app_config.app_name})
+        return all_success
+
+    logger.error("Some stacks failed to delete")
 
     return all_success

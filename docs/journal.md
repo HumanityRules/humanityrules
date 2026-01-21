@@ -1,5 +1,9 @@
 # DevOpsHero Development Journal
 
+## 2026-01-21 - Reduce ECS target group deregistration delay
+
+Set ALB target group `deregistration_delay` to 10 seconds (default is 300). ECS service removal was taking minutes in "Draining" state while waiting for ALB connection draining. Marked as TODO for production where longer graceful draining may be needed.
+
 ## 2026-01-20 14:42 - Chat auto-scroll behavior
 
 - Updated chat auto-scroll to unlock on user-initiated scrolling while reattaching immediately when the scrollbar reaches the bottom during streaming.
