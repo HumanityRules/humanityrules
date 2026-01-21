@@ -700,17 +700,13 @@ class DeploymentLog(models.Model):
     class Level(models.TextChoices):
         DEBUG = "debug", "Debug"
         INFO = "info", "Info"
-        WARNING = "warning", "Warning"
         ERROR = "error", "Error"
 
-    class Phase(models.TextChoices):
-        INIT = "init", "Initialization"
-        BUILD = "build", "Docker Build"
-        PUSH = "push", "ECR Push"
-        SYNTH = "synth", "CDK Synthesis"
-        DEPLOY = "deploy", "CDK Deploy"
-        HEALTH = "health", "Health Check"
-        COMPLETE = "complete", "Completion"
+    class Source(models.TextChoices):
+        APP = "app", "App"
+        CDK = "cdk", "CDK"
+        DOCKER = "docker", "Docker"
+        SYSTEM = "system", "System"
 
     id = models.UUIDField(
         primary_key=True,
@@ -722,9 +718,10 @@ class DeploymentLog(models.Model):
         on_delete=models.CASCADE,
         related_name="logs",
     )
-    phase = models.CharField(
+    source = models.CharField(
         max_length=20,
-        choices=Phase.choices,
+        choices=Source.choices,
+        default=Source.APP,
     )
     level = models.CharField(
         max_length=20,
@@ -744,4 +741,4 @@ class DeploymentLog(models.Model):
         verbose_name_plural = "Deployment Logs"
 
     def __str__(self):
-        return f"[{self.phase}] {self.level}: {self.message[:50]}..."
+        return f"[{self.source}] {self.level}: {self.message[:50]}..."

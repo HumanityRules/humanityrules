@@ -1,5 +1,9 @@
 # DevOpsHero Development Journal
 
+## 2026-01-21 07:25 - Deployment logging source + streaming output
+
+- Replaced deployment log phase with a source field, added structured template/params logging, and capture CDK/Docker stdout/stderr into DeploymentLog. Added stderr downgrade logic for CDK output and hardened log formatting to avoid formatting exceptions.
+
 ## 2026-01-21 - Reduce ECS target group deregistration delay
 
 Set ALB target group `deregistration_delay` to 10 seconds (default is 300). ECS service removal was taking minutes in "Draining" state while waiting for ALB connection draining. Marked as TODO for production where longer graceful draining may be needed.

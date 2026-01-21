@@ -2,19 +2,69 @@
 CDK utility functions for deploying stacks.
 """
 
+import logging
 import os
-import subprocess
 from pathlib import Path
+import subprocess
+import threading
 
 import boto3
 from aws_cdk import App
 
 CDK_OUT_DIR = Path(__file__).parent / "cdk.out"
 
+logger = logging.getLogger(__name__)
+
+
+def _cdk_level_for_line(line: str) -> int:
+    failure_tokens = (
+        "FAILED",
+        "ROLLBACK",
+        "ERROR",
+        "CANCELLED",
+    )
+    upper_line = line.upper()
+    if any(token in upper_line for token in failure_tokens):
+        return logging.ERROR
+    return logging.INFO
+
+
+def _stream_output(stream, level: int, source: str, stream_name: str) -> None:
+    if stream is None:
+        return
+    for line in stream:
+        cleaned = line.rstrip("\n")
+        if not cleaned:
+            continue
+        if source == "cdk" and stream_name == "stderr":
+            level = _cdk_level_for_line(cleaned)
+        logger.log(
+            level,
+            "%(line)s",
+            {"line": cleaned},
+            extra={"source": source, "stream": stream_name},
+        )
+
+
+def _stream_process_output(process: subprocess.Popen[str], source: str) -> None:
+    stdout_thread = threading.Thread(
+        target=_stream_output,
+        args=(process.stdout, logging.INFO, source, "stdout"),
+    )
+    stderr_thread = threading.Thread(
+        target=_stream_output,
+        args=(process.stderr, logging.ERROR, source, "stderr"),
+    )
+    stdout_thread.start()
+    stderr_thread.start()
+    process.wait()
+    stdout_thread.join()
+    stderr_thread.join()
+
 
 def deploy_cdk_stacks(app: App, session: boto3.Session) -> bool:
     """Synthesize and deploy CDK stacks using the CDK CLI."""
-    print(f"\n{'='*60}\n📦 Synthesizing and deploying CDK stacks...\n{'='*60}")
+    logger.info("Synthesizing and deploying CDK stacks")
 
     credentials = session.get_credentials()
     frozen_credentials = credentials.get_frozen_credentials()
@@ -27,18 +77,23 @@ def deploy_cdk_stacks(app: App, session: boto3.Session) -> bool:
 
     cloud_assembly = app.synth()
 
-    print(f"   Synthesized CDK stacks to: {cloud_assembly.directory}")
-    print(f"   Deploying CDK stacks using the CDK CLI...")
+    logger.info("   Synthesized CDK stacks to: %(directory)s", {"directory": cloud_assembly.directory})
+    logger.info("   Deploying CDK stacks using the CDK CLI")
 
-    deploy_result = subprocess.run(
+    process = subprocess.Popen(
         ["npx", "cdk", "deploy", "--all", "--require-approval", "never", "--no-notices", "--app", cloud_assembly.directory],
         env=cdk_env,
-        capture_output=False,  # Show output in real-time
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        bufsize=1,
     )
+    _stream_process_output(process=process, source="cdk")
 
-    if deploy_result.returncode != 0:
-        print(f"\n❌ CDK deployment failed")
+    if process.returncode != 0:
+        logger.error("CDK deployment failed")
         return False
 
-    print(f"\n{'='*60}\n✅ CDK deployment complete\n{'='*60}")
+    logger.info("CDK deployment complete")
+
     return True

@@ -114,7 +114,6 @@ def main():
                 session=session,
                 env_slug=args.env,
                 synth_only=args.synth_only,
-                log_callback=None,
             )
     else:
         app_config = example_apps.get_app_config(
@@ -137,7 +136,6 @@ def main():
                 image_tag=args.image_tag,
                 env_slug=args.env,
                 synth_only=args.synth_only,
-                log_callback=None,
             )
 
     if not success:

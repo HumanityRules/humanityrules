@@ -2,11 +2,14 @@
 ECS utility functions for monitoring and managing ECS services.
 """
 
+import logging
 import time
 from datetime import datetime, timezone
 
 import boto3
 from botocore.exceptions import ClientError
+
+logger = logging.getLogger(__name__)
 
 
 def check_stopped_tasks(
@@ -97,7 +100,7 @@ def wait_for_service_stable(
     
     Returns True if service is stable, False if timed out or tasks failing.
     """
-    print(f"\nWaiting for service to stabilize (timeout: {timeout_seconds}s)...")
+    logger.info("Waiting for service to stabilize (timeout: %(timeout_seconds)s)...", {"timeout_seconds": timeout_seconds})
     
     STABLE_CHECKS_REQUIRED = 3  # Need 3 consecutive stable checks (30 seconds)
     
@@ -116,17 +119,23 @@ def wait_for_service_stable(
             pending = svc["pendingCount"]
             
             if running != last_running:
-                print(f"   Tasks: {running}/{desired} running, {pending} pending")
+                logger.info(
+                    "   Tasks: %(running)s/%(desired)s running, %(pending)s pending",
+                    {"running": running, "desired": desired, "pending": pending},
+                )
                 last_running = running
                 consecutive_stable = 0  # Reset stability counter on change
             
             if running == desired and desired > 0 and pending == 0:
                 consecutive_stable += 1
                 if consecutive_stable >= STABLE_CHECKS_REQUIRED:
-                    print("   ✅ Service stable!")
+                    logger.info("   Service stable")
                     return True
                 elif consecutive_stable == 1:
-                    print(f"   ⏳ Confirming stability ({STABLE_CHECKS_REQUIRED - consecutive_stable} more checks)...")
+                    logger.info(
+                        "   Confirming stability (%(checks_remaining)s more checks)",
+                        {"checks_remaining": STABLE_CHECKS_REQUIRED - consecutive_stable},
+                    )
             else:
                 consecutive_stable = 0
             
@@ -141,29 +150,32 @@ def wait_for_service_stable(
                 consecutive_failures += 1
                 consecutive_stable = 0  # Reset stability on failures
                 if consecutive_failures >= 2:  # Show failures after 2 checks
-                    print("   ⚠️  Tasks are failing:")
+                    logger.error("   Tasks are failing:")
                     for reason in failure_reasons[:3]:  # Show up to 3 reasons
-                        print(f"      ❌ {reason}")
+                        logger.error("      %(reason)s", {"reason": reason})
                     
                     # If we've seen failures for 3+ consecutive checks, give up early
                     if consecutive_failures >= 4:
-                        print("   ❌ Too many task failures, aborting")
+                        logger.error("   Too many task failures, aborting")
                         return False
             else:
                 consecutive_failures = 0
             
         except ClientError as e:
-            print(f"   ⚠️  Error checking service: {e}")
+            logger.error("   Error checking service: %(error)s", {"error": str(e)})
         
         time.sleep(10)
     
-    print(f"   ❌ Timed out after {timeout_seconds}s waiting for service")
+    logger.error("   Timed out after %(timeout_seconds)s waiting for service", {"timeout_seconds": timeout_seconds})
     return False
 
 
 def start_ecs_service(session: boto3.Session, service_name: str, cluster_name: str) -> bool:
     """Start the ECS service (set desiredCount to 1) and wait for stabilization."""
-    print(f"\n📦 Starting ECS service (cluster={cluster_name}, service={service_name}, desiredCount=1)...")
+    logger.info(
+        "Starting ECS service (cluster=%(cluster_name)s, service=%(service_name)s, desiredCount=1)",
+        {"cluster_name": cluster_name, "service_name": service_name},
+    )
     ecs_client = session.client("ecs")
 
     # Record deployment start time to filter out old failed tasks
@@ -171,9 +183,9 @@ def start_ecs_service(session: boto3.Session, service_name: str, cluster_name: s
 
     try:
         ecs_client.update_service(cluster=cluster_name, service=service_name, desiredCount=1, forceNewDeployment=True)
-        print("   ✅ Deployment triggered (desiredCount=1)")
+        logger.info("   Deployment triggered (desiredCount=1)")
     except ClientError as e:
-        print(f"   ❌ Failed to trigger deployment: {e}")
+        logger.error("   Failed to trigger deployment: %(error)s", {"error": str(e)})
         return False
 
     stable = wait_for_service_stable(
@@ -185,7 +197,7 @@ def start_ecs_service(session: boto3.Session, service_name: str, cluster_name: s
     )
 
     if not stable:
-        print("\n❌ Service failed to stabilize. Check ECS console for details.")
+        logger.error("Service failed to stabilize. Check ECS console for details.")
         return False
 
     return True

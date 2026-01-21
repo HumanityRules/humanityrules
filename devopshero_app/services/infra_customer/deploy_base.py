@@ -3,7 +3,7 @@ Deploy shared DevOpsHero infrastructure (VPC, ECS cluster) using AWS CDK.
 """
 
 from dataclasses import dataclass
-from typing import Callable
+import logging
 
 import boto3
 from aws_cdk import App, Aws, CfnOutput, Fn, RemovalPolicy, Stack
@@ -18,15 +18,7 @@ from . import cloudformation_utils
 from . import vpc_utils
 
 
-# Type alias for log callback: (phase, level, message) -> None
-LogCallback = Callable[[str, str, str], None] | None
-
-
-def _log(phase: str, level: str, message: str, log_callback: LogCallback) -> None:
-    """Log a message and optionally call the callback."""
-    print(message)
-    if log_callback:
-        log_callback(phase, level, message)
+logger = logging.getLogger(__name__)
 
 
 # =============================================================================
@@ -224,24 +216,25 @@ class EcsClusterStack(Stack):
 # =============================================================================
 
 
-def get_or_create_vpc_cidr(session: boto3.Session, env_slug: str, log_callback: LogCallback) -> str:
+def get_or_create_vpc_cidr(session: boto3.Session, env_slug: str) -> str:
     """Get existing VPC CIDR or find an available one."""
     cf_client = session.client("cloudformation")
 
     vpc_stack_name = f"devopshero-{env_slug}-vpc"
     if cloudformation_utils.stack_exists(cf_client, vpc_stack_name):
-        _log("deploy", "info", f"VPC stack '{vpc_stack_name}' already exists, getting existing CIDR...", log_callback)
-        vpc_cidr = cloudformation_utils.get_stack_output(cf_client, vpc_stack_name, "VpcCidr")
-        if not vpc_cidr:
-            raise RuntimeError("Could not get VPC CIDR from existing stack")
-        _log("deploy", "info", f"Using existing VPC CIDR: {vpc_cidr}", log_callback)
-        return vpc_cidr
+        logger.info("VPC stack '%(stack_name)s' already exists, getting existing CIDR", {"stack_name": vpc_stack_name})
+        vpc_cidr = cloudformation_utils.get_stack_output(cf_client, vpc_stack_name, "VpcCidr")        
+        logger.info("Using existing VPC CIDR: %(vpc_cidr)s", {"vpc_cidr": vpc_cidr})
     else:
-        _log("deploy", "info", f"VPC stack '{vpc_stack_name}' does not exist, finding available CIDR...", log_callback)
+        logger.info("VPC stack '%(stack_name)s' does not exist, finding available CIDR", {"stack_name": vpc_stack_name})
         ec2_client = session.client("ec2")
         vpc_cidr = vpc_utils.find_available_vpc_cidr(ec2_client)["VpcCidr"]
-        _log("deploy", "info", f"Found available VPC CIDR: {vpc_cidr}", log_callback)
-        return vpc_cidr
+        logger.info("Found available VPC CIDR: %(vpc_cidr)s", {"vpc_cidr": vpc_cidr})
+
+    if not vpc_cidr:
+        raise RuntimeError("Could not get VPC CIDR")
+    
+    return vpc_cidr
 
 
 # =============================================================================
@@ -253,7 +246,6 @@ def deploy(
     session: boto3.Session,
     env_slug: str,
     synth_only: bool,
-    log_callback: LogCallback,
 ) -> bool:
     """
     Deploy shared infrastructure: VPC and ECS cluster.
@@ -262,14 +254,12 @@ def deploy(
         session: Boto3 session with assumed role credentials.
         env_slug: Environment slug for resource naming (e.g., "default", "prod").
         synth_only: If True, only synthesize templates, don't deploy.
-        log_callback: Optional callback for logging progress.
-
     Returns:
         True on success, False on failure.
     """
-    _log("deploy", "info", f"Deploying shared infrastructure for environment '{env_slug}'", log_callback)
+    logger.info("Deploying shared infrastructure for environment '%(env_slug)s'", {"env_slug": env_slug})
 
-    vpc_cidr = get_or_create_vpc_cidr(session, env_slug, log_callback)
+    vpc_cidr = get_or_create_vpc_cidr(session=session, env_slug=env_slug)
 
     cdk_app = App(outdir=str(cdk_utils.CDK_OUT_DIR))
 
@@ -282,13 +272,13 @@ def deploy(
 
     if synth_only:
         cloud_assembly = cdk_app.synth()
-        _log("deploy", "info", f"CDK templates synthesized to: {cloud_assembly.directory}", log_callback)
+        logger.info("CDK templates synthesized to: %(directory)s", {"directory": cloud_assembly.directory})
         return True
 
     success = cdk_utils.deploy_cdk_stacks(cdk_app, session)
 
     if success:
-        _log("deploy", "info", f"Infrastructure deployment complete for environment '{env_slug}'", log_callback)
+        logger.info("Infrastructure deployment complete for environment '%(env_slug)s'", {"env_slug": env_slug})
 
     return success
 
@@ -305,13 +295,10 @@ def teardown(session: boto3.Session, env_slug: str) -> bool:
         f"devopshero-{env_slug}-vpc",
     ]
 
-    print(f"\n{'='*60}")
-    print(f"Tearing down shared infrastructure for environment '{env_slug}'")
-    print(f"{'='*60}")
-    print(f"\nStacks to delete (in order):")
+    logger.info("Tearing down shared infrastructure for environment '%(env_slug)s'", {"env_slug": env_slug})
+    logger.info("Stacks to delete (in order):")
     for stack in stacks_to_delete:
-        print(f"   - {stack}")
-    print()
+        logger.info("   - %(stack_name)s", {"stack_name": stack})
 
     all_success = True
     for stack_name in stacks_to_delete:
@@ -320,12 +307,9 @@ def teardown(session: boto3.Session, env_slug: str) -> bool:
             all_success = False
 
     if all_success:
-        print(f"\n{'='*60}")
-        print("Infrastructure stacks deleted successfully")
-        print(f"{'='*60}")
-    else:
-        print(f"\n{'='*60}")
-        print("Some stacks failed to delete (apps may still depend on them)")
-        print(f"{'='*60}")
+        logger.info("Infrastructure stacks deleted successfully")
+        return all_success
+
+    logger.error("Some stacks failed to delete (apps may still depend on them)")
 
     return all_success
