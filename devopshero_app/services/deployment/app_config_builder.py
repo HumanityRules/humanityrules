@@ -102,7 +102,13 @@ def build_app_config(app: App, environment: Environment) -> infra_customer.appco
         database_config = build_database_config(app.datastore)
 
     return infra_customer.appconfig.AppConfig(
-        app_name=app.slug,
+        app_name=app.slug,  # This is a huge decision. For example, app_name is used to derive the secrets path in
+                            # secrets_utils.py (e.g., "devopshero/{app_name}/secrets"). But apps may have
+                            # hardcoded expectations about their secret path. If the slug doesn't match
+                            # (e.g., agent creates "db-portal" twice → second gets "db-portal-1"), the app
+                            # can't find its secrets. Consider separating app_name (for resource naming) from secrets_path,
+                            # and the agent repository-analyzer determines the secret path by reading the code.
+                            # beads: devopshero-bxr
         ecr_repo_name=ecr_repo_name,
         container_port=app.container_port,
         cpu=app.cpu,
