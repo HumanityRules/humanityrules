@@ -163,18 +163,14 @@ async def create_app(
         ValueError: If validation fails.
     """
     # Validate app_type
-    valid_app_types = [choice[0] for choice in App.AppType.choices]
+    valid_app_types = [choice.value for choice in App.AppType]
     if app_type not in valid_app_types:
-        raise ValueError(
-            f"Invalid app_type '{app_type}'. Must be one of: {', '.join(valid_app_types)}"
-        )
+        raise ValueError(f"Invalid app_type '{app_type}'. Must be one of: {', '.join(valid_app_types)}")
 
     # Validate build_strategy
-    valid_strategies = [choice[0] for choice in App.BuildStrategy.choices]
+    valid_strategies = [choice.value for choice in App.BuildStrategy]
     if build_strategy not in valid_strategies:
-        raise ValueError(
-            f"Invalid build_strategy '{build_strategy}'. Must be one of: {', '.join(valid_strategies)}"
-        )
+        raise ValueError(f"Invalid build_strategy '{build_strategy}'. Must be one of: {', '.join(valid_strategies)}")
 
     # Validate datastore if provided
     datastore = None
@@ -189,7 +185,7 @@ async def create_app(
                 f"Datastore {datastore_id} not found or doesn't belong to workspace."
             )
 
-    # Generate globally unique slug (app names must be unique across all workspaces)
+    # Generate globally unique slug (app slugs must be unique across all workspaces)
     base_slug = slugify(name)
     slug = base_slug
     counter = 1
