@@ -58,8 +58,8 @@ async def _require_workspace(conversation: Conversation) -> Workspace:
             "Use select_workspace to choose a workspace first, "
             "or create_workspace if you don't have one yet."
         )
-    # Use async ORM to fetch the related workspace
-    return await Workspace.objects.aget(id=conversation.workspace_id)
+    # Use async ORM to fetch the related workspace (with organization for create_app)
+    return await Workspace.objects.select_related("organization").aget(id=conversation.workspace_id)
 
 
 def _mcp_response(data: Any) -> dict[str, Any]:

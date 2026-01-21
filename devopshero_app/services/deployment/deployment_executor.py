@@ -147,8 +147,6 @@ def run_deployment(deployment_id: str) -> bool:
             )
 
             # Execute deployment
-            logger.info("Deploying app '%(app_name)s'", {"app_name": app.name})
-
             deployment.status = models.Deployment.Status.DEPLOYING
             deployment.save()
 

@@ -495,7 +495,7 @@ def deploy(
     """
     logger.info("Deploying app '%(app_name)s' to environment '%(env_slug)s'", {"app_name": app_config.app_name, "env_slug": env_slug})
 
-    # Resource prefix for consistent naming: doh-{env}-{app} (app slugs are globally unique)
+    # Resource prefix for consistent naming: doh-{env}-{app} (app slugs are per organization unique)
     resource_prefix = f"doh-{env_slug}-{app_config.app_name}"
 
     # Verify infrastructure exists

@@ -1,5 +1,64 @@
 # DevOpsHero Development Journal
 
+## 2026-01-21 21:10 - App Slug Uniqueness: Global → Per Organization
+
+Changed `App.slug` from globally unique to unique per organization to fix a multi-tenant information leakage issue.
+
+### The Problem
+
+When generating app slugs, the system appends incrementing numbers if the slug already exists (e.g., `my-app` → `my-app-1`). With global uniqueness, this leaks information across tenants: if Tenant B tries to create "analytics-dashboard" and gets "analytics-dashboard-1", they learn that some other tenant already has "analytics-dashboard".
+
+### Decision: Unique Per Organization
+
+Considered three scopes:
+
+- **Per Workspace** — Strongest isolation, but requires workspace slug in AWS resource names (longer, repetitive)
+- **Per Organization** — Good isolation (orgs are tenant boundaries), keeps resource names short
+- **Global** (previous) — Simplest AWS naming, but cross-tenant leakage
+
+Chose **per organization** because:
+1. Organizations are the tenant boundary — no cross-tenant leakage
+2. AWS resource names stay short: `doh/{env.slug}/{app.slug}` still works since environments are per-account, accounts are per-org
+3. Same-org collisions are acceptable (users probably want to know if a colleague already created that app name)
+
+### Implementation: Denormalized FK
+
+The constraint `unique_together = [["organization", "slug"]]` requires a direct FK from App to Organization. Since App → Workspace → Organization, we added a denormalized `organization` FK to App:
+
+```python
+class App(models.Model):
+    organization = models.ForeignKey(
+        Organization,
+        on_delete=models.CASCADE,
+        related_name="apps",
+        help_text="Denormalized from workspace for unique constraint",
+    )
+    workspace = models.ForeignKey(...)
+    slug = models.SlugField(max_length=255)  # No longer unique=True
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["organization", "slug"],
+                name="unique_app_slug_per_org",
+            )
+        ]
+```
+
+The `create_app` tool sets `organization=workspace.organization` and generates slugs with `App.objects.filter(organization=org, slug=slug)`.
+
+### Async Gotcha: select_related for Organization
+
+In `mcp_tools._get_workspace()`, added `select_related("organization")` so the organization is eagerly loaded when fetching the workspace. Without this, accessing `workspace.organization` in async code would require `sync_to_async` since Django lazy-loads related objects synchronously. Pre-fetching avoids this friction.
+
+### Why Not Application-Level Validation Only?
+
+Could skip the denormalized FK and just check uniqueness in `create_app.py`. Rejected because:
+- Race conditions without DB-level constraint
+- Other code paths (admin, future APIs) would need duplicate validation
+- DB constraint is authoritative
+
+
 ## 2026-01-21 - ECS Exec command reference
 
 To shell into a running ECS container for debugging:
