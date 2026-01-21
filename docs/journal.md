@@ -1,5 +1,17 @@
 # DevOpsHero Development Journal
 
+## 2026-01-21 - ECS Exec command reference
+
+To shell into a running ECS container for debugging:
+
+```bash
+aws ecs execute-command --cluster <cluster-name> \
+    --task <task-id> --container <app-name> \
+    --interactive --command /bin/sh
+```
+
+Removed this from deployment output logs since it cluttered the UI. Keep here for reference.
+
 ## 2026-01-21 07:25 - Deployment logging source + streaming output
 
 - Replaced deployment log phase with a source field, added structured template/params logging, and capture CDK/Docker stdout/stderr into DeploymentLog. Added stderr downgrade logic for CDK output and hardened log formatting to avoid formatting exceptions.
