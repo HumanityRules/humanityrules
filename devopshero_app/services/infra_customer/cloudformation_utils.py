@@ -211,9 +211,10 @@ def get_app_urls(cf_client, app_name: str, env_slug: str, has_domain: bool) -> d
     """Get the app URLs from CloudFormation stack outputs."""
     stack_name = f"doh-{env_slug}-{app_name}-app"
 
-    urls = {
-        "alb_url": get_stack_output(cf_client, stack_name=stack_name, output_key="AlbUrl"),
-    }
+    shared_alb_dns = get_stack_output(cf_client, stack_name=stack_name, output_key="SharedAlbDns")
+    alb_url = f"http://{shared_alb_dns}" if shared_alb_dns else None
+
+    urls = {"alb_url": alb_url}
 
     if has_domain:
         urls["https_url"] = get_stack_output(cf_client, stack_name=stack_name, output_key="HttpsUrl")
@@ -253,6 +254,4 @@ def print_deployment_summary(
 
     if urls.get("alb_url"):
         logger.info("App URL (ALB):   %(alb_url)s", {"alb_url": urls["alb_url"]})
-    else:
-        logger.info("URLs: (waiting for ALB to be ready...)")
 
