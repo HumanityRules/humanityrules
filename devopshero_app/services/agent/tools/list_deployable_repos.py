@@ -61,11 +61,14 @@ def list_deployable_repos() -> list[DeployableRepoSummary]:
         return []
 
     repos = []
+    public_repos_dir = deployable_repos_dir / "public"
     for entry in sorted(deployable_repos_dir.iterdir()):
         if not entry.is_dir():
             continue
         # Skip hidden directories
         if entry.name.startswith("."):
+            continue
+        if entry.name == "public":
             continue
 
         repos.append(
@@ -75,5 +78,20 @@ def list_deployable_repos() -> list[DeployableRepoSummary]:
                 description=_extract_description(repo_path=entry),
             )
         )
+
+    if public_repos_dir.exists():
+        for entry in sorted(public_repos_dir.iterdir()):
+            if not entry.is_dir():
+                continue
+            if entry.name.startswith("."):
+                continue
+
+            repos.append(
+                DeployableRepoSummary(
+                    name=f"public/{entry.name}",
+                    url=f"file://{entry.resolve()}",
+                    description=_extract_description(repo_path=entry),
+                )
+            )
 
     return repos
