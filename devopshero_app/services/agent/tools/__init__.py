@@ -7,11 +7,15 @@ repositories, AWS accounts, and the deployment system.
 
 from .create_app import create_app, AppSummary
 from .create_datastore import create_datastore, DatastoreSummary
+from .create_environment import create_environment
+from .create_environment import EnvironmentSummary as CreateEnvironmentSummary
 from .create_workspace import create_workspace, WorkspaceSummary
 from .deploy_app import deploy_app, DeploymentSummary
 from .get_deployment_status import get_deployment_status, DeploymentStatus, DeploymentLogEntry
 from .initiate_aws_connection import initiate_aws_connection, AWSConnectionInfo
 from .list_aws_accounts import list_aws_accounts, AWSAccountSummary
+from .list_environments import list_environments
+from .list_environments import EnvironmentSummary as ListEnvironmentSummary
 from .list_hosted_zones import list_hosted_zones, HostedZoneSummary
 from .list_deployable_repos import list_deployable_repos, DeployableRepoSummary
 from .list_workspaces import list_workspaces, WorkspaceListItem
@@ -25,6 +29,11 @@ __all__ = [
     # Datastore management
     "create_datastore",
     "DatastoreSummary",
+    # Environment management
+    "create_environment",
+    "CreateEnvironmentSummary",
+    "list_environments",
+    "ListEnvironmentSummary",
     # Workspace management
     "create_workspace",
     "WorkspaceSummary",

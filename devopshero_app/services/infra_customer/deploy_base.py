@@ -1,5 +1,5 @@
 """
-Deploy shared DevOpsHero infrastructure (VPC, ECS cluster) using AWS CDK.
+Deploy shared DevOpsHero infrastructure (VPC, ECS cluster, shared ALB) using AWS CDK.
 """
 
 from dataclasses import dataclass
@@ -7,14 +7,19 @@ import logging
 
 import boto3
 from aws_cdk import App, Aws, CfnOutput, Fn, RemovalPolicy, Stack
+from aws_cdk import aws_certificatemanager as acm
 from aws_cdk import aws_ec2 as ec2
 from aws_cdk import aws_ecs as ecs
+from aws_cdk import aws_elasticloadbalancingv2 as elbv2
 from aws_cdk import aws_iam as iam
 from aws_cdk import aws_logs as logs
+from aws_cdk import aws_route53 as route53
+from aws_cdk import aws_route53_targets as targets
 from constructs import Construct
 
 from . import cdk_utils
 from . import cloudformation_utils
+from . import route53_utils
 from . import vpc_utils
 
 
@@ -35,17 +40,23 @@ class EnvironmentInfrastructure:
     cluster: ecs.ICluster
     task_execution_role: iam.IRole
     log_group: logs.ILogGroup
+    # Shared ALB resources
+    shared_alb_http_listener_arn: str
+    shared_alb_https_listener_arn: str | None
+    shared_alb_security_group: ec2.ISecurityGroup
+    shared_alb_hosted_zone: str | None
 
 
-def import_environment_infrastructure(scope: Construct, env_slug: str) -> EnvironmentInfrastructure:
+def import_environment_infrastructure(scope: Construct, env_slug: str, shared_alb_hosted_zone: str | None) -> EnvironmentInfrastructure:
     """
-    Import VPC, security group, cluster, and other base infrastructure from an environment.
+    Import VPC, security group, cluster, shared ALB, and other base infrastructure from an environment.
 
     Must be called from within a Stack context since it creates CDK constructs.
 
     Args:
         scope: The CDK construct scope (typically 'self' from within a Stack).
         env_slug: Environment slug (e.g., "default", "prod").
+        shared_alb_hosted_zone: The hosted zone for the shared ALB (used to determine if HTTPS is available).
 
     Returns:
         EnvironmentInfrastructure with all imported resources.
@@ -90,12 +101,28 @@ def import_environment_infrastructure(scope: Construct, env_slug: str) -> Enviro
         Fn.import_value(f"{prefix}-ecs-log-group"),
     )
 
+    # Import shared ALB resources (always present)
+    shared_alb_http_listener_arn = Fn.import_value(f"{prefix}-shared-alb-http-listener-arn")
+    shared_alb_security_group = ec2.SecurityGroup.from_security_group_id(
+        scope, "ImportedSharedAlbSg",
+        Fn.import_value(f"{prefix}-shared-alb-sg-id"),
+    )
+
+    # HTTPS listener is only present if hosted zone was configured
+    shared_alb_https_listener_arn = None
+    if shared_alb_hosted_zone:
+        shared_alb_https_listener_arn = Fn.import_value(f"{prefix}-shared-alb-https-listener-arn")
+
     return EnvironmentInfrastructure(
         vpc=vpc,
         default_security_group=default_security_group,
         cluster=cluster,
         task_execution_role=task_execution_role,
         log_group=log_group,
+        shared_alb_http_listener_arn=shared_alb_http_listener_arn,
+        shared_alb_https_listener_arn=shared_alb_https_listener_arn,
+        shared_alb_security_group=shared_alb_security_group,
+        shared_alb_hosted_zone=shared_alb_hosted_zone,
     )
 
 
@@ -164,7 +191,7 @@ class VpcStack(Stack):
 
 class EcsClusterStack(Stack):
     """
-    DevOpsHero ECS Cluster Stack - Fargate cluster with IAM roles for app deployments.
+    DevOpsHero ECS Cluster Stack - Fargate cluster, IAM roles, and shared ALB for app deployments.
     """
 
     def __init__(
@@ -173,20 +200,26 @@ class EcsClusterStack(Stack):
         construct_id: str,
         env_slug: str,
         vpc: ec2.IVpc,
+        shared_hosted_zone_name: str | None,
+        shared_hosted_zone_id: str | None,
         **kwargs,
     ) -> None:
         super().__init__(scope, construct_id, **kwargs)
 
+        prefix = f"devopshero-{env_slug}"
+
+        # ECS Cluster
         self.cluster = ecs.Cluster(
             self, "EcsCluster",
-            cluster_name=f"devopshero-{env_slug}-cluster",
+            cluster_name=f"{prefix}-cluster",
             vpc=vpc,
             container_insights_v2=ecs.ContainerInsights.ENABLED,
         )
 
+        # Task Execution Role
         self.task_execution_role = iam.Role(
             self, "TaskExecutionRole",
-            role_name=f"devopshero-{env_slug}-task-execution-role",
+            role_name=f"{prefix}-task-execution-role",
             assumed_by=iam.ServicePrincipal("ecs-tasks.amazonaws.com"),
             managed_policies=[iam.ManagedPolicy.from_aws_managed_policy_name("service-role/AmazonECSTaskExecutionRolePolicy")],
         )
@@ -196,6 +229,7 @@ class EcsClusterStack(Stack):
             resources=[f"arn:aws:secretsmanager:{Aws.REGION}:{Aws.ACCOUNT_ID}:secret:devopshero/*"],
         ))
 
+        # Log Group
         self.log_group = logs.LogGroup(
             self, "EcsLogGroup",
             log_group_name=f"/devopshero/{env_slug}/ecs",
@@ -203,12 +237,105 @@ class EcsClusterStack(Stack):
             removal_policy=RemovalPolicy.DESTROY,
         )
 
-        # Export names include env_slug for environment isolation
-        prefix = f"devopshero-{env_slug}"
+        # Shared ALB Security Group - always created
+        self.alb_security_group = ec2.SecurityGroup(
+            self, "SharedAlbSecurityGroup",
+            vpc=vpc,
+            security_group_name=f"{prefix}-shared-alb-sg",
+            description="Security group for shared ALB - allows HTTP (and HTTPS if hosted zone configured)",
+            allow_all_outbound=True,
+        )
+        self.alb_security_group.add_ingress_rule(
+            peer=ec2.Peer.any_ipv4(),
+            connection=ec2.Port.tcp(80),
+            description="Allow HTTP from anywhere",
+        )
+
+        # Shared ALB - always created
+        self.shared_alb = elbv2.ApplicationLoadBalancer(
+            self, "SharedAlb",
+            load_balancer_name=f"doh-{env_slug}-shared"[:32],
+            vpc=vpc,
+            internet_facing=True,
+            security_group=self.alb_security_group,
+            vpc_subnets=ec2.SubnetSelection(subnet_type=ec2.SubnetType.PUBLIC),
+        )
+
+        # HTTP Listener - always created with default 404 action
+        self.http_listener = self.shared_alb.add_listener(
+            "HttpListener",
+            port=80,
+            protocol=elbv2.ApplicationProtocol.HTTP,
+            default_action=elbv2.ListenerAction.fixed_response(
+                status_code=404,
+                content_type="text/plain",
+                message_body="No app configured for this host",
+            ),
+        )
+
+        # HTTPS setup - only if hosted zone is provided
+        self.https_listener = None
+        self.wildcard_certificate = None
+        if shared_hosted_zone_name and shared_hosted_zone_id:
+            # Allow HTTPS traffic
+            self.alb_security_group.add_ingress_rule(
+                peer=ec2.Peer.any_ipv4(),
+                connection=ec2.Port.tcp(443),
+                description="Allow HTTPS from anywhere",
+            )
+
+            # Import the hosted zone
+            hosted_zone = route53.HostedZone.from_hosted_zone_attributes(
+                self, "HostedZone",
+                hosted_zone_id=shared_hosted_zone_id,
+                zone_name=shared_hosted_zone_name,
+            )
+
+            # Wildcard certificate
+            self.wildcard_certificate = acm.Certificate(
+                self, "WildcardCertificate",
+                domain_name=f"*.{shared_hosted_zone_name}",
+                validation=acm.CertificateValidation.from_dns(hosted_zone),
+            )
+
+            # HTTPS Listener with default 404 action
+            self.https_listener = self.shared_alb.add_listener(
+                "HttpsListener",
+                port=443,
+                protocol=elbv2.ApplicationProtocol.HTTPS,
+                certificates=[self.wildcard_certificate],
+                ssl_policy=elbv2.SslPolicy.TLS13_RES,
+                default_action=elbv2.ListenerAction.fixed_response(
+                    status_code=404,
+                    content_type="text/plain",
+                    message_body="No app configured for this host",
+                ),
+            )
+
+            # Wildcard DNS record pointing to ALB
+            route53.ARecord(
+                self, "WildcardDnsRecord",
+                zone=hosted_zone,
+                record_name=f"*.{shared_hosted_zone_name}",
+                target=route53.RecordTarget.from_alias(targets.LoadBalancerTarget(self.shared_alb)),
+            )
+
+            # Export HTTPS-specific values
+            CfnOutput(self, "SharedAlbHttpsListenerArn", value=self.https_listener.listener_arn, export_name=f"{prefix}-shared-alb-https-listener-arn")
+            CfnOutput(self, "SharedAlbHostedZone", value=shared_hosted_zone_name, export_name=f"{prefix}-shared-alb-hosted-zone")
+            CfnOutput(self, "WildcardCertificateArn", value=self.wildcard_certificate.certificate_arn, export_name=f"{prefix}-wildcard-cert-arn")
+
+        # Export cluster and role values
         CfnOutput(self, "ClusterArn", value=self.cluster.cluster_arn, export_name=f"{prefix}-cluster-arn")
         CfnOutput(self, "ClusterName", value=self.cluster.cluster_name, export_name=f"{prefix}-cluster-name")
         CfnOutput(self, "TaskExecutionRoleArn", value=self.task_execution_role.role_arn, export_name=f"{prefix}-task-execution-role-arn")
         CfnOutput(self, "LogGroupName", value=self.log_group.log_group_name, export_name=f"{prefix}-ecs-log-group")
+
+        # Export shared ALB values (always present)
+        CfnOutput(self, "SharedAlbArn", value=self.shared_alb.load_balancer_arn, export_name=f"{prefix}-shared-alb-arn")
+        CfnOutput(self, "SharedAlbDns", value=self.shared_alb.load_balancer_dns_name, export_name=f"{prefix}-shared-alb-dns")
+        CfnOutput(self, "SharedAlbSecurityGroupId", value=self.alb_security_group.security_group_id, export_name=f"{prefix}-shared-alb-sg-id")
+        CfnOutput(self, "SharedAlbHttpListenerArn", value=self.http_listener.listener_arn, export_name=f"{prefix}-shared-alb-http-listener-arn")
 
 
 # =============================================================================
@@ -246,14 +373,16 @@ def deploy(
     session: boto3.Session,
     env_slug: str,
     synth_only: bool,
+    shared_alb_hosted_zone: str | None,
 ) -> bool:
     """
-    Deploy shared infrastructure: VPC and ECS cluster.
+    Deploy shared infrastructure: VPC, ECS cluster, and shared ALB.
 
     Args:
         session: Boto3 session with assumed role credentials.
         env_slug: Environment slug for resource naming (e.g., "default", "prod").
         synth_only: If True, only synthesize templates, don't deploy.
+        shared_alb_hosted_zone: Hosted zone for wildcard cert (e.g., "dev.example.com"). None = HTTP only.
     Returns:
         True on success, False on failure.
     """
@@ -261,13 +390,31 @@ def deploy(
 
     vpc_cidr = get_or_create_vpc_cidr(session=session, env_slug=env_slug)
 
+    # Look up hosted zone ID if hosted zone name is provided
+    shared_hosted_zone_id = None
+    if shared_alb_hosted_zone:
+        logger.info("Looking up hosted zone for '%(hosted_zone)s'", {"hosted_zone": shared_alb_hosted_zone})
+        shared_hosted_zone_id = route53_utils.get_hosted_zone_id(session=session, hosted_zone_name=shared_alb_hosted_zone)
+        if shared_hosted_zone_id:
+            logger.info("Found hosted zone: %(hosted_zone_id)s", {"hosted_zone_id": shared_hosted_zone_id})
+        else:
+            logger.error("Could not find hosted zone '%(hosted_zone)s', HTTPS will not be configured", {"hosted_zone": shared_alb_hosted_zone})
+            shared_alb_hosted_zone = None  # Fall back to HTTP-only
+
     cdk_app = App(outdir=str(cdk_utils.CDK_OUT_DIR))
 
     vpc_stack_name = f"devopshero-{env_slug}-vpc"
     cluster_stack_name = f"devopshero-{env_slug}-cluster"
 
     vpc_stack = VpcStack(cdk_app, vpc_stack_name, env_slug=env_slug, vpc_cidr=vpc_cidr)
-    ecs_cluster_stack = EcsClusterStack(cdk_app, cluster_stack_name, env_slug=env_slug, vpc=vpc_stack.vpc)
+    ecs_cluster_stack = EcsClusterStack(
+        cdk_app,
+        cluster_stack_name,
+        env_slug=env_slug,
+        vpc=vpc_stack.vpc,
+        shared_hosted_zone_name=shared_alb_hosted_zone,
+        shared_hosted_zone_id=shared_hosted_zone_id,
+    )
     ecs_cluster_stack.add_dependency(vpc_stack)
 
     if synth_only:

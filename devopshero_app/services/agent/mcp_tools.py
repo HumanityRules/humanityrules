@@ -18,12 +18,14 @@ from devopshero_app.models import Conversation, Workspace
 from .tools import (
     create_app as _create_app,
     create_datastore as _create_datastore,
+    create_environment as _create_environment,
     create_workspace as _create_workspace,
     deploy_app as _deploy_app,
     get_deployment_status as _get_deployment_status,
     initiate_aws_connection as _initiate_aws_connection,
     list_aws_accounts as _list_aws_accounts,
     list_deployable_repos as _list_deployable_repos,
+    list_environments as _list_environments,
     list_hosted_zones as _list_hosted_zones,
     list_workspaces as _list_workspaces,
     scan_repository as _scan_repository,
@@ -78,7 +80,9 @@ TOOL_DISPLAY_NAMES = {
     # Platform tools
     "mcp__devopshero__list_aws_accounts": "List AWS Accounts",
     "mcp__devopshero__list_hosted_zones": "List Hosted Zones",
+    "mcp__devopshero__list_environments": "List Environments",
     "mcp__devopshero__initiate_aws_connection": "Initiate AWS Connection",
+    "mcp__devopshero__create_environment": "Create Environment",
     "mcp__devopshero__list_workspaces": "List Workspaces",
     "mcp__devopshero__select_workspace": "Select Workspace",
     "mcp__devopshero__create_workspace": "Create Workspace",
@@ -110,6 +114,8 @@ TOOL_MAIN_PARAMS = {
     "mcp__devopshero__select_workspace": "workspace_name",
     "mcp__devopshero__initiate_aws_connection": "account_name",
     "mcp__devopshero__list_hosted_zones": "aws_account_uuid",
+    "mcp__devopshero__list_environments": "aws_account_uuid",
+    "mcp__devopshero__create_environment": "environment_name",
     "mcp__devopshero__scan_repository": "repo_url",
     "mcp__devopshero__create_app": "name",
     "mcp__devopshero__create_datastore": "name",
@@ -242,6 +248,59 @@ async def list_hosted_zones(args: dict[str, Any]) -> dict[str, Any]:
         organization=conversation.organization,
     )
     return _mcp_response(zones)
+
+
+@tool(
+    "list_environments",
+    (
+        "List environments in a connected AWS account. "
+        "Environments contain the base infrastructure (VPC, ECS cluster, shared ALB) for deployments. "
+        "Returns environment ID, name, slug, status, and shared ALB configuration. "
+        "Use this to discover existing environments before deploying. "
+        "Decision logic: if 'default' exists and is READY, use it; if none exist, create one; "
+        "if multiple exist, ask the user which one to use."
+    ),
+    {
+        "aws_account_uuid": str,
+    },
+)
+async def list_environments(args: dict[str, Any]) -> dict[str, Any]:
+    """List environments in an AWS account."""
+    conversation = _get_conversation()
+    environments = await _list_environments(
+        aws_account_uuid=args["aws_account_uuid"],
+        organization=conversation.organization,
+    )
+    return _mcp_response(environments)
+
+
+@tool(
+    "create_environment",
+    (
+        "Create and provision an environment in a connected AWS account. "
+        "Provisions VPC, ECS cluster, and shared ALB infrastructure. "
+        "If hosted_zone_name is provided, creates a wildcard SSL certificate for HTTPS. "
+        "This is a blocking operation - it waits for CloudFormation to complete (5-10 minutes). "
+        "The aws_account_uuid is the internal UUID from list_aws_accounts (the 'id' field), "
+        "not the 12-digit AWS account number."
+    ),
+    {
+        "aws_account_uuid": str,
+        "environment_name": str,
+        "hosted_zone_name": str,
+    },
+)
+async def create_environment(args: dict[str, Any]) -> dict[str, Any]:
+    """Create and provision an environment."""
+    conversation = _get_conversation()
+    result = await _create_environment(
+        aws_account_uuid=args["aws_account_uuid"],
+        environment_name=args["environment_name"],
+        hosted_zone_name=args.get("hosted_zone_name"),
+        organization=conversation.organization,
+        user=conversation.user,
+    )
+    return _mcp_response(result)
 
 
 @tool(
@@ -401,7 +460,6 @@ async def scan_repository(args: dict[str, Any]) -> dict[str, Any]:
         "memory": int,
         "health_check_path": str,
         "environment_variables": list,
-        "domain_name": str,
         "datastore_id": str,
         "dockerfile_path": str,
         "app_secrets": dict,
@@ -424,7 +482,6 @@ async def create_app(args: dict[str, Any]) -> dict[str, Any]:
         health_check_path=args["health_check_path"],
         user=conversation.user,
         environment_variables=args.get("environment_variables"),
-        domain_name=args.get("domain_name"),
         datastore_id=args.get("datastore_id"),
         dockerfile_path=args.get("dockerfile_path", ""),
         app_secrets=args.get("app_secrets"),
@@ -561,7 +618,9 @@ devopshero_mcp_server = create_sdk_mcp_server(
         # Platform tools
         list_aws_accounts,
         list_hosted_zones,
+        list_environments,
         initiate_aws_connection,
+        create_environment,
         list_workspaces,
         select_workspace,
         create_workspace,
@@ -582,7 +641,9 @@ TOOL_NAMES = [
     # Platform tools
     "mcp__devopshero__list_aws_accounts",
     "mcp__devopshero__list_hosted_zones",
+    "mcp__devopshero__list_environments",
     "mcp__devopshero__initiate_aws_connection",
+    "mcp__devopshero__create_environment",
     "mcp__devopshero__list_workspaces",
     "mcp__devopshero__select_workspace",
     "mcp__devopshero__create_workspace",

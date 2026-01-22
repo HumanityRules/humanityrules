@@ -12,7 +12,7 @@ from django.http import JsonResponse
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_POST
 
-from ..models import AWSAccount, Environment
+from ..models import AWSAccount
 
 logger = logging.getLogger(__name__)
 
@@ -93,15 +93,6 @@ def aws_install_account_callback(request):
         aws_account.status_message = f"Connected from {stack_region}"
         aws_account.save()
         
-        # Auto-create default environment for this account
-        Environment.objects.get_or_create(
-            aws_account=aws_account,
-            slug="default",
-            defaults={
-                "name": "default",
-                "status": Environment.Status.PENDING,
-            },
-        )
         
         logger.info(
             f"AWS account connected: {aws_account.name} "

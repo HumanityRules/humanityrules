@@ -114,7 +114,7 @@ class WorkspaceAdmin(admin.ModelAdmin):
 class AppAdmin(admin.ModelAdmin):
     list_display = ["name", "slug", "organization", "workspace", "app_type", "build_strategy", "branch", "container_port", "updated_at"]
     list_filter = ["app_type", "build_strategy", "organization"]
-    search_fields = ["name", "slug", "workspace__name", "organization__name", "branch", "domain_name"]
+    search_fields = ["name", "slug", "workspace__name", "organization__name", "branch"]
     prepopulated_fields = {"slug": ("name",)}
     readonly_fields = ["id", "created_at", "updated_at"]
     autocomplete_fields = ["organization", "workspace", "datastore", "created_by"]

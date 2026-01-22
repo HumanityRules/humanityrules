@@ -11,16 +11,6 @@ from devopshero_app.models import App, Datastore, Environment
 from devopshero_app.services import infra_customer
 
 
-def derive_hosted_zone_name(domain_name: str | None) -> str | None:
-    """Derive hosted zone name from domain name (e.g., 'foo.example.com' -> 'example.com')."""
-    if not domain_name:
-        return None
-    parts = domain_name.split(".")
-    if len(parts) >= 2:
-        return ".".join(parts[-2:])
-    return None
-
-
 def extract_repo_path(repo_url: str) -> Path | None:
     """Extract local path from file:// URL."""
     if repo_url.startswith("file://"):
@@ -93,9 +83,6 @@ def build_app_config(app: App, environment: Environment) -> infra_customer.appco
     # Extract app source path from workspace repo URL
     app_source_path = extract_repo_path(workspace.primary_repo_url)
 
-    # Derive hosted zone from domain name
-    hosted_zone_name = derive_hosted_zone_name(app.domain_name)
-
     # Build database config if app has a datastore
     database_config = None
     if app.datastore:
@@ -111,8 +98,6 @@ def build_app_config(app: App, environment: Environment) -> infra_customer.appco
         health_check_command=app.health_check_command or None,
         environment_variables=app.environment_variables or [],
         app_source_path=app_source_path,
-        domain_name=app.domain_name or None,
-        hosted_zone_name=hosted_zone_name,
         database_config=database_config,
         app_secrets=app.app_secrets,
     )

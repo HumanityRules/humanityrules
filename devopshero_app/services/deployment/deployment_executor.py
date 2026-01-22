@@ -32,45 +32,6 @@ def _get_aws_session(deployment: models.Deployment):
     )
 
 
-def _provision_environment(deployment: models.Deployment, session) -> bool:
-    """Provision base infrastructure for an environment if needed."""
-    environment = deployment.environment
-    env_slug = environment.slug
-
-    logger.info("Provisioning base infrastructure for environment '%(env_slug)s'", {"env_slug": env_slug})
-
-    # Update environment status
-    environment.status = models.Environment.Status.PROVISIONING
-    environment.vpc_stack_name = f"devopshero-{env_slug}-vpc"
-    environment.cluster_stack_name = f"devopshero-{env_slug}-cluster"
-    environment.save()
-
-    try:
-        success = infra_customer.deploy_base.deploy(
-            session=session,
-            env_slug=env_slug,
-            synth_only=False,
-        )
-
-        if success:
-            environment.status = models.Environment.Status.READY
-            environment.save()
-            logger.info("Base infrastructure ready for environment '%(env_slug)s'", {"env_slug": env_slug})
-            return True
-
-        environment.status = models.Environment.Status.ERROR
-        environment.status_message = "Base infrastructure deployment failed"
-        environment.save()
-        logger.error("Base infrastructure deployment failed for environment '%(env_slug)s'", {"env_slug": env_slug})
-        return False
-
-    except Exception as e:
-        environment.status = models.Environment.Status.ERROR
-        environment.status_message = str(e)
-        environment.save()
-        raise
-
-
 def run_deployment(deployment_id: str) -> bool:
     """
     Execute a deployment.
@@ -78,8 +39,8 @@ def run_deployment(deployment_id: str) -> bool:
     This is the main entry point called by the deployment worker.
     It orchestrates the full deployment flow:
     1. Load deployment and related models
-    2. Update status to BUILDING
-    3. Provision environment base infra if needed
+    2. Verify environment is READY (agent must create it first)
+    3. Update status to BUILDING
     4. Build AppConfig from Django models
     5. Execute CDK deployment
     6. Update deployment status and outputs
@@ -116,6 +77,16 @@ def run_deployment(deployment_id: str) -> bool:
             {"deployment_id": str(deployment_id), "app_name": app.name, "environment_name": environment.name},
         )
 
+        # Verify environment is READY (agent must create it via create_environment tool)
+        if environment.status != models.Environment.Status.READY:
+            error_msg = f"Environment '{environment.name}' is not ready (status: {environment.status}). Use create_environment to provision it first."
+            logger.error(error_msg)
+            deployment.status = models.Deployment.Status.FAILED
+            deployment.status_message = error_msg
+            deployment.completed_at = timezone.now()
+            deployment.save()
+            return False
+
         # Update status to BUILDING
         deployment.status = models.Deployment.Status.BUILDING
         deployment.status_message = "Deployment started"
@@ -130,15 +101,6 @@ def run_deployment(deployment_id: str) -> bool:
         try:
             # Get AWS session
             session = _get_aws_session(deployment)
-
-            # Provision environment if needed
-            if environment.status == models.Environment.Status.PENDING:
-                if not _provision_environment(deployment, session):
-                    deployment.status = models.Deployment.Status.FAILED
-                    deployment.status_message = "Environment provisioning failed"
-                    deployment.completed_at = timezone.now()
-                    deployment.save()
-                    return False
 
             # Build AppConfig
             app_config = app_config_builder.build_app_config(
@@ -158,6 +120,7 @@ def run_deployment(deployment_id: str) -> bool:
                 image_tag=deployment.image_tag,
                 env_slug=environment.slug,
                 synth_only=False,
+                shared_alb_hosted_zone=environment.shared_alb_hosted_zone or None,
             )
 
             if success:

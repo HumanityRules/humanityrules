@@ -227,6 +227,13 @@ class Environment(models.Model):
         help_text="ECS cluster ARN after provisioning",
     )
 
+    # Shared ALB configuration
+    shared_alb_hosted_zone = models.CharField(
+        max_length=255,
+        blank=True,
+        help_text="Hosted zone for shared ALB wildcard cert (e.g., 'dev.example.com'). Empty = HTTP only.",
+    )
+
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -451,13 +458,6 @@ class App(models.Model):
     environment_variables = models.JSONField(
         default=list,
         help_text="List of {name, value} environment variable objects",
-    )
-
-    # Domain
-    domain_name = models.CharField(
-        max_length=255,
-        blank=True,
-        help_text="Custom domain name for this app",
     )
 
     # Database binding

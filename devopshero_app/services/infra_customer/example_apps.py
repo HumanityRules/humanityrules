@@ -26,8 +26,6 @@ def get_simple_dashboard_config(env_slug: str) -> appconfig.AppConfig:
             {"name": "STREAMLIT_BROWSER_GATHER_USAGE_STATS", "value": "false"},
         ],
         app_source_path=Path(__file__).parent.parent / "deployable_repos" / "simple_dashboard",
-        domain_name="simple-dashboard.chsandbox.com",
-        hosted_zone_name="chsandbox.com",
     )
 
 
@@ -51,8 +49,6 @@ def get_db_portal_config(env_slug: str) -> appconfig.AppConfig:
             {"name": "RUN_SAMPLER", "value": "N"},
         ],
         app_source_path=Path(__file__).parent.parent / "deployable_repos" / "db_portal",
-        domain_name="dataengr.chsandbox.com",
-        hosted_zone_name="chsandbox.com",
         database_config=appconfig.DatabaseConfig(
             name="db_portal_prod",
             engine=appconfig.EngineConfig(
