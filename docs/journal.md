@@ -1,5 +1,30 @@
 # DevOpsHero Development Journal
 
+## 2026-01-22 04:50 - Convert deploy.py to Django Management Command
+
+Converted the standalone `deploy.py` script to a Django management command `doh_deploy`. The script required manual `.env` path resolution and hardcoded AWS account IDs — both problems solved by leveraging Django's infrastructure.
+
+### Why Management Command
+
+- **`.env` loading** — Django settings already loads `.env` at startup, no path gymnastics needed
+- **Database access** — Can look up AWS account by name from the database instead of hardcoding `TARGET_ACCOUNT_ID` and `TARGET_EXTERNAL_ID`
+- **Consistent UX** — `python manage.py doh_deploy` fits the Django workflow
+
+### Usage
+
+```bash
+python manage.py doh_deploy --app simple-dashboard --account "Humanity Rules Sandbox"
+python manage.py doh_deploy --app simple-dashboard --account "Humanity Rules Sandbox" --teardown
+python manage.py doh_deploy --base --account "Humanity Rules Sandbox" --env prod
+```
+
+### Changes
+
+- **Added** `devopshero_app/management/commands/doh_deploy.py`
+- **Deleted** `devopshero_app/services/infra_customer/deploy.py`
+- **Simplified** `iam_utils.py` — Removed `load_credentials_from_env()`, now only contains `get_assumed_role_session()`
+
+
 ## 2026-01-22 03:45 - Async Environment Provisioning
 
 Made `create_environment` non-blocking. Previously it waited 5-10 minutes for CloudFormation to complete, causing HTTP timeouts and poor UX. Now it returns immediately with PENDING status, and a background worker handles provisioning.

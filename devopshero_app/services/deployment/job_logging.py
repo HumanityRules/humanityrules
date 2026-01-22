@@ -53,6 +53,21 @@ def _map_environment_level(levelno: int) -> str:
     return models.EnvironmentLog.Level.INFO
 
 
+# Prefixes for loggers that should be captured by job log handlers.
+# This excludes async code paths (views, agent) that would cause SynchronousOnlyOperation errors.
+_JOB_LOG_PREFIXES = (
+    "devopshero_app.services.deployment",
+    "devopshero_app.services.infra_customer",
+)
+
+
+class _JobLogFilter(logging.Filter):
+    """Filter that only allows logs from job-related modules (sync code paths)."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        return record.name.startswith(_JOB_LOG_PREFIXES)
+
+
 class DeploymentLogHandler(logging.Handler):
     """Persist log records to DeploymentLog."""
 
@@ -60,7 +75,7 @@ class DeploymentLogHandler(logging.Handler):
         super().__init__(level=logging.NOTSET)
         self._deployment = deployment
         self._source_default = source_default
-        self.addFilter(logging.Filter("devopshero_app"))
+        self.addFilter(_JobLogFilter())
 
     def emit(self, record: logging.LogRecord) -> None:
         try:
@@ -107,7 +122,7 @@ class EnvironmentLogHandler(logging.Handler):
         super().__init__(level=logging.NOTSET)
         self._environment = environment
         self._source_default = source_default
-        self.addFilter(logging.Filter("devopshero_app"))
+        self.addFilter(_JobLogFilter())
 
     def emit(self, record: logging.LogRecord) -> None:
         try:

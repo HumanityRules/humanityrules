@@ -1,32 +1,4 @@
-import os
-from pathlib import Path
-
 import boto3
-from botocore.exceptions import ClientError
-from dotenv import load_dotenv
-
-
-def load_credentials_from_env() -> None:
-    """
-    Load AWS credentials from .env file.
-
-    Loads environment variables from the .env file in the project root
-    and validates that required AWS credentials are present.
-
-    Raises:
-        FileNotFoundError: If .env file is not found
-        ValueError: If required environment variables are missing
-    """
-    env_path = Path(__file__).parent.parent / ".env"
-    if not env_path.exists():
-        raise FileNotFoundError(f".env file not found at {env_path}")
-    
-    load_dotenv(env_path)
-
-    required_vars = ["DOH_AWS_ACCESS_KEY", "DOH_AWS_SECRET_KEY"]
-    missing = [var for var in required_vars if not os.getenv(var)]
-    if missing:
-        raise ValueError(f"Missing environment variables: {', '.join(missing)}")
 
 
 def get_assumed_role_session(
