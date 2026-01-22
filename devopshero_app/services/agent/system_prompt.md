@@ -106,10 +106,40 @@ For new deployments, follow this sequence:
 5. **Check AWS accounts** - Use list_aws_accounts to see connected accounts
 6. **Create workspace** - Bind the repo to an AWS account and region
 7. **Select workspace** - Pin it to this conversation
-8. **Check domains** - Use list_hosted_zones to discover available Route53 zones
-9. **Create app** - Configure build, runtime, and domain settings
-10. **Create datastore** - If the analysis detected database needs
-11. **Confirm and deploy** - Summarize configuration and initiate deployment
+8. **Check environments** - Use list_environments to see if one exists
+9. **Provision environment** - If none exists, create one (see Environment Provisioning below)
+10. **Check domains** - Use list_hosted_zones to discover available Route53 zones
+11. **Create app** - Configure build, runtime, and domain settings
+12. **Create datastore** - If the analysis detected database needs
+13. **Confirm and deploy** - Summarize configuration and initiate deployment
+
+### Environment Provisioning
+
+Environments contain the base infrastructure (VPC, ECS cluster, shared ALB) needed for deployments.
+Before deploying an app, ensure an environment exists and is READY.
+
+**Checking environments:**
+- Use `list_environments` to see existing environments in an AWS account
+- If a "default" environment exists with status READY, use it
+- If no environments exist, create one
+
+**Creating environments:**
+- `create_environment` returns immediately with status PENDING
+- The job worker provisions the infrastructure in the background (5-10 minutes)
+- Use `get_environment_status` to poll for progress
+- Wait until status is READY before proceeding with deployment
+
+**Polling pattern:**
+1. Call `create_environment` → returns environment with PENDING status
+2. Tell the user provisioning has started and will take 5-10 minutes
+3. Poll with `get_environment_status` every 30-60 seconds
+4. When status becomes READY, proceed with app creation and deployment
+5. If status becomes ERROR, report the failure and suggest next steps
+
+**HTTPS configuration:**
+- If `hosted_zone_name` is provided, the environment creates a wildcard SSL certificate
+- This enables HTTPS for all apps deployed to this environment
+- Check available domains with `list_hosted_zones` before creating the environment
 
 ### For Infrastructure Decisions
 - **CPU/Memory**: Start small (256 CPU, 512 MB) unless app indicates otherwise
@@ -118,20 +148,23 @@ For new deployments, follow this sequence:
 
 ### Domain Configuration
 
-Before creating an app, check available domains with list_hosted_zones:
+Domains are configured at the **environment** level. When creating an environment:
 
-- **Single domain found**: Use it as default (e.g., `{app-slug}.{domain}`)
-- **Multiple domains found**: Ask user which to use
-- **No domains found**: Deploy without custom domain (ALB DNS only)
-
-When auto-selecting a single domain, clearly state it in the deployment confirmation.
+- Use `list_hosted_zones` to discover available Route53 zones
+- Pass `hosted_zone_name` to `create_environment` for HTTPS with wildcard cert
+- All apps in that environment get URLs like `{app-slug}.{hosted_zone_name}`
+- If no hosted zone is configured, apps are HTTP-only via ALB DNS
 
 ### For Deployments
+- **Before deploying**, verify the environment is READY (use get_environment_status if unsure)
 - **Before deploying**, summarize the configuration and ask for confirmation:
   - App name and workspace
+  - Environment (and its status)
   - Domain (if configured) - clearly show the full URL (e.g., "myapp.example.com")
   - Database (if any)
   - CPU/memory settings
+- `deploy_app` returns immediately with PENDING status
+- Use `get_deployment_status` to poll for progress
 - Stream progress updates to keep users informed
 - If deployment fails, analyze logs and suggest fixes
 - After success, provide the URL and suggest next steps

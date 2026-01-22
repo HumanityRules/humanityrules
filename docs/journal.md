@@ -1,5 +1,41 @@
 # DevOpsHero Development Journal
 
+## 2026-01-22 03:45 - Async Environment Provisioning
+
+Made `create_environment` non-blocking. Previously it waited 5-10 minutes for CloudFormation to complete, causing HTTP timeouts and poor UX. Now it returns immediately with PENDING status, and a background worker handles provisioning.
+
+### Architecture
+
+- **Job Worker Pattern** — Renamed `deployment_worker` → `job_worker` to handle multiple job types (deployments and environment provisioning)
+- **EnvironmentLog Model** — Added parallel to `DeploymentLog` for tracking provisioning progress
+- **Polling via `get_environment_status`** — New MCP tool for agents to check provisioning progress
+
+### Flow
+
+1. Agent calls `create_environment` → Creates `Environment` with `PENDING` status, returns immediately
+2. Job worker claims it → Sets `PROVISIONING`, spawns thread
+3. `environment_executor` runs CDK → Provisions VPC, ECS cluster, shared ALB
+4. Updates to `READY` or `ERROR`
+5. Agent polls with `get_environment_status` until ready
+
+### Renamed Files
+
+- `deployment_worker.py` → `job_worker.py`
+- `deployment_logging.py` → `job_logging.py`
+- `run_deployment_worker.py` → `run_job_worker.py`
+- `DOH_RUN_DEPLOYMENT_WORKER` → `DOH_RUN_JOB_WORKER`
+
+### New Files
+
+- `environment_executor.py` — Runs provisioning (parallel to `deployment_executor.py`)
+- `get_environment_status.py` — MCP tool to poll progress
+- `EnvironmentLog` model + migration
+
+### System Prompt Updates
+
+Updated agent instructions to explain the async flow: check environments with `list_environments`, create with `create_environment`, poll with `get_environment_status` until READY, then proceed with deployment.
+
+
 ## 2026-01-22 02:30 - Simplified ALB Architecture: Removed Dedicated ALB + domain_name
 
 Removed the option for per-app dedicated ALBs and the `domain_name` field from the App model. All apps now use the shared ALB exclusively.

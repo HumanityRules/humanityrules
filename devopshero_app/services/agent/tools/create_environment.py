@@ -1,18 +1,15 @@
 """
-Tool for creating and provisioning environments.
+Tool for creating environments.
 
-This tool allows the agent to create environments with optional HTTPS configuration.
-It provisions VPC, ECS cluster, and shared ALB infrastructure.
+This tool creates an Environment record with PENDING status. The job worker
+picks up pending environments and provisions them via the environment_executor.
 """
 
 from dataclasses import dataclass, asdict
 
-from asgiref.sync import sync_to_async
-from django.conf import settings
 from django.utils.text import slugify
 
 from devopshero_app.models import AWSAccount, Environment, Organization, User
-from devopshero_app.services import infra_customer
 
 
 @dataclass
@@ -32,28 +29,6 @@ class EnvironmentSummary:
         return asdict(self)
 
 
-def _provision_environment_sync(
-    aws_account: AWSAccount,
-    environment: Environment,
-    shared_alb_hosted_zone: str | None,
-) -> bool:
-    """Synchronous function to provision environment infrastructure."""
-    session = infra_customer.iam_utils.get_assumed_role_session(
-        access_key=settings.DOH_AWS_ACCESS_KEY,
-        secret_key=settings.DOH_AWS_SECRET_KEY,
-        account_id=aws_account.aws_account_id,
-        external_id=str(aws_account.external_id),
-        region="us-east-1",  # Default region for base infrastructure
-    )
-
-    return infra_customer.deploy_base.deploy(
-        session=session,
-        env_slug=environment.slug,
-        synth_only=False,
-        shared_alb_hosted_zone=shared_alb_hosted_zone,
-    )
-
-
 async def create_environment(
     aws_account_uuid: str,
     environment_name: str,
@@ -62,13 +37,13 @@ async def create_environment(
     user: User,
 ) -> EnvironmentSummary:
     """
-    Create and provision an environment in an AWS account.
+    Create an environment in an AWS account.
 
-    This provisions VPC, ECS cluster, and shared ALB. If hosted_zone_name
-    is provided, also creates wildcard cert for HTTPS.
+    Creates an Environment record with status PENDING. The job worker
+    picks it up and provisions VPC, ECS cluster, and shared ALB.
+    If hosted_zone_name is provided, also creates wildcard cert for HTTPS.
 
-    The provisioning is synchronous - this tool waits for CloudFormation
-    to complete (may take 5-10 minutes for first environment).
+    Use get_environment_status to poll for provisioning progress.
 
     Args:
         aws_account_uuid: Internal UUID of the AWSAccount record.
@@ -121,59 +96,29 @@ async def create_environment(
         if existing.status == Environment.Status.PROVISIONING:
             raise ValueError(
                 f"Environment '{environment_name}' is currently being provisioned. "
-                "Please wait for it to complete."
+                "Use get_environment_status to check progress."
+            )
+        if existing.status == Environment.Status.PENDING:
+            raise ValueError(
+                f"Environment '{environment_name}' is already queued for provisioning. "
+                "Use get_environment_status to check progress."
             )
         if existing.status == Environment.Status.ERROR:
             raise ValueError(
                 f"Environment '{environment_name}' exists but failed to provision. "
                 f"Error: {existing.status_message}. Please delete it and try again."
             )
-        # If PENDING, we can provision it
-        environment = existing
-    else:
-        # Create new environment record
-        environment = await Environment.objects.acreate(
-            aws_account=aws_account,
-            name=environment_name,
-            slug=slug,
-            status=Environment.Status.PENDING,
-            shared_alb_hosted_zone=hosted_zone_name or "",
-        )
 
-    # Update status to PROVISIONING
-    environment.status = Environment.Status.PROVISIONING
-    environment.vpc_stack_name = f"devopshero-{slug}-vpc"
-    environment.cluster_stack_name = f"devopshero-{slug}-cluster"
-    environment.shared_alb_hosted_zone = hosted_zone_name or ""
-    await environment.asave()
-
-    try:
-        # Provision infrastructure (synchronous, may take several minutes)
-        success = await sync_to_async(_provision_environment_sync)(
-            aws_account=aws_account,
-            environment=environment,
-            shared_alb_hosted_zone=hosted_zone_name,
-        )
-
-        if success:
-            environment.status = Environment.Status.READY
-            await environment.asave()
-        else:
-            environment.status = Environment.Status.ERROR
-            environment.status_message = "Infrastructure deployment failed. Check CloudFormation console for details."
-            await environment.asave()
-            raise ValueError(
-                f"Failed to provision environment '{environment_name}'. "
-                "Infrastructure deployment failed."
-            )
-
-    except Exception as e:
-        environment.status = Environment.Status.ERROR
-        environment.status_message = str(e)
-        await environment.asave()
-        raise ValueError(
-            f"Failed to provision environment '{environment_name}': {e}"
-        )
+    # Create new environment record with PENDING status
+    environment = await Environment.objects.acreate(
+        aws_account=aws_account,
+        name=environment_name,
+        slug=slug,
+        status=Environment.Status.PENDING,
+        vpc_stack_name=f"devopshero-{slug}-vpc",
+        cluster_stack_name=f"devopshero-{slug}-cluster",
+        shared_alb_hosted_zone=hosted_zone_name or "",
+    )
 
     return EnvironmentSummary(
         id=str(environment.id),

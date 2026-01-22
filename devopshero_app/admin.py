@@ -9,6 +9,7 @@ from devopshero_app.models import (
     Deployment,
     DeploymentLog,
     Environment,
+    EnvironmentLog,
     Message,
     Organization,
     OrganizationMembership,
@@ -179,6 +180,21 @@ class DeploymentLogAdmin(admin.ModelAdmin):
     search_fields = ["deployment__app__name", "message"]
     readonly_fields = ["id", "created_at"]
     autocomplete_fields = ["deployment"]
+
+    @admin.display(description="Message")
+    def short_message(self, obj):
+        if not obj.message:
+            return ""
+        return obj.message[:120]
+
+
+@admin.register(EnvironmentLog)
+class EnvironmentLogAdmin(admin.ModelAdmin):
+    list_display = ["created_at", "environment", "source", "level", "short_message"]
+    list_filter = ["source", "level"]
+    search_fields = ["environment__name", "message"]
+    readonly_fields = ["id", "created_at"]
+    autocomplete_fields = ["environment"]
 
     @admin.display(description="Message")
     def short_message(self, obj):
