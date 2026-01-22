@@ -2,7 +2,7 @@
 Deployment executor.
 
 Orchestrates the actual deployment by calling CDK infrastructure code.
-This is the main entry point called by the deployment worker.
+This is the main entry point called by the job worker.
 """
 
 import logging
@@ -14,7 +14,7 @@ from devopshero_app import models
 from devopshero_app.services import infra_customer
 
 from . import app_config_builder
-from . import deployment_logging
+from . import job_logging
 
 logger = logging.getLogger(__name__)
 
@@ -36,7 +36,7 @@ def run_deployment(deployment_id: str) -> bool:
     """
     Execute a deployment.
 
-    This is the main entry point called by the deployment worker.
+    This is the main entry point called by the job worker.
     It orchestrates the full deployment flow:
     1. Load deployment and related models
     2. Verify environment is READY (agent must create it first)
@@ -68,7 +68,7 @@ def run_deployment(deployment_id: str) -> bool:
     app = deployment.app
     workspace = app.workspace
 
-    with deployment_logging.DeploymentLogContext(
+    with job_logging.DeploymentLogContext(
         deployment=deployment,
         source_default=models.DeploymentLog.Source.APP,
     ):

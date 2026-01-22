@@ -1,7 +1,7 @@
 """
 Tool for deploying applications.
 
-Creates a Deployment record with PENDING status. The deployment worker
+Creates a Deployment record with PENDING status. The job worker
 picks up pending deployments and executes them via the CDK infrastructure.
 """
 
@@ -74,7 +74,7 @@ async def deploy_app(
     """
     Create a deployment for an application.
 
-    Creates a Deployment record with status PENDING. The deployment worker
+    Creates a Deployment record with status PENDING. The job worker
     picks it up and executes the actual CDK deployment.
 
     Args:

@@ -22,6 +22,7 @@ from .tools import (
     create_workspace as _create_workspace,
     deploy_app as _deploy_app,
     get_deployment_status as _get_deployment_status,
+    get_environment_status as _get_environment_status,
     initiate_aws_connection as _initiate_aws_connection,
     list_aws_accounts as _list_aws_accounts,
     list_deployable_repos as _list_deployable_repos,
@@ -83,6 +84,7 @@ TOOL_DISPLAY_NAMES = {
     "mcp__devopshero__list_environments": "List Environments",
     "mcp__devopshero__initiate_aws_connection": "Initiate AWS Connection",
     "mcp__devopshero__create_environment": "Create Environment",
+    "mcp__devopshero__get_environment_status": "Get Environment Status",
     "mcp__devopshero__list_workspaces": "List Workspaces",
     "mcp__devopshero__select_workspace": "Select Workspace",
     "mcp__devopshero__create_workspace": "Create Workspace",
@@ -116,6 +118,7 @@ TOOL_MAIN_PARAMS = {
     "mcp__devopshero__list_hosted_zones": "aws_account_uuid",
     "mcp__devopshero__list_environments": "aws_account_uuid",
     "mcp__devopshero__create_environment": "environment_name",
+    "mcp__devopshero__get_environment_status": "environment_id",
     "mcp__devopshero__scan_repository": "repo_url",
     "mcp__devopshero__create_app": "name",
     "mcp__devopshero__create_datastore": "name",
@@ -277,10 +280,11 @@ async def list_environments(args: dict[str, Any]) -> dict[str, Any]:
 @tool(
     "create_environment",
     (
-        "Create and provision an environment in a connected AWS account. "
-        "Provisions VPC, ECS cluster, and shared ALB infrastructure. "
-        "If hosted_zone_name is provided, creates a wildcard SSL certificate for HTTPS. "
-        "This is a blocking operation - it waits for CloudFormation to complete (5-10 minutes). "
+        "Create an environment in a connected AWS account. "
+        "Queues provisioning of VPC, ECS cluster, and shared ALB infrastructure. "
+        "If hosted_zone_name is provided, also creates a wildcard SSL certificate for HTTPS. "
+        "Returns immediately with PENDING status - use get_environment_status to poll for progress. "
+        "Provisioning typically takes 5-10 minutes. "
         "The aws_account_uuid is the internal UUID from list_aws_accounts (the 'id' field), "
         "not the 12-digit AWS account number."
     ),
@@ -291,7 +295,7 @@ async def list_environments(args: dict[str, Any]) -> dict[str, Any]:
     },
 )
 async def create_environment(args: dict[str, Any]) -> dict[str, Any]:
-    """Create and provision an environment."""
+    """Create an environment (queues provisioning)."""
     conversation = _get_conversation()
     result = await _create_environment(
         aws_account_uuid=args["aws_account_uuid"],
@@ -300,7 +304,14 @@ async def create_environment(args: dict[str, Any]) -> dict[str, Any]:
         organization=conversation.organization,
         user=conversation.user,
     )
-    return _mcp_response(result)
+    return _mcp_response({
+        **result.to_dict(),
+        "note": (
+            "Environment created with PENDING status. The job worker will provision "
+            "the infrastructure (VPC, ECS cluster, shared ALB). "
+            "Use get_environment_status to check progress."
+        ),
+    })
 
 
 @tool(
@@ -528,7 +539,7 @@ async def create_datastore(args: dict[str, Any]) -> dict[str, Any]:
     (
         "Deploy an application to AWS infrastructure. "
         "Creates a deployment record and triggers the deployment process. "
-        "The deployment worker will build the Docker image, push to ECR, "
+        "The job worker will build the Docker image, push to ECR, "
         "and deploy via CDK. Use get_deployment_status to check progress. "
         "For environment_slug, always use 'default'."
     ),
@@ -558,7 +569,7 @@ async def deploy_app(args: dict[str, Any]) -> dict[str, Any]:
     return _mcp_response({
         **result.to_dict(),
         "note": (
-            "Deployment created. The deployment worker will pick it up "
+            "Deployment created. The job worker will pick it up "
             "and execute the build/push/deploy pipeline. "
             "Use get_deployment_status to check progress."
         ),
@@ -582,6 +593,29 @@ async def get_deployment_status(args: dict[str, Any]) -> dict[str, Any]:
 
     result = await _get_deployment_status(
         deployment_id=args["deployment_id"],
+        organization=conversation.organization,
+        log_limit=10,
+    )
+    return _mcp_response(result)
+
+
+@tool(
+    "get_environment_status",
+    (
+        "Get the current status of an environment including provisioning progress and logs. "
+        "Returns the environment status, configuration, and recent log entries. "
+        "Use this to monitor environment provisioning progress."
+    ),
+    {
+        "environment_id": str,
+    },
+)
+async def get_environment_status(args: dict[str, Any]) -> dict[str, Any]:
+    """Get current environment status and recent logs."""
+    conversation = _get_conversation()
+
+    result = await _get_environment_status(
+        environment_id=args["environment_id"],
         organization=conversation.organization,
         log_limit=10,
     )
@@ -621,6 +655,7 @@ devopshero_mcp_server = create_sdk_mcp_server(
         list_environments,
         initiate_aws_connection,
         create_environment,
+        get_environment_status,
         list_workspaces,
         select_workspace,
         create_workspace,
@@ -644,6 +679,7 @@ TOOL_NAMES = [
     "mcp__devopshero__list_environments",
     "mcp__devopshero__initiate_aws_connection",
     "mcp__devopshero__create_environment",
+    "mcp__devopshero__get_environment_status",
     "mcp__devopshero__list_workspaces",
     "mcp__devopshero__select_workspace",
     "mcp__devopshero__create_workspace",

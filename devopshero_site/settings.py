@@ -149,8 +149,8 @@ DOH_API_SECRET_KEY = os.environ.get("DOH_API_SECRET_KEY")
 DOH_AWS_ACCESS_KEY = os.environ.get("DOH_AWS_ACCESS_KEY")
 DOH_AWS_SECRET_KEY = os.environ.get("DOH_AWS_SECRET_KEY")
 
-# Deployment Worker - enable with DOH_RUN_DEPLOYMENT_WORKER=1
-DOH_RUN_DEPLOYMENT_WORKER = os.environ.get("DOH_RUN_DEPLOYMENT_WORKER") == "1"
+# Job Worker - enable with DOH_RUN_JOB_WORKER=1
+DOH_RUN_JOB_WORKER = os.environ.get("DOH_RUN_JOB_WORKER") == "1"
 
 # Claude Agent Configuration
 # Priority: ANTHROPIC_API_KEY > AWS_BEDROCK_REGION

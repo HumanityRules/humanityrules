@@ -9,6 +9,7 @@ from .create_app import create_app, AppSummary
 from .create_datastore import create_datastore, DatastoreSummary
 from .create_environment import create_environment
 from .create_environment import EnvironmentSummary as CreateEnvironmentSummary
+from .get_environment_status import get_environment_status, EnvironmentStatus, EnvironmentLogEntry
 from .create_workspace import create_workspace, WorkspaceSummary
 from .deploy_app import deploy_app, DeploymentSummary
 from .get_deployment_status import get_deployment_status, DeploymentStatus, DeploymentLogEntry
@@ -32,6 +33,9 @@ __all__ = [
     # Environment management
     "create_environment",
     "CreateEnvironmentSummary",
+    "get_environment_status",
+    "EnvironmentStatus",
+    "EnvironmentLogEntry",
     "list_environments",
     "ListEnvironmentSummary",
     # Workspace management

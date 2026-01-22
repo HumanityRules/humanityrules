@@ -754,3 +754,52 @@ class DeploymentLog(models.Model):
 
     def __str__(self):
         return f"[{self.source}] {self.level}: {self.message[:50]}..."
+
+
+class EnvironmentLog(models.Model):
+    """Log entries from environment provisioning."""
+
+    class Level(models.TextChoices):
+        DEBUG = "debug", "Debug"
+        INFO = "info", "Info"
+        ERROR = "error", "Error"
+
+    class Source(models.TextChoices):
+        SYSTEM = "system", "System"
+        CDK = "cdk", "CDK"
+
+    id = models.UUIDField(
+        primary_key=True,
+        default=uuid.uuid7,
+        editable=False,
+    )
+    environment = models.ForeignKey(
+        Environment,
+        on_delete=models.CASCADE,
+        related_name="logs",
+    )
+    source = models.CharField(
+        max_length=20,
+        choices=Source.choices,
+        default=Source.SYSTEM,
+    )
+    level = models.CharField(
+        max_length=20,
+        choices=Level.choices,
+    )
+    message = models.TextField()
+    details = models.JSONField(
+        null=True,
+        blank=True,
+        help_text="Structured data: stack name, resource ARN, etc.",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["created_at"]
+        indexes = [models.Index(fields=["environment", "created_at"])]
+        verbose_name = "Environment Log"
+        verbose_name_plural = "Environment Logs"
+
+    def __str__(self):
+        return f"[{self.source}] {self.level}: {self.message[:50]}..."
