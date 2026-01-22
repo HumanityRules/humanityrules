@@ -112,7 +112,31 @@ async def deploy_app(
     ).afirst()
     if not environment:
         raise ValueError(
-            f"Environment '{environment_slug}' not found for this workspace's AWS account."
+            f"Environment '{environment_slug}' does not exist for this AWS account. "
+            "Use list_environments to see available environments, or create_environment to create one first."
+        )
+
+    # Verify environment is READY (provisioned)
+    if environment.status != Environment.Status.READY:
+        if environment.status == Environment.Status.PENDING:
+            raise ValueError(
+                f"Environment '{environment.name}' exists but has not been provisioned yet. "
+                "Use create_environment to provision it before deploying."
+            )
+        if environment.status == Environment.Status.PROVISIONING:
+            raise ValueError(
+                f"Environment '{environment.name}' is currently being provisioned. "
+                "Please wait for it to complete before deploying."
+            )
+        if environment.status == Environment.Status.ERROR:
+            raise ValueError(
+                f"Environment '{environment.name}' failed to provision. "
+                f"Error: {environment.status_message}. "
+                "Please resolve the issue or create a new environment."
+            )
+        raise ValueError(
+            f"Environment '{environment.name}' is not ready (status: {environment.status}). "
+            "Use create_environment to ensure it's properly provisioned."
         )
 
     # Check for existing active deployments

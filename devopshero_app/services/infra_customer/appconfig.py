@@ -89,10 +89,6 @@ class AppConfig:
     # Local paths
     app_source_path: Path | None  # Path to app source for Docker build
 
-    # Domain configuration (for HTTPS and Route53)
-    domain_name: str | None  # e.g., "simple-dashboard.chsandbox.com"
-    hosted_zone_name: str | None  # e.g., "chsandbox.com"
-
     # Database configuration (None = no database)
     database_config: DatabaseConfig | None = None
 
@@ -114,6 +110,4 @@ class AppConfig:
             "health_check_path": self.health_check_path,
             "health_check_command": self.health_check_command,
             "environment_variables": self.environment_variables,
-            "domain_name": self.domain_name,
-            "hosted_zone_name": self.hosted_zone_name,
         }

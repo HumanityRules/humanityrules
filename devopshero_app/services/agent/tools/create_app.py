@@ -108,7 +108,6 @@ class AppSummary:
     cpu: int
     memory: int
     health_check_path: str
-    domain_name: str | None
     datastore_id: str | None
     app_secrets: dict[str, str | None] | None
 
@@ -129,7 +128,6 @@ async def create_app(
     health_check_path: str,
     user: User,
     environment_variables: list[dict] | None,
-    domain_name: str | None,
     datastore_id: str | None,
     dockerfile_path: str,
     app_secrets: dict | None,
@@ -151,7 +149,6 @@ async def create_app(
         health_check_path: HTTP path for health checks.
         user: The User creating the app.
         environment_variables: List of {name, value} dicts for env vars.
-        domain_name: Custom domain.
         datastore_id: UUID of datastore to bind.
         dockerfile_path: Path to Dockerfile if using dockerfile strategy.
         app_secrets: Dict mapping secret field names to values. Use null to auto-generate.
@@ -212,7 +209,6 @@ async def create_app(
         memory=memory,
         health_check_path=health_check_path,
         environment_variables=_normalize_environment_variables(environment_variables),
-        domain_name=domain_name or "",
         datastore=datastore,
         app_secrets=normalized_app_secrets,
         created_by=user,
@@ -231,7 +227,6 @@ async def create_app(
         cpu=app.cpu,
         memory=app.memory,
         health_check_path=app.health_check_path,
-        domain_name=app.domain_name or None,
         datastore_id=str(datastore.id) if datastore else None,
         app_secrets=app.app_secrets,
     )

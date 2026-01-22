@@ -1,5 +1,46 @@
 # DevOpsHero Development Journal
 
+## 2026-01-22 02:30 - Simplified ALB Architecture: Removed Dedicated ALB + domain_name
+
+Removed the option for per-app dedicated ALBs and the `domain_name` field from the App model. All apps now use the shared ALB exclusively.
+
+### What Changed
+
+- **Removed `domain_name` from App model** — Apps no longer have custom domain configuration. The URL is derived automatically as `{app_slug}.{environment.shared_alb_hosted_zone}`.
+
+- **Removed dedicated ALB mode** — Previously `deploy_app.py` supported two modes: shared ALB (fast, uses host-based routing) and dedicated ALB (slow, creates per-app infrastructure). Removed the dedicated mode entirely.
+
+- **Simplified `deploy_app.py`** — Renamed `AppWithAlbStack` → `AppStack`, removed `_setup_dedicated_alb()` method, removed `use_shared_alb` and `hosted_zone_id` parameters, removed unused ACM/Route53 imports.
+
+### Why Simplify Now
+
+The dedicated ALB mode was future-proofing for "full isolation" scenarios, but:
+1. It significantly complicated the codebase with conditional paths
+2. Shared ALB with host-based routing handles our current use cases well
+3. If we need per-app ALBs later, we can reimplement with better clarity on actual requirements
+
+### Domain Resolution
+
+With this change, app domains are fully determined by the environment:
+- Environment has `shared_alb_hosted_zone` (e.g., `dev.example.com`)
+- App gets domain `{app_slug}.{shared_alb_hosted_zone}` (e.g., `my-app.dev.example.com`)
+- No per-app domain configuration needed
+
+This also resolves the earlier architectural concern about `domain_name` not fitting multi-environment scenarios (prod vs staging would need different domains per app).
+
+### Files Changed
+
+- `models.py` — Removed `domain_name` field
+- `appconfig.py` — Removed `domain_name` from `AppConfig` dataclass
+- `app_config_builder.py` — Removed `domain_name` from config construction
+- `deploy_app.py` — Major cleanup: removed dedicated ALB, simplified to shared-only
+- `deployment_executor.py` — Removed `use_shared_alb` parameter
+- `example_apps.py` — Removed `domain_name` from example configs
+- `create_app.py` / `mcp_tools.py` — Removed `domain_name` from tool
+- `admin.py` — Removed from search fields
+- Migration `0019_remove_app_domain_name.py` created
+
+
 ## 2026-01-21 21:10 - App Slug Uniqueness: Global → Per Organization
 
 Changed `App.slug` from globally unique to unique per organization to fix a multi-tenant information leakage issue.

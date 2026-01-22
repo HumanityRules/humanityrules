@@ -6,7 +6,6 @@ import logging
 
 import boto3
 from aws_cdk import App, Aws, CfnOutput, Duration, Fn, RemovalPolicy, SecretValue, Stack, Tags
-from aws_cdk import aws_certificatemanager as acm
 from aws_cdk import aws_ec2 as ec2
 from aws_cdk import aws_ecr as ecr
 from aws_cdk import aws_ecs as ecs
@@ -14,8 +13,6 @@ from aws_cdk import aws_elasticloadbalancingv2 as elbv2
 from aws_cdk import aws_iam as iam
 from aws_cdk import aws_logs as logs
 from aws_cdk import aws_rds as rds
-from aws_cdk import aws_route53 as route53
-from aws_cdk import aws_route53_targets as targets
 from aws_cdk import aws_secretsmanager as secretsmanager
 from constructs import Construct
 
@@ -25,7 +22,6 @@ from . import cloudformation_utils
 from . import deploy_base
 from . import ecr_utils
 from . import ecs_utils
-from . import route53_utils
 from . import secrets_utils
 
 logger = logging.getLogger(__name__)
@@ -133,8 +129,12 @@ class AuroraClusterStack(Stack):
         if not database_config:
             raise ValueError("DatabaseConfig is required for Aurora cluster creation")
 
-        # Import environment infrastructure
-        self.environment_infra = deploy_base.import_environment_infrastructure(self, env_slug)
+        # Import environment infrastructure (Aurora doesn't need shared ALB info, pass None)
+        self.environment_infra = deploy_base.import_environment_infrastructure(
+            scope=self,
+            env_slug=env_slug,
+            shared_alb_hosted_zone=None,
+        )
 
         # Validate database name: alphanumeric and underscores, 1-64 chars, must start with letter
         db_name = database_config.name
@@ -288,10 +288,14 @@ class AuroraClusterStack(Stack):
         )
 
 
-class AppWithAlbStack(Stack):
-    """
-    DevOpsHero App Stack - ECS Service with ALB.
-    """
+def _compute_listener_rule_priority(app_name: str) -> int:
+    """Compute a deterministic listener rule priority from app name."""
+    # Use hash to get a deterministic priority. Range: 1000-41000 (leaving room for manual overrides)
+    return (hash(app_name) % 40000) + 1000
+
+
+class AppStack(Stack):
+    """DevOpsHero App Stack - ECS Service with shared ALB routing."""
 
     def __init__(
         self,
@@ -301,14 +305,18 @@ class AppWithAlbStack(Stack):
         image_tag: str,
         env_slug: str,
         resource_prefix: str,
-        hosted_zone_id: str | None,
         database_connection_secret: secretsmanager.ISecret | None,
+        shared_alb_hosted_zone: str | None,
         **kwargs,
     ) -> None:
         super().__init__(scope, construct_id, **kwargs)
 
         # Import environment infrastructure
-        self.environment_infra = deploy_base.import_environment_infrastructure(self, env_slug)
+        self.environment_infra = deploy_base.import_environment_infrastructure(
+            scope=self,
+            env_slug=env_slug,
+            shared_alb_hosted_zone=shared_alb_hosted_zone,
+        )
 
         # Per-app task role for secret isolation - each app can only read its own secrets
         task_role = iam.Role(
@@ -371,26 +379,6 @@ class AppWithAlbStack(Stack):
         )
         container.add_port_mappings(ecs.PortMapping(container_port=app_config.container_port, protocol=ecs.Protocol.TCP))
 
-        alb_security_group = ec2.SecurityGroup(
-            self, "AlbSecurityGroup",
-            vpc=self.environment_infra.vpc,
-            security_group_name=f"{resource_prefix}-alb-sg"[:255],
-            description="Security group for ALB - allows HTTP and HTTPS from internet",
-            allow_all_outbound=True,
-        )
-        alb_security_group.add_ingress_rule(peer=ec2.Peer.any_ipv4(), connection=ec2.Port.tcp(80), description="Allow HTTP from anywhere")
-        if app_config.domain_name and app_config.hosted_zone_name:
-            alb_security_group.add_ingress_rule(peer=ec2.Peer.any_ipv4(), connection=ec2.Port.tcp(443), description="Allow HTTPS from anywhere")
-
-        alb = elbv2.ApplicationLoadBalancer(
-            self, "ApplicationLoadBalancer",
-            load_balancer_name=f"doh-{env_slug}-{app_config.app_name}"[:32],
-            vpc=self.environment_infra.vpc,
-            internet_facing=True,
-            security_group=alb_security_group,
-            vpc_subnets=ec2.SubnetSelection(subnet_type=ec2.SubnetType.PUBLIC),
-        )
-
         # TODO(production): Increase deregistration_delay for graceful connection draining.
         # 10 seconds is aggressive but speeds up service removal during DOH development.
         target_group = elbv2.ApplicationTargetGroup(
@@ -408,35 +396,14 @@ class AppWithAlbStack(Stack):
             ),
         )
 
-        if app_config.domain_name and app_config.hosted_zone_name and hosted_zone_id:
-            hosted_zone = route53.HostedZone.from_hosted_zone_attributes(
-                self, "HostedZone", hosted_zone_id=hosted_zone_id, zone_name=app_config.hosted_zone_name,
-            )
-
-            certificate = acm.Certificate(
-                self, "Certificate", domain_name=app_config.domain_name, validation=acm.CertificateValidation.from_dns(hosted_zone),
-            )
-            Tags.of(certificate).add("Name", f"{resource_prefix}-cert")
-
-            alb.add_listener(
-                "HttpsListener", port=443, protocol=elbv2.ApplicationProtocol.HTTPS,
-                certificates=[certificate], ssl_policy=elbv2.SslPolicy.TLS13_RES, default_target_groups=[target_group],
-            )
-
-            alb.add_listener(
-                "HttpListener", port=80, protocol=elbv2.ApplicationProtocol.HTTP,
-                default_action=elbv2.ListenerAction.redirect(protocol="HTTPS", port="443", permanent=True),
-            )
-
-            route53.ARecord(
-                self, "DnsRecord", zone=hosted_zone, record_name=app_config.domain_name,
-                target=route53.RecordTarget.from_alias(targets.LoadBalancerTarget(alb)),
-            )
-
-            CfnOutput(self, "HttpsUrl", value=f"https://{app_config.domain_name}", export_name=f"{resource_prefix}-https-url")
-            CfnOutput(self, "CertificateArn", value=certificate.certificate_arn, export_name=f"{resource_prefix}-cert-arn")
-        else:
-            alb.add_listener("HttpListener", port=80, protocol=elbv2.ApplicationProtocol.HTTP, default_target_groups=[target_group])
+        # Configure routing rules on the shared ALB
+        self._setup_shared_alb_routing(
+            app_config=app_config,
+            env_slug=env_slug,
+            resource_prefix=resource_prefix,
+            target_group=target_group,
+            shared_alb_hosted_zone=shared_alb_hosted_zone,
+        )
 
         service = ecs.FargateService(
             self, "EcsService",
@@ -457,10 +424,71 @@ class AppWithAlbStack(Stack):
         Tags.of(task_definition).add("App", app_config.app_name)
 
         CfnOutput(self, "TaskDefinitionArn", value=task_definition.task_definition_arn, export_name=f"{resource_prefix}-task-def-arn")
-        CfnOutput(self, "AlbDnsName", value=alb.load_balancer_dns_name, export_name=f"{resource_prefix}-alb-dns")
-        CfnOutput(self, "AlbUrl", value=f"http://{alb.load_balancer_dns_name}", export_name=f"{resource_prefix}-alb-url")
         CfnOutput(self, "ServiceArn", value=service.service_arn, export_name=f"{resource_prefix}-service-arn")
         CfnOutput(self, "ServiceName", value=service.service_name, export_name=f"{resource_prefix}-service-name")
+
+    def _setup_shared_alb_routing(
+        self,
+        app_config: appconfig.AppConfig,
+        env_slug: str,
+        resource_prefix: str,
+        target_group: elbv2.ApplicationTargetGroup,
+        shared_alb_hosted_zone: str | None,
+    ) -> None:
+        """Configure routing rules on the shared ALB."""
+        priority = _compute_listener_rule_priority(app_config.app_name)
+        prefix = f"devopshero-{env_slug}"
+
+        # Import shared ALB DNS for output
+        shared_alb_dns = Fn.import_value(f"{prefix}-shared-alb-dns")
+
+        # Add HTTP listener rule (always)
+        http_listener = elbv2.ApplicationListener.from_application_listener_attributes(
+            self, "ImportedHttpListener",
+            listener_arn=self.environment_infra.shared_alb_http_listener_arn,
+            security_group=self.environment_infra.shared_alb_security_group,
+        )
+
+        # Determine the host header for routing
+        if shared_alb_hosted_zone:
+            # Use app slug + hosted zone for the hostname
+            app_hostname = f"{app_config.app_name}.{shared_alb_hosted_zone}"
+            host_condition = elbv2.ListenerCondition.host_headers([app_hostname])
+        else:
+            # HTTP-only mode: route by path prefix since no domain
+            app_hostname = None
+            host_condition = elbv2.ListenerCondition.path_patterns([f"/{app_config.app_name}/*"])
+
+        elbv2.ApplicationListenerRule(
+            self, "HttpListenerRule",
+            listener=http_listener,
+            priority=priority,
+            conditions=[host_condition],
+            target_groups=[target_group],
+        )
+
+        # Add HTTPS listener rule if hosted zone is configured
+        if shared_alb_hosted_zone and self.environment_infra.shared_alb_https_listener_arn:
+            https_listener = elbv2.ApplicationListener.from_application_listener_attributes(
+                self, "ImportedHttpsListener",
+                listener_arn=self.environment_infra.shared_alb_https_listener_arn,
+                security_group=self.environment_infra.shared_alb_security_group,
+            )
+
+            elbv2.ApplicationListenerRule(
+                self, "HttpsListenerRule",
+                listener=https_listener,
+                priority=priority,
+                conditions=[elbv2.ListenerCondition.host_headers([app_hostname])],
+                target_groups=[target_group],
+            )
+
+            CfnOutput(self, "HttpsUrl", value=f"https://{app_hostname}", export_name=f"{resource_prefix}-https-url")
+
+        # Output the ALB URL
+        if app_hostname:
+            CfnOutput(self, "AppUrl", value=f"http://{app_hostname}", export_name=f"{resource_prefix}-app-url")
+        CfnOutput(self, "SharedAlbDns", value=shared_alb_dns, export_name=f"{resource_prefix}-shared-alb-dns")
 
 
 # =============================================================================
@@ -476,6 +504,7 @@ def deploy(
     image_tag: str,
     env_slug: str,
     synth_only: bool,
+    shared_alb_hosted_zone: str | None,
 ) -> bool:
     """
     Deploy an app to existing infrastructure.
@@ -490,6 +519,7 @@ def deploy(
         image_tag: Docker image tag to deploy.
         env_slug: Environment slug (e.g., "default", "prod").
         synth_only: If True, only synthesize templates, don't deploy.
+        shared_alb_hosted_zone: Hosted zone for shared ALB (e.g., "dev.example.com"). None = HTTP only.
     Returns:
         True on success, False on failure.
     """
@@ -509,15 +539,6 @@ def deploy(
     if not cloudformation_utils.stack_exists(cf_client, cluster_stack_name):
         logger.error("ECS cluster not deployed. Cluster stack '%(stack_name)s' not found", {"stack_name": cluster_stack_name})
         return False
-
-    hosted_zone_id = None
-    if app_config.domain_name and app_config.hosted_zone_name:
-        logger.info("Looking up hosted zone for %(hosted_zone_name)s", {"hosted_zone_name": app_config.hosted_zone_name})
-        hosted_zone_id = route53_utils.get_hosted_zone_id(session, app_config.hosted_zone_name)
-        if hosted_zone_id:
-            logger.info("Found hosted zone: %(hosted_zone_id)s", {"hosted_zone_id": hosted_zone_id})
-        else:
-            logger.error("Could not find hosted zone, HTTPS will not be configured")
 
     # Ensure app secrets exist in Secrets Manager (created outside CDK for security)
     if app_config.app_secrets:
@@ -546,15 +567,15 @@ def deploy(
         )
         aurora_connection_secret = aurora_stack.connection_secret
 
-    app_stack = AppWithAlbStack(
+    app_stack = AppStack(
         scope=cdk_app,
         construct_id=f"{resource_prefix}-app",
         app_config=app_config,
         image_tag=image_tag,
         env_slug=env_slug,
         resource_prefix=resource_prefix,
-        hosted_zone_id=hosted_zone_id,
         database_connection_secret=aurora_connection_secret,
+        shared_alb_hosted_zone=shared_alb_hosted_zone,
     )
     app_stack.add_dependency(ecr_stack)
     if aurora_stack:
@@ -604,7 +625,7 @@ def deploy(
         app_name=app_config.app_name,
         env_slug=env_slug,
         image_tag=image_tag,
-        has_domain=bool(app_config.domain_name),
+        has_domain=bool(shared_alb_hosted_zone),
         cluster_name=app_stack.environment_infra.cluster.cluster_name,
     )
 
