@@ -485,9 +485,6 @@ class AppStack(Stack):
 
             CfnOutput(self, "HttpsUrl", value=f"https://{app_hostname}", export_name=f"{resource_prefix}-https-url")
 
-        # Output the ALB URL
-        if app_hostname:
-            CfnOutput(self, "AppUrl", value=f"http://{app_hostname}", export_name=f"{resource_prefix}-app-url")
         CfnOutput(self, "SharedAlbDns", value=shared_alb_dns, export_name=f"{resource_prefix}-shared-alb-dns")
 
 
