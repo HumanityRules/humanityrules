@@ -171,6 +171,133 @@ class AWSAccount(models.Model):
         return f"{base_url}?region=us-east-1#/stacks/quickcreate?{urllib.parse.urlencode(params)}"
 
 
+class GitProviderIntegration(models.Model):
+    """
+    Organization-level connection to a Git provider (GitHub, GitLab).
+    Stores authentication credentials for accessing repositories.
+    """
+
+    class Provider(models.TextChoices):
+        GITHUB = "github", "GitHub"
+        GITLAB = "gitlab", "GitLab"
+
+    class Status(models.TextChoices):
+        PENDING = "pending", "Pending"
+        CONNECTED = "connected", "Connected"
+        ERROR = "error", "Error"
+
+    id = models.UUIDField(
+        primary_key=True,
+        default=uuid.uuid7,
+        editable=False,
+    )
+    organization = models.ForeignKey(
+        Organization,
+        on_delete=models.CASCADE,
+        related_name="git_integrations",
+    )
+    provider = models.CharField(
+        max_length=20,
+        choices=Provider.choices,
+    )
+    status = models.CharField(
+        max_length=20,
+        choices=Status.choices,
+        default=Status.PENDING,
+    )
+    installation_id = models.CharField(
+        max_length=255,
+        blank=True,
+        help_text="GitHub App installation ID",
+    )
+    access_token_encrypted = models.TextField(
+        blank=True,
+        help_text="Encrypted OAuth access token",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "Git Provider Integration"
+        verbose_name_plural = "Git Provider Integrations"
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"{self.organization.name} - {self.get_provider_display()}"
+
+
+class Repository(models.Model):
+    """
+    A Git repository connected to an organization.
+    Can be from GitHub, GitLab, or a local file:// URL.
+    """
+
+    class Provider(models.TextChoices):
+        GITHUB = "github", "GitHub"
+        GITLAB = "gitlab", "GitLab"
+        LOCAL = "local", "Local"
+
+    id = models.UUIDField(
+        primary_key=True,
+        default=uuid.uuid7,
+        editable=False,
+    )
+    organization = models.ForeignKey(
+        Organization,
+        on_delete=models.CASCADE,
+        related_name="repositories",
+    )
+    integration = models.ForeignKey(
+        GitProviderIntegration,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="repositories",
+        help_text="Git provider integration (null for local repos)",
+    )
+    provider = models.CharField(
+        max_length=20,
+        choices=Provider.choices,
+    )
+    external_id = models.CharField(
+        max_length=255,
+        blank=True,
+        help_text="Provider's repository ID",
+    )
+    name = models.CharField(
+        max_length=255,
+        help_text="Repository name (e.g., 'flask-api')",
+    )
+    full_name = models.CharField(
+        max_length=500,
+        help_text="Full repository name (e.g., 'acme/flask-api')",
+    )
+    default_branch = models.CharField(
+        max_length=255,
+        default="main",
+    )
+    clone_url = models.URLField(
+        max_length=2048,
+        help_text="HTTPS clone URL or file:// for local repos",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "Repository"
+        verbose_name_plural = "Repositories"
+        ordering = ["name"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["organization", "full_name"],
+                name="unique_repo_full_name_per_org",
+            )
+        ]
+
+    def __str__(self):
+        return self.full_name
+
+
 class Environment(models.Model):
     """
     An environment within an AWS account (e.g., default, prod, staging).
@@ -196,6 +323,10 @@ class Environment(models.Model):
     )
     name = models.CharField(max_length=255)
     slug = models.SlugField(max_length=255)
+    aws_region = models.CharField(
+        max_length=50,
+        help_text="AWS region for this environment (e.g., us-east-1)",
+    )
     status = models.CharField(
         max_length=20,
         choices=Status.choices,
@@ -248,7 +379,7 @@ class Environment(models.Model):
 
 
 class Workspace(models.Model):
-    """A workspace containing apps and configuration."""
+    """A workspace for governance and policy. Contains apps and datastores."""
 
     id = models.UUIDField(
         primary_key=True,
@@ -263,19 +394,6 @@ class Workspace(models.Model):
     name = models.CharField(max_length=255)
     slug = models.SlugField(max_length=255)
     description = models.TextField(blank=True)
-    primary_repo_url = models.URLField(
-        max_length=2048,
-        help_text="Primary repository URL (only file:// URLs supported in v1)",
-    )
-    aws_account = models.ForeignKey(
-        AWSAccount,
-        on_delete=models.PROTECT,
-        related_name="workspaces",
-    )
-    aws_region = models.CharField(
-        max_length=50,
-        help_text="Target AWS region for deployments (e.g., us-east-1)",
-    )
     created_by = models.ForeignKey(
         User,
         on_delete=models.SET_NULL,
@@ -424,6 +542,11 @@ class App(models.Model):
         on_delete=models.CASCADE,
         related_name="apps",
     )
+    repository = models.ForeignKey(
+        Repository,
+        on_delete=models.PROTECT,
+        related_name="apps",
+    )
     name = models.CharField(max_length=255)
     slug = models.SlugField(max_length=255)
     app_type = models.CharField(
@@ -435,7 +558,12 @@ class App(models.Model):
         choices=BuildStrategy.choices,
     )
 
-    # Source (inherited from workspace.primary_repo_url)
+    # Source configuration
+    repo_subpath = models.CharField(
+        max_length=500,
+        blank=True,
+        help_text="Subdirectory within repository (for monorepos, optional)",
+    )
     branch = models.CharField(max_length=255)
     dockerfile_path = models.CharField(
         max_length=500,
@@ -521,13 +649,21 @@ class Conversation(models.Model):
         on_delete=models.CASCADE,
         related_name="conversations",
     )
-    workspace = models.ForeignKey(
+    context_repository = models.ForeignKey(
+        Repository,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="conversations",
+        help_text="Repository context for this conversation (set via UI)",
+    )
+    context_workspace = models.ForeignKey(
         Workspace,
         on_delete=models.SET_NULL,
         null=True,
         blank=True,
         related_name="conversations",
-        help_text="Set once workspace is determined during conversation",
+        help_text="Workspace context for this conversation (set via UI)",
     )
     status = models.CharField(
         max_length=20,
@@ -803,3 +939,23 @@ class EnvironmentLog(models.Model):
 
     def __str__(self):
         return f"[{self.source}] {self.level}: {self.message[:50]}..."
+
+
+# =============================================================================
+# Signals
+# =============================================================================
+
+from django.db.models.signals import post_save
+from django.dispatch import receiver
+
+
+@receiver(post_save, sender=Organization)
+def create_default_workspace(sender, instance, created, **kwargs):
+    """Create a Default workspace when an Organization is created."""
+    if created:
+        Workspace.objects.create(
+            organization=instance,
+            name="Default",
+            slug="default",
+            description="Default workspace",
+        )

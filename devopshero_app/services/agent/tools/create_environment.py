@@ -19,6 +19,7 @@ class EnvironmentSummary:
     id: str
     name: str
     slug: str
+    aws_region: str
     status: str
     shared_alb_hosted_zone: str | None
     aws_account_id: str
@@ -32,6 +33,7 @@ class EnvironmentSummary:
 async def create_environment(
     aws_account_uuid: str,
     environment_name: str,
+    aws_region: str,
     hosted_zone_name: str | None,
     organization: Organization,
     user: User,
@@ -48,6 +50,7 @@ async def create_environment(
     Args:
         aws_account_uuid: Internal UUID of the AWSAccount record.
         environment_name: Human-readable name for the environment (e.g., "default", "staging").
+        aws_region: AWS region for this environment (e.g., "us-east-1").
         hosted_zone_name: Hosted zone for wildcard cert (e.g., "dev.example.com"). None = HTTP only.
         organization: The Organization (for access validation).
         user: The User creating the environment.
@@ -114,6 +117,7 @@ async def create_environment(
         aws_account=aws_account,
         name=environment_name,
         slug=slug,
+        aws_region=aws_region,
         status=Environment.Status.PENDING,
         vpc_stack_name=f"devopshero-{slug}-vpc",
         cluster_stack_name=f"devopshero-{slug}-cluster",
@@ -124,6 +128,7 @@ async def create_environment(
         id=str(environment.id),
         name=environment.name,
         slug=environment.slug,
+        aws_region=environment.aws_region,
         status=environment.status,
         shared_alb_hosted_zone=environment.shared_alb_hosted_zone or None,
         aws_account_id=str(aws_account.id),

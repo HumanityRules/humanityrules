@@ -28,7 +28,7 @@ def _get_aws_session(deployment: models.Deployment):
         secret_key=settings.DOH_AWS_SECRET_KEY,
         account_id=aws_account.aws_account_id,
         external_id=str(aws_account.external_id),
-        region=deployment.app.workspace.aws_region,
+        region=deployment.environment.aws_region,
     )
 
 
@@ -55,7 +55,7 @@ def run_deployment(deployment_id: str) -> bool:
         deployment = models.Deployment.objects.select_related(
             "app",
             "app__workspace",
-            "app__workspace__aws_account",
+            "app__repository",
             "app__datastore",
             "environment",
             "environment__aws_account",
@@ -66,7 +66,6 @@ def run_deployment(deployment_id: str) -> bool:
 
     environment = deployment.environment
     app = deployment.app
-    workspace = app.workspace
 
     with job_logging.DeploymentLogContext(
         deployment=deployment,
@@ -115,7 +114,7 @@ def run_deployment(deployment_id: str) -> bool:
             success = infra_customer.deploy_app.deploy(
                 session=session,
                 account_id=environment.aws_account.aws_account_id,
-                region=workspace.aws_region,
+                region=environment.aws_region,
                 app_config=app_config,
                 image_tag=deployment.image_tag,
                 env_slug=environment.slug,

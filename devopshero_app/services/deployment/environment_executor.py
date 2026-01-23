@@ -26,7 +26,7 @@ def _get_aws_session(environment: models.Environment):
         secret_key=settings.DOH_AWS_SECRET_KEY,
         account_id=aws_account.aws_account_id,
         external_id=str(aws_account.external_id),
-        region="us-east-1",  # Default region for base infrastructure
+        region=environment.aws_region,
     )
 
 

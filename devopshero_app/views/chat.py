@@ -24,7 +24,7 @@ def _get_conversations(user):
     return Conversation.objects.filter(
         user=user,
         organization=user.current_organization,
-    ).select_related("workspace").order_by("-updated_at")
+    ).select_related("context_workspace").order_by("-updated_at")
 
 
 @login_required
