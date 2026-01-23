@@ -14,6 +14,7 @@ urlpatterns = [
     path("settings/aws-accounts/", views.settings_aws_accounts, name="settings_aws_accounts"),
     path("settings/aws-accounts/add/", views.settings_aws_accounts_add, name="settings_aws_accounts_add"),
     path("settings/billing/", views.settings_billing, name="settings_billing"),
+    path("settings/git-integrations/", views.settings_git_integrations, name="settings_git_integrations"),
     path("random-quote/", views.random_quote, name="random_quote"),
     path("switch-organization/", views.switch_organization, name="switch_organization"),
     
@@ -25,9 +26,16 @@ urlpatterns = [
     # Onboarding
     path("onboarding/", views.onboarding, name="onboarding"),
     
+    # GitHub App OAuth
+    path("github/connect", views.github_connect, name="github_connect"),
+    path("github/callback", views.github_callback, name="github_callback"),
+    path("github/setup", views.github_callback, name="github_setup"),  # Setup URL uses same handler
+
     # API endpoints
     #  - aws_install_account_callback: called by Lambda after customer deploys the CloudFormation stack, not browsers
     path("api/aws/install-account-callback", views.aws_install_account_callback, name="aws_install_account_callback"),
+    #  - github_webhook: receives push/installation events from GitHub
+    path("api/github/webhook", views.github_webhook, name="github_webhook"),
 
     # Chat / Agent
     path("chat/", views.chat_list, name="chat_list"),

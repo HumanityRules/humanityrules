@@ -28,6 +28,7 @@ from .tools import (
     list_deployable_repos as _list_deployable_repos,
     list_environments as _list_environments,
     list_hosted_zones as _list_hosted_zones,
+    list_repositories as _list_repositories,
     list_workspaces as _list_workspaces,
     scan_repository as _scan_repository,
     select_workspace as _select_workspace,
@@ -89,6 +90,7 @@ TOOL_DISPLAY_NAMES = {
     "mcp__devopshero__select_workspace": "Select Workspace",
     "mcp__devopshero__create_workspace": "Create Workspace",
     "mcp__devopshero__list_deployable_repos": "List Deployable Repos",
+    "mcp__devopshero__list_repositories": "List Repositories",
     "mcp__devopshero__scan_repository": "Scan Repository",
     # Workspace tools
     "mcp__devopshero__create_app": "Create App",
@@ -419,6 +421,24 @@ async def list_deployable_repos(args: dict[str, Any]) -> dict[str, Any]:
 
 
 @tool(
+    "list_repositories",
+    (
+        "List repositories connected to the organization via GitHub integration. "
+        "Returns repository names, clone URLs, default branches, and providers. "
+        "Use this to discover available repositories for app deployment. "
+        "If no repositories are found, the user may need to connect GitHub first "
+        "via Settings > Git Integrations."
+    ),
+    {},
+)
+async def list_repositories(args: dict[str, Any]) -> dict[str, Any]:
+    """List repositories connected to the organization."""
+    conversation = _get_conversation()
+    repos = await _list_repositories(organization=conversation.organization)
+    return _mcp_response(repos)
+
+
+@tool(
     "scan_repository",
     (
         "Quick scan of a repository to detect basic characteristics. "
@@ -656,6 +676,7 @@ devopshero_mcp_server = create_sdk_mcp_server(
         select_workspace,
         create_workspace,
         list_deployable_repos,
+        list_repositories,
         scan_repository,
         # Workspace tools
         create_app,
@@ -680,6 +701,7 @@ TOOL_NAMES = [
     "mcp__devopshero__select_workspace",
     "mcp__devopshero__create_workspace",
     "mcp__devopshero__list_deployable_repos",
+    "mcp__devopshero__list_repositories",
     "mcp__devopshero__scan_repository",
     # Workspace tools
     "mcp__devopshero__create_app",

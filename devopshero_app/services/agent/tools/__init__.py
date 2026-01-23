@@ -19,6 +19,7 @@ from .list_environments import list_environments
 from .list_environments import EnvironmentSummary as ListEnvironmentSummary
 from .list_hosted_zones import list_hosted_zones, HostedZoneSummary
 from .list_deployable_repos import list_deployable_repos, DeployableRepoSummary
+from .list_repositories import list_repositories, RepositoryListItem
 from .list_workspaces import list_workspaces, WorkspaceListItem
 from .scan_repository import scan_repository, RepositoryScan
 from .select_workspace import select_workspace, SelectedWorkspaceSummary
@@ -63,4 +64,6 @@ __all__ = [
     "RepositoryScan",
     "list_deployable_repos",
     "DeployableRepoSummary",
+    "list_repositories",
+    "RepositoryListItem",
 ]
