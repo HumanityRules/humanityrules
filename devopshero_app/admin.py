@@ -10,9 +10,11 @@ from devopshero_app.models import (
     DeploymentLog,
     Environment,
     EnvironmentLog,
+    GitProviderIntegration,
     Message,
     Organization,
     OrganizationMembership,
+    Repository,
     User,
     Workspace,
 )
@@ -75,8 +77,8 @@ class AWSAccountAdmin(admin.ModelAdmin):
 
 @admin.register(Environment)
 class EnvironmentAdmin(admin.ModelAdmin):
-    list_display = ["name", "slug", "aws_account", "status", "vpc_id", "cluster_arn", "created_at"]
-    list_filter = ["status", "aws_account__organization"]
+    list_display = ["name", "slug", "aws_account", "aws_region", "status", "vpc_id", "cluster_arn", "created_at"]
+    list_filter = ["status", "aws_region", "aws_account__organization"]
     search_fields = ["name", "slug", "aws_account__name", "aws_account__aws_account_id", "vpc_id"]
     prepopulated_fields = {"slug": ("name",)}
     readonly_fields = ["id", "created_at", "updated_at"]
@@ -84,7 +86,7 @@ class EnvironmentAdmin(admin.ModelAdmin):
 
     fieldsets = (
         (None, {
-            "fields": ("name", "slug", "aws_account", "status", "status_message")
+            "fields": ("name", "slug", "aws_account", "aws_region", "status", "status_message")
         }),
         ("Stack Names", {
             "fields": ("vpc_stack_name", "cluster_stack_name"),
@@ -101,24 +103,42 @@ class EnvironmentAdmin(admin.ModelAdmin):
     )
 
 
+@admin.register(GitProviderIntegration)
+class GitProviderIntegrationAdmin(admin.ModelAdmin):
+    list_display = ["organization", "provider", "status", "installation_id", "created_at"]
+    list_filter = ["provider", "status", "organization"]
+    search_fields = ["organization__name", "installation_id"]
+    readonly_fields = ["id", "created_at", "updated_at"]
+    autocomplete_fields = ["organization"]
+
+
+@admin.register(Repository)
+class RepositoryAdmin(admin.ModelAdmin):
+    list_display = ["full_name", "organization", "provider", "default_branch", "created_at"]
+    list_filter = ["provider", "organization"]
+    search_fields = ["name", "full_name", "organization__name", "clone_url"]
+    readonly_fields = ["id", "created_at", "updated_at"]
+    autocomplete_fields = ["organization", "integration"]
+
+
 @admin.register(Workspace)
 class WorkspaceAdmin(admin.ModelAdmin):
-    list_display = ["name", "slug", "organization", "aws_account", "aws_region", "created_at", "updated_at"]
-    list_filter = ["organization", "aws_region", "aws_account"]
-    search_fields = ["name", "slug", "organization__name", "primary_repo_url", "aws_account__aws_account_id"]
+    list_display = ["name", "slug", "organization", "created_at", "updated_at"]
+    list_filter = ["organization"]
+    search_fields = ["name", "slug", "organization__name"]
     prepopulated_fields = {"slug": ("name",)}
     readonly_fields = ["id", "created_at", "updated_at"]
-    autocomplete_fields = ["organization", "aws_account", "created_by"]
+    autocomplete_fields = ["organization", "created_by"]
 
 
 @admin.register(App)
 class AppAdmin(admin.ModelAdmin):
-    list_display = ["name", "slug", "organization", "workspace", "app_type", "build_strategy", "branch", "container_port", "updated_at"]
+    list_display = ["name", "slug", "organization", "workspace", "repository", "app_type", "build_strategy", "branch", "container_port", "updated_at"]
     list_filter = ["app_type", "build_strategy", "organization"]
-    search_fields = ["name", "slug", "workspace__name", "organization__name", "branch"]
+    search_fields = ["name", "slug", "workspace__name", "organization__name", "repository__full_name", "branch"]
     prepopulated_fields = {"slug": ("name",)}
     readonly_fields = ["id", "created_at", "updated_at"]
-    autocomplete_fields = ["organization", "workspace", "datastore", "created_by"]
+    autocomplete_fields = ["organization", "workspace", "repository", "datastore", "created_by"]
 
 
 @admin.register(Datastore)
@@ -133,11 +153,11 @@ class DatastoreAdmin(admin.ModelAdmin):
 
 @admin.register(Conversation)
 class ConversationAdmin(admin.ModelAdmin):
-    list_display = ["title", "status", "user", "organization", "workspace", "updated_at"]
-    list_filter = ["status", "organization", "workspace"]
-    search_fields = ["title", "user__email", "user__username", "organization__name", "workspace__name", "session_id"]
+    list_display = ["title", "status", "user", "organization", "context_workspace", "context_repository", "updated_at"]
+    list_filter = ["status", "organization", "context_workspace"]
+    search_fields = ["title", "user__email", "user__username", "organization__name", "context_workspace__name", "context_repository__full_name", "session_id"]
     readonly_fields = ["id", "created_at", "updated_at"]
-    autocomplete_fields = ["user", "organization", "workspace"]
+    autocomplete_fields = ["user", "organization", "context_workspace", "context_repository"]
     filter_horizontal = ["deployments"]
 
 

@@ -18,10 +18,6 @@ class SelectedWorkspaceSummary:
     name: str
     slug: str
     description: str
-    primary_repo_url: str
-    aws_account_id: str
-    aws_account_name: str
-    aws_region: str
 
     def to_dict(self) -> dict:
         """Convert to dictionary for JSON serialization."""
@@ -46,16 +42,16 @@ async def select_workspace(workspace_id: str, conversation: Conversation, organi
     Raises:
         ValueError: If workspace is already pinned or doesn't exist.
     """
-    # Check if workspace is already pinned (use workspace_id to avoid lazy load)
-    if conversation.workspace_id is not None:
+    # Check if workspace is already pinned (use context_workspace_id to avoid lazy load)
+    if conversation.context_workspace_id is not None:
         raise ValueError(
             "This conversation is already pinned to a workspace. "
             "Start a new conversation to work with a different workspace."
         )
 
-    # Fetch the workspace with related AWS account
+    # Fetch the workspace
     try:
-        workspace = await Workspace.objects.select_related("aws_account").aget(
+        workspace = await Workspace.objects.aget(
             id=workspace_id,
             organization=organization,
         )
@@ -65,7 +61,7 @@ async def select_workspace(workspace_id: str, conversation: Conversation, organi
         )
 
     # Pin the workspace to the conversation and update title
-    conversation.workspace = workspace
+    conversation.context_workspace = workspace
     conversation.title = f"Working on {workspace.name}"
     await conversation.asave()
 
@@ -74,8 +70,4 @@ async def select_workspace(workspace_id: str, conversation: Conversation, organi
         name=workspace.name,
         slug=workspace.slug,
         description=workspace.description,
-        primary_repo_url=workspace.primary_repo_url,
-        aws_account_id=str(workspace.aws_account.id),
-        aws_account_name=workspace.aws_account.name,
-        aws_region=workspace.aws_region,
     )

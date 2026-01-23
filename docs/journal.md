@@ -1,5 +1,32 @@
 # DevOpsHero Development Journal
 
+## 2026-01-23 04:55 - Domain Model Refactor: Workspace as Governance
+
+Major refactor to make Repository a first-class entity and transform Workspace into a governance-only container.
+
+### Key Changes
+
+- **New models:** `GitProviderIntegration` (org-level GitHub/GitLab connection), `Repository` (connected git repos)
+- **Workspace simplified:** Removed `primary_repo_url`, `aws_account`, `aws_region` — now purely governance/policy container
+- **App sources from Repository:** Added `repository` FK and `repo_subpath` to App model
+- **Environment owns region:** Moved `aws_region` from Workspace to Environment
+- **Conversation context:** Renamed `workspace` to `context_workspace`, added `context_repository` for UI-driven context selection
+- **Default workspace signal:** Auto-creates "Default" workspace when Organization is created
+
+### Rationale
+
+Workspace was overloaded — it coupled governance (apps, policies) with infrastructure (AWS account/region) and source (repo URL). Splitting these concerns enables:
+- Multiple repos per workspace (or multiple workspaces sharing repos)
+- Apps in different repos deployed to the same governance container
+- Future GitHub/GitLab integration as a separate concern
+
+### aws_region Bug Fix
+
+After refactor, `create_environment` wasn't setting `aws_region`, causing `sts..amazonaws.com` errors (empty region). Fixed by:
+- Adding `aws_region` parameter to `create_environment` tool (defaults to "us-east-1")
+- Updated tool description to instruct agent: confirm region with user before provisioning, since it can't be changed later
+
+
 ## 2026-01-23 00:30 - Add --yes flag to npx cdk command
 
 Added `--yes` flag to the `npx cdk deploy` command in `cdk_utils.py`. Without this flag, npx prompts for confirmation when it needs to install the CDK CLI package, which blocks non-interactive deployments.

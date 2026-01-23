@@ -54,15 +54,15 @@ def _get_conversation() -> Conversation:
 
 async def _require_workspace(conversation: Conversation) -> Workspace:
     """Get workspace from conversation or raise helpful error."""
-    # Check workspace_id (just an integer field, no DB query) to see if set
-    if conversation.workspace_id is None:
+    # Check context_workspace_id (just an integer field, no DB query) to see if set
+    if conversation.context_workspace_id is None:
         raise ValueError(
             "No workspace selected for this conversation. "
             "Use select_workspace to choose a workspace first, "
             "or create_workspace if you don't have one yet."
         )
     # Use async ORM to fetch the related workspace (with organization for create_app)
-    return await Workspace.objects.select_related("organization").aget(id=conversation.workspace_id)
+    return await Workspace.objects.select_related("organization").aget(id=conversation.context_workspace_id)
 
 
 def _mcp_response(data: Any) -> dict[str, Any]:
@@ -282,6 +282,9 @@ async def list_environments(args: dict[str, Any]) -> dict[str, Any]:
     (
         "Create an environment in a connected AWS account. "
         "Queues provisioning of VPC, ECS cluster, and shared ALB infrastructure. "
+        "IMPORTANT: Before calling this tool, confirm the AWS region with the user. "
+        "The default is us-east-1, but this cannot be changed after provisioning. "
+        "Tell the user: 'I'll create the environment in us-east-1. Let me know if you need a different region.' "
         "If hosted_zone_name is provided, also creates a wildcard SSL certificate for HTTPS. "
         "Returns immediately with PENDING status - use get_environment_status to poll for progress. "
         "Provisioning typically takes 5-10 minutes. "
@@ -291,6 +294,7 @@ async def list_environments(args: dict[str, Any]) -> dict[str, Any]:
     {
         "aws_account_uuid": str,
         "environment_name": str,
+        "aws_region": str,
         "hosted_zone_name": str,
     },
 )
@@ -300,6 +304,7 @@ async def create_environment(args: dict[str, Any]) -> dict[str, Any]:
     result = await _create_environment(
         aws_account_uuid=args["aws_account_uuid"],
         environment_name=args["environment_name"],
+        aws_region=args.get("aws_region", "us-east-1"),
         hosted_zone_name=args.get("hosted_zone_name"),
         organization=conversation.organization,
         user=conversation.user,
@@ -378,17 +383,11 @@ async def select_workspace(args: dict[str, Any]) -> dict[str, Any]:
     "create_workspace",
     (
         "Create a new workspace for organizing applications and deployments. "
-        "A workspace binds a repository to an AWS account and region. "
-        "You must have at least one connected AWS account to create a workspace. "
-        "The primary_repo_url is required and must be a file:// URL. "
-        "The aws_account_uuid parameter is the internal UUID from list_aws_accounts (the 'id' field), "
-        "not the 12-digit AWS account number."
+        "Workspaces are governance containers for apps. "
+        "Apps link to repositories separately."
     ),
     {
         "name": str,
-        "aws_account_uuid": str,
-        "aws_region": str,
-        "primary_repo_url": str,
         "description": str,
     },
 )
@@ -397,12 +396,9 @@ async def create_workspace(args: dict[str, Any]) -> dict[str, Any]:
     conversation = _get_conversation()
     result = await _create_workspace(
         name=args["name"],
-        aws_account_uuid=args["aws_account_uuid"],
-        aws_region=args["aws_region"],
         organization=conversation.organization,
         user=conversation.user,
         description=args.get("description", ""),
-        primary_repo_url=args["primary_repo_url"],
     )
     return _mcp_response(result)
 

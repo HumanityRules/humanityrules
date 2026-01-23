@@ -40,9 +40,9 @@
                                 {{ conv.title|default:"New Conversation" }}
                             </h3>
                             <div class="flex items-center mt-1 space-x-2">
-                                {% if conv.workspace %}
+                                {% if conv.context_workspace %}
                                 <span class="text-xs text-gray-500 dark:text-gray-400 truncate">
-                                    {{ conv.workspace.name }}
+                                    {{ conv.context_workspace.name }}
                                 </span>
                                 {% endif %}
                                 <span class="text-xs text-gray-400 dark:text-gray-500">

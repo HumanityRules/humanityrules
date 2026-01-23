@@ -69,19 +69,19 @@ def build_app_config(app: App, environment: Environment) -> infra_customer.appco
     Build an AppConfig from Django App model.
 
     Args:
-        app: The Django App model with related workspace and datastore.
+        app: The Django App model with related repository and datastore.
         environment: The target Environment for deployment.
 
     Returns:
         An AppConfig ready for CDK deployment.
     """
-    workspace = app.workspace
-
     # Build ECR repo name (app slugs are unique per org, environments are per-account, no collision)
     ecr_repo_name = f"doh/{environment.slug}/{app.slug}"
 
-    # Extract app source path from workspace repo URL
-    app_source_path = extract_repo_path(workspace.primary_repo_url)
+    # Extract app source path from repository clone URL
+    app_source_path = extract_repo_path(app.repository.clone_url)
+    if app_source_path and app.repo_subpath:
+        app_source_path = app_source_path / app.repo_subpath
 
     # Build database config if app has a datastore
     database_config = None
@@ -89,7 +89,7 @@ def build_app_config(app: App, environment: Environment) -> infra_customer.appco
         database_config = build_database_config(app.datastore)
 
     return infra_customer.appconfig.AppConfig(
-        app_name=app.slug,  # bead: devopshero-bxr
+        app_name=app.slug,
         ecr_repo_name=ecr_repo_name,
         container_port=app.container_port,
         cpu=app.cpu,
