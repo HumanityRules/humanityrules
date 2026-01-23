@@ -81,7 +81,7 @@ def deploy_cdk_stacks(app: App, session: boto3.Session) -> bool:
     logger.info("   Deploying CDK stacks using the CDK CLI")
 
     process = subprocess.Popen(
-        ["npx", "cdk", "deploy", "--all", "--require-approval", "never", "--no-notices", "--app", cloud_assembly.directory],
+        ["npx", "--yes", "cdk", "deploy", "--all", "--require-approval", "never", "--no-notices", "--app", cloud_assembly.directory],
         env=cdk_env,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
