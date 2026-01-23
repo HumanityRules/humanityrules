@@ -1,7 +1,7 @@
 from django.contrib.auth.decorators import login_required
 from django.shortcuts import render
 
-from ..models import AWSAccount
+from ..models import AWSAccount, GitProviderIntegration, Repository
 from .base import get_app_shell_context
 
 
@@ -111,5 +111,45 @@ def settings_billing(request):
         return render(request, "devopshero_app/settings/billing.html", context=context)
     
     context["content_url"] = "/settings/billing/"
+    return render(request, "devopshero_app/app_shell.html", context=context)
+
+
+@login_required
+def settings_git_integrations(request):
+    """Render the Git Integrations settings tab and handle sync requests."""
+    from devopshero_app.services.github import github_client
+
+    context = get_app_shell_context(request=request, current_page="settings")
+    context["active_tab"] = "git-integrations"
+
+    org = request.user.current_organization
+
+    # Handle POST request for re-sync
+    if request.method == "POST":
+        integration = GitProviderIntegration.objects.filter(
+            organization=org,
+            provider=GitProviderIntegration.Provider.GITHUB,
+        ).first()
+
+        if integration and integration.status == GitProviderIntegration.Status.CONNECTED:
+            github_client.sync_repositories(organization=org, integration=integration)
+
+    # Get GitHub integration for this org
+    github_integration = GitProviderIntegration.objects.filter(
+        organization=org,
+        provider=GitProviderIntegration.Provider.GITHUB,
+    ).first()
+
+    context["github_integration"] = github_integration
+
+    if github_integration:
+        repositories = Repository.objects.filter(integration=github_integration).order_by("full_name")
+        context["repositories"] = repositories
+        context["repo_count"] = repositories.count()
+
+    if request.htmx:
+        return render(request, "devopshero_app/settings/git_integrations.html", context=context)
+
+    context["content_url"] = "/settings/git-integrations/"
     return render(request, "devopshero_app/app_shell.html", context=context)
 

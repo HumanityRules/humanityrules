@@ -138,9 +138,19 @@ STATIC_URL = 'static/'
 # Custom user model
 AUTH_USER_MODEL = 'devopshero_app.User'
 
+# Login URL for @login_required redirects
+LOGIN_URL = '/auth/login/'
+
 # WorkOS Configuration
 WORKOS_CLIENT_ID = os.environ.get("WORKOS_CLIENT_ID")
 WORKOS_API_KEY = os.environ.get("WORKOS_API_KEY")
+
+# GitHub App Configuration
+GITHUB_APP_ID = os.environ.get("GITHUB_APP_ID")
+GITHUB_APP_CLIENT_ID = os.environ.get("GITHUB_APP_CLIENT_ID")
+GITHUB_APP_CLIENT_SECRET = os.environ.get("GITHUB_APP_CLIENT_SECRET")
+GITHUB_APP_PRIVATE_KEY = os.environ.get("GITHUB_APP_PRIVATE_KEY", "").replace("\\n", "\n")
+GITHUB_WEBHOOK_SECRET = os.environ.get("GITHUB_WEBHOOK_SECRET")
 
 # DevOpsHero API Configuration
 DOH_API_SECRET_KEY = os.environ.get("DOH_API_SECRET_KEY")

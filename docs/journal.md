@@ -1,5 +1,37 @@
 # DevOpsHero Development Journal
 
+## 2026-01-23 - GitHub App Integration
+
+Implemented GitHub App OAuth flow to connect organizations to GitHub and sync repositories.
+
+### Design Decisions
+
+- **GitHub App over OAuth App** — GitHub Apps provide org-wide installation, fine-grained permissions, and installation access tokens (short-lived, no PATs to manage).
+- **Auto-sync on connect** — Repositories are fetched immediately after OAuth callback, so users see their repos right away.
+- **Hybrid sync model** — Initial sync on connect, plus `sync_repositories` agent tool and UI "Re-sync" button for manual refresh.
+- **Credentials split** — App-level credentials (ID, private key, client secret) in `.env`; per-org `installation_id` in database (`GitProviderIntegration` model).
+
+### Implementation
+
+- **GitHub service** (`services/github/github_client.py`) — JWT generation for App auth, installation token exchange, repo listing, sync logic that adds/updates/removes `Repository` records.
+- **OAuth flow** (`views/github.py`) — `/github/connect` redirects to GitHub App installation, `/github/setup` callback creates `GitProviderIntegration` and triggers sync.
+- **Settings UI** — New "Git Integrations" tab showing connection status, repo count, and Re-sync button.
+- **Agent tools** — `list_repositories` queries local DB, `sync_repositories` re-fetches from GitHub API.
+- **Webhook endpoint** (`/api/github/webhook`) — Stubbed for future auto-deploy on push.
+
+### Configuration
+
+Created GitHub App "DevOps Hero App" under DevOpsHeroAI organization with:
+- Permissions: Contents (read/write), Metadata (read), Pull Requests (read/write)
+- Events: Push (for future auto-deploy)
+- Callback URL: `https://devopshero.ngrok.io/github/callback`
+- Setup URL: `https://devopshero.ngrok.io/github/setup`
+
+### Fixes During Testing
+
+- Added `LOGIN_URL = '/auth/login/'` — Django's default `/accounts/login/` doesn't exist in this project.
+
+
 ## 2026-01-23 04:55 - Domain Model Refactor: Workspace as Governance
 
 Major refactor to make Repository a first-class entity and transform Workspace into a governance-only container.

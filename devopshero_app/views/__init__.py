@@ -11,11 +11,13 @@ from .settings import (
     settings_aws_accounts,
     settings_aws_accounts_add,
     settings_billing,
+    settings_git_integrations,
 )
 from .partials import random_quote, switch_organization
 from .auth import auth_login, auth_callback, auth_logout
 from .onboarding import onboarding
 from .api import aws_install_account_callback
+from .github import github_connect, github_callback, github_webhook
 from .chat import (
     chat_list,
     chat_new,
@@ -39,6 +41,7 @@ __all__ = [
     "settings_aws_accounts",
     "settings_aws_accounts_add",
     "settings_billing",
+    "settings_git_integrations",
     "random_quote",
     "switch_organization",
     "auth_login",
@@ -46,6 +49,9 @@ __all__ = [
     "auth_logout",
     "onboarding",
     "aws_install_account_callback",
+    "github_connect",
+    "github_callback",
+    "github_webhook",
     "chat_list",
     "chat_new",
     "chat_view",
