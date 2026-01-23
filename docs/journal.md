@@ -1,5 +1,10 @@
 # DevOpsHero Development Journal
 
+## 2026-01-23 21:30 - Dev Server Config Cleanup
+
+Moved uvicorn dev server configuration from inline CLI flags in `Procfile.tailwind` to a dedicated `run_dev.py` script. This makes reload patterns easier to maintain and adds `tmp/*` to exclusions so temporary files don't trigger reloads.
+
+
 ## 2026-01-23 19:45 - Conversation Context UI
 
 Replaced agent-driven workspace/repository selection with UI-driven context selection. Users now enter conversations from the workspace page with context pre-set.
