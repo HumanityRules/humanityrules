@@ -79,11 +79,12 @@ def aws_install_account_callback(request):
     try:
         aws_account = AWSAccount.objects.get(external_id=external_id)
     except AWSAccount.DoesNotExist:
-        logger.error(f"AWS callback received for unknown external_id: {external_id}")
-        return JsonResponse(
-            {"error": "Unknown external_id"},
-            status=404,
-        )
+        # Account may have been deleted from our DB - acknowledge receipt but do nothing
+        logger.info(f"AWS callback received for unknown external_id: {external_id} (ignored)")
+        return JsonResponse({
+            "status": "success",
+            "message": "Codepath 200",
+        })
     
     # Handle different request types
     if request_type == "Create":
