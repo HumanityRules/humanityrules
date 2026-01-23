@@ -1,5 +1,10 @@
 # DevOpsHero Development Journal
 
+## 2026-01-23 00:30 - Add --yes flag to npx cdk command
+
+Added `--yes` flag to the `npx cdk deploy` command in `cdk_utils.py`. Without this flag, npx prompts for confirmation when it needs to install the CDK CLI package, which blocks non-interactive deployments.
+
+
 ## 2026-01-22 04:50 - Convert deploy.py to Django Management Command
 
 Converted the standalone `deploy.py` script to a Django management command `doh_deploy`. The script required manual `.env` path resolution and hardcoded AWS account IDs — both problems solved by leveraging Django's infrastructure.
