@@ -776,8 +776,6 @@ class Deployment(models.Model):
         Environment,
         on_delete=models.PROTECT,
         related_name="deployments",
-        null=True,
-        blank=True,
         help_text="The environment this deployment targets",
     )
 
