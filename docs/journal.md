@@ -1,8 +1,10 @@
 # DevOpsHero Development Journal
 
-## 2026-01-23 21:30 - Dev Server Config Cleanup
+## 2026-01-23 21:30 - Dev Server Reload Exclusions
 
-Moved uvicorn dev server configuration from inline CLI flags in `Procfile.tailwind` to a dedicated `run_dev.py` script. This makes reload patterns easier to maintain and adds `tmp/*` to exclusions so temporary files don't trigger reloads.
+Added `--reload-exclude "tmp/*"` to uvicorn in `Procfile.tailwind` so temporary files don't trigger reloads.
+
+Attempted to use programmatic `uvicorn.run()` for cleaner config, but it conflicts with honcho (django-tailwind's process manager) — uvicorn's reload spawns subprocesses that honcho can't track, causing port conflicts on restart.
 
 
 ## 2026-01-23 19:45 - Conversation Context UI
