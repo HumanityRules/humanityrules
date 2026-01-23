@@ -25,13 +25,13 @@ def workspaces(request):
 
 
 @login_required
-def workspace_detail(request, slug):
+def workspace_detail(request, workspace_slug):
     """Show workspace detail with apps, datastores, and conversations."""
     context = get_app_shell_context(request=request, current_page="workspaces")
     
     workspace = get_object_or_404(
         Workspace,
-        slug=slug,
+        slug=workspace_slug,
         organization=request.user.current_organization,
     )
     
@@ -55,6 +55,6 @@ def workspace_detail(request, slug):
     if request.htmx:
         return render(request, "devopshero_app/workspaces/workspace_detail.html", context=context)
 
-    context["content_url"] = f"/workspaces/{slug}/"
+    context["content_url"] = f"/workspaces/{workspace_slug}/"
     return render(request, "devopshero_app/app_shell.html", context=context)
 

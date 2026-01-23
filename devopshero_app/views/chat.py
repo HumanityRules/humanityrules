@@ -47,9 +47,14 @@ def chat_list(request):
 @login_required
 def chat_new(request):
     """Create a new conversation and redirect to it."""
+    workspace_id = request.GET.get("workspace")
+    repo_id = request.GET.get("repo")
+    
     conversation = Conversation.objects.create(
         user=request.user,
         organization=request.user.current_organization,
+        context_workspace_id=workspace_id if workspace_id else None,
+        context_repository_id=repo_id if repo_id else None,
         status=Conversation.Status.ACTIVE,
     )
     return redirect("chat_view", conversation_id=conversation.id)
@@ -59,7 +64,7 @@ def chat_new(request):
 def chat_view(request, conversation_id):
     """View a specific conversation in the unified chat interface."""
     conversation = get_object_or_404(
-        Conversation,
+        Conversation.objects.select_related("context_workspace", "context_repository"),
         id=conversation_id,
         user=request.user,
         organization=request.user.current_organization,

@@ -11,7 +11,7 @@ from typing import Any
 
 from django.utils.text import slugify
 
-from devopshero_app.models import App, Datastore, User, Workspace
+from devopshero_app.models import App, Datastore, Repository, User, Workspace
 
 
 def _normalize_environment_variables(value: Any) -> list[dict[str, str]]:
@@ -118,6 +118,7 @@ class AppSummary:
 
 async def create_app(
     workspace: Workspace,
+    repository: Repository,
     name: str,
     branch: str,
     app_type: str,
@@ -135,10 +136,9 @@ async def create_app(
     """
     Create an application configuration in a workspace.
 
-    The repository URL is inherited from workspace.primary_repo_url.
-
     Args:
         workspace: The Workspace to create the app in (from conversation context).
+        repository: The Repository containing the app source code.
         name: Human-readable name for the app.
         branch: Git branch to deploy from.
         app_type: Type of app (web, worker, scheduled).
@@ -198,6 +198,7 @@ async def create_app(
     app = await App.objects.acreate(
         organization=organization,
         workspace=workspace,
+        repository=repository,
         name=name,
         slug=slug,
         app_type=app_type,

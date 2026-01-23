@@ -1,6 +1,6 @@
 <div class="max-w-5xl">
     {# Header with workspace name and action buttons #}
-    <div class="flex items-center justify-between mb-6">
+    <div class="flex items-start justify-between mb-6">
         <div>
             <div class="flex items-center space-x-2 text-sm text-gray-500 dark:text-gray-400 mb-1">
                 <a href="{% url 'workspaces' %}"
@@ -13,7 +13,7 @@
             </div>
             <h1 class="text-2xl font-bold text-gray-900 dark:text-white">{{ workspace.name }}</h1>
             {% if workspace.description %}
-            <p class="mt-1 text-sm text-gray-600 dark:text-gray-400">{{ workspace.description }}</p>
+            <p class="mt-1 text-sm text-gray-600 dark:text-gray-400 max-w-2xl">{{ workspace.description }}</p>
             {% endif %}
         </div>
         <div class="flex items-center space-x-3">

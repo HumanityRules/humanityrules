@@ -10,7 +10,6 @@ from .create_datastore import create_datastore, DatastoreSummary
 from .create_environment import create_environment
 from .create_environment import EnvironmentSummary as CreateEnvironmentSummary
 from .get_environment_status import get_environment_status, EnvironmentStatus, EnvironmentLogEntry
-from .create_workspace import create_workspace, WorkspaceSummary
 from .deploy_app import deploy_app, DeploymentSummary
 from .get_deployment_status import get_deployment_status, DeploymentStatus, DeploymentLogEntry
 from .initiate_aws_connection import initiate_aws_connection, AWSConnectionInfo
@@ -20,9 +19,7 @@ from .list_environments import EnvironmentSummary as ListEnvironmentSummary
 from .list_hosted_zones import list_hosted_zones, HostedZoneSummary
 from .list_deployable_repos import list_deployable_repos, DeployableRepoSummary
 from .list_repositories import list_repositories, RepositoryListItem
-from .list_workspaces import list_workspaces, WorkspaceListItem
 from .scan_repository import scan_repository, RepositoryScan
-from .select_workspace import select_workspace, SelectedWorkspaceSummary
 
 __all__ = [
     # App management
@@ -39,13 +36,6 @@ __all__ = [
     "EnvironmentLogEntry",
     "list_environments",
     "ListEnvironmentSummary",
-    # Workspace management
-    "create_workspace",
-    "WorkspaceSummary",
-    "list_workspaces",
-    "WorkspaceListItem",
-    "select_workspace",
-    "SelectedWorkspaceSummary",
     # Deployment
     "deploy_app",
     "DeploymentSummary",

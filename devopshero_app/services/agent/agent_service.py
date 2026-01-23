@@ -34,7 +34,7 @@ from claude_agent_sdk.types import (
 )
 from django.conf import settings
 
-from devopshero_app.models import App, Conversation, Message, Workspace
+from devopshero_app.models import App, Conversation, Message, Repository, Workspace
 
 from .agent_client import get_claude_env
 from .mcp_tools import (
@@ -81,6 +81,24 @@ def _load_system_prompt() -> str:
     """Load the system prompt from the markdown file."""
     prompt_path = Path(__file__).parent / "system_prompt.md"
     return prompt_path.read_text()
+
+
+async def _build_system_prompt(conversation: Conversation) -> str:
+    """Build system prompt with conversation context injected."""
+    base_prompt = _load_system_prompt()
+    
+    context_lines = []
+    if conversation.context_workspace_id:
+        ws = await Workspace.objects.aget(id=conversation.context_workspace_id)
+        context_lines.append(f"Current workspace: {ws.name} (id: {ws.id})")
+    if conversation.context_repository_id:
+        repo = await Repository.objects.aget(id=conversation.context_repository_id)
+        context_lines.append(f"Current repository: {repo.full_name} (id: {repo.id})")
+    
+    if context_lines:
+        context_section = "\n## Conversation Context\n\n" + "\n".join(context_lines)
+        return base_prompt + context_section
+    return base_prompt
 
 
 async def _aget_last_user_message(conversation: Conversation) -> str:
@@ -295,8 +313,9 @@ async def stream_response(conversation: Conversation, fork_session: bool) -> Asy
     """
     conversation_context.set(conversation)
     user_message = await _aget_last_user_message(conversation)
+    system_prompt = await _build_system_prompt(conversation)
     options = _create_agent_options(
-        system_prompt=_load_system_prompt(),
+        system_prompt=system_prompt,
         resume_session_id=conversation.session_id,
         fork_session=fork_session,
     )

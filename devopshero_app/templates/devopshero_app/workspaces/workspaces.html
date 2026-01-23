@@ -1,4 +1,4 @@
-<div class="max-w-4xl">
+<div class="max-w-[960px]">
     <div class="flex items-center justify-between mb-6">
         <div>
             <h1 class="text-2xl font-bold text-gray-900 dark:text-white">Workspaces</h1>
@@ -9,8 +9,8 @@
     {% if workspaces %}
     <div class="grid gap-4">
         {% for workspace in workspaces %}
-        <a href="{% url 'workspace_detail' slug=workspace.slug %}"
-           hx-get="{% url 'workspace_detail' slug=workspace.slug %}"
+        <a href="{% url 'workspace_detail' workspace_slug=workspace.slug %}"
+           hx-get="{% url 'workspace_detail' workspace_slug=workspace.slug %}"
            hx-target="#main-content"
            hx-swap="innerHTML"
            hx-push-url="true"
