@@ -957,5 +957,5 @@ def create_default_workspace(sender, instance, created, **kwargs):
             organization=instance,
             name="Default",
             slug="default",
-            description="Default workspace",
+            description="Your starting workspace for apps and datastores. Rename or create additional workspaces to organize by team or project.",
         )

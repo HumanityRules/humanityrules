@@ -13,13 +13,12 @@ from typing import Any
 
 from claude_agent_sdk import tool, create_sdk_mcp_server
 
-from devopshero_app.models import Conversation, Workspace
+from devopshero_app.models import Conversation, Repository, Workspace
 
 from .tools import (
     create_app as _create_app,
     create_datastore as _create_datastore,
     create_environment as _create_environment,
-    create_workspace as _create_workspace,
     deploy_app as _deploy_app,
     get_deployment_status as _get_deployment_status,
     get_environment_status as _get_environment_status,
@@ -29,9 +28,7 @@ from .tools import (
     list_environments as _list_environments,
     list_hosted_zones as _list_hosted_zones,
     list_repositories as _list_repositories,
-    list_workspaces as _list_workspaces,
     scan_repository as _scan_repository,
-    select_workspace as _select_workspace,
 )
 
 
@@ -58,9 +55,8 @@ async def _require_workspace(conversation: Conversation) -> Workspace:
     # Check context_workspace_id (just an integer field, no DB query) to see if set
     if conversation.context_workspace_id is None:
         raise ValueError(
-            "No workspace selected for this conversation. "
-            "Use select_workspace to choose a workspace first, "
-            "or create_workspace if you don't have one yet."
+            "No workspace context for this conversation. "
+            "Start a new conversation from a workspace page to set the context."
         )
     # Use async ORM to fetch the related workspace (with organization for create_app)
     return await Workspace.objects.select_related("organization").aget(id=conversation.context_workspace_id)
@@ -86,9 +82,6 @@ TOOL_DISPLAY_NAMES = {
     "mcp__devopshero__initiate_aws_connection": "Initiate AWS Connection",
     "mcp__devopshero__create_environment": "Create Environment",
     "mcp__devopshero__get_environment_status": "Get Environment Status",
-    "mcp__devopshero__list_workspaces": "List Workspaces",
-    "mcp__devopshero__select_workspace": "Select Workspace",
-    "mcp__devopshero__create_workspace": "Create Workspace",
     "mcp__devopshero__list_deployable_repos": "List Deployable Repos",
     "mcp__devopshero__list_repositories": "List Repositories",
     "mcp__devopshero__scan_repository": "Scan Repository",
@@ -114,8 +107,6 @@ def get_tool_display_name(full_name: str, parameters: dict | None) -> str:
 
 # Mapping from tool names to their "main" parameter for display in titles.
 TOOL_MAIN_PARAMS = {
-    "mcp__devopshero__create_workspace": "name",
-    "mcp__devopshero__select_workspace": "workspace_name",
     "mcp__devopshero__initiate_aws_connection": "account_name",
     "mcp__devopshero__list_hosted_zones": "aws_account_uuid",
     "mcp__devopshero__list_environments": "aws_account_uuid",
@@ -344,68 +335,6 @@ async def initiate_aws_connection(args: dict[str, Any]) -> dict[str, Any]:
 
 
 @tool(
-    "list_workspaces",
-    (
-        "List all workspaces in the user's organization. "
-        "Returns workspace names, repository URLs, and AWS configuration. "
-        "Use this to find a workspace to select before creating apps."
-    ),
-    {},
-)
-async def list_workspaces(args: dict[str, Any]) -> dict[str, Any]:
-    """List all workspaces in the organization."""
-    conversation = _get_conversation()
-    workspaces = await _list_workspaces(organization=conversation.organization)
-    return _mcp_response(workspaces)
-
-
-@tool(
-    "select_workspace",
-    (
-        "Select a workspace for this conversation. "
-        "Once selected, the workspace is pinned and cannot be changed. "
-        "All subsequent app and deployment operations will use this workspace."
-    ),
-    {
-        "workspace_id": str,
-    },
-)
-async def select_workspace(args: dict[str, Any]) -> dict[str, Any]:
-    """Pin a workspace to this conversation."""
-    conversation = _get_conversation()
-    result = await _select_workspace(
-        workspace_id=args["workspace_id"],
-        conversation=conversation,
-        organization=conversation.organization,
-    )
-    return _mcp_response(result)
-
-
-@tool(
-    "create_workspace",
-    (
-        "Create a new workspace for organizing applications and deployments. "
-        "Workspaces are governance containers for apps. "
-        "Apps link to repositories separately."
-    ),
-    {
-        "name": str,
-        "description": str,
-    },
-)
-async def create_workspace(args: dict[str, Any]) -> dict[str, Any]:
-    """Create a new workspace in the organization."""
-    conversation = _get_conversation()
-    result = await _create_workspace(
-        name=args["name"],
-        organization=conversation.organization,
-        user=conversation.user,
-        description=args.get("description", ""),
-    )
-    return _mcp_response(result)
-
-
-@tool(
     "list_deployable_repos",
     (
         "List available repositories for deployment. "
@@ -471,7 +400,8 @@ async def scan_repository(args: dict[str, Any]) -> dict[str, Any]:
         "Create an application configuration in the selected workspace. "
         "This defines how an app will be built and deployed. "
         "Requires a workspace to be selected first with select_workspace. "
-        "The repository URL is inherited from the workspace. "
+        "The repository is taken from conversation context if available (set from UI), "
+        "otherwise pass repository_id. "
         "For environment_variables, pass an array of objects with 'name' and 'value' keys, "
         "e.g., [{\"name\": \"API_KEY\", \"value\": \"secret\"}]. Pass [] if no env vars needed. "
         "For app_secrets, pass a dict mapping secret field names to values. "
@@ -490,6 +420,7 @@ async def scan_repository(args: dict[str, Any]) -> dict[str, Any]:
         "datastore_id": str,
         "dockerfile_path": str,
         "app_secrets": dict,
+        "repository_id": str,
     },
 )
 async def create_app(args: dict[str, Any]) -> dict[str, Any]:
@@ -497,8 +428,25 @@ async def create_app(args: dict[str, Any]) -> dict[str, Any]:
     conversation = _get_conversation()
     workspace = await _require_workspace(conversation)
 
+    # Get repository: prefer explicit arg, fallback to conversation context
+    repository_id = args.get("repository_id") or conversation.context_repository_id
+    if not repository_id:
+        raise ValueError(
+            "No repository specified. Either pass repository_id or start conversation "
+            "from a workspace with a selected repository."
+        )
+    
+    try:
+        repository = await Repository.objects.aget(
+            id=repository_id,
+            organization=conversation.organization,
+        )
+    except Repository.DoesNotExist:
+        raise ValueError(f"Repository {repository_id} not found in organization.")
+
     result = await _create_app(
         workspace=workspace,
+        repository=repository,
         name=args["name"],
         branch=args["branch"],
         app_type=args["app_type"],
@@ -672,9 +620,6 @@ devopshero_mcp_server = create_sdk_mcp_server(
         initiate_aws_connection,
         create_environment,
         get_environment_status,
-        list_workspaces,
-        select_workspace,
-        create_workspace,
         list_deployable_repos,
         list_repositories,
         scan_repository,
@@ -697,9 +642,6 @@ TOOL_NAMES = [
     "mcp__devopshero__initiate_aws_connection",
     "mcp__devopshero__create_environment",
     "mcp__devopshero__get_environment_status",
-    "mcp__devopshero__list_workspaces",
-    "mcp__devopshero__select_workspace",
-    "mcp__devopshero__create_workspace",
     "mcp__devopshero__list_deployable_repos",
     "mcp__devopshero__list_repositories",
     "mcp__devopshero__scan_repository",

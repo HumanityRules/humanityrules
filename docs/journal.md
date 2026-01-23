@@ -1,5 +1,50 @@
 # DevOpsHero Development Journal
 
+## 2026-01-23 19:45 - Conversation Context UI
+
+Replaced agent-driven workspace/repository selection with UI-driven context selection. Users now enter conversations from the workspace page with context pre-set.
+
+### Why This Change
+
+The original flow required users to start a conversation, then use agent tools (`select_workspace`, `create_workspace`, `list_workspaces`) to establish context. This was awkward:
+- Users had to explain what they wanted before the agent knew where to work
+- Agent had to ask clarifying questions about workspace/repo selection
+- Context wasn't visible until the agent responded
+
+The new flow: users click "New Conversation" or "New App" from a workspace page, and context is set before the conversation starts.
+
+### Two Entry Points
+
+- **"New Conversation"** — Creates workspace-scoped conversation for managing existing apps
+- **"New App"** — Opens repo picker modal, then creates workspace+repo scoped conversation for deploying a new app
+
+This solves the chicken-and-egg problem: apps require a repository, but we can't select from existing apps when creating a new one.
+
+### Implementation
+
+- **Workspace detail page** (`/workspaces/<workspace_slug>/`) — Shows apps, datastores, recent conversations, with action buttons
+- **Repo picker modal** — Lists organization's connected repositories for "New App" flow
+- **Chat URL params** — `chat_new` accepts `?workspace=<id>&repo=<id>` to set context
+- **Chat header** — Displays "Workspace: X" and optionally "Repository: Y" 
+- **System prompt injection** — `_build_system_prompt()` appends context section with workspace/repo names and IDs
+- **create_app tool** — Now gets repository from `context_repository_id` if not passed explicitly
+
+### Removed Agent Tools
+
+Deleted workspace management tools since workspaces are now UI-only:
+- `select_workspace` — Context set via UI
+- `create_workspace` — Workspaces created via UI (default auto-created on org setup)
+- `list_workspaces` — Not needed without select/create
+
+Updated system prompt to reflect that workspace context comes from UI, not agent tools.
+
+### Learnings
+
+- When renaming URL parameters (e.g., `slug` → `workspace_slug`), must update: URL pattern, view function parameter, template `{% url %}` tags, and any f-strings using the old name
+- Templates must be exported from `views/__init__.py` to be accessible via `views.function_name`
+- The `<slug:param_name>` syntax has two parts: converter type and parameter name
+
+
 ## 2026-01-23 - GitHub App Integration
 
 Implemented GitHub App OAuth flow to connect organizations to GitHub and sync repositories.

@@ -5,6 +5,7 @@ urlpatterns = [
     path("", views.landing, name="landing"),
     path("dashboard/", views.dashboard, name="dashboard"),
     path("workspaces/", views.workspaces, name="workspaces"),
+    path("workspaces/<slug:workspace_slug>/", views.workspace_detail, name="workspace_detail"),
     path("apps/", views.apps, name="apps"),
     path("datastores/", views.datastores, name="datastores"),
     path("security/", views.security, name="security"),
