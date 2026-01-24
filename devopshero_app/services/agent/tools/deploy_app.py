@@ -93,10 +93,7 @@ async def deploy_app(
     """
     # Validate app exists and belongs to organization
     try:
-        app = await App.objects.select_related(
-            "workspace",
-            "workspace__aws_account",
-        ).aget(
+        app = await App.objects.select_related("workspace").aget(
             id=app_id,
             workspace__organization=organization,
         )
@@ -105,9 +102,9 @@ async def deploy_app(
             f"App {app_id} not found or doesn't belong to your organization."
         )
 
-    # Get target environment
+    # Get target environment from any AWS account in this organization
     environment = await Environment.objects.filter(
-        aws_account=app.workspace.aws_account,
+        aws_account__organization=organization,
         slug=environment_slug,
     ).afirst()
     if not environment:
