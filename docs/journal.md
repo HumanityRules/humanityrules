@@ -1,5 +1,51 @@
 # DevOpsHero Development Journal
 
+## 2026-01-24 01:45 - Git Cloning and Agent Sandboxing
+
+Implemented repository cloning with GitHub App authentication and enabled Claude Agent SDK sandboxing.
+
+### Repository Cloning
+
+New `repo_service.py` handles cloning:
+- GitHub repos: Uses installation token in URL (`https://x-access-token:{token}@github.com/...`)
+- Local `file://` URLs: Copies to sandbox dir (was returning path directly, changed for consistency)
+- Re-uses existing clones for same conversation (clone_id based on conversation ID)
+- Cleanup in `finally` block after agent session
+
+Clone path moved to `settings.CLAUDE_SANDBOX_DIR` (was `CLONE_BASE_DIR` in repo_service).
+
+### Agent Sandboxing
+
+`stream_response()` now clones repo when `conversation.context_repository_id` is set, passes path to agent options. Agent's `cwd` is set to the cloned repo directory.
+
+Enabled `SandboxSettings(enabled=True, autoAllowBashIfSandboxed=True)` to restrict agent's filesystem access.
+
+### TMPDIR Fix
+
+Sandbox initially crashed with `EOPNOTSUPP: watch` errors on `/var/folders/...` paths. The Claude CLI was trying to access macOS system temp (where VS Code sockets exist).
+
+Root cause: `TMPDIR=/var/folders/...` in environment, which is outside the sandbox's allowed paths.
+
+Fix: Override `TMPDIR` to point to our sandbox directory:
+```python
+env = {
+    **get_claude_env(),
+    "TMPDIR": str(settings.CLAUDE_SANDBOX_DIR),
+}
+```
+
+Note: Claude docs mention `CLAUDE_CODE_TMPDIR` for internal temp files, but it's narrowly scoped. Standard `TMPDIR` covers all temp operations.
+
+### Files Changed
+
+- `repo_service.py` — Clone/cleanup functions
+- `agent_service.py` — Sandbox config, repo cloning in stream_response
+- `deployment_executor.py` — Uses repo_service for cloning
+- `app_config_builder.py` — Accepts explicit repo_path parameter
+- `mcp_tools.py` — scan_repository uses repo_service
+- `settings.py` — Added `CLAUDE_SANDBOX_DIR`
+
+
 ## 2026-01-23 21:30 - Dev Server Reload Exclusions
 
 Added `tmp/` exclusion to uvicorn's file watcher so cloned repos don't trigger reloads.

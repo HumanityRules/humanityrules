@@ -326,26 +326,27 @@ def _detect_env_vars(repo_path: Path) -> list[str]:
     return sorted(env_vars)
 
 
-def scan_repository(repo_url: str, branch: str) -> RepositoryScan:
+def scan_repository_path(repo_path: Path) -> RepositoryScan:
     """
-    Quick scan of a repository to detect basic characteristics.
+    Quick scan of a repository directory to detect basic characteristics.
 
     This is a fast, pattern-based scan. For deep analysis with LLM,
     use the analyze-repository sub-agent instead.
 
     Args:
-        repo_url: Repository URL. Only file:// URLs supported in v1.
-                  Example: file:///app/deployable_repos/flask-app
-        branch: Branch to analyze (currently ignored for file:// URLs).
+        repo_path: Path to the repository directory (already cloned or local).
 
     Returns:
         RepositoryScan with detected characteristics.
 
     Raises:
-        ValueError: If URL is not a valid file:// URL or path doesn't exist.
+        ValueError: If path doesn't exist or is not a directory.
     """
-    # Parse the file URL
-    repo_path = _parse_file_url(repo_url)
+    if not repo_path.exists():
+        raise ValueError(f"Repository path does not exist: {repo_path}")
+
+    if not repo_path.is_dir():
+        raise ValueError(f"Repository path is not a directory: {repo_path}")
 
     # Detect language first
     language = _detect_language(repo_path)
@@ -383,3 +384,26 @@ def scan_repository(repo_url: str, branch: str) -> RepositoryScan:
         environment_variables=environment_variables,
         detected_database=detected_database,
     )
+
+
+def scan_repository(repo_url: str, branch: str) -> RepositoryScan:
+    """
+    Quick scan of a repository to detect basic characteristics.
+
+    DEPRECATED: Use scan_repository_path with a cloned repo path instead.
+    This function only supports file:// URLs for backward compatibility.
+
+    Args:
+        repo_url: Repository URL. Only file:// URLs supported.
+                  Example: file:///app/deployable_repos/flask-app
+        branch: Branch to analyze (ignored for file:// URLs).
+
+    Returns:
+        RepositoryScan with detected characteristics.
+
+    Raises:
+        ValueError: If URL is not a valid file:// URL or path doesn't exist.
+    """
+    # Parse the file URL
+    repo_path = _parse_file_url(repo_url)
+    return scan_repository_path(repo_path)

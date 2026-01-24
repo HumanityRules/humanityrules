@@ -14,6 +14,7 @@ from typing import Any
 from claude_agent_sdk import tool, create_sdk_mcp_server
 
 from devopshero_app.models import Conversation, Repository, Workspace
+from devopshero_app.services.github import repo_service
 
 from .tools import (
     create_app as _create_app,
@@ -28,7 +29,7 @@ from .tools import (
     list_environments as _list_environments,
     list_hosted_zones as _list_hosted_zones,
     list_repositories as _list_repositories,
-    scan_repository as _scan_repository,
+    scan_repository_path as _scan_repository_path,
 )
 
 
@@ -112,7 +113,7 @@ TOOL_MAIN_PARAMS = {
     "mcp__devopshero__list_environments": "aws_account_uuid",
     "mcp__devopshero__create_environment": "environment_name",
     "mcp__devopshero__get_environment_status": "environment_id",
-    "mcp__devopshero__scan_repository": "repo_url",
+    "mcp__devopshero__scan_repository": "repository_id",
     "mcp__devopshero__create_app": "name",
     "mcp__devopshero__create_datastore": "name",
     "mcp__devopshero__deploy_app": "app_name",
@@ -186,10 +187,6 @@ def _format_glob_params(parameters: dict) -> str | None:
 def _format_param_value(tool_name: str, value: Any) -> str:
     """Format parameter value for display (extract repo names, truncate UUIDs)."""
     value_str = str(value)
-
-    # Extract repo name from file:// URLs
-    if "scan_repository" in tool_name and value_str.startswith("file://"):
-        return value_str.rstrip("/").split("/")[-1]
 
     # Truncate UUIDs (36 chars with dashes)
     if len(value_str) == 36 and value_str.count("-") == 4:
@@ -373,20 +370,47 @@ async def list_repositories(args: dict[str, Any]) -> dict[str, Any]:
         "Quick scan of a repository to detect basic characteristics. "
         "Returns framework, language, Dockerfile info, suggested port, health path, "
         "detected database, and required environment variables. "
+        "Use list_repositories first to get available repository IDs. "
         "For deep analysis, use the analyze-repository sub-agent instead."
     ),
     {
-        "repo_url": str,
+        "repository_id": str,
         "branch": str,
     },
 )
 async def scan_repository(args: dict[str, Any]) -> dict[str, Any]:
     """Quick scan of a repository's contents."""
-    result = _scan_repository(
-        repo_url=args["repo_url"],
-        branch=args["branch"],
+    import uuid
+
+    conversation = _get_conversation()
+
+    # Look up repository
+    try:
+        repository = await Repository.objects.select_related("integration").aget(
+            id=args["repository_id"],
+            organization=conversation.organization,
+        )
+    except Repository.DoesNotExist:
+        raise ValueError(
+            f"Repository {args['repository_id']} not found or doesn't belong to your organization."
+        )
+
+    # Clone the repository (run sync I/O in thread pool)
+    clone_id = f"scan-{uuid.uuid4().hex[:8]}"
+    repo_path = await asyncio.to_thread(
+        repo_service.clone_repository,
+        repository,
+        args["branch"],
+        clone_id,
     )
-    return _mcp_response(result)
+
+    try:
+        # Scan the cloned repository
+        result = _scan_repository_path(repo_path=repo_path)
+        return _mcp_response(result)
+    finally:
+        # Always clean up
+        await asyncio.to_thread(repo_service.cleanup_repository, repo_path)
 
 
 # =============================================================================

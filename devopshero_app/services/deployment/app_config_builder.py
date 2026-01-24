@@ -11,13 +11,6 @@ from devopshero_app.models import App, Datastore, Environment
 from devopshero_app.services import infra_customer
 
 
-def extract_repo_path(repo_url: str) -> Path | None:
-    """Extract local path from file:// URL."""
-    if repo_url.startswith("file://"):
-        return Path(repo_url[7:])
-    return None
-
-
 def build_database_config(datastore: Datastore) -> infra_customer.appconfig.DatabaseConfig:
     """Build DatabaseConfig from Django Datastore model."""
     # Engine config
@@ -64,13 +57,14 @@ def build_database_config(datastore: Datastore) -> infra_customer.appconfig.Data
     )
 
 
-def build_app_config(app: App, environment: Environment) -> infra_customer.appconfig.AppConfig:
+def build_app_config(app: App, environment: Environment, repo_path: Path) -> infra_customer.appconfig.AppConfig:
     """
     Build an AppConfig from Django App model.
 
     Args:
         app: The Django App model with related repository and datastore.
         environment: The target Environment for deployment.
+        repo_path: Path to the cloned repository directory.
 
     Returns:
         An AppConfig ready for CDK deployment.
@@ -78,10 +72,10 @@ def build_app_config(app: App, environment: Environment) -> infra_customer.appco
     # Build ECR repo name (app slugs are unique per org, environments are per-account, no collision)
     ecr_repo_name = f"doh/{environment.slug}/{app.slug}"
 
-    # Extract app source path from repository clone URL
-    app_source_path = extract_repo_path(app.repository.clone_url)
-    if app_source_path and app.repo_subpath:
-        app_source_path = app_source_path / app.repo_subpath
+    # Use provided repo path, applying subpath if configured
+    app_source_path = repo_path
+    if app.repo_subpath:
+        app_source_path = repo_path / app.repo_subpath
 
     # Build database config if app has a datastore
     database_config = None

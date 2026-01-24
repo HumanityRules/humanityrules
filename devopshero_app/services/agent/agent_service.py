@@ -12,6 +12,7 @@ Built on the Claude Agent SDK for robust agent orchestration with
 structured tool calling, conversation memory, and streaming responses.
 """
 
+import asyncio
 import logging
 import time
 from collections.abc import AsyncGenerator
@@ -24,6 +25,7 @@ from claude_agent_sdk import (
     ClaudeAgentOptions,
     AssistantMessage,
     ResultMessage,
+    SandboxSettings,
     UserMessage,
 )
 from claude_agent_sdk.types import (
@@ -35,6 +37,7 @@ from claude_agent_sdk.types import (
 from django.conf import settings
 
 from devopshero_app.models import App, Conversation, Message, Repository, Workspace
+from devopshero_app.services.github import repo_service
 
 from .agent_client import get_claude_env
 from .mcp_tools import (
@@ -274,18 +277,45 @@ async def _handle_tool_results(message: UserMessage, ctx: StreamingContext) -> A
     yield AgentStreamEvent(type="thinking")
 
 
-def _create_agent_options(system_prompt: str, resume_session_id: str | None, fork_session: bool) -> ClaudeAgentOptions:
-    """Create SDK client options with standard configuration."""
+def _create_agent_options(system_prompt: str, resume_session_id: str | None, fork_session: bool, repo_path: Path | None) -> ClaudeAgentOptions:
+    """
+    Create SDK client options with standard configuration.
+
+    Args:
+        system_prompt: The system prompt for the agent.
+        resume_session_id: Session ID to resume, if any.
+        fork_session: Whether to fork the session.
+        repo_path: Optional path to a cloned repository. When provided,
+                   cwd is set to this path. Otherwise defaults to CLONE_BASE_DIR.
+    """
+    # Sandbox the agent to our tmp directory
+    settings.CLAUDE_SANDBOX_DIR.mkdir(parents=True, exist_ok=True)
+    cwd = str(repo_path) if repo_path else str(settings.CLAUDE_SANDBOX_DIR)
+
+    sandbox_settings = SandboxSettings(
+        enabled=True,
+        autoAllowBashIfSandboxed=True,
+    )
+
+    # Override TMPDIR so CLI uses our sandbox dir for temp files
+    # (prevents access to /var/folders which is outside sandbox)
+    env = {
+        **get_claude_env(),
+        "TMPDIR": str(settings.CLAUDE_SANDBOX_DIR),
+    }
+
     return ClaudeAgentOptions(
         model=settings.CLAUDE_MODEL,
         system_prompt=system_prompt,
         resume=resume_session_id,
         fork_session=fork_session,
+        cwd=cwd,
+        sandbox=sandbox_settings,
         agents={"analyze-repository": get_analyze_repository_agent()},
         mcp_servers={"devopshero": devopshero_mcp_server},
         allowed_tools=TOOL_NAMES,
         permission_mode="bypassPermissions",
-        env=get_claude_env(),
+        env=env,
         include_partial_messages=True,
     )
 
@@ -295,11 +325,13 @@ async def stream_response(conversation: Conversation, fork_session: bool) -> Asy
     Stream agent response for a conversation.
 
     This is the main entry point for streaming agent processing. It:
-    1. Sets up the conversation context for MCP tools
-    2. Sends the latest user message to Claude via the Agent SDK
-    3. Yields text deltas for real-time frontend updates
-    4. Handles tool calls and yields tool events
-    5. Persists final messages to the database on completion
+    1. Clones the repository if one is set in conversation context
+    2. Sets up the conversation context for MCP tools
+    3. Sends the latest user message to Claude via the Agent SDK
+    4. Yields text deltas for real-time frontend updates
+    5. Handles tool calls and yields tool events
+    6. Persists final messages to the database on completion
+    7. Cleans up cloned repository
 
     Args:
         conversation: The Conversation to process. Its session_id is used to resume or fork.
@@ -314,55 +346,76 @@ async def stream_response(conversation: Conversation, fork_session: bool) -> Asy
     conversation_context.set(conversation)
     user_message = await _aget_last_user_message(conversation)
     system_prompt = await _build_system_prompt(conversation)
-    options = _create_agent_options(
-        system_prompt=system_prompt,
-        resume_session_id=conversation.session_id,
-        fork_session=fork_session,
-    )
-    
-    # The streaming context is used to store the accumulated content and the pending tool calls, and is passed 
-    # around and mutated by the event handlers
-    ctx = StreamingContext(conversation=conversation)
-    
-    # Start with thinking indicator (will be replaced by streaming container on first text)
-    yield AgentStreamEvent(type="thinking")
+
+    # Clone repository if one is set in conversation context
+    repo_path = None
+    if conversation.context_repository_id:
+        repository = await Repository.objects.select_related("integration").aget(
+            id=conversation.context_repository_id,
+        )
+        repo_path = await asyncio.to_thread(
+            repo_service.clone_repository,
+            repository,
+            "main",  # TODO: Allow branch selection from context
+            f"conv-{conversation.id}",
+        )
 
     try:
-        async with ClaudeSDKClient(options=options) as client:
-            await client.query(user_message)
+        options = _create_agent_options(
+            system_prompt=system_prompt,
+            resume_session_id=conversation.session_id,
+            fork_session=fork_session,
+            repo_path=repo_path,
+        )
 
-            async for message in client.receive_response():
-                if isinstance(message, SDKStreamEvent):
-                    async for event in _handle_sdk_stream_event(message, ctx):
-                        yield event
+        # The streaming context is used to store the accumulated content and the pending tool calls, and is passed 
+        # around and mutated by the event handlers
+        ctx = StreamingContext(conversation=conversation)
 
-                elif isinstance(message, AssistantMessage):
-                    async for event in _handle_assistant_message(message, ctx):
-                        yield event
+        # Start with thinking indicator (will be replaced by streaming container on first text)
+        yield AgentStreamEvent(type="thinking")
 
-                elif isinstance(message, UserMessage):
-                    async for event in _handle_tool_results(message, ctx):
-                        yield event
-
-                elif isinstance(message, ResultMessage):
-                    logger.info(f"[SDK] ResultMessage: turns={message.num_turns}, cost=${message.total_cost_usd or 0:.4f}")
-                    # Capture session_id for conversation continuity
-                    if message.session_id and not conversation.session_id:
-                        conversation.session_id = message.session_id
-
-                elif isinstance(message, SystemMessage):
-                    logger.debug(f"[SDK] SystemMessage: subtype={message.subtype}")
-
-        if ctx.accumulated_content:
-            await _persist_text_message(conversation=conversation, content=ctx.accumulated_content)
-
-        await conversation.asave()
-        yield AgentStreamEvent(type="complete")
-
-    except Exception as e:
-        logger.exception("Error during streaming conversation processing")
         try:
-            await _persist_error(conversation=conversation, error=e)
-        except Exception:
-            logger.exception("Failed to save error message to database")
-        yield AgentStreamEvent(type="error", data={"error": str(e)})
+            async with ClaudeSDKClient(options=options) as client:
+                await client.query(user_message)
+
+                async for message in client.receive_response():
+                    if isinstance(message, SDKStreamEvent):
+                        async for event in _handle_sdk_stream_event(message, ctx):
+                            yield event
+
+                    elif isinstance(message, AssistantMessage):
+                        async for event in _handle_assistant_message(message, ctx):
+                            yield event
+
+                    elif isinstance(message, UserMessage):
+                        async for event in _handle_tool_results(message, ctx):
+                            yield event
+
+                    elif isinstance(message, ResultMessage):
+                        logger.info(f"[SDK] ResultMessage: turns={message.num_turns}, cost=${message.total_cost_usd or 0:.4f}")
+                        # Capture session_id for conversation continuity
+                        if message.session_id and not conversation.session_id:
+                            conversation.session_id = message.session_id
+
+                    elif isinstance(message, SystemMessage):
+                        logger.debug(f"[SDK] SystemMessage: subtype={message.subtype}")
+
+            if ctx.accumulated_content:
+                await _persist_text_message(conversation=conversation, content=ctx.accumulated_content)
+
+            await conversation.asave()
+            yield AgentStreamEvent(type="complete")
+
+        except Exception as e:
+            logger.exception("Error during streaming conversation processing")
+            try:
+                await _persist_error(conversation=conversation, error=e)
+            except Exception:
+                logger.exception("Failed to save error message to database")
+            yield AgentStreamEvent(type="error", data={"error": str(e)})
+
+    finally:
+        # Always clean up cloned repository
+        if repo_path:
+            await asyncio.to_thread(repo_service.cleanup_repository, repo_path)
