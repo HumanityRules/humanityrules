@@ -2,9 +2,15 @@
 
 ## 2026-01-23 21:30 - Dev Server Reload Exclusions
 
-Added `--reload-exclude "tmp/*"` to uvicorn in `Procfile.tailwind` so temporary files don't trigger reloads.
+Added `tmp/` exclusion to uvicorn's file watcher so cloned repos don't trigger reloads.
 
-Attempted to use programmatic `uvicorn.run()` for cleaner config, but it conflicts with honcho (django-tailwind's process manager) — uvicorn's reload spawns subprocesses that honcho can't track, causing port conflicts on restart.
+**The bug:** uvicorn's `--reload-exclude` with relative paths like `tmp` doesn't work. Watchfiles reports absolute paths, but uvicorn's `FileFilter` compares `Path("tmp") in path.parents` directly — a relative Path is never `in` an absolute path's parents.
+
+**The fix:** Use absolute paths:
+- `Procfile.tailwind`: `--reload-exclude "$(pwd)/tmp"` (shell expansion)
+- `run_dev.py`: `reload_excludes=[str(Path("tmp").resolve())]`
+
+Also added `run_dev.py` for debugger configs and standalone runs. Can't use it from Procfile because `uvicorn.run()` with `reload=True` spawns subprocesses that conflict with honcho's process management.
 
 
 ## 2026-01-23 19:45 - Conversation Context UI

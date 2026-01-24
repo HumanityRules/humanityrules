@@ -8,7 +8,13 @@ Note: Don't use from Procfile.tailwind - uvicorn.run() with reload=True
 spawns subprocesses that conflict with honcho's process management.
 """
 
+from pathlib import Path
+
 import uvicorn
+
+# Must use absolute path - uvicorn's FileFilter compares Path objects directly
+# and watchfiles reports absolute paths, so relative paths never match
+TMP_DIR = str(Path("tmp").resolve())
 
 uvicorn.run(
     app="devopshero_site.asgi:application",
@@ -16,7 +22,7 @@ uvicorn.run(
     port=8000,
     reload=True,
     reload_includes=["*.html", "*.css", "*.js"],
-    reload_excludes=["tmp/*"],
+    reload_excludes=[TMP_DIR],
     log_level="warning",
     timeout_graceful_shutdown=0,
 )
