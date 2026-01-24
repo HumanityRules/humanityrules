@@ -10,7 +10,8 @@ New `repo_service.py` handles cloning:
 - GitHub repos: Uses installation token in URL (`https://x-access-token:{token}@github.com/...`)
 - Local `file://` URLs: Copies to sandbox dir (was returning path directly, changed for consistency)
 - Re-uses existing clones for same conversation (clone_id based on conversation ID)
-- Cleanup in `finally` block after agent session
+- Clones persist for conversation lifetime (no per-message cleanup)
+- TODO: Implement cleanup on conversation close or via periodic job (see devopshero-3ur)
 
 Clone path moved to `settings.CLAUDE_SANDBOX_DIR` (was `CLONE_BASE_DIR` in repo_service).
 

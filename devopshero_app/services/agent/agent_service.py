@@ -360,62 +360,60 @@ async def stream_response(conversation: Conversation, fork_session: bool) -> Asy
             f"conv-{conversation.id}",
         )
 
+    options = _create_agent_options(
+        system_prompt=system_prompt,
+        resume_session_id=conversation.session_id,
+        fork_session=fork_session,
+        repo_path=repo_path,
+    )
+
+    # The streaming context is used to store the accumulated content and the pending tool calls, and is passed 
+    # around and mutated by the event handlers
+    ctx = StreamingContext(conversation=conversation)
+
+    # Start with thinking indicator (will be replaced by streaming container on first text)
+    yield AgentStreamEvent(type="thinking")
+
     try:
-        options = _create_agent_options(
-            system_prompt=system_prompt,
-            resume_session_id=conversation.session_id,
-            fork_session=fork_session,
-            repo_path=repo_path,
-        )
+        async with ClaudeSDKClient(options=options) as client:
+            await client.query(user_message)
 
-        # The streaming context is used to store the accumulated content and the pending tool calls, and is passed 
-        # around and mutated by the event handlers
-        ctx = StreamingContext(conversation=conversation)
+            async for message in client.receive_response():
+                if isinstance(message, SDKStreamEvent):
+                    async for event in _handle_sdk_stream_event(message, ctx):
+                        yield event
 
-        # Start with thinking indicator (will be replaced by streaming container on first text)
-        yield AgentStreamEvent(type="thinking")
+                elif isinstance(message, AssistantMessage):
+                    async for event in _handle_assistant_message(message, ctx):
+                        yield event
 
+                elif isinstance(message, UserMessage):
+                    async for event in _handle_tool_results(message, ctx):
+                        yield event
+
+                elif isinstance(message, ResultMessage):
+                    logger.info(f"[SDK] ResultMessage: turns={message.num_turns}, cost=${message.total_cost_usd or 0:.4f}")
+                    # Capture session_id for conversation continuity
+                    if message.session_id and not conversation.session_id:
+                        conversation.session_id = message.session_id
+
+                elif isinstance(message, SystemMessage):
+                    logger.debug(f"[SDK] SystemMessage: subtype={message.subtype}")
+
+        if ctx.accumulated_content:
+            await _persist_text_message(conversation=conversation, content=ctx.accumulated_content)
+
+        await conversation.asave()
+        yield AgentStreamEvent(type="complete")
+
+    except Exception as e:
+        logger.exception("Error during streaming conversation processing")
         try:
-            async with ClaudeSDKClient(options=options) as client:
-                await client.query(user_message)
+            await _persist_error(conversation=conversation, error=e)
+        except Exception:
+            logger.exception("Failed to save error message to database")
+        yield AgentStreamEvent(type="error", data={"error": str(e)})
 
-                async for message in client.receive_response():
-                    if isinstance(message, SDKStreamEvent):
-                        async for event in _handle_sdk_stream_event(message, ctx):
-                            yield event
-
-                    elif isinstance(message, AssistantMessage):
-                        async for event in _handle_assistant_message(message, ctx):
-                            yield event
-
-                    elif isinstance(message, UserMessage):
-                        async for event in _handle_tool_results(message, ctx):
-                            yield event
-
-                    elif isinstance(message, ResultMessage):
-                        logger.info(f"[SDK] ResultMessage: turns={message.num_turns}, cost=${message.total_cost_usd or 0:.4f}")
-                        # Capture session_id for conversation continuity
-                        if message.session_id and not conversation.session_id:
-                            conversation.session_id = message.session_id
-
-                    elif isinstance(message, SystemMessage):
-                        logger.debug(f"[SDK] SystemMessage: subtype={message.subtype}")
-
-            if ctx.accumulated_content:
-                await _persist_text_message(conversation=conversation, content=ctx.accumulated_content)
-
-            await conversation.asave()
-            yield AgentStreamEvent(type="complete")
-
-        except Exception as e:
-            logger.exception("Error during streaming conversation processing")
-            try:
-                await _persist_error(conversation=conversation, error=e)
-            except Exception:
-                logger.exception("Failed to save error message to database")
-            yield AgentStreamEvent(type="error", data={"error": str(e)})
-
-    finally:
-        # Always clean up cloned repository
-        if repo_path:
-            await asyncio.to_thread(repo_service.cleanup_repository, repo_path)
+    # NOTE: Cloned repos are NOT cleaned up per-message.
+    # They persist for the conversation lifetime to allow agent work to accumulate.
+    # TODO: Implement cleanup via chat_close or periodic cleanup job.
