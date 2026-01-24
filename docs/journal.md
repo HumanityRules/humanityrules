@@ -1,5 +1,15 @@
 # DevOpsHero Development Journal
 
+## 2026-01-24 12:30 - Repository Picker Modal Search and Pagination
+
+Added client-side search and pagination to the repository picker modal:
+- Search box filters by repo name or full name
+- Pagination shows 10 repositories per page with Previous/Next navigation
+- Escape key closes the modal
+- State resets when modal opens (clears search, returns to page 1)
+- Reduced row padding from `py-3` to `py-2` for denser list
+
+
 ## 2026-01-24 12:15 - Repository Picker Modal Scrollbar Styling
 
 Applied consistent scrollbar styling to the repository picker modal. Added `dark-scrollbar` class, `scroll-smooth`, and `scrollbar-gutter: stable` to match the chat interface scrollbar appearance.
