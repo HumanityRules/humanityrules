@@ -8,9 +8,9 @@ from django.shortcuts import get_object_or_404, redirect, render
 from django.template.loader import render_to_string
 from django.views.decorators.http import require_POST
 
-from ..models import Conversation, Message, User
+from ..models import Conversation, Message
 from ..services.agent import agent_client
-from ..services.agent import agent_service
+from ..services.agent import agent_runner
 from ..services.agent.agent_service import AgentStreamEvent
 from ..services.agent.mcp_tools import get_tool_display_name, get_tool_main_param
 from ..templatetags.chat_filters import extract_mcp_text_content
@@ -156,53 +156,41 @@ async def chat_stream(request, conversation_id):
         response["X-Accel-Buffering"] = "no"
         return response
 
-    # Verify conversation access upfront (before returning streaming response)
-    user_pk = request.session.get('_auth_user_id')
-    user = await User.objects.select_related('current_organization').aget(pk=user_pk)
-    current_org = user.current_organization
+    user = await request.auser()
 
-    conversation_exists = await Conversation.objects.filter(
-        id=conversation_id,
-        user=user,
-        organization=current_org,
-    ).aexists()
-    if not conversation_exists:
+    try:
+        conversation = await Conversation.objects.select_related(
+            'organization', 'user'
+        ).aget(
+            id=conversation_id,
+            user=user,
+            organization_id=user.current_organization_id,
+        )
+    except Conversation.DoesNotExist:
         return HttpResponse(status=404)
 
     async def event_generator():
-        """Generate SSE events by running agent directly when needed."""
+        """Subscribe to agent runner's event queue and yield SSE events."""
         logger.info(f"SSE event_generator started for conversation {conversation_id}")
 
         try:
+            # Get or spawn agent runner
+            runner = await agent_runner.ensure_agent_running(conversation=conversation)
+            agent_runner.mark_client_connected(conversation_id=conversation_id)
+
+            # Consume events from runner's queue
             while True:
-                # Load conversation fresh each iteration
-                conversation = await Conversation.objects.select_related(
-                    'organization', 'user'
-                ).aget(
-                    id=conversation_id,
-                    user=user,
-                    organization=current_org,
-                )
+                event = await runner.event_queue.get()
+                if event is None:
+                    # Sentinel: runner finished, exit loop
+                    logger.info(f"Agent runner completed for conversation {conversation_id}")
+                    break
+                yield _format_sse_event(event=event)
 
-                # Check if response needed: last message is from user
-                if await _needs_response(conversation=conversation):
-                    logger.info(f"Running agent for conversation {conversation_id}")
-                    async for event in agent_service.stream_response(
-                        conversation=conversation,
-                        fork_session=False,
-                    ):
-                        # logger.info(f"SSE event: {event} for conversation {conversation_id}")
-                        yield _format_sse_event(event=event)
-                    logger.info(f"Agent completed for conversation {conversation_id}")
-                    continue
-
-                # No pending message - wait before checking again
-                await asyncio.sleep(0.5)
-                # Send keepalive to prevent connection timeout
-                yield ": keepalive\n\n"
         except asyncio.CancelledError:
             # Uvicorn cancels async tasks when the client disconnects (e.g., page reload).
-            # This stops the agent stream cleanly rather than leaving it orphaned.
+            # Mark disconnected so runner can exit when done with current work.
+            agent_runner.mark_client_disconnected(conversation_id=conversation_id)
             logger.info(f"SSE client disconnected for conversation {conversation_id}")
             raise
 
@@ -210,12 +198,6 @@ async def chat_stream(request, conversation_id):
     response["Cache-Control"] = "no-cache"
     response["X-Accel-Buffering"] = "no"
     return response
-
-
-async def _needs_response(conversation: Conversation) -> bool:
-    """Check if conversation has an unanswered user message."""
-    last_message = await conversation.messages.order_by("-created_at").afirst()
-    return last_message is not None and last_message.role == Message.Role.USER
 
 
 def _format_sse(event_name: str, data: str) -> str:

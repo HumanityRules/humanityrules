@@ -1,5 +1,69 @@
 # DevOpsHero Development Journal
 
+## 2026-01-24 - Agent Task Decoupling Architecture
+
+Major refactor to decouple agent processing from SSE request lifecycle. Previously, reloading the page mid-response would kill the agent (Uvicorn cancels async tasks on client disconnect), losing the in-progress response. On reconnect, the agent would restart from scratch.
+
+### Problem
+
+The agent ran inline with the SSE request:
+```
+SSE request → runs agent → yields events → client disconnect kills agent
+```
+
+When a client reloaded mid-stream:
+1. Uvicorn raised `CancelledError`, killing the agent
+2. Response wasn't persisted (agent hadn't finished)
+3. On reconnect, `_needs_response()` was still True
+4. Agent restarted, duplicating work
+
+### Solution: Background Agent Tasks
+
+New architecture separates concerns:
+```
+User sends message → spawns background agent task (if not running)
+SSE request → subscribes to event queue from that task
+Client disconnect → SSE dies, agent continues
+```
+
+Created `devopshero_app/services/agent/agent_runner.py` with:
+- **`AgentRunner`** dataclass: holds task, event queue, client_connected flag
+- **`_runners`** dict: in-memory registry keyed by conversation_id
+- **`ensure_agent_running()`**: spawns runner if needed, uses double-checked locking
+- **`_run_agent_loop()`**: polls DB for messages, runs agent, pushes events to queue
+
+### Key Design Decisions
+
+- **Agent owns the message polling loop** — The runner's internal loop checks for pending messages, not the SSE endpoint. SSE is a pure consumer.
+- **Unbounded queue** — Safe because agent responses are finite. Avoids producer blocking if client disconnects mid-stream.
+- **Runner exits when**: client disconnected AND no pending user message. Stays alive while client connected (waiting for input) OR work to do.
+- **Double-checked locking** — Prevents race conditions when multiple requests try to spawn a runner for the same conversation.
+- **No DB flag for "processing"** — Single-instance deployment means in-memory `_runners` dict is source of truth.
+
+### Reconnect Behavior
+
+When client disconnects and reconnects:
+1. `ensure_agent_running()` returns existing runner (logged as "Reusing existing runner")
+2. New SSE attaches to the same queue
+3. Drains any buffered events from in-progress response
+4. Continues receiving live events
+
+### SSE Endpoint Simplification
+
+`chat_stream` now:
+1. Gets runner via `ensure_agent_running()`
+2. Marks client connected
+3. Consumes from queue until sentinel (None)
+4. On `CancelledError`: marks client disconnected (doesn't kill runner)
+
+Also simplified: single DB query using `request.auser()` + `organization_id` FK instead of two queries.
+
+### Files
+
+- **New**: `devopshero_app/services/agent/agent_runner.py`
+- **Modified**: `devopshero_app/views/chat.py` — SSE becomes queue consumer
+
+
 ## 2026-01-24 - SSE Client Disconnection Logging
 
 Added `CancelledError` handling to the SSE event generator in `chat_stream`. When a client disconnects (e.g., page reload), Uvicorn cancels the async task, which raises `CancelledError`. This stops the agent stream cleanly rather than leaving it orphaned. The handler logs the disconnection for observability.
