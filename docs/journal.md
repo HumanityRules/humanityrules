@@ -1,5 +1,10 @@
 # DevOpsHero Development Journal
 
+## 2026-01-24 12:15 - Repository Picker Modal Scrollbar Styling
+
+Applied consistent scrollbar styling to the repository picker modal. Added `dark-scrollbar` class, `scroll-smooth`, and `scrollbar-gutter: stable` to match the chat interface scrollbar appearance.
+
+
 ## 2026-01-24 11:30 - Integrate Local Repos into Repository Model
 
 Replaced dynamic `list_deployable_repos` filesystem scan with persisted Repository records.
