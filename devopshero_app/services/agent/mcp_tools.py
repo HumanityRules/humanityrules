@@ -406,9 +406,7 @@ async def scan_repository(args: dict[str, Any]) -> dict[str, Any]:
     (
         "Create an application configuration in the selected workspace. "
         "This defines how an app will be built and deployed. "
-        "Requires a workspace to be selected first with select_workspace. "
-        "The repository is taken from conversation context if available (set from UI), "
-        "otherwise pass repository_id. "
+        "Requires a workspace and repository in the conversation context. "
         "For environment_variables, pass an array of objects with 'name' and 'value' keys, "
         "e.g., [{\"name\": \"API_KEY\", \"value\": \"secret\"}]. Pass [] if no env vars needed. "
         "For app_secrets, pass a dict mapping secret field names to values. "
@@ -427,7 +425,6 @@ async def scan_repository(args: dict[str, Any]) -> dict[str, Any]:
         "datastore_id": str,
         "dockerfile_path": str,
         "app_secrets": dict,
-        "repository_id": str,
     },
 )
 async def create_app(args: dict[str, Any]) -> dict[str, Any]:
@@ -435,12 +432,10 @@ async def create_app(args: dict[str, Any]) -> dict[str, Any]:
     conversation = _get_conversation()
     workspace = await _require_workspace(conversation)
 
-    # Get repository: prefer explicit arg, fallback to conversation context
-    repository_id = args.get("repository_id") or conversation.context_repository_id
+    repository_id = conversation.context_repository_id
     if not repository_id:
         raise ValueError(
-            "No repository specified. Either pass repository_id or start conversation "
-            "from a workspace with a selected repository."
+            "No repository selected. Start the conversation from a workspace with a selected repository."
         )
     
     try:
@@ -476,7 +471,7 @@ async def create_app(args: dict[str, Any]) -> dict[str, Any]:
     (
         "Create a managed database (datastore) in the selected workspace. "
         "Supports Aurora PostgreSQL and Aurora MySQL with Serverless v2 scaling. "
-        "Requires a workspace to be selected first with select_workspace."
+        "Requires a workspace in the conversation context."
     ),
     {
         "name": str,
