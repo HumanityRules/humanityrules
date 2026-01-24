@@ -1,5 +1,14 @@
 # DevOpsHero Development Journal
 
+## 2026-01-24 - Fix run_dev.py Port Binding Issues on macOS
+
+Fixed "Address already in use" errors when running `uv run run_dev.py`:
+
+- **Root cause**: `uvicorn.run()` with `reload=True` has socket binding issues on macOS. The Python API creates the socket before forking, causing race conditions.
+- **Solution**: Use `os.execvp()` to run uvicorn CLI directly (same approach as Procfile.tailwind). The CLI handles socket binding correctly.
+- **Added auto-cleanup**: Script now kills any existing process on port 8000 before starting, preventing stale process issues.
+
+
 ## 2026-01-24 - Chat Sidebar Shows Workspace and Repository
 
 Updated conversation list sidebar to display workspace and repository context:
