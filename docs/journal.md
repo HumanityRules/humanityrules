@@ -1,5 +1,10 @@
 # DevOpsHero Development Journal
 
+## 2026-01-24 - SSE Client Disconnection Logging
+
+Added `CancelledError` handling to the SSE event generator in `chat_stream`. When a client disconnects (e.g., page reload), Uvicorn cancels the async task, which raises `CancelledError`. This stops the agent stream cleanly rather than leaving it orphaned. The handler logs the disconnection for observability.
+
+
 ## 2026-01-24 - Fix run_dev.py Port Binding Issues on macOS
 
 Fixed "Address already in use" errors when running `uv run run_dev.py`:
