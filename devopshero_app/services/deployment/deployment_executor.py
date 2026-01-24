@@ -12,6 +12,7 @@ from django.utils import timezone
 
 from devopshero_app import models
 from devopshero_app.services import infra_customer
+from devopshero_app.services.github import repo_service
 
 from . import app_config_builder
 from . import job_logging
@@ -97,14 +98,22 @@ def run_deployment(deployment_id: str) -> bool:
             {"app_name": app.name, "environment_name": environment.name, "git_ref": deployment.git_ref, "image_tag": deployment.image_tag},
         )
 
+        # Clone the repository
+        repo_path = repo_service.clone_repository(
+            repository=app.repository,
+            branch=deployment.git_ref,
+            clone_id=str(deployment_id),
+        )
+
         try:
             # Get AWS session
             session = _get_aws_session(deployment)
 
-            # Build AppConfig
+            # Build AppConfig with cloned repo path
             app_config = app_config_builder.build_app_config(
                 app=app,
                 environment=environment,
+                repo_path=repo_path,
             )
 
             # Execute deployment
@@ -150,3 +159,7 @@ def run_deployment(deployment_id: str) -> bool:
             deployment.completed_at = timezone.now()
             deployment.save()
             return False
+
+        finally:
+            # Always cleanup the cloned repository
+            repo_service.cleanup_repository(repo_path=repo_path)

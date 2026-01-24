@@ -175,6 +175,10 @@ CLAUDE_MODEL = os.environ.get("CLAUDE_MODEL", "us.anthropic.claude-sonnet-4-5-20
 AWS_BEDROCK_ACCESS_KEY_ID = os.environ.get("AWS_BEDROCK_ACCESS_KEY_ID")
 AWS_BEDROCK_SECRET_ACCESS_KEY = os.environ.get("AWS_BEDROCK_SECRET_ACCESS_KEY")
 
+# Claude Agent Sandbox
+# Base directory for agent sandbox (cloned repos, temp files, etc.)
+CLAUDE_SANDBOX_DIR = BASE_DIR / "tmp"
+
 # Logging configuration
 LOGGING = {
     "version": 1,
