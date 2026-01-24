@@ -39,16 +39,14 @@
                             <h3 id="sidebar-title-{{ conv.id }}" class="text-sm font-medium text-gray-900 dark:text-white truncate">
                                 {{ conv.title|default:"New Conversation" }}
                             </h3>
-                            <div class="flex items-center mt-1 space-x-2">
-                                {% if conv.context_workspace %}
-                                <span class="text-xs text-gray-500 dark:text-gray-400 truncate">
-                                    {{ conv.context_workspace.name }}
-                                </span>
-                                {% endif %}
-                                <span class="text-xs text-gray-400 dark:text-gray-500">
-                                    {{ conv.updated_at|timesince }} ago
-                                </span>
-                            </div>
+                            <p class="text-xs text-gray-400 dark:text-gray-500">
+                                {{ conv.updated_at|timesince }} ago
+                            </p>
+                            {% if conv.context_workspace or conv.context_repository %}
+                            <p class="text-xs text-gray-500 dark:text-gray-400 truncate">
+                                {% if conv.context_workspace %}<span class="text-gray-400 dark:text-gray-500">Workspace:</span> {{ conv.context_workspace.name }}{% endif %}{% if conv.context_workspace and conv.context_repository %} &nbsp; {% endif %}{% if conv.context_repository %}<span class="text-gray-400 dark:text-gray-500">Repository:</span> {{ conv.context_repository.name }}{% endif %}
+                            </p>
+                            {% endif %}
                         </div>
                         <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ml-2 shrink-0
                                      {% if conv.status == 'active' %}

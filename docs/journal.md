@@ -1,5 +1,14 @@
 # DevOpsHero Development Journal
 
+## 2026-01-24 - Chat Sidebar Shows Workspace and Repository
+
+Updated conversation list sidebar to display workspace and repository context:
+- Time ("X minutes ago") now on first line below title
+- "Workspace: Name  Repository: Name" on second line when set
+- Labels use lighter gray, values use brighter text (matching header style)
+- Added `context_repository` to `select_related()` for efficient loading
+
+
 ## 2026-01-24 - AI-Generated Conversation Titles
 
 Implemented automatic conversation title generation after the first agent response.
