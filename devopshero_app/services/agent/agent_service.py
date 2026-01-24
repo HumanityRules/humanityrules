@@ -38,6 +38,7 @@ from django.conf import settings
 
 from devopshero_app.models import App, Conversation, Message, Repository, Workspace
 from devopshero_app.services.github import repo_service
+from devopshero_app.services.llm import llm_client, title_generator
 
 from .agent_client import get_claude_env
 from .mcp_tools import (
@@ -57,7 +58,7 @@ AgentEventType = Literal[
     "text_flush",   # Finalize current streaming text (before tool call)
     "tool_start",   # Tool execution starting
     "tool_result",  # Tool execution completed
-    "complete",     # Streaming finished
+    "complete",     # Streaming finished (may include title for OOB update)
     "error",        # Error occurred
 ]
 
@@ -150,6 +151,38 @@ async def _persist_error(conversation: Conversation, error: Exception) -> None:
         content=f"Agent error: {str(error)}",
         metadata={"error_type": type(error).__name__},
     )
+
+
+async def _maybe_generate_title(conversation: Conversation, user_message: str, agent_response: str) -> None:
+    """Generate and set conversation title using LLM if not already set."""
+    try:
+        # Get context names for title generation
+        workspace_name = None
+        repo_name = None
+
+        if conversation.context_workspace_id:
+            ws = await Workspace.objects.only("name").aget(id=conversation.context_workspace_id)
+            workspace_name = ws.name
+
+        if conversation.context_repository_id:
+            repo = await Repository.objects.only("full_name").aget(id=conversation.context_repository_id)
+            repo_name = repo.full_name
+
+        # Generate title in thread (anthropic client is sync)
+        title = await asyncio.to_thread(
+            title_generator.generate_title,
+            user_message,
+            agent_response,
+            workspace_name,
+            repo_name,
+        )
+
+        conversation.title = title
+        logger.info(f"Generated title for conversation {conversation.id}: {title}")
+
+    except Exception as e:
+        # Don't fail the conversation if title generation fails
+        logger.error(f"Failed to generate title for conversation {conversation.id}: {e}")
 
 
 async def _handle_sdk_stream_event(message: SDKStreamEvent, ctx: StreamingContext) -> AsyncGenerator[AgentStreamEvent, None]:
@@ -305,7 +338,7 @@ def _create_agent_options(system_prompt: str, resume_session_id: str | None, for
     }
 
     return ClaudeAgentOptions(
-        model=settings.CLAUDE_MODEL,
+        model=llm_client.get_model_id(alias=settings.CLAUDE_MODEL),
         system_prompt=system_prompt,
         resume=resume_session_id,
         fork_session=fork_session,
@@ -403,8 +436,24 @@ async def stream_response(conversation: Conversation, fork_session: bool) -> Asy
         if ctx.accumulated_content:
             await _persist_text_message(conversation=conversation, content=ctx.accumulated_content)
 
+        # Generate title for new conversations (first message)
+        generated_title = None
+        if not conversation.title:
+            await _maybe_generate_title(
+                conversation=conversation,
+                user_message=user_message,
+                agent_response=ctx.accumulated_content or "",
+            )
+            if conversation.title:
+                generated_title = conversation.title
+
         await conversation.asave()
-        yield AgentStreamEvent(type="complete")
+
+        # Include title in complete event if generated (for OOB UI update)
+        complete_data = {"conversation_id": str(conversation.id)}
+        if generated_title:
+            complete_data["title"] = generated_title
+        yield AgentStreamEvent(type="complete", data=complete_data)
 
     except Exception as e:
         logger.exception("Error during streaming conversation processing")

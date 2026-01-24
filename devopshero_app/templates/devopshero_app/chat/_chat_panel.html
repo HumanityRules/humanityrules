@@ -284,7 +284,7 @@ function handleTextFlush() {
 /**
  * Handle sse-complete events (finalize final streaming message).
  */
-function handleComplete() {
+function handleComplete(data) {
     finalizeStreamingRender();
     resetStreamingState();
     const thinkingIndicator = document.getElementById('thinking-indicator');
@@ -296,6 +296,14 @@ function handleComplete() {
         const streamingText = streamingMessage.querySelector('#streaming-text');
         if (streamingText) streamingText.removeAttribute('id');
     }
+
+    // Process OOB elements (e.g., title update) if present
+    if (data && data.trim()) {
+        const template = document.createElement('template');
+        template.innerHTML = data;
+        processOobElements(template.content);
+    }
+
     scrollToBottomSmooth();
 }
 
@@ -333,7 +341,7 @@ messages.addEventListener('htmx:sseBeforeMessage', function(event) {
 
     if (eventType === 'sse-complete') {
         event.preventDefault();
-        handleComplete();
+        handleComplete(event.detail.data);
         return;
     }
 
