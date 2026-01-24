@@ -1,5 +1,31 @@
 # DevOpsHero Development Journal
 
+## 2026-01-24 - AI-Generated Conversation Titles
+
+Implemented automatic conversation title generation after the first agent response.
+
+### LLM Client Service
+
+Created `devopshero_app/services/llm/` for lightweight LLM calls (separate from Claude Agent SDK):
+- `llm_client.py` — Client factory supporting both Anthropic API and Bedrock, mirroring agent_client.py config
+- `title_generator.py` — Generates titles using Haiku with user message, agent response, and context
+
+Centralized model names in `LLM_MODELS` dict with simple aliases (`opus-4.5`, `sonnet-4.5`, `haiku-4.5`) that map to correct format for API vs Bedrock. Settings now use aliases: `CLAUDE_MODEL=sonnet-4.5`.
+
+### Title Generation Flow
+
+1. Agent finishes first response → `ctx.accumulated_content` has response text
+2. `_maybe_generate_title()` calls Haiku with: user message, agent response, workspace name, repo name
+3. Title is set on conversation and included in `sse-complete` event data
+4. JS `handleComplete(data)` processes OOB elements to update header and sidebar titles
+
+Title OOB swap piggy-backs on `sse-complete` rather than a separate event — matches how `select_workspace` (now removed) used to bundle title updates with tool results.
+
+### Cleanup
+
+Removed dead `select_workspace` code from `chat.py` (tool was deleted in earlier commit but OOB swap code remained).
+
+
 ## 2026-01-24 12:30 - Repository Picker Modal Search and Pagination
 
 Added client-side search and pagination to the repository picker modal:

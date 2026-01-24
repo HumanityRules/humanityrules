@@ -167,16 +167,13 @@ DOH_RUN_JOB_WORKER = os.environ.get("DOH_RUN_JOB_WORKER") == "1"
 # Bedrock credentials: AWS_BEDROCK_ACCESS_KEY_ID + AWS_BEDROCK_SECRET_ACCESS_KEY (optional, falls back to boto3 chain)
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY")
 AWS_BEDROCK_REGION = os.environ.get("AWS_BEDROCK_REGION")
-# CLAUDE_MODEL options:
-# - us.anthropic.claude-opus-4-5-20251101-v1:0
-# - us.anthropic.claude-sonnet-4-5-20250929-v1:0
-# - us.anthropic.claude-3-7-sonnet-20250219-v1:0
-CLAUDE_MODEL = os.environ.get("CLAUDE_MODEL", "us.anthropic.claude-sonnet-4-5-20250929-v1:0")
 AWS_BEDROCK_ACCESS_KEY_ID = os.environ.get("AWS_BEDROCK_ACCESS_KEY_ID")
 AWS_BEDROCK_SECRET_ACCESS_KEY = os.environ.get("AWS_BEDROCK_SECRET_ACCESS_KEY")
 
-# Claude Agent Sandbox
-# Base directory for agent sandbox (cloned repos, temp files, etc.)
+# CLAUDE_MODEL: Use simple aliases (opus-4.5, sonnet-4.5, haiku-4.5) (devopshero_app/services/llm/llm_client.py)
+CLAUDE_MODEL = os.environ.get("CLAUDE_MODEL", "sonnet-4.5")
+
+# Claude Agent Sandbox: Base directory for agent sandbox (cloned repos, temp files, etc.)
 CLAUDE_SANDBOX_DIR = BASE_DIR / "tmp"
 
 # Logging configuration

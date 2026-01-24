@@ -359,13 +359,3 @@ After closing each beads task, immediately commit the related changes:
 3. `git commit -m "<id>: <description>"` - Commit with task ID
 
 This ensures atomic, traceable commits linked to specific work items.
-
-### Discovered Work
-
-When you encounter work that's out of scope for the current task but needs doing:
-
-1. `bd create --title="..." --type=task --priority=3` - Create a bead immediately
-2. Optionally add dependency if it blocks current work
-3. Continue with current task
-
-Don't let discovered work slip through the cracks.

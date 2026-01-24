@@ -269,30 +269,7 @@ def _render_tool_result(data: dict) -> str:
         "result_json": result_json,
     })
 
-    # Add OOB swap for conversation title when workspace is selected
-    if tool_full_name == "mcp__devopshero__select_workspace" and data.get("status") == "success":
-        html += _render_title_oob_swap(result=result)
-
     return html
-
-
-def _render_title_oob_swap(result: str) -> str:
-    """Render OOB swap HTML to update conversation title after workspace selection."""
-    try:
-        result_data = json.loads(result) if isinstance(result, str) else result
-        # Handle MCP content wrapper format: [{"type": "text", "text": "..."}]
-        if isinstance(result_data, list) and result_data and "text" in result_data[0]:
-            result_data = json.loads(result_data[0]["text"])
-        workspace_name = result_data.get("name", "")
-        if workspace_name:
-            title = f"Working on {workspace_name}"
-            return (
-                f'<h1 id="conversation-title" hx-swap-oob="true" '
-                f'class="text-lg font-semibold text-gray-900 dark:text-white">{title}</h1>'
-            )
-    except (json.JSONDecodeError, TypeError, KeyError, IndexError):
-        pass
-    return ""
 
 
 def _render_thinking() -> str:
@@ -312,6 +289,21 @@ def _render_streaming_error(error_msg: str) -> str:
     })
 
 
+def _render_title_update(title: str, conversation_id: str) -> str:
+    """Render OOB swap HTML to update conversation title in header and sidebar."""
+    # OOB swap for main header title
+    header_html = (
+        f'<h1 id="conversation-title" hx-swap-oob="true" '
+        f'class="text-lg font-semibold text-gray-900 dark:text-white">{title}</h1>'
+    )
+    # OOB swap for sidebar title
+    sidebar_html = (
+        f'<h3 id="sidebar-title-{conversation_id}" hx-swap-oob="true" '
+        f'class="text-sm font-medium text-gray-900 dark:text-white truncate">{title}</h3>'
+    )
+    return header_html + sidebar_html
+
+
 def _format_sse_event(event: AgentStreamEvent) -> str:
     """Convert AgentStreamEvent to SSE format."""
     if event.type == "thinking":
@@ -327,7 +319,9 @@ def _format_sse_event(event: AgentStreamEvent) -> str:
     elif event.type == "tool_result":
         return _format_sse(event_name="sse-tool-result", data=_render_tool_result(event.data))
     elif event.type == "complete":
-        return _format_sse(event_name="sse-complete", data="{}")
+        # Include title OOB swap if a title was generated
+        data = _render_title_update(title=event.data["title"], conversation_id=event.data["conversation_id"]) if event.data.get("title") else ""
+        return _format_sse(event_name="sse-complete", data=data)
     elif event.type == "error":
         error_msg = event.data.get("error", "Unknown error") if event.data else "Unknown error"
         return _format_sse(event_name="sse-error", data=_render_streaming_error(error_msg=error_msg))

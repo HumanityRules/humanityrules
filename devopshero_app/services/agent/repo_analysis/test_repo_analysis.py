@@ -39,6 +39,7 @@ from pydantic import ValidationError
 from devopshero_app.services.agent.agent_client import get_claude_env
 from devopshero_app.services.agent.repo_analysis.repo_analyzer_config import get_analyze_repository_agent
 from devopshero_app.services.agent.repo_analysis.repo_analysis_schema import RepoAnalysisOutput
+from devopshero_app.services.llm import llm_client
 
 
 # Reference app expectations
@@ -207,7 +208,7 @@ def validate_result(app_name: str, result: RepoAnalysisOutput, expectation: AppE
 async def analyze_repository(repo_file_url: str, verbose: bool) -> RepoAnalysisOutput:
     """Analyze a repository using the SDK's native sub-agent invocation."""
     options = ClaudeAgentOptions(
-        model=settings.CLAUDE_MODEL,
+        model=llm_client.get_model_id(alias=settings.CLAUDE_MODEL),
         system_prompt="You are a test orchestrator. When asked to analyze a repository, use the analyze-repository agent.",
         agents={"analyze-repository": get_analyze_repository_agent()},
         permission_mode="bypassPermissions",
