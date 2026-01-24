@@ -20,15 +20,34 @@
                     </button>
                 </div>
                 <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">Choose a repository to create a new app from.</p>
+                
+                {# Search box #}
+                {% if repositories %}
+                <div class="mt-3 relative">
+                    <input type="text"
+                           id="repo-search-input"
+                           placeholder="Search repositories..."
+                           autocomplete="off"
+                           class="w-full pl-9 pr-4 py-2 text-sm border border-gray-300 dark:border-gray-600
+                                  bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100
+                                  rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent
+                                  placeholder-gray-400 dark:placeholder-gray-500">
+                    <svg class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                    </svg>
+                </div>
+                {% endif %}
             </div>
             
             {# Repository list #}
-            <div class="flex-1 overflow-y-auto dark-scrollbar scroll-smooth p-2" style="scrollbar-gutter: stable;">
+            <div id="repo-list-container" class="flex-1 overflow-y-auto dark-scrollbar scroll-smooth p-2" style="scrollbar-gutter: stable;">
                 {% if repositories %}
-                <div class="space-y-1">
+                <div id="repo-list" class="space-y-1">
                     {% for repo in repositories %}
                     <a href="{% url 'chat_new' %}?workspace={{ workspace.id }}&repo={{ repo.id }}"
-                       class="flex items-center px-4 py-3 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
+                       class="repo-item flex items-center px-4 py-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+                       data-repo-name="{{ repo.name|lower }}"
+                       data-repo-fullname="{{ repo.full_name|lower }}">
                         {# Provider icon #}
                         <div class="flex-shrink-0 mr-3">
                             {% if repo.provider == 'github' %}
@@ -38,6 +57,10 @@
                             {% elif repo.provider == 'gitlab' %}
                             <svg class="w-6 h-6 text-orange-600" fill="currentColor" viewBox="0 0 24 24">
                                 <path d="M22.65 14.39L12 22.13 1.35 14.39a.84.84 0 01-.3-.94l1.22-3.78 2.44-7.51A.42.42 0 014.82 2a.43.43 0 01.58 0 .42.42 0 01.11.18l2.44 7.49h8.1l2.44-7.51A.42.42 0 0118.6 2a.43.43 0 01.58 0 .42.42 0 01.11.18l2.44 7.51L23 13.45a.84.84 0 01-.35.94z" />
+                            </svg>
+                            {% elif repo.provider == 'local' %}
+                            <svg class="w-6 h-6 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
                             </svg>
                             {% else %}
                             <svg class="w-6 h-6 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -59,6 +82,14 @@
                     </a>
                     {% endfor %}
                 </div>
+                
+                {# No results message #}
+                <div id="repo-no-results" class="hidden text-center py-8">
+                    <svg class="mx-auto h-10 w-10 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                    </svg>
+                    <p class="mt-2 text-sm text-gray-500 dark:text-gray-400">No repositories match your search.</p>
+                </div>
                 {% else %}
                 <div class="text-center py-8">
                     <svg class="mx-auto h-10 w-10 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -75,6 +106,144 @@
                 </div>
                 {% endif %}
             </div>
+            
+            {# Pagination #}
+            {% if repositories %}
+            <div id="repo-pagination" class="px-6 py-3 border-t border-gray-200 dark:border-gray-700 flex items-center justify-between">
+                <span id="repo-page-info" class="text-sm text-gray-500 dark:text-gray-400"></span>
+                <div class="flex items-center space-x-2">
+                    <button type="button" id="repo-prev-btn"
+                            class="px-3 py-1.5 text-sm font-medium text-gray-700 dark:text-gray-300 bg-white dark:bg-gray-700
+                                   border border-gray-300 dark:border-gray-600 rounded-md
+                                   hover:bg-gray-50 dark:hover:bg-gray-600 disabled:opacity-50 disabled:cursor-not-allowed">
+                        Previous
+                    </button>
+                    <button type="button" id="repo-next-btn"
+                            class="px-3 py-1.5 text-sm font-medium text-gray-700 dark:text-gray-300 bg-white dark:bg-gray-700
+                                   border border-gray-300 dark:border-gray-600 rounded-md
+                                   hover:bg-gray-50 dark:hover:bg-gray-600 disabled:opacity-50 disabled:cursor-not-allowed">
+                        Next
+                    </button>
+                </div>
+            </div>
+            {% endif %}
         </div>
     </div>
 </div>
+
+{% if repositories %}
+<script>
+(function() {
+    const PAGE_SIZE = 10;
+    let currentPage = 1;
+    let filteredItems = [];
+    
+    const searchInput = document.getElementById('repo-search-input');
+    const repoList = document.getElementById('repo-list');
+    const noResults = document.getElementById('repo-no-results');
+    const pageInfo = document.getElementById('repo-page-info');
+    const prevBtn = document.getElementById('repo-prev-btn');
+    const nextBtn = document.getElementById('repo-next-btn');
+    const pagination = document.getElementById('repo-pagination');
+    const allItems = Array.from(document.querySelectorAll('.repo-item'));
+    
+    function filterItems(query) {
+        const q = query.toLowerCase().trim();
+        if (!q) {
+            return allItems;
+        }
+        return allItems.filter(item => {
+            const name = item.dataset.repoName || '';
+            const fullname = item.dataset.repoFullname || '';
+            return name.includes(q) || fullname.includes(q);
+        });
+    }
+    
+    function render() {
+        const totalPages = Math.max(1, Math.ceil(filteredItems.length / PAGE_SIZE));
+        currentPage = Math.min(currentPage, totalPages);
+        currentPage = Math.max(1, currentPage);
+        
+        const start = (currentPage - 1) * PAGE_SIZE;
+        const end = start + PAGE_SIZE;
+        const pageItems = filteredItems.slice(start, end);
+        
+        // Hide all, show only current page items
+        allItems.forEach(item => item.classList.add('hidden'));
+        pageItems.forEach(item => item.classList.remove('hidden'));
+        
+        // Show/hide no results message
+        if (filteredItems.length === 0) {
+            noResults.classList.remove('hidden');
+            repoList.classList.add('hidden');
+            pagination.classList.add('hidden');
+        } else {
+            noResults.classList.add('hidden');
+            repoList.classList.remove('hidden');
+            pagination.classList.remove('hidden');
+        }
+        
+        // Update page info
+        const startNum = filteredItems.length > 0 ? start + 1 : 0;
+        const endNum = Math.min(end, filteredItems.length);
+        pageInfo.textContent = `Showing ${startNum}-${endNum} of ${filteredItems.length} repositories`;
+        
+        // Update button states
+        prevBtn.disabled = currentPage <= 1;
+        nextBtn.disabled = currentPage >= totalPages;
+    }
+    
+    function onSearch() {
+        const query = searchInput.value;
+        filteredItems = filterItems(query);
+        currentPage = 1;
+        render();
+    }
+    
+    // Event listeners
+    searchInput.addEventListener('input', onSearch);
+    
+    prevBtn.addEventListener('click', function() {
+        if (currentPage > 1) {
+            currentPage--;
+            render();
+        }
+    });
+    
+    nextBtn.addEventListener('click', function() {
+        const totalPages = Math.ceil(filteredItems.length / PAGE_SIZE);
+        if (currentPage < totalPages) {
+            currentPage++;
+            render();
+        }
+    });
+    
+    const modal = document.getElementById('repo-picker-modal');
+    
+    // Close on Escape key
+    document.addEventListener('keydown', function(e) {
+        if (e.key === 'Escape' && !modal.classList.contains('hidden')) {
+            modal.classList.add('hidden');
+        }
+    });
+    
+    // Reset state when modal opens
+    const observer = new MutationObserver(function(mutations) {
+        mutations.forEach(function(mutation) {
+            if (mutation.attributeName === 'class' && !modal.classList.contains('hidden')) {
+                searchInput.value = '';
+                currentPage = 1;
+                filteredItems = allItems;
+                render();
+                searchInput.focus();
+            }
+        });
+    });
+    observer.observe(modal, { attributes: true });
+    
+    // Initial render
+    filteredItems = allItems;
+    render();
+})();
+</script>
+{% endif %}
