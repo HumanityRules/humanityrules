@@ -140,9 +140,10 @@ Before deploying an app, ensure an environment exists and is READY.
 **Polling pattern:**
 1. Call `create_environment` → returns environment with PENDING status
 2. Tell the user provisioning has started and will take 5-10 minutes
-3. Poll with `get_environment_status` every 30-60 seconds
-4. When status becomes READY, proceed with app creation and deployment
-5. If status becomes ERROR, report the failure and suggest next steps
+3. Use `wait` to wait for 10 seconds, then `get_environment_status` to check progress
+4. Repeat step 3 until status becomes READY or ERROR
+5. When READY, proceed with app creation and deployment
+6. If ERROR, report the failure and suggest next steps
 
 **HTTPS configuration:**
 - If `hosted_zone_name` is provided, the environment creates a wildcard SSL certificate
