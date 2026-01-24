@@ -173,31 +173,38 @@ async def chat_stream(request, conversation_id):
         """Generate SSE events by running agent directly when needed."""
         logger.info(f"SSE event_generator started for conversation {conversation_id}")
 
-        while True:
-            # Load conversation fresh each iteration
-            conversation = await Conversation.objects.select_related(
-                'organization', 'user'
-            ).aget(
-                id=conversation_id,
-                user=user,
-                organization=current_org,
-            )
+        try:
+            while True:
+                # Load conversation fresh each iteration
+                conversation = await Conversation.objects.select_related(
+                    'organization', 'user'
+                ).aget(
+                    id=conversation_id,
+                    user=user,
+                    organization=current_org,
+                )
 
-            # Check if response needed: last message is from user
-            if await _needs_response(conversation=conversation):
-                logger.info(f"Running agent for conversation {conversation_id}")
-                async for event in agent_service.stream_response(
-                    conversation=conversation,
-                    fork_session=False,
-                ):
-                    yield _format_sse_event(event=event)
-                logger.info(f"Agent completed for conversation {conversation_id}")
-                continue
+                # Check if response needed: last message is from user
+                if await _needs_response(conversation=conversation):
+                    logger.info(f"Running agent for conversation {conversation_id}")
+                    async for event in agent_service.stream_response(
+                        conversation=conversation,
+                        fork_session=False,
+                    ):
+                        # logger.info(f"SSE event: {event} for conversation {conversation_id}")
+                        yield _format_sse_event(event=event)
+                    logger.info(f"Agent completed for conversation {conversation_id}")
+                    continue
 
-            # No pending message - wait before checking again
-            await asyncio.sleep(0.5)
-            # Send keepalive to prevent connection timeout
-            yield ": keepalive\n\n"
+                # No pending message - wait before checking again
+                await asyncio.sleep(0.5)
+                # Send keepalive to prevent connection timeout
+                yield ": keepalive\n\n"
+        except asyncio.CancelledError:
+            # Uvicorn cancels async tasks when the client disconnects (e.g., page reload).
+            # This stops the agent stream cleanly rather than leaving it orphaned.
+            logger.info(f"SSE client disconnected for conversation {conversation_id}")
+            raise
 
     response = StreamingHttpResponse(event_generator(), content_type="text/event-stream")
     response["Cache-Control"] = "no-cache"
