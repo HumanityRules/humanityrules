@@ -1,5 +1,22 @@
 # DevOpsHero Development Journal
 
+## 2026-01-24 11:30 - Integrate Local Repos into Repository Model
+
+Replaced dynamic `list_deployable_repos` filesystem scan with persisted Repository records.
+
+**The problem:** Two parallel discovery mechanisms — `list_deployable_repos` scanned `deployable_repos/` at runtime returning `file://` URLs, while `list_repositories` queried Repository model from DB. Agent needed two tools for the same conceptual operation.
+
+**The solution:** New management command `seed_local_repos --org=<slug>` scans `deployable_repos/` and creates Repository records with `provider="local"` and `file://` clone URLs. Agent now uses unified `list_repositories` for all repo discovery.
+
+Changes:
+- Created `seed_local_repos` management command
+- Deleted `list_deployable_repos.py` and removed from mcp_tools
+- Removed dead code: `_parse_file_url()` and deprecated `scan_repository(url, branch)` from scan_repository.py
+- Renamed `scan_repository_path` to `scan_repository`
+
+Repository model already supported `provider="local"` and `file://` URLs. `repo_service.clone_repository` already handles `file://` URLs by copying directory contents.
+
+
 ## 2026-01-24 01:45 - Git Cloning and Agent Sandboxing
 
 Implemented repository cloning with GitHub App authentication and enabled Claude Agent SDK sandboxing.

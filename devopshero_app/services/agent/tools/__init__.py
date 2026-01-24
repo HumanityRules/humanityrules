@@ -17,9 +17,8 @@ from .list_aws_accounts import list_aws_accounts, AWSAccountSummary
 from .list_environments import list_environments
 from .list_environments import EnvironmentSummary as ListEnvironmentSummary
 from .list_hosted_zones import list_hosted_zones, HostedZoneSummary
-from .list_deployable_repos import list_deployable_repos, DeployableRepoSummary
 from .list_repositories import list_repositories, RepositoryListItem
-from .scan_repository import scan_repository, scan_repository_path, RepositoryScan
+from .scan_repository import scan_repository, RepositoryScan
 
 __all__ = [
     # App management
@@ -51,10 +50,7 @@ __all__ = [
     "HostedZoneSummary",
     # Repository
     "scan_repository",
-    "scan_repository_path",
     "RepositoryScan",
-    "list_deployable_repos",
-    "DeployableRepoSummary",
     "list_repositories",
     "RepositoryListItem",
 ]

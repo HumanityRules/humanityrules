@@ -25,11 +25,10 @@ from .tools import (
     get_environment_status as _get_environment_status,
     initiate_aws_connection as _initiate_aws_connection,
     list_aws_accounts as _list_aws_accounts,
-    list_deployable_repos as _list_deployable_repos,
     list_environments as _list_environments,
     list_hosted_zones as _list_hosted_zones,
     list_repositories as _list_repositories,
-    scan_repository_path as _scan_repository_path,
+    scan_repository as _scan_repository,
 )
 
 
@@ -83,7 +82,6 @@ TOOL_DISPLAY_NAMES = {
     "mcp__devopshero__initiate_aws_connection": "Initiate AWS Connection",
     "mcp__devopshero__create_environment": "Create Environment",
     "mcp__devopshero__get_environment_status": "Get Environment Status",
-    "mcp__devopshero__list_deployable_repos": "List Deployable Repos",
     "mcp__devopshero__list_repositories": "List Repositories",
     "mcp__devopshero__scan_repository": "Scan Repository",
     # Workspace tools
@@ -332,21 +330,6 @@ async def initiate_aws_connection(args: dict[str, Any]) -> dict[str, Any]:
 
 
 @tool(
-    "list_deployable_repos",
-    (
-        "List available repositories for deployment. "
-        "Returns repository names and file:// URLs. "
-        "Use this to discover what apps are available to deploy."
-    ),
-    {},
-)
-async def list_deployable_repos(args: dict[str, Any]) -> dict[str, Any]:
-    """List available repositories for deployment."""
-    repos = _list_deployable_repos()
-    return _mcp_response(repos)
-
-
-@tool(
     "list_repositories",
     (
         "List repositories connected to the organization via GitHub integration. "
@@ -406,7 +389,7 @@ async def scan_repository(args: dict[str, Any]) -> dict[str, Any]:
 
     try:
         # Scan the cloned repository
-        result = _scan_repository_path(repo_path=repo_path)
+        result = _scan_repository(repo_path=repo_path)
         return _mcp_response(result)
     finally:
         # Always clean up
@@ -644,7 +627,6 @@ devopshero_mcp_server = create_sdk_mcp_server(
         initiate_aws_connection,
         create_environment,
         get_environment_status,
-        list_deployable_repos,
         list_repositories,
         scan_repository,
         # Workspace tools
@@ -666,7 +648,6 @@ TOOL_NAMES = [
     "mcp__devopshero__initiate_aws_connection",
     "mcp__devopshero__create_environment",
     "mcp__devopshero__get_environment_status",
-    "mcp__devopshero__list_deployable_repos",
     "mcp__devopshero__list_repositories",
     "mcp__devopshero__scan_repository",
     # Workspace tools

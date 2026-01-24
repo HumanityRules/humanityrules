@@ -10,7 +10,6 @@ import json
 import re
 from dataclasses import dataclass, asdict
 from pathlib import Path
-from urllib.parse import urlparse
 
 
 @dataclass
@@ -31,41 +30,6 @@ class RepositoryScan:
     def to_dict(self) -> dict:
         """Convert to dictionary for JSON serialization."""
         return asdict(self)
-
-
-def _parse_file_url(repo_url: str) -> Path:
-    """
-    Parse a file:// URL and return the local path.
-
-    Args:
-        repo_url: URL in file:// format.
-
-    Returns:
-        Path object for the local directory.
-
-    Raises:
-        ValueError: If URL is not a valid file:// URL.
-    """
-    parsed = urlparse(repo_url)
-
-    if parsed.scheme != "file":
-        raise ValueError(
-            f"Only file:// URLs are supported in v1. Got: {parsed.scheme}://"
-        )
-
-    # Handle file:///path/to/repo and file://localhost/path/to/repo
-    path = parsed.path
-    if not path:
-        raise ValueError(f"Invalid file URL: {repo_url}")
-
-    repo_path = Path(path)
-    if not repo_path.exists():
-        raise ValueError(f"Repository path does not exist: {repo_path}")
-
-    if not repo_path.is_dir():
-        raise ValueError(f"Repository path is not a directory: {repo_path}")
-
-    return repo_path
 
 
 def _detect_python_framework(repo_path: Path) -> str | None:
@@ -326,7 +290,7 @@ def _detect_env_vars(repo_path: Path) -> list[str]:
     return sorted(env_vars)
 
 
-def scan_repository_path(repo_path: Path) -> RepositoryScan:
+def scan_repository(repo_path: Path) -> RepositoryScan:
     """
     Quick scan of a repository directory to detect basic characteristics.
 
@@ -384,26 +348,3 @@ def scan_repository_path(repo_path: Path) -> RepositoryScan:
         environment_variables=environment_variables,
         detected_database=detected_database,
     )
-
-
-def scan_repository(repo_url: str, branch: str) -> RepositoryScan:
-    """
-    Quick scan of a repository to detect basic characteristics.
-
-    DEPRECATED: Use scan_repository_path with a cloned repo path instead.
-    This function only supports file:// URLs for backward compatibility.
-
-    Args:
-        repo_url: Repository URL. Only file:// URLs supported.
-                  Example: file:///app/deployable_repos/flask-app
-        branch: Branch to analyze (ignored for file:// URLs).
-
-    Returns:
-        RepositoryScan with detected characteristics.
-
-    Raises:
-        ValueError: If URL is not a valid file:// URL or path doesn't exist.
-    """
-    # Parse the file URL
-    repo_path = _parse_file_url(repo_url)
-    return scan_repository_path(repo_path)
