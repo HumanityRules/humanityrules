@@ -1,5 +1,14 @@
 # DevOpsHero Development Journal
 
+## 2026-01-24 - Remove Apps/Datastores Sidebar Entries
+
+Removed the top-level "Apps" and "Datastores" menu entries from the sidebar. These were stub pages ("coming soon") that added clutter without functionality.
+
+Apps and datastores are already accessible within their workspace context — the workspace detail page shows both, and the "New App" flow starts from there. The workspace-first navigation model makes separate top-level entries redundant.
+
+If cross-workspace views are needed later, they'll go on the Dashboard with a workspace filter dropdown.
+
+
 ## 2026-01-24 - Mid-Stream Reconnect Text Replay
 
 Added accumulated text replay when clients reconnect mid-stream. Previously, if a user navigated away during streaming and came back, they'd see streaming resume but the beginning of the message was lost (those events were already consumed by the old SSE connection).
