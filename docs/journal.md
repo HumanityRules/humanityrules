@@ -1,5 +1,12 @@
 # DevOpsHero Development Journal
 
+## 2026-01-24 - Dashboard Shows All Apps and Datastores
+
+Replaced the "coming soon" dashboard placeholder with an org-wide view of all apps and datastores. Each card shows the item details plus a link to its parent workspace for navigation.
+
+This provides the cross-workspace overview that was discussed when removing the top-level Apps/Datastores sidebar entries — users can see everything from Dashboard, then drill into specific workspaces.
+
+
 ## 2026-01-24 - Remove Apps/Datastores Sidebar Entries
 
 Removed the top-level "Apps" and "Datastores" menu entries from the sidebar. These were stub pages ("coming soon") that added clutter without functionality.
