@@ -379,8 +379,9 @@ class AppStack(Stack):
         )
         container.add_port_mappings(ecs.PortMapping(container_port=app_config.container_port, protocol=ecs.Protocol.TCP))
 
-        # TODO(production): Increase deregistration_delay for graceful connection draining.
-        # 10 seconds is aggressive but speeds up service removal during DOH development.
+        # TODO(production): Increase deregistration_delay for graceful connection draining,
+        # and consider higher health check interval/timeout for stability.
+        # Current aggressive settings optimize for fast dev iteration.
         target_group = elbv2.ApplicationTargetGroup(
             self, "TargetGroup",
             target_group_name=f"doh-{env_slug}-{app_config.app_name}"[:32],
@@ -388,10 +389,10 @@ class AppStack(Stack):
             port=app_config.container_port,
             protocol=elbv2.ApplicationProtocol.HTTP,
             target_type=elbv2.TargetType.IP,
-            deregistration_delay=Duration.seconds(10),
+            deregistration_delay=Duration.seconds(5),
             health_check=elbv2.HealthCheck(
                 enabled=True, path=app_config.health_check_path, protocol=elbv2.Protocol.HTTP,
-                interval=Duration.seconds(15), timeout=Duration.seconds(5),
+                interval=Duration.seconds(5), timeout=Duration.seconds(2),
                 healthy_threshold_count=2, unhealthy_threshold_count=3, healthy_http_codes="200",
             ),
         )
@@ -405,6 +406,8 @@ class AppStack(Stack):
             shared_alb_hosted_zone=shared_alb_hosted_zone,
         )
 
+        # TODO(production): Set min_healthy_percent=100 for zero-downtime deployments.
+        # min_healthy_percent=0 allows faster deployments but brief downtime during rollout.
         service = ecs.FargateService(
             self, "EcsService",
             service_name=resource_prefix[:255],
@@ -415,7 +418,7 @@ class AppStack(Stack):
             vpc_subnets=ec2.SubnetSelection(subnet_type=ec2.SubnetType.PRIVATE_WITH_EGRESS),
             security_groups=[self.environment_infra.default_security_group],
             enable_execute_command=True,
-            min_healthy_percent=100,
+            min_healthy_percent=0,
             max_healthy_percent=200,
         )
         service.attach_to_application_target_group(target_group)
