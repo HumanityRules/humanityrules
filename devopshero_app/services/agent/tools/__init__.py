@@ -19,6 +19,7 @@ from .list_environments import EnvironmentSummary as ListEnvironmentSummary
 from .list_hosted_zones import list_hosted_zones, HostedZoneSummary
 from .list_repositories import list_repositories, RepositoryListItem
 from .scan_repository import scan_repository, RepositoryScan
+from .teardown_deployment import teardown_deployment, TeardownSummary
 
 __all__ = [
     # App management
@@ -53,4 +54,7 @@ __all__ = [
     "RepositoryScan",
     "list_repositories",
     "RepositoryListItem",
+    # Teardown
+    "teardown_deployment",
+    "TeardownSummary",
 ]

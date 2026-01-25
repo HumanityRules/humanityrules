@@ -29,6 +29,7 @@ from .tools import (
     list_hosted_zones as _list_hosted_zones,
     list_repositories as _list_repositories,
     scan_repository as _scan_repository,
+    teardown_deployment as _teardown_deployment,
 )
 
 
@@ -89,6 +90,7 @@ TOOL_DISPLAY_NAMES = {
     "mcp__devopshero__create_datastore": "Create Datastore",
     "mcp__devopshero__deploy_app": "Deploy App",
     "mcp__devopshero__get_deployment_status": "Get Deployment Status",
+    "mcp__devopshero__teardown_deployment": "Teardown Deployment",
     # Utility
     "mcp__devopshero__wait": "Wait",
 }
@@ -116,6 +118,7 @@ TOOL_MAIN_PARAMS = {
     "mcp__devopshero__create_datastore": "name",
     "mcp__devopshero__deploy_app": "app_name",
     "mcp__devopshero__get_deployment_status": "deployment_id",
+    "mcp__devopshero__teardown_deployment": "app_id",
     "mcp__devopshero__wait": "seconds",
     # External/Claude Agent SDK tools
     "Read": "file_path",
@@ -566,6 +569,39 @@ async def get_deployment_status(args: dict[str, Any]) -> dict[str, Any]:
 
 
 @tool(
+    "teardown_deployment",
+    (
+        "Tear down (destroy) a deployed application. "
+        "Deletes all app-specific AWS infrastructure: ECS service, ALB listener rules, "
+        "Aurora database (if any), and ECR repository. "
+        "The app must be in RUNNING or FAILED state. Cannot teardown in-progress deployments. "
+        "Use get_deployment_status to monitor teardown progress."
+    ),
+    {
+        "app_id": str,
+    },
+)
+async def teardown_deployment(args: dict[str, Any]) -> dict[str, Any]:
+    """Queue teardown of an application's deployment."""
+    conversation = _get_conversation()
+
+    result = await _teardown_deployment(
+        app_id=args["app_id"],
+        organization=conversation.organization,
+        user=conversation.user,
+    )
+
+    return _mcp_response({
+        **result.to_dict(),
+        "note": (
+            "Teardown queued. The job worker will delete the app's CDK stacks "
+            "(ECS service, ALB rules, ECR repository, and Aurora if applicable). "
+            "Use get_deployment_status to check progress."
+        ),
+    })
+
+
+@tool(
     "get_environment_status",
     (
         "Get the current status of an environment including provisioning progress and logs. "
@@ -629,6 +665,7 @@ devopshero_mcp_server = create_sdk_mcp_server(
         create_datastore,
         deploy_app,
         get_deployment_status,
+        teardown_deployment,
         # Utility
         wait,
     ],
@@ -650,6 +687,7 @@ TOOL_NAMES = [
     "mcp__devopshero__create_datastore",
     "mcp__devopshero__deploy_app",
     "mcp__devopshero__get_deployment_status",
+    "mcp__devopshero__teardown_deployment",
     # Utility
     "mcp__devopshero__wait",
 ]

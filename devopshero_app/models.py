@@ -761,6 +761,9 @@ class Deployment(models.Model):
         RUNNING = "running", "Running"
         FAILED = "failed", "Failed"
         ROLLED_BACK = "rolled_back", "Rolled Back"
+        TEARDOWN_PENDING = "teardown_pending", "Teardown Pending"
+        TEARING_DOWN = "tearing_down", "Tearing Down"
+        TORN_DOWN = "torn_down", "Torn Down"
 
     id = models.UUIDField(
         primary_key=True,

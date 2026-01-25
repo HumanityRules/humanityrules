@@ -16,6 +16,7 @@ from devopshero_app.models import Deployment, Environment
 
 from . import deployment_executor
 from . import environment_executor
+from . import teardown_executor
 
 logger = logging.getLogger(__name__)
 
@@ -90,6 +91,41 @@ def _claim_pending_environment() -> Environment | None:
     return None
 
 
+def _claim_pending_teardown() -> Deployment | None:
+    """
+    Atomically claim a pending teardown deployment.
+
+    Uses select_for_update with skip_locked to prevent multiple workers
+    from claiming the same teardown.
+
+    Returns:
+        The claimed Deployment, or None if no pending teardowns.
+    """
+    with transaction.atomic():
+        deployment = (
+            Deployment.objects
+            .select_for_update(skip_locked=True)
+            .filter(status=Deployment.Status.TEARDOWN_PENDING)
+            .select_related(
+                "app",
+                "app__workspace",
+                "app__datastore",
+                "environment",
+            )
+            .first()
+        )
+
+        if deployment:
+            # Claim it by updating status
+            deployment.status = Deployment.Status.TEARING_DOWN
+            deployment.status_message = "Claimed by worker"
+            deployment.save(update_fields=["status", "status_message", "updated_at"])
+            logger.info(f"Claimed teardown {deployment.id} for app '{deployment.app.name}'")
+            return deployment
+
+    return None
+
+
 def _run_deployment_thread(deployment_id: str) -> None:
     """Thread target that runs a single deployment."""
     try:
@@ -104,6 +140,14 @@ def _run_environment_thread(environment_id: str) -> None:
         environment_executor.run_provisioning(environment_id)
     except Exception:
         logger.exception(f"Unhandled error in environment provisioning {environment_id}")
+
+
+def _run_teardown_thread(deployment_id: str) -> None:
+    """Thread target that runs a single teardown."""
+    try:
+        teardown_executor.run_teardown(deployment_id)
+    except Exception:
+        logger.exception(f"Unhandled error in teardown {deployment_id}")
 
 
 def _worker_loop() -> None:
@@ -135,6 +179,18 @@ def _worker_loop() -> None:
                 )
                 thread.start()
                 logger.debug(f"Spawned thread for environment {environment.id}")
+
+            # Check for pending teardowns
+            teardown = _claim_pending_teardown()
+            if teardown:
+                thread = threading.Thread(
+                    target=_run_teardown_thread,
+                    args=(str(teardown.id),),
+                    name=f"teardown-{teardown.id.hex[:8]}",
+                    daemon=True,
+                )
+                thread.start()
+                logger.debug(f"Spawned thread for teardown {teardown.id}")
 
         except Exception:
             logger.exception("Error in worker loop")
