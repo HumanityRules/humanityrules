@@ -28,6 +28,8 @@ class AgentRunner:
     task: asyncio.Task
     event_queue: asyncio.Queue = field(default_factory=asyncio.Queue)  # Unbounded
     client_connected: bool = True
+    is_streaming: bool = False  # True between 'start' and 'complete' events
+    accumulated_text: str = ""  # Current text block for reconnect replay
 
 
 # In-memory state (single instance deployment)
@@ -76,7 +78,15 @@ def mark_client_connected(conversation_id: UUID) -> None:
     runner = _runners.get(conversation_id)
     if runner:
         runner.client_connected = True
-        logger.info(f"Client reconnected for conversation {conversation_id}")
+
+        # If reconnecting mid-stream, replay state so client can resume
+        if runner.is_streaming:
+            logger.info(f"Replaying stream state for reconnected client on conversation {conversation_id}")
+            runner.event_queue.put_nowait(AgentStreamEvent(type="start", data={}))
+            if runner.accumulated_text:
+                runner.event_queue.put_nowait(AgentStreamEvent(type="text_delta", data={"text": runner.accumulated_text}))
+        else:
+            logger.info(f"Client reconnected for conversation {conversation_id}")
     else:
         logger.error(f"No runner found to mark connected for conversation {conversation_id}")
 
@@ -133,6 +143,17 @@ async def _run_agent_loop(runner: AgentRunner, conversation_id: UUID) -> None:
                     conversation=conversation,
                     fork_session=False,
                 ):
+                    # Track streaming state for reconnect handling
+                    if event.type == "start":
+                        runner.is_streaming = True
+                        runner.accumulated_text = ""
+                    elif event.type == "text_delta":
+                        runner.accumulated_text += event.data.get("text", "")
+                    elif event.type == "text_flush":
+                        runner.accumulated_text = ""  # Current block finalized (before tool call)
+                    elif event.type == "complete":
+                        runner.is_streaming = False
+                        runner.accumulated_text = ""
                     await runner.event_queue.put(event)
                 logger.info(f"Agent completed response for conversation {conversation_id}")
             else:

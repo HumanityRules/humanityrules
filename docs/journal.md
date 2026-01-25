@@ -1,5 +1,67 @@
 # DevOpsHero Development Journal
 
+## 2026-01-24 - Mid-Stream Reconnect Text Replay
+
+Added accumulated text replay when clients reconnect mid-stream. Previously, if a user navigated away during streaming and came back, they'd see streaming resume but the beginning of the message was lost (those events were already consumed by the old SSE connection).
+
+### The Problem
+
+Events flow: `agent_service` → `runner.event_queue` → `chat_stream` SSE → client
+
+When client disconnects mid-stream:
+1. Old SSE stops consuming from queue (on `CancelledError`)
+2. Agent continues, events keep going into queue
+3. Client reconnects, new SSE starts consuming
+4. But the `start` event and early `text_delta` events were already consumed by old connection
+
+The new client receives orphan `text_delta` events with no streaming container to render into.
+
+### Solution: Runner Tracks and Replays State
+
+Added two fields to `AgentRunner`:
+- **`is_streaming: bool`** — True between `start` and `complete` events
+- **`accumulated_text: str`** — Current text block being streamed
+
+The runner tracks streaming state as events flow through:
+- `start` → set `is_streaming=True`, reset `accumulated_text`
+- `text_delta` → append chunk to `accumulated_text`
+- `text_flush` → reset `accumulated_text` (text block finalized before tool call)
+- `complete` → set `is_streaming=False`, reset `accumulated_text`
+
+On reconnect, `mark_client_connected()` checks if mid-stream and replays:
+```python
+if runner.is_streaming:
+    runner.event_queue.put_nowait(AgentStreamEvent(type="start", data={}))
+    if runner.accumulated_text:
+        runner.event_queue.put_nowait(AgentStreamEvent(type="text_delta", data={"text": runner.accumulated_text}))
+```
+
+The client sees: `start` (creates container) → accumulated text (appears instantly) → live `text_delta` events continue.
+
+### Why State Lives in Runner, Not agent_service
+
+`agent_service.StreamingContext` already tracks `accumulated_content` and `has_started_streaming`, but it's the wrong place:
+
+- **`StreamingContext`** is local to each `stream_response()` call. It's created fresh when the agent starts and lives inside the async generator. Purpose: track state for DB persistence at the end.
+
+- **`AgentRunner`** persists across client reconnects. Same runner serves multiple SSE connections. Purpose: track state for client replay.
+
+The runner can't access `StreamingContext` — it only sees events yielded out. Exposing accumulated state in events would be more invasive (each `text_delta` carrying full accumulated text). The duplication is pragmatic: simple string concatenation in two places for different purposes.
+
+### put_nowait vs put
+
+`mark_client_connected()` is a sync function, so we can't `await queue.put()`. Instead, `put_nowait()` adds to the queue synchronously. It would raise `QueueFull` on a bounded queue, but ours is unbounded (safe for finite agent responses), so it always succeeds.
+
+### Clean Separation of Concerns
+
+The SSE endpoint (`chat_stream`) is now a "dumb pipe":
+1. `ensure_agent_running()` — get/spawn runner
+2. `mark_client_connected()` — runner handles replay if needed
+3. Pull from queue → forward to client
+
+All streaming state and reconnect logic lives in the runner. The SSE endpoint knows nothing about `is_streaming` or `accumulated_text`.
+
+
 ## 2026-01-24 - Agent Task Decoupling Architecture
 
 Major refactor to decouple agent processing from SSE request lifecycle. Previously, reloading the page mid-response would kill the agent (Uvicorn cancels async tasks on client disconnect), losing the in-progress response. On reconnect, the agent would restart from scratch.
