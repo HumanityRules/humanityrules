@@ -1,5 +1,18 @@
 # DevOpsHero Development Journal
 
+## 2026-01-25 - CloudFront + ngrok Host Header Fix
+
+Fixed devopshero.ai domain not resolving. Two issues discovered:
+
+1. **Missing Route 53 A record** — CloudFront doesn't auto-create DNS records when you add an alternate domain name. Created alias A record pointing `devopshero.ai` → `d2yopfffsrimnp.cloudfront.net` (CloudFront hosted zone ID `Z2FDTNDATAQYW2` is fixed for all distributions).
+
+2. **Host header mismatch** — ngrok returns HTTP 421 (Misdirected Request) if Host header doesn't match the tunnel name. CloudFront was forwarding `Host: devopshero.ai` from viewer requests, but ngrok expected `Host: devopshero.ngrok.io`. Fix required two policy changes:
+   - Cache policy: `UseOriginCacheControlHeaders` → `Managed-CachingDisabled` (the original policy whitelisted Host header)
+   - Origin request policy: Added `Managed-AllViewerExceptHostHeader` to forward all viewer headers except Host
+
+When Host header isn't forwarded, CloudFront uses the origin domain name as the Host header automatically.
+
+
 ## 2026-01-25 - Add list_apps Tool to Prevent Duplicate Apps
 
 Agent was creating duplicate apps with numeric suffixes (e.g., `simple-dashboard-2`) when users asked to "deploy again" after teardown. Root cause: agent had no way to discover existing apps in the workspace, so it always called `create_app`.
