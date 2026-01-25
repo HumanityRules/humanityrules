@@ -2,6 +2,9 @@ from django.urls import path
 from . import views
 
 urlpatterns = [
+    # Health check for ALB/ECS
+    path("health/", views.health_check, name="health_check"),
+    
     path("", views.landing, name="landing"),
     path("dashboard/", views.dashboard, name="dashboard"),
     path("workspaces/", views.workspaces, name="workspaces"),

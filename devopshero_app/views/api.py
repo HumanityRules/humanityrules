@@ -1,6 +1,6 @@
 """
 API endpoints for external integrations.
-These endpoints are called by AWS Lambda and other services, not by browsers.
+These endpoints are called by AWS Lambda, ALB health checks, and other services, not by browsers.
 """
 
 import json
@@ -10,11 +10,17 @@ import uuid
 from django.conf import settings
 from django.http import JsonResponse
 from django.views.decorators.csrf import csrf_exempt
-from django.views.decorators.http import require_POST
+from django.views.decorators.http import require_GET, require_POST
 
 from ..models import AWSAccount
 
 logger = logging.getLogger(__name__)
+
+
+@require_GET
+def health_check(request):
+    """Health check endpoint for ALB/ECS health checks."""
+    return JsonResponse({"status": "healthy"})
 
 
 @csrf_exempt

@@ -12,6 +12,8 @@ https://docs.djangoproject.com/en/6.0/ref/settings/
 
 import os
 from pathlib import Path
+
+import dj_database_url
 from dotenv import load_dotenv
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
@@ -25,14 +27,20 @@ load_dotenv(BASE_DIR / ".env")
 # See https://docs.djangoproject.com/en/6.0/howto/deployment/checklist/
 
 # SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = 'django-insecure-!@4vjx6%j+tp*4^s(a)93($b!79ky1#$9_xj!p**q-3pc!tw8j'
+SECRET_KEY = os.environ.get("DJANGO_SECRET_KEY", "django-insecure-!@4vjx6%j+tp*4^s(a)93($b!79ky1#$9_xj!p**q-3pc!tw8j")
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
+DEBUG = os.environ.get("DJANGO_DEBUG", "1") == "1"
 
-ALLOWED_HOSTS = ['localhost', '127.0.0.1', 'devopshero.ngrok.io']
+# Allow all hosts. In production, CloudFront validates the domain for external traffic.
+# In development, there's no security concern for local requests.
+ALLOWED_HOSTS = ["*"]
 
-CSRF_TRUSTED_ORIGINS = ['https://devopshero.ngrok.io']
+CSRF_TRUSTED_ORIGINS = [
+    "https://devopshero.ngrok.io",
+    "https://devopshero.ai",
+    "https://*.devopshero.ai",
+]
 
 
 # Application definition
@@ -87,16 +95,29 @@ TEMPLATES = [
 WSGI_APPLICATION = 'devopshero_site.wsgi.application'
 
 
-# Database
-# https://docs.djangoproject.com/en/6.0/ref/settings/#databases
-DB_PATH = os.environ.get("DOH_DB_PATH")
-
-DATABASES = {
-    'default': {
-        'ENGINE': 'django.db.backends.sqlite3',
-        'NAME': DB_PATH if DB_PATH else BASE_DIR / 'db.sqlite3',
+# Production: construct DATABASE_URL from individual env vars (injected by ECS from Secrets Manager)
+# Local dev: fallback to SQLite
+DATABASE_HOST = os.environ.get("DATABASE_HOST")
+if DATABASE_HOST:
+    # Production: PostgreSQL via individual env vars
+    DATABASE_USER = os.environ.get("DATABASE_USERNAME", "")
+    DATABASE_PASS = os.environ.get("DATABASE_PASSWORD", "")
+    DATABASE_PORT = os.environ.get("DATABASE_PORT", "5432")
+    DATABASE_NAME = os.environ.get("DATABASE_NAME", "devopshero")
+    DATABASE_URL = f"postgresql://{DATABASE_USER}:{DATABASE_PASS}@{DATABASE_HOST}:{DATABASE_PORT}/{DATABASE_NAME}"
+    DATABASES = {"default": dj_database_url.parse(DATABASE_URL)}
+elif os.environ.get("DATABASE_URL"):
+    # Alternative: direct DATABASE_URL (e.g., for local PostgreSQL testing)
+    DATABASES = {"default": dj_database_url.parse(os.environ["DATABASE_URL"])}
+else:
+    # Local dev: SQLite
+    DB_PATH = os.environ.get("DOH_DB_PATH")
+    DATABASES = {
+        "default": {
+            "ENGINE": "django.db.backends.sqlite3",
+            "NAME": DB_PATH if DB_PATH else BASE_DIR / "db.sqlite3",
+        }
     }
-}
 
 
 # Password validation
@@ -133,7 +154,8 @@ USE_TZ = True
 # Static files (CSS, JavaScript, Images)
 # https://docs.djangoproject.com/en/6.0/howto/static-files/
 
-STATIC_URL = 'static/'
+STATIC_URL = "static/"
+STATIC_ROOT = BASE_DIR / "staticfiles"
 
 # Custom user model
 AUTH_USER_MODEL = 'devopshero_app.User'

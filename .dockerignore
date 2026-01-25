@@ -1,0 +1,65 @@
+# Git
+.git
+.gitignore
+.gitattributes
+
+# Python
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.Python
+.venv
+venv
+.pytest_cache
+.mypy_cache
+*.egg-info
+
+# IDE
+.vscode
+.idea
+*.swp
+*.swo
+.DS_Store
+
+# Build artifacts
+*.log
+tmp/
+cdk.out/
+staticfiles/
+node_modules/
+
+# Development files
+.env
+.env.*
+!.env.example
+*.sqlite3
+db.sqlite3
+
+# Documentation and specs
+docs/
+openspec/
+*.md
+!README.md
+
+# Deployable repos (example apps for customers)
+deployable_repos/
+
+# Test files
+tests/
+*_test.py
+test_*.py
+
+# CDK infrastructure (not needed in container)
+infra_devopshero/stacks/
+infra_devopshero/*.sh
+infra_devopshero/*.json
+infra_devopshero/cdk.json
+infra_devopshero/app.py
+
+# Other
+.beads/
+.claude/
+.cursor/
+.perles/
+.playwright-mcp/

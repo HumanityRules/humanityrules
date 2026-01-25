@@ -406,8 +406,6 @@ class AppStack(Stack):
             shared_alb_hosted_zone=shared_alb_hosted_zone,
         )
 
-        # TODO(production): Set min_healthy_percent=100 for zero-downtime deployments.
-        # min_healthy_percent=0 allows faster deployments but brief downtime during rollout.
         service = ecs.FargateService(
             self, "EcsService",
             service_name=resource_prefix[:255],
@@ -418,7 +416,7 @@ class AppStack(Stack):
             vpc_subnets=ec2.SubnetSelection(subnet_type=ec2.SubnetType.PRIVATE_WITH_EGRESS),
             security_groups=[self.environment_infra.default_security_group],
             enable_execute_command=True,
-            min_healthy_percent=0,
+            min_healthy_percent=100,  # Zero-downtime: keep old task until new one is healthy
             max_healthy_percent=200,
         )
         service.attach_to_application_target_group(target_group)
