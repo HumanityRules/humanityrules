@@ -40,10 +40,9 @@ class Command(BaseCommand):
         ))
 
         # Keep the main thread alive
-        try:
+        # Must loop because signal.pause() returns on ANY signal (including SIGCHLD from subprocesses)
+        while job_worker.is_running():
             signal.pause()
-        except AttributeError:
-            # signal.pause() not available on Windows
-            import time
-            while job_worker.is_running():
-                time.sleep(1)
+            self.stdout.write("Signal received, continuing...")
+        
+        self.stdout.write(self.style.WARNING("Worker stopped"))
