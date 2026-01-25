@@ -9,9 +9,11 @@ via contextvars to maintain request isolation.
 import asyncio
 import json
 from contextvars import ContextVar
+from pathlib import Path
 from typing import Any
 
 from claude_agent_sdk import tool, create_sdk_mcp_server
+from django.conf import settings
 
 from devopshero_app.models import Conversation, Repository, Workspace
 from devopshero_app.services.github import repo_service
@@ -185,9 +187,68 @@ def _format_glob_params(parameters: dict) -> str | None:
     return pattern
 
 
+def _relativize_sandbox_path(path_str: str) -> str:
+    """Relativize a path within the sandbox directory for display.
+
+    Strips the sandbox directory prefix and the first subdirectory (which is the
+    context-specific folder like conv-xxx, scan-xxx, or deployment-id).
+
+    Paths outside the sandbox are returned unchanged (security signal).
+    """
+    try:
+        path = Path(path_str)
+        sandbox = settings.CLAUDE_SANDBOX_DIR
+
+        # Check if path is under sandbox
+        if not path_str.startswith(str(sandbox)):
+            return path_str
+
+        # Get path relative to sandbox
+        relative = path.relative_to(sandbox)
+        parts = relative.parts
+
+        # If empty or just the context dir, return "."
+        if len(parts) == 0:
+            return "."
+        if len(parts) == 1:
+            return "."
+
+        # Strip the first part (conv-xxx, scan-xxx, deployment-id, etc.)
+        return str(Path(*parts[1:]))
+
+    except (ValueError, TypeError):
+        # relative_to raises ValueError if path is not under sandbox
+        return path_str
+
+
+def sanitize_paths_for_display(obj: Any) -> Any:
+    """Recursively sanitize sandbox paths in a data structure for display.
+
+    Walks through dicts, lists, and strings, relativizing any paths that
+    are under CLAUDE_SANDBOX_DIR.
+    """
+    if isinstance(obj, str):
+        # Only attempt to relativize if it looks like an absolute path
+        if obj.startswith("/"):
+            return _relativize_sandbox_path(obj)
+        return obj
+
+    if isinstance(obj, dict):
+        return {k: sanitize_paths_for_display(v) for k, v in obj.items()}
+
+    if isinstance(obj, list):
+        return [sanitize_paths_for_display(item) for item in obj]
+
+    return obj
+
+
 def _format_param_value(tool_name: str, value: Any) -> str:
     """Format parameter value for display (extract repo names, truncate UUIDs)."""
     value_str = str(value)
+
+    # Relativize sandbox paths
+    if value_str.startswith("/"):
+        value_str = _relativize_sandbox_path(value_str)
 
     # Truncate UUIDs (36 chars with dashes)
     if len(value_str) == 36 and value_str.count("-") == 4:
