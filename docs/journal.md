@@ -1,5 +1,17 @@
 # DevOpsHero Development Journal
 
+## 2026-01-25 - Relative Path Display in Tool Calls
+
+Tool call UI now shows relative paths instead of absolute paths. Before: `/Users/.../tmp/conv-abc123/requirements.txt`. After: `requirements.txt`.
+
+- Added `_relativize_sandbox_path()` using `pathlib` with `settings.CLAUDE_SANDBOX_DIR` as the single source of truth
+- Added `sanitize_paths_for_display()` that recursively walks dicts/lists/strings
+- Applied to tool header (via `_format_param_value`), parameters panel, and results panel (via `json_pretty` filter)
+- Paths outside the sandbox remain unchanged as a security signal
+
+Consulted Codex (GPT-5.2) for architecture validation. Key insight: apply transformation recursively to all nested values, not just the main parameter, and use pathlib instead of string prefix checks for robustness.
+
+
 ## 2026-01-24 - Chat Sidebar UX Improvements
 
 Two fixes for the conversation sidebar:

@@ -6,6 +6,7 @@ from typing import Any
 from django import template
 
 from devopshero_app.services.agent import mcp_tools
+from devopshero_app.services.agent.mcp_tools import sanitize_paths_for_display
 
 register = template.Library()
 
@@ -68,7 +69,7 @@ def json_pretty(value: Any) -> str:
     """Format a dict/list or JSON string as pretty-printed JSON.
 
     Handles MCP content block structures by extracting and parsing
-    the text content within them.
+    the text content within them. Sanitizes sandbox paths for display.
 
     Args:
         value: A dict, list, JSON string, or MCP content block.
@@ -91,5 +92,8 @@ def json_pretty(value: Any) -> str:
     # If it's now a string (extracted from MCP), return as-is
     if isinstance(value, str):
         return value
+
+    # Sanitize sandbox paths for display
+    value = sanitize_paths_for_display(value)
 
     return json.dumps(value, indent=2)
