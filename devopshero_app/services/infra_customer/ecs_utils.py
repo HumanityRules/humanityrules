@@ -81,6 +81,14 @@ def check_stopped_tasks(
     return reasons
 
 
+def _get_primary_deployment_state(svc: dict) -> tuple[str | None, str | None]:
+    """Get the rolloutState and status of the PRIMARY deployment."""
+    for deployment in svc.get("deployments", []):
+        if deployment.get("status") == "PRIMARY":
+            return deployment.get("rolloutState"), deployment.get("status")
+    return None, None
+
+
 def wait_for_service_stable(
     ecs_client,
     cluster: str,
@@ -91,8 +99,9 @@ def wait_for_service_stable(
     """
     Wait for ECS service to stabilize, with diagnostics on failure.
     
-    Requires multiple consecutive stable checks to confirm the service isn't
-    just briefly running before crashing.
+    Stability is determined by checking that the PRIMARY deployment has
+    rolloutState=COMPLETED, which is more reliable than just checking
+    running/desired counts (which can be true mid-rollout).
     
     Args:
         deployment_start_time: Only check for failures in tasks started after this time.
@@ -102,7 +111,7 @@ def wait_for_service_stable(
     """
     logger.info("Waiting for service to stabilize (timeout: %(timeout_seconds)s)...", {"timeout_seconds": timeout_seconds})
     
-    STABLE_CHECKS_REQUIRED = 3  # Need 3 consecutive stable checks (30 seconds)
+    STABLE_CHECKS_REQUIRED = 2  # Need 2 consecutive stable checks (10 seconds)
     
     start = time.time()
     last_running = -1
@@ -117,6 +126,7 @@ def wait_for_service_stable(
             running = svc["runningCount"]
             desired = svc["desiredCount"]
             pending = svc["pendingCount"]
+            rollout_state, _ = _get_primary_deployment_state(svc)
             
             if running != last_running:
                 logger.info(
@@ -126,7 +136,16 @@ def wait_for_service_stable(
                 last_running = running
                 consecutive_stable = 0  # Reset stability counter on change
             
-            if running == desired and desired > 0 and pending == 0:
+            # Check rolloutState=COMPLETED for reliable stability detection
+            # This handles edge cases where running==desired during mid-rollout
+            is_stable = (
+                running == desired
+                and desired > 0
+                and pending == 0
+                and rollout_state == "COMPLETED"
+            )
+            
+            if is_stable:
                 consecutive_stable += 1
                 if consecutive_stable >= STABLE_CHECKS_REQUIRED:
                     logger.info("   Service stable")
@@ -164,7 +183,7 @@ def wait_for_service_stable(
         except ClientError as e:
             logger.error("   Error checking service: %(error)s", {"error": str(e)})
         
-        time.sleep(10)
+        time.sleep(5)
     
     logger.error("   Timed out after %(timeout_seconds)s waiting for service", {"timeout_seconds": timeout_seconds})
     return False

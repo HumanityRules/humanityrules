@@ -1,5 +1,22 @@
 # DevOpsHero Development Journal
 
+## 2026-01-25 - ECS Deployment Stabilization Optimization
+
+Reduced ECS service stabilization time from ~2 minutes to ~1.5 minutes by tuning health check and polling parameters. These settings prioritize fast dev iteration over zero-downtime guarantees.
+
+**CDK changes (deploy_app.py):**
+- ALB health check interval: 15s → 5s, timeout: 5s → 2s (healthy window: ~30s → ~10s)
+- Target group deregistration delay: 10s → 5s
+- ECS service min_healthy_percent: 100 → 0 (allows old task to stop before new fully healthy)
+
+**Polling code changes (ecs_utils.py):**
+- STABLE_CHECKS_REQUIRED: 3 → 2
+- Poll interval: 10s → 5s
+- Added rolloutState=COMPLETED check for more reliable stability detection (catches edge cases where running==desired during mid-rollout)
+
+Production settings (higher min_healthy_percent, longer deregistration_delay) are marked with TODO comments.
+
+
 ## 2026-01-25 - Ask Codex Skill for External Perspective
 
 Added a skill to query GPT-5.2 (via Codex CLI) for external perspective on current problems. Useful for architecture validation and getting a second opinion without conversation context bias.
