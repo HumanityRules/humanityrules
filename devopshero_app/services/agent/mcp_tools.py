@@ -26,6 +26,7 @@ from .tools import (
     get_deployment_status as _get_deployment_status,
     get_environment_status as _get_environment_status,
     initiate_aws_connection as _initiate_aws_connection,
+    list_apps as _list_apps,
     list_aws_accounts as _list_aws_accounts,
     list_environments as _list_environments,
     list_hosted_zones as _list_hosted_zones,
@@ -88,6 +89,7 @@ TOOL_DISPLAY_NAMES = {
     "mcp__devopshero__list_repositories": "List Repositories",
     "mcp__devopshero__scan_repository": "Scan Repository",
     # Workspace tools
+    "mcp__devopshero__list_apps": "List Apps",
     "mcp__devopshero__create_app": "Create App",
     "mcp__devopshero__create_datastore": "Create Datastore",
     "mcp__devopshero__deploy_app": "Deploy App",
@@ -466,6 +468,25 @@ async def scan_repository(args: dict[str, Any]) -> dict[str, Any]:
 
 
 @tool(
+    "list_apps",
+    (
+        "List applications in the current workspace. "
+        "Use this to discover existing apps before creating new ones. "
+        "If an app with the desired name already exists, use deploy_app with its ID "
+        "instead of calling create_app (which would create a duplicate with a numeric suffix). "
+        "Returns app ID, name, slug, type, branch, repository, and latest deployment status."
+    ),
+    {},
+)
+async def list_apps(args: dict[str, Any]) -> dict[str, Any]:
+    """List applications in the current workspace."""
+    conversation = _get_conversation()
+    workspace = await _require_workspace(conversation)
+    apps = await _list_apps(workspace=workspace)
+    return _mcp_response(apps)
+
+
+@tool(
     "create_app",
     (
         "Create an application configuration in the selected workspace. "
@@ -722,6 +743,7 @@ devopshero_mcp_server = create_sdk_mcp_server(
         list_repositories,
         scan_repository,
         # Workspace tools
+        list_apps,
         create_app,
         create_datastore,
         deploy_app,
@@ -744,6 +766,7 @@ TOOL_NAMES = [
     "mcp__devopshero__list_repositories",
     "mcp__devopshero__scan_repository",
     # Workspace tools
+    "mcp__devopshero__list_apps",
     "mcp__devopshero__create_app",
     "mcp__devopshero__create_datastore",
     "mcp__devopshero__deploy_app",

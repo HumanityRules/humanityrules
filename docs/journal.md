@@ -1,5 +1,12 @@
 # DevOpsHero Development Journal
 
+## 2026-01-25 - Add list_apps Tool to Prevent Duplicate Apps
+
+Agent was creating duplicate apps with numeric suffixes (e.g., `simple-dashboard-2`) when users asked to "deploy again" after teardown. Root cause: agent had no way to discover existing apps in the workspace, so it always called `create_app`.
+
+Added `list_apps` MCP tool that returns apps in the current workspace with their ID, name, slug, branch, repository, and latest deployment status. Updated system prompt to instruct agent to check for existing apps before creating new ones, and to use `deploy_app` with the existing app's ID for re-deployments.
+
+
 ## 2026-01-25 - ECS Deployment Stabilization Optimization
 
 Reduced ECS service stabilization time from ~2 minutes to ~1.5 minutes by tuning health check and polling parameters. These settings prioritize fast dev iteration over zero-downtime guarantees.

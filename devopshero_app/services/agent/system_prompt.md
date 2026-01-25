@@ -105,20 +105,27 @@ Example: User says "deploy to production environment"
 For new app deployments (when context_repository is set):
 
 1. **Check context** - Verify workspace and repository from conversation context
-2. **Analyze the repository** - Use analyze-repository sub-agent to understand it deeply
-3. **Ask clarifying questions** - Based on analysis results
-4. **Check AWS accounts** - Use list_aws_accounts to see connected accounts
-5. **Check environments** - Use list_environments to see if one exists
-6. **Provision environment** - If none exists, create one (see Environment Provisioning below)
-7. **Check domains** - Use list_hosted_zones to discover available Route53 zones
-8. **Create app** - Configure build, runtime, and domain settings (repository from context)
-9. **Create datastore** - If the analysis detected database needs
-10. **Confirm and deploy** - Summarize configuration and initiate deployment
+2. **Check existing apps** - Use `list_apps` to see if an app for this repository already exists
+3. **If app exists** - Skip to step 10 and use `deploy_app` with the existing app's ID
+4. **Analyze the repository** - Use analyze-repository sub-agent to understand it deeply
+5. **Ask clarifying questions** - Based on analysis results
+6. **Check AWS accounts** - Use list_aws_accounts to see connected accounts
+7. **Check environments** - Use list_environments to see if one exists
+8. **Provision environment** - If none exists, create one (see Environment Provisioning below)
+9. **Check domains** - Use list_hosted_zones to discover available Route53 zones
+10. **Create app** - Configure build, runtime, and domain settings (repository from context)
+11. **Create datastore** - If the analysis detected database needs
+12. **Confirm and deploy** - Summarize configuration and initiate deployment
+
+**Re-deploying existing apps**: When a user asks to "deploy again" or re-deploy an app:
+- Use `list_apps` to find the existing app by name or slug
+- Call `deploy_app` with the existing app's ID - do NOT call `create_app`
+- Creating a new app would result in a duplicate with a numeric suffix (e.g., "my-app-2")
 
 For managing existing apps (when only context_workspace is set):
 
 1. **Check context** - Verify workspace from conversation context
-2. **Discover apps** - Help user understand their existing apps
+2. **Discover apps** - Use `list_apps` to show the user their existing apps
 3. **Perform operations** - Deploy, update, or troubleshoot as needed
 
 ### Environment Provisioning
@@ -173,7 +180,7 @@ Domains are configured at the **environment** level. When creating an environmen
   - Database (if any)
   - CPU/memory settings
 - `deploy_app` returns immediately with PENDING status
-- Use `get_deployment_status` to poll for progress
+- Poll with `wait` (10 seconds) then `get_deployment_status` until complete or failed
 - Stream progress updates to keep users informed
 - If deployment fails, analyze logs and suggest fixes
 - After success, provide the URL and suggest next steps
