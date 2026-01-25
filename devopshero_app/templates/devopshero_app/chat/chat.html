@@ -6,7 +6,7 @@
     </div>
 
     {# Right panel: Conversation list #}
-    <div class="w-96 flex flex-col bg-gray-50 dark:bg-gray-800/50">
+    <div class="w-96 flex flex-col bg-gray-50 dark:bg-gray-800/50" style="view-transition-name: chat-sidebar;">
         {# Header with New Conversation button #}
         <div class="p-4 border-b border-gray-200 dark:border-gray-700">
             <a href="{% url 'chat_new' %}"
@@ -32,8 +32,8 @@
                    hx-swap="innerHTML transition:true"
                    hx-push-url="true"
                    data-conversation-id="{{ conv.id }}"
-                   class="conversation-item block px-4 py-3 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors
-                          {% if conversation and conversation.id == conv.id %}bg-gray-100 dark:bg-gray-700{% endif %}">
+                   class="conversation-item block px-4 py-3 transition-colors
+                          {% if conversation and conversation.id == conv.id %}bg-gray-100 dark:bg-gray-700 pointer-events-none cursor-default{% else %}hover:bg-gray-100 dark:hover:bg-gray-700{% endif %}">
                     <div class="flex items-center justify-between">
                         <div class="flex-1 min-w-0">
                             <h3 id="sidebar-title-{{ conv.id }}" class="text-sm font-medium text-gray-900 dark:text-white truncate">
@@ -87,6 +87,10 @@ function updateActiveConversation() {
         const isActive = el.dataset.conversationId === activeId;
         el.classList.toggle('bg-gray-100', isActive);
         el.classList.toggle('dark:bg-gray-700', isActive);
+        el.classList.toggle('pointer-events-none', isActive);
+        el.classList.toggle('cursor-default', isActive);
+        el.classList.toggle('hover:bg-gray-100', !isActive);
+        el.classList.toggle('dark:hover:bg-gray-700', !isActive);
     });
 }
 

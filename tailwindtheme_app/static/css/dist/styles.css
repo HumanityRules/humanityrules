@@ -2669,6 +2669,12 @@
   animation-delay: 0ms;
   opacity: 0;
 }
+::view-transition-old(chat-sidebar) {
+  display: none;
+}
+::view-transition-new(chat-sidebar) {
+  animation: none;
+}
 el-select {
   anchor-name: --select-anchor;
 }
