@@ -1,5 +1,14 @@
 # DevOpsHero Development Journal
 
+## 2026-01-24 - Chat Sidebar UX Improvements
+
+Two fixes for the conversation sidebar:
+
+- **Disabled clicks on selected item** — Added `pointer-events-none` to the currently active conversation to prevent redundant navigation. The JavaScript `updateActiveConversation()` also toggles this class when navigating via HTMX.
+
+- **Fixed sidebar flash during transitions** — The View Transitions API was causing the sidebar background to briefly flash when switching conversations. Gave the sidebar its own `view-transition-name: chat-sidebar` and disabled its transition animation via CSS (`display: none` on old snapshot, `animation: none` on new). The chat panel content still transitions smoothly.
+
+
 ## 2026-01-24 - Dashboard Shows All Apps and Datastores
 
 Replaced the "coming soon" dashboard placeholder with an org-wide view of all apps and datastores. Each card shows the item details plus a link to its parent workspace for navigation.

@@ -48,6 +48,15 @@
   opacity: 0;
 }
 
+/* Chat sidebar - completely skip transition */
+::view-transition-old(chat-sidebar) {
+  display: none;
+}
+
+::view-transition-new(chat-sidebar) {
+  animation: none;
+}
+
 /* Fix el-options popover width to match the anchor button */
 el-select {
   anchor-name: --select-anchor;
