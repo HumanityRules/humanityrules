@@ -1,5 +1,17 @@
 # DevOpsHero Development Journal
 
+## 2026-01-25 - Ask Codex Skill for External Perspective
+
+Added a skill to query GPT-5.2 (via Codex CLI) for external perspective on current problems. Useful for architecture validation and getting a second opinion without conversation context bias.
+
+Key fixes for non-interactive shell execution:
+- **`-o <file>` flag** — Writes final answer to file, bypassing TTY buffering issues
+- **`< /dev/null`** — Closes stdin to prevent command from waiting on input
+- **`--full-auto`** — Ensures no approval prompts interrupt execution
+
+Initial implementation hung indefinitely in the Shell tool. Root cause was `codex exec` waiting on stdin which never closed in non-interactive environments.
+
+
 ## 2026-01-25 - Relative Path Display in Tool Calls
 
 Tool call UI now shows relative paths instead of absolute paths. Before: `/Users/.../tmp/conv-abc123/requirements.txt`. After: `requirements.txt`.
