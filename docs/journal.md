@@ -1,5 +1,22 @@
 # DevOpsHero Development Journal
 
+## 2026-01-26 - S3 BucketDeployment for Customer CF Templates
+
+CloudFormation Quick Create Stack returned "S3 Access Denied" when customers tried to connect their AWS accounts. The public S3 bucket had correct permissions but was empty — the template file hadn't been uploaded.
+
+**Root cause:** CDK creates infrastructure but doesn't automatically upload files to S3 buckets. The `cf_install_template.json` (customer-facing template for AWS account connection) was accidentally deleted on Jan 20th when cleaning up `_old_cf/` directory.
+
+**Fix:**
+1. Restored `cf_install_template.json` from git history (`git show 'ef6891a0b^:...'`)
+2. Added `BucketDeployment` construct to `storage_stack.py` that automatically uploads the template to the public bucket on every deploy
+
+The `BucketDeployment` uses CDK's built-in Lambda to sync files, with content-hash comparison for automatic updates when templates change.
+
+**Two template files to understand:**
+- `infra_devopshero/cf_install_template.json` — Customer runs this in their account. Creates IAM role + calls install callback Lambda.
+- `infra_devopshero/_old/cf_install_callback_lambda.json` — DOH runs this to create the callback Lambda (now managed via `lambda_stack.py`).
+
+
 ## 2026-01-26 - Automated Superuser Setup via Init Container
 
 Added `ensure_superuser` management command to automatically promote a configured user to Django admin on every deployment. This ensures admin access is reproducible without manual intervention.
