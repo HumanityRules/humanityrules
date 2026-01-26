@@ -11,9 +11,9 @@ Investigated why production latency (~250ms) was much higher than localhost (~30
 
 **Root cause of high backend time:** Django's `CONN_MAX_AGE` was unset (default 0), meaning every request opened a new TCP connection to Aurora, performed TLS handshake, and authenticated — adding ~30-50ms per request.
 
-**Fix:** Added `conn_max_age=600` to database configuration. Connections now persist for 10 minutes per Uvicorn thread.
+**Fix:** Added `conn_max_age=60` to database configuration. Connections persist for 1 minute per thread/coroutine.
 
-**Side effect:** DB connections increased from 0 to ~40-50. This is expected — Uvicorn's AnyIO threadpool defaults to 40 threads, and each thread that handles a DB request keeps its connection alive. Aurora Serverless v2 handles thousands of connections, so this is fine.
+**Side effect:** DB connections increased from 0 to ~57. This exceeded the expected 40 (threadpool size) because async agent tools create additional connections outside the threadpool. Reduced `CONN_MAX_AGE` from 600 to 60 seconds to limit connection buildup while still benefiting from pooling.
 
 **Latency breakdown for US West user → us-east-1 infrastructure:**
 - You → CloudFront edge: ~20ms

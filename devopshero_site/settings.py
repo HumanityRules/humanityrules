@@ -109,11 +109,11 @@ if DATABASE_HOST:
     DATABASE_PORT = os.environ.get("DATABASE_PORT", "5432")
     DATABASE_NAME = os.environ.get("DATABASE_NAME", "devopshero")
     DATABASE_URL = f"postgresql://{DATABASE_USER}:{DATABASE_PASS}@{DATABASE_HOST}:{DATABASE_PORT}/{DATABASE_NAME}"
-    # conn_max_age=600: Keep connections alive for 10 minutes to avoid per-request connection overhead
-    DATABASES = {"default": dj_database_url.parse(DATABASE_URL, conn_max_age=600)}
+    # conn_max_age=60: Keep connections alive for 1 minute to balance latency vs connection count
+    DATABASES = {"default": dj_database_url.parse(DATABASE_URL, conn_max_age=60)}
 elif os.environ.get("DATABASE_URL"):
     # Alternative: direct DATABASE_URL (e.g., for local PostgreSQL testing)
-    DATABASES = {"default": dj_database_url.parse(os.environ["DATABASE_URL"], conn_max_age=600)}
+    DATABASES = {"default": dj_database_url.parse(os.environ["DATABASE_URL"], conn_max_age=60)}
 else:
     # Local dev: SQLite
     DB_PATH = os.environ.get("DOH_DB_PATH")
