@@ -116,7 +116,7 @@ class AppStack(Stack):
             container_name="devopshero",
             image=ecs.ContainerImage.from_ecr_repository(ecr_repository, tag="latest"),
             logging=ecs.LogDrivers.aws_logs(stream_prefix="devopshero", log_group=log_group),
-            environment={"DJANGO_DEBUG": "0"},
+            environment={"DJANGO_DEBUG": "0", "DOH_RUN_JOB_WORKER": "1"},
             secrets=app_secrets,
             health_check=ecs.HealthCheck(
                 command=["CMD-SHELL", "curl -f http://localhost:8000/health/ || exit 1"],

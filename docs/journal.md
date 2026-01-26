@@ -1,5 +1,12 @@
 # DevOpsHero Development Journal
 
+## 2026-01-26 - Enable Job Worker in Production
+
+Added `DOH_RUN_JOB_WORKER=1` to the app container's environment in `app_stack.py`. The job worker was not running in production because the env var wasn't set — jobs (deployments, environment provisioning, teardowns) were stuck in PENDING.
+
+The worker runs as a daemon thread within the web process via Django's `AppConfig.ready()`. This is fine for current volume; can migrate to a separate ECS service later if resource contention becomes an issue.
+
+
 ## 2026-01-26 - Move deployable_repos to Separate Repository
 
 Moved `deployable_repos/` to a separate Git repository at `vmendi/deployable-repos` (private). This reduces the main repo size and separates example apps from the core platform.
