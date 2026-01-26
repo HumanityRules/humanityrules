@@ -21,7 +21,7 @@ class AppStack(Stack):
         vpc: ec2.IVpc,
         cluster: ecs.ICluster,
         alb: elbv2.IApplicationLoadBalancer,
-        http_listener: elbv2.IApplicationListener,
+        https_listener: elbv2.IApplicationListener,
         alb_security_group: ec2.ISecurityGroup,
         task_execution_role: iam.IRole,
         log_group: logs.ILogGroup,
@@ -182,7 +182,7 @@ class AppStack(Stack):
         elbv2.ApplicationListenerRule(
             self,
             "ListenerRule",
-            listener=http_listener,
+            listener=https_listener,
             priority=100,
             conditions=[elbv2.ListenerCondition.path_patterns(["/*"])],
             target_groups=[target_group],

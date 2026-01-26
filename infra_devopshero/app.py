@@ -68,8 +68,10 @@ cluster_stack = ClusterStack(
     f"{prefix}-cluster",
     vpc=vpc_stack.vpc,
     ecr_repository=storage_stack.ecr_repository,
+    certificate=cert_stack.certificate,
     env=env_us_east_1,
 )
+cluster_stack.add_dependency(cert_stack)
 cluster_stack.add_dependency(vpc_stack)
 cluster_stack.add_dependency(storage_stack)
 
@@ -89,7 +91,7 @@ app_stack = AppStack(
     vpc=vpc_stack.vpc,
     cluster=cluster_stack.cluster,
     alb=cluster_stack.alb,
-    http_listener=cluster_stack.http_listener,
+    https_listener=cluster_stack.https_listener,
     alb_security_group=cluster_stack.alb_security_group,
     task_execution_role=cluster_stack.task_execution_role,
     log_group=cluster_stack.log_group,

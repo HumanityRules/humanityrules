@@ -36,8 +36,7 @@ class CdnStack(Stack):
             default_behavior=cloudfront.BehaviorOptions(
                 origin=origins.LoadBalancerV2Origin(
                     alb,
-                    protocol_policy=cloudfront.OriginProtocolPolicy.HTTP_ONLY,
-                    http_port=80,
+                    protocol_policy=cloudfront.OriginProtocolPolicy.HTTPS_ONLY,
                 ),
                 viewer_protocol_policy=cloudfront.ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
                 allowed_methods=cloudfront.AllowedMethods.ALLOW_ALL,
@@ -51,8 +50,7 @@ class CdnStack(Stack):
                 "/static/*": cloudfront.BehaviorOptions(
                     origin=origins.LoadBalancerV2Origin(
                         alb,
-                        protocol_policy=cloudfront.OriginProtocolPolicy.HTTP_ONLY,
-                        http_port=80,
+                        protocol_policy=cloudfront.OriginProtocolPolicy.HTTPS_ONLY,
                     ),
                     viewer_protocol_policy=cloudfront.ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
                     allowed_methods=cloudfront.AllowedMethods.ALLOW_GET_HEAD,
