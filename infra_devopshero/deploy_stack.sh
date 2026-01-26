@@ -13,11 +13,13 @@ fi
 
 STACK_NAME="$1"
 
-# Load all environment variables from .env
+# Load environment variables from .env (selective to avoid issues with multi-line values like GITHUB_APP_PRIVATE_KEY)
 if [ -f "../.env" ]; then
-    set -a
-    source ../.env
-    set +a
+    export DOH_AWS_ACCESS_KEY=$(grep -E '^DOH_AWS_ACCESS_KEY=' ../.env | cut -d'=' -f2-)
+    export DOH_AWS_SECRET_KEY=$(grep -E '^DOH_AWS_SECRET_KEY=' ../.env | cut -d'=' -f2-)
+    export DOH_AWS_ACCOUNT_ID=$(grep -E '^DOH_AWS_ACCOUNT_ID=' ../.env | cut -d'=' -f2-)
+    export DOH_API_SECRET_KEY=$(grep -E '^DOH_API_SECRET_KEY=' ../.env | cut -d'=' -f2-)
+    export DOH_API_ENDPOINT=$(grep -E '^DOH_API_ENDPOINT=' ../.env | cut -d'=' -f2-)
 fi
 
 # Map to AWS CLI expected names

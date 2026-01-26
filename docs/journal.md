@@ -6,7 +6,11 @@ After fixing the Lambda name mismatch, the install callback still failed with 40
 
 **Root cause:** `deploy.sh` only loaded AWS credentials (`DOH_AWS_*`) via grep, not the other env vars needed by the Lambda stack. The Lambda stack reads `DOH_API_SECRET_KEY` from the shell environment at deploy time and bakes it into the Lambda's environment variables.
 
-**Fix:** Changed `deploy.sh` and `deploy_stack.sh` to use `set -a; source .env; set +a` which loads all environment variables. This is simpler and won't break when new env vars are added.
+**Attempted fix:** Tried `set -a; source .env; set +a` to load all env vars, but this broke due to `GITHUB_APP_PRIVATE_KEY` containing special characters (`\n` escapes in the PEM key).
+
+**Actual fix:** Added `DOH_API_SECRET_KEY` and `DOH_API_ENDPOINT` to the selective grep loading in both `deploy.sh` and `deploy_stack.sh`.
+
+**Future improvement:** Consider fetching `DOH_API_SECRET_KEY` from Secrets Manager at Lambda runtime (like ECS does) instead of baking it in at deploy time. This would eliminate the need to load it in deploy scripts.
 
 
 ## 2026-01-26 - Fix Lambda Name Mismatch in CF Install Template
