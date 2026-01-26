@@ -32,6 +32,7 @@ The main developer documentation lives in the docs/ subdirectory. **When creatin
 
 **Subsystem AGENTS.md files:**
 - **`devopshero_app/views/AGENTS.md`** — HTMX navigation paradigm, view patterns, adding pages
+- **`infra_devopshero/AGENTS.md`** — Control plane CDK infrastructure, deployment operations, AWS credentials setup
 
 
 # Journal Writing
