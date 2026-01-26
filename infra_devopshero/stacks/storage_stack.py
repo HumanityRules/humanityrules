@@ -27,6 +27,14 @@ class StorageStack(Stack):
                 ignore_public_acls=False,
                 restrict_public_buckets=False,
             ),
+            # CORS required for CloudFormation Quick Create Stack (browser fetches template)
+            cors=[
+                s3.CorsRule(
+                    allowed_methods=[s3.HttpMethods.GET],
+                    allowed_origins=["*"],
+                    allowed_headers=["*"],
+                )
+            ],
             removal_policy=RemovalPolicy.RETAIN,
         )
         # Allow public read access
