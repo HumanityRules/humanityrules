@@ -3,8 +3,10 @@ Management command to seed local repositories into the database.
 
 Usage:
     python manage.py seed_local_repos --org=acme
+    python manage.py seed_local_repos --org=acme --exclude=db_portal,other_repo
+    python manage.py seed_local_repos --org=acme --path=/custom/path/to/repos
 
-Scans the deployable_repos/ folder and creates Repository records
+Scans a local directory for repository folders and creates Repository records
 for the specified organization.
 """
 
@@ -17,7 +19,7 @@ from devopshero_app.models import Organization, Repository
 
 
 class Command(BaseCommand):
-    help = "Create Repository records for deployable_repos/ folders"
+    help = "Create Repository records from local repository folders"
 
     def add_arguments(self, parser):
         parser.add_argument(
@@ -25,10 +27,22 @@ class Command(BaseCommand):
             required=True,
             help="Organization slug to add repositories to",
         )
+        parser.add_argument(
+            "--path",
+            default=str(settings.BASE_DIR / ".." / "deployable-repos"),
+            help="Path to directory containing repository folders (default: ../deployable-repos)",
+        )
+        parser.add_argument(
+            "--exclude",
+            default="",
+            help="Comma-separated list of repository names to skip (e.g., db_portal,other_repo)",
+        )
 
     def handle(self, *args, **options):
-        """Scan deployable_repos/ and create Repository records."""
+        """Scan repository directory and create Repository records."""
         org_slug = options["org"]
+        repos_dir = Path(options["path"]).resolve()
+        exclude_list = set(name.strip() for name in options["exclude"].split(",") if name.strip())
 
         # Look up organization
         try:
@@ -36,21 +50,26 @@ class Command(BaseCommand):
         except Organization.DoesNotExist:
             raise CommandError(f"Organization with slug '{org_slug}' not found")
 
-        deployable_repos_dir = settings.BASE_DIR / "deployable_repos"
+        if not repos_dir.exists():
+            raise CommandError(f"Repository directory not found at {repos_dir}")
 
-        if not deployable_repos_dir.exists():
-            raise CommandError(f"deployable_repos/ directory not found at {deployable_repos_dir}")
+        if exclude_list:
+            self.stdout.write(f"Excluding: {', '.join(sorted(exclude_list))}")
 
         created_count = 0
         updated_count = 0
 
+        self.stdout.write(f"Scanning: {repos_dir}")
+
         # Process top-level repos (skip public/ and hidden dirs)
-        for entry in sorted(deployable_repos_dir.iterdir()):
+        for entry in sorted(repos_dir.iterdir()):
             if not entry.is_dir():
                 continue
             if entry.name.startswith("."):
                 continue
             if entry.name == "public":
+                continue
+            if entry.name in exclude_list:
                 continue
 
             created, updated = self._upsert_repository(
@@ -62,12 +81,14 @@ class Command(BaseCommand):
             updated_count += updated
 
         # Process public/ subdirectory
-        public_repos_dir = deployable_repos_dir / "public"
+        public_repos_dir = repos_dir / "public"
         if public_repos_dir.exists():
             for entry in sorted(public_repos_dir.iterdir()):
                 if not entry.is_dir():
                     continue
                 if entry.name.startswith("."):
+                    continue
+                if entry.name in exclude_list:
                     continue
 
                 created, updated = self._upsert_repository(
