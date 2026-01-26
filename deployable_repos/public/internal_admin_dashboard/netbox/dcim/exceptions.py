@@ -1,2 +1,0 @@
-class UnsupportedCablePath(Exception):
-    pass

@@ -1,9 +1,0 @@
-{% load i18n %}
-{% if path.destination_id %}
-    {% with endpoint=path.destination %}
-        <td>{{ endpoint.parent_object|linkify }}</td>
-        <td>{{ endpoint|linkify }}</td>
-    {% endwith %}
-{% else %}
-    <td colspan="2" class="text-muted">{% trans "Not connected" %}</td>
-{% endif %}

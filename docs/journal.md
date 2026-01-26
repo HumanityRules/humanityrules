@@ -1,5 +1,12 @@
 # DevOpsHero Development Journal
 
+## 2026-01-26 - Add deploy_app.sh for Fast App-Only Deployments
+
+Created `infra_devopshero/deploy_app.sh` for deploying code changes without running CDK stack checks. The full `deploy.sh` takes 10+ minutes even with no infrastructure changes because CDK synthesizes and compares all 6 stacks.
+
+The new script only builds the Docker image, pushes to ECR, and triggers ECS force-new-deployment (~2-3 minutes). Added `--sync-secrets` flag for optionally syncing secrets from `.env` to AWS Secrets Manager before deploying.
+
+
 ## 2026-01-26 - Production Latency Investigation and DB Connection Pooling
 
 Investigated why production latency (~250ms) was much higher than localhost (~30ms).
