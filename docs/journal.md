@@ -5,15 +5,22 @@
 Investigated why production latency (~250ms) was much higher than localhost (~30ms).
 
 **Diagnosis approach:**
+- Created `curl-format.txt` to measure timing breakdown (DNS, connect, TLS, transfer)
 - Compared CloudFront path vs direct ALB to isolate components
 - CloudFront warm: ~140ms, Direct ALB: ~330ms (CloudFront faster due to edge TLS termination)
-- Backend processing: ~90-100ms
+- Checked CloudWatch RDS metrics and ECS logs
 
 **Root cause of high backend time:** Django's `CONN_MAX_AGE` was unset (default 0), meaning every request opened a new TCP connection to Aurora, performed TLS handshake, and authenticated — adding ~30-50ms per request.
 
-**Fix:** Added `conn_max_age=60` to database configuration. Connections persist for 1 minute per thread/coroutine.
+**Initial fix:** Added `conn_max_age=600` (10 minutes). This caused DB connections to spike from 0 to 57.
 
-**Side effect:** DB connections increased from 0 to ~57. This exceeded the expected 40 (threadpool size) because async agent tools create additional connections outside the threadpool. Reduced `CONN_MAX_AGE` from 600 to 60 seconds to limit connection buildup while still benefiting from pooling.
+**Why 57 connections (more than 40-thread pool)?**
+- Uvicorn uses AnyIO's threadpool (default 40 threads) for sync views
+- Each thread that handles a DB request keeps its connection alive for CONN_MAX_AGE
+- Async views (`chat_stream`) and async agent tools (19 files) create connections outside the threadpool
+- Multiple deployments during testing caused connection stacking until old ones expired
+
+**Final fix:** Reduced `CONN_MAX_AGE` to 60 seconds. Balances latency benefit vs connection buildup.
 
 **Latency breakdown for US West user → us-east-1 infrastructure:**
 - You → CloudFront edge: ~20ms
@@ -22,10 +29,13 @@ Investigated why production latency (~250ms) was much higher than localhost (~30
 - App processing: ~25ms
 - **Total: ~140ms** (unavoidable without moving region)
 
-**Learnings:**
+**Key learnings:**
 - `CONN_MAX_AGE` is essential for production Django with network databases
-- 40 thread default in AnyIO is reasonable; connection count scales with it
-- Cross-region latency (~70ms) dominates for geographically distant users
+- Uvicorn's AnyIO threadpool defaults to 40 threads — configurable via `anyio.to_thread.current_default_thread_limiter().total_tokens`
+- Async Django ORM creates connections outside the threadpool, so total connections = threadpool + async coroutines
+- Cross-region latency (~70ms round trip US West ↔ US East) dominates for geographically distant users
+- Health check endpoint (`/health/`) doesn't hit DB — no session cookie means SessionMiddleware skips DB
+- Aurora Serverless v2 handles 2000+ connections easily; 57 connections caused ~60% ACU utilization but isn't a problem
 
 
 ## 2026-01-26 - Fix Lambda Missing DOH_API_SECRET_KEY (401 on Callback)
