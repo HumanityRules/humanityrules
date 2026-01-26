@@ -62,26 +62,11 @@ This script:
 
 ```bash
 cd infra_devopshero
-
-# Load AWS credentials
-export DOH_AWS_ACCESS_KEY=$(grep -E '^DOH_AWS_ACCESS_KEY=' ../.env | cut -d'=' -f2-)
-export DOH_AWS_SECRET_KEY=$(grep -E '^DOH_AWS_SECRET_KEY=' ../.env | cut -d'=' -f2-)
-export AWS_ACCESS_KEY_ID="${DOH_AWS_ACCESS_KEY}"
-export AWS_SECRET_ACCESS_KEY="${DOH_AWS_SECRET_KEY}"
-export AWS_DEFAULT_REGION="us-east-1"
-
-# Build and push Docker image
-ECR_URI=$(aws ecr describe-repositories --repository-names devopshero --query 'repositories[0].repositoryUri' --output text)
-aws ecr get-login-password | docker login --username AWS --password-stdin ${ECR_URI}
-
-cd ..
-docker build -f infra_devopshero/Dockerfile -t devopshero:latest .
-docker tag devopshero:latest ${ECR_URI}:latest
-docker push ${ECR_URI}:latest
-
-# Trigger ECS deployment
-aws ecs update-service --cluster doh-prod-cluster --service doh-prod-app --force-new-deployment --desired-count 1
+./deploy_app.sh                 # App only (~2-3 min)
+./deploy_app.sh --sync-secrets  # Sync secrets first, then deploy
 ```
+
+This skips CDK stack deployment and only builds/pushes the Docker image and triggers ECS update.
 
 ### Update Secrets
 
