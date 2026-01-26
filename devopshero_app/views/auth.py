@@ -22,10 +22,8 @@ def auth_login(request):
         return redirect("/dashboard/")
     
     # Build redirect URI dynamically from the current request
-    scheme = 'https' if request.is_secure() or 'ngrok' in request.get_host() else 'http'
+    scheme = "https" if request.is_secure() else "http"
     redirect_uri = f"{scheme}://{request.get_host()}/auth/callback"
-
-    print(f"Redirect URI: {redirect_uri}")
     
     authorization_url = workos_client.user_management.get_authorization_url(
         provider="authkit",

@@ -1,6 +1,7 @@
 """Cluster Stack for DevOps Hero - ECS Cluster and ALB."""
 
 from aws_cdk import Aws, CfnOutput, RemovalPolicy, Stack
+from aws_cdk import aws_certificatemanager as acm
 from aws_cdk import aws_ec2 as ec2
 from aws_cdk import aws_ecr as ecr
 from aws_cdk import aws_ecs as ecs
@@ -11,9 +12,9 @@ from constructs import Construct
 
 
 class ClusterStack(Stack):
-    """ECS Fargate cluster with internal ALB for DevOps Hero."""
+    """ECS Fargate cluster with ALB for DevOps Hero."""
 
-    def __init__(self, scope: Construct, construct_id: str, vpc: ec2.IVpc, ecr_repository: ecr.IRepository, **kwargs) -> None:
+    def __init__(self, scope: Construct, construct_id: str, vpc: ec2.IVpc, ecr_repository: ecr.IRepository, certificate: acm.ICertificate, **kwargs) -> None:
         super().__init__(scope, construct_id, **kwargs)
 
         # ECS Cluster with Container Insights
@@ -50,19 +51,18 @@ class ClusterStack(Stack):
             removal_policy=RemovalPolicy.DESTROY,
         )
 
-        # ALB Security Group - allows HTTP from anywhere (CloudFront will connect here)
+        # ALB Security Group - allows HTTPS from anywhere (CloudFront will connect here)
         self.alb_security_group = ec2.SecurityGroup(
             self,
             "AlbSecurityGroup",
             vpc=vpc,
-            security_group_name="doh-prod-alb-sg",
-            description="Security group for ALB - allows HTTP from CloudFront",
+            description="Security group for ALB - allows HTTPS from CloudFront",
             allow_all_outbound=True,
         )
         self.alb_security_group.add_ingress_rule(
             peer=ec2.Peer.any_ipv4(),
-            connection=ec2.Port.tcp(80),
-            description="Allow HTTP from anywhere (CloudFront)",
+            connection=ec2.Port.tcp(443),
+            description="Allow HTTPS from anywhere (CloudFront)",
         )
 
         # Internal ALB (CloudFront is the public entry point)
@@ -77,11 +77,12 @@ class ClusterStack(Stack):
             vpc_subnets=ec2.SubnetSelection(subnet_type=ec2.SubnetType.PUBLIC),
         )
 
-        # HTTP Listener with default 404 action
-        self.http_listener = self.alb.add_listener(
-            "HttpListener",
-            port=80,
-            protocol=elbv2.ApplicationProtocol.HTTP,
+        # HTTPS Listener with default 404 action
+        self.https_listener = self.alb.add_listener(
+            "HttpsListener",
+            port=443,
+            protocol=elbv2.ApplicationProtocol.HTTPS,
+            certificates=[certificate],
             default_action=elbv2.ListenerAction.fixed_response(
                 status_code=404,
                 content_type="text/plain",
@@ -93,6 +94,6 @@ class ClusterStack(Stack):
         CfnOutput(self, "ClusterName", value=self.cluster.cluster_name, export_name="doh-prod-cluster-name")
         CfnOutput(self, "AlbArn", value=self.alb.load_balancer_arn, export_name="doh-prod-alb-arn")
         CfnOutput(self, "AlbDns", value=self.alb.load_balancer_dns_name, export_name="doh-prod-alb-dns")
-        CfnOutput(self, "HttpListenerArn", value=self.http_listener.listener_arn, export_name="doh-prod-http-listener-arn")
+        CfnOutput(self, "HttpsListenerArn", value=self.https_listener.listener_arn, export_name="doh-prod-https-listener-arn")
         CfnOutput(self, "TaskExecutionRoleArn", value=self.task_execution_role.role_arn, export_name="doh-prod-task-execution-role-arn")
         CfnOutput(self, "LogGroupName", value=self.log_group.log_group_name, export_name="doh-prod-ecs-log-group")

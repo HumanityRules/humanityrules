@@ -36,6 +36,10 @@ DEBUG = os.environ.get("DJANGO_DEBUG", "1") == "1"
 # In development, there's no security concern for local requests.
 ALLOWED_HOSTS = ["*"]
 
+# Trust X-Forwarded-Proto header from ALB (behind CloudFront)
+# This makes request.is_secure() return True when the original request was HTTPS
+SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+
 CSRF_TRUSTED_ORIGINS = [
     "https://devopshero.ngrok.io",
     "https://devopshero.ai",

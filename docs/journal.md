@@ -1,5 +1,21 @@
 # DevOpsHero Development Journal
 
+## 2026-01-26 - CloudFront to ALB HTTPS Communication
+
+Fixed OAuth redirect URI using `http://` instead of `https://` in production. Root cause: CloudFront terminated HTTPS and forwarded to ALB over HTTP, so Django's `request.is_secure()` returned False.
+
+**Infrastructure changes:**
+- ALB now has HTTPS listener (port 443) with ACM certificate (same cert used by CloudFront)
+- CloudFront origin protocol changed from `HTTP_ONLY` to `HTTPS_ONLY`
+- Removed fixed `security_group_name` from ALB security group to allow CDK replacements
+
+**Django changes:**
+- Added `SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")` to trust ALB's forwarded protocol header
+- Removed ngrok hack from auth.py — `request.is_secure()` now works correctly in all environments
+
+The standard pattern: when ALB receives HTTPS, it sets `X-Forwarded-Proto: https`, and Django trusts that header.
+
+
 ## 2026-01-25 - CloudFront + ngrok Host Header Fix
 
 Fixed devopshero.ai domain not resolving. Two issues discovered:
