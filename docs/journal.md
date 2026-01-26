@@ -1,5 +1,33 @@
 # DevOpsHero Development Journal
 
+## 2026-01-26 - Production Latency Investigation and DB Connection Pooling
+
+Investigated why production latency (~250ms) was much higher than localhost (~30ms).
+
+**Diagnosis approach:**
+- Compared CloudFront path vs direct ALB to isolate components
+- CloudFront warm: ~140ms, Direct ALB: ~330ms (CloudFront faster due to edge TLS termination)
+- Backend processing: ~90-100ms
+
+**Root cause of high backend time:** Django's `CONN_MAX_AGE` was unset (default 0), meaning every request opened a new TCP connection to Aurora, performed TLS handshake, and authenticated — adding ~30-50ms per request.
+
+**Fix:** Added `conn_max_age=600` to database configuration. Connections now persist for 10 minutes per Uvicorn thread.
+
+**Side effect:** DB connections increased from 0 to ~40-50. This is expected — Uvicorn's AnyIO threadpool defaults to 40 threads, and each thread that handles a DB request keeps its connection alive. Aurora Serverless v2 handles thousands of connections, so this is fine.
+
+**Latency breakdown for US West user → us-east-1 infrastructure:**
+- You → CloudFront edge: ~20ms
+- CloudFront → us-east-1 (cross-country round trip): ~70ms
+- TLS handshakes: ~25ms
+- App processing: ~25ms
+- **Total: ~140ms** (unavoidable without moving region)
+
+**Learnings:**
+- `CONN_MAX_AGE` is essential for production Django with network databases
+- 40 thread default in AnyIO is reasonable; connection count scales with it
+- Cross-region latency (~70ms) dominates for geographically distant users
+
+
 ## 2026-01-26 - Fix Lambda Missing DOH_API_SECRET_KEY (401 on Callback)
 
 After fixing the Lambda name mismatch, the install callback still failed with 401. The Lambda was sending an empty `Authorization: Bearer ` header because `DOH_API_SECRET_KEY` wasn't being loaded from `.env` during CDK deployment.
