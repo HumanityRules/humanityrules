@@ -4,16 +4,15 @@ set -e
 # DevOps Hero Production Infrastructure Deployment Script
 # 
 # Prerequisites:
-# - AWS CLI configured with credentials for the DevOps Hero AWS account
 # - CDK CLI installed (npm install -g aws-cdk)
 # - Python dependencies installed (uv sync)
-# - Secrets created in AWS Secrets Manager (see below)
+# - .env file with secrets (synced to AWS Secrets Manager by this script)
 
-# Load only the AWS credentials we need from .env (avoids issues with multi-line values)
+# Load all environment variables from .env
 if [ -f "../.env" ]; then
-    export DOH_AWS_ACCESS_KEY=$(grep -E '^DOH_AWS_ACCESS_KEY=' ../.env | cut -d'=' -f2-)
-    export DOH_AWS_SECRET_KEY=$(grep -E '^DOH_AWS_SECRET_KEY=' ../.env | cut -d'=' -f2-)
-    export DOH_AWS_ACCOUNT_ID=$(grep -E '^DOH_AWS_ACCOUNT_ID=' ../.env | cut -d'=' -f2-)
+    set -a
+    source ../.env
+    set +a
 fi
 
 # Map DOH variables to AWS CLI expected names
