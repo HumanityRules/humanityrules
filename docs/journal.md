@@ -1,5 +1,14 @@
 # DevOpsHero Development Journal
 
+## 2026-01-26 - Fix Lambda Missing DOH_API_SECRET_KEY (401 on Callback)
+
+After fixing the Lambda name mismatch, the install callback still failed with 401. The Lambda was sending an empty `Authorization: Bearer ` header because `DOH_API_SECRET_KEY` wasn't being loaded from `.env` during CDK deployment.
+
+**Root cause:** `deploy.sh` only loaded AWS credentials (`DOH_AWS_*`) via grep, not the other env vars needed by the Lambda stack. The Lambda stack reads `DOH_API_SECRET_KEY` from the shell environment at deploy time and bakes it into the Lambda's environment variables.
+
+**Fix:** Changed `deploy.sh` and `deploy_stack.sh` to use `set -a; source .env; set +a` which loads all environment variables. This is simpler and won't break when new env vars are added.
+
+
 ## 2026-01-26 - Fix Lambda Name Mismatch in CF Install Template
 
 First AWS account integration failed with "Function not found" error. The CloudFormation template referenced `devopshero-install-callback` but CDK deploys the Lambda as `doh-prod-install-callback`.

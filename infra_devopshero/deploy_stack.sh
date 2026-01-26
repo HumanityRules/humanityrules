@@ -13,11 +13,11 @@ fi
 
 STACK_NAME="$1"
 
-# Load AWS credentials from .env
+# Load all environment variables from .env
 if [ -f "../.env" ]; then
-    export DOH_AWS_ACCESS_KEY=$(grep -E '^DOH_AWS_ACCESS_KEY=' ../.env | cut -d'=' -f2-)
-    export DOH_AWS_SECRET_KEY=$(grep -E '^DOH_AWS_SECRET_KEY=' ../.env | cut -d'=' -f2-)
-    export DOH_AWS_ACCOUNT_ID=$(grep -E '^DOH_AWS_ACCOUNT_ID=' ../.env | cut -d'=' -f2-)
+    set -a
+    source ../.env
+    set +a
 fi
 
 # Map to AWS CLI expected names
