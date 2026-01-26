@@ -51,15 +51,7 @@ def load_env_values(env_path: Path) -> dict[str, str]:
         print(f"Error: .env file not found at {env_path}")
         sys.exit(1)
     
-    values = dotenv_values(env_path)
-    
-    # Generate DJANGO_SECRET_KEY if not present
-    if "DJANGO_SECRET_KEY" not in values or not values["DJANGO_SECRET_KEY"]:
-        import secrets
-        values["DJANGO_SECRET_KEY"] = secrets.token_urlsafe(50)
-        print(f"Generated new DJANGO_SECRET_KEY")
-    
-    return values
+    return dotenv_values(env_path)
 
 
 def get_secrets_client(env_values: dict[str, str]) -> boto3.client:

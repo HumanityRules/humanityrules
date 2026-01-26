@@ -23,7 +23,7 @@ class ClusterStack(Stack):
             "EcsCluster",
             cluster_name="doh-prod-cluster",
             vpc=vpc,
-            container_insights_v2=ecs.ContainerInsights.ENABLED,
+            container_insights_v2=ecs.ContainerInsights.ENHANCED,
         )
 
         # Task Execution Role (for ECS to pull images and write logs)
