@@ -1,5 +1,14 @@
 # DevOpsHero Development Journal
 
+## 2026-01-26 - Fix Job Worker select_for_update Error
+
+Job worker was failing with `FOR UPDATE cannot be applied to the nullable side of an outer join`. Root cause: `_claim_pending_teardown()` used `select_for_update()` with `select_related("app__datastore")`, and `datastore` is a nullable FK which creates a LEFT OUTER JOIN.
+
+**Fix:** Removed `app__datastore` from `select_related()` in the claim function. The teardown executor re-fetches the deployment with all relations anyway, so the eager load in the claim was redundant.
+
+Also expanded `infra_devopshero/AGENTS.md` with production debugging instructions (CloudWatch log commands for listing streams, fetching logs, filtering errors).
+
+
 ## 2026-01-26 - Enable Job Worker in Production
 
 Added `DOH_RUN_JOB_WORKER=1` to the app container's environment in `app_stack.py`. The job worker was not running in production because the env var wasn't set — jobs (deployments, environment provisioning, teardowns) were stuck in PENDING.

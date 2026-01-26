@@ -103,7 +103,50 @@ This script loads AWS credentials from `.env` and deploys the specified stack.
 cdk diff doh-prod-app
 ```
 
-### View CloudWatch Logs
+### Debugging Production
+
+**Log group:** `/devopshero/prod/ecs`
+
+**Stream prefixes:**
+- `devopshero/devopshero/` — App container logs
+- `migrate/migrate/` — Migration init container logs
+
+**List recent log streams (find latest task):**
+
+```bash
+aws logs describe-log-streams \
+  --log-group-name "/devopshero/prod/ecs" \
+  --order-by LastEventTime \
+  --descending \
+  --limit 5 \
+  --query 'logStreams[*].[logStreamName,lastEventTimestamp]' \
+  --output text
+```
+
+**Get logs from a specific stream:**
+
+```bash
+# Replace STREAM_NAME with actual stream from above
+aws logs get-log-events \
+  --log-group-name "/devopshero/prod/ecs" \
+  --log-stream-name "devopshero/devopshero/TASK_ID" \
+  --limit 100 \
+  --query 'events[*].message' \
+  --output text
+```
+
+**Filter for errors or specific patterns:**
+
+```bash
+aws logs get-log-events \
+  --log-group-name "/devopshero/prod/ecs" \
+  --log-stream-name "devopshero/devopshero/TASK_ID" \
+  --limit 100 \
+  --query 'events[*].message' \
+  --output text | grep -iE 'error|exception|worker'
+```
+
+**Tail logs in real-time:**
 
 ```bash
 # App logs
@@ -115,7 +158,7 @@ aws logs tail /devopshero/prod/ecs --follow --filter-pattern migrate
 
 ### ECS Exec (SSH Alternative)
 
-Requires the AWS Session Manager Plugin installed locally.
+Requires the AWS Session Manager Plugin (already installed and in PATH).
 
 ```bash
 # Find running task

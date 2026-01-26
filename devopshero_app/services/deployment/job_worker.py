@@ -109,7 +109,6 @@ def _claim_pending_teardown() -> Deployment | None:
             .select_related(
                 "app",
                 "app__workspace",
-                "app__datastore",
                 "environment",
             )
             .first()
