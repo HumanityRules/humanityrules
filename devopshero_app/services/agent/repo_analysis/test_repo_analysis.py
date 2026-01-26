@@ -117,17 +117,17 @@ REFERENCE_APPS: dict[str, AppExpectation] = {
 
 
 def get_deployable_repos_path() -> Path:
-    """Get the path to the deployable_repos directory."""
+    """Get the path to the deployable-repos directory (sibling of project root)."""
     # Navigate up from this file to find the project root
     current = Path(__file__).resolve()
     # Go up: repo_analysis -> agent -> services -> devopshero_app -> project root
     project_root = current.parent.parent.parent.parent.parent
-    deployable_repos = project_root / "deployable_repos"
+    deployable_repos = project_root / ".." / "deployable-repos"
 
     if not deployable_repos.exists():
-        raise RuntimeError(f"deployable_repos directory not found at {deployable_repos}")
+        raise RuntimeError(f"deployable-repos directory not found at {deployable_repos}")
 
-    return deployable_repos
+    return deployable_repos.resolve()
 
 
 

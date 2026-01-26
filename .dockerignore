@@ -42,9 +42,6 @@ openspec/
 *.md
 !README.md
 
-# Deployable repos (example apps for customers)
-deployable_repos/
-
 # Test files
 tests/
 *_test.py

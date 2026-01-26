@@ -1,5 +1,21 @@
 # DevOpsHero Development Journal
 
+## 2026-01-26 - Move deployable_repos to Separate Repository
+
+Moved `deployable_repos/` to a separate Git repository at `vmendi/deployable-repos` (private). This reduces the main repo size and separates example apps from the core platform.
+
+**Changes:**
+- Created new repo at `../deployable-repos` (sibling directory)
+- Updated `seed_local_repos` command with `--path` argument (defaults to `../deployable-repos`)
+- Added `--exclude` argument to skip specific repos (e.g., `--exclude=db_portal`)
+- Updated `example_apps.py` and `test_repo_analysis.py` to use new path
+- Removed `deployable_repos/` from `.dockerignore` (no longer needed)
+- Added `.gitignore` to deployable-repos to exclude `node_modules/`, `_build/`, `deps/`, etc.
+- Removed `internal_admin_dashboard/` (full NetBox clone, 60MB) from deployable-repos
+
+**Repo size:** deployable-repos went from 296MB to ~15MB after cleanup.
+
+
 ## 2026-01-26 - Add deploy_app.sh for Fast App-Only Deployments
 
 Created `infra_devopshero/deploy_app.sh` for deploying code changes without running CDK stack checks. The full `deploy.sh` takes 10+ minutes even with no infrastructure changes because CDK synthesizes and compares all 6 stacks.

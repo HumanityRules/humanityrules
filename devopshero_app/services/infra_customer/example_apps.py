@@ -6,7 +6,14 @@ Each function returns an AppConfig for a specific app.
 
 from pathlib import Path
 
+from django.conf import settings
+
 from . import appconfig
+
+
+def _get_deployable_repos_path() -> Path:
+    """Get path to the deployable-repos directory (sibling of project root)."""
+    return (settings.BASE_DIR / ".." / "deployable-repos").resolve()
 
 
 def get_simple_dashboard_config(env_slug: str) -> appconfig.AppConfig:
@@ -25,7 +32,7 @@ def get_simple_dashboard_config(env_slug: str) -> appconfig.AppConfig:
             {"name": "STREAMLIT_SERVER_HEADLESS", "value": "true"},
             {"name": "STREAMLIT_BROWSER_GATHER_USAGE_STATS", "value": "false"},
         ],
-        app_source_path=Path(__file__).parent.parent / "deployable_repos" / "simple_dashboard",
+        app_source_path=_get_deployable_repos_path() / "simple_dashboard",
     )
 
 
@@ -48,7 +55,7 @@ def get_db_portal_config(env_slug: str) -> appconfig.AppConfig:
             {"name": "DISABLE_AUTH", "value": "true"},
             {"name": "RUN_SAMPLER", "value": "N"},
         ],
-        app_source_path=Path(__file__).parent.parent / "deployable_repos" / "db_portal",
+        app_source_path=_get_deployable_repos_path() / "db_portal",
         database_config=appconfig.DatabaseConfig(
             name="db_portal_prod",
             engine=appconfig.EngineConfig(
