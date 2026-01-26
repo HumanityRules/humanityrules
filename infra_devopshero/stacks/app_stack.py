@@ -64,73 +64,60 @@ class AppStack(Stack):
             ),
         )
 
-        # Container with secrets injection
-        container = task_definition.add_container(
+        # Secret references (created once, shared between containers)
+        django_secret = secretsmanager.Secret.from_secret_name_v2(self, "DjangoSecret", "devopshero/prod/django")
+        workos_secret = secretsmanager.Secret.from_secret_name_v2(self, "WorkosSecret", "devopshero/prod/workos")
+        github_secret = secretsmanager.Secret.from_secret_name_v2(self, "GithubSecret", "devopshero/prod/github")
+        bedrock_secret = secretsmanager.Secret.from_secret_name_v2(self, "BedrockSecret", "devopshero/prod/bedrock")
+        api_secret = secretsmanager.Secret.from_secret_name_v2(self, "ApiSecret", "devopshero/prod/api")
+
+        # All secrets needed by the app (shared between migration and app containers)
+        app_secrets = {
+            # Database credentials from Aurora-generated secret
+            "DATABASE_HOST": ecs.Secret.from_secrets_manager(database_secret, field="host"),
+            "DATABASE_PORT": ecs.Secret.from_secrets_manager(database_secret, field="port"),
+            "DATABASE_NAME": ecs.Secret.from_secrets_manager(database_secret, field="dbname"),
+            "DATABASE_USERNAME": ecs.Secret.from_secrets_manager(database_secret, field="username"),
+            "DATABASE_PASSWORD": ecs.Secret.from_secrets_manager(database_secret, field="password"),
+            # App secrets (created manually in Secrets Manager before deployment)
+            "DJANGO_SECRET_KEY": ecs.Secret.from_secrets_manager(django_secret, field="DJANGO_SECRET_KEY"),
+            "DJANGO_SUPERUSER_EMAIL": ecs.Secret.from_secrets_manager(django_secret, field="DJANGO_SUPERUSER_EMAIL"),
+            "WORKOS_CLIENT_ID": ecs.Secret.from_secrets_manager(workos_secret, field="WORKOS_CLIENT_ID"),
+            "WORKOS_API_KEY": ecs.Secret.from_secrets_manager(workos_secret, field="WORKOS_API_KEY"),
+            "GITHUB_APP_ID": ecs.Secret.from_secrets_manager(github_secret, field="GITHUB_APP_ID"),
+            "GITHUB_APP_CLIENT_ID": ecs.Secret.from_secrets_manager(github_secret, field="GITHUB_APP_CLIENT_ID"),
+            "GITHUB_APP_CLIENT_SECRET": ecs.Secret.from_secrets_manager(github_secret, field="GITHUB_APP_CLIENT_SECRET"),
+            "GITHUB_APP_PRIVATE_KEY": ecs.Secret.from_secrets_manager(github_secret, field="GITHUB_APP_PRIVATE_KEY"),
+            "GITHUB_WEBHOOK_SECRET": ecs.Secret.from_secrets_manager(github_secret, field="GITHUB_WEBHOOK_SECRET"),
+            "AWS_BEDROCK_REGION": ecs.Secret.from_secrets_manager(bedrock_secret, field="AWS_BEDROCK_REGION"),
+            "AWS_BEDROCK_ACCESS_KEY_ID": ecs.Secret.from_secrets_manager(bedrock_secret, field="AWS_BEDROCK_ACCESS_KEY_ID"),
+            "AWS_BEDROCK_SECRET_ACCESS_KEY": ecs.Secret.from_secrets_manager(bedrock_secret, field="AWS_BEDROCK_SECRET_ACCESS_KEY"),
+            "DOH_API_SECRET_KEY": ecs.Secret.from_secrets_manager(api_secret, field="DOH_API_SECRET_KEY"),
+        }
+
+        # Init container - runs Django migrations and ensures superuser before app starts
+        migration_container = task_definition.add_container(
+            "MigrationContainer",
+            container_name="migrate",
+            image=ecs.ContainerImage.from_ecr_repository(ecr_repository, tag="latest"),
+            logging=ecs.LogDrivers.aws_logs(stream_prefix="migrate", log_group=log_group),
+            essential=False,  # Task continues after this container exits
+            command=[
+                "sh", "-c",
+                "uv run python manage.py migrate --noinput && uv run python manage.py ensure_superuser",
+            ],
+            environment={"DJANGO_DEBUG": "0"},
+            secrets=app_secrets,
+        )
+
+        # App container
+        app_container = task_definition.add_container(
             "AppContainer",
             container_name="devopshero",
             image=ecs.ContainerImage.from_ecr_repository(ecr_repository, tag="latest"),
             logging=ecs.LogDrivers.aws_logs(stream_prefix="devopshero", log_group=log_group),
-            environment={
-                "DJANGO_DEBUG": "0",
-            },
-            secrets={
-                # Database credentials from Aurora-generated secret
-                # App constructs DATABASE_URL from these components
-                "DATABASE_HOST": ecs.Secret.from_secrets_manager(database_secret, field="host"),
-                "DATABASE_PORT": ecs.Secret.from_secrets_manager(database_secret, field="port"),
-                "DATABASE_NAME": ecs.Secret.from_secrets_manager(database_secret, field="dbname"),
-                "DATABASE_USERNAME": ecs.Secret.from_secrets_manager(database_secret, field="username"),
-                "DATABASE_PASSWORD": ecs.Secret.from_secrets_manager(database_secret, field="password"),
-                # These secrets should be created manually in Secrets Manager before deployment
-                "DJANGO_SECRET_KEY": ecs.Secret.from_secrets_manager(
-                    secretsmanager.Secret.from_secret_name_v2(self, "DjangoSecret", "devopshero/prod/django"),
-                    field="DJANGO_SECRET_KEY",
-                ),
-                "WORKOS_CLIENT_ID": ecs.Secret.from_secrets_manager(
-                    secretsmanager.Secret.from_secret_name_v2(self, "WorkosSecret", "devopshero/prod/workos"),
-                    field="WORKOS_CLIENT_ID",
-                ),
-                "WORKOS_API_KEY": ecs.Secret.from_secrets_manager(
-                    secretsmanager.Secret.from_secret_name_v2(self, "WorkosSecret2", "devopshero/prod/workos"),
-                    field="WORKOS_API_KEY",
-                ),
-                "GITHUB_APP_ID": ecs.Secret.from_secrets_manager(
-                    secretsmanager.Secret.from_secret_name_v2(self, "GithubSecret", "devopshero/prod/github"),
-                    field="GITHUB_APP_ID",
-                ),
-                "GITHUB_APP_CLIENT_ID": ecs.Secret.from_secrets_manager(
-                    secretsmanager.Secret.from_secret_name_v2(self, "GithubSecret2", "devopshero/prod/github"),
-                    field="GITHUB_APP_CLIENT_ID",
-                ),
-                "GITHUB_APP_CLIENT_SECRET": ecs.Secret.from_secrets_manager(
-                    secretsmanager.Secret.from_secret_name_v2(self, "GithubSecret3", "devopshero/prod/github"),
-                    field="GITHUB_APP_CLIENT_SECRET",
-                ),
-                "GITHUB_APP_PRIVATE_KEY": ecs.Secret.from_secrets_manager(
-                    secretsmanager.Secret.from_secret_name_v2(self, "GithubSecret4", "devopshero/prod/github"),
-                    field="GITHUB_APP_PRIVATE_KEY",
-                ),
-                "GITHUB_WEBHOOK_SECRET": ecs.Secret.from_secrets_manager(
-                    secretsmanager.Secret.from_secret_name_v2(self, "GithubSecret5", "devopshero/prod/github"),
-                    field="GITHUB_WEBHOOK_SECRET",
-                ),
-                "AWS_BEDROCK_REGION": ecs.Secret.from_secrets_manager(
-                    secretsmanager.Secret.from_secret_name_v2(self, "BedrockSecret", "devopshero/prod/bedrock"),
-                    field="AWS_BEDROCK_REGION",
-                ),
-                "AWS_BEDROCK_ACCESS_KEY_ID": ecs.Secret.from_secrets_manager(
-                    secretsmanager.Secret.from_secret_name_v2(self, "BedrockSecret2", "devopshero/prod/bedrock"),
-                    field="AWS_BEDROCK_ACCESS_KEY_ID",
-                ),
-                "AWS_BEDROCK_SECRET_ACCESS_KEY": ecs.Secret.from_secrets_manager(
-                    secretsmanager.Secret.from_secret_name_v2(self, "BedrockSecret3", "devopshero/prod/bedrock"),
-                    field="AWS_BEDROCK_SECRET_ACCESS_KEY",
-                ),
-                "DOH_API_SECRET_KEY": ecs.Secret.from_secrets_manager(
-                    secretsmanager.Secret.from_secret_name_v2(self, "ApiSecret", "devopshero/prod/api"),
-                    field="DOH_API_SECRET_KEY",
-                ),
-            },
+            environment={"DJANGO_DEBUG": "0"},
+            secrets=app_secrets,
             health_check=ecs.HealthCheck(
                 command=["CMD-SHELL", "curl -f http://localhost:8000/health/ || exit 1"],
                 interval=Duration.seconds(30),
@@ -139,7 +126,15 @@ class AppStack(Stack):
                 start_period=Duration.seconds(60),
             ),
         )
-        container.add_port_mappings(ecs.PortMapping(container_port=8000, protocol=ecs.Protocol.TCP))
+        app_container.add_port_mappings(ecs.PortMapping(container_port=8000, protocol=ecs.Protocol.TCP))
+
+        # App container waits for migration to complete successfully
+        app_container.add_container_dependencies(
+            ecs.ContainerDependency(
+                container=migration_container,
+                condition=ecs.ContainerDependencyCondition.SUCCESS,
+            )
+        )
 
         # Security group for ECS tasks
         ecs_security_group = ec2.SecurityGroup(

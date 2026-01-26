@@ -1,5 +1,81 @@
 # DevOpsHero Development Journal
 
+## 2026-01-26 - Automated Superuser Setup via Init Container
+
+Added `ensure_superuser` management command to automatically promote a configured user to Django admin on every deployment. This ensures admin access is reproducible without manual intervention.
+
+**The problem:** Django migrations don't create a superuser. Previously required SSH/ECS Exec with Session Manager Plugin to run `createsuperuser` or promote users manually — not reproducible and easy to forget on fresh deployments.
+
+**Solution:** Custom management command + init container:
+1. **`ensure_superuser` command** — Reads `DJANGO_SUPERUSER_EMAIL` from environment, promotes that user to `is_staff=True` and `is_superuser=True`. Idempotent: skips if already superuser, logs message if user doesn't exist yet (will be promoted on next deployment after they log in).
+2. **Init container updated** — Now runs `migrate --noinput && ensure_superuser` in sequence.
+3. **Secret configuration** — Added `DJANGO_SUPERUSER_EMAIL` field to `devopshero/prod/django` secret in AWS Secrets Manager.
+
+**To configure for new deployments:**
+1. Add `DJANGO_SUPERUSER_EMAIL=your@email.com` to `.env`
+2. Run `cd infra_devopshero && uv run python sync_secrets.py` to push to AWS Secrets Manager
+3. The email should match the WorkOS login email of the intended admin
+4. User must log in at least once (to create their account) before or after deployment
+
+**Gotcha:** The `sync_secrets.py` script overwrites secrets entirely based on `SECRET_DEFINITIONS`. If you manually add fields to a secret in AWS console, they'll be wiped on next sync. Always add new secret fields to both `.env` and `SECRET_DEFINITIONS` in `sync_secrets.py`.
+
+**ECS Exec alternative (requires Session Manager Plugin):**
+```bash
+aws ecs execute-command --cluster doh-prod-cluster --task <TASK_ARN> --container devopshero --interactive \
+  --command "uv run python manage.py shell -c \"from devopshero_app.models import User; u = User.objects.get(email='user@example.com'); u.is_staff=True; u.is_superuser=True; u.save()\""
+```
+
+
+## 2026-01-26 - CloudFront Static Files 502 Fix
+
+Static assets (`/static/*`) returned 502 errors after deploying the migration init container. Root cause: the `/static/*` CloudFront behavior was missing an `origin_request_policy`, so CloudFront didn't forward the Host header to the ALB.
+
+**Why it broke now:** A previous change switched CloudFront origin protocol from `HTTP_ONLY` (port 80) to `HTTPS_ONLY` (port 443). With HTTP, the missing policy wasn't a problem. With HTTPS, the Host header became essential for proper TLS negotiation and routing.
+
+**Diagnosis steps:**
+- ALB served CSS correctly when accessed directly (`curl -sk https://alb-hostname/static/...`)
+- CloudFront returned 502 for `/static/*` but 200 for `/`
+- Difference: default behavior had `origin_request_policy=ALL_VIEWER`, static behavior had none
+- Cache invalidation didn't help — CloudFront was actively failing, not serving cached errors
+
+**Fix:** Added `origin_request_policy=ALL_VIEWER` to the `/static/*` behavior. Applied via AWS CLI because CDK deploy failed with a separate web ACL error (CloudFront pricing plan subscription requires web ACL).
+
+**CDK code updated** in `cdn_stack.py`:
+- Added `origin_request_policy=cloudfront.OriginRequestPolicy.ALL_VIEWER` for the static behavior
+
+
+## 2026-01-26 - ECS Migration Init Container
+
+Added a migration init container to the ECS task definition so Django migrations run automatically before the app starts on every deployment.
+
+**The problem:** Database was connected but migrations hadn't run. Previously there was no automated way to run `manage.py migrate` in production.
+
+**Solution:** Init container pattern using ECS container dependencies:
+1. **Migration container** — Runs `manage.py migrate --noinput`, marked `essential=False` so task continues after it exits
+2. **App container** — Has `ContainerDependency` with `condition=SUCCESS`, so it waits for migration to complete before starting
+
+**Initial failure:** Migration container crashed because Django's migrate command runs system checks, which loads URL configs, which imports `auth.py`, which initializes the WorkOS client at module level. The migration container only had database secrets, not WorkOS secrets.
+
+**First fix attempt:** Added `--skip-checks` to bypass Django system checks. This worked but was suboptimal — checks provide valuable validation before running migrations.
+
+**Proper fix:** User refactored `auth.py` to lazy-initialize the WorkOS client (not at module import time). Then removed `--skip-checks` and gave the migration container all the same secrets as the app container. This ensures migration runs in an identical environment to the app.
+
+**Code changes in `app_stack.py`:**
+- Extracted secret references to variables (e.g., `django_secret`, `workos_secret`) to avoid duplicate CDK construct IDs
+- Created `app_secrets` dict combining database and app secrets
+- Both containers now use `secrets=app_secrets`
+- Migration command: `["uv", "run", "python", "manage.py", "migrate", "--noinput"]`
+
+**Deploy flow now:**
+1. ECS starts new task
+2. Migration container runs, applies any pending migrations
+3. Migration exits successfully (code 0)
+4. App container starts (was blocked on migration SUCCESS)
+5. Health check passes, traffic routes to new task
+
+Migration logs go to CloudWatch under the "migrate" stream prefix, separate from "devopshero" app logs.
+
+
 ## 2026-01-26 - CloudFront to ALB HTTPS Communication
 
 Fixed OAuth redirect URI using `http://` instead of `https://` in production. Root cause: CloudFront terminated HTTPS and forwarded to ALB over HTTP, so Django's `request.is_secure()` returned False.

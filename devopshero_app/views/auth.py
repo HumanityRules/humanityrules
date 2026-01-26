@@ -1,3 +1,5 @@
+from functools import lru_cache
+
 from django.conf import settings
 from django.contrib.auth import login, logout
 from django.shortcuts import redirect
@@ -7,11 +9,13 @@ from workos import WorkOSClient
 from ..models import User
 
 
-# Initialize WorkOS client
-workos_client = WorkOSClient(
-    api_key=settings.WORKOS_API_KEY,
-    client_id=settings.WORKOS_CLIENT_ID,
-)
+@lru_cache(maxsize=1)
+def _get_workos_client():
+    """Lazily initialize WorkOS client on first use."""
+    return WorkOSClient(
+        api_key=settings.WORKOS_API_KEY,
+        client_id=settings.WORKOS_CLIENT_ID,
+    )
 
 
 def auth_login(request):
@@ -25,7 +29,7 @@ def auth_login(request):
     scheme = "https" if request.is_secure() else "http"
     redirect_uri = f"{scheme}://{request.get_host()}/auth/callback"
     
-    authorization_url = workos_client.user_management.get_authorization_url(
+    authorization_url = _get_workos_client().user_management.get_authorization_url(
         provider="authkit",
         redirect_uri=redirect_uri,
     )
@@ -46,7 +50,7 @@ def auth_callback(request):
     
     try:
         # Exchange code for user info
-        auth_response = workos_client.user_management.authenticate_with_code(
+        auth_response = _get_workos_client().user_management.authenticate_with_code(
             code=code,
         )
         
