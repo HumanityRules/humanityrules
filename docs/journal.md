@@ -1,16 +1,19 @@
 # DevOpsHero Development Journal
 
-## 2026-01-26 - S3 BucketDeployment for Customer CF Templates
+## 2026-01-26 - S3 BucketDeployment and CORS for Customer CF Templates
 
-CloudFormation Quick Create Stack returned "S3 Access Denied" when customers tried to connect their AWS accounts. The public S3 bucket had correct permissions but was empty — the template file hadn't been uploaded.
+CloudFormation Quick Create Stack failed when customers tried to connect their AWS accounts. Two issues discovered:
 
-**Root cause:** CDK creates infrastructure but doesn't automatically upload files to S3 buckets. The `cf_install_template.json` (customer-facing template for AWS account connection) was accidentally deleted on Jan 20th when cleaning up `_old_cf/` directory.
+**Issue 1: Empty bucket (Access Denied)**
+The public S3 bucket had correct permissions but was empty. CDK creates infrastructure but doesn't automatically upload files. The `cf_install_template.json` was accidentally deleted on Jan 20th when cleaning up `_old_cf/`.
+
+**Issue 2: Missing CORS (TypeError: Load failed)**
+After uploading the template, Quick Create Stack still failed with "TypeError: Load failed". The CloudFormation console runs in the browser and fetches templates via JavaScript — requires CORS headers.
 
 **Fix:**
 1. Restored `cf_install_template.json` from git history (`git show 'ef6891a0b^:...'`)
-2. Added `BucketDeployment` construct to `storage_stack.py` that automatically uploads the template to the public bucket on every deploy
-
-The `BucketDeployment` uses CDK's built-in Lambda to sync files, with content-hash comparison for automatic updates when templates change.
+2. Added `BucketDeployment` construct to automatically upload templates on deploy
+3. Added CORS rule to public bucket allowing GET from any origin
 
 **Two template files to understand:**
 - `infra_devopshero/cf_install_template.json` — Customer runs this in their account. Creates IAM role + calls install callback Lambda.
