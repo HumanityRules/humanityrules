@@ -1,5 +1,14 @@
 # DevOpsHero Development Journal
 
+## 2026-01-26 - Fix Lambda Name Mismatch in CF Install Template
+
+First AWS account integration failed with "Function not found" error. The CloudFormation template referenced `devopshero-install-callback` but CDK deploys the Lambda as `doh-prod-install-callback`.
+
+**Fix:** Updated `cf_install_template.json` ServiceToken to use the correct function name `doh-prod-install-callback`.
+
+Also added `deploy_stack.sh` helper script to deploy individual CDK stacks without running the full `deploy.sh`.
+
+
 ## 2026-01-26 - S3 BucketDeployment and CORS for Customer CF Templates
 
 CloudFormation Quick Create Stack failed when customers tried to connect their AWS accounts. Two issues discovered:

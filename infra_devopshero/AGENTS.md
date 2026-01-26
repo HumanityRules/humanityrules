@@ -106,8 +106,11 @@ uv run python sync_secrets.py --dry-run # Preview changes
 ### Deploy Single Stack
 
 ```bash
-cdk deploy doh-prod-app --require-approval never
+cd infra_devopshero
+./deploy_stack.sh doh-prod-storage
 ```
+
+This script loads AWS credentials from `.env` and deploys the specified stack.
 
 ### View CDK Diff
 
