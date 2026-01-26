@@ -56,6 +56,7 @@ class CdnStack(Stack):
                     allowed_methods=cloudfront.AllowedMethods.ALLOW_GET_HEAD,
                     cached_methods=cloudfront.CachedMethods.CACHE_GET_HEAD,
                     cache_policy=cloudfront.CachePolicy.CACHING_OPTIMIZED,
+                    origin_request_policy=cloudfront.OriginRequestPolicy.ALL_VIEWER,
                     compress=True,
                 ),
             },

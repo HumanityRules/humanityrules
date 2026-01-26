@@ -21,6 +21,7 @@ from dotenv import dotenv_values
 SECRET_DEFINITIONS = {
     "devopshero/prod/django": [
         "DJANGO_SECRET_KEY",
+        "DJANGO_SUPERUSER_EMAIL",
     ],
     "devopshero/prod/workos": [
         "WORKOS_CLIENT_ID",
