@@ -1,8 +1,11 @@
 """Storage Stack for DevOps Hero - S3 buckets and ECR repository."""
 
+import os
+
 from aws_cdk import CfnOutput, RemovalPolicy, Stack
 from aws_cdk import aws_ecr as ecr
 from aws_cdk import aws_s3 as s3
+from aws_cdk import aws_s3_deployment as s3_deployment
 from constructs import Construct
 
 
@@ -28,6 +31,16 @@ class StorageStack(Stack):
         )
         # Allow public read access
         self.public_bucket.grant_public_access()
+
+        # Deploy CloudFormation templates to public bucket
+        # These templates are used by customers to connect their AWS accounts
+        infra_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        s3_deployment.BucketDeployment(
+            self,
+            "PublicBucketTemplates",
+            sources=[s3_deployment.Source.asset(infra_dir, exclude=["*", "!cf_install_template.json"])],
+            destination_bucket=self.public_bucket,
+        )
 
         # Private bucket for internal assets (encrypted)
         self.private_bucket = s3.Bucket(
