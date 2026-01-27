@@ -1,5 +1,18 @@
 # DevOpsHero Development Journal
 
+## 2026-01-27 - Reuse Existing ACM Certificates and Fix Domain Selection UX
+
+**Problem 1:** When deploying the shared ALB with HTTPS, we always created a new wildcard certificate even if one already existed. This caused duplicate certificates and potential conflicts.
+
+**Solution:** Added `acm_utils.py` with `find_wildcard_certificate()` that searches ACM for existing certificates. Key insight: certificates can have the wildcard domain in Subject Alternative Names (SANs), not just the primary domain. Initial implementation only checked primary domain and missed certificates like `devopshero.ai` with `*.devopshero.ai` in SANs.
+
+**Problem 2:** When creating environments, the agent would guess a domain (e.g., `devopshero.ai`) without calling `list_hosted_zones`, presenting a yes/no question instead of showing all available options.
+
+**Solution:** Strengthened system prompt instructions in the "Environment Provisioning" section with explicit numbered steps, example output format, and CRITICAL rules. The agent must call `list_hosted_zones` first and present ALL domains as numbered options before creating an environment.
+
+**Debugging approach:** Used CloudFormation stack events to diagnose failures. First failure was the ACM SAN bug. Second failure was a Route53 conflict — `*.devopshero.ai` record already existed (owned by DOH CDN stack). Used Django admin message log to confirm agent wasn't calling tools before making assumptions.
+
+
 ## 2026-01-27 - Fix Phantom Bubbles and Missing Tool Spinners on Page Refresh
 
 Refreshing the page mid-conversation caused phantom empty message bubbles and lost tool spinner state.

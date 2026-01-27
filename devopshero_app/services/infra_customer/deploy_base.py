@@ -17,6 +17,7 @@ from aws_cdk import aws_route53 as route53
 from aws_cdk import aws_route53_targets as targets
 from constructs import Construct
 
+from . import acm_utils
 from . import cdk_utils
 from . import cloudformation_utils
 from . import route53_utils
@@ -202,6 +203,7 @@ class EcsClusterStack(Stack):
         vpc: ec2.IVpc,
         shared_hosted_zone_name: str | None,
         shared_hosted_zone_id: str | None,
+        existing_certificate_arn: str | None,
         **kwargs,
     ) -> None:
         super().__init__(scope, construct_id, **kwargs)
@@ -291,12 +293,18 @@ class EcsClusterStack(Stack):
                 zone_name=shared_hosted_zone_name,
             )
 
-            # Wildcard certificate
-            self.wildcard_certificate = acm.Certificate(
-                self, "WildcardCertificate",
-                domain_name=f"*.{shared_hosted_zone_name}",
-                validation=acm.CertificateValidation.from_dns(hosted_zone),
-            )
+            # Use existing certificate if available, otherwise create new
+            if existing_certificate_arn:
+                self.wildcard_certificate = acm.Certificate.from_certificate_arn(
+                    self, "WildcardCertificate",
+                    certificate_arn=existing_certificate_arn,
+                )
+            else:
+                self.wildcard_certificate = acm.Certificate(
+                    self, "WildcardCertificate",
+                    domain_name=f"*.{shared_hosted_zone_name}",
+                    validation=acm.CertificateValidation.from_dns(hosted_zone),
+                )
 
             # HTTPS Listener with default 404 action
             self.https_listener = self.shared_alb.add_listener(
@@ -392,11 +400,18 @@ def deploy(
 
     # Look up hosted zone ID if hosted zone name is provided
     shared_hosted_zone_id = None
+    existing_certificate_arn = None
     if shared_alb_hosted_zone:
         logger.info("Looking up hosted zone for '%(hosted_zone)s'", {"hosted_zone": shared_alb_hosted_zone})
         shared_hosted_zone_id = route53_utils.get_hosted_zone_id(session=session, hosted_zone_name=shared_alb_hosted_zone)
         if shared_hosted_zone_id:
             logger.info("Found hosted zone: %(hosted_zone_id)s", {"hosted_zone_id": shared_hosted_zone_id})
+            # Check if wildcard certificate already exists
+            existing_certificate_arn = acm_utils.find_wildcard_certificate(session=session, domain_name=shared_alb_hosted_zone)
+            if existing_certificate_arn:
+                logger.info("Will use existing wildcard certificate")
+            else:
+                logger.info("No existing wildcard certificate found, will create new one")
         else:
             logger.error("Could not find hosted zone '%(hosted_zone)s', HTTPS will not be configured", {"hosted_zone": shared_alb_hosted_zone})
             shared_alb_hosted_zone = None  # Fall back to HTTP-only
@@ -414,6 +429,7 @@ def deploy(
         vpc=vpc_stack.vpc,
         shared_hosted_zone_name=shared_alb_hosted_zone,
         shared_hosted_zone_id=shared_hosted_zone_id,
+        existing_certificate_arn=existing_certificate_arn,
     )
     ecs_cluster_stack.add_dependency(vpc_stack)
 
