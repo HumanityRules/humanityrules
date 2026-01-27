@@ -1,5 +1,19 @@
 # DevOpsHero Development Journal
 
+## 2026-01-27 - Fix Phantom Bubbles and Missing Tool Spinners on Page Refresh
+
+Refreshing the page mid-conversation caused phantom empty message bubbles and lost tool spinner state.
+
+**Root cause:** The SSE reconnect replay logic only tracked text streaming state (`accumulated_text`), not in-progress tool calls. After `text_flush` (which persists text to DB before tool execution), `accumulated_text` was empty but `is_streaming` remained true. On reconnect, this sent an empty `start` event creating a phantom bubble. Additionally, in-progress tools had no replay mechanism.
+
+**Fix:** Track `pending_tools` in `AgentRunner` (tool_use_id → event data). On reconnect:
+- If tools are pending → replay `tool_start` events (restores spinners)
+- Else if text is streaming with content → replay text
+- Otherwise → no replay (no phantom bubbles)
+
+Also gate text replay on `accumulated_text` being non-empty, preventing empty `start` events after `text_flush`.
+
+
 ## 2026-01-27 - Include AWS Infrastructure in Agent System Context
 
 Agent previously had to call `list_aws_accounts` and `list_environments` tools to discover available infrastructure before each deployment. This added latency and tool call overhead.

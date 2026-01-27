@@ -30,6 +30,7 @@ class AgentRunner:
     client_connected: bool = True
     is_streaming: bool = False  # True between 'start' and 'complete' events
     accumulated_text: str = ""  # Current text block for reconnect replay
+    pending_tools: dict = field(default_factory=dict)  # tool_use_id → {name, input} for in-progress tools
 
 
 # In-memory state (single instance deployment)
@@ -79,12 +80,17 @@ def mark_client_connected(conversation_id: UUID) -> None:
     if runner:
         runner.client_connected = True
 
-        # If reconnecting mid-stream, replay state so client can resume
-        if runner.is_streaming:
+        # Replay in-progress tools so their spinners show after refresh
+        if runner.pending_tools:
+            logger.info(f"Replaying {len(runner.pending_tools)} pending tool(s) for conversation {conversation_id}")
+            for tool_data in runner.pending_tools.values():
+                runner.event_queue.put_nowait(AgentStreamEvent(type="tool_start", data=tool_data))
+
+        # Replay text streaming state if there's actual content
+        elif runner.is_streaming and runner.accumulated_text:
             logger.info(f"Replaying stream state for reconnected client on conversation {conversation_id}")
             runner.event_queue.put_nowait(AgentStreamEvent(type="start", data={}))
-            if runner.accumulated_text:
-                runner.event_queue.put_nowait(AgentStreamEvent(type="text_delta", data={"text": runner.accumulated_text}))
+            runner.event_queue.put_nowait(AgentStreamEvent(type="text_delta", data={"text": runner.accumulated_text}))
         else:
             logger.info(f"Client reconnected for conversation {conversation_id}")
     else:
@@ -151,9 +157,17 @@ async def _run_agent_loop(runner: AgentRunner, conversation_id: UUID) -> None:
                         runner.accumulated_text += event.data.get("text", "")
                     elif event.type == "text_flush":
                         runner.accumulated_text = ""  # Current block finalized (before tool call)
+                    elif event.type == "tool_start":
+                        tool_use_id = event.data.get("tool_use_id")
+                        if tool_use_id:
+                            runner.pending_tools[tool_use_id] = event.data
+                    elif event.type == "tool_result":
+                        tool_use_id = event.data.get("tool_use_id")
+                        runner.pending_tools.pop(tool_use_id, None)
                     elif event.type == "complete":
                         runner.is_streaming = False
                         runner.accumulated_text = ""
+                        runner.pending_tools.clear()
                     await runner.event_queue.put(event)
                 logger.info(f"Agent completed response for conversation {conversation_id}")
             else:
