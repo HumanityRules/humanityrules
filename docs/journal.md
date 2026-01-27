@@ -1,5 +1,12 @@
 # DevOpsHero Development Journal
 
+## 2026-01-27 - Use T-Shirt Sizes for Container Resources
+
+Agent was presenting ECS CPU capacity as "256 CPU, 512 MB" which sounds like 256 processors. ECS uses CPU units where 1024 = 1 vCPU, so 256 units = 0.25 vCPU — confusing for users unfamiliar with AWS internals.
+
+**Fix:** Updated system prompt to use t-shirt sizes (XS, Small, Medium, Large) with human-readable vCPU values. Agent now says "XS (0.25 vCPU, 512 MB)" instead of "256 CPU". Added mapping table so agent knows internal values while presenting user-friendly terms. Also added CPU/memory documentation to the `create_app` tool schema.
+
+
 ## 2026-01-27 - Fix AI Assistant in Production
 
 Three issues preventing the AI assistant from working in production:
