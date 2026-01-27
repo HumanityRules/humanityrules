@@ -36,7 +36,7 @@ from claude_agent_sdk.types import (
 )
 from django.conf import settings
 
-from devopshero_app.models import App, Conversation, Message, Repository, Workspace
+from devopshero_app.models import App, AWSAccount, Conversation, Message, Repository, Workspace
 from devopshero_app.services.github import repo_service
 from devopshero_app.services.llm import llm_client, title_generator
 
@@ -90,7 +90,9 @@ def _load_system_prompt() -> str:
 async def _build_system_prompt(conversation: Conversation) -> str:
     """Build system prompt with conversation context injected."""
     base_prompt = _load_system_prompt()
-    
+    sections = []
+
+    # Conversation context section
     context_lines = []
     if conversation.context_workspace_id:
         ws = await Workspace.objects.aget(id=conversation.context_workspace_id)
@@ -98,11 +100,44 @@ async def _build_system_prompt(conversation: Conversation) -> str:
     if conversation.context_repository_id:
         repo = await Repository.objects.aget(id=conversation.context_repository_id)
         context_lines.append(f"Current repository: {repo.full_name} (id: {repo.id})")
-    
+
     if context_lines:
-        context_section = "\n## Conversation Context\n\n" + "\n".join(context_lines)
-        return base_prompt + context_section
+        sections.append("## Conversation Context\n\n" + "\n".join(context_lines))
+
+    # AWS infrastructure section
+    infra_section = await _build_aws_infrastructure_section(conversation.organization_id)
+    if infra_section:
+        sections.append(infra_section)
+
+    if sections:
+        return base_prompt + "\n" + "\n\n".join(sections)
     return base_prompt
+
+
+async def _build_aws_infrastructure_section(organization_id) -> str:
+    """Build the AWS infrastructure section listing accounts and environments."""
+    accounts = AWSAccount.objects.filter(organization_id=organization_id).prefetch_related("environments")
+
+    lines = ["## AWS Infrastructure", ""]
+    account_count = 0
+
+    async for account in accounts:
+        account_count += 1
+        lines.append(f"**{account.name}** (id: {account.id}, aws: {account.aws_account_id or 'pending'}, status: {account.status})")
+
+        environments = [env async for env in account.environments.all()]
+        if environments:
+            for env in environments:
+                domain_info = f", domain: *.{env.shared_alb_hosted_zone}" if env.shared_alb_hosted_zone else ""
+                lines.append(f"  - **{env.name}** (id: {env.id}, slug: {env.slug}, region: {env.aws_region}, status: {env.status}{domain_info})")
+        else:
+            lines.append("  - No environments yet")
+        lines.append("")
+
+    if account_count == 0:
+        return "## AWS Infrastructure\n\nNo AWS accounts connected. Guide the user to connect one using initiate_aws_connection."
+
+    return "\n".join(lines)
 
 
 async def _aget_last_user_message(conversation: Conversation) -> str:
