@@ -31,22 +31,9 @@ The main developer documentation lives in the docs/ subdirectory. **When creatin
 
 - **`docs/domain_model.md`** — Core domain concepts and entity relationships. Defines Workspace, App, Environment, Datastore, Deployment, etc entities with their attributes and how they relate. Read this when implementing features that touch the domain model or when clarifying entity boundaries.
 
-**OpenSpec specifications** live in `openspec/specs/`. Run `openspec list --specs` to see all capabilities. Pending changes (including design docs) are in `openspec/changes/`.
-
 **Subsystem AGENTS.md files:**
 - **`devopshero_app/views/AGENTS.md`** — HTMX navigation paradigm, view patterns, adding pages
 - **`infra_devopshero/AGENTS.md`** — Control plane CDK infrastructure, deployment operations, AWS credentials setup
-
-
-# Journal Writing
-
-When adding entries to `docs/journal.md`:
-
-- **Format** — Reverse chronological order (latest on top). Use `## YYYY-MM-DD HH:MM - Title`
-- **Be concise** — One or two sentences per point. Avoid verbose explanations.
-- **Explain decisions** — Document what was decided and the reasoning behind it, not just what changed.
-- **Capture learnings** — Document mistakes, corrections, and insights gained, especially when implementation required iteration or user feedback.
-- **No "Files Changed" sections** — The git history tracks file changes; the journal captures intent and context.
 
 
 # Django 6.0 Template Partials
@@ -324,16 +311,18 @@ Prefix beads task titles with a category to make the domain clear at a glance. F
 
 - **Onboarding** — User registration, organization creation, session handling
 - **AgentChat** — AI conversation interface, streaming, message rendering, tool calls
-- **AWSAccounts** — AWS account connection wizard, verification, AssumeRole
-- **CustomerInstall** — Infrastructure deployed to customer accounts (CDK stacks, IAM roles, tagging)
-- **Deployment** — Build pipeline, ECR push, ECS deployment, health checks
-- **Workspaces** — Workspace CRUD, apps, datastores, environments
-- **Dashboard** — Main dashboard UI, navigation, layouts
+- **Integrations** — External services: AWS accounts, GitHub, WorkOS
+- **Deployment** — Everything in customer accounts: environments, apps, datastores, VPCs, ECS, ALB
+- **DomainModel** — Core entities (workspaces, apps, datastores, environments), CRUD, relationships, refactors
+- **UI** — Shared frontend: base templates, navigation, design system, shared components
+- **ControlPlane** — DOH's own infrastructure (EFS, Aurora, CloudFront, ALB)
+- **DevEx** — Developer tooling, scripts, CLI, local development
+- **Bugfix** — Bug fixes and debugging sessions
 
 **Examples:**
 - `AgentChat: Fix markdown underscore rendering`
-- `Onboarding: Form validation and session expiration handling`
-- `CustomerInstall: Least privilege role and resource tagging`
+- `Deployment: ECS health check timeout tuning`
+- `ControlPlane: Add EFS for session persistence`
 
 ### Task Completion
 

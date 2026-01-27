@@ -1,5 +1,37 @@
 # DevOpsHero Development Journal
 
+## 2026-01-27 00:30 - [DevEx] Journaling Skill and Category System Overhaul
+
+Created a `/journal` skill to standardize development journaling and overhauled the category system for both journal entries and beads tasks. The skill is triggered by `/journal` (just adds entry) or `/journal commit` (adds entry and commits all session changes).
+
+**Category system redesign (from 7 to 9 categories):**
+
+The original beads categories had unclear boundaries, particularly around infrastructure and deployment. After analysis:
+
+- **CustomerInstall + Deployment → Deployment** — Merged because deploying apps can also create infrastructure (e.g., datastores). The distinction was artificial since both happen in customer AWS accounts.
+- **AWSAccounts → Integrations** — Expanded to cover all external services: AWS accounts, GitHub App, WorkOS. The original name was too narrow.
+- **Workspaces + Architecture → DomainModel** — Merged because "Workspaces" only named one entity while covering all domain objects. Architecture (refactors, design changes) naturally fits with domain model work.
+- **Dashboard → UI** — Renamed for broader scope: shared frontend components, design system, base templates, not just the dashboard page.
+- **ControlPlane (new)** — DOH's own infrastructure (EFS, Aurora, CloudFront, ALB). Critical to distinguish from customer infrastructure.
+- **DevEx (new)** — Developer tooling, scripts, CLI, local development.
+- **Bugfix (new)** — Bug fixes and debugging sessions.
+
+**Final 9 categories:** Onboarding, AgentChat, Integrations, Deployment, DomainModel, UI, ControlPlane, DevEx, Bugfix.
+
+**Journal entry format change:**
+
+Added `[Category]` tag to entry titles for searchability: `## YYYY-MM-DD HH:MM - [Category] Title`. This enables grep filtering by category.
+
+**Style change from concise to thorough:**
+
+Initially the skill emphasized conciseness ("one or two sentences per point"). Changed to thoroughness ("include enough detail to understand context months later") because the journal serves as long-term documentation of decisions and their reasoning. Concise entries often lose the "why" that makes them valuable months later.
+
+**Implementation details:**
+- Skill location: `.claude/skills/journal/SKILL.md` (project skill, not personal)
+- Updated AGENTS.md: removed Journal Writing section (now in skill), updated Task Categories
+- Updated existing beads issues to use new category names via `bd update --title`
+
+
 ## 2026-01-27 - Workspace View UI Cleanup
 
 Simplified the workspace detail page header by removing the "New Conversation" button. Reasoning: no clear use case for workspace-level conversations without a repository context yet — better to add it back when the need emerges (YAGNI).
