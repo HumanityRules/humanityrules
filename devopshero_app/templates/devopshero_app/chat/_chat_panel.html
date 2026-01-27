@@ -1,6 +1,6 @@
 {# Chat panel content - can be swapped via HTMX #}
 {# Wrapped in div for hx-select targeting #}
-<div id="chat-panel-content" class="flex flex-col h-full" style="view-transition-name: chat-panel-content;">
+<div id="chat-panel-content" class="flex flex-col h-full relative" style="view-transition-name: chat-panel-content;">
 {% if conversation %}
     {# Header #}
     <div class="border-b border-gray-200 dark:border-gray-700 px-6">
@@ -61,6 +61,19 @@
         </div>
     </div>
 
+    {# Scroll to bottom button - shown when auto-scroll is disabled #}
+    <button id="scroll-to-bottom-btn"
+            type="button"
+            class="hidden absolute bottom-22 right-6 p-2 rounded-full
+                   bg-indigo-600 text-white shadow-lg border border-white dark:border-gray-400
+                   hover:bg-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500
+                   transition-opacity opacity-90 hover:opacity-100"
+            aria-label="Scroll to bottom">
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 14l-7 7m0 0l-7-7m7 7V3" />
+        </svg>
+    </button>
+
     {# Message input #}
     <div class="border-t border-gray-200 dark:border-gray-700 px-6 py-4"
          style="view-transition-name: message-input;">
@@ -115,6 +128,43 @@ function scrollToBottomSmooth() {
         container.scrollTo({ top: getScrollTargetTop(), behavior: 'smooth' });
     });
 }
+
+// Auto-scroll state management
+let autoScrollEnabled = true;
+
+function showScrollButton() {
+    document.getElementById('scroll-to-bottom-btn').classList.remove('hidden');
+}
+
+function hideScrollButton() {
+    document.getElementById('scroll-to-bottom-btn').classList.add('hidden');
+}
+
+function disableAutoScroll() {
+    autoScrollEnabled = false;
+    showScrollButton();
+}
+
+function enableAutoScrollAndScroll() {
+    autoScrollEnabled = true;
+    hideScrollButton();
+    scrollToBottom();
+}
+
+function maybeScrollToBottom() {
+    if (autoScrollEnabled) scrollToBottom();
+}
+
+function maybeScrollToBottomSmooth() {
+    if (autoScrollEnabled) scrollToBottomSmooth();
+}
+
+// Disable auto-scroll when user starts scrolling
+container.addEventListener('wheel', disableAutoScroll);
+container.addEventListener('touchstart', disableAutoScroll, { passive: true });
+
+// Button click handler
+document.getElementById('scroll-to-bottom-btn').addEventListener('click', enableAutoScrollAndScroll);
 
 marked.setOptions({ gfm: true, breaks: false });
 
@@ -194,7 +244,7 @@ function handleThinking(data) {
             target.outerHTML = oobElement.outerHTML;
         }
     }
-    scrollToBottomSmooth();
+    maybeScrollToBottomSmooth();
 }
 
 /**
@@ -218,7 +268,7 @@ function handleStart(data) {
         window.markdownPendingBuffer = '';
         window.markdownTargetEl = streamingText;
     }
-    scrollToBottomSmooth();
+    maybeScrollToBottomSmooth();
 }
 
 /**
@@ -243,7 +293,7 @@ function handleTextDelta(data) {
         window.markdownPendingBuffer = pendingBuffer;
         window.markdownStreamBuffer = streamBuffer;
         renderMarkdown(window.markdownTargetEl, streamBuffer);
-        scrollToBottomSmooth();
+        maybeScrollToBottomSmooth();
     } catch (e) {
         console.error('Failed to parse sse-text-delta:', e);
     }
@@ -272,13 +322,13 @@ function handleTextFlush() {
         const streamingText = streamingMessage.querySelector('#streaming-text');
         if (streamingText && !streamingText.textContent.trim()) {
             streamingMessage.remove();
-            scrollToBottom();
+            maybeScrollToBottom();
             return;
         }
         streamingMessage.removeAttribute('id');
         if (streamingText) streamingText.removeAttribute('id');
     }
-    scrollToBottomSmooth();
+    maybeScrollToBottomSmooth();
 }
 
 /**
@@ -304,7 +354,7 @@ function handleComplete(data) {
         processOobElements(template.content);
     }
 
-    scrollToBottomSmooth();
+    maybeScrollToBottomSmooth();
 }
 
 // Initialize on page load
@@ -373,7 +423,7 @@ function handleToolStart(data) {
     while (fragment.firstChild) {
         messages.appendChild(fragment.firstChild);
     }
-    scrollToBottomSmooth();
+    maybeScrollToBottomSmooth();
 }
 
 /**
@@ -391,7 +441,7 @@ function handleToolResult(data) {
     while (fragment.firstChild) {
         messages.appendChild(fragment.firstChild);
     }
-    scrollToBottomSmooth();
+    maybeScrollToBottomSmooth();
 }
 
 // Up arrow message history

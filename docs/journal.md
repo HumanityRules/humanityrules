@@ -1,5 +1,23 @@
 # DevOpsHero Development Journal
 
+## 2026-01-27 - Chat Auto-scroll Toggle
+
+Previously, the chat panel auto-scrolled to bottom on every SSE event, making it impossible for users to scroll up and read message history during streaming.
+
+**Solution:** Added an auto-scroll toggle with a floating "scroll to bottom" button.
+
+- **Initial state:** auto-scroll enabled
+- **Disabled by:** `wheel` or `touchstart` events (user intent to scroll up)
+- **Re-enabled by:** clicking the floating button (explicit action only)
+
+**Implementation:** Added `autoScrollEnabled` state and gated all `scrollToBottom`/`scrollToBottomSmooth` calls through `maybeScroll*` wrappers. The floating button is positioned outside the scrollable container (relative to `#chat-panel-content`) so it stays fixed while content scrolls.
+
+**Design decisions:**
+- Used user-intent events (`wheel`, `touchstart`) rather than `scrollend` to disable auto-scroll immediately when user starts scrolling
+- Button click uses instant scroll (not smooth) for immediate feedback
+- No automatic re-enable based on scroll position — only explicit button click re-enables
+
+
 ## 2026-01-27 - Reuse Existing ACM Certificates and Fix Domain Selection UX
 
 **Problem 1:** When deploying the shared ALB with HTTPS, we always created a new wildcard certificate even if one already existed. This caused duplicate certificates and potential conflicts.
