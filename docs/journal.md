@@ -1,5 +1,56 @@
 # DevOpsHero Development Journal
 
+## 2026-01-27 15:45 - [UI] Landing Page Conversion from React to Django Templates
+
+Converted the React/TypeScript landing page (built with Bolt.new in `tmp/project/`) to Django templates. The original React version had 8 components using Tailwind 3, Lucide React icons, and React hooks for interactivity. The new Django version replicates the design without any React dependencies.
+
+**Template structure decision — partials over monolithic:**
+
+Created a `templates/devopshero_app/landing/` folder with 9 files:
+- `landing_page.html` — main template that includes all partials, loads fonts, contains all JS
+- `_header.html`, `_hero.html`, `_problem.html`, `_solution.html`, `_features.html`, `_personas.html`, `_cta.html`, `_footer.html`
+
+Chose partials for maintainability even though the total is ~700 lines. Each section is self-contained and can be edited independently. The main template handles the JS for all interactive features.
+
+**Tailwind 4 custom colors via @theme:**
+
+The React version used Tailwind 3's `tailwind.config.js` to define custom `navy` and `cyber` color palettes. In Tailwind 4, custom colors go in CSS using `@theme`:
+
+```css
+@theme {
+  --color-navy-900: #0a0f1c;
+  --color-navy-950: #060911;
+  --color-cyber-400: #22d3ee;
+  --color-cyber-500: #06b6d4;
+  /* etc */
+}
+```
+
+This enables `bg-navy-950`, `text-cyber-400` etc. as utility classes. Also added custom utility classes for the landing page: `.gradient-text`, `.gradient-text-glow`, `.btn-primary`, `.btn-secondary`, `.section-padding`, `.container-custom`, `.bg-grid-pattern`, `.bg-radial-gradient`.
+
+**Icon strategy — inline SVGs over library:**
+
+The React version used `lucide-react`. For Django templates without a build step, chose inline SVGs copied from lucide.dev. This avoids JS dependencies and gives full CSS control via `currentColor`. The landing uses ~15 unique icons across all sections.
+
+**Vanilla JS for interactivity:**
+
+Replicated React hooks with vanilla JS in a single `<script>` block:
+- Header scroll effect (adds blur/border background when scrolled past 20px)
+- Mobile menu toggle with icon swap animation
+- IntersectionObserver for scroll-triggered fade-in animations
+- Animated counters in the Problem section (counts up when visible)
+- Terminal animation loop in the Solution section (steps appear sequentially, then success message, then restarts)
+
+**Known issue — button padding conflict:**
+
+The `.btn-primary` class uses hardcoded `padding: 1rem 2rem`, which doesn't get overridden by utility classes like `py-2 px-6` on individual elements. The React version used `@apply` which allows overrides. Result: form buttons appear larger than the React original. Would need to either remove padding from `.btn-primary` or restructure to allow overrides.
+
+**Key points:**
+- Tailwind 4 uses `@theme` in CSS instead of `tailwind.config.js` for custom design tokens
+- Inline SVGs are the cleanest approach for icons in server-rendered templates — no dependencies, full CSS control
+- When converting CSS utility classes from React, avoid hardcoding values that should be overridable — use CSS custom properties or structure classes to allow utility overrides
+- The conversion preserves all visual design and interactivity without any React/Node dependencies
+
 ## 2026-01-27 01:00 - [DevEx] Debug Production Skill
 
 Created a new skill for debugging DOH production infrastructure issues. The skill provides context needed to investigate ECS tasks, CloudFormation stacks, and logs in the control plane.

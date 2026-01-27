@@ -9,6 +9,211 @@
   */
 @source "../../../**/*.{html,py,js}";
 
+/* ===== Custom Colors for Landing Page ===== */
+@theme {
+  --color-navy-900: #0a0f1c;
+  --color-navy-950: #060911;
+  --color-cyber-50: #ecfeff;
+  --color-cyber-100: #cffafe;
+  --color-cyber-200: #a5f3fc;
+  --color-cyber-300: #67e8f9;
+  --color-cyber-400: #22d3ee;
+  --color-cyber-500: #06b6d4;
+  --color-cyber-600: #0891b2;
+  --color-cyber-700: #0e7490;
+  --color-cyber-800: #155e75;
+  --color-cyber-900: #164e63;
+}
+
+/* ===== Landing Page Utility Classes ===== */
+
+/* Gradient text effect */
+.gradient-text {
+  background: linear-gradient(to right, #22d3ee, #67e8f9, #2dd4bf);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+/* Gradient text with glow animation */
+.gradient-text-glow {
+  background: linear-gradient(to right, #22d3ee, #67e8f9, #2dd4bf);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: text-glow-landing 2s ease-in-out infinite;
+  filter: drop-shadow(0 0 8px rgba(6, 182, 212, 0.6));
+}
+
+@keyframes text-glow-landing {
+  0%, 100% {
+    filter: drop-shadow(0 0 8px rgba(6, 182, 212, 0.6)) drop-shadow(0 0 20px rgba(6, 182, 212, 0.4));
+  }
+  50% {
+    filter: drop-shadow(0 0 16px rgba(6, 182, 212, 0.8)) drop-shadow(0 0 30px rgba(6, 182, 212, 0.6));
+  }
+}
+
+/* Glow box effect */
+.glow-box {
+  position: relative;
+  overflow: hidden;
+  box-shadow:
+    0 0 20px rgba(6, 182, 212, 0.1),
+    0 0 40px rgba(6, 182, 212, 0.05);
+}
+
+.glow-box:hover {
+  box-shadow:
+    0 0 30px rgba(6, 182, 212, 0.2),
+    0 0 60px rgba(6, 182, 212, 0.1);
+}
+
+/* Card hover effect */
+.card-hover {
+  transition: all 0.3s ease-out;
+}
+
+.card-hover:hover {
+  transform: translateY(-4px);
+}
+
+/* Primary button style */
+.btn-primary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem 2rem;
+  font-weight: 600;
+  color: #060911;
+  background: linear-gradient(to right, #22d3ee, #06b6d4);
+  border-radius: 0.5rem;
+  overflow: hidden;
+  transition: all 0.3s;
+}
+
+.btn-primary:hover {
+  box-shadow: 0 0 30px rgba(6, 182, 212, 0.5);
+  transform: scale(1.05);
+}
+
+/* Secondary button style */
+.btn-secondary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem 2rem;
+  font-weight: 600;
+  color: white;
+  border: 1px solid rgba(6, 182, 212, 0.5);
+  border-radius: 0.5rem;
+  overflow: hidden;
+  transition: all 0.3s;
+}
+
+.btn-secondary:hover {
+  border-color: #22d3ee;
+  background-color: rgba(6, 182, 212, 0.1);
+}
+
+/* Section padding */
+.section-padding {
+  padding-top: 6rem;
+  padding-bottom: 6rem;
+}
+
+@media (min-width: 768px) {
+  .section-padding {
+    padding-top: 8rem;
+    padding-bottom: 8rem;
+  }
+}
+
+/* Container */
+.container-custom {
+  max-width: 80rem;
+  margin-left: auto;
+  margin-right: auto;
+  padding-left: 1rem;
+  padding-right: 1rem;
+}
+
+@media (min-width: 640px) {
+  .container-custom {
+    padding-left: 1.5rem;
+    padding-right: 1.5rem;
+  }
+}
+
+@media (min-width: 1024px) {
+  .container-custom {
+    padding-left: 2rem;
+    padding-right: 2rem;
+  }
+}
+
+/* Background patterns */
+.bg-grid-pattern {
+  background-image:
+    linear-gradient(rgba(6, 182, 212, 0.03) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(6, 182, 212, 0.03) 1px, transparent 1px);
+  background-size: 60px 60px;
+}
+
+.bg-radial-gradient {
+  background: radial-gradient(ellipse 80% 50% at 50% -20%, rgba(6, 182, 212, 0.15), transparent);
+}
+
+.bg-radial-gradient-bottom {
+  background: radial-gradient(ellipse 80% 50% at 50% 120%, rgba(6, 182, 212, 0.1), transparent);
+}
+
+/* Typing cursor animation */
+.typing-cursor::after {
+  content: '|';
+  animation: blink-cursor 1s step-end infinite;
+}
+
+@keyframes blink-cursor {
+  0%, 50% { opacity: 1; }
+  51%, 100% { opacity: 0; }
+}
+
+/* Pulse glow animation for background blobs */
+.animate-pulse-glow {
+  animation: pulse-glow 2s ease-in-out infinite;
+}
+
+@keyframes pulse-glow {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+/* Slide up animation */
+.animate-slide-up {
+  animation: slide-up 0.5s ease-out forwards;
+}
+
+@keyframes slide-up {
+  0% { transform: translateY(20px); opacity: 0; }
+  100% { transform: translateY(0); opacity: 1; }
+}
+
+/* Fade in animation */
+.animate-fade-in-landing {
+  animation: fade-in-landing 0.6s ease-out forwards;
+}
+
+@keyframes fade-in-landing {
+  0% { opacity: 0; }
+  100% { opacity: 1; }
+}
+
+/* Shadow glow utility */
+.shadow-glow {
+  box-shadow: 0 0 30px rgba(6, 182, 212, 0.5);
+}
+
 /* ===== View Transitions for HTMX content swaps ===== */
 
 /* Define the main-content element for view transitions */
