@@ -1,0 +1,96 @@
+{% comment %}
+Landing page header with navigation and mobile menu.
+JS for scroll effect and mobile toggle is in landing_page.html.
+{% endcomment %}
+
+<header id="landing-header" class="fixed top-0 left-0 right-0 z-50 transition-all duration-500 bg-transparent">
+    <div class="container-custom">
+        <nav class="flex items-center justify-between h-20 relative">
+            <!-- Logo -->
+            <a href="#" class="flex items-center gap-3 group">
+                <div class="relative">
+                    <div class="w-10 h-10 bg-gradient-to-br from-cyber-400 to-cyan-500 rounded-xl flex items-center justify-center transform group-hover:scale-110 transition-all duration-300 group-hover:shadow-glow">
+                        <!-- Zap icon -->
+                        <svg class="w-5 h-5 text-navy-950" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M4 14a1 1 0 0 1-.78-1.63l9.9-10.2a.5.5 0 0 1 .86.46l-1.92 6.02A1 1 0 0 0 13 10h7a1 1 0 0 1 .78 1.63l-9.9 10.2a.5.5 0 0 1-.86-.46l1.92-6.02A1 1 0 0 0 11 14z"/>
+                        </svg>
+                    </div>
+                    <div class="absolute inset-0 bg-cyber-400/20 rounded-xl blur-xl opacity-0 group-hover:opacity-100 transition-opacity duration-300"></div>
+                </div>
+                <span class="text-xl font-bold text-white tracking-tight">
+                    DevOps<span class="gradient-text">Hero</span>
+                </span>
+            </a>
+
+            <!-- Desktop Navigation -->
+            <div class="hidden lg:flex items-center gap-1 absolute left-1/2 -translate-x-1/2 bg-white/[0.03] backdrop-blur-sm border border-white/[0.06] rounded-full px-2 py-1.5">
+                <a href="#problem" class="relative px-4 py-2 text-gray-400 hover:text-white transition-colors text-sm font-medium rounded-full hover:bg-white/[0.06]">
+                    Problem
+                </a>
+                <a href="#solution" class="relative px-4 py-2 text-gray-400 hover:text-white transition-colors text-sm font-medium rounded-full hover:bg-white/[0.06]">
+                    Solution
+                </a>
+                <a href="#features" class="relative px-4 py-2 text-gray-400 hover:text-white transition-colors text-sm font-medium rounded-full hover:bg-white/[0.06]">
+                    Features
+                </a>
+                <a href="#personas" class="relative px-4 py-2 text-gray-400 hover:text-white transition-colors text-sm font-medium rounded-full hover:bg-white/[0.06]">
+                    Who It's For
+                </a>
+            </div>
+
+            <!-- Desktop CTA -->
+            <div class="hidden lg:flex items-center gap-4">
+                <a href="#cta" class="group inline-flex items-center gap-2 px-5 py-2.5 bg-gradient-to-r from-cyber-400 to-cyan-400 text-navy-950 font-semibold text-sm rounded-full transition-all duration-300 hover:shadow-glow hover:scale-105">
+                    Get Early Access
+                    <!-- ArrowRight icon -->
+                    <svg class="w-4 h-4 transform group-hover:translate-x-0.5 transition-transform" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M5 12h14"/><path d="m12 5 7 7-7 7"/>
+                    </svg>
+                </a>
+            </div>
+
+            <!-- Mobile Menu Button -->
+            <button id="mobile-menu-button" class="lg:hidden relative p-2 text-gray-400 hover:text-white transition-colors rounded-lg hover:bg-white/[0.06]" aria-label="Toggle menu">
+                <div class="relative w-6 h-6">
+                    <!-- Menu icon (hamburger) -->
+                    <svg id="menu-icon-open" class="w-6 h-6 absolute inset-0 transition-all duration-300 opacity-100 rotate-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <line x1="4" x2="20" y1="12" y2="12"/><line x1="4" x2="20" y1="6" y2="6"/><line x1="4" x2="20" y1="18" y2="18"/>
+                    </svg>
+                    <!-- X icon (close) -->
+                    <svg id="menu-icon-close" class="w-6 h-6 absolute inset-0 transition-all duration-300 opacity-0 -rotate-90" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M18 6 6 18"/><path d="m6 6 12 12"/>
+                    </svg>
+                </div>
+            </button>
+        </nav>
+    </div>
+
+    <!-- Mobile Menu -->
+    <div id="mobile-menu" class="lg:hidden fixed inset-0 top-20 bg-navy-950/98 backdrop-blur-xl transition-all duration-500 opacity-0 pointer-events-none">
+        <div class="container-custom py-8">
+            <div class="space-y-2">
+                <a href="#problem" class="block px-4 py-4 text-xl font-medium text-gray-300 hover:text-white hover:bg-white/[0.04] rounded-xl transition-all duration-300">
+                    Problem
+                </a>
+                <a href="#solution" class="block px-4 py-4 text-xl font-medium text-gray-300 hover:text-white hover:bg-white/[0.04] rounded-xl transition-all duration-300">
+                    Solution
+                </a>
+                <a href="#features" class="block px-4 py-4 text-xl font-medium text-gray-300 hover:text-white hover:bg-white/[0.04] rounded-xl transition-all duration-300">
+                    Features
+                </a>
+                <a href="#personas" class="block px-4 py-4 text-xl font-medium text-gray-300 hover:text-white hover:bg-white/[0.04] rounded-xl transition-all duration-300">
+                    Who It's For
+                </a>
+            </div>
+
+            <div class="mt-8 pt-8 border-t border-white/[0.06]">
+                <a href="#cta" class="flex items-center justify-center gap-2 w-full px-6 py-4 bg-gradient-to-r from-cyber-400 to-cyan-400 text-navy-950 font-semibold rounded-xl">
+                    Get Early Access
+                    <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M5 12h14"/><path d="m12 5 7 7-7 7"/>
+                    </svg>
+                </a>
+            </div>
+        </div>
+    </div>
+</header>
