@@ -1,5 +1,29 @@
 # DevOpsHero Development Journal
 
+## 2026-01-27 01:00 - [DevEx] Debug Production Skill
+
+Created a new skill for debugging DOH production infrastructure issues. The skill provides context needed to investigate ECS tasks, CloudFormation stacks, and logs in the control plane.
+
+**Design evolution toward minimalism:**
+
+Started with a verbose version containing full AWS CLI command examples for every operation (list log streams, get log events, ECS exec, describe stacks, etc.). User correctly pointed out that the agent is smart enough to construct these commands — what it actually needs is the DOH-specific context it can't infer: resource names, log groups, stream prefixes.
+
+Stripped down to just the essential context: ECS cluster name, service name, container names, log group, log stream prefixes, and CDK stack list.
+
+**Dynamic extraction from source:**
+
+Instead of hardcoding resource names in the skill (which could drift out of sync), created `extract_resources.py` that parses the CDK source files using regex to extract current values. The script reads `infra_devopshero/app.py`, `cluster_stack.py`, and `app_stack.py` to pull out resource names.
+
+**Robust path resolution:**
+
+Initially used fragile `.parent.parent.parent.parent` chain to find the infra directory. Replaced with a walk-up-the-tree approach that looks for `infra_devopshero/` directly at each parent level — works regardless of where the script lives in the repo.
+
+**Key points:**
+- Skills should provide context the agent can't infer, not instructions it already knows
+- Dynamic extraction from source prevents skill/code drift
+- Walk-up-tree pattern for finding directories is more robust than counting parents
+- Tested the skill live — successfully retrieved ECS logs on first real use
+
 ## 2026-01-27 00:30 - [DevEx] Journaling Skill and Category System Overhaul
 
 Created a `/journal` skill to standardize development journaling and overhauled the category system for both journal entries and beads tasks. The skill is triggered by `/journal` (just adds entry) or `/journal commit` (adds entry and commits all session changes).
