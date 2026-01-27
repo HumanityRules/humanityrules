@@ -673,6 +673,9 @@
   .max-h-\[80vh\] {
     max-height: 80vh;
   }
+  .min-h-\[104px\] {
+    min-height: 104px;
+  }
   .min-h-full {
     min-height: 100%;
   }
@@ -1717,6 +1720,20 @@
       rotate: 90deg;
     }
   }
+  .group-hover\:text-indigo-500 {
+    &:is(:where(.group):hover *) {
+      @media (hover: hover) {
+        color: var(--color-indigo-500);
+      }
+    }
+  }
+  .group-hover\:text-indigo-600 {
+    &:is(:where(.group):hover *) {
+      @media (hover: hover) {
+        color: var(--color-indigo-600);
+      }
+    }
+  }
   .group-focus\/option\:text-white {
     &:is(:where(.group\/option):focus *) {
       color: var(--color-white);
@@ -2509,6 +2526,15 @@
       }
     }
   }
+  .dark\:group-hover\:text-indigo-400 {
+    @media (prefers-color-scheme: dark) {
+      &:is(:where(.group):hover *) {
+        @media (hover: hover) {
+          color: var(--color-indigo-400);
+        }
+      }
+    }
+  }
   .dark\:placeholder\:text-gray-500 {
     @media (prefers-color-scheme: dark) {
       &::placeholder {
@@ -2569,6 +2595,18 @@
           background-color: color-mix(in srgb, oklch(37.3% 0.034 259.733) 50%, transparent);
           @supports (color: color-mix(in lab, red, red)) {
             background-color: color-mix(in oklab, var(--color-gray-700) 50%, transparent);
+          }
+        }
+      }
+    }
+  }
+  .dark\:hover\:bg-gray-800\/50 {
+    @media (prefers-color-scheme: dark) {
+      &:hover {
+        @media (hover: hover) {
+          background-color: color-mix(in srgb, oklch(27.8% 0.033 256.848) 50%, transparent);
+          @supports (color: color-mix(in lab, red, red)) {
+            background-color: color-mix(in oklab, var(--color-gray-800) 50%, transparent);
           }
         }
       }

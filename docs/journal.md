@@ -1,5 +1,12 @@
 # DevOpsHero Development Journal
 
+## 2026-01-27 - Workspace View UI Cleanup
+
+Simplified the workspace detail page header by removing the "New Conversation" button. Reasoning: no clear use case for workspace-level conversations without a repository context yet — better to add it back when the need emerges (YAGNI).
+
+Moved "New App" from a floating header button to a dashed-border card at the end of the apps grid. This integrates the action with the content it relates to and scales naturally whether there are 0 or many apps.
+
+
 ## 2026-01-27 - Chat Auto-scroll Toggle
 
 Previously, the chat panel auto-scrolled to bottom on every SSE event, making it impossible for users to scroll up and read message history during streaming.

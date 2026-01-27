@@ -1,44 +1,24 @@
 <div class="max-w-5xl">
-    {# Header with workspace name and action buttons #}
-    <div class="flex items-start justify-between mb-6">
-        <div>
-            <div class="flex items-center space-x-2 text-sm text-gray-500 dark:text-gray-400 mb-1">
-                <a href="{% url 'workspaces' %}"
-                   hx-get="{% url 'workspaces' %}"
-                   hx-target="#main-content"
-                   hx-swap="innerHTML"
-                   hx-push-url="true"
-                   class="hover:text-indigo-600 dark:hover:text-indigo-400">Workspaces</a>
-                <span>/</span>
-            </div>
-            <h1 class="text-2xl font-bold text-gray-900 dark:text-white">{{ workspace.name }}</h1>
-            {% if workspace.description %}
-            <p class="mt-1 text-sm text-gray-600 dark:text-gray-400 max-w-2xl">{{ workspace.description }}</p>
-            {% endif %}
+    {# Header with workspace name #}
+    <div class="mb-6">
+        <div class="flex items-center space-x-2 text-sm text-gray-500 dark:text-gray-400 mb-1">
+            <a href="{% url 'workspaces' %}"
+               hx-get="{% url 'workspaces' %}"
+               hx-target="#main-content"
+               hx-swap="innerHTML"
+               hx-push-url="true"
+               class="hover:text-indigo-600 dark:hover:text-indigo-400">Workspaces</a>
+            <span>/</span>
         </div>
-        <div class="flex items-center space-x-3">
-            <a href="{% url 'chat_new' %}?workspace={{ workspace.id }}"
-               class="inline-flex items-center px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg text-sm font-medium text-gray-700 dark:text-gray-200 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors">
-                <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
-                </svg>
-                New Conversation
-            </a>
-            <button type="button"
-                    onclick="document.getElementById('repo-picker-modal').classList.remove('hidden')"
-                    class="inline-flex items-center px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-500 transition-colors">
-                <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
-                </svg>
-                New App
-            </button>
-        </div>
+        <h1 class="text-2xl font-bold text-gray-900 dark:text-white">{{ workspace.name }}</h1>
+        {% if workspace.description %}
+        <p class="mt-1 text-sm text-gray-600 dark:text-gray-400 max-w-2xl">{{ workspace.description }}</p>
+        {% endif %}
     </div>
 
     {# Apps section #}
     <div class="mb-8">
         <h2 class="text-lg font-semibold text-gray-900 dark:text-white mb-4">Apps</h2>
-        {% if apps %}
         <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
             {% for app in apps %}
             <div class="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-4">
@@ -56,12 +36,16 @@
                 </div>
             </div>
             {% endfor %}
+            {# New App card #}
+            <button type="button"
+                    onclick="document.getElementById('repo-picker-modal').classList.remove('hidden')"
+                    class="flex flex-col items-center justify-center p-4 border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-lg hover:border-indigo-500 dark:hover:border-indigo-400 hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors group min-h-[104px]">
+                <svg class="w-8 h-8 text-gray-400 group-hover:text-indigo-500 dark:group-hover:text-indigo-400 transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
+                </svg>
+                <span class="mt-2 text-sm font-medium text-gray-500 dark:text-gray-400 group-hover:text-indigo-600 dark:group-hover:text-indigo-400 transition-colors">New App</span>
+            </button>
         </div>
-        {% else %}
-        <div class="bg-gray-50 dark:bg-gray-800/50 border border-gray-200 dark:border-gray-700 border-dashed rounded-lg p-6 text-center">
-            <p class="text-sm text-gray-500 dark:text-gray-400">No apps yet. Click "New App" to deploy your first application.</p>
-        </div>
-        {% endif %}
     </div>
 
     {# Datastores section #}
