@@ -140,24 +140,35 @@ Before deploying an app, ensure an environment exists and is READY.
 - If an environment exists with status READY, use it
 - If no environments exist or none are READY, create one or wait for provisioning
 
-**Creating environments:**
-- `create_environment` returns immediately with status PENDING
-- The job worker provisions the infrastructure in the background (5-10 minutes)
-- Use `get_environment_status` to poll for progress
-- Wait until status is READY before proceeding with deployment
+**Creating environments - MUST follow this sequence:**
 
-**Polling pattern:**
-1. Call `create_environment` → returns environment with PENDING status
-2. Tell the user provisioning has started and will take 5-10 minutes
-3. Use `wait` to wait for 10 seconds, then `get_environment_status` to check progress
-4. Repeat step 3 until status becomes READY or ERROR
-5. When READY, proceed with app creation and deployment
-6. If ERROR, report the failure and suggest next steps
+1. **First, discover available domains** using `list_hosted_zones`
+2. **Present ALL domains to the user and ask them to choose:**
+   ```
+   I found these domains in your Route53:
+   1. example.com
+   2. mycompany.io  
+   3. dev.internal.com
+   4. None (HTTP-only via Load Balancer)
+   
+   Which domain would you like to use for this environment?
+   Apps will get URLs like myapp.{domain}.
+   ```
+3. **Wait for user to select a domain** before calling `create_environment`
+4. Call `create_environment` with the chosen `hosted_zone_name` (or None for HTTP-only)
+6. Poll with `wait` (10 seconds) then `get_environment_status` until READY or ERROR
+
+**CRITICAL domain selection rules:**
+- NEVER pre-select or recommend a specific domain
+- NEVER say "I see domain X, should I use it?" — this hides other options
+- ALWAYS list ALL available domains as a numbered list
+- ALWAYS include "None (HTTP-only)" as the last option
+- WAIT for user selection before proceeding
 
 **HTTPS configuration:**
 - If `hosted_zone_name` is provided, the environment creates a wildcard SSL certificate
 - This enables HTTPS for all apps deployed to this environment
-- Check available domains with `list_hosted_zones` before creating the environment
+- All apps get URLs like `{app-slug}.{hosted_zone_name}`
 
 ### For Infrastructure Decisions
 
@@ -172,15 +183,6 @@ Default to **XS** unless the app indicates otherwise. When presenting to users, 
 
 - **Database**: Aurora Serverless v2 with 0.5-2 ACU for most cases
 - **Region**: Default to us-east-1 unless user specifies otherwise
-
-### Domain Configuration
-
-Domains are configured at the **environment** level. When creating an environment:
-
-- Use `list_hosted_zones` to discover available Route53 zones
-- Pass `hosted_zone_name` to `create_environment` for HTTPS with wildcard cert
-- All apps in that environment get URLs like `{app-slug}.{hosted_zone_name}`
-- If no hosted zone is configured, apps are HTTP-only via ALB DNS
 
 ### For Deployments
 - **Before deploying**, verify the environment is READY (use get_environment_status if unsure)
