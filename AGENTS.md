@@ -12,6 +12,9 @@
 - **Target Audience:** It aims to empower Full Stack Engineers, Data Scientists, Machine Learning Engineers, and Business staff to "vibe-code" and ship tools independently, while giving DevOps teams the control and standardization they need.
 
 DevOps Hero is your vibe-deploying platform. With DevOps Hero, ship; let bots assist.
+Because your code deserves to be running in production, not stuck on your laptop.
+
+Built with ❤️ to make DevOps accessible to everyone.
 
 We abbrebrivate the name of DevOps Hero as DOH.
 
