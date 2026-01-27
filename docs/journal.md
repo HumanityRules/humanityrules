@@ -1,5 +1,16 @@
 # DevOpsHero Development Journal
 
+## 2026-01-27 - Fix AI Assistant in Production
+
+Three issues preventing the AI assistant from working in production:
+
+1. **Missing `CLAUDE_CODE_USE_BEDROCK=1`** — The agent client checks for this env var to enable Bedrock mode. The Bedrock credentials were in Secrets Manager, but the flag wasn't set. Added to `app_stack.py` environment.
+
+2. **Missing `git` in Docker image** — Agent clones user repos via `subprocess.run(["git", ...])`, but `git` wasn't installed. Added to Dockerfile apt-get.
+
+3. **Container running as root** — Claude SDK refuses `permission_mode="bypassPermissions"` when running as root for security. Added non-root `appuser` to Dockerfile and switched with `USER appuser`.
+
+
 ## 2026-01-26 - Fix Job Worker select_for_update Error
 
 Job worker was failing with `FOR UPDATE cannot be applied to the nullable side of an outer join`. Root cause: `_claim_pending_teardown()` used `select_for_update()` with `select_related("app__datastore")`, and `datastore` is a nullable FK which creates a LEFT OUTER JOIN.
