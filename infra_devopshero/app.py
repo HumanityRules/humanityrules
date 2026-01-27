@@ -46,12 +46,14 @@ vpc_stack = VpcStack(
     env=env_us_east_1,
 )
 
-# 3. Storage Stack (S3 buckets)
+# 3. Storage Stack (S3 buckets, ECR, EFS)
 storage_stack = StorageStack(
     app,
     f"{prefix}-storage",
+    vpc=vpc_stack.vpc,
     env=env_us_east_1,
 )
+storage_stack.add_dependency(vpc_stack)
 
 # 4. Lambda Stack (Install callback)
 lambda_stack = LambdaStack(
@@ -97,6 +99,8 @@ app_stack = AppStack(
     log_group=cluster_stack.log_group,
     ecr_repository=storage_stack.ecr_repository,
     database_secret=database_stack.database_secret,
+    claude_efs=storage_stack.claude_efs,
+    claude_efs_access_point=storage_stack.claude_efs_access_point,
     env=env_us_east_1,
 )
 app_stack.add_dependency(storage_stack)

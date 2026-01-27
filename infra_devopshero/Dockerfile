@@ -21,8 +21,10 @@ COPY . .
 # Collect static files
 RUN uv run python manage.py collectstatic --noinput
 
-# Create non-root user (required for Claude SDK's bypassPermissions mode, and because it's a good practice)
-RUN useradd --create-home --shell /bin/bash appuser && \
+# Create non-root user with explicit UID/GID 1000 (must match EFS Access Point configuration)
+# Required for Claude SDK's bypassPermissions mode, and because it's a good practice
+RUN groupadd --gid 1000 appuser && \
+    useradd --create-home --shell /bin/bash --uid 1000 --gid 1000 appuser && \
     chown -R appuser:appuser /app
 
 USER appuser

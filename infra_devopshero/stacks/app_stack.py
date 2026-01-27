@@ -4,6 +4,7 @@ from aws_cdk import Aws, CfnOutput, Duration, Stack
 from aws_cdk import aws_ec2 as ec2
 from aws_cdk import aws_ecr as ecr
 from aws_cdk import aws_ecs as ecs
+from aws_cdk import aws_efs as efs
 from aws_cdk import aws_elasticloadbalancingv2 as elbv2
 from aws_cdk import aws_iam as iam
 from aws_cdk import aws_logs as logs
@@ -27,6 +28,8 @@ class AppStack(Stack):
         log_group: logs.ILogGroup,
         ecr_repository: ecr.IRepository,
         database_secret: secretsmanager.ISecret,
+        claude_efs: efs.IFileSystem,
+        claude_efs_access_point: efs.IAccessPoint,
         **kwargs,
     ) -> None:
         super().__init__(scope, construct_id, **kwargs)
@@ -48,6 +51,22 @@ class AppStack(Stack):
             actions=["bedrock:InvokeModel", "bedrock:InvokeModelWithResponseStream"],
             resources=["*"],
         ))
+        # Grant permission to assume customer-installed DevOpsHero roles (cross-account)
+        # Security: Customer roles have trust policies requiring our account + ExternalId
+        task_role.add_to_policy(iam.PolicyStatement(
+            actions=["sts:AssumeRole"],
+            resources=["arn:aws:iam::*:role/devopshero-*"],
+        ))
+        # Grant permission to mount EFS with IAM authorization
+        task_role.add_to_policy(iam.PolicyStatement(
+            actions=["elasticfilesystem:ClientMount", "elasticfilesystem:ClientWrite"],
+            resources=[claude_efs.file_system_arn],
+            conditions={
+                "StringEquals": {
+                    "elasticfilesystem:AccessPointArn": claude_efs_access_point.access_point_arn,
+                },
+            },
+        ))
 
         # Task Definition
         task_definition = ecs.FargateTaskDefinition(
@@ -61,6 +80,19 @@ class AppStack(Stack):
             runtime_platform=ecs.RuntimePlatform(
                 cpu_architecture=ecs.CpuArchitecture.ARM64,
                 operating_system_family=ecs.OperatingSystemFamily.LINUX,
+            ),
+        )
+
+        # EFS volume for Claude session persistence (using access point for correct ownership)
+        task_definition.add_volume(
+            name="claude-data",
+            efs_volume_configuration=ecs.EfsVolumeConfiguration(
+                file_system_id=claude_efs.file_system_id,
+                transit_encryption="ENABLED",
+                authorization_config=ecs.AuthorizationConfig(
+                    access_point_id=claude_efs_access_point.access_point_id,
+                    iam="ENABLED",
+                ),
             ),
         )
 
@@ -116,7 +148,12 @@ class AppStack(Stack):
             container_name="devopshero",
             image=ecs.ContainerImage.from_ecr_repository(ecr_repository, tag="latest"),
             logging=ecs.LogDrivers.aws_logs(stream_prefix="devopshero", log_group=log_group),
-            environment={"DJANGO_DEBUG": "0", "DOH_RUN_JOB_WORKER": "1", "CLAUDE_CODE_USE_BEDROCK": "1"},
+            environment={
+                "DJANGO_DEBUG": "0",
+                "DOH_RUN_JOB_WORKER": "1",
+                "CLAUDE_CODE_USE_BEDROCK": "1",
+                "CLAUDE_CONFIG_DIR": "/home/appuser/.claude",
+            },
             secrets=app_secrets,
             health_check=ecs.HealthCheck(
                 command=["CMD-SHELL", "curl -f http://localhost:8000/health/ || exit 1"],
@@ -127,6 +164,14 @@ class AppStack(Stack):
             ),
         )
         app_container.add_port_mappings(ecs.PortMapping(container_port=8000, protocol=ecs.Protocol.TCP))
+        # Mount EFS for Claude session persistence
+        app_container.add_mount_points(
+            ecs.MountPoint(
+                container_path="/home/appuser/.claude",
+                source_volume="claude-data",
+                read_only=False,
+            )
+        )
 
         # App container waits for migration to complete successfully
         app_container.add_container_dependencies(
