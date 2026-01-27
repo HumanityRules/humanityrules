@@ -2,8 +2,8 @@ FROM python:3.14-slim
 
 WORKDIR /app
 
-# Install curl for health checks, Node.js for CDK/jsii, and uv for dependency management
-RUN apt-get update && apt-get install -y --no-install-recommends curl gnupg && \
+# Install curl for health checks, Node.js for CDK/jsii, git for repo cloning, and uv for dependency management
+RUN apt-get update && apt-get install -y --no-install-recommends curl gnupg git && \
     curl -fsSL https://deb.nodesource.com/setup_20.x | bash - && \
     apt-get install -y nodejs && \
     rm -rf /var/lib/apt/lists/*
@@ -20,6 +20,12 @@ COPY . .
 
 # Collect static files
 RUN uv run python manage.py collectstatic --noinput
+
+# Create non-root user (required for Claude SDK's bypassPermissions mode, and because it's a good practice)
+RUN useradd --create-home --shell /bin/bash appuser && \
+    chown -R appuser:appuser /app
+
+USER appuser
 
 # Expose the application port
 EXPOSE 8000
