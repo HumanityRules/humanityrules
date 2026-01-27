@@ -492,6 +492,8 @@ async def list_apps(args: dict[str, Any]) -> dict[str, Any]:
         "Create an application configuration in the selected workspace. "
         "This defines how an app will be built and deployed. "
         "Requires a workspace and repository in the conversation context. "
+        "For cpu: ECS CPU units (256=0.25vCPU, 512=0.5vCPU, 1024=1vCPU, 2048=2vCPU). "
+        "For memory: MiB (512, 1024, 2048, 4096). "
         "For environment_variables, pass an array of objects with 'name' and 'value' keys, "
         "e.g., [{\"name\": \"API_KEY\", \"value\": \"secret\"}]. Pass [] if no env vars needed. "
         "For app_secrets, pass a dict mapping secret field names to values. "
