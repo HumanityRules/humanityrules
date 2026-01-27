@@ -2,8 +2,8 @@ import boto3
 
 
 def get_assumed_role_session(
-    access_key: str,
-    secret_key: str,
+    access_key: str | None,
+    secret_key: str | None,
     account_id: str,
     external_id: str,
     region: str,
@@ -11,16 +11,22 @@ def get_assumed_role_session(
     """
     Assume the DevOpsHero role in the target account and return a boto3 session.
 
+    If access_key/secret_key are provided, uses explicit credentials (local dev).
+    If None, uses default credential chain (ECS task role in production).
+
     Raises:
         ClientError: If role assumption fails
     """
-    # Create STS client with control plane credentials
-    sts_client = boto3.client(
-        "sts",
-        aws_access_key_id=access_key,
-        aws_secret_access_key=secret_key,
-        region_name=region,
-    )
+    # Create STS client - explicit credentials for local dev, task role for production
+    if access_key and secret_key:
+        sts_client = boto3.client(
+            "sts",
+            aws_access_key_id=access_key,
+            aws_secret_access_key=secret_key,
+            region_name=region,
+        )
+    else:
+        sts_client = boto3.client("sts", region_name=region)
 
     # The role ARN follows the pattern from cf_install_template.json
     role_arn = f"arn:aws:iam::{account_id}:role/devopshero-{external_id}"

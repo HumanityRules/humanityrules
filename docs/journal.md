@@ -1,5 +1,65 @@
 # DevOpsHero Development Journal
 
+## 2026-01-27 - Include AWS Infrastructure in Agent System Context
+
+Agent previously had to call `list_aws_accounts` and `list_environments` tools to discover available infrastructure before each deployment. This added latency and tool call overhead.
+
+**Change:** Now inject all AWS accounts and environments directly into the system prompt. The agent sees the infrastructure immediately and can reference it without discovery calls.
+
+**Implementation:** Added `_build_aws_infrastructure_section()` in `agent_service.py` that queries all accounts for the conversation's organization with prefetched environments. Updated system_prompt.md to reference this section instead of instructing the agent to call discovery tools.
+
+**Format in system prompt:**
+```
+## AWS Infrastructure
+
+**Production AWS** (id: abc123, aws: 123456789012, status: connected)
+  - **default** (id: xyz789, slug: default, region: us-east-1, status: ready, domain: *.example.com)
+```
+
+
+## 2026-01-27 - EFS for Claude Session Persistence
+
+Claude SDK stores conversation sessions locally in `~/.claude/`. When ECS tasks are replaced (deployments, restarts), sessions were lost — causing "No conversation found with session ID" errors when resuming.
+
+**Solution:** Added EFS filesystem mounted at `/home/appuser/.claude` to persist sessions across container replacements.
+
+**Implementation:**
+- Created EFS filesystem in `storage_stack.py` with encryption enabled
+- Added EFS Access Point with POSIX user UID/GID 1000 (matches `appuser`) — required for correct file ownership
+- Mounted EFS in task definition with transit encryption and IAM authorization
+- Added `elasticfilesystem:ClientMount` and `elasticfilesystem:ClientWrite` permissions to task role
+- Set `CLAUDE_CONFIG_DIR=/home/appuser/.claude` environment variable
+
+**Key learnings:**
+- `CLAUDE_CONFIG_DIR` env var controls where Claude stores data (discovered via web search)
+- Claude handles concurrent access from multiple instances (designed for desktop use with multiple terminals)
+
+**Explicit UID in Dockerfile:** Updated `useradd` to explicitly set `--uid 1000 --gid 1000` so the EFS Access Point configuration isn't brittle. Added comment documenting the dependency.
+
+**What is an EFS Access Point?**
+
+An Access Point is a custom entry door into EFS with pre-configured settings. Without one, EFS mounts are root-owned and apps need root to write. With an Access Point:
+
+- **Enforced user identity** — All file operations are performed as a specific UID/GID, regardless of the process's actual user
+- **Enforced root directory** — The app sees a subdirectory as its root (chroot-like isolation)
+- **Auto-create directory** — EFS creates the path with specified ownership if it doesn't exist
+
+We configured `posix_user=PosixUser(uid="1000", gid="1000")` so when `appuser` (UID 1000) writes files, EFS performs the operation as UID 1000 and the files end up with correct ownership. No need for the container to run as root or use entrypoint scripts with `chown`.
+
+
+## 2026-01-27 - Fix AssumeRole Permission for Customer Accounts
+
+Agent tools failed with "AccessDenied" when trying to assume customer-installed IAM roles. The `doh-prod-task-role` lacked `sts:AssumeRole` permission.
+
+**Root cause:** `DOH_AWS_ACCESS_KEY` / `DOH_AWS_SECRET_KEY` weren't configured in production Secrets Manager. When these are `None`, boto3 falls back to the ECS task role credentials, which didn't have AssumeRole permission.
+
+**Fix:**
+- Added `sts:AssumeRole` permission to task role for `arn:aws:iam::*:role/devopshero-*`
+- Updated `iam_utils.py` to gracefully fall back to default credential chain when explicit credentials not provided
+
+The wildcard account ID is intentional — DOH deploys to customer accounts. Security is enforced by customer role trust policies (require our account + ExternalId).
+
+
 ## 2026-01-27 - Use T-Shirt Sizes for Container Resources
 
 Agent was presenting ECS CPU capacity as "256 CPU, 512 MB" which sounds like 256 processors. ECS uses CPU units where 1024 = 1 vCPU, so 256 units = 0.25 vCPU — confusing for users unfamiliar with AWS internals.
