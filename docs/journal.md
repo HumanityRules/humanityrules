@@ -2,7 +2,7 @@
 
 ## 2026-01-28 21:45 - [Bugfix] Investigating Production Database Connection Exhaustion
 
-**Conversation:** 
+**Conversation:** [2026-01-28-1336-e98d63ee.md](conversations/2026-01-28-1336-e98d63ee.md)
 
 PostHog showed production errors on the chat streaming endpoint (`/chat/.../stream/`):
 
