@@ -17,9 +17,13 @@ class DevopsheroAppConfig(AppConfig):
             from posthog import Posthog
             import posthog as posthog_module
 
+            # Use reverse proxy if configured (bypasses ad blockers)
+            proxy_host = getattr(settings, 'POSTHOG_PROXY_HOST', None)
+            host = proxy_host if proxy_host else getattr(settings, 'POSTHOG_HOST', 'https://us.i.posthog.com')
+
             client = Posthog(
                 posthog_key,
-                host=getattr(settings, 'POSTHOG_HOST', 'https://us.i.posthog.com'),
+                host=host,
                 enable_exception_autocapture=True,
             )
             posthog_module.default_client = client
