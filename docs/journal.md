@@ -1,5 +1,36 @@
 # DevOpsHero Development Journal
 
+## 2026-01-28 21:35 - [Integrations] PostHog Analytics Integration
+
+Integrated PostHog analytics for both frontend (auto-capture) and backend (exception tracking) to understand user behavior and catch production errors.
+
+**Architecture decisions:**
+
+1. **Frontend JS SDK + Backend Python SDK** — The JS SDK auto-captures pageviews, clicks, and session recordings. The Python SDK is primarily for exception tracking with request context. We're NOT using the Python SDK for manual event capture since we don't have backend-specific events worth tracking yet.
+
+2. **Django middleware included** — Added `PosthogContextMiddleware` even though we're not capturing backend events. The middleware provides request context (URL, method, user ID) when exceptions are auto-captured, making debugging significantly easier. Added a request filter to skip `/admin`, `/health`, `/static`, `/__reload__`.
+
+3. **Dev environment exclusion** — The JS snippet checks for localhost, 127.0.0.1, and ngrok.io to avoid polluting analytics during development. This is done client-side rather than server-side so the snippet is still present (easier to debug issues).
+
+4. **Context processor for config** — Created `context_processors.py` to serialize PostHog config as JSON. This avoids mixing Django template tags inside JavaScript code blocks, which caused linter warnings and is generally ugly. The template just outputs `{{ posthog_config_json|safe }}` into a JSON script tag.
+
+5. **Partial for reusability** — Extracted the PostHog snippet to `partials/_posthog.html` since the landing page uses a standalone template that doesn't extend `base.html`. Both templates now include the same partial.
+
+6. **User identification** — Logged-in users are identified with their ID, email, and name. This happens in the context processor so it's automatically available wherever the partial is included.
+
+**Infrastructure changes:**
+
+- Added `devopshero/prod/posthog` secret to AWS Secrets Manager via `sync_secrets.py`
+- Updated `app_stack.py` to inject `POSTHOG_API_KEY` and `POSTHOG_HOST` into the ECS task definition
+- PostHog SDK v7.7.0 installed (latest stable)
+
+**Key learnings:**
+
+- PostHog Python SDK has no native async support (GitHub issue #103) but the middleware is lightweight enough that it doesn't matter for our async Django app
+- The Python SDK does NOT auto-instrument events like the JS SDK — it's primarily for manual capture and exception tracking
+- The `enable_exception_autocapture=True` option requires using the `Posthog()` constructor, not the simpler `posthog.api_key = ...` pattern shown in Django docs
+- Landing page had its own HTML structure and wasn't getting PostHog until we added the include
+
 ## 2026-01-28 19:40 - [Deployment] ECS Stabilization Timeout Race Condition Fix
 
 Debugged a "failed" deployment of simple-dashboard that was actually running fine. Root cause was a race condition between the ECS stabilization timeout and the deployment completing.
