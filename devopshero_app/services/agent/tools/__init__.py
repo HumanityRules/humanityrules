@@ -5,8 +5,6 @@ Tools provide the agent with capabilities to interact with
 repositories, AWS accounts, and the deployment system.
 """
 
-from .create_app import create_app
-from .create_app import AppSummary as CreateAppSummary
 from .create_datastore import create_datastore, DatastoreSummary
 from .list_apps import list_apps
 from .list_apps import AppSummary as ListAppSummary
@@ -26,8 +24,6 @@ from .teardown_deployment import teardown_deployment, TeardownSummary
 
 __all__ = [
     # App management
-    "create_app",
-    "CreateAppSummary",
     "list_apps",
     "ListAppSummary",
     # Datastore management

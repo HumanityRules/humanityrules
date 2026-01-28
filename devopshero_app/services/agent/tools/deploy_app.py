@@ -1,30 +1,140 @@
 """
-Tool for deploying applications.
+Tool for deploying applications with upsert semantics.
 
-Creates a Deployment record with PENDING status. The job worker
-picks up pending deployments and executes them via the CDK infrastructure.
+Creates or updates an App record, then creates a Deployment with PENDING status.
+The job worker picks up pending deployments and executes them via CDK infrastructure.
+
+This is the unified deployment tool - it handles both new apps and redeployments.
 """
 
+import json
 from dataclasses import asdict, dataclass
 from datetime import datetime
+from typing import Any
+
+from django.db import IntegrityError
+from django.utils.text import slugify
 
 from devopshero_app.models import (
     App,
+    Datastore,
     Deployment,
     DeploymentLog,
     Environment,
     Organization,
+    Repository,
     User,
+    Workspace,
 )
+
+
+# =============================================================================
+# Normalization Helpers
+# =============================================================================
+
+
+def _normalize_environment_variables(value: Any, existing: list | None) -> list[dict[str, str]]:
+    """
+    Normalize environment_variables input with sentinel semantics.
+
+    Sentinel values:
+    - None (not provided) -> keep existing unchanged
+    - [] (empty list) -> clear all
+    - [...] (with values) -> replace with provided
+
+    Handles common LLM mistakes like sending strings instead of objects.
+    Expected format: [{"name": "FOO", "value": "bar"}, ...]
+    """
+    # None = keep existing unchanged
+    if value is None:
+        return existing if existing else []
+
+    # Handle string input (LLM might send "{}" or "[]" as string)
+    if isinstance(value, str):
+        value = value.strip()
+        if not value:
+            return existing if existing else []
+        try:
+            value = json.loads(value)
+        except json.JSONDecodeError:
+            return existing if existing else []
+
+    # Must be a list at this point
+    if not isinstance(value, list):
+        return existing if existing else []
+
+    # Empty list = clear all (sentinel)
+    if len(value) == 0:
+        return []
+
+    # Validate each item is a dict with name/value keys
+    result = []
+    for item in value:
+        if isinstance(item, dict) and "name" in item and "value" in item:
+            result.append({"name": str(item["name"]), "value": str(item["value"])})
+
+    return result
+
+
+def _normalize_app_secrets(value: Any, existing: dict | None) -> dict[str, str | None] | None:
+    """
+    Normalize app_secrets input with sentinel semantics.
+
+    Sentinel values:
+    - None (not provided) -> keep existing unchanged
+    - {} (empty dict) -> clear all (return None)
+    - {...} (with values) -> replace with provided
+
+    Expected format: {"field_name": "value" or null, ...}
+    String "null" values -> Python None (auto-generate)
+    """
+    # None = keep existing unchanged
+    if value is None:
+        return existing
+
+    # Handle string input (LLM might send "{}" as string)
+    if isinstance(value, str):
+        value = value.strip()
+        if not value:
+            return existing
+        try:
+            value = json.loads(value)
+        except json.JSONDecodeError:
+            return existing
+
+    # Must be a dict at this point
+    if not isinstance(value, dict):
+        return existing
+
+    # Empty dict = clear all (sentinel)
+    if not value:
+        return None
+
+    # Normalize values: string "null" -> Python None
+    result = {}
+    for key, val in value.items():
+        if val is None or val == "null":
+            result[str(key)] = None
+        else:
+            result[str(key)] = str(val)
+
+    return result if result else None
+
+
+# =============================================================================
+# Data Classes
+# =============================================================================
 
 
 @dataclass
 class DeploymentSummary:
-    """Summary of a created deployment."""
+    """Summary of a created deployment with app info."""
 
     id: str
     app_id: str
     app_name: str
+    app_slug: str
+    app_created: bool  # True if app was created, False if updated
     environment_name: str
     git_ref: str
     status: str
@@ -35,6 +145,11 @@ class DeploymentSummary:
     def to_dict(self) -> dict:
         """Convert to dictionary for JSON serialization."""
         return asdict(self)
+
+
+# =============================================================================
+# Helper Functions
+# =============================================================================
 
 
 def _generate_image_tag(app: App, git_ref: str) -> str:
@@ -64,49 +179,23 @@ async def _create_initial_logs(deployment: Deployment) -> None:
     )
 
 
-async def deploy_app(
-    app_id: str,
-    git_ref: str,
-    organization: Organization,
-    user: User,
-    environment_slug: str,
-) -> DeploymentSummary:
-    """
-    Create a deployment for an application.
-
-    Creates a Deployment record with status PENDING. The job worker
-    picks it up and executes the actual CDK deployment.
-
-    Args:
-        app_id: UUID of the App to deploy.
-        git_ref: Git reference (branch, tag, or commit SHA) to deploy.
-        organization: The Organization this deployment belongs to.
-        user: The User initiating the deployment.
-        environment_slug: Target environment slug (e.g., "default").
-
-    Returns:
-        DeploymentSummary with the created deployment details.
-
-    Raises:
-        ValueError: If app doesn't exist, doesn't belong to organization,
-                    or environment not found.
-    """
-    # Validate app exists and belongs to organization
+async def _validate_datastore(datastore_id: str | None, workspace: Workspace) -> Datastore | None:
+    """Validate and fetch datastore if provided."""
+    if not datastore_id:
+        return None
     try:
-        app = await App.objects.select_related("workspace").aget(
-            id=app_id,
-            workspace__organization=organization,
-        )
-    except App.DoesNotExist:
-        raise ValueError(
-            f"App {app_id} not found or doesn't belong to your organization."
-        )
+        return await Datastore.objects.aget(id=datastore_id, workspace=workspace)
+    except Datastore.DoesNotExist:
+        raise ValueError(f"Datastore {datastore_id} not found or doesn't belong to workspace.")
 
-    # Get target environment from any AWS account in this organization
+
+async def _get_environment(organization: Organization, environment_slug: str) -> Environment:
+    """Get and validate target environment."""
     environment = await Environment.objects.filter(
         aws_account__organization=organization,
         slug=environment_slug,
     ).afirst()
+
     if not environment:
         raise ValueError(
             f"Environment '{environment_slug}' does not exist for this AWS account. "
@@ -136,7 +225,11 @@ async def deploy_app(
             "Use create_environment to ensure it's properly provisioned."
         )
 
-    # Check for existing active deployments
+    return environment
+
+
+async def _check_active_deployments(app: App) -> None:
+    """Check for existing active deployments and raise if found."""
     active_statuses = [
         Deployment.Status.PENDING,
         Deployment.Status.BUILDING,
@@ -155,6 +248,181 @@ async def deploy_app(
             f"(status: {active_deployment.status}). Please wait for it to complete."
         )
 
+
+# =============================================================================
+# Main Tool Function
+# =============================================================================
+
+
+async def deploy_app(
+    workspace: Workspace,
+    repository: Repository,
+    name: str,
+    branch: str,
+    app_type: str,
+    build_strategy: str,
+    container_port: int,
+    cpu: int,
+    memory: int,
+    health_check_path: str,
+    user: User,
+    environment_slug: str,
+    git_ref: str,
+    environment_variables: list[dict] | None,
+    datastore_id: str | None,
+    dockerfile_path: str | None,
+    app_secrets: dict | None,
+) -> DeploymentSummary:
+    """
+    Deploy an application with upsert semantics.
+
+    Creates the app if it doesn't exist, updates config if it does, then deploys.
+
+    Matching: App is identified by (organization, slug) where slug = slugify(name).
+
+    Sentinel semantics for environment_variables and app_secrets:
+    - None (not provided) -> keep existing unchanged
+    - [] or {} (empty) -> clear all
+    - [...] or {...} (with values) -> replace with provided
+
+    Args:
+        workspace: The Workspace to deploy in.
+        repository: The Repository containing the app source code.
+        name: Human-readable name for the app (used to derive slug for matching).
+        branch: Git branch to deploy from.
+        app_type: Type of app (web, worker, scheduled).
+        build_strategy: How to build (dockerfile, nixpacks, buildpack).
+        container_port: Port the container listens on.
+        cpu: Fargate CPU units (256, 512, 1024, etc.).
+        memory: Fargate memory in MiB.
+        health_check_path: HTTP path for health checks.
+        user: The User initiating the deployment.
+        environment_slug: Target environment slug (e.g., "default").
+        git_ref: Git reference (branch, tag, or commit SHA) to deploy.
+        environment_variables: List of {name, value} dicts. None=keep, []=clear, [values]=replace.
+        datastore_id: UUID of datastore to bind. None to keep existing.
+        dockerfile_path: Path to Dockerfile if using dockerfile strategy.
+        app_secrets: Dict mapping secret field names to values. None=keep, {}=clear, {values}=replace.
+
+    Returns:
+        DeploymentSummary with deployment details and app_created flag.
+
+    Raises:
+        ValueError: If validation fails or repository mismatch.
+    """
+    organization = workspace.organization
+
+    # Validate app_type
+    valid_app_types = [choice.value for choice in App.AppType]
+    if app_type not in valid_app_types:
+        raise ValueError(f"Invalid app_type '{app_type}'. Must be one of: {', '.join(valid_app_types)}")
+
+    # Validate build_strategy
+    valid_strategies = [choice.value for choice in App.BuildStrategy]
+    if build_strategy not in valid_strategies:
+        raise ValueError(f"Invalid build_strategy '{build_strategy}'. Must be one of: {', '.join(valid_strategies)}")
+
+    # Validate datastore if provided
+    datastore = await _validate_datastore(datastore_id, workspace)
+
+    # Validate environment
+    environment = await _get_environment(organization, environment_slug)
+
+    # Generate slug for matching
+    slug = slugify(name)
+    if not slug:
+        raise ValueError(f"Invalid app name '{name}': cannot generate slug.")
+
+    # Look up existing app by (organization, slug)
+    existing_app = await App.objects.filter(organization=organization, slug=slug).afirst()
+    app_created = False
+
+    if existing_app:
+        # Guard: repository mismatch is a hard error
+        if existing_app.repository_id != repository.id:
+            existing_repo = await Repository.objects.aget(id=existing_app.repository_id)
+            raise ValueError(
+                f"App '{name}' (slug: {slug}) already exists but is linked to a different repository "
+                f"('{existing_repo.full_name}'). Cannot redeploy with repository '{repository.full_name}'. "
+                "Use a different app name or update the existing app's repository manually."
+            )
+
+        # Update config fields (sentinel semantics for env/secrets)
+        existing_app.name = name
+        existing_app.workspace = workspace
+        existing_app.branch = branch
+        existing_app.app_type = app_type
+        existing_app.build_strategy = build_strategy
+        existing_app.container_port = container_port
+        existing_app.cpu = cpu
+        existing_app.memory = memory
+        existing_app.health_check_path = health_check_path
+        existing_app.dockerfile_path = dockerfile_path or ""
+
+        # Sentinel semantics: None=keep, []=clear, [values]=replace
+        existing_app.environment_variables = _normalize_environment_variables(
+            environment_variables, existing_app.environment_variables
+        )
+        existing_app.app_secrets = _normalize_app_secrets(app_secrets, existing_app.app_secrets)
+
+        # Update datastore only if explicitly provided
+        if datastore_id is not None:
+            existing_app.datastore = datastore
+
+        await existing_app.asave()
+        app = existing_app
+    else:
+        # Create new app
+        try:
+            app = await App.objects.acreate(
+                organization=organization,
+                workspace=workspace,
+                repository=repository,
+                name=name,
+                slug=slug,
+                app_type=app_type,
+                build_strategy=build_strategy,
+                branch=branch,
+                dockerfile_path=dockerfile_path or "",
+                container_port=container_port,
+                cpu=cpu,
+                memory=memory,
+                health_check_path=health_check_path,
+                environment_variables=_normalize_environment_variables(environment_variables, None),
+                datastore=datastore,
+                app_secrets=_normalize_app_secrets(app_secrets, None),
+                created_by=user,
+            )
+            app_created = True
+        except IntegrityError:
+            # Race condition: another request created the app. Re-fetch and update.
+            existing_app = await App.objects.filter(organization=organization, slug=slug).afirst()
+            if existing_app:
+                # Recursive call to handle as update
+                return await deploy_app(
+                    workspace=workspace,
+                    repository=repository,
+                    name=name,
+                    branch=branch,
+                    app_type=app_type,
+                    build_strategy=build_strategy,
+                    container_port=container_port,
+                    cpu=cpu,
+                    memory=memory,
+                    health_check_path=health_check_path,
+                    user=user,
+                    environment_slug=environment_slug,
+                    git_ref=git_ref,
+                    environment_variables=environment_variables,
+                    datastore_id=datastore_id,
+                    dockerfile_path=dockerfile_path,
+                    app_secrets=app_secrets,
+                )
+            raise  # Unexpected error, re-raise
+
+    # Check for existing active deployments
+    await _check_active_deployments(app)
+
     # Generate image tag
     image_tag = _generate_image_tag(app, git_ref)
 
@@ -163,8 +431,8 @@ async def deploy_app(
         app=app,
         environment=environment,
         git_ref=git_ref,
-        git_commit_sha="",  # Would be resolved from git
-        git_commit_message="",  # Would be fetched from git
+        git_commit_sha="",
+        git_commit_message="",
         image_tag=image_tag,
         status=Deployment.Status.PENDING,
         status_message="Deployment queued",
@@ -178,6 +446,8 @@ async def deploy_app(
         id=str(deployment.id),
         app_id=str(app.id),
         app_name=app.name,
+        app_slug=app.slug,
+        app_created=app_created,
         environment_name=environment.name,
         git_ref=deployment.git_ref,
         status=deployment.status,

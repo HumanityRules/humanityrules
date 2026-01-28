@@ -19,7 +19,6 @@ from devopshero_app.models import Conversation, Repository, Workspace
 from devopshero_app.services.github import repo_service
 
 from .tools import (
-    create_app as _create_app,
     create_datastore as _create_datastore,
     create_environment as _create_environment,
     deploy_app as _deploy_app,
@@ -90,7 +89,6 @@ TOOL_DISPLAY_NAMES = {
     "mcp__devopshero__scan_repository": "Scan Repository",
     # Workspace tools
     "mcp__devopshero__list_apps": "List Apps",
-    "mcp__devopshero__create_app": "Create App",
     "mcp__devopshero__create_datastore": "Create Datastore",
     "mcp__devopshero__deploy_app": "Deploy App",
     "mcp__devopshero__get_deployment_status": "Get Deployment Status",
@@ -118,9 +116,8 @@ TOOL_MAIN_PARAMS = {
     "mcp__devopshero__create_environment": "environment_name",
     "mcp__devopshero__get_environment_status": "environment_id",
     "mcp__devopshero__scan_repository": "repository_id",
-    "mcp__devopshero__create_app": "name",
     "mcp__devopshero__create_datastore": "name",
-    "mcp__devopshero__deploy_app": "app_name",
+    "mcp__devopshero__deploy_app": "name",
     "mcp__devopshero__get_deployment_status": "deployment_id",
     "mcp__devopshero__teardown_deployment": "app_id",
     "mcp__devopshero__wait": "seconds",
@@ -471,9 +468,7 @@ async def scan_repository(args: dict[str, Any]) -> dict[str, Any]:
     "list_apps",
     (
         "List applications in the current workspace. "
-        "Use this to discover existing apps before creating new ones. "
-        "If an app with the desired name already exists, use deploy_app with its ID "
-        "instead of calling create_app (which would create a duplicate with a numeric suffix). "
+        "Use this to discover existing apps and their deployment status. "
         "Returns app ID, name, slug, type, branch, repository, and latest deployment status."
     ),
     {},
@@ -484,73 +479,6 @@ async def list_apps(args: dict[str, Any]) -> dict[str, Any]:
     workspace = await _require_workspace(conversation)
     apps = await _list_apps(workspace=workspace)
     return _mcp_response(apps)
-
-
-@tool(
-    "create_app",
-    (
-        "Create an application configuration in the selected workspace. "
-        "This defines how an app will be built and deployed. "
-        "Requires a workspace and repository in the conversation context. "
-        "For cpu: ECS CPU units (256=0.25vCPU, 512=0.5vCPU, 1024=1vCPU, 2048=2vCPU). "
-        "For memory: MiB (512, 1024, 2048, 4096). "
-        "For environment_variables, pass an array of objects with 'name' and 'value' keys, "
-        "e.g., [{\"name\": \"API_KEY\", \"value\": \"secret\"}]. Pass [] if no env vars needed. "
-        "For app_secrets, pass a dict mapping secret field names to values. "
-        "Use null for auto-generated secrets, e.g., {\"secret_key_base\": null, \"api_token\": \"disabled\"}."
-    ),
-    {
-        "name": str,
-        "branch": str,
-        "app_type": str,
-        "build_strategy": str,
-        "container_port": int,
-        "cpu": int,
-        "memory": int,
-        "health_check_path": str,
-        "environment_variables": list,
-        "datastore_id": str,
-        "dockerfile_path": str,
-        "app_secrets": dict,
-    },
-)
-async def create_app(args: dict[str, Any]) -> dict[str, Any]:
-    """Create an application configuration in the selected workspace."""
-    conversation = _get_conversation()
-    workspace = await _require_workspace(conversation)
-
-    repository_id = conversation.context_repository_id
-    if not repository_id:
-        raise ValueError(
-            "No repository selected. Start the conversation from a workspace with a selected repository."
-        )
-    
-    try:
-        repository = await Repository.objects.aget(
-            id=repository_id,
-            organization=conversation.organization,
-        )
-    except Repository.DoesNotExist:
-        raise ValueError(f"Repository {repository_id} not found in organization.")
-
-    result = await _create_app(
-        workspace=workspace,
-        repository=repository,
-        name=args["name"],
-        branch=args["branch"],
-        app_type=args["app_type"],
-        build_strategy=args["build_strategy"],
-        container_port=args["container_port"],
-        cpu=args["cpu"],
-        memory=args["memory"],
-        health_check_path=args["health_check_path"],
-        user=conversation.user,
-        environment_variables=args.get("environment_variables"),
-        datastore_id=args.get("datastore_id"),
-        dockerfile_path=args.get("dockerfile_path", ""),
-        app_secrets=args.get("app_secrets"),
-    )
-    return _mcp_response(result)
 
 
 @tool(
@@ -591,27 +519,71 @@ async def create_datastore(args: dict[str, Any]) -> dict[str, Any]:
     "deploy_app",
     (
         "Deploy an application to AWS infrastructure. "
-        "Creates a deployment record and triggers the deployment process. "
-        "The job worker will build the Docker image, push to ECR, "
-        "and deploy via CDK. Use get_deployment_status to check progress. "
-        "For environment_slug, always use 'default'."
+        "Creates the app if it doesn't exist, updates config if it does, then deploys. "
+        "Requires a workspace and repository in the conversation context. "
+        "The job worker will build the Docker image, push to ECR, and deploy via CDK. "
+        "Use get_deployment_status to check progress. "
+        "For environment_slug, always use 'default'. "
+        "For cpu: ECS CPU units (256=0.25vCPU, 512=0.5vCPU, 1024=1vCPU, 2048=2vCPU). "
+        "For memory: MiB (512, 1024, 2048, 4096). "
+        "For environment_variables: pass null to keep existing, [] to clear, or [{\"name\": \"FOO\", \"value\": \"bar\"}] to replace. "
+        "For app_secrets: pass null to keep existing, {} to clear, or {\"key\": \"value\"} to replace. "
+        "Use null values in app_secrets for auto-generated secrets, e.g., {\"secret_key_base\": null, \"api_token\": \"disabled\"}."
     ),
     {
-        "app_id": str,
+        "name": str,
+        "branch": str,
+        "app_type": str,
+        "build_strategy": str,
+        "container_port": int,
+        "cpu": int,
+        "memory": int,
+        "health_check_path": str,
         "git_ref": str,
         "environment_slug": str,
+        "environment_variables": list,
+        "datastore_id": str,
+        "dockerfile_path": str,
+        "app_secrets": dict,
     },
 )
 async def deploy_app(args: dict[str, Any]) -> dict[str, Any]:
-    """Create a deployment for an application."""
+    """Deploy an application (creates if new, updates if exists)."""
     conversation = _get_conversation()
+    workspace = await _require_workspace(conversation)
+
+    repository_id = conversation.context_repository_id
+    if not repository_id:
+        raise ValueError(
+            "No repository selected. Start the conversation from a workspace with a selected repository."
+        )
+
+    try:
+        repository = await Repository.objects.aget(
+            id=repository_id,
+            organization=conversation.organization,
+        )
+    except Repository.DoesNotExist:
+        raise ValueError(f"Repository {repository_id} not found in organization.")
 
     result = await _deploy_app(
-        app_id=args["app_id"],
-        git_ref=args["git_ref"],
-        organization=conversation.organization,
+        workspace=workspace,
+        repository=repository,
+        name=args["name"],
+        branch=args["branch"],
+        app_type=args["app_type"],
+        build_strategy=args["build_strategy"],
+        container_port=args["container_port"],
+        cpu=args["cpu"],
+        memory=args["memory"],
+        health_check_path=args["health_check_path"],
         user=conversation.user,
         environment_slug=args["environment_slug"],
+        git_ref=args["git_ref"],
+        environment_variables=args.get("environment_variables"),
+        datastore_id=args.get("datastore_id"),
+        dockerfile_path=args.get("dockerfile_path"),
+        app_secrets=args.get("app_secrets"),
     )
 
     # Link deployment to conversation via M2M
@@ -619,13 +591,21 @@ async def deploy_app(args: dict[str, Any]) -> dict[str, Any]:
     deployment = await Deployment.objects.aget(id=result.id)
     await conversation.deployments.aadd(deployment)
 
+    # Customize note based on whether app was created or updated
+    if result.app_created:
+        note = (
+            f"App '{result.app_name}' created and deployment queued. "
+            "The job worker will build/push/deploy. Use get_deployment_status to check progress."
+        )
+    else:
+        note = (
+            f"App '{result.app_name}' config updated and deployment queued. "
+            "The job worker will build/push/deploy. Use get_deployment_status to check progress."
+        )
+
     return _mcp_response({
         **result.to_dict(),
-        "note": (
-            "Deployment created. The job worker will pick it up "
-            "and execute the build/push/deploy pipeline. "
-            "Use get_deployment_status to check progress."
-        ),
+        "note": note,
     })
 
 
@@ -746,7 +726,6 @@ devopshero_mcp_server = create_sdk_mcp_server(
         scan_repository,
         # Workspace tools
         list_apps,
-        create_app,
         create_datastore,
         deploy_app,
         get_deployment_status,
@@ -769,7 +748,6 @@ TOOL_NAMES = [
     "mcp__devopshero__scan_repository",
     # Workspace tools
     "mcp__devopshero__list_apps",
-    "mcp__devopshero__create_app",
     "mcp__devopshero__create_datastore",
     "mcp__devopshero__deploy_app",
     "mcp__devopshero__get_deployment_status",
