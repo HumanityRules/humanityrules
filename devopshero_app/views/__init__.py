@@ -25,6 +25,7 @@ from .chat import (
     chat_messages,
     chat_close,
 )
+from .waitlist_views import waitlist_signup
 
 __all__ = [
     "landing",
@@ -57,5 +58,6 @@ __all__ = [
     "chat_stream",
     "chat_messages",
     "chat_close",
+    "waitlist_signup",
 ]
 

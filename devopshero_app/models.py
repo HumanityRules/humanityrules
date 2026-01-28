@@ -942,6 +942,30 @@ class EnvironmentLog(models.Model):
         return f"[{self.source}] {self.level}: {self.message[:50]}..."
 
 
+class WaitlistSignup(models.Model):
+    """Captures email signups from the landing page 'notify me' form."""
+    id = models.UUIDField(
+        primary_key=True,
+        default=uuid.uuid7,
+        editable=False,
+    )
+    email = models.EmailField(unique=True)
+    source = models.CharField(
+        max_length=50,
+        blank=True,
+        help_text="Where on the landing page they signed up (hero, cta)",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        verbose_name = "Waitlist Signup"
+        verbose_name_plural = "Waitlist Signups"
+
+    def __str__(self):
+        return self.email
+
+
 # =============================================================================
 # Signals
 # =============================================================================
