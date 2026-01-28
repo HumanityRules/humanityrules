@@ -596,6 +596,7 @@ def deploy(
         session=session,
         account_id=account_id,
         region=region,
+        env_slug=env_slug,
         app_name=app_config.app_name,
         ecr_repo_name=app_config.ecr_repo_name,
         app_source_path=app_config.app_source_path,

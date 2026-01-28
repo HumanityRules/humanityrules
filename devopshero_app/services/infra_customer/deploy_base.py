@@ -46,6 +46,8 @@ class EnvironmentInfrastructure:
     shared_alb_https_listener_arn: str | None
     shared_alb_security_group: ec2.ISecurityGroup
     shared_alb_hosted_zone: str | None
+    # Builder resources (builder_instance_id is looked up at runtime via ec2_builder_utils)
+    builder_security_group: ec2.ISecurityGroup | None
 
 
 def import_environment_infrastructure(scope: Construct, env_slug: str, shared_alb_hosted_zone: str | None) -> EnvironmentInfrastructure:
@@ -114,6 +116,12 @@ def import_environment_infrastructure(scope: Construct, env_slug: str, shared_al
     if shared_alb_hosted_zone:
         shared_alb_https_listener_arn = Fn.import_value(f"{prefix}-shared-alb-https-listener-arn")
 
+    # Import builder security group
+    builder_security_group = ec2.SecurityGroup.from_security_group_id(
+        scope, "ImportedBuilderSg",
+        Fn.import_value(f"{prefix}-builder-sg-id"),
+    )
+
     return EnvironmentInfrastructure(
         vpc=vpc,
         default_security_group=default_security_group,
@@ -124,6 +132,7 @@ def import_environment_infrastructure(scope: Construct, env_slug: str, shared_al
         shared_alb_https_listener_arn=shared_alb_https_listener_arn,
         shared_alb_security_group=shared_alb_security_group,
         shared_alb_hosted_zone=shared_alb_hosted_zone,
+        builder_security_group=builder_security_group,
     )
 
 
@@ -346,6 +355,153 @@ class EcsClusterStack(Stack):
         CfnOutput(self, "SharedAlbHttpListenerArn", value=self.http_listener.listener_arn, export_name=f"{prefix}-shared-alb-http-listener-arn")
 
 
+class BuilderStack(Stack):
+    """
+    DevOpsHero Builder Stack - EC2 instance for Docker builds with auto-stop watchdog.
+
+    The instance is placed in a private subnet (uses NAT for outbound) with no inbound rules.
+    SSM is used for remote access (no SSH keys needed). Docker cache persists on the root EBS
+    volume when the instance is stopped. A watchdog service auto-stops the instance after
+    15 minutes of inactivity.
+    """
+
+    # User data script: install Docker, create build directory, set up watchdog
+    USER_DATA_SCRIPT = """#!/bin/bash
+set -e
+
+# Install Docker
+dnf install -y docker
+systemctl enable docker
+systemctl start docker
+usermod -aG docker ec2-user
+
+# Create build directory
+mkdir -p /build
+chown ec2-user:ec2-user /build
+
+# Watchdog script: stop instance after 15min idle
+# Uses ec2-user home directory for activity file (avoids permission issues)
+cat > /usr/local/bin/watchdog.sh << 'WATCHDOG'
+#!/bin/bash
+IDLE_TIMEOUT=900
+ACTIVITY_FILE=/home/ec2-user/last_build_activity
+touch $ACTIVITY_FILE
+chown ec2-user:ec2-user $ACTIVITY_FILE
+while true; do
+  sleep 60
+  idle=$(($(date +%s) - $(stat -c %Y $ACTIVITY_FILE)))
+  if [ $idle -gt $IDLE_TIMEOUT ]; then
+    shutdown -h now
+  fi
+done
+WATCHDOG
+chmod +x /usr/local/bin/watchdog.sh
+
+# Watchdog systemd service
+cat > /etc/systemd/system/watchdog.service << 'SERVICE'
+[Unit]
+Description=Builder idle watchdog
+After=network.target
+
+[Service]
+ExecStart=/usr/local/bin/watchdog.sh
+Restart=always
+
+[Install]
+WantedBy=multi-user.target
+SERVICE
+systemctl enable watchdog
+systemctl start watchdog
+
+# Signal successful initialization
+touch /tmp/builder_ready
+"""
+
+    def __init__(
+        self,
+        scope: Construct,
+        construct_id: str,
+        env_slug: str,
+        vpc: ec2.IVpc,
+        **kwargs,
+    ) -> None:
+        super().__init__(scope, construct_id, **kwargs)
+
+        prefix = f"devopshero-{env_slug}"
+
+        # IAM Role for EC2 instance
+        self.instance_role = iam.Role(
+            self, "BuilderRole",
+            role_name=f"{prefix}-builder-role",
+            assumed_by=iam.ServicePrincipal("ec2.amazonaws.com"),
+            managed_policies=[
+                # SSM agent permissions
+                iam.ManagedPolicy.from_aws_managed_policy_name("AmazonSSMManagedInstanceCore"),
+            ],
+        )
+
+        # ECR push permissions (for all repositories in the account)
+        self.instance_role.add_to_policy(iam.PolicyStatement(
+            actions=[
+                "ecr:GetAuthorizationToken",
+            ],
+            resources=["*"],
+        ))
+        self.instance_role.add_to_policy(iam.PolicyStatement(
+            actions=[
+                "ecr:BatchCheckLayerAvailability",
+                "ecr:GetDownloadUrlForLayer",
+                "ecr:BatchGetImage",
+                "ecr:InitiateLayerUpload",
+                "ecr:UploadLayerPart",
+                "ecr:CompleteLayerUpload",
+                "ecr:PutImage",
+            ],
+            resources=[f"arn:aws:ecr:{Aws.REGION}:{Aws.ACCOUNT_ID}:repository/doh/*"],
+        ))
+
+        # Security Group - no inbound rules (SSM works outbound-only)
+        self.security_group = ec2.SecurityGroup(
+            self, "BuilderSecurityGroup",
+            vpc=vpc,
+            security_group_name=f"{prefix}-builder-sg",
+            description="Security group for Docker builder - no inbound (SSM only)",
+            allow_all_outbound=True,
+        )
+
+        # EC2 Instance - Amazon Linux 2023, t4g.medium (Graviton ARM64), 50GB root volume
+        # ARM64 so Docker builds natively match ECS Fargate ARM64 target
+        self.instance = ec2.Instance(
+            self, "BuilderInstance",
+            instance_name=f"{prefix}-builder",
+            instance_type=ec2.InstanceType.of(ec2.InstanceClass.T4G, ec2.InstanceSize.MEDIUM),
+            machine_image=ec2.MachineImage.latest_amazon_linux2023(cpu_type=ec2.AmazonLinuxCpuType.ARM_64),
+            vpc=vpc,
+            vpc_subnets=ec2.SubnetSelection(subnet_type=ec2.SubnetType.PRIVATE_WITH_EGRESS),
+            security_group=self.security_group,
+            role=self.instance_role,
+            block_devices=[
+                ec2.BlockDevice(
+                    device_name="/dev/xvda",
+                    volume=ec2.BlockDeviceVolume.ebs(
+                        volume_size=50,
+                        volume_type=ec2.EbsDeviceVolumeType.GP3,
+                        delete_on_termination=False,  # Preserve Docker cache
+                    ),
+                ),
+            ],
+            user_data=ec2.UserData.custom(self.USER_DATA_SCRIPT),
+        )
+
+        # Tag for environment identification (used by ec2_builder_utils to find the instance)
+        from aws_cdk import Tags
+        Tags.of(self.instance).add("devopshero:environment", env_slug)
+
+        # Exports
+        CfnOutput(self, "BuilderInstanceId", value=self.instance.instance_id, export_name=f"{prefix}-builder-instance-id")
+        CfnOutput(self, "BuilderSecurityGroupId", value=self.security_group.security_group_id, export_name=f"{prefix}-builder-sg-id")
+
+
 # =============================================================================
 # HELPER FUNCTIONS
 # =============================================================================
@@ -419,9 +575,14 @@ def deploy(
     cdk_app = App(outdir=str(cdk_utils.CDK_OUT_DIR))
 
     vpc_stack_name = f"devopshero-{env_slug}-vpc"
+    builder_stack_name = f"devopshero-{env_slug}-builder"
     cluster_stack_name = f"devopshero-{env_slug}-cluster"
 
     vpc_stack = VpcStack(cdk_app, vpc_stack_name, env_slug=env_slug, vpc_cidr=vpc_cidr)
+
+    builder_stack = BuilderStack(cdk_app, builder_stack_name, env_slug=env_slug, vpc=vpc_stack.vpc)
+    builder_stack.add_dependency(vpc_stack)
+
     ecs_cluster_stack = EcsClusterStack(
         cdk_app,
         cluster_stack_name,
@@ -448,13 +609,15 @@ def deploy(
 
 def teardown(session: boto3.Session, env_slug: str) -> bool:
     """
-    Delete shared infrastructure stacks (ECS cluster, VPC).
+    Delete shared infrastructure stacks (ECS cluster, builder, VPC).
     WARNING: This will fail if any app stacks still depend on them.
     """
     cf_client = session.client("cloudformation")
 
+    # Order matters: cluster has no dependencies, builder depends on VPC, VPC is base
     stacks_to_delete = [
         f"devopshero-{env_slug}-cluster",
+        f"devopshero-{env_slug}-builder",
         f"devopshero-{env_slug}-vpc",
     ]
 

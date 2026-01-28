@@ -2,11 +2,22 @@ FROM python:3.14-slim
 
 WORKDIR /app
 
-# Install curl for health checks, Node.js for CDK/jsii, git for repo cloning, and uv for dependency management
-RUN apt-get update && apt-get install -y --no-install-recommends curl gnupg git && \
+# Install curl for health checks, Node.js for CDK/jsii, git for repo cloning, openssh-client + rsync for remote builder
+RUN apt-get update && apt-get install -y --no-install-recommends curl gnupg git openssh-client rsync unzip && \
     curl -fsSL https://deb.nodesource.com/setup_20.x | bash - && \
     apt-get install -y nodejs && \
     rm -rf /var/lib/apt/lists/*
+
+# Install AWS CLI v2 (arm64) for remote builder SSM commands
+RUN curl -fsSL "https://awscli.amazonaws.com/awscli-exe-linux-aarch64.zip" -o /tmp/awscliv2.zip && \
+    unzip -q /tmp/awscliv2.zip -d /tmp && \
+    /tmp/aws/install && \
+    rm -rf /tmp/aws /tmp/awscliv2.zip
+
+# Install AWS Session Manager Plugin for SSH-over-SSM (remote builder)
+RUN curl -fsSL "https://s3.amazonaws.com/session-manager-downloads/plugin/latest/ubuntu_arm64/session-manager-plugin.deb" -o /tmp/ssm-plugin.deb && \
+    dpkg -i /tmp/ssm-plugin.deb && \
+    rm /tmp/ssm-plugin.deb
 RUN pip install uv
 
 # Copy dependency files first for better caching

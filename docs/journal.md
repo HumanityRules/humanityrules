@@ -1,5 +1,135 @@
 # DevOpsHero Development Journal
 
+## 2026-01-28 00:45 - [Deployment] Remote EC2 Docker Builder via SSH-over-SSM
+
+Implemented a remote Docker builder that runs on EC2 in the customer's AWS account, solving the fundamental problem that DOH runs on ECS Fargate which doesn't support Docker-in-Docker. This was a multi-day effort with significant design discussion, implementation, debugging, and iteration.
+
+**The problem:**
+
+DOH needs to build customer Dockerfiles to deploy their apps. When running locally, we use the host's Docker daemon. But in production, DOH runs as a container on ECS Fargate, which doesn't expose a Docker socket. We can't use Docker-in-Docker on Fargate, and we don't want to run privileged containers for security reasons.
+
+**Design alternatives considered:**
+
+1. **S3 for code transfer** — Upload source to S3, have builder pull it. Rejected because it requires a bucket in the customer's account (more moving parts) and adds complexity for a simple file transfer use case.
+
+2. **EFS in customer account** — Shared filesystem between DOH and builder. Rejected for the same reason: we want minimal footprint in customer accounts.
+
+3. **SSH-over-SSM** — Use AWS Systems Manager Session Manager to tunnel SSH to the EC2 instance. No inbound security group rules needed, no bastion hosts, no public IPs. SSH gives us `scp`/`rsync` for file transfer. This won.
+
+**Key design decisions:**
+
+- **One EC2 builder per Environment** — Each Environment gets its own builder instance. EBS volume persists Docker layer cache even when instance stops, so subsequent builds are fast.
+
+- **Auto-shutdown after idle** — A watchdog systemd service monitors `/home/ec2-user/last_build_activity`. If no activity for 15 minutes, the instance shuts itself down. Keeps costs low for infrequent deployments.
+
+- **SSH via EC2 Instance Connect** — Instead of managing SSH keys, we generate ephemeral key pairs per build. Push the public key via EC2 Instance Connect (valid for 60 seconds), then SSH immediately. No long-lived credentials.
+
+- **Private subnet with NAT** — Builder sits in private subnet for security. NAT gateway provides outbound internet for pulling base images and pushing to ECR.
+
+- **ARM64 Graviton (t4g.medium)** — Initially used t3.medium (x86_64), but hit architecture mismatch issues. The app's Dockerfile had `COPY --from=ghcr.io/astral-sh/uv:latest /uv /bin/uv` which pulled the builder's native architecture (x86_64), but the resulting image needed to run on ARM64 Fargate. Switching to Graviton means native ARM64 builds — no cross-compilation needed, and multi-stage `COPY --from` pulls correct architecture automatically.
+
+- **Feature flag for local dev** — `DOH_USE_REMOTE_BUILDER=1` env var controls whether to use remote builder. Local development continues using host Docker directly. This keeps the dev experience fast while production uses the remote builder.
+
+**Implementation components:**
+
+- `deploy_base.py` — Added `BuilderStack` CDK construct with EC2 instance, IAM role (SSM + ECR permissions), security group (no inbound), and user data script that installs Docker and the watchdog service.
+
+- `ec2_builder_utils.py` — New module with functions: `get_builder_instance_id()` (find by tag), `ensure_builder_running()` (start if stopped, wait for running), `wait_for_ssm_ready()` (poll until SSM agent online), `transfer_source()` (rsync via SSH-over-SSM), `run_remote_docker_build()` (SSH to run docker build/tag/push).
+
+- `ecr_utils.py` — Modified `build_and_push_docker_image()` to check `DOH_USE_REMOTE_BUILDER` and dispatch to either local or remote build path.
+
+- `infra_devopshero/Dockerfile` — Added dependencies for remote builder: `openssh-client` (for ssh-keygen and ssh), `rsync` (for file transfer), `awscli` (for SSM start-session), and AWS Session Manager Plugin (arm64 .deb).
+
+**Debugging journey:**
+
+This took significant debugging to get working in production:
+
+1. **Missing ssh-keygen** — Container didn't have openssh-client. Added to Dockerfile.
+
+2. **Missing rsync** — Needed for efficient file transfer. Added to Dockerfile.
+
+3. **`aws: command not found` in ProxyCommand** — The AWS CLI was installed in the venv but not on PATH when bash runs ProxyCommand. Fixed by using absolute path `/app/.venv/bin/aws`.
+
+4. **Session Manager Plugin not found** — Required for `aws ssm start-session`. Installed the arm64 .deb package in Dockerfile.
+
+5. **Permission denied on activity file** — Watchdog script tried to write to `/tmp/last_build_activity` but ran as root while SSH user was ec2-user. Changed to `/home/ec2-user/last_build_activity` with proper ownership.
+
+6. **ProxyCommand quoting nightmare** — Environment variables with special characters broke the SSH command. Fixed by using `bash -c 'export VAR=val; command'` pattern and `shlex.quote()` for proper escaping of credentials.
+
+7. **ARM64 architecture mismatch** — The killer bug. `COPY --from=ghcr.io/astral-sh/uv:latest` pulled x86_64 binary because the builder was x86_64, but target was ARM64. Solved by switching to Graviton (t4g.medium) so native builds match target architecture.
+
+**Key learnings:**
+
+- SSH-over-SSM is powerful for secure access without opening inbound ports, but the ProxyCommand setup with credentials requires careful shell escaping.
+- Multi-stage Docker builds with `COPY --from` don't respect `--platform` flag — they pull based on builder's native architecture. Match builder architecture to target to avoid issues.
+- Graviton instances are cheaper and eliminate cross-compilation complexity when targeting ARM64 Fargate.
+- Watchdog pattern for auto-shutdown is simple and effective for cost control.
+
+## 2026-01-28 00:30 - [DevEx] Production Management CLI (prod_manage.sh + doh_customer)
+
+Created a CLI toolchain for managing DOH production: a wrapper script to run Django management commands via ECS exec, and a comprehensive `doh_customer` management command for customer operations. This emerged from the need to debug and operate on production during the remote builder implementation.
+
+**The problem:**
+
+During debugging of the remote builder, I needed to frequently check deployment status, view logs, retry failed deployments, and inspect database state. Running ad-hoc Python in the Django shell via ECS exec was tedious and error-prone.
+
+**Solution: Two-layer CLI:**
+
+1. **`infra_devopshero/prod_manage.sh`** — Wrapper script that handles AWS credentials, finds the running ECS task, and executes any Django management command via `aws ecs execute-command`. Usage: `./prod_manage.sh <command> [args...]`
+
+2. **`doh_customer` management command** — Django command with subcommands for customer operations. Provides a structured interface instead of ad-hoc shell queries.
+
+**prod_manage.sh implementation:**
+
+- Loads AWS credentials from `../.env` (DOH_AWS_ACCESS_KEY, DOH_AWS_SECRET_KEY)
+- Finds running task via `aws ecs list-tasks`
+- Properly escapes arguments for nested shell execution
+- Runs command via `aws ecs execute-command --interactive`
+
+**doh_customer operations:**
+
+- **`list`** — Show all organizations, AWS accounts, and environments with their status
+- **`create-env`** — Create a new environment record (with optional `--provision` flag)
+- **`provision-env`** — Trigger environment provisioning by setting status to PENDING
+- **`list-apps`** — Show all apps with their workspace, repository, and build strategy
+- **`list-deployments`** — Show recent deployments with status (color-coded)
+- **`deployment-logs`** — Show logs for a deployment (most recent by default, or filter by `--app`)
+- **`retry-deployment`** — Reset a failed deployment to PENDING for retry
+
+**Refinements to deployment-logs:**
+
+The initial implementation required `--app` flag. After using it during debugging, made several improvements:
+
+- **Made `--app` optional** — If omitted, shows the most recent deployment globally. This is the common case when debugging: "what's the latest deployment doing?"
+- **Added `updated_at` timestamp** — Critical for monitoring in-progress deployments. Shows when the deployment record was last touched.
+- **Reverse chronological order** — Logs now show newest first. When debugging, you usually want to see the latest activity, not scroll through old entries.
+- **Added timestamps to log lines** — Each log entry shows `[HH:MM:SS]` so you can see the timeline.
+- **Color-coded status** — Green for running, red for failed, yellow for in-progress states.
+
+**Skill documentation:**
+
+Created `.claude/skills/prod-manage/SKILL.md` with usage examples for all operations. The skill teaches agents how to use the CLI for production operations.
+
+**Usage example (real debugging session):**
+
+```bash
+# Quick status check - what's the latest deployment doing?
+./prod_manage.sh doh_customer deployment-logs --limit 5
+
+# Re-provision environment after code change
+./prod_manage.sh doh_customer provision-env --slug default --aws-account "DevOps Hero AWS Account"
+
+# Retry a failed deployment
+./prod_manage.sh doh_customer retry-deployment --app simple-dashboard
+```
+
+**Key learnings:**
+
+- Management commands with subcommands scale better than separate commands. One entry point, discoverable operations via `--help`.
+- When building debugging tools, optimize for the common case. Showing the most recent deployment globally (no `--app` required) eliminates a lookup step in 90% of uses.
+- Reverse chronological order and timestamps are essential for debugging time-sensitive operations like deployments.
+- ECS exec is powerful but requires careful argument escaping for nested shell execution.
+
 ## 2026-01-27 15:45 - [UI] Landing Page Conversion from React to Django Templates
 
 Converted the React/TypeScript landing page (built with Bolt.new in `tmp/project/`) to Django templates. The original React version had 8 components using Tailwind 3, Lucide React icons, and React hooks for interactivity. The new Django version replicates the design without any React dependencies.
