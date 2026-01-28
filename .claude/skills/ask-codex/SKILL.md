@@ -35,7 +35,7 @@ OUT="$(mktemp).txt"
 codex exec --skip-git-repo-check \
   --full-auto \
   --model gpt-5.2 \
-  -c model_reasoning_effort="high" \
+  -c model_reasoning_effort="xhigh" \
   -o "$OUT" \
   "$QUESTION" < /dev/null
 
