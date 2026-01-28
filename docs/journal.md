@@ -1,5 +1,35 @@
 # DevOpsHero Development Journal
 
+## 2026-01-28 22:35 - [ControlPlane] Add devopshero.co redirect to devopshero.ai
+
+**Conversation:** [2026-01-28-1419-d25d7b1e.md](conversations/2026-01-28-1419-d25d7b1e.md)
+
+Added infrastructure to redirect the secondary domain `devopshero.co` (apex and www) to the primary domain `devopshero.ai`. This ensures users who land on the .co domain are redirected to the canonical .ai domain.
+
+**Implementation approach:**
+
+Created a new `RedirectStack` CDK stack that uses a CloudFront Function to return 302 (temporary) redirects. The stack creates:
+
+- ACM certificate for `devopshero.co` and `www.devopshero.co` with DNS validation
+- CloudFront Function that intercepts all requests and returns 302 redirects preserving the URI path
+- CloudFront distribution with the function attached
+- Route53 A records (Alias) for both apex and www pointing to CloudFront
+
+**Why 302 instead of 301:**
+
+Chose 302 (temporary redirect) over 301 (permanent) to avoid browser caching issues. With 301, browsers cache the redirect indefinitely, making it difficult to change later. 302 gives flexibility to modify the redirect behavior without users having stale cached redirects.
+
+**Why CloudFront Function instead of S3:**
+
+Explored alternatives including S3 website hosting with built-in redirect rules. However, S3's `website_redirect` feature only supports 301 redirects — there's no option for 302. For temporary redirects, CloudFront Functions are the simplest AWS approach despite requiring a small JavaScript snippet. Lambda@Edge would work but is overkill for this use case.
+
+**Key points:**
+
+- New `redirect_stack.py` creates all resources needed for the redirect
+- CloudFront Function is 8 lines of JS that returns 302 with `Location: https://devopshero.ai{original_path}`
+- Requires hosted zone for `devopshero.co` to exist in Route53 before deployment
+- Deploy with `./deploy_stack.sh doh-prod-redirect`
+
 ## 2026-01-28 22:10 - [DevEx] Move extract_resources.py to infra_devopshero
 
 **Conversation:** [2026-01-28-1338-b18ae424.md](conversations/2026-01-28-1338-b18ae424.md)

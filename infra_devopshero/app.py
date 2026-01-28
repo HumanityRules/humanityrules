@@ -17,9 +17,11 @@ from stacks.cluster_stack import ClusterStack
 from stacks.database_stack import DatabaseStack
 from stacks.app_stack import AppStack
 from stacks.cdn_stack import CdnStack
+from stacks.redirect_stack import RedirectStack
 
 # Configuration
 DOMAIN_NAME = "devopshero.ai"
+REDIRECT_DOMAIN = "devopshero.co"
 AWS_ACCOUNT = os.environ.get("DOH_AWS_ACCOUNT_ID", "555553041615")
 AWS_REGION = "us-east-1"
 
@@ -118,5 +120,14 @@ cdn_stack = CdnStack(
 )
 cdn_stack.add_dependency(cert_stack)
 cdn_stack.add_dependency(app_stack)
+
+# 9. Redirect Stack (devopshero.co -> devopshero.ai)
+redirect_stack = RedirectStack(
+    app,
+    f"{prefix}-redirect",
+    redirect_domain=REDIRECT_DOMAIN,
+    target_domain=DOMAIN_NAME,
+    env=env_us_east_1,
+)
 
 app.synth()
