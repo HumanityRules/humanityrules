@@ -19,9 +19,15 @@ def posthog_context(request):
             'name': user.get_full_name() or user.email,
         }
 
+    # Use reverse proxy if configured (bypasses ad blockers)
+    # Proxy paths: /doh-ph/* for API, /doh-ph-static/* for static assets
+    proxy_host = getattr(settings, 'POSTHOG_PROXY_HOST', None)
+    api_host = proxy_host if proxy_host else getattr(settings, 'POSTHOG_HOST', 'https://us.i.posthog.com')
+
     config = {
         'apiKey': api_key,
-        'apiHost': getattr(settings, 'POSTHOG_HOST', 'https://us.i.posthog.com'),
+        'apiHost': api_host,
+        'useProxy': bool(proxy_host),
         'user': user_data,
     }
     return {'posthog_config_json': json.dumps(config)}

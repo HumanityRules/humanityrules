@@ -45,6 +45,7 @@ SECRET_DEFINITIONS = {
     "devopshero/prod/posthog": [
         "POSTHOG_API_KEY",
         "POSTHOG_HOST",
+        "POSTHOG_PROXY_HOST",
     ],
 }
 

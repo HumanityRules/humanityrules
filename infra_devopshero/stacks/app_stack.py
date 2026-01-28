@@ -128,6 +128,7 @@ class AppStack(Stack):
             "DOH_API_SECRET_KEY": ecs.Secret.from_secrets_manager(api_secret, field="DOH_API_SECRET_KEY"),
             "POSTHOG_API_KEY": ecs.Secret.from_secrets_manager(posthog_secret, field="POSTHOG_API_KEY"),
             "POSTHOG_HOST": ecs.Secret.from_secrets_manager(posthog_secret, field="POSTHOG_HOST"),
+            "POSTHOG_PROXY_HOST": ecs.Secret.from_secrets_manager(posthog_secret, field="POSTHOG_PROXY_HOST"),
         }
 
         # Init container - runs Django migrations and ensures superuser before app starts
