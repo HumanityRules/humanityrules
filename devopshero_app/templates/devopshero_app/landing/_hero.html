@@ -43,7 +43,14 @@ Landing page hero section with headline, subheadline, email signup form, and fea
 
             <!-- Email signup form -->
             <div class="max-w-md mx-auto mb-16 animate-slide-up" style="animation-delay: 0.3s;">
-                <form class="space-y-3" action="#" method="POST">
+                <form
+                    hx-post="{% url 'waitlist_signup' %}"
+                    hx-target="#signup-response-hero"
+                    hx-swap="innerHTML"
+                    class="space-y-3"
+                >
+                    {% csrf_token %}
+                    <input type="hidden" name="source" value="hero">
                     <div class="flex gap-2">
                         <input
                             type="email"
@@ -56,9 +63,11 @@ Landing page hero section with headline, subheadline, email signup form, and fea
                             Notify me
                         </button>
                     </div>
-                    <p class="text-sm text-gray-500 text-left">
-                        We'll email you when DevOps Hero is ready. No spam.
-                    </p>
+                    <div id="signup-response-hero">
+                        <p class="text-sm text-gray-500 text-left">
+                            We'll email you when DevOps Hero is ready. No spam.
+                        </p>
+                    </div>
                 </form>
             </div>
 

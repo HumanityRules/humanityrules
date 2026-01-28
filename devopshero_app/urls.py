@@ -6,6 +6,7 @@ urlpatterns = [
     path("health/", views.health_check, name="health_check"),
     
     path("", views.landing, name="landing"),
+    path("waitlist/signup/", views.waitlist_signup, name="waitlist_signup"),
     path("dashboard/", views.dashboard, name="dashboard"),
     path("workspaces/", views.workspaces, name="workspaces"),
     path("workspaces/<slug:workspace_slug>/", views.workspace_detail, name="workspace_detail"),

@@ -16,6 +16,7 @@ from devopshero_app.models import (
     OrganizationMembership,
     Repository,
     User,
+    WaitlistSignup,
     Workspace,
 )
 
@@ -221,3 +222,11 @@ class EnvironmentLogAdmin(admin.ModelAdmin):
         if not obj.message:
             return ""
         return obj.message[:120]
+
+
+@admin.register(WaitlistSignup)
+class WaitlistSignupAdmin(admin.ModelAdmin):
+    list_display = ["email", "source", "created_at"]
+    list_filter = ["source", "created_at"]
+    search_fields = ["email"]
+    readonly_fields = ["id", "created_at"]

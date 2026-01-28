@@ -34,7 +34,14 @@ Landing page CTA section - final call to action with email signup.
 
                 <!-- Email signup form -->
                 <div class="max-w-md mx-auto">
-                    <form class="space-y-3" action="#" method="POST">
+                    <form
+                        hx-post="{% url 'waitlist_signup' %}"
+                        hx-target="#signup-response-cta"
+                        hx-swap="innerHTML"
+                        class="space-y-3"
+                    >
+                        {% csrf_token %}
+                        <input type="hidden" name="source" value="cta">
                         <div class="flex gap-2">
                             <input
                                 type="email"
@@ -47,9 +54,11 @@ Landing page CTA section - final call to action with email signup.
                                 Notify me
                             </button>
                         </div>
-                        <p class="text-sm text-gray-500 text-left">
-                            We'll email you when DevOps Hero is ready. No spam.
-                        </p>
+                        <div id="signup-response-cta">
+                            <p class="text-sm text-gray-500 text-left">
+                                We'll email you when DevOps Hero is ready. No spam.
+                            </p>
+                        </div>
                     </form>
                 </div>
 

@@ -1,5 +1,27 @@
 # DevOpsHero Development Journal
 
+## 2026-01-28 23:15 - [UI] Waitlist Email Capture on Landing Page
+
+Wired up the "Notify me" forms on the landing page to capture email signups in the database for early access notifications.
+
+**Implementation approach:**
+
+1. **New `WaitlistSignup` model** — Simple model with `email` (unique), `source`, and `created_at`. The `source` field tracks which form the user signed up from (hero section at top vs CTA section at bottom) so we can measure conversion rates for each placement.
+
+2. **HTMX for smooth UX** — The landing page is a standalone template that doesn't extend `base.html`, so it didn't have HTMX. Added the HTMX script and converted both forms to use `hx-post` with `hx-target` pointing to a response container. On submit, the helper text swaps to a success message without page reload.
+
+3. **Security consideration for duplicates** — When a duplicate email is submitted, we silently return success rather than revealing "this email already exists." This prevents email enumeration attacks where someone could probe to see which emails are already in the waitlist.
+
+4. **Admin registration** — Added `WaitlistSignupAdmin` with list display showing email, source, and timestamp. Includes filters by source and date for segmentation analysis.
+
+**Key points:**
+- Two forms exist: `_hero.html` (above fold) and `_cta.html` (bottom of page) — both now submit to `/waitlist/signup/`
+- Source values are `hero` and `cta` respectively, passed via hidden input
+- The view is simple POST-only, no authentication required (public landing page)
+- Django's `IntegrityError` on duplicate email is caught and handled gracefully
+
+---
+
 ## 2026-01-27 19:55 - [UI] Recover Sign-in Button on Landing Page
 
 During the React-to-Django template conversion (see 2026-01-27 15:45 entry), the sign-in button was lost from the landing page header. The old `landing.html` had conditional auth logic that wasn't carried over to the new partials structure.
