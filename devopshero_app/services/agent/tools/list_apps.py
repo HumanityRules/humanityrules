@@ -1,8 +1,7 @@
 """
 Tool for listing applications in a workspace.
 
-This tool allows the agent to discover existing apps before creating new ones,
-enabling re-deployment of existing apps instead of creating duplicates.
+This tool allows the agent to discover existing apps and their deployment status.
 """
 
 from dataclasses import dataclass, asdict
@@ -31,10 +30,6 @@ class AppSummary:
 async def list_apps(workspace: Workspace) -> list[AppSummary]:
     """
     List applications in a workspace.
-
-    Use this to discover existing apps before creating new ones.
-    If an app with the desired name/slug already exists, use deploy_app
-    with its ID instead of calling create_app.
 
     Args:
         workspace: The Workspace to list apps from.

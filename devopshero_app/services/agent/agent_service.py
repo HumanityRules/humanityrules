@@ -36,7 +36,7 @@ from claude_agent_sdk.types import (
 )
 from django.conf import settings
 
-from devopshero_app.models import App, AWSAccount, Conversation, Message, Repository, Workspace
+from devopshero_app.models import AWSAccount, Conversation, Message, Repository, Workspace
 from devopshero_app.services.github import repo_service
 from devopshero_app.services.llm import llm_client, title_generator
 
@@ -238,18 +238,20 @@ async def _handle_sdk_stream_event(message: SDKStreamEvent, ctx: StreamingContex
 
 
 async def _enrich_tool_input(tool_name: str, tool_input: dict) -> dict:
-    """Enrich tool input with display-friendly data looked up from the database."""
-    enriched = tool_input
+    """
+    Enrich tool input with display-friendly data looked up from the database.
 
-    # For deploy_app, add app_name from app_id for UI display
-    if tool_name == "mcp__devopshero__deploy_app" and "app_id" in tool_input:
-        try:
-            app = await App.objects.only("name").aget(id=tool_input["app_id"])
-            enriched = {**enriched, "app_name": app.name}
-        except Exception as e:
-            logger.error(f"Failed to enrich deploy_app tool input: {e}")
+    Originally added (2026-01-15) to resolve UUIDs to friendly names for UI display.
+    For example, when deploy_app was called with app_id, we'd look up the app name
+    so the UI could show "Deploy App: my-cool-app" instead of a UUID.
 
-    return enriched
+    As of 2026-01-27, the two original use cases are obsolete:
+    - deploy_app now takes 'name' directly (upsert by name, not app_id)
+    - select_workspace tool was removed
+
+    Kept as a hook for future enrichment needs.
+    """
+    return tool_input
 
 
 async def _handle_assistant_message(message: AssistantMessage, ctx: StreamingContext) -> AsyncGenerator[AgentStreamEvent, None]:

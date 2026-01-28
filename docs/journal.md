@@ -1,5 +1,57 @@
 # DevOpsHero Development Journal
 
+## 2026-01-28 17:50 - [AgentChat] Unified deploy_app Tool with Upsert Semantics
+
+Merged `create_app` and `deploy_app` into a single tool to eliminate duplicate app creation when redeploying after teardown.
+
+**The problem:**
+
+When a user tears down an app and asks to "deploy the same app again," the agent was calling `create_app`. Since the App record still exists (teardown only deletes AWS infrastructure, not the DB record), `create_app` would find the slug collision and auto-suffix it: `simple-dashboard` → `simple-dashboard-1`. This created orphan duplicates and confused users.
+
+The tool descriptions told the agent to call `list_apps` first to check for existing apps, but LLMs don't reliably follow multi-step patterns like this.
+
+**Design decision: single unified tool**
+
+Instead of relying on the agent to pick the right tool, we merged them into one `deploy_app` with upsert semantics:
+- Look up existing app by `(organization, slug)` where `slug = slugify(name)`
+- If exists → update config, create deployment
+- If not exists → create app, create deployment
+
+This makes "deploy this thing" a single-intent operation. The agent doesn't need to decide between tools.
+
+**Consulted Codex (GPT-5.2) for external validation.** Key insights that shaped the design:
+
+1. **DB constraint is essential** — The unique constraint on `(organization, slug)` prevents duplicates under race conditions. Application-level checks alone aren't sufficient.
+
+2. **Don't match on repository** — Repository URLs change (renames, monorepos). Match by app identity and *guard* repo changes instead. We error if existing app has different repository.
+
+3. **Sentinel semantics for env/secrets** — Needed clear semantics for "keep unchanged" vs "clear" vs "replace". Settled on:
+   - `None` (not provided) → keep existing unchanged
+   - `[]` or `{}` (empty) → clear all
+   - `[values]` or `{values}` → replace with provided
+
+4. **Return `app_created` flag** — Response indicates whether app was created or updated, so agent can communicate "Created and deployed simple-dashboard" vs "Redeployed simple-dashboard with updated config."
+
+**Key design choices:**
+
+- **Identity is `(organization, slug)`** — Kept at org level (not workspace). This was the existing constraint.
+- **`app_type` is config, not identity** — Separate apps should have distinct names like "dashboard-web", "dashboard-worker".
+- **Repository mismatch = hard error** — Prevents accidentally rewiring an app to wrong repo.
+- **Silent updates for other config** — `cpu`, `memory`, `container_port`, `branch`, `build_strategy`, etc. can change without explicit flags.
+
+**Implementation:**
+
+- Rewrote `deploy_app.py` with full upsert logic, sentinel value handling, and race condition recovery via `IntegrityError` catch-and-retry
+- Deleted `create_app.py` entirely — no longer exposed as a tool
+- Updated `mcp_tools.py` — removed `create_app`, updated `deploy_app` signature with all config params
+- Tool count: 15 → 14
+
+**Cleanup:**
+
+The `_enrich_tool_input()` function in `agent_service.py` was originally added to resolve UUIDs to friendly names for UI display (e.g., show "Deploy App: my-cool-app" instead of a UUID). With the new `deploy_app` taking `name` directly, this enrichment is no longer needed. Kept the function as a hook but updated the docstring to document the history.
+
+---
+
 ## 2026-01-28 00:45 - [Deployment] Remote EC2 Docker Builder via SSH-over-SSM
 
 Implemented a remote Docker builder that runs on EC2 in the customer's AWS account, solving the fundamental problem that DOH runs on ECS Fargate which doesn't support Docker-in-Docker. This was a multi-day effort with significant design discussion, implementation, debugging, and iteration.
