@@ -9,13 +9,13 @@ Add entries to `docs/journal.md` documenting decisions, learnings, and architect
 
 ## Workflow
 
-1. Review the conversation to extract:
+1. **Review the conversation** to identify:
    - Decisions made and their reasoning
    - Learnings, mistakes, corrections
    - Architectural choices
    - Non-obvious implementation details
 
-2. Select ONE category from:
+2. **Select ONE category** from:
    - **Onboarding** — User registration, organization creation, session handling
    - **AgentChat** — AI conversation interface, streaming, message rendering, tool calls
    - **Integrations** — External services: AWS accounts, GitHub, WorkOS
@@ -26,16 +26,26 @@ Add entries to `docs/journal.md` documenting decisions, learnings, and architect
    - **DevEx** — Developer tooling, scripts, CLI, local development
    - **Bugfix** — Bug fixes and debugging sessions
 
-3. Write a thorough entry following the format below
+3. **Write a thorough entry** following the format below
 
-4. Prepend the entry to `docs/journal.md` (latest on top)
+4. **Prepend the entry** to `docs/journal.md` (latest on top) — leave `**Conversation:**` blank for now
 
-5. If user said `/journal commit`, also commit all changes from the session
+5. **Extract the conversation to disk** — Run the extraction script:
+   ```bash
+   python .claude/skills/journal/extract_conversation.py --list --search "<first few words of user's first message>" --limit 3
+   python .claude/skills/journal/extract_conversation.py --uuid <UUID>
+   ```
+
+6. **Update the journal entry** with the conversation link
+
+7. If user said `/journal commit`, also commit all changes from the session
 
 ## Entry Format
 
 ```markdown
 ## YYYY-MM-DD HH:MM - [Category] Title
+
+**Conversation:** [YYYY-MM-DD-HHMM-uuid.md](conversations/YYYY-MM-DD-HHMM-uuid.md)
 
 Describe the decision/change and WHY in sufficient detail for future reference.
 
@@ -53,4 +63,5 @@ Describe the decision/change and WHY in sufficient detail for future reference.
 - **Include technical details** — Specific configurations, error messages, solutions tried
 - **No "Files Changed" sections** — Git tracks files; journal captures intent
 - **Use current time** — Format: `YYYY-MM-DD HH:MM` (24-hour, local time)
+
 
