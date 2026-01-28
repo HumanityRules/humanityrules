@@ -1,5 +1,124 @@
 # DevOpsHero Development Journal
 
+## 2026-01-28 21:45 - [Bugfix] Investigating Production Database Connection Exhaustion
+
+**Conversation:** 
+
+PostHog showed production errors on the chat streaming endpoint (`/chat/.../stream/`):
+
+1. `OperationalError: connection failed ... FATAL: remaining connection slots are reserved for roles with the SUPERUSER attribute`
+2. `AttributeError: 'SessionStore' object has no attribute '_session_cache'`
+
+**Initial diagnosis pointed to connection exhaustion:**
+
+- Aurora Serverless v2 at `min_capacity=0.5` ACU provides only ~45 connections when idle
+- Django `conn_max_age=60` kept connections alive for 60 seconds
+- The async agent runner polls the database every 500ms while clients are connected
+- Long-running SSE streams could hold connections for extended periods
+
+The SessionStore error appeared to be a cascading failure — when Django's session middleware couldn't get a database connection, it failed with an AttributeError.
+
+**Mitigation applied:**
+
+Changed `conn_max_age` from 60 to 0 in `settings.py`. This closes database connections after each request instead of keeping them alive. Trade-off is slightly higher latency per request, but prevents connection pool exhaustion.
+
+```python
+# Before
+DATABASES = {"default": dj_database_url.parse(DATABASE_URL, conn_max_age=60)}
+
+# After  
+DATABASES = {"default": dj_database_url.parse(DATABASE_URL, conn_max_age=0)}
+```
+
+**Important caveat:** We're not 100% certain this is the root cause. The comment reflects this uncertainty — we need to monitor after deployment to confirm.
+
+**Logging gap discovered:**
+
+CloudWatch logs showed HTTP 500 responses but no stack traces. The logging configuration only captures `devopshero_app` logs, not Django exceptions or the root logger. Exceptions are captured by PostHog middleware but not printed to CloudWatch. This should be addressed separately to improve production debugging.
+
+**Alternative solutions considered (not implemented):**
+
+- Increase Aurora `min_capacity` to 2 ACU (~180 connections) — costs more
+- Add PgBouncer connection pooling — more infrastructure
+- Reduce agent runner polling frequency — changes behavior
+
+## 2026-01-28 14:15 - [AgentChat] Making deploy_app Tool Optional Parameters Actually Optional
+
+**Conversation:** [2026-01-28-1330-bd79e017.md](conversations/2026-01-28-1330-bd79e017.md)
+
+The DOH agent was failing when trying to deploy apps without a database. The agent would either pass `"datastore_id": "null"` (string literal) which failed UUID validation, or omit the field entirely which failed because it was marked as required. This was a schema definition problem in the MCP tool.
+
+**Root cause discovered:**
+
+The claude-agent-sdk `@tool` decorator has two schema formats:
+
+1. **Simple type mapping** — `{"name": str, "datastore_id": str}` — ALL fields become required
+2. **Full JSON Schema** — `{"type": "object", "properties": {...}, "required": [...]}` — explicit control
+
+Our `deploy_app` tool used the simple format, so every field was required. The SDK source code confirmed this:
+
+```python
+# In create_sdk_mcp_server when processing simple dict schemas:
+schema = {
+    "type": "object",
+    "properties": properties,
+    "required": list(properties.keys()),  # ALL properties marked required!
+}
+```
+
+**Solution:**
+
+Converted `deploy_app` to use full JSON Schema format with explicit `"required"` array. Made these fields optional:
+
+- `datastore_id` — apps without databases can omit this entirely
+- `dockerfile_path` — not always needed
+- `environment_variables` — omit to keep existing values
+- `app_secrets` — omit to keep existing values
+- `git_ref` — defaults to HEAD of branch (most common case)
+- `branch` — defaults to `repository.default_branch` (we already fetch the repo)
+
+**Key insight:** Since we already fetch the Repository in deploy_app to validate it, we can use `repository.default_branch` as the default. Similarly, `git_ref` can default to the branch value. This reduces cognitive load on the agent.
+
+**Future improvements identified (not implemented):**
+- Default `environment_slug` to "default" (the description says "always use 'default'")
+- Default `app_type` to "web" (most common)
+- Default `cpu` to 256 and `memory` to 512 (sensible starting points)
+- Default `name` to `repository.name`
+
+These would reduce truly required fields from 8 to just 3: `build_strategy`, `container_port`, `health_check_path` — all of which come from `scan_repository`.
+
+## 2026-01-28 13:25 - [DevEx] Cursor Conversation Extraction Script for Journal Linking
+
+**Conversation:** [2026-01-28-1322-a14d52b0.md](conversations/2026-01-28-1322-a14d52b0.md)
+
+Created a script to extract Cursor conversations to markdown files, enabling journal entries to link back to the conversation that generated them. This provides traceability between documented decisions and the full context of the discussion.
+
+**The problem:** Journal entries capture decisions and reasoning, but sometimes you want to revisit the full conversation that led to those decisions. Cursor stores conversations internally in an SQLite database, not as accessible files.
+
+**Investigation findings:**
+
+Cursor stores all conversation data in `~/Library/Application Support/Cursor/User/globalStorage/state.vscdb`. Conversations are keyed as `composerData:<UUID>` and contain JSON with the full message history. The `CURSOR_TRACE_ID` environment variable exists but is unrelated to conversation UUIDs — it's a separate tracing mechanism.
+
+Key limitation discovered: in-progress conversations aren't visible in the database until they're saved/closed. This means you can't extract the current conversation while it's happening — extraction must happen after.
+
+**Solution implemented:**
+
+Created `.claude/skills/journal/extract_conversation.py` with these capabilities:
+- `--list` — Show recent conversations sorted by content size (conversations with actual content appear first)
+- `--search "keyword"` — Filter by first user message
+- `--search "keyword" --full` — Full-text search across all messages
+- `--uuid <UUID>` — Extract specific conversation to markdown
+- Default output to `docs/conversations/` (gitignored since these files are large)
+
+**Key points:**
+- Conversations stored in SQLite at `state.vscdb`, not individual files
+- UUIDs identify conversations: `composerData:<UUID>`
+- Full-text search required iterating all messages, not just first user message
+- Added `.gitignore` in `docs/conversations/` to exclude extracted files from version control
+- Updated journal skill with instructions for linking conversations post-session
+
+---
+
 ## 2026-01-28 21:35 - [ControlPlane] CloudFront Origin Request Policy: all() Forwards Host Header
 
 Attempted to improve the PostHog proxy by forwarding more headers to PostHog for better analytics enrichment. Changed from `OriginRequestHeaderBehavior.allow_list("Origin")` to `OriginRequestHeaderBehavior.all()`. This immediately broke the proxy with 502 Bad Gateway errors.
