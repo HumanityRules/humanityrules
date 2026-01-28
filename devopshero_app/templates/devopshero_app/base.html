@@ -17,6 +17,8 @@
     <!-- like for example the profile dropdown menu -->
     <script src="https://cdn.jsdelivr.net/npm/@tailwindplus/elements@1" type="module"></script>
 
+    {% include "devopshero_app/partials/_posthog.html" %}
+
     {% block extra_head %}{% endblock %}    
 </head>
 <body hx-headers='{"x-csrftoken": "{{ csrf_token }}"}' class="h-full" hx-ext="sse">

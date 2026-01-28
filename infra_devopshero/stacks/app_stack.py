@@ -102,6 +102,7 @@ class AppStack(Stack):
         github_secret = secretsmanager.Secret.from_secret_name_v2(self, "GithubSecret", "devopshero/prod/github")
         bedrock_secret = secretsmanager.Secret.from_secret_name_v2(self, "BedrockSecret", "devopshero/prod/bedrock")
         api_secret = secretsmanager.Secret.from_secret_name_v2(self, "ApiSecret", "devopshero/prod/api")
+        posthog_secret = secretsmanager.Secret.from_secret_name_v2(self, "PosthogSecret", "devopshero/prod/posthog")
 
         # All secrets needed by the app (shared between migration and app containers)
         app_secrets = {
@@ -125,6 +126,8 @@ class AppStack(Stack):
             "AWS_BEDROCK_ACCESS_KEY_ID": ecs.Secret.from_secrets_manager(bedrock_secret, field="AWS_BEDROCK_ACCESS_KEY_ID"),
             "AWS_BEDROCK_SECRET_ACCESS_KEY": ecs.Secret.from_secrets_manager(bedrock_secret, field="AWS_BEDROCK_SECRET_ACCESS_KEY"),
             "DOH_API_SECRET_KEY": ecs.Secret.from_secrets_manager(api_secret, field="DOH_API_SECRET_KEY"),
+            "POSTHOG_API_KEY": ecs.Secret.from_secrets_manager(posthog_secret, field="POSTHOG_API_KEY"),
+            "POSTHOG_HOST": ecs.Secret.from_secrets_manager(posthog_secret, field="POSTHOG_HOST"),
         }
 
         # Init container - runs Django migrations and ensures superuser before app starts

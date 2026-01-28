@@ -77,6 +77,7 @@ MIDDLEWARE = [
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
     "django_browser_reload.middleware.BrowserReloadMiddleware",
     "django_htmx.middleware.HtmxMiddleware",
+    "posthog.integrations.django.PosthogContextMiddleware",
 ]
 
 ROOT_URLCONF = 'devopshero_site.urls'
@@ -91,6 +92,7 @@ TEMPLATES = [
                 'django.template.context_processors.request',
                 'django.contrib.auth.context_processors.auth',
                 'django.contrib.messages.context_processors.messages',
+                'devopshero_app.context_processors.posthog_context',
             ],
         },
     },
@@ -202,6 +204,19 @@ CLAUDE_MODEL = os.environ.get("CLAUDE_MODEL", "sonnet-4.5")
 
 # Claude Agent Sandbox: Base directory for agent sandbox (cloned repos, temp files, etc.)
 CLAUDE_SANDBOX_DIR = BASE_DIR / "tmp"
+
+# PostHog Analytics Configuration
+POSTHOG_API_KEY = os.environ.get("POSTHOG_API_KEY")
+POSTHOG_HOST = os.environ.get("POSTHOG_HOST", "https://us.i.posthog.com")
+
+
+def posthog_request_filter(request):
+    """Skip PostHog tracking for admin, health checks, and static files."""
+    skip_prefixes = ('/admin', '/health', '/static', '/__reload__')
+    return not request.path.startswith(skip_prefixes)
+
+
+POSTHOG_MW_REQUEST_FILTER = posthog_request_filter
 
 # Logging configuration
 LOGGING = {

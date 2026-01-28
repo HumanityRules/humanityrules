@@ -25,4 +25,5 @@ dependencies = [
     "servestatic>=3.0.0",
     "psycopg[binary]>=3.2.0",
     "dj-database-url>=2.2.0",
+    "posthog>=3.0.0",
 ]
