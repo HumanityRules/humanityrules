@@ -1,0 +1,2 @@
+# Ignore extracted conversations (they're large and contain raw data)
+*.md
