@@ -526,25 +526,32 @@ async def create_datastore(args: dict[str, Any]) -> dict[str, Any]:
         "For environment_slug, always use 'default'. "
         "For cpu: ECS CPU units (256=0.25vCPU, 512=0.5vCPU, 1024=1vCPU, 2048=2vCPU). "
         "For memory: MiB (512, 1024, 2048, 4096). "
-        "For environment_variables: pass null to keep existing, [] to clear, or [{\"name\": \"FOO\", \"value\": \"bar\"}] to replace. "
-        "For app_secrets: pass null to keep existing, {} to clear, or {\"key\": \"value\"} to replace. "
-        "Use null values in app_secrets for auto-generated secrets, e.g., {\"secret_key_base\": null, \"api_token\": \"disabled\"}."
+        "For environment_variables: omit to keep existing, pass [] to clear, or [{\"name\": \"FOO\", \"value\": \"bar\"}] to replace. "
+        "For app_secrets: omit to keep existing, pass {} to clear, or {\"key\": \"value\"} to replace. "
+        "Use null values in app_secrets for auto-generated secrets, e.g., {\"secret_key_base\": null}."
     ),
     {
-        "name": str,
-        "branch": str,
-        "app_type": str,
-        "build_strategy": str,
-        "container_port": int,
-        "cpu": int,
-        "memory": int,
-        "health_check_path": str,
-        "git_ref": str,
-        "environment_slug": str,
-        "environment_variables": list,
-        "datastore_id": str,
-        "dockerfile_path": str,
-        "app_secrets": dict,
+        "type": "object",
+        "properties": {
+            "name": {"type": "string", "description": "Human-readable name for the app (used to derive slug for matching)"},
+            "branch": {"type": "string", "description": "Git branch to deploy from. Omit to use repository's default branch."},
+            "app_type": {"type": "string", "description": "Type of app: web, worker, or scheduled"},
+            "build_strategy": {"type": "string", "description": "How to build: dockerfile, nixpacks, or buildpack"},
+            "container_port": {"type": "integer", "description": "Port the container listens on (e.g., 8000)"},
+            "cpu": {"type": "integer", "description": "Fargate CPU units (256, 512, 1024, 2048)"},
+            "memory": {"type": "integer", "description": "Fargate memory in MiB (512, 1024, 2048, 4096)"},
+            "health_check_path": {"type": "string", "description": "HTTP path for health checks (e.g., /health)"},
+            "git_ref": {"type": "string", "description": "Git reference (tag or commit SHA) to deploy. Omit to deploy HEAD of branch."},
+            "environment_slug": {"type": "string", "description": "Target environment slug (use 'default')"},
+            "environment_variables": {"type": "array", "description": "List of {name, value} dicts. Omit to keep existing, [] to clear."},
+            "datastore_id": {"type": "string", "description": "UUID of datastore to bind. Omit if app doesn't need a database."},
+            "dockerfile_path": {"type": "string", "description": "Path to Dockerfile (e.g., 'Dockerfile'). Required for dockerfile build strategy."},
+            "app_secrets": {"type": "object", "description": "Dict of secret field names to values. Omit to keep existing, {} to clear."},
+        },
+        "required": [
+            "name", "app_type", "build_strategy", "container_port",
+            "cpu", "memory", "health_check_path", "environment_slug"
+        ],
     },
 )
 async def deploy_app(args: dict[str, Any]) -> dict[str, Any]:
@@ -566,11 +573,14 @@ async def deploy_app(args: dict[str, Any]) -> dict[str, Any]:
     except Repository.DoesNotExist:
         raise ValueError(f"Repository {repository_id} not found in organization.")
 
+    # Default branch to repository's default_branch
+    branch = args.get("branch") or repository.default_branch
+
     result = await _deploy_app(
         workspace=workspace,
         repository=repository,
         name=args["name"],
-        branch=args["branch"],
+        branch=branch,
         app_type=args["app_type"],
         build_strategy=args["build_strategy"],
         container_port=args["container_port"],
@@ -579,7 +589,7 @@ async def deploy_app(args: dict[str, Any]) -> dict[str, Any]:
         health_check_path=args["health_check_path"],
         user=conversation.user,
         environment_slug=args["environment_slug"],
-        git_ref=args["git_ref"],
+        git_ref=args.get("git_ref") or branch,  # Default to branch HEAD
         environment_variables=args.get("environment_variables"),
         datastore_id=args.get("datastore_id"),
         dockerfile_path=args.get("dockerfile_path"),
