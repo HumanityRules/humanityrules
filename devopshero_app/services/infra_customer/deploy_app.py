@@ -418,6 +418,7 @@ class AppStack(Stack):
             enable_execute_command=True,
             min_healthy_percent=100,  # Zero-downtime: keep old task until new one is healthy
             max_healthy_percent=200,
+            health_check_grace_period=Duration.seconds(15),  # Reduced from 60s default for faster deployments
         )
         service.attach_to_application_target_group(target_group)
 

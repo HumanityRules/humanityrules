@@ -1,5 +1,45 @@
 # DevOpsHero Development Journal
 
+## 2026-01-28 19:40 - [Deployment] ECS Stabilization Timeout Race Condition Fix
+
+Debugged a "failed" deployment of simple-dashboard that was actually running fine. Root cause was a race condition between the ECS stabilization timeout and the deployment completing.
+
+**The symptom:**
+
+Deployment logs showed `CDK deployment failed` with message `Service failed to stabilize. Check ECS console for details. Timed out after 180 waiting for service`. However, AWS showed the ECS service running and healthy.
+
+**Investigation timeline:**
+
+Checked CloudFormation (CREATE_COMPLETE), ECS service (1/1 running), target group (healthy), and the app itself (HTTP 200). Everything was fine. The DOH deployment-logs command revealed the truth: the deployment was marked failed at 03:20:25, but AWS events showed the service reached steady state at... 03:20:25. Same moment.
+
+**Root cause analysis:**
+
+The stabilization code in `ecs_utils.py` requires `rollout_state == "COMPLETED"` before considering the service stable. The ECS deployment timeline was:
+
+- 03:17:22 — Started waiting for stabilization (180s timeout)
+- 03:17:58 — 1/1 running, but 1 pending (old task still draining)
+- 03:19:15 — AWS began draining connections from old task
+- 03:20:25 — Rollout completed AND timeout expired at same instant
+
+The 180-second timeout was barely enough. Key contributors:
+
+1. **Health check grace period: 60s (CDK default)** — ECS waits 60 seconds before checking ALB health, even for fast-starting apps like Streamlit that boot in ~1 second.
+2. **minimumHealthyPercent: 100%** — Old task can't be killed until new one passes health checks.
+3. **ALB healthy threshold: 2 checks × 5s** — Another ~10s after grace period.
+
+Minimum deployment time: ~105-135s, leaving only ~45-75s buffer.
+
+**The fix:**
+
+Added explicit `health_check_grace_period=Duration.seconds(15)` to the FargateService in `deploy_app.py`. This reduces the grace period from 60s (CDK default) to 15s, which is plenty for most containerized apps.
+
+**Key learnings:**
+
+- CDK defaults aren't always suitable — 60s grace period is for slow JVM apps, not modern containers
+- Race conditions with exact timing are real — the timeout and completion happened at the same second
+- "Failed" deployments may be false positives — always verify AWS state directly
+- The deregistration delay was already optimized (5s) — wasn't the culprit despite initial suspicion
+
 ## 2026-01-28 17:50 - [AgentChat] Unified deploy_app Tool with Upsert Semantics
 
 Merged `create_app` and `deploy_app` into a single tool to eliminate duplicate app creation when redeploying after teardown.
