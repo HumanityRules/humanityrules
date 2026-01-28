@@ -4,12 +4,15 @@ Docker utility functions for building and pushing images to ECR.
 
 import base64
 import logging
+import os
 from pathlib import Path
 import subprocess
 import threading
 
 import boto3
 from botocore.exceptions import ClientError
+
+from . import ec2_builder_utils
 
 logger = logging.getLogger(__name__)
 
@@ -98,6 +101,7 @@ def build_and_push_docker_image(
     session: boto3.Session,
     account_id: str,
     region: str,
+    env_slug: str,
     app_name: str,
     ecr_repo_name: str,
     app_source_path: Path | None,
@@ -106,10 +110,14 @@ def build_and_push_docker_image(
     """
     Build Docker image and push to ECR.
 
+    Uses local Docker in development (DOH_USE_REMOTE_BUILDER unset) or
+    remote EC2 builder in production (DOH_USE_REMOTE_BUILDER=1).
+
     Args:
         session: Boto3 session with credentials for the target account
         account_id: AWS account ID
         region: AWS region
+        env_slug: Environment slug (needed to find EC2 builder in remote mode)
         app_name: Application name (for logging)
         ecr_repo_name: ECR repository name (e.g., "doh/default/simple-dashboard")
         app_source_path: Path to the app source directory containing Dockerfile
@@ -131,6 +139,27 @@ def build_and_push_docker_image(
     # Full image URI
     image_uri = f"{account_id}.dkr.ecr.{region}.amazonaws.com/{ecr_repo_name}:{image_tag}"
 
+    # Choose build method based on environment
+    if os.environ.get("DOH_USE_REMOTE_BUILDER") == "1":
+        logger.info("Using remote EC2 builder")
+        return _build_and_push_remote(
+            session=session,
+            env_slug=env_slug,
+            app_source_path=app_source_path,
+            image_uri=image_uri,
+            image_tag=image_tag,
+        )
+    else:
+        logger.info("Using local Docker")
+        return _build_and_push_local(
+            session=session,
+            app_source_path=app_source_path,
+            image_uri=image_uri,
+        )
+
+
+def _build_and_push_local(session: boto3.Session, app_source_path: Path, image_uri: str) -> str | None:
+    """Build and push Docker image using local Docker daemon."""
     # Build Docker image for ARM64 (Fargate supports ARM, avoids QEMU emulation issues on Apple Silicon)
     logger.info("   Building Docker image (platform: linux/arm64)")
     build_process = subprocess.Popen(
@@ -203,4 +232,34 @@ def build_and_push_docker_image(
     logger.info("Image pushed to ECR: %(image_uri)s", {"image_uri": image_uri})
 
     return image_uri
+
+
+def _build_and_push_remote(session: boto3.Session, env_slug: str, app_source_path: Path, image_uri: str, image_tag: str) -> str | None:
+    """Build and push Docker image using remote EC2 builder."""
+    try:
+        # Start EC2 builder if stopped
+        instance_id = ec2_builder_utils.ensure_builder_running(session=session, env_slug=env_slug)
+
+        # Wait for SSM agent to come online
+        if not ec2_builder_utils.wait_for_ssm_ready(session=session, instance_id=instance_id, timeout_seconds=180):
+            logger.error("SSM agent did not come online in time")
+            return None
+
+        # Transfer source code to builder (use image_tag as build_id for concurrent build isolation)
+        if not ec2_builder_utils.transfer_source(session=session, instance_id=instance_id, source_path=app_source_path, build_id=image_tag):
+            logger.error("Failed to transfer source code to builder")
+            return None
+
+        # Run Docker build and push
+        success, logs = ec2_builder_utils.run_remote_docker_build(session=session, instance_id=instance_id, image_uri=image_uri, build_id=image_tag)
+        if not success:
+            logger.error("Remote Docker build failed: %(logs)s", {"logs": logs})
+            return None
+
+        logger.info("Image pushed to ECR: %(image_uri)s", {"image_uri": image_uri})
+        return image_uri
+
+    except Exception as e:
+        logger.error("Remote build failed: %(error)s", {"error": str(e)})
+        return None
 
