@@ -1,5 +1,24 @@
 # DevOpsHero Development Journal
 
+## 2026-01-28 22:15 - [UI] Default to Dark Mode
+
+Users were seeing light theme by default because Tailwind CSS v4 uses `prefers-color-scheme` media query, which follows the OS preference. Most users have light mode set in their OS, resulting in a light UI despite having dark mode styles throughout the codebase.
+
+**Solution: Class-based dark mode**
+
+Instead of relying on OS preference, we now use Tailwind's class-based dark mode strategy:
+
+1. **Added custom variant in CSS** — `@custom-variant dark (&:where(.dark, .dark *));` in `styles.css` tells Tailwind to apply `dark:` utilities when an ancestor has the `dark` class, rather than using the `prefers-color-scheme` media query.
+
+2. **Added `dark` class to HTML element** — The base template now has `<html class="... dark">`, forcing dark mode for all users regardless of their OS setting.
+
+This approach was chosen over flipping all color classes (e.g., `bg-gray-900` as default instead of `bg-white dark:bg-gray-900`) because:
+- It's a 2-line change vs hundreds of template changes
+- It preserves the ability to add a theme toggle later (just toggle the `dark` class)
+- The existing `dark:` variant classes work exactly as intended
+
+---
+
 ## 2026-01-28 23:15 - [UI] Waitlist Email Capture on Landing Page
 
 Wired up the "Notify me" forms on the landing page to capture email signups in the database for early access notifications.
