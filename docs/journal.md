@@ -1,5 +1,55 @@
 # DevOpsHero Development Journal
 
+## 2026-01-27 22:45 - [AgentChat] Streaming Message Placeholder Minimum Height
+
+Fixed visual jump when assistant messages start streaming. The `#streaming-text` div in `_streaming_start.html` was initially empty, causing it to collapse to zero height. When the first text chunk arrived, the container would suddenly expand, creating a jarring visual shift.
+
+**Solution:** Added `min-h-[1.5em]` to the `#streaming-text` div. Using `1.5em` (relative to font size) ensures the placeholder matches one line of text regardless of the actual font size applied. This way the message bubble appears at its correct minimum height immediately when inserted, and text streams in without layout shifts.
+
+---
+
+## 2026-01-28 21:17 - [ControlPlane] PostHog CloudFront Reverse Proxy
+
+Implemented a reverse proxy for PostHog analytics through our existing CloudFront distribution to bypass ad blockers. Many browser extensions block requests to `posthog.com` domains, causing lost analytics data. Routing through our own domain makes PostHog traffic appear as first-party.
+
+**Architecture approach:**
+
+Considered two options: (1) separate CloudFront distribution for a subdomain like `ph.devopshero.ai`, or (2) path-based routing through existing distribution. Chose path-based because CloudFront doesn't route behaviors by Host header, so a subdomain would require a separate distribution anyway. Path prefix also avoids SSL certificate complexity.
+
+**CloudFront configuration (`cdn_stack.py`):**
+
+1. **Two new origins** — `us.i.posthog.com` for API requests (event capture, feature flags) and `us-assets.i.posthog.com` for static assets (PostHog SDK JavaScript).
+
+2. **Non-obvious path prefixes** — Used `/doh-ph/*` and `/doh-ph-static/*` instead of obvious names like `/analytics` or `/posthog`. PostHog docs explicitly warn that ad blockers catch common patterns.
+
+3. **CloudFront Functions for path rewriting** — The proxy paths need to be stripped before forwarding to PostHog. Created two functions: one strips `/doh-ph` prefix, the other rewrites `/doh-ph-static/*` to `/static/*` (PostHog serves assets from `/static/`).
+
+4. **Cache policy with minimal TTL** — CloudFront has a frustrating restriction: `Authorization` header can only be forwarded via cache policy, not origin request policy. But cache policies with TTL=0 can't specify headers. Workaround: use 1-second TTL cache policy that includes `Authorization` and `Origin` headers.
+
+**Key CloudFront learnings:**
+
+- **Header forwarding restrictions** — `Authorization` and `Accept-Encoding` MUST use cache policy, cannot be in origin request policy. First deployment failed with cryptic "Invalid request" error.
+- **Caching disabled = no headers** — When using `CACHING_DISABLED`, you cannot specify which headers to forward. The policy implicitly forwards nothing. Had to switch to minimal-TTL cache policy.
+- **CloudFront Functions vs Lambda@Edge** — Functions are cheaper and faster (sub-millisecond) but limited to request/response modification. Perfect for our simple path rewriting use case.
+
+**Application changes:**
+
+- **`context_processors.py`** — Added `POSTHOG_PROXY_HOST` support. When set, outputs `useProxy: true` and the proxy URL in the JSON config. Frontend uses this to determine SDK loading strategy.
+- **`_posthog.html`** — Modified the PostHog snippet to detect proxy mode. The standard snippet loads SDK from `api_host.replace(".i.posthog.com", "-assets.i.posthog.com")+"/static/array.js"` — this replacement doesn't match our proxy URL, so we override to load from `/doh-ph-static/array.js` instead.
+- **`apps.py`** — Python SDK backend uses proxy URL when `POSTHOG_PROXY_HOST` is set.
+- **ECS task** — Added `POSTHOG_PROXY_HOST` to secrets injection in `app_stack.py`.
+
+**Opt-in design:**
+
+The proxy is only activated when `POSTHOG_PROXY_HOST` env var is set. Without it, everything works exactly as before (direct to PostHog). This allows local development to skip the proxy and simplifies debugging.
+
+**Key points:**
+- PostHog warns self-hosted proxies lose their support — debugging issues becomes harder
+- AWS WAF (if enabled later) needs 64MB body size limit for session recordings (default is 8KB)
+- `ui_host` must point to `https://us.posthog.com` so toolbar and dashboard links work correctly
+
+---
+
 ## 2026-01-28 22:15 - [UI] Default to Dark Mode
 
 Users were seeing light theme by default because Tailwind CSS v4 uses `prefers-color-scheme` media query, which follows the OS preference. Most users have light mode set in their OS, resulting in a light UI despite having dark mode styles throughout the codebase.
