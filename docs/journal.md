@@ -1,5 +1,33 @@
 # DevOpsHero Development Journal
 
+## 2026-01-27 19:55 - [UI] Recover Sign-in Button on Landing Page
+
+During the React-to-Django template conversion (see 2026-01-27 15:45 entry), the sign-in button was lost from the landing page header. The old `landing.html` had conditional auth logic that wasn't carried over to the new partials structure.
+
+**What was missing:**
+
+The old view passed `is_authenticated` context explicitly:
+```python
+context = {
+    "is_authenticated": request.user.is_authenticated,
+    "site_logo_url": static('devopshero_app/devops-hero-logo-large.png'),
+}
+```
+
+The new view stripped this to just `return render(request, ...)` with no context.
+
+**Recovery:**
+
+1. Updated `views/landing.py` to pass `is_authenticated` context again
+2. Updated `_header.html` with conditional CTA buttons:
+   - **Not authenticated**: "Sign in" text link + "Get Early Access" primary button
+   - **Authenticated**: "Go to Dashboard" primary button
+3. Applied same logic to mobile menu for consistency
+
+The sign-in link uses simple styling (`text-gray-400 hover:text-white`) to differentiate from the primary CTA button, following the common pattern of secondary auth links in marketing headers.
+
+---
+
 ## 2026-01-28 21:35 - [Integrations] PostHog Analytics Integration
 
 Integrated PostHog analytics for both frontend (auto-capture) and backend (exception tracking) to understand user behavior and catch production errors.
