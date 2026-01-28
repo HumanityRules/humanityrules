@@ -1,5 +1,21 @@
 # DevOpsHero Development Journal
 
+## 2026-01-28 22:10 - [DevEx] Move extract_resources.py to infra_devopshero
+
+**Conversation:** [2026-01-28-1338-b18ae424.md](conversations/2026-01-28-1338-b18ae424.md)
+
+Relocated the `extract_resources.py` script from `.claude/skills/debug-production/` to `infra_devopshero/`. This script parses CDK source files to extract production resource names (cluster, service, log groups, etc.) for debugging purposes.
+
+**Rationale:**
+
+The script belongs with the infrastructure code it analyzes, not buried in a skill folder. Placing it in `infra_devopshero/` makes it discoverable alongside other infrastructure tooling and follows the principle of co-locating related code. The debug-production skill now references the new location.
+
+**Key points:**
+
+- Script moved from `.claude/skills/debug-production/extract_resources.py` to `infra_devopshero/extract_resources.py`
+- Updated skill reference to point to new location
+- Script logic unchanged — it still walks up to find `infra_devopshero/` which now resolves immediately
+
 ## 2026-01-28 21:45 - [Bugfix] Investigating Production Database Connection Exhaustion
 
 **Conversation:** [2026-01-28-1336-e98d63ee.md](conversations/2026-01-28-1336-e98d63ee.md)

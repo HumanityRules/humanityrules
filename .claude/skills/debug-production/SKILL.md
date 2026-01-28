@@ -12,7 +12,7 @@ For investigating production issues with the DevOps Hero control plane (devopshe
 Run this script to extract current resource names from CDK source:
 
 ```bash
-python .claude/skills/debug-production/extract_resources.py
+python infra_devopshero/extract_resources.py
 ```
 
 ## AWS Credentials
