@@ -1,5 +1,25 @@
 # DevOpsHero Development Journal
 
+## 2026-01-28 21:35 - [ControlPlane] CloudFront Origin Request Policy: all() Forwards Host Header
+
+Attempted to improve the PostHog proxy by forwarding more headers to PostHog for better analytics enrichment. Changed from `OriginRequestHeaderBehavior.allow_list("Origin")` to `OriginRequestHeaderBehavior.all()`. This immediately broke the proxy with 502 Bad Gateway errors.
+
+**Root cause:** `all()` forwards ALL viewer headers including the `Host` header. When CloudFront sends `Host: devopshero.ai` to `us-assets.i.posthog.com`, PostHog's server rejects the request because the Host doesn't match their expected domain.
+
+**The fix:** Reverted to `allow_list("Origin")`. CloudFront automatically sets the correct `Host` header for the origin when you don't explicitly forward it.
+
+**Why the original config was actually fine:**
+
+Initial concern was that not forwarding headers like `User-Agent`, `Content-Type`, and `Accept-Language` would reduce analytics quality. After verifying in PostHog's dashboard, all device/browser/OS data was present. The reason: PostHog's JavaScript SDK captures all this data **client-side** and embeds it in the JSON request body — it doesn't rely on HTTP headers for device detection. The SDK calls `navigator.userAgent`, reads screen dimensions, etc., and includes them as event properties.
+
+**Key points:**
+- `OriginRequestHeaderBehavior.all()` includes `Host`, which breaks reverse proxies
+- For reverse proxies, always use `allow_list()` with specific headers (excluding `Host`)
+- PostHog SDK is self-sufficient — it captures device info client-side, headers aren't needed for enrichment
+- When in doubt, check the actual data in the destination service before "fixing" header forwarding
+
+---
+
 ## 2026-01-27 22:45 - [AgentChat] Streaming Message Placeholder Minimum Height
 
 Fixed visual jump when assistant messages start streaming. The `#streaming-text` div in `_streaming_start.html` was initially empty, causing it to collapse to zero height. When the first text chunk arrived, the container would suddenly expand, creating a jarring visual shift.
