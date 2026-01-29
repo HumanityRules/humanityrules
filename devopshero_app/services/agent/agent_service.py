@@ -37,7 +37,7 @@ from claude_agent_sdk.types import (
 from django.conf import settings
 
 from devopshero_app.models import AWSAccount, Conversation, Message, Repository, Workspace
-from devopshero_app.services.github import repo_service
+from devopshero_app.services.gitproviders import repo_service
 from devopshero_app.services.llm import llm_client, title_generator
 
 from .agent_client import get_claude_env

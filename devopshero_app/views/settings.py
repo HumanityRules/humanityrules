@@ -117,7 +117,7 @@ def settings_billing(request):
 @login_required
 def settings_git_integrations(request):
     """Render the Git Integrations settings tab and handle sync requests."""
-    from devopshero_app.services.github import github_client
+    from devopshero_app.services.gitproviders import github_client
 
     context = get_app_shell_context(request=request, current_page="settings")
     context["active_tab"] = "git-integrations"

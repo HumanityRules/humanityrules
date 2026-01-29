@@ -15,7 +15,7 @@ from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_POST
 
 from devopshero_app.models import GitProviderIntegration
-from devopshero_app.services.github import github_client
+from devopshero_app.services.gitproviders import github_client
 
 logger = logging.getLogger(__name__)
 

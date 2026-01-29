@@ -1,5 +1,32 @@
 # DevOpsHero Development Journal
 
+## 2026-01-29 18:15 - [Integrations] Rename services/github to services/gitproviders
+
+**Conversation:** [2026-01-28-1833-3e29ca4b.md](conversations/2026-01-28-1833-3e29ca4b.md)
+
+Renamed the `devopshero_app/services/github/` directory to `devopshero_app/services/gitproviders/` in preparation for supporting multiple git providers. The existing code handles GitHub App integration (OAuth flow, installation tokens, repository sync, cloning), and the new naming reflects that this module will be the home for all git provider integrations.
+
+**Changes made:**
+- `git mv devopshero_app/services/github devopshero_app/services/gitproviders`
+- Updated 5 import statements across the codebase:
+  - `services/agent/agent_service.py` — imports `repo_service` for cloning repos into agent sandbox
+  - `services/agent/mcp_tools.py` — imports `repo_service` for MCP tool repo access
+  - `services/deployment/deployment_executor.py` — imports `repo_service` for deployment cloning
+  - `views/settings.py` — imports `github_client` for re-sync functionality
+  - `views/github.py` — imports `github_client` for OAuth flow
+
+**Architecture context:**
+The existing GitHub integration consists of:
+- `github_client.py` — JWT generation for GitHub App auth, installation token exchange, repo listing, sync logic
+- `repo_service.py` — Cloning with installation tokens (`https://x-access-token:{token}@github.com/...`), handles local `file://` URLs for dev
+- `views/github.py` — OAuth flow (`/github/connect`, `/github/callback`, webhook endpoint)
+- Models already have `Provider.GITHUB` and `Provider.GITLAB` enum values in `GitProviderIntegration` and `Repository`
+
+**Key points:**
+- The `repo_service.py` name remains appropriate since it handles cloning for any provider
+- Provider-specific API clients (like `github_client.py`) will be siblings in this directory
+- No functional changes — purely a rename for better organization
+
 ## 2026-01-29 16:45 - [UI] Landing page header logo update to shield icon
 
 **Conversation:** [2026-01-28-1802-a5d820f5.md](conversations/2026-01-28-1802-a5d820f5.md)
