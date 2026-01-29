@@ -69,6 +69,32 @@ Output includes:
 - Status message (if any)
 - Logs in reverse chronological order (newest first) with timestamps
 
+## Ad-hoc Model Queries (`doh_query`)
+
+Query any model without shell quoting issues. **Use this instead of `shell -c`** for inspecting data.
+
+```bash
+# Basic usage: list all records with default fields
+./prod_manage.sh doh_query Repository
+
+# Specify fields to display
+./prod_manage.sh doh_query Repository full_name default_branch clone_url
+
+# Filter results (Django ORM syntax)
+./prod_manage.sh doh_query Repository full_name default_branch --filter full_name__icontains=dashboard
+
+# Multiple filters
+./prod_manage.sh doh_query Deployment status created_at --filter status=failed --filter app__slug=my-app
+
+# Limit and order results
+./prod_manage.sh doh_query Deployment app status --limit 10 --order -created_at
+
+# List available models (intentionally use wrong name)
+./prod_manage.sh doh_query WrongModel
+```
+
+Common models: `Repository`, `App`, `Deployment`, `DeploymentLog`, `Environment`, `AWSAccount`, `Organization`, `Workspace`, `Conversation`, `Message`
+
 ## Other Commands
 
 Any Django management command works:
@@ -84,3 +110,22 @@ The script:
 1. Loads AWS credentials from `../.env`
 2. Finds the running ECS task for `doh-prod-app`
 3. Runs `aws ecs execute-command` with the management command
+
+## Shell Quoting Limitations
+
+**Avoid `shell -c` with complex Python code.** Commands pass through multiple shell layers (local → AWS CLI → ECS → bash → Python), causing quote mangling.
+
+**Bad** (quotes get mangled):
+```bash
+./prod_manage.sh shell -c "from devopshero_app.models import Repository; print(Repository.objects.get(id='abc'))"
+```
+
+**Good** (use `doh_query` instead):
+```bash
+./prod_manage.sh doh_query Repository full_name default_branch --filter id=abc
+```
+
+If you must use `shell -c`, avoid string literals with quotes. This works:
+```bash
+./prod_manage.sh shell -c "from devopshero_app.models import Repository; [print(r.full_name) for r in Repository.objects.all()]"
+```

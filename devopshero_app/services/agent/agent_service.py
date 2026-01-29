@@ -418,7 +418,7 @@ async def stream_response(conversation: Conversation, fork_session: bool) -> Asy
         repo_path = await asyncio.to_thread(
             repo_service.clone_repository,
             repository,
-            "main",  # TODO: Allow branch selection from context
+            repository.default_branch,
             f"conv-{conversation.id}",
         )
 

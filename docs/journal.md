@@ -1,5 +1,50 @@
 # DevOpsHero Development Journal
 
+## 2026-01-29 19:00 - [Bugfix] Agent fails when repo default branch is not "main"
+
+**Conversation:** [2026-01-28-1852-34bac04d.md](conversations/2026-01-28-1852-34bac04d.md)
+
+Diagnosed production errors where conversations with certain GitHub repositories failed immediately with "Agent task failed unexpectedly". The root cause was a hardcoded `"main"` branch in `agent_service.py` when cloning the repository for conversation context.
+
+**Root cause:**
+When a conversation starts with a repository selected, `stream_response()` clones the repo to provide file context to the agent. Line 421 had:
+```python
+repo_path = await asyncio.to_thread(
+    repo_service.clone_repository,
+    repository,
+    "main",  # TODO: Allow branch selection from context  <-- BUG
+    f"conv-{conversation.id}",
+)
+```
+
+The repository `vmendi/ai-detector-and-humanizer` uses `master` as its default branch (not `main`), causing `git clone --branch main` to fail with "Remote branch main not found in upstream origin".
+
+**Fix:**
+Changed to use `repository.default_branch` which is properly synced from GitHub during repository import. The `default_branch` field existed and had correct values — it just wasn't being used here.
+
+**Diagnosing the shell quoting problem:**
+Verifying the fix required querying production to check the `default_branch` value. This took many failed attempts because `prod_manage.sh shell -c "..."` mangles quotes through multiple shell layers (local → AWS CLI → ECS → bash → Python). Complex Python with string literals is nearly impossible to pass.
+
+**Solution — new `doh_query` command:**
+Created `doh_query` management command for ad-hoc model inspection without quoting issues:
+```bash
+./prod_manage.sh doh_query Repository full_name default_branch --filter full_name__icontains=ai-detector
+```
+
+Features:
+- Query any model by name
+- Specify fields to display
+- Filter with Django ORM syntax (`--filter key=value`)
+- Limit and order results
+- Shows available models on error
+
+Updated the `prod-manage` skill to document `doh_query` and warn against using `shell -c` for complex Python.
+
+**Key points:**
+- The `Repository.default_branch` field was correctly synced from GitHub — the bug was simply not using it
+- Shell quoting through ECS execute-command is fragile; purpose-built commands avoid the problem entirely
+- `doh_query` covers 90% of debugging needs (inspecting model data) without quoting issues
+
 ## 2026-01-29 18:15 - [Integrations] Rename services/github to services/gitproviders
 
 **Conversation:** [2026-01-28-1833-3e29ca4b.md](conversations/2026-01-28-1833-3e29ca4b.md)
