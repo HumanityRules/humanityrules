@@ -74,6 +74,9 @@ Output includes:
 Query any model without shell quoting issues. **Use this instead of `shell -c`** for inspecting data.
 
 ```bash
+# Discover available fields on a model
+./prod_manage.sh doh_query Message --describe
+
 # Basic usage: list all records with default fields
 ./prod_manage.sh doh_query Repository
 
@@ -81,16 +84,26 @@ Query any model without shell quoting issues. **Use this instead of `shell -c`**
 ./prod_manage.sh doh_query Repository full_name default_branch clone_url
 
 # Filter results (Django ORM syntax)
-./prod_manage.sh doh_query Repository full_name default_branch --filter full_name__icontains=dashboard
+./prod_manage.sh doh_query Repository full_name --filter full_name__icontains=dashboard
 
 # Multiple filters
 ./prod_manage.sh doh_query Deployment status created_at --filter status=failed --filter app__slug=my-app
 
-# Limit and order results
-./prod_manage.sh doh_query Deployment app status --limit 10 --order -created_at
+# Order results (use --desc for descending)
+./prod_manage.sh doh_query Deployment app status --limit 10 --order created_at --desc
 
 # List available models (intentionally use wrong name)
 ./prod_manage.sh doh_query WrongModel
+```
+
+### Conversation Messages
+
+```bash
+# Get messages from a conversation (chronological)
+./prod_manage.sh doh_query Message role content --filter conversation_id=<uuid> --order created_at --limit 100
+
+# Get recent messages (newest first)
+./prod_manage.sh doh_query Message role content --filter conversation_id=<uuid> --order created_at --desc --limit 20
 ```
 
 Common models: `Repository`, `App`, `Deployment`, `DeploymentLog`, `Environment`, `AWSAccount`, `Organization`, `Workspace`, `Conversation`, `Message`

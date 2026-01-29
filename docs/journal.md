@@ -1,5 +1,57 @@
 # DevOpsHero Development Journal
 
+## 2026-01-29 19:45 - [Deployment] Aurora PostgreSQL version 15.4 unavailable
+
+**Conversation:** [2026-01-28-1951-3ebc2269.md](conversations/2026-01-28-1951-3ebc2269.md)
+
+Diagnosed a production deployment failure where the agent couldn't create Aurora PostgreSQL databases for customer apps. The error was: `"Cannot find version 15.4 for aurora-postgresql"`.
+
+**Root cause:**
+The `deploy_app.py` had hardcoded Aurora PostgreSQL version `15.4` as the default, with a version map containing only that single entry:
+```python
+AURORA_POSTGRES_DEFAULT_VERSION = "15.4"
+AURORA_POSTGRES_VERSION_MAP = {
+    "15.4": rds.AuroraPostgresEngineVersion.VER_15_4,
+}
+```
+
+While the CDK constant `VER_15_4` exists, AWS had retired or made this specific Aurora version unavailable in the region. The control plane's own database uses `VER_16_4` which works fine.
+
+**Fix:**
+1. Updated default to `16.4` (matches working control plane)
+2. Updated Aurora MySQL default to `3.08.0` (was `3.04.0`)
+3. Removed the version maps entirely — now uses CDK's `of()` method which accepts any valid version string:
+```python
+version = rds.AuroraPostgresEngineVersion.of(
+    aurora_postgres_full_version=version_str,
+    aurora_postgres_major_version=major,
+)
+```
+
+This is simpler and future-proof: sensible defaults that work, and any user-specified version passes through to AWS for validation at deployment time.
+
+**DevEx improvements while debugging:**
+Querying the conversation logs from production was difficult — I initially guessed wrong field names and the `-field` descending order syntax failed through shell layers. Added three improvements to `doh_query`:
+
+1. **`--describe` flag** — Shows available fields without running a query:
+   ```bash
+   ./prod_manage.sh doh_query Message --describe
+   # Output: Fields: content, content_type, conversation, created_at, id, metadata, role
+   ```
+
+2. **`--desc` flag** — Explicit descending order (avoids `-field` syntax that gets mangled):
+   ```bash
+   ./prod_manage.sh doh_query Message --order created_at --desc
+   ```
+
+3. **Conversation query examples** — Added ready-to-use examples in the `prod-manage` skill for the common case of retrieving conversation messages.
+
+**Key points:**
+- Aurora engine versions can become unavailable; don't hardcode them
+- CDK's `of()` method provides flexibility without maintaining version maps
+- The control plane config (VER_16_4) was a working reference we should have matched
+- Shell quoting through ECS execute-command remains fragile; purpose-built flags (`--desc`) avoid the problem
+
 ## 2026-01-29 19:00 - [Bugfix] Agent fails when repo default branch is not "main"
 
 **Conversation:** [2026-01-28-1852-34bac04d.md](conversations/2026-01-28-1852-34bac04d.md)
