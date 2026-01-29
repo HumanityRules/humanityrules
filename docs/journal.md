@@ -1,5 +1,22 @@
 # DevOpsHero Development Journal
 
+## 2026-01-29 16:45 - [UI] Landing page header logo update to shield icon
+
+**Conversation:** [2026-01-28-1802-a5d820f5.md](conversations/2026-01-28-1802-a5d820f5.md)
+
+Updated the landing page header to use the actual DevOps Hero shield logo instead of a generic Zap icon SVG. The shield logo (`devops-hero-logo-shield.png`) already existed in the static assets and is used in the dashboard sidebar — this change brings visual consistency between the landing page and the authenticated app experience.
+
+**Changes made:**
+- Replaced the inline SVG Zap icon (wrapped in a gradient container with hover effects) with the shield PNG image
+- Added `{% load static %}` to the header partial template
+- Set initial height to `h-10` but bumped to `h-14` after visual testing showed it was too small relative to the "DevOpsHero" text
+- Kept the hover scale animation (`group-hover:scale-110`) for interactivity
+
+**Key points:**
+- Brand consistency matters — using the same shield logo across landing and dashboard reinforces visual identity
+- The shield PNG has a transparent background and includes the infinity symbol, blue shield, and swoosh, which is more distinctive than a generic icon
+- Size tuning required iteration: the previous container was 40px (`w-10 h-10`) but the shield needed 56px (`h-14`) to balance visually with the text
+
 ## 2026-01-29 15:32 - [UI] Landing page "vibe-deploying" messaging pivot
 
 **Conversation:** [2026-01-28-1759-e700af23.md](conversations/2026-01-28-1759-e700af23.md)
