@@ -37,30 +37,11 @@
         {% include "devopshero_app/landing/_features.html" %}
         {% include "devopshero_app/landing/_personas.html" %}
         {% include "devopshero_app/landing/_cta.html" %}
+        {% include "devopshero_app/landing/_footer.html" %}
     </main>
-    
-    {% include "devopshero_app/landing/_footer.html" %}
 
     <script>
     (function() {
-        // ===== Header Scroll Effect =====
-        const header = document.getElementById('landing-header');
-        let lastScrollY = 0;
-        
-        function updateHeader() {
-            const scrollY = window.scrollY;
-            if (scrollY > 20) {
-                header.classList.add('bg-navy-950/80', 'backdrop-blur-xl', 'border-b', 'border-white/[0.06]');
-                header.classList.remove('bg-transparent');
-            } else {
-                header.classList.remove('bg-navy-950/80', 'backdrop-blur-xl', 'border-b', 'border-white/[0.06]');
-                header.classList.add('bg-transparent');
-            }
-            lastScrollY = scrollY;
-        }
-        
-        window.addEventListener('scroll', updateHeader, { passive: true });
-        updateHeader();
 
         // ===== Mobile Menu Toggle =====
         const menuButton = document.getElementById('mobile-menu-button');
@@ -235,6 +216,54 @@
             }, { threshold: 0.3 });
             terminalObserver.observe(terminalContainer);
         }
+
+        // ===== Full-page Section Scrolling =====
+        const sections = document.querySelectorAll('.landing-section');
+        let isScrolling = false;
+        let wheelAccumulator = 0;
+        const wheelThreshold = 15;
+
+        function scrollToSection(index) {
+            if (index < 0 || index >= sections.length || isScrolling) return;
+            isScrolling = true;
+            sections[index].scrollIntoView({ behavior: 'smooth' });
+            setTimeout(() => { isScrolling = false; }, 800);
+        }
+
+        function getCurrentSectionIndex() {
+            const scrollY = window.scrollY;
+            const viewportHeight = window.innerHeight;
+            for (let i = sections.length - 1; i >= 0; i--) {
+                if (scrollY >= sections[i].offsetTop - viewportHeight / 2) {
+                    return i;
+                }
+            }
+            return 0;
+        }
+
+        window.addEventListener('wheel', (e) => {
+            e.preventDefault();
+            if (isScrolling) return;
+
+            wheelAccumulator += e.deltaY;
+
+            if (Math.abs(wheelAccumulator) >= wheelThreshold) {
+                const currentIndex = getCurrentSectionIndex();
+                if (wheelAccumulator > 0) {
+                    scrollToSection(currentIndex + 1);
+                } else {
+                    scrollToSection(currentIndex - 1);
+                }
+                wheelAccumulator = 0;
+            }
+        }, { passive: false });
+
+        // Reset accumulator after pause in scrolling
+        let wheelTimeout;
+        window.addEventListener('wheel', () => {
+            clearTimeout(wheelTimeout);
+            wheelTimeout = setTimeout(() => { wheelAccumulator = 0; }, 150);
+        }, { passive: true });
     })();
     </script>
 </body>

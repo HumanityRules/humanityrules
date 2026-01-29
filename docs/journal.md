@@ -1,5 +1,38 @@
 # DevOpsHero Development Journal
 
+## 2026-01-29 11:45 - [UI] Landing page full-page scroll and layout improvements
+
+**Conversation:** [2026-01-28-1741-29f25199.md](conversations/2026-01-28-1741-29f25199.md)
+
+Implemented full-page scroll snapping for the landing page, where each section fills the viewport and scrolling moves between sections smoothly. Also made various layout and styling improvements.
+
+**Full-page scroll implementation:**
+
+Initially tried CSS `scroll-snap-type: y mandatory` on the body element, but this didn't work — browsers use the `<html>` element as the viewport scroll container. Moving the snap properties to `<html>` worked for keyboard navigation (PageDown) but not for mouse wheel on Mac due to trackpad inertia fighting with mandatory snapping.
+
+The solution was JavaScript-based section scrolling:
+- Listen for `wheel` events with `{ passive: false }` to allow `preventDefault()`
+- Accumulate wheel delta until it passes a threshold (15px) to filter micro-movements
+- Call `scrollIntoView({ behavior: 'smooth' })` on the target section
+- Block additional scrolls during animation (800ms) to prevent jitter
+- Reset accumulator after 150ms pause in scrolling
+
+**Layout changes:**
+
+- **Logo navigation** — Made logo link to root `/` without HTMX (full page navigation to landing)
+- **Removed slide-up animations** — Removed `animate-slide-up` from hero section elements for cleaner appearance
+- **Header styling** — Removed dynamic scroll effect that toggled background/border classes; now permanently styled with `bg-transparent backdrop-blur-xl border-b border-white/[0.06]`
+- **Problem section** — Removed `section-padding` class (was adding 128px padding) and replaced with `pt-24 pb-16` for tighter spacing; reduced margins around stats box
+- **CTA section** — Reduced padding from `section-padding` (128px) to `pt-16 pb-8`
+- **Footer as separate section** — Made footer its own `landing-section` with `min-h-screen flex items-end` so it scrolls to separately and aligns content to bottom of viewport
+
+**Key points:**
+
+- CSS scroll-snap doesn't work well with Mac trackpad inertia — JavaScript provides better control
+- Each landing section needs `landing-section` class for the JS scroll handler to find them
+- Footer uses `items-end` instead of `items-center` to align content to viewport bottom
+- Sections with content taller than viewport need careful padding to fit; debug with browser tools checking actual heights vs viewport
+
 ## 2026-01-28 22:35 - [ControlPlane] Add devopshero.co redirect to devopshero.ai
 
 **Conversation:** [2026-01-28-1419-d25d7b1e.md](conversations/2026-01-28-1419-d25d7b1e.md)
