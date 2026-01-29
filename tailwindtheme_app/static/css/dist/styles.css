@@ -842,6 +842,18 @@
   .resize-none {
     resize: none;
   }
+  .snap-y {
+    scroll-snap-type: y var(--tw-scroll-snap-strictness);
+  }
+  .snap-mandatory {
+    --tw-scroll-snap-strictness: mandatory;
+  }
+  .snap-proximity {
+    --tw-scroll-snap-strictness: proximity;
+  }
+  .snap-start {
+    scroll-snap-align: start;
+  }
   .list-none {
     list-style-type: none;
   }
@@ -862,6 +874,9 @@
   }
   .items-center {
     align-items: center;
+  }
+  .items-end {
+    align-items: flex-end;
   }
   .items-start {
     align-items: flex-start;
@@ -1029,6 +1044,9 @@
   .overflow-y-auto {
     overflow-y: auto;
   }
+  .overflow-y-scroll {
+    overflow-y: scroll;
+  }
   .scroll-smooth {
     scroll-behavior: smooth;
   }
@@ -1188,6 +1206,12 @@
     border-color: color-mix(in srgb, #fff 10%, transparent);
     @supports (color: color-mix(in lab, red, red)) {
       border-color: color-mix(in oklab, var(--color-white) 10%, transparent);
+    }
+  }
+  .border-white\/\[0\.03\] {
+    border-color: color-mix(in srgb, #fff 3%, transparent);
+    @supports (color: color-mix(in lab, red, red)) {
+      border-color: color-mix(in oklab, var(--color-white) 3%, transparent);
     }
   }
   .border-white\/\[0\.06\] {
@@ -1620,8 +1644,14 @@
   .pt-10 {
     padding-top: calc(var(--spacing) * 10);
   }
+  .pt-16 {
+    padding-top: calc(var(--spacing) * 16);
+  }
   .pt-20 {
     padding-top: calc(var(--spacing) * 20);
+  }
+  .pt-24 {
+    padding-top: calc(var(--spacing) * 24);
   }
   .pr-2 {
     padding-right: calc(var(--spacing) * 2);
@@ -1638,8 +1668,14 @@
   .pb-4 {
     padding-bottom: calc(var(--spacing) * 4);
   }
+  .pb-8 {
+    padding-bottom: calc(var(--spacing) * 8);
+  }
   .pb-10 {
     padding-bottom: calc(var(--spacing) * 10);
+  }
+  .pb-16 {
+    padding-bottom: calc(var(--spacing) * 16);
   }
   .pl-1\.5 {
     padding-left: calc(var(--spacing) * 1.5);
@@ -3668,6 +3704,11 @@ el-options[popover] {
   syntax: "*";
   inherits: false;
 }
+@property --tw-scroll-snap-strictness {
+  syntax: "*";
+  inherits: false;
+  initial-value: proximity;
+}
 @property --tw-space-y-reverse {
   syntax: "*";
   inherits: false;
@@ -3945,6 +3986,7 @@ el-options[popover] {
       --tw-rotate-z: initial;
       --tw-skew-x: initial;
       --tw-skew-y: initial;
+      --tw-scroll-snap-strictness: proximity;
       --tw-space-y-reverse: 0;
       --tw-space-x-reverse: 0;
       --tw-divide-y-reverse: 0;

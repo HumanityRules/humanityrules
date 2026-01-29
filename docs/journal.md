@@ -1,5 +1,25 @@
 # DevOpsHero Development Journal
 
+## 2026-01-29 15:32 - [UI] Landing page "vibe-deploying" messaging pivot
+
+**Conversation:** [2026-01-28-1759-e700af23.md](conversations/2026-01-28-1759-e700af23.md)
+
+Reworked the landing page hero badge to embrace the "vibe-coding → vibe-deploying" narrative. The original tagline "Heroku-style deployments inside your AWS account" was functional but didn't capture the cultural moment — AI has made building apps dramatically faster (vibe-coding), and deployment is now the bottleneck.
+
+**Hero badge changes:**
+- Changed copy from "Heroku-style deployments inside your AWS account" to "Everyone's vibe-coding. Now everyone can vibe-deploy."
+- Made the badge more prominent: `text-sm` → `text-lg`, `font-medium` → `font-semibold`, increased padding (`px-4 py-2` → `px-6 py-3`), larger icon (`w-4 h-4` → `w-5 h-5`)
+- The "everyone" framing emphasizes democratization — it's not just for the individual developer, it's about enabling the whole team/company
+
+**Solution section cleanup:**
+- Kept the title "The Heroku experience inside your enterprise" — tried "The vibe-deploying experience" but the longer text caused awkward line breaks
+- Removed redundant opening sentence "DevOps Hero brings the Heroku, Render or Railway experience inside your enterprise" from the paragraph since the headline already conveys this
+
+**Key points:**
+- "Vibe-deploying" positions DOH as the natural next step after vibe-coding tools like Cursor/Claude/Copilot
+- Using "everyone" instead of "you" shifts focus from individual to team empowerment
+- Heroku remains a useful reference for the solution section since it's universally understood shorthand for "easy deployment"
+
 ## 2026-01-29 11:45 - [UI] Landing page full-page scroll and layout improvements
 
 **Conversation:** [2026-01-28-1741-29f25199.md](conversations/2026-01-28-1741-29f25199.md)
