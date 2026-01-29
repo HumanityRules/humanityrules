@@ -485,16 +485,33 @@ async def list_apps(args: dict[str, Any]) -> dict[str, Any]:
     "create_datastore",
     (
         "Create a managed database (datastore) in the selected workspace. "
-        "Supports Aurora PostgreSQL and Aurora MySQL with Serverless v2 scaling. "
         "Requires a workspace in the conversation context."
     ),
     {
-        "name": str,
-        "engine": str,
-        "database_name": str,
-        "deployment_mode": str,
-        "serverless_min_acu": float,
-        "serverless_max_acu": float,
+        "type": "object",
+        "properties": {
+            "name": {"type": "string", "description": "Human-readable name for the datastore"},
+            "engine": {
+                "type": "string",
+                "enum": ["aurora-postgresql", "aurora-mysql"],
+                "description": "Database engine: aurora-postgresql or aurora-mysql",
+            },
+            "database_name": {"type": "string", "description": "Name of the database to create within the cluster"},
+            "deployment_mode": {
+                "type": "string",
+                "enum": ["aurora_serverless_v2", "aurora_provisioned"],
+                "description": "aurora_serverless_v2 (recommended, auto-scales) or aurora_provisioned (fixed capacity)",
+            },
+            "serverless_min_acu": {
+                "type": "number",
+                "description": "Minimum ACU for serverless scaling (0.5-128). Only used with aurora_serverless_v2.",
+            },
+            "serverless_max_acu": {
+                "type": "number",
+                "description": "Maximum ACU for serverless scaling (0.5-128). Only used with aurora_serverless_v2.",
+            },
+        },
+        "required": ["name", "engine", "database_name", "deployment_mode"],
     },
 )
 async def create_datastore(args: dict[str, Any]) -> dict[str, Any]:
