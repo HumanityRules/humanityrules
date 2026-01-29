@@ -16,7 +16,7 @@ from claude_agent_sdk import tool, create_sdk_mcp_server
 from django.conf import settings
 
 from devopshero_app.models import Conversation, Repository, Workspace
-from devopshero_app.services.github import repo_service
+from devopshero_app.services.gitproviders import repo_service
 
 from .tools import (
     create_datastore as _create_datastore,

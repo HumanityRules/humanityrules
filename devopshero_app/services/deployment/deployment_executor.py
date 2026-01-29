@@ -12,7 +12,7 @@ from django.utils import timezone
 
 from devopshero_app import models
 from devopshero_app.services import infra_customer
-from devopshero_app.services.github import repo_service
+from devopshero_app.services.gitproviders import repo_service
 
 from . import app_config_builder
 from . import job_logging
