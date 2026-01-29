@@ -2,7 +2,7 @@
 Landing page hero section with headline, subheadline, email signup form, and feature badges.
 {% endcomment %}
 
-<section class="relative min-h-screen flex items-center pt-20 overflow-hidden">
+<section id="hero" class="landing-section relative min-h-screen flex items-center pt-20 overflow-hidden">
     <!-- Background effects -->
     <div class="absolute inset-0 bg-grid-pattern"></div>
     <div class="absolute inset-0 bg-radial-gradient"></div>
@@ -24,25 +24,25 @@ Landing page hero section with headline, subheadline, email signup form, and fea
             </div>
 
             <!-- Headline -->
-            <h1 class="text-5xl sm:text-6xl lg:text-7xl font-bold leading-tight mb-6 animate-slide-up">
+            <h1 class="text-5xl sm:text-6xl lg:text-7xl font-bold leading-tight mb-6">
                 <span class="text-white">Deploy internal tools inside your AWS account </span>
                 <span class="gradient-text">in minutes</span>
             </h1>
 
             <!-- Sub-headline -->
-            <p class="text-xl sm:text-2xl font-semibold mb-4 animate-slide-up" style="animation-delay: 0.1s;">
+            <p class="text-xl sm:text-2xl font-semibold mb-4">
                 <span class="gradient-text-glow">SSO + RBAC, least-privilege IAM, and approval workflows</span>
                 <span class="text-white"> — built in</span>
             </p>
 
             <!-- Description -->
-            <p class="text-lg text-gray-400 max-w-3xl mx-auto mb-10 leading-relaxed animate-slide-up" style="animation-delay: 0.2s;">
+            <p class="text-lg text-gray-400 max-w-3xl mx-auto mb-10 leading-relaxed">
                 DevOps Hero is an AI deployment co-pilot that provisions infrastructure and generates least-privilege IAM requests in your AWS account.
                 Build or vibe-code dashboards, APIs, Slack bots, admin portals, and more — then ship them without opening infra tickets.
             </p>
 
             <!-- Email signup form -->
-            <div class="max-w-md mx-auto mb-16 animate-slide-up" style="animation-delay: 0.3s;">
+            <div class="max-w-md mx-auto mb-16">
                 <form
                     hx-post="{% url 'waitlist_signup' %}"
                     hx-target="#signup-response-hero"
@@ -72,7 +72,7 @@ Landing page hero section with headline, subheadline, email signup form, and fea
             </div>
 
             <!-- Feature badges -->
-            <div class="grid grid-cols-1 sm:grid-cols-3 gap-6 max-w-3xl mx-auto animate-slide-up" style="animation-delay: 0.4s;">
+            <div class="grid grid-cols-1 sm:grid-cols-3 gap-6 max-w-3xl mx-auto">
                 <div class="flex items-center justify-center gap-3 px-6 py-4 bg-white/5 rounded-xl border border-white/5">
                     <!-- Clock icon -->
                     <svg class="w-5 h-5 text-cyber-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
