@@ -56,12 +56,16 @@ Chose 302 (temporary redirect) over 301 (permanent) to avoid browser caching iss
 
 Explored alternatives including S3 website hosting with built-in redirect rules. However, S3's `website_redirect` feature only supports 301 redirects — there's no option for 302. For temporary redirects, CloudFront Functions are the simplest AWS approach despite requiring a small JavaScript snippet. Lambda@Edge would work but is overkill for this use case.
 
+**Deployment gotcha:**
+
+After creating the stack, running `deploy.sh` didn't deploy it because `deploy.sh` has a hardcoded list of stacks. The redirect stack was added to `app.py` but `deploy.sh` wasn't updated. Diagnosed this when `devopshero.co` wasn't loading — Route53 showed no A record for apex (only an old wildcard pointing to a defunct ALB). Fixed by adding step 7/7 to `deploy.sh`.
+
 **Key points:**
 
 - New `redirect_stack.py` creates all resources needed for the redirect
 - CloudFront Function is 8 lines of JS that returns 302 with `Location: https://devopshero.ai{original_path}`
 - Requires hosted zone for `devopshero.co` to exist in Route53 before deployment
-- Deploy with `./deploy_stack.sh doh-prod-redirect`
+- **Important:** When adding new CDK stacks, remember to update `deploy.sh` — it doesn't auto-discover stacks
 
 ## 2026-01-28 22:10 - [DevEx] Move extract_resources.py to infra_devopshero
 
