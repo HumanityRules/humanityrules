@@ -1,5 +1,62 @@
 # DevOpsHero Development Journal
 
+## 2026-01-29 23:30 - [AgentChat] Fix duplicate tool outputs on SSE reconnection
+
+**Conversation:** [2026-01-28-2224-7e618e6b.md](conversations/2026-01-28-2224-7e618e6b.md)
+
+Diagnosed and fixed a bug where bash tool outputs appeared duplicated or triplicated in the agent chat. During long-running tool executions (like waiting for Aurora database provisioning), users saw the same "Bash: Wait 2 more minutes for DB instance" card appear 3 times.
+
+**Root cause analysis:**
+
+The duplication stemmed from the interaction between SSE reconnection handling and frontend rendering:
+
+1. **Backend replay mechanism** — When SSE reconnects, `mark_client_connected()` in `agent_runner.py` replays all pending `tool_start` events so users see spinners for tools still in progress:
+   ```python
+   if runner.pending_tools:
+       for tool_data in runner.pending_tools.values():
+           runner.event_queue.put_nowait(AgentStreamEvent(type="tool_start", data=tool_data))
+   ```
+
+2. **Frontend blindly appends** — `handleToolStart()` always appends the tool div to the messages container without checking if it already exists:
+   ```javascript
+   while (fragment.firstChild) {
+       messages.appendChild(fragment.firstChild);  // No deduplication!
+   }
+   ```
+
+3. **Result** — Each SSE reconnection creates another duplicate. Browser DevTools confirmed multiple `<div id="tool-{same_id}">` elements (invalid HTML with duplicate IDs).
+
+**Why so many reconnections?**
+
+Console showed repeated `ERR_QUIC_PROTOCOL_ERROR` on the SSE stream endpoint. HTTP/3 (QUIC) doesn't handle long-lived SSE connections well — it has aggressive timeout/flow-control that interrupts streaming. Each error triggers EventSource auto-reconnect, which replays tools, which creates duplicates.
+
+**Fix:**
+
+Made `handleToolStart` idempotent by checking if a tool div with that ID already exists before appending:
+
+```javascript
+function handleToolStart(data) {
+    // ... parse fragment ...
+    
+    // Skip if tool already exists (SSE reconnection replay)
+    const toolDiv = fragment.querySelector('[id^="tool-"]');
+    if (toolDiv && document.getElementById(toolDiv.id)) {
+        return;
+    }
+    
+    // Append remaining content to messages
+    while (fragment.firstChild) {
+        messages.appendChild(fragment.firstChild);
+    }
+}
+```
+
+**Key points:**
+- SSE reconnections are unavoidable (network blips, tab throttling, QUIC issues) — the UI must handle them gracefully
+- The backend's replay mechanism is correct design — it ensures users see in-progress tools after refresh
+- The bug was in the frontend not being idempotent for replayed events
+- Created `devopshero-3hn` to investigate the QUIC protocol errors separately (potential CloudFront HTTP/3 configuration)
+
 ## 2026-01-29 22:15 - [AgentChat] Auto-scroll re-engagement when user scrolls to bottom
 
 **Conversation:** [2026-01-28-2208-bf425239.md](conversations/2026-01-28-2208-bf425239.md)
