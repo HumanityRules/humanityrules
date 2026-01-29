@@ -159,8 +159,22 @@ function maybeScrollToBottomSmooth() {
     if (autoScrollEnabled) scrollToBottomSmooth();
 }
 
-// Disable auto-scroll when user starts scrolling
-container.addEventListener('wheel', disableAutoScroll);
+// Re-enable auto-scroll when user reaches bottom
+container.addEventListener('scroll', function() {
+    if (!autoScrollEnabled) {
+        const threshold = 1;
+        const isAtBottom = container.scrollTop + container.clientHeight >= container.scrollHeight - threshold;
+        if (isAtBottom) {
+            autoScrollEnabled = true;
+            hideScrollButton();
+        }
+    }
+});
+
+// Disable auto-scroll when user scrolls up (away from bottom)
+container.addEventListener('wheel', function(e) {
+    if (e.deltaY < 0) disableAutoScroll();
+});
 container.addEventListener('touchstart', disableAutoScroll, { passive: true });
 
 // Button click handler
@@ -410,6 +424,7 @@ messages.addEventListener('htmx:sseBeforeMessage', function(event) {
 
 /**
  * Handle sse-tool-start events (append tool start and scroll).
+ * Idempotent: skips if tool already rendered (handles SSE reconnection replays).
  */
 function handleToolStart(data) {
     const template = document.createElement('template');
@@ -418,6 +433,12 @@ function handleToolStart(data) {
 
     // Process any OOB elements (e.g., thinking indicator reset)
     processOobElements(fragment);
+
+    // Skip if tool already exists (SSE reconnection replay)
+    const toolDiv = fragment.querySelector('[id^="tool-"]');
+    if (toolDiv && document.getElementById(toolDiv.id)) {
+        return;
+    }
 
     // Append remaining content to messages
     while (fragment.firstChild) {
