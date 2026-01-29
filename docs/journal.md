@@ -1,5 +1,47 @@
 # DevOpsHero Development Journal
 
+## 2026-01-29 06:55 - [AgentChat] Fix create_datastore tool schema to prevent invalid deployment_mode guesses
+
+**Conversation:** [2026-01-29-0919-aefbdc1b.md](conversations/2026-01-29-0919-aefbdc1b.md)
+
+Diagnosed a production issue where the agent had to call `create_datastore` twice because it guessed the wrong `deployment_mode` value. The agent used `"serverless"` but the valid values are `"aurora_serverless_v2"` or `"aurora_provisioned"`.
+
+**Root cause:**
+
+The `create_datastore` MCP tool used the simple parameter format which only specifies types without constraints:
+
+```python
+@tool("create_datastore", "description...", {
+    "deployment_mode": str,  # No guidance on valid values
+    "engine": str,
+})
+```
+
+The tool description mentioned "Serverless v2 scaling" but didn't specify the exact parameter value. The agent reasonably guessed `"serverless"` instead of the required `"aurora_serverless_v2"`.
+
+**Fix:**
+
+Converted to JSON Schema format with enum constraints (same format already used by `deploy_app`):
+
+```python
+"deployment_mode": {
+    "type": "string",
+    "enum": ["aurora_serverless_v2", "aurora_provisioned"],
+    "description": "aurora_serverless_v2 (recommended) or aurora_provisioned",
+},
+"engine": {
+    "type": "string",
+    "enum": ["aurora-postgresql", "aurora-mysql"],
+    "description": "Database engine",
+},
+```
+
+**Key points:**
+- JSON Schema format is superior to simple dict format for MCP tools — it supports per-parameter descriptions, enum constraints, and explicit required vs optional fields
+- Enum constraints make valid values explicit in the tool schema that Claude sees, preventing guessing
+- The `deploy_app` tool already used this format; `create_datastore` was an inconsistency
+- Also made `serverless_min_acu` and `serverless_max_acu` optional (not in `required` array) since they have sensible defaults
+
 ## 2026-01-29 23:30 - [AgentChat] Fix duplicate tool outputs on SSE reconnection
 
 **Conversation:** [2026-01-28-2224-7e618e6b.md](conversations/2026-01-28-2224-7e618e6b.md)
