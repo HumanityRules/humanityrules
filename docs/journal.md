@@ -1,5 +1,55 @@
 # DevOpsHero Development Journal
 
+## 2026-01-29 22:15 - [AgentChat] Auto-scroll re-engagement when user scrolls to bottom
+
+**Conversation:** [2026-01-28-2208-bf425239.md](conversations/2026-01-28-2208-bf425239.md)
+
+Improved the chat panel's auto-scroll behavior. Previously, once a user scrolled up (disengaging auto-scroll), the only way to re-engage was clicking the "scroll to bottom" button. Now auto-scroll re-enables automatically when the user scrolls back to the bottom.
+
+**Evolution of the solution:**
+
+1. **Initial approach: `scrollend` event** — Seemed ideal since it fires once when scrolling stops, avoiding the performance cost of continuous `scroll` events. However, two problems emerged:
+   - Doesn't fire if no actual scrolling occurs (e.g., wheeling down when already at bottom)
+   - Waits for momentum/inertia to stop — too slow for responsive UX
+
+2. **Consulted GPT-5.2** — Suggested `scroll` with rAF throttling or IntersectionObserver sentinel. Valid for complex cases, but overkill here.
+
+3. **Final solution: Simple `scroll` event** — Check if at bottom on each scroll; re-enable immediately when threshold is reached. No state tracking needed.
+
+**Key fixes:**
+
+- **Wheel direction filtering** — Only disable auto-scroll on `wheel` up (`deltaY < 0`). Wheeling down while at bottom no longer disengages. The `scroll` event doesn't have delta info, but we don't need it — being at bottom is the signal regardless of how you got there.
+
+- **Immediate re-engagement** — Using `scroll` instead of `scrollend` means auto-scroll re-enables the instant you hit bottom, not after momentum stops.
+
+- **Minimal threshold** — 1px handles subpixel rounding across browsers/zoom levels while being effectively "at bottom".
+
+**Final implementation:**
+```javascript
+// Re-enable auto-scroll when user reaches bottom
+container.addEventListener('scroll', function() {
+    if (!autoScrollEnabled) {
+        const threshold = 1;
+        const isAtBottom = container.scrollTop + container.clientHeight >= container.scrollHeight - threshold;
+        if (isAtBottom) {
+            autoScrollEnabled = true;
+            hideScrollButton();
+        }
+    }
+});
+
+// Disable auto-scroll when user scrolls up (away from bottom)
+container.addEventListener('wheel', function(e) {
+    if (e.deltaY < 0) disableAutoScroll();
+});
+```
+
+**Key points:**
+- `scrollend` is elegant but not suitable for immediate feedback — fires after momentum stops, not during scrolling
+- `scroll` event doesn't include delta; direction must be computed from position changes OR handled via the `wheel` event separately
+- For re-enabling auto-scroll, direction tracking is unnecessary — if you're at bottom, that's the signal
+- Small threshold (1-5px) handles floating-point rounding issues across browsers and zoom levels
+
 ## 2026-01-29 19:45 - [Deployment] Aurora PostgreSQL version 15.4 unavailable
 
 **Conversation:** [2026-01-28-1951-3ebc2269.md](conversations/2026-01-28-1951-3ebc2269.md)
