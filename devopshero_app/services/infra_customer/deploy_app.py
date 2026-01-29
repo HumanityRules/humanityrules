@@ -31,16 +31,8 @@ logger = logging.getLogger(__name__)
 # CDK STACKS
 # =============================================================================
 
-AURORA_MYSQL_DEFAULT_VERSION = "3.04.0"
-AURORA_POSTGRES_DEFAULT_VERSION = "15.4"
-
-AURORA_MYSQL_VERSION_MAP = {
-    "3.04.0": rds.AuroraMysqlEngineVersion.VER_3_04_0,
-}
-
-AURORA_POSTGRES_VERSION_MAP = {
-    "15.4": rds.AuroraPostgresEngineVersion.VER_15_4,
-}
+AURORA_MYSQL_DEFAULT_VERSION = "3.08.0"
+AURORA_POSTGRES_DEFAULT_VERSION = "16.4"
 
 
 def get_engine_port(engine_family: str) -> int:
@@ -60,17 +52,22 @@ def get_engine_scheme(engine_family: str) -> str:
 
 
 def get_engine_version(engine_config: appconfig.EngineConfig) -> "rds.IClusterEngine":
+    """Get CDK engine version from config. Uses sensible defaults if version not specified."""
     if engine_config.family == "aurora-mysql":
-        version_key = engine_config.version or AURORA_MYSQL_DEFAULT_VERSION
-        version = AURORA_MYSQL_VERSION_MAP.get(version_key)
-        if not version:
-            raise ValueError(f"Unsupported Aurora MySQL version: {version_key}")
+        version_str = engine_config.version or AURORA_MYSQL_DEFAULT_VERSION
+        major = version_str.split(".")[0]
+        version = rds.AuroraMysqlEngineVersion.of(
+            aurora_mysql_full_version=version_str,
+            aurora_mysql_major_version=major,
+        )
         return rds.DatabaseClusterEngine.aurora_mysql(version=version)
     if engine_config.family == "aurora-postgresql":
-        version_key = engine_config.version or AURORA_POSTGRES_DEFAULT_VERSION
-        version = AURORA_POSTGRES_VERSION_MAP.get(version_key)
-        if not version:
-            raise ValueError(f"Unsupported Aurora PostgreSQL version: {version_key}")
+        version_str = engine_config.version or AURORA_POSTGRES_DEFAULT_VERSION
+        major = version_str.split(".")[0]
+        version = rds.AuroraPostgresEngineVersion.of(
+            aurora_postgres_full_version=version_str,
+            aurora_postgres_major_version=major,
+        )
         return rds.DatabaseClusterEngine.aurora_postgres(version=version)
     raise ValueError(f"Unsupported engine family: {engine_config.family}")
 

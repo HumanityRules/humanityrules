@@ -9,9 +9,11 @@ Usage:
 Examples:
     ./prod_manage.sh doh_query Repository
     ./prod_manage.sh doh_query Repository full_name default_branch
-    ./prod_manage.sh doh_query Repository full_name default_branch --filter full_name__icontains=ai-detector
+    ./prod_manage.sh doh_query Repository full_name --filter full_name__icontains=ai-detector
     ./prod_manage.sh doh_query App name slug app_type --limit 5
     ./prod_manage.sh doh_query Deployment status --filter status=failed --limit 10
+    ./prod_manage.sh doh_query Message --describe  # Show available fields
+    ./prod_manage.sh doh_query Message role content --order created_at --desc  # Descending order
 """
 
 from django.apps import apps
@@ -26,7 +28,9 @@ class Command(BaseCommand):
         parser.add_argument("fields", nargs="*", help="Fields to display (default: all)")
         parser.add_argument("--filter", "-f", action="append", dest="filters", help="Filter as key=value (can repeat)")
         parser.add_argument("--limit", "-l", type=int, default=50, help="Max rows to return (default: 50)")
-        parser.add_argument("--order", "-o", help="Field to order by (prefix with - for descending)")
+        parser.add_argument("--order", "-o", help="Field to order by")
+        parser.add_argument("--desc", action="store_true", help="Order descending (use with --order)")
+        parser.add_argument("--describe", action="store_true", help="Show available fields and exit")
 
     def handle(self, *args, **options):
         model_name = options["model"]
@@ -34,6 +38,8 @@ class Command(BaseCommand):
         filters = options["filters"] or []
         limit = options["limit"]
         order_by = options.get("order")
+        desc = options.get("desc", False)
+        describe = options.get("describe", False)
 
         # Find the model
         try:
@@ -41,6 +47,13 @@ class Command(BaseCommand):
         except LookupError:
             available = [m.__name__ for m in apps.get_app_config("devopshero_app").get_models()]
             raise CommandError(f"Model '{model_name}' not found. Available: {', '.join(sorted(available))}")
+
+        # Handle --describe: show fields and exit
+        if describe:
+            all_fields = [f.name for f in model._meta.get_fields()]
+            self.stdout.write(f"Model: {model_name}")
+            self.stdout.write(f"Fields: {', '.join(sorted(all_fields))}")
+            return
 
         # Build queryset
         queryset = model.objects.all()
@@ -65,6 +78,8 @@ class Command(BaseCommand):
 
         # Apply ordering
         if order_by:
+            if desc:
+                order_by = f"-{order_by}"
             queryset = queryset.order_by(order_by)
 
         # Apply limit

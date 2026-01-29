@@ -45,8 +45,8 @@ The system SHALL support explicit engine version selection via `DatabaseConfig.e
 #### Scenario: Version is null
 - **WHEN** `engine.version` is null
 - **THEN** the CDK stack uses the default version from the Engine Version Catalog
-- **AND** the default for Aurora MySQL is `3.04.0`
-- **AND** the default for Aurora PostgreSQL is `15.4`
+- **AND** the default for Aurora MySQL is `3.08.0`
+- **AND** the default for Aurora PostgreSQL is `16.4`
 
 #### Scenario: Unsupported version
 - **WHEN** `engine.version` is not in the Engine Version Catalog
@@ -235,10 +235,12 @@ ConnectionConfig:
 
 ### Engine Version Catalog
 
-| Family | Version Key | CDK Constant |
-|--------|-------------|--------------|
-| aurora-mysql | 3.04.0 | `AuroraMysqlEngineVersion.VER_3_04_0` |
-| aurora-postgresql | 15.4 | `AuroraPostgresEngineVersion.VER_15_4` |
+| Family | Default Version |
+|--------|-----------------|
+| aurora-mysql | 3.08.0 |
+| aurora-postgresql | 16.4 |
+
+Custom versions can be specified via `engine.version`. The CDK `of()` method is used to create version objects dynamically, so any valid Aurora version string is supported.
 
 ### Hardcoded Values
 
