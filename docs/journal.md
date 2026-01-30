@@ -1,5 +1,33 @@
 # DevOpsHero Development Journal
 
+## 2026-01-30 15:30 - [UI] Add Environments section to site navigation
+
+**Conversation:** [2026-01-30-1416-4855039b.md](conversations/2026-01-30-1416-4855039b.md)
+
+Implemented the "Environments" section as a new top-level page in the application. Environments are deployment targets (VPC + ECS cluster) that live within connected AWS accounts. The relationship chain is Organization → AWSAccount → Environment.
+
+**Design decisions:**
+
+- **Navigation placement** — Added "Environments" between "Workspaces" and "Security" in the sidebar, using the Heroicons "server-stack" icon. This groups deployment-related concepts together (Workspaces define apps, Environments define where they run).
+
+- **List page layout** — Follows the same grid pattern as workspace_detail apps: left-to-right boxes showing environment name, AWS account name, status badge, and region. The description explicitly mentions AWS accounts: "Deployment targets within your connected AWS accounts."
+
+- **"New Environment" flow** — Rather than a form, clicking "New Environment" opens a modal to select an AWS account, then redirects to the chat agent with that account as context. This matches our agent-first approach where the AI guides users through environment creation (asking about name, region, domain via Route53).
+
+- **Empty state UX** — When no environments exist, the empty state checks if AWS accounts are connected. If not, it shows a link to Settings → AWS Accounts. This guides users through the prerequisite step.
+
+- **Environment detail page** — Shows environment metadata (AWS account, region, VPC ID, domain) and lists recent deployments. Includes breadcrumb navigation back to the environments list.
+
+**Model change:**
+
+Added `context_aws_account` FK to Conversation model, following the existing pattern for `context_workspace` and `context_repository`. The `chat_new` view now accepts `?aws_account=<uuid>` to set this context. Note: The agent service doesn't yet read this context — that's a follow-up task to wire up the prompt injection and flow guidance.
+
+**Key points:**
+
+- Environment belongs to AWSAccount (not Organization directly), so queries use `aws_account__organization` for filtering
+- The "New Environment" button only appears when connected AWS accounts exist
+- Agent context is stored but not yet used — follow-up needed to update agent_service.py and system_prompt.md
+
 ## 2026-01-29 22:45 - [ControlPlane] Enable psycopg3 native connection pooling for ASGI
 
 **Conversation:** [2026-01-29-2246-3fe2d24d.md](conversations/2026-01-29-2246-3fe2d24d.md)

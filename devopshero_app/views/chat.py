@@ -67,12 +67,14 @@ def chat_new(request):
     """Create a new conversation and redirect to it."""
     workspace_id = request.GET.get("workspace")
     repo_id = request.GET.get("repo")
-    
+    aws_account_id = request.GET.get("aws_account")
+
     conversation = Conversation.objects.create(
         user=request.user,
         organization=request.user.current_organization,
         context_workspace_id=workspace_id if workspace_id else None,
         context_repository_id=repo_id if repo_id else None,
+        context_aws_account_id=aws_account_id if aws_account_id else None,
         status=Conversation.Status.ACTIVE,
     )
     return redirect("chat_view", conversation_id=conversation.id)
