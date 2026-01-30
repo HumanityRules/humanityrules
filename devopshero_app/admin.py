@@ -154,8 +154,8 @@ class DatastoreAdmin(admin.ModelAdmin):
 
 @admin.register(Conversation)
 class ConversationAdmin(admin.ModelAdmin):
-    list_display = ["title", "status", "user", "organization", "context_workspace", "context_repository", "updated_at"]
-    list_filter = ["status", "organization", "context_workspace"]
+    list_display = ["title", "mode", "status", "user", "organization", "context_workspace", "context_repository", "updated_at"]
+    list_filter = ["mode", "status", "organization", "context_workspace"]
     search_fields = ["title", "user__email", "user__username", "organization__name", "context_workspace__name", "context_repository__full_name", "session_id"]
     readonly_fields = ["id", "created_at", "updated_at"]
     autocomplete_fields = ["user", "organization", "context_workspace", "context_repository"]
