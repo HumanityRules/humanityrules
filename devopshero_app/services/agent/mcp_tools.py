@@ -333,9 +333,8 @@ async def list_environments(args: dict[str, Any]) -> dict[str, Any]:
     (
         "Create an environment in a connected AWS account. "
         "Queues provisioning of VPC, ECS cluster, and shared ALB infrastructure. "
-        "IMPORTANT: Before calling this tool, confirm the AWS region with the user. "
-        "The default is us-east-1, but this cannot be changed after provisioning. "
-        "Tell the user: 'I'll create the environment in us-east-1. Let me know if you need a different region.' "
+        "IMPORTANT: Before calling this tool, you MUST confirm name, region, and domain with the user. "
+        "Present settings and wait for explicit user confirmation before calling this tool. "
         "If hosted_zone_name is provided, also creates a wildcard SSL certificate for HTTPS. "
         "Returns immediately with PENDING status - use get_environment_status to poll for progress. "
         "Provisioning typically takes 5-10 minutes. "
