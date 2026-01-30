@@ -2,7 +2,9 @@ import asyncio
 import json
 import logging
 
+from asgiref.sync import sync_to_async
 from django.contrib.auth.decorators import login_required
+from django.db import connection, connections
 from django.http import HttpResponse, StreamingHttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.template.loader import render_to_string
@@ -17,6 +19,22 @@ from ..templatetags.chat_filters import extract_mcp_text_content
 from .base import get_app_shell_context
 
 logger = logging.getLogger(__name__)
+
+
+def _get_db_connection_count() -> int | None:
+    """Query PostgreSQL for connection count excluding this session."""
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute("SELECT count(*) FROM pg_stat_activity WHERE pid <> pg_backend_pid()")
+            return cursor.fetchone()[0]
+    except Exception:
+        return None
+
+
+async def _log_connections(label: str) -> None:
+    """Log current DB connection count with a label."""
+    count = await sync_to_async(_get_db_connection_count, thread_sensitive=True)()
+    logger.info(f"[CONN] {label}: db_connections={count}")
 
 
 def _get_conversations(user):
@@ -193,6 +211,14 @@ async def chat_stream(request, conversation_id):
             agent_runner.mark_client_disconnected(conversation_id=conversation_id)
             logger.info(f"SSE client disconnected for conversation {conversation_id}")
             raise
+
+        finally:
+            # Close DB connections in this SSE stream's context.
+            # StreamingHttpResponse generators escape Django's normal request lifecycle,
+            # so connections aren't automatically cleaned up. Explicit close_all() is needed.
+            conn_before = await sync_to_async(_get_db_connection_count, thread_sensitive=True)()
+            await sync_to_async(connections.close_all, thread_sensitive=True)()
+            logger.info(f"[CONN] event_generator CLEANUP {conversation_id}: db_connections {conn_before}")
 
     response = StreamingHttpResponse(event_generator(), content_type="text/event-stream")
     response["Cache-Control"] = "no-cache"

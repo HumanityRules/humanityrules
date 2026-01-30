@@ -13,6 +13,9 @@ import logging
 from dataclasses import dataclass, field
 from uuid import UUID
 
+from asgiref.sync import sync_to_async
+from django.db import connections
+
 from devopshero_app.models import Conversation, Message
 
 from . import agent_service
@@ -183,4 +186,9 @@ async def _run_agent_loop(runner: AgentRunner, conversation_id: UUID) -> None:
         # Send completion sentinel and cleanup
         await runner.event_queue.put(None)
         _runners.pop(conversation_id, None)
+
+        # Close DB connections opened in this task's context.
+        # asyncio.create_task() creates a new context, so connections opened by
+        # stream_response() are isolated here. close_all() cleans them up.
+        await sync_to_async(connections.close_all, thread_sensitive=True)()
         logger.info(f"Agent runner exited for conversation {conversation_id}")
