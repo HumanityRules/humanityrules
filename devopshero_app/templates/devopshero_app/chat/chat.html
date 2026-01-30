@@ -42,9 +42,9 @@
                             <p class="text-xs text-gray-400 dark:text-gray-500">
                                 {{ conv.updated_at|timesince }} ago
                             </p>
-                            {% if conv.context_workspace or conv.context_repository %}
+                            {% if conv.context_workspace or conv.context_repository or conv.context_aws_account %}
                             <p class="text-xs text-gray-500 dark:text-gray-400 truncate">
-                                {% if conv.context_workspace %}<span class="text-gray-400 dark:text-gray-500">Workspace:</span> {{ conv.context_workspace.name }}{% endif %}{% if conv.context_workspace and conv.context_repository %} &nbsp; {% endif %}{% if conv.context_repository %}<span class="text-gray-400 dark:text-gray-500">Repository:</span> {{ conv.context_repository.name }}{% endif %}
+                                {% if conv.context_workspace %}<span class="text-gray-400 dark:text-gray-500">Workspace:</span> {{ conv.context_workspace.name }}{% endif %}{% if conv.context_workspace and conv.context_repository %} &nbsp; {% endif %}{% if conv.context_repository %}<span class="text-gray-400 dark:text-gray-500">Repository:</span> {{ conv.context_repository.name }}{% endif %}{% if conv.context_aws_account %}<span class="text-gray-400 dark:text-gray-500">AWS Account:</span> {{ conv.context_aws_account.name }}{% endif %}
                             </p>
                             {% endif %}
                         </div>
