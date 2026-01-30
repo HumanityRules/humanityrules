@@ -1,5 +1,57 @@
 # DevOpsHero Development Journal
 
+## 2026-01-30 06:15 - [Bugfix] Fix Django ASGI SSE database connection leak
+
+**Conversation:** [2026-01-29-2210-8db8285e.md](conversations/2026-01-29-2210-8db8285e.md)
+
+Diagnosed and fixed a critical production issue where database connections leaked at +1 per SSE request, eventually exhausting Aurora's connection limit (800+ connections overnight from a single user).
+
+**Root cause:**
+
+Django stores database connections using `asgiref.local.Local(thread_critical=True)`, which in async contexts uses `contextvars` for isolation. Two async patterns escape Django's normal request lifecycle cleanup (via `request_finished` signal):
+
+1. **StreamingHttpResponse generators** — Long-lived SSE streams don't "finish" until the client disconnects, and the `request_finished` signal doesn't properly clean up connections for these long-lived responses.
+
+2. **Background tasks via `asyncio.create_task()`** — The agent runner spawns a background task that does many ORM operations. This task runs outside Django's request lifecycle entirely.
+
+**The fix:**
+
+Add explicit `connections.close_all()` in the `finally` block of BOTH async contexts:
+
+```python
+# chat.py - SSE generator
+async def event_generator():
+    try:
+        # ... stream events ...
+    finally:
+        await sync_to_async(connections.close_all, thread_sensitive=True)()
+
+# agent_runner.py - Background task  
+async def _run_agent_loop(...):
+    try:
+        # ... ORM operations in stream_response() ...
+    finally:
+        await sync_to_async(connections.close_all, thread_sensitive=True)()
+```
+
+**Key learnings:**
+
+- Both `close_all()` calls are required — removing either one causes the leak to return
+- Query placement (inside vs outside generator) doesn't matter — what matters is cleanup in async contexts that escape Django's lifecycle
+- Django ticket #33497 documents that persistent connections don't work with ASGI, but the SSE-specific nuance is less documented
+- The `close_all()` must use `sync_to_async(..., thread_sensitive=True)` because Django's connection management is synchronous
+
+**Debugging approach that worked:**
+
+Added connection count logging via `pg_stat_activity` queries at strategic points to trace where connections were created and whether cleanup was effective. This revealed that `close_all()` showed no effect initially because it was running in a different context than where connections were opened.
+
+**Production pattern for Django ASGI SSE endpoints:**
+
+Any async code that escapes Django's request lifecycle needs explicit connection cleanup:
+- `StreamingHttpResponse` with async generators
+- Background tasks via `asyncio.create_task()`
+- Any long-lived async operation that does DB queries
+
 ## 2026-01-29 06:55 - [AgentChat] Fix create_datastore tool schema to prevent invalid deployment_mode guesses
 
 **Conversation:** [2026-01-29-0919-aefbdc1b.md](conversations/2026-01-29-0919-aefbdc1b.md)
