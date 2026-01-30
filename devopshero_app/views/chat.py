@@ -196,14 +196,20 @@ async def chat_stream(request, conversation_id):
             runner = await agent_runner.ensure_agent_running(conversation=conversation)
             agent_runner.mark_client_connected(conversation_id=conversation_id)
 
-            # Consume events from runner's queue
+            # Consume events from runner's queue with keepalive
+            # Keepalive interval must be shorter than CloudFront origin timeout (30s default)
+            keepalive_interval = 15.0
             while True:
-                event = await runner.event_queue.get()
-                if event is None:
-                    # Sentinel: runner finished, exit loop
-                    logger.info(f"Agent runner completed for conversation {conversation_id}")
-                    break
-                yield _format_sse_event(event=event)
+                try:
+                    event = await asyncio.wait_for(runner.event_queue.get(), timeout=keepalive_interval)
+                    if event is None:
+                        # Sentinel: runner finished, exit loop
+                        logger.info(f"Agent runner completed for conversation {conversation_id}")
+                        break
+                    yield _format_sse_event(event=event)
+                except asyncio.TimeoutError:
+                    # No event within timeout - send SSE comment to keep connection alive
+                    yield ": keepalive\n\n"
 
         except asyncio.CancelledError:
             # Uvicorn cancels async tasks when the client disconnects (e.g., page reload).

@@ -1,5 +1,40 @@
 # DevOpsHero Development Journal
 
+## 2026-01-30 10:45 - [Bugfix] SSE keepalive to prevent CloudFront timeout disconnections
+
+**Conversation:** [2026-01-29-2236-05c53325.md](conversations/2026-01-29-2236-05c53325.md)
+
+Diagnosed and fixed production SSE connection errors where the browser console showed thousands of `net::ERR_HTTP2_PROTOCOL_ERROR` errors on the `/chat/.../stream/` endpoint, with htmx-ext-sse continuously reconnecting.
+
+**Root cause:**
+
+The architecture is: `Browser (HTTP/2) → CloudFront → ALB → ECS`. CloudFront has a default origin response timeout of 30 seconds. When the SSE stream goes idle (waiting for user input or agent processing), no data flows. After 30 seconds, CloudFront closes the connection. With HTTP/2, this manifests as a `RST_STREAM` frame, which Chrome reports as `ERR_HTTP2_PROTOCOL_ERROR`. htmx-ext-sse auto-reconnects, creating the same timeout cycle, resulting in 2000+ errors.
+
+**Clarification on HTTP/2 + SSE:**
+
+HTTP/2 and SSE are fully compatible — SSE simply becomes one of HTTP/2's multiplexed streams. The issue isn't protocol incompatibility but idle timeout configuration. The same timeout problem would occur with HTTP/1.1, just with a different error presentation (connection reset vs protocol error).
+
+**The fix:**
+
+Add SSE keepalive comments in `chat.py`'s event generator. SSE comments (lines starting with `:`) are ignored by clients but keep data flowing through the connection:
+
+```python
+keepalive_interval = 15.0  # Must be < CloudFront's 30s timeout
+while True:
+    try:
+        event = await asyncio.wait_for(runner.event_queue.get(), timeout=keepalive_interval)
+        # ... handle event ...
+    except asyncio.TimeoutError:
+        yield ": keepalive\n\n"  # SSE comment keeps connection alive
+```
+
+**Key points:**
+
+- 15-second interval is safely under CloudFront's 30-second default and ALB's 60-second default
+- Keepalive logic belongs in the SSE transport layer (`chat.py`), not the agent runner — it's a transport concern
+- No frontend changes needed — htmx-ext-sse (and all SSE clients) transparently ignore comment lines
+- This is standard SSE practice for long-lived connections behind proxies/CDNs
+
 ## 2026-01-30 06:15 - [Bugfix] Fix Django ASGI SSE database connection leak
 
 **Conversation:** [2026-01-29-2210-8db8285e.md](conversations/2026-01-29-2210-8db8285e.md)
