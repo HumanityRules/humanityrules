@@ -90,8 +90,8 @@ def chat_new(request):
     # Create trigger message for auto-start modes (agent starts immediately)
     # The message content sets a friendly tone for the conversation
     trigger_content = {
-        Conversation.Mode.ENVIRONMENT_SETUP: "Hi! I'd like to set up a new environment in my AWS account. Can you help me get started?",
-        Conversation.Mode.APP_DEPLOYMENT: "Hi! I'd like to deploy this repository. Can you help me get it running?",
+        Conversation.Mode.ENVIRONMENT_SETUP: "Hi! I'm your friendly user who would like to set up a new environment in my AWS account.",
+        Conversation.Mode.APP_DEPLOYMENT: "Hi! I'm your friendly user who would like to deploy this repository.",
     }
     if mode in trigger_content:
         Message.objects.create(
