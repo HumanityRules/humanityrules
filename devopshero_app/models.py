@@ -665,6 +665,14 @@ class Conversation(models.Model):
         related_name="conversations",
         help_text="Workspace context for this conversation (set via UI)",
     )
+    context_aws_account = models.ForeignKey(
+        AWSAccount,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="conversations",
+        help_text="AWS account context for this conversation (set via UI for environment creation)",
+    )
     status = models.CharField(
         max_length=20,
         choices=Status.choices,
