@@ -1,5 +1,48 @@
 # DevOpsHero Development Journal
 
+## 2026-01-29 22:45 - [ControlPlane] Enable psycopg3 native connection pooling for ASGI
+
+**Conversation:** [2026-01-29-2246-3fe2d24d.md](conversations/2026-01-29-2246-3fe2d24d.md)
+
+Following up on the database connection leak fix from earlier, enabled Django 6.0's native connection pooling via psycopg3's `ConnectionPool` instead of relying on `CONN_MAX_AGE`.
+
+**Background:**
+
+The earlier fix (2026-01-30 06:15) addressed connection leaks by adding explicit `connections.close_all()` in async contexts that escape Django's request lifecycle. As a mitigation, `conn_max_age` was set to 0 (close after each request). This worked but sacrificed the latency benefits of connection reuse.
+
+**The better solution — psycopg3 native pooling:**
+
+Django 6.0 added support for psycopg3's built-in `ConnectionPool` via the `pool` option. The Django docs explicitly recommend this approach for ASGI:
+
+> When using ASGI, persistent connections should be disabled. Instead, use your database backend's built-in connection pooling if available.
+
+**Key differences between CONN_MAX_AGE and pool=True:**
+
+- **`CONN_MAX_AGE`** — Per-thread persistent connections. Each thread keeps its own connection. Breaks with ASGI because async contexts create connections outside the threadpool, leading to leaks.
+
+- **`pool=True`** — Uses psycopg3's `ConnectionPool`. A shared pool where connections are borrowed and returned. Designed to work correctly with async code.
+
+**Changes made:**
+
+1. Added `pool` extra to psycopg: `psycopg[binary,pool]>=3.2.0` in pyproject.toml
+2. Added `OPTIONS: {"pool": True}` to database config in settings.py
+3. Kept `conn_max_age=0` alongside pool (disables Django's per-thread persistence, lets pool handle everything)
+
+**Important: `close_all()` is still required:**
+
+Even with connection pooling, the explicit `connections.close_all()` calls in `chat.py` and `agent_runner.py` remain necessary. The difference is what they do:
+
+- Without pool: `close_all()` closes actual TCP connections
+- With pool: `close_all()` returns borrowed connections to the pool
+
+If we don't call `close_all()` in async contexts that escape Django's lifecycle, connections stay "checked out" from the pool's perspective, eventually exhausting the pool.
+
+**Key points:**
+
+- psycopg3's pool is the recommended approach for Django ASGI applications
+- `close_all()` changes from "close connections" to "return to pool" but is still required
+- Updated comments in both cleanup locations to explain this behavior and cross-reference each other
+
 ## 2026-01-30 10:45 - [Bugfix] SSE keepalive to prevent CloudFront timeout disconnections
 
 **Conversation:** [2026-01-29-2236-05c53325.md](conversations/2026-01-29-2236-05c53325.md)

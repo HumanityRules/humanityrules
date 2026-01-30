@@ -187,8 +187,11 @@ async def _run_agent_loop(runner: AgentRunner, conversation_id: UUID) -> None:
         await runner.event_queue.put(None)
         _runners.pop(conversation_id, None)
 
-        # Close DB connections opened in this background task. asyncio.create_task()
-        # runs in its own context, so ORM work inside stream_response() isn't covered
-        # by request_finished cleanup. Explicit close_all() is required here.
+        # Return DB connections to the pool. Background tasks spawned via asyncio.create_task()
+        # run outside Django's request lifecycle, so request_finished signal doesn't cover them.
+        # Without this, connections opened during stream_response() ORM operations leak from the
+        # pool. With psycopg3's pool=True, close_all() returns connections to the pool rather
+        # than truly closing them.
+        # See also: chat.py's event_generator() — both cleanups are required.
         await sync_to_async(connections.close_all, thread_sensitive=True)()
         logger.info(f"Agent runner exited for conversation {conversation_id}")
