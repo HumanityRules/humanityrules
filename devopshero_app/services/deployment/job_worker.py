@@ -165,7 +165,7 @@ def _worker_loop() -> None:
                     daemon=True,
                 )
                 thread.start()
-                logger.debug(f"Spawned thread for deployment {deployment.id}")
+                logger.info(f"Spawned thread for deployment {deployment.id}")
 
             # Check for pending environments
             environment = _claim_pending_environment()
@@ -177,7 +177,7 @@ def _worker_loop() -> None:
                     daemon=True,
                 )
                 thread.start()
-                logger.debug(f"Spawned thread for environment {environment.id}")
+                logger.info(f"Spawned thread for environment {environment.id}")
 
             # Check for pending teardowns
             teardown = _claim_pending_teardown()
@@ -189,7 +189,7 @@ def _worker_loop() -> None:
                     daemon=True,
                 )
                 thread.start()
-                logger.debug(f"Spawned thread for teardown {teardown.id}")
+                logger.info(f"Spawned thread for teardown {teardown.id}")
 
         except Exception:
             logger.exception("Error in worker loop")
