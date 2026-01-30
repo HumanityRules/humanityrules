@@ -81,15 +81,42 @@ class StreamingContext:
     has_started_streaming: bool = False
 
 
-def _load_system_prompt() -> str:
-    """Load the system prompt from the markdown file."""
-    prompt_path = Path(__file__).parent / "system_prompt.md"
+def _load_prompt_file(filename: str) -> str:
+    """Load a system prompt from the given filename."""
+    prompt_path = Path(__file__).parent / filename
     return prompt_path.read_text()
 
 
 async def _build_system_prompt(conversation: Conversation) -> str:
-    """Build system prompt with conversation context injected."""
-    base_prompt = _load_system_prompt()
+    """Build system prompt based on conversation mode."""
+    if conversation.mode == Conversation.Mode.ENVIRONMENT_SETUP:
+        return await _build_environment_prompt(conversation)
+    elif conversation.mode == Conversation.Mode.APP_DEPLOYMENT:
+        return await _build_app_deployment_prompt(conversation)
+    else:
+        return await _build_general_prompt(conversation)
+
+
+async def _build_environment_prompt(conversation: Conversation) -> str:
+    """Build system prompt for environment setup conversations."""
+    base_prompt = _load_prompt_file("system_prompt_environment.md")
+    sections = []
+
+    # Conversation context - AWS account
+    account = await AWSAccount.objects.aget(id=conversation.context_aws_account_id)
+    context_lines = [
+        f"Target AWS Account: {account.name} (id: {account.id}, aws: {account.aws_account_id or 'pending'}, status: {account.status})"
+    ]
+    sections.append("## Conversation Context\n\n" + "\n".join(context_lines))
+
+    if sections:
+        return base_prompt + "\n\n" + "\n\n".join(sections)
+    return base_prompt
+
+
+async def _build_app_deployment_prompt(conversation: Conversation) -> str:
+    """Build system prompt for app deployment conversations."""
+    base_prompt = _load_prompt_file("system_prompt_app_deployment.md")
     sections = []
 
     # Conversation context section
@@ -110,7 +137,31 @@ async def _build_system_prompt(conversation: Conversation) -> str:
         sections.append(infra_section)
 
     if sections:
-        return base_prompt + "\n" + "\n\n".join(sections)
+        return base_prompt + "\n\n" + "\n\n".join(sections)
+    return base_prompt
+
+
+async def _build_general_prompt(conversation: Conversation) -> str:
+    """Build system prompt for general conversations."""
+    base_prompt = _load_prompt_file("system_prompt_general.md")
+    sections = []
+
+    # Conversation context section (workspace only for general mode)
+    context_lines = []
+    if conversation.context_workspace_id:
+        ws = await Workspace.objects.aget(id=conversation.context_workspace_id)
+        context_lines.append(f"Current workspace: {ws.name} (id: {ws.id})")
+
+    if context_lines:
+        sections.append("## Conversation Context\n\n" + "\n".join(context_lines))
+
+    # AWS infrastructure section
+    infra_section = await _build_aws_infrastructure_section(conversation.organization_id)
+    if infra_section:
+        sections.append(infra_section)
+
+    if sections:
+        return base_prompt + "\n\n" + "\n\n".join(sections)
     return base_prompt
 
 
@@ -194,6 +245,7 @@ async def _maybe_generate_title(conversation: Conversation, user_message: str, a
         # Get context names for title generation
         workspace_name = None
         repo_name = None
+        aws_account_name = None
 
         if conversation.context_workspace_id:
             ws = await Workspace.objects.only("name").aget(id=conversation.context_workspace_id)
@@ -203,6 +255,10 @@ async def _maybe_generate_title(conversation: Conversation, user_message: str, a
             repo = await Repository.objects.only("full_name").aget(id=conversation.context_repository_id)
             repo_name = repo.full_name
 
+        if conversation.context_aws_account_id:
+            account = await AWSAccount.objects.only("name").aget(id=conversation.context_aws_account_id)
+            aws_account_name = account.name
+
         # Generate title in thread (anthropic client is sync)
         title = await asyncio.to_thread(
             title_generator.generate_title,
@@ -210,6 +266,7 @@ async def _maybe_generate_title(conversation: Conversation, user_message: str, a
             agent_response,
             workspace_name,
             repo_name,
+            aws_account_name,
         )
 
         conversation.title = title
@@ -339,7 +396,7 @@ async def _handle_tool_results(message: UserMessage, ctx: StreamingContext) -> A
     yield AgentStreamEvent(type="thinking")
 
 
-def _create_agent_options(system_prompt: str, resume_session_id: str | None, fork_session: bool, repo_path: Path | None) -> ClaudeAgentOptions:
+def _create_agent_options(system_prompt: str, resume_session_id: str | None, fork_session: bool, repo_path: Path | None, model_alias: str) -> ClaudeAgentOptions:
     """
     Create SDK client options with standard configuration.
 
@@ -349,6 +406,7 @@ def _create_agent_options(system_prompt: str, resume_session_id: str | None, for
         fork_session: Whether to fork the session.
         repo_path: Optional path to a cloned repository. When provided,
                    cwd is set to this path. Otherwise defaults to CLONE_BASE_DIR.
+        model_alias: Model alias to use (e.g., "opus-4.5", "sonnet-4.5").
     """
     # Sandbox the agent to our tmp directory
     settings.CLAUDE_SANDBOX_DIR.mkdir(parents=True, exist_ok=True)
@@ -367,7 +425,7 @@ def _create_agent_options(system_prompt: str, resume_session_id: str | None, for
     }
 
     return ClaudeAgentOptions(
-        model=llm_client.get_model_id(alias=settings.CLAUDE_MODEL),
+        model=llm_client.get_model_id(alias=model_alias),
         system_prompt=system_prompt,
         resume=resume_session_id,
         fork_session=fork_session,
@@ -422,11 +480,16 @@ async def stream_response(conversation: Conversation, fork_session: bool) -> Asy
             f"conv-{conversation.id}",
         )
 
+    # Use Sonnet for environment setup (simpler task), Opus for deployment (complex reasoning)
+    model_alias = "sonnet-4.5" if conversation.mode == Conversation.Mode.ENVIRONMENT_SETUP else settings.CLAUDE_MODEL
+    logger.info(f"Using model {model_alias} for conversation {conversation.id} (mode={conversation.mode})")
+
     options = _create_agent_options(
         system_prompt=system_prompt,
         resume_session_id=conversation.session_id,
         fork_session=fork_session,
         repo_path=repo_path,
+        model_alias=model_alias,
     )
 
     # The streaming context is used to store the accumulated content and the pending tool calls, and is passed 

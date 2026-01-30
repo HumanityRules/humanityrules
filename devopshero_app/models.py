@@ -634,6 +634,11 @@ class Conversation(models.Model):
         COMPLETED = "completed", "Completed"
         ABANDONED = "abandoned", "Abandoned"
 
+    class Mode(models.TextChoices):
+        GENERAL = "general", "General"
+        ENVIRONMENT_SETUP = "environment_setup", "Environment Setup"
+        APP_DEPLOYMENT = "app_deployment", "App Deployment"
+
     id = models.UUIDField(
         primary_key=True,
         default=uuid.uuid7,
@@ -677,6 +682,12 @@ class Conversation(models.Model):
         max_length=20,
         choices=Status.choices,
         default=Status.ACTIVE,
+    )
+    mode = models.CharField(
+        max_length=20,
+        choices=Mode.choices,
+        default=Mode.GENERAL,
+        help_text="Conversation mode determines system prompt and model selection",
     )
     title = models.CharField(
         max_length=255,
@@ -722,6 +733,7 @@ class Message(models.Model):
         DEPLOYMENT_LOG = "deployment_log", "Deployment Log"
         ERROR = "error", "Error"
         TOOL_CALL = "tool_call", "Tool Call"
+        SYSTEM_TRIGGER = "system_trigger", "System Trigger"
 
     id = models.UUIDField(
         primary_key=True,

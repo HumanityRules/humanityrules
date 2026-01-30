@@ -1,5 +1,69 @@
 # DevOpsHero Development Journal
 
+## 2026-01-30 18:45 - [AgentChat] Conversation modes and mode-specific system prompts
+
+**Conversation:** (to be linked after session)
+
+Major refactor of how conversations work. Introduced explicit conversation modes that determine system prompts, model selection, and auto-triggering behavior. This creates focused, purpose-driven agent experiences rather than one generic assistant trying to do everything.
+
+**The problem:**
+
+The original system prompt was a monolithic 220-line document trying to handle everything: environment creation, app deployment, managing existing apps, connecting AWS accounts. The agent had to figure out what the user wanted based on context clues. When we added `context_aws_account` for environment setup, the prompt became even more complex.
+
+**The solution — Conversation Modes:**
+
+Added a `mode` field to Conversation model with three values:
+- **GENERAL** — Default mode for general help, managing existing apps, connecting AWS accounts
+- **ENVIRONMENT_SETUP** — Focused on creating environments (user selected AWS account)
+- **APP_DEPLOYMENT** — Focused on deploying a repo (user selected workspace + repository)
+
+Mode is determined at conversation creation based on context parameters:
+- `aws_account_id` → ENVIRONMENT_SETUP
+- `workspace_id` AND `repo_id` → APP_DEPLOYMENT
+- Otherwise → GENERAL
+
+**System prompt split:**
+
+Created three focused prompts:
+- `system_prompt_general.md` (~70 lines) — Help with existing resources, guide to proper flows for new things
+- `system_prompt_environment.md` (~86 lines) — Just environment setup: list domains, user picks, create, poll
+- `system_prompt_app_deployment.md` (~141 lines) — Repo analysis, app creation, deployment
+
+Each prompt tells the agent exactly what it CAN'T do and where to direct users for other tasks. This prevents mode confusion.
+
+**Auto-triggering with SYSTEM_TRIGGER:**
+
+For ENVIRONMENT_SETUP and APP_DEPLOYMENT modes, the agent starts immediately when the conversation opens — no need for the user to type anything. Implemented via:
+
+1. New `SYSTEM_TRIGGER` content type for Message (hidden from UI)
+2. `chat_new` creates a trigger message for these modes with friendly content:
+   - "Hi! I'd like to set up a new environment in my AWS account. Can you help me get started?"
+   - "Hi! I'd like to deploy this repository. Can you help me get it running?"
+3. Template filters out SYSTEM_TRIGGER messages from display
+4. Agent runner sees the USER role message and starts processing
+5. SDK session stores the trigger; our DB hides it — clean separation
+
+The friendly message content sets a warm tone so the agent responds helpfully.
+
+**Model selection by mode:**
+
+Environment setup is simple (list domains, create, poll) so it uses Sonnet (~5x cheaper, faster). App deployment needs complex reasoning (repo analysis, infrastructure decisions) so it uses Opus. General uses Opus.
+
+**Key design discussions:**
+
+- **Inferring mode vs explicit field** — Initially considered inferring mode from which context FKs are set. Decided explicit `mode` field is cleaner: single source of truth, simpler queries, easy to extend. The context FKs remain for relationships and display.
+
+- **Context fields are orthogonal** — `context_aws_account` is mutually exclusive with `context_workspace`/`context_repository`. They represent different conversation intents. UI reflects this with `{% elif %}` patterns.
+
+- **Session continuity** — SDK maintains full conversation history including trigger message. Our DB is a display-friendly mirror that omits implementation details. This works because SDK is the source of truth for Claude's context.
+
+**Key points:**
+
+- Mode-specific prompts are dramatically simpler and more focused than the monolithic approach
+- Auto-triggering removes friction — user clicks "New Environment" and agent immediately presents domain options
+- SYSTEM_TRIGGER messages exist in SDK session but hidden from UI, preserving clean user experience
+- Sonnet for simple flows, Opus for complex reasoning — cost optimization without sacrificing quality
+
 ## 2026-01-30 15:30 - [UI] Add Environments section to site navigation
 
 **Conversation:** [2026-01-30-1416-4855039b.md](conversations/2026-01-30-1416-4855039b.md)

@@ -7,7 +7,7 @@ from . import llm_client
 logger = logging.getLogger(__name__)
 
 
-def generate_title(user_message: str, agent_response: str, workspace_name: str | None, repo_name: str | None) -> str:
+def generate_title(user_message: str, agent_response: str, workspace_name: str | None, repo_name: str | None, aws_account_name: str | None) -> str:
     """
     Generate a short, descriptive title for a conversation.
 
@@ -18,6 +18,7 @@ def generate_title(user_message: str, agent_response: str, workspace_name: str |
         agent_response: The agent's response to the user's message.
         workspace_name: Optional workspace name for context.
         repo_name: Optional repository name for context.
+        aws_account_name: Optional AWS account name for environment setup context.
 
     Returns:
         A title string (max 50 characters).
@@ -27,6 +28,8 @@ def generate_title(user_message: str, agent_response: str, workspace_name: str |
         context_parts.append(f"Workspace: {workspace_name}")
     if repo_name:
         context_parts.append(f"Repository: {repo_name}")
+    if aws_account_name:
+        context_parts.append(f"AWS Account: {aws_account_name} (environment setup)")
 
     context = "\n".join(context_parts) if context_parts else "General DevOps conversation"
 
