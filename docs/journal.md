@@ -1,5 +1,46 @@
 # DevOpsHero Development Journal
 
+## 2026-01-30 20:30 - [AgentChat] Environment setup confirmation flow and naming guidance
+
+**Conversation:** [2026-01-30-1531-8b4f63cc.md](conversations/2026-01-30-1531-8b4f63cc.md)
+
+Fixed two issues discovered when reviewing a real environment setup conversation (019c112b-eb8b-7668-9cf2-6598754f1a11):
+
+**Issue 1: Model didn't wait for user confirmation on region**
+
+The agent said "I'll set this up in us-east-1. Let me know if you need a different region, otherwise I'll proceed" and then *immediately* called `create_environment` in the same turn. The model interpreted this as a polite notification rather than a blocking question — Claude optimizes for efficiency and proceeded when it thought the user would likely accept the default.
+
+**Issue 2: Model used "default" name when one already existed**
+
+The agent called `create_environment` with name "default", but a "default" environment already existed (created a week earlier). The system prompt didn't inject existing environments, so the model had no way to know the name was taken.
+
+**Solution:**
+
+1. **Inject existing environments into system prompt** — `_build_environment_prompt` now queries existing environments and adds context like:
+   ```
+   ## Existing Environments
+   This AWS account already has these environments:
+   - default (us-east-1, ready)
+   
+   Naming priority (use first available): default, dev, staging, prod
+   Suggested name: **dev**
+   ```
+
+2. **Batched confirmation flow** — After domain selection, agent must present name + region + domain as a package and wait for explicit user confirmation before calling `create_environment`. Changed from implicit "let me know if different" to explicit "does this look good?"
+
+3. **Updated tool description** — Removed the "tell user: let me know if different region" phrasing that encouraged proceeding without waiting. Now explicitly requires confirmation before calling.
+
+**Key insight:** The model needs a *question* that expects an answer, not a statement with an escape hatch. "Let me know if you need different settings" reads as informational, not interrogative.
+
+**Key points:**
+
+- Explicit confirmation flow prevents the model from "helpfully" proceeding without user input
+- Injecting existing state (environments, names taken) lets the model make intelligent suggestions
+- Naming priority in the prompt (default → dev → staging → prod) eliminates guesswork
+- Both name and region are now confirmed together, reducing interaction steps while ensuring user control
+
+---
+
 ## 2026-01-30 18:45 - [AgentChat] Conversation modes and mode-specific system prompts
 
 **Conversation:** (to be linked after session)

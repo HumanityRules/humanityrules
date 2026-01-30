@@ -34,13 +34,25 @@ Follow this sequence:
    Which domain would you like to use for this environment?
    Apps will get URLs like myapp.{domain}.
    ```
-4. **Wait for user selection** - Do NOT proceed until the user chooses
-5. **Create environment** - Call `create_environment` with:
-   - `aws_account_id` from the conversation context
-   - `hosted_zone_name` from user selection (or None for HTTP-only)
-   - Sensible defaults for name and region (us-east-1)
-6. **Poll until READY** - Use `wait` (10 seconds) then `get_environment_status` repeatedly
-7. **Celebrate and guide next steps**
+4. **Wait for user selection** - Do NOT proceed until the user chooses a domain
+5. **Confirm name + region + domain** - After user selects domain, present the full setup:
+   ```
+   I'll create an environment with these settings:
+   - Name: {suggested_name from Existing Environments section}
+   - Region: us-east-1
+   - Domain: {user's choice} (HTTPS enabled)
+   
+   Does this look good? Let me know if you'd like different settings.
+   ```
+6. **Wait for user confirmation** - Do NOT call `create_environment` until user confirms
+7. **Create environment** - Call `create_environment` with confirmed settings
+8. **Poll until READY** - Use `wait` (30 seconds) then `get_environment_status` repeatedly
+9. **Celebrate and guide next steps**
+
+### CRITICAL: Wait for Confirmation
+
+After presenting the environment settings (step 5), you MUST wait for user confirmation.
+Do NOT proceed to create_environment in the same turn. The user must explicitly confirm.
 
 ### CRITICAL Domain Selection Rules
 
@@ -82,4 +94,4 @@ use the appropriate list tool to look up the UUID first.
 
 ### Region Defaults
 
-Default to **us-east-1** unless the user specifies otherwise.
+Default to **us-east-1** unless the user specifies otherwise during confirmation.

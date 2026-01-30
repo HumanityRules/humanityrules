@@ -36,7 +36,7 @@ from claude_agent_sdk.types import (
 )
 from django.conf import settings
 
-from devopshero_app.models import AWSAccount, Conversation, Message, Repository, Workspace
+from devopshero_app.models import AWSAccount, Conversation, Environment, Message, Repository, Workspace
 from devopshero_app.services.gitproviders import repo_service
 from devopshero_app.services.llm import llm_client, title_generator
 
@@ -108,6 +108,33 @@ async def _build_environment_prompt(conversation: Conversation) -> str:
         f"Target AWS Account: {account.name} (id: {account.id}, aws: {account.aws_account_id or 'pending'}, status: {account.status})"
     ]
     sections.append("## Conversation Context\n\n" + "\n".join(context_lines))
+
+    # Existing environments and naming guidance
+    existing_envs = [
+        env async for env in Environment.objects.filter(aws_account_id=account.id).values("name", "aws_region", "status")
+    ]
+    existing_names = {env["name"] for env in existing_envs}
+
+    env_lines = []
+    if existing_envs:
+        env_lines.append("This AWS account already has these environments:")
+        for env in existing_envs:
+            env_lines.append(f"- {env['name']} ({env['aws_region']}, {env['status']})")
+    else:
+        env_lines.append("This AWS account has no environments yet.")
+
+    # Naming priority: suggest first available name
+    naming_priority = ["default", "dev", "staging", "prod"]
+    suggested_name = next((name for name in naming_priority if name not in existing_names), None)
+
+    env_lines.append("")
+    env_lines.append("Naming priority (use first available): default, dev, staging, prod")
+    if suggested_name:
+        env_lines.append(f"Suggested name: **{suggested_name}**")
+    else:
+        env_lines.append("All standard names taken — ask the user for a custom name.")
+
+    sections.append("## Existing Environments\n\n" + "\n".join(env_lines))
 
     if sections:
         return base_prompt + "\n\n" + "\n\n".join(sections)
