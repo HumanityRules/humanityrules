@@ -187,8 +187,8 @@ async def _run_agent_loop(runner: AgentRunner, conversation_id: UUID) -> None:
         await runner.event_queue.put(None)
         _runners.pop(conversation_id, None)
 
-        # Close DB connections opened in this task's context.
-        # asyncio.create_task() creates a new context, so connections opened by
-        # stream_response() are isolated here. close_all() cleans them up.
+        # Close DB connections opened in this background task. asyncio.create_task()
+        # runs in its own context, so ORM work inside stream_response() isn't covered
+        # by request_finished cleanup. Explicit close_all() is required here.
         await sync_to_async(connections.close_all, thread_sensitive=True)()
         logger.info(f"Agent runner exited for conversation {conversation_id}")

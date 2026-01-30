@@ -213,9 +213,10 @@ async def chat_stream(request, conversation_id):
             raise
 
         finally:
-            # Close DB connections in this SSE stream's context.
-            # StreamingHttpResponse generators escape Django's normal request lifecycle,
-            # so connections aren't automatically cleaned up. Explicit close_all() is needed.
+            # Close DB connections opened while iterating this generator. Streaming responses
+            # are consumed after the view returns, so request_finished cleanup (the normal Django 
+            # cleanup tied to the request lifecycle) won't see them and close them.
+            # Explicit close_all() is required here to clean up connections created in this context.
             conn_before = await sync_to_async(_get_db_connection_count, thread_sensitive=True)()
             await sync_to_async(connections.close_all, thread_sensitive=True)()
             logger.info(f"[CONN] event_generator CLEANUP {conversation_id}: db_connections {conn_before}")
