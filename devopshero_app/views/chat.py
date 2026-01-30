@@ -219,10 +219,12 @@ async def chat_stream(request, conversation_id):
             raise
 
         finally:
-            # Close DB connections opened while iterating this generator. Streaming responses
-            # are consumed after the view returns, so request_finished cleanup (the normal Django 
-            # cleanup tied to the request lifecycle) won't see them and close them.
-            # Explicit close_all() is required here to clean up connections created in this context.
+            # Return DB connections to the pool. StreamingHttpResponse generators run after
+            # the view returns, so Django's request_finished signal (which normally returns
+            # connections to the pool) doesn't cover them. Without this, connections opened
+            # during iteration leak from the pool. With psycopg3's pool=True, close_all()
+            # returns connections to the pool rather than truly closing them.
+            # See also: agent_runner.py's _run_agent_loop() — both cleanups are required.
             conn_before = await sync_to_async(_get_db_connection_count, thread_sensitive=True)()
             await sync_to_async(connections.close_all, thread_sensitive=True)()
             logger.info(f"[CONN] event_generator CLEANUP {conversation_id}: db_connections {conn_before}")

@@ -111,11 +111,14 @@ if DATABASE_HOST:
     DATABASE_PORT = os.environ.get("DATABASE_PORT", "5432")
     DATABASE_NAME = os.environ.get("DATABASE_NAME", "devopshero")
     DATABASE_URL = f"postgresql://{DATABASE_USER}:{DATABASE_PASS}@{DATABASE_HOST}:{DATABASE_PORT}/{DATABASE_NAME}"
-    # conn_max_age=0: Close connections after each request. We need to investigate connection exhaustion issues.
+    # Use psycopg3's connection pool instead of CONN_MAX_AGE for ASGI compatibility.
+    # Pool is recommended for async Django; CONN_MAX_AGE causes connection leaks in async contexts.
     DATABASES = {"default": dj_database_url.parse(DATABASE_URL, conn_max_age=0)}
+    DATABASES["default"]["OPTIONS"] = {"pool": True}
 elif os.environ.get("DATABASE_URL"):
     # Alternative: direct DATABASE_URL (e.g., for local PostgreSQL testing)
     DATABASES = {"default": dj_database_url.parse(os.environ["DATABASE_URL"], conn_max_age=0)}
+    DATABASES["default"]["OPTIONS"] = {"pool": True}
 else:
     # Local dev: SQLite
     DB_PATH = os.environ.get("DOH_DB_PATH")
