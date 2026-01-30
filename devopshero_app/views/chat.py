@@ -42,7 +42,7 @@ def _get_conversations(user):
     return Conversation.objects.filter(
         user=user,
         organization=user.current_organization,
-    ).select_related("context_workspace", "context_repository").order_by("-updated_at")
+    ).select_related("context_workspace", "context_repository", "context_aws_account").order_by("-updated_at")
 
 
 @login_required
@@ -69,14 +69,38 @@ def chat_new(request):
     repo_id = request.GET.get("repo")
     aws_account_id = request.GET.get("aws_account")
 
+    # Determine conversation mode based on context
+    if aws_account_id:
+        mode = Conversation.Mode.ENVIRONMENT_SETUP
+    elif workspace_id and repo_id:
+        mode = Conversation.Mode.APP_DEPLOYMENT
+    else:
+        mode = Conversation.Mode.GENERAL
+
     conversation = Conversation.objects.create(
         user=request.user,
         organization=request.user.current_organization,
         context_workspace_id=workspace_id if workspace_id else None,
         context_repository_id=repo_id if repo_id else None,
         context_aws_account_id=aws_account_id if aws_account_id else None,
+        mode=mode,
         status=Conversation.Status.ACTIVE,
     )
+
+    # Create trigger message for auto-start modes (agent starts immediately)
+    # The message content sets a friendly tone for the conversation
+    trigger_content = {
+        Conversation.Mode.ENVIRONMENT_SETUP: "Hi! I'd like to set up a new environment in my AWS account. Can you help me get started?",
+        Conversation.Mode.APP_DEPLOYMENT: "Hi! I'd like to deploy this repository. Can you help me get it running?",
+    }
+    if mode in trigger_content:
+        Message.objects.create(
+            conversation=conversation,
+            role=Message.Role.USER,
+            content_type=Message.ContentType.SYSTEM_TRIGGER,
+            content=trigger_content[mode],
+        )
+
     return redirect("chat_view", conversation_id=conversation.id)
 
 
@@ -84,13 +108,13 @@ def chat_new(request):
 def chat_view(request, conversation_id):
     """View a specific conversation in the unified chat interface."""
     conversation = get_object_or_404(
-        Conversation.objects.select_related("context_workspace", "context_repository"),
+        Conversation.objects.select_related("context_workspace", "context_repository", "context_aws_account"),
         id=conversation_id,
         user=request.user,
         organization=request.user.current_organization,
     )
 
-    messages = conversation.messages.all().order_by("created_at")
+    messages = conversation.messages.exclude(content_type=Message.ContentType.SYSTEM_TRIGGER).order_by("created_at")
 
     context = get_app_shell_context(request=request, current_page="chat")
     context["conversation"] = conversation
@@ -368,7 +392,7 @@ def chat_messages(request, conversation_id):
     offset = int(request.GET.get("offset", 0))
     limit = int(request.GET.get("limit", 50))
 
-    messages = conversation.messages.all().order_by("created_at")[offset : offset + limit]
+    messages = conversation.messages.exclude(content_type=Message.ContentType.SYSTEM_TRIGGER).order_by("created_at")[offset : offset + limit]
 
     context = {"messages": messages, "conversation_id": conversation_id}
 
