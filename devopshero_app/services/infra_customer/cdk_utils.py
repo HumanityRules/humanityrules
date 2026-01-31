@@ -6,7 +6,6 @@ import logging
 import os
 from pathlib import Path
 import subprocess
-import threading
 
 import boto3
 from aws_cdk import App
@@ -29,37 +28,16 @@ def _cdk_level_for_line(line: str) -> int:
     return logging.INFO
 
 
-def _stream_output(stream, level: int, source: str, stream_name: str) -> None:
+def _stream_cdk_output(stream) -> None:
+    """Stream CDK output, detecting error lines by content."""
     if stream is None:
         return
     for line in stream:
         cleaned = line.rstrip("\n")
         if not cleaned:
             continue
-        if source == "cdk" and stream_name == "stderr":
-            level = _cdk_level_for_line(cleaned)
-        logger.log(
-            level,
-            "%(line)s",
-            {"line": cleaned},
-            extra={"source": source, "stream": stream_name},
-        )
-
-
-def _stream_process_output(process: subprocess.Popen[str], source: str) -> None:
-    stdout_thread = threading.Thread(
-        target=_stream_output,
-        args=(process.stdout, logging.INFO, source, "stdout"),
-    )
-    stderr_thread = threading.Thread(
-        target=_stream_output,
-        args=(process.stderr, logging.ERROR, source, "stderr"),
-    )
-    stdout_thread.start()
-    stderr_thread.start()
-    process.wait()
-    stdout_thread.join()
-    stderr_thread.join()
+        level = _cdk_level_for_line(cleaned)
+        logger.log(level, "%(line)s", {"line": cleaned}, extra={"source": "cdk"})
 
 
 def deploy_cdk_stacks(app: App, session: boto3.Session) -> bool:
@@ -81,14 +59,15 @@ def deploy_cdk_stacks(app: App, session: boto3.Session) -> bool:
     logger.info("   Deploying CDK stacks using the CDK CLI")
 
     process = subprocess.Popen(
-        ["npx", "--yes", "cdk", "deploy", "--all", "--require-approval", "never", "--no-notices", "--app", cloud_assembly.directory],
+        ["npx", "--yes", "cdk", "deploy", "--all", "--ci", "--progress", "events", "--require-approval", "never", "--no-notices", "--app", cloud_assembly.directory],
         env=cdk_env,
         stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
+        stderr=subprocess.STDOUT,  # Merge stderr into stdout (--ci sends logs to stdout anyway)
         text=True,
         bufsize=1,
     )
-    _stream_process_output(process=process, source="cdk")
+    _stream_cdk_output(process.stdout)
+    process.wait()
 
     if process.returncode != 0:
         logger.error("CDK deployment failed")
