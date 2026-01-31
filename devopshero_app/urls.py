@@ -10,6 +10,7 @@ urlpatterns = [
     path("dashboard/", views.dashboard, name="dashboard"),
     path("workspaces/", views.workspaces, name="workspaces"),
     path("workspaces/<slug:workspace_slug>/", views.workspace_detail, name="workspace_detail"),
+    path("apps/<slug:app_slug>/", views.app_detail, name="app_detail"),
     path("environments/", views.environments, name="environments"),
     path("environments/<slug:environment_slug>/", views.environment_detail, name="environment_detail"),
     path("security/", views.security, name="security"),
