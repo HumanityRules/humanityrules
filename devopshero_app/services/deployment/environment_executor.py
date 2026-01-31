@@ -11,6 +11,7 @@ from django.conf import settings
 
 from devopshero_app import models
 from devopshero_app.services import infra_customer
+from devopshero_app.services.infra_customer import cloudformation_utils
 
 from . import job_logging
 
@@ -28,6 +29,22 @@ def _get_aws_session(environment: models.Environment):
         external_id=str(aws_account.external_id),
         region=environment.aws_region,
     )
+
+
+def _sync_outputs_from_cloudformation(session, environment: models.Environment) -> None:
+    """Populate environment.vpc_id and environment.cluster_arn from CloudFormation stack outputs."""
+    try:
+        cf_client = session.client("cloudformation")
+        vpc_stack_name = environment.vpc_stack_name or f"devopshero-{environment.slug}-vpc"
+        cluster_stack_name = environment.cluster_stack_name or f"devopshero-{environment.slug}-cluster"
+        vpc_id = cloudformation_utils.get_stack_output(cf_client, stack_name=vpc_stack_name, output_key="VpcId")
+        cluster_arn = cloudformation_utils.get_stack_output(cf_client, stack_name=cluster_stack_name, output_key="ClusterArn")
+        if vpc_id:
+            environment.vpc_id = vpc_id
+        if cluster_arn:
+            environment.cluster_arn = cluster_arn
+    except Exception:
+        logger.error("Failed to sync outputs from CloudFormation for environment '%(environment_id)s'", {"environment_id": environment.id})
 
 
 def run_provisioning(environment_id: str) -> bool:
@@ -98,6 +115,7 @@ def run_provisioning(environment_id: str) -> bool:
             )
 
             if success:
+                _sync_outputs_from_cloudformation(session=session, environment=environment)
                 environment.status = models.Environment.Status.READY
                 environment.status_message = "Provisioning completed successfully"
                 environment.save()
