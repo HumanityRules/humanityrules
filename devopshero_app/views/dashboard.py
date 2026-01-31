@@ -1,7 +1,8 @@
 from django.contrib.auth.decorators import login_required
+from django.db.models import Max, OuterRef, Subquery
 from django.shortcuts import render
 
-from ..models import App, Datastore
+from ..models import App, Datastore, Deployment
 from .base import get_app_shell_context
 
 
@@ -10,7 +11,20 @@ def dashboard(request):
     context = get_app_shell_context(request=request, current_page="dashboard")
     org = request.user.current_organization
     
-    apps = App.objects.filter(organization=org).select_related("workspace", "repository").order_by("-created_at")
+    latest_deployment_status = (
+        Deployment.objects.filter(app=OuterRef("pk"))
+        .order_by("-created_at")
+        .values("status")[:1]
+    )
+    apps = (
+        App.objects.filter(organization=org)
+        .select_related("workspace", "repository")
+        .annotate(
+            last_deployed_at=Max("deployments__created_at"),
+            latest_status=Subquery(latest_deployment_status),
+        )
+        .order_by("-created_at")
+    )
     datastores = Datastore.objects.filter(workspace__organization=org).select_related("workspace").order_by("-created_at")
     
     context["apps"] = apps
