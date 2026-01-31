@@ -1,5 +1,19 @@
 # DevOpsHero Development Journal
 
+## 2026-01-31 15:57 - [Integrations] PostHog only when DEBUG is False
+
+**Conversation:** [2026-01-31-1557-6179b2b2.md](conversations/2026-01-31-1557-6179b2b2.md)
+
+PostHog analytics (frontend and backend) is now disabled whenever `DEBUG=True`, so local development never sends events or initializes the SDK even if `POSTHOG_API_KEY` is set in `.env`.
+
+**Changes:**
+- **`devopshero_app/apps.py`** — `_init_posthog()` runs only when `posthog_key and not settings.DEBUG`. The Python SDK (exception autocapture) is not initialized in DEBUG mode.
+- **`devopshero_app/context_processors.py`** — `posthog_context()` returns `{'posthog_config_json': None}` when `not api_key or settings.DEBUG`, so the base template does not render the PostHog script tag and no client-side tracking runs.
+
+**Key points:**
+- Activation still requires `POSTHOG_API_KEY`; DEBUG is an additional gate. Production (DEBUG=False) with the key set continues to use PostHog as before.
+- Single source of truth: Django’s `DEBUG` flag, no separate “is production” env needed for this behavior.
+
 ## 2026-01-31 17:13 - [UI] Dashboard app card revamp with deployment info
 
 **Conversation:** [2026-01-31-1514-f3894281.md](conversations/2026-01-31-1514-f3894281.md)
