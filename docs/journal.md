@@ -1,5 +1,45 @@
 # DevOpsHero Development Journal
 
+## 2026-01-30 21:45 - [Bugfix] Environment logs cross-talk between concurrent provisioning jobs
+
+**Conversation:** [2026-01-30-1803-2231ca98.md](conversations/2026-01-30-1803-2231ca98.md)
+
+Fixed a bug where `GetEnvironmentStatus` returned logs from other environments. User reported querying staging environment but seeing `devopshero-dev-cluster` logs in the response.
+
+**Initial misdiagnosis:**
+
+At first glance, the query code in `get_environment_status.py` looked correct — it was filtering by `environment=environment`. I made a quick speculative fix changing it to `environment_id=environment.id` thinking async ORM might have issues with object comparison. This was wrong.
+
+**The real issue (found by checking the database):**
+
+User asked me to query the database directly. This revealed the actual problem: every log message was being **duplicated to BOTH environments**. The same CDK output appeared twice — once for staging, once for dev. The query filtering was working correctly; the data itself was corrupted.
+
+**Root cause:**
+
+When multiple environment provisioning jobs run concurrently, both `EnvironmentLogContext` instances attach their handlers to the same root logger (`devopshero_app`). When any code logs a message, ALL attached handlers receive it and write to their respective environments.
+
+```
+Job A (staging) enters context → adds Handler A to logger
+Job B (dev) enters context → adds Handler B to logger
+Any log message → Handler A writes to staging, Handler B writes to dev
+```
+
+**The fix:**
+
+Added thread-local context tracking in `job_logging.py`:
+
+1. Module-level `threading.local()` to track active job context per thread
+2. Context managers set `_job_context.environment_id` (or `deployment_id`) on enter, clear on exit
+3. Handlers check if current thread's context matches their ID before emitting — if not, they skip the log
+
+This isolates logs to their originating job even when multiple jobs run concurrently with handlers attached to the same logger.
+
+**Key lesson:**
+
+When debugging "filter not working" issues, **check the data first**. The query can be correct while the data is corrupted. A 30-second database query would have saved time spent analyzing the query code.
+
+---
+
 ## 2026-01-30 20:30 - [AgentChat] Environment setup confirmation flow and naming guidance
 
 **Conversation:** [2026-01-30-1531-8b4f63cc.md](conversations/2026-01-30-1531-8b4f63cc.md)
