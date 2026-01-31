@@ -1,5 +1,21 @@
 # DevOpsHero Development Journal
 
+## 2026-01-31 14:15 - [UI] Landing page full-page section scrolling disabled
+
+**Conversation:** [2026-01-31-1411-7c55c255.md](conversations/2026-01-31-1411-7c55c255.md)
+
+Disabled the full-page section snapping on the landing page by commenting out the wheel event listener instead of removing it, so the behavior can be re-enabled easily later.
+
+**What was disconnected:** A wheel listener was intercepting scroll events (`e.preventDefault()`), accumulating `deltaY`, and calling `scrollToSection()` to snap to the next/previous `.landing-section`. That hijacked normal browser scrolling in favor of one-section-at-a-time snapping.
+
+**Minimal change:** Only the single `window.addEventListener('wheel', ...)` block (the one with `passive: false` and the section-index logic) was commented out. Helpers (`scrollToSection`, `getCurrentSectionIndex`, `wheelAccumulator`, etc.) were left in place so they are unused but harmless. A comment was added above the block: "Disabled: full-page section snapping (wheel hijacks scroll and snaps to sections)."
+
+**Why comment instead of delete:** Per user request — disconnect the behavior without removing code, so it can be restored by uncommenting.
+
+**Key points:**
+- Smooth scrolling via `scroll-smooth` on `<html>` and anchor links is unchanged; only the wheel-based section snapping was disabled.
+- The second wheel listener (accumulator reset after 150ms) remains active but has no effect once the main listener is disabled.
+
 ## 2026-01-31 12:45 - [DevEx] CDK CLI output control for programmatic invocation
 
 **Conversation:** [2026-01-31-0230-e42f8c01.md](conversations/2026-01-31-0230-e42f8c01.md) 
