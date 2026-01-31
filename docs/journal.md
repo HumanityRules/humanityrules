@@ -1,5 +1,41 @@
 # DevOpsHero Development Journal
 
+## 2026-01-31 12:45 - [DevEx] CDK CLI output control for programmatic invocation
+
+**Conversation:** [2026-01-31-0230-e42f8c01.md](conversations/2026-01-31-0230-e42f8c01.md) 
+
+When invoking CDK via subprocess from Python, the default progress bar output renders poorly — it uses terminal cursor manipulation optimized for interactive use, resulting in repeated/garbled lines when captured as stream text.
+
+**The problem:** CDK's default `--progress bar` mode shows a progress bar that updates in place. When piped through subprocess, each "update" becomes a separate line with the same content, creating noise instead of useful progress information.
+
+**Solution: Two CLI flags**
+
+1. **`--progress events`** — Shows CloudFormation events line-by-line instead of a progress bar. Each event is a discrete line, perfect for logging.
+
+2. **`--ci`** — Indicates CI environment. The key behavioral change: logs go to stdout instead of stderr.
+
+**Why stderr was weird:** CDK by default sends deployment output to stderr (not stdout), which is why `cdk_utils.py` had this special case:
+
+```python
+if source == "cdk" and stream_name == "stderr":
+    level = _cdk_level_for_line(cleaned)
+```
+
+With `--ci`, everything goes to stdout, which is more logical.
+
+**Code simplification:** With merged streams, we no longer need:
+- Threading (was running parallel stdout/stderr readers)
+- Generic `_stream_process_output` function with stream_name parameter
+- Special stderr detection logic
+
+The new code uses `stderr=subprocess.STDOUT` to merge streams and a simple `_stream_cdk_output` function that reads stdout and detects error lines by content (FAILED, ROLLBACK, ERROR, CANCELLED tokens).
+
+**Other CDK output options discovered:**
+- `--no-color` — Removes ANSI color codes
+- `--verbose` / `-v` — Increases detail (stackable)
+- `cdk.json` can set `"progress": "events"` as default
+- CDK Toolkit Library (`@aws-cdk/toolkit-lib`) exists for TypeScript/JS but not Python — allows programmatic control via `IIoHost` interface
+
 ## 2026-01-31 11:15 - [AgentChat] Prompt patterns for re-deploy vs deploy distinction
 
 **Conversation:** [2026-01-31-0117-2ea6c7d1.md](conversations/2026-01-31-0117-2ea6c7d1.md)
