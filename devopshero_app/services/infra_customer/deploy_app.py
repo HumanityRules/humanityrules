@@ -500,10 +500,12 @@ class AppStack(Stack):
             )
 
             # Import the shared ALB for the Route53 alias target
+            # Canonical hosted zone ID is required for Route53 alias records
             shared_alb = elbv2.ApplicationLoadBalancer.from_application_load_balancer_attributes(
                 self, "ImportedSharedAlb",
                 load_balancer_arn=Fn.import_value(f"{prefix}-shared-alb-arn"),
                 security_group_id=self.environment_infra.shared_alb_security_group.security_group_id,
+                load_balancer_canonical_hosted_zone_id=Fn.import_value(f"{prefix}-shared-alb-canonical-hz-id"),
             )
 
             route53.ARecord(
