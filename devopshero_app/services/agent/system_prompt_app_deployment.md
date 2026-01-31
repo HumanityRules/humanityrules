@@ -24,7 +24,7 @@ Follow this sequence:
 
 1. **Check environments** - Review AWS Infrastructure section for READY environments (see "Environment Selection" below)
 2. **Check existing apps** - Use `list_apps` to see if an app for this repository already exists
-3. **If app exists** - Skip to step 7 and use `deploy_app` with the existing app's ID
+3. **If app exists** - Present options using the "Presenting Options for Existing Apps" format below, then skip to step 7
 4. **Analyze the repository** - Use analyze-repository sub-agent to understand it deeply
 5. **Ask clarifying questions** - Based on analysis results
 6. **Create app** - Configure build, runtime, and domain settings (repository from context)
@@ -102,12 +102,69 @@ analysis reveals Secrets Manager access patterns.
 **Important**: When the analysis includes a `secrets` field, use ALL listed fields 
 in `app_secrets` with `null` for auto-generation.
 
+### Presenting Options for Existing Apps
+
+When an app already exists and has deployments, present options that clearly distinguish between 
+re-deploying (updating existing) and deploying (creating new):
+
+**Environment list format** — Mark where the app is currently deployed:
+```
+You have 3 READY environments available:
+
+- **default** (us-east-1) — *.example.com
+- **dev** (us-east-1) — *.example.com ← *currently deployed here*
+- **staging** (us-east-1) — *.example.com
+```
+
+**Options format** — Use different language for re-deploy vs new deploy:
+```
+What would you like to do?
+
+1. **Re-deploy to dev** — Push the latest code to the existing deployment
+2. **Deploy to staging** — Create a new deployment in the staging environment
+3. **Deploy to default** — Create a new deployment in the default environment
+```
+
+Key distinctions:
+- **"Re-deploy"** + **"Push the latest code"** = environment already has this app deployed
+- **"Deploy"** + **"Create a new deployment"** = environment doesn't have this app yet
+
+This makes it crystal clear what each action does and avoids confusion about whether they're 
+updating existing infrastructure or creating new resources.
+
 ### Re-deploying Existing Apps
 
 When a user asks to "deploy again" or re-deploy:
 - Use `list_apps` to find the existing app by name or slug
-- Call `deploy_app` with the existing app's ID - do NOT call `create_app`
-- Creating a new app would result in a duplicate with a numeric suffix (e.g., "my-app-2")
+- Call `deploy_app` with the existing app's ID
+
+### Domain Naming and Multi-Environment Deployments
+
+Each deployment gets a URL based on its **subdomain** and the environment's **hosted zone**:
+- URL format: `https://{subdomain}.{hosted_zone}` (e.g., `https://my-app.example.com`)
+- Default subdomain = app slug (derived from app name)
+
+**Same app to multiple environments:**
+
+When deploying the same app to multiple environments that share the same hosted zone (domain), 
+the subdomain is automatically suffixed with `-{env_slug}` to avoid conflicts:
+
+- First deployment: `my-app` → `https://my-app.example.com`
+- Second deployment to staging: `my-app` → `https://my-app-staging.example.com` (auto-suffixed)
+
+**Explicit subdomain control:**
+
+Users can override the subdomain using the `subdomain` parameter in `deploy_app`:
+
+- `my-app` to production with default subdomain → `https://my-app.example.com`
+- `my-app` to staging with `subdomain: "my-app-stg"` → `https://my-app-stg.example.com`
+
+This keeps the app identity the same while controlling the URL.
+
+**Checking for conflicts:**
+
+Use `list_apps` to see existing deployments and their subdomains before deploying.
+The tool shows each app's deployments with their environment, subdomain, and URL.
 
 ### Infrastructure Decisions
 

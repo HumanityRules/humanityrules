@@ -835,6 +835,13 @@ class Deployment(models.Model):
     started_at = models.DateTimeField(null=True, blank=True)
     completed_at = models.DateTimeField(null=True, blank=True)
 
+    # Routing
+    subdomain = models.CharField(
+        max_length=63,
+        blank=True,
+        help_text="Route53 subdomain. Defaults to app slug, auto-suffixed with -env if conflict.",
+    )
+
     # Outputs
     service_url = models.URLField(
         max_length=2048,

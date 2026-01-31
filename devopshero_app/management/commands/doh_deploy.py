@@ -201,6 +201,7 @@ class Command(BaseCommand):
                 app_config=app_config,
                 image_tag=image_tag,
                 env_slug=env_slug,
+                subdomain=app_name,  # CLI uses app_name as subdomain
                 synth_only=synth_only,
                 shared_alb_hosted_zone=hosted_zone,
             )

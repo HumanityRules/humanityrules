@@ -1,5 +1,75 @@
 # DevOpsHero Development Journal
 
+## 2026-01-31 11:15 - [AgentChat] Prompt patterns for re-deploy vs deploy distinction
+
+**Conversation:** [2026-01-31-0117-2ea6c7d1.md](conversations/2026-01-31-0117-2ea6c7d1.md)
+
+Observed an excellent deployment agent response and codified the patterns that made it effective into the system prompt. The response clearly distinguished between updating an existing deployment and creating a new one — something users need to understand before taking action.
+
+**What made the response great:**
+
+1. **"← currently deployed here" marker** — When listing environments, the response marked which one already had the app deployed. This immediately orients the user.
+
+2. **Language distinction for actions:**
+   - "**Re-deploy to dev** — Push the latest code to the existing deployment" (for environments with the app)
+   - "**Deploy to staging** — Create a new deployment in the staging environment" (for environments without)
+
+The verbs "re-deploy" vs "deploy" and the descriptions "push latest code" vs "create new deployment" make the consequences crystal clear. Users know whether they're updating existing infrastructure or spinning up new resources.
+
+**Prompt changes:**
+
+Added a new "Presenting Options for Existing Apps" section to `system_prompt_app_deployment.md` with:
+- Concrete example of the environment list format with the deployment marker
+- Concrete example of the options format with both re-deploy and deploy variants
+- Explicit guidance on when to use each phrasing
+
+Updated deployment flow step 3 to reference this section when an app already exists.
+
+**Key insight:** Good prompts don't just say "be clear" — they provide concrete examples of what clarity looks like in the specific context. The model that produced the great response happened upon this pattern; encoding it ensures consistency.
+
+## 2026-01-31 00:45 - [DomainModel] Subdomain field for multi-environment deployments
+
+**Conversation:** [2026-01-31-0059-a57e0fec.md](conversations/2026-01-31-0059-a57e0fec.md)
+
+Diagnosed and fixed a bug where deploying the same app to multiple environments with the same hosted zone caused Route53 conflicts. The root cause: Route53 domain = `{app_slug}.{hosted_zone}`, so `simple-dashboard` deployed to both `dev` and `staging` would both try to use `simple-dashboard.chsandbox.com`.
+
+**The bug in action:** Conversation `019c12cf-*` showed the agent proposing to deploy `simple-dashboard` to staging when it was already running in dev. The agent had no way to know this would conflict because `list_apps` didn't show which environments apps were deployed to. Conversation `019c12c3-*` showed correct behavior only because the user explicitly asked about deploying to different environments, prompting the agent to suggest a different app name.
+
+**Solution: `subdomain` field on Deployment**
+
+Added a `subdomain` field that controls the Route53 record name, separate from app identity:
+- Default: `app.slug`
+- Auto-suffixed with `-{env_slug}` if conflict detected (e.g., `simple-dashboard-staging`)
+- User can override explicitly via the `subdomain` parameter
+
+**Conflict detection logic:**
+
+The tricky part was getting the exclusion right. Initial implementation excluded all deployments from the same app, which broke the exact scenario we were fixing:
+
+```python
+# WRONG: Excludes all app deployments, misses cross-environment conflicts
+query.exclude(app_id=app_id)
+
+# CORRECT: Only exclude same app + same environment (we're replacing that deployment)
+query.exclude(app_id=app_id, environment_id=environment_id)
+```
+
+The key insight: when redeploying to the same environment, we're replacing that deployment so it's not a conflict. But same app to a different environment IS a conflict if they share a hosted zone.
+
+**Enhanced `list_apps` to show deployment info:**
+
+The agent needs visibility into where apps are deployed to make informed decisions. Added `DeploymentInfo` with environment, subdomain, hosted_zone, status, and URL. Returns one deployment per environment (most recent), using Python-level deduplication for SQLite compatibility (PostgreSQL's `DISTINCT ON` isn't portable).
+
+**Files changed:**
+- `models.py` — Added `subdomain` field to Deployment
+- `tools/deploy_app.py` — Added conflict detection, auto-suffix logic, subdomain parameter
+- `tools/list_apps.py` — Enhanced with deployment info per environment
+- `infra_customer/deploy_app.py` — CDK uses subdomain for Route53 and ALB routing
+- `mcp_tools.py` — Updated tool descriptions
+- `system_prompt_app_deployment.md` — Added "Domain Naming and Multi-Environment Deployments" section
+
+**Follow-up task created:** `devopshero-isa` — Add SUPERSEDED status for replaced deployments. Currently, old deployments stay as RUNNING even after being replaced, which causes the list_apps query to scan more rows than necessary.
+
 ## 2026-01-31 14:30 - [Deployment] DEBUG-based ECS deployment tuning for faster local iteration
 
 **Conversation:** [2026-01-30-2226-13ef15ba.md](conversations/2026-01-30-2226-13ef15ba.md)
