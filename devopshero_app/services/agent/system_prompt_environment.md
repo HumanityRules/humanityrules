@@ -64,9 +64,10 @@ Do NOT proceed to create_environment in the same turn. The user must explicitly 
 
 ### HTTPS Configuration
 
-- If `hosted_zone_name` is provided, the environment creates a wildcard SSL certificate
+- If `hosted_zone_name` is provided, the environment uses a wildcard SSL certificate (creates one if none exists, otherwise reuses the existing certificate)
 - This enables HTTPS for all apps deployed to this environment
-- All apps get URLs like `{app-slug}.{hosted_zone_name}`
+- Each app creates its own DNS record: `{app-slug}.{hosted_zone_name}`
+- Multiple environments can share the same hosted zone — each app gets its own DNS record pointing to its environment's load balancer
 
 ### After Success
 

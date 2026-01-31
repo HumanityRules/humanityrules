@@ -1,5 +1,42 @@
 # DevOpsHero Development Journal
 
+## 2026-01-31 10:45 - [Deployment] Per-app DNS records instead of wildcard Route53 entries
+
+**Conversation:** [2026-01-30-1855-0237afda.md](conversations/2026-01-30-1855-0237afda.md)
+
+Fixed a DNS conflict issue where two environments using the same hosted zone would clash. The problem: each environment created a wildcard Route53 record (`*.dev.example.com` → its ALB), so the second environment would either fail or overwrite the first environment's DNS, making its apps unreachable.
+
+**The original architecture:**
+
+- Environment creates wildcard cert `*.dev.example.com` (already reused if exists ✓)
+- Environment creates wildcard DNS `*.dev.example.com` → its ALB (CONFLICT!)
+- Apps rely on wildcard DNS — no per-app records
+
+**The new architecture:**
+
+- Environment creates/reuses wildcard cert `*.dev.example.com` (unchanged)
+- Environment does NOT create any DNS record
+- Each app creates its own DNS record: `myapp.dev.example.com` → its environment's ALB
+
+**Changes made:**
+
+1. **`deploy_base.py`** — Removed the `route53.ARecord` that created `*.{hosted_zone}` pointing to the ALB. Also removed the now-unused `aws_route53_targets` import.
+
+2. **`deploy_app.py`** — Added per-app DNS record creation in `_setup_shared_alb_routing`:
+   - Added `route53`, `targets`, and `route53_utils` imports
+   - Added `shared_hosted_zone_id` parameter to `AppStack`
+   - Look up hosted zone ID in `deploy()` before CDK synthesis
+   - Import the shared ALB using `Fn.import_value(f"{prefix}-shared-alb-arn")`
+   - Create `route53.ARecord` for `{app_name}.{hosted_zone}` → ALB
+
+3. **`system_prompt_environment.md`** and **`mcp_tools.py`** — Updated messaging to accurately describe certificate behavior: "uses a wildcard SSL certificate (creates one if none exists, otherwise reuses the existing certificate)" instead of "creates a wildcard SSL certificate".
+
+**Design decision:** App hostnames are `{app_name}.{hosted_zone}` without environment slug. The expectation is that different environments use different hosted zones (e.g., `staging.example.com` vs `prod.example.com`). If someone deploys the same app name to two environments sharing a hosted zone, the DNS records will conflict — but that's a configuration error.
+
+**Key insight:** The ALB import for Route53 alias targets requires the ALB ARN, which was already exported by `EcsClusterStack`. The `env_slug` passed through the deployment chain determines which environment's ALB to import via the CloudFormation export name pattern `devopshero-{env_slug}-shared-alb-arn`.
+
+---
+
 ## 2026-01-30 18:53 - [AgentChat] Switch environment setup model from Sonnet to Opus
 
 **Conversation:** [2026-01-30-1853-a3908fba.md](conversations/2026-01-30-1853-a3908fba.md)
