@@ -193,4 +193,5 @@ class Command(BaseCommand):
                 image_tag=image_tag,
                 env_slug=env_slug,
                 synth_only=synth_only,
+                shared_alb_hosted_zone=None,  # CLI uses HTTP-only mode
             )

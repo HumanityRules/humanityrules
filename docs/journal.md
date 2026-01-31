@@ -1,5 +1,43 @@
 # DevOpsHero Development Journal
 
+## 2026-01-31 05:05 - [Bugfix] Missing ALB DNS name for Route53 alias records
+
+**Conversation:** [2026-01-30-2152-d16a6306.md](conversations/2026-01-30-2152-d16a6306.md)
+
+Follow-up fix to the previous journal entry (2026-01-31 19:45). When deploying `simple-dashboard` to the `dev` environment, CDK synthesis failed with:
+
+```
+RuntimeError: 'loadBalancerDnsName' was not provided when constructing Application Load Balancer doh-dev-simple-dashboard-app/ImportedSharedAlb from attributes
+```
+
+This is the sibling bug to the canonical hosted zone ID fix. The `from_application_load_balancer_attributes` method requires THREE attributes when importing an ALB for Route53 alias targets:
+1. `load_balancer_arn` — was provided
+2. `load_balancer_canonical_hosted_zone_id` — was added in previous fix
+3. `load_balancer_dns_name` — **was missing**
+
+The DNS name was already being imported in the same function (`shared_alb_dns` at line 448) but wasn't being passed to the ALB constructor.
+
+**The fix:**
+
+```python
+shared_alb = elbv2.ApplicationLoadBalancer.from_application_load_balancer_attributes(
+    self, "ImportedSharedAlb",
+    load_balancer_arn=Fn.import_value(f"{prefix}-shared-alb-arn"),
+    security_group_id=self.environment_infra.shared_alb_security_group.security_group_id,
+    load_balancer_dns_name=shared_alb_dns,  # ADD THIS
+    load_balancer_canonical_hosted_zone_id=Fn.import_value(f"{prefix}-shared-alb-canonical-hz-id"),
+)
+```
+
+**Secondary fix:** The `doh_deploy` CLI command was also broken — it was missing the `shared_alb_hosted_zone` parameter added with the per-app DNS feature. Added `shared_alb_hosted_zone=None` so the CLI works in HTTP-only mode.
+
+**Key points:**
+- No environment updates needed — the DNS export (`{prefix}-shared-alb-dns`) already exists in `deploy_base.py`
+- The previous fix (canonical hosted zone ID) was incomplete; both DNS name AND hosted zone ID are required for Route53 alias targets
+- When importing CDK constructs for use with other services (like Route53), check all required attributes in the CDK docs, not just the obvious ones
+
+---
+
 ## 2026-01-31 19:45 - [Bugfix] Missing ALB canonical hosted zone ID for Route53 alias records
 
 **Conversation:** [2026-01-30-1911-3eee1b79.md](conversations/2026-01-30-1911-3eee1b79.md)
