@@ -1,0 +1,170 @@
+<div class="max-w-5xl">
+    {# Header with breadcrumb #}
+    <div class="mb-6">
+        <div class="flex items-center space-x-2 text-sm text-gray-500 dark:text-gray-400 mb-1">
+            <a href="{% url 'workspaces' %}"
+               hx-get="{% url 'workspaces' %}"
+               hx-target="#main-content"
+               hx-swap="innerHTML"
+               hx-push-url="true"
+               class="hover:text-indigo-600 dark:hover:text-indigo-400">Workspaces</a>
+            <span>/</span>
+            <a href="{% url 'workspace_detail' workspace_slug=app.workspace.slug %}"
+               hx-get="{% url 'workspace_detail' workspace_slug=app.workspace.slug %}"
+               hx-target="#main-content"
+               hx-swap="innerHTML"
+               hx-push-url="true"
+               class="hover:text-indigo-600 dark:hover:text-indigo-400">{{ app.workspace.name }}</a>
+            <span>/</span>
+        </div>
+        <div class="flex items-center justify-between">
+            <div>
+                <h1 class="text-2xl font-bold text-gray-900 dark:text-white">{{ app.name }}</h1>
+                <p class="mt-2 text-xs text-gray-500 dark:text-gray-500">
+                    Created {{ app.created_at|date:"M j, Y" }}{% if app.created_by %} by {{ app.created_by.email }}{% endif %}
+                </p>
+            </div>
+            <span class="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-300">
+                {{ app.get_app_type_display }}
+            </span>
+        </div>
+    </div>
+
+    {# Source & Build sections side by side #}
+    <div class="grid gap-6 sm:grid-cols-2 mb-6">
+        {# Source section #}
+        <div class="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-4">
+            <h2 class="text-base font-semibold text-gray-900 dark:text-white mb-4">Source</h2>
+            <dl class="space-y-3 text-sm">
+                <div>
+                    <dt class="text-gray-500 dark:text-gray-400">Repository</dt>
+                    <dd class="mt-1 font-medium text-gray-900 dark:text-white">{{ app.repository.full_name }}</dd>
+                </div>
+                <div>
+                    <dt class="text-gray-500 dark:text-gray-400">Branch</dt>
+                    <dd class="mt-1 font-medium text-gray-900 dark:text-white">{{ app.branch }}</dd>
+                </div>
+                <div>
+                    <dt class="text-gray-500 dark:text-gray-400">Subpath</dt>
+                    <dd class="mt-1 font-medium text-gray-900 dark:text-white font-mono text-xs">{{ app.repo_subpath|default:"—" }}</dd>
+                </div>
+            </dl>
+        </div>
+
+        {# Build section #}
+        <div class="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-4">
+            <h2 class="text-base font-semibold text-gray-900 dark:text-white mb-4">Build</h2>
+            <dl class="space-y-3 text-sm">
+                <div>
+                    <dt class="text-gray-500 dark:text-gray-400">Strategy</dt>
+                    <dd class="mt-1 font-medium text-gray-900 dark:text-white">{{ app.get_build_strategy_display }}</dd>
+                </div>
+                <div>
+                    <dt class="text-gray-500 dark:text-gray-400">Dockerfile</dt>
+                    <dd class="mt-1 font-medium text-gray-900 dark:text-white font-mono text-xs">{{ app.dockerfile_path|default:"—" }}</dd>
+                </div>
+            </dl>
+        </div>
+    </div>
+
+    {# Container section #}
+    <div class="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-4 mb-6">
+        <h2 class="text-base font-semibold text-gray-900 dark:text-white mb-4">Container</h2>
+        <dl class="grid grid-cols-2 gap-4 sm:grid-cols-5 text-sm">
+            <div>
+                <dt class="text-gray-500 dark:text-gray-400">Port</dt>
+                <dd class="mt-1 font-medium text-gray-900 dark:text-white">{{ app.container_port }}</dd>
+            </div>
+            <div>
+                <dt class="text-gray-500 dark:text-gray-400">CPU</dt>
+                <dd class="mt-1 font-medium text-gray-900 dark:text-white">{{ app.cpu }} units ({{ cpu_vcpu }} vCPU)</dd>
+            </div>
+            <div>
+                <dt class="text-gray-500 dark:text-gray-400">Memory</dt>
+                <dd class="mt-1 font-medium text-gray-900 dark:text-white">{{ app.memory }} MiB</dd>
+            </div>
+            <div>
+                <dt class="text-gray-500 dark:text-gray-400">Health Check Path</dt>
+                <dd class="mt-1 font-medium text-gray-900 dark:text-white font-mono text-xs">{{ app.health_check_path|default:"—" }}</dd>
+            </div>
+            <div>
+                <dt class="text-gray-500 dark:text-gray-400">Health Check Command</dt>
+                <dd class="mt-1 font-medium text-gray-900 dark:text-white font-mono text-xs">{{ app.health_check_command|default:"—" }}</dd>
+            </div>
+        </dl>
+    </div>
+
+    {# Connections section #}
+    <div class="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-4 mb-6">
+        <h2 class="text-base font-semibold text-gray-900 dark:text-white mb-4">Connections</h2>
+        <dl class="grid grid-cols-2 gap-4 text-sm">
+            <div>
+                <dt class="text-gray-500 dark:text-gray-400">Datastore</dt>
+                <dd class="mt-1 font-medium text-gray-900 dark:text-white">{% if app.datastore %}{{ app.datastore.name }} ({{ app.datastore.get_engine_display }}){% else %}—{% endif %}</dd>
+            </div>
+            <div>
+                <dt class="text-gray-500 dark:text-gray-400">Secrets</dt>
+                <dd class="mt-1 font-medium text-gray-900 dark:text-white font-mono text-xs">{% if secret_keys %}{{ secret_keys|join:", " }}{% else %}—{% endif %}</dd>
+            </div>
+        </dl>
+    </div>
+
+    {# Environment variables section #}
+    <div class="mb-6">
+        <h2 class="text-base font-semibold text-gray-900 dark:text-white mb-4">Environment Variables</h2>
+        {% if app.environment_variables %}
+        <div class="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg divide-y divide-gray-200 dark:divide-gray-700">
+            {% for env_var in app.environment_variables %}
+            <div class="px-4 py-2 flex items-center justify-between">
+                <span class="font-mono text-sm text-gray-900 dark:text-white">{{ env_var.name }}</span>
+                <span class="font-mono text-xs text-gray-500 dark:text-gray-400 truncate max-w-xs">{{ env_var.value|truncatechars:40 }}</span>
+            </div>
+            {% endfor %}
+        </div>
+        {% else %}
+        <div class="bg-gray-50 dark:bg-gray-800/50 border border-gray-200 dark:border-gray-700 border-dashed rounded-lg p-4 text-center">
+            <p class="text-sm text-gray-500 dark:text-gray-400">No environment variables configured.</p>
+        </div>
+        {% endif %}
+    </div>
+
+    {# Deployments section #}
+    <div>
+        <h2 class="text-lg font-semibold text-gray-900 dark:text-white mb-4">Recent Deployments</h2>
+        {% if deployments %}
+        <div class="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg divide-y divide-gray-200 dark:divide-gray-700">
+            {% for deployment in deployments %}
+            <div class="px-4 py-3">
+                <div class="flex items-center justify-between">
+                    <div>
+                        <h3 class="text-sm font-medium text-gray-900 dark:text-white">{{ deployment.environment.name }}</h3>
+                        <p class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                            {{ deployment.git_ref }}{% if deployment.git_commit_sha %} · {{ deployment.git_commit_sha|slice:":7" }}{% endif %}
+                        </p>
+                    </div>
+                    <div class="flex items-center space-x-3">
+                        <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium
+                            {% if deployment.status == 'running' %}bg-green-100 text-green-700 dark:bg-green-500/10 dark:text-green-400
+                            {% elif deployment.status == 'pending' or deployment.status == 'building' or deployment.status == 'deploying' or deployment.status == 'pushing' or deployment.status == 'starting' %}bg-yellow-100 text-yellow-700 dark:bg-yellow-500/10 dark:text-yellow-400
+                            {% elif deployment.status == 'failed' %}bg-red-100 text-red-700 dark:bg-red-500/10 dark:text-red-400
+                            {% else %}bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-300{% endif %}">
+                            {{ deployment.get_status_display }}
+                        </span>
+                        <span class="text-xs text-gray-500 dark:text-gray-400">{{ deployment.created_at|timesince }} ago</span>
+                    </div>
+                </div>
+                {% if deployment.service_url %}
+                <p class="mt-1 text-xs text-indigo-600 dark:text-indigo-400 truncate">
+                    <a href="{{ deployment.service_url }}" target="_blank" rel="noopener noreferrer" class="hover:underline">{{ deployment.service_url }}</a>
+                </p>
+                {% endif %}
+            </div>
+            {% endfor %}
+        </div>
+        {% else %}
+        <div class="bg-gray-50 dark:bg-gray-800/50 border border-gray-200 dark:border-gray-700 border-dashed rounded-lg p-6 text-center">
+            <p class="text-sm text-gray-500 dark:text-gray-400">No deployments for this app yet.</p>
+        </div>
+        {% endif %}
+    </div>
+</div>

@@ -1,5 +1,32 @@
 # DevOpsHero Development Journal
 
+## 2026-01-31 16:30 - [UI] App detail view and configuration sections
+
+**Conversation:** [2026-01-31-1453-1c304568.md](conversations/2026-01-31-1453-1c304568.md)
+
+Added an app detail page reachable from the workspace detail view (clicking an app card) and structured configuration into separate cards instead of one large block.
+
+**App detail view:**
+- New route `/apps/<slug>/` with `app_detail` view in `views/apps.py`.
+- Breadcrumb: Workspaces → Workspace name → (current app in title).
+- Workspace detail app cards are now links with HTMX (same pattern as environments/workspace detail).
+
+**Configuration layout:**
+- Replaced a single "Configuration" card with smaller sections so labels stay fixed and empty values show "—" instead of sections appearing/disappearing.
+- **Source** — Repository, Branch, Subpath (side-by-side with Build on larger screens).
+- **Build** — Strategy, Dockerfile.
+- **Container** — Port, CPU (units + vCPU), Memory, Health Check Path, Health Check Command.
+- **Connections** — Datastore, Secrets (keys only).
+- **Environment Variables** — Own section; always shown with empty state when none.
+- Section headings use `text-base font-semibold` for prominence.
+- CPU vCPU: computed in view as `app.cpu / 1024`, displayed next to units (e.g. "1024 units (1.0 vCPU)").
+- Created/Created By moved from a floating metadata line into the header block under the repo/branch line so it feels attached to the app identity.
+
+**Key points:**
+- All app fields are shown in a stable layout; empty values render as "—".
+- Field order: Repository, Branch, Subpath, then Build (Strategy, Dockerfile), then Container, then Connections; Repository and Branch added to config so repo is visible in the grid.
+- `get_app_type_display` is Django’s auto-generated method for `choices` fields (returns human-readable label).
+
 ## 2026-01-31 14:15 - [UI] Landing page full-page section scrolling disabled
 
 **Conversation:** [2026-01-31-1411-7c55c255.md](conversations/2026-01-31-1411-7c55c255.md)

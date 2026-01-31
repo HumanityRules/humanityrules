@@ -1,6 +1,7 @@
 from .landing import landing
 from .dashboard import dashboard
 from .workspaces import workspaces, workspace_detail
+from .apps import app_detail
 from .environments import environments, environment_detail
 from .security import security
 from .settings import (
@@ -33,6 +34,7 @@ __all__ = [
     "dashboard",
     "workspaces",
     "workspace_detail",
+    "app_detail",
     "environments",
     "environment_detail",
     "security",
