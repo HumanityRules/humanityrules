@@ -1,5 +1,23 @@
 # DevOpsHero Development Journal
 
+## 2026-01-31 17:13 - [UI] Dashboard app card revamp with deployment info
+
+**Conversation:** [2026-01-31-1514-f3894281.md](conversations/2026-01-31-1514-f3894281.md)
+
+Revamped the app cards on the dashboard to be more informative and navigable. The cards now link to the app detail page and show deployment status at a glance.
+
+**Changes made:**
+- **Clickable app name** — The app name is now an HTMX link to `/apps/<slug>/` instead of plain text, matching the navigation pattern used elsewhere.
+- **Labeled fields** — Each field (Repository, Branch, Workspace) now has a title on the left with the value on the right, using a consistent key-value layout with `flex justify-between`.
+- **Type badge retained in header** — The app type capsule stays next to the app name in the header row rather than moving to the field list.
+- **Last deployed field** — Shows relative time (e.g., "2 days ago") using Django's `timesince` filter, or "Never" if no deployments exist. View annotates apps with `Max("deployments__created_at")`.
+- **Status field** — Shows the latest deployment status as a colored badge (green=running, yellow=in-progress, red=failed). Uses a `Subquery` to fetch the status from the most recent deployment per app.
+
+**Key points:**
+- App model has no status field; status comes from the latest Deployment, requiring a subquery annotation.
+- The `latest_status` annotation uses `Subquery` with `OuterRef` to get the status of the newest deployment for each app.
+- Color coding follows the same pattern as datastore status badges (green/yellow/red/gray).
+
 ## 2026-01-31 16:30 - [UI] App detail view and configuration sections
 
 **Conversation:** [2026-01-31-1453-1c304568.md](conversations/2026-01-31-1453-1c304568.md)
