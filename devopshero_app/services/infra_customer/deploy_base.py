@@ -348,6 +348,7 @@ class EcsClusterStack(Stack):
         CfnOutput(self, "SharedAlbDns", value=self.shared_alb.load_balancer_dns_name, export_name=f"{prefix}-shared-alb-dns")
         CfnOutput(self, "SharedAlbSecurityGroupId", value=self.alb_security_group.security_group_id, export_name=f"{prefix}-shared-alb-sg-id")
         CfnOutput(self, "SharedAlbHttpListenerArn", value=self.http_listener.listener_arn, export_name=f"{prefix}-shared-alb-http-listener-arn")
+        CfnOutput(self, "SharedAlbCanonicalHostedZoneId", value=self.shared_alb.load_balancer_canonical_hosted_zone_id, export_name=f"{prefix}-shared-alb-canonical-hz-id")
 
 
 class BuilderStack(Stack):
