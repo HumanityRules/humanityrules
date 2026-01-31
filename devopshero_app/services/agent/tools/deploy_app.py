@@ -136,6 +136,8 @@ class DeploymentSummary:
     app_slug: str
     app_created: bool  # True if app was created, False if updated
     environment_name: str
+    subdomain: str
+    url: str  # Full URL (e.g., https://my-app.example.com)
     git_ref: str
     status: str
     status_message: str
@@ -249,6 +251,96 @@ async def _check_active_deployments(app: App) -> None:
         )
 
 
+async def _check_subdomain_conflict(subdomain: str, hosted_zone: str, exclude_deployment_key: tuple[str, str] | None) -> Deployment | None:
+    """
+    Check if a subdomain is already in use by a running deployment in the same hosted zone.
+
+    Args:
+        subdomain: The subdomain to check.
+        hosted_zone: The hosted zone (domain) to check within.
+        exclude_deployment_key: Optional (app_id, environment_id) tuple to exclude from check.
+            Used when redeploying to the same environment - we're replacing that deployment.
+    """
+    running_statuses = [
+        Deployment.Status.RUNNING,
+        Deployment.Status.PENDING,
+        Deployment.Status.BUILDING,
+        Deployment.Status.PUSHING,
+        Deployment.Status.DEPLOYING,
+        Deployment.Status.STARTING,
+    ]
+    query = Deployment.objects.filter(
+        subdomain=subdomain,
+        environment__shared_alb_hosted_zone=hosted_zone,
+        status__in=running_statuses,
+    )
+    if exclude_deployment_key:
+        # Exclude only the specific app+environment combo (we're replacing that deployment)
+        app_id, environment_id = exclude_deployment_key
+        query = query.exclude(app_id=app_id, environment_id=environment_id)
+    return await query.select_related("app", "environment").afirst()
+
+
+async def _resolve_subdomain(app_slug: str, environment: Environment, explicit_subdomain: str | None, app_id: str | None) -> str:
+    """
+    Resolve the effective subdomain for a deployment.
+
+    If explicit_subdomain is provided, validates it doesn't conflict.
+    Otherwise, defaults to app_slug, auto-suffixing with -{env_slug} if conflict.
+    """
+    hosted_zone = environment.shared_alb_hosted_zone
+    if not hosted_zone:
+        # No domain configured - subdomain doesn't matter for Route53, but store it anyway
+        return explicit_subdomain or app_slug
+
+    # When redeploying to the same environment, exclude that specific deployment from conflict check
+    # (we're replacing it, so it's not a conflict)
+    exclude_key = (app_id, str(environment.id)) if app_id else None
+
+    if explicit_subdomain:
+        # User provided explicit subdomain - check for conflict
+        conflict = await _check_subdomain_conflict(
+            subdomain=explicit_subdomain,
+            hosted_zone=hosted_zone,
+            exclude_deployment_key=exclude_key,
+        )
+        if conflict:
+            raise ValueError(
+                f"Subdomain '{explicit_subdomain}.{hosted_zone}' is already in use by "
+                f"'{conflict.app.name}' in environment '{conflict.environment.name}'. "
+                "Please choose a different subdomain."
+            )
+        return explicit_subdomain
+
+    # Default to app_slug
+    subdomain = app_slug
+
+    # Check for conflict
+    conflict = await _check_subdomain_conflict(
+        subdomain=subdomain,
+        hosted_zone=hosted_zone,
+        exclude_deployment_key=exclude_key,
+    )
+
+    if conflict:
+        # Auto-suffix with environment slug
+        subdomain = f"{app_slug}-{environment.slug}"
+
+        # Check if suffixed version also conflicts (unlikely but possible)
+        conflict = await _check_subdomain_conflict(
+            subdomain=subdomain,
+            hosted_zone=hosted_zone,
+            exclude_deployment_key=exclude_key,
+        )
+        if conflict:
+            raise ValueError(
+                f"Both '{app_slug}.{hosted_zone}' and '{subdomain}.{hosted_zone}' are in use. "
+                "Please specify an explicit subdomain using the 'subdomain' parameter."
+            )
+
+    return subdomain
+
+
 # =============================================================================
 # Main Tool Function
 # =============================================================================
@@ -272,6 +364,7 @@ async def deploy_app(
     datastore_id: str | None,
     dockerfile_path: str | None,
     app_secrets: dict | None,
+    subdomain: str | None,
 ) -> DeploymentSummary:
     """
     Deploy an application with upsert semantics.
@@ -279,6 +372,11 @@ async def deploy_app(
     Creates the app if it doesn't exist, updates config if it does, then deploys.
 
     Matching: App is identified by (organization, slug) where slug = slugify(name).
+
+    Subdomain resolution:
+    - If subdomain is provided, validates it doesn't conflict with running deployments.
+    - If not provided, defaults to app slug.
+    - If default conflicts (same domain already in use), auto-suffixes with -{env_slug}.
 
     Sentinel semantics for environment_variables and app_secrets:
     - None (not provided) -> keep existing unchanged
@@ -303,6 +401,7 @@ async def deploy_app(
         datastore_id: UUID of datastore to bind. None to keep existing.
         dockerfile_path: Path to Dockerfile if using dockerfile strategy.
         app_secrets: Dict mapping secret field names to values. None=keep, {}=clear, {values}=replace.
+        subdomain: Route53 subdomain override. None = use app slug (auto-suffixed if conflict).
 
     Returns:
         DeploymentSummary with deployment details and app_created flag.
@@ -417,11 +516,20 @@ async def deploy_app(
                     datastore_id=datastore_id,
                     dockerfile_path=dockerfile_path,
                     app_secrets=app_secrets,
+                    subdomain=subdomain,
                 )
             raise  # Unexpected error, re-raise
 
     # Check for existing active deployments
     await _check_active_deployments(app)
+
+    # Resolve subdomain (auto-suffix if conflict)
+    effective_subdomain = await _resolve_subdomain(
+        app_slug=app.slug,
+        environment=environment,
+        explicit_subdomain=subdomain,
+        app_id=str(app.id),
+    )
 
     # Generate image tag
     image_tag = _generate_image_tag(app, git_ref)
@@ -430,6 +538,7 @@ async def deploy_app(
     deployment = await Deployment.objects.acreate(
         app=app,
         environment=environment,
+        subdomain=effective_subdomain,
         git_ref=git_ref,
         git_commit_sha="",
         git_commit_message="",
@@ -442,6 +551,13 @@ async def deploy_app(
     # Create initial log entries
     await _create_initial_logs(deployment)
 
+    # Compute URL
+    hosted_zone = environment.shared_alb_hosted_zone
+    if hosted_zone:
+        url = f"https://{effective_subdomain}.{hosted_zone}"
+    else:
+        url = ""  # No domain configured
+
     return DeploymentSummary(
         id=str(deployment.id),
         app_id=str(app.id),
@@ -449,6 +565,8 @@ async def deploy_app(
         app_slug=app.slug,
         app_created=app_created,
         environment_name=environment.name,
+        subdomain=effective_subdomain,
+        url=url,
         git_ref=deployment.git_ref,
         status=deployment.status,
         status_message=deployment.status_message,

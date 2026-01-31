@@ -61,7 +61,6 @@ async def _require_workspace(conversation: Conversation) -> Workspace:
             "No workspace context for this conversation. "
             "Start a new conversation from a workspace page to set the context."
         )
-    # Use async ORM to fetch the related workspace (with organization for create_app)
     return await Workspace.objects.select_related("organization").aget(id=conversation.context_workspace_id)
 
 
@@ -467,9 +466,10 @@ async def scan_repository(args: dict[str, Any]) -> dict[str, Any]:
 @tool(
     "list_apps",
     (
-        "List applications in the current workspace. "
-        "Use this to discover existing apps and their deployment status. "
-        "Returns app ID, name, slug, type, branch, repository, and latest deployment status."
+        "List applications in the current workspace with their active deployments. "
+        "Returns app ID, name, slug, type, branch, repository, and a list of deployments. "
+        "Each deployment includes: environment name/slug, subdomain, hosted zone, status, and URL. "
+        "Use this to see which environments an app is deployed to and check for potential domain conflicts."
     ),
     {},
 )
@@ -540,12 +540,13 @@ async def create_datastore(args: dict[str, Any]) -> dict[str, Any]:
         "Requires a workspace and repository in the conversation context. "
         "The job worker will build the Docker image, push to ECR, and deploy via CDK. "
         "Use get_deployment_status to check progress. "
-        "For environment_slug, always use 'default'. "
         "For cpu: ECS CPU units (256=0.25vCPU, 512=0.5vCPU, 1024=1vCPU, 2048=2vCPU). "
         "For memory: MiB (512, 1024, 2048, 4096). "
         "For environment_variables: omit to keep existing, pass [] to clear, or [{\"name\": \"FOO\", \"value\": \"bar\"}] to replace. "
         "For app_secrets: omit to keep existing, pass {} to clear, or {\"key\": \"value\"} to replace. "
-        "Use null values in app_secrets for auto-generated secrets, e.g., {\"secret_key_base\": null}."
+        "Use null values in app_secrets for auto-generated secrets, e.g., {\"secret_key_base\": null}. "
+        "For subdomain: Route53 subdomain for the app. Defaults to app slug. "
+        "If deploying the same app to multiple environments that share a domain, the subdomain is auto-suffixed with -{env_slug}."
     ),
     {
         "type": "object",
@@ -559,11 +560,12 @@ async def create_datastore(args: dict[str, Any]) -> dict[str, Any]:
             "memory": {"type": "integer", "description": "Fargate memory in MiB (512, 1024, 2048, 4096)"},
             "health_check_path": {"type": "string", "description": "HTTP path for health checks (e.g., /health)"},
             "git_ref": {"type": "string", "description": "Git reference (tag or commit SHA) to deploy. Omit to deploy HEAD of branch."},
-            "environment_slug": {"type": "string", "description": "Target environment slug (use 'default')"},
+            "environment_slug": {"type": "string", "description": "Target environment slug"},
             "environment_variables": {"type": "array", "description": "List of {name, value} dicts. Omit to keep existing, [] to clear."},
             "datastore_id": {"type": "string", "description": "UUID of datastore to bind. Omit if app doesn't need a database."},
             "dockerfile_path": {"type": "string", "description": "Path to Dockerfile (e.g., 'Dockerfile'). Required for dockerfile build strategy."},
             "app_secrets": {"type": "object", "description": "Dict of secret field names to values. Omit to keep existing, {} to clear."},
+            "subdomain": {"type": "string", "description": "Route53 subdomain override. Defaults to app slug, auto-suffixed with -{env_slug} if conflict."},
         },
         "required": [
             "name", "app_type", "build_strategy", "container_port",
@@ -611,6 +613,7 @@ async def deploy_app(args: dict[str, Any]) -> dict[str, Any]:
         datastore_id=args.get("datastore_id"),
         dockerfile_path=args.get("dockerfile_path"),
         app_secrets=args.get("app_secrets"),
+        subdomain=args.get("subdomain"),
     )
 
     # Link deployment to conversation via M2M

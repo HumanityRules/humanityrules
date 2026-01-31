@@ -305,6 +305,7 @@ class AppStack(Stack):
         image_tag: str,
         env_slug: str,
         resource_prefix: str,
+        subdomain: str,
         database_connection_secret: secretsmanager.ISecret | None,
         shared_alb_hosted_zone: str | None,
         shared_hosted_zone_id: str | None,
@@ -414,6 +415,7 @@ class AppStack(Stack):
         # Configure routing rules on the shared ALB and create per-app DNS record
         self._setup_shared_alb_routing(
             app_config=app_config,
+            subdomain=subdomain,
             env_slug=env_slug,
             resource_prefix=resource_prefix,
             target_group=target_group,
@@ -447,6 +449,7 @@ class AppStack(Stack):
     def _setup_shared_alb_routing(
         self,
         app_config: appconfig.AppConfig,
+        subdomain: str,
         env_slug: str,
         resource_prefix: str,
         target_group: elbv2.ApplicationTargetGroup,
@@ -454,7 +457,8 @@ class AppStack(Stack):
         shared_hosted_zone_id: str | None,
     ) -> None:
         """Configure routing rules on the shared ALB and create per-app DNS record."""
-        priority = _compute_listener_rule_priority(app_config.app_name)
+        # Use subdomain for listener priority to ensure uniqueness per Route53 record
+        priority = _compute_listener_rule_priority(subdomain)
         prefix = f"devopshero-{env_slug}"
 
         # Import shared ALB DNS for output
@@ -469,13 +473,13 @@ class AppStack(Stack):
 
         # Determine the host header for routing
         if shared_alb_hosted_zone:
-            # Use app slug + hosted zone for the hostname
-            app_hostname = f"{app_config.app_name}.{shared_alb_hosted_zone}"
+            # Use subdomain + hosted zone for the hostname (subdomain may differ from app_name)
+            app_hostname = f"{subdomain}.{shared_alb_hosted_zone}"
             host_condition = elbv2.ListenerCondition.host_headers([app_hostname])
         else:
             # HTTP-only mode: route by path prefix since no domain
             app_hostname = None
-            host_condition = elbv2.ListenerCondition.path_patterns([f"/{app_config.app_name}/*"])
+            host_condition = elbv2.ListenerCondition.path_patterns([f"/{subdomain}/*"])
 
         elbv2.ApplicationListenerRule(
             self, "HttpListenerRule",
@@ -544,6 +548,7 @@ def deploy(
     app_config: appconfig.AppConfig,
     image_tag: str,
     env_slug: str,
+    subdomain: str,
     synth_only: bool,
     shared_alb_hosted_zone: str | None,
 ) -> bool:
@@ -559,6 +564,7 @@ def deploy(
         app_config: Application configuration.
         image_tag: Docker image tag to deploy.
         env_slug: Environment slug (e.g., "default", "prod").
+        subdomain: Route53 subdomain for this deployment (may differ from app name).
         synth_only: If True, only synthesize templates, don't deploy.
         shared_alb_hosted_zone: Hosted zone for shared ALB (e.g., "dev.example.com"). None = HTTP only.
     Returns:
@@ -625,6 +631,7 @@ def deploy(
         image_tag=image_tag,
         env_slug=env_slug,
         resource_prefix=resource_prefix,
+        subdomain=subdomain,
         database_connection_secret=aurora_connection_secret,
         shared_alb_hosted_zone=shared_alb_hosted_zone,
         shared_hosted_zone_id=shared_hosted_zone_id,

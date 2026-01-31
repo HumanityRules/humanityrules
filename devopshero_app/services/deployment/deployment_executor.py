@@ -127,6 +127,7 @@ def run_deployment(deployment_id: str) -> bool:
                 app_config=app_config,
                 image_tag=deployment.image_tag,
                 env_slug=environment.slug,
+                subdomain=deployment.subdomain or app.slug,
                 synth_only=False,
                 shared_alb_hosted_zone=environment.shared_alb_hosted_zone or None,
             )
