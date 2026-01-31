@@ -13,6 +13,8 @@ from aws_cdk import aws_elasticloadbalancingv2 as elbv2
 from aws_cdk import aws_iam as iam
 from aws_cdk import aws_logs as logs
 from aws_cdk import aws_rds as rds
+from aws_cdk import aws_route53 as route53
+from aws_cdk import aws_route53_targets as targets
 from aws_cdk import aws_secretsmanager as secretsmanager
 from constructs import Construct
 
@@ -22,6 +24,7 @@ from . import cloudformation_utils
 from . import deploy_base
 from . import ecr_utils
 from . import ecs_utils
+from . import route53_utils
 from . import secrets_utils
 
 logger = logging.getLogger(__name__)
@@ -304,6 +307,7 @@ class AppStack(Stack):
         resource_prefix: str,
         database_connection_secret: secretsmanager.ISecret | None,
         shared_alb_hosted_zone: str | None,
+        shared_hosted_zone_id: str | None,
         **kwargs,
     ) -> None:
         super().__init__(scope, construct_id, **kwargs)
@@ -394,13 +398,14 @@ class AppStack(Stack):
             ),
         )
 
-        # Configure routing rules on the shared ALB
+        # Configure routing rules on the shared ALB and create per-app DNS record
         self._setup_shared_alb_routing(
             app_config=app_config,
             env_slug=env_slug,
             resource_prefix=resource_prefix,
             target_group=target_group,
             shared_alb_hosted_zone=shared_alb_hosted_zone,
+            shared_hosted_zone_id=shared_hosted_zone_id,
         )
 
         service = ecs.FargateService(
@@ -433,8 +438,9 @@ class AppStack(Stack):
         resource_prefix: str,
         target_group: elbv2.ApplicationTargetGroup,
         shared_alb_hosted_zone: str | None,
+        shared_hosted_zone_id: str | None,
     ) -> None:
-        """Configure routing rules on the shared ALB."""
+        """Configure routing rules on the shared ALB and create per-app DNS record."""
         priority = _compute_listener_rule_priority(app_config.app_name)
         prefix = f"devopshero-{env_slug}"
 
@@ -483,6 +489,29 @@ class AppStack(Stack):
             )
 
             CfnOutput(self, "HttpsUrl", value=f"https://{app_hostname}", export_name=f"{resource_prefix}-https-url")
+
+        # Create per-app DNS record pointing to this environment's ALB
+        # This allows multiple environments to share the same hosted zone without conflicts
+        if shared_alb_hosted_zone and shared_hosted_zone_id and app_hostname:
+            hosted_zone = route53.HostedZone.from_hosted_zone_attributes(
+                self, "HostedZone",
+                hosted_zone_id=shared_hosted_zone_id,
+                zone_name=shared_alb_hosted_zone,
+            )
+
+            # Import the shared ALB for the Route53 alias target
+            shared_alb = elbv2.ApplicationLoadBalancer.from_application_load_balancer_attributes(
+                self, "ImportedSharedAlb",
+                load_balancer_arn=Fn.import_value(f"{prefix}-shared-alb-arn"),
+                security_group_id=self.environment_infra.shared_alb_security_group.security_group_id,
+            )
+
+            route53.ARecord(
+                self, "AppDnsRecord",
+                zone=hosted_zone,
+                record_name=app_hostname,
+                target=route53.RecordTarget.from_alias(targets.LoadBalancerTarget(shared_alb)),
+            )
 
         CfnOutput(self, "SharedAlbDns", value=shared_alb_dns, export_name=f"{resource_prefix}-shared-alb-dns")
 
@@ -541,6 +570,16 @@ def deploy(
         logger.info("Ensuring app secrets exist")
         secrets_utils.ensure_app_secrets_exist(session=session, app_config=app_config)
 
+    # Look up hosted zone ID for per-app DNS record creation
+    shared_hosted_zone_id = None
+    if shared_alb_hosted_zone:
+        logger.info("Looking up hosted zone ID for '%(hosted_zone)s'", {"hosted_zone": shared_alb_hosted_zone})
+        shared_hosted_zone_id = route53_utils.get_hosted_zone_id(session=session, hosted_zone_name=shared_alb_hosted_zone)
+        if shared_hosted_zone_id:
+            logger.info("Found hosted zone ID: %(hosted_zone_id)s", {"hosted_zone_id": shared_hosted_zone_id})
+        else:
+            logger.error("Could not find hosted zone ID for '%(hosted_zone)s', DNS record will not be created", {"hosted_zone": shared_alb_hosted_zone})
+
     cdk_app = App(outdir=str(cdk_utils.CDK_OUT_DIR))
 
     ecr_stack = EcrStack(
@@ -572,6 +611,7 @@ def deploy(
         resource_prefix=resource_prefix,
         database_connection_secret=aurora_connection_secret,
         shared_alb_hosted_zone=shared_alb_hosted_zone,
+        shared_hosted_zone_id=shared_hosted_zone_id,
     )
     app_stack.add_dependency(ecr_stack)
     if aurora_stack:
