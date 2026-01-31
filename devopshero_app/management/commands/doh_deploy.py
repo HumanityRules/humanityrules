@@ -10,6 +10,7 @@ Usage:
 
     # Apps
     python manage.py doh_deploy --app simple-dashboard --account "Humanity Rules Sandbox"
+    python manage.py doh_deploy --app simple-dashboard --account "Humanity Rules Sandbox" --hosted-zone dev.example.com
     python manage.py doh_deploy --app simple-dashboard --account "Humanity Rules Sandbox" --teardown
     python manage.py doh_deploy --app simple-dashboard --account "Humanity Rules Sandbox" --image-tag v1.2.3
     python manage.py doh_deploy --app simple-dashboard --account "Humanity Rules Sandbox" --synth-only
@@ -79,12 +80,18 @@ class Command(BaseCommand):
             default="latest",
             help="Docker image tag (default: latest). Only used with --app",
         )
+        parser.add_argument(
+            "--hosted-zone",
+            help="Hosted zone for HTTPS and DNS (e.g., 'dev.example.com'). Only used with --app",
+        )
 
     def handle(self, *args, **options):
         """Execute the deployment command."""
         # Validate args
         if options["image_tag"] != "latest" and options["base"]:
             raise CommandError("--image-tag is only valid with --app")
+        if options["hosted_zone"] and options["base"]:
+            raise CommandError("--hosted-zone is only valid with --app")
 
         if options["synth_only"] and options["teardown"]:
             raise CommandError("--synth-only and --teardown are mutually exclusive")
@@ -124,6 +131,7 @@ class Command(BaseCommand):
                 app_name=options["app"],
                 env_slug=options["env"],
                 image_tag=options["image_tag"],
+                hosted_zone=options["hosted_zone"],
                 teardown=options["teardown"],
                 synth_only=options["synth_only"],
             )
@@ -169,6 +177,7 @@ class Command(BaseCommand):
         app_name: str,
         env_slug: str,
         image_tag: str,
+        hosted_zone: str | None,
         teardown: bool,
         synth_only: bool,
     ) -> bool:
@@ -193,5 +202,5 @@ class Command(BaseCommand):
                 image_tag=image_tag,
                 env_slug=env_slug,
                 synth_only=synth_only,
-                shared_alb_hosted_zone=None,  # CLI uses HTTP-only mode
+                shared_alb_hosted_zone=hosted_zone,
             )
