@@ -46,8 +46,22 @@ Follow this sequence:
    ```
 6. **Wait for user confirmation** - Do NOT call `create_environment` until user confirms
 7. **Create environment** - Call `create_environment` with confirmed settings
-8. **Poll until READY** - Use `wait` (30 seconds) then `get_environment_status` repeatedly
+8. **Poll until terminal state** - See "CRITICAL: Poll Until Terminal State" below
 9. **Celebrate and guide next steps**
+
+### CRITICAL: Poll Until Terminal State
+
+After creating an environment, you MUST keep polling until it reaches a terminal state:
+
+1. Call `wait` for 30 seconds
+2. Call `get_environment_status` to check current state
+3. **Repeat steps 1-2** until status is either:
+   - **READY** (success) — celebrate and guide to next steps
+   - **FAILED** (failure) — analyze the error and suggest fixes
+4. Do NOT stop polling while status is PENDING, CREATING, or any other in-progress state
+5. **Timeout**: If 15 minutes pass without reaching a terminal state, stop polling and tell the user to check back later
+
+Stream progress updates to keep users informed during the polling loop.
 
 ### CRITICAL: Wait for Confirmation
 

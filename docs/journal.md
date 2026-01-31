@@ -1,5 +1,77 @@
 # DevOpsHero Development Journal
 
+## 2026-01-31 19:45 - [Bugfix] Missing ALB canonical hosted zone ID for Route53 alias records
+
+**Conversation:** [2026-01-30-1911-3eee1b79.md](conversations/2026-01-30-1911-3eee1b79.md)
+
+Fixed a deployment failure introduced in the per-app DNS records change. When deploying `simple-dashboard` to the `staging` environment, the CDK synthesis failed with:
+
+```
+'loadBalancerCanonicalHostedZoneId' was not provided when constructing Application Load Balancer doh-staging-simple-dashboard-app/ImportedSharedAlb from attributes
+```
+
+**Root cause:** When creating Route53 alias records pointing to an ALB, AWS requires the ALB's "canonical hosted zone ID" — this is AWS's internal hosted zone identifier for load balancers (different from the user's Route53 hosted zone). The previous change imported the ALB using `from_application_load_balancer_attributes()` but didn't provide this required parameter.
+
+**The fix:**
+
+1. **`deploy_base.py`** — Export the ALB's canonical hosted zone ID from `EcsClusterStack`:
+   ```python
+   CfnOutput(self, "SharedAlbCanonicalHostedZoneId", 
+             value=self.shared_alb.load_balancer_canonical_hosted_zone_id, 
+             export_name=f"{prefix}-shared-alb-canonical-hz-id")
+   ```
+
+2. **`deploy_app.py`** — Import it when reconstructing the ALB for Route53 alias targets:
+   ```python
+   shared_alb = elbv2.ApplicationLoadBalancer.from_application_load_balancer_attributes(
+       self, "ImportedSharedAlb",
+       load_balancer_arn=Fn.import_value(f"{prefix}-shared-alb-arn"),
+       security_group_id=self.environment_infra.shared_alb_security_group.security_group_id,
+       load_balancer_canonical_hosted_zone_id=Fn.import_value(f"{prefix}-shared-alb-canonical-hz-id"),
+   )
+   ```
+
+**Key insight:** The canonical hosted zone ID is a fixed AWS value per region for ALBs (e.g., `Z35SXDOTRQ7X7K` for us-east-1). It's available on the ALB construct via `load_balancer_canonical_hosted_zone_id` but must be explicitly exported/imported when crossing stack boundaries.
+
+**Deployment note:** Existing environments need to be recreated (or their cluster stacks updated) to export the new value before app deployments will work. For sandbox environments, delete + recreate is cleaner than in-place updates.
+
+---
+
+## 2026-01-31 11:30 - [AgentChat] Deployment polling and environment selection improvements
+
+**Conversation:** [2026-01-30-1911-6ca796ea.md](conversations/2026-01-30-1911-6ca796ea.md)
+
+Improved agent system prompts to ensure reliable deployment monitoring and proper environment selection.
+
+**Problem 1: Agent stops polling prematurely**
+
+The agent would sometimes stop checking deployment status before it completed, leaving users uncertain about whether their deployment succeeded or failed. The existing guidance was too brief: "Poll with `wait` then `get_deployment_status` until complete or failed."
+
+**Solution:** Added explicit "CRITICAL: Poll Until Terminal State" sections to both `system_prompt_app_deployment.md` and `system_prompt_environment.md` with numbered steps:
+1. Call `wait` (10s for deploys, 30s for environments)
+2. Call status check tool
+3. Repeat until terminal state (DEPLOYED/FAILED or READY/FAILED)
+4. 15-minute timeout as safety valve
+
+The timeout prevents infinite loops if something gets stuck while still ensuring the agent follows through on normal deployments.
+
+**Problem 2: Agent assumes environment when multiple exist**
+
+When a user had multiple READY environments, the agent might pick one arbitrarily instead of asking.
+
+**Solution:** Added "Environment Selection" section to `system_prompt_app_deployment.md`:
+- No READY environments → guide to create one
+- One READY environment → use automatically
+- Multiple READY environments → ALWAYS ask user to choose
+
+**Key points:**
+- Terminal states for apps: DEPLOYED (success), FAILED (failure)
+- Terminal states for environments: READY (success), FAILED (failure)
+- 15-minute timeout balances reliability with practical limits
+- Environment selection respects user choice when ambiguous
+
+---
+
 ## 2026-01-31 10:45 - [Deployment] Per-app DNS records instead of wildcard Route53 entries
 
 **Conversation:** [2026-01-30-1855-0237afda.md](conversations/2026-01-30-1855-0237afda.md)
