@@ -380,9 +380,22 @@ class AppStack(Stack):
         )
         container.add_port_mappings(ecs.PortMapping(container_port=app_config.container_port, protocol=ecs.Protocol.TCP))
 
-        # TODO(production): Increase deregistration_delay for graceful connection draining,
-        # and consider higher health check interval/timeout for stability.
-        # Current aggressive settings optimize for fast dev iteration.
+        # When DOH runs in production (DEBUG=False), use stable settings
+        # When developing locally (DEBUG=True), use aggressive settings for fast deploys
+        from django.conf import settings
+        if settings.DEBUG:
+            deregistration_delay = 0
+            health_check_interval = 5
+            healthy_threshold = 1
+            min_healthy = 0
+            health_check_grace = 0
+        else:
+            deregistration_delay = 30
+            health_check_interval = 10
+            healthy_threshold = 2
+            min_healthy = 100
+            health_check_grace = 60
+
         target_group = elbv2.ApplicationTargetGroup(
             self, "TargetGroup",
             target_group_name=f"doh-{env_slug}-{app_config.app_name}"[:32],
@@ -390,11 +403,11 @@ class AppStack(Stack):
             port=app_config.container_port,
             protocol=elbv2.ApplicationProtocol.HTTP,
             target_type=elbv2.TargetType.IP,
-            deregistration_delay=Duration.seconds(5),
+            deregistration_delay=Duration.seconds(deregistration_delay),
             health_check=elbv2.HealthCheck(
                 enabled=True, path=app_config.health_check_path, protocol=elbv2.Protocol.HTTP,
-                interval=Duration.seconds(5), timeout=Duration.seconds(2),
-                healthy_threshold_count=2, unhealthy_threshold_count=3, healthy_http_codes="200",
+                interval=Duration.seconds(health_check_interval), timeout=Duration.seconds(2),
+                healthy_threshold_count=healthy_threshold, unhealthy_threshold_count=3, healthy_http_codes="200",
             ),
         )
 
@@ -418,9 +431,9 @@ class AppStack(Stack):
             vpc_subnets=ec2.SubnetSelection(subnet_type=ec2.SubnetType.PRIVATE_WITH_EGRESS),
             security_groups=[self.environment_infra.default_security_group],
             enable_execute_command=True,
-            min_healthy_percent=100,  # Zero-downtime: keep old task until new one is healthy
+            min_healthy_percent=min_healthy,
             max_healthy_percent=200,
-            health_check_grace_period=Duration.seconds(15),  # Reduced from 60s default for faster deployments
+            health_check_grace_period=Duration.seconds(health_check_grace),
         )
         service.attach_to_application_target_group(target_group)
 

@@ -1,5 +1,39 @@
 # DevOpsHero Development Journal
 
+## 2026-01-31 14:30 - [Deployment] DEBUG-based ECS deployment tuning for faster local iteration
+
+**Conversation:** [2026-01-30-2226-13ef15ba.md](conversations/2026-01-30-2226-13ef15ba.md)
+
+Troubleshooted a deployment that reported failure but actually succeeded. The `simple-dashboard` deploy to the `dev` environment timed out at exactly 180 seconds, but ECS reported the deployment complete at 179 seconds. The root cause was a combination of:
+
+1. The 180-second stabilization timeout being barely sufficient
+2. The code requiring 2 consecutive stable checks (STABLE_CHECKS_REQUIRED=2) to confirm deployment success
+3. Rolling deployments keeping old tasks running until new ones are healthy
+
+Rather than simply increasing the timeout, we analyzed all ECS timing parameters and implemented DEBUG-based tuning. When DOH runs locally (DEBUG=True), deployments use aggressive settings for fast iteration. When DOH runs in production (DEBUG=False), deployments use stable settings with zero-downtime guarantees.
+
+**Parameters adjusted based on DEBUG flag:**
+
+| Parameter | DEBUG=True | DEBUG=False | Effect |
+|-----------|------------|-------------|--------|
+| `min_healthy_percent` | 0% | 100% | Old task killed immediately vs zero-downtime rolling |
+| `deregistration_delay` | 0s | 30s | No connection draining vs graceful drain |
+| `healthy_threshold_count` | 1 | 2 | Healthy after 1 ALB check vs 2 |
+| `health_check_interval` | 5s | 10s | Faster health checks |
+| `health_check_grace_period` | 0s | 60s | No grace period vs app warmup time |
+
+Also reduced the `consecutive_failures` threshold from 4 to 3 checks (~15s) for faster fail-fast behavior.
+
+**Key learnings:**
+
+- The "2/1 running" pattern in logs indicates rolling deployment (old + new tasks running simultaneously)
+- ALB health checks are the gating factor for deployment speed — container health checks run in parallel and don't affect the happy path
+- Container health check parameters (interval, retries, start_period) affect **failure detection speed**, not deployment speed
+- ECS `rolloutState=COMPLETED` is the reliable stability indicator, not just `running==desired`
+- When using assume role for cross-account access, the `external_id` parameter is required — without it you get "AccessDenied" even with correct credentials
+
+---
+
 ## 2026-01-31 10:42 - [DevEx] Add --hosted-zone parameter to doh_deploy CLI
 
 **Conversation:** [2026-01-30-2210-5e432907.md](conversations/2026-01-30-2210-5e432907.md)

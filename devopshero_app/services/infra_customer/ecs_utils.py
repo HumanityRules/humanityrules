@@ -173,8 +173,8 @@ def wait_for_service_stable(
                     for reason in failure_reasons[:3]:  # Show up to 3 reasons
                         logger.error("      %(reason)s", {"reason": reason})
                     
-                    # If we've seen failures for 3+ consecutive checks, give up early
-                    if consecutive_failures >= 4:
+                    # If we've seen failures for 3 consecutive checks, give up early
+                    if consecutive_failures >= 3:
                         logger.error("   Too many task failures, aborting")
                         return False
             else:
