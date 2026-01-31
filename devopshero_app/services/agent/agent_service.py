@@ -507,8 +507,9 @@ async def stream_response(conversation: Conversation, fork_session: bool) -> Asy
             f"conv-{conversation.id}",
         )
 
-    # Use Sonnet for environment setup (simpler task), Opus for deployment (complex reasoning)
-    model_alias = "sonnet-4.5" if conversation.mode == Conversation.Mode.ENVIRONMENT_SETUP else settings.CLAUDE_MODEL
+    # model_alias = "sonnet-4.5" if conversation.mode == Conversation.Mode.ENVIRONMENT_SETUP else settings.CLAUDE_MODEL
+    # Use Opus for all modes
+    model_alias = "opus-4.5"
     logger.info(f"Using model {model_alias} for conversation {conversation.id} (mode={conversation.mode})")
 
     options = _create_agent_options(

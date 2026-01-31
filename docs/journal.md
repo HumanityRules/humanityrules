@@ -1,5 +1,23 @@
 # DevOpsHero Development Journal
 
+## 2026-01-30 18:53 - [AgentChat] Switch environment setup model from Sonnet to Opus
+
+**Conversation:** [2026-01-30-1853-a3908fba.md](conversations/2026-01-30-1853-a3908fba.md)
+
+Changed the LLM model for environment setup conversations from Sonnet 4.5 to Opus 4.5. The previous logic used Sonnet for environment setup (considered a simpler task) and Opus for deployment (complex reasoning). Now all agent modes use Opus.
+
+The change was made in `agent_service.py` where model selection happens. The previous conditional logic is preserved as a comment for easy rollback:
+
+```python
+# Previous: Use Sonnet for environment setup (simpler task), Opus for deployment (complex reasoning)
+# model_alias = "sonnet-4.5" if conversation.mode == Conversation.Mode.ENVIRONMENT_SETUP else settings.CLAUDE_MODEL
+model_alias = "opus-4.5"
+```
+
+**Rationale:** Testing whether Opus provides better quality responses for environment setup conversations, at the cost of higher latency and token usage.
+
+---
+
 ## 2026-01-30 21:45 - [Bugfix] Environment logs cross-talk between concurrent provisioning jobs
 
 **Conversation:** [2026-01-30-1803-2231ca98.md](conversations/2026-01-30-1803-2231ca98.md)
