@@ -11,9 +11,9 @@ class DevopsheroAppConfig(AppConfig):
         self._init_job_worker()
 
     def _init_posthog(self):
-        """Initialize PostHog analytics with exception autocapture."""
+        """Initialize PostHog analytics with exception autocapture. Disabled in DEBUG mode."""
         posthog_key = getattr(settings, 'POSTHOG_API_KEY', None)
-        if posthog_key:
+        if posthog_key and not settings.DEBUG:
             from posthog import Posthog
             import posthog as posthog_module
 

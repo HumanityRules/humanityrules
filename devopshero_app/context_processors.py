@@ -5,9 +5,9 @@ from django.conf import settings
 
 
 def posthog_context(request):
-    """Inject PostHog settings into all templates."""
+    """Inject PostHog settings into all templates. Disabled in DEBUG mode."""
     api_key = getattr(settings, 'POSTHOG_API_KEY', None)
-    if not api_key:
+    if not api_key or settings.DEBUG:
         return {'posthog_config_json': None}
 
     user = request.user
