@@ -386,7 +386,7 @@ class AppStack(Stack):
         if settings.DEBUG:
             deregistration_delay = 0
             health_check_interval = 5
-            healthy_threshold = 1
+            healthy_threshold = 2  # ALB minimum is 2
             min_healthy = 0
             health_check_grace = 0
         else:

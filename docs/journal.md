@@ -18,7 +18,7 @@ Rather than simply increasing the timeout, we analyzed all ECS timing parameters
 |-----------|------------|-------------|--------|
 | `min_healthy_percent` | 0% | 100% | Old task killed immediately vs zero-downtime rolling |
 | `deregistration_delay` | 0s | 30s | No connection draining vs graceful drain |
-| `healthy_threshold_count` | 1 | 2 | Healthy after 1 ALB check vs 2 |
+| `healthy_threshold_count` | 2 | 2 | ALB minimum is 2 — cannot be reduced |
 | `health_check_interval` | 5s | 10s | Faster health checks |
 | `health_check_grace_period` | 0s | 60s | No grace period vs app warmup time |
 
