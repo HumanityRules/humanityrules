@@ -1,5 +1,31 @@
 # DevOpsHero Development Journal
 
+## 2026-01-31 10:42 - [DevEx] Add --hosted-zone parameter to doh_deploy CLI
+
+**Conversation:** [2026-01-30-2210-5e432907.md](conversations/2026-01-30-2210-5e432907.md)
+
+The `doh_deploy` CLI command had a misleading comment: `shared_alb_hosted_zone=None,  # CLI uses HTTP-only mode`. This implied the CLI inherently couldn't support HTTPS, but that's not true — the CLI was HTTP-only simply because we hadn't exposed the `shared_alb_hosted_zone` parameter.
+
+When `shared_alb_hosted_zone=None`, the deployment uses path-based routing (`/{app_name}/*`) without HTTPS or DNS records. When a hosted zone is provided, it uses hostname-based routing with HTTPS listener rules and creates a Route53 A record pointing to the shared ALB.
+
+Added the `--hosted-zone` parameter to enable full HTTPS deployments from the CLI:
+
+```bash
+# Path-based routing (HTTP only, no domain)
+uv run manage.py doh_deploy --app simple-dashboard --account "CH Sandbox"
+
+# Host-based routing with HTTPS and DNS record
+uv run manage.py doh_deploy --app simple-dashboard --account "CH Sandbox" --hosted-zone dev.example.com
+```
+
+**Key points:**
+- The "HTTP-only mode" wasn't a CLI limitation — it was just a missing parameter
+- Added validation to prevent `--hosted-zone` with `--base` (only makes sense for app deployments)
+- Updated the usage docstring with an example
+- Removed the misleading comment that implied causality between CLI and HTTP-only
+
+---
+
 ## 2026-01-31 05:05 - [Bugfix] Missing ALB DNS name for Route53 alias records
 
 **Conversation:** [2026-01-30-2152-d16a6306.md](conversations/2026-01-30-2152-d16a6306.md)
