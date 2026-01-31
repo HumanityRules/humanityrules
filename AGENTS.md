@@ -19,6 +19,23 @@ Built with ❤️ to make DevOps accessible to everyone.
 We abbrebrivate the name of DevOps Hero as DOH.
 
 
+# Running Python Commands
+
+**Always use `uv run` to execute Python commands.** This project uses uv for dependency management — never run Python or project scripts directly.
+
+**Bad:**
+```bash
+python manage.py runserver
+python manage.py doh_deploy
+```
+
+**Good:**
+```bash
+uv run manage.py runserver
+uv run doh_deploy
+```
+
+
 # Documentation
 
 The main developer documentation lives in the docs/ subdirectory. **When creating a new document in `docs/`, always add a reference to it here.**
