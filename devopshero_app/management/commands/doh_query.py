@@ -6,14 +6,25 @@ Designed for shell-safe queries that avoid quoting issues when run via prod_mana
 Usage:
     ./prod_manage.sh doh_query <Model> [field1 field2 ...] [--filter key=value] [--limit N]
 
-Examples:
-    ./prod_manage.sh doh_query Repository
-    ./prod_manage.sh doh_query Repository full_name default_branch
-    ./prod_manage.sh doh_query Repository full_name --filter full_name__icontains=ai-detector
-    ./prod_manage.sh doh_query App name slug app_type --limit 5
-    ./prod_manage.sh doh_query Deployment status --filter status=failed --limit 10
-    ./prod_manage.sh doh_query Message --describe  # Show available fields
-    ./prod_manage.sh doh_query Message role content --order created_at --desc  # Descending order
+Common queries:
+
+  Infrastructure:
+    doh_query Organization slug name
+    doh_query AWSAccount name aws_account_id status
+    doh_query Environment name slug aws_region status
+
+  Apps and deployments:
+    doh_query App name slug app_type build_strategy
+    doh_query Deployment id status created_at --order created_at --desc --limit 10
+    doh_query Deployment status --filter status=failed --limit 10
+    doh_query DeploymentLog level source message --filter deployment_id=123 --order created_at --desc
+
+  Repositories:
+    doh_query Repository full_name default_branch
+    doh_query Repository full_name --filter full_name__icontains=dashboard
+
+  Utilities:
+    doh_query <Model> --describe   # Show available fields for any model
 """
 
 from django.apps import apps
