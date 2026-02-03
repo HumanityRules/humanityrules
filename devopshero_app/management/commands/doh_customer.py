@@ -5,6 +5,7 @@ Usage (via prod_manage.sh):
     ./prod_manage.sh doh_customer list
     ./prod_manage.sh doh_customer create-env --aws-account "Name" --name default --region us-east-1 --hosted-zone example.com
     ./prod_manage.sh doh_customer provision-env --slug default --aws-account "Name"
+    ./prod_manage.sh doh_customer teardown-env --slug default --aws-account "Name"
     ./prod_manage.sh doh_customer list-apps
     ./prod_manage.sh doh_customer list-deployments
     ./prod_manage.sh doh_customer deployment-logs                    # most recent deployment globally
@@ -60,6 +61,11 @@ class Command(BaseCommand):
         retry_deployment = subparsers.add_parser("retry-deployment", help="Retry a failed deployment")
         retry_deployment.add_argument("--app", required=True, help="App slug")
 
+        # teardown-env
+        teardown_env = subparsers.add_parser("teardown-env", help="Tear down an environment (deletes all deployments and infrastructure)")
+        teardown_env.add_argument("--slug", required=True, help="Environment slug")
+        teardown_env.add_argument("--aws-account", required=True, help="AWS account name")
+
     def handle(self, *args, **options):
         operation = options.get("operation")
 
@@ -77,6 +83,8 @@ class Command(BaseCommand):
             self._handle_deployment_logs(options)
         elif operation == "retry-deployment":
             self._handle_retry_deployment(options)
+        elif operation == "teardown-env":
+            self._handle_teardown_env(options)
         else:
             self.stderr.write(self.style.ERROR("No operation specified. Use --help for usage."))
 
@@ -318,4 +326,43 @@ class Command(BaseCommand):
         self.stdout.write(self.style.SUCCESS(f"\nDeployment for '{app_slug}' reset to PENDING"))
         self.stdout.write(f"  Previous status: {old_status}")
         self.stdout.write(self.style.WARNING("Deployment will restart automatically (job worker picks up pending deployments)"))
+        self.stdout.write("")
+
+    def _handle_teardown_env(self, options):
+        """Tear down an environment by setting status to TEARDOWN_PENDING."""
+        slug = options["slug"]
+        account_name = options["aws_account"]
+
+        # Find AWS account
+        try:
+            aws_account = models.AWSAccount.objects.get(name=account_name)
+        except models.AWSAccount.DoesNotExist:
+            self.stderr.write(self.style.ERROR(f"AWS account '{account_name}' not found"))
+            return
+
+        # Find environment
+        try:
+            env = models.Environment.objects.get(aws_account=aws_account, slug=slug)
+        except models.Environment.DoesNotExist:
+            self.stderr.write(self.style.ERROR(f"Environment '{slug}' not found for account '{account_name}'"))
+            return
+
+        # Check current status
+        if env.status == models.Environment.Status.TEARDOWN_PENDING:
+            self.stdout.write(self.style.WARNING(f"Environment '{slug}' is already queued for teardown"))
+            return
+
+        if env.status == models.Environment.Status.TEARING_DOWN:
+            self.stderr.write(self.style.ERROR(f"Environment '{slug}' is already being torn down"))
+            return
+
+        # Set to teardown pending
+        old_status = env.status
+        env.status = models.Environment.Status.TEARDOWN_PENDING
+        env.status_message = f"Teardown triggered (was: {old_status})"
+        env.save(update_fields=["status", "status_message", "updated_at"])
+
+        self.stdout.write(self.style.SUCCESS(f"\nEnvironment '{slug}' set to TEARDOWN_PENDING"))
+        self.stdout.write(f"  Previous status: {old_status}")
+        self.stdout.write(self.style.WARNING("Teardown will start automatically (job worker picks up pending teardowns)"))
         self.stdout.write("")

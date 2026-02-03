@@ -1,7 +1,8 @@
 """
-Teardown executor.
+App deployment teardown executor.
 
 Orchestrates the teardown of deployed applications by calling CDK infrastructure code.
+Deletes the deployment record from the database after successful teardown.
 This is the entry point called by the job worker for teardown jobs.
 """
 
@@ -162,13 +163,9 @@ def run_teardown(deployment_id: str) -> bool:
             )
 
             if success:
-                deployment.status = models.Deployment.Status.TORN_DOWN
-                deployment.status_message = "Teardown completed successfully"
-                deployment.completed_at = timezone.now()
-                deployment.save()
-
-                logger.info("Teardown completed successfully")
+                logger.info("Teardown completed successfully, deployment deleted")
                 logger.info("Teardown %(deployment_id)s completed successfully", {"deployment_id": str(deployment_id)})
+                deployment.delete()
                 return True
 
             deployment.status = models.Deployment.Status.FAILED
