@@ -1,7 +1,7 @@
 """
 Job worker.
 
-Polls for pending jobs (deployments and environment provisioning) and
+Polls for pending jobs (deployments, environment provisioning, teardowns) and
 spawns threads to execute them. This provides a simple, in-process
 job execution mechanism for background tasks.
 """
@@ -14,9 +14,10 @@ from django.db import transaction
 
 from devopshero_app.models import Deployment, Environment
 
-from . import deployment_executor
-from . import environment_executor
-from . import teardown_executor
+from . import app_deployment_executor
+from . import app_deployment_teardown_executor
+from . import environment_provisioning_executor
+from . import environment_teardown_executor
 
 logger = logging.getLogger(__name__)
 
@@ -27,16 +28,8 @@ _stop_flag = threading.Event()
 _worker_thread: threading.Thread | None = None
 
 
-def _claim_pending_deployment() -> Deployment | None:
-    """
-    Atomically claim a pending deployment.
-
-    Uses select_for_update with skip_locked to prevent multiple workers
-    from claiming the same deployment.
-
-    Returns:
-        The claimed Deployment, or None if no pending deployments.
-    """
+def _claim_pending_app_deployment() -> Deployment | None:
+    """Atomically claim a pending app deployment."""
     with transaction.atomic():
         deployment = (
             Deployment.objects
@@ -51,26 +44,17 @@ def _claim_pending_deployment() -> Deployment | None:
         )
 
         if deployment:
-            # Claim it by updating status
             deployment.status = Deployment.Status.BUILDING
             deployment.status_message = "Claimed by worker"
             deployment.save(update_fields=["status", "status_message", "updated_at"])
-            logger.info(f"Claimed deployment {deployment.id} for app '{deployment.app.name}'")
+            logger.info(f"Claimed app deployment {deployment.id} for app '{deployment.app.name}'")
             return deployment
 
     return None
 
 
-def _claim_pending_environment() -> Environment | None:
-    """
-    Atomically claim a pending environment for provisioning.
-
-    Uses select_for_update with skip_locked to prevent multiple workers
-    from claiming the same environment.
-
-    Returns:
-        The claimed Environment, or None if no pending environments.
-    """
+def _claim_pending_environment_provisioning() -> Environment | None:
+    """Atomically claim a pending environment for provisioning."""
     with transaction.atomic():
         environment = (
             Environment.objects
@@ -81,26 +65,17 @@ def _claim_pending_environment() -> Environment | None:
         )
 
         if environment:
-            # Claim it by updating status
             environment.status = Environment.Status.PROVISIONING
             environment.status_message = "Claimed by worker"
             environment.save(update_fields=["status", "status_message", "updated_at"])
-            logger.info(f"Claimed environment {environment.id} '{environment.name}'")
+            logger.info(f"Claimed environment provisioning {environment.id} '{environment.name}'")
             return environment
 
     return None
 
 
-def _claim_pending_teardown() -> Deployment | None:
-    """
-    Atomically claim a pending teardown deployment.
-
-    Uses select_for_update with skip_locked to prevent multiple workers
-    from claiming the same teardown.
-
-    Returns:
-        The claimed Deployment, or None if no pending teardowns.
-    """
+def _claim_pending_app_deployment_teardown() -> Deployment | None:
+    """Atomically claim a pending app deployment teardown."""
     with transaction.atomic():
         deployment = (
             Deployment.objects
@@ -115,38 +90,66 @@ def _claim_pending_teardown() -> Deployment | None:
         )
 
         if deployment:
-            # Claim it by updating status
             deployment.status = Deployment.Status.TEARING_DOWN
             deployment.status_message = "Claimed by worker"
             deployment.save(update_fields=["status", "status_message", "updated_at"])
-            logger.info(f"Claimed teardown {deployment.id} for app '{deployment.app.name}'")
+            logger.info(f"Claimed app deployment teardown {deployment.id} for app '{deployment.app.name}'")
             return deployment
 
     return None
 
 
-def _run_deployment_thread(deployment_id: str) -> None:
-    """Thread target that runs a single deployment."""
+def _run_app_deployment_thread(deployment_id: str) -> None:
+    """Thread target that runs a single app deployment."""
     try:
-        deployment_executor.run_deployment(deployment_id)
+        app_deployment_executor.run_deployment(deployment_id)
     except Exception:
-        logger.exception(f"Unhandled error in deployment {deployment_id}")
+        logger.exception(f"Unhandled error in app deployment {deployment_id}")
 
 
-def _run_environment_thread(environment_id: str) -> None:
+def _run_environment_provisioning_thread(environment_id: str) -> None:
     """Thread target that runs a single environment provisioning."""
     try:
-        environment_executor.run_provisioning(environment_id)
+        environment_provisioning_executor.run_provisioning(environment_id)
     except Exception:
         logger.exception(f"Unhandled error in environment provisioning {environment_id}")
 
 
-def _run_teardown_thread(deployment_id: str) -> None:
-    """Thread target that runs a single teardown."""
+def _run_app_deployment_teardown_thread(deployment_id: str) -> None:
+    """Thread target that runs a single app deployment teardown."""
     try:
-        teardown_executor.run_teardown(deployment_id)
+        app_deployment_teardown_executor.run_teardown(deployment_id)
     except Exception:
-        logger.exception(f"Unhandled error in teardown {deployment_id}")
+        logger.exception(f"Unhandled error in app deployment teardown {deployment_id}")
+
+
+def _claim_pending_environment_teardown() -> Environment | None:
+    """Atomically claim a pending environment teardown."""
+    with transaction.atomic():
+        environment = (
+            Environment.objects
+            .select_for_update(skip_locked=True)
+            .filter(status=Environment.Status.TEARDOWN_PENDING)
+            .select_related("aws_account")
+            .first()
+        )
+
+        if environment:
+            environment.status = Environment.Status.TEARING_DOWN
+            environment.status_message = "Claimed by worker"
+            environment.save(update_fields=["status", "status_message", "updated_at"])
+            logger.info(f"Claimed environment teardown {environment.id} '{environment.name}'")
+            return environment
+
+    return None
+
+
+def _run_environment_teardown_thread(environment_id: str) -> None:
+    """Thread target that runs a single environment teardown."""
+    try:
+        environment_teardown_executor.run_environment_teardown(environment_id)
+    except Exception:
+        logger.exception(f"Unhandled error in environment teardown {environment_id}")
 
 
 def _worker_loop() -> None:
@@ -155,41 +158,53 @@ def _worker_loop() -> None:
 
     while not _stop_flag.is_set():
         try:
-            # Check for pending deployments
-            deployment = _claim_pending_deployment()
-            if deployment:
+            # Check for pending app deployments
+            app_deployment = _claim_pending_app_deployment()
+            if app_deployment:
                 thread = threading.Thread(
-                    target=_run_deployment_thread,
-                    args=(str(deployment.id),),
-                    name=f"deployment-{deployment.id.hex[:8]}",
+                    target=_run_app_deployment_thread,
+                    args=(str(app_deployment.id),),
+                    name=f"app-deploy-{app_deployment.id.hex[:8]}",
                     daemon=True,
                 )
                 thread.start()
-                logger.info(f"Spawned thread for deployment {deployment.id}")
+                logger.info(f"Spawned thread for app deployment {app_deployment.id}")
 
-            # Check for pending environments
-            environment = _claim_pending_environment()
-            if environment:
+            # Check for pending environment provisioning
+            env_provisioning = _claim_pending_environment_provisioning()
+            if env_provisioning:
                 thread = threading.Thread(
-                    target=_run_environment_thread,
-                    args=(str(environment.id),),
-                    name=f"environment-{environment.id.hex[:8]}",
+                    target=_run_environment_provisioning_thread,
+                    args=(str(env_provisioning.id),),
+                    name=f"env-provision-{env_provisioning.id.hex[:8]}",
                     daemon=True,
                 )
                 thread.start()
-                logger.info(f"Spawned thread for environment {environment.id}")
+                logger.info(f"Spawned thread for environment provisioning {env_provisioning.id}")
 
-            # Check for pending teardowns
-            teardown = _claim_pending_teardown()
-            if teardown:
+            # Check for pending app deployment teardowns
+            app_deployment_teardown = _claim_pending_app_deployment_teardown()
+            if app_deployment_teardown:
                 thread = threading.Thread(
-                    target=_run_teardown_thread,
-                    args=(str(teardown.id),),
-                    name=f"teardown-{teardown.id.hex[:8]}",
+                    target=_run_app_deployment_teardown_thread,
+                    args=(str(app_deployment_teardown.id),),
+                    name=f"app-deploy-teardown-{app_deployment_teardown.id.hex[:8]}",
                     daemon=True,
                 )
                 thread.start()
-                logger.info(f"Spawned thread for teardown {teardown.id}")
+                logger.info(f"Spawned thread for app deployment teardown {app_deployment_teardown.id}")
+
+            # Check for pending environment teardowns
+            env_teardown = _claim_pending_environment_teardown()
+            if env_teardown:
+                thread = threading.Thread(
+                    target=_run_environment_teardown_thread,
+                    args=(str(env_teardown.id),),
+                    name=f"env-teardown-{env_teardown.id.hex[:8]}",
+                    daemon=True,
+                )
+                thread.start()
+                logger.info(f"Spawned thread for environment teardown {env_teardown.id}")
 
         except Exception:
             logger.exception("Error in worker loop")

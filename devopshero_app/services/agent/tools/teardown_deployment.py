@@ -105,10 +105,6 @@ async def teardown_deployment(
         Deployment.Status.FAILED,
     ]
     if deployment.status not in teardownable_statuses:
-        if deployment.status == Deployment.Status.TORN_DOWN:
-            raise ValueError(
-                f"App '{app.name}' has already been torn down."
-            )
         if deployment.status == Deployment.Status.TEARDOWN_PENDING:
             raise ValueError(
                 f"App '{app.name}' is already queued for teardown."

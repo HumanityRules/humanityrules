@@ -310,6 +310,8 @@ class Environment(models.Model):
         PROVISIONING = "provisioning", "Provisioning"  # Base infra deploying
         READY = "ready", "Ready"  # VPC + cluster exist
         ERROR = "error", "Error"  # Provisioning failed
+        TEARDOWN_PENDING = "teardown_pending", "Teardown Pending"  # Queued for teardown
+        TEARING_DOWN = "tearing_down", "Tearing Down"  # Teardown in progress
 
     id = models.UUIDField(
         primary_key=True,
@@ -783,7 +785,6 @@ class Deployment(models.Model):
         ROLLED_BACK = "rolled_back", "Rolled Back"
         TEARDOWN_PENDING = "teardown_pending", "Teardown Pending"
         TEARING_DOWN = "tearing_down", "Tearing Down"
-        TORN_DOWN = "torn_down", "Torn Down"
 
     id = models.UUIDField(
         primary_key=True,

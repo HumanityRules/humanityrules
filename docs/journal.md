@@ -1,5 +1,71 @@
 # DevOpsHero Development Journal
 
+## 2026-02-03 21:45 - [DevEx] Fix job worker starting during prod_manage.sh commands
+
+**Conversation:** [2026-02-03-1420-ceb0fdee.md](conversations/2026-02-03-1420-ceb0fdee.md)
+
+When running management commands via `prod_manage.sh` (which uses `aws ecs execute-command` to run commands in the production container), the job worker was starting up unexpectedly. This caused duplicate workers competing for jobs.
+
+**Root cause analysis:**
+
+The production ECS container has `DOH_RUN_JOB_WORKER=1` set in its environment. When `prod_manage.sh` runs a command like `doh_customer list`, it spawns a **new Python process** inside the existing container via ECS Exec. This new process goes through Django's `AppConfig.ready()` initialization, sees the env var is set, and starts its own job worker thread.
+
+So we'd have:
+1. The main Gunicorn process with its job worker (correct)
+2. Each management command spawning its own short-lived job worker (wrong)
+
+These extra workers would compete with the main one for claiming jobs, and die when the management command exits.
+
+**Solution:**
+
+Added `_is_management_command()` detection in `apps.py` that checks if running via `manage.py`. The job worker now only starts for web server processes:
+
+- **Gunicorn** — `sys.argv[0]` is the gunicorn executable, not `manage.py`
+- **`manage.py runserver`** — Explicitly allowed for local development
+- **Other management commands** — Worker skipped
+
+The "blocklist" approach (detect `manage.py`) is more robust than an "allowlist" (detect specific servers) because it automatically works with any WSGI/ASGI server without needing to enumerate them.
+
+**Key points:**
+- `prod_manage.sh` doesn't spin up new containers; it uses ECS Exec to run commands in the existing container
+- Each `manage.py` invocation is a separate Python process with its own Django initialization
+- The fix detects `sys.argv[0].endswith('manage.py')` and skips worker startup (except for `runserver`)
+
+## 2026-02-03 14:30 - [Deployment] Environment teardown feature
+
+**Conversation:** [2026-02-03-1424-677f28ff.md](conversations/2026-02-03-1424-677f28ff.md)
+
+Implemented environment teardown functionality that deletes all infrastructure and removes records from the database. The feature runs asynchronously via the existing job worker infrastructure.
+
+**Teardown flow:**
+1. User triggers teardown via CLI (`doh_customer teardown-env`) or agent tool
+2. Environment status set to `TEARDOWN_PENDING`
+3. Job worker picks up pending teardown, sets status to `TEARING_DOWN`
+4. All deployments in the environment are torn down sequentially (stop on first failure)
+5. Base infrastructure stacks deleted (cluster, builder, VPC)
+6. Environment record deleted from database
+
+**Key design decisions:**
+
+- **Delete records instead of TORN_DOWN status** — Initially implemented with a `TORN_DOWN` status for audit trail, but decided to delete records instead. Rationale: the records are just references to infrastructure that no longer exists. If audit history is needed, logs/events serve that purpose better. This keeps the database clean and allows slug reuse.
+
+- **Always force teardown** — Removed the `--force` flag that would check for active deployments. Teardown always proceeds regardless of deployment states. Simplifies the API and matches the "delete everything" semantics.
+
+- **File renames for clarity** — Renamed executor files to be explicit about what they operate on:
+  - `teardown_executor.py` → `app_deployment_teardown_executor.py` (tears down a deployment, not an app)
+  - `deployment_executor.py` → `app_deployment_executor.py`
+  - `environment_executor.py` → `environment_provisioning_executor.py`
+  - Similarly renamed functions in `job_worker.py` (e.g., `_claim_pending_teardown` → `_claim_pending_app_deployment_teardown`)
+
+- **Log before delete** — Fixed a bug where logging after `environment.delete()` failed because the `EnvironmentLogContext` handler tried to create a log record with a deleted foreign key. Solution: log the success message before calling delete.
+
+**Key points:**
+- Environment has `TEARDOWN_PENDING` and `TEARING_DOWN` statuses but no `TORN_DOWN` (record is deleted on success)
+- Deployment teardown also deletes the record on success
+- Sequential teardown with stop-on-first-failure prevents orphaned infrastructure
+- Added `teardown-env` subcommand to `doh_customer` management command
+- Added `teardown_environment` agent tool for UI/agent integration
+
 ## 2026-01-31 15:57 - [Integrations] PostHog only when DEBUG is False
 
 **Conversation:** [2026-01-31-1557-6179b2b2.md](conversations/2026-01-31-1557-6179b2b2.md)
