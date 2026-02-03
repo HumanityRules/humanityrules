@@ -1,5 +1,17 @@
+import sys
+
 from django.apps import AppConfig
 from django.conf import settings
+
+
+def _is_management_command() -> bool:
+    """Detect if running as a Django management command (excluding runserver)."""
+    if sys.argv and sys.argv[0].endswith('manage.py'):
+        # Allow runserver to start the worker for local development
+        if len(sys.argv) >= 2 and sys.argv[1] == 'runserver':
+            return False
+        return True
+    return False
 
 
 class DevopsheroAppConfig(AppConfig):
@@ -29,8 +41,13 @@ class DevopsheroAppConfig(AppConfig):
             posthog_module.default_client = client
 
     def _init_job_worker(self):
-        """Start the job worker if enabled via settings."""
-        if settings.DOH_RUN_JOB_WORKER:
-            # Import here because job_worker imports models, which aren't ready at module load time
-            from .services.deployment import job_worker
-            job_worker.start_worker()
+        """Start the job worker for web server processes only."""
+        if not settings.DOH_RUN_JOB_WORKER:
+            return
+
+        if _is_management_command():
+            return
+
+        # Import here because job_worker imports models, which aren't ready at module load time
+        from .services.deployment import job_worker
+        job_worker.start_worker()
