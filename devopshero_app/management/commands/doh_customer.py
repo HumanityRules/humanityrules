@@ -2,7 +2,7 @@
 Management command for customer account operations.
 
 Usage (via prod_manage.sh):
-    ./prod_manage.sh doh_customer list
+    ./prod_manage.sh doh_customer list-infra
     ./prod_manage.sh doh_customer create-env --aws-account "Name" --name default --region us-east-1 --hosted-zone example.com
     ./prod_manage.sh doh_customer provision-env --slug default --aws-account "Name"
     ./prod_manage.sh doh_customer teardown-env --slug default --aws-account "Name"
@@ -24,8 +24,8 @@ class Command(BaseCommand):
     def add_arguments(self, parser):
         subparsers = parser.add_subparsers(dest="operation", help="Operation to perform")
 
-        # list
-        subparsers.add_parser("list", help="List all AWS accounts and environments")
+        # list-infra
+        subparsers.add_parser("list-infra", help="List all organizations, AWS accounts, and environments")
 
         # create-env
         create_env = subparsers.add_parser("create-env", help="Create a new environment")
@@ -69,8 +69,8 @@ class Command(BaseCommand):
     def handle(self, *args, **options):
         operation = options.get("operation")
 
-        if operation == "list":
-            self._handle_list()
+        if operation == "list-infra":
+            self._handle_list_infra()
         elif operation == "create-env":
             self._handle_create_env(options)
         elif operation == "provision-env":
@@ -88,8 +88,8 @@ class Command(BaseCommand):
         else:
             self.stderr.write(self.style.ERROR("No operation specified. Use --help for usage."))
 
-    def _handle_list(self):
-        """List all AWS accounts and environments."""
+    def _handle_list_infra(self):
+        """List all organizations, AWS accounts, and environments."""
         self.stdout.write(self.style.MIGRATE_HEADING("\n=== Organizations ==="))
         for org in models.Organization.objects.all():
             self.stdout.write(f"  {org.slug}: {org.name}")
