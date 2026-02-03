@@ -28,10 +28,14 @@
 
     {# Environment details card #}
     <div class="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-4 mb-8">
-        <dl class="grid grid-cols-2 gap-4 sm:grid-cols-4 text-sm">
+        <dl class="grid grid-cols-2 gap-4 sm:grid-cols-5 text-sm">
             <div>
                 <dt class="text-gray-500 dark:text-gray-400">AWS Account</dt>
                 <dd class="mt-1 font-medium text-gray-900 dark:text-white">{{ environment.aws_account.name }}</dd>
+            </div>
+            <div>
+                <dt class="text-gray-500 dark:text-gray-400">Account ID</dt>
+                <dd class="mt-1 font-medium text-gray-900 dark:text-white font-mono text-xs">{{ environment.aws_account.aws_account_id|default:"—" }}</dd>
             </div>
             <div>
                 <dt class="text-gray-500 dark:text-gray-400">Region</dt>
