@@ -17,10 +17,7 @@
            hx-push-url="true"
            class="block bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-4 hover:border-indigo-500 dark:hover:border-indigo-400 transition-colors">
             <div class="flex items-start justify-between">
-                <div>
-                    <h3 class="font-medium text-gray-900 dark:text-white">{{ env.name }}</h3>
-                    <p class="text-sm text-gray-500 dark:text-gray-400">{{ env.aws_account.name }}</p>
-                </div>
+                <h3 class="font-medium text-gray-900 dark:text-white">{{ env.name }}</h3>
                 <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium
                     {% if env.status == 'ready' %}bg-green-100 text-green-700 dark:bg-green-500/10 dark:text-green-400
                     {% elif env.status == 'pending' or env.status == 'provisioning' %}bg-yellow-100 text-yellow-700 dark:bg-yellow-500/10 dark:text-yellow-400
@@ -28,9 +25,20 @@
                     {{ env.get_status_display }}
                 </span>
             </div>
-            <div class="mt-3 text-xs text-gray-500 dark:text-gray-400">
-                {{ env.aws_region }}
-            </div>
+            <dl class="mt-3 space-y-1.5 text-xs">
+                <div class="flex">
+                    <dt class="text-gray-500 dark:text-gray-400 w-20">Account</dt>
+                    <dd class="text-gray-700 dark:text-gray-300">{{ env.aws_account.name }}</dd>
+                </div>
+                <div class="flex">
+                    <dt class="text-gray-500 dark:text-gray-400 w-20">Account ID</dt>
+                    <dd class="text-gray-700 dark:text-gray-300 font-mono">{{ env.aws_account.aws_account_id|default:"—" }}</dd>
+                </div>
+                <div class="flex">
+                    <dt class="text-gray-500 dark:text-gray-400 w-20">Region</dt>
+                    <dd class="text-gray-700 dark:text-gray-300">{{ env.aws_region }}</dd>
+                </div>
+            </dl>
         </a>
         {% endfor %}
 
