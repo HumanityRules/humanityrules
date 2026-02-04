@@ -3,17 +3,17 @@ Direct CDK deployment command, bypassing the normal UI/DB/job-worker flow.
 
 Usage:
     # Base layer (VPC + ECS cluster)
-    uv run manage.py doh_direct --base --account "Humanity Rules Sandbox"
-    uv run manage.py doh_direct --base --account "Humanity Rules Sandbox" --teardown
-    uv run manage.py doh_direct --base --account "Humanity Rules Sandbox" --synth-only
-    uv run manage.py doh_direct --base --account "Humanity Rules Sandbox" --env prod
+    uv run manage.py doh_raw --base --account "Humanity Rules Sandbox"
+    uv run manage.py doh_raw --base --account "Humanity Rules Sandbox" --teardown
+    uv run manage.py doh_raw --base --account "Humanity Rules Sandbox" --synth-only
+    uv run manage.py doh_raw --base --account "Humanity Rules Sandbox" --env prod
 
     # Apps
-    uv run manage.py doh_direct --app simple-dashboard --account "Humanity Rules Sandbox"
-    uv run manage.py doh_direct --app simple-dashboard --account "Humanity Rules Sandbox" --hosted-zone dev.example.com
-    uv run manage.py doh_direct --app simple-dashboard --account "Humanity Rules Sandbox" --teardown
-    uv run manage.py doh_direct --app simple-dashboard --account "Humanity Rules Sandbox" --image-tag v1.2.3
-    uv run manage.py doh_direct --app simple-dashboard --account "Humanity Rules Sandbox" --synth-only
+    uv run manage.py doh_raw --app simple-dashboard --account "Humanity Rules Sandbox"
+    uv run manage.py doh_raw --app simple-dashboard --account "Humanity Rules Sandbox" --hosted-zone dev.example.com
+    uv run manage.py doh_raw --app simple-dashboard --account "Humanity Rules Sandbox" --teardown
+    uv run manage.py doh_raw --app simple-dashboard --account "Humanity Rules Sandbox" --image-tag v1.2.3
+    uv run manage.py doh_raw --app simple-dashboard --account "Humanity Rules Sandbox" --synth-only
 
 Requires DOH_AWS_ACCESS_KEY and DOH_AWS_SECRET_KEY in .env (loaded via Django settings).
 """
