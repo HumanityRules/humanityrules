@@ -1,13 +1,13 @@
 """
-Management command for customer account operations.
+Control plane operations for environments and deployments.
 
 Usage:
-    uv run manage.py doh_customer create-env --aws-account "Name" --name default --region us-east-1 --hosted-zone example.com
-    uv run manage.py doh_customer provision-env --slug default --aws-account "Name"
-    uv run manage.py doh_customer teardown-env --slug default --aws-account "Name"
-    uv run manage.py doh_customer retry-deployment --app simple-dashboard
+    uv run manage.py doh_control create-env --aws-account "Name" --name default --region us-east-1 --hosted-zone example.com
+    uv run manage.py doh_control provision-env --slug default --aws-account "Name"
+    uv run manage.py doh_control teardown-env --slug default --aws-account "Name"
+    uv run manage.py doh_control retry-deployment --app simple-dashboard
 
-For production, use ./prod_manage.sh doh_customer <operation> instead.
+For production, use ./prod_manage.sh doh_control <operation> instead.
 
 For querying data, use doh_query instead.
 """
@@ -18,7 +18,7 @@ from devopshero_app import models
 
 
 class Command(BaseCommand):
-    help = "Manage customer AWS accounts and environments"
+    help = "Control plane operations for environments and deployments"
 
     def add_arguments(self, parser):
         subparsers = parser.add_subparsers(dest="operation", help="Operation to perform")
@@ -94,7 +94,7 @@ class Command(BaseCommand):
             aws_region=region,
             shared_alb_hosted_zone=hosted_zone,
             status=status,
-            status_message="Created via doh_customer command",
+            status_message="Created via doh_control command",
         )
 
         self.stdout.write(self.style.SUCCESS(f"\nCreated environment: {env.name} ({env.slug})"))
@@ -107,7 +107,7 @@ class Command(BaseCommand):
             self.stdout.write(self.style.WARNING("\nProvisioning will start automatically (job worker picks up pending environments)"))
         else:
             self.stdout.write(self.style.NOTICE("\nTo trigger provisioning, run:"))
-            self.stdout.write(f"  ./prod_manage.sh doh_customer provision-env --slug {slug} --aws-account \"{account_name}\"")
+            self.stdout.write(f"  ./prod_manage.sh doh_control provision-env --slug {slug} --aws-account \"{account_name}\"")
 
         self.stdout.write("")
 

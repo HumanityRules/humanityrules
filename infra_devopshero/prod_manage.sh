@@ -6,8 +6,8 @@
 #   ./prod_manage.sh <command> [args...]
 #
 # Examples:
-#   ./prod_manage.sh doh_customer list
-#   ./prod_manage.sh doh_customer create-env --aws-account "DevOps Hero AWS Account" --name default --region us-east-1 --hosted-zone devopshero.co --provision
+#   ./prod_manage.sh doh_query Environment
+#   ./prod_manage.sh doh_control create-env --aws-account "DevOps Hero AWS Account" --name default --region us-east-1 --hosted-zone devopshero.co --provision
 #   ./prod_manage.sh shell
 #   ./prod_manage.sh dbshell
 #
@@ -18,8 +18,8 @@ if [ $# -eq 0 ]; then
     echo "Usage: ./prod_manage.sh <command> [args...]"
     echo ""
     echo "Examples:"
-    echo "  ./prod_manage.sh doh_customer list"
-    echo "  ./prod_manage.sh doh_customer create-env --aws-account \"Name\" --name default --region us-east-1"
+    echo "  ./prod_manage.sh doh_query Environment"
+    echo "  ./prod_manage.sh doh_control create-env --aws-account \"Name\" --name default --region us-east-1"
     echo "  ./prod_manage.sh shell"
     exit 1
 fi
