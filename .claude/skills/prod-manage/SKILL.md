@@ -14,16 +14,13 @@ cd infra_devopshero
 ./prod_manage.sh <command> [args...]
 ```
 
-## Customer Operations (`doh_customer`)
+## Control Plane Operations (`doh_control`)
 
-### Infrastructure
+Operations that modify state for environments and deployments.
 
 ```bash
-# List organizations, AWS accounts, and environments
-./prod_manage.sh doh_customer list
-
 # Create environment (triggers provisioning)
-./prod_manage.sh doh_customer create-env \
+./prod_manage.sh doh_control create-env \
     --aws-account "DevOps Hero AWS Account" \
     --name default \
     --region us-east-1 \
@@ -31,66 +28,52 @@ cd infra_devopshero
     --provision
 
 # Re-provision existing environment
-./prod_manage.sh doh_customer provision-env \
+./prod_manage.sh doh_control provision-env \
     --slug default \
     --aws-account "DevOps Hero AWS Account"
-```
 
-### Apps and Deployments
-
-```bash
-# List all apps
-./prod_manage.sh doh_customer list-apps
-
-# List recent deployments (default: 10)
-./prod_manage.sh doh_customer list-deployments
-./prod_manage.sh doh_customer list-deployments --limit 20
-
-# Show deployment logs - most recent deployment globally
-./prod_manage.sh doh_customer deployment-logs
-
-# Show deployment logs - specific app
-./prod_manage.sh doh_customer deployment-logs --app simple-dashboard
-./prod_manage.sh doh_customer deployment-logs --app simple-dashboard --limit 50
+# Tear down environment
+./prod_manage.sh doh_control teardown-env \
+    --slug default \
+    --aws-account "DevOps Hero AWS Account"
 
 # Retry a failed deployment
-./prod_manage.sh doh_customer retry-deployment --app simple-dashboard
+./prod_manage.sh doh_control retry-deployment --app simple-dashboard
 ```
-
-### Quick Status Check
-
-```bash
-# Fast check: what's the latest deployment doing?
-./prod_manage.sh doh_customer deployment-logs --limit 5
-```
-
-Output includes:
-- Deployment ID, status (color-coded), created/updated timestamps
-- Status message (if any)
-- Logs in reverse chronological order (newest first) with timestamps
 
 ## Ad-hoc Model Queries (`doh_query`)
 
 Query any model without shell quoting issues. **Use this instead of `shell -c`** for inspecting data.
 
+### Infrastructure
+
+```bash
+./prod_manage.sh doh_query Organization slug name
+./prod_manage.sh doh_query AWSAccount name aws_account_id status
+./prod_manage.sh doh_query Environment name slug aws_region status
+```
+
+### Apps and Deployments
+
+```bash
+./prod_manage.sh doh_query App name slug app_type build_strategy
+./prod_manage.sh doh_query Deployment id status created_at --order created_at --desc --limit 10
+./prod_manage.sh doh_query Deployment status --filter status=failed --limit 10
+./prod_manage.sh doh_query DeploymentLog level source message --filter deployment_id=<uuid> --order created_at --desc
+```
+
+### Repositories
+
+```bash
+./prod_manage.sh doh_query Repository full_name default_branch
+./prod_manage.sh doh_query Repository full_name --filter full_name__icontains=dashboard
+```
+
+### Utilities
+
 ```bash
 # Discover available fields on a model
-./prod_manage.sh doh_query Message --describe
-
-# Basic usage: list all records with default fields
-./prod_manage.sh doh_query Repository
-
-# Specify fields to display
-./prod_manage.sh doh_query Repository full_name default_branch clone_url
-
-# Filter results (Django ORM syntax)
-./prod_manage.sh doh_query Repository full_name --filter full_name__icontains=dashboard
-
-# Multiple filters
-./prod_manage.sh doh_query Deployment status created_at --filter status=failed --filter app__slug=my-app
-
-# Order results (use --desc for descending)
-./prod_manage.sh doh_query Deployment app status --limit 10 --order created_at --desc
+./prod_manage.sh doh_query Deployment --describe
 
 # List available models (intentionally use wrong name)
 ./prod_manage.sh doh_query WrongModel
@@ -106,7 +89,7 @@ Query any model without shell quoting issues. **Use this instead of `shell -c`**
 ./prod_manage.sh doh_query Message role content --filter conversation_id=<uuid> --order created_at --desc --limit 20
 ```
 
-Common models: `Repository`, `App`, `Deployment`, `DeploymentLog`, `Environment`, `AWSAccount`, `Organization`, `Workspace`, `Conversation`, `Message`
+Common models: `Organization`, `AWSAccount`, `Environment`, `App`, `Deployment`, `DeploymentLog`, `Repository`, `Workspace`, `Conversation`, `Message`
 
 ## Other Commands
 
