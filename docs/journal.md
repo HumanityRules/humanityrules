@@ -1,5 +1,37 @@
 # DevOpsHero Development Journal
 
+## 2026-02-04 14:06 - [ControlPlane] Aurora Serverless cold start causing production timeouts
+
+**Conversation:** [2026-02-04-1407-64239c6e.md](conversations/2026-02-04-1407-64239c6e.md)
+
+User reported production website (devopshero.ai) was timing out after 10+ seconds. Systematic diagnosis through ECS, ALB, and Aurora metrics revealed the root cause: Aurora Serverless v2 cold start latency.
+
+**Investigation process:**
+
+1. **Initial checks** — ECS service healthy (1/1 running), ALB target healthy, Aurora cluster "available"
+2. **Found the smoking gun in ALB metrics** — `TargetResponseTime` showed:
+   - 21:56 UTC: 30-second timeout (average and max both 30s — hitting ALB timeout limit)
+   - 21:59 UTC: 17-second max response time
+   - All other periods: 4-5ms average
+3. **Aurora Serverless capacity metrics** — Running at minimum 0.5 ACUs most of the time, with occasional spikes to 2-4 ACUs under load
+
+**Root cause:** Aurora Serverless v2 at 0.5 ACU minimum capacity goes cold during idle periods. When the next request arrives, the database needs to scale up, adding 10-30 seconds of latency. This is especially problematic after traffic spikes (saw 500+ req/min at 21:45-21:47) followed by near-zero traffic.
+
+**Contributing factor:** SSE connection cleanup logs showed `db_connections 15` being returned to pool, while CloudWatch showed only 4 Aurora connections. This suggests connection pool fragmentation, though not the primary cause of timeouts.
+
+**Fix:** Increased `serverless_v2_min_capacity` from 0.5 to 1 ACU in `infra_devopshero/stacks/database_stack.py`. This doubles the baseline capacity and significantly reduces cold start latency. The cost increase is minimal (~$43/month vs ~$22/month at idle) but eliminates the 10-30 second cold start penalty.
+
+**Key debugging commands used:**
+- `aws cloudwatch get-metric-statistics` for ALB TargetResponseTime, Aurora ServerlessDatabaseCapacity, CPUUtilization
+- `aws logs tail /devopshero/prod/ecs --since 10m` for real-time log inspection
+- `aws elbv2 describe-target-health` for ALB health checks
+- `aws rds describe-db-clusters` for Aurora status
+
+**Key points:**
+- Aurora Serverless v2 at 0.5 ACU minimum is too aggressive for user-facing production workloads — cold start can take 10-30 seconds
+- ALB access logs were disabled, making it harder to identify which specific URLs caused timeouts — consider enabling
+- The prod-debug skill provides a good starting framework but needed CloudWatch metrics commands for this diagnosis
+
 ## 2026-02-04 06:15 - [Bugfix] GitHub integration Re-sync button doesn't work when status is ERROR
 
 **Conversation:** [2026-02-03-2201-53c9f06e.md](conversations/2026-02-03-2201-53c9f06e.md)
