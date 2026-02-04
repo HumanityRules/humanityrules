@@ -1,19 +1,19 @@
 """
-Management command for deploying DevOpsHero infrastructure and apps.
+Direct CDK deployment command, bypassing the normal UI/DB/job-worker flow.
 
 Usage:
     # Base layer (VPC + ECS cluster)
-    python manage.py doh_deploy --base --account "CH Sandbox"
-    python manage.py doh_deploy --base --account "CH Sandbox" --teardown
-    python manage.py doh_deploy --base --account "CH Sandbox" --synth-only
-    python manage.py doh_deploy --base --account "CH Sandbox" --env prod
+    uv run manage.py doh_direct --base --account "CH Sandbox"
+    uv run manage.py doh_direct --base --account "CH Sandbox" --teardown
+    uv run manage.py doh_direct --base --account "CH Sandbox" --synth-only
+    uv run manage.py doh_direct --base --account "CH Sandbox" --env prod
 
     # Apps
-    python manage.py doh_deploy --app simple-dashboard --account "CH Sandbox"
-    python manage.py doh_deploy --app simple-dashboard --account "CH Sandbox" --hosted-zone dev.example.com
-    python manage.py doh_deploy --app simple-dashboard --account "CH Sandbox" --teardown
-    python manage.py doh_deploy --app simple-dashboard --account "CH Sandbox" --image-tag v1.2.3
-    python manage.py doh_deploy --app simple-dashboard --account "CH Sandbox" --synth-only
+    uv run manage.py doh_direct --app simple-dashboard --account "CH Sandbox"
+    uv run manage.py doh_direct --app simple-dashboard --account "CH Sandbox" --hosted-zone dev.example.com
+    uv run manage.py doh_direct --app simple-dashboard --account "CH Sandbox" --teardown
+    uv run manage.py doh_direct --app simple-dashboard --account "CH Sandbox" --image-tag v1.2.3
+    uv run manage.py doh_direct --app simple-dashboard --account "CH Sandbox" --synth-only
 
 Requires DOH_AWS_ACCESS_KEY and DOH_AWS_SECRET_KEY in .env (loaded via Django settings).
 """
@@ -34,7 +34,7 @@ DEFAULT_REGION = "us-east-1"
 
 
 class Command(BaseCommand):
-    help = "Deploy DevOpsHero infrastructure and apps to AWS accounts"
+    help = "Direct CDK deployment, bypassing UI/DB/job-worker flow"
 
     def add_arguments(self, parser):
         # Mutually exclusive: --base or --app
