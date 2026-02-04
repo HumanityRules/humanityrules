@@ -96,7 +96,7 @@ aws ecs execute-command \
 ```bash
 # Get target group ARN
 TG_ARN=$(aws elbv2 describe-target-groups \
-  --names doh-prod-tg \
+  --names doh-prod-app-tg \
   --query 'TargetGroups[0].TargetGroupArn' \
   --output text)
 
@@ -138,4 +138,4 @@ Key resources:
 - **Cluster:** `doh-prod-cluster`
 - **Service:** `doh-prod-app`
 - **Log group:** `/devopshero/prod/ecs`
-- **Target group:** `doh-prod-tg`
+- **Target group:** `doh-prod-app-tg`
