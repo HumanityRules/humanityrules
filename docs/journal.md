@@ -1,5 +1,30 @@
 # DevOpsHero Development Journal
 
+## 2026-02-03 15:30 - [DevEx] Rename doh_control retry commands for clarity
+
+**Conversation:** [2026-02-03-1941-3dce166b.md](conversations/2026-02-03-1941-3dce166b.md)
+
+Refactored `doh_control` management command to use more explicit, self-documenting command names for retry operations.
+
+**Changes:**
+
+- `provision-env` → `retry-env-provisioning` — The old name was confusing because it sounded like initial provisioning rather than retrying a failed one. The new name makes it explicit this is a retry operation.
+- `retry-deployment` → `retry-app-deployment` — Clarifies this retries an *app* deployment specifically, not an environment deployment or other type.
+- Removed `--provision` flag from `create-env` — There was a bug where the flag did nothing (status was always set to PENDING regardless). Rather than fix the bug, we made PENDING the only behavior since you create an environment to use it, not to let it sit idle.
+
+**Rationale:**
+
+The naming now follows a consistent pattern where retry commands explicitly state what's being retried:
+- `retry-env-provisioning` — retry failed environment provisioning
+- `retry-app-deployment` — retry failed app deployment
+
+This eliminates ambiguity. "provision-env" could have meant "provision this environment for the first time" vs "re-provision/retry". The new name is unambiguous.
+
+**Key points:**
+- Updated both `doh_control.py` and the `prod-manage` skill documentation
+- Fixed status messages to say "queued for retry" instead of technical "set to PENDING"
+- Created sandbox environment in production for Course Hero organization using Course Hero Sandbox AWS account (chsandbox.com hosted zone)
+
 ## 2026-02-04 10:45 - [UI] Show deployed environments on workspace app tiles
 
 **Conversation:** [2026-02-03-1924-eb36c2ae.md](conversations/2026-02-03-1924-eb36c2ae.md)
