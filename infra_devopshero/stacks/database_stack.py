@@ -49,7 +49,7 @@ class DatabaseStack(Stack):
             vpc=vpc,
             subnet_group=subnet_group,
             security_groups=[self.security_group],
-            serverless_v2_min_capacity=0.5,  # Cost optimization: scale down when idle
+            serverless_v2_min_capacity=1,
             serverless_v2_max_capacity=4,    # Scale up under load
             writer=rds.ClusterInstance.serverless_v2("writer"),
             readers=[],
