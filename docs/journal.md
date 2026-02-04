@@ -1,5 +1,48 @@
 # DevOpsHero Development Journal
 
+## 2026-02-04 06:15 - [Bugfix] GitHub integration Re-sync button doesn't work when status is ERROR
+
+**Conversation:** [2026-02-03-2201-53c9f06e.md](conversations/2026-02-03-2201-53c9f06e.md)
+
+Debugged why the GitHub integration showed "Error" status locally and why the Re-sync button did nothing.
+
+**Bug 1: Re-sync only works when already connected**
+
+The `settings_git_integrations` view had a condition that only ran sync if status was already CONNECTED:
+
+```python
+if integration and integration.status == GitProviderIntegration.Status.CONNECTED:
+    github_client.sync_repositories(...)
+```
+
+This meant clicking Re-sync on an ERROR status integration did nothing — the button appeared to work (POST request succeeded) but the sync was silently skipped.
+
+**Fix:** Changed the condition to check for `installation_id` instead of status, and added proper error handling that updates status based on sync result:
+- Sync succeeds → status becomes CONNECTED
+- Sync fails → status becomes/stays ERROR (with error logged)
+
+**Bug 2: Stale installation ID causes 404**
+
+After fixing the Re-sync button, clicking it produced:
+```
+Client error '404 Not Found' for url 'https://api.github.com/app/installations/105666021/access_tokens'
+```
+
+The local database had installation ID `105666021`, but that installation no longer existed on GitHub (likely uninstalled at some point). The GitHub App credentials were correct, but the installation reference was stale.
+
+**Workaround:** Queried production for the valid installation ID using `doh_query`:
+```bash
+./prod_manage.sh doh_query GitProviderIntegration installation_id status provider
+# Result: 106276726 | connected | github
+```
+
+Then updated local database to use production's installation ID. This works because both local and prod use the same GitHub App (same `GITHUB_APP_ID` and `GITHUB_APP_PRIVATE_KEY`), so they can share the installation.
+
+**Key points:**
+- Re-sync should attempt sync regardless of current status — the whole point of "re-sync" is to recover from problems
+- GitHub App installation IDs are org-specific but can be shared across environments using the same GitHub App credentials
+- When GitHub integration shows ERROR locally, "Reconnect" (full OAuth flow) is the proper fix; copying installation ID from prod is a shortcut that works if using shared credentials
+
 ## 2026-02-03 15:30 - [DevEx] Rename doh_control retry commands for clarity
 
 **Conversation:** [2026-02-03-1941-3dce166b.md](conversations/2026-02-03-1941-3dce166b.md)

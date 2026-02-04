@@ -1,8 +1,12 @@
+import logging
+
 from django.contrib.auth.decorators import login_required
 from django.shortcuts import render
 
 from ..models import AWSAccount, GitProviderIntegration, Repository
 from .base import get_app_shell_context
+
+logger = logging.getLogger(__name__)
 
 
 @login_required
@@ -131,8 +135,17 @@ def settings_git_integrations(request):
             provider=GitProviderIntegration.Provider.GITHUB,
         ).first()
 
-        if integration and integration.status == GitProviderIntegration.Status.CONNECTED:
-            github_client.sync_repositories(organization=org, integration=integration)
+        if integration and integration.installation_id:
+            try:
+                github_client.sync_repositories(organization=org, integration=integration)
+                # Sync succeeded — ensure status is CONNECTED
+                if integration.status != GitProviderIntegration.Status.CONNECTED:
+                    integration.status = GitProviderIntegration.Status.CONNECTED
+                    integration.save(update_fields=["status", "updated_at"])
+            except Exception as e:
+                logger.error("GitHub re-sync failed: %s", str(e))
+                integration.status = GitProviderIntegration.Status.ERROR
+                integration.save(update_fields=["status", "updated_at"])
 
     # Get GitHub integration for this org
     github_integration = GitProviderIntegration.objects.filter(
