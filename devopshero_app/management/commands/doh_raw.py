@@ -3,17 +3,17 @@ Direct CDK deployment command, bypassing the normal UI/DB/job-worker flow.
 
 Usage:
     # Base layer (VPC + ECS cluster)
-    uv run manage.py doh_direct --base --account "CH Sandbox"
-    uv run manage.py doh_direct --base --account "CH Sandbox" --teardown
-    uv run manage.py doh_direct --base --account "CH Sandbox" --synth-only
-    uv run manage.py doh_direct --base --account "CH Sandbox" --env prod
+    uv run manage.py doh_raw --base --account "CH Sandbox"
+    uv run manage.py doh_raw --base --account "CH Sandbox" --teardown
+    uv run manage.py doh_raw --base --account "CH Sandbox" --synth-only
+    uv run manage.py doh_raw --base --account "CH Sandbox" --env prod
 
     # Apps
-    uv run manage.py doh_direct --app simple-dashboard --account "CH Sandbox"
-    uv run manage.py doh_direct --app simple-dashboard --account "CH Sandbox" --hosted-zone dev.example.com
-    uv run manage.py doh_direct --app simple-dashboard --account "CH Sandbox" --teardown
-    uv run manage.py doh_direct --app simple-dashboard --account "CH Sandbox" --image-tag v1.2.3
-    uv run manage.py doh_direct --app simple-dashboard --account "CH Sandbox" --synth-only
+    uv run manage.py doh_raw --app simple-dashboard --account "CH Sandbox"
+    uv run manage.py doh_raw --app simple-dashboard --account "CH Sandbox" --hosted-zone dev.example.com
+    uv run manage.py doh_raw --app simple-dashboard --account "CH Sandbox" --teardown
+    uv run manage.py doh_raw --app simple-dashboard --account "CH Sandbox" --image-tag v1.2.3
+    uv run manage.py doh_raw --app simple-dashboard --account "CH Sandbox" --synth-only
 
 Requires DOH_AWS_ACCESS_KEY and DOH_AWS_SECRET_KEY in .env (loaded via Django settings).
 """

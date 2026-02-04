@@ -26,13 +26,13 @@ We abbrebrivate the name of DevOps Hero as DOH.
 **Bad:**
 ```bash
 python manage.py runserver
-python manage.py doh_direct
+python manage.py doh_raw
 ```
 
 **Good:**
 ```bash
 uv run manage.py runserver
-uv run manage.py doh_direct
+uv run manage.py doh_raw
 ```
 
 
