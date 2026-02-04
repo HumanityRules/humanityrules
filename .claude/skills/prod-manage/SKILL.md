@@ -24,21 +24,20 @@ Operations that modify state for environments and deployments.
     --aws-account "DevOps Hero AWS Account" \
     --name default \
     --region us-east-1 \
-    --hosted-zone devopshero.co \
-    --provision
-
-# Re-provision existing environment
-./prod_manage.sh doh_control provision-env \
-    --slug default \
-    --aws-account "DevOps Hero AWS Account"
+    --hosted-zone devopshero.co
 
 # Tear down environment
 ./prod_manage.sh doh_control teardown-env \
     --slug default \
     --aws-account "DevOps Hero AWS Account"
 
-# Retry a failed deployment
-./prod_manage.sh doh_control retry-deployment --app simple-dashboard
+# Retry failed environment provisioning
+./prod_manage.sh doh_control retry-env-provisioning \
+    --slug default \
+    --aws-account "DevOps Hero AWS Account"
+
+# Retry a failed app deployment
+./prod_manage.sh doh_control retry-app-deployment --app simple-dashboard
 ```
 
 ## Ad-hoc Model Queries (`doh_query`)
