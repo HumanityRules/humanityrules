@@ -1,10 +1,10 @@
 """
 Management command for ad-hoc model queries.
 
-Designed for shell-safe queries that avoid quoting issues when run via prod_manage.sh.
-
 Usage:
-    ./prod_manage.sh doh_query <Model> [field1 field2 ...] [--filter key=value] [--limit N]
+    uv run manage.py doh_query <Model> [field1 field2 ...] [--filter key=value] [--limit N]
+
+For production, use ./prod_manage.sh doh_query <args> instead.
 
 Common queries:
 

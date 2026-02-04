@@ -1,18 +1,15 @@
 """
 Management command for customer account operations.
 
-Usage (via prod_manage.sh):
-    ./prod_manage.sh doh_customer create-env --aws-account "Name" --name default --region us-east-1 --hosted-zone example.com
-    ./prod_manage.sh doh_customer provision-env --slug default --aws-account "Name"
-    ./prod_manage.sh doh_customer teardown-env --slug default --aws-account "Name"
-    ./prod_manage.sh doh_customer retry-deployment --app simple-dashboard
+Usage:
+    uv run manage.py doh_customer create-env --aws-account "Name" --name default --region us-east-1 --hosted-zone example.com
+    uv run manage.py doh_customer provision-env --slug default --aws-account "Name"
+    uv run manage.py doh_customer teardown-env --slug default --aws-account "Name"
+    uv run manage.py doh_customer retry-deployment --app simple-dashboard
 
-For querying data, use doh_query instead:
-    ./prod_manage.sh doh_query Organization
-    ./prod_manage.sh doh_query AWSAccount
-    ./prod_manage.sh doh_query Environment
-    ./prod_manage.sh doh_query App
-    ./prod_manage.sh doh_query Deployment
+For production, use ./prod_manage.sh doh_customer <operation> instead.
+
+For querying data, use doh_query instead.
 """
 
 from django.core.management.base import BaseCommand
