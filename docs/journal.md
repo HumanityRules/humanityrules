@@ -1,5 +1,43 @@
 # DevOpsHero Development Journal
 
+## 2026-02-03 23:15 - [DevEx] Management command and skill cleanup
+
+**Conversation:** [2026-02-03-1739-7d1d03f5.md](conversations/2026-02-03-1739-7d1d03f5.md)
+
+Major cleanup of the `doh_*` management commands and Claude skills to improve naming consistency, reduce duplication, and consolidate query operations.
+
+**Command renames:**
+
+- `doh_customer` → `doh_control` — Better reflects "control plane operations" (create-env, provision-env, teardown-env, retry-deployment)
+- `doh_deploy` → `doh_direct` → `doh_raw` — Evolved through discussion; "raw" best conveys bypassing the normal UI/DB/job-worker flow for direct CDK access
+- `list` → `list-infra` — More specific than generic "list" (though later removed entirely)
+
+**Query consolidation:**
+
+Removed all read-only operations from `doh_control` (formerly `doh_customer`):
+- `list-infra` (was `list`)
+- `list-apps`
+- `list-deployments`
+- `deployment-logs`
+
+These are now handled by `doh_query` which already supports all models. Updated `doh_query` docstring with common query examples for Organization, AWSAccount, Environment, App, Deployment, DeploymentLog. Tested all documented queries to verify they work.
+
+**Final command taxonomy:**
+- `doh_query` — Read-only ad-hoc queries on any model
+- `doh_control` — Control plane mutations (env/deployment operations)
+- `doh_raw` — Direct CDK deployment bypassing normal flow
+
+**Skill improvements:**
+
+- Updated `prod-manage/SKILL.md` with current command names and examples
+- Expanded `prod-debug/SKILL.md` with practical debugging examples (ECS status, CloudWatch logs, ALB health, CloudFormation stacks)
+- Fixed incorrect target group name (`doh-prod-tg` → `doh-prod-app-tg`) discovered during testing
+
+**Key principles applied:**
+- Commands should have clear, distinct purposes (query vs mutate vs bypass)
+- Active documentation (SKILL.md, AGENTS.md) must be updated; historical docs (journal, conversations) left as-is
+- All documented examples should be tested to catch errors like wrong resource names
+
 ## 2026-02-03 21:45 - [DevEx] Fix job worker starting during prod_manage.sh commands
 
 **Conversation:** [2026-02-03-1420-ceb0fdee.md](conversations/2026-02-03-1420-ceb0fdee.md)
