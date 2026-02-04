@@ -1,7 +1,8 @@
 from django.contrib.auth.decorators import login_required
+from django.db.models import Prefetch
 from django.shortcuts import get_object_or_404, render
 
-from devopshero_app.models import Conversation, Repository, Workspace
+from devopshero_app.models import Conversation, Deployment, Repository, Workspace
 
 from .base import get_app_shell_context
 
@@ -35,7 +36,17 @@ def workspace_detail(request, workspace_slug):
         organization=request.user.current_organization,
     )
     
-    apps = workspace.apps.select_related("repository").order_by("name")
+    # Prefetch active deployments (running, not being torn down) with their environments
+    active_deployments_prefetch = Prefetch(
+        "deployments",
+        queryset=Deployment.objects.filter(
+            status=Deployment.Status.RUNNING,
+        ).select_related("environment").order_by("environment__name"),
+        to_attr="active_deployments",
+    )
+    apps = workspace.apps.select_related("repository").prefetch_related(
+        active_deployments_prefetch,
+    ).order_by("name")
     datastores = workspace.datastores.order_by("name")
     conversations = Conversation.objects.filter(
         context_workspace=workspace,

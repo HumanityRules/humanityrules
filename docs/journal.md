@@ -1,5 +1,34 @@
 # DevOpsHero Development Journal
 
+## 2026-02-04 10:45 - [UI] Show deployed environments on workspace app tiles
+
+**Conversation:** [2026-02-03-1924-eb36c2ae.md](conversations/2026-02-03-1924-eb36c2ae.md)
+
+Added environment indicators to app tiles in the workspace detail view, showing which environments each app is currently deployed to.
+
+**Implementation:**
+
+Modified `workspace_detail` view to prefetch active deployments (status=RUNNING) with their environments using Django's `Prefetch` object. This avoids N+1 queries by loading all deployment/environment data in a single optimized query. The prefetched data is stored in `app.active_deployments` attribute.
+
+Updated the workspace detail template to display environment names as green badges on each app tile. Apps without active deployments show an em dash (—) instead.
+
+**Style refactor:**
+
+During implementation, noticed the workspace app tiles had inconsistent styling compared to the dashboard. The original style had inline "Field: value" text, while the dashboard uses a clean two-column layout with labels left-aligned and values right-aligned. Refactored the entire app tile structure to match the dashboard pattern:
+
+- Header row with app name and type badge
+- `space-y-2 text-sm` container for info rows
+- Each row uses `flex items-center justify-between`
+- Labels in muted gray, values in lighter gray
+- Environment badges right-aligned with `flex-wrap justify-end`
+
+This ensures visual consistency across the dashboard and workspace detail views.
+
+**Key points:**
+- Only RUNNING deployments are shown — excludes pending, failed, and teardown statuses
+- Used `Prefetch` with `to_attr` to create a clean `active_deployments` list attribute
+- Em dash (—) for empty state matches dashboard convention for missing status
+
 ## 2026-02-03 23:15 - [DevEx] Management command and skill cleanup
 
 **Conversation:** [2026-02-03-1739-7d1d03f5.md](conversations/2026-02-03-1739-7d1d03f5.md)
