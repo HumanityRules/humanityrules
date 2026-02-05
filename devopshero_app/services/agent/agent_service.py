@@ -41,7 +41,7 @@ from claude_agent_sdk.types import (
 )
 from django.conf import settings
 
-from devopshero_app.models import AWSAccount, Conversation, Environment, Message, Repository, Workspace
+from devopshero_app.models import AWSAccount, Conversation, Environment, LLMUsageLog, Message, Repository, Workspace
 from devopshero_app.services.gitproviders import repo_service
 from devopshero_app.services.llm import llm_client, title_generator
 
@@ -320,7 +320,7 @@ async def _maybe_generate_title(conversation: Conversation, user_message: str, a
             aws_account_name = account.name
 
         # Generate title in thread (anthropic client is sync)
-        title = await asyncio.to_thread(
+        result = await asyncio.to_thread(
             title_generator.generate_title,
             user_message,
             agent_response,
@@ -329,8 +329,23 @@ async def _maybe_generate_title(conversation: Conversation, user_message: str, a
             aws_account_name,
         )
 
-        conversation.title = title
-        logger.info(f"Generated title for conversation {conversation.id}: {title}")
+        conversation.title = result.title
+        logger.info(f"Generated title for conversation {conversation.id}: {result.title}")
+
+        # Log title generation LLM usage
+        await LLMUsageLog.objects.acreate(
+            organization_id=conversation.organization_id,
+            user_id=conversation.user_id,
+            conversation=conversation,
+            source=LLMUsageLog.Source.TITLE_GENERATION,
+            model_alias=title_generator.MODEL_ALIAS,
+            model_id=llm_client.get_model_id(alias=title_generator.MODEL_ALIAS),
+            input_tokens=result.input_tokens,
+            output_tokens=result.output_tokens,
+            cost_usd=None,
+            duration_ms=None,
+            num_turns=None,
+        )
 
     except Exception as e:
         # Don't fail the conversation if title generation fails
@@ -594,6 +609,22 @@ async def stream_response(conversation: Conversation, fork_session: bool) -> Asy
                     # Capture session_id for conversation continuity
                     if message.session_id and not conversation.session_id:
                         conversation.session_id = message.session_id
+
+                    # Log LLM usage to database
+                    usage = message.usage or {}
+                    await LLMUsageLog.objects.acreate(
+                        organization_id=conversation.organization_id,
+                        user_id=conversation.user_id,
+                        conversation=conversation,
+                        source=LLMUsageLog.Source.AGENT_TURN,
+                        model_alias=model_alias,
+                        model_id=llm_client.get_model_id(alias=model_alias),
+                        input_tokens=usage.get("input_tokens"),
+                        output_tokens=usage.get("output_tokens"),
+                        cost_usd=message.total_cost_usd,
+                        duration_ms=message.duration_ms,
+                        num_turns=message.num_turns,
+                    )
 
                 elif isinstance(message, SystemMessage):
                     logger.info(f"[SDK] SystemMessage: subtype={message.subtype}, data=\n{json.dumps(message.data, indent=2)}")

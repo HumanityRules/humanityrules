@@ -11,6 +11,7 @@ from devopshero_app.models import (
     Environment,
     EnvironmentLog,
     GitProviderIntegration,
+    LLMUsageLog,
     Message,
     Organization,
     OrganizationMembership,
@@ -222,6 +223,28 @@ class EnvironmentLogAdmin(admin.ModelAdmin):
         if not obj.message:
             return ""
         return obj.message[:120]
+
+
+@admin.register(LLMUsageLog)
+class LLMUsageLogAdmin(admin.ModelAdmin):
+    list_display = ["created_at", "organization", "user", "conversation", "source", "model_alias", "input_tokens", "output_tokens", "cost_usd", "duration_ms"]
+    list_filter = ["source", "model_alias", "organization"]
+    search_fields = ["organization__name", "user__email", "conversation__title", "model_alias"]
+    readonly_fields = [
+        "id", "organization", "user", "conversation", "source",
+        "model_alias", "model_id", "input_tokens", "output_tokens",
+        "cost_usd", "duration_ms", "num_turns", "created_at",
+    ]
+    autocomplete_fields = []
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
 
 
 @admin.register(WaitlistSignup)

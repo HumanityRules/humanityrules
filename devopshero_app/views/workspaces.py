@@ -1,5 +1,5 @@
 from django.contrib.auth.decorators import login_required
-from django.db.models import Prefetch
+from django.db.models import Prefetch, Sum
 from django.shortcuts import get_object_or_404, render
 
 from devopshero_app.models import Conversation, Deployment, Repository, Workspace
@@ -48,10 +48,14 @@ def workspace_detail(request, workspace_slug):
         active_deployments_prefetch,
     ).order_by("name")
     datastores = workspace.datastores.order_by("name")
-    conversations = Conversation.objects.filter(
+    show_costs = request.user.is_staff
+    conversations_qs = Conversation.objects.filter(
         context_workspace=workspace,
         user=request.user,
-    ).order_by("-updated_at")[:10]
+    ).order_by("-updated_at")
+    if show_costs:
+        conversations_qs = conversations_qs.annotate(total_cost=Sum("llm_usage_logs__cost_usd"))
+    conversations = conversations_qs[:10]
     
     repositories = Repository.objects.filter(
         organization=request.user.current_organization,
@@ -62,6 +66,7 @@ def workspace_detail(request, workspace_slug):
     context["datastores"] = datastores
     context["conversations"] = conversations
     context["repositories"] = repositories
+    context["show_costs"] = show_costs
     
     if request.htmx:
         return render(request, "devopshero_app/workspaces/workspace_detail.html", context=context)

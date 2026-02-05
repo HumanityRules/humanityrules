@@ -10,6 +10,8 @@ from django.shortcuts import get_object_or_404, redirect, render
 from django.template.loader import render_to_string
 from django.views.decorators.http import require_POST
 
+from django.db.models import Sum
+
 from ..models import Conversation, Message
 from ..services.agent import agent_client
 from ..services.agent import agent_runner
@@ -37,23 +39,28 @@ async def _log_connections(label: str) -> None:
     logger.info(f"[CONN] {label}: db_connections={count}")
 
 
-def _get_conversations(user):
+def _get_conversations(user, annotate_costs):
     """Get all conversations for a user in their current organization."""
-    return Conversation.objects.filter(
+    qs = Conversation.objects.filter(
         user=user,
         organization=user.current_organization,
     ).select_related("context_workspace", "context_repository", "context_aws_account").order_by("-updated_at")
+    if annotate_costs:
+        qs = qs.annotate(total_cost=Sum("llm_usage_logs__cost_usd"))
+    return qs
 
 
 @login_required
 def chat_list(request):
     """Show unified chat interface with no conversation selected."""
-    conversations = _get_conversations(user=request.user)
+    show_costs = request.user.is_staff
+    conversations = _get_conversations(user=request.user, annotate_costs=show_costs)
 
     context = get_app_shell_context(request=request, current_page="chat")
     context["conversations"] = conversations
     context["conversation"] = None
     context["messages"] = []
+    context["show_costs"] = show_costs
 
     if request.htmx:
         return render(request, "devopshero_app/chat/chat.html", context=context)
@@ -125,7 +132,9 @@ def chat_view(request, conversation_id):
         return render(request, "devopshero_app/chat/_chat_panel.html", context=context)
 
     # Full HTMX navigation or direct page load - need full unified template
-    context["conversations"] = _get_conversations(user=request.user)
+    show_costs = request.user.is_staff
+    context["conversations"] = _get_conversations(user=request.user, annotate_costs=show_costs)
+    context["show_costs"] = show_costs
 
     if request.htmx:
         return render(request, "devopshero_app/chat/chat.html", context=context)

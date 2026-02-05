@@ -1,5 +1,27 @@
 # DevOpsHero Development Journal
 
+## 2026-02-05 23:10 - [AgentChat] Add LLM usage cost tracking to database
+
+**Conversation:** [2026-02-05-1405-b98ede79.md](conversations/2026-02-05-1405-b98ede79.md)
+
+Added an `LLMUsageLog` model to record every LLM interaction for cost tracking and future billing. The design went through a deliberate options discussion: (A) dedicated log model, (B) fields on Conversation, (C) hybrid. Chose Option A — a dedicated append-only log table — because it provides per-interaction granularity, avoids race conditions on accumulation, and cleanly handles future LLM call sites beyond agent turns.
+
+The model tracks organization, user, conversation (nullable FK with SET_NULL so cost data survives conversation deletion), source type (agent_turn or title_generation), model alias/ID, input/output tokens, cost in USD, duration, and number of turns. Two indexes support billing rollup queries: `(organization, created_at)` and `(conversation, created_at)`.
+
+Two call sites were wired up:
+
+- **Agent turns** — The Claude Agent SDK's `ResultMessage` already provides `total_cost_usd`, `usage` dict, `duration_ms`, and `num_turns`. These were previously only logged to stdout. Now an `LLMUsageLog` row is created after each `ResultMessage`.
+- **Title generation** — The raw Anthropic API doesn't return cost (only the Agent SDK computes that), so `title_generator.py` was refactored to return a `TitleResult` dataclass with `title`, `input_tokens`, and `output_tokens`. Cost is stored as NULL for title generation rows; the token counts are available for retroactive computation if needed.
+
+Per-conversation cost is displayed in the chat sidebar and workspace detail conversation list, gated on `request.user.is_staff` (Django admin flag). The cost comes from a `SUM` annotation on the conversation queryset — a single JOIN + GROUP BY, no N+1 queries. Non-admin users see no difference. Real-time cost updates during streaming were discussed but deferred to a follow-up.
+
+**Key points:**
+- Chose append-only log model over accumulator fields on Conversation — better granularity, no race conditions, extensible to future LLM call sites
+- Organization FK uses CASCADE (consistent with all other org-owned models); Conversation and User FKs use SET_NULL to preserve cost data
+- Raw Anthropic API doesn't expose cost_usd — only the Claude Agent SDK's ResultMessage computes it. Title generation logs tokens but cost is NULL
+- Admin-only display uses `is_staff` flag — simplest gating mechanism, no feature flags needed
+- Real-time sidebar cost updates (via OOB swap on stream complete) identified as natural follow-up but deferred
+
 ## 2026-02-05 20:30 - [Bugfix] Fix Claude Opus 4.6 Bedrock model ID for inference profile
 
 **Conversation:** [2026-02-05-1227-f844bdc7.md](conversations/2026-02-05-1227-f844bdc7.md)

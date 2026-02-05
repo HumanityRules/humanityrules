@@ -1,28 +1,26 @@
 """Generate conversation titles using Claude Haiku."""
 
 import logging
+from dataclasses import dataclass
 
 from . import llm_client
 
 logger = logging.getLogger(__name__)
 
+MODEL_ALIAS = "haiku-4.5"
 
-def generate_title(user_message: str, agent_response: str, workspace_name: str | None, repo_name: str | None, aws_account_name: str | None) -> str:
-    """
-    Generate a short, descriptive title for a conversation.
 
-    Uses Claude Haiku for fast, cheap title generation.
+@dataclass
+class TitleResult:
+    """Result of title generation including usage data for cost tracking."""
 
-    Args:
-        user_message: The user's first message in the conversation.
-        agent_response: The agent's response to the user's message.
-        workspace_name: Optional workspace name for context.
-        repo_name: Optional repository name for context.
-        aws_account_name: Optional AWS account name for environment setup context.
+    title: str
+    input_tokens: int
+    output_tokens: int
 
-    Returns:
-        A title string (max 50 characters).
-    """
+
+def generate_title(user_message: str, agent_response: str, workspace_name: str | None, repo_name: str | None, aws_account_name: str | None) -> TitleResult:
+    """Generate a short, descriptive title for a conversation."""
     context_parts = []
     if workspace_name:
         context_parts.append(f"Workspace: {workspace_name}")
@@ -47,10 +45,10 @@ Agent's response:
 Reply with ONLY the title, no quotes or explanation."""
 
     client = llm_client.get_client()
-    model = llm_client.get_model_id(alias="haiku-4.5")
+    model_id = llm_client.get_model_id(alias=MODEL_ALIAS)
 
     response = client.messages.create(
-        model=model,
+        model=model_id,
         max_tokens=60,
         messages=[{"role": "user", "content": prompt}],
     )
@@ -63,4 +61,11 @@ Reply with ONLY the title, no quotes or explanation."""
     if title.startswith("'") and title.endswith("'"):
         title = title[1:-1]
 
-    return title[:50]
+    # Note: cost_usd is not available from the raw Anthropic API response.
+    # Only the Claude Agent SDK's ResultMessage computes cost. Token counts
+    # are returned so the caller can log them; cost is left as None.
+    return TitleResult(
+        title=title[:50],
+        input_tokens=response.usage.input_tokens,
+        output_tokens=response.usage.output_tokens,
+    )
