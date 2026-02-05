@@ -1,5 +1,23 @@
 # DevOpsHero Development Journal
 
+## 2026-02-05 20:30 - [Bugfix] Fix Claude Opus 4.6 Bedrock model ID for inference profile
+
+**Conversation:** [2026-02-05-1227-f844bdc7.md](conversations/2026-02-05-1227-f844bdc7.md)
+
+After upgrading to Claude Opus 4.6, the agent started returning `400 Invocation of model ID anthropic.claude-opus-4-6-v1 with on-demand throughput isn't supported` errors. The root cause: starting with Claude Sonnet 4.5 and all subsequent models, AWS Bedrock requires cross-region inference profile IDs rather than raw model IDs for on-demand invocation.
+
+The `LLM_MODELS` dict in `llm_client.py` had the Opus 4.6 Bedrock ID set to `anthropic.claude-opus-4-6-v1` (raw model ID, no inference profile prefix). All other models already used the `us.` prefix correctly (e.g., `us.anthropic.claude-opus-4-5-20251101-v1:0`).
+
+The first fix attempt used `us.anthropic.claude-opus-4-6-v1:0` (adding both the `us.` prefix and a `:0` version suffix by analogy with the older models). This produced a different error: `400 The provided model identifier is invalid.` The `:0` suffix was the problem — Opus 4.6 uses a simplified ID format without the version suffix and without a date stamp, unlike the 4.5-era models.
+
+The correct Bedrock inference profile ID, confirmed from the AWS Bedrock docs (inference-profiles-support.html), is `us.anthropic.claude-opus-4-6-v1` — with the `us.` prefix but no `:0`.
+
+**Key points:**
+- AWS Bedrock requires inference profile IDs (`us.`, `eu.`, `global.` prefix) for all Claude models from Sonnet 4.5 onward — raw model IDs (`anthropic.claude-*`) return "on-demand throughput isn't supported"
+- Opus 4.6 uses a new simplified naming convention: no date stamp, no `:0` version suffix (base ID is `anthropic.claude-opus-4-6-v1`, not `anthropic.claude-opus-4-6-20260205-v1:0`)
+- Always check the AWS Bedrock inference profiles docs directly — Anthropic's own docs listed `anthropic.claude-opus-4-6-v1:0` (with `:0`) as the Bedrock ID, but the actual AWS inference profile is `us.anthropic.claude-opus-4-6-v1` (without `:0`)
+- The two-attempt debugging sequence is a good reminder: when a model ID fails, the error message tells you which part is wrong (missing inference profile vs. invalid identifier format)
+
 ## 2026-02-05 13:45 - [Bugfix] Handle API errors from Claude Agent SDK AssistantMessage
 
 **Conversation:** [2026-02-05-1215-cf8bd08f.md](conversations/2026-02-05-1215-cf8bd08f.md)
