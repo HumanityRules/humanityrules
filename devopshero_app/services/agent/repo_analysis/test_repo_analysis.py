@@ -15,7 +15,7 @@ Usage:
     uv run python -m devopshero_app.services.agent.repo_analysis.test_repo_analysis --app django_postgres_app --quiet
 """
 
-# Set up Django FIRST so we can reuse existing app configuration (e.g. settings.CLAUDE_MODEL).
+# Set up Django FIRST so we can reuse existing app configuration (e.g. settings.CLAUDE_MODEL_GENERAL).
 # This harness does NOT use Django models, streaming, or persistence — it only needs settings.
 import os
 import django
@@ -208,7 +208,7 @@ def validate_result(app_name: str, result: RepoAnalysisOutput, expectation: AppE
 async def analyze_repository(repo_file_url: str, verbose: bool) -> RepoAnalysisOutput:
     """Analyze a repository using the SDK's native sub-agent invocation."""
     options = ClaudeAgentOptions(
-        model=llm_client.get_model_id(alias=settings.CLAUDE_MODEL),
+        model=llm_client.get_model_id(alias=settings.CLAUDE_MODEL_GENERAL),
         system_prompt="You are a test orchestrator. When asked to analyze a repository, use the analyze-repository agent.",
         agents={"analyze-repository": get_analyze_repository_agent()},
         permission_mode="bypassPermissions",

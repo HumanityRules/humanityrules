@@ -1,5 +1,23 @@
 # DevOpsHero Development Journal
 
+## 2026-02-05 13:45 - [Bugfix] Handle API errors from Claude Agent SDK AssistantMessage
+
+**Conversation:** [2026-02-05-1215-cf8bd08f.md](conversations/2026-02-05-1215-cf8bd08f.md)
+
+Discovered that `_handle_assistant_message` silently dropped API-level errors from the Claude Agent SDK. When the SDK returns an `AssistantMessage` with `message.error` set (e.g., `invalid_request`, `rate_limit`, `server_error`), the error description arrives inside a `TextBlock` in `message.content`. However, unlike the happy path, this `TextBlock` was **never streamed** via `SDKStreamEvent` — the streaming events only fire for successful responses. The old code assumed all `TextBlock` content had already been streamed and skipped it, so API errors vanished silently and the conversation just hung.
+
+The fix adds an early-return guard at the top of `_handle_assistant_message`: if `message.error` is set, extract the error text from the `TextBlock` content, log it, persist it to the database, and yield an error event to the UI.
+
+During the fix, we also corrected a misleading comment that claimed `ThinkingBlock` content was "streamed via SDKStreamEvent." Inspecting `_handle_sdk_stream_event` confirmed it only handles `text_delta` events — thinking content is never streamed. The skip is still correct (we intentionally don't surface thinking to users), but the comment was inaccurate.
+
+Finally, we unified two nearly-identical functions (`_persist_error` taking an `Exception` and `_persist_api_error` taking strings) into a single `_persist_error(conversation, error_type, error_description)` that both call sites use. The Exception-based caller now does `type(e).__name__` and `f"Agent error: {e}"` at the call site instead of inside the function.
+
+**Key points:**
+- `AssistantMessage.error` can be any of: `authentication_failed`, `billing_error`, `rate_limit`, `invalid_request`, `server_error`, `unknown` — all were silently ignored before this fix
+- The `TextBlock` inside an error `AssistantMessage` is NOT pre-streamed, unlike the happy path — this was the core incorrect assumption
+- `ThinkingBlock` is never streamed via `SDKStreamEvent`; we skip it intentionally (not surfaced to users), not because it was already streamed
+- Consolidated two persist-error functions into one with a string-based interface, eliminating duplication
+
 ## 2026-02-04 14:06 - [ControlPlane] Aurora Serverless cold start causing production timeouts
 
 **Conversation:** [2026-02-04-1407-64239c6e.md](conversations/2026-02-04-1407-64239c6e.md)

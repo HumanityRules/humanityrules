@@ -158,6 +158,9 @@ class AppStack(Stack):
                 "DOH_USE_REMOTE_BUILDER": "1",
                 "CLAUDE_CODE_USE_BEDROCK": "1",
                 "CLAUDE_CONFIG_DIR": "/home/appuser/.claude",
+                "CLAUDE_MODEL_GENERAL": "opus-4.6",
+                "CLAUDE_MODEL_ENVIRONMENT": "opus-4.6",
+                "CLAUDE_MODEL_APP_DEPLOYMENT": "opus-4.6",
             },
             secrets=app_secrets,
             health_check=ecs.HealthCheck(
