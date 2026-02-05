@@ -206,7 +206,7 @@ AWS_BEDROCK_SECRET_ACCESS_KEY = os.environ.get("AWS_BEDROCK_SECRET_ACCESS_KEY")
 CLAUDE_MODEL = os.environ.get("CLAUDE_MODEL", "sonnet-4.5")
 
 # Claude Agent Sandbox: Base directory for agent sandbox (cloned repos, temp files, etc.)
-CLAUDE_SANDBOX_DIR = BASE_DIR / "tmp"
+CLAUDE_SANDBOX_DIR = BASE_DIR / "sandbox"
 
 # PostHog Analytics Configuration
 POSTHOG_API_KEY = os.environ.get("POSTHOG_API_KEY")

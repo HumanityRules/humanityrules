@@ -1,3 +1,3 @@
-django: uv run uvicorn devopshero_site.asgi:application --reload --host 127.0.0.1 --port 8000 --timeout-graceful-shutdown 0 --reload-exclude "$(pwd)/tmp" --reload-include "*.html" --reload-include "*.css" --reload-include "*.js" --log-level warning
+django: uv run uvicorn devopshero_site.asgi:application --reload --host 127.0.0.1 --port 8000 --timeout-graceful-shutdown 0 --reload-exclude "$(pwd)/sandbox" --reload-include "*.html" --reload-include "*.css" --reload-include "*.js" --log-level warning
 tailwind: python manage.py tailwind start > /dev/null
 

@@ -19,27 +19,16 @@ from . import github_client
 logger = logging.getLogger(__name__)
 
 
-def clone_repository(repository: Repository, branch: str, clone_id: str) -> Path:
+def clone_repository(repository: Repository, branch: str, target_dir: Path) -> None:
     """
-    Clone a repository to a local directory.
+    Clone a repository to a specified directory.
 
     For GitHub repositories, uses installation token authentication.
     For local file:// URLs, copies the directory contents.
 
-    Args:
-        repository: The Repository model instance to clone.
-        branch: Git branch to checkout.
-        clone_id: Unique identifier for this clone (e.g., deployment_id).
-
-    Returns:
-        Path to the cloned repository directory (always under settings.CLAUDE_SANDBOX_DIR).
-
-    Raises:
-        ValueError: If repository has no integration (for GitHub repos).
-        subprocess.CalledProcessError: If git clone fails.
+    If target_dir already exists, cloning is skipped (re-uses existing clone).
     """
     clone_url = repository.clone_url
-    target_dir = settings.CLAUDE_SANDBOX_DIR / clone_id
 
     # Re-use existing clone if present (e.g., subsequent messages in same conversation)
     if target_dir.exists():
@@ -47,7 +36,7 @@ def clone_repository(repository: Repository, branch: str, clone_id: str) -> Path
             "Re-using existing clone at %(target)s",
             {"target": str(target_dir)},
         )
-        return target_dir
+        return
 
     # Handle local file:// URLs (backward compatibility with deployable_repos/)
     if clone_url.startswith("file://"):
@@ -62,7 +51,7 @@ def clone_repository(repository: Repository, branch: str, clone_id: str) -> Path
 
         # Copy directory contents to target
         shutil.copytree(src=source_path, dst=target_dir, dirs_exist_ok=False)
-        return target_dir
+        return
 
     # For GitHub repos, we need the integration to get a token
     if repository.provider == Repository.Provider.GITHUB:
@@ -122,8 +111,7 @@ def clone_repository(repository: Repository, branch: str, clone_id: str) -> Path
             "Successfully cloned %(repo)s to %(target)s",
             {"repo": repository.full_name, "target": str(target_dir)},
         )
-
-        return target_dir
+        return
 
     # Unsupported provider
     raise ValueError(f"Unsupported repository provider: {repository.provider}")

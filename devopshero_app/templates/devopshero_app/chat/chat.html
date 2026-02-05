@@ -1,7 +1,7 @@
 {# Unified chat interface with conversation list sidebar #}
-<div class="flex h-[calc(100vh-9rem)] -mx-8">
+<div class="flex h-[calc(100vh-9rem)] -mx-8 overflow-hidden">
     {# Left panel: Chat interface #}
-    <div id="chat-panel" class="flex-1 flex flex-col border-r border-gray-200 dark:border-gray-700">
+    <div id="chat-panel" class="flex-1 min-w-0 flex flex-col border-r border-gray-200 dark:border-gray-700">
         {% include "devopshero_app/chat/_chat_panel.html" %}
     </div>
 
