@@ -419,8 +419,18 @@ async def list_repositories(args: dict[str, Any]) -> dict[str, Any]:
         "For deep analysis, use the analyze-repository sub-agent instead."
     ),
     {
-        "repository_id": str,
-        "branch": str,
+        "type": "object",
+        "properties": {
+            "repository_id": {
+                "type": "string",
+                "description": "Repository ID from list_repositories",
+            },
+            "branch": {
+                "type": "string",
+                "description": "Branch to scan. If not specified, uses the repository's default branch.",
+            },
+        },
+        "required": ["repository_id"],
     },
 )
 async def scan_repository(args: dict[str, Any]) -> dict[str, Any]:
@@ -440,22 +450,25 @@ async def scan_repository(args: dict[str, Any]) -> dict[str, Any]:
             f"Repository {args['repository_id']} not found or doesn't belong to your organization."
         )
 
+    # Use specified branch or fall back to repository's default
+    branch = args.get("branch") or repository.default_branch
+
     # Clone the repository (run sync I/O in thread pool)
-    clone_id = f"scan-{uuid.uuid4().hex[:8]}"
-    repo_path = await asyncio.to_thread(
+    cloned_repo_path = settings.CLAUDE_SANDBOX_DIR / f"scan-{uuid.uuid4().hex[:8]}"
+    await asyncio.to_thread(
         repo_service.clone_repository,
         repository,
-        args["branch"],
-        clone_id,
+        branch,
+        cloned_repo_path,
     )
 
     try:
         # Scan the cloned repository
-        result = _scan_repository(repo_path=repo_path)
+        result = _scan_repository(repo_path=cloned_repo_path)
         return _mcp_response(result)
     finally:
         # Always clean up
-        await asyncio.to_thread(repo_service.cleanup_repository, repo_path)
+        await asyncio.to_thread(repo_service.cleanup_repository, cloned_repo_path)
 
 
 # =============================================================================

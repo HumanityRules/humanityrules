@@ -13,6 +13,7 @@ structured tool calling, conversation memory, and streaming responses.
 """
 
 import asyncio
+import json
 import logging
 import time
 from collections.abc import AsyncGenerator
@@ -33,6 +34,9 @@ from claude_agent_sdk.types import (
     ToolResultBlock,
     SystemMessage,
     StreamEvent as SDKStreamEvent,
+    PermissionResultAllow,
+    PermissionResultDeny,
+    ToolPermissionContext,
 )
 from django.conf import settings
 
@@ -79,6 +83,24 @@ class StreamingContext:
     pending_tool_calls: dict[str, dict[str, Any]] = field(default_factory=dict)
     accumulated_content: str = ""
     has_started_streaming: bool = False
+
+
+@dataclass
+class SandboxPaths:
+    """Sandbox directory structure for a conversation."""
+    root_path: Path   # sandbox/conv-{id}/ — conversation isolation folder
+    src_path: Path    # sandbox/conv-{id}/src/ — cloned repository
+    tmp_path: Path    # sandbox/conv-{id}/tmp/ — temp files for this conversation
+
+
+def _get_sandbox_paths(conversation_id) -> SandboxPaths:
+    """Single source of truth for conversation sandbox paths."""
+    root_path = settings.CLAUDE_SANDBOX_DIR / f"conv-{conversation_id}"
+    return SandboxPaths(
+        root_path=root_path,
+        src_path=root_path / "src",
+        tmp_path=root_path / "tmp",
+    )
 
 
 def _load_prompt_file(filename: str) -> str:
@@ -423,45 +445,43 @@ async def _handle_tool_results(message: UserMessage, ctx: StreamingContext) -> A
     yield AgentStreamEvent(type="thinking")
 
 
-def _create_agent_options(system_prompt: str, resume_session_id: str | None, fork_session: bool, repo_path: Path | None, model_alias: str) -> ClaudeAgentOptions:
-    """
-    Create SDK client options with standard configuration.
+def _create_agent_options(system_prompt: str, resume_session_id: str | None, fork_session: bool, sandbox_paths: SandboxPaths, model_alias: str) -> ClaudeAgentOptions:
+    """Create SDK client options with standard configuration."""
 
-    Args:
-        system_prompt: The system prompt for the agent.
-        resume_session_id: Session ID to resume, if any.
-        fork_session: Whether to fork the session.
-        repo_path: Optional path to a cloned repository. When provided,
-                   cwd is set to this path. Otherwise defaults to CLONE_BASE_DIR.
-        model_alias: Model alias to use (e.g., "opus-4.5", "sonnet-4.5").
-    """
-    # Sandbox the agent to our tmp directory
-    settings.CLAUDE_SANDBOX_DIR.mkdir(parents=True, exist_ok=True)
-    cwd = str(repo_path) if repo_path else str(settings.CLAUDE_SANDBOX_DIR)
-
+    # The sandbox settings are used to restrict the agent's filesystem access but only for Bash commands.
     sandbox_settings = SandboxSettings(
         enabled=True,
-        autoAllowBashIfSandboxed=True,
+        autoAllowBashIfSandboxed=False,
+        allowUnsandboxedCommands=False
     )
 
-    # Override TMPDIR so CLI uses our sandbox dir for temp files
-    # (prevents access to /var/folders which is outside sandbox)
+    # TMPDIR points to the per-conversation tmp folder for isolation
     env = {
         **get_claude_env(),
-        "TMPDIR": str(settings.CLAUDE_SANDBOX_DIR),
+        "TMPDIR": str(sandbox_paths.tmp_path),
     }
 
+    # Excluded built-in tools: NotebookEdit, WebFetch, KillShell, AskUserQuestion, Skill
+    builtin_tools = [
+        "Read", "Write", "Edit", "Glob", "Grep", "Bash",
+        "Task", "TaskOutput", "TodoWrite", "EnterPlanMode", "ExitPlanMode",
+    ]
+
+    blocked_agents = ["Task(Bash)", "Task(statusline-setup)"]
+    
     return ClaudeAgentOptions(
         model=llm_client.get_model_id(alias=model_alias),
         system_prompt=system_prompt,
         resume=resume_session_id,
         fork_session=fork_session,
-        cwd=cwd,
+        permission_mode="default",
+        cwd=str(sandbox_paths.src_path),
         sandbox=sandbox_settings,
         agents={"analyze-repository": get_analyze_repository_agent()},
         mcp_servers={"devopshero": devopshero_mcp_server},
+        tools=builtin_tools,
         allowed_tools=TOOL_NAMES,
-        permission_mode="bypassPermissions",
+        disallowed_tools=blocked_agents,
         env=env,
         include_partial_messages=True,
     )
@@ -494,17 +514,21 @@ async def stream_response(conversation: Conversation, fork_session: bool) -> Asy
     user_message = await _aget_last_user_message(conversation)
     system_prompt = await _build_system_prompt(conversation)
 
+    # Set up per-conversation sandbox directory structure. Do not create the src path here, it will be created by the repository clone.
+    sandbox_paths = _get_sandbox_paths(conversation.id)
+    sandbox_paths.root_path.mkdir(parents=True, exist_ok=True)
+    sandbox_paths.tmp_path.mkdir(parents=True, exist_ok=True)
+
     # Clone repository if one is set in conversation context
-    repo_path = None
     if conversation.context_repository_id:
         repository = await Repository.objects.select_related("integration").aget(
             id=conversation.context_repository_id,
         )
-        repo_path = await asyncio.to_thread(
+        await asyncio.to_thread(
             repo_service.clone_repository,
             repository,
             repository.default_branch,
-            f"conv-{conversation.id}",
+            sandbox_paths.src_path,
         )
 
     # model_alias = "sonnet-4.5" if conversation.mode == Conversation.Mode.ENVIRONMENT_SETUP else settings.CLAUDE_MODEL
@@ -516,7 +540,7 @@ async def stream_response(conversation: Conversation, fork_session: bool) -> Asy
         system_prompt=system_prompt,
         resume_session_id=conversation.session_id,
         fork_session=fork_session,
-        repo_path=repo_path,
+        sandbox_paths=sandbox_paths,
         model_alias=model_alias,
     )
 
@@ -551,7 +575,7 @@ async def stream_response(conversation: Conversation, fork_session: bool) -> Asy
                         conversation.session_id = message.session_id
 
                 elif isinstance(message, SystemMessage):
-                    logger.debug(f"[SDK] SystemMessage: subtype={message.subtype}")
+                    logger.info(f"[SDK] SystemMessage: subtype={message.subtype}, data=\n{json.dumps(message.data, indent=2)}")
 
         if ctx.accumulated_content:
             await _persist_text_message(conversation=conversation, content=ctx.accumulated_content)

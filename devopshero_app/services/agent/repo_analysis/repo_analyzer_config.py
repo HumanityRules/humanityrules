@@ -30,5 +30,6 @@ def get_analyze_repository_agent() -> AgentDefinition:
             "and questions to ask the user. Returns structured JSON with evidence."
         ),
         prompt=_load_system_prompt(),
-        tools=["Bash", "Read", "LS", "Glob", "Grep"],
+        # prompt="Do a quick Bash ls of the repository and return your interpretation of the contents. Also, try to ls /Users/vmendi/websites/devopshero/",
+        tools=["Bash", "Read", "Glob", "Grep"],
     )

@@ -99,10 +99,11 @@ def run_deployment(deployment_id: str) -> bool:
         )
 
         # Clone the repository
-        repo_path = repo_service.clone_repository(
+        cloned_repo_path = settings.CLAUDE_SANDBOX_DIR / f"deployment-{deployment_id}"
+        repo_service.clone_repository(
             repository=app.repository,
             branch=deployment.git_ref,
-            clone_id=str(deployment_id),
+            target_dir=cloned_repo_path,
         )
 
         try:
@@ -113,7 +114,7 @@ def run_deployment(deployment_id: str) -> bool:
             app_config = app_config_builder.build_app_config(
                 app=app,
                 environment=environment,
-                repo_path=repo_path,
+                repo_path=cloned_repo_path,
             )
 
             # Execute deployment
@@ -163,4 +164,4 @@ def run_deployment(deployment_id: str) -> bool:
 
         finally:
             # Always cleanup the cloned repository
-            repo_service.cleanup_repository(repo_path=repo_path)
+            repo_service.cleanup_repository(repo_path=cloned_repo_path)

@@ -5,26 +5,6 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "Python Debugger: Deploy App",
-            "type": "debugpy",
-            "request": "launch",
-            "program": "${workspaceFolder}/infra_customer/deploy_app.py",
-            "args": [
-            ],
-            "console": "integratedTerminal"
-        },
-        {
-            "name": "Python Debugger: Django WSGI",
-            "type": "debugpy",
-            "request": "launch",
-            "args": [
-                "runserver"
-            ],
-            "django": true,
-            "autoStartBrowser": false,
-            "program": "${workspaceFolder}/manage.py"
-        },
-        {
             "name": "Python Debugger: Django ASGI (Uvicorn)",
             "type": "debugpy",
             "request": "launch",
