@@ -1,5 +1,21 @@
 # DevOpsHero Development Journal
 
+## 2026-02-05 23:45 - [AgentChat] Real-time sidebar cost update via OOB swap
+
+**Conversation:** [2026-02-05-1414-b98ede79.md](conversations/2026-02-05-1414-b98ede79.md)
+
+Added dynamic cost updates to the chat sidebar so the "Agent Cost:" value refreshes in real time as the agent completes each turn, rather than only showing the cost at page load.
+
+The implementation follows the same OOB swap pattern already used for title updates (`_render_title_update`). The agent service queries the cumulative conversation cost from `LLMUsageLog` via a `SUM` aggregate after each turn completes, and includes `total_cost` in the `complete` event data. On the view side, a new `_render_cost_update()` function generates an OOB swap targeting a stable `id="sidebar-cost-{conversation_id}"` element. The `_format_sse_event` function gained a `show_costs` parameter, and the `chat_stream` view passes `user.is_staff` into it — non-admin users never receive cost swap HTML.
+
+A subtle template change was needed: the sidebar cost `<p>` element now always renders (with a stable `id`) when `show_costs` is true, even if there's no cost yet. This ensures the OOB swap has a target on the first turn of a new conversation. Previously, the element only rendered when `conv.total_cost` was truthy, which meant the first cost update had nothing to swap into.
+
+**Key points:**
+- OOB swap pattern mirrors `_render_title_update` — proven pattern for sidebar updates during streaming
+- Sidebar cost element always renders with stable `id` when `show_costs=True` (empty if no cost) so the first OOB swap has a target
+- `_format_sse_event` now takes `show_costs` param — keeps admin gating in the view layer, not the agent service
+- Agent service queries `SUM(cost_usd)` on complete — one extra query per turn, negligible overhead
+
 ## 2026-02-05 23:10 - [AgentChat] Add LLM usage cost tracking to database
 
 **Conversation:** [2026-02-05-1405-b98ede79.md](conversations/2026-02-05-1405-b98ede79.md)
