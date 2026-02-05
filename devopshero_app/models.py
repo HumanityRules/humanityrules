@@ -994,6 +994,84 @@ class WaitlistSignup(models.Model):
         return self.email
 
 
+class LLMUsageLog(models.Model):
+    """Append-only log of every LLM interaction for cost tracking and billing."""
+
+    class Source(models.TextChoices):
+        AGENT_TURN = "agent_turn", "Agent Turn"
+        TITLE_GENERATION = "title_generation", "Title Generation"
+
+    id = models.UUIDField(
+        primary_key=True,
+        default=uuid.uuid7,
+        editable=False,
+    )
+    organization = models.ForeignKey(
+        Organization,
+        on_delete=models.CASCADE,
+        related_name="llm_usage_logs",
+    )
+    user = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        related_name="llm_usage_logs",
+    )
+    conversation = models.ForeignKey(
+        Conversation,
+        on_delete=models.SET_NULL,
+        null=True,
+        related_name="llm_usage_logs",
+    )
+    source = models.CharField(
+        max_length=20,
+        choices=Source.choices,
+    )
+    model_alias = models.CharField(
+        max_length=50,
+        help_text="Model alias used (e.g., 'opus-4.6', 'haiku-4.5')",
+    )
+    model_id = models.CharField(
+        max_length=255,
+        help_text="Resolved API or Bedrock model ID",
+    )
+    input_tokens = models.IntegerField(
+        null=True,
+        help_text="Number of input tokens consumed",
+    )
+    output_tokens = models.IntegerField(
+        null=True,
+        help_text="Number of output tokens generated",
+    )
+    cost_usd = models.DecimalField(
+        max_digits=10,
+        decimal_places=6,
+        null=True,
+        help_text="Cost in USD (from SDK or computed)",
+    )
+    duration_ms = models.IntegerField(
+        null=True,
+        help_text="Wall-clock duration in milliseconds",
+    )
+    num_turns = models.IntegerField(
+        null=True,
+        help_text="Number of agent turns (only for agent_turn source)",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        verbose_name = "LLM Usage Log"
+        verbose_name_plural = "LLM Usage Logs"
+        indexes = [
+            models.Index(fields=["organization", "created_at"]),
+            models.Index(fields=["conversation", "created_at"]),
+        ]
+
+    def __str__(self):
+        return f"{self.source} — {self.model_alias} — ${self.cost_usd or 0:.4f}"
+
+
 # =============================================================================
 # Signals
 # =============================================================================
