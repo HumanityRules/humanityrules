@@ -13,10 +13,11 @@ import anthropic
 
 
 # Model aliases mapped to (API model ID, Bedrock model ID)
-# Use these simple aliases in CLAUDE_MODEL env var
+# Use these aliases in CLAUDE_MODEL_GENERAL / CLAUDE_MODEL_ENVIRONMENT / CLAUDE_MODEL_APP_DEPLOYMENT env vars
 # See: https://docs.anthropic.com/en/docs/about-claude/models/overview
 LLM_MODELS: dict[str, tuple[str, str]] = {
-    "opus-4.5": ("claude-opus-4-5-20251101", "us.anthropic.claude-opus-4-5-20251101-v1:0"),
+    "opus-4.6": ("claude-opus-4-6-v1", "anthropic.claude-opus-4-6-v1"),
+    "opus-4.5": ("claude-opus-4-5-20251101", "us.anthropic.claude-opus-4-5-20251101-v1:0"),    
     "sonnet-4.5": ("claude-sonnet-4-5-20250929", "us.anthropic.claude-sonnet-4-5-20250929-v1:0"),
     "haiku-4.5": ("claude-haiku-4-5-20251001", "us.anthropic.claude-haiku-4-5-20251001-v1:0"),
 }

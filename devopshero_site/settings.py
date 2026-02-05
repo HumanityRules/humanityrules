@@ -202,8 +202,10 @@ AWS_BEDROCK_REGION = os.environ.get("AWS_BEDROCK_REGION")
 AWS_BEDROCK_ACCESS_KEY_ID = os.environ.get("AWS_BEDROCK_ACCESS_KEY_ID")
 AWS_BEDROCK_SECRET_ACCESS_KEY = os.environ.get("AWS_BEDROCK_SECRET_ACCESS_KEY")
 
-# CLAUDE_MODEL: Use simple aliases (opus-4.5, sonnet-4.5, haiku-4.5) (devopshero_app/services/llm/llm_client.py)
-CLAUDE_MODEL = os.environ.get("CLAUDE_MODEL", "sonnet-4.5")
+# Claude model aliases per conversation mode (opus-4.6, opus-4.5, sonnet-4.5, haiku-4.5)
+CLAUDE_MODEL_GENERAL = os.environ.get("CLAUDE_MODEL_GENERAL", "opus-4.6")
+CLAUDE_MODEL_ENVIRONMENT = os.environ.get("CLAUDE_MODEL_ENVIRONMENT", "opus-4.6")
+CLAUDE_MODEL_APP_DEPLOYMENT = os.environ.get("CLAUDE_MODEL_APP_DEPLOYMENT", "opus-4.6")
 
 # Claude Agent Sandbox: Base directory for agent sandbox (cloned repos, temp files, etc.)
 CLAUDE_SANDBOX_DIR = BASE_DIR / "sandbox"

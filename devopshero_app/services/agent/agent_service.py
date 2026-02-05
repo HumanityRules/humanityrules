@@ -30,6 +30,7 @@ from claude_agent_sdk import (
     UserMessage,
 )
 from claude_agent_sdk.types import (
+    TextBlock,
     ToolUseBlock,
     ToolResultBlock,
     SystemMessage,
@@ -107,6 +108,16 @@ def _load_prompt_file(filename: str) -> str:
     """Load a system prompt from the given filename."""
     prompt_path = Path(__file__).parent / filename
     return prompt_path.read_text()
+
+
+def _get_llm_model_for_conversation_mode(mode: str) -> str:
+    """Return the Claude model alias for a conversation mode."""
+    mode_to_setting = {
+        Conversation.Mode.GENERAL: settings.CLAUDE_MODEL_GENERAL,
+        Conversation.Mode.ENVIRONMENT_SETUP: settings.CLAUDE_MODEL_ENVIRONMENT,
+        Conversation.Mode.APP_DEPLOYMENT: settings.CLAUDE_MODEL_APP_DEPLOYMENT,
+    }
+    return mode_to_setting.get(mode, settings.CLAUDE_MODEL_GENERAL)
 
 
 async def _build_system_prompt(conversation: Conversation) -> str:
@@ -223,13 +234,13 @@ async def _build_aws_infrastructure_section(organization_id) -> str:
 
     async for account in accounts:
         account_count += 1
-        lines.append(f"**{account.name}** (id: {account.id}, aws: {account.aws_account_id or 'pending'}, status: {account.status})")
+        lines.append(f"Account: **{account.name}** (id: {account.id}, aws: {account.aws_account_id or 'pending'}, status: {account.status})")
 
         environments = [env async for env in account.environments.all()]
         if environments:
             for env in environments:
                 domain_info = f", domain: *.{env.shared_alb_hosted_zone}" if env.shared_alb_hosted_zone else ""
-                lines.append(f"  - **{env.name}** (id: {env.id}, slug: {env.slug}, region: {env.aws_region}, status: {env.status}{domain_info})")
+                lines.append(f"  - Environment: **{env.name}** (id: {env.id}, slug: {env.slug}, region: {env.aws_region}, status: {env.status}{domain_info})")
         else:
             lines.append("  - No environments yet")
         lines.append("")
@@ -277,14 +288,14 @@ async def _persist_tool_call(conversation: Conversation, tool_name: str, paramet
     )
 
 
-async def _persist_error(conversation: Conversation, error: Exception) -> None:
+async def _persist_error(conversation: Conversation, error_type: str, error_description: str) -> None:
     """Persist an error message to the database."""
     await Message.objects.acreate(
         conversation=conversation,
         role=Message.Role.SYSTEM,
         content_type=Message.ContentType.ERROR,
-        content=f"Agent error: {str(error)}",
-        metadata={"error_type": type(error).__name__},
+        content=error_description,
+        metadata={"error_type": error_type},
     )
 
 
@@ -362,6 +373,16 @@ async def _enrich_tool_input(tool_name: str, tool_input: dict) -> dict:
 
 async def _handle_assistant_message(message: AssistantMessage, ctx: StreamingContext) -> AsyncGenerator[AgentStreamEvent, None]:
     """Handle assistant messages containing tool use blocks."""
+
+    # Handle API-level errors (rate_limit, invalid_request, server_error, etc.)
+    # When message.error is set, the TextBlock content was NOT streamed — it contains the error description.
+    if message.error:
+        error_text = " ".join(block.text for block in message.content if isinstance(block, TextBlock))
+        error_description = error_text or message.error
+        logger.error(f"[SDK] AssistantMessage error ({message.error}): {error_description}")
+        await _persist_error(conversation=ctx.conversation, error_type=message.error, error_description=error_description)
+        yield AgentStreamEvent(type="error", data={"error": error_description})
+        return
     
     # Persist any accumulated text before tool calls
     if ctx.accumulated_content:
@@ -375,8 +396,8 @@ async def _handle_assistant_message(message: AssistantMessage, ctx: StreamingCon
 
     for block in message.content:
         if not isinstance(block, ToolUseBlock):
-            # TextBlocks are expected here when Claude responds with text only.
-            # The text has already been streamed via SDKStreamEvent, so we skip it.
+            # TextBlocks have already been streamed via SDKStreamEvent, so we skip them.
+            # ThinkingBlocks are intentionally not surfaced to the user.
             continue
 
         # Enrich input with display-friendly data (e.g., app_name from app_id)
@@ -514,6 +535,8 @@ async def stream_response(conversation: Conversation, fork_session: bool) -> Asy
     user_message = await _aget_last_user_message(conversation)
     system_prompt = await _build_system_prompt(conversation)
 
+    logger.info(f"System prompt for conversation {conversation.id}:\n{system_prompt}")
+
     # Set up per-conversation sandbox directory structure. Do not create the src path here, it will be created by the repository clone.
     sandbox_paths = _get_sandbox_paths(conversation.id)
     sandbox_paths.root_path.mkdir(parents=True, exist_ok=True)
@@ -531,9 +554,7 @@ async def stream_response(conversation: Conversation, fork_session: bool) -> Asy
             sandbox_paths.src_path,
         )
 
-    # model_alias = "sonnet-4.5" if conversation.mode == Conversation.Mode.ENVIRONMENT_SETUP else settings.CLAUDE_MODEL
-    # Use Opus for all modes
-    model_alias = "opus-4.5"
+    model_alias = _get_llm_model_for_conversation_mode(conversation.mode)
     logger.info(f"Using model {model_alias} for conversation {conversation.id} (mode={conversation.mode})")
 
     options = _create_agent_options(
@@ -602,7 +623,7 @@ async def stream_response(conversation: Conversation, fork_session: bool) -> Asy
     except Exception as e:
         logger.exception("Error during streaming conversation processing")
         try:
-            await _persist_error(conversation=conversation, error=e)
+            await _persist_error(conversation=conversation, error_type=type(e).__name__, error_description=f"Agent error: {e}")
         except Exception:
             logger.exception("Failed to save error message to database")
         yield AgentStreamEvent(type="error", data={"error": str(e)})
