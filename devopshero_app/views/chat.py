@@ -222,6 +222,8 @@ async def chat_stream(request, conversation_id):
     except Conversation.DoesNotExist:
         return HttpResponse(status=404)
 
+    show_costs = user.is_staff
+
     async def event_generator():
         """Subscribe to agent runner's event queue and yield SSE events."""
         logger.info(f"SSE event_generator started for conversation {conversation_id}")
@@ -241,7 +243,7 @@ async def chat_stream(request, conversation_id):
                         # Sentinel: runner finished, exit loop
                         logger.info(f"Agent runner completed for conversation {conversation_id}")
                         break
-                    yield _format_sse_event(event=event)
+                    yield _format_sse_event(event=event, show_costs=show_costs)
                 except asyncio.TimeoutError:
                     # No event within timeout - send SSE comment to keep connection alive
                     yield ": keepalive\n\n"
@@ -363,7 +365,16 @@ def _render_title_update(title: str, conversation_id: str) -> str:
     return header_html + sidebar_html
 
 
-def _format_sse_event(event: AgentStreamEvent) -> str:
+def _render_cost_update(total_cost: str, conversation_id: str) -> str:
+    """Render OOB swap HTML to update conversation cost in sidebar."""
+    return (
+        f'<p id="sidebar-cost-{conversation_id}" hx-swap-oob="true" '
+        f'class="text-xs text-gray-500 dark:text-gray-400">'
+        f'<span class="text-gray-400 dark:text-gray-500">Agent Cost:</span> ${total_cost}</p>'
+    )
+
+
+def _format_sse_event(event: AgentStreamEvent, show_costs: bool) -> str:
     """Convert AgentStreamEvent to SSE format."""
     if event.type == "thinking":
         return _format_sse(event_name="sse-thinking", data=_render_thinking())
@@ -380,6 +391,9 @@ def _format_sse_event(event: AgentStreamEvent) -> str:
     elif event.type == "complete":
         # Include title OOB swap if a title was generated
         data = _render_title_update(title=event.data["title"], conversation_id=event.data["conversation_id"]) if event.data.get("title") else ""
+        # Include cost OOB swap for admin users
+        if show_costs and event.data.get("total_cost"):
+            data += _render_cost_update(total_cost=event.data["total_cost"], conversation_id=event.data["conversation_id"])
         return _format_sse(event_name="sse-complete", data=data)
     elif event.type == "error":
         error_msg = event.data.get("error", "Unknown error") if event.data else "Unknown error"

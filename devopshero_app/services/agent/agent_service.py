@@ -40,6 +40,7 @@ from claude_agent_sdk.types import (
     ToolPermissionContext,
 )
 from django.conf import settings
+from django.db.models import Sum
 
 from devopshero_app.models import AWSAccount, Conversation, Environment, LLMUsageLog, Message, Repository, Workspace
 from devopshero_app.services.gitproviders import repo_service
@@ -645,10 +646,18 @@ async def stream_response(conversation: Conversation, fork_session: bool) -> Asy
 
         await conversation.asave()
 
-        # Include title in complete event if generated (for OOB UI update)
+        # Query total cost for this conversation (includes the turn we just logged + title gen)
+        total_cost = await LLMUsageLog.objects.filter(
+            conversation=conversation,
+        ).aaggregate(total=Sum("cost_usd"))
+        total_cost_value = total_cost["total"]
+
+        # Include title and cost in complete event (for OOB UI updates)
         complete_data = {"conversation_id": str(conversation.id)}
         if generated_title:
             complete_data["title"] = generated_title
+        if total_cost_value is not None:
+            complete_data["total_cost"] = f"{total_cost_value:.4f}"
         yield AgentStreamEvent(type="complete", data=complete_data)
 
     except Exception as e:
