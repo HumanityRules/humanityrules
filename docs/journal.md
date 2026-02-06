@@ -1,5 +1,27 @@
 # DevOpsHero Development Journal
 
+## 2026-02-06 11:41 - [AgentChat] Bookmarkable URL shortcut for app deployment conversations
+
+**Conversation:** [2026-02-06-1141-39a89719.md](conversations/2026-02-06-1141-39a89719.md)
+
+Added a human-readable URL endpoint to start app deployment conversations without navigating the UI. The existing `/chat/new/?workspace=<uuid>&repo=<uuid>` endpoint already worked but required remembering UUIDs — unusable as a bookmark.
+
+New endpoint: `/chat/app_deploy/<workspace_slug>/<repo_full_name>/` where `repo_full_name` can be either `owner/repo-name` (2 path segments) or just `repo-name` (1 segment) for repos whose `full_name` has no owner prefix. The URL always represents the repository's `full_name` field, with slashes naturally becoming path separators.
+
+**Design decisions:**
+
+- **`chat/app_deploy` prefix** — Keeps it in the `/chat/` namespace (consistent with existing chat routes) while being descriptive about intent. Alternatives like `/deploy/` were considered but breaking out of the namespace wasn't worth the marginal brevity gain.
+- **Workspace slug, not name** — `Workspace` already has a `slug` field (unique per org), making it URL-safe by design. No new fields needed.
+- **`full_name` via path segments, not `name` lookup** — Repository uniqueness constraint is on `(organization, full_name)`, not `(organization, name)`. Looking up by `name` alone could be ambiguous if the same repo name exists under different owners. Instead, the URL always encodes the `full_name` and the lookup uses `full_name__iexact`. If someone omits the owner for a repo that has one, it simply 404s — correct behavior since they gave the wrong `full_name`.
+- **Two Django URL patterns, one view** — The 3-segment pattern (`workspace/owner/repo`) is registered before the 2-segment one (`workspace/repo`) so Django matches the longer path first. The view receives `repo_owner=None` for the short form and reconstructs `full_name` accordingly.
+
+**Key points:**
+- The view delegates to the same `agent_service.create_conversation()` used by `chat_new`, so all existing conversation setup logic (mode auto-derivation, system trigger message creation) is reused
+- Case-insensitive lookup on `full_name` keeps URLs forgiving (matches existing pattern in `test_main_agent` harness)
+- Example bookmark for test defaults: `/chat/app_deploy/default/vmendi/ai-detector-and-humanizer/`
+
+---
+
 ## 2026-02-05 23:21 - [AgentChat] Hide Nixpacks/buildpack from deployment agent
 
 **Conversation:** [2026-02-05-2321-c0bc30f1.md](conversations/2026-02-05-2321-c0bc30f1.md)

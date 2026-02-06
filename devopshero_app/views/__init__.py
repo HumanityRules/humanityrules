@@ -19,6 +19,7 @@ from .onboarding import onboarding
 from .api import aws_install_account_callback, health_check
 from .github import github_connect, github_callback, github_webhook
 from .chat import (
+    chat_app_deploy,
     chat_list,
     chat_new,
     chat_view,
@@ -56,6 +57,7 @@ __all__ = [
     "github_connect",
     "github_callback",
     "github_webhook",
+    "chat_app_deploy",
     "chat_list",
     "chat_new",
     "chat_view",
