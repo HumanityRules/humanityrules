@@ -72,41 +72,15 @@ def chat_list(request):
 @login_required
 def chat_new(request):
     """Create a new conversation and redirect to it."""
-    workspace_id = request.GET.get("workspace")
-    repo_id = request.GET.get("repo")
-    aws_account_id = request.GET.get("aws_account")
+    from ..services.agent import agent_service
 
-    # Determine conversation mode based on context
-    if aws_account_id:
-        mode = Conversation.Mode.ENVIRONMENT_SETUP
-    elif workspace_id and repo_id:
-        mode = Conversation.Mode.APP_DEPLOYMENT
-    else:
-        mode = Conversation.Mode.GENERAL
-
-    conversation = Conversation.objects.create(
+    conversation = agent_service.create_conversation(
         user=request.user,
-        organization=request.user.current_organization,
-        context_workspace_id=workspace_id if workspace_id else None,
-        context_repository_id=repo_id if repo_id else None,
-        context_aws_account_id=aws_account_id if aws_account_id else None,
-        mode=mode,
-        status=Conversation.Status.ACTIVE,
+        workspace_id=request.GET.get("workspace") or None,
+        repo_id=request.GET.get("repo") or None,
+        aws_account_id=request.GET.get("aws_account") or None,
+        mode=None,
     )
-
-    # Create trigger message for auto-start modes (agent starts immediately)
-    # The message content sets a friendly tone for the conversation
-    trigger_content = {
-        Conversation.Mode.ENVIRONMENT_SETUP: "Hi! I'm your friendly user who would like to set up a new environment in my AWS account.",
-        Conversation.Mode.APP_DEPLOYMENT: "Hi! I'm your friendly user who would like to deploy this repository.",
-    }
-    if mode in trigger_content:
-        Message.objects.create(
-            conversation=conversation,
-            role=Message.Role.USER,
-            content_type=Message.ContentType.SYSTEM_TRIGGER,
-            content=trigger_content[mode],
-        )
 
     return redirect("chat_view", conversation_id=conversation.id)
 

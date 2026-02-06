@@ -1,5 +1,28 @@
 # DevOpsHero Development Journal
 
+## 2026-02-06 01:50 - [DevEx] CLI test harness parity with web experience
+
+**Conversation:** [2026-02-05-1749-102fd7ae.md](conversations/2026-02-05-1749-102fd7ae.md)
+
+The `test_main_agent.py` CLI harness was missing critical context that the web UI provides, making it useless for testing APP_DEPLOYMENT and ENVIRONMENT_SETUP flows. The web's `chat_new` view sets workspace, repository, and AWS account context on the conversation, derives mode from that context, and creates a SYSTEM_TRIGGER message for auto-start modes — the CLI did none of this, always creating bare GENERAL conversations.
+
+The fix involved several layers:
+
+**Context resolution** — Added `--workspace` (default: "default"), `--repo` (default: "vmendi/ai-detector-and-humanizer"), and `--aws-account` CLI args. Each resolves by name (case-insensitive) or UUID against the user's organization. Added `--no-context` to strip all context for pure GENERAL mode testing, and `--mode` to override auto-derivation.
+
+**Centralized conversation creation** — During implementation, we noticed the trigger content map and mode derivation logic were being duplicated between `chat.py` and the CLI. Extracted `create_conversation()` into `agent_service.py` as the single source of truth. It takes `mode: str | None` — when `None`, it auto-derives from context fields (aws_account → ENVIRONMENT_SETUP, workspace+repo → APP_DEPLOYMENT, else GENERAL). Both `chat_new` and the CLI now call this one function. The trigger content map is a local inside the method since nothing else needs it.
+
+**Auto-start for trigger messages** — The web UI auto-starts the agent when a SYSTEM_TRIGGER message exists. The CLI now checks for a trigger message after conversation creation and runs `_stream_agent` before entering the REPL or processing `--prompt`. This required splitting `_run_agent_once` into `_stream_agent` (streams response for whatever the last message is) and `_run_agent_once` (creates user message + streams).
+
+**REPL quality of life** — Prints conversation ID after each turn for easy copy-paste into `--conversation-id` for subsequent runs.
+
+**Key points:**
+- Default experience is now APP_DEPLOYMENT with workspace "default" + repo "vmendi/ai-detector-and-humanizer" — matches the most common test scenario
+- `create_conversation()` in `agent_service.py` owns mode derivation + trigger creation — DRY across web view and CLI
+- Sync-only `create_conversation()` — the CLI wraps it with `sync_to_async` rather than maintaining a parallel async version
+- Auto-start streams the trigger response before `you>` prompt, matching web behavior exactly
+- `--no-context` and `--mode` provide escape hatches for testing edge cases (GENERAL mode, forced mode override)
+
 ## 2026-02-05 23:45 - [AgentChat] Real-time sidebar cost update via OOB swap
 
 **Conversation:** [2026-02-05-1414-b98ede79.md](conversations/2026-02-05-1414-b98ede79.md)
