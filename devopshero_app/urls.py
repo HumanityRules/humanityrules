@@ -44,6 +44,8 @@ urlpatterns = [
     path("api/github/webhook", views.github_webhook, name="github_webhook"),
 
     # Chat / Agent
+    path("chat/app_deploy/<slug:workspace_slug>/<str:repo_owner>/<str:repo_name>/", views.chat_app_deploy, name="chat_app_deploy_with_owner"),
+    path("chat/app_deploy/<slug:workspace_slug>/<str:repo_name>/", views.chat_app_deploy, name="chat_app_deploy"),
     path("chat/", views.chat_list, name="chat_list"),
     path("chat/new/", views.chat_new, name="chat_new"),
     path("chat/<uuid:conversation_id>/", views.chat_view, name="chat_view"),

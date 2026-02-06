@@ -86,6 +86,28 @@ def chat_new(request):
 
 
 @login_required
+def chat_app_deploy(request, workspace_slug, repo_name, repo_owner=None):
+    """Shortcut: create an APP_DEPLOYMENT conversation from human-readable URL segments."""
+    from ..models import Repository, Workspace
+    from ..services.agent import agent_service
+
+    org = request.user.current_organization
+    workspace = get_object_or_404(Workspace, organization=org, slug=workspace_slug)
+    full_name = f"{repo_owner}/{repo_name}" if repo_owner else repo_name
+    repo = get_object_or_404(Repository, organization=org, full_name__iexact=full_name)
+
+    conversation = agent_service.create_conversation(
+        user=request.user,
+        workspace_id=workspace.id,
+        repo_id=repo.id,
+        aws_account_id=None,
+        mode=None,
+    )
+
+    return redirect("chat_view", conversation_id=conversation.id)
+
+
+@login_required
 def chat_view(request, conversation_id):
     """View a specific conversation in the unified chat interface."""
     conversation = get_object_or_404(
