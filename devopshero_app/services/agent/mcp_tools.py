@@ -567,7 +567,6 @@ async def create_datastore(args: dict[str, Any]) -> dict[str, Any]:
             "name": {"type": "string", "description": "Human-readable name for the app (used to derive slug for matching)"},
             "branch": {"type": "string", "description": "Git branch to deploy from. Omit to use repository's default branch."},
             "app_type": {"type": "string", "description": "Type of app: web, worker, or scheduled"},
-            "build_strategy": {"type": "string", "description": "How to build: dockerfile, nixpacks, or buildpack"},
             "container_port": {"type": "integer", "description": "Port the container listens on (e.g., 8000)"},
             "cpu": {"type": "integer", "description": "Fargate CPU units (256, 512, 1024, 2048)"},
             "memory": {"type": "integer", "description": "Fargate memory in MiB (512, 1024, 2048, 4096)"},
@@ -576,12 +575,12 @@ async def create_datastore(args: dict[str, Any]) -> dict[str, Any]:
             "environment_slug": {"type": "string", "description": "Target environment slug"},
             "environment_variables": {"type": "array", "description": "List of {name, value} dicts. Omit to keep existing, [] to clear."},
             "datastore_id": {"type": "string", "description": "UUID of datastore to bind. Omit if app doesn't need a database."},
-            "dockerfile_path": {"type": "string", "description": "Path to Dockerfile (e.g., 'Dockerfile'). Required for dockerfile build strategy."},
+            "dockerfile_path": {"type": "string", "description": "Path to Dockerfile relative to repo root (e.g., 'Dockerfile')."},
             "app_secrets": {"type": "object", "description": "Dict of secret field names to values. Omit to keep existing, {} to clear."},
             "subdomain": {"type": "string", "description": "Route53 subdomain override. Defaults to app slug, auto-suffixed with -{env_slug} if conflict."},
         },
         "required": [
-            "name", "app_type", "build_strategy", "container_port",
+            "name", "app_type", "container_port", "dockerfile_path",
             "cpu", "memory", "health_check_path", "environment_slug"
         ],
     },
@@ -614,7 +613,7 @@ async def deploy_app(args: dict[str, Any]) -> dict[str, Any]:
         name=args["name"],
         branch=branch,
         app_type=args["app_type"],
-        build_strategy=args["build_strategy"],
+        build_strategy="dockerfile",  # Hard-default; nixpacks/buildpack not yet implemented
         container_port=args["container_port"],
         cpu=args["cpu"],
         memory=args["memory"],
