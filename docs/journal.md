@@ -1,5 +1,22 @@
 # DevOpsHero Development Journal
 
+## 2026-02-05 23:21 - [AgentChat] Hide Nixpacks/buildpack from deployment agent
+
+**Conversation:** [2026-02-05-2321-c0bc30f1.md](conversations/2026-02-05-2321-c0bc30f1.md)
+
+The deployment agent was mentioning Nixpacks as a build strategy option to users during app deployment conversations. Root cause: the `deploy_app` MCP tool schema listed `"How to build: dockerfile, nixpacks, or buildpack"` in the `build_strategy` parameter description, and `build_strategy` was in the `required` list — so the LLM had to pick one and naturally surfaced all three options to the user.
+
+This contradicts the design intent documented in `deployment_agent_design.md`: "Always containerize. User never chooses Nixpacks vs Docker." The system prompt had no guidance to override what the tool schema was telling the LLM.
+
+**Fix: hide from agent, keep in backend** — Removed `build_strategy` from the tool schema `properties` entirely so the agent never sees it. Hard-defaulted `build_strategy="dockerfile"` in the `mcp_tools.py` handler. Made `dockerfile_path` required instead (since a Dockerfile is always needed now). The `App.BuildStrategy` model enum still has `nixpacks` and `buildpack` options for future use — they're just invisible to the agent.
+
+**Key points:**
+- Tool schemas are a powerful influence on LLM behavior — if you list options, the LLM will mention them. Removing unused options from the schema is more reliable than adding system prompt instructions to "don't mention X"
+- The `dockerfile_path` description was also cleaned up from "Required for dockerfile build strategy" to just the path description, since there's no other strategy to contrast against
+- The `deploy_app.py` backend function docstring was updated to note "currently only 'dockerfile'" for future developers
+
+---
+
 ## 2026-02-06 03:05 - [AgentChat] System prompt restructuring with XML tags per Claude prompt engineering docs
 
 **Conversation:** [2026-02-05-2307-3796616f.md](conversations/2026-02-05-2307-3796616f.md)

@@ -389,7 +389,7 @@ async def deploy_app(
         name: Human-readable name for the app (used to derive slug for matching).
         branch: Git branch to deploy from.
         app_type: Type of app (web, worker, scheduled).
-        build_strategy: How to build (dockerfile, nixpacks, buildpack).
+        build_strategy: How to build the container image (currently only 'dockerfile').
         container_port: Port the container listens on.
         cpu: Fargate CPU units (256, 512, 1024, etc.).
         memory: Fargate memory in MiB.
