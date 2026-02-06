@@ -1,5 +1,26 @@
 # DevOpsHero Development Journal
 
+## 2026-02-06 03:05 - [AgentChat] System prompt restructuring with XML tags per Claude prompt engineering docs
+
+**Conversation:** [2026-02-05-2307-3796616f.md](conversations/2026-02-05-2307-3796616f.md)
+
+Audited `system_prompt_app_deployment.md` against every recommendation in Anthropic's Claude prompt engineering documentation (overview, be-clear-and-direct, use-examples, give-claude-a-role, use-xml-tags, chain-of-thought, chain-prompts, long-context-tips, extended-thinking-tips). Produced a prioritized list of 10 improvements, then implemented #2 (XML tags) and parts of #3 (stronger goal) and #10 (consolidation).
+
+**XML tag restructuring** — Replaced all markdown headers (`##`, `###`) with semantic XML tags: `<role>`, `<goal>`, `<formatting>`, `<deployment_flow>`, `<environment_selection>`, `<no_environment>`, `<repository_analysis>`, `<app_secrets>`, `<existing_apps>`, `<domain_naming>`, `<infrastructure_decisions>`, `<pre_deployment_checklist>`, `<polling>`, `<question_philosophy>`, `<names_vs_uuids>`. The docs say XML tags "reduce errors from Claude misinterpreting parts of your prompt" compared to markdown headers, and recommend referring to tag names in instructions (e.g., "see `<environment_selection>` rules" instead of "see Environment Selection below").
+
+**Dynamic sections also tagged** — Updated `agent_service.py` so the runtime-appended context uses XML: `<conversation_context>` (with nested `<workspace>`, `<repository>`, `<aws_account>`), `<aws_infrastructure>` (with nested `<aws_account>` and `<environment>`), `<existing_environments>` (with nested `<environment>`). This affected all three prompt builders (app deployment, environment, general).
+
+**Child tags over attributes** — Initially used XML attributes (`<environment name="dev" id="uuid" .../>`) for the nested data. Switched to child tags (`<name>dev</name>`, `<id>uuid</id>`) after realizing the documentation's examples consistently use child tags (the `<document><source>...</source>` pattern), and I couldn't find doc evidence that attributes are parsed more reliably. Honesty about what the docs actually say matters when making prompt engineering decisions — don't extrapolate claims beyond evidence.
+
+**Goal rewrite** — The original goal was process-oriented ("analyze, configure, and deploy"). Rewrote to be outcome-oriented per the docs' recommendation to define "what a successful task completion looks like": successful conversation ends with the app deployed and accessible at its URL; when not possible, give user a clear next step. Added audience context (user understands their app but may not know AWS internals) and workflow position (user clicked "New App Deployment" — they're ready to ship).
+
+**Section consolidation** — Merged `<redeployment>` (2 bullet points about tool mechanics) into `<existing_apps>` since both handle the "app already exists" case. Eliminated a tag that was too small to justify its own section.
+
+**Key points:**
+- The docs' tag name cross-referencing tip ("Using the contract in `<contract>` tags...") was applied throughout — `<deployment_flow>` references `<aws_infrastructure>`, `<environment_selection>`, `<existing_apps>`, `<conversation_context>` by tag name
+- Remaining improvements from the audit (not yet implemented): #1 multishot examples (highest impact), #3 role strengthening, #5 chain-of-thought for complex decisions, #6 success criteria, #7 replace vague personality directives
+- The XML restructuring is consistent across all three system prompts (`system_prompt_general.md` also updated its one reference to `<aws_infrastructure>`)
+
 ## 2026-02-06 01:50 - [DevEx] CLI test harness parity with web experience
 
 **Conversation:** [2026-02-05-1749-102fd7ae.md](conversations/2026-02-05-1749-102fd7ae.md)
