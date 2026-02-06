@@ -111,6 +111,41 @@ def _load_prompt_file(filename: str) -> str:
     return prompt_path.read_text()
 
 
+def create_conversation(user, workspace_id, repo_id, aws_account_id, mode: str | None) -> Conversation:
+    """Create a conversation with context, auto-derived mode, and trigger message."""
+    trigger_content = {
+        Conversation.Mode.ENVIRONMENT_SETUP: "Hi! I'm your friendly user who would like to set up a new environment in my AWS account.",
+        Conversation.Mode.APP_DEPLOYMENT: "Hi! I'm your friendly user who would like to deploy this repository.",
+    }
+
+    if not mode:
+        if aws_account_id:
+            mode = Conversation.Mode.ENVIRONMENT_SETUP
+        elif workspace_id and repo_id:
+            mode = Conversation.Mode.APP_DEPLOYMENT
+        else:
+            mode = Conversation.Mode.GENERAL
+
+    conversation = Conversation.objects.create(
+        user=user,
+        organization=user.current_organization,
+        context_workspace_id=workspace_id,
+        context_repository_id=repo_id,
+        context_aws_account_id=aws_account_id,
+        mode=mode,
+        status=Conversation.Status.ACTIVE,
+    )
+    content = trigger_content.get(mode)
+    if content:
+        Message.objects.create(
+            conversation=conversation,
+            role=Message.Role.USER,
+            content_type=Message.ContentType.SYSTEM_TRIGGER,
+            content=content,
+        )
+    return conversation
+
+
 def _get_llm_model_for_conversation_mode(mode: str) -> str:
     """Return the Claude model alias for a conversation mode."""
     mode_to_setting = {
@@ -139,9 +174,14 @@ async def _build_environment_prompt(conversation: Conversation) -> str:
     # Conversation context - AWS account
     account = await AWSAccount.objects.aget(id=conversation.context_aws_account_id)
     context_lines = [
-        f"Target AWS Account: {account.name} (id: {account.id}, aws: {account.aws_account_id or 'pending'}, status: {account.status})"
+        "<aws_account>",
+        f"  <name>{account.name}</name>",
+        f"  <id>{account.id}</id>",
+        f"  <aws_id>{account.aws_account_id or 'pending'}</aws_id>",
+        f"  <status>{account.status}</status>",
+        "</aws_account>",
     ]
-    sections.append("## Conversation Context\n\n" + "\n".join(context_lines))
+    sections.append("<conversation_context>\n" + "\n".join(context_lines) + "\n</conversation_context>")
 
     # Existing environments and naming guidance
     existing_envs = [
@@ -153,7 +193,11 @@ async def _build_environment_prompt(conversation: Conversation) -> str:
     if existing_envs:
         env_lines.append("This AWS account already has these environments:")
         for env in existing_envs:
-            env_lines.append(f"- {env['name']} ({env['aws_region']}, {env['status']})")
+            env_lines.append("<environment>")
+            env_lines.append(f"  <name>{env['name']}</name>")
+            env_lines.append(f"  <region>{env['aws_region']}</region>")
+            env_lines.append(f"  <status>{env['status']}</status>")
+            env_lines.append("</environment>")
     else:
         env_lines.append("This AWS account has no environments yet.")
 
@@ -168,7 +212,7 @@ async def _build_environment_prompt(conversation: Conversation) -> str:
     else:
         env_lines.append("All standard names taken — ask the user for a custom name.")
 
-    sections.append("## Existing Environments\n\n" + "\n".join(env_lines))
+    sections.append("<existing_environments>\n" + "\n".join(env_lines) + "\n</existing_environments>")
 
     if sections:
         return base_prompt + "\n\n" + "\n\n".join(sections)
@@ -184,13 +228,13 @@ async def _build_app_deployment_prompt(conversation: Conversation) -> str:
     context_lines = []
     if conversation.context_workspace_id:
         ws = await Workspace.objects.aget(id=conversation.context_workspace_id)
-        context_lines.append(f"Current workspace: {ws.name} (id: {ws.id})")
+        context_lines.append(f"<workspace>\n  <name>{ws.name}</name>\n  <id>{ws.id}</id>\n</workspace>")
     if conversation.context_repository_id:
         repo = await Repository.objects.aget(id=conversation.context_repository_id)
-        context_lines.append(f"Current repository: {repo.full_name} (id: {repo.id})")
+        context_lines.append(f"<repository>\n  <name>{repo.full_name}</name>\n  <id>{repo.id}</id>\n</repository>")
 
     if context_lines:
-        sections.append("## Conversation Context\n\n" + "\n".join(context_lines))
+        sections.append("<conversation_context>\n" + "\n".join(context_lines) + "\n</conversation_context>")
 
     # AWS infrastructure section
     infra_section = await _build_aws_infrastructure_section(conversation.organization_id)
@@ -211,10 +255,10 @@ async def _build_general_prompt(conversation: Conversation) -> str:
     context_lines = []
     if conversation.context_workspace_id:
         ws = await Workspace.objects.aget(id=conversation.context_workspace_id)
-        context_lines.append(f"Current workspace: {ws.name} (id: {ws.id})")
+        context_lines.append(f"<workspace>\n  <name>{ws.name}</name>\n  <id>{ws.id}</id>\n</workspace>")
 
     if context_lines:
-        sections.append("## Conversation Context\n\n" + "\n".join(context_lines))
+        sections.append("<conversation_context>\n" + "\n".join(context_lines) + "\n</conversation_context>")
 
     # AWS infrastructure section
     infra_section = await _build_aws_infrastructure_section(conversation.organization_id)
@@ -230,25 +274,37 @@ async def _build_aws_infrastructure_section(organization_id) -> str:
     """Build the AWS infrastructure section listing accounts and environments."""
     accounts = AWSAccount.objects.filter(organization_id=organization_id).prefetch_related("environments")
 
-    lines = ["## AWS Infrastructure", ""]
+    lines = ["<aws_infrastructure>"]
     account_count = 0
 
     async for account in accounts:
         account_count += 1
-        lines.append(f"Account: **{account.name}** (id: {account.id}, aws: {account.aws_account_id or 'pending'}, status: {account.status})")
+        lines.append("<aws_account>")
+        lines.append(f"  <name>{account.name}</name>")
+        lines.append(f"  <id>{account.id}</id>")
+        lines.append(f"  <aws_id>{account.aws_account_id or 'pending'}</aws_id>")
+        lines.append(f"  <status>{account.status}</status>")
 
         environments = [env async for env in account.environments.all()]
         if environments:
             for env in environments:
-                domain_info = f", domain: *.{env.shared_alb_hosted_zone}" if env.shared_alb_hosted_zone else ""
-                lines.append(f"  - Environment: **{env.name}** (id: {env.id}, slug: {env.slug}, region: {env.aws_region}, status: {env.status}{domain_info})")
+                lines.append("  <environment>")
+                lines.append(f"    <name>{env.name}</name>")
+                lines.append(f"    <id>{env.id}</id>")
+                lines.append(f"    <slug>{env.slug}</slug>")
+                lines.append(f"    <region>{env.aws_region}</region>")
+                lines.append(f"    <status>{env.status}</status>")
+                if env.shared_alb_hosted_zone:
+                    lines.append(f"    <domain>*.{env.shared_alb_hosted_zone}</domain>")
+                lines.append("  </environment>")
         else:
-            lines.append("  - No environments yet")
-        lines.append("")
+            lines.append("  No environments yet")
+        lines.append("</aws_account>")
 
     if account_count == 0:
-        return "## AWS Infrastructure\n\nNo AWS accounts connected. Guide the user to connect one using initiate_aws_connection."
+        return "<aws_infrastructure>\nNo AWS accounts connected. Guide the user to connect one using initiate_aws_connection.\n</aws_infrastructure>"
 
+    lines.append("</aws_infrastructure>")
     return "\n".join(lines)
 
 
