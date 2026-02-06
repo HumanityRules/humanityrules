@@ -244,7 +244,7 @@ def _print_event(event: Any, state: PrintState, show_tool_io: bool) -> None:
         duration_ms = event.data.get("duration_ms", 0)
         label = _format_tool_label(tool_name=tool_name, parameters=parameters)
         print(f"[tool:done] {label} status={status} duration_ms={duration_ms}")
-        if show_tool_io:
+        if show_tool_io or status == "error":
             result = event.data.get("result", "")
             print(_render_tool_payload(result))
         return
