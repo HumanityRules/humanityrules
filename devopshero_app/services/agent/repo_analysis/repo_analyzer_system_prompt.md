@@ -108,7 +108,8 @@ When you have gathered enough evidence, output your findings as a JSON object in
       "file_path": "README.md",
       "excerpt": "Run with: gunicorn config.wsgi:application --bind 0.0.0.0:8000"
     }
-  ]
+  ],
+  "dockerfile_path": null
 }
 ```
 
@@ -134,6 +135,7 @@ When you have gathered enough evidence, output your findings as a JSON object in
   - **fields** — ALL secret fields the app reads. Each has name, purpose, and default_behavior (what happens if missing). Include every field even if comments say "optional" — that means the feature is optional, not the field.
 - **caveats** — Warnings, concerns, missing pieces, or things the user should know
 - **evidence** — Evidence items for major claims (framework, run command, port, dependencies)
+- **dockerfile_path** — Path to existing Dockerfile relative to repo root if found (e.g., "Dockerfile", "docker/Dockerfile.prod"); null if no Dockerfile exists
 
 ## Important Rules
 
