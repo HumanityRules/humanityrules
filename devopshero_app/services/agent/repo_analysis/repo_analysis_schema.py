@@ -76,3 +76,4 @@ class RepoAnalysisOutput(BaseModel):
     secrets: SecretsConfig | None = Field(description="Secrets Manager config if detected, null otherwise")
     caveats: list[str] = Field(description="Warnings, concerns, or things the user should know")
     evidence: list[EvidenceItem] = Field(description="Evidence supporting major claims")
+    dockerfile_path: str | None = Field(default=None, description="Path to existing Dockerfile relative to repo root (null if none found)")

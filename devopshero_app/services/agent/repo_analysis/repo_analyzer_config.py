@@ -12,7 +12,7 @@ from claude_agent_sdk import AgentDefinition
 
 def _load_system_prompt() -> str:
     """Load the system prompt from the markdown file."""
-    prompt_path = Path(__file__).parent / "system_prompt.md"
+    prompt_path = Path(__file__).parent / "repo_analyzer_system_prompt.md"
     return prompt_path.read_text()
 
 

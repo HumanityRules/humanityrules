@@ -52,6 +52,7 @@ from .mcp_tools import (
     devopshero_mcp_server,
     TOOL_NAMES,
 )
+from .dockerfile_gen.dockerfile_gen_config import get_generate_dockerfile_agent
 from .repo_analysis.repo_analyzer_config import get_analyze_repository_agent
 
 logger = logging.getLogger(__name__)
@@ -567,10 +568,13 @@ def _create_agent_options(system_prompt: str, resume_session_id: str | None, for
         system_prompt=system_prompt,
         resume=resume_session_id,
         fork_session=fork_session,
-        permission_mode="default",
+        permission_mode="acceptEdits",
         cwd=str(sandbox_paths.src_path),
         sandbox=sandbox_settings,
-        agents={"analyze-repository": get_analyze_repository_agent()},
+        agents={
+            "analyze-repository": get_analyze_repository_agent(),
+            "generate-dockerfile": get_generate_dockerfile_agent(),
+        },
         mcp_servers={"devopshero": devopshero_mcp_server},
         tools=builtin_tools,
         allowed_tools=TOOL_NAMES,
@@ -625,7 +629,10 @@ async def stream_response(conversation: Conversation, fork_session: bool) -> Asy
             repository.default_branch,
             sandbox_paths.src_path,
         )
-
+    else:
+        # The agent always uses the src_path as its working directory, we need to create it when clone_repository doesn't do it
+        sandbox_paths.src_path.mkdir(parents=True, exist_ok=True)
+    
     model_alias = _get_llm_model_for_conversation_mode(conversation.mode)
     logger.info(f"Using model {model_alias} for conversation {conversation.id} (mode={conversation.mode})")
 
