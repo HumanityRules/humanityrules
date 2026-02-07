@@ -340,7 +340,7 @@ class AppStack(Stack):
 
         environment = {env["name"]: env["value"] for env in app_config.environment_variables}
 
-        # If database connection secret is provided, inject DB credentials from Secrets Manager
+        # Inject secrets from Secrets Manager as environment variables via ECS secrets
         secrets = {}
         if database_connection_secret and app_config.database_config:
             env_var_name = get_connection_env_var_name(app_config.database_config.connection)
@@ -350,6 +350,14 @@ class AppStack(Stack):
             secrets["DATABASE_NAME"] = ecs.Secret.from_secrets_manager(database_connection_secret, field="dbname")
             secrets["DATABASE_USERNAME"] = ecs.Secret.from_secrets_manager(database_connection_secret, field="username")
             secrets["DATABASE_PASSWORD"] = ecs.Secret.from_secrets_manager(database_connection_secret, field="password")
+
+        # Inject app secrets as env vars — ECS resolves them from Secrets Manager at startup
+        if app_config.app_secrets:
+            app_secret = secretsmanager.Secret.from_secret_name_v2(
+                self, "AppSecret", f"devopshero/{app_config.app_name}/secrets"
+            )
+            for field_name in app_config.app_secrets:
+                secrets[field_name] = ecs.Secret.from_secrets_manager(app_secret, field=field_name)
 
         task_definition = ecs.FargateTaskDefinition(
             self, "TaskDefinition",

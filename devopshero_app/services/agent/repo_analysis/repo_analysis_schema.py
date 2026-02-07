@@ -58,9 +58,9 @@ class SecretField(BaseModel):
 
 
 class SecretsConfig(BaseModel):
-    """AWS Secrets Manager configuration detected in the repository."""
+    """Secrets detected in the repository — both Secrets Manager patterns and sensitive env vars."""
 
-    secret_path: str = Field(description="Secret path pattern (e.g., 'devopshero/{app}/secrets')")
+    secret_path: str | None = Field(description="Secret path pattern if app uses Secrets Manager SDK (e.g., 'devopshero/{app}/secrets'). Null for env-var-based secrets.")
     fields: list[SecretField] = Field(description="All secret fields the app reads - include ALL detected fields")
 
 

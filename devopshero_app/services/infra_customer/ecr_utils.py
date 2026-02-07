@@ -158,6 +158,66 @@ def build_and_push_docker_image(
         )
 
 
+def test_docker_build(session: boto3.Session, env_slug: str, source_path: Path) -> tuple[bool, str]:
+    """
+    Test a Dockerfile by running docker build only (no push).
+
+    Uses local Docker in development (DOH_USE_REMOTE_BUILDER unset) or
+    remote EC2 builder in production (DOH_USE_REMOTE_BUILDER=1).
+
+    Returns (success, build_output) tuple.
+    """
+    logger.info("Running test Docker build for %(source_path)s", {"source_path": str(source_path)})
+
+    if os.environ.get("DOH_USE_REMOTE_BUILDER") == "1":
+        logger.info("Using remote EC2 builder for test build")
+        return _test_build_remote(session=session, env_slug=env_slug, source_path=source_path)
+    else:
+        logger.info("Using local Docker for test build")
+        return _test_build_local(source_path=source_path)
+
+
+def _test_build_local(source_path: Path) -> tuple[bool, str]:
+    """Test docker build locally — build only, no push."""
+    import uuid
+    tag = f"doh-test-build:{uuid.uuid4().hex[:8]}"
+
+    process = subprocess.Popen(
+        ["docker", "build", "--platform", "linux/arm64", "-t", tag, "."],
+        cwd=source_path,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+    )
+    output, _ = process.communicate()
+
+    # Clean up test image regardless of outcome
+    subprocess.run(["docker", "rmi", tag], capture_output=True)
+
+    return process.returncode == 0, output
+
+
+def _test_build_remote(session: boto3.Session, env_slug: str, source_path: Path) -> tuple[bool, str]:
+    """Test docker build on remote EC2 builder — build only, no push."""
+    import uuid
+    build_id = f"test-{uuid.uuid4().hex[:8]}"
+
+    try:
+        instance_id = ec2_builder_utils.ensure_builder_running(session=session, env_slug=env_slug)
+
+        if not ec2_builder_utils.wait_for_ssm_ready(session=session, instance_id=instance_id, timeout_seconds=180):
+            return False, "SSM agent did not come online in time"
+
+        if not ec2_builder_utils.transfer_source(session=session, instance_id=instance_id, source_path=source_path, build_id=build_id):
+            return False, "Failed to transfer source code to builder"
+
+        return ec2_builder_utils.run_remote_docker_build(session=session, instance_id=instance_id, image_uri=None, build_id=build_id)
+
+    except Exception as e:
+        logger.error("Remote test build failed: %(error)s", {"error": str(e)})
+        return False, str(e)
+
+
 def _build_and_push_local(session: boto3.Session, app_source_path: Path, image_uri: str) -> str | None:
     """Build and push Docker image using local Docker daemon."""
     # Build Docker image for ARM64 (Fargate supports ARM, avoids QEMU emulation issues on Apple Silicon)

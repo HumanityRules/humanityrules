@@ -32,6 +32,7 @@ from .tools import (
     list_repositories as _list_repositories,
     scan_repository as _scan_repository,
     teardown_deployment as _teardown_deployment,
+    test_docker_build as _test_docker_build,
 )
 
 
@@ -557,7 +558,9 @@ async def create_datastore(args: dict[str, Any]) -> dict[str, Any]:
         "For memory: MiB (512, 1024, 2048, 4096). "
         "For environment_variables: omit to keep existing, pass [] to clear, or [{\"name\": \"FOO\", \"value\": \"bar\"}] to replace. "
         "For app_secrets: omit to keep existing, pass {} to clear, or {\"key\": \"value\"} to replace. "
-        "Use null values in app_secrets for auto-generated secrets, e.g., {\"secret_key_base\": null}. "
+        "Secrets are stored in Secrets Manager and injected as env vars at container startup. "
+        "Use null values for auto-generated secrets (e.g., {\"SECRET_KEY\": null}), "
+        "use \"PLACEHOLDER\" for third-party keys the user must fill in (e.g., {\"STRIPE_SECRET_KEY\": \"PLACEHOLDER\"}). "
         "For subdomain: Route53 subdomain for the app. Defaults to app slug. "
         "If deploying the same app to multiple environments that share a domain, the subdomain is auto-suffixed with -{env_slug}."
     ),
@@ -576,7 +579,7 @@ async def create_datastore(args: dict[str, Any]) -> dict[str, Any]:
             "environment_variables": {"type": "array", "description": "List of {name, value} dicts. Omit to keep existing, [] to clear."},
             "datastore_id": {"type": "string", "description": "UUID of datastore to bind. Omit if app doesn't need a database."},
             "dockerfile_path": {"type": "string", "description": "Path to Dockerfile relative to repo root (e.g., 'Dockerfile')."},
-            "app_secrets": {"type": "object", "description": "Dict of secret field names to values. Omit to keep existing, {} to clear."},
+            "app_secrets": {"type": "object", "description": "Dict of secret field names to values. Stored in Secrets Manager, injected as env vars. Use null for auto-generated, 'PLACEHOLDER' for user-provided. Omit to keep existing, {} to clear."},
             "subdomain": {"type": "string", "description": "Route53 subdomain override. Defaults to app slug, auto-suffixed with -{env_slug} if conflict."},
         },
         "required": [
@@ -731,6 +734,38 @@ async def get_environment_status(args: dict[str, Any]) -> dict[str, Any]:
 
 
 # =============================================================================
+# Docker Build Testing
+# =============================================================================
+
+
+@tool(
+    "test_docker_build",
+    (
+        "Test a Dockerfile by running 'docker build'. Returns success/failure and build output. "
+        "Use this after generating a Dockerfile to verify it builds correctly. "
+        "If the build fails, use the output to diagnose and fix the Dockerfile."
+    ),
+    {
+        "environment_slug": {"type": "string", "description": "Target environment slug (e.g., 'default'). Used to locate the build machine in production."},
+    },
+)
+async def test_docker_build(args: dict[str, Any]) -> dict[str, Any]:
+    """Test a Dockerfile by running docker build (no push)."""
+    conversation = _get_conversation()
+
+    result = await _test_docker_build(
+        conversation_id=conversation.id,
+        organization=conversation.organization,
+        environment_slug=args["environment_slug"],
+    )
+
+    return _mcp_response({
+        "success": result.success,
+        "build_output": result.build_output,
+    })
+
+
+# =============================================================================
 # Utility Tools
 # =============================================================================
 
@@ -772,6 +807,8 @@ devopshero_mcp_server = create_sdk_mcp_server(
         deploy_app,
         get_deployment_status,
         teardown_deployment,
+        # Docker build testing
+        test_docker_build,
         # Utility
         wait,
     ],
@@ -794,6 +831,8 @@ TOOL_NAMES = [
     "mcp__devopshero__deploy_app",
     "mcp__devopshero__get_deployment_status",
     "mcp__devopshero__teardown_deployment",
+    # Docker build testing
+    "mcp__devopshero__test_docker_build",
     # Utility
     "mcp__devopshero__wait",
 ]
