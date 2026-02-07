@@ -15,6 +15,7 @@ structured tool calling, conversation memory, and streaming responses.
 import asyncio
 import json
 import logging
+import shutil
 import time
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass, field
@@ -578,7 +579,43 @@ def _create_agent_options(system_prompt: str, resume_session_id: str | None, for
     )
 
 
-async def stream_response(conversation: Conversation, fork_session: bool) -> AsyncGenerator[AgentStreamEvent, None]:
+async def _detect_and_prepare_fork(conversation: Conversation, target_cwd: Path) -> bool:
+    """Detect if this conversation is a fork and prepare the session file if so.
+
+    A fork is detected when session_id is already set but no agent messages exist — impossible
+    for normal conversations where session_id is only set after the first agent turn completes.
+
+    The Claude CLI indexes session files by cwd at ~/.claude/projects/{cwd-with-slashes-as-dashes}/.
+    Since forked conversations get a new sandbox (different cwd), the source session file must be
+    copied to the fork's project directory for the CLI to find it.
+    """
+    if not conversation.session_id:
+        return False
+
+    has_agent_messages = await conversation.messages.filter(role=Message.Role.AGENT).aexists()
+    if has_agent_messages:
+        return False
+
+    logger.info(f"Detected forked conversation {conversation.id} from session {conversation.session_id}")
+
+    claude_projects = Path.home() / ".claude" / "projects"
+    target_project_dir = claude_projects / str(target_cwd).replace("/", "-")
+    target_session_file = target_project_dir / f"{conversation.session_id}.jsonl"
+
+    if not target_session_file.exists():
+        for source_file in claude_projects.rglob(f"{conversation.session_id}.jsonl"):
+            if source_file != target_session_file:
+                target_project_dir.mkdir(parents=True, exist_ok=True)
+                await asyncio.to_thread(shutil.copy2, source_file, target_session_file)
+                logger.info(f"Copied session file to {target_project_dir.name}")
+                break
+        else:
+            logger.error(f"Session file {conversation.session_id}.jsonl not found in any project directory")
+
+    return True
+
+
+async def stream_response(conversation: Conversation) -> AsyncGenerator[AgentStreamEvent, None]:
     """
     Stream agent response for a conversation.
 
@@ -591,9 +628,9 @@ async def stream_response(conversation: Conversation, fork_session: bool) -> Asy
     6. Persists final messages to the database on completion
     7. Cleans up cloned repository
 
-    Args:
-        conversation: The Conversation to process. Its session_id is used to resume or fork.
-        fork_session: Whether to fork a resumed session into a new session ID.
+    Fork detection: if session_id is already set but no agent messages exist, this conversation
+    was forked from another. Normal conversations have session_id=None until their first agent
+    turn completes. The SDK is told to fork so it branches into a new session file.
 
     Yields:
         AgentStreamEvent objects for each streaming event.
@@ -611,6 +648,8 @@ async def stream_response(conversation: Conversation, fork_session: bool) -> Asy
     sandbox_paths = get_sandbox_paths(conversation.id)
     sandbox_paths.root_path.mkdir(parents=True, exist_ok=True)
     sandbox_paths.tmp_path.mkdir(parents=True, exist_ok=True)
+
+    fork_session = await _detect_and_prepare_fork(conversation=conversation, target_cwd=sandbox_paths.src_path)
 
     # Clone repository if one is set in conversation context
     if conversation.context_repository_id:

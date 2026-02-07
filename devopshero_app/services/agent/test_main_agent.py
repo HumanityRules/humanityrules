@@ -270,7 +270,7 @@ async def _aget_user(user_email: str | None, user_id: str | None):
 
 
 async def _resolve_conversation_for_fork(user, source_id: str):
-    """Fork from a source conversation (creates new conversation, branches session)."""
+    """Fork from a source conversation (creates new conversation, copies session_id)."""
     from devopshero_app.models import Conversation
 
     source = await Conversation.objects.select_related("organization").aget(
@@ -286,10 +286,14 @@ async def _resolve_conversation_for_fork(user, source_id: str):
     conversation = await Conversation.objects.acreate(
         user=user,
         organization=user.current_organization,
+        mode=source.mode,
+        context_workspace_id=source.context_workspace_id,
+        context_repository_id=source.context_repository_id,
+        context_aws_account_id=source.context_aws_account_id,
+        session_id=source.session_id,
         status=Conversation.Status.ACTIVE,
     )
-    conversation.session_id = source.session_id 
-    return conversation, True
+    return conversation
 
 
 async def _resolve_conversation_for_resume(user, conversation_id: str):
@@ -301,7 +305,7 @@ async def _resolve_conversation_for_resume(user, conversation_id: str):
         user=user,
         organization=user.current_organization,
     )
-    return conversation, False
+    return conversation
 
 
 async def _resolve_workspace(user, workspace_arg: str | None):
@@ -380,7 +384,7 @@ async def _create_new_conversation(user, workspace_id, repo_id, aws_account_id, 
         aws_account_id=aws_account_id,
         mode=mode,
     )
-    return conversation, False
+    return conversation
 
 
 async def _create_user_message(conversation, content: str) -> None:
@@ -396,25 +400,24 @@ async def _create_user_message(conversation, content: str) -> None:
     await conversation.asave()
 
 
-async def _stream_agent(conversation, fork_session: bool, show_tool_io: bool) -> None:
+async def _stream_agent(conversation, show_tool_io: bool) -> None:
     """Stream agent response for the current last message in the conversation."""
     from devopshero_app.services.agent import agent_service
 
     state = PrintState(in_text_stream=False)
     async for event in agent_service.stream_response(
         conversation=conversation,
-        fork_session=fork_session,
     ):
         _print_event(event=event, state=state, show_tool_io=show_tool_io)
 
 
-async def _run_agent_once(conversation, fork_session: bool, prompt: str, show_tool_io: bool) -> None:
+async def _run_agent_once(conversation, prompt: str, show_tool_io: bool) -> None:
     """Create a user message then stream the agent response."""
     await _create_user_message(conversation=conversation, content=prompt)
-    await _stream_agent(conversation=conversation, fork_session=fork_session, show_tool_io=show_tool_io)
+    await _stream_agent(conversation=conversation, show_tool_io=show_tool_io)
 
 
-async def _run_repl(conversation, fork_session: bool, show_tool_io: bool) -> None:
+async def _run_repl(conversation, show_tool_io: bool) -> None:
     while True:
         try:
             prompt = input("you> ").strip()
@@ -427,11 +430,9 @@ async def _run_repl(conversation, fork_session: bool, show_tool_io: bool) -> Non
             break
         await _run_agent_once(
             conversation=conversation,
-            fork_session=fork_session,
             prompt=prompt,
             show_tool_io=show_tool_io,
         )
-        fork_session = False
         print(f"[conversation] {conversation.id}")
 
 
@@ -446,7 +447,7 @@ async def _run(args: argparse.Namespace, run_db_path: Path) -> int:
             repo_id = await _resolve_repository(user=user, repo_arg=args.repo)
             aws_account_id = await _resolve_aws_account(user=user, aws_account_arg=args.aws_account)
 
-        conversation, fork_session = await _create_new_conversation(
+        conversation = await _create_new_conversation(
             user=user,
             workspace_id=workspace_id,
             repo_id=repo_id,
@@ -454,12 +455,12 @@ async def _run(args: argparse.Namespace, run_db_path: Path) -> int:
             mode=args.mode,
         )
     elif args.fork:
-        conversation, fork_session = await _resolve_conversation_for_fork(
+        conversation = await _resolve_conversation_for_fork(
             user=user,
             source_id=args.conversation_id,
         )
     else:
-        conversation, fork_session = await _resolve_conversation_for_resume(
+        conversation = await _resolve_conversation_for_resume(
             user=user,
             conversation_id=args.conversation_id,
         )
@@ -475,20 +476,18 @@ async def _run(args: argparse.Namespace, run_db_path: Path) -> int:
     if conversation.context_aws_account_id:
         print(f"AWS Account: {conversation.context_aws_account_id}")
     if conversation.session_id:
-        print(f"Resume session: {conversation.session_id} fork={fork_session}")
+        print(f"Resume session: {conversation.session_id}")
 
     # Auto-start: if conversation has a trigger message, run the agent before user input
     has_trigger = await conversation.messages.filter(
         content_type="system_trigger",
     ).aexists()
     if has_trigger:
-        await _stream_agent(conversation=conversation, fork_session=fork_session, show_tool_io=args.show_tool_io)
-        fork_session = False
+        await _stream_agent(conversation=conversation, show_tool_io=args.show_tool_io)
 
     if args.prompt:
         await _run_agent_once(
             conversation=conversation,
-            fork_session=fork_session,
             prompt=args.prompt,
             show_tool_io=args.show_tool_io,
         )
@@ -496,7 +495,6 @@ async def _run(args: argparse.Namespace, run_db_path: Path) -> int:
 
     await _run_repl(
         conversation=conversation,
-        fork_session=fork_session,
         show_tool_io=args.show_tool_io,
     )
     return 0

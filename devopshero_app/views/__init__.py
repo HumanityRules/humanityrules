@@ -27,6 +27,7 @@ from .chat import (
     chat_stream,
     chat_messages,
     chat_close,
+    chat_fork,
 )
 from .waitlist_views import waitlist_signup
 
@@ -65,6 +66,7 @@ __all__ = [
     "chat_stream",
     "chat_messages",
     "chat_close",
+    "chat_fork",
     "waitlist_signup",
 ]
 

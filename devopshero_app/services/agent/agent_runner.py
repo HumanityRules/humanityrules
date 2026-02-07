@@ -150,7 +150,6 @@ async def _run_agent_loop(runner: AgentRunner, conversation_id: UUID) -> None:
                 logger.info(f"Agent processing message for conversation {conversation_id}")
                 async for event in agent_service.stream_response(
                     conversation=conversation,
-                    fork_session=False,
                 ):
                     # Track streaming state for reconnect handling
                     if event.type == "start":

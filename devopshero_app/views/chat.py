@@ -445,3 +445,28 @@ def chat_close(request, conversation_id):
     conversation.save()
 
     return redirect("chat_list")
+
+
+@login_required
+def chat_fork(request, conversation_id):
+    """Fork a conversation: create a new conversation that branches from the source's agent session."""
+    source = get_object_or_404(
+        Conversation,
+        id=conversation_id,
+        user=request.user,
+        organization=request.user.current_organization,
+    )
+    if not source.session_id:
+        return HttpResponse("Cannot fork: conversation has no agent session yet.", status=400)
+
+    forked = Conversation.objects.create(
+        user=request.user,
+        organization=request.user.current_organization,
+        mode=source.mode,
+        context_workspace=source.context_workspace,
+        context_repository=source.context_repository,
+        context_aws_account=source.context_aws_account,
+        session_id=source.session_id,
+        status=Conversation.Status.ACTIVE,
+    )
+    return redirect("chat_view", conversation_id=forked.id)
