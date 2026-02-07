@@ -1,5 +1,29 @@
 # DevOpsHero Development Journal
 
+## 2026-02-06 18:45 - [Deployment] Dockerfile build testing for the generate-dockerfile sub-agent
+
+**Conversation:** [2026-02-06-2237-aeec6f8c.md](conversations/2026-02-06-2237-aeec6f8c.md)
+
+The dockerfile generator sub-agent had no way to verify that the Dockerfile it produced actually builds. A bad Dockerfile (wrong COPY paths, missing system packages, wrong base image) would only be caught later when the real deployment failed — a slow and expensive feedback loop.
+
+Added a `test_docker_build` MCP tool that the sub-agent calls after writing each Dockerfile. The tool runs `docker build` only (no push) and returns success/failure with the build output. Locally it uses the host Docker daemon; in production it delegates to the same EC2 builder machine used for real deployments, reusing the existing SSH-over-SSM infrastructure.
+
+**Architecture — parameterized `run_remote_docker_build`:** The original `run_remote_docker_build` in `ec2_builder_utils.py` did build + ECR login + push. Rather than duplicating 60 lines of SSH setup boilerplate into a `run_remote_docker_build_only` function, we parameterized the existing function with `image_uri: str | None`. When `image_uri` is provided, it does the full build+push flow. When `None`, it builds with a throwaway tag and discards the image. The SSH keygen, Instance Connect key push, and SSM proxy setup are shared. Clean at the call site: `image_uri=image_uri` for deployment, `image_uri=None` for test.
+
+**Architecture — sandbox path extraction:** The sandbox path computation (`CLAUDE_SANDBOX_DIR / conv-{id} / src`) was defined as a private function inside `agent_service.py` (documented as "single source of truth" but not reusable). The new tool needed the same paths. Extracted `SandboxPaths` dataclass and `get_sandbox_paths()` into `agent/sandbox.py` so both `agent_service.py` and the tool import from one place.
+
+**Architecture — tool placement:** The `test_docker_build` tool is an MCP tool registered on the `devopshero` server, included in the sub-agent's `AgentDefinition.tools` list as `mcp__devopshero__test_docker_build`. Sub-agents inherit MCP servers from the parent agent, so this works without any changes to the SDK wiring. The main agent doesn't call this tool directly — it's solely used by the dockerfile generator sub-agent.
+
+**Prompt engineering lesson — sub-agents ignoring failures:** First test run showed the sub-agent calling `test_docker_build`, getting a failure (Docker daemon not running), and then proceeding to report the Dockerfile path as if nothing happened. The original prompt said "if all 3 fail, report the failure" but never explicitly said "do NOT report a path if the build failed." Added a CRITICAL instruction forbidding path reporting on failure, and also distinguished infrastructure errors (Docker not running — don't retry) from Dockerfile errors (wrong package — retry up to 3 times). Sub-agents need very explicit success/failure contracts in their prompts.
+
+**Key points:**
+- Build output is truncated to 80 lines before returning to the LLM to avoid flooding the context window
+- The tool gets its AWS session the same way the deployment executor does — assumed role via `iam_utils.get_assumed_role_session()`
+- The environment slug is passed from the main agent through the sub-agent task prompt — by step 6 (Dockerfile generation) in the deployment flow, the target environment is always known
+- Local builds use `--platform linux/arm64` to match the Fargate target, same as production builds
+
+---
+
 ## 2026-02-06 11:41 - [AgentChat] Bookmarkable URL shortcut for app deployment conversations
 
 **Conversation:** [2026-02-06-1141-39a89719.md](conversations/2026-02-06-1141-39a89719.md)

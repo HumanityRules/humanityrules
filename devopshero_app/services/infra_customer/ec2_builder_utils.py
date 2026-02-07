@@ -166,8 +166,13 @@ def transfer_source(session: boto3.Session, instance_id: str, source_path: Path,
         return True
 
 
-def run_remote_docker_build(session: boto3.Session, instance_id: str, image_uri: str, build_id: str) -> tuple[bool, str]:
-    """SSH to EC2, run docker build + docker push, return (success, logs)."""
+def run_remote_docker_build(session: boto3.Session, instance_id: str, image_uri: str | None, build_id: str) -> tuple[bool, str]:
+    """
+    SSH to EC2, run docker build, return (success, logs).
+
+    When image_uri is provided: builds, pushes to ECR, and cleans up.
+    When image_uri is None: build-only test, no push, discards the image.
+    """
     region = session.region_name
     build_dir = f"/build/{build_id}"
 
@@ -193,15 +198,11 @@ def run_remote_docker_build(session: boto3.Session, instance_id: str, image_uri:
 
         ssh_options = _build_ssh_options(key_path=key_path, region=region, session=session)
 
-        # Build the docker commands
-        # Get ECR registry from image URI
-        ecr_registry = image_uri.split("/")[0]
-
-        build_script = f"""
+        if image_uri is not None:
+            ecr_registry = image_uri.split("/")[0]
+            build_script = f"""
 set -e
 cd {build_dir}
-
-# Mark activity for watchdog
 touch /home/ec2-user/last_build_activity
 
 # Login to ECR
@@ -215,25 +216,39 @@ docker push {image_uri}
 
 # Cleanup build directory to free disk space
 rm -rf {build_dir}
-
-# Mark activity again
+touch /home/ec2-user/last_build_activity
+echo "BUILD_SUCCESS"
+"""
+        else:
+            test_tag = f"doh-test-build:{build_id}"
+            build_script = f"""
+set -e
+cd {build_dir}
 touch /home/ec2-user/last_build_activity
 
+# Build Docker image (ARM64 for Fargate) — test only, no push
+docker build --platform linux/arm64 -t {test_tag} .
+
+# Cleanup build directory and test image
+rm -rf {build_dir}
+docker rmi {test_tag} || true
+touch /home/ec2-user/last_build_activity
 echo "BUILD_SUCCESS"
 """
 
         ssh_cmd = ["ssh"] + ssh_options + [f"ec2-user@{instance_id}", build_script]
 
-        logger.info("Running Docker build on remote instance")
+        mode = "build+push" if image_uri else "test-only"
+        logger.info("Running Docker build on remote instance (%(mode)s)", {"mode": mode})
         result = subprocess.run(ssh_cmd, capture_output=True, text=True)
 
         logs = result.stdout + result.stderr
 
         if result.returncode != 0 or "BUILD_SUCCESS" not in result.stdout:
-            logger.error("Docker build failed: %(logs)s", {"logs": logs})
+            logger.error("Docker build failed (%(mode)s): %(logs)s", {"mode": mode, "logs": logs})
             return False, logs
 
-        logger.info("Docker build and push completed successfully")
+        logger.info("Docker build completed successfully (%(mode)s)", {"mode": mode})
         return True, logs
 
 

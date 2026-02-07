@@ -32,11 +32,22 @@ Follow this general approach (adapt as needed):
    - Health check path (from code or framework conventions)
    - Environment variables (from .env.example, config files, or code)
 
-6. **Detect secrets** — Look for AWS Secrets Manager patterns:
+6. **Detect secrets** — Identify ALL values that are sensitive and should not be stored as plaintext:
+
+   **Sensitive environment variables** — Any env var whose value is a secret:
+   - API keys (GEMINI_API_KEY, STRIPE_SECRET_KEY, OPENAI_API_KEY, etc.)
+   - Auth tokens, access tokens, refresh tokens
+   - Passwords, passphrases
+   - Signing keys, encryption keys, secret keys (SECRET_KEY, JWT_SECRET, etc.)
+   - Webhook secrets
+   - Any variable with KEY, SECRET, TOKEN, or PASSWORD in the name
+
+   **Secrets Manager SDK patterns** — Apps that explicitly call AWS Secrets Manager:
    - GetSecretValue API calls
    - Config providers that load secrets at startup
    - Secret path patterns (devopshero/{app}/secrets, etc.)
-   - Include ALL secret fields the app reads, even if described as "optional" in comments
+
+   **Important**: Put ALL sensitive values in `secrets.fields`, NOT in `env.required`. Non-sensitive config (PORT, DEBUG, NODE_ENV, LOG_LEVEL, hostnames, feature flags) stays in `env`. Include every secret field even if comments say "optional" — that means the feature is optional, not the field.
 
 7. **Produce output** — Return structured JSON with your findings.
 
@@ -84,15 +95,18 @@ When you have gathered enough evidence, output your findings as a JSON object in
     "aws_services": []
   },
   "env": {
-    "required": [
-      {"name": "DATABASE_URL", "purpose": "PostgreSQL connection string"},
-      {"name": "SECRET_KEY", "purpose": "Django secret key"}
-    ],
+    "required": [],
     "optional": [
       {"name": "DEBUG", "purpose": "Enable debug mode"}
     ]
   },
-  "secrets": null,
+  "secrets": {
+    "secret_path": null,
+    "fields": [
+      {"name": "SECRET_KEY", "purpose": "Django secret key", "default_behavior": "required, app crashes without it"},
+      {"name": "STRIPE_SECRET_KEY", "purpose": "Stripe API key for payments", "default_behavior": "payment features fail"}
+    ]
+  },
   "caveats": [
     "No /health endpoint found — will need to add one for ALB health checks",
     "Uses SQLite in development — needs DATABASE_URL for production Postgres"
@@ -130,9 +144,9 @@ When you have gathered enough evidence, output your findings as a JSON object in
 - **env**
   - **required** — Environment variables the app needs to run
   - **optional** — Environment variables that are optional
-- **secrets** — AWS Secrets Manager config (null if not detected)
-  - **secret_path** — Path pattern for secrets (e.g., "devopshero/{app}/secrets")
-  - **fields** — ALL secret fields the app reads. Each has name, purpose, and default_behavior (what happens if missing). Include every field even if comments say "optional" — that means the feature is optional, not the field.
+- **secrets** — All sensitive values the app needs (null only if zero secrets detected)
+  - **secret_path** — Path pattern if app uses Secrets Manager SDK (e.g., "devopshero/{app}/secrets"); null for env-var-based secrets
+  - **fields** — ALL secret fields: API keys, tokens, passwords, signing keys, etc. Each has name, purpose, and default_behavior. Do NOT put these in `env.required` — they belong here.
 - **caveats** — Warnings, concerns, missing pieces, or things the user should know
 - **evidence** — Evidence items for major claims (framework, run command, port, dependencies)
 - **dockerfile_path** — Path to existing Dockerfile relative to repo root if found (e.g., "Dockerfile", "docker/Dockerfile.prod"); null if no Dockerfile exists

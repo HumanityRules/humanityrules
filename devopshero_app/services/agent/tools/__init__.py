@@ -21,6 +21,7 @@ from .list_hosted_zones import list_hosted_zones, HostedZoneSummary
 from .list_repositories import list_repositories, RepositoryListItem
 from .scan_repository import scan_repository, RepositoryScan
 from .teardown_deployment import teardown_deployment, TeardownSummary
+from .test_docker_build import test_docker_build, TestBuildResult
 
 __all__ = [
     # App management
@@ -58,4 +59,7 @@ __all__ = [
     # Teardown
     "teardown_deployment",
     "TeardownSummary",
+    # Docker build testing
+    "test_docker_build",
+    "TestBuildResult",
 ]

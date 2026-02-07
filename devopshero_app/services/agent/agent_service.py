@@ -54,6 +54,7 @@ from .mcp_tools import (
 )
 from .dockerfile_gen.dockerfile_gen_config import get_generate_dockerfile_agent
 from .repo_analysis.repo_analyzer_config import get_analyze_repository_agent
+from .sandbox import SandboxPaths, get_sandbox_paths
 
 logger = logging.getLogger(__name__)
 
@@ -88,22 +89,6 @@ class StreamingContext:
     has_started_streaming: bool = False
 
 
-@dataclass
-class SandboxPaths:
-    """Sandbox directory structure for a conversation."""
-    root_path: Path   # sandbox/conv-{id}/ — conversation isolation folder
-    src_path: Path    # sandbox/conv-{id}/src/ — cloned repository
-    tmp_path: Path    # sandbox/conv-{id}/tmp/ — temp files for this conversation
-
-
-def _get_sandbox_paths(conversation_id) -> SandboxPaths:
-    """Single source of truth for conversation sandbox paths."""
-    root_path = settings.CLAUDE_SANDBOX_DIR / f"conv-{conversation_id}"
-    return SandboxPaths(
-        root_path=root_path,
-        src_path=root_path / "src",
-        tmp_path=root_path / "tmp",
-    )
 
 
 def _load_prompt_file(filename: str) -> str:
@@ -614,7 +599,7 @@ async def stream_response(conversation: Conversation, fork_session: bool) -> Asy
     logger.info(f"System prompt for conversation {conversation.id}:\n{system_prompt}")
 
     # Set up per-conversation sandbox directory structure. Do not create the src path here, it will be created by the repository clone.
-    sandbox_paths = _get_sandbox_paths(conversation.id)
+    sandbox_paths = get_sandbox_paths(conversation.id)
     sandbox_paths.root_path.mkdir(parents=True, exist_ok=True)
     sandbox_paths.tmp_path.mkdir(parents=True, exist_ok=True)
 
