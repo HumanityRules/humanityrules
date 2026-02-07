@@ -1,5 +1,31 @@
 # DevOpsHero Development Journal
 
+## 2026-02-07 20:55 - [AgentChat] Conversation forking via URL for faster debugging
+
+**Conversation:** [2026-02-07-1328-e7b9f2be.md](conversations/2026-02-07-1328-e7b9f2be.md)
+
+Added conversation forking so you can branch from any completed conversation and continue with the agent remembering the full prior context. The motivation is debugging: when a conversation fails at turn 15, you had to re-run turns 1-14 from scratch (expensive in tokens, time, and non-deterministic). Now you visit `/chat/<conversation-id>/fork/` and get a new conversation where the agent picks up where the source left off.
+
+**Design decisions and trade-offs:**
+
+- **URL-based trigger** — Fork is just a GET to `/chat/<id>/fork/` that creates a new conversation and redirects. No UI changes, no buttons, no banners. This is a developer debugging tool; the person forking knows what conversation they came from.
+
+- **Zero model fields** — Instead of adding `forked_from` or `fork_pending` fields to the Conversation model, we derive the fork signal from existing state. The key insight: normal conversations have `session_id=None` until their first agent turn completes (set by `stream_response` after the SDK returns). A forked conversation has `session_id` copied from the source before any agent turn. So `stream_response` checks: if `session_id is not None` and no agent messages exist, it's a fork. This condition is impossible for normal conversations.
+
+- **Removed `fork_session` parameter from `stream_response`** — Previously `fork_session: bool` was threaded through `stream_response` -> `agent_runner` -> `_create_agent_options`. Now `stream_response` detects forks internally, so `agent_runner` doesn't need to know about forking at all. The `test_main_agent.py` CLI was also simplified — `fork_session` was removed from the entire call chain (`_stream_agent`, `_run_agent_once`, `_run_repl`, `_run`).
+
+- **Session file copy for cwd mismatch** — The Claude CLI indexes session files by working directory at `~/.claude/projects/{cwd-with-slashes-replaced-by-dashes}/{session_id}.jsonl`. Each DOH conversation gets its own sandbox (`sandbox/conv-{id}/src/`), so a forked conversation has a different cwd than the source. The SDK couldn't find the session file because it was looking in the wrong project directory. Fix: `_ensure_session_file_for_fork` searches `~/.claude/projects/` for the session `.jsonl` and copies it to the fork's project directory before the SDK initializes. After forking, the SDK creates a new session file with a fresh UUID in the fork's directory — the copied source file is only needed for initialization.
+
+- **Context fields copied** — The fork view copies `mode`, `context_workspace`, `context_repository`, and `context_aws_account` from the source conversation so the forked conversation has the same system prompt and tool configuration.
+
+**Key points:**
+- The Claude CLI's session storage path encoding is: absolute cwd path with every `/` replaced by `-` (e.g., `/Users/foo/bar/` becomes `-Users-foo-bar`)
+- The Agent SDK and Claude Code CLI share the same underlying `claude` binary — session storage, resume, and fork are CLI features, not SDK features
+- When `fork_session=True`, the SDK reads the source session, creates a brand-new session UUID, and writes a new `.jsonl` file. The source session is not modified.
+- The `_resolve_conversation_for_fork` in `test_main_agent.py` was also updated to save `session_id` to the DB (was in-memory only before) and to copy context fields from the source
+
+---
+
 ## 2026-02-07 00:00 - [Bugfix] Claude Code SDK session persistence — process killed before session flush
 
 **Conversation:** [2026-02-06-2348-014ddac5.md](conversations/2026-02-06-2348-014ddac5.md)

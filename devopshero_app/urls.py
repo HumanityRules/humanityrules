@@ -53,4 +53,5 @@ urlpatterns = [
     path("chat/<uuid:conversation_id>/stream/", views.chat_stream, name="chat_stream"),
     path("chat/<uuid:conversation_id>/messages/", views.chat_messages, name="chat_messages"),
     path("chat/<uuid:conversation_id>/close/", views.chat_close, name="chat_close"),
+    path("chat/<uuid:conversation_id>/fork/", views.chat_fork, name="chat_fork"),
 ]
