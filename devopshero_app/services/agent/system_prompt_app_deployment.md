@@ -97,10 +97,14 @@ After repository analysis, check the `dockerfile_path` field in the analysis res
   - **Include the target environment_slug** so the sub-agent can run a test build
   - The sub-agent writes a Dockerfile, validates it with a test build, and reports the path
   - Use the reported path as the dockerfile_path for deploy_app
-  - If the sub-agent reports a build failure after retries, inform the user and ask for guidance
+
+**CRITICAL — A failed build test is a hard blocker.** If the sub-agent reports `"success": false`,
+do NOT proceed to deploy_app. Show the user the exact error and ask how to proceed. Never
+rationalize the failure (e.g., "it failed locally but will work in the cloud").
 
 Do NOT ask the user whether to generate a Dockerfile — just generate it when none exists.
-Mention to the user that a Dockerfile was generated and build-tested as part of the deployment summary.
+When the build test succeeds, mention to the user that a Dockerfile was generated and
+build-tested as part of the deployment summary.
 </dockerfile_generation>
 
 <app_secrets>
