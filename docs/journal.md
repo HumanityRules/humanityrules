@@ -1,5 +1,33 @@
 # DevOpsHero Development Journal
 
+## 2026-02-07 00:00 - [Bugfix] Claude Code SDK session persistence — process killed before session flush
+
+**Conversation:** [2026-02-06-2348-014ddac5.md](conversations/2026-02-06-2348-014ddac5.md)
+
+Deep debugging session to fix a `ProcessError` on the second message turn of conversations without a cloned repository. The error was `"No conversation found with session ID: ..."` — the CLI couldn't resume a session whose data had never been persisted to disk.
+
+**The symptom:** Conversations with a cloned git repo (app deployment mode) worked fine across multiple turns. Conversations without a repo (general mode, empty sandbox directory) failed on every second turn with exit code 1.
+
+**The red herring — git repos:** Initial investigation found that the Claude CLI stores session data in `~/.claude/projects/{cwd-slug}/{session_id}.jsonl`. For working conversations (cloned repo in cwd), the session file contained full conversation data (user/assistant messages, ~27KB). For broken conversations (empty dir), only a 139-byte dequeue marker was written — no conversation data at all, despite the first turn completing successfully with a full response. This led to a long detour trying `git init` and `git init + commit` in the sandbox directory, thinking the CLI required a git repo to persist sessions. None of these worked.
+
+**The actual root cause — process lifecycle:** The SDK's `async with ClaudeSDKClient` pattern calls `connect()` then `query()` to send the user message. With `query()`, stdin stays open (the CLI expects more turns). When the `async with` block exits, `__aexit__` calls `disconnect()` which calls `transport.close()` — this sends SIGTERM to the CLI process. The CLI was being killed before it could flush session data to disk. With repo-context conversations, the timing happened to work (possibly because the CLI persists earlier when there's git context). Without a repo, the CLI hadn't persisted yet when SIGTERM arrived.
+
+**The fix — `connect(prompt=...)` + `receive_messages()`:** Instead of `connect()` + `query()` + `receive_response()`, we now use:
+
+- **`connect(prompt=async_generator)`** — The SDK's `stream_input()` sends the message and then, critically, calls `end_input()` (closes stdin) after the ResultMessage. This signals the CLI that no more input is coming, so it can persist session data and exit cleanly.
+- **`receive_messages()`** instead of `receive_response()` — Keeps reading until the CLI actually exits (stream ends), rather than stopping at ResultMessage and immediately tearing down. A try/except around the loop ignores transport errors that occur after the ResultMessage has been received (the CLI exiting with a non-zero code during cleanup is harmless once we have the result).
+
+**Why `receive_messages()` doesn't hang:** With `query()`, the CLI stays alive waiting for more input, so `receive_messages()` would block forever. But with `connect(prompt=...)`, stdin gets closed after the result, so the CLI persists and exits, which terminates the message stream naturally.
+
+**Key points:**
+- The SDK has two usage patterns: `connect()` + `query()` for multi-turn within a single connection (stdin stays open), and `connect(prompt=...)` for single-response workflows (stdin closes after result). Our code is single-response per connection (we create a new `ClaudeSDKClient` per turn), so the prompt-based pattern is correct.
+- The `stream_input()` method has special handling for MCP servers: it waits for the ResultMessage before closing stdin, ensuring bidirectional MCP communication can complete. Without MCP servers, stdin would close immediately after the prompt is sent.
+- The 139-byte dequeue marker was written at CLI startup (before any conversation), not at the end. Session conversation data was supposed to be appended at shutdown — which never happened because SIGTERM killed the process.
+- Session files for working conversations had a `"gitBranch": "master"` field in user messages, which was a distraction — it's just metadata the CLI includes when it detects a git branch, not a persistence requirement.
+- This was identified with help from Codex, which was given a factual summary of all findings and suggested the `connect(prompt=...)` + `receive_messages()` approach.
+
+---
+
 ## 2026-02-06 18:45 - [Deployment] Dockerfile build testing for the generate-dockerfile sub-agent
 
 **Conversation:** [2026-02-06-2237-aeec6f8c.md](conversations/2026-02-06-2237-aeec6f8c.md)

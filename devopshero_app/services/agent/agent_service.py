@@ -97,6 +97,15 @@ def _load_prompt_file(filename: str) -> str:
     return prompt_path.read_text()
 
 
+async def _single_user_prompt_stream(user_message: str) -> AsyncGenerator[dict[str, Any], None]:
+    """Wrap a user message as an async generator for connect(prompt=...)."""
+    yield {
+        "type": "user",
+        "message": {"role": "user", "content": user_message},
+        "parent_tool_use_id": None,
+    }
+
+
 def create_conversation(user, workspace_id, repo_id, aws_account_id, mode: str | None) -> Conversation:
     """Create a conversation with context, auto-derived mode, and trigger message."""
     trigger_content = {
@@ -637,10 +646,16 @@ async def stream_response(conversation: Conversation, fork_session: bool) -> Asy
     yield AgentStreamEvent(type="thinking")
 
     try:
-        async with ClaudeSDKClient(options=options) as client:
-            await client.query(user_message)
+        # Use connect(prompt=...) instead of connect() + query() so the SDK closes stdin after the
+        # ResultMessage (via stream_input → end_input). This signals the CLI to persist session data
+        # and exit cleanly. With query(), stdin stays open and the CLI gets SIGTERM'd during cleanup
+        # before it can persist, which breaks --resume on subsequent turns.
+        client = ClaudeSDKClient(options=options)
+        await client.connect(prompt=_single_user_prompt_stream(user_message))
+        saw_result = False
 
-            async for message in client.receive_response():
+        try:
+            async for message in client.receive_messages():
                 if isinstance(message, SDKStreamEvent):
                     async for event in _handle_sdk_stream_event(message, ctx):
                         yield event
@@ -654,6 +669,7 @@ async def stream_response(conversation: Conversation, fork_session: bool) -> Asy
                         yield event
 
                 elif isinstance(message, ResultMessage):
+                    saw_result = True
                     logger.info(f"[SDK] ResultMessage: turns={message.num_turns}, cost=${message.total_cost_usd or 0:.4f}")
                     # Capture session_id for conversation continuity
                     if message.session_id and not conversation.session_id:
@@ -677,6 +693,16 @@ async def stream_response(conversation: Conversation, fork_session: bool) -> Asy
 
                 elif isinstance(message, SystemMessage):
                     logger.info(f"[SDK] SystemMessage: subtype={message.subtype}, data=\n{json.dumps(message.data, indent=2)}")
+        except Exception as e:
+            if saw_result:
+                logger.error(f"[SDK] Ignoring post-result transport error: {e}")
+            else:
+                raise
+        finally:
+            await client.disconnect()
+
+        if not saw_result:
+            raise RuntimeError("Claude SDK stream ended before receiving a ResultMessage")
 
         if ctx.accumulated_content:
             await _persist_text_message(conversation=conversation, content=ctx.accumulated_content)
