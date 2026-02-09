@@ -1,8 +1,8 @@
 """
 Tool for testing a Dockerfile by running docker build.
 
-Used by the generate-dockerfile sub-agent to validate generated Dockerfiles
-before handing them off for deployment. Build-only — no push to ECR.
+Used by the main deployment agent after the generate-dockerfile sub-agent returns
+a path. Build-only — no push to ECR.
 
 Locally uses the host Docker daemon. In production, delegates to the
 remote EC2 builder (same machine used for deployment builds).

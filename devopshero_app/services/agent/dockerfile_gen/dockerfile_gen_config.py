@@ -26,10 +26,9 @@ def get_generate_dockerfile_agent() -> AgentDefinition:
     return AgentDefinition(
         description=(
             "Dockerfile generator specialist. Given a repository analysis JSON and "
-            "target environment slug, generates a production-ready Dockerfile, "
-            "validates it with a test build, and returns the path. "
-            "Retries up to 3 times if the build fails."
+            "target environment slug, generates a production-ready Dockerfile and "
+            "returns a <dockerfile_result> XML block with <dockerfile_path>. "
         ),
         prompt=_load_system_prompt(),
-        tools=["Write", "Read", "Glob", "Grep", "mcp__devopshero__test_docker_build"],
+        tools=["Write", "Read", "Glob", "Grep", "Bash"],
     )

@@ -32,7 +32,6 @@ from .tools import (
     list_repositories as _list_repositories,
     scan_repository as _scan_repository,
     teardown_deployment as _teardown_deployment,
-    test_docker_build as _test_docker_build,
 )
 
 
@@ -733,37 +732,6 @@ async def get_environment_status(args: dict[str, Any]) -> dict[str, Any]:
     return _mcp_response(result)
 
 
-# =============================================================================
-# Docker Build Testing
-# =============================================================================
-
-
-@tool(
-    "test_docker_build",
-    (
-        "Test a Dockerfile by running 'docker build'. Returns success/failure and build output. "
-        "Use this after generating a Dockerfile to verify it builds correctly. "
-        "If the build fails, use the output to diagnose and fix the Dockerfile."
-    ),
-    {
-        "environment_slug": {"type": "string", "description": "Target environment slug (e.g., 'default'). Used to locate the build machine in production."},
-    },
-)
-async def test_docker_build(args: dict[str, Any]) -> dict[str, Any]:
-    """Test a Dockerfile by running docker build (no push)."""
-    conversation = _get_conversation()
-
-    result = await _test_docker_build(
-        conversation_id=conversation.id,
-        organization=conversation.organization,
-        environment_slug=args["environment_slug"],
-    )
-
-    return _mcp_response({
-        "success": result.success,
-        "build_output": result.build_output,
-    })
-
 
 # =============================================================================
 # Utility Tools
@@ -807,8 +775,6 @@ devopshero_mcp_server = create_sdk_mcp_server(
         deploy_app,
         get_deployment_status,
         teardown_deployment,
-        # Docker build testing
-        test_docker_build,
         # Utility
         wait,
     ],
@@ -831,8 +797,6 @@ TOOL_NAMES = [
     "mcp__devopshero__deploy_app",
     "mcp__devopshero__get_deployment_status",
     "mcp__devopshero__teardown_deployment",
-    # Docker build testing
-    "mcp__devopshero__test_docker_build",
     # Utility
     "mcp__devopshero__wait",
 ]
