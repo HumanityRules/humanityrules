@@ -32,6 +32,7 @@ from .tools import (
     list_repositories as _list_repositories,
     scan_repository as _scan_repository,
     teardown_deployment as _teardown_deployment,
+    test_docker_build as _test_docker_build,
 )
 
 
@@ -92,6 +93,7 @@ TOOL_DISPLAY_NAMES = {
     "mcp__devopshero__deploy_app": "Deploy App",
     "mcp__devopshero__get_deployment_status": "Get Deployment Status",
     "mcp__devopshero__teardown_deployment": "Teardown Deployment",
+    "mcp__devopshero__test_docker_build": "Test Docker Build",
     # Utility
     "mcp__devopshero__wait": "Wait",
 }
@@ -710,6 +712,29 @@ async def teardown_deployment(args: dict[str, Any]) -> dict[str, Any]:
 
 
 @tool(
+    "test_docker_build",
+    (
+        "Test-build the Dockerfile in the conversation's repository sandbox. "
+        "Build-only — does not push to ECR. "
+        "Use this after generating a Dockerfile to verify it builds successfully before deploying. "
+        "Returns success/failure and the build output (truncated to last 80 lines)."
+    ),
+    {
+        "environment_slug": str,
+    },
+)
+async def test_docker_build(args: dict[str, Any]) -> dict[str, Any]:
+    """Run a test Docker build for the Dockerfile in the sandbox."""
+    conversation = _get_conversation()
+    result = await _test_docker_build(
+        conversation_id=conversation.id,
+        organization=conversation.organization,
+        environment_slug=args["environment_slug"],
+    )
+    return _mcp_response({"success": result.success, "build_output": result.build_output})
+
+
+@tool(
     "get_environment_status",
     (
         "Get the current status of an environment including provisioning progress and logs. "
@@ -775,6 +800,7 @@ devopshero_mcp_server = create_sdk_mcp_server(
         deploy_app,
         get_deployment_status,
         teardown_deployment,
+        test_docker_build,
         # Utility
         wait,
     ],
@@ -797,6 +823,7 @@ TOOL_NAMES = [
     "mcp__devopshero__deploy_app",
     "mcp__devopshero__get_deployment_status",
     "mcp__devopshero__teardown_deployment",
+    "mcp__devopshero__test_docker_build",
     # Utility
     "mcp__devopshero__wait",
 ]
