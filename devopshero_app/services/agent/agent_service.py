@@ -53,7 +53,6 @@ from .mcp_tools import (
     devopshero_mcp_server,
     TOOL_NAMES,
 )
-from .dockerfile_gen.dockerfile_gen_config import get_generate_dockerfile_agent
 from .repo_analysis.repo_analyzer_config import get_analyze_repository_agent
 from .sandbox import SandboxPaths, get_sandbox_paths
 
@@ -568,7 +567,6 @@ def _create_agent_options(system_prompt: str, resume_session_id: str | None, for
         sandbox=sandbox_settings,
         agents={
             "analyze-repository": get_analyze_repository_agent(),
-            "generate-dockerfile": get_generate_dockerfile_agent(),
         },
         mcp_servers={"devopshero": devopshero_mcp_server},
         tools=builtin_tools,
@@ -601,16 +599,16 @@ async def _detect_and_prepare_fork(conversation: Conversation, target_cwd: Path)
     claude_projects = Path.home() / ".claude" / "projects"
     target_project_dir = claude_projects / str(target_cwd).replace("/", "-")
     target_session_file = target_project_dir / f"{conversation.session_id}.jsonl"
+    logger.info(f"Session ID: {conversation.session_id}, session file: {target_session_file}")
 
-    if not target_session_file.exists():
-        for source_file in claude_projects.rglob(f"{conversation.session_id}.jsonl"):
-            if source_file != target_session_file:
-                target_project_dir.mkdir(parents=True, exist_ok=True)
-                await asyncio.to_thread(shutil.copy2, source_file, target_session_file)
-                logger.info(f"Copied session file to {target_project_dir.name}")
-                break
-        else:
-            logger.error(f"Session file {conversation.session_id}.jsonl not found in any project directory")
+    # Find the source session file from the parent conversation's project directory
+    source_file = next(claude_projects.rglob(f"{conversation.session_id}.jsonl"), None)
+    if source_file:
+        target_project_dir.mkdir(parents=True, exist_ok=True)
+        await asyncio.to_thread(shutil.copy2, source_file, target_session_file)
+        logger.info(f"Copied session file from {source_file.parent.name} to {target_project_dir.name}")
+    else:
+        logger.error(f"Session file {conversation.session_id}.jsonl not found in any project directory")
 
     return True
 
