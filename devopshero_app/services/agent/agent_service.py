@@ -218,6 +218,8 @@ class MainAgent:
                 user_message=user_message,
                 agent_response=ctx.accumulated_content or "",
             )
+            if generated_title is not None:
+                conversation.title = generated_title
 
             # Persist conversation — session_id and title may have been set above (typically turn 1)
             await conversation.asave()
@@ -529,7 +531,6 @@ async def _maybe_generate_title(conversation: Conversation, user_message: str, a
             aws_account_name,
         )
 
-        conversation.title = result.title
         logger.info(f"Generated title for conversation {conversation.id}: {result.title}")
 
         # Log title generation LLM usage
