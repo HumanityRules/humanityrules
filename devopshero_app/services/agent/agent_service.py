@@ -11,7 +11,6 @@ This module provides the core agent service that:
 Built on the Claude Agent SDK for robust agent orchestration with
 structured tool calling, conversation memory, and streaming responses.
 """
-
 import asyncio
 import json
 import logging
@@ -89,21 +88,181 @@ class StreamingContext:
     has_started_streaming: bool = False
 
 
+class MessageChannel:
+    """Async iterable that feeds user messages to connect(prompt=...) on demand. Closing it signals stdin EOF so the CLI persists the session and exits cleanly."""
+
+    def __init__(self) -> None:
+        self._queue: asyncio.Queue[dict[str, Any] | None] = asyncio.Queue()
+
+    def send(self, user_message: str) -> None:
+        """Enqueue a user message for the SDK to send to the CLI."""
+        self._queue.put_nowait({
+            "type": "user",
+            "message": {"role": "user", "content": user_message},
+            "parent_tool_use_id": None,
+        })
+
+    def close(self) -> None:
+        """Signal end of input; stream_input will call end_input() and the CLI will persist and exit."""
+        self._queue.put_nowait(None)
+
+    async def __aiter__(self) -> AsyncGenerator[dict[str, Any], None]:
+        while True:
+            item = await self._queue.get()
+            if item is None:
+                return
+            yield item
+
+
+class MainAgent:
+    """Persistent Claude agent for a single conversation."""
+
+    def __init__(self, client: ClaudeSDKClient, channel: MessageChannel, sandbox_paths: SandboxPaths, model_alias: str) -> None:
+        self._client = client
+        self._channel = channel
+        self._sandbox_paths = sandbox_paths
+        self._model_alias = model_alias
+
+    @classmethod
+    async def create(cls, conversation: Conversation) -> MainAgent:
+        """Async factory: one-time setup, returns ready-to-use agent."""
+        conversation_context.set(conversation)
+        system_prompt = await _build_system_prompt(conversation)
+        logger.info(f"System prompt for conversation {conversation.id}:\n{system_prompt}")
+
+        sandbox_paths = get_sandbox_paths(conversation.id)
+        sandbox_paths.root_path.mkdir(parents=True, exist_ok=True)
+        sandbox_paths.tmp_path.mkdir(parents=True, exist_ok=True)
+
+        fork_session = await _detect_and_prepare_fork(conversation=conversation, target_cwd=sandbox_paths.src_path)
+
+        if conversation.context_repository_id:
+            repository = await Repository.objects.select_related("integration").aget(
+                id=conversation.context_repository_id,
+            )
+            await asyncio.to_thread(
+                repo_service.clone_repository,
+                repository,
+                repository.default_branch,
+                sandbox_paths.src_path,
+            )
+        else:
+            sandbox_paths.src_path.mkdir(parents=True, exist_ok=True)
+
+        model_alias = _get_llm_model_for_conversation_mode(conversation.mode)
+        logger.info(f"Using model {model_alias} for conversation {conversation.id} (mode={conversation.mode})")
+
+        options = _create_agent_options(
+            system_prompt=system_prompt,
+            resume_session_id=conversation.session_id,
+            fork_session=fork_session,
+            sandbox_paths=sandbox_paths,
+            model_alias=model_alias,
+        )
+
+        channel = MessageChannel()
+        client = ClaudeSDKClient(options=options)
+        await client.connect(prompt=channel)
+
+        return cls(client=client, channel=channel, sandbox_paths=sandbox_paths, model_alias=model_alias)
+
+    async def stream_turn(self, conversation: Conversation) -> AsyncGenerator[AgentStreamEvent, None]:
+        """Process one message turn using the persistent client."""
+        conversation_context.set(conversation)
+        user_message = await _aget_last_user_message(conversation)
+        self._channel.send(user_message)
+
+        ctx = StreamingContext(conversation=conversation)
+        yield AgentStreamEvent(type="thinking")
+
+        try:
+            async for message in self._client.receive_response():
+                if isinstance(message, SDKStreamEvent):
+                    async for event in _handle_sdk_stream_event(message, ctx):
+                        yield event
+
+                elif isinstance(message, AssistantMessage):
+                    async for event in _handle_assistant_message(message, ctx):
+                        yield event
+
+                elif isinstance(message, UserMessage):
+                    async for event in _handle_tool_results(message, ctx):
+                        yield event
+
+                elif isinstance(message, ResultMessage):
+                    logger.info(f"[SDK] ResultMessage: turns={message.num_turns}, cost=${message.total_cost_usd or 0:.4f}")
+                    if message.session_id and not conversation.session_id:
+                        conversation.session_id = message.session_id
+
+                    usage = message.usage or {}
+                    await LLMUsageLog.objects.acreate(
+                        organization_id=conversation.organization_id,
+                        user_id=conversation.user_id,
+                        conversation=conversation,
+                        source=LLMUsageLog.Source.AGENT_TURN,
+                        model_alias=self._model_alias,
+                        model_id=llm_client.get_model_id(alias=self._model_alias),
+                        input_tokens=usage.get("input_tokens"),
+                        output_tokens=usage.get("output_tokens"),
+                        cost_usd=message.total_cost_usd,
+                        duration_ms=message.duration_ms,
+                        num_turns=message.num_turns,
+                    )
+
+                elif isinstance(message, SystemMessage):
+                    logger.info(f"[SDK] SystemMessage: subtype={message.subtype}, cwd={message.data.get('cwd')}, session_id={message.data.get('session_id')}")
+
+            if ctx.accumulated_content:
+                await _persist_text_message(conversation=conversation, content=ctx.accumulated_content)
+
+            generated_title = None
+            if not conversation.title:
+                await _maybe_generate_title(
+                    conversation=conversation,
+                    user_message=user_message,
+                    agent_response=ctx.accumulated_content or "",
+                )
+                if conversation.title:
+                    generated_title = conversation.title
+
+            await conversation.asave()
+
+            total_cost = await LLMUsageLog.objects.filter(
+                conversation=conversation,
+            ).aaggregate(total=Sum("cost_usd"))
+            total_cost_value = total_cost["total"]
+
+            complete_data = {"conversation_id": str(conversation.id)}
+            if generated_title:
+                complete_data["title"] = generated_title
+            if total_cost_value is not None:
+                complete_data["total_cost"] = f"{total_cost_value:.4f}"
+            yield AgentStreamEvent(type="complete", data=complete_data)
+
+        except Exception as e:
+            logger.exception("Error during streaming conversation processing")
+            try:
+                await _persist_error(conversation=conversation, error_type=type(e).__name__, error_description=f"Agent error: {e}")
+            except Exception:
+                logger.exception("Failed to save error message to database")
+            yield AgentStreamEvent(type="error", data={"error": str(e)})
+
+    async def shutdown(self) -> None:
+        """Graceful shutdown: close channel, drain, disconnect."""
+        self._channel.close()
+        try:
+            async with asyncio.timeout(10):
+                async for _ in self._client.receive_messages():
+                    pass
+        except (TimeoutError, Exception):
+            pass
+        await self._client.disconnect()
 
 
 def _load_prompt_file(filename: str) -> str:
     """Load a system prompt from the given filename."""
     prompt_path = Path(__file__).parent / filename
     return prompt_path.read_text()
-
-
-async def _single_user_prompt_stream(user_message: str) -> AsyncGenerator[dict[str, Any], None]:
-    """Wrap a user message as an async generator for connect(prompt=...)."""
-    yield {
-        "type": "user",
-        "message": {"role": "user", "content": user_message},
-        "parent_tool_use_id": None,
-    }
 
 
 def create_conversation(user, workspace_id, repo_id, aws_account_id, mode: str | None) -> Conversation:
@@ -611,174 +770,3 @@ async def _detect_and_prepare_fork(conversation: Conversation, target_cwd: Path)
         logger.error(f"Session file {conversation.session_id}.jsonl not found in any project directory")
 
     return True
-
-
-async def stream_response(conversation: Conversation) -> AsyncGenerator[AgentStreamEvent, None]:
-    """
-    Stream agent response for a conversation.
-
-    This is the main entry point for streaming agent processing. It:
-    1. Clones the repository if one is set in conversation context
-    2. Sets up the conversation context for MCP tools
-    3. Sends the latest user message to Claude via the Agent SDK
-    4. Yields text deltas for real-time frontend updates
-    5. Handles tool calls and yields tool events
-    6. Persists final messages to the database on completion
-    7. Cleans up cloned repository
-
-    Fork detection: if session_id is already set but no agent messages exist, this conversation
-    was forked from another. Normal conversations have session_id=None until their first agent
-    turn completes. The SDK is told to fork so it branches into a new session file.
-
-    Yields:
-        AgentStreamEvent objects for each streaming event.
-
-    Raises:
-        ValueError: If the conversation has no user messages.
-    """
-    conversation_context.set(conversation)
-    user_message = await _aget_last_user_message(conversation)
-    system_prompt = await _build_system_prompt(conversation)
-
-    logger.info(f"System prompt for conversation {conversation.id}:\n{system_prompt}")
-
-    # Set up per-conversation sandbox directory structure. Do not create the src path here, it will be created by the repository clone.
-    sandbox_paths = get_sandbox_paths(conversation.id)
-    sandbox_paths.root_path.mkdir(parents=True, exist_ok=True)
-    sandbox_paths.tmp_path.mkdir(parents=True, exist_ok=True)
-
-    fork_session = await _detect_and_prepare_fork(conversation=conversation, target_cwd=sandbox_paths.src_path)
-
-    # Clone repository if one is set in conversation context
-    if conversation.context_repository_id:
-        repository = await Repository.objects.select_related("integration").aget(
-            id=conversation.context_repository_id,
-        )
-        await asyncio.to_thread(
-            repo_service.clone_repository,
-            repository,
-            repository.default_branch,
-            sandbox_paths.src_path,
-        )
-    else:
-        # The agent always uses the src_path as its working directory, we need to create it when clone_repository doesn't do it
-        sandbox_paths.src_path.mkdir(parents=True, exist_ok=True)
-    
-    model_alias = _get_llm_model_for_conversation_mode(conversation.mode)
-    logger.info(f"Using model {model_alias} for conversation {conversation.id} (mode={conversation.mode})")
-
-    options = _create_agent_options(
-        system_prompt=system_prompt,
-        resume_session_id=conversation.session_id,
-        fork_session=fork_session,
-        sandbox_paths=sandbox_paths,
-        model_alias=model_alias,
-    )
-
-    # The streaming context is used to store the accumulated content and the pending tool calls, and is passed 
-    # around and mutated by the event handlers
-    ctx = StreamingContext(conversation=conversation)
-
-    # Start with thinking indicator (will be replaced by streaming container on first text)
-    yield AgentStreamEvent(type="thinking")
-
-    try:
-        # Use connect(prompt=...) instead of connect() + query() so the SDK closes stdin after the
-        # ResultMessage (via stream_input → end_input). This signals the CLI to persist session data
-        # and exit cleanly. With query(), stdin stays open and the CLI gets SIGTERM'd during cleanup
-        # before it can persist, which breaks --resume on subsequent turns.
-        client = ClaudeSDKClient(options=options)
-        await client.connect(prompt=_single_user_prompt_stream(user_message))
-        saw_result = False
-
-        try:
-            async for message in client.receive_messages():
-                if isinstance(message, SDKStreamEvent):
-                    async for event in _handle_sdk_stream_event(message, ctx):
-                        yield event
-
-                elif isinstance(message, AssistantMessage):
-                    async for event in _handle_assistant_message(message, ctx):
-                        yield event
-
-                elif isinstance(message, UserMessage):
-                    async for event in _handle_tool_results(message, ctx):
-                        yield event
-
-                elif isinstance(message, ResultMessage):
-                    saw_result = True
-                    logger.info(f"[SDK] ResultMessage: turns={message.num_turns}, cost=${message.total_cost_usd or 0:.4f}")
-                    # Capture session_id for conversation continuity
-                    if message.session_id and not conversation.session_id:
-                        conversation.session_id = message.session_id
-
-                    # Log LLM usage to database
-                    usage = message.usage or {}
-                    await LLMUsageLog.objects.acreate(
-                        organization_id=conversation.organization_id,
-                        user_id=conversation.user_id,
-                        conversation=conversation,
-                        source=LLMUsageLog.Source.AGENT_TURN,
-                        model_alias=model_alias,
-                        model_id=llm_client.get_model_id(alias=model_alias),
-                        input_tokens=usage.get("input_tokens"),
-                        output_tokens=usage.get("output_tokens"),
-                        cost_usd=message.total_cost_usd,
-                        duration_ms=message.duration_ms,
-                        num_turns=message.num_turns,
-                    )
-
-                elif isinstance(message, SystemMessage):
-                    logger.info(f"[SDK] SystemMessage: subtype={message.subtype}, data=\n{json.dumps(message.data, indent=2)}")
-        except Exception as e:
-            if saw_result:
-                logger.error(f"[SDK] Ignoring post-result transport error: {e}")
-            else:
-                raise
-        finally:
-            await client.disconnect()
-
-        if not saw_result:
-            raise RuntimeError("Claude SDK stream ended before receiving a ResultMessage")
-
-        if ctx.accumulated_content:
-            await _persist_text_message(conversation=conversation, content=ctx.accumulated_content)
-
-        # Generate title for new conversations (first message)
-        generated_title = None
-        if not conversation.title:
-            await _maybe_generate_title(
-                conversation=conversation,
-                user_message=user_message,
-                agent_response=ctx.accumulated_content or "",
-            )
-            if conversation.title:
-                generated_title = conversation.title
-
-        await conversation.asave()
-
-        # Query total cost for this conversation (includes the turn we just logged + title gen)
-        total_cost = await LLMUsageLog.objects.filter(
-            conversation=conversation,
-        ).aaggregate(total=Sum("cost_usd"))
-        total_cost_value = total_cost["total"]
-
-        # Include title and cost in complete event (for OOB UI updates)
-        complete_data = {"conversation_id": str(conversation.id)}
-        if generated_title:
-            complete_data["title"] = generated_title
-        if total_cost_value is not None:
-            complete_data["total_cost"] = f"{total_cost_value:.4f}"
-        yield AgentStreamEvent(type="complete", data=complete_data)
-
-    except Exception as e:
-        logger.exception("Error during streaming conversation processing")
-        try:
-            await _persist_error(conversation=conversation, error_type=type(e).__name__, error_description=f"Agent error: {e}")
-        except Exception:
-            logger.exception("Failed to save error message to database")
-        yield AgentStreamEvent(type="error", data={"error": str(e)})
-
-    # NOTE: Cloned repos are NOT cleaned up per-message.
-    # They persist for the conversation lifetime to allow agent work to accumulate.
-    # TODO: Implement cleanup via chat_close or periodic cleanup job.

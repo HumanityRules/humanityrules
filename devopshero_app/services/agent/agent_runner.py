@@ -34,6 +34,7 @@ class AgentRunner:
     is_streaming: bool = False  # True between 'start' and 'complete' events
     accumulated_text: str = ""  # Current text block for reconnect replay
     pending_tools: dict = field(default_factory=dict)  # tool_use_id → {name, input} for in-progress tools
+    agent: agent_service.MainAgent | None = None
 
 
 # In-memory state (single instance deployment)
@@ -143,14 +144,15 @@ async def _run_agent_loop(runner: AgentRunner, conversation_id: UUID) -> None:
     Continues when: client connected (waiting for input) OR work to do.
     """
     try:
+        conversation = await _reload_conversation(conversation_id=conversation_id)
+        runner.agent = await agent_service.MainAgent.create(conversation)
+
         while runner.client_connected or await _needs_response_by_id(conversation_id=conversation_id):
             conversation = await _reload_conversation(conversation_id=conversation_id)
 
             if await _needs_response(conversation=conversation):
                 logger.info(f"Agent processing message for conversation {conversation_id}")
-                async for event in agent_service.stream_response(
-                    conversation=conversation,
-                ):
+                async for event in runner.agent.stream_turn(conversation=conversation):
                     # Track streaming state for reconnect handling
                     if event.type == "start":
                         runner.is_streaming = True
@@ -182,13 +184,15 @@ async def _run_agent_loop(runner: AgentRunner, conversation_id: UUID) -> None:
         await runner.event_queue.put(error_event)
 
     finally:
+        if runner.agent:
+            await runner.agent.shutdown()
         # Send completion sentinel and cleanup
         await runner.event_queue.put(None)
         _runners.pop(conversation_id, None)
 
         # Return DB connections to the pool. Background tasks spawned via asyncio.create_task()
         # run outside Django's request lifecycle, so request_finished signal doesn't cover them.
-        # Without this, connections opened during stream_response() ORM operations leak from the
+        # Without this, connections opened during agent ORM operations leak from the
         # pool. With psycopg3's pool=True, close_all() returns connections to the pool rather
         # than truly closing them.
         # See also: chat.py's event_generator() — both cleanups are required.
