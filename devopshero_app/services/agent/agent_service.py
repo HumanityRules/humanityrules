@@ -166,10 +166,10 @@ class MainAgent:
 
         return cls(client=client, channel=channel, sandbox_paths=sandbox_paths, model_alias=model_alias)
 
-    async def stream_turn(self, conversation: Conversation) -> AsyncGenerator[AgentStreamEvent, None]:
+
+    async def stream_turn(self, conversation: Conversation, user_message: str) -> AsyncGenerator[AgentStreamEvent, None]:
         """Process one message turn using the persistent client."""
         conversation_context.set(conversation)
-        user_message = await _aget_last_user_message(conversation)
         self._channel.send(user_message)
 
         ctx = StreamingContext(conversation=conversation)
@@ -215,16 +215,12 @@ class MainAgent:
             if ctx.accumulated_content:
                 await _persist_text_message(conversation=conversation, content=ctx.accumulated_content)
 
-            generated_title = None
-            if not conversation.title:
-                await _maybe_generate_title(
-                    conversation=conversation,
-                    user_message=user_message,
-                    agent_response=ctx.accumulated_content or "",
-                )
-                if conversation.title:
-                    generated_title = conversation.title
+            generated_title = await _maybe_generate_title(conversation=conversation, 
+                                                          user_message=user_message, 
+                                                          agent_response=ctx.accumulated_content or "",
+                                                          total_cost=message.total_cost_usd)
 
+            # Persist conversation — session_id and title may have been set above (typically turn 1)
             await conversation.asave()
 
             total_cost = await LLMUsageLog.objects.filter(
@@ -246,6 +242,7 @@ class MainAgent:
             except Exception:
                 logger.exception("Failed to save error message to database")
             yield AgentStreamEvent(type="error", data={"error": str(e)})
+
 
     async def shutdown(self) -> None:
         """Graceful shutdown: close channel, drain, disconnect."""
@@ -462,16 +459,6 @@ async def _build_aws_infrastructure_section(organization_id) -> str:
     return "\n".join(lines)
 
 
-async def _aget_last_user_message(conversation: Conversation) -> str:
-    """Get the content of the most recent user message."""
-    last_message = await conversation.messages.filter(role="user").order_by("-created_at").afirst()
-
-    if not last_message:
-        raise ValueError("Conversation has no user messages to process")
-
-    return last_message.content
-
-
 async def _persist_text_message(conversation: Conversation, content: str) -> None:
     """Persist an agent text message to the database as markdown."""
     await Message.objects.acreate(
@@ -510,8 +497,11 @@ async def _persist_error(conversation: Conversation, error_type: str, error_desc
     )
 
 
-async def _maybe_generate_title(conversation: Conversation, user_message: str, agent_response: str) -> None:
-    """Generate and set conversation title using LLM if not already set."""
+async def _maybe_generate_title(conversation: Conversation, user_message: str, agent_response: str) -> str | None:
+    """Generate, persist, and return conversation title if not already set."""
+    if conversation.title:
+        return None
+    
     try:
         # Get context names for title generation
         workspace_name = None
@@ -558,9 +548,12 @@ async def _maybe_generate_title(conversation: Conversation, user_message: str, a
             num_turns=None,
         )
 
+        return result.title
+
     except Exception as e:
         # Don't fail the conversation if title generation fails
         logger.error(f"Failed to generate title for conversation {conversation.id}: {e}")
+        return None
 
 
 async def _handle_sdk_stream_event(message: SDKStreamEvent, ctx: StreamingContext) -> AsyncGenerator[AgentStreamEvent, None]:

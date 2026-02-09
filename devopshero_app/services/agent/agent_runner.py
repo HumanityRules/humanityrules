@@ -42,25 +42,13 @@ _runners: dict[UUID, AgentRunner] = {}
 _spawn_lock = asyncio.Lock()
 
 
-async def _needs_response(conversation: Conversation) -> bool:
-    """Check if conversation has an unanswered user message."""
+async def get_pending_user_message(conversation: Conversation) -> str | None:
+    """Return the content of the most recent message if it is from the user, else None."""
     last_message = await conversation.messages.order_by("-created_at").afirst()
-    return last_message is not None and last_message.role == Message.Role.USER
+    if last_message is None or last_message.role != Message.Role.USER:
+        return None
+    return last_message.content
 
-
-async def _needs_response_by_id(conversation_id: UUID) -> bool:
-    """Check if conversation needs response by ID (avoids loading full conversation)."""
-    last_message = await Message.objects.filter(
-        conversation_id=conversation_id
-    ).order_by("-created_at").afirst()
-    return last_message is not None and last_message.role == Message.Role.USER
-
-
-async def _reload_conversation(conversation_id: UUID) -> Conversation:
-    """Fetch fresh conversation from DB with required relations."""
-    return await Conversation.objects.select_related(
-        'organization', 'user'
-    ).aget(id=conversation_id)
 
 
 def get_runner(conversation_id: UUID) -> AgentRunner | None:
@@ -144,15 +132,14 @@ async def _run_agent_loop(runner: AgentRunner, conversation_id: UUID) -> None:
     Continues when: client connected (waiting for input) OR work to do.
     """
     try:
-        conversation = await _reload_conversation(conversation_id=conversation_id)
+        conversation = await Conversation.objects.select_related('organization', 'user').aget(id=conversation_id)
         runner.agent = await agent_service.MainAgent.create(conversation)
 
-        while runner.client_connected or await _needs_response_by_id(conversation_id=conversation_id):
-            conversation = await _reload_conversation(conversation_id=conversation_id)
-
-            if await _needs_response(conversation=conversation):
+        while True:
+            pending_message = await get_pending_user_message(conversation)
+            if pending_message is not None:
                 logger.info(f"Agent processing message for conversation {conversation_id}")
-                async for event in runner.agent.stream_turn(conversation=conversation):
+                async for event in runner.agent.stream_turn(conversation=conversation, user_message=pending_message):
                     # Track streaming state for reconnect handling
                     if event.type == "start":
                         runner.is_streaming = True
@@ -174,8 +161,9 @@ async def _run_agent_loop(runner: AgentRunner, conversation_id: UUID) -> None:
                         runner.pending_tools.clear()
                     await runner.event_queue.put(event)
                 logger.info(f"Agent completed response for conversation {conversation_id}")
+            elif not runner.client_connected:
+                break
             else:
-                # No pending message - wait before checking again
                 await asyncio.sleep(0.5)
 
     except Exception:
