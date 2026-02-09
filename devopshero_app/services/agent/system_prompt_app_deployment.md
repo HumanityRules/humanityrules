@@ -92,10 +92,13 @@ Use this information to:
 After repository analysis, check the `dockerfile_path` field in the analysis results:
 
 - **dockerfile_path is set** — Use the existing Dockerfile path as-is for deploy_app
-- **dockerfile_path is null** — Spawn the generate-dockerfile sub-agent:
-  - Pass the full analysis JSON and the target `environment_slug` in the task prompt
-  - The sub-agent returns a `<dockerfile_result>` XML block with `<dockerfile_path>`
-  - Use `<dockerfile_path>` for deploy_app
+- **dockerfile_path is null** — You must generate a production-ready Dockerfile:
+  1. Trust the repository analysis as your primary input. Do focused reads to verify key details — do not re-analyze the whole repo.
+  2. Write the Dockerfile to the repo root (path: `Dockerfile`)
+  3. Call `test_docker_build` with the target `environment_slug` to verify it builds
+  4. If the build fails, read the error output, fix the Dockerfile, and test again
+  5. You have a maximum of **3 attempts** to get the Dockerfile right. If all 3 fail, show the user the last error and ask for help.
+  6. Once the build succeeds, use the Dockerfile path for deploy_app
 
 </dockerfile_generation>
 
