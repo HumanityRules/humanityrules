@@ -7,7 +7,6 @@ import logging
 import os
 from pathlib import Path
 import subprocess
-import threading
 
 import boto3
 from botocore.exceptions import ClientError
@@ -30,22 +29,6 @@ def _stream_output(stream, level: int, source: str, stream_name: str) -> None:
             {"line": cleaned},
             extra={"source": source, "stream": stream_name},
         )
-
-
-def _stream_process_output(process: subprocess.Popen[str], source: str) -> None:
-    stdout_thread = threading.Thread(
-        target=_stream_output,
-        args=(process.stdout, logging.INFO, source, "stdout"),
-    )
-    stderr_thread = threading.Thread(
-        target=_stream_output,
-        args=(process.stderr, logging.ERROR, source, "stderr"),
-    )
-    stdout_thread.start()
-    stderr_thread.start()
-    process.wait()
-    stdout_thread.join()
-    stderr_thread.join()
 
 
 def delete_all_ecr_images(session: boto3.Session, ecr_repo_name: str) -> bool:
@@ -226,11 +209,12 @@ def _build_and_push_local(session: boto3.Session, app_source_path: Path, image_u
         ["docker", "build", "--platform", "linux/arm64", "-t", image_uri, "."],
         cwd=app_source_path,
         stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
         text=True,
         bufsize=1,
     )
-    _stream_process_output(process=build_process, source="docker")
+    _stream_output(build_process.stdout, logging.INFO, "docker", "build")
+    build_process.wait()
 
     if build_process.returncode != 0:
         logger.error("Docker build failed")
@@ -259,14 +243,15 @@ def _build_and_push_local(session: boto3.Session, app_source_path: Path, image_u
         ["docker", "login", "--username", username, "--password-stdin", registry_url],
         stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
         text=True,
         bufsize=1,
     )
     if login_process.stdin is not None:
         login_process.stdin.write(password)
         login_process.stdin.close()
-    _stream_process_output(process=login_process, source="docker")
+    _stream_output(login_process.stdout, logging.INFO, "docker", "login")
+    login_process.wait()
 
     if login_process.returncode != 0:
         logger.error("ECR login failed")
@@ -279,11 +264,12 @@ def _build_and_push_local(session: boto3.Session, app_source_path: Path, image_u
     push_process = subprocess.Popen(
         ["docker", "push", image_uri],
         stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
         text=True,
         bufsize=1,
     )
-    _stream_process_output(process=push_process, source="docker")
+    _stream_output(push_process.stdout, logging.INFO, "docker", "push")
+    push_process.wait()
 
     if push_process.returncode != 0:
         logger.error("Docker push failed")
