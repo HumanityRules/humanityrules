@@ -213,10 +213,11 @@ class MainAgent:
             if ctx.accumulated_content:
                 await _persist_text_message(conversation=conversation, content=ctx.accumulated_content)
 
-            generated_title = await _maybe_generate_title(conversation=conversation, 
-                                                          user_message=user_message, 
-                                                          agent_response=ctx.accumulated_content or "",
-                                                          total_cost=message.total_cost_usd)
+            generated_title = await _maybe_generate_title(
+                conversation=conversation,
+                user_message=user_message,
+                agent_response=ctx.accumulated_content or "",
+            )
 
             # Persist conversation — session_id and title may have been set above (typically turn 1)
             await conversation.asave()
