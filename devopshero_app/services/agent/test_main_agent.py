@@ -400,24 +400,20 @@ async def _create_user_message(conversation, content: str) -> None:
     await conversation.asave()
 
 
-async def _stream_agent(conversation, show_tool_io: bool) -> None:
+async def _stream_agent(conversation, agent, show_tool_io: bool) -> None:
     """Stream agent response for the current last message in the conversation."""
-    from devopshero_app.services.agent import agent_service
-
     state = PrintState(in_text_stream=False)
-    async for event in agent_service.stream_response(
-        conversation=conversation,
-    ):
+    async for event in agent.stream_turn(conversation=conversation):
         _print_event(event=event, state=state, show_tool_io=show_tool_io)
 
 
-async def _run_agent_once(conversation, prompt: str, show_tool_io: bool) -> None:
+async def _run_agent_once(conversation, prompt: str, agent, show_tool_io: bool) -> None:
     """Create a user message then stream the agent response."""
     await _create_user_message(conversation=conversation, content=prompt)
-    await _stream_agent(conversation=conversation, show_tool_io=show_tool_io)
+    await _stream_agent(conversation=conversation, agent=agent, show_tool_io=show_tool_io)
 
 
-async def _run_repl(conversation, show_tool_io: bool) -> None:
+async def _run_repl(conversation, agent, show_tool_io: bool) -> None:
     while True:
         try:
             prompt = input("you> ").strip()
@@ -431,6 +427,7 @@ async def _run_repl(conversation, show_tool_io: bool) -> None:
         await _run_agent_once(
             conversation=conversation,
             prompt=prompt,
+            agent=agent,
             show_tool_io=show_tool_io,
         )
         print(f"[conversation] {conversation.id}")
@@ -478,26 +475,34 @@ async def _run(args: argparse.Namespace, run_db_path: Path) -> int:
     if conversation.session_id:
         print(f"Resume session: {conversation.session_id}")
 
-    # Auto-start: if conversation has a trigger message, run the agent before user input
-    has_trigger = await conversation.messages.filter(
-        content_type="system_trigger",
-    ).aexists()
-    if has_trigger:
-        await _stream_agent(conversation=conversation, show_tool_io=args.show_tool_io)
+    from devopshero_app.services.agent.agent_service import MainAgent
 
-    if args.prompt:
-        await _run_agent_once(
+    agent = await MainAgent.create(conversation)
+    try:
+        # Auto-start: if conversation has a trigger message, run the agent before user input
+        has_trigger = await conversation.messages.filter(
+            content_type="system_trigger",
+        ).aexists()
+        if has_trigger:
+            await _stream_agent(conversation=conversation, agent=agent, show_tool_io=args.show_tool_io)
+
+        if args.prompt:
+            await _run_agent_once(
+                conversation=conversation,
+                prompt=args.prompt,
+                agent=agent,
+                show_tool_io=args.show_tool_io,
+            )
+            return 0
+
+        await _run_repl(
             conversation=conversation,
-            prompt=args.prompt,
+            agent=agent,
             show_tool_io=args.show_tool_io,
         )
         return 0
-
-    await _run_repl(
-        conversation=conversation,
-        show_tool_io=args.show_tool_io,
-    )
-    return 0
+    finally:
+        await agent.shutdown()
 
 
 def main() -> int:
