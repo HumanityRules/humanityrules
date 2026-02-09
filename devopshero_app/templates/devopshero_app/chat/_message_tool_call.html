@@ -30,10 +30,18 @@
             <div class="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">Parameters</div>
             <pre class="bg-gray-100 dark:bg-gray-900 p-2 rounded text-xs overflow-x-auto max-h-96 overflow-y-auto font-mono text-gray-800 dark:text-gray-200 whitespace-pre-wrap break-all">{{ message.metadata.parameters|json_pretty }}</pre>
         </div>
+        {% with message.metadata|tool_result_get_template as custom_tpl %}
+        {% if custom_tpl %}
+            {% with message.metadata|tool_result_get_data as custom_result_template_data %}
+            {% include custom_tpl %}
+            {% endwith %}
+        {% else %}
         <div class="min-w-0">
             <div class="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">Result</div>
             <pre class="bg-gray-100 dark:bg-gray-900 p-2 rounded text-xs overflow-x-auto max-h-[32rem] overflow-y-auto font-mono text-gray-800 dark:text-gray-200 whitespace-pre-wrap break-all">{{ message.metadata.result|json_pretty }}</pre>
         </div>
+        {% endif %}
+        {% endwith %}
         {% if message.metadata.error_message %}
         <div class="min-w-0">
             <div class="text-xs font-medium text-red-500 mb-1">Error</div>

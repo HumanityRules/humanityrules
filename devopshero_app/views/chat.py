@@ -15,10 +15,10 @@ from django.db.models import Sum
 from ..models import Conversation, Message
 from ..services.agent import agent_client
 from ..services.agent import agent_runner
-from ..services.agent.agent_service import AgentStreamEvent
-from ..services.agent.mcp_tools import get_tool_display_name, get_tool_main_param
-from ..templatetags.chat_filters import extract_mcp_text_content
-from .base import get_app_shell_context
+from ..services.agent import agent_service
+from ..services.agent import mcp_tools
+from ..templatetags import chat_filters
+from . import base
 
 logger = logging.getLogger(__name__)
 
@@ -56,7 +56,7 @@ def chat_list(request):
     show_costs = request.user.is_staff
     conversations = _get_conversations(user=request.user, annotate_costs=show_costs)
 
-    context = get_app_shell_context(request=request, current_page="chat")
+    context = base.get_app_shell_context(request=request, current_page="chat")
     context["conversations"] = conversations
     context["conversation"] = None
     context["messages"] = []
@@ -72,8 +72,6 @@ def chat_list(request):
 @login_required
 def chat_new(request):
     """Create a new conversation and redirect to it."""
-    from ..services.agent import agent_service
-
     conversation = agent_service.create_conversation(
         user=request.user,
         workspace_id=request.GET.get("workspace") or None,
@@ -89,7 +87,6 @@ def chat_new(request):
 def chat_app_deploy(request, workspace_slug, repo_name, repo_owner=None):
     """Shortcut: create an APP_DEPLOYMENT conversation from human-readable URL segments."""
     from ..models import Repository, Workspace
-    from ..services.agent import agent_service
 
     org = request.user.current_organization
     workspace = get_object_or_404(Workspace, organization=org, slug=workspace_slug)
@@ -119,7 +116,7 @@ def chat_view(request, conversation_id):
 
     messages = conversation.messages.exclude(content_type=Message.ContentType.SYSTEM_TRIGGER).order_by("created_at")
 
-    context = get_app_shell_context(request=request, current_page="chat")
+    context = base.get_app_shell_context(request=request, current_page="chat")
     context["conversation"] = conversation
     context["messages"] = messages
 
@@ -274,12 +271,12 @@ def _format_sse(event_name: str, data: str) -> str:
     return f"event: {event_name}\n{sse_data}\n\n"
 
 
-def _render_tool_start(data: dict) -> str:
+def _render_streaming_tool_start(data: dict) -> str:
     """Render HTML for tool execution start."""
     tool_full_name = data.get("name", "unknown")
     parameters = data.get("input", {})
-    tool_name = get_tool_display_name(tool_full_name, parameters)
-    tool_main_param = get_tool_main_param(tool_full_name, parameters)
+    tool_name = mcp_tools.get_tool_display_name(tool_full_name, parameters)
+    tool_main_param = mcp_tools.get_tool_main_param(tool_full_name, parameters)
     if tool_main_param:
         tool_name = f"{tool_name}: "
     params_json = json.dumps(parameters, indent=2) if parameters else "{}"
@@ -291,30 +288,34 @@ def _render_tool_start(data: dict) -> str:
     })
 
 
-def _render_tool_result(data: dict) -> str:
+def _render_streaming_tool_result(data: dict) -> str:
     """Render HTML for tool execution result (OOB swap)."""
     tool_full_name = data.get("name", "unknown")
     parameters = data.get("input", {})
     result = data.get("result", "")
 
-    # Format JSON for display
     params_json = json.dumps(parameters, indent=2) if parameters else "{}"
 
-    # Parse result, extract MCP text content, and pretty-print
+    # Tool results arrive wrapped in MCP content blocks:
+    #   '[{"type": "text", "text": "{\"success\": true, ...}"}]'
+    # Unwrap to get the inner data (dict/list/string).
     try:
         result_parsed = json.loads(result) if isinstance(result, str) else result
-        result_parsed = extract_mcp_text_content(result_parsed)
-        if isinstance(result_parsed, str):
-            result_json = result_parsed
-        else:
-            result_json = json.dumps(result_parsed, indent=2)
+        result_parsed = chat_filters.extract_mcp_text_content(result_parsed)
     except (json.JSONDecodeError, TypeError):
-        result_json = str(result)
+        result_parsed = result
 
-    tool_name = get_tool_display_name(tool_full_name, parameters)
-    tool_main_param = get_tool_main_param(tool_full_name, parameters)
+    # Generic path renders result_json in a <pre> tag.
+    # Custom templates use result_parsed directly (preserving real newlines etc.)
+    result_json = result_parsed if isinstance(result_parsed, str) else json.dumps(result_parsed, indent=2)
+
+    tool_name = mcp_tools.get_tool_display_name(tool_full_name, parameters)
+    tool_main_param = mcp_tools.get_tool_main_param(tool_full_name, parameters)
     if tool_main_param:
         tool_name = f"{tool_name}: "
+
+    # Check for custom result template
+    custom_result_template = chat_filters.TOOL_RESULT_TEMPLATES.get(tool_full_name, "")
 
     html = render_to_string("devopshero_app/chat/_streaming_tool_result.html", context={
         "tool_name": tool_name,
@@ -324,12 +325,14 @@ def _render_tool_result(data: dict) -> str:
         "duration_ms": data.get("duration_ms", 0),
         "params_json": params_json,
         "result_json": result_json,
+        "custom_result_template": custom_result_template,
+        "custom_result_template_data": result_parsed if custom_result_template else None,
     })
 
     return html
 
 
-def _render_thinking() -> str:
+def _render_streaming_thinking() -> str:
     """Render HTML for 'agent is thinking' indicator (OOB swap into placeholder)."""
     return render_to_string("devopshero_app/chat/_streaming_thinking.html")
 
@@ -370,10 +373,10 @@ def _render_cost_update(total_cost: str, conversation_id: str) -> str:
     )
 
 
-def _format_sse_event(event: AgentStreamEvent, show_costs: bool) -> str:
-    """Convert AgentStreamEvent to SSE format."""
+def _format_sse_event(event: agent_service.AgentStreamEvent, show_costs: bool) -> str:
+    """Convert agent_service.AgentStreamEvent to SSE format."""
     if event.type == "thinking":
-        return _format_sse(event_name="sse-thinking", data=_render_thinking())
+        return _format_sse(event_name="sse-thinking", data=_render_streaming_thinking())
     elif event.type == "start":
         return _format_sse(event_name="sse-start", data=_render_streaming_start())
     elif event.type == "text_delta":
@@ -381,9 +384,9 @@ def _format_sse_event(event: AgentStreamEvent, show_costs: bool) -> str:
     elif event.type == "text_flush":
         return _format_sse(event_name="sse-text-flush", data="{}")
     elif event.type == "tool_start":
-        return _format_sse(event_name="sse-tool-start", data=_render_tool_start(event.data))
+        return _format_sse(event_name="sse-tool-start", data=_render_streaming_tool_start(event.data))
     elif event.type == "tool_result":
-        return _format_sse(event_name="sse-tool-result", data=_render_tool_result(event.data))
+        return _format_sse(event_name="sse-tool-result", data=_render_streaming_tool_result(event.data))
     elif event.type == "complete":
         # Include title OOB swap if a title was generated
         data = _render_title_update(title=event.data["title"], conversation_id=event.data["conversation_id"]) if event.data.get("title") else ""

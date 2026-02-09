@@ -10,7 +10,6 @@ from devopshero_app.services.agent.mcp_tools import sanitize_paths_for_display
 
 register = template.Library()
 
-
 @register.filter
 def tool_display_name(metadata: dict) -> str:
     """Get display name with colon suffix if main param exists."""
@@ -97,3 +96,39 @@ def json_pretty(value: Any) -> str:
     value = sanitize_paths_for_display(value)
 
     return json.dumps(value, indent=2)
+
+
+
+# Mapping from MCP tool names to custom result templates.
+# Tools not in this dict get the generic JSON dump.
+TOOL_RESULT_TEMPLATES = {
+    "mcp__devopshero__test_docker_build": "devopshero_app/chat/tool_results/_test_docker_build.html",
+}
+
+@register.filter
+def tool_result_get_template(metadata: dict) -> str:
+    """Return custom result template path for a tool, or empty string for generic rendering."""
+    tool_name = metadata.get("tool_name", "")
+    return TOOL_RESULT_TEMPLATES.get(tool_name, "")
+
+
+@register.filter
+def tool_result_get_data(metadata: dict) -> Any:
+    """Extract parsed result data from tool call metadata for custom rendering."""
+    result = metadata.get("result", "")
+
+    if isinstance(result, str):
+        try:
+            result = json.loads(result)
+        except json.JSONDecodeError:
+            return result
+
+    result = extract_mcp_text_content(result)
+
+    if isinstance(result, str):
+        try:
+            return json.loads(result)
+        except json.JSONDecodeError:
+            return result
+
+    return result
