@@ -402,8 +402,13 @@ async def _create_user_message(conversation, content: str) -> None:
 
 async def _stream_agent(conversation, agent, show_tool_io: bool) -> None:
     """Stream agent response for the current last message in the conversation."""
+    from devopshero_app.services.agent.agent_runner import get_pending_user_message
+
+    user_message = await get_pending_user_message(conversation)
+    if user_message is None:
+        raise ValueError("No pending user message to stream")
     state = PrintState(in_text_stream=False)
-    async for event in agent.stream_turn(conversation=conversation):
+    async for event in agent.stream_turn(conversation=conversation, user_message=user_message):
         _print_event(event=event, state=state, show_tool_io=show_tool_io)
 
 
