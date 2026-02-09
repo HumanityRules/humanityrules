@@ -2,13 +2,12 @@
 MCP tools for the Claude Agent SDK.
 
 This module wraps our domain-specific tools as MCP tools using the
-@tool decorator from claude-agent-sdk. Tools access Django context
-via contextvars to maintain request isolation.
+@tool decorator from claude-agent-sdk. Tools receive the conversation
+via closure from create_devopshero_mcp_server().
 """
 
 import asyncio
 import json
-from contextvars import ContextVar
 from pathlib import Path
 from typing import Any
 
@@ -34,24 +33,6 @@ from .tools import (
     teardown_deployment as _teardown_deployment,
     test_docker_build as _test_docker_build,
 )
-
-
-# Context variable for the current conversation
-# Set before processing, accessed by tools
-conversation_context: ContextVar[Conversation | None] = ContextVar(
-    "conversation_context", default=None
-)
-
-
-def _get_conversation() -> Conversation:
-    """Get the current conversation from context."""
-    conversation = conversation_context.get()
-    if conversation is None:
-        raise RuntimeError(
-            "No conversation context set. "
-            "Ensure conversation_context.set() is called before processing."
-        )
-    return conversation
 
 
 async def _require_workspace(conversation: Conversation) -> Workspace:
@@ -97,8 +78,6 @@ TOOL_DISPLAY_NAMES = {
     # Utility
     "mcp__devopshero__wait": "Wait",
 }
-
-
 def get_tool_display_name(full_name: str, parameters: dict | None) -> str:
     """Get the human-friendly display name for an MCP tool."""
     # Special handling for Task tool - derive display name from sub-agent type
@@ -128,8 +107,6 @@ TOOL_MAIN_PARAMS = {
     "Bash": "description",
     # Glob and Grep have special handling in get_tool_main_param
 }
-
-
 def get_tool_main_param(full_name: str, parameters: dict) -> str | None:
     """Extract and format the main parameter value for display."""
     if not parameters:
@@ -262,549 +239,519 @@ def _format_param_value(tool_name: str, value: Any) -> str:
 
 
 # =============================================================================
-# Platform Tools (always available, no workspace required)
+# MCP Server Factory
 # =============================================================================
 
 
-@tool(
-    "list_aws_accounts",
-    (
-        "List AWS accounts connected to the user's organization. "
-        "Use this to find available deployment targets. "
-        "Returns account ID, name, status, and region for each account."
-    ),
-    {},
-)
-async def list_aws_accounts(args: dict[str, Any]) -> dict[str, Any]:
-    """List AWS accounts connected to the organization."""
-    conversation = _get_conversation()
-    accounts = await _list_aws_accounts(organization=conversation.organization)
-    return _mcp_response(accounts)
+def create_devopshero_mcp_server(conversation: Conversation):
+    """Create an MCP server with tools scoped to a conversation via closures."""
 
+    # =========================================================================
+    # Platform Tools (always available, no workspace required)
+    # =========================================================================
 
-@tool(
-    "list_hosted_zones",
-    (
-        "List Route53 hosted zones (domains) in a connected AWS account. "
-        "Use this to discover available domains for app configuration. "
-        "Returns zone ID, domain name, and record count for each public hosted zone. "
-        "The aws_account_uuid parameter is the internal UUID from list_aws_accounts (the 'id' field), "
-        "not the 12-digit AWS account number."
-    ),
-    {
-        "aws_account_uuid": str,
-    },
-)
-async def list_hosted_zones(args: dict[str, Any]) -> dict[str, Any]:
-    """List Route53 hosted zones in an AWS account."""
-    conversation = _get_conversation()
-    zones = await _list_hosted_zones(
-        aws_account_uuid=args["aws_account_uuid"],
-        organization=conversation.organization,
-    )
-    return _mcp_response(zones)
-
-
-@tool(
-    "list_environments",
-    (
-        "List environments in a connected AWS account. "
-        "Environments contain the base infrastructure (VPC, ECS cluster, shared ALB) for deployments. "
-        "Returns environment ID, name, slug, status, and shared ALB configuration. "
-        "Use this to discover existing environments before deploying. "
-        "Decision logic: if 'default' exists and is READY, use it; if none exist, create one; "
-        "if multiple exist, ask the user which one to use."
-    ),
-    {
-        "aws_account_uuid": str,
-    },
-)
-async def list_environments(args: dict[str, Any]) -> dict[str, Any]:
-    """List environments in an AWS account."""
-    conversation = _get_conversation()
-    environments = await _list_environments(
-        aws_account_uuid=args["aws_account_uuid"],
-        organization=conversation.organization,
-    )
-    return _mcp_response(environments)
-
-
-@tool(
-    "create_environment",
-    (
-        "Create an environment in a connected AWS account. "
-        "Queues provisioning of VPC, ECS cluster, and shared ALB infrastructure. "
-        "IMPORTANT: Before calling this tool, you MUST confirm name, region, and domain with the user. "
-        "Present settings and wait for explicit user confirmation before calling this tool. "
-        "If hosted_zone_name is provided, enables HTTPS using a wildcard SSL certificate "
-        "(creates one if none exists for the domain, otherwise reuses the existing certificate). "
-        "Returns immediately with PENDING status - use get_environment_status to poll for progress. "
-        "Provisioning typically takes 5-10 minutes. "
-        "The aws_account_uuid is the internal UUID from list_aws_accounts (the 'id' field), "
-        "not the 12-digit AWS account number."
-    ),
-    {
-        "aws_account_uuid": str,
-        "environment_name": str,
-        "aws_region": str,
-        "hosted_zone_name": str,
-    },
-)
-async def create_environment(args: dict[str, Any]) -> dict[str, Any]:
-    """Create an environment (queues provisioning)."""
-    conversation = _get_conversation()
-    result = await _create_environment(
-        aws_account_uuid=args["aws_account_uuid"],
-        environment_name=args["environment_name"],
-        aws_region=args.get("aws_region", "us-east-1"),
-        hosted_zone_name=args.get("hosted_zone_name"),
-        organization=conversation.organization,
-        user=conversation.user,
-    )
-    return _mcp_response({
-        **result.to_dict(),
-        "note": (
-            "Environment created with PENDING status. The job worker will provision "
-            "the infrastructure (VPC, ECS cluster, shared ALB). "
-            "Use get_environment_status to check progress."
+    @tool(
+        "list_aws_accounts",
+        (
+            "List AWS accounts connected to the user's organization. "
+            "Use this to find available deployment targets. "
+            "Returns account ID, name, status, and region for each account."
         ),
-    })
-
-
-@tool(
-    "initiate_aws_connection",
-    (
-        "Start the process of connecting a new AWS account. "
-        "Creates a pending account record and returns a CloudFormation URL. "
-        "The user must click the URL to deploy the stack in their AWS account."
-    ),
-    {
-        "account_name": str,
-    },
-)
-async def initiate_aws_connection(args: dict[str, Any]) -> dict[str, Any]:
-    """Create a pending AWS account and return the CloudFormation URL."""
-    conversation = _get_conversation()
-    result = await _initiate_aws_connection(
-        account_name=args["account_name"],
-        organization=conversation.organization,
-        user=conversation.user,
+        {},
     )
-    return _mcp_response(result)
+    async def list_aws_accounts(args: dict[str, Any]) -> dict[str, Any]:
+        """List AWS accounts connected to the organization."""
+        accounts = await _list_aws_accounts(organization=conversation.organization)
+        return _mcp_response(accounts)
 
-
-@tool(
-    "list_repositories",
-    (
-        "List repositories connected to the organization via GitHub integration. "
-        "Returns repository names, clone URLs, default branches, and providers. "
-        "Use this to discover available repositories for app deployment. "
-        "If no repositories are found, the user may need to connect GitHub first "
-        "via Settings > Git Integrations."
-    ),
-    {},
-)
-async def list_repositories(args: dict[str, Any]) -> dict[str, Any]:
-    """List repositories connected to the organization."""
-    conversation = _get_conversation()
-    repos = await _list_repositories(organization=conversation.organization)
-    return _mcp_response(repos)
-
-
-@tool(
-    "scan_repository",
-    (
-        "Quick scan of a repository to detect basic characteristics. "
-        "Returns framework, language, Dockerfile info, suggested port, health path, "
-        "detected database, and required environment variables. "
-        "Use list_repositories first to get available repository IDs. "
-        "For deep analysis, use the analyze-repository sub-agent instead."
-    ),
-    {
-        "type": "object",
-        "properties": {
-            "repository_id": {
-                "type": "string",
-                "description": "Repository ID from list_repositories",
-            },
-            "branch": {
-                "type": "string",
-                "description": "Branch to scan. If not specified, uses the repository's default branch.",
-            },
+    @tool(
+        "list_hosted_zones",
+        (
+            "List Route53 hosted zones (domains) in a connected AWS account. "
+            "Use this to discover available domains for app configuration. "
+            "Returns zone ID, domain name, and record count for each public hosted zone. "
+            "The aws_account_uuid parameter is the internal UUID from list_aws_accounts (the 'id' field), "
+            "not the 12-digit AWS account number."
+        ),
+        {
+            "aws_account_uuid": str,
         },
-        "required": ["repository_id"],
-    },
-)
-async def scan_repository(args: dict[str, Any]) -> dict[str, Any]:
-    """Quick scan of a repository's contents."""
-    import uuid
-
-    conversation = _get_conversation()
-
-    # Look up repository
-    try:
-        repository = await Repository.objects.select_related("integration").aget(
-            id=args["repository_id"],
+    )
+    async def list_hosted_zones(args: dict[str, Any]) -> dict[str, Any]:
+        """List Route53 hosted zones in an AWS account."""
+        zones = await _list_hosted_zones(
+            aws_account_uuid=args["aws_account_uuid"],
             organization=conversation.organization,
         )
-    except Repository.DoesNotExist:
-        raise ValueError(
-            f"Repository {args['repository_id']} not found or doesn't belong to your organization."
-        )
+        return _mcp_response(zones)
 
-    # Use specified branch or fall back to repository's default
-    branch = args.get("branch") or repository.default_branch
-
-    # Clone the repository (run sync I/O in thread pool)
-    cloned_repo_path = settings.CLAUDE_SANDBOX_DIR / f"scan-{uuid.uuid4().hex[:8]}"
-    await asyncio.to_thread(
-        repo_service.clone_repository,
-        repository,
-        branch,
-        cloned_repo_path,
+    @tool(
+        "list_environments",
+        (
+            "List environments in a connected AWS account. "
+            "Environments contain the base infrastructure (VPC, ECS cluster, shared ALB) for deployments. "
+            "Returns environment ID, name, slug, status, and shared ALB configuration. "
+            "Use this to discover existing environments before deploying. "
+            "Decision logic: if 'default' exists and is READY, use it; if none exist, create one; "
+            "if multiple exist, ask the user which one to use."
+        ),
+        {
+            "aws_account_uuid": str,
+        },
     )
+    async def list_environments(args: dict[str, Any]) -> dict[str, Any]:
+        """List environments in an AWS account."""
+        environments = await _list_environments(
+            aws_account_uuid=args["aws_account_uuid"],
+            organization=conversation.organization,
+        )
+        return _mcp_response(environments)
 
-    try:
-        # Scan the cloned repository
-        result = _scan_repository(repo_path=cloned_repo_path)
+    @tool(
+        "create_environment",
+        (
+            "Create an environment in a connected AWS account. "
+            "Queues provisioning of VPC, ECS cluster, and shared ALB infrastructure. "
+            "IMPORTANT: Before calling this tool, you MUST confirm name, region, and domain with the user. "
+            "Present settings and wait for explicit user confirmation before calling this tool. "
+            "If hosted_zone_name is provided, enables HTTPS using a wildcard SSL certificate "
+            "(creates one if none exists for the domain, otherwise reuses the existing certificate). "
+            "Returns immediately with PENDING status - use get_environment_status to poll for progress. "
+            "Provisioning typically takes 5-10 minutes. "
+            "The aws_account_uuid is the internal UUID from list_aws_accounts (the 'id' field), "
+            "not the 12-digit AWS account number."
+        ),
+        {
+            "aws_account_uuid": str,
+            "environment_name": str,
+            "aws_region": str,
+            "hosted_zone_name": str,
+        },
+    )
+    async def create_environment(args: dict[str, Any]) -> dict[str, Any]:
+        """Create an environment (queues provisioning)."""
+        result = await _create_environment(
+            aws_account_uuid=args["aws_account_uuid"],
+            environment_name=args["environment_name"],
+            aws_region=args.get("aws_region", "us-east-1"),
+            hosted_zone_name=args.get("hosted_zone_name"),
+            organization=conversation.organization,
+            user=conversation.user,
+        )
+        return _mcp_response({
+            **result.to_dict(),
+            "note": (
+                "Environment created with PENDING status. The job worker will provision "
+                "the infrastructure (VPC, ECS cluster, shared ALB). "
+                "Use get_environment_status to check progress."
+            ),
+        })
+
+    @tool(
+        "initiate_aws_connection",
+        (
+            "Start the process of connecting a new AWS account. "
+            "Creates a pending account record and returns a CloudFormation URL. "
+            "The user must click the URL to deploy the stack in their AWS account."
+        ),
+        {
+            "account_name": str,
+        },
+    )
+    async def initiate_aws_connection(args: dict[str, Any]) -> dict[str, Any]:
+        """Create a pending AWS account and return the CloudFormation URL."""
+        result = await _initiate_aws_connection(
+            account_name=args["account_name"],
+            organization=conversation.organization,
+            user=conversation.user,
+        )
         return _mcp_response(result)
-    finally:
-        # Always clean up
-        await asyncio.to_thread(repo_service.cleanup_repository, cloned_repo_path)
 
-
-# =============================================================================
-# Workspace Tools (require a pinned workspace)
-# =============================================================================
-
-
-@tool(
-    "list_apps",
-    (
-        "List applications in the current workspace with their active deployments. "
-        "Returns app ID, name, slug, type, branch, repository, and a list of deployments. "
-        "Each deployment includes: environment name/slug, subdomain, hosted zone, status, and URL. "
-        "Use this to see which environments an app is deployed to and check for potential domain conflicts."
-    ),
-    {},
-)
-async def list_apps(args: dict[str, Any]) -> dict[str, Any]:
-    """List applications in the current workspace."""
-    conversation = _get_conversation()
-    workspace = await _require_workspace(conversation)
-    apps = await _list_apps(workspace=workspace)
-    return _mcp_response(apps)
-
-
-@tool(
-    "create_datastore",
-    (
-        "Create a managed database (datastore) in the selected workspace. "
-        "Requires a workspace in the conversation context."
-    ),
-    {
-        "type": "object",
-        "properties": {
-            "name": {"type": "string", "description": "Human-readable name for the datastore"},
-            "engine": {
-                "type": "string",
-                "enum": ["aurora-postgresql", "aurora-mysql"],
-                "description": "Database engine: aurora-postgresql or aurora-mysql",
-            },
-            "database_name": {"type": "string", "description": "Name of the database to create within the cluster"},
-            "deployment_mode": {
-                "type": "string",
-                "enum": ["aurora_serverless_v2", "aurora_provisioned"],
-                "description": "aurora_serverless_v2 (recommended, auto-scales) or aurora_provisioned (fixed capacity)",
-            },
-            "serverless_min_acu": {
-                "type": "number",
-                "description": "Minimum ACU for serverless scaling (0.5-128). Only used with aurora_serverless_v2.",
-            },
-            "serverless_max_acu": {
-                "type": "number",
-                "description": "Maximum ACU for serverless scaling (0.5-128). Only used with aurora_serverless_v2.",
-            },
-        },
-        "required": ["name", "engine", "database_name", "deployment_mode"],
-    },
-)
-async def create_datastore(args: dict[str, Any]) -> dict[str, Any]:
-    """Create a managed database in the selected workspace."""
-    conversation = _get_conversation()
-    workspace = await _require_workspace(conversation)
-
-    result = await _create_datastore(
-        workspace=workspace,
-        name=args["name"],
-        engine=args["engine"],
-        database_name=args["database_name"],
-        user=conversation.user,
-        deployment_mode=args.get("deployment_mode", "aurora_serverless_v2"),
-        serverless_min_acu=args.get("serverless_min_acu", 0.5),
-        serverless_max_acu=args.get("serverless_max_acu", 2.0),
-    )
-    return _mcp_response(result)
-
-
-@tool(
-    "deploy_app",
-    (
-        "Deploy an application to AWS infrastructure. "
-        "Creates the app if it doesn't exist, updates config if it does, then deploys. "
-        "Requires a workspace and repository in the conversation context. "
-        "The job worker will build the Docker image, push to ECR, and deploy via CDK. "
-        "Use get_deployment_status to check progress. "
-        "For cpu: ECS CPU units (256=0.25vCPU, 512=0.5vCPU, 1024=1vCPU, 2048=2vCPU). "
-        "For memory: MiB (512, 1024, 2048, 4096). "
-        "For environment_variables: omit to keep existing, pass [] to clear, or [{\"name\": \"FOO\", \"value\": \"bar\"}] to replace. "
-        "For app_secrets: omit to keep existing, pass {} to clear, or {\"key\": \"value\"} to replace. "
-        "Secrets are stored in Secrets Manager and injected as env vars at container startup. "
-        "Use null values for auto-generated secrets (e.g., {\"SECRET_KEY\": null}), "
-        "use \"PLACEHOLDER\" for third-party keys the user must fill in (e.g., {\"STRIPE_SECRET_KEY\": \"PLACEHOLDER\"}). "
-        "For subdomain: Route53 subdomain for the app. Defaults to app slug. "
-        "If deploying the same app to multiple environments that share a domain, the subdomain is auto-suffixed with -{env_slug}."
-    ),
-    {
-        "type": "object",
-        "properties": {
-            "name": {"type": "string", "description": "Human-readable name for the app (used to derive slug for matching)"},
-            "branch": {"type": "string", "description": "Git branch to deploy from. Omit to use repository's default branch."},
-            "app_type": {"type": "string", "description": "Type of app: web, worker, or scheduled"},
-            "container_port": {"type": "integer", "description": "Port the container listens on (e.g., 8000)"},
-            "cpu": {"type": "integer", "description": "Fargate CPU units (256, 512, 1024, 2048)"},
-            "memory": {"type": "integer", "description": "Fargate memory in MiB (512, 1024, 2048, 4096)"},
-            "health_check_path": {"type": "string", "description": "HTTP path for health checks (e.g., /health)"},
-            "git_ref": {"type": "string", "description": "Git reference (tag or commit SHA) to deploy. Omit to deploy HEAD of branch."},
-            "environment_slug": {"type": "string", "description": "Target environment slug"},
-            "environment_variables": {"type": "array", "description": "List of {name, value} dicts. Omit to keep existing, [] to clear."},
-            "datastore_id": {"type": "string", "description": "UUID of datastore to bind. Omit if app doesn't need a database."},
-            "dockerfile_path": {"type": "string", "description": "Path to Dockerfile relative to repo root (e.g., 'Dockerfile')."},
-            "app_secrets": {"type": "object", "description": "Dict of secret field names to values. Stored in Secrets Manager, injected as env vars. Use null for auto-generated, 'PLACEHOLDER' for user-provided. Omit to keep existing, {} to clear."},
-            "subdomain": {"type": "string", "description": "Route53 subdomain override. Defaults to app slug, auto-suffixed with -{env_slug} if conflict."},
-        },
-        "required": [
-            "name", "app_type", "container_port", "dockerfile_path",
-            "cpu", "memory", "health_check_path", "environment_slug"
-        ],
-    },
-)
-async def deploy_app(args: dict[str, Any]) -> dict[str, Any]:
-    """Deploy an application (creates if new, updates if exists)."""
-    conversation = _get_conversation()
-    workspace = await _require_workspace(conversation)
-
-    repository_id = conversation.context_repository_id
-    if not repository_id:
-        raise ValueError(
-            "No repository selected. Start the conversation from a workspace with a selected repository."
-        )
-
-    try:
-        repository = await Repository.objects.aget(
-            id=repository_id,
-            organization=conversation.organization,
-        )
-    except Repository.DoesNotExist:
-        raise ValueError(f"Repository {repository_id} not found in organization.")
-
-    # Default branch to repository's default_branch
-    branch = args.get("branch") or repository.default_branch
-
-    result = await _deploy_app(
-        workspace=workspace,
-        repository=repository,
-        name=args["name"],
-        branch=branch,
-        app_type=args["app_type"],
-        build_strategy="dockerfile",  # Hard-default; nixpacks/buildpack not yet implemented
-        container_port=args["container_port"],
-        cpu=args["cpu"],
-        memory=args["memory"],
-        health_check_path=args["health_check_path"],
-        user=conversation.user,
-        environment_slug=args["environment_slug"],
-        git_ref=args.get("git_ref") or branch,  # Default to branch HEAD
-        environment_variables=args.get("environment_variables"),
-        datastore_id=args.get("datastore_id"),
-        dockerfile_path=args.get("dockerfile_path"),
-        app_secrets=args.get("app_secrets"),
-        subdomain=args.get("subdomain"),
-    )
-
-    # Link deployment to conversation via M2M
-    from devopshero_app.models import Deployment
-    deployment = await Deployment.objects.aget(id=result.id)
-    await conversation.deployments.aadd(deployment)
-
-    # Customize note based on whether app was created or updated
-    if result.app_created:
-        note = (
-            f"App '{result.app_name}' created and deployment queued. "
-            "The job worker will build/push/deploy. Use get_deployment_status to check progress."
-        )
-    else:
-        note = (
-            f"App '{result.app_name}' config updated and deployment queued. "
-            "The job worker will build/push/deploy. Use get_deployment_status to check progress."
-        )
-
-    return _mcp_response({
-        **result.to_dict(),
-        "note": note,
-    })
-
-
-@tool(
-    "get_deployment_status",
-    (
-        "Get the current status of a deployment including progress and logs. "
-        "Returns the deployment phase, percentage complete, and recent log entries. "
-        "Use this to monitor deployment progress and report status to users."
-    ),
-    {
-        "deployment_id": str,
-    },
-)
-async def get_deployment_status(args: dict[str, Any]) -> dict[str, Any]:
-    """Get current deployment status and recent logs."""
-    conversation = _get_conversation()
-
-    result = await _get_deployment_status(
-        deployment_id=args["deployment_id"],
-        organization=conversation.organization,
-        log_limit=10,
-    )
-    return _mcp_response(result)
-
-
-@tool(
-    "teardown_deployment",
-    (
-        "Tear down (destroy) a deployed application. "
-        "Deletes all app-specific AWS infrastructure: ECS service, ALB listener rules, "
-        "Aurora database (if any), and ECR repository. "
-        "The app must be in RUNNING or FAILED state. Cannot teardown in-progress deployments. "
-        "Use get_deployment_status to monitor teardown progress."
-    ),
-    {
-        "app_id": str,
-    },
-)
-async def teardown_deployment(args: dict[str, Any]) -> dict[str, Any]:
-    """Queue teardown of an application's deployment."""
-    conversation = _get_conversation()
-
-    result = await _teardown_deployment(
-        app_id=args["app_id"],
-        organization=conversation.organization,
-        user=conversation.user,
-    )
-
-    return _mcp_response({
-        **result.to_dict(),
-        "note": (
-            "Teardown queued. The job worker will delete the app's CDK stacks "
-            "(ECS service, ALB rules, ECR repository, and Aurora if applicable). "
-            "Use get_deployment_status to check progress."
+    @tool(
+        "list_repositories",
+        (
+            "List repositories connected to the organization via GitHub integration. "
+            "Returns repository names, clone URLs, default branches, and providers. "
+            "Use this to discover available repositories for app deployment. "
+            "If no repositories are found, the user may need to connect GitHub first "
+            "via Settings > Git Integrations."
         ),
-    })
-
-
-@tool(
-    "test_docker_build",
-    (
-        "Test-build the Dockerfile in the conversation's repository sandbox. "
-        "Build-only — does not push to ECR. "
-        "Use this after generating a Dockerfile to verify it builds successfully before deploying. "
-        "Returns success/failure and the build output (truncated to last 80 lines)."
-    ),
-    {
-        "environment_slug": str,
-    },
-)
-async def test_docker_build(args: dict[str, Any]) -> dict[str, Any]:
-    """Run a test Docker build for the Dockerfile in the sandbox."""
-    conversation = _get_conversation()
-    result = await _test_docker_build(
-        conversation_id=conversation.id,
-        organization=conversation.organization,
-        environment_slug=args["environment_slug"],
+        {},
     )
-    return _mcp_response({"success": result.success, "build_output": result.build_output})
+    async def list_repositories(args: dict[str, Any]) -> dict[str, Any]:
+        """List repositories connected to the organization."""
+        repos = await _list_repositories(organization=conversation.organization)
+        return _mcp_response(repos)
 
-
-@tool(
-    "get_environment_status",
-    (
-        "Get the current status of an environment including provisioning progress and logs. "
-        "Returns the environment status, configuration, and recent log entries. "
-        "Use this to monitor environment provisioning progress."
-    ),
-    {
-        "environment_id": str,
-    },
-)
-async def get_environment_status(args: dict[str, Any]) -> dict[str, Any]:
-    """Get current environment status and recent logs."""
-    conversation = _get_conversation()
-
-    result = await _get_environment_status(
-        environment_id=args["environment_id"],
-        organization=conversation.organization,
-        log_limit=10,
+    @tool(
+        "scan_repository",
+        (
+            "Quick scan of a repository to detect basic characteristics. "
+            "Returns framework, language, Dockerfile info, suggested port, health path, "
+            "detected database, and required environment variables. "
+            "Use list_repositories first to get available repository IDs. "
+            "For deep analysis, use the analyze-repository sub-agent instead."
+        ),
+        {
+            "type": "object",
+            "properties": {
+                "repository_id": {
+                    "type": "string",
+                    "description": "Repository ID from list_repositories",
+                },
+                "branch": {
+                    "type": "string",
+                    "description": "Branch to scan. If not specified, uses the repository's default branch.",
+                },
+            },
+            "required": ["repository_id"],
+        },
     )
-    return _mcp_response(result)
+    async def scan_repository(args: dict[str, Any]) -> dict[str, Any]:
+        """Quick scan of a repository's contents."""
+        import uuid
 
+        # Look up repository
+        try:
+            repository = await Repository.objects.select_related("integration").aget(
+                id=args["repository_id"],
+                organization=conversation.organization,
+            )
+        except Repository.DoesNotExist:
+            raise ValueError(
+                f"Repository {args['repository_id']} not found or doesn't belong to your organization."
+            )
 
+        # Use specified branch or fall back to repository's default
+        branch = args.get("branch") or repository.default_branch
 
-# =============================================================================
-# Utility Tools
-# =============================================================================
+        # Clone the repository (run sync I/O in thread pool)
+        cloned_repo_path = settings.CLAUDE_SANDBOX_DIR / f"scan-{uuid.uuid4().hex[:8]}"
+        await asyncio.to_thread(
+            repo_service.clone_repository,
+            repository,
+            branch,
+            cloned_repo_path,
+        )
 
+        try:
+            # Scan the cloned repository
+            result = _scan_repository(repo_path=cloned_repo_path)
+            return _mcp_response(result)
+        finally:
+            # Always clean up
+            await asyncio.to_thread(repo_service.cleanup_repository, cloned_repo_path)
 
-@tool(
-    "wait",
-    "Wait for a specified number of seconds. Useful for debugging streaming UI.",
-    {"seconds": int},
-)
-async def wait(args: dict[str, Any]) -> dict[str, Any]:
-    """Wait for n seconds (default 2)."""
-    seconds = args.get("seconds", 2)
-    await asyncio.sleep(seconds)
-    return _mcp_response({"waited": seconds})
+    # =========================================================================
+    # Workspace Tools (require a pinned workspace)
+    # =========================================================================
 
+    @tool(
+        "list_apps",
+        (
+            "List applications in the current workspace with their active deployments. "
+            "Returns app ID, name, slug, type, branch, repository, and a list of deployments. "
+            "Each deployment includes: environment name/slug, subdomain, hosted zone, status, and URL. "
+            "Use this to see which environments an app is deployed to and check for potential domain conflicts."
+        ),
+        {},
+    )
+    async def list_apps(args: dict[str, Any]) -> dict[str, Any]:
+        """List applications in the current workspace."""
+        workspace = await _require_workspace(conversation)
+        apps = await _list_apps(workspace=workspace)
+        return _mcp_response(apps)
 
-# =============================================================================
-# MCP Server Configuration
-# =============================================================================
+    @tool(
+        "create_datastore",
+        (
+            "Create a managed database (datastore) in the selected workspace. "
+            "Requires a workspace in the conversation context."
+        ),
+        {
+            "type": "object",
+            "properties": {
+                "name": {"type": "string", "description": "Human-readable name for the datastore"},
+                "engine": {
+                    "type": "string",
+                    "enum": ["aurora-postgresql", "aurora-mysql"],
+                    "description": "Database engine: aurora-postgresql or aurora-mysql",
+                },
+                "database_name": {"type": "string", "description": "Name of the database to create within the cluster"},
+                "deployment_mode": {
+                    "type": "string",
+                    "enum": ["aurora_serverless_v2", "aurora_provisioned"],
+                    "description": "aurora_serverless_v2 (recommended, auto-scales) or aurora_provisioned (fixed capacity)",
+                },
+                "serverless_min_acu": {
+                    "type": "number",
+                    "description": "Minimum ACU for serverless scaling (0.5-128). Only used with aurora_serverless_v2.",
+                },
+                "serverless_max_acu": {
+                    "type": "number",
+                    "description": "Maximum ACU for serverless scaling (0.5-128). Only used with aurora_serverless_v2.",
+                },
+            },
+            "required": ["name", "engine", "database_name", "deployment_mode"],
+        },
+    )
+    async def create_datastore(args: dict[str, Any]) -> dict[str, Any]:
+        """Create a managed database in the selected workspace."""
+        workspace = await _require_workspace(conversation)
 
+        result = await _create_datastore(
+            workspace=workspace,
+            name=args["name"],
+            engine=args["engine"],
+            database_name=args["database_name"],
+            user=conversation.user,
+            deployment_mode=args.get("deployment_mode", "aurora_serverless_v2"),
+            serverless_min_acu=args.get("serverless_min_acu", 0.5),
+            serverless_max_acu=args.get("serverless_max_acu", 2.0),
+        )
+        return _mcp_response(result)
 
-# Create the MCP server with all tools
-devopshero_mcp_server = create_sdk_mcp_server(
-    name="devopshero",
-    version="1.0.0",
-    tools=[
-        # Platform tools
-        list_aws_accounts,
-        list_hosted_zones,
-        list_environments,
-        initiate_aws_connection,
-        create_environment,
-        get_environment_status,
-        list_repositories,
-        scan_repository,
-        # Workspace tools
-        list_apps,
-        create_datastore,
-        deploy_app,
-        get_deployment_status,
-        teardown_deployment,
-        test_docker_build,
-        # Utility
-        wait,
-    ],
-)
+    @tool(
+        "deploy_app",
+        (
+            "Deploy an application to AWS infrastructure. "
+            "Creates the app if it doesn't exist, updates config if it does, then deploys. "
+            "Requires a workspace and repository in the conversation context. "
+            "The job worker will build the Docker image, push to ECR, and deploy via CDK. "
+            "Use get_deployment_status to check progress. "
+            "For cpu: ECS CPU units (256=0.25vCPU, 512=0.5vCPU, 1024=1vCPU, 2048=2vCPU). "
+            "For memory: MiB (512, 1024, 2048, 4096). "
+            "For environment_variables: omit to keep existing, pass [] to clear, or [{\"name\": \"FOO\", \"value\": \"bar\"}] to replace. "
+            "For app_secrets: omit to keep existing, pass {} to clear, or {\"key\": \"value\"} to replace. "
+            "Secrets are stored in Secrets Manager and injected as env vars at container startup. "
+            "Use null values for auto-generated secrets (e.g., {\"SECRET_KEY\": null}), "
+            "use \"PLACEHOLDER\" for third-party keys the user must fill in (e.g., {\"STRIPE_SECRET_KEY\": \"PLACEHOLDER\"}). "
+            "For subdomain: Route53 subdomain for the app. Defaults to app slug. "
+            "If deploying the same app to multiple environments that share a domain, the subdomain is auto-suffixed with -{env_slug}."
+        ),
+        {
+            "type": "object",
+            "properties": {
+                "name": {"type": "string", "description": "Human-readable name for the app (used to derive slug for matching)"},
+                "branch": {"type": "string", "description": "Git branch to deploy from. Omit to use repository's default branch."},
+                "app_type": {"type": "string", "description": "Type of app: web, worker, or scheduled"},
+                "container_port": {"type": "integer", "description": "Port the container listens on (e.g., 8000)"},
+                "cpu": {"type": "integer", "description": "Fargate CPU units (256, 512, 1024, 2048)"},
+                "memory": {"type": "integer", "description": "Fargate memory in MiB (512, 1024, 2048, 4096)"},
+                "health_check_path": {"type": "string", "description": "HTTP path for health checks (e.g., /health)"},
+                "git_ref": {"type": "string", "description": "Git reference (tag or commit SHA) to deploy. Omit to deploy HEAD of branch."},
+                "environment_slug": {"type": "string", "description": "Target environment slug"},
+                "environment_variables": {"type": "array", "description": "List of {name, value} dicts. Omit to keep existing, [] to clear."},
+                "datastore_id": {"type": "string", "description": "UUID of datastore to bind. Omit if app doesn't need a database."},
+                "dockerfile_path": {"type": "string", "description": "Path to Dockerfile relative to repo root (e.g., 'Dockerfile')."},
+                "app_secrets": {"type": "object", "description": "Dict of secret field names to values. Stored in Secrets Manager, injected as env vars. Use null for auto-generated, 'PLACEHOLDER' for user-provided. Omit to keep existing, {} to clear."},
+                "subdomain": {"type": "string", "description": "Route53 subdomain override. Defaults to app slug, auto-suffixed with -{env_slug} if conflict."},
+            },
+            "required": [
+                "name", "app_type", "container_port", "dockerfile_path",
+                "cpu", "memory", "health_check_path", "environment_slug"
+            ],
+        },
+    )
+    async def deploy_app(args: dict[str, Any]) -> dict[str, Any]:
+        """Deploy an application (creates if new, updates if exists)."""
+        workspace = await _require_workspace(conversation)
+
+        repository_id = conversation.context_repository_id
+        if not repository_id:
+            raise ValueError(
+                "No repository selected. Start the conversation from a workspace with a selected repository."
+            )
+
+        try:
+            repository = await Repository.objects.aget(
+                id=repository_id,
+                organization=conversation.organization,
+            )
+        except Repository.DoesNotExist:
+            raise ValueError(f"Repository {repository_id} not found in organization.")
+
+        # Default branch to repository's default_branch
+        branch = args.get("branch") or repository.default_branch
+
+        result = await _deploy_app(
+            workspace=workspace,
+            repository=repository,
+            name=args["name"],
+            branch=branch,
+            app_type=args["app_type"],
+            build_strategy="dockerfile",  # Hard-default; nixpacks/buildpack not yet implemented
+            container_port=args["container_port"],
+            cpu=args["cpu"],
+            memory=args["memory"],
+            health_check_path=args["health_check_path"],
+            user=conversation.user,
+            environment_slug=args["environment_slug"],
+            git_ref=args.get("git_ref") or branch,  # Default to branch HEAD
+            environment_variables=args.get("environment_variables"),
+            datastore_id=args.get("datastore_id"),
+            dockerfile_path=args.get("dockerfile_path"),
+            app_secrets=args.get("app_secrets"),
+            subdomain=args.get("subdomain"),
+        )
+
+        # Link deployment to conversation via M2M
+        from devopshero_app.models import Deployment
+        deployment = await Deployment.objects.aget(id=result.id)
+        await conversation.deployments.aadd(deployment)
+
+        # Customize note based on whether app was created or updated
+        if result.app_created:
+            note = (
+                f"App '{result.app_name}' created and deployment queued. "
+                "The job worker will build/push/deploy. Use get_deployment_status to check progress."
+            )
+        else:
+            note = (
+                f"App '{result.app_name}' config updated and deployment queued. "
+                "The job worker will build/push/deploy. Use get_deployment_status to check progress."
+            )
+
+        return _mcp_response({
+            **result.to_dict(),
+            "note": note,
+        })
+
+    @tool(
+        "get_deployment_status",
+        (
+            "Get the current status of a deployment including progress and logs. "
+            "Returns the deployment phase, percentage complete, and recent log entries. "
+            "Use this to monitor deployment progress and report status to users."
+        ),
+        {
+            "deployment_id": str,
+        },
+    )
+    async def get_deployment_status(args: dict[str, Any]) -> dict[str, Any]:
+        """Get current deployment status and recent logs."""
+        result = await _get_deployment_status(
+            deployment_id=args["deployment_id"],
+            organization=conversation.organization,
+            log_limit=10,
+        )
+        return _mcp_response(result)
+
+    @tool(
+        "teardown_deployment",
+        (
+            "Tear down (destroy) a deployed application. "
+            "Deletes all app-specific AWS infrastructure: ECS service, ALB listener rules, "
+            "Aurora database (if any), and ECR repository. "
+            "The app must be in RUNNING or FAILED state. Cannot teardown in-progress deployments. "
+            "Use get_deployment_status to monitor teardown progress."
+        ),
+        {
+            "app_id": str,
+        },
+    )
+    async def teardown_deployment(args: dict[str, Any]) -> dict[str, Any]:
+        """Queue teardown of an application's deployment."""
+        result = await _teardown_deployment(
+            app_id=args["app_id"],
+            organization=conversation.organization,
+            user=conversation.user,
+        )
+
+        return _mcp_response({
+            **result.to_dict(),
+            "note": (
+                "Teardown queued. The job worker will delete the app's CDK stacks "
+                "(ECS service, ALB rules, ECR repository, and Aurora if applicable). "
+                "Use get_deployment_status to check progress."
+            ),
+        })
+
+    @tool(
+        "test_docker_build",
+        (
+            "Test-build the Dockerfile in the conversation's repository sandbox. "
+            "Build-only — does not push to ECR. "
+            "Use this after generating a Dockerfile to verify it builds successfully before deploying. "
+            "Returns success/failure and the build output (truncated to last 80 lines)."
+        ),
+        {
+            "environment_slug": str,
+        },
+    )
+    async def test_docker_build(args: dict[str, Any]) -> dict[str, Any]:
+        """Run a test Docker build for the Dockerfile in the sandbox."""
+        result = await _test_docker_build(
+            conversation_id=conversation.id,
+            organization=conversation.organization,
+            environment_slug=args["environment_slug"],
+        )
+        return _mcp_response({"success": result.success, "build_output": result.build_output})
+
+    @tool(
+        "get_environment_status",
+        (
+            "Get the current status of an environment including provisioning progress and logs. "
+            "Returns the environment status, configuration, and recent log entries. "
+            "Use this to monitor environment provisioning progress."
+        ),
+        {
+            "environment_id": str,
+        },
+    )
+    async def get_environment_status(args: dict[str, Any]) -> dict[str, Any]:
+        """Get current environment status and recent logs."""
+        result = await _get_environment_status(
+            environment_id=args["environment_id"],
+            organization=conversation.organization,
+            log_limit=10,
+        )
+        return _mcp_response(result)
+
+    # =========================================================================
+    # Utility Tools
+    # =========================================================================
+
+    @tool(
+        "wait",
+        "Wait for a specified number of seconds. Useful for debugging streaming UI.",
+        {"seconds": int},
+    )
+    async def wait(args: dict[str, Any]) -> dict[str, Any]:
+        """Wait for n seconds (default 2)."""
+        seconds = args.get("seconds", 2)
+        await asyncio.sleep(seconds)
+        return _mcp_response({"waited": seconds})
+
+    # =========================================================================
+    # MCP Server Configuration
+    # =========================================================================
+
+    return create_sdk_mcp_server(
+        name="devopshero",
+        version="1.0.0",
+        tools=[
+            # Platform tools
+            list_aws_accounts,
+            list_hosted_zones,
+            list_environments,
+            initiate_aws_connection,
+            create_environment,
+            get_environment_status,
+            list_repositories,
+            scan_repository,
+            # Workspace tools
+            list_apps,
+            create_datastore,
+            deploy_app,
+            get_deployment_status,
+            teardown_deployment,
+            test_docker_build,
+            # Utility
+            wait,
+        ],
+    )
+
 
 # Tool names for use in allowed_tools configuration
 TOOL_NAMES = [

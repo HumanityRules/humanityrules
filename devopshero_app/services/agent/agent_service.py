@@ -48,8 +48,7 @@ from devopshero_app.services.llm import llm_client, title_generator
 
 from .agent_client import get_claude_env
 from .mcp_tools import (
-    conversation_context,
-    devopshero_mcp_server,
+    create_devopshero_mcp_server,
     TOOL_NAMES,
 )
 from .repo_analysis.repo_analyzer_config import get_analyze_repository_agent
@@ -126,7 +125,6 @@ class MainAgent:
     @classmethod
     async def create(cls, conversation: Conversation) -> MainAgent:
         """Async factory: one-time setup, returns ready-to-use agent."""
-        conversation_context.set(conversation)
         system_prompt = await _build_system_prompt(conversation)
         logger.info(f"System prompt for conversation {conversation.id}:\n{system_prompt}")
 
@@ -153,6 +151,7 @@ class MainAgent:
         logger.info(f"Using model {model_alias} for conversation {conversation.id} (mode={conversation.mode})")
 
         options = _create_agent_options(
+            conversation=conversation,
             system_prompt=system_prompt,
             resume_session_id=conversation.session_id,
             fork_session=fork_session,
@@ -169,7 +168,6 @@ class MainAgent:
 
     async def stream_turn(self, conversation: Conversation, user_message: str) -> AsyncGenerator[AgentStreamEvent, None]:
         """Process one message turn using the persistent client."""
-        conversation_context.set(conversation)
         self._channel.send(user_message)
 
         ctx = StreamingContext(conversation=conversation)
@@ -498,7 +496,7 @@ async def _persist_error(conversation: Conversation, error_type: str, error_desc
 
 
 async def _maybe_generate_title(conversation: Conversation, user_message: str, agent_response: str) -> str | None:
-    """Generate, persist, and return conversation title if not already set."""
+    """Generate using an LLM, and return conversation title if not already set."""
     if conversation.title:
         return None
     
@@ -685,9 +683,11 @@ async def _handle_tool_results(message: UserMessage, ctx: StreamingContext) -> A
     yield AgentStreamEvent(type="thinking")
 
 
-def _create_agent_options(system_prompt: str, resume_session_id: str | None, fork_session: bool, sandbox_paths: SandboxPaths, model_alias: str) -> ClaudeAgentOptions:
-    """Create SDK client options with standard configuration."""
-
+def _create_agent_options(conversation: Conversation, 
+                          system_prompt: str, resume_session_id: str | None, 
+                          fork_session: bool, 
+                          sandbox_paths: SandboxPaths, 
+                          model_alias: str) -> ClaudeAgentOptions:
     # The sandbox settings are used to restrict the agent's filesystem access but only for Bash commands.
     sandbox_settings = SandboxSettings(
         enabled=True,
@@ -720,7 +720,7 @@ def _create_agent_options(system_prompt: str, resume_session_id: str | None, for
         agents={
             "analyze-repository": get_analyze_repository_agent(),
         },
-        mcp_servers={"devopshero": devopshero_mcp_server},
+        mcp_servers={"devopshero": create_devopshero_mcp_server(conversation)},
         tools=builtin_tools,
         allowed_tools=TOOL_NAMES,
         disallowed_tools=blocked_agents,
