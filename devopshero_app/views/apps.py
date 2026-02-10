@@ -19,7 +19,7 @@ def app_detail(request, app_slug):
 
     deployments = Deployment.objects.filter(
         app=app,
-    ).select_related("environment").order_by("-created_at")[:20]
+    ).select_related("environment", "environment__aws_account").order_by("-created_at")[:20]
 
     secret_keys = list(app.app_secrets.keys()) if app.app_secrets else []
     cpu_vcpu = app.cpu / 1024

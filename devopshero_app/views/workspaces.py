@@ -41,7 +41,7 @@ def workspace_detail(request, workspace_slug):
         "deployments",
         queryset=Deployment.objects.filter(
             status=Deployment.Status.RUNNING,
-        ).select_related("environment").order_by("environment__name"),
+        ).select_related("environment", "environment__aws_account").order_by("environment__name"),
         to_attr="active_deployments",
     )
     apps = workspace.apps.select_related("repository").prefetch_related(
