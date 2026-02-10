@@ -470,7 +470,7 @@ touch /tmp/builder_ready
         self.instance = ec2.Instance(
             self, "BuilderInstance",
             instance_name=f"{prefix}-builder",
-            instance_type=ec2.InstanceType.of(ec2.InstanceClass.T4G, ec2.InstanceSize.MEDIUM),
+            instance_type=ec2.InstanceType.of(ec2.InstanceClass.M8G, ec2.InstanceSize.LARGE),
             machine_image=ec2.MachineImage.latest_amazon_linux2023(cpu_type=ec2.AmazonLinuxCpuType.ARM_64),
             vpc=vpc,
             vpc_subnets=ec2.SubnetSelection(subnet_type=ec2.SubnetType.PRIVATE_WITH_EGRESS),
