@@ -36,6 +36,9 @@ Operations that modify state for environments and deployments.
     --slug default \
     --aws-account "DevOps Hero AWS Account"
 
+# Tear down an app's deployment
+./prod_manage.sh doh_control teardown-app --app ai-detector-and-humanizer
+
 # Retry a failed app deployment
 ./prod_manage.sh doh_control retry-app-deployment --app simple-dashboard
 ```

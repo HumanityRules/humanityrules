@@ -20,6 +20,7 @@ from .list_environments import EnvironmentSummary as ListEnvironmentSummary
 from .list_hosted_zones import list_hosted_zones, HostedZoneSummary
 from .list_repositories import list_repositories, RepositoryListItem
 from .scan_repository import scan_repository, RepositoryScan
+from .repository_git_operations import run_git_operation, GitOperationResult
 from .teardown_deployment import teardown_deployment, TeardownSummary
 from .test_docker_build import test_docker_build, TestBuildResult
 
@@ -54,6 +55,8 @@ __all__ = [
     # Repository
     "scan_repository",
     "RepositoryScan",
+    "run_git_operation",
+    "GitOperationResult",
     "list_repositories",
     "RepositoryListItem",
     # Teardown

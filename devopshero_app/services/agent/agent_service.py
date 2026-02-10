@@ -692,9 +692,9 @@ def _create_agent_options(conversation: Conversation,
                           model_alias: str) -> ClaudeAgentOptions:
     # The sandbox settings are used to restrict the agent's filesystem access but only for Bash commands.
     sandbox_settings = SandboxSettings(
-        enabled=True,
-        autoAllowBashIfSandboxed=False,
-        allowUnsandboxedCommands=False
+        enabled=False,
+        autoAllowBashIfSandboxed=True,
+        allowUnsandboxedCommands=False,
     )
 
     # TMPDIR points to the per-conversation tmp folder for isolation
