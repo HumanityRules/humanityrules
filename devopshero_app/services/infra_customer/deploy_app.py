@@ -413,10 +413,15 @@ class AppStack(Stack):
             protocol=elbv2.ApplicationProtocol.HTTP,
             target_type=elbv2.TargetType.IP,
             deregistration_delay=Duration.seconds(deregistration_delay),
+            # 301 accepted: the ALB terminates SSL and forwards to the container over HTTP, adding
+            # X-Forwarded-Proto: https so the app knows the original request was secure. Frameworks like
+            # Phoenix (force_ssl) and Rails (force_ssl) check this header and pass traffic through.
+            # But ALB health checks are synthetic HTTP requests without X-Forwarded-Proto, so apps
+            # with force_ssl redirect them to HTTPS (301). Accepting 301 as healthy handles this.
             health_check=elbv2.HealthCheck(
                 enabled=True, path=app_config.health_check_path, protocol=elbv2.Protocol.HTTP,
                 interval=Duration.seconds(health_check_interval), timeout=Duration.seconds(2),
-                healthy_threshold_count=healthy_threshold, unhealthy_threshold_count=3, healthy_http_codes="200",
+                healthy_threshold_count=healthy_threshold, unhealthy_threshold_count=3, healthy_http_codes="200,301",
             ),
         )
 
