@@ -258,7 +258,12 @@ def _execute_action(repo_path: Path, repository: Repository, action: str, parame
         if not isinstance(commit_message, str) or not commit_message.strip():
             raise ValueError("commit_message is required for commit action")
         normalized_commit_message = _normalize_multiline_text(text=commit_message)
-        command = ["git", "commit", "-m", normalized_commit_message]
+        command = [
+            "git",
+            "-c", "user.name=DevOps Hero",
+            "-c", "user.email=bot@devopshero.com",
+            "commit", "-m", normalized_commit_message,
+        ]
         result = _run_git_command(repo_path=repo_path, command=command, token=token)
         result.action = action
         return result
