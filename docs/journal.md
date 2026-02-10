@@ -1,5 +1,33 @@
 # DevOpsHero Development Journal
 
+## 2026-02-09 19:05 - [Deployment] ALB health checks fail when apps enforce HTTPS redirects (force_ssl)
+
+**Conversation:** [2026-02-09-1859-c4ef767f.md](conversations/2026-02-09-1859-c4ef767f.md)
+
+Debugged a Phoenix app (ai-detector-and-humanizer) whose ECS task kept failing ALB health checks with `Task failed ELB health checks`. The ECS task logs showed: `Plug.SSL is redirecting GET /health to https://... with status 301`.
+
+**Root cause — the full chain:**
+
+The ALB terminates SSL and forwards all traffic to containers over plain HTTP. For regular user requests, the ALB adds `X-Forwarded-Proto: https` to signal "this originally came over HTTPS." Frameworks like Phoenix (`force_ssl: [rewrite_on: [:x_forwarded_proto]]`) and Rails (`config.force_ssl`) check this header — if it says `https`, they pass the request through; if it says `http` or is missing, they 301 redirect to HTTPS.
+
+ALB health checks are synthetic HTTP requests generated internally by the load balancer. They don't include `X-Forwarded-Proto`, and AWS provides no way to add custom headers to them. So apps with `force_ssl` see the health check as a plain HTTP request and redirect it. Our ALB target group was configured with `healthy_http_codes="200"`, so the 301 was treated as unhealthy.
+
+The DOH agent created the `/health` endpoint correctly in the Phoenix router, but the `force_ssl` middleware in `config/prod.exs` intercepts requests at the Endpoint level *before* they reach the Router — so the health route was never hit. The agent had no awareness of this because the system prompt contains no guidance about framework-level SSL enforcement.
+
+**Fix — accept 301 as healthy:**
+
+Changed `healthy_http_codes` from `"200"` to `"200,301"` in the ALB target group health check configuration in `deploy_app.py`. This is an infrastructure-level fix that works universally for any framework that enforces HTTPS, without requiring the agent to detect and modify framework-specific SSL config. A 301 still proves the web server is running and processing requests.
+
+Considered alternatives: teaching the agent framework-specific knowledge (fragile, incomplete), TCP health checks (weaker signal — port can be open while app is stuck). The 301 approach is the right pragmatic default.
+
+**Key points:**
+- ALB health checks are always HTTP, and you cannot customize their headers — the fix must be app-side or infra-side
+- `force_ssl` with `rewrite_on: [:x_forwarded_proto]` means "trust the proxy header to decide if HTTPS" — but health checks don't have this header
+- The original `prod.exs` even had a commented-out `# paths: ["/health"]` exclude, but it was (a) commented out and (b) at the wrong nesting level (sibling of `force_ssl` instead of inside it)
+- This pattern affects Phoenix, Rails, Django (`SECURE_SSL_REDIRECT`), and any framework with middleware-level HTTPS enforcement
+
+---
+
 ## 2026-02-07 20:55 - [AgentChat] Conversation forking via URL for faster debugging
 
 **Conversation:** [2026-02-07-1328-e7b9f2be.md](conversations/2026-02-07-1328-e7b9f2be.md)
