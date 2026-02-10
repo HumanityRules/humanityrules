@@ -139,7 +139,10 @@
                     <div>
                         <h3 class="text-sm font-medium text-gray-900 dark:text-white">{{ deployment.environment.name }}</h3>
                         <p class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
-                            {{ deployment.git_ref }}{% if deployment.git_commit_sha %} · {{ deployment.git_commit_sha|slice:":7" }}{% endif %}
+                            <span class="text-gray-400 dark:text-gray-500">Account:</span> {{ deployment.environment.aws_account.name }} · <span class="text-gray-400 dark:text-gray-500">Region:</span> {{ deployment.environment.aws_region }}
+                        </p>
+                        <p class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                            <span class="text-gray-400 dark:text-gray-500">Ref:</span> {{ deployment.git_ref }}{% if deployment.git_commit_sha %} · {{ deployment.git_commit_sha|slice:":7" }}{% endif %}
                         </p>
                     </div>
                     <div class="flex items-center space-x-3">
