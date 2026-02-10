@@ -16,19 +16,23 @@ from . import ec2_builder_utils
 logger = logging.getLogger(__name__)
 
 
-def _stream_output(stream, level: int, source: str, stream_name: str) -> None:
+def _stream_output(stream, level: int, source: str, stream_name: str) -> str:
+    """Log each line from a subprocess stream and return the collected output."""
     if stream is None:
-        return
+        return ""
+    output_lines: list[str] = []
     for line in stream:
         cleaned = line.rstrip("\n")
         if not cleaned:
             continue
+        output_lines.append(cleaned)
         logger.log(
             level,
             "%(line)s",
             {"line": cleaned},
             extra={"source": source, "stream": stream_name},
         )
+    return "\n".join(output_lines)
 
 
 def delete_all_ecr_images(session: boto3.Session, ecr_repo_name: str) -> bool:
@@ -171,8 +175,15 @@ def _test_build_local(source_path: Path) -> tuple[bool, str]:
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         text=True,
+        bufsize=1,
     )
-    output, _ = process.communicate()
+    output = _stream_output(
+        stream=process.stdout,
+        level=logging.INFO,
+        source="docker",
+        stream_name="test-build",
+    )
+    process.wait()
 
     # Clean up test image regardless of outcome
     subprocess.run(["docker", "rmi", tag], capture_output=True)

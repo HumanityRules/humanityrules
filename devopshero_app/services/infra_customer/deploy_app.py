@@ -395,14 +395,14 @@ class AppStack(Stack):
         if settings.DEBUG:
             deregistration_delay = 0
             health_check_interval = 5
-            healthy_threshold = 2  # ALB minimum is 2
+            healthy_threshold = 2   # ALB minimum is 2
             min_healthy = 0
             health_check_grace = 0
         else:
             deregistration_delay = 30
             health_check_interval = 10
             healthy_threshold = 2
-            min_healthy = 100
+            min_healthy = 0       # Should it be 100 for "always on, zero downtime"? Make it an option for the user?
             health_check_grace = 60
 
         target_group = elbv2.ApplicationTargetGroup(

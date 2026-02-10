@@ -19,9 +19,16 @@ from botocore.exceptions import ClientError
 from .appconfig import AppConfig
 
 
+def _generate_secret_value(key: str, value: str | None) -> str:
+    """Generate a secret value: use literal if provided, otherwise random 64-char token."""
+    if value is None:
+        return secrets.token_urlsafe(48)[:64]
+    return value
+
+
 def ensure_app_secrets_exist(session: boto3.Session, app_config: AppConfig) -> None:
     """
-    Ensure app secrets exist in Secrets Manager. Creates if not exists.
+    Ensure all app secrets exist in Secrets Manager. Creates or merges as needed.
     
     This is called BEFORE CDK runs because CloudFormation's GenerateSecretString
     can only auto-generate ONE random field per secret. By using boto3, we can
@@ -30,6 +37,9 @@ def ensure_app_secrets_exist(session: boto3.Session, app_config: AppConfig) -> N
     The app_config.app_secrets dict maps field names to values:
     - str value: use this literal value
     - None: generate a random 64-char alphanumeric string
+    
+    If the secret already exists, any new keys from app_config.app_secrets are
+    merged in without overwriting existing keys.
     """
     if not app_config.app_secrets:
         return
@@ -39,23 +49,33 @@ def ensure_app_secrets_exist(session: boto3.Session, app_config: AppConfig) -> N
     
     # Check if secret already exists
     try:
-        sm_client.describe_secret(SecretId=secret_name)
-        print(f"   ✅ Secret '{secret_name}' already exists")
+        response = sm_client.get_secret_value(SecretId=secret_name)
+        existing_values = json.loads(response["SecretString"])
+        
+        # Find keys that are in app_config but missing from the stored secret
+        missing_keys = set(app_config.app_secrets.keys()) - set(existing_values.keys())
+        if not missing_keys:
+            print(f"   ✅ Secret '{secret_name}' already exists with all required keys")
+            return
+        
+        # Merge new keys into existing secret, preserving existing values
+        for key in missing_keys:
+            existing_values[key] = _generate_secret_value(key=key, value=app_config.app_secrets[key])
+        
+        print(f"   ⏳ Adding {len(missing_keys)} new key(s) to '{secret_name}': {', '.join(sorted(missing_keys))}")
+        sm_client.put_secret_value(SecretId=secret_name, SecretString=json.dumps(existing_values))
+        print(f"   ✅ Secret '{secret_name}' updated")
         return
+        
     except ClientError as e:
         if e.response["Error"]["Code"] != "ResourceNotFoundException":
             raise
     
-    # Generate values for None fields
+    # Secret doesn't exist — create it with all fields
     secret_values = {}
     for key, value in app_config.app_secrets.items():
-        if value is None:
-            # Generate a random 64-char alphanumeric string
-            secret_values[key] = secrets.token_urlsafe(48)[:64]
-        else:
-            secret_values[key] = value
+        secret_values[key] = _generate_secret_value(key=key, value=value)
     
-    # Create the secret
     print(f"   ⏳ Creating secret '{secret_name}'...")
     sm_client.create_secret(
         Name=secret_name,

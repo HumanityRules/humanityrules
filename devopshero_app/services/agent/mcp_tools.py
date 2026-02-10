@@ -29,6 +29,7 @@ from .tools import (
     list_environments as _list_environments,
     list_hosted_zones as _list_hosted_zones,
     list_repositories as _list_repositories,
+    run_git_operation as _run_git_operation,
     scan_repository as _scan_repository,
     teardown_deployment as _teardown_deployment,
     test_docker_build as _test_docker_build,
@@ -75,6 +76,7 @@ TOOL_DISPLAY_NAMES = {
     "mcp__devopshero__get_deployment_status": "Get Deployment Status",
     "mcp__devopshero__teardown_deployment": "Teardown Deployment",
     "mcp__devopshero__test_docker_build": "Test Docker Build",
+    "mcp__devopshero__git_ops": "Git Ops",
     # Utility
     "mcp__devopshero__wait": "Wait",
 }
@@ -100,6 +102,7 @@ TOOL_MAIN_PARAMS = {
     "mcp__devopshero__deploy_app": "name",
     "mcp__devopshero__get_deployment_status": "deployment_id",
     "mcp__devopshero__teardown_deployment": "app_id",
+    "mcp__devopshero__git_ops": "action",
     "mcp__devopshero__wait": "seconds",
     # External/Claude Agent SDK tools
     "Read": "file_path",
@@ -689,6 +692,104 @@ def create_devopshero_mcp_server(conversation: Conversation):
         return _mcp_response({"success": result.success, "build_output": result.build_output})
 
     @tool(
+        "git_ops",
+        (
+            "Run git operations in the conversation sandbox using DOH-managed repository credentials. "
+            "Supports: status, diff, log, create_branch, stage_files, commit, push_branch, "
+            "create_pull_request, update_pull_request, get_pull_request, and get_remote_info. "
+            "For GitHub push and PR actions, authentication uses the repository's GitHub App "
+            "installation token from DOH data, not local machine credentials."
+        ),
+        {
+            "type": "object",
+            "properties": {
+                "action": {
+                    "type": "string",
+                    "enum": [
+                        "status",
+                        "diff",
+                        "log",
+                        "create_branch",
+                        "stage_files",
+                        "commit",
+                        "push_branch",
+                        "create_pull_request",
+                        "update_pull_request",
+                        "get_pull_request",
+                        "get_remote_info",
+                    ],
+                    "description": "Git action to execute.",
+                },
+                "include_staged": {
+                    "type": "boolean",
+                    "description": "For diff action: if true, shows staged diff (git diff --cached).",
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": "For log action: number of commits to show (1-50).",
+                },
+                "branch_name": {
+                    "type": "string",
+                    "description": "For create_branch and push_branch actions.",
+                },
+                "files": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "For stage_files action: repository-relative paths to stage.",
+                },
+                "commit_message": {
+                    "type": "string",
+                    "description": "For commit action.",
+                },
+                "title": {
+                    "type": "string",
+                    "description": "For create_pull_request and update_pull_request actions.",
+                },
+                "body": {
+                    "type": "string",
+                    "description": "For create_pull_request and update_pull_request actions.",
+                },
+                "head_branch": {
+                    "type": "string",
+                    "description": "For create_pull_request action. Defaults to current branch.",
+                },
+                "base_branch": {
+                    "type": "string",
+                    "description": "For create_pull_request action. Defaults to repository default branch.",
+                },
+                "pull_number": {
+                    "type": "integer",
+                    "description": "For update_pull_request and get_pull_request actions.",
+                },
+            },
+            "required": ["action"],
+        },
+    )
+    async def git_ops(args: dict[str, Any]) -> dict[str, Any]:
+        """Run one git operation for the conversation's selected repository."""
+        repository_id = conversation.context_repository_id
+        if not repository_id:
+            raise ValueError(
+                "No repository selected. Start the conversation from a workspace with a selected repository."
+            )
+
+        try:
+            repository = await Repository.objects.select_related("integration").aget(
+                id=repository_id,
+                organization=conversation.organization,
+            )
+        except Repository.DoesNotExist:
+            raise ValueError(f"Repository {repository_id} not found in organization.")
+
+        result = await _run_git_operation(
+            conversation_id=conversation.id,
+            repository=repository,
+            action=args["action"],
+            parameters=args,
+        )
+        return _mcp_response(result)
+
+    @tool(
         "get_environment_status",
         (
             "Get the current status of an environment including provisioning progress and logs. "
@@ -747,6 +848,7 @@ def create_devopshero_mcp_server(conversation: Conversation):
             get_deployment_status,
             teardown_deployment,
             test_docker_build,
+            git_ops,
             # Utility
             wait,
         ],
@@ -771,6 +873,7 @@ TOOL_NAMES = [
     "mcp__devopshero__get_deployment_status",
     "mcp__devopshero__teardown_deployment",
     "mcp__devopshero__test_docker_build",
+    "mcp__devopshero__git_ops",
     # Utility
     "mcp__devopshero__wait",
 ]

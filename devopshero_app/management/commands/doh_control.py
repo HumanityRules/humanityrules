@@ -4,6 +4,7 @@ Control plane operations for environments and deployments.
 Usage:
     uv run manage.py doh_control create-env --aws-account "Name" --name default --region us-east-1 --hosted-zone example.com
     uv run manage.py doh_control teardown-env --slug default --aws-account "Name"
+    uv run manage.py doh_control teardown-app --app ai-detector-and-humanizer
     uv run manage.py doh_control retry-env-provisioning --slug default --aws-account "Name"
     uv run manage.py doh_control retry-app-deployment --app simple-dashboard
 
@@ -36,6 +37,10 @@ class Command(BaseCommand):
         teardown_env.add_argument("--slug", required=True, help="Environment slug")
         teardown_env.add_argument("--aws-account", required=True, help="AWS account name")
 
+        # teardown-app
+        teardown_app = subparsers.add_parser("teardown-app", help="Tear down an app's deployment")
+        teardown_app.add_argument("--app", required=True, help="App slug")
+
         # retry-env-provisioning
         retry_env = subparsers.add_parser("retry-env-provisioning", help="Retry provisioning for a failed environment")
         retry_env.add_argument("--slug", required=True, help="Environment slug")
@@ -52,6 +57,8 @@ class Command(BaseCommand):
             self._handle_create_env(options)
         elif operation == "teardown-env":
             self._handle_teardown_env(options)
+        elif operation == "teardown-app":
+            self._handle_teardown_app(options)
         elif operation == "retry-env-provisioning":
             self._handle_retry_env_provisioning(options)
         elif operation == "retry-app-deployment":
@@ -171,6 +178,56 @@ class Command(BaseCommand):
         env.save(update_fields=["status", "status_message", "updated_at"])
 
         self.stdout.write(self.style.SUCCESS(f"\nEnvironment '{slug}' set to TEARDOWN_PENDING"))
+        self.stdout.write(f"  Previous status: {old_status}")
+        self.stdout.write(self.style.WARNING("Teardown will start automatically (job worker picks up pending teardowns)"))
+        self.stdout.write("")
+
+    def _handle_teardown_app(self, options):
+        """Tear down an app's most recent deployment by setting status to TEARDOWN_PENDING."""
+        app_slug = options["app"]
+
+        # Find app
+        try:
+            app = models.App.objects.get(slug=app_slug)
+        except models.App.DoesNotExist:
+            self.stderr.write(self.style.ERROR(f"App '{app_slug}' not found"))
+            return
+
+        # Find latest deployment
+        deployment = models.Deployment.objects.filter(app=app).select_related("environment").order_by("-created_at").first()
+        if not deployment:
+            self.stderr.write(self.style.ERROR(f"No deployments found for app '{app_slug}'"))
+            return
+
+        # Check current status
+        if deployment.status == models.Deployment.Status.TEARDOWN_PENDING:
+            self.stdout.write(self.style.WARNING(f"Deployment is already queued for teardown"))
+            return
+
+        if deployment.status == models.Deployment.Status.TEARING_DOWN:
+            self.stderr.write(self.style.ERROR(f"Deployment is already being torn down"))
+            return
+
+        teardownable_statuses = [
+            models.Deployment.Status.RUNNING,
+            models.Deployment.Status.FAILED,
+        ]
+        if deployment.status not in teardownable_statuses:
+            self.stderr.write(self.style.ERROR(
+                f"Deployment is in progress ({deployment.status}) - cannot tear down. Wait for it to complete."
+            ))
+            return
+
+        # Set to teardown pending
+        old_status = deployment.status
+        deployment.status = models.Deployment.Status.TEARDOWN_PENDING
+        deployment.status_message = "Teardown triggered via doh_control"
+        deployment.save(update_fields=["status", "status_message", "updated_at"])
+
+        self.stdout.write(self.style.SUCCESS(f"\nDeployment for '{app_slug}' set to TEARDOWN_PENDING"))
+        self.stdout.write(f"  App: {app.name}")
+        self.stdout.write(f"  Environment: {deployment.environment.name}")
+        self.stdout.write(f"  Deployment: {deployment.id}")
         self.stdout.write(f"  Previous status: {old_status}")
         self.stdout.write(self.style.WARNING("Teardown will start automatically (job worker picks up pending teardowns)"))
         self.stdout.write("")
