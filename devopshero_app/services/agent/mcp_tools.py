@@ -106,6 +106,8 @@ TOOL_MAIN_PARAMS = {
     "mcp__devopshero__wait": "seconds",
     # External/Claude Agent SDK tools
     "Read": "file_path",
+    "Edit": "file_path",
+    "Write": "file_path",
     "Shell": "description",
     "Bash": "description",
     # Glob and Grep have special handling in get_tool_main_param
