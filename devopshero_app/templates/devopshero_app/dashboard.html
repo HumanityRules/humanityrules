@@ -7,16 +7,17 @@
         {% if apps %}
         <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
             {% for app in apps %}
-            <div class="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-4">
+            <div class="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-4 relative group hover:border-indigo-300 dark:hover:border-indigo-700 transition-colors">
+                <a href="{% url 'app_detail' app_slug=app.slug %}"
+                   hx-get="{% url 'app_detail' app_slug=app.slug %}"
+                   hx-target="#main-content"
+                   hx-swap="innerHTML"
+                   hx-push-url="true"
+                   class="absolute inset-0 rounded-lg z-0" aria-hidden="true"></a>
                 <div class="flex items-start justify-between mb-3">
-                    <a href="{% url 'app_detail' app_slug=app.slug %}"
-                       hx-get="{% url 'app_detail' app_slug=app.slug %}"
-                       hx-target="#main-content"
-                       hx-swap="innerHTML"
-                       hx-push-url="true"
-                       class="font-medium text-gray-900 dark:text-white hover:text-indigo-600 dark:hover:text-indigo-400 truncate">
+                    <span class="font-medium text-gray-900 dark:text-white group-hover:text-indigo-600 dark:group-hover:text-indigo-400 truncate">
                         {{ app.name }}
-                    </a>
+                    </span>
                     <span class="ml-2 inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-300">
                         {{ app.app_type }}
                     </span>
@@ -37,7 +38,7 @@
                            hx-target="#main-content"
                            hx-swap="innerHTML"
                            hx-push-url="true"
-                           class="text-indigo-600 dark:text-indigo-400 hover:underline">{{ app.workspace.name }}</a>
+                           class="relative z-10 text-indigo-600 dark:text-indigo-400 hover:underline">{{ app.workspace.name }}</a>
                     </div>
                     <div class="flex items-center justify-between">
                         <span class="text-gray-500 dark:text-gray-400">Last deployed</span>
