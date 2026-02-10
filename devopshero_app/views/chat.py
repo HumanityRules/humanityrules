@@ -271,10 +271,10 @@ def _format_sse(event_name: str, data: str) -> str:
     return f"event: {event_name}\n{sse_data}\n\n"
 
 
-def _render_streaming_tool_start(data: dict) -> str:
+def _render_streaming_tool_start(agent_streaming_event_data: dict) -> str:
     """Render HTML for tool execution start."""
-    tool_full_name = data.get("name", "unknown")
-    parameters = data.get("input", {})
+    tool_full_name = agent_streaming_event_data.get("name", "unknown")
+    parameters = agent_streaming_event_data.get("input", {})
     tool_name = mcp_tools.get_tool_display_name(tool_full_name, parameters)
     tool_main_param = mcp_tools.get_tool_main_param(tool_full_name, parameters)
     if tool_main_param:
@@ -283,16 +283,16 @@ def _render_streaming_tool_start(data: dict) -> str:
     return render_to_string("devopshero_app/chat/_streaming_tool_start.html", context={
         "tool_name": tool_name,
         "tool_main_param": tool_main_param,
-        "tool_use_id": data.get("tool_use_id", ""),
+        "tool_use_id": agent_streaming_event_data.get("tool_use_id", ""),
         "params_json": params_json,
     })
 
 
-def _render_streaming_tool_result(data: dict) -> str:
+def _render_streaming_tool_result(agent_streaming_event_data: dict) -> str:
     """Render HTML for tool execution result (OOB swap)."""
-    tool_full_name = data.get("name", "unknown")
-    parameters = data.get("input", {})
-    result = data.get("result", "")
+    tool_full_name = agent_streaming_event_data.get("name", "unknown")
+    parameters = agent_streaming_event_data.get("input", {})
+    result = agent_streaming_event_data.get("result", "")
 
     params_json = json.dumps(parameters, indent=2) if parameters else "{}"
 
@@ -305,28 +305,26 @@ def _render_streaming_tool_result(data: dict) -> str:
     except (json.JSONDecodeError, TypeError):
         result_parsed = result
 
-    # Generic path renders result_json in a <pre> tag.
-    # Custom templates use result_parsed directly (preserving real newlines etc.)
-    result_json = result_parsed if isinstance(result_parsed, str) else json.dumps(result_parsed, indent=2)
-
     tool_name = mcp_tools.get_tool_display_name(tool_full_name, parameters)
     tool_main_param = mcp_tools.get_tool_main_param(tool_full_name, parameters)
     if tool_main_param:
         tool_name = f"{tool_name}: "
 
-    # Check for custom result template
-    custom_result_template = chat_filters.TOOL_RESULT_TEMPLATES.get(tool_full_name, "")
+    # Override status when the tool reports business-logic failure via a success field.
+    # The MCP-level is_error only covers tool crashes, not domain failures like a failed build.
+    status = agent_streaming_event_data.get("status", "success")
+    if status == "success" and isinstance(result_parsed, dict) and result_parsed.get("success") is False:
+        status = "error"
 
     html = render_to_string("devopshero_app/chat/_streaming_tool_result.html", context={
         "tool_name": tool_name,
         "tool_main_param": tool_main_param,
-        "tool_use_id": data.get("tool_use_id", ""),
-        "status": data.get("status", "success"),
-        "duration_ms": data.get("duration_ms", 0),
+        "tool_use_id": agent_streaming_event_data.get("tool_use_id", ""),
+        "status": status,
+        "duration_ms": agent_streaming_event_data.get("duration_ms", 0),
         "params_json": params_json,
-        "result_json": result_json,
-        "custom_result_template": custom_result_template,
-        "custom_result_template_data": result_parsed if custom_result_template else None,
+        "tool_result": result_parsed,
+        "custom_result_template": chat_filters.TOOL_RESULT_TEMPLATES.get(tool_full_name, ""),
     })
 
     return html

@@ -113,8 +113,20 @@ def tool_result_get_template(metadata: dict) -> str:
 
 
 @register.filter
-def tool_result_get_data(metadata: dict) -> Any:
-    """Extract parsed result data from tool call metadata for custom rendering."""
+def tool_effective_status(metadata: dict) -> str:
+    """Return effective status considering both MCP is_error and business-logic success field."""
+    status = metadata.get("status", "success")
+    if status != "success":
+        return status
+    result_data = tool_result_get_parsed(metadata)
+    if isinstance(result_data, dict) and result_data.get("success") is False:
+        return "error"
+    return status
+
+
+@register.filter
+def tool_result_get_parsed(metadata: dict) -> Any:
+    """Parse and unwrap tool result from MCP content blocks in metadata."""
     result = metadata.get("result", "")
 
     if isinstance(result, str):

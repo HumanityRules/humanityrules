@@ -1,6 +1,6 @@
 {# Custom result display for Test Docker Build tool #}
 <div class="min-w-0 space-y-2">
-    {% if custom_result_template_data.success %}
+    {% if tool_result.success %}
     <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-green-100 text-green-800 dark:bg-green-900/50 dark:text-green-300">
         Build Succeeded
     </span>
@@ -9,7 +9,7 @@
         Build Failed
     </span>
     {% endif %}
-    {% if custom_result_template_data.build_output %}
-    <pre class="bg-gray-950 text-gray-300 p-3 rounded text-xs overflow-x-auto max-h-[32rem] overflow-y-auto font-mono whitespace-pre-wrap leading-5">{{ custom_result_template_data.build_output }}</pre>
+    {% if tool_result.build_output %}
+    <pre class="bg-gray-950 text-gray-300 p-3 rounded text-xs overflow-x-auto max-h-[32rem] overflow-y-auto font-mono whitespace-pre-wrap leading-5">{{ tool_result.build_output }}</pre>
     {% endif %}
 </div>

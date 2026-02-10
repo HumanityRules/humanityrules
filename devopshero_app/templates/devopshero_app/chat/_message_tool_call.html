@@ -10,7 +10,7 @@
             <svg class="w-4 h-4 text-gray-400 transition-transform duration-200 group-open:rotate-90" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
             </svg>
-            {% if message.metadata.status == 'success' %}
+            {% if message.metadata|tool_effective_status == 'success' %}
             <svg class="w-4 h-4 text-green-500" fill="currentColor" viewBox="0 0 20 20">
                 <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"/>
             </svg>
@@ -32,7 +32,7 @@
         </div>
         {% with message.metadata|tool_result_get_template as custom_tpl %}
         {% if custom_tpl %}
-            {% with message.metadata|tool_result_get_data as custom_result_template_data %}
+            {% with message.metadata|tool_result_get_parsed as tool_result %}
             {% include custom_tpl %}
             {% endwith %}
         {% else %}

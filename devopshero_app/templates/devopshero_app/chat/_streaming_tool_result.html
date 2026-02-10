@@ -1,3 +1,4 @@
+{% load chat_filters %}
 {# Tool execution result - replaces tool start via OOB swap #}
 <div id="tool-{{ tool_use_id }}" hx-swap-oob="outerHTML">
     <div class="flex items-start space-x-3 w-full max-w-[80%] mb-4">
@@ -37,7 +38,7 @@
                     {% else %}
                     <div class="min-w-0">
                         <div class="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">Result</div>
-                        <pre class="bg-gray-100 dark:bg-gray-900 p-2 rounded text-xs overflow-x-auto max-h-[32rem] overflow-y-auto font-mono text-gray-800 dark:text-gray-200 whitespace-pre-wrap break-all">{{ result_json }}</pre>
+                        <pre class="bg-gray-100 dark:bg-gray-900 p-2 rounded text-xs overflow-x-auto max-h-[32rem] overflow-y-auto font-mono text-gray-800 dark:text-gray-200 whitespace-pre-wrap break-all">{{ tool_result|json_pretty }}</pre>
                     </div>
                     {% endif %}
                 </div>

@@ -1,5 +1,25 @@
 # DevOpsHero Development Journal
 
+## 2026-02-09 22:41 - [AgentChat] Show error icon when MCP tools report business-logic failure
+
+**Conversation:** [2026-02-09-2241-c553c4cf.md](conversations/2026-02-09-2241-c553c4cf.md)
+
+When an MCP tool like "Test Docker Build" fails, the UI was showing a green success checkmark even though the custom template correctly showed "Build Failed" in red. The header icon and the result badge used different data sources that disagreed.
+
+**Root cause:** The MCP protocol has two layers of error reporting. The transport-level `isError` flag (set when a tool throws an exception) controls `block.is_error` in the SDK, which our `_handle_tool_results` maps to `status = "error"`. But tools that succeed at the transport level while reporting domain failure through their response data (e.g., `{"success": false, "build_output": "..."}`) always got `status = "success"`. The SDK's `@tool` decorator even documents an `"is_error": True` return field, but the SDK's internal `call_tool` function strips it and only returns content — a bug in `claude-agent-sdk`.
+
+**Decision — UI-level fix, don't patch the SDK:** Rather than modifying the vendored SDK (fragile across updates) or making tools throw exceptions (loses structured result data), we override status at the UI layer by checking the parsed result's `success` field.
+
+**Simplification:** Also consolidated the template context — removed `result_json` (pre-formatted string) and `custom_result_template_data` (conditionally-passed dict) in favor of a single `tool_result` variable. The generic template path uses `{{ tool_result|json_pretty }}` (filter already existed), and custom templates use dict access (`tool_result.success`). Both the streaming and persisted-message rendering paths now share the same variable name convention.
+
+**Key points:**
+- MCP protocol supports `isError: true` for business-logic failures, but the `claude-agent-sdk`'s `call_tool` at line 303 discards the field — only forwarding content, not `is_error`
+- If a tool throws an exception, `isError` propagates correctly through the MCP SDK's lowlevel server, but you lose structured result data (build output, etc.)
+- The status override uses `result_parsed.get("success") is False` — `None is False` is `False`, so tools without a `success` field are unaffected
+- Two rendering paths exist: streaming (view computes status in Python) and persisted (template filter `tool_effective_status` checks both `metadata.status` and inner `success` field)
+
+---
+
 ## 2026-02-09 19:05 - [Deployment] ALB health checks fail when apps enforce HTTPS redirects (force_ssl)
 
 **Conversation:** [2026-02-09-1859-c4ef767f.md](conversations/2026-02-09-1859-c4ef767f.md)
