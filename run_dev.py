@@ -62,7 +62,7 @@ cmd = [
     "--reload-include",
     "*.js",
     "--log-level",
-    "warning",
+    "info",
 ]
 
 # Run uvicorn, replacing this process
