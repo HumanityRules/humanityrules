@@ -253,7 +253,7 @@ async def _check_active_deployments(app: App) -> None:
 
 async def _check_subdomain_conflict(subdomain: str, hosted_zone: str, exclude_deployment_key: tuple[str, str] | None) -> Deployment | None:
     """
-    Check if a subdomain is already in use by a running deployment in the same hosted zone.
+    Check if a subdomain is already in use by a deployed deployment in the same hosted zone.
 
     Args:
         subdomain: The subdomain to check.
@@ -261,8 +261,8 @@ async def _check_subdomain_conflict(subdomain: str, hosted_zone: str, exclude_de
         exclude_deployment_key: Optional (app_id, environment_id) tuple to exclude from check.
             Used when redeploying to the same environment - we're replacing that deployment.
     """
-    running_statuses = [
-        Deployment.Status.RUNNING,
+    active_statuses = [
+        Deployment.Status.DEPLOYED,
         Deployment.Status.PENDING,
         Deployment.Status.BUILDING,
         Deployment.Status.PUSHING,
@@ -272,7 +272,7 @@ async def _check_subdomain_conflict(subdomain: str, hosted_zone: str, exclude_de
     query = Deployment.objects.filter(
         subdomain=subdomain,
         environment__shared_alb_hosted_zone=hosted_zone,
-        status__in=running_statuses,
+        status__in=active_statuses,
     )
     if exclude_deployment_key:
         # Exclude only the specific app+environment combo (we're replacing that deployment)
@@ -374,7 +374,7 @@ async def deploy_app(
     Matching: App is identified by (organization, slug) where slug = slugify(name).
 
     Subdomain resolution:
-    - If subdomain is provided, validates it doesn't conflict with running deployments.
+    - If subdomain is provided, validates it doesn't conflict with active deployments.
     - If not provided, defaults to app slug.
     - If default conflicts (same domain already in use), auto-suffixes with -{env_slug}.
 

@@ -36,11 +36,11 @@ def workspace_detail(request, workspace_slug):
         organization=request.user.current_organization,
     )
     
-    # Prefetch active deployments (running, not being torn down) with their environments
+    # Prefetch active deployments (deployed, not being torn down) with their environments
     active_deployments_prefetch = Prefetch(
         "deployments",
         queryset=Deployment.objects.filter(
-            status=Deployment.Status.RUNNING,
+            status=Deployment.Status.DEPLOYED,
         ).select_related("environment", "environment__aws_account").order_by("environment__name"),
         to_attr="active_deployments",
     )
@@ -49,8 +49,8 @@ def workspace_detail(request, workspace_slug):
         .order_by("-created_at")
         .values("status")[:1]
     )
-    latest_running_service_url = (
-        Deployment.objects.filter(app=OuterRef("pk"), status=Deployment.Status.RUNNING)
+    latest_deployed_service_url = (
+        Deployment.objects.filter(app=OuterRef("pk"), status=Deployment.Status.DEPLOYED)
         .order_by("-created_at")
         .values("service_url")[:1]
     )
@@ -59,7 +59,7 @@ def workspace_detail(request, workspace_slug):
     ).annotate(
         last_deployed_at=Max("deployments__created_at"),
         latest_status=Subquery(latest_deployment_status),
-        running_service_url=Subquery(latest_running_service_url),
+        deployed_service_url=Subquery(latest_deployed_service_url),
     ).order_by("name")
     datastores = workspace.datastores.order_by("name")
     show_costs = request.user.is_staff

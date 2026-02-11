@@ -648,7 +648,7 @@ def create_devopshero_mcp_server(conversation: Conversation):
             "Tear down (destroy) a deployed application. "
             "Deletes all app-specific AWS infrastructure: ECS service, ALB listener rules, "
             "Aurora database (if any), and ECR repository. "
-            "The app must be in RUNNING or FAILED state. Cannot teardown in-progress deployments. "
+            "The app must be in DEPLOYED or FAILED state. Cannot teardown in-progress deployments. "
             "Use get_deployment_status to monitor teardown progress."
         ),
         {

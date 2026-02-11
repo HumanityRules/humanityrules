@@ -209,7 +209,7 @@ class Command(BaseCommand):
             return
 
         teardownable_statuses = [
-            models.Deployment.Status.RUNNING,
+            models.Deployment.Status.DEPLOYED,
             models.Deployment.Status.FAILED,
         ]
         if deployment.status not in teardownable_statuses:
@@ -253,8 +253,8 @@ class Command(BaseCommand):
             self.stdout.write(self.style.WARNING(f"Deployment is already pending"))
             return
 
-        if deployment.status == models.Deployment.Status.RUNNING:
-            self.stderr.write(self.style.ERROR(f"Deployment is already running - nothing to retry"))
+        if deployment.status == models.Deployment.Status.DEPLOYED:
+            self.stderr.write(self.style.ERROR(f"Deployment is already deployed - nothing to retry"))
             return
 
         if deployment.status in [

@@ -9,9 +9,9 @@ from dataclasses import dataclass, asdict
 from devopshero_app.models import App, Deployment, Workspace
 
 
-# Statuses that represent "active" deployments (running or in-progress)
+# Statuses that represent "active" deployments (deployed or in-progress)
 ACTIVE_DEPLOYMENT_STATUSES = [
-    Deployment.Status.RUNNING,
+    Deployment.Status.DEPLOYED,
     Deployment.Status.PENDING,
     Deployment.Status.BUILDING,
     Deployment.Status.PUSHING,
