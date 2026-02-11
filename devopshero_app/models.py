@@ -780,7 +780,7 @@ class Deployment(models.Model):
         PUSHING = "pushing", "Pushing to ECR"
         DEPLOYING = "deploying", "Deploying Infrastructure"
         STARTING = "starting", "Starting Service"
-        RUNNING = "running", "Running"
+        DEPLOYED = "deployed", "Deployed"
         FAILED = "failed", "Failed"
         ROLLED_BACK = "rolled_back", "Rolled Back"
         SUPERSEDED = "superseded", "Superseded"

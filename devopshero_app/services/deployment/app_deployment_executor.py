@@ -150,18 +150,18 @@ def run_deployment(deployment_id: str) -> bool:
             )
 
             if success:
-                deployment.status = models.Deployment.Status.RUNNING
+                deployment.status = models.Deployment.Status.DEPLOYED
                 deployment.status_message = "Deployment completed successfully"
                 deployment.completed_at = timezone.now()
                 _populate_service_urls(session, deployment)
 
                 deployment.save()
 
-                # Mark previous running deployments for this app+environment as superseded
+                # Mark previous deployed deployments for this app+environment as superseded
                 models.Deployment.objects.filter(
                     app=deployment.app,
                     environment=deployment.environment,
-                    status=models.Deployment.Status.RUNNING,
+                    status=models.Deployment.Status.DEPLOYED,
                 ).exclude(
                     id=deployment.id,
                 ).update(

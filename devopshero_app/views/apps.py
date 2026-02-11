@@ -60,7 +60,7 @@ def app_deployment_teardown(request, app_slug, deployment_id):
     deployment = _get_deployment_for_app(app, deployment_id)
 
     teardownable_statuses = [
-        Deployment.Status.RUNNING,
+        Deployment.Status.DEPLOYED,
     ]
     if deployment.status not in teardownable_statuses:
         return HttpResponse(status=422)

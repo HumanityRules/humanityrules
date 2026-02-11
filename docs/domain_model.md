@@ -225,7 +225,7 @@ A deployment of an app to an environment.
 - **git_commit_message** — Commit message
 - **image_tag** — Docker image tag
 - **image_uri** — Full ECR image URI (set after push)
-- **status** — pending / building / pushing / deploying / starting / running / failed / rolled_back
+- **status** — pending / building / pushing / deploying / starting / deployed / failed / rolled_back / superseded / torn_down / teardown_pending / tearing_down
 - **status_message** — Status details
 - **started_at** — When deployment started
 - **completed_at** — When deployment completed
