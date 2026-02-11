@@ -1,7 +1,6 @@
 from django.contrib.auth.decorators import login_required
 from django.http import HttpResponse
 from django.shortcuts import get_object_or_404, render
-from django.template.loader import render_to_string
 from django.views.decorators.http import require_GET, require_POST
 
 from devopshero_app.models import App, Deployment
@@ -62,7 +61,6 @@ def app_deployment_teardown(request, app_slug, deployment_id):
 
     teardownable_statuses = [
         Deployment.Status.RUNNING,
-        Deployment.Status.FAILED,
     ]
     if deployment.status not in teardownable_statuses:
         return HttpResponse(status=422)
@@ -80,20 +78,7 @@ def app_deployment_teardown(request, app_slug, deployment_id):
 def app_deployment_status(request, app_slug, deployment_id):
     """Return updated deployment row HTML for polling."""
     app = _get_app_for_user(request, app_slug)
-
-    try:
-        deployment = Deployment.objects.select_related(
-            "environment", "environment__aws_account"
-        ).get(id=deployment_id, app=app)
-    except Deployment.DoesNotExist:
-        # Deployment was deleted (teardown succeeded) — remove the row.
-        # If no deployments remain, replace the container with the empty-state placeholder.
-        if not Deployment.objects.filter(app=app).exists():
-            empty_html = render_to_string("devopshero_app/apps/_app_deployments_empty.html")
-            return HttpResponse(
-                f'<div id="deployments-list" hx-swap-oob="outerHTML">{empty_html}</div>'
-            )
-        return HttpResponse("")
+    deployment = _get_deployment_for_app(app, deployment_id)
 
     context = {"app": app, "deployment": deployment}
     return render(request, "devopshero_app/apps/_app_deployment_row.html", context=context)

@@ -140,6 +140,18 @@ def run_deployment(deployment_id: str) -> bool:
                 # TODO: Extract service_url and alb_dns from CDK outputs
                 deployment.save()
 
+                # Mark previous running deployments for this app+environment as superseded
+                models.Deployment.objects.filter(
+                    app=deployment.app,
+                    environment=deployment.environment,
+                    status=models.Deployment.Status.RUNNING,
+                ).exclude(
+                    id=deployment.id,
+                ).update(
+                    status=models.Deployment.Status.SUPERSEDED,
+                    status_message="Superseded by new deployment",
+                )
+
                 logger.info("Deployment completed successfully")
                 logger.info("Deployment %(deployment_id)s completed successfully", {"deployment_id": str(deployment_id)})
                 return True

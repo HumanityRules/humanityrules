@@ -31,7 +31,7 @@
                 {{ deployment.get_status_display }}
             </span>
             <span class="text-xs text-gray-500 dark:text-gray-400">{{ deployment.created_at|timesince }} ago</span>
-            {% if deployment.status == 'running' or deployment.status == 'failed' %}
+            {% if deployment.status == 'running' %}
             <div class="relative ml-2 mt-0.5" data-menu>
                 <button type="button"
                         onclick="this.parentElement.querySelector('[data-menu-items]').classList.toggle('hidden')"
