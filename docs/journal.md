@@ -1,5 +1,26 @@
 # DevOpsHero Development Journal
 
+## 2026-02-10 23:15 - [Bugfix] Fix psycopg3 connection pool exhaustion causing site hangs during deployments
+
+**Conversation:** [2026-02-10-2341-5b9f138d.md](conversations/2026-02-10-2341-5b9f138d.md)
+
+Investigated a production incident where the site became completely unresponsive (endpoints not replying at all) while a deployment was in progress. The user was in the chat window watching a deployment complete, then clicked to navigate to another page — the loading spinner spun indefinitely and the network tab showed the request never received a response.
+
+**Root cause:** psycopg3's `ConnectionPool` with `pool=True` defaults to a fixed pool of 4 connections (`min_size=4, max_size=None`, and the docs explicitly state that `None` means "equal to `min_size` — the pool will not grow or shrink"). The job worker runs in the same Uvicorn process as the web server and spawns background threads for deployments, provisioning, and teardowns. None of these thread functions called `connections.close_all()`, so each thread held a database connection from the pool for its entire lifetime — a deployment thread holds one for 5+ minutes. With only 4 connections in the pool and 2+ held by job worker threads, the remaining connections became contended. When timing aligned poorly (SSE disconnect returning the main thread's connection to the pool, followed by the agent runner re-acquiring it before the sync view could), the main `sync_to_async(thread_sensitive=True)` thread would block waiting for a pool connection — and since ALL sync views in ASGI mode run on that single thread, the entire site hung.
+
+**Fix (two parts):**
+
+1. Added `connections.close_all()` in `finally` blocks to all 4 job thread target functions (`_run_app_deployment_thread`, `_run_environment_provisioning_thread`, `_run_app_deployment_teardown_thread`, `_run_environment_teardown_thread`) and to the worker polling loop. This matches the pattern already used in `chat.py` and `agent_runner.py` for async contexts.
+
+2. Changed the pool from `pool=True` (fixed at 4) to `pool={"min_size": 4, "max_size": 200}`. This allows the pool to grow under load while keeping a small idle baseline. Idle connections above `min_size` are reaped after 10 minutes (`max_idle` default). Aurora Serverless v2 supports ~1000 connections, so 200 is conservative.
+
+**Key points:**
+- psycopg_pool 3.3.0 docs: `max_size=None` means "equal to `min_size`" — the pool is fixed, not unbounded. This is a common misconception.
+- Django's `request_finished` signal (which normally returns connections) doesn't fire for background threads or SSE generators — manual `connections.close_all()` is required.
+- The `thread_sensitive=True` single-thread model in ASGI means ANY blocking operation on the main thread (like waiting for a pool connection) blocks ALL sync views.
+- CloudWatch Aurora metrics showed steady 4 connections, confirming the pool was fixed at 4. The `pg_stat_activity` count of 15 seen in SSE cleanup logs reflected psycopg3's pool overhead, not actual leaked connections.
+- Diagnosis involved checking ECS service status, ALB target health, CloudWatch CPU/memory metrics, Aurora connection metrics, deployment logs, and conversation status — production was healthy but the pool configuration was a time bomb.
+
 ## 2026-02-10 22:51 - [UI] Unify deployment row template across app and environment detail views
 
 **Conversation:** [2026-02-10-2252-1968ac6c.md](conversations/2026-02-10-2252-1968ac6c.md)

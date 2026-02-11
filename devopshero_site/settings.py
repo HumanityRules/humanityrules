@@ -113,12 +113,18 @@ if DATABASE_HOST:
     DATABASE_URL = f"postgresql://{DATABASE_USER}:{DATABASE_PASS}@{DATABASE_HOST}:{DATABASE_PORT}/{DATABASE_NAME}"
     # Use psycopg3's connection pool instead of CONN_MAX_AGE for ASGI compatibility.
     # Pool is recommended for async Django; CONN_MAX_AGE causes connection leaks in async contexts.
+    #
+    # Pool sizing: This process runs both the web server and the job worker (background threads
+    # for deployments, provisioning, etc.). Default pool is fixed at min_size=4 which is too
+    # tight — job worker threads hold connections during long operations (5+ min deployments),
+    # leaving few for web requests. Aurora Serverless v2 handles up to 1000 connections, so
+    # a generous max_size eliminates pool exhaustion as a failure mode entirely.
     DATABASES = {"default": dj_database_url.parse(DATABASE_URL, conn_max_age=0)}
-    DATABASES["default"]["OPTIONS"] = {"pool": True}
+    DATABASES["default"]["OPTIONS"] = {"pool": {"min_size": 4, "max_size": 200}}
 elif os.environ.get("DATABASE_URL"):
     # Alternative: direct DATABASE_URL (e.g., for local PostgreSQL testing)
     DATABASES = {"default": dj_database_url.parse(os.environ["DATABASE_URL"], conn_max_age=0)}
-    DATABASES["default"]["OPTIONS"] = {"pool": True}
+    DATABASES["default"]["OPTIONS"] = {"pool": {"min_size": 4, "max_size": 200}}
 else:
     # Local dev: SQLite
     DB_PATH = os.environ.get("DOH_DB_PATH")

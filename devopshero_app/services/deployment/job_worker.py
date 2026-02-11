@@ -10,7 +10,7 @@ import logging
 import threading
 import time
 
-from django.db import transaction
+from django.db import connections, transaction
 
 from devopshero_app.models import Deployment, Environment
 
@@ -105,6 +105,8 @@ def _run_app_deployment_thread(deployment_id: str) -> None:
         app_deployment_executor.run_deployment(deployment_id)
     except Exception:
         logger.exception(f"Unhandled error in app deployment {deployment_id}")
+    finally:
+        connections.close_all()
 
 
 def _run_environment_provisioning_thread(environment_id: str) -> None:
@@ -113,6 +115,8 @@ def _run_environment_provisioning_thread(environment_id: str) -> None:
         environment_provisioning_executor.run_provisioning(environment_id)
     except Exception:
         logger.exception(f"Unhandled error in environment provisioning {environment_id}")
+    finally:
+        connections.close_all()
 
 
 def _run_app_deployment_teardown_thread(deployment_id: str) -> None:
@@ -121,6 +125,8 @@ def _run_app_deployment_teardown_thread(deployment_id: str) -> None:
         app_deployment_teardown_executor.run_teardown(deployment_id)
     except Exception:
         logger.exception(f"Unhandled error in app deployment teardown {deployment_id}")
+    finally:
+        connections.close_all()
 
 
 def _claim_pending_environment_teardown() -> Environment | None:
@@ -150,6 +156,8 @@ def _run_environment_teardown_thread(environment_id: str) -> None:
         environment_teardown_executor.run_environment_teardown(environment_id)
     except Exception:
         logger.exception(f"Unhandled error in environment teardown {environment_id}")
+    finally:
+        connections.close_all()
 
 
 def _worker_loop() -> None:
@@ -208,6 +216,11 @@ def _worker_loop() -> None:
 
         except Exception:
             logger.exception("Error in worker loop")
+        finally:
+            # Return connections to the pool after each poll cycle.
+            # Without this, the worker thread holds a connection for its entire
+            # lifetime, reducing the pool available for web requests and agent sessions.
+            connections.close_all()
 
         # Sleep before next poll
         _stop_flag.wait(timeout=1.0)
