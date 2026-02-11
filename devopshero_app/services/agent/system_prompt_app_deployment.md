@@ -294,7 +294,7 @@ CRITICAL: After initiating deployment, you MUST keep polling until the deploymen
 1. Call `wait` for 10 seconds
 2. Call `get_deployment_status` to check current state
 3. **Repeat steps 1-2** until status is either:
-   - **DEPLOYED** (success) — celebrate and provide the URL
+   - **DEPLOYED** (success) — celebrate and provide the URL as an HTML link that opens in a new tab.
    - **FAILED** (failure) — analyze logs and suggest fixes
 4. Do NOT stop polling while status is PENDING, BUILDING, or any other in-progress state
 5. **Timeout**: If 15 minutes pass without reaching a terminal state, stop polling and tell the user to check back later
