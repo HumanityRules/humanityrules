@@ -1,5 +1,23 @@
 # DevOpsHero Development Journal
 
+## 2026-02-10 22:51 - [UI] Unify deployment row template across app and environment detail views
+
+**Conversation:** [2026-02-10-2252-1968ac6c.md](conversations/2026-02-10-2252-1968ac6c.md)
+
+The app detail and environment detail views both had "Recent Deployments" sections, but they used completely different HTML for the deployment rows. The app detail view used a shared partial (`_app_deployment_row.html`) with full features (status spinner, teardown menu, HTMX polling, clickable service URL), while the environment detail view had simpler inline HTML missing most of those features.
+
+Unified both views to use a single `_app_deployment_row.html` template controlled by a `mode` variable passed via `{% include ... with mode="environment" %}`. The default mode renders for the app detail context (shows environment name, AWS account/region, git ref), while `mode="environment"` renders for the environment context (shows app name, workspace name, git ref). All shared features — status badges with tearing-down spinner, teardown menu, HTMX polling, clickable service URLs — are now available in both views.
+
+The HTMX polling URL needed special handling: the `mode` query parameter is forwarded via `?mode={{ mode }}` so that when `app_deployment_status` re-renders the row, it preserves the correct layout. The view was updated to read `mode` from `request.GET` and pass it to the template context.
+
+Also made the entity names (environment, app, workspace) clickable links navigating to their respective detail pages using the standard HTMX SPA pattern, styled as visible indigo links rather than plain text.
+
+**Key points:**
+- Used a single `mode` variable instead of multiple boolean flags — cleaner and more extensible if new contexts are needed
+- Changed URL tag references from `app.slug` to `deployment.app.slug` so the template is self-contained and doesn't depend on an `app` variable in the parent context
+- The `mode` round-trips through HTMX polling via query parameter to prevent layout switching on re-render
+- Environment detail view now gains teardown menu and polling it was previously missing
+
 ## 2026-02-10 19:40 - [AgentChat] Strip verbose details from MCP deployment status logs
 
 **Conversation:** [2026-02-10-1940-f40c6a2b.md](conversations/2026-02-10-1940-f40c6a2b.md)
