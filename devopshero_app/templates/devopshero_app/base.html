@@ -6,6 +6,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{% block title %}DevOps Hero{% endblock %}</title>
+    <link rel="icon" type="image/x-icon" href="{% static 'devopshero_app/favicon.ico' %}">
 
     {% htmx_script %}
     {% tailwind_css %}
@@ -23,7 +24,7 @@
 
     {% block extra_head %}{% endblock %}    
 </head>
-<body hx-headers='{"x-csrftoken": "{{ csrf_token }}"}' class="h-full" hx-ext="sse">
+<body hx-headers='{"x-csrftoken": "{{ csrf_token }}"}' class="h-full" hx-ext="sse,morph">
     {% block content %}{% endblock %}
 
     {% include "devopshero_app/partials/_debug_htmx_indicator.html" %}
