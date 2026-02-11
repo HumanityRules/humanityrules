@@ -1,5 +1,29 @@
 # DevOpsHero Development Journal
 
+## 2026-02-10 17:25 - [UI] App teardown exposed in web UI with HTMX polling and idiomorph
+
+**Conversation:** [2026-02-10-1726-9aa277e5.md](conversations/2026-02-10-1726-9aa277e5.md)
+
+Exposed the existing CLI-only app teardown (`doh_control teardown-app`) in the web UI. Users can now tear down deployments directly from the app detail page without SSH/CLI access. The deployment row shows a kebab (3-dot) menu for deployments in `running` or `failed` status, which opens a confirmation modal, then polls for status updates until the deployment is deleted.
+
+**Architecture — partial extraction + HTMX polling:** Extracted the deployment row from `app_detail.html` into `_app_deployment_row.html` so it can be rendered both inline (full page) and standalone (returned by teardown/status endpoints). The row self-polls every 3s via `hx-get` with `hx-trigger="load delay:3s"` when in `teardown_pending` or `tearing_down` status. When the deployment record is deleted (teardown succeeded), the status endpoint returns empty HTML, and `hx-swap="morph:outerHTML"` replaces the row with nothing, removing it from the page.
+
+**CSRF gotcha with HTMX partials:** Initially added `hx-headers='{"X-CSRFToken": "{{ csrf_token }}"}'` on the confirm button inside the modal. This broke with "CSRF token has incorrect length" because the modal is loaded via an HTMX GET request and `{{ csrf_token }}` renders empty in that context. The fix: remove it entirely — CSRF is already configured globally on `<body>` in `base.html` with `hx-headers='{"x-csrftoken": "{{ csrf_token }}"}'`, and all HTMX requests inherit it. Documented this in `views/AGENTS.md`.
+
+**Modal close timing with hx-post:** The confirm "Tear Down" button uses `hx-post` targeting the deployment row. Initially used `onclick` to close the modal, but that removes the button from the DOM before HTMX fires the request. Then tried `hx-on::before-request`, but HTMX aborts if the element leaves the DOM after that event. The working solution: `hx-on::after-request` — the POST completes, the row is swapped, then the modal is cleared.
+
+**Idiomorph for animation continuity:** The `tearing_down` status shows a CSS spinner (`animate-spin`). With plain `outerHTML` swap, the spinner restarts its animation every 3s poll. Added the idiomorph extension (`idiomorph-htmx.min.js`) and switched to `hx-swap="morph:outerHTML"` — idiomorph diffs the DOM and leaves unchanged elements in place, preserving the spinner animation across polls.
+
+**Deployment IDs are UUIDs, not ints:** The initial URL patterns used `<int:deployment_id>`, which caused `NoReverseMatch` because the Deployment model uses UUID primary keys. Fixed to `<uuid:deployment_id>`.
+
+**Key points:**
+- Teardownable statuses: only `RUNNING` and `FAILED` — matches the CLI command's validation logic
+- Status endpoint uses `try/except Deployment.DoesNotExist` instead of `get_object_or_404` so it can return empty HTML (row removal) instead of 404
+- Kebab menu uses `data-menu` / `data-menu-items` attributes with a global click-outside listener for closing
+- Three new URL patterns: `teardown/` (POST), `status/` (GET polling), `teardown-confirm/` (GET modal)
+
+---
+
 ## 2026-02-09 22:41 - [AgentChat] Show error icon when MCP tools report business-logic failure
 
 **Conversation:** [2026-02-09-2241-c553c4cf.md](conversations/2026-02-09-2241-c553c4cf.md)

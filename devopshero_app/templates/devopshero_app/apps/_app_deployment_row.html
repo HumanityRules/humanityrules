@@ -3,7 +3,7 @@
         hx-get="{% url 'app_deployment_status' app_slug=app.slug deployment_id=deployment.id %}"
         hx-trigger="load delay:3s"
         hx-target="#deployment-{{ deployment.id }}"
-        hx-swap="outerHTML"
+        hx-swap="morph:outerHTML"
     {% endif %}>
     <div class="flex items-center justify-between">
         <div>
