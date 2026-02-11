@@ -1,0 +1,82 @@
+<div id="teardown-modal" class="relative z-50" aria-labelledby="modal-title" role="dialog" aria-modal="true">
+    {# Backdrop #}
+    <div class="fixed inset-0 bg-gray-500/75 dark:bg-gray-900/80 transition-opacity"></div>
+
+    <div class="fixed inset-0 z-10 w-screen overflow-y-auto">
+        <div class="flex min-h-full items-center justify-center p-4 text-center">
+            {# Modal panel #}
+            <div class="relative transform overflow-hidden rounded-lg bg-white dark:bg-gray-800 p-6 text-left shadow-xl transition-all my-8 w-full max-w-lg">
+                {# Close button #}
+                <div class="absolute right-0 top-0 pr-4 pt-4">
+                    <button type="button"
+                            onclick="document.getElementById('modal-container').innerHTML = ''"
+                            class="rounded-md bg-white dark:bg-gray-800 text-gray-400 hover:text-gray-500 dark:hover:text-gray-300 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 dark:focus:ring-offset-gray-800">
+                        <span class="sr-only">Close</span>
+                        <svg class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
+                        </svg>
+                    </button>
+                </div>
+
+                {# Warning icon and title #}
+                <div class="flex items-start gap-4">
+                    <div class="flex-shrink-0 flex items-center justify-center h-10 w-10 rounded-full bg-red-100 dark:bg-red-500/10">
+                        <svg class="h-5 w-5 text-red-600 dark:text-red-400" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126ZM12 15.75h.007v.008H12v-.008Z" />
+                        </svg>
+                    </div>
+                    <div>
+                        <h3 class="text-lg font-semibold text-gray-900 dark:text-white" id="modal-title">Tear Down Deployment</h3>
+                        <p class="mt-2 text-sm text-gray-500 dark:text-gray-400">
+                            This will permanently delete the deployment and all its AWS resources (ECS service, load balancer rules, DNS record, ECR repository).
+                            {% if app.datastore %} The Aurora cluster for this app will also be deleted.{% endif %}
+                        </p>
+                    </div>
+                </div>
+
+                {# Deployment details #}
+                <div class="mt-4 ml-14 rounded-md bg-gray-50 dark:bg-gray-700/50 p-3">
+                    <dl class="text-sm space-y-1">
+                        <div class="flex justify-between">
+                            <dt class="text-gray-500 dark:text-gray-400">App</dt>
+                            <dd class="font-medium text-gray-900 dark:text-white">{{ app.name }}</dd>
+                        </div>
+                        <div class="flex justify-between">
+                            <dt class="text-gray-500 dark:text-gray-400">Environment</dt>
+                            <dd class="font-medium text-gray-900 dark:text-white">{{ deployment.environment.name }}</dd>
+                        </div>
+                        <div class="flex justify-between">
+                            <dt class="text-gray-500 dark:text-gray-400">AWS Account</dt>
+                            <dd class="font-medium text-gray-900 dark:text-white">{{ deployment.environment.aws_account.name }}</dd>
+                        </div>
+                        <div class="flex justify-between">
+                            <dt class="text-gray-500 dark:text-gray-400">Region</dt>
+                            <dd class="font-medium text-gray-900 dark:text-white">{{ deployment.environment.aws_region }}</dd>
+                        </div>
+                        <div class="flex justify-between">
+                            <dt class="text-gray-500 dark:text-gray-400">Status</dt>
+                            <dd class="font-medium text-gray-900 dark:text-white">{{ deployment.get_status_display }}</dd>
+                        </div>
+                    </dl>
+                </div>
+
+                {# Actions #}
+                <div class="mt-6 ml-14 flex justify-end gap-3">
+                    <button type="button"
+                            onclick="document.getElementById('modal-container').innerHTML = ''"
+                            class="rounded-md bg-white dark:bg-gray-700 px-3 py-2 text-sm font-semibold text-gray-900 dark:text-white shadow-xs ring-1 ring-inset ring-gray-300 dark:ring-white/10 hover:bg-gray-50 dark:hover:bg-gray-600">
+                        Cancel
+                    </button>
+                    <button type="button"
+                            hx-post="{% url 'app_deployment_teardown' app_slug=app.slug deployment_id=deployment.id %}"
+                            hx-target="#deployment-{{ deployment.id }}"
+                            hx-swap="outerHTML"
+                            hx-on::after-request="document.getElementById('modal-container').innerHTML = ''"
+                            class="rounded-md bg-red-600 px-3 py-2 text-sm font-semibold text-white shadow-xs hover:bg-red-500 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-red-600 dark:bg-red-500 dark:hover:bg-red-400">
+                        Tear Down
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>

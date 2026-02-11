@@ -134,34 +134,7 @@
         {% if deployments %}
         <div class="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg divide-y divide-gray-200 dark:divide-gray-700">
             {% for deployment in deployments %}
-            <div class="px-4 py-3">
-                <div class="flex items-center justify-between">
-                    <div>
-                        <h3 class="text-sm font-medium text-gray-900 dark:text-white">{{ deployment.environment.name }}</h3>
-                        <p class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
-                            <span class="text-gray-400 dark:text-gray-500">Account:</span> {{ deployment.environment.aws_account.name }} · <span class="text-gray-400 dark:text-gray-500">Region:</span> {{ deployment.environment.aws_region }}
-                        </p>
-                        <p class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
-                            <span class="text-gray-400 dark:text-gray-500">Ref:</span> {{ deployment.git_ref }}{% if deployment.git_commit_sha %} · {{ deployment.git_commit_sha|slice:":7" }}{% endif %}
-                        </p>
-                    </div>
-                    <div class="flex items-center space-x-3">
-                        <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium
-                            {% if deployment.status == 'running' %}bg-green-100 text-green-700 dark:bg-green-500/10 dark:text-green-400
-                            {% elif deployment.status == 'pending' or deployment.status == 'building' or deployment.status == 'deploying' or deployment.status == 'pushing' or deployment.status == 'starting' %}bg-yellow-100 text-yellow-700 dark:bg-yellow-500/10 dark:text-yellow-400
-                            {% elif deployment.status == 'failed' %}bg-red-100 text-red-700 dark:bg-red-500/10 dark:text-red-400
-                            {% else %}bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-300{% endif %}">
-                            {{ deployment.get_status_display }}
-                        </span>
-                        <span class="text-xs text-gray-500 dark:text-gray-400">{{ deployment.created_at|timesince }} ago</span>
-                    </div>
-                </div>
-                {% if deployment.service_url %}
-                <p class="mt-1 text-xs text-indigo-600 dark:text-indigo-400 truncate">
-                    <a href="{{ deployment.service_url }}" target="_blank" rel="noopener noreferrer" class="hover:underline">{{ deployment.service_url }}</a>
-                </p>
-                {% endif %}
-            </div>
+                {% include "devopshero_app/apps/_app_deployment_row.html" %}
             {% endfor %}
         </div>
         {% else %}
@@ -171,3 +144,13 @@
         {% endif %}
     </div>
 </div>
+
+<script>
+document.addEventListener('click', function(e) {
+    document.querySelectorAll('[data-menu-items]:not(.hidden)').forEach(function(menu) {
+        if (!menu.closest('[data-menu]').contains(e.target)) {
+            menu.classList.add('hidden');
+        }
+    });
+});
+</script>
