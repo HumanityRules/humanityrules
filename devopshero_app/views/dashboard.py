@@ -16,12 +16,18 @@ def dashboard(request):
         .order_by("-created_at")
         .values("status")[:1]
     )
+    latest_running_service_url = (
+        Deployment.objects.filter(app=OuterRef("pk"), status=Deployment.Status.RUNNING)
+        .order_by("-created_at")
+        .values("service_url")[:1]
+    )
     apps = (
         App.objects.filter(organization=org)
         .select_related("workspace", "repository")
         .annotate(
             last_deployed_at=Max("deployments__created_at"),
             latest_status=Subquery(latest_deployment_status),
+            running_service_url=Subquery(latest_running_service_url),
         )
         .order_by("-created_at")
     )

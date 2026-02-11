@@ -1,5 +1,36 @@
 # DevOpsHero Development Journal
 
+## 2026-02-10 19:40 - [AgentChat] Strip verbose details from MCP deployment status logs
+
+**Conversation:** [2026-02-10-1940-f40c6a2b.md](conversations/2026-02-10-1940-f40c6a2b.md)
+
+The `get_deployment_status` MCP tool was returning the full `details` JSON field from each `DeploymentLog` entry. This field contains `template`, `params`, `logger`, and `stream` — all redundant since the `message` field already has the rendered text. Every status check was sending ~20 lines of JSON per log entry to the LLM, most of it noise that inflates context unnecessarily.
+
+Removed the `details` field from `DeploymentLogEntry` in `get_deployment_status.py`. Each log entry now only includes `source`, `level`, `message`, and `created_at` — cutting per-entry size from ~20 lines to ~4 lines. With 10 logs per status check, this is a meaningful reduction in token usage for every deployment monitoring call.
+
+**Key points:**
+- The `message` field already contains the fully rendered log text, making `details.template` and `details.params` redundant for the LLM consumer
+- `details.logger` and `details.stream` are internal implementation metadata not useful for the agent's decision-making
+- This is a read-path-only change — the `DeploymentLog` model still stores the full `details` in the database for our own debugging needs
+
+## 2026-02-10 20:48 - [Deployment] Populate service_url from CloudFormation and show on app cards
+
+**Conversation:** [2026-02-10-1940-1968ac6c.md](conversations/2026-02-10-1940-1968ac6c.md)
+
+Wired up the `service_url` and `alb_dns` fields on the Deployment model, which existed but were never populated. After a successful deploy in `app_deployment_executor.py`, we now call `cloudformation_utils.get_app_urls()` to extract the URLs from CloudFormation stack outputs. The best URL is chosen as `service_url` (preferring `https_url` over `alb_url`), and the raw ALB DNS is stored in `alb_dns` by stripping the `http://` prefix from `alb_url`. The logic is in a `_populate_service_urls` helper, wrapped in try/except so a failure to fetch URLs doesn't break the deployment itself.
+
+**Unified app card partial:** The dashboard and workspace detail had divergent app card implementations — dashboard used an overlay `<a>` pattern (allowing nested clickable links), while workspace wrapped the entire card in a single `<a>` tag with different fields (Environments instead of Last deployed/Status). Extracted a shared `partials/_app_card.html` partial that both pages now include. The partial accepts a `show_workspace` variable to conditionally render the Workspace row (shown on dashboard, hidden on workspace detail since it's redundant). Added the same `last_deployed_at`, `latest_status`, and `running_service_url` annotations to the workspace view's queryset to match the dashboard.
+
+**URL display:** The URL link shows the app name as clickable text rather than the full URL, with the full URL revealed on hover via `title` attribute. This keeps the card clean while still providing the full URL when needed.
+
+**Key points:**
+- `_populate_service_urls` only runs at deploy time — existing deployments need a redeploy to get URLs populated
+- Dashboard URL is a clickable `<a>` with `relative z-10` to sit above the card's full-area overlay link
+- The workspace card switched from the `<a>`-wrapper pattern to the dashboard's overlay pattern, gaining nested clickable links
+- Diagnosed "URL not showing" issue: the job worker needed a restart to pick up the new code
+
+---
+
 ## 2026-02-10 17:25 - [UI] App teardown exposed in web UI with HTMX polling and idiomorph
 
 **Conversation:** [2026-02-10-1726-9aa277e5.md](conversations/2026-02-10-1726-9aa277e5.md)

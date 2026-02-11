@@ -33,6 +33,23 @@ def _get_aws_session(deployment: models.Deployment):
     )
 
 
+def _populate_service_urls(session, deployment: models.Deployment):
+    """Populate service_url and alb_dns on the deployment from CloudFormation outputs."""
+    try:
+        cf_client = session.client("cloudformation")
+        urls = infra_customer.cloudformation_utils.get_app_urls(
+            cf_client,
+            app_name=deployment.app.slug,
+            env_slug=deployment.environment.slug,
+            has_domain=bool(deployment.environment.shared_alb_hosted_zone),
+        )
+        deployment.service_url = urls.get("https_url") or urls.get("alb_url") or ""
+        alb_url = urls.get("alb_url") or ""
+        deployment.alb_dns = alb_url.removeprefix("http://")
+    except Exception:
+        logger.exception("Failed to extract service URLs from CloudFormation outputs")
+
+
 def run_deployment(deployment_id: str) -> bool:
     """
     Execute a deployment.
@@ -107,7 +124,6 @@ def run_deployment(deployment_id: str) -> bool:
         )
 
         try:
-            # Get AWS session
             session = _get_aws_session(deployment)
 
             # Build AppConfig with cloned repo path
@@ -137,7 +153,8 @@ def run_deployment(deployment_id: str) -> bool:
                 deployment.status = models.Deployment.Status.RUNNING
                 deployment.status_message = "Deployment completed successfully"
                 deployment.completed_at = timezone.now()
-                # TODO: Extract service_url and alb_dns from CDK outputs
+                _populate_service_urls(session, deployment)
+
                 deployment.save()
 
                 # Mark previous running deployments for this app+environment as superseded
@@ -154,16 +171,16 @@ def run_deployment(deployment_id: str) -> bool:
 
                 logger.info("Deployment completed successfully")
                 logger.info("Deployment %(deployment_id)s completed successfully", {"deployment_id": str(deployment_id)})
-                return True
+                return True      
+            else:
+                deployment.status = models.Deployment.Status.FAILED
+                deployment.status_message = "CDK deployment failed"
+                deployment.completed_at = timezone.now()
+                deployment.save()
 
-            deployment.status = models.Deployment.Status.FAILED
-            deployment.status_message = "CDK deployment failed"
-            deployment.completed_at = timezone.now()
-            deployment.save()
-
-            logger.error("Deployment failed")
-            logger.error("Deployment %(deployment_id)s failed", {"deployment_id": str(deployment_id)})
-            return False
+                logger.error("Deployment failed")
+                logger.error("Deployment %(deployment_id)s failed", {"deployment_id": str(deployment_id)})
+                return False
 
         except Exception as e:
             logger.exception("Deployment error: %(error)s", {"error": str(e)})
