@@ -1,0 +1,61 @@
+<div id="deployment-{{ deployment.id }}" class="px-4 py-3"
+    {% if deployment.status == 'teardown_pending' or deployment.status == 'tearing_down' %}
+        hx-get="{% url 'app_deployment_status' app_slug=app.slug deployment_id=deployment.id %}"
+        hx-trigger="load delay:3s"
+        hx-target="#deployment-{{ deployment.id }}"
+        hx-swap="outerHTML"
+    {% endif %}>
+    <div class="flex items-center justify-between">
+        <div>
+            <h3 class="text-sm font-medium text-gray-900 dark:text-white">{{ deployment.environment.name }}</h3>
+            <p class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                <span class="text-gray-400 dark:text-gray-500">Account:</span> {{ deployment.environment.aws_account.name }} · <span class="text-gray-400 dark:text-gray-500">Region:</span> {{ deployment.environment.aws_region }}
+            </p>
+            <p class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                <span class="text-gray-400 dark:text-gray-500">Ref:</span> {{ deployment.git_ref }}{% if deployment.git_commit_sha %} · {{ deployment.git_commit_sha|slice:":7" }}{% endif %}
+            </p>
+        </div>
+        <div class="flex items-center space-x-3">
+            <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium
+                {% if deployment.status == 'running' %}bg-green-100 text-green-700 dark:bg-green-500/10 dark:text-green-400
+                {% elif deployment.status == 'pending' or deployment.status == 'building' or deployment.status == 'deploying' or deployment.status == 'pushing' or deployment.status == 'starting' or deployment.status == 'teardown_pending' %}bg-yellow-100 text-yellow-700 dark:bg-yellow-500/10 dark:text-yellow-400
+                {% elif deployment.status == 'tearing_down' %}bg-yellow-100 text-yellow-700 dark:bg-yellow-500/10 dark:text-yellow-400
+                {% elif deployment.status == 'failed' %}bg-red-100 text-red-700 dark:bg-red-500/10 dark:text-red-400
+                {% else %}bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-300{% endif %}">
+                {% if deployment.status == 'tearing_down' %}
+                <svg class="animate-spin -ml-0.5 mr-1.5 h-3 w-3" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                </svg>
+                {% endif %}
+                {{ deployment.get_status_display }}
+            </span>
+            <span class="text-xs text-gray-500 dark:text-gray-400">{{ deployment.created_at|timesince }} ago</span>
+            {% if deployment.status == 'running' or deployment.status == 'failed' %}
+            <div class="relative ml-2 mt-0.5" data-menu>
+                <button type="button"
+                        onclick="this.parentElement.querySelector('[data-menu-items]').classList.toggle('hidden')"
+                        class="rounded-md p-1.5 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 border border-gray-200 dark:border-gray-600 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
+                    <svg class="h-4 w-4" fill="currentColor" viewBox="0 0 20 20">
+                        <path d="M10 6a2 2 0 110-4 2 2 0 010 4zM10 12a2 2 0 110-4 2 2 0 010 4zM10 18a2 2 0 110-4 2 2 0 010 4z" />
+                    </svg>
+                </button>
+                <div data-menu-items class="hidden absolute right-0 mt-1 rounded-md bg-white dark:bg-gray-800 shadow-lg ring-1 ring-black/5 dark:ring-white/10 z-10 p-1">
+                    <button type="button"
+                            hx-get="{% url 'app_teardown_confirm' app_slug=app.slug deployment_id=deployment.id %}"
+                            hx-target="#modal-container"
+                            hx-swap="innerHTML"
+                            class="whitespace-nowrap px-3 py-1.5 text-sm text-red-600 dark:text-red-400 hover:bg-gray-50 dark:hover:bg-gray-700 rounded">
+                        Tear Down Deployment
+                    </button>
+                </div>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+    {% if deployment.service_url %}
+    <p class="mt-1 text-xs text-indigo-600 dark:text-indigo-400 truncate">
+        <a href="{{ deployment.service_url }}" target="_blank" rel="noopener noreferrer" class="hover:underline">{{ deployment.service_url }}</a>
+    </p>
+    {% endif %}
+</div>

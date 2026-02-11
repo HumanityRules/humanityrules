@@ -75,7 +75,7 @@ path("newpage/", views.newpage, name="newpage"),
 
 For pages with their own sub-navigation (tabs):
 
-### Step 1: Create base template with tab nav (e.g., `settings.html`)
+### Step 1: Create base template with tab nav (e.g., `settings/settings.html`)
 
 ```html
 <div class="max-w-4xl">
@@ -107,7 +107,7 @@ For pages with their own sub-navigation (tabs):
 ### Step 2: Create subsection templates that extend the base
 
 ```html
-{% extends "devopshero_app/settings.html" %}
+{% extends "devopshero_app/settings/settings.html" %}
 
 {% block settings_content %}
 <div>
@@ -138,6 +138,16 @@ def settings_organization(request):
 - Subsection templates extend the parent, so the whole settings section (nav + content) is returned
 - `hx-target="#main-content"` means tab clicks replace the entire settings section, re-rendering the tab nav with correct active states
 
+
+## CSRF for HTMX Requests
+
+CSRF is configured **globally** on `<body>` in `base.html`:
+
+```html
+<body hx-headers='{"x-csrftoken": "{{ csrf_token }}"}' ...>
+```
+
+All HTMX requests inherit this header automatically. **Do NOT add per-element `hx-headers` with CSRF tokens** — especially in partials/modals loaded via HTMX GET, where `{{ csrf_token }}` won't be populated (Django only injects it for templates rendered with a `RequestContext` that includes the CSRF processor during the original page load). Adding a redundant `hx-headers` on a dynamically-loaded partial will send an empty/malformed token and produce a "CSRF token has incorrect length" error.
 
 ## Why This Works
 
