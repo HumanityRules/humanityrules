@@ -1,0 +1,65 @@
+<div class="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-4 relative group hover:border-indigo-300 dark:hover:border-indigo-700 transition-colors">
+    <a href="{% url 'app_detail' app_slug=app.slug %}"
+       hx-get="{% url 'app_detail' app_slug=app.slug %}"
+       hx-target="#main-content"
+       hx-swap="innerHTML"
+       hx-push-url="true"
+       class="absolute inset-0 rounded-lg z-0" aria-hidden="true"></a>
+    <div class="flex items-start justify-between mb-3">
+        <span class="font-medium text-gray-900 dark:text-white group-hover:text-indigo-600 dark:group-hover:text-indigo-400 truncate">
+            {{ app.name }}
+        </span>
+        <span class="ml-2 inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-300">
+            {{ app.app_type }}
+        </span>
+    </div>
+    <div class="space-y-2 text-sm">
+        <div class="flex items-center justify-between">
+            <span class="text-gray-500 dark:text-gray-400">Repository</span>
+            <span class="text-gray-700 dark:text-gray-300 truncate ml-2">{{ app.repository.full_name }}</span>
+        </div>
+        <div class="flex items-center justify-between">
+            <span class="text-gray-500 dark:text-gray-400">Branch</span>
+            <span class="text-gray-700 dark:text-gray-300">{{ app.branch }}</span>
+        </div>
+        {% if show_workspace %}
+        <div class="flex items-center justify-between">
+            <span class="text-gray-500 dark:text-gray-400">Workspace</span>
+            <a href="{% url 'workspace_detail' workspace_slug=app.workspace.slug %}"
+               hx-get="{% url 'workspace_detail' workspace_slug=app.workspace.slug %}"
+               hx-target="#main-content"
+               hx-swap="innerHTML"
+               hx-push-url="true"
+               class="relative z-10 text-indigo-600 dark:text-indigo-400 hover:underline">{{ app.workspace.name }}</a>
+        </div>
+        {% endif %}
+        <div class="flex items-center justify-between">
+            <span class="text-gray-500 dark:text-gray-400">Last deployed</span>
+            <span class="text-gray-700 dark:text-gray-300">{% if app.last_deployed_at %}{{ app.last_deployed_at|timesince }} ago{% else %}Never{% endif %}</span>
+        </div>
+        <div class="flex items-center justify-between">
+            <span class="text-gray-500 dark:text-gray-400">URL</span>
+            {% if app.running_service_url %}
+            <a href="{{ app.running_service_url }}" target="_blank" rel="noopener noreferrer"
+               title="{{ app.running_service_url }}"
+               class="relative z-10 text-indigo-600 dark:text-indigo-400 hover:underline truncate ml-2">{{ app.name }}</a>
+            {% else %}
+            <span class="text-gray-500 dark:text-gray-400">—</span>
+            {% endif %}
+        </div>
+        <div class="flex items-center justify-between">
+            <span class="text-gray-500 dark:text-gray-400">Status</span>
+            {% if app.latest_status %}
+            <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium
+                {% if app.latest_status == 'running' %}bg-green-100 text-green-700 dark:bg-green-500/10 dark:text-green-400
+                {% elif app.latest_status == 'failed' or app.latest_status == 'rolled_back' %}bg-red-100 text-red-700 dark:bg-red-500/10 dark:text-red-400
+                {% elif app.latest_status in 'pending,building,pushing,deploying,starting' %}bg-yellow-100 text-yellow-700 dark:bg-yellow-500/10 dark:text-yellow-400
+                {% else %}bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-300{% endif %}">
+                {{ app.latest_status|title }}
+            </span>
+            {% else %}
+            <span class="text-gray-500 dark:text-gray-400">—</span>
+            {% endif %}
+        </div>
+    </div>
+</div>

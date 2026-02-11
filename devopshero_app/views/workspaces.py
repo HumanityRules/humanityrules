@@ -1,5 +1,5 @@
 from django.contrib.auth.decorators import login_required
-from django.db.models import Prefetch, Sum
+from django.db.models import Max, OuterRef, Prefetch, Subquery, Sum
 from django.shortcuts import get_object_or_404, render
 
 from devopshero_app.models import Conversation, Deployment, Repository, Workspace
@@ -44,8 +44,22 @@ def workspace_detail(request, workspace_slug):
         ).select_related("environment", "environment__aws_account").order_by("environment__name"),
         to_attr="active_deployments",
     )
+    latest_deployment_status = (
+        Deployment.objects.filter(app=OuterRef("pk"))
+        .order_by("-created_at")
+        .values("status")[:1]
+    )
+    latest_running_service_url = (
+        Deployment.objects.filter(app=OuterRef("pk"), status=Deployment.Status.RUNNING)
+        .order_by("-created_at")
+        .values("service_url")[:1]
+    )
     apps = workspace.apps.select_related("repository").prefetch_related(
         active_deployments_prefetch,
+    ).annotate(
+        last_deployed_at=Max("deployments__created_at"),
+        latest_status=Subquery(latest_deployment_status),
+        running_service_url=Subquery(latest_running_service_url),
     ).order_by("name")
     datastores = workspace.datastores.order_by("name")
     show_costs = request.user.is_staff
