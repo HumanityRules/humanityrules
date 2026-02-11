@@ -16,7 +16,6 @@ class DeploymentLogEntry:
     source: str
     level: str
     message: str
-    details: dict | None
     created_at: str
 
     def to_dict(self) -> dict:
@@ -91,7 +90,6 @@ async def get_deployment_status(
             source=log.source,
             level=log.level,
             message=log.message,
-            details=log.details,
             created_at=log.created_at.isoformat(),
         )
         for log in reversed(recent_logs_list)  # Reverse to show oldest first
