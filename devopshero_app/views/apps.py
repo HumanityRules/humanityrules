@@ -80,7 +80,8 @@ def app_deployment_status(request, app_slug, deployment_id):
     app = _get_app_for_user(request, app_slug)
     deployment = _get_deployment_for_app(app, deployment_id)
 
-    context = {"app": app, "deployment": deployment}
+    mode = request.GET.get("mode", "")
+    context = {"app": app, "deployment": deployment, "mode": mode}
     return render(request, "devopshero_app/apps/_app_deployment_row.html", context=context)
 
 
