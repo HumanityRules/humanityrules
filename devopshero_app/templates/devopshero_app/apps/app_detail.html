@@ -132,15 +132,13 @@
     <div>
         <h2 class="text-lg font-semibold text-gray-900 dark:text-white mb-4">Recent Deployments</h2>
         {% if deployments %}
-        <div class="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg divide-y divide-gray-200 dark:divide-gray-700">
+        <div id="deployments-list" class="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg divide-y divide-gray-200 dark:divide-gray-700">
             {% for deployment in deployments %}
                 {% include "devopshero_app/apps/_app_deployment_row.html" %}
             {% endfor %}
         </div>
         {% else %}
-        <div class="bg-gray-50 dark:bg-gray-800/50 border border-gray-200 dark:border-gray-700 border-dashed rounded-lg p-6 text-center">
-            <p class="text-sm text-gray-500 dark:text-gray-400">No deployments for this app yet.</p>
-        </div>
+        {% include "devopshero_app/apps/_app_deployments_empty.html" %}
         {% endif %}
     </div>
 </div>

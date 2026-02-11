@@ -1,6 +1,7 @@
 from django.contrib.auth.decorators import login_required
 from django.http import HttpResponse
 from django.shortcuts import get_object_or_404, render
+from django.template.loader import render_to_string
 from django.views.decorators.http import require_GET, require_POST
 
 from devopshero_app.models import App, Deployment
@@ -85,7 +86,13 @@ def app_deployment_status(request, app_slug, deployment_id):
             "environment", "environment__aws_account"
         ).get(id=deployment_id, app=app)
     except Deployment.DoesNotExist:
-        # Deployment was deleted (teardown succeeded) — remove the row
+        # Deployment was deleted (teardown succeeded) — remove the row.
+        # If no deployments remain, replace the container with the empty-state placeholder.
+        if not Deployment.objects.filter(app=app).exists():
+            empty_html = render_to_string("devopshero_app/apps/_app_deployments_empty.html")
+            return HttpResponse(
+                f'<div id="deployments-list" hx-swap-oob="outerHTML">{empty_html}</div>'
+            )
         return HttpResponse("")
 
     context = {"app": app, "deployment": deployment}
