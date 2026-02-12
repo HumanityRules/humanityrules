@@ -1,5 +1,33 @@
 # DevOpsHero Development Journal
 
+## 2026-02-11 23:50 - [AgentChat] Fix ~5s SSE stream delay and spurious reconnection when switching conversations
+
+**Conversation:** [2026-02-11-2205-614f1627.md](conversations/2026-02-11-2205-614f1627.md)
+
+Investigated a performance issue where clicking a different conversation in the chat sidebar caused the `stream/` SSE endpoint to stay pending for ~5 seconds, then close, and then a second `stream/` request would fire (taking 1.8 minutes). The UI itself refreshed immediately — the problem was entirely in the SSE lifecycle.
+
+**Root cause:** Three interacting issues in the agent runner and SSE plumbing:
+
+1. **Eager `MainAgent.create()` on every conversation visit.** In `_run_agent_loop`, the runner called `MainAgent.create(conversation)` immediately at startup — before checking if there was a pending user message. This triggers system prompt building, optional git clone, Claude SDK client instantiation, and `client.connect()` (session resumption) on every navigation, even when just viewing an idle conversation. This took ~5 seconds and was completely wasted when there was no message to process. If the initialization failed (API timeout, etc.), the runner crashed, sending an error + `None` sentinel to the event queue.
+
+2. **No `sse-close` event to prevent browser auto-reconnection.** The browser's `EventSource` API has built-in automatic reconnection. When the first `stream/` closed (due to the runner crashing from a failed `MainAgent.create()`), the browser immediately opened a second connection. The HTMX SSE extension v2.2.4 supports an `sse-close` attribute to gracefully close the EventSource, but we weren't using it.
+
+3. **The second connection stayed open indefinitely.** If the second `MainAgent.create()` succeeded (or the conversation had no repo to clone), the runner entered an idle polling loop (0.5s sleep intervals) and the SSE connection stayed open with 15s keepalives for as long as the user stayed on the page — explaining the 1.8 minute duration.
+
+**Fix (two changes):**
+
+1. **Lazy agent initialization** — Moved `MainAgent.create()` from the top of `_run_agent_loop` (unconditional) to inside the `if pending_message is not None` branch. Now the expensive SDK connection only happens when there's actually a user message to process. Viewing an idle conversation costs nothing beyond a lightweight DB poll every 0.5s.
+
+2. **Added `sse-close` SSE event** — When the event_generator receives the `None` sentinel (runner finished), it now emits an `sse-close` event before breaking. Added `sse-close="sse-close"` to the `#messages` div in `_chat_panel.html` so the HTMX SSE extension calls `EventSource.close()` instead of allowing automatic reconnection.
+
+Initially also proposed a `task.done()` guard in `ensure_agent_running` to detect stale runners mid-shutdown, but removed it after review — with lazy init, the shutdown race window shrinks to microseconds for idle conversations, making the guard unnecessary complexity.
+
+**Key points:**
+- The HTMX SSE extension uses the standard `EventSource` API which auto-reconnects by default when a connection closes. The `sse-close` attribute (added in htmx-ext-sse 2.x) sends a close signal that prevents this.
+- `MainAgent.create()` involves: `_build_system_prompt` (DB), `_detect_and_prepare_fork` (DB/IO), optional `clone_repository` (git, but skipped if dir exists), `ClaudeSDKClient` + `client.connect()` (API connection + session resume). The `connect()` call is likely the expensive part (~5s).
+- The `agent.shutdown()` method drains remaining messages with a 10-second timeout (`async with asyncio.timeout(10)`), which creates a window where a dying runner still exists in `_runners` — but this only matters if the agent was actually initialized (which lazy init avoids for idle views).
+- `clone_repository` already had a guard (`if target_dir.exists(): return`) so re-cloning wasn't the bottleneck — the SDK connection was.
+
 ## 2026-02-10 23:15 - [Bugfix] Fix psycopg3 connection pool exhaustion causing site hangs during deployments
 
 **Conversation:** [2026-02-10-2341-5b9f138d.md](conversations/2026-02-10-2341-5b9f138d.md)

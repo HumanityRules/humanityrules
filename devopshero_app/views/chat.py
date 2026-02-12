@@ -233,8 +233,11 @@ async def chat_stream(request, conversation_id):
                 try:
                     event = await asyncio.wait_for(runner.event_queue.get(), timeout=keepalive_interval)
                     if event is None:
-                        # Sentinel: runner finished, exit loop
+                        # Sentinel: runner finished — send sse-close so the HTMX SSE
+                        # extension closes the EventSource cleanly (prevents the
+                        # browser's automatic reconnection).
                         logger.info(f"Agent runner completed for conversation {conversation_id}")
+                        yield _format_sse(event_name="sse-close", data="")
                         break
                     yield _format_sse_event(event=event, show_costs=show_costs)
                 except asyncio.TimeoutError:
