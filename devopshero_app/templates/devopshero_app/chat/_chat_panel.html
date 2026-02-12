@@ -46,6 +46,7 @@
             <div id="messages"
                  hx-ext="sse"
                  sse-connect="{% url 'chat_stream' conversation_id=conversation.id %}"
+                 sse-close="sse-close"
                  sse-swap="sse-thinking,sse-start,sse-text-delta,sse-text-flush,sse-tool-start,sse-tool-result,sse-complete,sse-error"
                  hx-swap="beforeend">
                 {% for message in messages %}

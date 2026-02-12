@@ -130,14 +130,20 @@ async def _run_agent_loop(runner: AgentRunner, conversation_id: UUID) -> None:
 
     Exits when: client is disconnected AND no pending user message.
     Continues when: client connected (waiting for input) OR work to do.
+
+    The MainAgent is lazy-initialized on the first pending message to avoid
+    expensive SDK connection + session resumption when just viewing a conversation.
     """
     try:
         conversation = await Conversation.objects.select_related('organization', 'user').aget(id=conversation_id)
-        runner.agent = await agent_service.MainAgent.create(conversation)
 
         while True:
             pending_message = await get_pending_user_message(conversation)
             if pending_message is not None:
+                # Lazy-initialize the agent on first actual message
+                if runner.agent is None:
+                    runner.agent = await agent_service.MainAgent.create(conversation)
+
                 logger.info(f"Agent processing message for conversation {conversation_id}")
                 async for event in runner.agent.stream_turn(conversation=conversation, user_message=pending_message):
                     # Track streaming state for reconnect handling
