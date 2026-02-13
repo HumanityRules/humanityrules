@@ -204,4 +204,4 @@ class Command(BaseCommand):
                 subdomain=app_name,  # CLI uses app_name as subdomain
                 synth_only=synth_only,
                 shared_alb_hosted_zone=hosted_zone,
-            )
+            ).success

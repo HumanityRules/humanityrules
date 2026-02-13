@@ -33,23 +33,6 @@ def _get_aws_session(deployment: models.Deployment):
     )
 
 
-def _populate_service_urls(session, deployment: models.Deployment):
-    """Populate service_url and alb_dns on the deployment from CloudFormation outputs."""
-    try:
-        cf_client = session.client("cloudformation")
-        urls = infra_customer.cloudformation_utils.get_app_urls(
-            cf_client,
-            app_name=deployment.app.slug,
-            env_slug=deployment.environment.slug,
-            has_domain=bool(deployment.environment.shared_alb_hosted_zone),
-        )
-        deployment.service_url = urls.get("https_url") or urls.get("alb_url") or ""
-        alb_url = urls.get("alb_url") or ""
-        deployment.alb_dns = alb_url.removeprefix("http://")
-    except Exception:
-        logger.exception("Failed to extract service URLs from CloudFormation outputs")
-
-
 def run_deployment(deployment_id: str) -> bool:
     """
     Execute a deployment.
@@ -137,7 +120,7 @@ def run_deployment(deployment_id: str) -> bool:
             deployment.status = models.Deployment.Status.DEPLOYING
             deployment.save()
 
-            success = infra_customer.deploy_app.deploy(
+            result = infra_customer.deploy_app.deploy(
                 session=session,
                 account_id=environment.aws_account.aws_account_id,
                 region=environment.aws_region,
@@ -149,11 +132,12 @@ def run_deployment(deployment_id: str) -> bool:
                 shared_alb_hosted_zone=environment.shared_alb_hosted_zone or None,
             )
 
-            if success:
+            if result.success:
                 deployment.status = models.Deployment.Status.DEPLOYED
                 deployment.status_message = "Deployment completed successfully"
                 deployment.completed_at = timezone.now()
-                _populate_service_urls(session, deployment)
+                deployment.service_url = result.service_url
+                deployment.alb_dns = result.alb_dns
 
                 deployment.save()
 
@@ -174,7 +158,7 @@ def run_deployment(deployment_id: str) -> bool:
                 return True      
             else:
                 deployment.status = models.Deployment.Status.FAILED
-                deployment.status_message = "CDK deployment failed"
+                deployment.status_message = result.error or "Deployment failed"
                 deployment.completed_at = timezone.now()
                 deployment.save()
 

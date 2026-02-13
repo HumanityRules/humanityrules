@@ -1,5 +1,23 @@
 # DevOpsHero Development Journal
 
+## 2026-02-12 12:15 - [Deployment] Replace `_populate_service_urls()` with `DeployResult` from `deploy()`
+
+**Conversation:** [2026-02-12-1951-ab7eb6a4.md](conversations/2026-02-12-1951-ab7eb6a4.md)
+
+Refactored how deployment URLs (HTTPS URL and ALB DNS) flow from CloudFormation back to the caller. Previously, after `deploy()` returned a boolean, the executor made a separate CloudFormation `describe_stacks` API call via `_populate_service_urls()` to read back the `HttpsUrl` and `SharedAlbDns` stack outputs. Meanwhile, `print_deployment_summary()` (called inside `deploy()`) did the exact same fetch via `get_app_urls()`. This meant two redundant CloudFormation API calls for the same data.
+
+The fix introduces a `DeployResult` dataclass returned from `deploy()` that carries `success`, `error`, `service_url`, and `alb_dns`. After successful CDK deployment, `deploy()` calls `get_app_urls()` once using its existing `cf_client`, passes the URLs to `print_deployment_summary()` (which no longer fetches them itself), and returns them in the result. The executor reads URLs directly from the result object, eliminating `_populate_service_urls()` entirely.
+
+The `error` field was added so that specific failure reasons (e.g. "CDK deployment failed", "Docker build/push failed", "Failed to start ECS service") propagate to `deployment.status_message` instead of a generic hardcoded string.
+
+**Key points:**
+- `DeployResult` is a `@dataclass` with four fields: `success: bool`, `error: str`, `service_url: str`, `alb_dns: str`
+- `service_url` is the best available URL — HTTPS if a domain is configured, otherwise the HTTP ALB URL
+- `alb_dns` is the raw ALB DNS hostname (without `http://` prefix), matching what the `Deployment` model stores
+- `print_deployment_summary()` signature simplified: dropped `cf_client`, `has_domain`, `env_slug`, and `cluster_name` (the latter was already unused); now accepts `service_url` and `alb_dns` directly
+- `doh_raw.py` (CLI command) appends `.success` to the `deploy()` call since it only needs the boolean
+- Each failure path in `deploy()` has a specific error message rather than sharing a single `fail` object
+
 ## 2026-02-11 23:50 - [AgentChat] Fix ~5s SSE stream delay and spurious reconnection when switching conversations
 
 **Conversation:** [2026-02-11-2205-614f1627.md](conversations/2026-02-11-2205-614f1627.md)

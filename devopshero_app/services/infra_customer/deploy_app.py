@@ -3,6 +3,7 @@ Deploy DevOpsHero apps (ECR, ALB, ECS service) using AWS CDK.
 """
 
 import logging
+from dataclasses import dataclass
 
 import boto3
 from aws_cdk import App, Aws, CfnOutput, Duration, Fn, RemovalPolicy, SecretValue, Stack, Tags
@@ -28,6 +29,14 @@ from . import route53_utils
 from . import secrets_utils
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class DeployResult:
+    success: bool
+    error: str        # failure reason (empty on success)
+    service_url: str  # best URL (HTTPS if available, else HTTP ALB)
+    alb_dns: str      # raw ALB DNS hostname
 
 
 # =============================================================================
@@ -564,7 +573,7 @@ def deploy(
     subdomain: str,
     synth_only: bool,
     shared_alb_hosted_zone: str | None,
-) -> bool:
+) -> DeployResult:
     """
     Deploy an app to existing infrastructure.
 
@@ -581,7 +590,7 @@ def deploy(
         synth_only: If True, only synthesize templates, don't deploy.
         shared_alb_hosted_zone: Hosted zone for shared ALB (e.g., "dev.example.com"). None = HTTP only.
     Returns:
-        True on success, False on failure.
+        DeployResult with success flag and extracted URLs.
     """
     logger.info("Deploying app '%(app_name)s' to environment '%(env_slug)s'", {"app_name": app_config.app_name, "env_slug": env_slug})
 
@@ -594,11 +603,13 @@ def deploy(
     cluster_stack_name = f"devopshero-{env_slug}-cluster"
 
     if not cloudformation_utils.stack_exists(cf_client, vpc_stack_name):
-        logger.error("Base layer not deployed. VPC stack '%(stack_name)s' not found", {"stack_name": vpc_stack_name})
-        return False
+        msg = f"Base layer not deployed. VPC stack '{vpc_stack_name}' not found"
+        logger.error(msg)
+        return DeployResult(success=False, error=msg, service_url="", alb_dns="")
     if not cloudformation_utils.stack_exists(cf_client, cluster_stack_name):
-        logger.error("ECS cluster not deployed. Cluster stack '%(stack_name)s' not found", {"stack_name": cluster_stack_name})
-        return False
+        msg = f"ECS cluster not deployed. Cluster stack '{cluster_stack_name}' not found"
+        logger.error(msg)
+        return DeployResult(success=False, error=msg, service_url="", alb_dns="")
 
     # Ensure app secrets exist in Secrets Manager (created outside CDK for security)
     if app_config.app_secrets:
@@ -656,14 +667,14 @@ def deploy(
     if synth_only:
         cloud_assembly = cdk_app.synth()
         logger.info("CDK templates synthesized to: %(directory)s", {"directory": cloud_assembly.directory})
-        return True
+        return DeployResult(success=True, error="", service_url="", alb_dns="")
 
     logger.info("Deploying CDK stacks")
     success = cdk_utils.deploy_cdk_stacks(cdk_app, session)
 
     if not success:
         logger.error("CDK deployment failed")
-        return False
+        return DeployResult(success=False, error="CDK deployment failed", service_url="", alb_dns="")
 
     logger.info("Building and pushing Docker image")
     image_uri = ecr_utils.build_and_push_docker_image(
@@ -678,7 +689,7 @@ def deploy(
     )
     if not image_uri:
         logger.error("Docker build/push failed")
-        return False
+        return DeployResult(success=False, error="Docker build/push failed", service_url="", alb_dns="")
 
     logger.info("Starting ECS service")
     if not ecs_utils.start_ecs_service(
@@ -687,22 +698,26 @@ def deploy(
         cluster_name=app_stack.environment_infra.cluster.cluster_name,
     ):
         logger.error("Failed to start ECS service")
-        return False
+        return DeployResult(success=False, error="Failed to start ECS service", service_url="", alb_dns="")
 
     logger.info("Deployment of %(app_name)s completed successfully", {"app_name": app_config.app_name})
 
+    # Extract URLs from CloudFormation outputs
+    urls = cloudformation_utils.get_app_urls(cf_client, app_name=app_config.app_name, env_slug=env_slug, has_domain=bool(shared_alb_hosted_zone))
+    service_url = urls.get("https_url") or urls.get("alb_url") or ""
+    alb_url = urls.get("alb_url") or ""
+    alb_dns = alb_url.removeprefix("http://")
+
     cloudformation_utils.print_deployment_summary(
-        cf_client=cf_client,
         account_id=account_id,
         region=region,
         app_name=app_config.app_name,
-        env_slug=env_slug,
         image_tag=image_tag,
-        has_domain=bool(shared_alb_hosted_zone),
-        cluster_name=app_stack.environment_infra.cluster.cluster_name,
+        service_url=service_url,
+        alb_dns=alb_dns,
     )
 
-    return True
+    return DeployResult(success=True, error="", service_url=service_url, alb_dns=alb_dns)
 
 
 def teardown(
