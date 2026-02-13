@@ -223,16 +223,14 @@ def get_app_urls(cf_client, app_name: str, env_slug: str, has_domain: bool) -> d
 
 
 def print_deployment_summary(
-    cf_client,
     account_id: str,
     region: str,
     app_name: str,
-    env_slug: str,
     image_tag: str,
-    has_domain: bool,
-    cluster_name: str,
+    service_url: str,
+    alb_dns: str,
 ) -> None:
-    """Print a deployment summary with app URLs and ECS exec instructions."""
+    """Print a deployment summary with app URLs."""
     logger.info("%(separator)s", {"separator": "\n" + "=" * 60})
     logger.info("Deployment complete")
     logger.info("%(separator)s", {"separator": "=" * 60})
@@ -242,16 +240,9 @@ def print_deployment_summary(
     logger.info("App: %(app_name)s", {"app_name": app_name})
     logger.info("   Image tag: %(image_tag)s", {"image_tag": image_tag})
 
-    urls = get_app_urls(
-        cf_client=cf_client,
-        app_name=app_name,
-        env_slug=env_slug,
-        has_domain=has_domain,
-    )
+    if service_url.startswith("https://"):
+        logger.info("App URL (HTTPS): %(url)s", {"url": service_url})
 
-    if urls.get("https_url"):
-        logger.info("App URL (HTTPS): %(https_url)s", {"https_url": urls["https_url"]})
-
-    if urls.get("alb_url"):
-        logger.info("App URL (ALB):   %(alb_url)s", {"alb_url": urls["alb_url"]})
+    if alb_dns:
+        logger.info("App URL (ALB):   http://%(alb_dns)s", {"alb_dns": alb_dns})
 
