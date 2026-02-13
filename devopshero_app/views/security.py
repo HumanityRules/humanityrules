@@ -16,80 +16,145 @@ def _query_param_with_legacy_fallback(request, param_name, legacy_param_name):
     return request.GET.get(legacy_param_name, "").strip()
 
 
-def _build_inbox_filter_state(request, organization):
-    workspace_slug = _query_param_with_legacy_fallback(
-        request=request, param_name="inbox_workspace", legacy_param_name="workspace"
+def _build_search_params(app_search, environment_search):
+    params = {}
+    if app_search:
+        params["app_search"] = app_search
+    if environment_search:
+        params["env_search"] = environment_search
+    return params
+
+
+def _get_deployed_environment_ids_for_app(selected_app):
+    if not selected_app:
+        return set()
+
+    deployed_statuses = [
+        models.Deployment.Status.DEPLOYED,
+        models.Deployment.Status.SUPERSEDED,
+    ]
+    deployed_ids = models.Deployment.objects.filter(app=selected_app, status__in=deployed_statuses).values_list(
+        "environment_id",
+        flat=True,
     )
-    app_slug = _query_param_with_legacy_fallback(request=request, param_name="inbox_app", legacy_param_name="app")
-    environment_slug = _query_param_with_legacy_fallback(
-        request=request, param_name="inbox_environment", legacy_param_name="environment"
-    )
-
-    workspace_queryset = models.Workspace.objects.filter(organization=organization).order_by("name")
-    selected_workspace = workspace_queryset.filter(slug=workspace_slug).first() if workspace_slug else None
-
-    app_queryset = models.App.objects.filter(organization=organization).select_related("workspace").order_by("name")
-    if selected_workspace:
-        app_queryset = app_queryset.filter(workspace=selected_workspace)
-    selected_app = app_queryset.filter(slug=app_slug).first() if app_slug else None
-
-    environment_queryset = (
-        models.Environment.objects.filter(aws_account__organization=organization)
-        .select_related("aws_account")
-        .order_by("name")
-    )
-    selected_environment = environment_queryset.filter(slug=environment_slug).first() if environment_slug else None
-
-    filter_params = {}
-    if selected_workspace:
-        filter_params["inbox_workspace"] = selected_workspace.slug
-    if selected_app:
-        filter_params["inbox_app"] = selected_app.slug
-    if selected_environment:
-        filter_params["inbox_environment"] = selected_environment.slug
-
-    return {
-        "inbox_workspace_options": workspace_queryset,
-        "inbox_app_options": app_queryset,
-        "inbox_environment_options": environment_queryset,
-        "selected_inbox_workspace": selected_workspace,
-        "selected_inbox_app": selected_app,
-        "selected_inbox_environment": selected_environment,
-        "inbox_querystring": urlencode(query=filter_params),
-        "inbox_query_params": filter_params,
-    }
+    return {str(environment_id) for environment_id in deployed_ids}
 
 
-def _build_action_context_state(request, organization):
+def _has_app_environment_deployment(selected_app, selected_environment):
+    if not selected_app or not selected_environment:
+        return False
+
+    deployed_environment_ids = _get_deployed_environment_ids_for_app(selected_app=selected_app)
+    return str(selected_environment.id) in deployed_environment_ids
+
+
+def _build_selector_state(request, organization):
+    app_search = request.GET.get("app_search", "").strip()
+    environment_search = request.GET.get("env_search", "").strip()
     app_slug = _query_param_with_legacy_fallback(request=request, param_name="context_app", legacy_param_name="app")
     environment_slug = _query_param_with_legacy_fallback(
-        request=request, param_name="context_environment", legacy_param_name="environment"
+        request=request,
+        param_name="context_environment",
+        legacy_param_name="environment",
     )
 
-    app_queryset = models.App.objects.filter(organization=organization).select_related("workspace").order_by("name")
-    selected_app = app_queryset.filter(slug=app_slug).first() if app_slug else None
+    app_base_queryset = models.App.objects.filter(organization=organization).select_related("workspace")
+    selected_app = app_base_queryset.filter(slug=app_slug).first() if app_slug else None
 
-    environment_queryset = (
+    app_queryset = app_base_queryset
+    if app_search:
+        app_queryset = app_queryset.filter(
+            Q(name__icontains=app_search) | Q(slug__icontains=app_search) | Q(workspace__name__icontains=app_search)
+        )
+    app_rows = list(app_queryset.order_by("name"))
+    if selected_app and selected_app not in app_rows:
+        app_rows.append(selected_app)
+        app_rows = sorted(app_rows, key=lambda app_item: app_item.name.lower())
+
+    environment_base_queryset = (
         models.Environment.objects.filter(aws_account__organization=organization)
         .select_related("aws_account")
         .order_by("name")
     )
-    selected_environment = environment_queryset.filter(slug=environment_slug).first() if environment_slug else None
+    selected_environment = environment_base_queryset.filter(slug=environment_slug).first() if environment_slug else None
+    if not selected_app:
+        selected_environment = None
 
-    context_params = {}
+    environment_queryset = environment_base_queryset
+    if environment_search:
+        environment_queryset = environment_queryset.filter(
+            Q(name__icontains=environment_search)
+            | Q(slug__icontains=environment_search)
+            | Q(aws_account__name__icontains=environment_search)
+        )
+    environment_rows = list(environment_queryset)
+    if selected_environment and selected_environment not in environment_rows:
+        environment_rows.append(selected_environment)
+
+    deployed_environment_ids = _get_deployed_environment_ids_for_app(selected_app=selected_app)
     if selected_app:
-        context_params["context_app"] = selected_app.slug
+        environment_rows = sorted(
+            environment_rows,
+            key=lambda environment_item: (
+                0 if str(environment_item.id) in deployed_environment_ids else 1,
+                environment_item.name.lower(),
+            ),
+        )
+    else:
+        environment_rows = sorted(environment_rows, key=lambda environment_item: environment_item.name.lower())
+
+    search_params = _build_search_params(app_search=app_search, environment_search=environment_search)
+    selector_app_rows = []
+    for app_item in app_rows:
+        row_params = dict(search_params)
+        row_params["context_app"] = app_item.slug
+        if selected_app and selected_environment and selected_app.id == app_item.id:
+            row_params["context_environment"] = selected_environment.slug
+        selector_app_rows.append(
+            {
+                "app": app_item,
+                "is_selected": bool(selected_app and selected_app.id == app_item.id),
+                "select_querystring": urlencode(query=row_params),
+            }
+        )
+
+    selector_environment_rows = []
+    if selected_app:
+        for environment_item in environment_rows:
+            row_params = dict(search_params)
+            row_params["context_app"] = selected_app.slug
+            row_params["context_environment"] = environment_item.slug
+            selector_environment_rows.append(
+                {
+                    "environment": environment_item,
+                    "is_selected": bool(selected_environment and selected_environment.id == environment_item.id),
+                    "is_deployed": str(environment_item.id) in deployed_environment_ids,
+                    "select_querystring": urlencode(query=row_params),
+                }
+            )
+
+    selector_params = dict(search_params)
+    if selected_app:
+        selector_params["context_app"] = selected_app.slug
     if selected_environment:
-        context_params["context_environment"] = selected_environment.slug
+        selector_params["context_environment"] = selected_environment.slug
+
+    selected_context_has_deployment = _has_app_environment_deployment(
+        selected_app=selected_app,
+        selected_environment=selected_environment,
+    )
 
     return {
-        "action_app_options": app_queryset,
-        "action_environment_options": environment_queryset,
         "selected_context_app": selected_app,
         "selected_context_environment": selected_environment,
-        "action_context_ready": bool(selected_app and selected_environment),
-        "context_querystring": urlencode(query=context_params),
-        "context_query_params": context_params,
+        "selected_context_ready": bool(selected_app and selected_environment),
+        "selected_context_has_deployment": selected_context_has_deployment,
+        "selector_app_rows": selector_app_rows,
+        "selector_environment_rows": selector_environment_rows,
+        "selector_app_search": app_search,
+        "selector_environment_search": environment_search,
+        "selector_query_params": selector_params,
+        "selector_querystring": urlencode(query=selector_params),
     }
 
 
@@ -132,10 +197,8 @@ def _get_recent_permission_issues(organization, max_items):
     return issues
 
 
-def _filter_permission_issues(permission_issues, selected_workspace, selected_app, selected_environment):
+def _filter_permission_issues(permission_issues, selected_app, selected_environment):
     filtered_rows = permission_issues
-    if selected_workspace:
-        filtered_rows = [issue for issue in filtered_rows if issue["workspace"].id == selected_workspace.id]
     if selected_app:
         filtered_rows = [issue for issue in filtered_rows if issue["app"].id == selected_app.id]
     if selected_environment:
@@ -243,73 +306,99 @@ def _build_permission_request_statements(selected_app, prefill_issue):
     return statements
 
 
-def _build_security_context(request):
-    organization = request.user.current_organization
-    context = base.get_app_shell_context(request=request, current_page="security")
-    inbox_state = _build_inbox_filter_state(request=request, organization=organization)
-    action_state = _build_action_context_state(request=request, organization=organization)
-    all_recent_issues = _get_recent_permission_issues(organization=organization, max_items=24)
-
-    context.update(inbox_state)
-    context.update(action_state)
-
-    filtered_inbox_issues = _filter_permission_issues(
-        permission_issues=all_recent_issues,
-        selected_workspace=context["selected_inbox_workspace"],
-        selected_app=context["selected_inbox_app"],
-        selected_environment=context["selected_inbox_environment"],
-    )
-    filtered_history_issues = _filter_permission_issues(
-        permission_issues=all_recent_issues,
-        selected_workspace=None,
-        selected_app=context["selected_context_app"],
-        selected_environment=context["selected_context_environment"],
-    )
-
-    combined_query_params = {}
-    combined_query_params.update(context["inbox_query_params"])
-    combined_query_params.update(context["context_query_params"])
-    context["security_query_params"] = combined_query_params
-    context["security_querystring"] = urlencode(query=combined_query_params)
-
-    context["permission_issue_rows"] = filtered_inbox_issues[:8]
-    context["open_permission_request_rows"] = _build_open_request_rows(permission_issues=filtered_inbox_issues, max_items=4)
-    context["permission_history_rows"] = _build_permission_history_rows(permission_issues=filtered_history_issues, max_items=20)
-    context["task_role_policy_rows"] = _build_task_role_policies(
-        selected_app=context["selected_context_app"], selected_environment=context["selected_context_environment"]
-    )
-    context["selected_app"] = context["selected_context_app"]
-    context["selected_environment"] = context["selected_context_environment"]
-    context["security_action_cards"] = [
+def _build_action_cards(selected_context_ready, selected_context_has_deployment):
+    action_definitions = [
         {
             "title": "Fix failing app permissions",
             "description": "Use runtime AccessDenied logs to prefill a permission proposal.",
             "cta_label": "Fix now",
             "route_name": "security_permission_request_new",
-            "requires_context": True,
+            "requires_deployment": True,
         },
         {
             "title": "Request new permissions",
             "description": "Start a new IAM request from scratch using form or chat.",
             "cta_label": "New request",
             "route_name": "security_permission_request_new",
-            "requires_context": True,
+            "requires_deployment": False,
         },
         {
             "title": "View current app permissions",
-            "description": "Inspect task-role service policies for the selected app and environment.",
+            "description": "Inspect current task-role service policies.",
             "cta_label": "View permissions",
             "route_name": "security_task_role_view",
-            "requires_context": True,
+            "requires_deployment": True,
         },
         {
             "title": "Permission change history",
-            "description": "Review previous proposals and policy diffs for traceability.",
+            "description": "Review previous permission proposals and edits.",
             "cta_label": "Open history",
             "route_name": "security_permission_request_history",
-            "requires_context": True,
+            "requires_deployment": False,
         },
     ]
+
+    action_cards = []
+    for definition in action_definitions:
+        is_enabled = selected_context_ready and (selected_context_has_deployment or not definition["requires_deployment"])
+        if not selected_context_ready:
+            disabled_reason = "Select app and environment to enable this action."
+        elif definition["requires_deployment"] and not selected_context_has_deployment:
+            disabled_reason = "No deployment/task role exists in this environment yet."
+        else:
+            disabled_reason = ""
+
+        action_cards.append(
+            {
+                "title": definition["title"],
+                "description": definition["description"],
+                "cta_label": definition["cta_label"],
+                "route_name": definition["route_name"],
+                "is_enabled": is_enabled,
+                "disabled_reason": disabled_reason,
+            }
+        )
+    return action_cards
+
+
+def _build_security_context(request):
+    organization = request.user.current_organization
+    context = base.get_app_shell_context(request=request, current_page="security")
+    selector_state = _build_selector_state(request=request, organization=organization)
+    all_recent_issues = _get_recent_permission_issues(organization=organization, max_items=40)
+
+    context.update(selector_state)
+
+    filtered_issues = _filter_permission_issues(
+        permission_issues=all_recent_issues,
+        selected_app=context["selected_context_app"],
+        selected_environment=context["selected_context_environment"],
+    )
+    for issue in filtered_issues:
+        issue_query_params = _build_search_params(
+            app_search=context["selector_app_search"],
+            environment_search=context["selector_environment_search"],
+        )
+        issue_query_params["context_app"] = issue["app"].slug
+        issue_query_params["context_environment"] = issue["environment"].slug
+        issue_query_params["issue_id"] = issue["id"]
+        issue["fix_querystring"] = urlencode(query=issue_query_params)
+
+    context["permission_issue_rows"] = filtered_issues[:8]
+    context["open_permission_request_rows"] = _build_open_request_rows(permission_issues=filtered_issues, max_items=4)
+    context["permission_history_rows"] = _build_permission_history_rows(permission_issues=filtered_issues, max_items=20)
+    context["task_role_policy_rows"] = _build_task_role_policies(
+        selected_app=context["selected_context_app"],
+        selected_environment=context["selected_context_environment"],
+    )
+    context["security_action_cards"] = _build_action_cards(
+        selected_context_ready=context["selected_context_ready"],
+        selected_context_has_deployment=context["selected_context_has_deployment"],
+    )
+    context["security_query_params"] = context["selector_query_params"]
+    context["security_querystring"] = context["selector_querystring"]
+    context["selected_app"] = context["selected_context_app"]
+    context["selected_environment"] = context["selected_context_environment"]
     return context
 
 
@@ -333,7 +422,8 @@ def security_permission_request_new(request):
     context["permission_request_subtitle"] = "Draft a proposal for task-role policy updates."
     context["prefill_issue"] = prefill_issue
     context["permission_statement_rows"] = _build_permission_request_statements(
-        selected_app=context["selected_context_app"], prefill_issue=prefill_issue
+        selected_app=context["selected_context_app"],
+        prefill_issue=prefill_issue,
     )
     context["service_options"] = ["s3", "sqs", "dynamodb", "secretsmanager", "kms", "sns", "ssm"]
 
@@ -355,7 +445,8 @@ def security_permission_request_detail(request, request_id):
     context["permission_request_subtitle"] = "This is a UI skeleton view until persistence is implemented."
     context["prefill_issue"] = None
     context["permission_statement_rows"] = _build_permission_request_statements(
-        selected_app=context["selected_context_app"], prefill_issue=None
+        selected_app=context["selected_context_app"],
+        prefill_issue=None,
     )
     context["service_options"] = ["s3", "sqs", "dynamodb", "secretsmanager", "kms", "sns", "ssm"]
 
@@ -383,20 +474,29 @@ def security_task_role_view(request, app_slug, environment_slug):
     context = _build_security_context(request=request)
     context["selected_context_app"] = selected_app
     context["selected_context_environment"] = selected_environment
+    context["selected_context_ready"] = True
+    context["selected_context_has_deployment"] = _has_app_environment_deployment(
+        selected_app=selected_app,
+        selected_environment=selected_environment,
+    )
+
+    context_query_params = _build_search_params(
+        app_search=context["selector_app_search"],
+        environment_search=context["selector_environment_search"],
+    )
+    context_query_params["context_app"] = selected_app.slug
+    context_query_params["context_environment"] = selected_environment.slug
+    context["selector_query_params"] = context_query_params
+    context["selector_querystring"] = urlencode(query=context_query_params)
+    context["security_query_params"] = context["selector_query_params"]
+    context["security_querystring"] = context["selector_querystring"]
+
     context["selected_app"] = selected_app
     context["selected_environment"] = selected_environment
-    context["action_context_ready"] = True
-    context["context_query_params"] = {
-        "context_app": selected_app.slug,
-        "context_environment": selected_environment.slug,
-    }
-    context["context_querystring"] = urlencode(query=context["context_query_params"])
-    combined_query_params = {}
-    combined_query_params.update(context["inbox_query_params"])
-    combined_query_params.update(context["context_query_params"])
-    context["security_query_params"] = combined_query_params
-    context["security_querystring"] = urlencode(query=combined_query_params)
-    context["task_role_policy_rows"] = _build_task_role_policies(selected_app=selected_app, selected_environment=selected_environment)
+    context["task_role_policy_rows"] = _build_task_role_policies(
+        selected_app=selected_app,
+        selected_environment=selected_environment,
+    )
 
     if request.htmx:
         return render(request=request, template_name="devopshero_app/security/security_task_role_view.html", context=context)
