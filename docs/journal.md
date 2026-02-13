@@ -1,5 +1,34 @@
 # DevOpsHero Development Journal
 
+## 2026-02-13 12:30 - [Deployment] Pulumi research session — policy enforcement, IAM permissions, and deployment pipeline architecture
+
+**Conversation:** [2026-02-13-1025-174045a7.md](conversations/2026-02-13-1025-174045a7.md)
+
+Research session exploring Pulumi concepts and how they map to DOH's architecture, with an eye toward the internal vibe-coded apps use case.
+
+**Generated CDK code in the customer's repo:** Instead of DOH executing parameterized CDK internally, the agent would generate CDK code + a config file, commit it to a branch in the customer's repo, and open a PR. This makes infrastructure visible, auditable, and reproducible. The customer's repo becomes the source of truth. `cdk diff` gives preview/approval for free.
+
+**Staged deployment pipeline:** Moving from "agent does everything in one shot" to defined stages with clear inputs/outputs: Analyze → Generate → Validate → Preview → Execute → Verify. Each stage produces a concrete artifact. The user has natural approval points after Generate and Preview. Error recovery re-enters the pipeline at the appropriate stage rather than restarting from scratch. An agent handles the judgment calls within and between stages, but the stages provide structure and visibility.
+
+**Policy enforcement (documented in `docs/policy_enforcement_analysis.md`):** Pulumi CrossGuard has three layers: Policy (single rule), Policy Pack (bundle of rules), Policy Group (central assignment to stacks). CDK/AWS has equivalents for the first two (cdk-nag Aspects, CloudFormation Guard) but lacks the management layer (Policy Groups). DOH would need a domain model addition — PolicyPack entity with assignment to Environment. Since DOH controls the full pipeline, client-side validation (Guard rules against synthesized CloudFormation templates) is sufficient; server-side enforcement (CloudFormation Hooks) is unnecessary. For internal apps, the relevant policy packs are cost guardrails, internal-network-only, auto-cleanup/TTL, and security basics — not regulatory compliance.
+
+**Pulumi's audit policy groups:** Different from advisory/mandatory enforcement. Pulumi's audit mode runs continuous scans against live infrastructure in the AWS account, including resources not managed by Pulumi (manual changes, Terraform, CloudFormation). This is a cloud security posture tool, not a deployment guardrail. DOH already has the IAM cross-account role to do this, but it's a different product surface — noted as a future expansion path, not near-term scope.
+
+**IAM permissions as a product feature:** Inspired by ConsoleMe (Netflix) and Noq.dev (Curtis Castrapel's startup that failed because it sold to DevOps teams instead of the developers who actually feel the pain). DOH's approach: the agent deploys with minimal permissions on first iteration. A specialized permission agent (separate from the deployment agent) analyzes source code, ECS task logs, and optionally CloudTrail to propose permission changes. These go through an approval workflow — approver sees the IAM policy diff in the UI, approves or rejects asynchronously, DOH applies the stored change upon approval. The agent's job ends at proposal; the rest is mechanical.
+
+**IAM permission UI:** Hybrid approach — agent generates the proposal, UI renders it as an editable structured form (service dropdown, action multi-select, resource ARN field). The agent fills it in for non-DevOps users; power users can modify directly before approving. Avoids forcing either audience into the wrong interaction model.
+
+**IAM policy structure:** One inline policy per AWS service on the task role. Clean to reason about, maps well to the UI (each service is a card), and makes approval diffs easy to review — "App X is requesting S3 read access" is one isolated policy.
+
+**Prioritization insight:** Approval workflows before Guard rules. DevOps leads and managers want to see and approve permissions themselves before trusting automated policy checks. Guard rules reduce the approver's workload once trust in the system exists. They're complementary, but approval comes first.
+
+**Key points:**
+- TypeScript vs Python for generated CDK: doesn't matter if the agent generates the code — the language is part of the prompt/output, not a maintenance burden
+- `env_slug` already functions as DOH's equivalent of Pulumi's `getStack()` — just threaded explicitly rather than pulled from ambient context
+- Per-environment config (stack concept gap) is independent from policy groups — they assign different things to environments
+- Curtis Castrapel's lesson: don't sell IAM governance to DevOps teams (vitamins); sell it to the developers who feel the pain (painkillers)
+- TTL stacks and cost-focused policy enforcement are the highest-value Pulumi enterprise features for the internal apps use case
+
 ## 2026-02-12 12:15 - [Deployment] Replace `_populate_service_urls()` with `DeployResult` from `deploy()`
 
 **Conversation:** [2026-02-12-1951-ab7eb6a4.md](conversations/2026-02-12-1951-ab7eb6a4.md)
