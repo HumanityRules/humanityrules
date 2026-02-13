@@ -9,10 +9,21 @@ from .. import models
 from . import base
 
 
-def _build_security_filter_state(request, organization):
-    workspace_slug = request.GET.get("workspace", "").strip()
-    app_slug = request.GET.get("app", "").strip()
-    environment_slug = request.GET.get("environment", "").strip()
+def _query_param_with_legacy_fallback(request, param_name, legacy_param_name):
+    param_value = request.GET.get(param_name, "").strip()
+    if param_value:
+        return param_value
+    return request.GET.get(legacy_param_name, "").strip()
+
+
+def _build_inbox_filter_state(request, organization):
+    workspace_slug = _query_param_with_legacy_fallback(
+        request=request, param_name="inbox_workspace", legacy_param_name="workspace"
+    )
+    app_slug = _query_param_with_legacy_fallback(request=request, param_name="inbox_app", legacy_param_name="app")
+    environment_slug = _query_param_with_legacy_fallback(
+        request=request, param_name="inbox_environment", legacy_param_name="environment"
+    )
 
     workspace_queryset = models.Workspace.objects.filter(organization=organization).order_by("name")
     selected_workspace = workspace_queryset.filter(slug=workspace_slug).first() if workspace_slug else None
@@ -31,21 +42,54 @@ def _build_security_filter_state(request, organization):
 
     filter_params = {}
     if selected_workspace:
-        filter_params["workspace"] = selected_workspace.slug
+        filter_params["inbox_workspace"] = selected_workspace.slug
     if selected_app:
-        filter_params["app"] = selected_app.slug
+        filter_params["inbox_app"] = selected_app.slug
     if selected_environment:
-        filter_params["environment"] = selected_environment.slug
+        filter_params["inbox_environment"] = selected_environment.slug
 
     return {
-        "workspace_options": workspace_queryset,
-        "app_options": app_queryset,
-        "environment_options": environment_queryset,
-        "selected_workspace": selected_workspace,
-        "selected_app": selected_app,
-        "selected_environment": selected_environment,
-        "filter_querystring": urlencode(query=filter_params),
-        "filter_params": filter_params,
+        "inbox_workspace_options": workspace_queryset,
+        "inbox_app_options": app_queryset,
+        "inbox_environment_options": environment_queryset,
+        "selected_inbox_workspace": selected_workspace,
+        "selected_inbox_app": selected_app,
+        "selected_inbox_environment": selected_environment,
+        "inbox_querystring": urlencode(query=filter_params),
+        "inbox_query_params": filter_params,
+    }
+
+
+def _build_action_context_state(request, organization):
+    app_slug = _query_param_with_legacy_fallback(request=request, param_name="context_app", legacy_param_name="app")
+    environment_slug = _query_param_with_legacy_fallback(
+        request=request, param_name="context_environment", legacy_param_name="environment"
+    )
+
+    app_queryset = models.App.objects.filter(organization=organization).select_related("workspace").order_by("name")
+    selected_app = app_queryset.filter(slug=app_slug).first() if app_slug else None
+
+    environment_queryset = (
+        models.Environment.objects.filter(aws_account__organization=organization)
+        .select_related("aws_account")
+        .order_by("name")
+    )
+    selected_environment = environment_queryset.filter(slug=environment_slug).first() if environment_slug else None
+
+    context_params = {}
+    if selected_app:
+        context_params["context_app"] = selected_app.slug
+    if selected_environment:
+        context_params["context_environment"] = selected_environment.slug
+
+    return {
+        "action_app_options": app_queryset,
+        "action_environment_options": environment_queryset,
+        "selected_context_app": selected_app,
+        "selected_context_environment": selected_environment,
+        "action_context_ready": bool(selected_app and selected_environment),
+        "context_querystring": urlencode(query=context_params),
+        "context_query_params": context_params,
     }
 
 
@@ -86,6 +130,17 @@ def _get_recent_permission_issues(organization, max_items):
             }
         )
     return issues
+
+
+def _filter_permission_issues(permission_issues, selected_workspace, selected_app, selected_environment):
+    filtered_rows = permission_issues
+    if selected_workspace:
+        filtered_rows = [issue for issue in filtered_rows if issue["workspace"].id == selected_workspace.id]
+    if selected_app:
+        filtered_rows = [issue for issue in filtered_rows if issue["app"].id == selected_app.id]
+    if selected_environment:
+        filtered_rows = [issue for issue in filtered_rows if issue["environment"].id == selected_environment.id]
+    return filtered_rows
 
 
 def _build_open_request_rows(permission_issues, max_items):
@@ -191,40 +246,68 @@ def _build_permission_request_statements(selected_app, prefill_issue):
 def _build_security_context(request):
     organization = request.user.current_organization
     context = base.get_app_shell_context(request=request, current_page="security")
-    filter_state = _build_security_filter_state(request=request, organization=organization)
-    recent_issues = _get_recent_permission_issues(organization=organization, max_items=8)
+    inbox_state = _build_inbox_filter_state(request=request, organization=organization)
+    action_state = _build_action_context_state(request=request, organization=organization)
+    all_recent_issues = _get_recent_permission_issues(organization=organization, max_items=24)
 
-    context.update(filter_state)
-    context["permission_issue_rows"] = recent_issues
-    context["open_permission_request_rows"] = _build_open_request_rows(permission_issues=recent_issues, max_items=4)
-    context["permission_history_rows"] = _build_permission_history_rows(permission_issues=recent_issues, max_items=20)
-    context["task_role_policy_rows"] = _build_task_role_policies(
-        selected_app=context["selected_app"], selected_environment=context["selected_environment"]
+    context.update(inbox_state)
+    context.update(action_state)
+
+    filtered_inbox_issues = _filter_permission_issues(
+        permission_issues=all_recent_issues,
+        selected_workspace=context["selected_inbox_workspace"],
+        selected_app=context["selected_inbox_app"],
+        selected_environment=context["selected_inbox_environment"],
     )
+    filtered_history_issues = _filter_permission_issues(
+        permission_issues=all_recent_issues,
+        selected_workspace=None,
+        selected_app=context["selected_context_app"],
+        selected_environment=context["selected_context_environment"],
+    )
+
+    combined_query_params = {}
+    combined_query_params.update(context["inbox_query_params"])
+    combined_query_params.update(context["context_query_params"])
+    context["security_query_params"] = combined_query_params
+    context["security_querystring"] = urlencode(query=combined_query_params)
+
+    context["permission_issue_rows"] = filtered_inbox_issues[:8]
+    context["open_permission_request_rows"] = _build_open_request_rows(permission_issues=filtered_inbox_issues, max_items=4)
+    context["permission_history_rows"] = _build_permission_history_rows(permission_issues=filtered_history_issues, max_items=20)
+    context["task_role_policy_rows"] = _build_task_role_policies(
+        selected_app=context["selected_context_app"], selected_environment=context["selected_context_environment"]
+    )
+    context["selected_app"] = context["selected_context_app"]
+    context["selected_environment"] = context["selected_context_environment"]
     context["security_action_cards"] = [
         {
             "title": "Fix failing app permissions",
             "description": "Use runtime AccessDenied logs to prefill a permission proposal.",
             "cta_label": "Fix now",
             "route_name": "security_permission_request_new",
+            "requires_context": True,
         },
         {
             "title": "Request new permissions",
             "description": "Start a new IAM request from scratch using form or chat.",
             "cta_label": "New request",
             "route_name": "security_permission_request_new",
+            "requires_context": True,
         },
         {
             "title": "View current app permissions",
             "description": "Inspect task-role service policies for the selected app and environment.",
             "cta_label": "View permissions",
             "route_name": "security_task_role_view",
+            "requires_context": True,
         },
         {
             "title": "Permission change history",
             "description": "Review previous proposals and policy diffs for traceability.",
             "cta_label": "Open history",
             "route_name": "security_permission_request_history",
+            "requires_context": True,
         },
     ]
     return context
@@ -250,7 +333,7 @@ def security_permission_request_new(request):
     context["permission_request_subtitle"] = "Draft a proposal for task-role policy updates."
     context["prefill_issue"] = prefill_issue
     context["permission_statement_rows"] = _build_permission_request_statements(
-        selected_app=context["selected_app"], prefill_issue=prefill_issue
+        selected_app=context["selected_context_app"], prefill_issue=prefill_issue
     )
     context["service_options"] = ["s3", "sqs", "dynamodb", "secretsmanager", "kms", "sns", "ssm"]
 
@@ -272,7 +355,7 @@ def security_permission_request_detail(request, request_id):
     context["permission_request_subtitle"] = "This is a UI skeleton view until persistence is implemented."
     context["prefill_issue"] = None
     context["permission_statement_rows"] = _build_permission_request_statements(
-        selected_app=context["selected_app"], prefill_issue=None
+        selected_app=context["selected_context_app"], prefill_issue=None
     )
     context["service_options"] = ["s3", "sqs", "dynamodb", "secretsmanager", "kms", "sns", "ssm"]
 
@@ -298,14 +381,21 @@ def security_task_role_view(request, app_slug, environment_slug):
     )
 
     context = _build_security_context(request=request)
+    context["selected_context_app"] = selected_app
+    context["selected_context_environment"] = selected_environment
     context["selected_app"] = selected_app
     context["selected_environment"] = selected_environment
-    context["filter_params"] = {
-        "workspace": selected_app.workspace.slug,
-        "app": selected_app.slug,
-        "environment": selected_environment.slug,
+    context["action_context_ready"] = True
+    context["context_query_params"] = {
+        "context_app": selected_app.slug,
+        "context_environment": selected_environment.slug,
     }
-    context["filter_querystring"] = urlencode(query=context["filter_params"])
+    context["context_querystring"] = urlencode(query=context["context_query_params"])
+    combined_query_params = {}
+    combined_query_params.update(context["inbox_query_params"])
+    combined_query_params.update(context["context_query_params"])
+    context["security_query_params"] = combined_query_params
+    context["security_querystring"] = urlencode(query=combined_query_params)
     context["task_role_policy_rows"] = _build_task_role_policies(selected_app=selected_app, selected_environment=selected_environment)
 
     if request.htmx:

@@ -10,8 +10,8 @@
                 {% endif %}
             </p>
         </div>
-        <a href="{% url 'security' %}{% if filter_querystring %}?{{ filter_querystring }}{% endif %}"
-           hx-get="{% url 'security' %}{% if filter_querystring %}?{{ filter_querystring }}{% endif %}"
+        <a href="{% url 'security' %}{% if security_querystring %}?{{ security_querystring }}{% endif %}"
+           hx-get="{% url 'security' %}{% if security_querystring %}?{{ security_querystring }}{% endif %}"
            hx-target="#main-content"
            hx-swap="innerHTML"
            hx-push-url="true"

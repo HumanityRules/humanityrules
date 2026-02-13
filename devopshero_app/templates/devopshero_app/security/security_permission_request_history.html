@@ -4,8 +4,8 @@
             <h1 class="text-2xl font-bold text-gray-900 dark:text-white">Permission change history</h1>
             <p class="mt-1 text-sm text-gray-600 dark:text-gray-400">Timeline of generated permission proposals for the selected filters.</p>
         </div>
-        <a href="{% url 'security' %}{% if filter_querystring %}?{{ filter_querystring }}{% endif %}"
-           hx-get="{% url 'security' %}{% if filter_querystring %}?{{ filter_querystring }}{% endif %}"
+        <a href="{% url 'security' %}{% if security_querystring %}?{{ security_querystring }}{% endif %}"
+           hx-get="{% url 'security' %}{% if security_querystring %}?{{ security_querystring }}{% endif %}"
            hx-target="#main-content"
            hx-swap="innerHTML"
            hx-push-url="true"
@@ -24,8 +24,8 @@
                         <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ row.app.name }} / {{ row.environment.name }} · {{ row.source }} · {{ row.status }}</p>
                         <p class="mt-2 text-sm text-gray-700 dark:text-gray-300">{{ row.summary|truncatechars:180 }}</p>
                     </div>
-                    <a href="{% url 'security_permission_request_detail' request_id=row.id %}{% if filter_querystring %}?{{ filter_querystring }}{% endif %}"
-                       hx-get="{% url 'security_permission_request_detail' request_id=row.id %}{% if filter_querystring %}?{{ filter_querystring }}{% endif %}"
+                    <a href="{% url 'security_permission_request_detail' request_id=row.id %}{% if security_querystring %}?{{ security_querystring }}{% endif %}"
+                       hx-get="{% url 'security_permission_request_detail' request_id=row.id %}{% if security_querystring %}?{{ security_querystring }}{% endif %}"
                        hx-target="#main-content"
                        hx-swap="innerHTML"
                        hx-push-url="true"
