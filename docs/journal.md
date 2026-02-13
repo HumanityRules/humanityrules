@@ -1,5 +1,20 @@
 # DevOpsHero Development Journal
 
+## 2026-02-13 14:59 - [AgentChat] Strip details from GetEnvironmentStatus MCP tool logs
+
+**Conversation:**
+
+Applied the same context-reduction pattern from `GetDeploymentStatus` (commit `d978aac8f`) to the `GetEnvironmentStatus` MCP tool. Removed the `details` field from the `EnvironmentLogEntry` dataclass and its constructor call in `get_environment_status.py`.
+
+The `details` dict contains `template`, `params`, `logger`, and `stream` — all redundant because the `message` field already has the fully rendered text. Every environment status check was sending ~20 lines of JSON per log entry to the LLM, most of it noise. With `details` removed, each log entry shrinks from ~20 lines to ~4 lines, meaningfully reducing token usage per status call.
+
+This is a read-path-only change — `EnvironmentLog` still stores the full `details` in the database for debugging. Only the MCP tool's response to the agent was trimmed.
+
+**Key points:**
+- Exact same pattern as `d978aac8f` for `DeploymentLogEntry` — consistency across both status tools
+- `message` already contains rendered text, making `details.template` and `details.params` redundant for LLM consumption
+- `details.logger` and `details.stream` are internal metadata not useful for agent decision-making
+
 ## 2026-02-13 12:30 - [Deployment] Pulumi research session — policy enforcement, IAM permissions, and deployment pipeline architecture
 
 **Conversation:** [2026-02-13-1025-174045a7.md](conversations/2026-02-13-1025-174045a7.md)
