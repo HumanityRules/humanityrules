@@ -17,6 +17,26 @@ urlpatterns = [
     path("environments/", views.environments, name="environments"),
     path("environments/<slug:environment_slug>/", views.environment_detail, name="environment_detail"),
     path("security/", views.security, name="security"),
+    path(
+        "security/permission-requests/new/",
+        views.security_permission_request_new,
+        name="security_permission_request_new",
+    ),
+    path(
+        "security/permission-requests/<uuid:request_id>/",
+        views.security_permission_request_detail,
+        name="security_permission_request_detail",
+    ),
+    path(
+        "security/apps/<slug:app_slug>/environments/<slug:environment_slug>/task-role/",
+        views.security_task_role_view,
+        name="security_task_role_view",
+    ),
+    path(
+        "security/permission-requests/",
+        views.security_permission_request_history,
+        name="security_permission_request_history",
+    ),
     path("settings/", views.settings, name="settings"),
     path("settings/organization/", views.settings_organization, name="settings_organization"),
     path("settings/members/", views.settings_members, name="settings_members"),

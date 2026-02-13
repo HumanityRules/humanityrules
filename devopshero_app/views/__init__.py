@@ -3,7 +3,13 @@ from .dashboard import dashboard
 from .workspaces import workspaces, workspace_detail
 from .apps import app_detail, app_deployment_teardown, app_deployment_status, app_teardown_confirm
 from .environments import environments, environment_detail
-from .security import security
+from .security import (
+    security,
+    security_permission_request_new,
+    security_permission_request_detail,
+    security_task_role_view,
+    security_permission_request_history,
+)
 from .settings import (
     settings,
     settings_organization,
@@ -43,6 +49,10 @@ __all__ = [
     "environments",
     "environment_detail",
     "security",
+    "security_permission_request_new",
+    "security_permission_request_detail",
+    "security_task_role_view",
+    "security_permission_request_history",
     "settings",
     "settings_organization",
     "settings_members",
@@ -72,4 +82,3 @@ __all__ = [
     "chat_fork",
     "waitlist_signup",
 ]
-
