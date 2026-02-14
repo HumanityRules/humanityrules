@@ -50,7 +50,7 @@ def _has_app_environment_deployment(selected_app, selected_environment):
 
 def _build_selector_state(request, organization):
     app_search = request.GET.get("app_search", "").strip()
-    environment_search = request.GET.get("env_search", "").strip()
+    environment_search = ""
     app_slug = _query_param_with_legacy_fallback(request=request, param_name="context_app", legacy_param_name="app")
     environment_slug = _query_param_with_legacy_fallback(
         request=request,
@@ -81,15 +81,13 @@ def _build_selector_state(request, organization):
         selected_environment = None
 
     environment_queryset = environment_base_queryset
-    if environment_search:
-        environment_queryset = environment_queryset.filter(
-            Q(name__icontains=environment_search)
-            | Q(slug__icontains=environment_search)
-            | Q(aws_account__name__icontains=environment_search)
-        )
     environment_rows = list(environment_queryset)
     if selected_environment and selected_environment not in environment_rows:
         environment_rows.append(selected_environment)
+
+    should_auto_select_environment = bool(selected_app and not selected_environment and len(environment_rows) == 1)
+    if should_auto_select_environment:
+        selected_environment = environment_rows[0]
 
     deployed_environment_ids = _get_deployed_environment_ids_for_app(selected_app=selected_app)
     if selected_app:
@@ -153,6 +151,7 @@ def _build_selector_state(request, organization):
         "selector_environment_rows": selector_environment_rows,
         "selector_app_search": app_search,
         "selector_environment_search": environment_search,
+        "selector_environment_auto_selected": should_auto_select_environment,
         "selector_query_params": selector_params,
         "selector_querystring": urlencode(query=selector_params),
     }
