@@ -8,8 +8,8 @@ repositories, AWS accounts, and the deployment system.
 from .create_datastore import create_datastore, DatastoreSummary
 from .list_apps import list_apps
 from .list_apps import AppSummary as ListAppSummary
-from .create_environment import create_environment
-from .create_environment import EnvironmentSummary as CreateEnvironmentSummary
+from .provision_environment import provision_environment
+from .provision_environment import EnvironmentSummary as ProvisionEnvironmentSummary
 from .get_environment_status import get_environment_status, EnvironmentStatus, EnvironmentLogEntry
 from .deploy_app import deploy_app, DeploymentSummary
 from .get_deployment_status import get_deployment_status, DeploymentStatus, DeploymentLogEntry
@@ -32,8 +32,8 @@ __all__ = [
     "create_datastore",
     "DatastoreSummary",
     # Environment management
-    "create_environment",
-    "CreateEnvironmentSummary",
+    "provision_environment",
+    "ProvisionEnvironmentSummary",
     "get_environment_status",
     "EnvironmentStatus",
     "EnvironmentLogEntry",

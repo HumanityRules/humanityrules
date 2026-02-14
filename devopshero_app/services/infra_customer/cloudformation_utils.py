@@ -23,6 +23,17 @@ def stack_exists(cf_client, stack_name: str) -> bool:
             logger.info("Stack %(stack_name)s does not exist", {"stack_name": stack_name})
             return False
         raise
+
+
+def get_stack_status(cf_client, stack_name: str) -> str | None:
+    """Get the current status of a CloudFormation stack, or None if it doesn't exist."""
+    try:
+        response = cf_client.describe_stacks(StackName=stack_name)
+        return response["Stacks"][0]["StackStatus"]
+    except ClientError as e:
+        if e.response["Error"]["Code"] == "ValidationError":
+            return None
+        raise
     
     
 def render_jinja2_template(template_path: Path, variables: dict) -> str:

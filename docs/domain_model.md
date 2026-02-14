@@ -140,7 +140,7 @@ Relationships:
 - Has many EnvironmentLogs
 - Unique constraint: (aws_account, slug)
 
-A "default" environment is created explicitly during setup (via `create_environment`), not auto-created.
+A "default" environment is provisioned explicitly during setup (via `provision_environment`), not auto-created.
 
 ### Workspace
 Governance and policy container.

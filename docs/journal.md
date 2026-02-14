@@ -1,5 +1,22 @@
 # DevOpsHero Development Journal
 
+## 2026-02-14 00:10 - [Deployment] Rename create_environment to provision_environment + retry semantics + ROLLBACK_COMPLETE cleanup
+
+**Conversation:** [2026-02-13-1745-174045a7.md](conversations/2026-02-13-1745-174045a7.md)
+
+When an environment provisioning fails, the agent had no way to recover — calling `create_environment` again raised a ValueError telling the agent to "delete it and try again," but no `delete_environment` tool existed. This was a dead end.
+
+**Retry semantics for provision_environment:** Changed the ERROR branch in the tool to reset the environment record to PENDING instead of raising. This mirrors how `deploy_app` works — each call creates a new deployment attempt. Now calling `provision_environment` on a failed environment resets it to PENDING and the job worker retries. The tool description and all error messages in `deploy_app` and `app_deployment_executor` were updated to guide the agent toward the correct recovery path.
+
+**Renamed create_environment → provision_environment:** The old name implied a one-shot operation that shouldn't be called twice, which conflicted with retry semantics. "Provision" better describes the intent (ensure infrastructure is ready), matches the executor name (`environment_provisioning_executor.py`), and is consistent with `deploy_app` (named after the action, not the side effect of record creation). Renamed across all code, tool definitions, system prompts, and documentation. Historical records (journal, conversation logs) were left unchanged.
+
+**ROLLBACK_COMPLETE stack cleanup:** Testing the retry on localhost revealed a second issue: the VPC CloudFormation stack from the first failed attempt was in `ROLLBACK_COMPLETE` state. `stack_exists()` returned True for it (since `describe_stacks` returns stacks in any state), but it had no outputs, so `get_or_create_vpc_cidr` couldn't read the CIDR and failed. The fix was adding `cleanup_rollback_complete_stacks()` — a self-contained function in `deploy_base.py` that checks all three environment stacks (VPC, cluster, builder) for `ROLLBACK_COMPLETE` status and deletes them before deployment begins. This runs at the top of `deploy()`, making it idempotent regardless of what state previous attempts left behind. Also added `get_stack_status()` to `cloudformation_utils` to check stack status directly rather than relying on indirect signals like missing outputs.
+
+**Key points:**
+- Retry pattern: ERROR → PENDING transition only happens when agent explicitly calls `provision_environment` again, not automatically
+- The cleanup logic lives in `deploy_base.deploy()` (infrastructure layer), not in the executor — the executor shouldn't know about CloudFormation internals like ROLLBACK_COMPLETE
+- `get_or_create_vpc_cidr` stays simple — it just reads or finds a CIDR. Stack cleanup is a separate concern handled before it runs
+
 ## 2026-02-13 14:59 - [AgentChat] Strip details from GetEnvironmentStatus MCP tool logs
 
 **Conversation:**

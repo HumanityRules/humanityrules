@@ -510,7 +510,7 @@ def get_or_create_vpc_cidr(session: boto3.Session, env_slug: str) -> str:
     vpc_stack_name = f"devopshero-{env_slug}-vpc"
     if cloudformation_utils.stack_exists(cf_client, vpc_stack_name):
         logger.info("VPC stack '%(stack_name)s' already exists, getting existing CIDR", {"stack_name": vpc_stack_name})
-        vpc_cidr = cloudformation_utils.get_stack_output(cf_client, vpc_stack_name, "VpcCidr")        
+        vpc_cidr = cloudformation_utils.get_stack_output(cf_client, vpc_stack_name, "VpcCidr")
         logger.info("Using existing VPC CIDR: %(vpc_cidr)s", {"vpc_cidr": vpc_cidr})
     else:
         logger.info("VPC stack '%(stack_name)s' does not exist, finding available CIDR", {"stack_name": vpc_stack_name})
@@ -520,8 +520,32 @@ def get_or_create_vpc_cidr(session: boto3.Session, env_slug: str) -> str:
 
     if not vpc_cidr:
         raise RuntimeError("Could not get VPC CIDR")
-    
+
     return vpc_cidr
+
+
+def cleanup_rollback_complete_stacks(cf_client, env_slug: str) -> None:
+    """Delete any ROLLBACK_COMPLETE stacks left by a previous failed provisioning attempt.
+
+    CloudFormation stacks that fail during creation end up in ROLLBACK_COMPLETE — they
+    still "exist" but are unusable. This must run before deploying so that CDK can
+    create fresh stacks with the same names.
+    """
+    stack_names = [
+        f"devopshero-{env_slug}-vpc",
+        f"devopshero-{env_slug}-cluster",
+        f"devopshero-{env_slug}-builder",
+    ]
+
+    for stack_name in stack_names:
+        status = cloudformation_utils.get_stack_status(cf_client, stack_name)
+        if status != "ROLLBACK_COMPLETE":
+            continue
+
+        logger.info("Stack '%(stack_name)s' is in ROLLBACK_COMPLETE, deleting before retry", {"stack_name": stack_name})
+        deleted = cloudformation_utils.delete_stack_and_wait(cf_client, stack_name)
+        if not deleted:
+            raise RuntimeError(f"Could not delete failed stack '{stack_name}'")
 
 
 # =============================================================================
@@ -547,6 +571,9 @@ def deploy(
         True on success, False on failure.
     """
     logger.info("Deploying shared infrastructure for environment '%(env_slug)s'", {"env_slug": env_slug})
+
+    cf_client = session.client("cloudformation")
+    cleanup_rollback_complete_stacks(cf_client, env_slug=env_slug)
 
     vpc_cidr = get_or_create_vpc_cidr(session=session, env_slug=env_slug)
 
