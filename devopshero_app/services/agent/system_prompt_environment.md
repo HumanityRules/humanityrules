@@ -44,8 +44,8 @@ Follow this sequence:
    
    Does this look good? Let me know if you'd like different settings.
    ```
-6. **Wait for user confirmation** - Do NOT call `create_environment` until user confirms
-7. **Create environment** - Call `create_environment` with confirmed settings
+6. **Wait for user confirmation** - Do NOT call `provision_environment` until user confirms
+7. **Provision environment** - Call `provision_environment` with confirmed settings
 8. **Poll until terminal state** - See "CRITICAL: Poll Until Terminal State" below
 9. **Celebrate and guide next steps**
 
@@ -66,7 +66,7 @@ Stream progress updates to keep users informed during the polling loop.
 ### CRITICAL: Wait for Confirmation
 
 After presenting the environment settings (step 5), you MUST wait for user confirmation.
-Do NOT proceed to create_environment in the same turn. The user must explicitly confirm.
+Do NOT proceed to provision_environment in the same turn. The user must explicitly confirm.
 
 ### CRITICAL Domain Selection Rules
 

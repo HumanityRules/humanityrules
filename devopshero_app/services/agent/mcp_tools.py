@@ -19,7 +19,7 @@ from devopshero_app.services.gitproviders import repo_service
 
 from .tools import (
     create_datastore as _create_datastore,
-    create_environment as _create_environment,
+    provision_environment as _provision_environment,
     deploy_app as _deploy_app,
     get_deployment_status as _get_deployment_status,
     get_environment_status as _get_environment_status,
@@ -65,7 +65,7 @@ TOOL_DISPLAY_NAMES = {
     "mcp__devopshero__list_hosted_zones": "List Hosted Zones",
     "mcp__devopshero__list_environments": "List Environments",
     "mcp__devopshero__initiate_aws_connection": "Initiate AWS Connection",
-    "mcp__devopshero__create_environment": "Create Environment",
+    "mcp__devopshero__provision_environment": "Provision Environment",
     "mcp__devopshero__get_environment_status": "Get Environment Status",
     "mcp__devopshero__list_repositories": "List Repositories",
     "mcp__devopshero__scan_repository": "Scan Repository",
@@ -95,7 +95,7 @@ TOOL_MAIN_PARAMS = {
     "mcp__devopshero__initiate_aws_connection": "account_name",
     "mcp__devopshero__list_hosted_zones": "aws_account_uuid",
     "mcp__devopshero__list_environments": "aws_account_uuid",
-    "mcp__devopshero__create_environment": "environment_name",
+    "mcp__devopshero__provision_environment": "environment_name",
     "mcp__devopshero__get_environment_status": "environment_id",
     "mcp__devopshero__scan_repository": "repository_id",
     "mcp__devopshero__create_datastore": "name",
@@ -313,9 +313,9 @@ def create_devopshero_mcp_server(conversation: Conversation):
         return _mcp_response(environments)
 
     @tool(
-        "create_environment",
+        "provision_environment",
         (
-            "Create an environment in a connected AWS account. "
+            "Provision an environment in a connected AWS account. "
             "Queues provisioning of VPC, ECS cluster, and shared ALB infrastructure. "
             "IMPORTANT: Before calling this tool, you MUST confirm name, region, and domain with the user. "
             "Present settings and wait for explicit user confirmation before calling this tool. "
@@ -323,6 +323,8 @@ def create_devopshero_mcp_server(conversation: Conversation):
             "(creates one if none exists for the domain, otherwise reuses the existing certificate). "
             "Returns immediately with PENDING status - use get_environment_status to poll for progress. "
             "Provisioning typically takes 5-10 minutes. "
+            "Retry semantics: if the environment previously failed (ERROR status), calling this tool "
+            "again with the same name resets it to PENDING and retries provisioning. "
             "The aws_account_uuid is the internal UUID from list_aws_accounts (the 'id' field), "
             "not the 12-digit AWS account number."
         ),
@@ -333,9 +335,9 @@ def create_devopshero_mcp_server(conversation: Conversation):
             "hosted_zone_name": str,
         },
     )
-    async def create_environment(args: dict[str, Any]) -> dict[str, Any]:
-        """Create an environment (queues provisioning)."""
-        result = await _create_environment(
+    async def provision_environment(args: dict[str, Any]) -> dict[str, Any]:
+        """Provision an environment (queues provisioning)."""
+        result = await _provision_environment(
             aws_account_uuid=args["aws_account_uuid"],
             environment_name=args["environment_name"],
             aws_region=args.get("aws_region", "us-east-1"),
@@ -346,7 +348,7 @@ def create_devopshero_mcp_server(conversation: Conversation):
         return _mcp_response({
             **result.to_dict(),
             "note": (
-                "Environment created with PENDING status. The job worker will provision "
+                "Environment queued with PENDING status. The job worker will provision "
                 "the infrastructure (VPC, ECS cluster, shared ALB). "
                 "Use get_environment_status to check progress."
             ),
@@ -839,7 +841,7 @@ def create_devopshero_mcp_server(conversation: Conversation):
             list_hosted_zones,
             list_environments,
             initiate_aws_connection,
-            create_environment,
+            provision_environment,
             get_environment_status,
             list_repositories,
             scan_repository,
@@ -864,7 +866,7 @@ TOOL_NAMES = [
     "mcp__devopshero__list_hosted_zones",
     "mcp__devopshero__list_environments",
     "mcp__devopshero__initiate_aws_connection",
-    "mcp__devopshero__create_environment",
+    "mcp__devopshero__provision_environment",
     "mcp__devopshero__get_environment_status",
     "mcp__devopshero__list_repositories",
     "mcp__devopshero__scan_repository",

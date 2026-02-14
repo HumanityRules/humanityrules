@@ -77,9 +77,9 @@ def run_deployment(deployment_id: str) -> bool:
             {"deployment_id": str(deployment_id), "app_name": app.name, "environment_name": environment.name},
         )
 
-        # Verify environment is READY (agent must create it via create_environment tool)
+        # Verify environment is READY (agent must provision it via provision_environment tool)
         if environment.status != models.Environment.Status.READY:
-            error_msg = f"Environment '{environment.name}' is not ready (status: {environment.status}). Use create_environment to provision it first."
+            error_msg = f"Environment '{environment.name}' is not ready (status: {environment.status}). Use provision_environment to provision it first."
             logger.error(error_msg)
             deployment.status = models.Deployment.Status.FAILED
             deployment.status_message = error_msg

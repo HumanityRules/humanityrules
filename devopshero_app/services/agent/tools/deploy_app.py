@@ -201,7 +201,7 @@ async def _get_environment(organization: Organization, environment_slug: str) ->
     if not environment:
         raise ValueError(
             f"Environment '{environment_slug}' does not exist for this AWS account. "
-            "Use list_environments to see available environments, or create_environment to create one first."
+            "Use list_environments to see available environments, or provision_environment to provision one first."
         )
 
     # Verify environment is READY (provisioned)
@@ -209,7 +209,7 @@ async def _get_environment(organization: Organization, environment_slug: str) ->
         if environment.status == Environment.Status.PENDING:
             raise ValueError(
                 f"Environment '{environment.name}' exists but has not been provisioned yet. "
-                "Use create_environment to provision it before deploying."
+                "Use provision_environment to provision it before deploying."
             )
         if environment.status == Environment.Status.PROVISIONING:
             raise ValueError(
@@ -220,11 +220,11 @@ async def _get_environment(organization: Organization, environment_slug: str) ->
             raise ValueError(
                 f"Environment '{environment.name}' failed to provision. "
                 f"Error: {environment.status_message}. "
-                "Please resolve the issue or create a new environment."
+                "Call provision_environment with the same name to retry provisioning."
             )
         raise ValueError(
             f"Environment '{environment.name}' is not ready (status: {environment.status}). "
-            "Use create_environment to ensure it's properly provisioned."
+            "Use provision_environment to ensure it's properly provisioned."
         )
 
     return environment

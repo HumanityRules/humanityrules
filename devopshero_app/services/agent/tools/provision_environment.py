@@ -1,8 +1,12 @@
 """
-Tool for creating environments.
+Tool for provisioning environments.
 
-This tool creates an Environment record with PENDING status. The job worker
-picks up pending environments and provisions them via the environment_executor.
+This tool provisions an Environment by creating (or resetting) a record with
+PENDING status. The job worker picks up pending environments and provisions
+them via the environment_executor.
+
+Retry semantics: if the environment previously failed (ERROR status), calling
+this tool again resets it to PENDING and retries provisioning.
 """
 
 from dataclasses import dataclass, asdict
@@ -14,7 +18,7 @@ from devopshero_app.models import AWSAccount, Environment, Organization, User
 
 @dataclass
 class EnvironmentSummary:
-    """Summary of a created environment."""
+    """Summary of a provisioned environment."""
 
     id: str
     name: str
@@ -30,7 +34,7 @@ class EnvironmentSummary:
         return asdict(self)
 
 
-async def create_environment(
+async def provision_environment(
     aws_account_uuid: str,
     environment_name: str,
     aws_region: str,
@@ -39,27 +43,16 @@ async def create_environment(
     user: User,
 ) -> EnvironmentSummary:
     """
-    Create an environment in an AWS account.
+    Provision an environment in an AWS account.
 
-    Creates an Environment record with status PENDING. The job worker
-    picks it up and provisions VPC, ECS cluster, and shared ALB.
+    Creates an Environment record with status PENDING (or resets a failed one).
+    The job worker picks it up and provisions VPC, ECS cluster, and shared ALB.
     If hosted_zone_name is provided, also creates wildcard cert for HTTPS.
 
+    Retry semantics: if the environment previously failed (ERROR status),
+    resets it to PENDING and allows the job worker to retry provisioning.
+
     Use get_environment_status to poll for provisioning progress.
-
-    Args:
-        aws_account_uuid: Internal UUID of the AWSAccount record.
-        environment_name: Human-readable name for the environment (e.g., "default", "staging").
-        aws_region: AWS region for this environment (e.g., "us-east-1").
-        hosted_zone_name: Hosted zone for wildcard cert (e.g., "dev.example.com"). None = HTTP only.
-        organization: The Organization (for access validation).
-        user: The User creating the environment.
-
-    Returns:
-        EnvironmentSummary with the created environment details.
-
-    Raises:
-        ValueError: If AWS account not found, not connected, or environment already exists.
     """
     # Validate AWS account exists and belongs to organization
     try:
@@ -107,9 +100,24 @@ async def create_environment(
                 "Use get_environment_status to check progress."
             )
         if existing.status == Environment.Status.ERROR:
-            raise ValueError(
-                f"Environment '{environment_name}' exists but failed to provision. "
-                f"Error: {existing.status_message}. Please delete it and try again."
+            # Reset to PENDING so the job worker retries provisioning.
+            # Allow updating config (region, hosted zone) on retry.
+            existing.status = Environment.Status.PENDING
+            existing.status_message = ""
+            existing.name = environment_name
+            existing.aws_region = aws_region
+            existing.shared_alb_hosted_zone = hosted_zone_name or ""
+            await existing.asave()
+
+            return EnvironmentSummary(
+                id=str(existing.id),
+                name=existing.name,
+                slug=existing.slug,
+                aws_region=existing.aws_region,
+                status=existing.status,
+                shared_alb_hosted_zone=existing.shared_alb_hosted_zone or None,
+                aws_account_id=str(aws_account.id),
+                aws_account_name=aws_account.name,
             )
 
     # Create new environment record with PENDING status

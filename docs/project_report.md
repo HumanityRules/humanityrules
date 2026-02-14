@@ -130,7 +130,7 @@ Claude Agent SDK sessions are stored as JSONL files on EFS at `/home/appuser/.cl
 
 **Environment Management:**
 - `list_environments` — Lists environments in an AWS account with status
-- `create_environment` — Queues environment provisioning (VPC + ECS cluster + optional HTTPS). Returns immediately; agent polls status
+- `provision_environment` — Queues environment provisioning (VPC + ECS cluster + optional HTTPS). Returns immediately; agent polls status
 - `get_environment_status` — Polls provisioning progress with recent logs
 - `list_hosted_zones` — Lists Route53 domains for HTTPS configuration
 
@@ -184,7 +184,7 @@ A polling-based background job system (`job_worker.py`) runs inside the app cont
 
 ### Environment Provisioning Flow
 
-1. Agent calls `create_environment` → creates Environment record with PENDING status
+1. Agent calls `provision_environment` → creates Environment record with PENDING status
 2. Job worker claims, sets status to PROVISIONING
 3. CDK deploys: VpcStack (auto-selected /20 CIDR in 172.x range, 2 AZs, NAT gateway) → EcsClusterStack (Fargate cluster, shared ALB, optional HTTPS with wildcard cert) → BuilderStack (optional EC2 m8g.large for remote Docker builds)
 4. CloudFormation outputs synced: VPC ID, cluster ARN
