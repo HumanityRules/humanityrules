@@ -1,16 +1,6 @@
 {% partialdef security_action_row %}
 <div class="flex items-center justify-between gap-4 px-3 py-2">
-    <div class="min-w-0">
-        <p class="truncate text-sm font-medium text-gray-900 dark:text-white">{{ action.title }}</p>
-        <p class="text-xs text-gray-500 dark:text-gray-400">
-            {% if action.is_enabled %}
-            Ready
-            {% else %}
-            {{ action.disabled_reason }}
-            {% endif %}
-        </p>
-    </div>
-
+    <p class="truncate text-sm font-medium {% if action.is_enabled %}text-gray-900 dark:text-white{% else %}text-gray-400 dark:text-gray-500{% endif %}">{{ action.title }}</p>
     <div class="shrink-0">
         {% if action.is_enabled %}
             {% if action.route_name == "security_task_role_view" %}
@@ -59,106 +49,74 @@
 
     <div class="grid gap-4 lg:grid-cols-10">
         <section class="rounded-lg border border-gray-200 bg-white p-3 dark:border-gray-700 dark:bg-gray-800 lg:col-span-7">
-            <div class="mb-3">
-                <h2 class="text-sm font-semibold text-gray-900 dark:text-white">Context</h2>
-            </div>
-            <form method="get"
-                  action="{% url 'security' %}"
-                  hx-get="{% url 'security' %}"
-                  hx-target="#main-content"
-                  hx-swap="innerHTML"
-                  hx-push-url="true"
-                  hx-trigger="keyup changed delay:250ms from:input[name='app_search'], submit"
-                  class="space-y-3">
-                <input type="hidden" name="context_app" value="{{ selected_context_app.slug|default:'' }}" />
-                <input type="hidden" name="context_environment" value="{{ selected_context_environment.slug|default:'' }}" />
-                <div class="grid gap-3 lg:grid-cols-9">
-                    <div class="space-y-2 lg:col-span-6">
-                        <input type="text"
-                               name="app_search"
-                               value="{{ selector_app_search }}"
-                               placeholder="Search apps"
-                               class="w-full rounded-md border border-gray-300 bg-white px-3 py-1.5 text-sm dark:border-gray-600 dark:bg-gray-900 dark:text-white" />
-                        <div class="max-h-56 overflow-y-auto rounded-md border border-gray-200 dark:border-gray-700">
-                            {% for row in selector_app_rows|slice:":12" %}
-                            <a href="{% url 'security' %}?{{ row.select_querystring }}"
-                               hx-get="{% url 'security' %}?{{ row.select_querystring }}"
-                               hx-target="#main-content"
-                               hx-swap="innerHTML"
-                               hx-push-url="true"
-                               class="block border-b border-gray-200 px-3 py-2 last:border-b-0 {% if row.is_selected %}bg-indigo-50 dark:bg-indigo-500/20{% else %}hover:bg-gray-50 dark:hover:bg-gray-700/40{% endif %} dark:border-gray-700">
-                                <p class="text-sm font-medium text-gray-900 dark:text-white">{{ row.app.name }}</p>
-                                <p class="text-xs text-gray-500 dark:text-gray-400">{{ row.app.workspace.name }}</p>
-                            </a>
-                            {% empty %}
-                            <div class="px-3 py-5 text-sm text-gray-500 dark:text-gray-400">No apps found.</div>
-                            {% endfor %}
-                        </div>
-                    </div>
-
-                    <div class="space-y-2 lg:col-span-3">
-                        <p class="text-xs font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">Environment</p>
-                        {% if selected_context_app %}
-                        <p class="text-xs text-gray-500 dark:text-gray-400">Click one to select.</p>
-                        <div class="flex flex-wrap gap-2">
-                            {% for row in selector_environment_rows %}
-                            <a href="{% url 'security' %}?{{ row.select_querystring }}"
-                               hx-get="{% url 'security' %}?{{ row.select_querystring }}"
-                               hx-target="#main-content"
-                               hx-swap="innerHTML"
-                               hx-push-url="true"
-                               class="inline-flex cursor-pointer items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium transition-colors {% if row.is_selected %}border-indigo-400 bg-indigo-100 text-indigo-800 ring-1 ring-indigo-300 dark:border-indigo-400/60 dark:bg-indigo-500/30 dark:text-indigo-200 dark:ring-indigo-400/50{% else %}border-gray-300 text-gray-700 hover:border-indigo-300 hover:bg-indigo-50 dark:border-gray-600 dark:text-gray-300 dark:hover:border-indigo-500/40 dark:hover:bg-indigo-500/10{% endif %}">
-                                {% if row.is_selected %}
-                                <span class="text-indigo-700 dark:text-indigo-200">Selected</span>
-                                {% endif %}
-                                <span>{{ row.environment.name }}</span>
-                                {% if row.is_deployed %}
-                                <span class="text-green-700 dark:text-green-300">Deployed</span>
-                                {% else %}
-                                <span class="text-yellow-700 dark:text-yellow-300">Not deployed</span>
-                                {% endif %}
-                            </a>
-                            {% endfor %}
-                        </div>
-                        {% if selector_environment_auto_selected %}
-                        <p class="text-xs text-indigo-700 dark:text-indigo-300">Auto-selected the only available environment.</p>
-                        {% endif %}
-                        {% else %}
-                        <p class="text-sm text-gray-500 dark:text-gray-400">Select an app first.</p>
-                        {% endif %}
-                    </div>
-                </div>
-            </form>
-
-            <div class="mt-3 flex items-center justify-between rounded-md bg-gray-50 px-3 py-2 text-sm dark:bg-gray-900/50">
-                <div class="text-gray-700 dark:text-gray-300">
-                    {% if selected_context_ready and selected_context_has_deployment %}
-                    {{ selected_context_app.name }} / {{ selected_context_environment.name }}
-                    {% elif selected_context_ready %}
-                    {{ selected_context_app.name }} / {{ selected_context_environment.name }} (no deployment yet)
-                    {% elif selected_context_app %}
-                    {{ selected_context_app.name }} selected
-                    {% else %}
-                    Select app and environment
-                    {% endif %}
-                </div>
+            <div class="space-y-3">
+                {% if selected_context_app %}
                 <div class="flex items-center gap-2">
-                    {% if selected_context_ready and selected_context_has_deployment %}
-                    <span class="rounded-full bg-green-100 px-2 py-0.5 text-xs font-medium text-green-700 dark:bg-green-500/10 dark:text-green-300">Deployed</span>
-                    {% elif selected_context_ready %}
-                    <span class="rounded-full bg-yellow-100 px-2 py-0.5 text-xs font-medium text-yellow-700 dark:bg-yellow-500/10 dark:text-yellow-300">Not deployed</span>
-                    {% endif %}
-                    {% if selected_context_app or selected_context_environment %}
+                    <p class="text-sm font-medium text-gray-900 dark:text-white">{{ selected_context_app.name }}</p>
+                    <p class="text-xs text-gray-500 dark:text-gray-400">{{ selected_context_app.workspace.name }}</p>
                     <a href="{% url 'security' %}{% if selector_app_search %}?app_search={{ selector_app_search|urlencode }}{% endif %}"
                        hx-get="{% url 'security' %}{% if selector_app_search %}?app_search={{ selector_app_search|urlencode }}{% endif %}"
                        hx-target="#main-content"
                        hx-swap="innerHTML"
                        hx-push-url="true"
-                       class="text-xs font-medium text-indigo-700 hover:text-indigo-600 dark:text-indigo-300 dark:hover:text-indigo-200">
-                        Clear
+                       class="text-xs font-medium text-gray-400 hover:text-gray-600 dark:text-gray-500 dark:hover:text-gray-300"
+                       title="Clear selection">
+                        <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
                     </a>
-                    {% endif %}
                 </div>
+
+                <div class="flex flex-wrap gap-2">
+                    {% for row in selector_environment_rows %}
+                    <a href="{% url 'security' %}?{{ row.select_querystring }}"
+                       hx-get="{% url 'security' %}?{{ row.select_querystring }}"
+                       hx-target="#main-content"
+                       hx-swap="innerHTML"
+                       hx-push-url="true"
+                       class="inline-flex cursor-pointer items-center gap-1.5 rounded-md border px-2.5 py-1 text-xs font-medium transition-colors {% if row.is_selected %}border-indigo-400 bg-indigo-50 text-indigo-800 ring-1 ring-indigo-300 dark:border-indigo-400/60 dark:bg-indigo-500/20 dark:text-indigo-200 dark:ring-indigo-400/50{% else %}border-gray-300 text-gray-700 hover:border-indigo-300 hover:bg-indigo-50 dark:border-gray-600 dark:text-gray-300 dark:hover:border-indigo-500/40 dark:hover:bg-indigo-500/10{% endif %}">
+                        {{ row.environment.name }}
+                        {% if row.is_deployed %}
+                        <span class="text-green-700 dark:text-green-300">Deployed</span>
+                        {% else %}
+                        <span class="text-yellow-700 dark:text-yellow-300">Not deployed</span>
+                        {% endif %}
+                    </a>
+                    {% endfor %}
+                </div>
+                {% if selector_environment_auto_selected %}
+                <p class="text-xs text-indigo-700 dark:text-indigo-300">Auto-selected the only available environment.</p>
+                {% endif %}
+
+                {% else %}
+                <form method="get"
+                      action="{% url 'security' %}"
+                      hx-get="{% url 'security' %}"
+                      hx-target="#main-content"
+                      hx-swap="innerHTML"
+                      hx-push-url="true"
+                      hx-trigger="keyup changed delay:250ms from:input[name='app_search'], submit"
+                      class="space-y-2">
+                    <input type="text"
+                           name="app_search"
+                           value="{{ selector_app_search }}"
+                           placeholder="Search apps..."
+                           class="w-full rounded-md border border-gray-300 bg-white px-3 py-1.5 text-sm dark:border-gray-600 dark:bg-gray-900 dark:text-white" />
+                    <div class="max-h-56 overflow-y-auto rounded-md border border-gray-200 dark:border-gray-700">
+                        {% for row in selector_app_rows|slice:":12" %}
+                        <a href="{% url 'security' %}?{{ row.select_querystring }}"
+                           hx-get="{% url 'security' %}?{{ row.select_querystring }}"
+                           hx-target="#main-content"
+                           hx-swap="innerHTML"
+                           hx-push-url="true"
+                           class="block border-b border-gray-200 px-3 py-2 last:border-b-0 hover:bg-gray-50 dark:border-gray-700 dark:hover:bg-gray-700/40">
+                            <p class="text-sm font-medium text-gray-900 dark:text-white">{{ row.app.name }}</p>
+                            <p class="text-xs text-gray-500 dark:text-gray-400">{{ row.app.workspace.name }}</p>
+                        </a>
+                        {% empty %}
+                        <div class="px-3 py-5 text-sm text-gray-500 dark:text-gray-400">No apps found.</div>
+                        {% endfor %}
+                    </div>
+                </form>
+                {% endif %}
             </div>
         </section>
 
@@ -174,7 +132,7 @@
         </section>
     </div>
 
-    <details class="rounded-lg border border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-800">
+    <details open class="rounded-lg border border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-800">
         <summary class="cursor-pointer select-none px-3 py-2 text-sm font-semibold text-gray-900 dark:text-white">
             Inbox ({{ permission_issue_rows|length }} issues, {{ open_permission_request_rows|length }} requests)
         </summary>
