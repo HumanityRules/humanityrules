@@ -1,36 +1,57 @@
-<div class="max-w-[960px]">
-    <div class="flex items-center justify-between mb-6">
-        <div>
-            <h1 class="text-2xl font-bold text-gray-900 dark:text-white">Workspaces</h1>
-            <p class="mt-1 text-sm text-gray-600 dark:text-gray-400">Organize your apps and datastores into workspaces.</p>
-        </div>
+<div class="max-w-5xl">
+    <div class="mb-6">
+        <h1 class="text-2xl font-bold text-gray-900 dark:text-white">Workspaces</h1>
+        <p class="mt-1 text-sm text-gray-600 dark:text-gray-400">Organize your apps and datastores into workspaces.</p>
     </div>
 
     {% if workspaces %}
-    <div class="grid gap-4">
+    <div class="grid gap-5 sm:grid-cols-2">
         {% for workspace in workspaces %}
-        <a href="{% url 'workspace_detail' workspace_slug=workspace.slug %}"
-           hx-get="{% url 'workspace_detail' workspace_slug=workspace.slug %}"
-           hx-target="#main-content"
-           hx-swap="innerHTML"
-           hx-push-url="true"
-           class="block bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-5 hover:border-indigo-500 dark:hover:border-indigo-400 transition-colors">
-            <div class="flex items-center justify-between">
-                <div>
-                    <h3 class="text-lg font-semibold text-gray-900 dark:text-white">{{ workspace.name }}</h3>
-                    {% if workspace.description %}
-                    <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">{{ workspace.description }}</p>
-                    {% endif %}
+        <div class="relative group bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-6 hover:border-indigo-300 dark:hover:border-indigo-700 hover:bg-gray-50 dark:hover:bg-gray-700/50 hover:shadow-md transition-all">
+            <a href="{% url 'workspace_detail' workspace_slug=workspace.slug %}"
+               hx-get="{% url 'workspace_detail' workspace_slug=workspace.slug %}"
+               hx-target="#main-content"
+               hx-swap="innerHTML"
+               hx-push-url="true"
+               class="absolute inset-0 rounded-lg z-0" aria-hidden="true"></a>
+            <span class="font-medium text-gray-900 dark:text-white group-hover:text-indigo-600 dark:group-hover:text-indigo-400 truncate">
+                {{ workspace.name }}
+            </span>
+            {% if workspace.description %}
+            <p class="mt-1 text-sm text-gray-500 dark:text-gray-400 line-clamp-2">{{ workspace.description }}</p>
+            {% endif %}
+            {% if workspace.annotated_apps %}
+            <div class="mt-4 rounded-md border border-gray-200 dark:border-gray-700 divide-y divide-dashed divide-gray-200 dark:divide-gray-700 text-sm">
+                {% for app in workspace.annotated_apps %}
+                <div class="flex items-center justify-between px-3 py-2.5">
+                    <span class="text-gray-500 dark:text-gray-400 truncate">{{ app.name }}</span>
+                    <span class="ml-2 inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium
+                        {% if app.latest_status == 'deployed' %}bg-green-100 text-green-700 dark:bg-green-500/10 dark:text-green-400
+                        {% elif app.latest_status == 'failed' or app.latest_status == 'rolled_back' %}bg-red-100 text-red-700 dark:bg-red-500/10 dark:text-red-400
+                        {% elif app.latest_status == 'never_deployed' %}bg-gray-100 text-gray-500 dark:bg-gray-700 dark:text-gray-400
+                        {% else %}bg-yellow-100 text-yellow-700 dark:bg-yellow-500/10 dark:text-yellow-400{% endif %}">
+                        {{ app.latest_status|title }}
+                    </span>
                 </div>
-                <div class="flex items-center space-x-4 text-sm text-gray-500 dark:text-gray-400">
-                    <span>{{ workspace.apps.count }} app{{ workspace.apps.count|pluralize }}</span>
-                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" />
-                    </svg>
-                </div>
+                {% endfor %}
             </div>
-        </a>
+            {% else %}
+            <p class="mt-3 text-sm text-gray-400 dark:text-gray-500">No apps</p>
+            {% endif %}
+        </div>
         {% endfor %}
+        <form method="post" action="{% url 'workspace_create' %}" class="flex">
+            {% csrf_token %}
+            <button type="button"
+                    onclick="let n = prompt('Workspace name'); if (n) { this.closest('form').querySelector('input[name=name]').value = n; this.closest('form').submit(); }"
+                    class="flex w-full flex-1 flex-col items-center justify-center p-6 border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-lg hover:border-indigo-500 dark:hover:border-indigo-400 hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors group">
+                <svg class="w-8 h-8 text-gray-400 group-hover:text-indigo-500 dark:group-hover:text-indigo-400 transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
+                </svg>
+                <span class="mt-2 text-sm font-medium text-gray-500 dark:text-gray-400 group-hover:text-indigo-600 dark:group-hover:text-indigo-400 transition-colors">New Workspace</span>
+            </button>
+            <input type="hidden" name="name" value="" />
+        </form>
     </div>
     {% else %}
     <div class="text-center py-12 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg">
