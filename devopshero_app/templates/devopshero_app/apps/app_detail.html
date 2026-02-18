@@ -171,8 +171,8 @@
                             hx-target="#main-content"
                             hx-swap="innerHTML"
                             class="text-xs text-indigo-600 dark:text-indigo-400 hover:underline cursor-pointer">Redeploy</button>
-                    <a href="{% url 'security_permission_request_new' %}?context_app={{ app.slug }}&context_environment={{ row.environment.slug }}"
-                       hx-get="{% url 'security_permission_request_new' %}?context_app={{ app.slug }}&context_environment={{ row.environment.slug }}"
+                    <a href="{% url 'security_permissions_editor' %}?context_app={{ app.slug }}&context_environment={{ row.environment.slug }}"
+                       hx-get="{% url 'security_permissions_editor' %}?context_app={{ app.slug }}&context_environment={{ row.environment.slug }}"
                        hx-target="#main-content"
                        hx-swap="innerHTML"
                        hx-push-url="true"

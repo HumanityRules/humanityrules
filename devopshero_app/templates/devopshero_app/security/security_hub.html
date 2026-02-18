@@ -1,145 +1,16 @@
-{% partialdef security_action_row %}
-<div class="flex items-center justify-between gap-4 px-3 py-2">
-    <p class="truncate text-sm font-medium {% if action.is_enabled %}text-gray-900 dark:text-white{% else %}text-gray-400 dark:text-gray-500{% endif %}">{{ action.title }}</p>
-    <div class="shrink-0">
-        {% if action.is_enabled %}
-            {% if action.route_name == "security_task_role_view" %}
-            <a href="{% url 'security_task_role_view' app_slug=selected_context_app.slug environment_slug=selected_context_environment.slug %}{% if selector_querystring %}?{{ selector_querystring }}{% endif %}"
-               hx-get="{% url 'security_task_role_view' app_slug=selected_context_app.slug environment_slug=selected_context_environment.slug %}{% if selector_querystring %}?{{ selector_querystring }}{% endif %}"
-               hx-target="#main-content"
-               hx-swap="innerHTML"
-               hx-push-url="true"
-               class="inline-flex items-center rounded-md border border-indigo-300 px-2.5 py-1 text-xs font-medium text-indigo-700 hover:bg-indigo-50 dark:border-indigo-500/40 dark:text-indigo-300 dark:hover:bg-indigo-500/10">
-                {{ action.cta_label }}
-            </a>
-            {% elif action.route_name == "security_permission_request_history" %}
-            <a href="{% url 'security_permission_request_history' %}{% if selector_querystring %}?{{ selector_querystring }}{% endif %}"
-               hx-get="{% url 'security_permission_request_history' %}{% if selector_querystring %}?{{ selector_querystring }}{% endif %}"
-               hx-target="#main-content"
-               hx-swap="innerHTML"
-               hx-push-url="true"
-               class="inline-flex items-center rounded-md border border-indigo-300 px-2.5 py-1 text-xs font-medium text-indigo-700 hover:bg-indigo-50 dark:border-indigo-500/40 dark:text-indigo-300 dark:hover:bg-indigo-500/10">
-                {{ action.cta_label }}
-            </a>
-            {% else %}
-            <a href="{% url 'security_permission_request_new' %}{% if selector_querystring %}?{{ selector_querystring }}{% endif %}"
-               hx-get="{% url 'security_permission_request_new' %}{% if selector_querystring %}?{{ selector_querystring }}{% endif %}"
-               hx-target="#main-content"
-               hx-swap="innerHTML"
-               hx-push-url="true"
-               class="inline-flex items-center rounded-md border border-indigo-300 px-2.5 py-1 text-xs font-medium text-indigo-700 hover:bg-indigo-50 dark:border-indigo-500/40 dark:text-indigo-300 dark:hover:bg-indigo-500/10">
-                {{ action.cta_label }}
-            </a>
-            {% endif %}
-        {% else %}
-        <button type="button"
-                disabled
-                class="inline-flex cursor-not-allowed items-center rounded-md border border-gray-300 px-2.5 py-1 text-xs font-medium text-gray-500 dark:border-gray-600 dark:text-gray-400">
-            {{ action.cta_label }}
-        </button>
-        {% endif %}
-    </div>
-</div>
-{% endpartialdef security_action_row %}
-
 <div class="max-w-6xl space-y-4">
     <div>
         <h1 class="text-2xl font-bold text-gray-900 dark:text-white">Security</h1>
     </div>
 
-    <div class="grid gap-4 lg:grid-cols-10">
-        <section class="rounded-lg border border-gray-200 bg-white p-3 dark:border-gray-700 dark:bg-gray-800 lg:col-span-7">
-            <div class="space-y-3">
-                {% if selected_context_app %}
-                <div class="flex items-center gap-2">
-                    <p class="text-sm font-medium text-gray-900 dark:text-white">{{ selected_context_app.name }}</p>
-                    <p class="text-xs text-gray-500 dark:text-gray-400">{{ selected_context_app.workspace.name }}</p>
-                    <a href="{% url 'security' %}{% if selector_app_search %}?app_search={{ selector_app_search|urlencode }}{% endif %}"
-                       hx-get="{% url 'security' %}{% if selector_app_search %}?app_search={{ selector_app_search|urlencode }}{% endif %}"
-                       hx-target="#main-content"
-                       hx-swap="innerHTML"
-                       hx-push-url="true"
-                       class="text-xs font-medium text-gray-400 hover:text-gray-600 dark:text-gray-500 dark:hover:text-gray-300"
-                       title="Clear selection">
-                        <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
-                    </a>
-                </div>
-
-                <div class="flex flex-wrap gap-2">
-                    {% for row in selector_environment_rows %}
-                    <a href="{% url 'security' %}?{{ row.select_querystring }}"
-                       hx-get="{% url 'security' %}?{{ row.select_querystring }}"
-                       hx-target="#main-content"
-                       hx-swap="innerHTML"
-                       hx-push-url="true"
-                       class="inline-flex cursor-pointer items-center gap-1.5 rounded-md border px-2.5 py-1 text-xs font-medium transition-colors {% if row.is_selected %}border-indigo-400 bg-indigo-50 text-indigo-800 ring-1 ring-indigo-300 dark:border-indigo-400/60 dark:bg-indigo-500/20 dark:text-indigo-200 dark:ring-indigo-400/50{% else %}border-gray-300 text-gray-700 hover:border-indigo-300 hover:bg-indigo-50 dark:border-gray-600 dark:text-gray-300 dark:hover:border-indigo-500/40 dark:hover:bg-indigo-500/10{% endif %}">
-                        {{ row.environment.name }}
-                        {% if row.is_deployed %}
-                        <span class="text-green-700 dark:text-green-300">Deployed</span>
-                        {% else %}
-                        <span class="text-yellow-700 dark:text-yellow-300">Not deployed</span>
-                        {% endif %}
-                    </a>
-                    {% endfor %}
-                </div>
-                {% if selector_environment_auto_selected %}
-                <p class="text-xs text-indigo-700 dark:text-indigo-300">Auto-selected the only available environment.</p>
-                {% endif %}
-
-                {% else %}
-                <form method="get"
-                      action="{% url 'security' %}"
-                      hx-get="{% url 'security' %}"
-                      hx-target="#main-content"
-                      hx-swap="innerHTML"
-                      hx-push-url="true"
-                      hx-trigger="keyup changed delay:250ms from:input[name='app_search'], submit"
-                      class="space-y-2">
-                    <input type="text"
-                           name="app_search"
-                           value="{{ selector_app_search }}"
-                           placeholder="Search apps..."
-                           class="w-full rounded-md border border-gray-300 bg-white px-3 py-1.5 text-sm dark:border-gray-600 dark:bg-gray-900 dark:text-white" />
-                    <div class="max-h-56 overflow-y-auto rounded-md border border-gray-200 dark:border-gray-700">
-                        {% for row in selector_app_rows|slice:":12" %}
-                        <a href="{% url 'security' %}?{{ row.select_querystring }}"
-                           hx-get="{% url 'security' %}?{{ row.select_querystring }}"
-                           hx-target="#main-content"
-                           hx-swap="innerHTML"
-                           hx-push-url="true"
-                           class="block border-b border-gray-200 px-3 py-2 last:border-b-0 hover:bg-gray-50 dark:border-gray-700 dark:hover:bg-gray-700/40">
-                            <p class="text-sm font-medium text-gray-900 dark:text-white">{{ row.app.name }}</p>
-                            <p class="text-xs text-gray-500 dark:text-gray-400">{{ row.app.workspace.name }}</p>
-                        </a>
-                        {% empty %}
-                        <div class="px-3 py-5 text-sm text-gray-500 dark:text-gray-400">No apps found.</div>
-                        {% endfor %}
-                    </div>
-                </form>
-                {% endif %}
-            </div>
-        </section>
-
-        <section class="rounded-lg border border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-800 lg:col-span-3">
-            <div class="border-b border-gray-200 px-3 py-2 dark:border-gray-700">
-                <h2 class="text-sm font-semibold text-gray-900 dark:text-white">Actions</h2>
-            </div>
-            <div class="divide-y divide-gray-200 dark:divide-gray-700">
-                {% for action in security_action_cards %}
-                    {% partial security_action_row %}
-                {% endfor %}
-            </div>
-        </section>
-    </div>
-
-    <details open class="rounded-lg border border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-800">
-        <summary class="cursor-pointer select-none px-3 py-2 text-sm font-semibold text-gray-900 dark:text-white">
-            Inbox ({{ permission_issue_rows|length }} issues, {{ open_permission_request_rows|length }} requests)
-        </summary>
+    <section class="rounded-lg border border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-800">
+        <div class="px-3 py-2 text-sm font-semibold text-gray-900 dark:text-white">
+            Recent issues ({{ permission_issue_rows|length }})
+        </div>
         <div class="border-t border-gray-200 px-3 py-3 dark:border-gray-700">
-            <div class="grid gap-3 lg:grid-cols-2">
+            <div class="space-y-3">
                 <section class="rounded-md border border-gray-200 dark:border-gray-700">
-                    <div class="border-b border-gray-200 px-3 py-2 text-xs font-medium uppercase tracking-wide text-gray-500 dark:border-gray-700 dark:text-gray-400">Recent issues</div>
+                    <div class="border-b border-gray-200 px-3 py-2 text-xs font-medium uppercase tracking-wide text-gray-500 dark:border-gray-700 dark:text-gray-400">Runtime permission errors</div>
                     <div class="divide-y divide-gray-200 dark:divide-gray-700">
                         {% for issue in permission_issue_rows|slice:":4" %}
                         <div class="px-3 py-2">
@@ -148,8 +19,8 @@
                                     <p class="text-sm font-medium text-gray-900 dark:text-white">{{ issue.service }}:{{ issue.action }}</p>
                                     <p class="text-xs text-gray-500 dark:text-gray-400">{{ issue.app.name }} / {{ issue.environment.name }}</p>
                                 </div>
-                                <a href="{% url 'security_permission_request_new' %}?{{ issue.fix_querystring }}"
-                                   hx-get="{% url 'security_permission_request_new' %}?{{ issue.fix_querystring }}"
+                                <a href="{% url 'security_permissions_editor' %}?context_app={{ issue.app.slug }}&context_environment={{ issue.environment.slug }}"
+                                   hx-get="{% url 'security_permissions_editor' %}?context_app={{ issue.app.slug }}&context_environment={{ issue.environment.slug }}"
                                    hx-target="#main-content"
                                    hx-swap="innerHTML"
                                    hx-push-url="true"
@@ -163,26 +34,41 @@
                         {% endfor %}
                     </div>
                 </section>
-
-                <section class="rounded-md border border-gray-200 dark:border-gray-700">
-                    <div class="border-b border-gray-200 px-3 py-2 text-xs font-medium uppercase tracking-wide text-gray-500 dark:border-gray-700 dark:text-gray-400">Open requests</div>
-                    <div class="divide-y divide-gray-200 dark:divide-gray-700">
-                        {% for row in open_permission_request_rows|slice:":4" %}
-                        <a href="{% url 'security_permission_request_detail' request_id=row.id %}{% if selector_querystring %}?{{ selector_querystring }}{% endif %}"
-                           hx-get="{% url 'security_permission_request_detail' request_id=row.id %}{% if selector_querystring %}?{{ selector_querystring }}{% endif %}"
-                           hx-target="#main-content"
-                           hx-swap="innerHTML"
-                           hx-push-url="true"
-                           class="block px-3 py-2 hover:bg-gray-50 dark:hover:bg-gray-700/40">
-                            <p class="text-sm font-medium text-gray-900 dark:text-white">{{ row.title }}</p>
-                            <p class="text-xs text-gray-500 dark:text-gray-400">{{ row.status }}</p>
-                        </a>
-                        {% empty %}
-                        <div class="px-3 py-6 text-sm text-gray-500 dark:text-gray-400">No open requests.</div>
-                        {% endfor %}
-                    </div>
-                </section>
             </div>
         </div>
-    </details>
+    </section>
+
+    <section class="rounded-lg border border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-800">
+        <div class="px-3 py-2 text-sm font-semibold text-gray-900 dark:text-white">
+            Permission requests ({{ permission_request_rows|length }})
+        </div>
+        <div class="border-t border-gray-200 dark:border-gray-700">
+            <div class="divide-y divide-gray-200 dark:divide-gray-700">
+                {% for pr in permission_request_rows %}
+                <a href="{% url 'security_permissions_editor' %}?context_app={{ pr.app.slug }}&context_environment={{ pr.environment.slug }}"
+                   hx-get="{% url 'security_permissions_editor' %}?context_app={{ pr.app.slug }}&context_environment={{ pr.environment.slug }}"
+                   hx-target="#main-content"
+                   hx-swap="innerHTML"
+                   hx-push-url="true"
+                   class="flex items-center justify-between gap-4 px-3 py-2.5 hover:bg-gray-50 dark:hover:bg-gray-700/40">
+                    <div class="min-w-0">
+                        <p class="truncate text-sm font-medium text-gray-900 dark:text-white">{{ pr.app.name }} / {{ pr.environment.name }}</p>
+                        <p class="text-xs text-gray-500 dark:text-gray-400">{{ pr.statements|length }} statement{{ pr.statements|length|pluralize }} · {{ pr.created_at|timesince }} ago{% if pr.created_by %} · {{ pr.created_by }}{% endif %}</p>
+                    </div>
+                    <span class="inline-flex shrink-0 items-center rounded-full px-2 py-0.5 text-xs font-medium
+                        {% if pr.status == 'draft' %}bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-300
+                        {% elif pr.status == 'approved_pending_apply' %}bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300
+                        {% elif pr.status == 'applying' %}bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-300
+                        {% elif pr.status == 'applied' %}bg-green-100 text-green-800 dark:bg-green-900/40 dark:text-green-300
+                        {% elif pr.status == 'failed' %}bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-300
+                        {% endif %}">
+                        {{ pr.get_status_display }}
+                    </span>
+                </a>
+                {% empty %}
+                <div class="px-3 py-6 text-sm text-gray-500 dark:text-gray-400">No permission requests yet.</div>
+                {% endfor %}
+            </div>
+        </div>
+    </section>
 </div>

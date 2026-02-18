@@ -1,12 +1,24 @@
+import json
+import logging
 import re
 from urllib.parse import urlencode
 
 from django.contrib.auth.decorators import login_required
 from django.db.models import Q
+from django.http import JsonResponse
 from django.shortcuts import get_object_or_404, render
+from django.views.decorators.http import require_POST
 
 from .. import models
+from ..services.agent import agent_service
 from . import base
+
+logger = logging.getLogger(__name__)
+
+
+# =============================================================================
+# Shared helpers
+# =============================================================================
 
 
 def _query_param_with_legacy_fallback(request, param_name, legacy_param_name):
@@ -157,6 +169,11 @@ def _build_selector_state(request, organization):
     }
 
 
+# =============================================================================
+# Permission issues (runtime errors)
+# =============================================================================
+
+
 def _extract_permission_signature(message):
     match = re.search(pattern=r"([a-z0-9-]+):([A-Za-z0-9*]+)", string=message)
     if match:
@@ -205,40 +222,9 @@ def _filter_permission_issues(permission_issues, selected_app, selected_environm
     return filtered_rows
 
 
-def _build_open_request_rows(permission_issues, max_items):
-    rows = []
-    for issue in permission_issues[:max_items]:
-        rows.append(
-            {
-                "id": issue["id"],
-                "title": f"{issue['app'].name} requested {issue['service']}:{issue['action']}",
-                "status": "Draft proposal",
-                "created_at": issue["created_at"],
-                "source": "Runtime permission error",
-                "workspace": issue["workspace"],
-                "app": issue["app"],
-                "environment": issue["environment"],
-            }
-        )
-    return rows
-
-
-def _build_permission_history_rows(permission_issues, max_items):
-    rows = []
-    for issue in permission_issues[:max_items]:
-        rows.append(
-            {
-                "id": issue["id"],
-                "created_at": issue["created_at"],
-                "title": f"Proposed {issue['service']}:{issue['action']}",
-                "summary": issue["message"],
-                "source": "runtime_error",
-                "status": "Draft",
-                "app": issue["app"],
-                "environment": issue["environment"],
-            }
-        )
-    return rows
+# =============================================================================
+# Security hub helpers
+# =============================================================================
 
 
 def _build_task_role_policies(selected_app, selected_environment):
@@ -281,59 +267,21 @@ def _build_task_role_policies(selected_app, selected_environment):
     return policies
 
 
-def _build_permission_request_statements(selected_app, prefill_issue):
-    base_resource = f"arn:aws:s3:::replace-me-{selected_app.slug}/*" if selected_app else "arn:aws:s3:::replace-me/*"
-    statements = [
-        {
-            "service": "s3",
-            "effect": "Allow",
-            "actions": "GetObject",
-            "resource": base_resource,
-            "source": "manual",
-        }
-    ]
-    if prefill_issue:
-        statements.append(
-            {
-                "service": prefill_issue["service"],
-                "effect": "Allow",
-                "actions": prefill_issue["action"],
-                "resource": "*",
-                "source": "runtime_error",
-            }
-        )
-    return statements
-
-
 def _build_action_cards(selected_context_ready, selected_context_has_deployment):
     action_definitions = [
         {
             "title": "Fix failing app permissions",
             "description": "Use runtime AccessDenied logs to prefill a permission proposal.",
             "cta_label": "Fix now",
-            "route_name": "security_permission_request_new",
+            "route_name": "security_permissions_editor",
             "requires_deployment": True,
         },
         {
-            "title": "Request new permissions",
-            "description": "Start a new IAM request from scratch using form or chat.",
-            "cta_label": "New request",
-            "route_name": "security_permission_request_new",
-            "requires_deployment": False,
-        },
-        {
-            "title": "View current app permissions",
-            "description": "Inspect current task-role service policies.",
-            "cta_label": "View permissions",
-            "route_name": "security_task_role_view",
+            "title": "Edit permissions",
+            "description": "View and modify IAM task-role policies for the deployed app.",
+            "cta_label": "Open editor",
+            "route_name": "security_permissions_editor",
             "requires_deployment": True,
-        },
-        {
-            "title": "Permission change history",
-            "description": "Review previous permission proposals and edits.",
-            "cta_label": "Open history",
-            "route_name": "security_permission_request_history",
-            "requires_deployment": False,
         },
     ]
 
@@ -384,8 +332,11 @@ def _build_security_context(request):
         issue["fix_querystring"] = urlencode(query=issue_query_params)
 
     context["permission_issue_rows"] = filtered_issues[:8]
-    context["open_permission_request_rows"] = _build_open_request_rows(permission_issues=filtered_issues, max_items=4)
-    context["permission_history_rows"] = _build_permission_history_rows(permission_issues=filtered_issues, max_items=20)
+    context["permission_request_rows"] = list(
+        models.PermissionRequest.objects.filter(app__organization=organization)
+        .select_related("app", "environment", "created_by")
+        .order_by("-created_at")[:20]
+    )
     context["task_role_policy_rows"] = _build_task_role_policies(
         selected_app=context["selected_context_app"],
         selected_environment=context["selected_context_environment"],
@@ -401,6 +352,11 @@ def _build_security_context(request):
     return context
 
 
+# =============================================================================
+# Security Hub
+# =============================================================================
+
+
 @login_required
 def security(request):
     context = _build_security_context(request=request)
@@ -411,108 +367,136 @@ def security(request):
     return render(request=request, template_name="devopshero_app/app_shell.html", context=context)
 
 
-@login_required
-def security_permission_request_new(request):
-    context = _build_security_context(request=request)
-    issue_id = request.GET.get("issue_id", "").strip()
-    prefill_issue = next((issue for issue in context["permission_issue_rows"] if issue["id"] == issue_id), None)
+# =============================================================================
+# Permissions Editor
+# =============================================================================
 
-    context["permission_request_title"] = "New permission request"
-    context["permission_request_subtitle"] = "Draft a proposal for task-role policy updates."
-    context["prefill_issue"] = prefill_issue
-    context["permission_statement_rows"] = _build_permission_request_statements(
-        selected_app=context["selected_context_app"],
-        prefill_issue=prefill_issue,
+SERVICE_OPTIONS = ["s3", "sqs", "dynamodb", "secretsmanager", "kms", "sns", "ssm", "logs", "ecs", "ecr", "lambda", "ses"]
+
+
+def _get_or_create_permission_request(app, environment, user):
+    """Find an existing DRAFT PermissionRequest for this app+environment, or create a new one."""
+    from ..services.infra_customer import iam_utils
+
+    existing = models.PermissionRequest.objects.filter(
+        app=app,
+        environment=environment,
+        status=models.PermissionRequest.Status.DRAFT,
+    ).order_by("-created_at").first()
+
+    if existing:
+        return existing
+
+    # Read current IAM policies from AWS
+    try:
+        statements = iam_utils.read_task_role_statements(environment=environment, app=app)
+    except Exception:
+        logger.exception("Failed to read IAM policies for %s/%s", app.slug, environment.slug)
+        statements = []
+
+    # Create a conversation for this permissions session
+    conversation = agent_service.create_conversation(
+        user=user,
+        workspace_id=app.workspace_id,
+        repo_id=None,
+        aws_account_id=None,
+        mode=models.Conversation.Mode.PERMISSIONS,
     )
-    context["service_options"] = ["s3", "sqs", "dynamodb", "secretsmanager", "kms", "sns", "ssm"]
 
-    if request.htmx:
-        return render(
-            request=request,
-            template_name="devopshero_app/security/security_permission_request_workspace.html",
-            context=context,
-        )
-
-    context["content_url"] = request.get_full_path()
-    return render(request=request, template_name="devopshero_app/app_shell.html", context=context)
-
-
-@login_required
-def security_permission_request_detail(request, request_id):
-    context = _build_security_context(request=request)
-    context["permission_request_title"] = f"Permission request {request_id}"
-    context["permission_request_subtitle"] = "This is a UI skeleton view until persistence is implemented."
-    context["prefill_issue"] = None
-    context["permission_statement_rows"] = _build_permission_request_statements(
-        selected_app=context["selected_context_app"],
-        prefill_issue=None,
+    permission_request = models.PermissionRequest.objects.create(
+        app=app,
+        environment=environment,
+        conversation=conversation,
+        statements=statements,
+        status=models.PermissionRequest.Status.DRAFT,
+        created_by=user,
     )
-    context["service_options"] = ["s3", "sqs", "dynamodb", "secretsmanager", "kms", "sns", "ssm"]
-
-    if request.htmx:
-        return render(
-            request=request,
-            template_name="devopshero_app/security/security_permission_request_workspace.html",
-            context=context,
-        )
-
-    context["content_url"] = request.get_full_path()
-    return render(request=request, template_name="devopshero_app/app_shell.html", context=context)
+    return permission_request
 
 
 @login_required
-def security_task_role_view(request, app_slug, environment_slug):
+def security_permissions_editor(request):
+    """Permissions editor: two-panel UI with policy editor + agent chat."""
     organization = request.user.current_organization
-    selected_app = get_object_or_404(models.App, organization=organization, slug=app_slug)
-    selected_environment = get_object_or_404(
-        models.Environment,
-        aws_account__organization=organization,
-        slug=environment_slug,
-    )
+    app_slug = request.GET.get("context_app", "").strip()
+    environment_slug = request.GET.get("context_environment", "").strip()
 
-    context = _build_security_context(request=request)
-    context["selected_context_app"] = selected_app
-    context["selected_context_environment"] = selected_environment
-    context["selected_context_ready"] = True
-    context["selected_context_has_deployment"] = _has_app_environment_deployment(
-        selected_app=selected_app,
-        selected_environment=selected_environment,
-    )
+    if not app_slug or not environment_slug:
+        return render(request=request, template_name="devopshero_app/security/security_permissions_editor.html", context={
+            **base.get_app_shell_context(request=request, current_page="security"),
+            "error_message": "Missing app or environment. Navigate here from the App Detail page.",
+        })
 
-    context_query_params = _build_search_params(
-        app_search=context["selector_app_search"],
-        environment_search=context["selector_environment_search"],
-    )
-    context_query_params["context_app"] = selected_app.slug
-    context_query_params["context_environment"] = selected_environment.slug
-    context["selector_query_params"] = context_query_params
-    context["selector_querystring"] = urlencode(query=context_query_params)
-    context["security_query_params"] = context["selector_query_params"]
-    context["security_querystring"] = context["selector_querystring"]
+    app = get_object_or_404(models.App, organization=organization, slug=app_slug)
+    environment = get_object_or_404(models.Environment, aws_account__organization=organization, slug=environment_slug)
 
-    context["selected_app"] = selected_app
-    context["selected_environment"] = selected_environment
-    context["task_role_policy_rows"] = _build_task_role_policies(
-        selected_app=selected_app,
-        selected_environment=selected_environment,
-    )
+    permission_request = _get_or_create_permission_request(app=app, environment=environment, user=request.user)
+
+    conversation = permission_request.conversation
+    messages = []
+    if conversation:
+        messages = conversation.messages.exclude(
+            content_type=models.Message.ContentType.SYSTEM_TRIGGER,
+        ).order_by("created_at")
+
+    context = base.get_app_shell_context(request=request, current_page="security")
+    context.update({
+        "permission_request": permission_request,
+        "app": app,
+        "environment": environment,
+        "conversation": conversation,
+        "messages": messages,
+        "service_options": SERVICE_OPTIONS,
+        "security_querystring": urlencode(query={"context_app": app_slug, "context_environment": environment_slug}),
+    })
 
     if request.htmx:
-        return render(request=request, template_name="devopshero_app/security/security_task_role_view.html", context=context)
+        return render(request=request, template_name="devopshero_app/security/security_permissions_editor.html", context=context)
 
     context["content_url"] = request.get_full_path()
     return render(request=request, template_name="devopshero_app/app_shell.html", context=context)
 
 
 @login_required
-def security_permission_request_history(request):
-    context = _build_security_context(request=request)
-    if request.htmx:
-        return render(
-            request=request,
-            template_name="devopshero_app/security/security_permission_request_history.html",
-            context=context,
-        )
+@require_POST
+def security_permissions_editor_apply(request, request_id):
+    """Set PermissionRequest status to APPROVED_PENDING_APPLY with final statements."""
+    organization = request.user.current_organization
+    permission_request = get_object_or_404(
+        models.PermissionRequest,
+        id=request_id,
+        app__organization=organization,
+    )
 
-    context["content_url"] = request.get_full_path()
-    return render(request=request, template_name="devopshero_app/app_shell.html", context=context)
+    try:
+        body = json.loads(request.body)
+        statements = body.get("statements", [])
+    except (json.JSONDecodeError, AttributeError):
+        return JsonResponse({"error": "Invalid JSON body"}, status=400)
+
+    permission_request.statements = statements
+    permission_request.status = models.PermissionRequest.Status.APPROVED_PENDING_APPLY
+    permission_request.save(update_fields=["statements", "status", "updated_at"])
+
+    return JsonResponse({"status": "approved_pending_apply", "request_id": str(permission_request.id)})
+
+
+@login_required
+def security_permissions_editor_statements(request, request_id):
+    """Return the policy cards HTML for left-panel polling."""
+    organization = request.user.current_organization
+    permission_request = get_object_or_404(
+        models.PermissionRequest,
+        id=request_id,
+        app__organization=organization,
+    )
+
+    context = {
+        "permission_request": permission_request,
+        "service_options": SERVICE_OPTIONS,
+    }
+    return render(
+        request=request,
+        template_name="devopshero_app/security/_permission_statements.html",
+        context=context,
+    )

@@ -1,14 +1,13 @@
 from .landing import landing
 from .dashboard import dashboard
-from .workspaces import workspaces, workspace_detail
+from .workspaces import workspaces, workspace_detail, workspace_create
 from .apps import app_detail, app_deployment_teardown, app_deployment_redeploy, app_deployment_status, app_teardown_confirm
 from .environments import environments, environment_detail
 from .security import (
     security,
-    security_permission_request_new,
-    security_permission_request_detail,
-    security_task_role_view,
-    security_permission_request_history,
+    security_permissions_editor,
+    security_permissions_editor_apply,
+    security_permissions_editor_statements,
 )
 from .settings import (
     settings,
@@ -42,6 +41,7 @@ __all__ = [
     "dashboard",
     "workspaces",
     "workspace_detail",
+    "workspace_create",
     "app_detail",
     "app_deployment_teardown",
     "app_deployment_redeploy",
@@ -50,10 +50,9 @@ __all__ = [
     "environments",
     "environment_detail",
     "security",
-    "security_permission_request_new",
-    "security_permission_request_detail",
-    "security_task_role_view",
-    "security_permission_request_history",
+    "security_permissions_editor",
+    "security_permissions_editor_apply",
+    "security_permissions_editor_statements",
     "settings",
     "settings_organization",
     "settings_members",
