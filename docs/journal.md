@@ -1,5 +1,17 @@
 # DevOpsHero Development Journal
 
+## 2026-02-17 - [UI] Deployment row status widget polish
+
+**Conversation:**
+
+Improved visual design of the deployment status indicator used in `_app_deployment_row.html` and the "Deployed to Environments" section of `app_detail.html`.
+
+**Key points:**
+- Grouped the status badge and "time ago" text into a single centered box with rounded border (`border rounded-lg px-3 py-2 text-center`), replacing the flat inline layout where status and time were side-by-side.
+- Added `cursor-pointer` to the Redeploy button in `app_detail.html` since Tailwind's preflight resets the cursor on `<button>` elements — without it the pointer hand never appears.
+- Fixed vertical centering of the right-side controls (status box + 3-dots menu): the service URL `<p>` was outside the `flex items-center justify-between` container, making the flex height shorter than the visual row. Moving the URL inside the left column ensures both sides share the same height and `items-center` centers correctly.
+- The 3-dots menu button is always rendered (never conditionally removed) but marked `invisible` on non-deployed rows — this reserves the fixed column width so the status box stays horizontally aligned across all rows regardless of deployment state.
+
 ## 2026-02-14 00:10 - [Deployment] Rename create_environment to provision_environment + retry semantics + ROLLBACK_COMPLETE cleanup
 
 **Conversation:** [2026-02-13-1745-174045a7.md](conversations/2026-02-13-1745-174045a7.md)
