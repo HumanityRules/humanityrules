@@ -1,5 +1,28 @@
 # DevOpsHero Development Journal
 
+## 2026-02-17 19:45 - [AgentChat] Permissions Editor — Two-Panel UI with Agent Chat
+
+**Conversation:**
+
+Replaced the mockup security permissions UI with a real permissions editor backed by the `PermissionRequest` model. The editor is a two-panel layout: left panel shows editable IAM policy statement cards, right panel embeds the existing chat infrastructure for agent-assisted editing.
+
+**Architecture decisions:**
+
+The `PermissionRequest` model is the persistence layer for editing sessions. Each request links to an App, Environment, and Conversation. The `statements` JSONField stores a list of policy statement dicts in a normalized format (`{sid, service, effect, actions, resources}`). Status transitions follow a simple flow: DRAFT → APPROVED_PENDING_APPLY (user clicks Apply) → APPLYING → APPLIED/FAILED (handled by a separate apply engine, out of scope).
+
+When a user navigates to the editor for an app+environment, we either resume an existing DRAFT request or create a new one. On first creation, `read_task_role_statements()` reads the actual inline IAM policies from the task role in the customer's AWS account (via `list_role_policies` + `get_role_policy`), so the editor starts with real data. The task role naming convention (`doh-{env.slug}-{app.slug}-task-role`[:64]) matches the CDK code in `deploy_app.py`.
+
+**Chat integration:** Each PermissionRequest gets a linked Conversation with mode=PERMISSIONS and a trigger message. The right panel reuses `_chat_panel.html` directly — no new chat infrastructure needed. The agent has an `update_permission_statements` MCP tool that can modify the PermissionRequest's statements, and the left panel polls every 3s via HTMX to pick up agent-driven changes.
+
+**Cleanup:** Removed the old mockup pages (permission_request_detail, permission_request_history, permission_request_workspace template, security_task_role_view) and their helper functions. The security hub now shows real PermissionRequest rows with color-coded status badges instead of fake data derived from deployment logs.
+
+**Key points:**
+- The `_get_or_create_permission_request` pattern ensures revisiting the same app+environment resumes the existing DRAFT rather than creating duplicates
+- AWS IAM reading is done synchronously in the view on first creation only — subsequent visits reuse the stored statements
+- The Apply button collects statement data from the DOM via JS (not a form POST) and sends JSON to the apply endpoint, which just flips the status — the actual IAM modification is a separate engine
+- Added `_get_aws_session_for_environment()` helper to `iam_utils.py` to centralize the session-creation pattern already used in `app_deployment_executor.py`
+- The `Conversation.Mode` field's max_length=20 already accommodates "permissions" (11 chars)
+
 ## 2026-02-17 - [UI] Deployment row status widget polish
 
 **Conversation:**

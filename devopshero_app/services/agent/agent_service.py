@@ -268,6 +268,7 @@ def create_conversation(user, workspace_id, repo_id, aws_account_id, mode: str |
     trigger_content = {
         Conversation.Mode.ENVIRONMENT_SETUP: "Hi! I'm your friendly user who would like to set up a new environment in my AWS account.",
         Conversation.Mode.APP_DEPLOYMENT: "Hi! I'm your friendly user who would like to deploy this repository.",
+        Conversation.Mode.PERMISSIONS: "Hi! I'd like help configuring IAM permissions for my deployed app.",
     }
 
     if not mode:
@@ -304,6 +305,7 @@ def _get_llm_model_for_conversation_mode(mode: str) -> str:
         Conversation.Mode.GENERAL: settings.CLAUDE_MODEL_GENERAL,
         Conversation.Mode.ENVIRONMENT_SETUP: settings.CLAUDE_MODEL_ENVIRONMENT,
         Conversation.Mode.APP_DEPLOYMENT: settings.CLAUDE_MODEL_APP_DEPLOYMENT,
+        Conversation.Mode.PERMISSIONS: settings.CLAUDE_MODEL_GENERAL,
     }
     return mode_to_setting.get(mode, settings.CLAUDE_MODEL_GENERAL)
 

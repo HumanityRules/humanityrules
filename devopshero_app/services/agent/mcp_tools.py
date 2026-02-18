@@ -14,7 +14,7 @@ from typing import Any
 from claude_agent_sdk import tool, create_sdk_mcp_server
 from django.conf import settings
 
-from devopshero_app.models import Conversation, Repository, Workspace
+from devopshero_app.models import Conversation, PermissionRequest, Repository, Workspace
 from devopshero_app.services.gitproviders import repo_service
 
 from .tools import (
@@ -77,6 +77,8 @@ TOOL_DISPLAY_NAMES = {
     "mcp__devopshero__teardown_deployment": "Teardown Deployment",
     "mcp__devopshero__test_docker_build": "Test Docker Build",
     "mcp__devopshero__git_ops": "Git Ops",
+    # Permissions
+    "mcp__devopshero__update_permission_statements": "Update Permission Statements",
     # Utility
     "mcp__devopshero__wait": "Wait",
 }
@@ -103,6 +105,7 @@ TOOL_MAIN_PARAMS = {
     "mcp__devopshero__get_deployment_status": "deployment_id",
     "mcp__devopshero__teardown_deployment": "app_id",
     "mcp__devopshero__git_ops": "action",
+    "mcp__devopshero__update_permission_statements": "statements",
     "mcp__devopshero__wait": "seconds",
     # External/Claude Agent SDK tools
     "Read": "file_path",
@@ -814,6 +817,52 @@ def create_devopshero_mcp_server(conversation: Conversation):
         return _mcp_response(result)
 
     # =========================================================================
+    # Permissions Tools
+    # =========================================================================
+
+    @tool(
+        "update_permission_statements",
+        (
+            "Update the IAM policy statements for a permission request linked to this conversation. "
+            "Use this to propose or modify permission statements in the permissions editor. "
+            "The statements parameter should be a list of statement objects, each with: "
+            "service (string), effect ('Allow' or 'Deny'), actions (list of strings), resources (list of ARN strings). "
+            "This replaces all existing statements with the provided list."
+        ),
+        {
+            "type": "object",
+            "properties": {
+                "statements": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "sid": {"type": "string", "description": "Statement identifier"},
+                            "service": {"type": "string", "description": "AWS service (e.g., s3, sqs, dynamodb)"},
+                            "effect": {"type": "string", "enum": ["Allow", "Deny"]},
+                            "actions": {"type": "array", "items": {"type": "string"}, "description": "Action names without service prefix (e.g., GetObject, PutObject)"},
+                            "resources": {"type": "array", "items": {"type": "string"}, "description": "Resource ARNs"},
+                        },
+                        "required": ["service", "effect", "actions", "resources"],
+                    },
+                    "description": "List of policy statement objects to set",
+                },
+            },
+            "required": ["statements"],
+        },
+    )
+    async def update_permission_statements(args: dict[str, Any]) -> dict[str, Any]:
+        """Update permission statements for the conversation's linked PermissionRequest."""
+        try:
+            pr = await PermissionRequest.objects.aget(conversation=conversation)
+        except PermissionRequest.DoesNotExist:
+            raise ValueError("No PermissionRequest linked to this conversation.")
+
+        pr.statements = args["statements"]
+        await pr.asave(update_fields=["statements", "updated_at"])
+        return _mcp_response({"status": "updated", "statement_count": len(pr.statements)})
+
+    # =========================================================================
     # Utility Tools
     # =========================================================================
 
@@ -853,6 +902,8 @@ def create_devopshero_mcp_server(conversation: Conversation):
             teardown_deployment,
             test_docker_build,
             git_ops,
+            # Permissions
+            update_permission_statements,
             # Utility
             wait,
         ],
@@ -878,6 +929,8 @@ TOOL_NAMES = [
     "mcp__devopshero__teardown_deployment",
     "mcp__devopshero__test_docker_build",
     "mcp__devopshero__git_ops",
+    # Permissions
+    "mcp__devopshero__update_permission_statements",
     # Utility
     "mcp__devopshero__wait",
 ]
