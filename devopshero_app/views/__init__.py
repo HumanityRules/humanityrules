@@ -1,7 +1,7 @@
 from .landing import landing
 from .dashboard import dashboard
 from .workspaces import workspaces, workspace_detail
-from .apps import app_detail, app_deployment_teardown, app_deployment_status, app_teardown_confirm
+from .apps import app_detail, app_deployment_teardown, app_deployment_redeploy, app_deployment_status, app_teardown_confirm
 from .environments import environments, environment_detail
 from .security import (
     security,
@@ -44,6 +44,7 @@ __all__ = [
     "workspace_detail",
     "app_detail",
     "app_deployment_teardown",
+    "app_deployment_redeploy",
     "app_deployment_status",
     "app_teardown_confirm",
     "environments",

@@ -12,6 +12,7 @@ urlpatterns = [
     path("workspaces/<slug:workspace_slug>/", views.workspace_detail, name="workspace_detail"),
     path("apps/<slug:app_slug>/", views.app_detail, name="app_detail"),
     path("apps/<slug:app_slug>/deployments/<uuid:deployment_id>/teardown/", views.app_deployment_teardown, name="app_deployment_teardown"),
+    path("apps/<slug:app_slug>/deployments/<uuid:deployment_id>/redeploy/", views.app_deployment_redeploy, name="app_deployment_redeploy"),
     path("apps/<slug:app_slug>/deployments/<uuid:deployment_id>/status/", views.app_deployment_status, name="app_deployment_status"),
     path("apps/<slug:app_slug>/deployments/<uuid:deployment_id>/teardown-confirm/", views.app_teardown_confirm, name="app_teardown_confirm"),
     path("environments/", views.environments, name="environments"),
