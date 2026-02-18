@@ -1,8 +1,11 @@
 from django.contrib.auth.decorators import login_required
-from django.db.models import Max, OuterRef, Prefetch, Subquery, Sum
-from django.shortcuts import get_object_or_404, render
+from django.db.models import Max, OuterRef, Prefetch, Subquery, Sum, Value
+from django.db.models.functions import Coalesce
+from django.shortcuts import get_object_or_404, redirect, render
+from django.utils.text import slugify
+from django.views.decorators.http import require_POST
 
-from devopshero_app.models import Conversation, Deployment, Repository, Workspace
+from devopshero_app.models import App, Conversation, Deployment, Repository, Workspace
 
 from .base import get_app_shell_context
 
@@ -12,9 +15,21 @@ def workspaces(request):
     """List all workspaces in the current organization."""
     context = get_app_shell_context(request=request, current_page="workspaces")
     
+    latest_deployment_status = (
+        Deployment.objects.filter(app=OuterRef("pk"))
+        .order_by("-created_at")
+        .values("status")[:1]
+    )
+    apps_prefetch = Prefetch(
+        "apps",
+        queryset=App.objects.annotate(
+            latest_status=Coalesce(Subquery(latest_deployment_status), Value("never_deployed")),
+        ).order_by("name"),
+        to_attr="annotated_apps",
+    )
     workspace_list = Workspace.objects.filter(
         organization=request.user.current_organization,
-    ).prefetch_related("apps").order_by("name")
+    ).prefetch_related(apps_prefetch).order_by("name")
     
     context["workspaces"] = workspace_list
     
@@ -87,4 +102,29 @@ def workspace_detail(request, workspace_slug):
 
     context["content_url"] = f"/workspaces/{workspace_slug}/"
     return render(request, "devopshero_app/app_shell.html", context=context)
+
+
+@login_required
+@require_POST
+def workspace_create(request):
+    """Create a new workspace and redirect to it."""
+    name = request.POST.get("name", "").strip()
+    if not name:
+        return redirect("workspaces")
+
+    org = request.user.current_organization
+    base_slug = slugify(name)
+    slug = base_slug
+    counter = 1
+    while Workspace.objects.filter(organization=org, slug=slug).exists():
+        slug = f"{base_slug}-{counter}"
+        counter += 1
+
+    workspace = Workspace.objects.create(
+        organization=org,
+        name=name,
+        slug=slug,
+        created_by=request.user,
+    )
+    return redirect("workspace_detail", workspace_slug=workspace.slug)
 
