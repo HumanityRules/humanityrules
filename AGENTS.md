@@ -53,14 +53,6 @@ The main developer documentation lives in the docs/ subdirectory. **When creatin
 - **`infra_devopshero/AGENTS.md`** — Control plane CDK infrastructure, deployment operations, AWS credentials setup
 
 
-# Django 6.0 Template Partials
-
-**Prefer partials over plain `{% include %}`** — they're the modern Django 6.0 approach.
-
-- **Same template:** `{% partialdef name %}...{% endpartialdef %}` then `{% partial name %}`
-- **External template:** `{% include "path/to/template.html#partial_name" with foo=bar %}`
-
-
 # Django 6.0 Async ORM
 
 **Use native async ORM methods instead of `sync_to_async`.** Django 6.0 has full async ORM support — don't wrap sync methods.

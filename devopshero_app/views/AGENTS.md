@@ -167,3 +167,11 @@ All HTMX requests inherit this header automatically. Two rules follow:
 2. **Browser history works**: `hx-push-url="true"` + `hx-history-elt` enables proper back/forward.
 3. **Direct URL access works**: Views handle both htmx requests (return partial) and full page loads (return app_shell with content_url).
 4. **DRY**: Subsection templates extend their parent, so tab navigation is defined once.
+
+
+## Django 6.0 Template Partials
+
+**Prefer partials over plain `{% include %}`** — they're the modern Django 6.0 approach.
+
+- **Same template:** `{% partialdef name %}...{% endpartialdef %}` then `{% partial name %}`
+- **External template:** `{% include "path/to/template.html#partial_name" with foo=bar %}`
