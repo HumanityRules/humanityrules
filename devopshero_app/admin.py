@@ -15,6 +15,7 @@ from devopshero_app.models import (
     Message,
     Organization,
     OrganizationMembership,
+    PermissionRequest,
     Repository,
     User,
     WaitlistSignup,
@@ -245,6 +246,15 @@ class LLMUsageLogAdmin(admin.ModelAdmin):
 
     def has_delete_permission(self, request, obj=None):
         return False
+
+
+@admin.register(PermissionRequest)
+class PermissionRequestAdmin(admin.ModelAdmin):
+    list_display = ["id", "app", "environment", "status", "created_by", "created_at", "updated_at"]
+    list_filter = ["status", "app__organization"]
+    search_fields = ["app__name", "environment__name", "created_by__email", "status_message"]
+    readonly_fields = ["id", "statements", "created_at", "updated_at"]
+    autocomplete_fields = ["app", "environment", "conversation", "created_by"]
 
 
 @admin.register(WaitlistSignup)

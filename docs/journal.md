@@ -1,5 +1,19 @@
 # DevOpsHero Development Journal
 
+## 2026-02-18 18:20 - [AgentChat] Remove agent permissions update capability
+
+**Conversation:** [2026-02-18-1820-107c2e52.md](conversations/2026-02-18-1820-107c2e52.md)
+
+Removed the `update_permission_statements` MCP tool and all supporting SSE OOB plumbing that pushed agent-driven statement changes to the permissions editor UI in real time. The permissions editor works well with manual user edits only, and the agent-write path added complexity (OOB rendering, async template calls, htmx re-processing) that wasn't paying for itself yet. Can be re-implemented later if needed.
+
+The PERMISSIONS conversation mode stays — the chat panel in the permissions editor still works for the agent to discuss permissions, it just can't modify statements directly anymore.
+
+**Key points:**
+- Removed the MCP tool definition, its entries in `TOOL_DISPLAY_NAMES`, `TOOL_MAIN_PARAMS`, the tools list, and `TOOL_NAMES`
+- Removed `_render_permission_statements_oob` async function from `chat.py` and all `statements_oob_html` handling in the SSE event pipeline (`event_generator`, `_render_streaming_tool_result`, `_format_sse_event`)
+- Reverted `processOobElements` in `_chat_panel.html` — removed `htmx.process()` and `htmx.trigger('htmx:afterSwap')` calls that were only needed for the permissions OOB swap; existing OOB swaps (title, cost) are plain text and don't need htmx re-initialization
+- `PermissionRequest` import removed from `mcp_tools.py` since it was only used by the deleted tool
+
 ## 2026-02-17 19:45 - [AgentChat] Permissions Editor — Two-Panel UI with Agent Chat
 
 **Conversation:**
