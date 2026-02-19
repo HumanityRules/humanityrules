@@ -1103,6 +1103,20 @@ class PermissionRequest(models.Model):
         return f"PermissionRequest {self.id} ({self.status})"
 
 
+class AwsResourceCache(models.Model):
+    """Cached AWS resource listings per environment and service."""
+    environment = models.ForeignKey(Environment, on_delete=models.CASCADE, related_name="resource_caches")
+    service = models.CharField(max_length=100)
+    resources = models.JSONField(default=list, help_text="List of {arn, label} dicts")
+    fetched_at = models.DateTimeField()
+
+    class Meta:
+        unique_together = [("environment", "service")]
+
+    def __str__(self):
+        return f"{self.environment} / {self.service} ({len(self.resources)} resources)"
+
+
 # =============================================================================
 # Signals
 # =============================================================================

@@ -38,6 +38,18 @@
             <div class="p-5">
                 <div class="flex items-center justify-between">
                     <h2 class="text-sm font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">Policy statements</h2>
+                    <div class="flex items-center gap-2">
+                    {# Refresh resources button #}
+                    <button type="button"
+                            class="rounded-md border border-gray-300 px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:text-gray-300 dark:hover:bg-gray-800"
+                            hx-post="{% url 'security_permissions_editor_refresh_resources' permission_request_id=permission_request.id %}"
+                            hx-target="#statements-container"
+                            hx-swap="innerHTML"
+                            hx-indicator="#refresh-indicator"
+                            hx-disabled-elt="this">
+                        <span class="htmx-indicator-hide">Refresh resources</span>
+                        <span id="refresh-indicator" class="htmx-indicator">Refreshing…</span>
+                    </button>
                     {# Add service button + picker dropdown #}
                     <div class="relative" id="service-picker-wrapper">
                         <button type="button" id="add-service-btn"
@@ -53,6 +65,7 @@
                                 {# Populated by JS #}
                             </div>
                         </div>
+                    </div>
                     </div>
                 </div>
 

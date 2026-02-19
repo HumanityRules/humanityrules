@@ -115,13 +115,11 @@ def _group_statements_by_service(statements, available_resources_by_service):
 
 
 def _fetch_available_resources(permission_request):
-    """Fetch available AWS resources for all services in a permission request."""
-    from ..services.infra_customer import iam_utils
-
+    """Fetch available AWS resources for all services in a permission request (cache-backed)."""
     services = [stmt.get("service") for stmt in (permission_request.statements or []) if stmt.get("service")]
     if not services:
         return {}
-    return iam_utils.list_resources_for_services(permission_request.environment, services)
+    return permissions_service.get_resources_for_services(permission_request.environment, services)
 
 
 def _get_all_service_options():
@@ -180,8 +178,7 @@ def security_permissions_editor(request):
         content_type=models.Message.ContentType.SYSTEM_TRIGGER,
     ).order_by("created_at")
 
-    # available_resources = _fetch_available_resources(permission_request)
-    available_resources = {}
+    available_resources = _fetch_available_resources(permission_request)
     service_groups = _group_statements_by_service(permission_request.statements or [], available_resources)
     service_options = _get_all_service_options()
 
@@ -247,8 +244,7 @@ def security_permissions_editor_update_statement(request, permission_request_id)
             )
         return HttpResponse()
 
-    # available_resources = _fetch_available_resources(permission_request)
-    available_resources = {}
+    available_resources = _fetch_available_resources(permission_request)
     service_groups = _group_statements_by_service(permission_request.statements or [], available_resources)
     group = next((g for g in service_groups if g["service"] == service), None)
     if group is None:
@@ -264,7 +260,7 @@ def security_permissions_editor_update_statement(request, permission_request_id)
 def security_permissions_editor_service_group(request, permission_request_id):
     """HTMX endpoint: return a rendered service group partial for a new service."""
     organization = request.user.current_organization
-    get_object_or_404(
+    permission_request = get_object_or_404(
         models.PermissionRequest,
         id=permission_request_id,
         app__organization=organization,
@@ -274,14 +270,37 @@ def security_permissions_editor_service_group(request, permission_request_id):
     if not service:
         return JsonResponse({"error": "Missing service parameter"}, status=400)
 
+    available = permissions_service.get_resources_for_services(permission_request.environment, [service])
     group = _build_service_group_data(
         service=service,
         selected_levels=set(),
         resources=[],
-        available_resources=[],
+        available_resources=available.get(service, []),
     )
     return render(
         request=request,
         template_name="devopshero_app/security/_permission_service_group.html",
-        context={"group": group},
+        context={"group": group, "permission_request": permission_request},
+    )
+
+
+@login_required
+@require_POST
+def security_permissions_editor_refresh_resources(request, permission_request_id):
+    """Clear and re-fetch AWS resource cache, then re-render the statements partial."""
+    organization = request.user.current_organization
+    permission_request = get_object_or_404(
+        models.PermissionRequest,
+        id=permission_request_id,
+        app__organization=organization,
+    )
+
+    services = [stmt.get("service") for stmt in (permission_request.statements or []) if stmt.get("service")]
+    available_resources = permissions_service.refresh_resources_cache(permission_request.environment, services)
+    service_groups = _group_statements_by_service(permission_request.statements or [], available_resources)
+
+    return render(
+        request=request,
+        template_name="devopshero_app/security/_permission_statements.html",
+        context={"service_groups": service_groups, "permission_request": permission_request},
     )
