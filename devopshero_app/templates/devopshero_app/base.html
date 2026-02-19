@@ -20,6 +20,10 @@
     <!-- like for example the profile dropdown menu -->
     <script src="https://cdn.jsdelivr.net/npm/@tailwindplus/elements@1" type="module"></script>
 
+    <!-- Alpine.js for lightweight local UI state (e.g. multi-select dropdowns) -->
+    <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3/dist/cdn.min.js"></script>
+    <style>[x-cloak] { display: none !important; }</style>
+
     {% include "devopshero_app/partials/_posthog.html" %}
 
     {% block extra_head %}{% endblock %}    
