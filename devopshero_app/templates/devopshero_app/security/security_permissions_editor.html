@@ -114,7 +114,7 @@ const pickerList = document.getElementById('service-picker-list');
 function renderPickerList(filter = '') {
     const lower = filter.toLowerCase();
     const curated = SERVICE_OPTIONS.filter(s => s.is_curated);
-    const matchFn = s => !lower || s.label.toLowerCase().includes(lower) || s.value.toLowerCase().includes(lower);
+    const matchFn = s => !lower || s.label.toLowerCase().includes(lower);
     const curatedFiltered = curated.filter(matchFn);
     const allFiltered = SERVICE_OPTIONS.filter(matchFn);
 
@@ -122,14 +122,14 @@ function renderPickerList(filter = '') {
     if (curatedFiltered.length > 0 && !lower) {
         html += '<div class="px-2 pt-1 pb-0.5 text-xs font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500">Common</div>';
         curatedFiltered.forEach(s => {
-            html += `<button type="button" data-service="${s.value}" class="service-picker-item w-full text-left rounded-md px-2 py-1.5 text-sm text-gray-700 hover:bg-indigo-50 hover:text-indigo-700 dark:text-gray-300 dark:hover:bg-indigo-500/10 dark:hover:text-indigo-300">${s.label} <span class="text-gray-400 dark:text-gray-500 text-xs">${s.value}</span></button>`;
+            html += `<button type="button" data-service="${s.value}" class="service-picker-item w-full text-left rounded-md px-2 py-1.5 text-sm text-gray-700 hover:bg-indigo-50 hover:text-indigo-700 dark:text-gray-300 dark:hover:bg-indigo-500/10 dark:hover:text-indigo-300">${s.label}</button>`;
         });
         html += '<div class="my-1 border-t border-gray-100 dark:border-gray-700"></div>';
     }
     if (allFiltered.length > 0) {
         if (!lower) html += '<div class="px-2 pt-1 pb-0.5 text-xs font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500">All services</div>';
         allFiltered.forEach(s => {
-            html += `<button type="button" data-service="${s.value}" class="service-picker-item w-full text-left rounded-md px-2 py-1.5 text-sm text-gray-700 hover:bg-indigo-50 hover:text-indigo-700 dark:text-gray-300 dark:hover:bg-indigo-500/10 dark:hover:text-indigo-300">${s.label} <span class="text-gray-400 dark:text-gray-500 text-xs">${s.value}</span></button>`;
+            html += `<button type="button" data-service="${s.value}" class="service-picker-item w-full text-left rounded-md px-2 py-1.5 text-sm text-gray-700 hover:bg-indigo-50 hover:text-indigo-700 dark:text-gray-300 dark:hover:bg-indigo-500/10 dark:hover:text-indigo-300">${s.label}</button>`;
         });
     }
     if (!html) html = '<div class="px-2 py-3 text-center text-sm text-gray-400 dark:text-gray-500">No matching services</div>';
