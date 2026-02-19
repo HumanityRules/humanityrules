@@ -1,5 +1,24 @@
 # DevOpsHero Development Journal
 
+## 2026-02-19 13:24 - [UI] Permissions editor: Resources dropdown redesign as combobox with search
+
+**Conversation:** [2026-02-19-1325-9efa9084.md](conversations/2026-02-19-1325-9efa9084.md)
+
+Redesigned the Resources dropdown in the permissions editor to replace the native `<select>` element with a custom Alpine.js combobox that visually matches the Access Levels dropdown and adds search/filter plus manual ARN entry.
+
+The previous implementation used a plain HTML `<select>` for resource selection, a separate list of resource chips below, and a standalone manual ARN input with an Add button. This looked inconsistent next to the Access Levels dropdown which used a custom Alpine dropdown with chips, checkboxes, and a chevron. The new design unifies these into a single combobox pattern.
+
+**Design evolution through iteration:**
+
+The final design went through several rounds of refinement. Initially the resource chips were placed inside the trigger box (matching Access Levels exactly), but ARNs are much longer than access level names like "Read" or "Write", so chips were moved back below the dropdown as a separate list. The dropdown initially had a separate search input at the top and a separate manual ARN input at the bottom — these were merged into a single input that doubles as the trigger, the filter, and the ARN entry point. The placeholder dynamically switches between "Select resource..." (closed) and "Filter or paste resource ARN..." (open) using Alpine's `:placeholder` binding.
+
+**Key points:**
+- Created `devopshero_app/templatetags/aws_filters.py` with an `arn_short_name` filter that extracts the resource portion of an ARN (everything after the 5th colon). This shows `my-bucket/*` instead of the full ARN in chips, while preserving the resource type prefix (e.g. `table/my-table` for DynamoDB) which matters when a service has multiple resource types. Initial implementation incorrectly split on `/` which stripped bucket names from S3 ARNs like `arn:aws:s3:::my-bucket/*` → `*`.
+- The combobox input serves triple duty: (1) clicking it opens the dropdown via `@focus="open = true"`, (2) typing filters the resource list via Alpine `x-show` with `data-filter` attributes for case-insensitive contains matching, (3) pasting an ARN starting with `arn:` reveals an inline emerald Add button via `x-show="search.startsWith('arn:')"`. Enter key also submits but only when the value starts with `arn:` (htmx trigger condition).
+- The `x-data="{ open: false, search: '' }"` scope lives on the wrapper div outside the HTMX swap target `#resources-{service}`, so Alpine state (dropdown open, search text) survives fragment swaps — consistent with the pattern established for Access Levels and documented in AGENTS.md.
+- Added `autocomplete="off"` to suppress browser autocomplete popups that interfered with the custom dropdown. Added Escape key handler to close dropdown, clear search, and blur the input. Added a heavy custom shadow (`shadow-[0_10px_50px_-5px_rgba(0,0,0,0.5)]`) to visually lift the dropdown from the page surface.
+- Dropdown items show full ARNs in monospace font for precision, with checkbox-style SVGs (emerald for selected, gray for unselected) matching the Access Levels pattern. Clicking a selected resource removes it (toggle behavior).
+
 ## 2026-02-19 22:15 - [Deployment] Fix CREATE_ROLLBACK_COMPLETE stacks blocking re-deployment
 
 **Conversation:** [2026-02-19-1307-c1189ea2.md](conversations/2026-02-19-1307-c1189ea2.md)
