@@ -1,5 +1,7 @@
 import logging
 
+from django.utils import timezone
+
 from .. import models
 from .infra_customer import iam_utils
 
@@ -83,3 +85,66 @@ def approve(permission_request):
     """Set PermissionRequest status to APPROVED_PENDING_APPLY."""
     permission_request.status = models.PermissionRequest.Status.APPROVED_PENDING_APPLY
     permission_request.save(update_fields=["status", "updated_at"])
+
+
+def get_resources_for_services(environment, services):
+    """Return cached AWS resources, fetching from AWS only for cache misses.
+
+    Returns {"s3": [{"arn": "...", "label": "..."}, ...], ...}.
+    """
+    if not services:
+        return {}
+
+    cached = models.AwsResourceCache.objects.filter(
+        environment=environment, service__in=services,
+    )
+    result = {entry.service: entry.resources for entry in cached}
+
+    missing = [s for s in services if s not in result]
+    if missing:
+        fetched = iam_utils.list_resources_for_services(environment, missing)
+        now = timezone.now()
+        models.AwsResourceCache.objects.bulk_create(
+            [
+                models.AwsResourceCache(
+                    environment=environment,
+                    service=svc,
+                    resources=fetched.get(svc, []),
+                    fetched_at=now,
+                )
+                for svc in missing
+            ],
+            ignore_conflicts=True,
+        )
+        result.update(fetched)
+
+    return result
+
+
+def refresh_resources_cache(environment, services):
+    """Delete and re-fetch cached resources for the given services.
+
+    Returns {"s3": [{"arn": "...", "label": "..."}, ...], ...}.
+    """
+    if not services:
+        return {}
+
+    models.AwsResourceCache.objects.filter(
+        environment=environment, service__in=services,
+    ).delete()
+
+    fetched = iam_utils.list_resources_for_services(environment, services)
+    now = timezone.now()
+    models.AwsResourceCache.objects.bulk_create(
+        [
+            models.AwsResourceCache(
+                environment=environment,
+                service=svc,
+                resources=fetched.get(svc, []),
+                fetched_at=now,
+            )
+            for svc in services
+        ],
+        ignore_conflicts=True,
+    )
+    return fetched

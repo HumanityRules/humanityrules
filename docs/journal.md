@@ -1,5 +1,23 @@
 # DevOpsHero Development Journal
 
+## 2026-02-19 17:45 - [DomainModel] AwsResourceCache — DB-backed cache for AWS resource listings
+
+**Conversation:** [2026-02-19-0150-30ebb814.md](conversations/2026-02-19-0150-30ebb814.md)
+
+Added an `AwsResourceCache` model to avoid hitting AWS APIs (STS AssumeRole + List* calls) on every HTMX interaction in the permissions editor. The cache is per-environment (not per-PermissionRequest) because AWS resources belong to the infrastructure — two users editing different apps in the same environment see the same S3 buckets.
+
+**How it works.** `permissions_service.get_resources_for_services()` queries the cache table first, identifies which services are cache misses, calls `iam_utils.list_resources_for_services()` only for those, bulk-creates cache entries, and returns the combined result. A separate `refresh_resources_cache()` deletes and re-fetches everything for explicit refreshes.
+
+**Views wired up.** Uncommented the `_fetch_available_resources` calls that were disabled in the editor views (initial load, statement mutations, and new service addition). The `_fetch_available_resources` helper now delegates to the cache-aware service function instead of calling `iam_utils` directly. Added a new `security_permissions_editor_refresh_resources` POST endpoint + "Refresh resources" button in the editor UI.
+
+**No automatic expiry (intentional for now).** The `fetched_at` field is stored but not checked for staleness. Cache entries live until explicitly refreshed by the user or until the cache row is deleted. A TTL-based expiry was considered but deferred — for the permissions editor use case, stale-but-present resources are better than surprise AWS latency mid-editing.
+
+**Key points:**
+- `unique_together = [("environment", "service")]` ensures one cache row per service per environment
+- `bulk_create` with `ignore_conflicts=True` handles race conditions if two requests try to cache the same service simultaneously
+- Auto-increment PK (not UUID) — this is a cache table, not a domain entity
+- Registered in Django admin with read-only fields for debugging
+
 ## 2026-02-19 15:00 - [UI] Per-service-group HTMX swaps in permissions editor
 
 **Conversation:**

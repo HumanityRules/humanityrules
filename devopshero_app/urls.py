@@ -22,6 +22,7 @@ urlpatterns = [
     path("security/permissions/editor/", views.security_permissions_editor, name="security_permissions_editor"),
     path("security/permissions/<uuid:permission_request_id>/apply/", views.security_permissions_editor_apply, name="security_permissions_editor_apply"),
     path("security/permissions/<uuid:permission_request_id>/update-statement/", views.security_permissions_editor_update_statement, name="security_permissions_editor_update_statement"),
+    path("security/permissions/<uuid:permission_request_id>/refresh-resources/", views.security_permissions_editor_refresh_resources, name="security_permissions_editor_refresh_resources"),
     path("security/permissions/<uuid:permission_request_id>/service-group/", views.security_permissions_editor_service_group, name="security_permissions_editor_service_group"),
     path("settings/", views.settings, name="settings"),
     path("settings/organization/", views.settings_organization, name="settings_organization"),

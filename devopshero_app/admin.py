@@ -15,6 +15,7 @@ from devopshero_app.models import (
     Message,
     Organization,
     OrganizationMembership,
+    AwsResourceCache,
     PermissionRequest,
     Repository,
     User,
@@ -255,6 +256,14 @@ class PermissionRequestAdmin(admin.ModelAdmin):
     search_fields = ["app__name", "environment__name", "created_by__email", "status_message"]
     readonly_fields = ["id", "statements", "created_at", "updated_at"]
     autocomplete_fields = ["app", "environment", "conversation", "created_by"]
+
+
+@admin.register(AwsResourceCache)
+class AwsResourceCacheAdmin(admin.ModelAdmin):
+    list_display = ["environment", "service", "fetched_at"]
+    list_filter = ["service", "environment__aws_account__organization"]
+    search_fields = ["service", "environment__name"]
+    readonly_fields = ["environment", "service", "resources", "fetched_at"]
 
 
 @admin.register(WaitlistSignup)
