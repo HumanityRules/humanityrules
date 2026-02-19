@@ -1,5 +1,22 @@
 # DevOpsHero Development Journal
 
+## 2026-02-19 18:15 - [Bugfix] Idiomorph strips Alpine's x-show inline style during morph
+
+**Conversation:** [2026-02-19-1028-30ebb814.md](conversations/2026-02-19-1028-30ebb814.md)
+
+The access levels dropdown in the permissions editor was popping open whenever a resource was added or removed. The initial hypothesis (stale `window._alReopen` flag leaking across operations) was wrong — adding an `htmx:afterSettle` cleanup handler didn't fix it.
+
+**Root cause.** Alpine implements `x-show="open"` by setting `style="display: none"` on the element when `open` is `false`. The server-rendered HTML didn't include that inline style — it only had `x-show="open" x-cloak`. During `morph:outerHTML`, idiomorph diffs old DOM vs new HTML: it sees the old element has `style="display: none"` (set by Alpine) but the new HTML has no style attribute, so it **removes** the inline style. The element becomes visible. Alpine's reactive system doesn't notice because `open` is still `false` — nothing triggered a re-evaluation of `x-show`.
+
+**Fix.** Added `style="display: none"` directly in the template on the dropdown panel div. Now idiomorph sees the same style in both old and new HTML and leaves it alone. When Alpine initializes, it removes `x-cloak` and takes over via `x-show`, which also says "hidden" since `open` starts `false`. No conflict.
+
+**Alpine morph alternative considered.** Alpine has its own morph plugin that understands `x-show`, `x-data`, etc. natively. Using it via the htmx `alpine-morph` extension would fix this class of problem at the root. Decided against it for now — the inline style fix is surgical, and this is the only Alpine component being morphed. Worth revisiting if more Alpine+morph interactions appear.
+
+**Key points:**
+- `x-cloak` is a CSS-based hide (`[x-cloak] { display: none !important }`) that Alpine removes on init — it prevents FOUC on page load but is gone by the time morphs happen
+- Idiomorph treats inline styles as regular attributes to diff — it has no awareness of Alpine's reactive style management
+- When mixing Alpine `x-show` with idiomorph, always include the default inline style in server HTML so morphs preserve it
+
 ## 2026-02-19 17:45 - [DomainModel] AwsResourceCache — DB-backed cache for AWS resource listings
 
 **Conversation:** [2026-02-19-0150-30ebb814.md](conversations/2026-02-19-0150-30ebb814.md)
