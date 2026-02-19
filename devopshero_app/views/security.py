@@ -23,9 +23,13 @@ logger = logging.getLogger(__name__)
 
 @login_required
 def security(request):
+    if not request.htmx:
+        context = base.get_app_shell_context(request=request, current_page="security")
+        context["content_url"] = request.get_full_path()
+        return render(request=request, template_name="devopshero_app/app_shell.html", context=context)
+
     organization = request.user.current_organization
     context = base.get_app_shell_context(request=request, current_page="security")
-
     context["permission_issue_rows"] = []
     context["permission_request_rows"] = list(
         models.PermissionRequest.objects.filter(app__organization=organization)
@@ -33,11 +37,7 @@ def security(request):
         .order_by("-created_at")[:20]
     )
 
-    if request.htmx:
-        return render(request=request, template_name="devopshero_app/security/security_hub.html", context=context)
-
-    context["content_url"] = request.get_full_path()
-    return render(request=request, template_name="devopshero_app/app_shell.html", context=context)
+    return render(request=request, template_name="devopshero_app/security/security_hub.html", context=context)
 
 
 # =============================================================================

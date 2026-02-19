@@ -1,5 +1,22 @@
 # DevOpsHero Development Journal
 
+## 2026-02-18 20:45 - [UI] HTMX app shell early-return optimization across all views
+
+**Conversation:** [2026-02-18-2000-c8255962.md](conversations/2026-02-18-2000-c8255962.md)
+
+Fixed 9 views that were doing expensive work (DB queries, subqueries, external API calls) on non-HTMX requests where only the app shell frame is needed. The app shell pattern means every full page refresh hits the view twice — once for the shell, once for the content via HTMX. Without the early return, all that work runs twice but is only used once.
+
+The fix is mechanical: add `if not request.htmx: return` before any expensive work. This was applied to `security`, `chat_list`, `chat_view`, `workspaces`, `workspace_detail`, `app_detail`, `dashboard`, `settings_aws_accounts`, and `settings_git_integrations`. The worst offender was `settings_git_integrations` which was calling `github_client.sync_repositories()` (an external GitHub API call) on every full page load.
+
+Also updated `views/AGENTS.md` to show the correct early-return pattern in both the top-level page and nested page examples, with an explicit callout explaining why. The previous examples used `if request.htmx: ... else: ...` which naturally led to hoisting shared setup above the check — and the expensive stuff came along for the ride. The new `if not request.htmx: return` guard clause makes the mistake structurally impossible.
+
+Claude did a mass find-and-replace of the same three-line pattern across 9 views without introducing a single bug. Mass refactoring across view files without breaking anything is not nothing — but let's be honest, the pattern was identified by a human noticing a debugger breakpoint firing twice. The AI just did the mechanical part.
+
+**Key points:**
+- The root cause was a misleading example in AGENTS.md — the code template taught the wrong pattern, and every view copied it
+- `chat_view` had a subtlety: it checks `request.htmx.target == "chat-panel"` for partial panel updates vs full navigation, so the early return had to come before both checks
+- `settings_git_integrations` POST handling (GitHub sync) is safe behind the `not request.htmx` guard because POST requests in this SPA always come via HTMX
+
 ## 2026-02-18 20:15 - [DomainModel] Permissions service extraction + dedicated IAM policy
 
 **Conversation:** [2026-02-18-1928-c8255962.md](conversations/2026-02-18-1928-c8255962.md)

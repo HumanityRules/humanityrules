@@ -13,8 +13,11 @@ from .base import get_app_shell_context
 @login_required
 def workspaces(request):
     """List all workspaces in the current organization."""
-    context = get_app_shell_context(request=request, current_page="workspaces")
-    
+    if not request.htmx:
+        context = get_app_shell_context(request=request, current_page="workspaces")
+        context["content_url"] = "/workspaces/"
+        return render(request, "devopshero_app/app_shell.html", context=context)
+
     latest_deployment_status = (
         Deployment.objects.filter(app=OuterRef("pk"))
         .order_by("-created_at")
@@ -30,27 +33,26 @@ def workspaces(request):
     workspace_list = Workspace.objects.filter(
         organization=request.user.current_organization,
     ).prefetch_related(apps_prefetch).order_by("name")
-    
-    context["workspaces"] = workspace_list
-    
-    if request.htmx:
-        return render(request, "devopshero_app/workspaces/workspaces.html", context=context)
 
-    context["content_url"] = "/workspaces/"
-    return render(request, "devopshero_app/app_shell.html", context=context)
+    context = get_app_shell_context(request=request, current_page="workspaces")
+    context["workspaces"] = workspace_list
+    return render(request, "devopshero_app/workspaces/workspaces.html", context=context)
 
 
 @login_required
 def workspace_detail(request, workspace_slug):
     """Show workspace detail with apps, datastores, and conversations."""
-    context = get_app_shell_context(request=request, current_page="workspaces")
-    
+    if not request.htmx:
+        context = get_app_shell_context(request=request, current_page="workspaces")
+        context["content_url"] = f"/workspaces/{workspace_slug}/"
+        return render(request, "devopshero_app/app_shell.html", context=context)
+
     workspace = get_object_or_404(
         Workspace,
         slug=workspace_slug,
         organization=request.user.current_organization,
     )
-    
+
     # Prefetch active deployments (deployed, not being torn down) with their environments
     active_deployments_prefetch = Prefetch(
         "deployments",
@@ -85,23 +87,20 @@ def workspace_detail(request, workspace_slug):
     if show_costs:
         conversations_qs = conversations_qs.annotate(total_cost=Sum("llm_usage_logs__cost_usd"))
     conversations = conversations_qs[:10]
-    
+
     repositories = Repository.objects.filter(
         organization=request.user.current_organization,
     ).order_by("full_name")
-    
+
+    context = get_app_shell_context(request=request, current_page="workspaces")
     context["workspace"] = workspace
     context["apps"] = apps
     context["datastores"] = datastores
     context["conversations"] = conversations
     context["repositories"] = repositories
     context["show_costs"] = show_costs
-    
-    if request.htmx:
-        return render(request, "devopshero_app/workspaces/workspace_detail.html", context=context)
 
-    context["content_url"] = f"/workspaces/{workspace_slug}/"
-    return render(request, "devopshero_app/app_shell.html", context=context)
+    return render(request, "devopshero_app/workspaces/workspace_detail.html", context=context)
 
 
 @login_required
