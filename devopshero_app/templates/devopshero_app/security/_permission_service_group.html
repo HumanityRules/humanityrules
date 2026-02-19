@@ -1,5 +1,5 @@
 {# Service group: one collapsible card per service #}
-{% url 'security_permissions_editor_update_statement' permission_request_id=permission_request.id as update_url %}
+{% url 'security_permissions_editor_update_statement' app_permission_request_id=app_permission_request.id as update_url %}
 <div id="service-group-{{ group.service }}" class="service-group rounded-lg border border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-800/60" data-service="{{ group.service }}">
     <details open class="group">
         <summary class="flex items-center justify-between px-4 py-3 cursor-pointer list-none [&::-webkit-details-marker]:hidden select-none bg-gray-50 dark:bg-gray-800 rounded-t-lg">
@@ -45,7 +45,7 @@
 
 {% partialdef resources %}
 {% load aws_filters %}
-{% url 'security_permissions_editor_update_statement' permission_request_id=permission_request.id as update_url %}
+{% url 'security_permissions_editor_update_statement' app_permission_request_id=app_permission_request.id as update_url %}
 {# Combobox: input doubles as trigger and filter #}
 <div class="mt-1 flex gap-1.5">
     <div class="relative flex-1">
@@ -127,7 +127,7 @@
 {% endpartialdef %}
 
 {% partialdef access_levels %}
-{% url 'security_permissions_editor_update_statement' permission_request_id=permission_request.id as update_url %}
+{% url 'security_permissions_editor_update_statement' app_permission_request_id=app_permission_request.id as update_url %}
 {# Trigger: shows chips when levels are selected, placeholder otherwise #}
 <div @click="open = !open"
      class="mt-1 flex w-full cursor-pointer items-center justify-between rounded-md border border-gray-300 bg-white px-2 py-1.5 text-sm dark:border-gray-600 dark:bg-gray-900">

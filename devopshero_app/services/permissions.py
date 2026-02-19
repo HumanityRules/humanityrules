@@ -10,12 +10,12 @@ logger = logging.getLogger(__name__)
 DOH_APP_PERMISSIONS_POLICY_NAME = "doh-app-permissions"
 
 
-def get_or_create_draft(app, environment, user) -> models.PermissionRequest:
-    """Find an existing DRAFT PermissionRequest for this app+environment, or create a new one."""
-    existing = models.PermissionRequest.objects.filter(
+def get_or_create_draft(app, environment, user) -> models.AppPermissionRequest:
+    """Find an existing DRAFT AppPermissionRequest for this app+environment, or create a new one."""
+    existing = models.AppPermissionRequest.objects.filter(
         app=app,
         environment=environment,
-        status=models.PermissionRequest.Status.DRAFT,
+        status=models.AppPermissionRequest.Status.DRAFT,
     ).order_by("-created_at").first()
 
     if existing:
@@ -29,18 +29,18 @@ def get_or_create_draft(app, environment, user) -> models.PermissionRequest:
         logger.exception("Failed to read IAM policies for %s/%s", app.slug, environment.slug)
         statements = []
 
-    return models.PermissionRequest.objects.create(
+    return models.AppPermissionRequest.objects.create(
         app=app,
         environment=environment,
         statements=statements,
-        status=models.PermissionRequest.Status.DRAFT,
+        status=models.AppPermissionRequest.Status.DRAFT,
         created_by=user,
     )
 
 
-def update_statements(permission_request, *, action: str, service: str, level: str = "", arn: str = ""):
-    """Mutate a single aspect of a PermissionRequest's statements and save."""
-    statements = permission_request.statements or []
+def update_statements(app_permission_request, *, action: str, service: str, level: str = "", arn: str = ""):
+    """Mutate a single aspect of an AppPermissionRequest's statements and save."""
+    statements = app_permission_request.statements or []
 
     def _find_or_create_service(svc):
         for stmt in statements:
@@ -54,8 +54,8 @@ def update_statements(permission_request, *, action: str, service: str, level: s
         _find_or_create_service(service)
 
     elif action == "remove_service" and service:
-        permission_request.statements = [s for s in statements if s.get("service") != service]
-        statements = permission_request.statements
+        app_permission_request.statements = [s for s in statements if s.get("service") != service]
+        statements = app_permission_request.statements
 
     elif action == "add_level" and service and level:
         stmt = _find_or_create_service(service)
@@ -77,14 +77,14 @@ def update_statements(permission_request, *, action: str, service: str, level: s
             if stmt.get("service") == service:
                 stmt["resources"] = [r for r in stmt.get("resources", []) if r != arn]
 
-    permission_request.statements = statements
-    permission_request.save(update_fields=["statements", "updated_at"])
+    app_permission_request.statements = statements
+    app_permission_request.save(update_fields=["statements", "updated_at"])
 
 
-def approve(permission_request):
-    """Set PermissionRequest status to APPROVED_PENDING_APPLY."""
-    permission_request.status = models.PermissionRequest.Status.APPROVED_PENDING_APPLY
-    permission_request.save(update_fields=["status", "updated_at"])
+def approve(app_permission_request):
+    """Set AppPermissionRequest status to APPROVED_PENDING_APPLY."""
+    app_permission_request.status = models.AppPermissionRequest.Status.APPROVED_PENDING_APPLY
+    app_permission_request.save(update_fields=["status", "updated_at"])
 
 
 def get_resources_for_services(environment, services):

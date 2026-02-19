@@ -1075,7 +1075,7 @@ class LLMUsageLog(models.Model):
         return f"{self.source} — {self.model_alias} — ${self.cost_usd or 0:.4f}"
 
 
-class PermissionRequest(models.Model):
+class AppPermissionRequest(models.Model):
     """A request to modify IAM task-role policies for a deployed app."""
 
     class Status(models.TextChoices):
@@ -1086,13 +1086,13 @@ class PermissionRequest(models.Model):
         FAILED = "failed", "Failed"
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid7, editable=False)
-    app = models.ForeignKey(App, on_delete=models.CASCADE, related_name="permission_requests")
-    environment = models.ForeignKey(Environment, on_delete=models.CASCADE, related_name="permission_requests")
-    conversation = models.ForeignKey(Conversation, on_delete=models.SET_NULL, null=True, blank=True, related_name="permission_requests")
+    app = models.ForeignKey(App, on_delete=models.CASCADE, related_name="app_permission_requests")
+    environment = models.ForeignKey(Environment, on_delete=models.CASCADE, related_name="app_permission_requests")
+    conversation = models.ForeignKey(Conversation, on_delete=models.SET_NULL, null=True, blank=True, related_name="app_permission_requests")
     statements = models.JSONField(default=list, help_text="List of policy statement dicts")
     status = models.CharField(max_length=30, choices=Status.choices, default=Status.DRAFT)
     status_message = models.TextField(blank=True)
-    created_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, related_name="created_permission_requests")
+    created_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, related_name="created_app_permission_requests")
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -1100,7 +1100,7 @@ class PermissionRequest(models.Model):
         ordering = ["-created_at"]
 
     def __str__(self):
-        return f"PermissionRequest {self.id} ({self.status})"
+        return f"AppPermissionRequest {self.id} ({self.status})"
 
 
 class AwsResourceCache(models.Model):

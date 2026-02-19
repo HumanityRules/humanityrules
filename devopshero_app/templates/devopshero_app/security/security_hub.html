@@ -40,11 +40,11 @@
 
     <section class="rounded-lg border border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-800">
         <div class="px-3 py-2 text-sm font-semibold text-gray-900 dark:text-white">
-            Permission requests ({{ permission_request_rows|length }})
+            Permission requests ({{ app_permission_request_rows|length }})
         </div>
         <div class="border-t border-gray-200 dark:border-gray-700">
             <div class="divide-y divide-gray-200 dark:divide-gray-700">
-                {% for pr in permission_request_rows %}
+                {% for pr in app_permission_request_rows %}
                 <a href="{% url 'security_permissions_editor' %}?context_app={{ pr.app.slug }}&context_environment={{ pr.environment.slug }}"
                    hx-get="{% url 'security_permissions_editor' %}?context_app={{ pr.app.slug }}&context_environment={{ pr.environment.slug }}"
                    hx-target="#main-content"
