@@ -7,7 +7,10 @@ from .security import (
     security,
     security_permissions_editor,
     security_permissions_editor_apply,
+    security_permissions_editor_resources,
+    security_permissions_editor_service_group,
     security_permissions_editor_statements,
+    security_permissions_editor_update_statement,
 )
 from .settings import (
     settings,
@@ -52,7 +55,10 @@ __all__ = [
     "security",
     "security_permissions_editor",
     "security_permissions_editor_apply",
+    "security_permissions_editor_resources",
+    "security_permissions_editor_service_group",
     "security_permissions_editor_statements",
+    "security_permissions_editor_update_statement",
     "settings",
     "settings_organization",
     "settings_members",

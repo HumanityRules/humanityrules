@@ -1,0 +1,112 @@
+{# Service group: one collapsible card per service #}
+{% url 'security_permissions_editor_update_statement' permission_request_id=permission_request.id as update_url %}
+<div class="service-group rounded-lg border border-gray-200 dark:border-gray-700" data-service="{{ group.service }}">
+    <details open class="group">
+        <summary class="flex items-center justify-between px-4 py-3 cursor-pointer list-none [&::-webkit-details-marker]:hidden select-none bg-gray-50 dark:bg-gray-800 rounded-t-lg">
+            <div class="flex items-center space-x-2">
+                <svg class="w-4 h-4 text-gray-400 transition-transform duration-200 group-open:rotate-90" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
+                </svg>
+                <span class="text-sm font-semibold text-gray-900 dark:text-white">{{ group.display_name }}</span>
+                <span class="service-group-count rounded-full bg-indigo-100 px-2 py-0.5 text-xs font-medium text-indigo-700 dark:bg-indigo-900/50 dark:text-indigo-300">
+                    {{ group.selected_count }}/5
+                </span>
+            </div>
+            <button type="button"
+                    class="remove-service-btn rounded px-2 py-1 text-xs text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-900/20"
+                    title="Remove service"
+                    hx-post="{{ update_url }}"
+                    hx-vals='{"action": "remove_service", "service": "{{ group.service }}"}'
+                    hx-target="#statements-container"
+                    hx-swap="innerHTML"
+                    onclick="event.preventDefault(); event.stopPropagation();">
+                Remove
+            </button>
+        </summary>
+
+        <div class="border-t border-gray-200 dark:border-gray-700 px-4 py-3 space-y-3">
+            {# Resources #}
+            <div>
+                <span class="text-xs font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">Resources</span>
+                <select name="arn"
+                        class="resource-picker mt-1 w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm dark:border-gray-600 dark:bg-gray-900 dark:text-white"
+                        hx-post="{{ update_url }}"
+                        hx-vals='{"action": "add_resource", "service": "{{ group.service }}"}'
+                        hx-target="#statements-container"
+                        hx-swap="innerHTML"
+                        hx-trigger="change[this.value !== '']">
+                    <option value="">Select resource...</option>
+                </select>
+                <div class="resource-chips mt-2 flex flex-col gap-1.5">
+                    {% for r in group.resources %}
+                    <span class="resource-chip inline-flex items-center justify-between gap-1 rounded-md bg-emerald-50 px-2 py-1 text-xs font-mono text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300" data-arn="{{ r }}">
+                        <span class="truncate">{{ r }}</span>
+                        <button type="button"
+                                class="remove-resource-btn flex-shrink-0 text-emerald-400 hover:text-emerald-600 dark:text-emerald-500 dark:hover:text-emerald-300"
+                                aria-label="Remove resource"
+                                hx-post="{{ update_url }}"
+                                hx-vals='{"action": "remove_resource", "service": "{{ group.service }}", "arn": "{{ r }}"}'
+                                hx-target="#statements-container"
+                                hx-swap="innerHTML">
+                            <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+                        </button>
+                    </span>
+                    {% endfor %}
+                </div>
+                <div class="mt-2 flex gap-1.5">
+                    <input type="text"
+                           name="arn"
+                           class="manual-resource-input flex-1 rounded-md border border-gray-300 bg-white px-3 py-1.5 text-sm font-mono placeholder-gray-400 dark:border-gray-600 dark:bg-gray-900 dark:text-white dark:placeholder-gray-500"
+                           placeholder="arn:aws:..."
+                           hx-post="{{ update_url }}"
+                           hx-vals='{"action": "add_resource", "service": "{{ group.service }}"}'
+                           hx-target="#statements-container"
+                           hx-swap="innerHTML"
+                           hx-trigger="keyup[key=='Enter']">
+                    <button type="button"
+                            class="add-manual-resource-btn rounded-md border border-gray-300 px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:text-gray-300 dark:hover:bg-gray-800"
+                            hx-post="{{ update_url }}"
+                            hx-include="previous input.manual-resource-input"
+                            hx-vals='{"action": "add_resource", "service": "{{ group.service }}"}'
+                            hx-target="#statements-container"
+                            hx-swap="innerHTML">Add</button>
+                </div>
+            </div>
+
+            {# Access levels: dropdown + selected chips #}
+            <div>
+                <span class="text-xs font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">Access levels</span>
+                <select name="level"
+                        class="access-level-picker mt-1 w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm dark:border-gray-600 dark:bg-gray-900 dark:text-white"
+                        hx-post="{{ update_url }}"
+                        hx-vals='{"action": "add_level", "service": "{{ group.service }}"}'
+                        hx-target="#statements-container"
+                        hx-swap="innerHTML"
+                        hx-trigger="change[this.value !== '']">
+                    <option value="">Add access level...</option>
+                    {% for level in group.access_levels %}
+                    <option value="{{ level.name }}" {% if level.checked %}disabled{% endif %}>{{ level.name }}</option>
+                    {% endfor %}
+                </select>
+                <div class="access-level-chips mt-2 flex flex-wrap gap-1.5">
+                    {% for level in group.access_levels %}
+                    {% if level.checked %}
+                    <span class="access-level-chip inline-flex items-center gap-1 rounded-md bg-indigo-50 px-2 py-1 text-xs font-medium text-indigo-700 dark:bg-indigo-900/40 dark:text-indigo-300" data-level="{{ level.name }}">
+                        {{ level.name }}
+                        <button type="button"
+                                class="remove-level-btn -mr-0.5 ml-0.5 text-indigo-400 hover:text-indigo-600 dark:text-indigo-500 dark:hover:text-indigo-300"
+                                aria-label="Remove {{ level.name }}"
+                                hx-post="{{ update_url }}"
+                                hx-vals='{"action": "remove_level", "service": "{{ group.service }}", "level": "{{ level.name }}"}'
+                                hx-target="#statements-container"
+                                hx-swap="innerHTML">
+                            <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+                        </button>
+                    </span>
+                    {% endif %}
+                    {% endfor %}
+                </div>
+            </div>
+        </div>
+    </details>
+</div>
