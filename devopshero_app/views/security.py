@@ -76,6 +76,7 @@ def _build_service_group_data(service, selected_levels, resources, available_res
             for r in available_resources
         ],
         "access_levels": access_levels,
+        "has_checked_levels": bool(selected_set),
         "selected_count": len(selected_set),
     }
 

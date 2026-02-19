@@ -164,7 +164,7 @@ pickerList?.addEventListener('click', (e) => {
 
     htmx.ajax('POST', UPDATE_URL, {
         target: '#statements-container',
-        swap: 'innerHTML',
+        swap: 'morph:innerHTML',
         values: { action: 'add_service', service: service },
     });
 });
