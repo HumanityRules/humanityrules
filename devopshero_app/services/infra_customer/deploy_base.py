@@ -524,29 +524,6 @@ def get_or_create_vpc_cidr(session: boto3.Session, env_slug: str) -> str:
     return vpc_cidr
 
 
-def cleanup_rollback_complete_stacks(cf_client, env_slug: str) -> None:
-    """Delete any ROLLBACK_COMPLETE stacks left by a previous failed provisioning attempt.
-
-    CloudFormation stacks that fail during creation end up in ROLLBACK_COMPLETE — they
-    still "exist" but are unusable. This must run before deploying so that CDK can
-    create fresh stacks with the same names.
-    """
-    stack_names = [
-        f"devopshero-{env_slug}-vpc",
-        f"devopshero-{env_slug}-cluster",
-        f"devopshero-{env_slug}-builder",
-    ]
-
-    for stack_name in stack_names:
-        status = cloudformation_utils.get_stack_status(cf_client, stack_name)
-        if status != "ROLLBACK_COMPLETE":
-            continue
-
-        logger.info("Stack '%(stack_name)s' is in ROLLBACK_COMPLETE, deleting before retry", {"stack_name": stack_name})
-        deleted = cloudformation_utils.delete_stack_and_wait(cf_client, stack_name)
-        if not deleted:
-            raise RuntimeError(f"Could not delete failed stack '{stack_name}'")
-
 
 # =============================================================================
 # DEPLOYMENT FUNCTIONS
@@ -573,7 +550,11 @@ def deploy(
     logger.info("Deploying shared infrastructure for environment '%(env_slug)s'", {"env_slug": env_slug})
 
     cf_client = session.client("cloudformation")
-    cleanup_rollback_complete_stacks(cf_client, env_slug=env_slug)
+    vpc_stack_name = f"devopshero-{env_slug}-vpc"
+    cluster_stack_name = f"devopshero-{env_slug}-cluster"
+    builder_stack_name = f"devopshero-{env_slug}-builder"
+
+    cloudformation_utils.cleanup_rollback_complete_stacks(cf_client, [vpc_stack_name, cluster_stack_name, builder_stack_name])
 
     vpc_cidr = get_or_create_vpc_cidr(session=session, env_slug=env_slug)
 
@@ -596,10 +577,6 @@ def deploy(
             shared_alb_hosted_zone = None  # Fall back to HTTP-only
 
     cdk_app = App(outdir=str(cdk_utils.CDK_OUT_DIR))
-
-    vpc_stack_name = f"devopshero-{env_slug}-vpc"
-    builder_stack_name = f"devopshero-{env_slug}-builder"
-    cluster_stack_name = f"devopshero-{env_slug}-cluster"
 
     vpc_stack = VpcStack(cdk_app, vpc_stack_name, env_slug=env_slug, vpc_cidr=vpc_cidr)
 

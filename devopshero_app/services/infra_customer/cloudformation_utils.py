@@ -178,6 +178,24 @@ def _print_stack_failure_events(cf_client, stack_name: str) -> None:
         logger.error("   (Could not retrieve stack events - stack may have been deleted)")
 
 
+def cleanup_rollback_complete_stacks(cf_client, stack_names: list[str]) -> None:
+    """Delete any ROLLBACK_COMPLETE stacks left by a previous failed provisioning attempt.
+
+    CloudFormation stacks that fail during creation end up in ROLLBACK_COMPLETE — they
+    still "exist" but are unusable. This must run before deploying so that CDK can
+    create fresh stacks with the same names.
+    """
+    for stack_name in stack_names:
+        status = get_stack_status(cf_client, stack_name)
+        if status != "ROLLBACK_COMPLETE":
+            continue
+
+        logger.info("Stack '%(stack_name)s' is in ROLLBACK_COMPLETE, deleting before retry", {"stack_name": stack_name})
+        deleted = delete_stack_and_wait(cf_client, stack_name)
+        if not deleted:
+            raise RuntimeError(f"Could not delete failed stack '{stack_name}'")
+
+
 def delete_stack_and_wait(cf_client, stack_name: str) -> bool:
     """
     Delete a CloudFormation stack and wait for completion.

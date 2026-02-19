@@ -1,5 +1,19 @@
 # DevOpsHero Development Journal
 
+## 2026-02-19 22:15 - [Deployment] Fix CREATE_ROLLBACK_COMPLETE stacks blocking re-deployment
+
+**Conversation:** [2026-02-19-1307-c1189ea2.md](conversations/2026-02-19-1307-c1189ea2.md)
+
+CloudFormation stacks that fail during creation land in `ROLLBACK_COMPLETE` — they still "exist" as far as the API is concerned but cannot be updated or reused. CDK will refuse to deploy over them with an error like "Stack is in ROLLBACK_COMPLETE state and cannot be deployed." The fix is to detect and delete them before every deploy attempt.
+
+`deploy_base` already had `cleanup_rollback_complete_stacks` for the three base stacks (vpc, cluster, builder), but `deploy_app` had no equivalent. If an app's ECR, app, or Aurora stack failed on first create, subsequent deployments would always fail until someone manually deleted the stack.
+
+**Key points:**
+- Moved `cleanup_rollback_complete_stacks` from `deploy_base` to `cloudformation_utils` — it only calls `get_stack_status` and `delete_stack_and_wait`, both of which live there, so that's the right home.
+- Generalized the function signature from `(cf_client, env_slug: str)` (with hardcoded names inside) to `(cf_client, stack_names: list[str])` so it's reusable by any caller.
+- `deploy_base.deploy()` now defines the three base stack name variables at the top of the function (before the cleanup call) and reuses them for the CDK stack constructors further down — eliminating the previous duplication where the same f-strings appeared twice.
+- `deploy_app.deploy()` now calls the same cleanup for `{prefix}-ecr`, `{prefix}-app`, and conditionally `{prefix}-aurora` (only if `app_config.database_config` is set) before verifying that base infrastructure exists.
+
 ## 2026-02-19 21:30 - [UI] Fragment-level HTMX swaps for permissions editor using Django 6.0 partialdef
 
 **Conversation:** [2026-02-19-1211-f9681f3e.md](conversations/2026-02-19-1211-f9681f3e.md)
