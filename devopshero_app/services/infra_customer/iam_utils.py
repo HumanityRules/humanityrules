@@ -187,9 +187,10 @@ def _list_kms_resources(session) -> list[dict]:
     return results
 
 
-def read_task_role_statements(environment, app) -> list[dict]:
-    """Read inline IAM policies from the app's ECS task role in the customer's AWS account.
+def read_app_permissions_policy(environment, app, policy_name: str) -> list[dict]:
+    """Read a single inline policy from the app's ECS task role.
 
+    Only reads the named policy, ignoring CDK-generated infrastructure policies.
     Returns a list of statement dicts in our normalized format:
     [{"service": "s3", "access_levels": ["Read", "Write"], "resources": [...]}]
     """
@@ -205,43 +206,41 @@ def read_task_role_statements(environment, app) -> list[dict]:
 
     statements = []
     try:
-        policy_names_response = iam_client.list_role_policies(RoleName=role_name)
-        policy_names = policy_names_response.get("PolicyNames", [])
+        policy_response = iam_client.get_role_policy(
+            RoleName=role_name, PolicyName=policy_name,
+        )
+        policy_document = policy_response.get("PolicyDocument", {})
+        raw_statements = policy_document.get("Statement", [])
 
-        for policy_name in policy_names:
-            policy_response = iam_client.get_role_policy(RoleName=role_name, PolicyName=policy_name)
-            policy_document = policy_response.get("PolicyDocument", {})
-            raw_statements = policy_document.get("Statement", [])
+        for raw_stmt in raw_statements:
+            actions = raw_stmt.get("Action", [])
+            if isinstance(actions, str):
+                actions = [actions]
 
-            for idx, raw_stmt in enumerate(raw_statements):
-                actions = raw_stmt.get("Action", [])
-                if isinstance(actions, str):
-                    actions = [actions]
+            resources = raw_stmt.get("Resource", [])
+            if isinstance(resources, str):
+                resources = [resources]
 
-                resources = raw_stmt.get("Resource", [])
-                if isinstance(resources, str):
-                    resources = [resources]
+            # Extract service prefix from the first action (e.g., "s3:GetObject" -> "s3")
+            service = "unknown"
+            if actions:
+                first_action = actions[0]
+                if ":" in first_action:
+                    service = first_action.split(":")[0]
 
-                # Extract service prefix from the first action (e.g., "s3:GetObject" -> "s3")
-                service = "unknown"
-                if actions:
-                    first_action = actions[0]
-                    if ":" in first_action:
-                        service = first_action.split(":")[0]
+            # Strip service prefix and reverse-map to access levels
+            short_actions = [a.split(":")[-1] if ":" in a else a for a in actions]
+            access_levels = _actions_to_access_levels(service, short_actions)
 
-                # Strip service prefix and reverse-map to access levels
-                short_actions = [a.split(":")[-1] if ":" in a else a for a in actions]
-                access_levels = _actions_to_access_levels(service, short_actions)
-
-                statements.append({
-                    "service": service,
-                    "access_levels": access_levels,
-                    "resources": resources,
-                })
+            statements.append({
+                "service": service,
+                "access_levels": access_levels,
+                "resources": resources,
+            })
 
     except iam_client.exceptions.NoSuchEntityException:
-        logger.info("Task role %s not found — app may not be deployed yet", role_name)
+        logger.info("Policy %s not found on role %s — editor starts blank", policy_name, role_name)
     except Exception:
-        logger.exception("Failed to read task role policies for %s", role_name)
+        logger.exception("Failed to read policy %s from role %s", policy_name, role_name)
 
     return statements

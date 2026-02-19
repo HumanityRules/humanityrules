@@ -1,5 +1,24 @@
 # DevOpsHero Development Journal
 
+## 2026-02-18 20:15 - [DomainModel] Permissions service extraction + dedicated IAM policy
+
+**Conversation:** [2026-02-18-1928-c8255962.md](conversations/2026-02-18-1928-c8255962.md)
+
+Three related changes to the permissions editor, all motivated by separating concerns:
+
+**1. Dedicated `doh-app-permissions` IAM policy.** The editor previously read ALL inline policies from the ECS task role via `list_role_policies`, which surfaced CDK-generated infrastructure plumbing (`TaskRoleDefaultPolicy` with `ssmmessages`, `logs`, `secretsmanager`) that users shouldn't see or modify. Replaced with a single `get_role_policy(PolicyName="doh-app-permissions")` call. `NoSuchEntityException` returns `[]`, so the editor starts blank for new apps or apps that only have CDK policies — this is the desired behavior.
+
+**2. Extracted `services/permissions.py`.** Business logic was living directly in the view (`security.py`). Moved three operations into a new service: `get_or_create_draft()` (PermissionRequest lifecycle + IAM read), `update_statements()` (add/remove service, level, resource mutations), and `approve()` (status flip to APPROVED_PENDING_APPLY). The `DOH_APP_PERMISSIONS_POLICY_NAME` constant lives here too. Views are now thin HTTP handlers: parse request → call service → build template context → render. The service is where we'll later add the `put_role_policy` write-back, callable from a permission worker without any HTTP dependency.
+
+**3. Conversation creation moved to the view.** `get_or_create_draft` was creating a `Conversation` via `agent_service` — mixing permissions domain logic with agent/UI concerns. The conversation is only needed for the chat panel in the editor, so it's now lazily created in `security_permissions_editor` when `permission_request.conversation is None`. The `conversation` FK on `PermissionRequest` was already nullable, so no migration needed.
+
+**4. HTMX app shell early-return optimization.** Discovered that `security_permissions_editor` was doing all its expensive work (IAM calls, DB queries, conversation creation) on EVERY request, including full page loads where only the app shell frame is returned. Added an early return for non-HTMX requests before any expensive work. Then audited all views and found 9 others with the same wasteful pattern — those are queued for a follow-up fix.
+
+**Key points:**
+- `read_task_role_statements` renamed to `read_app_permissions_policy` with an explicit `policy_name` parameter — the constant is hardcoded at the service layer, not buried in iam_utils
+- The app shell HTMX pattern means every full page refresh hits the view twice (once for shell, once for content). Doing expensive work before the `request.htmx` check means it runs on BOTH hits but is only used by the second
+- `settings_git_integrations` is the worst offender in the audit — it calls `github_client.sync_repositories()` (external API) before the HTMX check
+
 ## 2026-02-18 18:20 - [AgentChat] Remove agent permissions update capability
 
 **Conversation:** [2026-02-18-1820-107c2e52.md](conversations/2026-02-18-1820-107c2e52.md)

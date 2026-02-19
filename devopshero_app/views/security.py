@@ -10,6 +10,7 @@ from policy_sentry.shared import iam_data as policy_sentry_iam_data
 
 from .. import models
 from ..services.agent import agent_service
+from ..services import permissions as permissions_service
 from . import base
 
 logger = logging.getLogger(__name__)
@@ -120,49 +121,14 @@ def _get_all_service_options():
     return options
 
 
-def _get_or_create_draft_permission_request(app, environment, user):
-    """Find an existing DRAFT PermissionRequest for this app+environment, or create a new one."""
-    from ..services.infra_customer import iam_utils
-
-    existing = models.PermissionRequest.objects.filter(
-        app=app,
-        environment=environment,
-        status=models.PermissionRequest.Status.DRAFT,
-    ).order_by("-created_at").first()
-
-    if existing:
-        return existing
-
-    # Read current IAM policies from AWS
-    try:
-        statements = iam_utils.read_task_role_statements(environment=environment, app=app)
-    except Exception:
-        logger.exception("Failed to read IAM policies for %s/%s", app.slug, environment.slug)
-        statements = []
-
-    # Create a conversation for this permissions session
-    conversation = agent_service.create_conversation(
-        user=user,
-        workspace_id=app.workspace_id,
-        repo_id=None,
-        aws_account_id=None,
-        mode=models.Conversation.Mode.PERMISSIONS,
-    )
-
-    permission_request = models.PermissionRequest.objects.create(
-        app=app,
-        environment=environment,
-        conversation=conversation,
-        statements=statements,
-        status=models.PermissionRequest.Status.DRAFT,
-        created_by=user,
-    )
-    return permission_request
-
-
 @login_required
 def security_permissions_editor(request):
     """Permissions editor: two-panel UI with policy editor + agent chat."""
+    if not request.htmx:
+        context = base.get_app_shell_context(request=request, current_page="security")
+        context["content_url"] = request.get_full_path()
+        return render(request=request, template_name="devopshero_app/app_shell.html", context=context)
+
     organization = request.user.current_organization
     app_slug = request.GET.get("context_app", "").strip()
     environment_slug = request.GET.get("context_environment", "").strip()
@@ -176,14 +142,24 @@ def security_permissions_editor(request):
     app = get_object_or_404(models.App, organization=organization, slug=app_slug)
     environment = get_object_or_404(models.Environment, aws_account__organization=organization, slug=environment_slug)
 
-    permission_request = _get_or_create_draft_permission_request(app=app, environment=environment, user=request.user)
+    permission_request = permissions_service.get_or_create_draft(app=app, environment=environment, user=request.user)
+
+    # Ensure a conversation exists for the agent chat panel
+    if not permission_request.conversation:
+        conversation = agent_service.create_conversation(
+            user=request.user,
+            workspace_id=app.workspace_id,
+            repo_id=None,
+            aws_account_id=None,
+            mode=models.Conversation.Mode.PERMISSIONS,
+        )
+        permission_request.conversation = conversation
+        permission_request.save(update_fields=["conversation", "updated_at"])
 
     conversation = permission_request.conversation
-    messages = []
-    if conversation:
-        messages = conversation.messages.exclude(
-            content_type=models.Message.ContentType.SYSTEM_TRIGGER,
-        ).order_by("created_at")
+    messages = conversation.messages.exclude(
+        content_type=models.Message.ContentType.SYSTEM_TRIGGER,
+    ).order_by("created_at")
 
     service_groups = _group_statements_by_service(permission_request.statements or [])
     service_options = _get_all_service_options()
@@ -200,11 +176,7 @@ def security_permissions_editor(request):
         "security_querystring": urlencode(query={"context_app": app_slug, "context_environment": environment_slug}),
     })
 
-    if request.htmx:
-        return render(request=request, template_name="devopshero_app/security/security_permissions_editor.html", context=context)
-
-    context["content_url"] = request.get_full_path()
-    return render(request=request, template_name="devopshero_app/app_shell.html", context=context)
+    return render(request=request, template_name="devopshero_app/security/security_permissions_editor.html", context=context)
 
 
 @login_required
@@ -218,8 +190,7 @@ def security_permissions_editor_apply(request, permission_request_id):
         app__organization=organization,
     )
 
-    permission_request.status = models.PermissionRequest.Status.APPROVED_PENDING_APPLY
-    permission_request.save(update_fields=["status", "updated_at"])
+    permissions_service.approve(permission_request)
 
     return JsonResponse({"status": "approved_pending_apply", "request_id": str(permission_request.id)})
 
@@ -258,55 +229,13 @@ def security_permissions_editor_update_statement(request, permission_request_id)
         app__organization=organization,
     )
 
-    action = request.POST.get("action", "")
-    service = request.POST.get("service", "").strip()
-    statements = permission_request.statements or []
-
-    def _find_or_create_service(svc):
-        for stmt in statements:
-            if stmt.get("service") == svc:
-                return stmt
-        new_stmt = {"service": svc, "effect": "Allow", "access_levels": [], "resources": []}
-        statements.append(new_stmt)
-        return new_stmt
-
-    if action == "add_service" and service:
-        _find_or_create_service(service)
-
-    elif action == "remove_service" and service:
-        permission_request.statements = [s for s in statements if s.get("service") != service]
-        statements = permission_request.statements
-
-    elif action == "add_level" and service:
-        level = request.POST.get("level", "").strip()
-        if level:
-            stmt = _find_or_create_service(service)
-            if level not in stmt.get("access_levels", []):
-                stmt.setdefault("access_levels", []).append(level)
-
-    elif action == "remove_level" and service:
-        level = request.POST.get("level", "").strip()
-        if level:
-            for stmt in statements:
-                if stmt.get("service") == service:
-                    stmt["access_levels"] = [l for l in stmt.get("access_levels", []) if l != level]
-
-    elif action == "add_resource" and service:
-        arn = request.POST.get("arn", "").strip()
-        if arn:
-            stmt = _find_or_create_service(service)
-            if arn not in stmt.get("resources", []):
-                stmt.setdefault("resources", []).append(arn)
-
-    elif action == "remove_resource" and service:
-        arn = request.POST.get("arn", "").strip()
-        if arn:
-            for stmt in statements:
-                if stmt.get("service") == service:
-                    stmt["resources"] = [r for r in stmt.get("resources", []) if r != arn]
-
-    permission_request.statements = statements
-    permission_request.save(update_fields=["statements", "updated_at"])
+    permissions_service.update_statements(
+        permission_request,
+        action=request.POST.get("action", ""),
+        service=request.POST.get("service", "").strip(),
+        level=request.POST.get("level", "").strip(),
+        arn=request.POST.get("arn", "").strip(),
+    )
 
     service_groups = _group_statements_by_service(permission_request.statements or [])
     return render(
