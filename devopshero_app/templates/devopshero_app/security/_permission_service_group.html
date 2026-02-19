@@ -109,7 +109,7 @@
                     </svg>
                 </div>
                 {# Dropdown panel #}
-                <div x-show="open" x-cloak
+                <div x-show="open" x-cloak style="display: none"
                      x-transition.opacity.duration.50ms
                      class="absolute z-50 mt-1 w-full rounded-md border border-gray-200 bg-white py-1 shadow-lg dark:border-gray-600 dark:bg-gray-900">
                     {% for level in group.access_levels %}
