@@ -88,6 +88,8 @@
     </div>
 </div>
 
+<script id="service-options-data" type="application/json">{{ service_options_json|safe }}</script>
+
 <script type="module">
 /**
  * Permissions editor — server-as-source-of-truth.
@@ -99,7 +101,7 @@
  * JS only handles: service picker UI and resource dropdown population.
  */
 
-const SERVICE_OPTIONS = {{ service_options_json|safe }};
+const SERVICE_OPTIONS = JSON.parse(document.getElementById('service-options-data').textContent);
 const UPDATE_URL = "{% url 'security_permissions_editor_update_statement' permission_request_id=permission_request.id %}";
 
 // ─── Service Picker ───────────────────────────────────────────────
