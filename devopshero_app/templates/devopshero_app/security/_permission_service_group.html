@@ -25,117 +25,129 @@
             {# Resources #}
             <div>
                 <span class="text-xs font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">Resources</span>
-                <select name="arn"
-                        class="resource-picker mt-1 w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm dark:border-gray-600 dark:bg-gray-900 dark:text-white"
-                        hx-post="{{ update_url }}"
-                        hx-vals='{"action": "add_resource", "service": "{{ group.service }}"}'
-                        hx-target="#service-group-{{ group.service }}"
-                        hx-swap="morph:outerHTML"
-                        hx-trigger="change[this.value !== '']">
-                    <option value="">Select resource...</option>
-                    {% for r in group.available_resources %}
-                    <option value="{{ r.arn }}" {% if r.selected %}disabled{% endif %}>{{ r.label }}</option>
-                    {% endfor %}
-                </select>
-                <div class="resource-chips mt-2 flex flex-col gap-1.5">
-                    {% for r in group.resources %}
-                    <span class="resource-chip inline-flex items-center justify-between gap-1 rounded-md bg-emerald-50 px-2 py-1 text-xs font-mono text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300" data-arn="{{ r }}">
-                        <span class="truncate">{{ r }}</span>
-                        <button type="button"
-                                class="remove-resource-btn flex-shrink-0 text-emerald-400 hover:text-emerald-600 dark:text-emerald-500 dark:hover:text-emerald-300"
-                                aria-label="Remove resource"
-                                hx-post="{{ update_url }}"
-                                hx-vals='{"action": "remove_resource", "service": "{{ group.service }}", "arn": "{{ r }}"}'
-                                hx-target="#service-group-{{ group.service }}"
-                                hx-swap="morph:outerHTML">
-                            <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
-                        </button>
-                    </span>
-                    {% endfor %}
-                </div>
-                <div class="mt-2 flex gap-1.5">
-                    <input type="text"
-                           name="arn"
-                           class="manual-resource-input flex-1 rounded-md border border-gray-300 bg-white px-3 py-1.5 text-sm font-mono placeholder-gray-400 dark:border-gray-600 dark:bg-gray-900 dark:text-white dark:placeholder-gray-500"
-                           placeholder="arn:aws:..."
-                           hx-post="{{ update_url }}"
-                           hx-vals='{"action": "add_resource", "service": "{{ group.service }}"}'
-                           hx-target="#service-group-{{ group.service }}"
-                           hx-swap="morph:outerHTML"
-                           hx-trigger="keyup[key=='Enter']">
-                    <button type="button"
-                            class="add-manual-resource-btn rounded-md border border-gray-300 px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:text-gray-300 dark:hover:bg-gray-800"
-                            hx-post="{{ update_url }}"
-                            hx-include="previous input.manual-resource-input"
-                            hx-vals='{"action": "add_resource", "service": "{{ group.service }}"}'
-                            hx-target="#service-group-{{ group.service }}"
-                            hx-swap="morph:outerHTML">Add</button>
+                <div id="resources-{{ group.service }}">
+                    {% partial resources %}
                 </div>
             </div>
 
             {# Access levels: Alpine multi-select dropdown + selected chips #}
             <div x-data="{ open: false }"
-                 x-init="if (window._alReopen === '{{ group.service }}') { open = true; window._alReopen = null; }"
-                 @click.outside="open = false" class="relative" data-al-service="{{ group.service }}">
+                 @click.outside="open = false" class="relative">
                 <span class="text-xs font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">Access levels</span>
-                {# Trigger: shows chips when levels are selected, placeholder otherwise #}
-                <div @click="open = !open"
-                     class="mt-1 flex w-full cursor-pointer items-center justify-between rounded-md border border-gray-300 bg-white px-2 py-1.5 text-sm dark:border-gray-600 dark:bg-gray-900">
-                    {% if group.has_checked_levels %}
-                    <div class="flex flex-wrap gap-1">
-                        {% for level in group.access_levels %}
-                        {% if level.checked %}
-                        <span class="inline-flex items-center gap-1 rounded-md bg-indigo-50 px-2 py-0.5 text-xs font-medium text-indigo-700 dark:bg-indigo-900/40 dark:text-indigo-300">
-                            {{ level.name }}
-                            <button type="button"
-                                    class="-mr-0.5 ml-0.5 text-indigo-400 hover:text-indigo-600 dark:text-indigo-500 dark:hover:text-indigo-300"
-                                    aria-label="Remove {{ level.name }}"
-                                    @click.stop
-                                    hx-post="{{ update_url }}"
-                                    hx-vals='{"action": "remove_level", "service": "{{ group.service }}", "level": "{{ level.name }}"}'
-                                    hx-target="#service-group-{{ group.service }}"
-                                    hx-swap="morph:outerHTML">
-                                <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
-                            </button>
-                        </span>
-                        {% endif %}
-                        {% endfor %}
-                    </div>
-                    {% else %}
-                    <span class="text-gray-500 dark:text-gray-400 px-1">Select access levels...</span>
-                    {% endif %}
-                    <svg class="ml-2 h-4 w-4 flex-shrink-0 text-gray-400 transition-transform duration-200" :class="open && 'rotate-180'" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
-                    </svg>
-                </div>
-                {# Dropdown panel #}
-                <div x-show="open" x-cloak style="display: none"
-                     x-transition.opacity.duration.50ms
-                     class="absolute z-50 mt-1 w-full rounded-md border border-gray-200 bg-white py-1 shadow-lg dark:border-gray-600 dark:bg-gray-900">
-                    {% for level in group.access_levels %}
-                    <button type="button"
-                            class="flex w-full items-center gap-2 px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50 dark:text-gray-300 dark:hover:bg-gray-800"
-                            @click="window._alReopen = '{{ group.service }}'"
-                            hx-post="{{ update_url }}"
-                            hx-vals='{"action": "{% if level.checked %}remove_level{% else %}add_level{% endif %}", "service": "{{ group.service }}", "level": "{{ level.name }}"}'
-                            hx-target="#service-group-{{ group.service }}"
-                            hx-swap="morph:outerHTML">
-                        {% if level.checked %}
-                        <svg class="h-4 w-4 text-indigo-600 dark:text-indigo-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <rect x="3" y="3" width="18" height="18" rx="3" stroke-width="2" fill="currentColor" opacity="0.15"/>
-                            <rect x="3" y="3" width="18" height="18" rx="3" stroke-width="2"/>
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M8 12l3 3 5-5"/>
-                        </svg>
-                        {% else %}
-                        <svg class="h-4 w-4 text-gray-400 dark:text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <rect x="3" y="3" width="18" height="18" rx="3" stroke-width="2"/>
-                        </svg>
-                        {% endif %}
-                        {{ level.name }}
-                    </button>
-                    {% endfor %}
+                <div id="access-levels-{{ group.service }}">
+                    {% partial access_levels %}
                 </div>
             </div>
         </div>
     </details>
 </div>
+
+{% partialdef resources %}
+{% url 'security_permissions_editor_update_statement' permission_request_id=permission_request.id as update_url %}
+<select name="arn"
+        class="resource-picker mt-1 w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm dark:border-gray-600 dark:bg-gray-900 dark:text-white"
+        hx-post="{{ update_url }}"
+        hx-vals='{"action": "add_resource", "service": "{{ group.service }}"}'
+        hx-target="#resources-{{ group.service }}"
+        hx-swap="innerHTML"
+        hx-trigger="change[this.value !== '']">
+    <option value="">Select resource...</option>
+    {% for r in group.available_resources %}
+    <option value="{{ r.arn }}" {% if r.selected %}disabled{% endif %}>{{ r.label }}</option>
+    {% endfor %}
+</select>
+<div class="resource-chips mt-2 flex flex-col gap-1.5">
+    {% for r in group.resources %}
+    <span class="resource-chip inline-flex items-center justify-between gap-1 rounded-md bg-emerald-50 px-2 py-1 text-xs font-mono text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300" data-arn="{{ r }}">
+        <span class="truncate">{{ r }}</span>
+        <button type="button"
+                class="remove-resource-btn flex-shrink-0 text-emerald-400 hover:text-emerald-600 dark:text-emerald-500 dark:hover:text-emerald-300"
+                aria-label="Remove resource"
+                hx-post="{{ update_url }}"
+                hx-vals='{"action": "remove_resource", "service": "{{ group.service }}", "arn": "{{ r }}"}'
+                hx-target="#resources-{{ group.service }}"
+                hx-swap="innerHTML">
+            <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+        </button>
+    </span>
+    {% endfor %}
+</div>
+<div class="mt-2 flex gap-1.5">
+    <input type="text"
+           name="arn"
+           class="manual-resource-input flex-1 rounded-md border border-gray-300 bg-white px-3 py-1.5 text-sm font-mono placeholder-gray-400 dark:border-gray-600 dark:bg-gray-900 dark:text-white dark:placeholder-gray-500"
+           placeholder="arn:aws:..."
+           hx-post="{{ update_url }}"
+           hx-vals='{"action": "add_resource", "service": "{{ group.service }}"}'
+           hx-target="#resources-{{ group.service }}"
+           hx-swap="innerHTML"
+           hx-trigger="keyup[key=='Enter']">
+    <button type="button"
+            class="add-manual-resource-btn rounded-md border border-gray-300 px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:text-gray-300 dark:hover:bg-gray-800"
+            hx-post="{{ update_url }}"
+            hx-include="previous input.manual-resource-input"
+            hx-vals='{"action": "add_resource", "service": "{{ group.service }}"}'
+            hx-target="#resources-{{ group.service }}"
+            hx-swap="innerHTML">Add</button>
+</div>
+{% endpartialdef %}
+
+{% partialdef access_levels %}
+{% url 'security_permissions_editor_update_statement' permission_request_id=permission_request.id as update_url %}
+{# Trigger: shows chips when levels are selected, placeholder otherwise #}
+<div @click="open = !open"
+     class="mt-1 flex w-full cursor-pointer items-center justify-between rounded-md border border-gray-300 bg-white px-2 py-1.5 text-sm dark:border-gray-600 dark:bg-gray-900">
+    {% if group.has_checked_levels %}
+    <div class="flex flex-wrap gap-1">
+        {% for level in group.access_levels %}
+        {% if level.checked %}
+        <span class="inline-flex items-center gap-1 rounded-md bg-indigo-50 px-2 py-0.5 text-xs font-medium text-indigo-700 dark:bg-indigo-900/40 dark:text-indigo-300">
+            {{ level.name }}
+            <button type="button"
+                    class="-mr-0.5 ml-0.5 text-indigo-400 hover:text-indigo-600 dark:text-indigo-500 dark:hover:text-indigo-300"
+                    aria-label="Remove {{ level.name }}"
+                    @click.stop
+                    hx-post="{{ update_url }}"
+                    hx-vals='{"action": "remove_level", "service": "{{ group.service }}", "level": "{{ level.name }}"}'
+                    hx-target="#access-levels-{{ group.service }}"
+                    hx-swap="innerHTML">
+                <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+            </button>
+        </span>
+        {% endif %}
+        {% endfor %}
+    </div>
+    {% else %}
+    <span class="text-gray-500 dark:text-gray-400 px-1">Select access levels...</span>
+    {% endif %}
+    <svg class="ml-2 h-4 w-4 flex-shrink-0 text-gray-400 transition-transform duration-200" :class="open && 'rotate-180'" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
+    </svg>
+</div>
+{# Dropdown panel #}
+<div x-show="open" x-cloak
+     x-transition.opacity.duration.50ms
+     class="absolute z-50 mt-1 w-full rounded-md border border-gray-200 bg-white py-1 shadow-lg dark:border-gray-600 dark:bg-gray-900">
+    {% for level in group.access_levels %}
+    <button type="button"
+            class="flex w-full items-center gap-2 px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50 dark:text-gray-300 dark:hover:bg-gray-800"
+            hx-post="{{ update_url }}"
+            hx-vals='{"action": "{% if level.checked %}remove_level{% else %}add_level{% endif %}", "service": "{{ group.service }}", "level": "{{ level.name }}"}'
+            hx-target="#access-levels-{{ group.service }}"
+            hx-swap="innerHTML">
+        {% if level.checked %}
+        <svg class="h-4 w-4 text-indigo-600 dark:text-indigo-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <rect x="3" y="3" width="18" height="18" rx="3" stroke-width="2" fill="currentColor" opacity="0.15"/>
+            <rect x="3" y="3" width="18" height="18" rx="3" stroke-width="2"/>
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M8 12l3 3 5-5"/>
+        </svg>
+        {% else %}
+        <svg class="h-4 w-4 text-gray-400 dark:text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <rect x="3" y="3" width="18" height="18" rx="3" stroke-width="2"/>
+        </svg>
+        {% endif %}
+        {{ level.name }}
+    </button>
+    {% endfor %}
+</div>
+{% endpartialdef %}

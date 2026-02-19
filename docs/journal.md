@@ -1,5 +1,29 @@
 # DevOpsHero Development Journal
 
+## 2026-02-19 21:30 - [UI] Fragment-level HTMX swaps for permissions editor using Django 6.0 partialdef
+
+**Conversation:** [2026-02-19-1211-f9681f3e.md](conversations/2026-02-19-1211-f9681f3e.md)
+
+Replaced the whole-service-group `morph:outerHTML` swap strategy in the permissions editor with fragment-level `innerHTML` swaps using Django 6.0's `{% partialdef %}` / `{% partial %}` tags. Previously, every mutation (add/remove resource, toggle access level) replaced the entire `#service-group-{service}` div, which destroyed Alpine's `x-data` scope and required the `window._alReopen` hack to reopen the dropdown, plus a `style="display: none"` hack to work around idiomorph stripping Alpine's inline styles.
+
+Now: resource mutations swap only `#resources-{service}` (innerHTML), level mutations swap only `#access-levels-{service}` (innerHTML). The Alpine `x-data="{ open: false }"` wrapper is never replaced, so dropdown state survives naturally. Both hacks are removed.
+
+**Three Django 6.0 partialdef lessons learned the hard way:**
+
+1. **`partialdef` does NOT render inline.** Unlike `{% block %}`, `{% partialdef name %}` only *defines* a named fragment — it doesn't output anything where it appears. You must use `{% partial name %}` to render it. This matches the pattern in `_message.html` where the partialdef is at the bottom and `{% partial %}` calls are above. The initial attempt put content directly inside `partialdef` expecting inline rendering, which produced empty divs.
+
+2. **Hyphenated names are invalid.** `{% partialdef access-levels %}` is parsed as `access` minus `levels` by the Django template engine, causing a `TemplateSyntaxError` that silently breaks the entire template. All existing partials in the project use underscores (`dropdown_select`, `message_dispatcher`, `navigation_item`). Changed to `access_levels`.
+
+3. **Partial renders only process the partialdef block.** When the view renders `template.html#resources`, Django only processes the content inside `{% partialdef resources %}`. Template tags outside the block (like `{% url ... as update_url %}` at the top of the file) are NOT executed. This meant `update_url` was empty in the partial response, breaking all `hx-post` URLs after the first swap. Fixed by adding `{% url %}` inside each partialdef.
+
+**View changes:** The `security_permissions_editor_update_statement` view now routes to the correct partial based on action: `add_resource`/`remove_resource` render `#resources`, `add_level`/`remove_level` render `#access_levels`, `remove_service` unchanged (still uses `hx-swap="delete"`).
+
+**Key points:**
+- `{% partialdef %}` defines, `{% partial %}` renders — they are always used as a pair
+- Partial names must be valid Python identifiers (no hyphens)
+- When rendering `template.html#partial_name`, only the partialdef block is processed — any template tags outside it (variable assignments, url lookups) must be duplicated inside each partialdef that needs them
+- `innerHTML` swap on a wrapper div preserves the wrapper's Alpine scope, eliminating the need for state-restoration hacks
+
 ## 2026-02-19 18:15 - [Bugfix] Idiomorph strips Alpine's x-show inline style during morph
 
 **Conversation:** [2026-02-19-1028-30ebb814.md](conversations/2026-02-19-1028-30ebb814.md)

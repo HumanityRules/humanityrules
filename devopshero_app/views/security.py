@@ -249,9 +249,16 @@ def security_permissions_editor_update_statement(request, permission_request_id)
     group = next((g for g in service_groups if g["service"] == service), None)
     if group is None:
         return HttpResponse(status=204)
+
+    template = "devopshero_app/security/_permission_service_group.html"
+    if action in ("add_resource", "remove_resource"):
+        template += "#resources"
+    elif action in ("add_level", "remove_level"):
+        template += "#access_levels"
+
     return render(
         request=request,
-        template_name="devopshero_app/security/_permission_service_group.html",
+        template_name=template,
         context={"group": group, "permission_request": permission_request},
     )
 
