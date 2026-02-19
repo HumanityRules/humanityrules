@@ -1,6 +1,6 @@
 {# Service group: one collapsible card per service #}
 {% url 'security_permissions_editor_update_statement' permission_request_id=permission_request.id as update_url %}
-<div class="service-group rounded-lg border border-gray-200 dark:border-gray-700" data-service="{{ group.service }}">
+<div id="service-group-{{ group.service }}" class="service-group rounded-lg border border-gray-200 dark:border-gray-700" data-service="{{ group.service }}">
     <details open class="group">
         <summary class="flex items-center justify-between px-4 py-3 cursor-pointer list-none [&::-webkit-details-marker]:hidden select-none bg-gray-50 dark:bg-gray-800 rounded-t-lg">
             <div class="flex items-center space-x-2">
@@ -8,17 +8,14 @@
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
                 </svg>
                 <span class="text-sm font-semibold text-gray-900 dark:text-white">{{ group.display_name }}</span>
-                <span class="service-group-count rounded-full bg-indigo-100 px-2 py-0.5 text-xs font-medium text-indigo-700 dark:bg-indigo-900/50 dark:text-indigo-300">
-                    {{ group.selected_count }}/5
-                </span>
             </div>
             <button type="button"
                     class="remove-service-btn rounded px-2 py-1 text-xs text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-900/20"
                     title="Remove service"
                     hx-post="{{ update_url }}"
                     hx-vals='{"action": "remove_service", "service": "{{ group.service }}"}'
-                    hx-target="#statements-container"
-                    hx-swap="morph:innerHTML"
+                    hx-target="#service-group-{{ group.service }}"
+                    hx-swap="delete"
                     onclick="event.preventDefault(); event.stopPropagation();">
                 Remove
             </button>
@@ -32,8 +29,8 @@
                         class="resource-picker mt-1 w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm dark:border-gray-600 dark:bg-gray-900 dark:text-white"
                         hx-post="{{ update_url }}"
                         hx-vals='{"action": "add_resource", "service": "{{ group.service }}"}'
-                        hx-target="#statements-container"
-                        hx-swap="morph:innerHTML"
+                        hx-target="#service-group-{{ group.service }}"
+                        hx-swap="morph:outerHTML"
                         hx-trigger="change[this.value !== '']">
                     <option value="">Select resource...</option>
                     {% for r in group.available_resources %}
@@ -49,8 +46,8 @@
                                 aria-label="Remove resource"
                                 hx-post="{{ update_url }}"
                                 hx-vals='{"action": "remove_resource", "service": "{{ group.service }}", "arn": "{{ r }}"}'
-                                hx-target="#statements-container"
-                                hx-swap="morph:innerHTML">
+                                hx-target="#service-group-{{ group.service }}"
+                                hx-swap="morph:outerHTML">
                             <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
                         </button>
                     </span>
@@ -63,16 +60,16 @@
                            placeholder="arn:aws:..."
                            hx-post="{{ update_url }}"
                            hx-vals='{"action": "add_resource", "service": "{{ group.service }}"}'
-                           hx-target="#statements-container"
-                           hx-swap="morph:innerHTML"
+                           hx-target="#service-group-{{ group.service }}"
+                           hx-swap="morph:outerHTML"
                            hx-trigger="keyup[key=='Enter']">
                     <button type="button"
                             class="add-manual-resource-btn rounded-md border border-gray-300 px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:text-gray-300 dark:hover:bg-gray-800"
                             hx-post="{{ update_url }}"
                             hx-include="previous input.manual-resource-input"
                             hx-vals='{"action": "add_resource", "service": "{{ group.service }}"}'
-                            hx-target="#statements-container"
-                            hx-swap="morph:innerHTML">Add</button>
+                            hx-target="#service-group-{{ group.service }}"
+                            hx-swap="morph:outerHTML">Add</button>
                 </div>
             </div>
 
@@ -96,8 +93,8 @@
                                     @click.stop
                                     hx-post="{{ update_url }}"
                                     hx-vals='{"action": "remove_level", "service": "{{ group.service }}", "level": "{{ level.name }}"}'
-                                    hx-target="#statements-container"
-                                    hx-swap="innerHTML">
+                                    hx-target="#service-group-{{ group.service }}"
+                                    hx-swap="morph:outerHTML">
                                 <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
                             </button>
                         </span>
@@ -118,10 +115,11 @@
                     {% for level in group.access_levels %}
                     <button type="button"
                             class="flex w-full items-center gap-2 px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50 dark:text-gray-300 dark:hover:bg-gray-800"
+                            @click="window._alReopen = '{{ group.service }}'"
                             hx-post="{{ update_url }}"
                             hx-vals='{"action": "{% if level.checked %}remove_level{% else %}add_level{% endif %}", "service": "{{ group.service }}", "level": "{{ level.name }}"}'
-                            hx-target="#statements-container"
-                            hx-swap="innerHTML">
+                            hx-target="#service-group-{{ group.service }}"
+                            hx-swap="morph:outerHTML">
                         {% if level.checked %}
                         <svg class="h-4 w-4 text-indigo-600 dark:text-indigo-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <rect x="3" y="3" width="18" height="18" rx="3" stroke-width="2" fill="currentColor" opacity="0.15"/>

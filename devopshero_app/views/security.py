@@ -3,7 +3,7 @@ import logging
 from urllib.parse import urlencode
 
 from django.contrib.auth.decorators import login_required
-from django.http import JsonResponse
+from django.http import HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, render
 from django.views.decorators.http import require_POST
 from policy_sentry.shared import iam_data as policy_sentry_iam_data
@@ -227,21 +227,36 @@ def security_permissions_editor_update_statement(request, permission_request_id)
         app__organization=organization,
     )
 
+    action = request.POST.get("action", "")
+    service = request.POST.get("service", "").strip()
+
     permissions_service.update_statements(
         permission_request,
-        action=request.POST.get("action", ""),
-        service=request.POST.get("service", "").strip(),
+        action=action,
+        service=service,
         level=request.POST.get("level", "").strip(),
         arn=request.POST.get("arn", "").strip(),
     )
 
+    if action == "remove_service":
+        if not permission_request.statements:
+            return render(
+                request=request,
+                template_name="devopshero_app/security/_permission_statements.html",
+                context={"service_groups": [], "permission_request": permission_request, "oob": True},
+            )
+        return HttpResponse()
+
     # available_resources = _fetch_available_resources(permission_request)
     available_resources = {}
     service_groups = _group_statements_by_service(permission_request.statements or [], available_resources)
+    group = next((g for g in service_groups if g["service"] == service), None)
+    if group is None:
+        return HttpResponse(status=204)
     return render(
         request=request,
-        template_name="devopshero_app/security/_permission_statements.html",
-        context={"service_groups": service_groups, "permission_request": permission_request},
+        template_name="devopshero_app/security/_permission_service_group.html",
+        context={"group": group, "permission_request": permission_request},
     )
 
 

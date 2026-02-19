@@ -1,5 +1,24 @@
 # DevOpsHero Development Journal
 
+## 2026-02-19 15:00 - [UI] Per-service-group HTMX swaps in permissions editor
+
+**Conversation:**
+
+Refactored the permissions editor so each service group makes its own HTMX call and receives back only its own HTML, instead of re-rendering the entire statements container on every interaction.
+
+**Why.** Previously, every mutation (toggle access level, add/remove resource, remove service) hit the same endpoint and returned `_permission_statements.html` — the full container with ALL service groups re-rendered. This was wasteful: changing one checkbox in S3 would re-render DynamoDB, Lambda, and every other group too. It also caused the idiomorph/Alpine cross-contamination bug documented in the previous entry.
+
+**What changed:**
+
+- Each service group div gets a unique `id="service-group-{{ group.service }}"`. All in-place mutations (levels, resources) now target that specific ID with `hx-swap="morph:outerHTML"` — only the affected group re-renders.
+- **Remove service** uses `hx-swap="delete"` — HTMX removes the element from DOM client-side. The backend just does the DB mutation and returns an empty `HttpResponse()`. No HTML rendering needed at all.
+- **Add service** uses `hx-swap="beforeend"` on `#permission-statements-container` — the backend returns just the new service group partial, appended to the end.
+- The backend view (`update_statement`) now branches by action: `remove_service` returns empty 200, everything else builds and returns just the single affected `_permission_service_group.html`.
+
+**Alpine simplification.** The global `htmx:beforeSwap` listener that scanned all Alpine instances to find which dropdown was open is gone. It was needed because all groups were re-rendered, destroying all Alpine state. Now only the clicked group re-renders, so other groups' Alpine state is naturally preserved. For the access level dropdown (which needs to stay open while toggling levels), a simple `@click="window._alReopen = '{{ group.service }}'"` on each dropdown button sets the reopen flag before the HTMX request fires. The existing `x-init` on the Alpine component picks it up after morph.
+
+**Empty state handling.** JS manages the "No policy statements yet" placeholder: removed before `beforeend` append on add, re-inserted via `htmx:afterSettle` listener when the last service group is deleted. The placeholder has `id="statements-empty"` for targeting.
+
 ## 2026-02-19 13:30 - [UI] Alpine.js multi-select dropdown for access levels — idiomorph/Alpine conflict and resolution
 
 **Conversation:** [2026-02-19-0005-a675f64f.md](conversations/2026-02-19-0005-a675f64f.md)
