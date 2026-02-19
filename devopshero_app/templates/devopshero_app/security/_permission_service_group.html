@@ -77,7 +77,9 @@
             </div>
 
             {# Access levels: Alpine multi-select dropdown + selected chips #}
-            <div x-data="{ open: false }" @click.outside="open = false" class="relative">
+            <div x-data="{ open: false }"
+                 x-init="if (window._alReopen === '{{ group.service }}') { open = true; window._alReopen = null; }"
+                 @click.outside="open = false" class="relative" data-al-service="{{ group.service }}">
                 <span class="text-xs font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">Access levels</span>
                 {# Trigger: shows chips when levels are selected, placeholder otherwise #}
                 <div @click="open = !open"
@@ -95,7 +97,7 @@
                                     hx-post="{{ update_url }}"
                                     hx-vals='{"action": "remove_level", "service": "{{ group.service }}", "level": "{{ level.name }}"}'
                                     hx-target="#statements-container"
-                                    hx-swap="morph:innerHTML">
+                                    hx-swap="innerHTML">
                                 <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
                             </button>
                         </span>
@@ -119,7 +121,7 @@
                             hx-post="{{ update_url }}"
                             hx-vals='{"action": "{% if level.checked %}remove_level{% else %}add_level{% endif %}", "service": "{{ group.service }}", "level": "{{ level.name }}"}'
                             hx-target="#statements-container"
-                            hx-swap="morph:innerHTML">
+                            hx-swap="innerHTML">
                         {% if level.checked %}
                         <svg class="h-4 w-4 text-indigo-600 dark:text-indigo-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <rect x="3" y="3" width="18" height="18" rx="3" stroke-width="2" fill="currentColor" opacity="0.15"/>

@@ -1,5 +1,23 @@
 # DevOpsHero Development Journal
 
+## 2026-02-19 13:30 - [UI] Alpine.js multi-select dropdown for access levels — idiomorph/Alpine conflict and resolution
+
+**Conversation:** [2026-02-19-0005-a675f64f.md](conversations/2026-02-19-0005-a675f64f.md)
+
+Replaced the native `<select>` for access levels in the permissions editor with a custom Alpine.js dropdown featuring checkboxes and inline chips. The dropdown stays open between selections, enabling quick multi-select without repeated open-close cycles.
+
+**The idiomorph/Alpine conflict.** The original plan called for `morph:innerHTML` swaps (via idiomorph) to preserve Alpine's `open` state across HTMX responses. This fundamentally doesn't work. Idiomorph patches DOM attributes and triggers Alpine's MutationObserver in ways that corrupt reactive state — in our case, clicking a checkbox in dropdown 1 would cause dropdown 2 to expand. We tried multiple fixes: unique IDs on wrapper elements (`id="al-dropdown-{{ service }}"`), unique IDs on service group cards (`id="sg-{{ service }}"`), explicit save/restore hooks via `htmx:beforeSwap`/`htmx:afterSettle` with `Alpine.$data()`, and even extracting state to a global `window._alDropdownState` object with getter/setter factory functions. None of these solved the morph+Alpine conflict.
+
+**The solution: plain `innerHTML` + `x-init` restore.** Access level toggle buttons use `hx-swap="innerHTML"` (no morph), which cleanly destroys and recreates Alpine components. A `htmx:beforeSwap` listener saves which dropdown was open (by service name) to `window._alReopen`. Each dropdown's `x-init` checks this variable and sets `open = true` if it matches, then clears it. Because `x-init` runs during Alpine's component initialization — before the browser paints — there is no flicker. Other mutations (remove service, add resource, etc.) still use `morph:innerHTML` since they don't involve Alpine state.
+
+**Key points:**
+- Idiomorph and Alpine.js are fundamentally incompatible for preserving local UI state — morph corrupts Alpine's reactive proxies and MutationObserver tracking, causing state to leak between components
+- `requestAnimationFrame` for post-swap state restore causes visible flicker because it fires AFTER the browser paints; `x-init` runs BEFORE the first paint
+- The `window._alDropdownState` global factory approach (getter/setter reading from a JS object) failed due to timing: when htmx injects HTML, Alpine's MutationObserver processes `x-data` attributes before `<script>` tags execute, so the factory function doesn't exist yet
+- Moving the factory to `base.html` (before Alpine CDN) solves timing but pollutes the global template with page-specific code — rejected for cleanliness
+- The final pattern (`htmx:beforeSwap` saves to `window._alReopen`, `x-init` reads and clears) is minimal, self-contained, and flicker-free
+- Added `has_checked_levels` boolean to the service group context data to conditionally render inline chips vs placeholder text in the trigger area
+
 ## 2026-02-19 00:15 - [Bugfix] Permissions editor CSRF 403 on Add Service — duplicate header from htmx.ajax + hx-headers inheritance
 
 **Conversation:**
