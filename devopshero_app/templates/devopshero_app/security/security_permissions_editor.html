@@ -64,7 +64,11 @@
                 {# Action buttons #}
                 <div class="mt-5 flex items-center justify-end gap-3">
                     <button type="button" id="apply-btn"
-                            class="rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed">
+                            class="rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed"
+                            hx-post="{% url 'security_permissions_editor_apply' permission_request_id=permission_request.id %}"
+                            hx-swap="none"
+                            hx-on::before-request="this.disabled = true; this.textContent = 'Applying...'"
+                            hx-on::after-request="if(event.detail.successful) { this.textContent = 'Applied'; this.className = this.className.replace('bg-indigo-600','bg-green-600').replace('hover:bg-indigo-500',''); } else { this.textContent = 'Failed'; this.className = this.className.replace('bg-indigo-600','bg-red-600').replace('hover:bg-indigo-500',''); }">
                         Apply
                     </button>
                 </div>
@@ -92,16 +96,11 @@
  * via htmx attributes on the template elements. Agent changes arrive as
  * OOB swaps in SSE tool_result / sse-complete events.
  *
- * JS only handles: service picker UI, resource dropdown population (from
- * cache), and the Apply button.
+ * JS only handles: service picker UI and resource dropdown population.
  */
 
 const SERVICE_OPTIONS = {{ service_options_json|safe }};
 const UPDATE_URL = "{% url 'security_permissions_editor_update_statement' permission_request_id=permission_request.id %}";
-const APPLY_URL = "{% url 'security_permissions_editor_apply' permission_request_id=permission_request.id %}";
-const CSRF_TOKEN = document.querySelector('body').getAttribute('hx-headers');
-let csrfValue = '';
-try { csrfValue = JSON.parse(CSRF_TOKEN)['x-csrftoken'] || ''; } catch(e) {}
 
 // ─── Service Picker ───────────────────────────────────────────────
 
@@ -167,37 +166,8 @@ pickerList?.addEventListener('click', (e) => {
         target: '#statements-container',
         swap: 'innerHTML',
         values: { action: 'add_service', service: service },
-        headers: { 'X-CSRFToken': csrfValue },
     });
 });
 
-// ─── Apply ────────────────────────────────────────────────────────
-
-document.getElementById('apply-btn')?.addEventListener('click', async () => {
-    const btn = document.getElementById('apply-btn');
-    btn.disabled = true;
-    btn.textContent = 'Applying...';
-
-    try {
-        const resp = await fetch(APPLY_URL, {
-            method: 'POST',
-            headers: { 'X-CSRFToken': csrfValue },
-        });
-        if (resp.ok) {
-            btn.textContent = 'Applied';
-            btn.classList.remove('bg-indigo-600', 'hover:bg-indigo-500');
-            btn.classList.add('bg-green-600');
-        } else {
-            btn.textContent = 'Failed';
-            btn.classList.remove('bg-indigo-600', 'hover:bg-indigo-500');
-            btn.classList.add('bg-red-600');
-        }
-    } catch (err) {
-        btn.textContent = 'Error';
-        btn.classList.remove('bg-indigo-600', 'hover:bg-indigo-500');
-        btn.classList.add('bg-red-600');
-        console.error('Apply error:', err);
-    }
-});
 </script>
 {% endif %}
