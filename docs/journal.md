@@ -1,5 +1,26 @@
 # DevOpsHero Development Journal
 
+## 2026-02-20 00:30 - [Bugfix] Resources dropdown flicker on close when search filter is active
+
+**Conversation:**
+
+When the resources combobox had an active search filter (narrowing the visible items) and the user clicked outside to close it, the full unfiltered list would briefly flash before the dropdown disappeared.
+
+**Root cause:** The dropdown panel uses `x-transition.opacity.duration.50ms` for a fade-out animation. The original `@click.outside` handler did `open = false; search = ''` in the same expression. Clearing `search` makes every item's `x-show="!search || ..."` evaluate to `true`, so all items become visible. But the panel isn't hidden instantly — it fades out over 50ms. During that 50ms fade, the now-unfiltered full list is visible. This happens regardless of `$nextTick` ordering because the transition delay means the panel is still partially opaque when the search clear takes effect.
+
+**Fix — separate the clear from the close, using two principles:**
+
+1. **On close (click-outside, Escape):** set `open = false` only. Clear `search` via `setTimeout(() => search = '', 60)` — the 60ms delay exceeds the 50ms transition, so the panel is fully hidden before items reappear.
+2. **On open (`@focus`):** clear `search` immediately so the filter is always fresh when the dropdown opens.
+
+This means the search text in the input also gets cleaned up after closing (the user's follow-up request), but safely after the panel is invisible.
+
+**Key points:**
+- `x-transition` delays mean any state that affects child visibility must not be reset during the fade-out window
+- `$nextTick` doesn't help here because it fires after Alpine's reactive flush but before CSS transitions complete — the panel is still mid-fade
+- The pattern "reset state on open, not on close" avoids an entire class of transition-related flicker bugs
+- `setTimeout` with a duration slightly longer than the transition is a pragmatic escape hatch when Alpine's reactive model conflicts with CSS transition timing
+
 ## 2026-02-19 13:24 - [UI] Permissions editor: Resources dropdown redesign as combobox with search
 
 **Conversation:** [2026-02-19-1325-9efa9084.md](conversations/2026-02-19-1325-9efa9084.md)
