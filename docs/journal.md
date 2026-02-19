@@ -1,5 +1,23 @@
 # DevOpsHero Development Journal
 
+## 2026-02-19 00:15 - [Bugfix] Permissions editor CSRF 403 on Add Service — duplicate header from htmx.ajax + hx-headers inheritance
+
+**Conversation:**
+
+Clicking "Add Service" in the permissions editor when the permission request had no statements produced a 403 "CSRF verification failed. Request aborted." The root cause was subtle: the JS code manually extracted the CSRF token from the body's `hx-headers` attribute and passed it as an explicit `headers: { 'X-CSRFToken': csrfValue }` to `htmx.ajax()`. But `htmx.ajax()` also inherits `hx-headers` from the body automatically (using `document.body` as the default source element). The browser's XMLHttpRequest spec combines case-insensitively matching headers (`x-csrftoken` from inheritance + `X-CSRFToken` from explicit) into a single value: `token, token`. Django's CSRF middleware compared this against the expected single `token` and rejected it.
+
+The other mutation buttons (Remove service, Add Level, etc.) worked because they used declarative `hx-post` attributes which only inherit — no duplication. The bug only surfaced on "Add Service" because it was the sole `htmx.ajax()` call with explicit headers.
+
+**Fix:** Removed the explicit `headers` parameter from the `htmx.ajax()` call. Also converted the Apply button from `fetch()` to declarative `hx-post` with `hx-on::before-request` / `hx-on::after-request` event handlers, eliminating the entire CSRF token extraction block (`CSRF_TOKEN`, `csrfValue`, `APPLY_URL`) from JS. Now zero JS code touches CSRF tokens — everything goes through htmx's inherited `hx-headers`.
+
+Updated `views/AGENTS.md` with a second CSRF rule: don't manually extract CSRF tokens in JS for htmx requests, and prefer `hx-post` attributes over `htmx.ajax()`/`fetch()`.
+
+**Key points:**
+- XMLHttpRequest's `setRequestHeader` combines case-insensitively matching header names by appending with `, ` — so setting both `x-csrftoken` and `X-CSRFToken` produces `token, token` which Django rejects
+- `htmx.ajax()` with no `source` option defaults to `document.body`, so it inherits `hx-headers` from the body just like attribute-based htmx requests
+- The bug only appeared when statements were empty because that's the only state where "Add Service" (the htmx.ajax path) is the first action — when statements exist from IAM, users interact via the declarative `hx-post` buttons instead
+- `hx-on::before-request` and `hx-on::after-request` are sufficient for button state management (disable, text change, color swap) — no need for fetch + try/catch
+
 ## 2026-02-18 21:30 - [DomainModel] Permissions editor: server-side resources + service extraction + dedicated IAM policy
 
 **Conversation:** [2026-02-18-2043-c8255962.md](conversations/2026-02-18-2043-c8255962.md)

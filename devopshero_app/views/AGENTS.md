@@ -155,7 +155,11 @@ CSRF is configured **globally** on `<body>` in `base.html`:
 <body hx-headers='{"x-csrftoken": "{{ csrf_token }}"}' ...>
 ```
 
-All HTMX requests inherit this header automatically. **Do NOT add per-element `hx-headers` with CSRF tokens** — especially in partials/modals loaded via HTMX GET, where `{{ csrf_token }}` won't be populated (Django only injects it for templates rendered with a `RequestContext` that includes the CSRF processor during the original page load). Adding a redundant `hx-headers` on a dynamically-loaded partial will send an empty/malformed token and produce a "CSRF token has incorrect length" error.
+All HTMX requests inherit this header automatically. Two rules follow:
+
+**1. Do NOT add per-element `hx-headers` with CSRF tokens** — especially in partials/modals loaded via HTMX GET, where `{{ csrf_token }}` won't be populated. Adding a redundant `hx-headers` on a dynamically-loaded partial will send an empty/malformed token and produce a "CSRF token has incorrect length" error.
+
+**2. Do NOT manually extract the CSRF token in JS for htmx requests.** `htmx.ajax()` inherits `hx-headers` from the body automatically — passing an explicit `headers: { 'X-CSRFToken': ... }` causes the browser to combine both values into `token, token`, which Django rejects. Prefer `hx-post` attributes on the element over `htmx.ajax()` or `fetch()` in JS whenever possible — it's declarative, inherits CSRF automatically, and supports response handling via `hx-on::before-request` / `hx-on::after-request`.
 
 ## Why This Works
 
