@@ -24,7 +24,7 @@
         <div class="border-t border-gray-200 dark:border-gray-700 px-4 py-3 space-y-3">
             {# Resources: Alpine multi-select dropdown + selected chips #}
             <div x-data="{ open: false, search: '' }"
-                 @click.outside="open = false; search = ''" class="relative">
+                 @click.outside="open = false; setTimeout(() => search = '', 60)" class="relative">
                 <span class="text-xs font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">Resources</span>
                 <div id="resources-{{ group.service }}">
                     {% partial resources %}
@@ -52,8 +52,8 @@
         <input type="text" x-model="search" x-ref="resourceSearch"
                name="arn"
                autocomplete="off"
-               @focus="open = true"
-               @keydown.escape="open = false; search = ''; $refs.resourceSearch.blur()"
+               @focus="open = true; search = ''"
+               @keydown.escape="open = false; setTimeout(() => search = '', 60); $refs.resourceSearch.blur()"
                :placeholder="open ? 'Filter or paste resource ARN...' : 'Select resource...'"
                class="w-full rounded-md border border-gray-300 bg-white pl-3 pr-8 py-1.5 text-sm placeholder-gray-400 cursor-pointer dark:border-gray-600 dark:bg-gray-900 dark:text-white dark:placeholder-gray-500"
                hx-post="{{ update_url }}"
