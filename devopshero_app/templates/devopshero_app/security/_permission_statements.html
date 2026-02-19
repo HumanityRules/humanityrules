@@ -1,4 +1,4 @@
-<div id="permission-statements-container" class="space-y-4"{% if oob %} hx-swap-oob="innerHTML"{% endif %}>
+<div id="permission-statements-container" class="space-y-6"{% if oob %} hx-swap-oob="innerHTML"{% endif %}>
     {% for group in service_groups %}
         {% include "devopshero_app/security/_permission_service_group.html" with group=group %}
     {% empty %}
