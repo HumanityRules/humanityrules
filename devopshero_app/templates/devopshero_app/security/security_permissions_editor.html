@@ -98,7 +98,6 @@
 
 const SERVICE_OPTIONS = {{ service_options_json|safe }};
 const UPDATE_URL = "{% url 'security_permissions_editor_update_statement' permission_request_id=permission_request.id %}";
-const RESOURCES_URL = "{% url 'security_permissions_editor_resources' permission_request_id=permission_request.id %}";
 const APPLY_URL = "{% url 'security_permissions_editor_apply' permission_request_id=permission_request.id %}";
 const CSRF_TOKEN = document.querySelector('body').getAttribute('hx-headers');
 let csrfValue = '';
@@ -170,54 +169,6 @@ pickerList?.addEventListener('click', (e) => {
         values: { action: 'add_service', service: service },
         headers: { 'X-CSRFToken': csrfValue },
     });
-});
-
-// ─── Resource Dropdown Population ─────────────────────────────────
-
-const resourceCache = {};
-
-async function fetchResourcesForGroup(serviceGroup) {
-    const service = serviceGroup.dataset.service;
-    if (!service) return;
-    const picker = serviceGroup.querySelector('.resource-picker');
-    if (!picker) return;
-
-    if (resourceCache[service]) { populateResourcePicker(serviceGroup, resourceCache[service]); return; }
-
-    try {
-        const resp = await fetch(`${RESOURCES_URL}?service=${encodeURIComponent(service)}`);
-        if (!resp.ok) throw new Error('Failed to fetch resources');
-        const data = await resp.json();
-        resourceCache[service] = data.resources || [];
-        populateResourcePicker(serviceGroup, resourceCache[service]);
-    } catch (err) {
-        console.error(`Error fetching resources for ${service}:`, err);
-    }
-}
-
-function populateResourcePicker(serviceGroup, resources) {
-    const picker = serviceGroup.querySelector('.resource-picker');
-    if (!picker) return;
-    const selectedArns = new Set();
-    serviceGroup.querySelectorAll('.resource-chip').forEach(chip => selectedArns.add(chip.dataset.arn));
-    picker.innerHTML = '<option value="">Select resource...</option>';
-    resources.forEach(r => {
-        const opt = document.createElement('option');
-        opt.value = r.arn;
-        opt.textContent = r.label;
-        if (selectedArns.has(r.arn)) opt.disabled = true;
-        picker.appendChild(opt);
-    });
-}
-
-// Populate on page load
-document.querySelectorAll('.service-group').forEach(group => fetchResourcesForGroup(group));
-
-// Re-populate after any swap into the statements container (htmx POST responses + SSE OOB)
-document.body.addEventListener('htmx:afterSwap', (e) => {
-    if (e.detail.target?.id === 'statements-container') {
-        e.detail.target.querySelectorAll('.service-group').forEach(group => fetchResourcesForGroup(group));
-    }
 });
 
 // ─── Apply ────────────────────────────────────────────────────────

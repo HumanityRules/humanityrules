@@ -1,5 +1,27 @@
 # DevOpsHero Development Journal
 
+## 2026-02-18 21:30 - [DomainModel] Permissions editor: server-side resources + service extraction + dedicated IAM policy
+
+**Conversation:** [2026-02-18-2043-c8255962.md](conversations/2026-02-18-2043-c8255962.md)
+
+Large refactoring session on the permissions editor, touching IAM reads, service layer extraction, view optimizations, and resource fetching. All motivated by the same principle: the server should own the data, views should be thin, and unnecessary work should be eliminated.
+
+**Dedicated `doh-app-permissions` IAM policy.** The editor previously read ALL inline policies from the ECS task role via `list_role_policies`, which surfaced CDK-generated infrastructure plumbing (`TaskRoleDefaultPolicy` with `ssmmessages`, `logs`, `secretsmanager`). Replaced with a single `get_role_policy(PolicyName="doh-app-permissions")` call. `NoSuchEntityException` → editor starts blank. The `policy_name` is passed as an explicit parameter from the service layer, not hardcoded in `iam_utils`.
+
+**Extracted `services/permissions.py`.** Business logic was living in `security.py` views. Three operations moved to the service: `get_or_create_draft()` (PermissionRequest lifecycle + IAM read), `update_statements()` (add/remove service/level/resource mutations), `approve()` (status flip). The `DOH_APP_PERMISSIONS_POLICY_NAME` constant lives here. Views became thin HTTP handlers. The service is where future `put_role_policy` write-back will live, callable from a worker without HTTP dependency.
+
+**Conversation creation moved to the view.** `get_or_create_draft` was creating a `Conversation` via `agent_service` — mixing permissions domain logic with agent/UI concerns. Now lazily created in `security_permissions_editor` when `permission_request.conversation is None`. The FK was already nullable.
+
+**Server-side resource rendering.** Previously, JS made N separate HTTP requests to a `/resources?service=X` endpoint (one per service group), each assuming the AWS role independently — 3 service groups = 3 STS assume-role calls. Rewrote to: (1) `list_resources_for_services` (plural) in `iam_utils` creates one session and lists all services in a loop, (2) the view calls `_fetch_available_resources` and passes the result through `_group_statements_by_service` into each group's template context, (3) `<option>` elements are rendered server-side in `_permission_service_group.html`. Deleted the `/resources/` JSON endpoint, all JS resource fetching code (`fetchAllResources`, `populateResourcePicker`, `resourceCache`), and the URL route. N assume-role calls → 1.
+
+**Removed dead `security_permissions_editor_statements` endpoint.** Was meant for left-panel polling but was never wired up in any template. Deleted view, URL, and imports.
+
+**Key points:**
+- `list_resources_for_service` (singular) became private `_list_resources_for_service` accepting a `session` param; new public `list_resources_for_services` (plural) creates one session and loops
+- `_build_service_group_data` adds `available_resources` with `selected` flags so the template can mark already-chosen resources as `disabled` in the dropdown
+- No `=None` default parameters — all parameters are required, callers pass explicit empty values
+- The HTMX app shell early-return pattern was applied to 9 views across the codebase, and `AGENTS.md` was updated with the correct pattern to prevent the mistake from recurring
+
 ## 2026-02-18 20:45 - [UI] HTMX app shell early-return optimization across all views
 
 **Conversation:** [2026-02-18-2000-c8255962.md](conversations/2026-02-18-2000-c8255962.md)

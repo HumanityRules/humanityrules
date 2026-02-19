@@ -49,7 +49,7 @@ CURATED_SERVICES = {"s3", "sqs", "dynamodb", "secretsmanager", "kms", "sns", "ss
 ACCESS_LEVELS = ["Read", "Write", "List", "Tagging", "Permissions management"]
 
 
-def _build_service_group_data(service, selected_levels, resources):
+def _build_service_group_data(service, selected_levels, resources, available_resources):
     """Build a template-ready dict for a single service group with access-level toggles."""
     try:
         service_data = policy_sentry_iam_data.get_service_prefix_data(service)
@@ -65,17 +65,24 @@ def _build_service_group_data(service, selected_levels, resources):
             "checked": level in selected_set,
         })
 
+    selected_arns = set(resources)
+
     return {
         "service": service,
         "display_name": display_name,
         "resources": resources,
+        "available_resources": [
+            {**r, "selected": r["arn"] in selected_arns}
+            for r in available_resources
+        ],
         "access_levels": access_levels,
         "selected_count": len(selected_set),
     }
 
 
-def _group_statements_by_service(statements):
+def _group_statements_by_service(statements, available_resources_by_service):
     """Merge multiple statements for the same service into one group."""
+    available = available_resources_by_service
     grouped = {}
     for statement in statements:
         service_name = statement.get("service", "")
@@ -100,9 +107,20 @@ def _group_statements_by_service(statements):
             service=service_name,
             selected_levels=data["access_levels"],
             resources=data["resources"],
+            available_resources=available.get(service_name, []),
         )
         service_groups.append(group)
     return service_groups
+
+
+def _fetch_available_resources(permission_request):
+    """Fetch available AWS resources for all services in a permission request."""
+    from ..services.infra_customer import iam_utils
+
+    services = [stmt.get("service") for stmt in (permission_request.statements or []) if stmt.get("service")]
+    if not services:
+        return {}
+    return iam_utils.list_resources_for_services(permission_request.environment, services)
 
 
 def _get_all_service_options():
@@ -161,7 +179,8 @@ def security_permissions_editor(request):
         content_type=models.Message.ContentType.SYSTEM_TRIGGER,
     ).order_by("created_at")
 
-    service_groups = _group_statements_by_service(permission_request.statements or [])
+    available_resources = _fetch_available_resources(permission_request)
+    service_groups = _group_statements_by_service(permission_request.statements or [], available_resources)
     service_options = _get_all_service_options()
 
     context = base.get_app_shell_context(request=request, current_page="security")
@@ -196,29 +215,6 @@ def security_permissions_editor_apply(request, permission_request_id):
 
 
 @login_required
-def security_permissions_editor_statements(request, permission_request_id):
-    """Return the policy cards HTML for left-panel polling."""
-    organization = request.user.current_organization
-    permission_request = get_object_or_404(
-        models.PermissionRequest,
-        id=permission_request_id,
-        app__organization=organization,
-    )
-
-    service_groups = _group_statements_by_service(permission_request.statements or [])
-
-    context = {
-        "permission_request": permission_request,
-        "service_groups": service_groups,
-    }
-    return render(
-        request=request,
-        template_name="devopshero_app/security/_permission_statements.html",
-        context=context,
-    )
-
-
-@login_required
 @require_POST
 def security_permissions_editor_update_statement(request, permission_request_id):
     """Mutate a single aspect of PermissionRequest.statements and return fresh HTML."""
@@ -237,32 +233,13 @@ def security_permissions_editor_update_statement(request, permission_request_id)
         arn=request.POST.get("arn", "").strip(),
     )
 
-    service_groups = _group_statements_by_service(permission_request.statements or [])
+    available_resources = _fetch_available_resources(permission_request)
+    service_groups = _group_statements_by_service(permission_request.statements or [], available_resources)
     return render(
         request=request,
         template_name="devopshero_app/security/_permission_statements.html",
         context={"service_groups": service_groups, "permission_request": permission_request},
     )
-
-
-@login_required
-def security_permissions_editor_resources(request, permission_request_id):
-    """JSON endpoint: return discovered AWS resources for a given service."""
-    from ..services.infra_customer import iam_utils
-
-    organization = request.user.current_organization
-    permission_request = get_object_or_404(
-        models.PermissionRequest,
-        id=permission_request_id,
-        app__organization=organization,
-    )
-
-    service = request.GET.get("service", "").strip()
-    if not service:
-        return JsonResponse({"error": "Missing service parameter"}, status=400)
-
-    resources = iam_utils.list_resources_for_service(permission_request.environment, service)
-    return JsonResponse({"resources": resources})
 
 
 @login_required
@@ -283,6 +260,7 @@ def security_permissions_editor_service_group(request, permission_request_id):
         service=service,
         selected_levels=set(),
         resources=[],
+        available_resources=[],
     )
     return render(
         request=request,
