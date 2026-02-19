@@ -41,14 +41,20 @@ navigation_items = [
 ```python
 @login_required
 def newpage(request):
-    if request.htmx:
+    # Non-HTMX (full page load): return the shell immediately, no expensive work
+    if not request.htmx:
         context = get_app_shell_context(current_page="newpage")
-        return render(request, "devopshero_app/newpage.html", context=context)
+        context["content_url"] = "/newpage/"
+        return render(request, "devopshero_app/app_shell.html", context=context)
 
+    # HTMX content request: do the real work
+    items = Item.objects.filter(organization=request.user.current_organization)
     context = get_app_shell_context(current_page="newpage")
-    context["content_url"] = "/newpage/"
-    return render(request, "devopshero_app/app_shell.html", context=context)
+    context["items"] = items
+    return render(request, "devopshero_app/newpage.html", context=context)
 ```
+
+**Important: early-return for non-HTMX.** Full page loads hit the view twice: once for the shell (non-HTMX), once for the content (HTMX). The shell only needs `content_url` — any DB queries or service calls are wasted. Always `if not request.htmx: return` before doing expensive work.
 
 ### Step 3: Create the template `templates/devopshero_app/newpage.html`
 
@@ -122,17 +128,19 @@ For pages with their own sub-navigation (tabs):
 ```python
 @login_required
 def settings_organization(request):
+    if not request.htmx:
+        context = get_app_shell_context(current_page="settings")
+        context["content_url"] = "/settings/organization/"
+        return render(request, "devopshero_app/app_shell.html", context=context)
+
+    # Expensive work only for HTMX content requests
     context = get_app_shell_context(current_page="settings")
     context["active_tab"] = "organization"
-
-    if request.htmx:
-        return render(request, "devopshero_app/settings/organization.html", context=context)
-
-    context["content_url"] = "/settings/organization/"
-    return render(request, "devopshero_app/app_shell.html", context=context)
+    return render(request, "devopshero_app/settings/organization.html", context=context)
 ```
 
 **Key points:**
+- Same early-return pattern as top-level pages — no expensive work before the HTMX check
 - `current_page="settings"` keeps the sidebar Settings item active
 - `active_tab="organization"` controls which tab is highlighted
 - Subsection templates extend the parent, so the whole settings section (nav + content) is returned

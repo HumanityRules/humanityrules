@@ -61,14 +61,14 @@ def _build_app_detail_context(request, app):
 @login_required
 def app_detail(request, app_slug):
     """Show app detail with configuration and deployments."""
+    if not request.htmx:
+        context = get_app_shell_context(request=request, current_page="workspaces")
+        context["content_url"] = f"/apps/{app_slug}/"
+        return render(request, "devopshero_app/app_shell.html", context=context)
+
     app = _get_app_for_user(request, app_slug)
     context = _build_app_detail_context(request, app)
-
-    if request.htmx:
-        return render(request, "devopshero_app/apps/app_detail.html", context=context)
-
-    context["content_url"] = f"/apps/{app_slug}/"
-    return render(request, "devopshero_app/app_shell.html", context=context)
+    return render(request, "devopshero_app/apps/app_detail.html", context=context)
 
 
 @login_required

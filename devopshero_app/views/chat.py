@@ -53,6 +53,11 @@ def _get_conversations(user, annotate_costs):
 @login_required
 def chat_list(request):
     """Show unified chat interface with no conversation selected."""
+    if not request.htmx:
+        context = base.get_app_shell_context(request=request, current_page="chat")
+        context["content_url"] = "/chat/"
+        return render(request, "devopshero_app/app_shell.html", context=context)
+
     show_costs = request.user.is_staff
     conversations = _get_conversations(user=request.user, annotate_costs=show_costs)
 
@@ -62,11 +67,7 @@ def chat_list(request):
     context["messages"] = []
     context["show_costs"] = show_costs
 
-    if request.htmx:
-        return render(request, "devopshero_app/chat/chat.html", context=context)
-
-    context["content_url"] = "/chat/"
-    return render(request, "devopshero_app/app_shell.html", context=context)
+    return render(request, "devopshero_app/chat/chat.html", context=context)
 
 
 @login_required
@@ -107,6 +108,11 @@ def chat_app_deploy(request, workspace_slug, repo_name, repo_owner=None):
 @login_required
 def chat_view(request, conversation_id):
     """View a specific conversation in the unified chat interface."""
+    if not request.htmx:
+        context = base.get_app_shell_context(request=request, current_page="chat")
+        context["content_url"] = f"/chat/{conversation_id}/"
+        return render(request, "devopshero_app/app_shell.html", context=context)
+
     conversation = get_object_or_404(
         Conversation.objects.select_related("context_workspace", "context_repository", "context_aws_account"),
         id=conversation_id,
@@ -121,19 +127,15 @@ def chat_view(request, conversation_id):
     context["messages"] = messages
 
     # HTMX request targeting the chat panel - return just the panel content
-    if request.htmx and request.htmx.target == "chat-panel":
+    if request.htmx.target == "chat-panel":
         return render(request, "devopshero_app/chat/_chat_panel.html", context=context)
 
-    # Full HTMX navigation or direct page load - need full unified template
+    # Full HTMX navigation - need full unified template
     show_costs = request.user.is_staff
     context["conversations"] = _get_conversations(user=request.user, annotate_costs=show_costs)
     context["show_costs"] = show_costs
 
-    if request.htmx:
-        return render(request, "devopshero_app/chat/chat.html", context=context)
-
-    context["content_url"] = f"/chat/{conversation_id}/"
-    return render(request, "devopshero_app/app_shell.html", context=context)
+    return render(request, "devopshero_app/chat/chat.html", context=context)
 
 
 @login_required

@@ -47,18 +47,18 @@ def settings_members(request):
 
 @login_required
 def settings_aws_accounts(request):
+    if not request.htmx:
+        context = get_app_shell_context(request=request, current_page="settings")
+        context["content_url"] = "/settings/aws-accounts/"
+        return render(request, "devopshero_app/app_shell.html", context=context)
+
+    org = request.user.current_organization
+
     context = get_app_shell_context(request=request, current_page="settings")
     context["active_tab"] = "aws-accounts"
-    
-    # Filter AWS accounts by user's current organization
-    org = request.user.current_organization
     context["aws_accounts"] = AWSAccount.objects.filter(organization=org)
-    
-    if request.htmx:
-        return render(request, "devopshero_app/settings/aws_accounts.html", context=context)
-    
-    context["content_url"] = "/settings/aws-accounts/"
-    return render(request, "devopshero_app/app_shell.html", context=context)
+
+    return render(request, "devopshero_app/settings/aws_accounts.html", context=context)
 
 
 @login_required
@@ -121,10 +121,12 @@ def settings_billing(request):
 @login_required
 def settings_git_integrations(request):
     """Render the Git Integrations settings tab and handle sync requests."""
-    from devopshero_app.services.gitproviders import github_client
+    if not request.htmx:
+        context = get_app_shell_context(request=request, current_page="settings")
+        context["content_url"] = "/settings/git-integrations/"
+        return render(request, "devopshero_app/app_shell.html", context=context)
 
-    context = get_app_shell_context(request=request, current_page="settings")
-    context["active_tab"] = "git-integrations"
+    from devopshero_app.services.gitproviders import github_client
 
     org = request.user.current_organization
 
@@ -153,6 +155,8 @@ def settings_git_integrations(request):
         provider=GitProviderIntegration.Provider.GITHUB,
     ).first()
 
+    context = get_app_shell_context(request=request, current_page="settings")
+    context["active_tab"] = "git-integrations"
     context["github_integration"] = github_integration
 
     if github_integration:
@@ -160,9 +164,5 @@ def settings_git_integrations(request):
         context["repositories"] = repositories
         context["repo_count"] = repositories.count()
 
-    if request.htmx:
-        return render(request, "devopshero_app/settings/git_integrations.html", context=context)
-
-    context["content_url"] = "/settings/git-integrations/"
-    return render(request, "devopshero_app/app_shell.html", context=context)
+    return render(request, "devopshero_app/settings/git_integrations.html", context=context)
 
