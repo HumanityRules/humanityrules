@@ -175,3 +175,80 @@ All HTMX requests inherit this header automatically. Two rules follow:
 
 - **Same template:** `{% partialdef name %}...{% endpartialdef %}` then `{% partial name %}`
 - **External template:** `{% include "path/to/template.html#partial_name" with foo=bar %}`
+
+### partialdef Rules
+
+1. **`partialdef` defines, `partial` renders.** `{% partialdef name %}` does NOT output anything where it appears. You must call `{% partial name %}` to render the content. Pattern: `{% partial %}` inline where content should appear, `{% partialdef %}` at the bottom of the file.
+
+2. **Names must be valid Python identifiers.** `{% partialdef access-levels %}` fails silently — the hyphen is parsed as minus. Use underscores: `access_levels`.
+
+3. **Partial renders are isolated.** When the view renders `template.html#partial_name`, only the `partialdef` block is processed. Template tags outside it (`{% url ... as var %}`, `{% load %}`, variable assignments) do NOT execute. Any shared setup (URL resolution, etc.) must be duplicated inside each `partialdef`.
+
+### Example: fragment-level HTMX swaps with partialdef
+
+```html
+{# Main template structure — rendered on full page load and add_service #}
+{% url 'my_update_url' id=obj.id as update_url %}
+<div id="wrapper-{{ obj.id }}">
+    <div id="section-a-{{ obj.id }}">
+        {% partial section_a %}
+    </div>
+    <div x-data="{ open: false }">          {# Alpine scope — NEVER replaced #}
+        <div id="section-b-{{ obj.id }}">
+            {% partial section_b %}
+        </div>
+    </div>
+</div>
+
+{# Partial definitions — define content for both full and fragment renders #}
+{% partialdef section_a %}
+{% url 'my_update_url' id=obj.id as update_url %}   {# Must repeat — isolated scope #}
+<select hx-post="{{ update_url }}"
+        hx-target="#section-a-{{ obj.id }}"
+        hx-swap="innerHTML">...</select>
+{% endpartialdef %}
+
+{% partialdef section_b %}
+{% url 'my_update_url' id=obj.id as update_url %}   {# Must repeat — isolated scope #}
+<div @click="open = !open">...</div>                 {# References parent Alpine scope #}
+<div x-show="open">...</div>
+{% endpartialdef %}
+```
+
+```python
+# View: route to the correct partial based on action
+template = "app/_my_partial.html"
+if action in ("action_a", "action_b"):
+    template += "#section_a"
+elif action in ("action_c", "action_d"):
+    template += "#section_b"
+return render(request, template, context)
+```
+
+
+## HTMX Swap Strategies
+
+Choose the narrowest swap target that covers the changed content:
+
+| Scenario | `hx-swap` | `hx-target` | Why |
+|---|---|---|---|
+| **Mutate within a section** (add/remove item, toggle) | `innerHTML` | `#section-id` | Replaces only inner content; wrapper div and any Alpine `x-data` on it survive |
+| **Delete an element** | `delete` | `#element-id` | Client-side removal, server returns empty 200 |
+| **Append new element** | `beforeend` | `#container-id` | Server returns just the new element HTML |
+| **Replace entire component** | `outerHTML` | `#component-id` | Last resort — destroys all client state on the element |
+
+### Alpine + HTMX: preserve state by narrowing swap targets
+
+**Never morph or replace an element that has `x-data`.** Morphing/replacing an Alpine `x-data` element destroys its reactive scope — `x-show` breaks, dropdown state is lost, event handlers detach. No amount of save/restore hacking (`window._alReopen`, `htmx:beforeSwap` listeners, global state factories) works reliably.
+
+Instead, structure templates so the `x-data` element is a **stable wrapper** and HTMX swaps only its **inner content**:
+
+```
+<div x-data="{ open: false }">     ← NEVER replaced by HTMX
+    <div id="swap-target">          ← innerHTML swap target
+        {% partial my_content %}    ← this content references `open` from parent scope
+    </div>
+</div>
+```
+
+When HTMX does `innerHTML` on `#swap-target`, Alpine's MutationObserver detects the new child elements and initializes `@click`, `x-show`, etc. within the existing `x-data` scope. The `open` variable retains its current value.
