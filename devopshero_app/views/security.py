@@ -180,7 +180,8 @@ def security_permissions_editor(request):
         content_type=models.Message.ContentType.SYSTEM_TRIGGER,
     ).order_by("created_at")
 
-    available_resources = _fetch_available_resources(permission_request)
+    # available_resources = _fetch_available_resources(permission_request)
+    available_resources = {}
     service_groups = _group_statements_by_service(permission_request.statements or [], available_resources)
     service_options = _get_all_service_options()
 
@@ -234,7 +235,8 @@ def security_permissions_editor_update_statement(request, permission_request_id)
         arn=request.POST.get("arn", "").strip(),
     )
 
-    available_resources = _fetch_available_resources(permission_request)
+    # available_resources = _fetch_available_resources(permission_request)
+    available_resources = {}
     service_groups = _group_statements_by_service(permission_request.statements or [], available_resources)
     return render(
         request=request,

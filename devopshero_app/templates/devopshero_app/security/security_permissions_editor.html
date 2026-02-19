@@ -169,5 +169,16 @@ pickerList?.addEventListener('click', (e) => {
     });
 });
 
+// ─── Access-level dropdown: keep open across innerHTML swaps ─────
+
+document.addEventListener('htmx:beforeSwap', (e) => {
+    if (e.detail.target?.id === 'statements-container') {
+        window._alReopen = null;
+        document.querySelectorAll('[data-al-service]').forEach(el => {
+            try { if (Alpine.$data(el)?.open) window._alReopen = el.dataset.alService; } catch {}
+        });
+    }
+});
+
 </script>
 {% endif %}
