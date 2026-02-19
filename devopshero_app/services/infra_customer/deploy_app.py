@@ -597,8 +597,14 @@ def deploy(
     # Resource prefix for consistent naming: doh-{env}-{app} (app slugs are per organization unique)
     resource_prefix = f"doh-{env_slug}-{app_config.app_name}"
 
-    # Verify infrastructure exists
     cf_client = session.client("cloudformation")
+
+    app_stack_names = [f"{resource_prefix}-ecr", f"{resource_prefix}-app"]
+    if app_config.database_config:
+        app_stack_names.append(f"{resource_prefix}-aurora")
+    cloudformation_utils.cleanup_rollback_complete_stacks(cf_client, app_stack_names)
+
+    # Verify infrastructure exists
     vpc_stack_name = f"devopshero-{env_slug}-vpc"
     cluster_stack_name = f"devopshero-{env_slug}-cluster"
 
