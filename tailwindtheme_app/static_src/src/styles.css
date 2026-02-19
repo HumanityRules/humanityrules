@@ -363,6 +363,11 @@ el-options[popover] {
   margin-bottom: 1.5em;
 }
 
+/* Spin icon inside button during HTMX request */
+.refresh-resources-btn.htmx-request svg {
+  animation: spin 1s linear infinite;
+}
+
 /* Dark scrollbar style - reusable for any scrollable container */
 .dark-scrollbar {
   scrollbar-width: auto; /* 'thin' or 'auto' (auto = wider) */

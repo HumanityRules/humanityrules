@@ -1,6 +1,6 @@
 {# Service group: one collapsible card per service #}
 {% url 'security_permissions_editor_update_statement' permission_request_id=permission_request.id as update_url %}
-<div id="service-group-{{ group.service }}" class="service-group rounded-lg border border-gray-200 dark:border-gray-700" data-service="{{ group.service }}">
+<div id="service-group-{{ group.service }}" class="service-group rounded-lg border border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-800/60" data-service="{{ group.service }}">
     <details open class="group">
         <summary class="flex items-center justify-between px-4 py-3 cursor-pointer list-none [&::-webkit-details-marker]:hidden select-none bg-gray-50 dark:bg-gray-800 rounded-t-lg">
             <div class="flex items-center space-x-2">
@@ -10,7 +10,7 @@
                 <span class="text-sm font-semibold text-gray-900 dark:text-white">{{ group.display_name }}</span>
             </div>
             <button type="button"
-                    class="remove-service-btn rounded px-2 py-1 text-xs text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-900/20"
+                    class="remove-service-btn rounded px-2 py-1 text-xs text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-900/20 cursor-pointer"
                     title="Remove service"
                     hx-post="{{ update_url }}"
                     hx-vals='{"action": "remove_service", "service": "{{ group.service }}"}'
@@ -108,12 +108,12 @@
     </div>
 </div>
 {# Selected resource chips #}
-<div class="mt-2 flex flex-col gap-1.5">
+<div class="mt-4 flex flex-col gap-1.5">
     {% for r in group.resources %}
     <span class="resource-chip inline-flex items-center justify-between gap-1 rounded-md bg-emerald-50 px-2 py-1 text-xs font-medium text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300">
         <span class="truncate">{{ r|arn_short_name }}</span>
         <button type="button"
-                class="flex-shrink-0 text-emerald-400 hover:text-emerald-600 dark:text-emerald-500 dark:hover:text-emerald-300"
+                class="flex-shrink-0 text-emerald-400 hover:text-emerald-600 dark:text-emerald-500 dark:hover:text-emerald-300 cursor-pointer"
                 aria-label="Remove resource"
                 hx-post="{{ update_url }}"
                 hx-vals='{"action": "remove_resource", "service": "{{ group.service }}", "arn": "{{ r }}"}'
@@ -138,7 +138,7 @@
         <span class="inline-flex items-center gap-1 rounded-md bg-indigo-50 px-2 py-0.5 text-xs font-medium text-indigo-700 dark:bg-indigo-900/40 dark:text-indigo-300">
             {{ level.name }}
             <button type="button"
-                    class="-mr-0.5 ml-0.5 text-indigo-400 hover:text-indigo-600 dark:text-indigo-500 dark:hover:text-indigo-300"
+                    class="-mr-0.5 ml-0.5 text-indigo-400 hover:text-indigo-600 dark:text-indigo-500 dark:hover:text-indigo-300 cursor-pointer"
                     aria-label="Remove {{ level.name }}"
                     @click.stop
                     hx-post="{{ update_url }}"
