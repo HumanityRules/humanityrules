@@ -164,22 +164,14 @@ pickerList?.addEventListener('click', (e) => {
         return;
     }
 
+    // Remove empty-state placeholder before appending
+    document.getElementById('statements-empty')?.remove();
+
     htmx.ajax('POST', UPDATE_URL, {
-        target: '#statements-container',
-        swap: 'morph:innerHTML',
+        target: '#permission-statements-container',
+        swap: 'beforeend',
         values: { action: 'add_service', service: service },
     });
-});
-
-// ─── Access-level dropdown: keep open across innerHTML swaps ─────
-
-document.addEventListener('htmx:beforeSwap', (e) => {
-    if (e.detail.target?.id === 'statements-container') {
-        window._alReopen = null;
-        document.querySelectorAll('[data-al-service]').forEach(el => {
-            try { if (Alpine.$data(el)?.open) window._alReopen = el.dataset.alService; } catch {}
-        });
-    }
 });
 
 </script>
