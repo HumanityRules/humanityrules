@@ -96,18 +96,26 @@ def _get_aws_session_for_environment(environment):
     )
 
 
-def list_resources_for_service(environment, service: str) -> list[dict]:
-    """List actual resources in a customer account for a given AWS service.
+def list_resources_for_services(environment, services: list[str]) -> dict[str, list[dict]]:
+    """List actual resources for multiple AWS services, using a single assumed-role session.
 
-    Returns [{"arn": "...", "label": "..."}, ...].
-    For unsupported services, returns an empty list.
+    Returns {"s3": [{"arn": "...", "label": "..."}, ...], ...}.
     """
     try:
         session = _get_aws_session_for_environment(environment)
     except Exception:
         logger.exception("Failed to assume role for environment %s", environment.slug)
-        return []
+        return {service: [] for service in services}
 
+    return {service: _list_resources_for_service(session, environment, service) for service in services}
+
+
+def _list_resources_for_service(session, environment, service: str) -> list[dict]:
+    """List actual resources in a customer account for a given AWS service.
+
+    Returns [{"arn": "...", "label": "..."}, ...].
+    For unsupported services, returns an empty list.
+    """
     region = environment.aws_region
     account_id = environment.aws_account.aws_account_id
 

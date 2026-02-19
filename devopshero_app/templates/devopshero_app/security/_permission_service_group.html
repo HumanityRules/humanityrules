@@ -36,6 +36,9 @@
                         hx-swap="innerHTML"
                         hx-trigger="change[this.value !== '']">
                     <option value="">Select resource...</option>
+                    {% for r in group.available_resources %}
+                    <option value="{{ r.arn }}" {% if r.selected %}disabled{% endif %}>{{ r.label }}</option>
+                    {% endfor %}
                 </select>
                 <div class="resource-chips mt-2 flex flex-col gap-1.5">
                     {% for r in group.resources %}
