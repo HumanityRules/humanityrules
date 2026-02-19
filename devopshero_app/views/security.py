@@ -31,8 +31,8 @@ def security(request):
     organization = request.user.current_organization
     context = base.get_app_shell_context(request=request, current_page="security")
     context["permission_issue_rows"] = []
-    context["permission_request_rows"] = list(
-        models.PermissionRequest.objects.filter(app__organization=organization)
+    context["app_permission_request_rows"] = list(
+        models.AppPermissionRequest.objects.filter(app__organization=organization)
         .select_related("app", "environment", "created_by")
         .order_by("-created_at")[:20]
     )
@@ -114,12 +114,12 @@ def _group_statements_by_service(statements, available_resources_by_service):
     return service_groups
 
 
-def _fetch_available_resources(permission_request):
+def _fetch_available_resources(app_permission_request):
     """Fetch available AWS resources for all services in a permission request (cache-backed)."""
-    services = [stmt.get("service") for stmt in (permission_request.statements or []) if stmt.get("service")]
+    services = [stmt.get("service") for stmt in (app_permission_request.statements or []) if stmt.get("service")]
     if not services:
         return {}
-    return permissions_service.get_resources_for_services(permission_request.environment, services)
+    return permissions_service.get_resources_for_services(app_permission_request.environment, services)
 
 
 def _get_all_service_options():
@@ -159,10 +159,10 @@ def security_permissions_editor(request):
     app = get_object_or_404(models.App, organization=organization, slug=app_slug)
     environment = get_object_or_404(models.Environment, aws_account__organization=organization, slug=environment_slug)
 
-    permission_request = permissions_service.get_or_create_draft(app=app, environment=environment, user=request.user)
+    app_permission_request = permissions_service.get_or_create_draft(app=app, environment=environment, user=request.user)
 
     # Ensure a conversation exists for the agent chat panel
-    if not permission_request.conversation:
+    if not app_permission_request.conversation:
         conversation = agent_service.create_conversation(
             user=request.user,
             workspace_id=app.workspace_id,
@@ -170,21 +170,21 @@ def security_permissions_editor(request):
             aws_account_id=None,
             mode=models.Conversation.Mode.PERMISSIONS,
         )
-        permission_request.conversation = conversation
-        permission_request.save(update_fields=["conversation", "updated_at"])
+        app_permission_request.conversation = conversation
+        app_permission_request.save(update_fields=["conversation", "updated_at"])
 
-    conversation = permission_request.conversation
+    conversation = app_permission_request.conversation
     messages = conversation.messages.exclude(
         content_type=models.Message.ContentType.SYSTEM_TRIGGER,
     ).order_by("created_at")
 
-    available_resources = _fetch_available_resources(permission_request)
-    service_groups = _group_statements_by_service(permission_request.statements or [], available_resources)
+    available_resources = _fetch_available_resources(app_permission_request)
+    service_groups = _group_statements_by_service(app_permission_request.statements or [], available_resources)
     service_options = _get_all_service_options()
 
     context = base.get_app_shell_context(request=request, current_page="security")
     context.update({
-        "permission_request": permission_request,
+        "app_permission_request": app_permission_request,
         "app": app,
         "environment": environment,
         "conversation": conversation,
@@ -199,28 +199,28 @@ def security_permissions_editor(request):
 
 @login_required
 @require_POST
-def security_permissions_editor_apply(request, permission_request_id):
-    """Set PermissionRequest status to APPROVED_PENDING_APPLY. Statements are already in DB."""
+def security_permissions_editor_apply(request, app_permission_request_id):
+    """Set AppPermissionRequest status to APPROVED_PENDING_APPLY. Statements are already in DB."""
     organization = request.user.current_organization
-    permission_request = get_object_or_404(
-        models.PermissionRequest,
-        id=permission_request_id,
+    app_permission_request = get_object_or_404(
+        models.AppPermissionRequest,
+        id=app_permission_request_id,
         app__organization=organization,
     )
 
-    permissions_service.approve(permission_request)
+    permissions_service.approve(app_permission_request)
 
-    return JsonResponse({"status": "approved_pending_apply", "request_id": str(permission_request.id)})
+    return JsonResponse({"status": "approved_pending_apply", "request_id": str(app_permission_request.id)})
 
 
 @login_required
 @require_POST
-def security_permissions_editor_update_statement(request, permission_request_id):
-    """Mutate a single aspect of PermissionRequest.statements and return fresh HTML."""
+def security_permissions_editor_update_statement(request, app_permission_request_id):
+    """Mutate a single aspect of AppPermissionRequest.statements and return fresh HTML."""
     organization = request.user.current_organization
-    permission_request = get_object_or_404(
-        models.PermissionRequest,
-        id=permission_request_id,
+    app_permission_request = get_object_or_404(
+        models.AppPermissionRequest,
+        id=app_permission_request_id,
         app__organization=organization,
     )
 
@@ -228,7 +228,7 @@ def security_permissions_editor_update_statement(request, permission_request_id)
     service = request.POST.get("service", "").strip()
 
     permissions_service.update_statements(
-        permission_request,
+        app_permission_request,
         action=action,
         service=service,
         level=request.POST.get("level", "").strip(),
@@ -236,16 +236,16 @@ def security_permissions_editor_update_statement(request, permission_request_id)
     )
 
     if action == "remove_service":
-        if not permission_request.statements:
+        if not app_permission_request.statements:
             return render(
                 request=request,
                 template_name="devopshero_app/security/_permission_statements.html",
-                context={"service_groups": [], "permission_request": permission_request, "oob": True},
+                context={"service_groups": [], "app_permission_request": app_permission_request, "oob": True},
             )
         return HttpResponse()
 
-    available_resources = _fetch_available_resources(permission_request)
-    service_groups = _group_statements_by_service(permission_request.statements or [], available_resources)
+    available_resources = _fetch_available_resources(app_permission_request)
+    service_groups = _group_statements_by_service(app_permission_request.statements or [], available_resources)
     group = next((g for g in service_groups if g["service"] == service), None)
     if group is None:
         return HttpResponse(status=204)
@@ -259,17 +259,17 @@ def security_permissions_editor_update_statement(request, permission_request_id)
     return render(
         request=request,
         template_name=template,
-        context={"group": group, "permission_request": permission_request},
+        context={"group": group, "app_permission_request": app_permission_request},
     )
 
 
 @login_required
-def security_permissions_editor_service_group(request, permission_request_id):
+def security_permissions_editor_service_group(request, app_permission_request_id):
     """HTMX endpoint: return a rendered service group partial for a new service."""
     organization = request.user.current_organization
-    permission_request = get_object_or_404(
-        models.PermissionRequest,
-        id=permission_request_id,
+    app_permission_request = get_object_or_404(
+        models.AppPermissionRequest,
+        id=app_permission_request_id,
         app__organization=organization,
     )
 
@@ -277,7 +277,7 @@ def security_permissions_editor_service_group(request, permission_request_id):
     if not service:
         return JsonResponse({"error": "Missing service parameter"}, status=400)
 
-    available = permissions_service.get_resources_for_services(permission_request.environment, [service])
+    available = permissions_service.get_resources_for_services(app_permission_request.environment, [service])
     group = _build_service_group_data(
         service=service,
         selected_levels=set(),
@@ -287,27 +287,27 @@ def security_permissions_editor_service_group(request, permission_request_id):
     return render(
         request=request,
         template_name="devopshero_app/security/_permission_service_group.html",
-        context={"group": group, "permission_request": permission_request},
+        context={"group": group, "app_permission_request": app_permission_request},
     )
 
 
 @login_required
 @require_POST
-def security_permissions_editor_refresh_resources(request, permission_request_id):
+def security_permissions_editor_refresh_resources(request, app_permission_request_id):
     """Clear and re-fetch AWS resource cache, then re-render the statements partial."""
     organization = request.user.current_organization
-    permission_request = get_object_or_404(
-        models.PermissionRequest,
-        id=permission_request_id,
+    app_permission_request = get_object_or_404(
+        models.AppPermissionRequest,
+        id=app_permission_request_id,
         app__organization=organization,
     )
 
-    services = [stmt.get("service") for stmt in (permission_request.statements or []) if stmt.get("service")]
-    available_resources = permissions_service.refresh_resources_cache(permission_request.environment, services)
-    service_groups = _group_statements_by_service(permission_request.statements or [], available_resources)
+    services = [stmt.get("service") for stmt in (app_permission_request.statements or []) if stmt.get("service")]
+    available_resources = permissions_service.refresh_resources_cache(app_permission_request.environment, services)
+    service_groups = _group_statements_by_service(app_permission_request.statements or [], available_resources)
 
     return render(
         request=request,
         template_name="devopshero_app/security/_permission_statements.html",
-        context={"service_groups": service_groups, "permission_request": permission_request},
+        context={"service_groups": service_groups, "app_permission_request": app_permission_request},
     )

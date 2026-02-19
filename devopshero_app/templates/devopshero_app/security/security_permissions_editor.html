@@ -19,9 +19,9 @@
         </div>
         <h1 class="text-lg font-semibold text-gray-900 dark:text-white">
             Permissions — {{ app.name }} / {{ environment.name }}
-            {% if permission_request.status != "draft" %}
+            {% if app_permission_request.status != "draft" %}
             <span class="ml-2 inline-flex items-center align-middle rounded-full bg-indigo-100 px-2.5 py-0.5 text-xs font-medium text-indigo-800 dark:bg-indigo-900 dark:text-indigo-200">
-                {{ permission_request.get_status_display }}
+                {{ app_permission_request.get_status_display }}
             </span>
             {% endif %}
         </h1>
@@ -41,7 +41,7 @@
                     {# Refresh resources button #}
                     <button type="button"
                             class="refresh-resources-btn inline-flex items-center gap-1.5 rounded-md border border-gray-300 px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:text-gray-300 dark:hover:bg-gray-800 cursor-pointer"
-                            hx-post="{% url 'security_permissions_editor_refresh_resources' permission_request_id=permission_request.id %}"
+                            hx-post="{% url 'security_permissions_editor_refresh_resources' app_permission_request_id=app_permission_request.id %}"
                             hx-target="#statements-container"
                             hx-swap="innerHTML"
                             hx-disabled-elt="this">
@@ -78,7 +78,7 @@
                 <div class="mt-5 flex items-center justify-end gap-3">
                     <button type="button" id="apply-btn"
                             class="rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
-                            hx-post="{% url 'security_permissions_editor_apply' permission_request_id=permission_request.id %}"
+                            hx-post="{% url 'security_permissions_editor_apply' app_permission_request_id=app_permission_request.id %}"
                             hx-swap="none"
                             hx-on::before-request="this.disabled = true; this.textContent = 'Applying...'"
                             hx-on::after-request="if(event.detail.successful) { this.textContent = 'Applied'; this.className = this.className.replace('bg-indigo-600','bg-green-600').replace('hover:bg-indigo-500',''); } else { this.textContent = 'Failed'; this.className = this.className.replace('bg-indigo-600','bg-red-600').replace('hover:bg-indigo-500',''); }">
@@ -115,7 +115,7 @@
  */
 
 const SERVICE_OPTIONS = JSON.parse(document.getElementById('service-options-data').textContent);
-const UPDATE_URL = "{% url 'security_permissions_editor_update_statement' permission_request_id=permission_request.id %}";
+const UPDATE_URL = "{% url 'security_permissions_editor_update_statement' app_permission_request_id=app_permission_request.id %}";
 
 // ─── Service Picker ───────────────────────────────────────────────
 
