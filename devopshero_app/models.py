@@ -1075,6 +1075,22 @@ class LLMUsageLog(models.Model):
         return f"{self.source} — {self.model_alias} — ${self.cost_usd or 0:.4f}"
 
 
+class AppPermissions(models.Model):
+    """The current (last-applied) permissions for an app in an environment."""
+    id = models.UUIDField(primary_key=True, default=uuid.uuid7, editable=False)
+    app = models.ForeignKey(App, on_delete=models.CASCADE, related_name="app_permissions")
+    environment = models.ForeignKey(Environment, on_delete=models.CASCADE, related_name="app_permissions")
+    statements = models.JSONField(default=list)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        unique_together = [("app", "environment")]
+
+    def __str__(self):
+        return f"AppPermissions {self.app.slug}/{self.environment.slug}"
+
+
 class AppPermissionRequest(models.Model):
     """A request to modify IAM task-role policies for a deployed app."""
 
