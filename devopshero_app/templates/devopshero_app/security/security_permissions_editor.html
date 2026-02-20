@@ -76,13 +76,23 @@
 
                 {# Action buttons #}
                 <div class="mt-5 flex items-center justify-end gap-3">
+                    <button type="button" id="cancel-btn"
+                            class="rounded-md border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:text-gray-300 dark:hover:bg-gray-800 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+                            {% if not has_changes %}disabled{% endif %}
+                            hx-post="{% url 'security_permissions_editor_cancel' app_permission_request_id=app_permission_request.id %}"
+                            hx-target="#statements-container"
+                            hx-swap="innerHTML"
+                            hx-on::after-request="if(event.detail.successful) { this.disabled = true; document.getElementById('apply-btn').disabled = true; }">
+                        Cancel
+                    </button>
                     <button type="button" id="apply-btn"
                             class="rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+                            {% if not has_changes %}disabled{% endif %}
                             hx-post="{% url 'security_permissions_editor_apply' app_permission_request_id=app_permission_request.id %}"
                             hx-swap="none"
-                            hx-on::before-request="this.disabled = true; this.textContent = 'Applying...'"
-                            hx-on::after-request="if(event.detail.successful) { this.textContent = 'Applied'; this.className = this.className.replace('bg-indigo-600','bg-green-600').replace('hover:bg-indigo-500',''); } else { this.textContent = 'Failed'; this.className = this.className.replace('bg-indigo-600','bg-red-600').replace('hover:bg-indigo-500',''); }">
-                        Apply
+                            hx-on::before-request="this.disabled = true; this.textContent = 'Submitting...'"
+                            hx-on::after-request="if(event.detail.successful) { this.textContent = 'Submitted'; this.className = this.className.replace('bg-indigo-600','bg-green-600').replace('hover:bg-indigo-500',''); } else { this.textContent = 'Failed'; this.className = this.className.replace('bg-indigo-600','bg-red-600').replace('hover:bg-indigo-500',''); }">
+                        Submit Request
                     </button>
                 </div>
             </div>
@@ -185,6 +195,16 @@ pickerList?.addEventListener('click', (e) => {
         swap: 'beforeend',
         values: { action: 'add_service', service: service },
     });
+});
+
+// ─── Show Cancel button after first mutation ─────────────────────
+document.body.addEventListener('htmx:afterRequest', (e) => {
+    if (e.detail.requestConfig?.path === UPDATE_URL && e.detail.successful) {
+        const cancel = document.getElementById('cancel-btn');
+        const apply = document.getElementById('apply-btn');
+        if (cancel) cancel.disabled = false;
+        if (apply) apply.disabled = false;
+    }
 });
 
 </script>

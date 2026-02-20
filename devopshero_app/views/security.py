@@ -159,7 +159,8 @@ def security_permissions_editor(request):
     app = get_object_or_404(models.App, organization=organization, slug=app_slug)
     environment = get_object_or_404(models.Environment, aws_account__organization=organization, slug=environment_slug)
 
-    app_permission_request = permissions_service.get_or_create_draft(app=app, environment=environment, user=request.user)
+    app_permissions = permissions_service.get_or_create_app_permissions(app=app, environment=environment)
+    app_permission_request = permissions_service.get_or_create_draft(app=app, environment=environment, user=request.user, app_permissions=app_permissions)
 
     # Ensure a conversation exists for the agent chat panel
     if not app_permission_request.conversation:
@@ -192,6 +193,7 @@ def security_permissions_editor(request):
         "service_groups": service_groups,
         "service_options_json": json.dumps(service_options),
         "security_querystring": urlencode(query={"context_app": app_slug, "context_environment": environment_slug}),
+        "has_changes": app_permission_request.statements != app_permissions.statements,
     })
 
     return render(request=request, template_name="devopshero_app/security/security_permissions_editor.html", context=context)
@@ -208,9 +210,38 @@ def security_permissions_editor_apply(request, app_permission_request_id):
         app__organization=organization,
     )
 
-    permissions_service.approve(app_permission_request)
+    app_permissions = permissions_service.get_or_create_app_permissions(
+        app=app_permission_request.app, environment=app_permission_request.environment,
+    )
+    permissions_service.approve(app_permission_request, app_permissions)
 
     return JsonResponse({"status": "approved_pending_apply", "request_id": str(app_permission_request.id)})
+
+
+@login_required
+@require_POST
+def security_permissions_editor_cancel(request, app_permission_request_id):
+    """Reset the draft's statements back to the AppPermissions baseline and re-render statements."""
+    organization = request.user.current_organization
+    app_permission_request = get_object_or_404(
+        models.AppPermissionRequest,
+        id=app_permission_request_id,
+        app__organization=organization,
+    )
+
+    app_permissions = permissions_service.get_or_create_app_permissions(
+        app=app_permission_request.app, environment=app_permission_request.environment,
+    )
+    permissions_service.cancel(app_permission_request, app_permissions)
+
+    available_resources = _fetch_available_resources(app_permission_request)
+    service_groups = _group_statements_by_service(app_permission_request.statements or [], available_resources)
+
+    return render(
+        request=request,
+        template_name="devopshero_app/security/_permission_statements.html",
+        context={"service_groups": service_groups, "app_permission_request": app_permission_request},
+    )
 
 
 @login_required

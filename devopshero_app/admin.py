@@ -4,6 +4,7 @@ from django.contrib.auth.admin import UserAdmin as BaseUserAdmin
 from devopshero_app.models import (
     AWSAccount,
     App,
+    AppPermissions,
     Conversation,
     Datastore,
     Deployment,
@@ -247,6 +248,15 @@ class LLMUsageLogAdmin(admin.ModelAdmin):
 
     def has_delete_permission(self, request, obj=None):
         return False
+
+
+@admin.register(AppPermissions)
+class AppPermissionsAdmin(admin.ModelAdmin):
+    list_display = ["id", "app", "environment", "created_at", "updated_at"]
+    list_filter = ["app__organization"]
+    search_fields = ["app__name", "environment__name"]
+    readonly_fields = ["id", "statements", "created_at", "updated_at"]
+    autocomplete_fields = ["app", "environment"]
 
 
 @admin.register(AppPermissionRequest)

@@ -1,5 +1,35 @@
 # DevOpsHero Development Journal
 
+## 2026-02-19 16:26 - [DomainModel] AppPermissions model + Cancel feature for permissions editor
+
+**Conversation:** [2026-02-19-1627-9e601f6c.md](conversations/2026-02-19-1627-9e601f6c.md)
+
+Introduced `AppPermissions` as the DB-side source of truth for an app+environment's current (last-applied) IAM permissions. Previously, the permissions editor read IAM policies from AWS every time a new draft was created, making "cancel" impossible — there was no stored baseline to revert to.
+
+**AppPermissions model:** Stores `statements` (JSONField) per app+environment pair with a `unique_together` constraint. On first access, seeds from AWS via `iam_utils.read_app_permissions_policy()` (best-effort, empty list on failure). This is a one-time migration — after that, the DB is the source of truth.
+
+**Flow changes:**
+- `get_or_create_app_permissions()` fetches or creates the baseline (seeds from AWS on first access)
+- `get_or_create_draft()` now copies from `AppPermissions.statements` instead of calling AWS directly
+- `approve()` updates `AppPermissions.statements` to match the approved request, so the baseline advances
+- `cancel()` resets the draft's statements back to the `AppPermissions` baseline
+
+**Cancel button UX evolution** — went through several iterations:
+1. Started with `hidden` class (display:none) → caused layout shift when appearing (Apply button jumped down a few pixels)
+2. Switched to `invisible` (visibility:hidden) → button reserves space, no layout shift
+3. Tried opacity fade-in/fade-out (50ms, then 100ms) → user decided against it
+4. Final: always visible, **disabled/enabled** state. Both Cancel and Submit Request start `disabled` (greyed out at 50% opacity), become enabled after first mutation, Cancel re-disables both
+
+**Cancel swap target narrowing:** Initially the cancel view re-rendered the full editor template (`hx-target="#main-content"`), which caused a brief flicker in the chat panel as it was torn down and rebuilt. Fixed by targeting only `#statements-container` and rendering just the `_permission_statements.html` partial. The cancel button hides itself via `hx-on::after-request`.
+
+**Show-after-mutation approach (hybrid server+client):** Server controls initial disabled state via `has_changes` (compares `app_permission_request.statements != app_permissions.statements`). A JS `htmx:afterRequest` listener enables both buttons after any successful POST to the update-statement URL. This avoids complex OOB swaps from the update_statement view, which returns varied response shapes (partials, empty HttpResponse, sub-fragments).
+
+**Key points:**
+- `invisible` vs `hidden` vs `opacity-0` vs `disabled` — each has different layout/interaction trade-offs. `disabled` was the right choice here: buttons are always visible as affordances, just greyed out
+- Narrowing HTMX swap targets prevents unnecessary DOM teardown — only swap what actually changes
+- Hybrid server+client visibility control works well when the mutation endpoint has varied response shapes that make OOB swaps impractical
+- Renamed "Apply" → "Submit Request" with matching states ("Submitting...", "Submitted", "Failed")
+
 ## 2026-02-20 00:30 - [Bugfix] Resources dropdown flicker on close when search filter is active
 
 **Conversation:**
