@@ -1,5 +1,21 @@
 # DevOpsHero Development Journal
 
+## 2026-02-23 21:30 - [UI] App detail page deployment rows redesign
+
+**Conversation:**
+
+Redesigned the deployment rows on the app detail page to fix alignment issues and reduce visual clutter. The original design had several problems: status badges wrapped in bordered boxes (card-within-a-card), "Redeploy" and "Permissions" as loose text links with no structure, and inconsistent layouts between the "Deployed to Environments" and "Recent Deployments" sections.
+
+**Key changes:**
+
+- Removed the bordered box around status+timestamp in both sections — the colored pill badge is sufficient, wrapping it in another container was double-framing. Status and timestamp are now inline: `[Deployed] · 3h ago`
+- Replaced the three-dot dropdown menu with a plain "Tear Down" text link — the dropdown was overkill for a single action. The link still triggers the same confirmation modal. Styled in indigo like other links (not red) since the confirmation modal handles the "are you sure" concern.
+- Switched both sections from `flex justify-between` to CSS grid with fixed columns (`grid-cols-[1fr_auto_5rem]`) so the info, status, and actions columns align consistently across all rows regardless of content
+- Moved "New Deployment" button from the "Deployed to Environments" header up to the page header (where the app type pill was), and moved the pill inline next to the "Created" date under the title
+- Consolidated the "Deployed to Environments" inline template code into a reuse of `_app_deployment_row.html` with a new `mode="app_summary"` — this was the key fix for alignment since both sections now share the exact same grid template and column widths
+- When a deployment row has no action links (non-deployed status), a centered em-dash placeholder (`&mdash;&mdash;&mdash;`) reserves the column width to maintain alignment
+- The `app_summary` mode now shows the same heading format as the default mode ("Environment: dev" with Account/Region and Ref lines) for consistency
+
 ## 2026-02-19 16:26 - [DomainModel] AppPermissions model + Cancel feature for permissions editor
 
 **Conversation:** [2026-02-19-1627-9e601f6c.md](conversations/2026-02-19-1627-9e601f6c.md)
