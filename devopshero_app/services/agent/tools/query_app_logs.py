@@ -126,16 +126,10 @@ def _query_logs_sync(session, log_group: str, stream_prefix: str, start_time_ms:
     truncated = False
 
     try:
-        for page_num in range(MAX_PAGES):
-            t_page = time_module.monotonic()
+        for _ in range(MAX_PAGES):
             response = client.filter_log_events(**kwargs)
-            page_events = response.get("events", [])
-            logger.info(
-                "query_app_logs: page %d returned %d events in %.1fs",
-                page_num, len(page_events), time_module.monotonic() - t_page,
-            )
 
-            for e in page_events:
+            for e in response.get("events", []):
                 raw_events.append((e["timestamp"], e.get("message", "")))
 
             next_token = response.get("nextToken")
@@ -213,11 +207,9 @@ async def query_app_logs(
     start_time_ms = int((now - timedelta(hours=time_window_hours)).timestamp() * 1000)
     end_time_ms = int(now.timestamp() * 1000)
 
-    t0 = time_module.monotonic()
-    session = await asyncio.to_thread(_get_aws_session_for_environment, env)
     t1 = time_module.monotonic()
-    logger.info("query_app_logs: assume_role took %.1fs", t1 - t0)
-
+    session = await asyncio.to_thread(_get_aws_session_for_environment, env)
+    
     result = await asyncio.to_thread(
         _query_logs_sync, session, log_group, stream_prefix, start_time_ms, end_time_ms,
     )
@@ -226,6 +218,5 @@ async def query_app_logs(
         "query_app_logs: filter_log_events took %.1fs (%d events, %d groups)",
         t2 - t1, result.total_events, result.distinct_errors,
     )
-    logger.info("query_app_logs: total %.1fs", t2 - t0)
-
+    
     return result
