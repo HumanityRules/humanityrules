@@ -98,6 +98,10 @@ After repository analysis, check the `dockerfile_path` field in the analysis res
   5. You have a maximum of **3 attempts** to get the Dockerfile right. If all 3 fail, show the user the last error and ask for help.
   6. Once the build succeeds, proceed to the pull request workflow (step 7 in the deployment flow)
 
+**Best practices:**
+
+- **Python apps** — Always include `ENV PYTHONUNBUFFERED=1`.
+
 </dockerfile_generation>
 
 <pull_request_workflow>
