@@ -1,5 +1,27 @@
 # DevOpsHero Development Journal
 
+## 2026-02-24 06:45 - [AgentChat] Permissions agent runtime error detection tools (CloudWatch Logs + CloudTrail)
+
+**Conversation:** [2026-02-23-2231-75de2430.md](conversations/2026-02-23-2231-75de2430.md)
+
+Added two new MCP tools for the permissions agent to detect IAM permission denials at runtime, complementing the existing source code analysis. The agent now has three signals to work with: static code analysis (what permissions the code *needs*), CloudWatch Logs (what errors the app is *logging*), and CloudTrail (what API calls AWS *denied*).
+
+**Tools created:**
+
+- `query_app_logs` — Queries CloudWatch Logs `FilterLogEvents` on the app's ECS log group (`/devopshero/{env.slug}/ecs`) with the app slug as stream prefix. Uses a multi-term OR filter pattern (`?"AccessDenied" ?"is not authorized to perform" ?"AuthorizationError"` etc.) to catch common AWS permission error formats. Results are **compacted**: raw events are grouped by an extracted error signature (error code + API operation + resource ARN via regex) so the agent sees each distinct denial once with a count and time range, instead of 50 copies of the same error. This was a key design decision — agents have limited context, so deduplication directly improves analysis quality.
+
+- `lookup_access_denied_events` — Queries CloudTrail `LookupEvents` for AccessDenied management events from the app's task role. Client-side filters by error code and role ARN since CloudTrail doesn't support server-side filtering on error codes. Paginates up to 10 pages with 0.5s sleep for rate limiting. Always includes a note about the data events limitation (S3 GetObject, DynamoDB PutItem require separate CloudTrail data event logging).
+
+**Tool scoping for PERMISSIONS mode:**
+
+In `_create_agent_options()`, permissions conversations now get a restricted tool set: only `Read`, `Glob`, `Grep` as built-in tools (no Write, Edit, Bash, Task) and only `query_app_logs`, `lookup_access_denied_events`, `wait` as MCP tools. No deployment/git/infrastructure tools, no sub-agents. This prevents the permissions agent from accidentally deploying or modifying code.
+
+**Key learnings:**
+
+- CloudWatch `FilterLogEvents` returns many empty pages while scanning log streams — a 24h window with few matches can take 10+ API calls returning 0 events before finding results. Considered early termination (stop after finding events then hitting an empty page) but rejected it because results can be spread across non-contiguous pages from different log streams. `MAX_PAGES=20` is the only safe cap.
+- The filter pattern needed widening: original had `?"AccessDeniedException"` which misses the bare `AccessDenied` error code boto3 uses in `(AccessDenied)`. Changed to `?"AccessDenied"` (substring match catches both). Also added `?"AuthorizationError"` (SNS/SQS) and `?"ExpiredToken"`.
+- Both tools reuse `iam_utils._get_aws_session_for_environment()` for cross-account role assumption. The `AppPermissionRequest` loaded with `select_related("app", "environment", "environment__aws_account")` provides all needed context — no additional DB queries.
+
 ## 2026-02-23 23:15 - [DomainModel] Reverse Conversation ↔ AppPermissionRequest FK direction + permissions system prompt
 
 **Conversation:** [2026-02-23-1632-478b7885.md](conversations/2026-02-23-1632-478b7885.md)

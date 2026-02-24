@@ -28,55 +28,51 @@ Add a `context_app_permission_request` FK (nullable) to `Conversation`. This giv
 
 ---
 
-## Open Tasks
+## Error Detection: Data Sources and Priority
 
-### 1. Pass app/environment context to the agent
+The agent detects permission errors through multiple sources, prioritized by value vs. setup cost:
 
-The agent needs to know the app slug, environment slug, AWS account ID, region, repository URL, and task role name. This context is available through the `AppPermissionRequest` → `App` / `Environment` chain.
+**1. Source code analysis** (primary) — Agent analyzes the app's repo to detect AWS resource usage and suggest an initial permission set. Covers most cases upfront before the app even hits a runtime error.
 
-### 2. CloudTrail setup on customer accounts
+**2. CloudWatch Logs** (runtime, zero setup) — DOH already creates log groups per app. AWS SDK errors (`AccessDeniedException`, `is not authorized to perform`, etc.) appear in app stdout/stderr. Less structured than CloudTrail — requires pattern matching across SDK languages — but free and already there.
 
-Required for log-based permission analysis. Key considerations:
+**3. CloudTrail `LookupEvents` API** (management events, zero setup) — Every AWS account logs management events by default. The agent can call `LookupEvents` through the existing assumed role to find `AccessDenied` errors on management-plane operations (e.g., `CreateTable`, `ListBuckets`). No infrastructure to provision — just an API call, like `list_resources_for_services` today.
 
-- **Management events vs. Data events** — Management events (e.g., `CreateBucket`, `DeleteTable`) are cheap and enabled by default in most accounts. Data events (e.g., `GetObject`, `PutItem`) are where most permission denials happen but cost significantly more and are often not enabled.
-- **Existing trails** — The customer may already have CloudTrail enabled. We need to discover and hook into existing trails rather than always creating a new one.
-- **CloudTrail Lake vs. S3 + Athena vs. CloudWatch Logs** — Different query mechanisms with different cost/latency tradeoffs. Needs detailed analysis.
-- **Multi-region** — CloudTrail can be configured per-region or as an organization trail. We need to handle both cases.
+**4. CloudTrail Lake event data store** (data events, deferred) — A DOH-managed event data store in the customer's account with data events scoped to the app's known resources. Provides structured detection of data-plane denials (`GetObject`, `PutItem`, etc.). Significant setup complexity (CloudFormation per customer, event selector lifecycle, Lake query API, cost management) for incremental value over items 1-3. Cherry-on-top feature, mainly for demo wow factor.
 
-### 3. CloudWatch log access for ECS task logs
+### Workflow
 
-Required for detecting runtime permission errors from the app's own logs (not just CloudTrail API-level denials). The ECS task already writes to CloudWatch Logs. The agent needs:
+1. App is deployed (starts with no extra permissions)
+2. User opens permissions editor — agent analyzes source code, suggests permissions with specific resources
+3. User reviews, adjusts, approves
+4. App runs — if it hits permission denials, CloudWatch Logs and `LookupEvents` catch them
+5. Agent detects errors, suggests follow-up permission requests
+6. (Phase 2) DOH enables CloudTrail data events scoped to the approved resources, expanding scope as new resources are added
 
-- The log group name (derivable from the environment/app naming convention)
-- Permission to call `FilterLogEvents` or `GetLogEvents` on the customer's account
-- A strategy for searching relevant time windows (not scanning all history)
+### Data source details
 
+- **CloudTrail** — Logs all AWS API calls including AccessDenied with exact action, resource, and principal. By default only management events are logged. Data events (what apps actually do — GetObject, PutItem) are NOT logged by default. Can be enabled scoped by resource ARN. Cannot filter capture by role — filter by role ARN at query time.
+- **CloudWatch Logs** — AWS SDK errors appear in app stdout/stderr. Less structured, requires pattern matching. No additional setup or cost.
+- **Other sources** (less central): ECS stopped task reasons (startup failures only), IAM Access Analyzer (policy generation from usage patterns), IAM Policy Simulator (pre-validation, not runtime detection).
 
+---
 
-## Discussion about sources of information for detecting permission errors
+## Agent Tools
 
-We discussed sources of information for detecting when a DOH-managed app has IAM permission errors:
+The permissions agent uses a restricted tool set — it doesn't need deployment, git, or infrastructure tools.
 
-  CloudTrail
-  - Logs all AWS API calls including AccessDenied errors with exact action, resource, and principal.
-  - Limitation: by default only logs management events (control-plane like CreateBucket, ListBuckets). Data events (what apps actually do — GetObject, PutObject, Query, GetItem) are
-   NOT logged by default.
-  - Solution: you can enable data events on a trail, scoped by resource ARN to control cost. DOH knows the exact resources from the permission statements, so it can scope tightly.
-  For low-traffic internal apps with dedicated resources, cost is negligible.
-  - Cannot filter capture by role — advanced event selectors don't support userIdentity. But you filter by role ARN at query time, which is fine.
+**Built-in tools (source code analysis):**
+- Read, Grep, Glob — the agent reads the cloned repo in its sandbox to detect AWS resource usage. This is how the initial source code analysis works today.
 
-  CloudWatch Logs (application logs)
-  - Already available — DOH creates log groups per app. AWS SDK errors (AccessDeniedException, is not authorized to perform, etc.) appear in app stdout/stderr.
-  - Less structured than CloudTrail — requires pattern matching across different SDK languages/formats.
-  - No additional setup or cost.
+**New MCP tools to build:**
 
-  Other sources mentioned (less central):
-  - ECS stopped task reasons (startup-time failures only)
-  - IAM Access Analyzer (policy generation from usage patterns)
-  - IAM Policy Simulator (pre-validation, not runtime detection)
+- **`query_app_logs`** — Assumes the customer's role, calls `FilterLogEvents` on the app's CloudWatch log group, filters for permission error patterns (`AccessDeniedException`, `is not authorized to perform`, `Access Denied`). Log group name derived from environment/app naming convention. Takes a time window parameter.
 
-  Conclusion: both CloudTrail and CloudWatch Logs are worth pursuing. CloudTrail gives structured, precise data (action + resource) but needs data events enabled. CloudWatch Logs
-  are free and already there but need parsing.
+- **`lookup_access_denied_events`** — Assumes the customer's role, calls CloudTrail `LookupEvents`, filters client-side for the app's task role ARN and `errorCode: AccessDenied`. Management events only. Takes a time window parameter.
+
+**Proactive behavior:** The agent runs source code analysis, `query_app_logs`, and `lookup_access_denied_events` automatically when the conversation starts — same as it already does with source code analysis. The user doesn't need to ask.
+
+**Tool scoping:** The `allowed_tools` in `_create_agent_options` should be restricted for PERMISSIONS mode conversations to only the tools above. The current deployment/git/infra tools are irrelevant and add noise to the agent's tool list.
 
 ---
 
