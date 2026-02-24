@@ -23,6 +23,8 @@ from .scan_repository import scan_repository, RepositoryScan
 from .repository_git_operations import run_git_operation, GitOperationResult
 from .teardown_deployment import teardown_deployment, TeardownSummary
 from .test_docker_build import test_docker_build, TestBuildResult
+from .query_app_logs import query_app_logs, AppLogsResult
+from .lookup_access_denied_events import lookup_access_denied_events, AccessDeniedEventsResult
 
 __all__ = [
     # App management
@@ -65,4 +67,9 @@ __all__ = [
     # Docker build testing
     "test_docker_build",
     "TestBuildResult",
+    # Permissions analysis
+    "query_app_logs",
+    "AppLogsResult",
+    "lookup_access_denied_events",
+    "AccessDeniedEventsResult",
 ]

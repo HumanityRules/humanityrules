@@ -49,6 +49,7 @@ from devopshero_app.services.llm import llm_client, title_generator
 from .agent_client import get_claude_env
 from .mcp_tools import (
     create_devopshero_mcp_server,
+    PERMISSIONS_ALLOWED_TOOLS,
     TOOL_NAMES,
 )
 from .repo_analysis.repo_analyzer_config import get_analyze_repository_agent
@@ -748,14 +749,22 @@ def _create_agent_options(conversation: Conversation,
         "TMPDIR": str(sandbox_paths.tmp_path),
     }
 
-    # Excluded built-in tools: NotebookEdit, WebFetch, KillShell, AskUserQuestion, Skill
-    builtin_tools = [
-        "Read", "Write", "Edit", "Glob", "Grep", "Bash",
-        "Task", "TaskOutput", "TodoWrite", "EnterPlanMode", "ExitPlanMode",
-    ]
+    # Scope built-in tools and MCP tools by conversation mode
+    if conversation.mode == Conversation.Mode.PERMISSIONS:
+        builtin_tools = ["Read", "Glob", "Grep"]
+        allowed_tools = PERMISSIONS_ALLOWED_TOOLS
+        blocked_agents: list[str] = []
+        agents = {}
+    else:
+        # Excluded built-in tools: NotebookEdit, WebFetch, KillShell, AskUserQuestion, Skill
+        builtin_tools = [
+            "Read", "Write", "Edit", "Glob", "Grep", "Bash",
+            "Task", "TaskOutput", "TodoWrite", "EnterPlanMode", "ExitPlanMode",
+        ]
+        allowed_tools = TOOL_NAMES
+        blocked_agents = ["Task(Bash)", "Task(statusline-setup)"]
+        agents = {"analyze-repository": get_analyze_repository_agent()}
 
-    blocked_agents = ["Task(Bash)", "Task(statusline-setup)"]
-    
     return ClaudeAgentOptions(
         model=llm_client.get_model_id(alias=model_alias),
         system_prompt=system_prompt,
@@ -764,12 +773,10 @@ def _create_agent_options(conversation: Conversation,
         permission_mode="acceptEdits",
         cwd=str(sandbox_paths.src_path),
         sandbox=sandbox_settings,
-        agents={
-            "analyze-repository": get_analyze_repository_agent(),
-        },
+        agents=agents,
         mcp_servers={"devopshero": create_devopshero_mcp_server(conversation)},
         tools=builtin_tools,
-        allowed_tools=TOOL_NAMES,
+        allowed_tools=allowed_tools,
         disallowed_tools=blocked_agents,
         env=env,
         include_partial_messages=True,

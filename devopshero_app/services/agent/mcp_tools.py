@@ -14,7 +14,7 @@ from typing import Any
 from claude_agent_sdk import tool, create_sdk_mcp_server
 from django.conf import settings
 
-from devopshero_app.models import Conversation, Repository, Workspace
+from devopshero_app.models import AppPermissionRequest, Conversation, Repository, Workspace
 from devopshero_app.services.gitproviders import repo_service
 
 from .tools import (
@@ -33,6 +33,8 @@ from .tools import (
     scan_repository as _scan_repository,
     teardown_deployment as _teardown_deployment,
     test_docker_build as _test_docker_build,
+    query_app_logs as _query_app_logs,
+    lookup_access_denied_events as _lookup_access_denied_events,
 )
 
 
@@ -45,6 +47,18 @@ async def _require_workspace(conversation: Conversation) -> Workspace:
             "Start a new conversation from a workspace page to set the context."
         )
     return await Workspace.objects.select_related("organization").aget(id=conversation.context_workspace_id)
+
+
+async def _require_app_permission_request(conversation: Conversation) -> AppPermissionRequest:
+    """Get AppPermissionRequest from conversation or raise helpful error."""
+    if conversation.context_app_permission_request_id is None:
+        raise ValueError(
+            "No permission request context for this conversation. "
+            "Start a new conversation from the permissions editor to set the context."
+        )
+    return await AppPermissionRequest.objects.select_related(
+        "app", "environment", "environment__aws_account",
+    ).aget(id=conversation.context_app_permission_request_id)
 
 
 def _mcp_response(data: Any) -> dict[str, Any]:
@@ -77,6 +91,9 @@ TOOL_DISPLAY_NAMES = {
     "mcp__devopshero__teardown_deployment": "Teardown Deployment",
     "mcp__devopshero__test_docker_build": "Test Docker Build",
     "mcp__devopshero__git_ops": "Git Ops",
+    # Permissions
+    "mcp__devopshero__query_app_logs": "Query App Logs",
+    "mcp__devopshero__lookup_access_denied_events": "Lookup Access Denied Events",
     # Utility
     "mcp__devopshero__wait": "Wait",
 }
@@ -103,6 +120,8 @@ TOOL_MAIN_PARAMS = {
     "mcp__devopshero__get_deployment_status": "deployment_id",
     "mcp__devopshero__teardown_deployment": "app_id",
     "mcp__devopshero__git_ops": "action",
+    "mcp__devopshero__query_app_logs": "time_window_hours",
+    "mcp__devopshero__lookup_access_denied_events": "time_window_hours",
     "mcp__devopshero__wait": "seconds",
     # External/Claude Agent SDK tools
     "Read": "file_path",
@@ -814,6 +833,67 @@ def create_devopshero_mcp_server(conversation: Conversation):
         return _mcp_response(result)
 
     # =========================================================================
+    # Permissions Tools (require an AppPermissionRequest context)
+    # =========================================================================
+
+    @tool(
+        "query_app_logs",
+        (
+            "Query CloudWatch Logs for permission-related errors in the app's ECS log group. "
+            "Searches for patterns like AccessDenied and authorization errors. "
+            "Results are compacted: duplicate errors are grouped by signature with a count and time range. "
+            "Use this to detect runtime permission denials from application logs."
+        ),
+        {
+            "type": "object",
+            "properties": {
+                "time_window_hours": {
+                    "type": "integer",
+                    "description": "How many hours back to search (1-168, default 24).",
+                },
+            },
+            "required": [],
+        },
+    )
+    async def query_app_logs(args: dict[str, Any]) -> dict[str, Any]:
+        """Query CloudWatch Logs for permission errors."""
+        apr = await _require_app_permission_request(conversation)
+        result = await _query_app_logs(
+            apr=apr,
+            time_window_hours=args.get("time_window_hours", 24),
+        )
+        return _mcp_response(result)
+
+    @tool(
+        "lookup_access_denied_events",
+        (
+            "Look up CloudTrail AccessDenied management events for the app's ECS task role. "
+            "Searches recent CloudTrail events for permission denials attributed to the task role. "
+            "Note: only covers management events (e.g., CreateBucket, PutQueuePolicy). "
+            "Data events (S3 GetObject, DynamoDB PutItem) require separate CloudTrail data event logging. "
+            "CloudTrail events may be delayed by up to 15 minutes."
+        ),
+        {
+            "type": "object",
+            "properties": {
+                "time_window_hours": {
+                    "type": "integer",
+                    "description": "How many hours back to search (1-2160 / 90 days, default 24).",
+                },
+            },
+            "required": [],
+        },
+    )
+    async def lookup_access_denied_events(args: dict[str, Any]) -> dict[str, Any]:
+        """Look up CloudTrail AccessDenied events for the app's task role."""
+        apr = await _require_app_permission_request(conversation)
+        result = await _lookup_access_denied_events(
+            apr=apr,
+            time_window_hours=args.get("time_window_hours", 24),
+        )
+        return _mcp_response(result)
+
+    # =========================================================================
     # Utility Tools
     # =========================================================================
 
@@ -853,6 +933,9 @@ def create_devopshero_mcp_server(conversation: Conversation):
             teardown_deployment,
             test_docker_build,
             git_ops,
+            # Permissions
+            query_app_logs,
+            lookup_access_denied_events,
             # Utility
             wait,
         ],
@@ -878,6 +961,17 @@ TOOL_NAMES = [
     "mcp__devopshero__teardown_deployment",
     "mcp__devopshero__test_docker_build",
     "mcp__devopshero__git_ops",
+    # Permissions
+    "mcp__devopshero__query_app_logs",
+    "mcp__devopshero__lookup_access_denied_events",
     # Utility
+    "mcp__devopshero__wait",
+]
+
+
+# Subset of MCP tools allowed in PERMISSIONS mode
+PERMISSIONS_ALLOWED_TOOLS = [
+    "mcp__devopshero__query_app_logs",
+    "mcp__devopshero__lookup_access_denied_events",
     "mcp__devopshero__wait",
 ]
