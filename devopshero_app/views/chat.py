@@ -79,6 +79,7 @@ def chat_new(request):
         repo_id=request.GET.get("repo") or None,
         aws_account_id=request.GET.get("aws_account") or None,
         mode=None,
+        app_permission_request_id=None,
     )
 
     return redirect("chat_view", conversation_id=conversation.id)
@@ -100,6 +101,7 @@ def chat_app_deploy(request, workspace_slug, repo_name, repo_owner=None):
         repo_id=repo.id,
         aws_account_id=None,
         mode=None,
+        app_permission_request_id=None,
     )
 
     return redirect("chat_view", conversation_id=conversation.id)

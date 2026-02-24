@@ -383,6 +383,7 @@ async def _create_new_conversation(user, workspace_id, repo_id, aws_account_id, 
         repo_id=repo_id,
         aws_account_id=aws_account_id,
         mode=mode,
+        app_permission_request_id=None,
     )
     return conversation
 

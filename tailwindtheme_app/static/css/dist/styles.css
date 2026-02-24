@@ -394,6 +394,9 @@
   .bottom-1\/4 {
     bottom: calc(1/4 * 100%);
   }
+  .bottom-2 {
+    bottom: calc(var(--spacing) * 2);
+  }
   .bottom-4 {
     bottom: calc(var(--spacing) * 4);
   }

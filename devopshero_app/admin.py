@@ -162,7 +162,7 @@ class ConversationAdmin(admin.ModelAdmin):
     list_filter = ["mode", "status", "organization", "context_workspace"]
     search_fields = ["title", "user__email", "user__username", "organization__name", "context_workspace__name", "context_repository__full_name", "session_id"]
     readonly_fields = ["id", "created_at", "updated_at"]
-    autocomplete_fields = ["user", "organization", "context_workspace", "context_repository"]
+    autocomplete_fields = ["user", "organization", "context_workspace", "context_repository", "context_app_permission_request"]
     filter_horizontal = ["deployments"]
 
 
@@ -265,7 +265,7 @@ class AppPermissionRequestAdmin(admin.ModelAdmin):
     list_filter = ["status", "app__organization"]
     search_fields = ["app__name", "environment__name", "created_by__email", "status_message"]
     readonly_fields = ["id", "statements", "created_at", "updated_at"]
-    autocomplete_fields = ["app", "environment", "conversation", "created_by"]
+    autocomplete_fields = ["app", "environment", "created_by"]
 
 
 @admin.register(AwsResourceCache)
