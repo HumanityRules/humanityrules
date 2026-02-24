@@ -163,18 +163,18 @@ def security_permissions_editor(request):
     app_permission_request = permissions_service.get_or_create_draft(app=app, environment=environment, user=request.user, app_permissions=app_permissions)
 
     # Ensure a conversation exists for the agent chat panel
-    if not app_permission_request.conversation:
+    conversation = models.Conversation.objects.filter(
+        context_app_permission_request=app_permission_request,
+    ).first()
+    if not conversation:
         conversation = agent_service.create_conversation(
             user=request.user,
             workspace_id=app.workspace_id,
-            repo_id=None,
-            aws_account_id=None,
+            repo_id=app.repository_id,
+            aws_account_id=environment.aws_account_id,
             mode=models.Conversation.Mode.PERMISSIONS,
+            app_permission_request_id=app_permission_request.id,
         )
-        app_permission_request.conversation = conversation
-        app_permission_request.save(update_fields=["conversation", "updated_at"])
-
-    conversation = app_permission_request.conversation
     messages = conversation.messages.exclude(
         content_type=models.Message.ContentType.SYSTEM_TRIGGER,
     ).order_by("created_at")

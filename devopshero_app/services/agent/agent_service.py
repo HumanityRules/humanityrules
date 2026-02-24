@@ -42,7 +42,7 @@ from claude_agent_sdk.types import (
 from django.conf import settings
 from django.db.models import Sum
 
-from devopshero_app.models import AWSAccount, Conversation, Environment, LLMUsageLog, Message, Repository, Workspace
+from devopshero_app.models import AWSAccount, AppPermissionRequest, Conversation, Environment, LLMUsageLog, Message, Repository, Workspace
 from devopshero_app.services.gitproviders import repo_service
 from devopshero_app.services.llm import llm_client, title_generator
 
@@ -263,7 +263,7 @@ def _load_prompt_file(filename: str) -> str:
     return prompt_path.read_text()
 
 
-def create_conversation(user, workspace_id, repo_id, aws_account_id, mode: str | None) -> Conversation:
+def create_conversation(user, workspace_id, repo_id, aws_account_id, mode: str | None, app_permission_request_id) -> Conversation:
     """Create a conversation with context, auto-derived mode, and trigger message."""
     trigger_content = {
         Conversation.Mode.ENVIRONMENT_SETUP: "Hi! I'm your friendly user who would like to set up a new environment in my AWS account.",
@@ -285,6 +285,7 @@ def create_conversation(user, workspace_id, repo_id, aws_account_id, mode: str |
         context_workspace_id=workspace_id,
         context_repository_id=repo_id,
         context_aws_account_id=aws_account_id,
+        context_app_permission_request_id=app_permission_request_id,
         mode=mode,
         status=Conversation.Status.ACTIVE,
     )
@@ -316,6 +317,8 @@ async def _build_system_prompt(conversation: Conversation) -> str:
         return await _build_environment_prompt(conversation)
     elif conversation.mode == Conversation.Mode.APP_DEPLOYMENT:
         return await _build_app_deployment_prompt(conversation)
+    elif conversation.mode == Conversation.Mode.PERMISSIONS:
+        return await _build_permissions_prompt(conversation)
     else:
         return await _build_general_prompt(conversation)
 
@@ -394,6 +397,46 @@ async def _build_app_deployment_prompt(conversation: Conversation) -> str:
     infra_section = await _build_aws_infrastructure_section(conversation.organization_id)
     if infra_section:
         sections.append(infra_section)
+
+    if sections:
+        return base_prompt + "\n\n" + "\n\n".join(sections)
+    return base_prompt
+
+
+async def _build_permissions_prompt(conversation: Conversation) -> str:
+    """Build system prompt for permissions-mode conversations."""
+    base_prompt = _load_prompt_file("system_prompt_permissions.md")
+    sections = []
+
+    if conversation.context_app_permission_request_id:
+        apr = await AppPermissionRequest.objects.select_related(
+            "app", "app__repository", "environment", "environment__aws_account",
+        ).aget(id=conversation.context_app_permission_request_id)
+
+        app = apr.app
+        env = apr.environment
+        task_role_name = f"doh-{env.slug}-{app.slug}-task-role"[:64]
+
+        context_lines = [
+            "<conversation_context>",
+            "<app>",
+            f"  <name>{app.name}</name>",
+            f"  <slug>{app.slug}</slug>",
+            f"  <repository_url>{app.repository.clone_url if app.repository else 'none'}</repository_url>",
+            "</app>",
+            "<environment>",
+            f"  <name>{env.name}</name>",
+            f"  <slug>{env.slug}</slug>",
+            f"  <aws_account_id>{env.aws_account.aws_account_id or 'pending'}</aws_account_id>",
+            f"  <region>{env.aws_region}</region>",
+            "</environment>",
+            f"<task_role>{task_role_name}</task_role>",
+            "</conversation_context>",
+        ]
+        sections.append("\n".join(context_lines))
+
+        statements_json = json.dumps(apr.statements, indent=2) if apr.statements else "[]"
+        sections.append(f"<current_draft_statements>\n{statements_json}\n</current_draft_statements>")
 
     if sections:
         return base_prompt + "\n\n" + "\n\n".join(sections)

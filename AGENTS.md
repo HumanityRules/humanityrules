@@ -46,6 +46,8 @@ The main developer documentation lives in the docs/ subdirectory. **When creatin
 
 - **`docs/deployment_agent_design.md`** — Design document for the AI-powered deployment agent. Defines implementation steps (reference apps, repo analysis, Dockerfile generation, CDK constructs, deployment plan, code generation, execution UI, agent states) and guiding design principles.
 
+- **`docs/permissions_agent_design.md`** — Design document for the AI-powered permissions agent. Defines the agent's purposes (source code analysis, log analysis, transitive dependencies, blast radius assessment, draft review), required context, and open tasks (CloudTrail setup, CloudWatch access).
+
 - **`docs/domain_model.md`** — Core domain concepts and entity relationships. Defines Workspace, App, Environment, Datastore, Deployment, etc entities with their attributes and how they relate. Read this when implementing features that touch the domain model or when clarifying entity boundaries.
 
 **Subsystem AGENTS.md files:**

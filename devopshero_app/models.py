@@ -681,6 +681,14 @@ class Conversation(models.Model):
         related_name="conversations",
         help_text="AWS account context for this conversation (set via UI for environment creation)",
     )
+    context_app_permission_request = models.ForeignKey(
+        "AppPermissionRequest",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="conversations",
+        help_text="AppPermissionRequest context for permissions-mode conversations",
+    )
     status = models.CharField(
         max_length=20,
         choices=Status.choices,
@@ -1104,7 +1112,6 @@ class AppPermissionRequest(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid7, editable=False)
     app = models.ForeignKey(App, on_delete=models.CASCADE, related_name="app_permission_requests")
     environment = models.ForeignKey(Environment, on_delete=models.CASCADE, related_name="app_permission_requests")
-    conversation = models.ForeignKey(Conversation, on_delete=models.SET_NULL, null=True, blank=True, related_name="app_permission_requests")
     statements = models.JSONField(default=list, help_text="List of policy statement dicts")
     status = models.CharField(max_length=30, choices=Status.choices, default=Status.DRAFT)
     status_message = models.TextField(blank=True)

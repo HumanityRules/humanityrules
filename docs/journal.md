@@ -1,5 +1,22 @@
 # DevOpsHero Development Journal
 
+## 2026-02-23 23:15 - [DomainModel] Reverse Conversation ↔ AppPermissionRequest FK direction + permissions system prompt
+
+**Conversation:** [2026-02-23-1632-478b7885.md](conversations/2026-02-23-1632-478b7885.md)
+
+Reversed the FK relationship between `Conversation` and `AppPermissionRequest` to match the established pattern used by other context FKs on Conversation (`context_repository`, `context_aws_account`). Previously `AppPermissionRequest` had a nullable FK pointing to `Conversation`; now `Conversation` has a `context_app_permission_request` FK pointing to `AppPermissionRequest`. The Conversation points to what it's about, not the other way around.
+
+This also fixed a real bug in the `security_permissions_editor` view: when creating conversations for the permissions chat panel, `repo_id` and `aws_account_id` were passed as `None`. Now they're correctly derived from the app and environment (`app.repository_id`, `environment.aws_account_id`), giving the agent access to the repository for source code analysis.
+
+**Key points:**
+
+- Added `context_app_permission_request` FK (nullable, `SET_NULL`) to `Conversation` using a string reference `"AppPermissionRequest"` since the model is defined later in models.py
+- Removed `conversation` FK from `AppPermissionRequest` — the conversation lookup in `security.py` now uses `Conversation.objects.filter(context_app_permission_request=...)` instead of `app_permission_request.conversation`
+- Added `app_permission_request_id` as a required (no default) parameter to `create_conversation()` — all four callers (`chat_new`, `chat_app_deploy`, `test_main_agent`, `security_permissions_editor`) explicitly pass it. The plan initially had a default value of `None` but this was removed per code review to keep the signature explicit.
+- Created `system_prompt_permissions.md` base prompt describing the permissions assistant role, capabilities (source code analysis, draft review, transitive dependency inference, blast radius assessment), and guidelines
+- Added `_build_permissions_prompt()` in `agent_service.py` that loads the base prompt and appends XML context sections: `<conversation_context>` (app, environment, task role name) and `<current_draft_statements>` (current draft JSON). Uses `select_related` to avoid N+1 queries. Task role name computed as `doh-{env.slug}-{app.slug}-task-role`[:64] matching the CDK naming convention.
+- Had to fix admin.py before running makemigrations — Django's system checks caught the stale `"conversation"` autocomplete field on `AppPermissionRequestAdmin` before it would generate the migration
+
 ## 2026-02-23 21:30 - [UI] App detail page deployment rows redesign
 
 **Conversation:**
