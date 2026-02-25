@@ -164,6 +164,9 @@ def _format_input_param_title(tool_name: str, param_value: Any) -> str:
     if "wait" in tool_name:
         return f"{param_value}s"
 
+    if tool_name in ("mcp__devopshero__query_app_logs", "mcp__devopshero__lookup_access_denied_events"):
+        return f"Last {param_value} hours"
+
     return value_str
 
 
