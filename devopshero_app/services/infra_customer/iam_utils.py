@@ -1,3 +1,4 @@
+import json
 import logging
 
 import boto3
@@ -252,3 +253,77 @@ def read_app_permissions_policy(environment, app, policy_name: str) -> list[dict
         logger.exception("Failed to read policy %s from role %s", policy_name, role_name)
 
     return statements
+
+
+def _access_levels_to_actions(service: str, access_levels: list[str]) -> list[str]:
+    """Expand access levels into IAM actions for a service (forward direction of _actions_to_access_levels)."""
+    actions = set()
+    for level in access_levels:
+        try:
+            level_actions = get_actions_with_access_level(service, level)
+            actions.update(level_actions)
+        except Exception:
+            logger.exception("Failed to get actions for %s/%s", service, level)
+    return sorted(actions)
+
+
+def _build_iam_policy_document(statements: list[dict]) -> dict:
+    """Convert normalized statements to an AWS IAM policy document.
+
+    Input format:  [{"service": "s3", "access_levels": ["Read", "Write"], "resources": ["arn:aws:s3:::my-bucket/*"]}]
+    Output format: standard IAM policy document with Version and Statement list.
+    """
+    iam_statements = []
+    for stmt in statements:
+        service = stmt.get("service", "")
+        access_levels = stmt.get("access_levels", [])
+        resources = stmt.get("resources", [])
+
+        if not service or not access_levels:
+            continue
+
+        actions = _access_levels_to_actions(service, access_levels)
+        if not actions:
+            continue
+
+        iam_stmt = {
+            "Effect": "Allow",
+            "Action": actions,
+            "Resource": resources if resources else ["*"],
+        }
+        iam_statements.append(iam_stmt)
+
+    return {
+        "Version": "2012-10-17",
+        "Statement": iam_statements,
+    }
+
+
+def write_app_permissions_policy(environment, app, policy_name: str, statements: list[dict]) -> None:
+    """Write an inline policy to the app's ECS task role.
+
+    Converts normalized statements to an IAM policy document and calls put_role_policy.
+    If statements is empty, deletes the policy instead.
+    """
+    resource_prefix = f"doh-{environment.slug}-{app.slug}"
+    role_name = f"{resource_prefix}-task-role"[:64]
+
+    session = _get_aws_session_for_environment(environment)
+    iam_client = session.client("iam")
+
+    if not statements:
+        try:
+            iam_client.delete_role_policy(RoleName=role_name, PolicyName=policy_name)
+            logger.info("Deleted empty policy %s from role %s", policy_name, role_name)
+        except iam_client.exceptions.NoSuchEntityException:
+            logger.info("Policy %s already absent on role %s — nothing to delete", policy_name, role_name)
+        return
+
+    policy_document = _build_iam_policy_document(statements)
+
+    iam_client.put_role_policy(
+        RoleName=role_name,
+        PolicyName=policy_name,
+        PolicyDocument=json.dumps(policy_document),
+    )
+    logger.info("Applied policy %s to role %s (%d statements)", policy_name, role_name, len(policy_document["Statement"]))
