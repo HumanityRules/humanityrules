@@ -1,5 +1,23 @@
 # DevOpsHero Development Journal
 
+## 2026-02-25 - [AgentChat] Unwrap MCP content at source, simplify tool result pipeline
+
+**Conversation:** [2026-02-24-1958-f85ab96e.md](conversations/2026-02-24-1958-f85ab96e.md)
+
+MCP tool results were flowing through the system in raw wire format (`[{"type": "text", "text": "<json>"}]`) and every consumer had to independently unwrap them via `extract_mcp_text_content`. This created duplicated parsing logic in the streaming views, template filters, and test harness.
+
+**Core change:** Added `_unwrap_mcp_content` in `agent_service.py` that converts MCP content blocks into plain dicts or strings at the source — inside `_handle_tool_results`, right after receiving `block.content` from the SDK. Both the persisted `Message.metadata["result"]` and the `AgentStreamEvent.data["result"]` now carry clean domain data. Only applied to `mcp__*` tools; built-in SDK tools (Bash, etc.) return plain strings as `block.content`, so they pass through unchanged.
+
+**Key points:**
+- Deleted `extract_mcp_text_content` entirely — was called in 4 places (chat.py streaming, chat_filters.py json_pretty, chat_filters.py tool_result_get_parsed, test_main_agent.py). All eliminated.
+- Removed `tool_result_get_parsed` template filter — was just `metadata.get("result", "")` after simplification. Template now uses `message.metadata.result` directly.
+- `chat_filters.py` went from 147 lines to 73 — the MCP unwrapping layers, double `json.loads` chains, and defensive `try/except` blocks are all gone.
+- Fixed `sanitize_paths_for_display` to use `re.sub` for substring matching instead of only handling strings that start with `/`. Sandbox paths embedded mid-string (e.g., in error messages) are now sanitized too.
+- Tool parameters in streaming UI now use `json_pretty` template filter instead of pre-formatted `json.dumps` in the view, so they also get path sanitization.
+- Added `SANITIZE_SANDBOX_PATHS` setting to toggle path sanitization on/off.
+- Renamed `get_tool_main_param` → `get_tool_input_param_for_title`, `TOOL_MAIN_PARAMS` → `TOOL_INPUT_PARAMS_FOR_TITLE`, and `_format_param_value` → `_format_input_param_title` (moved closer to its single caller) for clarity.
+- Also updated permissions agent system prompt to not proactively run analysis on conversation start.
+
 ## 2026-02-25 - [AgentChat] Replace cross-component OOB swaps with SSE notify-and-refetch pattern
 
 **Conversation:** [2026-02-24-1729-d6f5988d.md](conversations/2026-02-24-1729-d6f5988d.md)

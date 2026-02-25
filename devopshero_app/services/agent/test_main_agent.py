@@ -184,19 +184,16 @@ def _format_tool_label(tool_name: str, parameters: dict[str, Any]) -> str:
     import devopshero_app.services.agent.mcp_tools as mcp_tools
 
     display_name = mcp_tools.get_tool_display_name(tool_name, parameters)
-    main_param = mcp_tools.get_tool_main_param(tool_name, parameters)
-    if main_param:
-        return f"{display_name}: {main_param}"
+    title_param = mcp_tools.get_tool_input_param_for_title(tool_name, parameters)
+    if title_param:
+        return f"{display_name}: {title_param}"
     return display_name
 
 
 def _render_tool_payload(value: Any) -> str:
-    import devopshero_app.templatetags.chat_filters as chat_filters
-
-    extracted = chat_filters.extract_mcp_text_content(value)
-    if isinstance(extracted, str):
-        return extracted
-    return json.dumps(extracted, indent=2, default=str)
+    if isinstance(value, str):
+        return value
+    return json.dumps(value, indent=2, default=str)
 
 
 def _print_event(event: Any, state: PrintState, show_tool_io: bool) -> None:

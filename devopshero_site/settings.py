@@ -215,6 +215,7 @@ CLAUDE_MODEL_APP_DEPLOYMENT = os.environ.get("CLAUDE_MODEL_APP_DEPLOYMENT", "son
 
 # Claude Agent Sandbox: Base directory for agent sandbox (cloned repos, temp files, etc.)
 CLAUDE_SANDBOX_DIR = BASE_DIR / "sandbox"
+SANITIZE_SANDBOX_PATHS = True
 
 # PostHog Analytics Configuration
 POSTHOG_API_KEY = os.environ.get("POSTHOG_API_KEY")
