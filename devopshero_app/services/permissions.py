@@ -119,13 +119,14 @@ async def aupsert_statement(app_permission_request, service, access_levels, reso
     await app_permission_request.asave(update_fields=["statements", "updated_at"])
 
 
-def approve(app_permission_request, app_permissions):
-    """Set AppPermissionRequest status to APPROVED_PENDING_APPLY and update the baseline."""
+def approve(app_permission_request):
+    """Set AppPermissionRequest status to APPROVED_PENDING_APPLY.
+
+    The baseline (AppPermissions) is updated by the executor after the IAM policy is
+    successfully applied, not here — so the baseline always reflects what's in AWS.
+    """
     app_permission_request.status = models.AppPermissionRequest.Status.APPROVED_PENDING_APPLY
     app_permission_request.save(update_fields=["status", "updated_at"])
-
-    app_permissions.statements = app_permission_request.statements
-    app_permissions.save(update_fields=["statements", "updated_at"])
 
 
 def cancel(app_permission_request, app_permissions):

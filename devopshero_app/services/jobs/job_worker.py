@@ -1,8 +1,8 @@
 """
 Job worker.
 
-Polls for pending jobs (deployments, environment provisioning, teardowns) and
-spawns threads to execute them. This provides a simple, in-process
+Polls for pending jobs (deployments, environment provisioning, teardowns,
+permissions applies) and spawns threads to execute them. This provides a simple, in-process
 job execution mechanism for background tasks.
 """
 
@@ -12,12 +12,13 @@ import time
 
 from django.db import connections, transaction
 
-from devopshero_app.models import Deployment, Environment
+from devopshero_app.models import AppPermissionRequest, Deployment, Environment
 
 from . import app_deployment_executor
 from . import app_deployment_teardown_executor
 from . import environment_provisioning_executor
 from . import environment_teardown_executor
+from . import permissions_apply_executor
 
 logger = logging.getLogger(__name__)
 
@@ -129,6 +130,27 @@ def _run_app_deployment_teardown_thread(deployment_id: str) -> None:
         connections.close_all()
 
 
+def _claim_pending_permissions_apply() -> AppPermissionRequest | None:
+    """Atomically claim a pending permissions apply."""
+    with transaction.atomic():
+        apr = (
+            AppPermissionRequest.objects
+            .select_for_update(skip_locked=True)
+            .filter(status=AppPermissionRequest.Status.APPROVED_PENDING_APPLY)
+            .select_related("app", "environment")
+            .first()
+        )
+
+        if apr:
+            apr.status = AppPermissionRequest.Status.APPLYING
+            apr.status_message = "Claimed by worker"
+            apr.save(update_fields=["status", "status_message", "updated_at"])
+            logger.info(f"Claimed permissions apply {apr.id} for app '{apr.app.name}'")
+            return apr
+
+    return None
+
+
 def _claim_pending_environment_teardown() -> Environment | None:
     """Atomically claim a pending environment teardown."""
     with transaction.atomic():
@@ -156,6 +178,16 @@ def _run_environment_teardown_thread(environment_id: str) -> None:
         environment_teardown_executor.run_environment_teardown(environment_id)
     except Exception:
         logger.exception(f"Unhandled error in environment teardown {environment_id}")
+    finally:
+        connections.close_all()
+
+
+def _run_permissions_apply_thread(app_permission_request_id: str) -> None:
+    """Thread target that runs a single permissions apply."""
+    try:
+        permissions_apply_executor.run_apply(app_permission_request_id)
+    except Exception:
+        logger.exception(f"Unhandled error in permissions apply {app_permission_request_id}")
     finally:
         connections.close_all()
 
@@ -213,6 +245,18 @@ def _worker_loop() -> None:
                 )
                 thread.start()
                 logger.info(f"Spawned thread for environment teardown {env_teardown.id}")
+
+            # Check for pending permissions applies
+            permissions_apply = _claim_pending_permissions_apply()
+            if permissions_apply:
+                thread = threading.Thread(
+                    target=_run_permissions_apply_thread,
+                    args=(str(permissions_apply.id),),
+                    name=f"permissions-apply-{permissions_apply.id.hex[:8]}",
+                    daemon=True,
+                )
+                thread.start()
+                logger.info(f"Spawned thread for permissions apply {permissions_apply.id}")
 
         except Exception:
             logger.exception("Error in worker loop")

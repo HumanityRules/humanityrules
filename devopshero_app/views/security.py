@@ -231,10 +231,7 @@ def security_permissions_editor_apply(request, app_permission_request_id):
         app__organization=organization,
     )
 
-    app_permissions = permissions_service.get_or_create_app_permissions(
-        app=app_permission_request.app, environment=app_permission_request.environment,
-    )
-    permissions_service.approve(app_permission_request, app_permissions)
+    permissions_service.approve(app_permission_request)
 
     return JsonResponse({"status": "approved_pending_apply", "request_id": str(app_permission_request.id)})
 

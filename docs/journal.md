@@ -1,5 +1,31 @@
 # DevOpsHero Development Journal
 
+## 2026-02-24 22:00 - [Deployment] Permissions apply executor — job worker applies approved IAM policies
+
+**Conversation:**
+
+Implemented the missing piece in the permissions flow: applying approved permission changes to the actual IAM role in AWS. Previously, clicking "Apply" in the permissions editor set the `AppPermissionRequest` status to `APPROVED_PENDING_APPLY` but nothing picked it up — the IAM role was never modified.
+
+**Architecture — follows established job worker pattern:**
+
+Added a new executor (`permissions_apply_executor.py`) that the job worker polls for and spawns in a thread, identical to how deployments, environment provisioning, and teardowns work: `_claim_pending_permissions_apply()` atomically transitions APPROVED_PENDING_APPLY → APPLYING via `select_for_update(skip_locked=True)`, then a thread runs `run_apply()` which calls `put_role_policy()` and transitions to APPLIED or FAILED.
+
+**IAM policy generation — forward mapping with policy_sentry:**
+
+The existing `read_app_permissions_policy` reverse-maps IAM actions to access levels (e.g., `s3:GetObject` → "Read") using `_actions_to_access_levels`. The new `write_app_permissions_policy` does the inverse: expands access levels back to IAM actions using `get_actions_with_access_level(service, level)`. For example, S3 "Read" + "Write" expands to 112 individual actions. Tested that the resulting policy document is ~3700 chars for 2 services, well under the 10,240 char inline policy limit.
+
+Empty statements are handled by deleting the inline policy rather than writing an empty one (IAM doesn't accept empty statement lists).
+
+**Baseline update moved from approve() to post-apply:**
+
+Previously `approve()` eagerly updated `AppPermissions.statements` (the baseline reflecting what's in AWS) at the moment of approval. This was incorrect — if the IAM apply failed, the baseline would diverge from AWS reality. Now `approve()` only transitions the status; the executor updates the baseline after `put_role_policy()` succeeds. This means "cancel" during a failed apply correctly reverts to what's actually in AWS.
+
+**Key points:**
+- `_build_iam_policy_document()` skips statements with no service or no access levels, and defaults to `["*"]` for resources when none are specified
+- `write_app_permissions_policy()` handles the empty-statements case by calling `delete_role_policy()` with a `NoSuchEntityException` guard (idempotent)
+- `approve()` signature simplified: no longer takes `app_permissions` parameter since it doesn't touch the baseline
+- The executor uses `permissions_service.get_or_create_app_permissions()` to fetch the baseline for update, reusing the existing seed-from-AWS-on-first-access logic
+
 ## 2026-02-25 - [AgentChat] Unwrap MCP content at source, simplify tool result pipeline
 
 **Conversation:** [2026-02-24-1958-f85ab96e.md](conversations/2026-02-24-1958-f85ab96e.md)
