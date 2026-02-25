@@ -1,5 +1,57 @@
 # DevOpsHero Development Journal
 
+## 2026-02-25 01:30 - [Deployment] S3 prefix input for permissions editor
+
+**Conversation:** [2026-02-25-0053-8af2e350.md](conversations/2026-02-25-0053-8af2e350.md)
+
+Added a prefix input field to the S3 service group in the permissions editor so users can scope object-level permissions to a specific path (e.g., `data/uploads/*`) instead of defaulting to `*` (all objects). This is S3-only — other services don't have the concept of object path prefixes in their ARNs.
+
+**Architecture — split bucket ARN from prefix:**
+
+`_list_s3_resources` now returns base bucket ARNs (`arn:aws:s3:::my-bucket`) without the `/*` suffix. The prefix is a separate input in the UI. When the user selects a bucket from the dropdown, the view combines them: `{bucket_arn}/{prefix}`. This keeps the stored resource ARN as a standard IAM resource pattern (e.g., `arn:aws:s3:::my-bucket/data/*`) while giving the user explicit control over the prefix.
+
+**S3 "selected" matching uses startswith:**
+
+Since the dropdown shows base bucket ARNs but stored resources include the prefix, the "selected" checkmark in the dropdown uses `startswith` matching: a bucket shows as checked if any stored resource starts with `bucket_arn/`. This handles multiple prefixes for the same bucket — the bucket shows checked when any of its resources are selected.
+
+**S3 dropdown removal is bucket-scoped:**
+
+Clicking a checked S3 bucket in the dropdown sends `remove_resource` with the base bucket ARN. The view handles this specially: instead of exact-match removal (which would miss prefixed ARNs), it removes all stored resources matching `r == base_arn or r.startswith(base_arn + "/")`. This is done directly in the view rather than the service layer to keep S3-specific logic out of the generic `update_statements` function.
+
+**Alpine state preserves prefix across HTMX swaps:**
+
+The prefix input uses `x-model="s3Prefix"` bound to the Alpine `x-data` scope on the parent div (which is NOT inside the `resources` partialdef). Since HTMX only swaps the inner `#resources-{service}` div, the Alpine scope survives and the user's typed prefix persists across add/remove operations.
+
+**Key points:**
+- Service-specific placeholder text (`RESOURCE_PLACEHOLDERS` dict) — "Select S3 bucket...", "Select SQS queue...", etc. for 10 curated services, falling back to "Select resource..." for others
+- Dropdown close-on-reclick: changed `@focus` to `@mousedown` toggle so clicking the input when the dropdown is open closes it, with `@focus` as fallback for keyboard navigation
+- The prefix input only renders for S3 (`{% if group.service == "s3" %}`), and the Alpine `x-data` conditionally includes `s3Prefix` only for S3 to avoid wasted state on other services
+- Width layout: bucket selector is `w-50` (compact, just shows bucket name) and prefix input is `flex-1` (takes remaining space), visually separated by a `/` character
+
+## 2026-02-25 - [UI] Accordion for Applied/Failed permission requests on Security hub
+
+**Conversation:**
+
+Added an accordion to the Permission Requests list on the Security hub page. Applied and Failed APRs now expand in-place to show a compact summary of what was applied, instead of navigating to the permissions editor. Draft, Approved-Pending-Apply, and Applying APRs retain the existing click-to-navigate behavior.
+
+**Implementation — template-only, no view changes:**
+
+The `statements` JSONField is already on the queryset (fetched via `select_related` in the `security()` view), so the accordion content renders inline with zero additional HTTP requests. Alpine.js `x-data="{ openId: null }"` on the list container ensures only one row is open at a time — clicking a row toggles `openId`, and any previously open row collapses.
+
+**Accordion height animation without Alpine collapse plugin:**
+
+The project loads core Alpine.js only (no plugins). Used the CSS grid trick for smooth height transitions: a wrapper with `grid-template-rows: 0fr` (collapsed) transitioning to `1fr` (expanded), with an inner `overflow-hidden` div. This gives a true vertical expand/collapse animation purely with CSS transitions, no JS height calculation needed.
+
+**Compact statement summary format:**
+
+Each service block shows three labeled lines — `Service: s3`, `Resources: arn:..., arn:...` (monospace, comma-separated), `Access levels: Read, Write` (indigo text). Services are separated with `space-y-3`. Uniform `space-y-1` within a service block ensures consistent vertical rhythm since all rows are plain `<p>` elements.
+
+**Key points:**
+- Applied/Failed rows render as `<button>` (not `<a>`) to avoid navigation; other statuses keep `<a>` with `hx-get` to the permissions editor
+- Accordion panel uses `dark:bg-gray-900` against the parent card's `dark:bg-gray-800` for visible contrast in dark mode
+- Chevron icon rotates 90° when expanded via Alpine `:class` binding
+- Tried indigo pills for access levels (matching the editor) but reverted to plain text — the pills' internal padding (`py-0.5`) broke vertical spacing consistency between the three label lines
+
 ## 2026-02-24 22:00 - [Deployment] Permissions apply executor — job worker applies approved IAM policies
 
 **Conversation:**

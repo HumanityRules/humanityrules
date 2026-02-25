@@ -42,9 +42,57 @@
         <div class="px-3 py-2 text-sm font-semibold text-gray-900 dark:text-white">
             Permission requests ({{ app_permission_request_rows|length }})
         </div>
-        <div class="border-t border-gray-200 dark:border-gray-700">
+        <div class="border-t border-gray-200 dark:border-gray-700" x-data="{ openId: null }">
             <div class="divide-y divide-gray-200 dark:divide-gray-700">
                 {% for pr in app_permission_request_rows %}
+                {% if pr.status == 'applied' or pr.status == 'failed' %}
+                <div>
+                    <button type="button"
+                            @click="openId = openId === '{{ pr.id }}' ? null : '{{ pr.id }}'"
+                            class="flex w-full items-center justify-between gap-4 px-3 py-2.5 hover:bg-gray-50 dark:hover:bg-gray-700/40 cursor-pointer">
+                        <div class="min-w-0 text-left">
+                            <p class="truncate text-sm font-medium text-gray-900 dark:text-white">{{ pr.app.name }} / {{ pr.environment.name }}</p>
+                            <p class="text-xs text-gray-500 dark:text-gray-400">{{ pr.statements|length }} statement{{ pr.statements|length|pluralize }} · {{ pr.created_at|timesince }} ago{% if pr.created_by %} · {{ pr.created_by }}{% endif %}</p>
+                        </div>
+                        <div class="flex items-center gap-2 shrink-0">
+                            <span class="inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium
+                                {% if pr.status == 'applied' %}bg-green-100 text-green-800 dark:bg-green-900/40 dark:text-green-300
+                                {% elif pr.status == 'failed' %}bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-300
+                                {% endif %}">
+                                {{ pr.get_status_display }}
+                            </span>
+                            <svg class="w-4 h-4 text-gray-400 transition-transform duration-200"
+                                 :class="openId === '{{ pr.id }}' && 'rotate-90'"
+                                 fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
+                            </svg>
+                        </div>
+                    </button>
+                    <div class="grid transition-[grid-template-rows] duration-200 ease-out"
+                         :class="openId === '{{ pr.id }}' ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]'">
+                        <div class="overflow-hidden">
+                            <div class="border-t border-gray-200 dark:border-gray-700 bg-gray-100 dark:bg-gray-900 px-4 py-3 space-y-3">
+                                {% for stmt in pr.statements %}
+                                {% if stmt.service %}
+                                <div class="space-y-1 text-xs">
+                                    <p><span class="text-gray-400 dark:text-gray-500">Service:</span> <span class="font-medium text-gray-900 dark:text-white">{{ stmt.service }}</span></p>
+                                    {% if stmt.resources %}
+                                    <p><span class="text-gray-400 dark:text-gray-500">Resources:</span> <span class="text-gray-600 dark:text-gray-300 font-mono">{{ stmt.resources|join:", " }}</span></p>
+                                    {% endif %}
+                                    {% if stmt.access_levels %}
+                                    <p><span class="text-gray-400 dark:text-gray-500">Access levels:</span> <span class="text-indigo-600 dark:text-indigo-400">{{ stmt.access_levels|join:", " }}</span></p>
+                                    {% endif %}
+                                </div>
+                                {% endif %}
+                                {% endfor %}
+                                {% if not pr.statements %}
+                                <p class="text-xs text-gray-400 dark:text-gray-500 italic">No statements (policy cleared)</p>
+                                {% endif %}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                {% else %}
                 <a href="{% url 'security_permissions_editor' %}?context_app={{ pr.app.slug }}&context_environment={{ pr.environment.slug }}"
                    hx-get="{% url 'security_permissions_editor' %}?context_app={{ pr.app.slug }}&context_environment={{ pr.environment.slug }}"
                    hx-target="#main-content"
@@ -59,12 +107,11 @@
                         {% if pr.status == 'draft' %}bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-300
                         {% elif pr.status == 'approved_pending_apply' %}bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300
                         {% elif pr.status == 'applying' %}bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-300
-                        {% elif pr.status == 'applied' %}bg-green-100 text-green-800 dark:bg-green-900/40 dark:text-green-300
-                        {% elif pr.status == 'failed' %}bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-300
                         {% endif %}">
                         {{ pr.get_status_display }}
                     </span>
                 </a>
+                {% endif %}
                 {% empty %}
                 <div class="px-3 py-6 text-sm text-gray-500 dark:text-gray-400">No permission requests yet.</div>
                 {% endfor %}
