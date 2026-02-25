@@ -15,6 +15,7 @@ from claude_agent_sdk import tool, create_sdk_mcp_server
 from django.conf import settings
 
 from devopshero_app.models import AppPermissionRequest, Conversation, Repository, Workspace
+from devopshero_app.services import permissions as permissions_service
 from devopshero_app.services.gitproviders import repo_service
 
 from .tools import (
@@ -94,6 +95,7 @@ TOOL_DISPLAY_NAMES = {
     # Permissions
     "mcp__devopshero__query_app_logs": "Query App Logs",
     "mcp__devopshero__lookup_access_denied_events": "Lookup Access Denied Events",
+    "mcp__devopshero__update_permission_draft": "Update Permission Draft",
     # Utility
     "mcp__devopshero__wait": "Wait",
 }
@@ -122,6 +124,7 @@ TOOL_MAIN_PARAMS = {
     "mcp__devopshero__git_ops": "action",
     "mcp__devopshero__query_app_logs": "time_window_hours",
     "mcp__devopshero__lookup_access_denied_events": "time_window_hours",
+    "mcp__devopshero__update_permission_draft": "service",
     "mcp__devopshero__wait": "seconds",
     # External/Claude Agent SDK tools
     "Read": "file_path",
@@ -893,6 +896,48 @@ def create_devopshero_mcp_server(conversation: Conversation):
         )
         return _mcp_response(result)
 
+    @tool(
+        "update_permission_draft",
+        (
+            "Add or update a permission statement in the draft policy. "
+            "Merges the given access levels and resource ARNs into the statement for the specified service, "
+            "creating the statement if it doesn't exist. "
+            "Use this tool proactively when you identify missing permissions from source code analysis, "
+            "CloudWatch Logs, or CloudTrail. The draft must be in 'draft' status."
+        ),
+        {
+            "type": "object",
+            "properties": {
+                "service": {
+                    "type": "string",
+                    "description": "AWS service prefix (e.g., 's3', 'dynamodb', 'sqs').",
+                },
+                "access_levels": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Access levels to grant: 'Read', 'Write', 'List', 'Tagging', 'Permissions management'.",
+                },
+                "resources": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "AWS resource ARNs to grant access to (e.g., 'arn:aws:s3:::my-bucket').",
+                },
+            },
+            "required": ["service", "access_levels", "resources"],
+        },
+    )
+    async def update_permission_draft(args: dict[str, Any]) -> dict[str, Any]:
+        """Add or update a permission statement in the draft policy."""
+        app_permission_request = await _require_app_permission_request(conversation)
+        if app_permission_request.status != "draft":
+            raise ValueError(f"Cannot modify permission request in '{app_permission_request.status}' status. Only draft requests can be edited.")
+
+        await permissions_service.aupsert_statement(
+            app_permission_request, args["service"], args["access_levels"], args["resources"],
+        )
+
+        return _mcp_response({"success": True, "app_permission_request_id": str(app_permission_request.id), "statements": app_permission_request.statements})
+
     # =========================================================================
     # Utility Tools
     # =========================================================================
@@ -912,7 +957,7 @@ def create_devopshero_mcp_server(conversation: Conversation):
     # MCP Server Configuration
     # =========================================================================
 
-    return create_sdk_mcp_server(
+    server = create_sdk_mcp_server(
         name="devopshero",
         version="1.0.0",
         tools=[
@@ -936,10 +981,12 @@ def create_devopshero_mcp_server(conversation: Conversation):
             # Permissions
             query_app_logs,
             lookup_access_denied_events,
+            update_permission_draft,
             # Utility
             wait,
         ],
     )
+    return server
 
 
 # Tool names for use in allowed_tools configuration
@@ -964,6 +1011,7 @@ TOOL_NAMES = [
     # Permissions
     "mcp__devopshero__query_app_logs",
     "mcp__devopshero__lookup_access_denied_events",
+    "mcp__devopshero__update_permission_draft",
     # Utility
     "mcp__devopshero__wait",
 ]
@@ -973,5 +1021,6 @@ TOOL_NAMES = [
 PERMISSIONS_ALLOWED_TOOLS = [
     "mcp__devopshero__query_app_logs",
     "mcp__devopshero__lookup_access_denied_events",
+    "mcp__devopshero__update_permission_draft",
     "mcp__devopshero__wait",
 ]

@@ -25,25 +25,34 @@
             {% if conversations %}
             <div class="divide-y divide-gray-200 dark:divide-gray-700">
                 {% for conv in conversations %}
+                {# hx-disinherit prevents child elements (sidebar title/cost) from inheriting #}
+                {# hx-push-url, hx-target, hx-select from this <a> when they do their own refetch #}
                 <a href="{% url 'chat_view' conversation_id=conv.id %}"
                    hx-get="{% url 'chat_view' conversation_id=conv.id %}"
                    hx-target="#chat-panel"
                    hx-select="#chat-panel-content"
                    hx-swap="innerHTML transition:true"
                    hx-push-url="true"
+                   hx-disinherit="*"
                    data-conversation-id="{{ conv.id }}"
                    class="conversation-item block px-4 py-3 transition-colors
                           {% if conversation and conversation.id == conv.id %}bg-gray-100 dark:bg-gray-700 pointer-events-none cursor-default{% else %}hover:bg-gray-100 dark:hover:bg-gray-700{% endif %}">
                     <div class="flex items-center justify-between">
                         <div class="flex-1 min-w-0 space-y-0.5">
-                            <h3 id="sidebar-title-{{ conv.id }}" class="text-sm font-medium text-gray-900 dark:text-white truncate">
+                            <h3 id="sidebar-title-{{ conv.id }}" class="text-sm font-medium text-gray-900 dark:text-white truncate"
+                                hx-get="{% url 'chat_conversation_title' conversation_id=conv.id %}"
+                                hx-trigger="doh:title-changed-{{ conv.id }} from:document"
+                                hx-swap="innerHTML">
                                 {{ conv.title|default:"New Conversation" }}
                             </h3>
                             <p class="text-xs text-gray-400 dark:text-gray-500">
                                 {{ conv.updated_at|timesince }} ago
                             </p>
                             {% if show_costs %}
-                            <p id="sidebar-cost-{{ conv.id }}" class="text-xs text-gray-500 dark:text-gray-400">{% if conv.total_cost %}<span class="text-gray-400 dark:text-gray-500">Agent Cost:</span> ${{ conv.total_cost|floatformat:4 }}{% endif %}</p>
+                            <p id="sidebar-cost-{{ conv.id }}" class="text-xs text-gray-500 dark:text-gray-400"
+                               hx-get="{% url 'chat_conversation_cost' conversation_id=conv.id %}"
+                               hx-trigger="doh:cost-changed-{{ conv.id }} from:document"
+                               hx-swap="innerHTML">{% if conv.total_cost %}<span class="text-gray-400 dark:text-gray-500">Agent Cost:</span> ${{ conv.total_cost|floatformat:4 }}{% endif %}</p>
                             {% endif %}
                             {% if conv.context_workspace or conv.context_repository or conv.context_aws_account %}
                             <p class="text-xs text-gray-500 dark:text-gray-400 truncate">

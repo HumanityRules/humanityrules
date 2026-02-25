@@ -75,7 +75,7 @@ class AgentStreamEvent:
     """Event yielded during agent response streaming."""
 
     type: AgentEventType
-    data: Any = None
+    data: Any
 
 
 @dataclass
@@ -172,7 +172,7 @@ class MainAgent:
         self._channel.send(user_message)
 
         ctx = StreamingContext(conversation=conversation)
-        yield AgentStreamEvent(type="thinking")
+        yield AgentStreamEvent(type="thinking", data=None)
 
         try:
             async for message in self._client.receive_response():
@@ -613,7 +613,7 @@ async def _handle_sdk_stream_event(message: SDKStreamEvent, ctx: StreamingContex
             if text_chunk:
                 # Create streaming container on first text (replaces thinking indicator)
                 if not ctx.has_started_streaming:
-                    yield AgentStreamEvent(type="start")
+                    yield AgentStreamEvent(type="start", data=None)
                     ctx.has_started_streaming = True
                 ctx.accumulated_content += text_chunk
                 yield AgentStreamEvent(type="text_delta", data={"text": text_chunk})
@@ -656,7 +656,7 @@ async def _handle_assistant_message(message: AssistantMessage, ctx: StreamingCon
 
     # Flush to release streaming element IDs (only if we were streaming text)
     if ctx.has_started_streaming:
-        yield AgentStreamEvent(type="text_flush")
+        yield AgentStreamEvent(type="text_flush", data=None)
         ctx.has_started_streaming = False
 
     for block in message.content:
@@ -728,7 +728,7 @@ async def _handle_tool_results(message: UserMessage, ctx: StreamingContext) -> A
 
     # Show thinking indicator while waiting for next response (text or another tool)
     ctx.has_started_streaming = False
-    yield AgentStreamEvent(type="thinking")
+    yield AgentStreamEvent(type="thinking", data=None)
 
 
 def _create_agent_options(conversation: Conversation, 

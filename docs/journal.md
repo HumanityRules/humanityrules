@@ -1,5 +1,63 @@
 # DevOpsHero Development Journal
 
+## 2026-02-25 - [AgentChat] Replace cross-component OOB swaps with SSE notify-and-refetch pattern
+
+**Conversation:** [2026-02-24-1729-d6f5988d.md](conversations/2026-02-24-1729-d6f5988d.md)
+
+The chat SSE stream was sending fully-rendered OOB HTML to update components outside the chat panel (conversation title, sidebar title/cost, permission statements editor). This coupled the server to every consumer's markup and required the chat JS to manually process OOB elements for cross-component targets. Replaced with a lightweight notification pattern where the server sends a JSON event and each interested component refetches its own content.
+
+**Architecture — three layers:**
+
+1. **Server sends `sse-notify`** — just a JSON payload like `{"type": "title-changed", "id": "abc123"}`, no rendered HTML. Added `_format_sse_notify` helper. Removed `_render_title_update`, `_render_cost_update`, and the `render_statements_oob_html` call from tool results. Also removed the `sync_to_async` wrapper for tool_result events since the DB query for permission statements rendering is gone.
+
+2. **JS handler bridges SSE scope to document** — `handleNotify` in `_chat_panel.html` parses the JSON and dispatches `doh:{type}-{id}` on `document`. The `-{id}` suffix means only the matching entity's elements react. The SSE connection lives on `#messages` (confined to the chat panel), so the document-level dispatch is necessary for elements outside that subtree.
+
+3. **Components self-refetch** — Header title uses declarative `hx-trigger="doh:title-changed-{id} from:document"` + `hx-get`. Sidebar title/cost use the same pattern. Permission statements editor uses a JS listener with `htmx.ajax()` (needs the dynamic URL and also enables Apply/Cancel buttons).
+
+**New thin GET endpoints** return minimal fragments: `/chat/{id}/title/` (plain text), `/chat/{id}/cost/` (cost span HTML), `/security/permissions/{id}/statements/` (rendered statements template).
+
+**Key learnings:**
+
+- **HTMX attribute inheritance is a trap for nested hx-* elements** — sidebar `<h3>` and `<p>` elements with `hx-get`/`hx-trigger` sat inside an `<a>` tag with `hx-push-url="true"` and `hx-target="#chat-panel"`. The title refetch navigated the page instead of doing an in-place swap. Fixed with `hx-disinherit="*"` on the `<a>`. Considered `htmx.config.disableInheritance` globally but rolled back because it breaks CSRF token delivery via `hx-headers` on `<body>`.
+
+- **OOB swaps are fine for same-component updates** — thinking indicator reset and tool spinner→result replacement stay as OOB because the producing template owns the target element. Cross-component OOB was the anti-pattern.
+
+- **`doh:oob-swap` event removed** — was dispatched by `processOobElements` after each swap so external components could react. No longer needed since those consumers now use the targeted `doh:{type}-{id}` events instead.
+
+## 2026-02-24 22:30 - [AgentChat] Add `update_permission_draft` MCP tool — agent can now modify the draft policy
+
+**Conversation:** [2026-02-24-1527-f9772ca7.md](conversations/2026-02-24-1527-f9772ca7.md)
+
+Added an MCP tool that lets the permissions agent directly add/update permission statements in the draft policy, rather than only advising the user to make changes manually. When the agent detects missing permissions (from source code analysis, CloudWatch Logs, or CloudTrail), it calls `update_permission_draft` and the editor panel updates in real-time via OOB HTML swap.
+
+**Architecture — iterative simplification:**
+
+The implementation went through several design iterations, each simplifying the previous approach:
+
+1. **Started with `pending_oob` plumbing** — a list threaded from `create_devopshero_mcp_server` through `_create_agent_options`, stored on `MainAgent`, drained in `stream_turn`. The MCP tool rendered OOB HTML and appended it. This was over-engineered: the list was always created empty and immediately passed in, so it could just live inside the MCP server factory.
+
+2. **Moved to `pending_events` signals** — the MCP tool published `{"type": "permission_draft_updated", "apr_id": ...}` and chat.py handled rendering. Better separation but still unnecessary plumbing through `agent_service.py`.
+
+3. **Removed all plumbing** — realized `_render_streaming_tool_result` in chat.py already has the tool name and parsed result. Just check the tool name there and render OOB HTML. No events, no pending lists, no changes to `agent_service.py` at all.
+
+4. **Considered moving OOB render into the MCP tool's `asyncio.to_thread`** to avoid the async/sync issue in chat.py, but rejected it because it couples the service layer (mcp_tools) to the view layer (security_views). Instead, tool_result events go through `sync_to_async` in the SSE generator.
+
+**Key design decisions:**
+
+- **`doh:oob-swap` custom event** — `processOobElements` in `_chat_panel.html` used to have hardcoded knowledge of `permission-statements-container` and `conversation-title`. Replaced with a generic `document.dispatchEvent(new CustomEvent('doh:oob-swap', { detail: { targetId } }))` after each swap. The permissions editor and chat sidebar each listen for their own target IDs. The chat panel is now fully generic — it just does the DOM swap and fires the event.
+
+- **`upsert_statement` merge semantics** — unions access_levels and resources into the existing statement for a service, creating if absent. Never duplicates. This lets the agent call the tool multiple times for the same service without worrying about state.
+
+- **Tool result includes `apr_id`** — the view layer needs the APR ID to render the OOB HTML. Including it in the MCP tool response means the data flows naturally through the existing tool result pipeline.
+
+**Python import gotcha with `__init__.py`:**
+
+`views/__init__.py` does `from .security import security` which creates an attribute `security` on the package bound to the view *function*. This shadows the `security` *module*. Every import form that resolves through the package namespace (`from . import security`, `import devopshero_app.views.security as x`) gets the function, not the module. Even `import X.Y.Z as alias` walks the attribute chain and hits the shadowed name. The only reliable ways to get the module are `importlib.import_module` or `sys.modules` — both ugly. We settled on `from .security import render_statements_oob_html` (importing the function directly by name).
+
+**Async/sync boundary:**
+
+`_render_streaming_tool_result` is a sync function called from an async SSE generator. The existing `render_to_string` calls work because they don't hit the DB. But `render_statements_oob_html` loads the APR and fetches available resources (DB queries). Solution: `tool_result` events specifically go through `sync_to_async(_format_sse_event, thread_sensitive=True)` in the generator. All other event types stay on the fast path.
+
 ## 2026-02-24 06:45 - [AgentChat] Permissions agent runtime error detection tools (CloudWatch Logs + CloudTrail)
 
 **Conversation:** [2026-02-23-2231-75de2430.md](conversations/2026-02-23-2231-75de2430.md)
