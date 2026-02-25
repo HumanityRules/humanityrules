@@ -275,56 +275,46 @@ async def chat_stream(request, conversation_id):
 def _render_streaming_tool_start(agent_streaming_event_data: dict) -> str:
     """Render HTML for tool execution start."""
     tool_full_name = agent_streaming_event_data.get("name", "unknown")
-    parameters = agent_streaming_event_data.get("input", {})
-    tool_name = mcp_tools.get_tool_display_name(tool_full_name, parameters)
-    tool_main_param = mcp_tools.get_tool_main_param(tool_full_name, parameters)
-    if tool_main_param:
+    input_params = agent_streaming_event_data.get("input", {})
+
+    tool_name = mcp_tools.get_tool_display_name(tool_full_name, input_params)
+    tool_input_param_for_title = mcp_tools.get_tool_input_param_for_title(tool_full_name, input_params)
+    if tool_input_param_for_title:
         tool_name = f"{tool_name}: "
-    params_json = json.dumps(parameters, indent=2) if parameters else "{}"
+
     return render_to_string("devopshero_app/chat/_streaming_tool_start.html", context={
         "tool_name": tool_name,
-        "tool_main_param": tool_main_param,
+        "tool_input_param_for_title": tool_input_param_for_title,
         "tool_use_id": agent_streaming_event_data.get("tool_use_id", ""),
-        "params_json": params_json,
+        "params": input_params,
     })
 
 
 def _render_streaming_tool_result(agent_streaming_event_data: dict) -> str:
     """Render HTML for tool execution result."""
     tool_full_name = agent_streaming_event_data.get("name", "unknown")
-    parameters = agent_streaming_event_data.get("input", {})
+    input_params = agent_streaming_event_data.get("input", {})
     result = agent_streaming_event_data.get("result", "")
-
-    params_json = json.dumps(parameters, indent=2) if parameters else "{}"
-
-    # Tool results arrive wrapped in MCP content blocks:
-    #   '[{"type": "text", "text": "{\"success\": true, ...}"}]'
-    # Unwrap to get the inner data (dict/list/string).
-    try:
-        result_parsed = json.loads(result) if isinstance(result, str) else result
-        result_parsed = chat_filters.extract_mcp_text_content(result_parsed)
-    except (json.JSONDecodeError, TypeError):
-        result_parsed = result
-
-    tool_name = mcp_tools.get_tool_display_name(tool_full_name, parameters)
-    tool_main_param = mcp_tools.get_tool_main_param(tool_full_name, parameters)
-    if tool_main_param:
+    
+    tool_name = mcp_tools.get_tool_display_name(tool_full_name, input_params)
+    tool_input_param_for_title = mcp_tools.get_tool_input_param_for_title(tool_full_name, input_params)
+    if tool_input_param_for_title:
         tool_name = f"{tool_name}: "
 
     # Override status when the tool reports business-logic failure via a success field.
     # The MCP-level is_error only covers tool crashes, not domain failures like a failed build.
     status = agent_streaming_event_data.get("status", "success")
-    if status == "success" and isinstance(result_parsed, dict) and result_parsed.get("success") is False:
+    if status == "success" and isinstance(result, dict) and result.get("success") is False:
         status = "error"
 
     return render_to_string("devopshero_app/chat/_streaming_tool_result.html", context={
         "tool_name": tool_name,
-        "tool_main_param": tool_main_param,
+        "tool_input_param_for_title": tool_input_param_for_title,
         "tool_use_id": agent_streaming_event_data.get("tool_use_id", ""),
         "status": status,
         "duration_ms": agent_streaming_event_data.get("duration_ms", 0),
-        "params_json": params_json,
-        "tool_result": result_parsed,
+        "params": input_params,
+        "tool_result": result,
         "custom_result_template": chat_filters.TOOL_RESULT_TEMPLATES.get(tool_full_name, ""),
     })
 
@@ -371,15 +361,8 @@ def _format_sse_event(event: agent_service.AgentStreamEvent, show_costs: bool) -
         return _format_sse(event_name="sse-tool-start", data=_render_streaming_tool_start(event.data))
     elif event.type == "tool_result":
         result = _format_sse(event_name="sse-tool-result", data=_render_streaming_tool_result(event.data))
-        if event.data.get("name") == "mcp__devopshero__update_permission_draft":
-            try:
-                raw = event.data.get("result", "")
-                parsed = json.loads(raw) if isinstance(raw, str) else raw
-                parsed = chat_filters.extract_mcp_text_content(parsed)
-                if isinstance(parsed, dict) and "app_permission_request_id" in parsed:
-                    result += _format_sse_notify("permissions-changed", id=parsed["app_permission_request_id"])
-            except (json.JSONDecodeError, TypeError):
-                pass
+        if event.data["name"] == "mcp__devopshero__update_permission_draft":
+            result += _format_sse_notify("permissions-changed", id=event.data["result"]["app_permission_request_id"])
         return result
     elif event.type == "complete":
         result = _format_sse(event_name="sse-complete", data="")

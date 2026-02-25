@@ -8,6 +8,7 @@ via closure from create_devopshero_mcp_server().
 
 import asyncio
 import json
+import re
 from pathlib import Path
 from typing import Any
 
@@ -110,7 +111,7 @@ def get_tool_display_name(full_name: str, parameters: dict | None) -> str:
 
 
 # Mapping from tool names to their "main" parameter for display in titles.
-TOOL_MAIN_PARAMS = {
+TOOL_INPUT_PARAMS_FOR_TITLE = {
     "mcp__devopshero__initiate_aws_connection": "account_name",
     "mcp__devopshero__list_hosted_zones": "aws_account_uuid",
     "mcp__devopshero__list_environments": "aws_account_uuid",
@@ -132,9 +133,10 @@ TOOL_MAIN_PARAMS = {
     "Write": "file_path",
     "Shell": "description",
     "Bash": "description",
-    # Glob and Grep have special handling in get_tool_main_param
+    # Glob and Grep have special handling in get_tool_input_param_for_title
 }
-def get_tool_main_param(full_name: str, parameters: dict) -> str | None:
+
+def get_tool_input_param_for_title(full_name: str, parameters: dict) -> str | None:
     """Extract and format the main parameter value for display."""
     if not parameters:
         return None
@@ -145,12 +147,24 @@ def get_tool_main_param(full_name: str, parameters: dict) -> str | None:
     if full_name == "Glob":
         return _format_glob_params(parameters)
 
-    main_param = TOOL_MAIN_PARAMS.get(full_name)
-    if not main_param or main_param not in parameters:
+    param_name = TOOL_INPUT_PARAMS_FOR_TITLE.get(full_name)
+    if not param_name or param_name not in parameters:
         return None
 
-    value = parameters[main_param]
-    return _format_param_value(full_name, value)
+    return _format_input_param_title(tool_name=full_name, param_value=parameters[param_name])
+
+
+def _format_input_param_title(tool_name: str, param_value: Any) -> str:
+    """Format parameter value for display (sanitize paths, truncate UUIDs)."""
+    value_str = sanitize_paths_for_display(str(param_value))
+
+    if len(value_str) == 36 and value_str.count("-") == 4:
+        return value_str[:8]
+
+    if "wait" in tool_name:
+        return f"{param_value}s"
+
+    return value_str
 
 
 def _format_grep_params(parameters: dict) -> str | None:
@@ -191,51 +205,32 @@ def _format_glob_params(parameters: dict) -> str | None:
     return pattern
 
 
-def _relativize_sandbox_path(path_str: str) -> str:
-    """Relativize a path within the sandbox directory for display.
+def _get_sandbox_prefix() -> str:
+    """Build the sandbox path prefix including the context subdirectory glob.
 
-    Strips the sandbox directory prefix and the first subdirectory (which is the
-    context-specific folder like conv-xxx, scan-xxx, or deployment-id).
-
-    Paths outside the sandbox are returned unchanged (security signal).
+    Sandbox paths look like: /sandbox-dir/conv-xxx/file.py
+    The prefix pattern matches '/sandbox-dir/' plus the context subdirectory and its slash,
+    so replacing it leaves just the relative path (e.g. 'file.py').
     """
-    try:
-        path = Path(path_str)
-        sandbox = settings.CLAUDE_SANDBOX_DIR
-
-        # Check if path is under sandbox
-        if not path_str.startswith(str(sandbox)):
-            return path_str
-
-        # Get path relative to sandbox
-        relative = path.relative_to(sandbox)
-        parts = relative.parts
-
-        # If empty or just the context dir, return "."
-        if len(parts) == 0:
-            return "."
-        if len(parts) == 1:
-            return "."
-
-        # Strip the first part (conv-xxx, scan-xxx, deployment-id, etc.)
-        return str(Path(*parts[1:]))
-
-    except (ValueError, TypeError):
-        # relative_to raises ValueError if path is not under sandbox
-        return path_str
+    return str(settings.CLAUDE_SANDBOX_DIR).rstrip("/") + "/"
 
 
 def sanitize_paths_for_display(obj: Any) -> Any:
-    """Recursively sanitize sandbox paths in a data structure for display.
+    """Recursively strip sandbox path prefixes from strings in a data structure.
 
-    Walks through dicts, lists, and strings, relativizing any paths that
-    are under CLAUDE_SANDBOX_DIR.
+    Matches any occurrence of CLAUDE_SANDBOX_DIR within strings (not just at
+    the start), and strips both the sandbox prefix and the context subdirectory
+    that follows it (conv-xxx/, scan-xxx/, deployment-id/, etc.).
+    Only active when SANITIZE_SANDBOX_PATHS is True.
     """
-    if isinstance(obj, str):
-        # Only attempt to relativize if it looks like an absolute path
-        if obj.startswith("/"):
-            return _relativize_sandbox_path(obj)
+    if not settings.SANITIZE_SANDBOX_PATHS:
         return obj
+
+    if isinstance(obj, str):
+        prefix = _get_sandbox_prefix()
+        if prefix not in obj:
+            return obj
+        return re.sub(re.escape(prefix) + r"[^/]+/", "", obj)
 
     if isinstance(obj, dict):
         return {k: sanitize_paths_for_display(v) for k, v in obj.items()}
@@ -246,23 +241,6 @@ def sanitize_paths_for_display(obj: Any) -> Any:
     return obj
 
 
-def _format_param_value(tool_name: str, value: Any) -> str:
-    """Format parameter value for display (extract repo names, truncate UUIDs)."""
-    value_str = str(value)
-
-    # Relativize sandbox paths
-    if value_str.startswith("/"):
-        value_str = _relativize_sandbox_path(value_str)
-
-    # Truncate UUIDs (36 chars with dashes)
-    if len(value_str) == 36 and value_str.count("-") == 4:
-        return value_str[:8]
-
-    # Format seconds
-    if "wait" in tool_name:
-        return f"{value}s"
-
-    return value_str
 
 
 # =============================================================================

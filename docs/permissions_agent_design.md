@@ -70,7 +70,7 @@ The permissions agent uses a restricted tool set — it doesn't need deployment,
 
 - **`lookup_access_denied_events`** — Assumes the customer's role, calls CloudTrail `LookupEvents`, filters client-side for the app's task role ARN and `errorCode: AccessDenied`. Management events only. Takes a time window parameter.
 
-**Proactive behavior:** The agent runs source code analysis, `query_app_logs`, and `lookup_access_denied_events` automatically when the conversation starts — same as it already does with source code analysis. The user doesn't need to ask.
+**First-turn behavior:** When the conversation starts, the agent introduces itself and presents its capabilities — it does NOT proactively run analysis. The user chooses what to do first (source code analysis, log checks, draft review, etc.).
 
 **Tool scoping:** The `allowed_tools` in `_create_agent_options` should be restricted for PERMISSIONS mode conversations to only the tools above. The current deployment/git/infra tools are irrelevant and add noise to the agent's tool list.
 

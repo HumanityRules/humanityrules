@@ -685,6 +685,20 @@ async def _handle_assistant_message(message: AssistantMessage, ctx: StreamingCon
         )
         
 
+def _unwrap_mcp_content(content: list) -> dict | str:
+    """Unwrap MCP content blocks into a plain dict or string.
+
+    MCP tool results arrive as [{"type": "text", "text": "<json>"}].
+    This extracts the text and parses it as JSON when possible, so downstream
+    consumers receive clean domain data instead of MCP wire format.
+    """
+    text = content[0]["text"]
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        return text
+
+
 async def _handle_tool_results(message: UserMessage, ctx: StreamingContext) -> AsyncGenerator[AgentStreamEvent, None]:
     """Handle tool results from synthetic user messages."""
     if not isinstance(message.content, list):
@@ -705,11 +719,17 @@ async def _handle_tool_results(message: UserMessage, ctx: StreamingContext) -> A
         duration_ms = int((time.time() - call_info["start_time"]) * 1000)
         status = "error" if block.is_error else "success"
 
+        # MCP tools return content as [{"type": "text", "text": "<json>"}]; built-in SDK tools return a plain string.
+        if tool_name.startswith("mcp__"):
+            result = _unwrap_mcp_content(block.content)
+        else:
+            result = block.content
+
         await _persist_tool_call(
             conversation=ctx.conversation,
             tool_name=tool_name,
             parameters=call_info["input"],
-            result=block.content,
+            result=result,
             status=status,
             duration_ms=duration_ms,
         )
@@ -720,7 +740,7 @@ async def _handle_tool_results(message: UserMessage, ctx: StreamingContext) -> A
                 "tool_use_id": block.tool_use_id,
                 "name": tool_name,
                 "input": call_info["input"],
-                "result": block.content,
+                "result": result,
                 "status": status,
                 "duration_ms": duration_ms,
             },
