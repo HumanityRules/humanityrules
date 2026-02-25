@@ -49,6 +49,19 @@ CURATED_SERVICES = {"s3", "sqs", "dynamodb", "secretsmanager", "kms", "sns", "ss
 
 ACCESS_LEVELS = ["Read", "Write", "List", "Tagging", "Permissions management"]
 
+RESOURCE_PLACEHOLDERS = {
+    "s3": "Select S3 bucket...",
+    "sqs": "Select SQS queue...",
+    "dynamodb": "Select DynamoDB table...",
+    "secretsmanager": "Select secret...",
+    "kms": "Select KMS key...",
+    "sns": "Select SNS topic...",
+    "ssm": "Select SSM parameter...",
+    "logs": "Select log group...",
+    "ses": "Select SES identity...",
+    "ecr": "Select ECR repository...",
+}
+
 
 def _build_service_group_data(service, selected_levels, resources, available_resources):
     """Build a template-ready dict for a single service group with access-level toggles."""
@@ -66,16 +79,27 @@ def _build_service_group_data(service, selected_levels, resources, available_res
             "checked": level in selected_set,
         })
 
-    selected_arns = set(resources)
+    # For S3, available resources are base bucket ARNs (e.g. arn:aws:s3:::my-bucket)
+    # but stored resources include the prefix (e.g. arn:aws:s3:::my-bucket/data/*).
+    # Use startswith matching so the bucket shows as "selected" when any prefixed resource exists.
+    if service == "s3":
+        marked_available = [
+            {**r, "selected": any(res == r["arn"] or res.startswith(r["arn"] + "/") for res in resources)}
+            for r in available_resources
+        ]
+    else:
+        selected_arns = set(resources)
+        marked_available = [
+            {**r, "selected": r["arn"] in selected_arns}
+            for r in available_resources
+        ]
 
     return {
         "service": service,
         "display_name": display_name,
         "resources": resources,
-        "available_resources": [
-            {**r, "selected": r["arn"] in selected_arns}
-            for r in available_resources
-        ],
+        "available_resources": marked_available,
+        "resource_placeholder": RESOURCE_PLACEHOLDERS.get(service, "Select resource..."),
         "access_levels": access_levels,
         "has_checked_levels": bool(selected_set),
         "selected_count": len(selected_set),
@@ -275,14 +299,29 @@ def security_permissions_editor_update_statement(request, app_permission_request
 
     action = request.POST.get("action", "")
     service = request.POST.get("service", "").strip()
+    arn = request.POST.get("arn", "").strip()
 
-    permissions_service.update_statements(
-        app_permission_request,
-        action=action,
-        service=service,
-        level=request.POST.get("level", "").strip(),
-        arn=request.POST.get("arn", "").strip(),
-    )
+    # For S3 dropdown selections, the ARN is a base bucket ARN (arn:aws:s3:::bucket).
+    # On add: combine with the prefix input to form the full resource ARN.
+    # On remove: remove all stored resources that belong to this bucket.
+    s3_prefix = request.POST.get("s3_prefix", "").strip()
+    if service == "s3" and action == "add_resource" and s3_prefix:
+        arn = f"{arn}/{s3_prefix}"
+    elif service == "s3" and action == "remove_resource":
+        base_arn = arn
+        for stmt in (app_permission_request.statements or []):
+            if stmt.get("service") == "s3":
+                stmt["resources"] = [r for r in stmt.get("resources", []) if not (r == base_arn or r.startswith(base_arn + "/"))]
+        app_permission_request.save(update_fields=["statements", "updated_at"])
+
+    if not (service == "s3" and action == "remove_resource"):
+        permissions_service.update_statements(
+            app_permission_request,
+            action=action,
+            service=service,
+            level=request.POST.get("level", "").strip(),
+            arn=arn,
+        )
 
     if action == "remove_service":
         if not app_permission_request.statements:

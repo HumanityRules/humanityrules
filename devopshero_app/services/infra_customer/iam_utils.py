@@ -141,9 +141,10 @@ def _list_resources_for_service(session, environment, service: str) -> list[dict
 
 
 def _list_s3_resources(session) -> list[dict]:
+    """List S3 buckets as base ARNs (without object prefix). Prefix is added by the UI."""
     client = session.client("s3")
     buckets = client.list_buckets().get("Buckets", [])
-    return [{"arn": f"arn:aws:s3:::{b['Name']}/*", "label": b["Name"]} for b in buckets]
+    return [{"arn": f"arn:aws:s3:::{b['Name']}", "label": b["Name"]} for b in buckets]
 
 
 def _list_sqs_resources(session, region, account_id) -> list[dict]:

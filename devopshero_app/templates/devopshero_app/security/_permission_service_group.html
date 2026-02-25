@@ -23,7 +23,7 @@
 
         <div class="border-t border-gray-200 dark:border-gray-700 px-4 py-3 space-y-3">
             {# Resources: Alpine multi-select dropdown + selected chips #}
-            <div x-data="{ open: false, search: '' }"
+            <div x-data="{ open: false, search: ''{% if group.service == 's3' %}, s3Prefix: '*'{% endif %} }"
                  @click.outside="open = false; setTimeout(() => search = '', 60)" class="relative">
                 <span class="text-xs font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">Resources</span>
                 <div id="resources-{{ group.service }}">
@@ -48,13 +48,14 @@
 {% url 'security_permissions_editor_update_statement' app_permission_request_id=app_permission_request.id as update_url %}
 {# Combobox: input doubles as trigger and filter #}
 <div class="mt-1 flex gap-1.5">
-    <div class="relative flex-1">
+    <div class="relative {% if group.service == 's3' %}w-50{% else %}flex-1{% endif %}">
         <input type="text" x-model="search" x-ref="resourceSearch"
                name="arn"
                autocomplete="off"
-               @focus="open = true; search = ''"
+               @mousedown="if(open) { $event.preventDefault(); open = false; $refs.resourceSearch.blur() } else { open = true; search = '' }"
+               @focus="if(!open) { open = true; search = '' }"
                @keydown.escape="open = false; setTimeout(() => search = '', 60); $refs.resourceSearch.blur()"
-               :placeholder="open ? 'Filter or paste resource ARN...' : 'Select resource...'"
+               :placeholder="open ? 'Filter or paste resource ARN...' : '{{ group.resource_placeholder }}'"
                class="w-full rounded-md border border-gray-300 bg-white pl-3 pr-8 py-1.5 text-sm placeholder-gray-400 cursor-pointer dark:border-gray-600 dark:bg-gray-900 dark:text-white dark:placeholder-gray-500"
                hx-post="{{ update_url }}"
                hx-vals='{"action": "add_resource", "service": "{{ group.service }}"}'
@@ -65,6 +66,13 @@
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
         </svg>
     </div>
+    {% if group.service == "s3" %}
+    <span class="self-center text-sm text-gray-400 dark:text-gray-500 font-mono">/</span>
+    <input type="text" name="s3_prefix" id="s3-prefix-{{ group.service }}" x-model="s3Prefix"
+           autocomplete="off"
+           class="flex-1 rounded-md border border-gray-300 bg-white px-2 py-1.5 text-sm font-mono placeholder-gray-400 dark:border-gray-600 dark:bg-gray-900 dark:text-white dark:placeholder-gray-500"
+           placeholder="*">
+    {% endif %}
     <button type="button"
             x-show="search.startsWith('arn:')" x-cloak
             x-transition.opacity.duration.100ms
@@ -87,6 +95,7 @@
                 class="flex w-full items-center gap-2 px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50 dark:text-gray-300 dark:hover:bg-gray-800"
                 hx-post="{{ update_url }}"
                 hx-vals='{"action": "{% if r.selected %}remove_resource{% else %}add_resource{% endif %}", "service": "{{ group.service }}", "arn": "{{ r.arn }}"}'
+                {% if group.service == "s3" %}hx-include="#s3-prefix-{{ group.service }}"{% endif %}
                 hx-target="#resources-{{ group.service }}"
                 hx-swap="innerHTML">
             {% if r.selected %}
