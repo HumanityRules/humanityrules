@@ -1,5 +1,32 @@
 # DevOpsHero Development Journal
 
+## 2026-02-25 - [Deployment] Description field for AppPermissionRequest in Permissions Editor
+
+**Conversation:** [2026-02-25-1358-64e65289.md](conversations/2026-02-25-1358-64e65289.md)
+
+Added a `description` field to `AppPermissionRequest` so users and the permissions agent can document why permission changes are needed. The field is filled in by the user via a multi-line textarea in the PE, and/or by the agent via the `update_permission_draft` MCP tool.
+
+**Model and service layer:**
+
+- `AppPermissionRequest.description` — TextField, blank=True. Migration applied.
+- `update_description(app_permission_request, description)` — sync, replaces the full description (used when the user saves the textarea).
+- `amerge_description(app_permission_request, text)` — async, appends text with `\n\n` separator if existing content exists (used when the agent provides a description). Preserves user-authored text at the top.
+
+**Cancel semantics:** Cancel resets `statements` back to baseline but leaves `description` untouched. The description is metadata about the request intent, not the policy itself — so a user who typed rationale then fat-fingered a service and hit cancel keeps their description.
+
+**PE UI:** Expandable panel (same style as service groups) between the statements container and cancel/submit buttons. Textarea with debounced htmx POST (`hx-trigger="input changed delay:1s"`) — `changed` ensures we only persist when there are new keystrokes. Panel defaults to expanded (`<details open>`).
+
+**MCP tool:** Optional `description` parameter on `update_permission_draft`. When provided, the agent's text is merged via `amerge_description`. Tool description updated to explain the append behavior.
+
+**Security hub accordion:** Applied/Failed APRs now show the description in the accordion panel, with a "Description:" label above the text, matching the style of Service/Resources/Access levels.
+
+**SSE refetch:** The `doh:permissions-changed-{id}` event listener fetches the description via a new GET endpoint and updates the textarea — but only when the textarea is not focused, to avoid clobbering in-progress user typing.
+
+**Key points:**
+- New endpoints: `security_permissions_editor_description` (GET, plain text) and `security_permissions_editor_update_description` (POST, 204)
+- Description panel has a "Description:" title in the security hub accordion for Applied/Failed rows
+- `TOOL_INPUT_PARAMS_FOR_TITLE` stays as `service` for `update_permission_draft` since description is secondary context
+
 ## 2026-02-25 01:30 - [Deployment] S3 prefix input for permissions editor
 
 **Conversation:** [2026-02-25-0053-8af2e350.md](conversations/2026-02-25-0053-8af2e350.md)

@@ -1114,6 +1114,7 @@ class AppPermissionRequest(models.Model):
     environment = models.ForeignKey(Environment, on_delete=models.CASCADE, related_name="app_permission_requests")
     statements = models.JSONField(default=list, help_text="List of policy statement dicts")
     status = models.CharField(max_length=30, choices=Status.choices, default=Status.DRAFT)
+    description = models.TextField(blank=True, help_text="Human/agent-authored rationale for the permission changes")
     status_message = models.TextField(blank=True)
     created_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, related_name="created_app_permission_requests")
     created_at = models.DateTimeField(auto_now_add=True)

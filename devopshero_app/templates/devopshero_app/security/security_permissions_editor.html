@@ -74,6 +74,30 @@
                     {% include "devopshero_app/security/_permission_statements.html" %}
                 </div>
 
+                {# Description #}
+                <div class="mt-6 rounded-lg border border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-800/60">
+                    <details open class="group">
+                        <summary class="flex items-center justify-between px-4 py-3 cursor-pointer list-none [&::-webkit-details-marker]:hidden select-none bg-gray-50 dark:bg-gray-800 rounded-t-lg">
+                            <div class="flex items-center space-x-2">
+                                <svg class="w-4 h-4 text-gray-400 transition-transform duration-200 group-open:rotate-90" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
+                                </svg>
+                                <span class="text-sm font-semibold text-gray-900 dark:text-white">Description</span>
+                            </div>
+                        </summary>
+                        <div class="border-t border-gray-200 dark:border-gray-700 px-4 py-3">
+                            <div id="description-container">
+                                <textarea name="description" rows="3"
+                                          placeholder="Describe why these permission changes are needed..."
+                                          class="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 placeholder-gray-400 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 dark:border-gray-600 dark:bg-gray-900 dark:text-white dark:placeholder-gray-500"
+                                          hx-post="{% url 'security_permissions_editor_update_description' app_permission_request_id=app_permission_request.id %}"
+                                          hx-trigger="input changed delay:1s"
+                                          hx-swap="none">{{ app_permission_request.description }}</textarea>
+                            </div>
+                        </div>
+                    </details>
+                </div>
+
                 {# Action buttons #}
                 <div class="mt-5 flex items-center justify-end gap-3">
                     <button type="button" id="cancel-btn"
@@ -127,6 +151,7 @@
 const SERVICE_OPTIONS = JSON.parse(document.getElementById('service-options-data').textContent);
 const UPDATE_URL = "{% url 'security_permissions_editor_update_statement' app_permission_request_id=app_permission_request.id %}";
 const STATEMENTS_URL = "{% url 'security_permissions_statements' app_permission_request_id=app_permission_request.id %}";
+const DESCRIPTION_URL = "{% url 'security_permissions_editor_description' app_permission_request_id=app_permission_request.id %}";
 
 // ─── Service Picker ───────────────────────────────────────────────
 
@@ -208,12 +233,18 @@ document.body.addEventListener('htmx:afterRequest', (e) => {
     }
 });
 
-// ─── Refetch statements and enable buttons when agent updates the draft ────
+// ─── Refetch statements + description and enable buttons when agent updates the draft ────
 document.addEventListener('doh:permissions-changed-{{ app_permission_request.id }}', () => {
     htmx.ajax('GET', STATEMENTS_URL, {
         target: '#statements-container',
         swap: 'innerHTML',
     });
+    const textarea = document.querySelector('#description-container textarea');
+    if (textarea && document.activeElement !== textarea) {
+        fetch(DESCRIPTION_URL).then(r => r.text()).then(text => {
+            if (document.activeElement !== textarea) textarea.value = text;
+        });
+    }
     const cancel = document.getElementById('cancel-btn');
     const apply = document.getElementById('apply-btn');
     if (cancel) cancel.disabled = false;
