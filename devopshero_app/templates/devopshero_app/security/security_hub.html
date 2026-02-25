@@ -92,6 +92,16 @@
                         </div>
                     </div>
                 </div>
+                {% elif pr.status == 'applying' %}
+                <div class="flex items-center justify-between gap-4 px-3 py-2.5 opacity-60">
+                    <div class="min-w-0">
+                        <p class="truncate text-sm font-medium text-gray-900 dark:text-white">{{ pr.app.name }} / {{ pr.environment.name }}</p>
+                        <p class="text-xs text-gray-500 dark:text-gray-400">{{ pr.statements|length }} statement{{ pr.statements|length|pluralize }} · {{ pr.created_at|timesince }} ago{% if pr.created_by %} · {{ pr.created_by }}{% endif %}</p>
+                    </div>
+                    <span class="inline-flex shrink-0 items-center rounded-full px-2 py-0.5 text-xs font-medium bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-300">
+                        {{ pr.get_status_display }}
+                    </span>
+                </div>
                 {% else %}
                 <a href="{% url 'security_permissions_editor' %}?context_app={{ pr.app.slug }}&context_environment={{ pr.environment.slug }}"
                    hx-get="{% url 'security_permissions_editor' %}?context_app={{ pr.app.slug }}&context_environment={{ pr.environment.slug }}"
@@ -106,7 +116,6 @@
                     <span class="inline-flex shrink-0 items-center rounded-full px-2 py-0.5 text-xs font-medium
                         {% if pr.status == 'draft' %}bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-300
                         {% elif pr.status == 'approved_pending_apply' %}bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300
-                        {% elif pr.status == 'applying' %}bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-300
                         {% endif %}">
                         {{ pr.get_status_display }}
                     </span>
