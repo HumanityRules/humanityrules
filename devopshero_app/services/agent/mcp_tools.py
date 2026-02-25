@@ -883,6 +883,8 @@ def create_devopshero_mcp_server(conversation: Conversation):
             "Add or update a permission statement in the draft policy. "
             "Merges the given access levels and resource ARNs into the statement for the specified service, "
             "creating the statement if it doesn't exist. "
+            "Optionally provide a description that explains why these permissions are needed — "
+            "it will be appended to any existing description the user has already written. "
             "Use this tool proactively when you identify missing permissions from source code analysis, "
             "CloudWatch Logs, or CloudTrail. The draft must be in 'draft' status."
         ),
@@ -903,6 +905,10 @@ def create_devopshero_mcp_server(conversation: Conversation):
                     "items": {"type": "string"},
                     "description": "AWS resource ARNs to grant access to (e.g., 'arn:aws:s3:::my-bucket').",
                 },
+                "description": {
+                    "type": "string",
+                    "description": "Rationale for these permissions — appended to the existing description.",
+                },
             },
             "required": ["service", "access_levels", "resources"],
         },
@@ -916,6 +922,10 @@ def create_devopshero_mcp_server(conversation: Conversation):
         await permissions_service.aupsert_statement(
             app_permission_request, args["service"], args["access_levels"], args["resources"],
         )
+
+        description_text = args.get("description", "").strip()
+        if description_text:
+            await permissions_service.amerge_description(app_permission_request, description_text)
 
         return _mcp_response({"success": True, "app_permission_request_id": str(app_permission_request.id), "statements": app_permission_request.statements})
 

@@ -72,6 +72,12 @@
                          :class="openId === '{{ pr.id }}' ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]'">
                         <div class="overflow-hidden">
                             <div class="border-t border-gray-200 dark:border-gray-700 bg-gray-100 dark:bg-gray-900 px-4 py-3 space-y-3">
+                                {% if pr.description %}
+                                <div class="space-y-1">
+                                    <p class="text-xs text-gray-400 dark:text-gray-500">Description:</p>
+                                    <p class="text-xs text-gray-600 dark:text-gray-300 whitespace-pre-line">{{ pr.description }}</p>
+                                </div>
+                                {% endif %}
                                 {% for stmt in pr.statements %}
                                 {% if stmt.service %}
                                 <div class="space-y-1 text-xs">

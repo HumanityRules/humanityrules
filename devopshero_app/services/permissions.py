@@ -119,6 +119,22 @@ async def aupsert_statement(app_permission_request, service, access_levels, reso
     await app_permission_request.asave(update_fields=["statements", "updated_at"])
 
 
+def update_description(app_permission_request, description):
+    """Replace the description field with the given text."""
+    app_permission_request.description = description
+    app_permission_request.save(update_fields=["description", "updated_at"])
+
+
+async def amerge_description(app_permission_request, text):
+    """Append text to the existing description, separated by a blank line."""
+    existing = (app_permission_request.description or "").strip()
+    if existing:
+        app_permission_request.description = existing + "\n\n" + text
+    else:
+        app_permission_request.description = text
+    await app_permission_request.asave(update_fields=["description", "updated_at"])
+
+
 def approve(app_permission_request):
     """Set AppPermissionRequest status to APPROVED_PENDING_APPLY.
 

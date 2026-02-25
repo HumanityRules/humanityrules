@@ -380,6 +380,34 @@ def security_permissions_editor_service_group(request, app_permission_request_id
 
 
 @login_required
+def security_permissions_editor_description(request, app_permission_request_id):
+    """Return the current description as plain text (for SSE refetch)."""
+    organization = request.user.current_organization
+    app_permission_request = get_object_or_404(
+        models.AppPermissionRequest,
+        id=app_permission_request_id,
+        app__organization=organization,
+    )
+    return HttpResponse(app_permission_request.description, content_type="text/plain")
+
+
+@login_required
+@require_POST
+def security_permissions_editor_update_description(request, app_permission_request_id):
+    """Save the description textarea content (debounced from client)."""
+    organization = request.user.current_organization
+    app_permission_request = get_object_or_404(
+        models.AppPermissionRequest,
+        id=app_permission_request_id,
+        app__organization=organization,
+    )
+    permissions_service.update_description(
+        app_permission_request, request.POST.get("description", ""),
+    )
+    return HttpResponse(status=204)
+
+
+@login_required
 @require_POST
 def security_permissions_editor_refresh_resources(request, app_permission_request_id):
     """Clear and re-fetch AWS resource cache, then re-render the statements partial."""
