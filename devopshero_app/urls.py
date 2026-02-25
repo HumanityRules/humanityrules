@@ -25,6 +25,7 @@ urlpatterns = [
     path("security/permissions/<uuid:app_permission_request_id>/update-statement/", views.security_permissions_editor_update_statement, name="security_permissions_editor_update_statement"),
     path("security/permissions/<uuid:app_permission_request_id>/refresh-resources/", views.security_permissions_editor_refresh_resources, name="security_permissions_editor_refresh_resources"),
     path("security/permissions/<uuid:app_permission_request_id>/service-group/", views.security_permissions_editor_service_group, name="security_permissions_editor_service_group"),
+    path("security/permissions/<uuid:app_permission_request_id>/statements/", views.security_permissions_statements, name="security_permissions_statements"),
     path("settings/", views.settings, name="settings"),
     path("settings/organization/", views.settings_organization, name="settings_organization"),
     path("settings/members/", views.settings_members, name="settings_members"),
@@ -65,4 +66,6 @@ urlpatterns = [
     path("chat/<uuid:conversation_id>/messages/", views.chat_messages, name="chat_messages"),
     path("chat/<uuid:conversation_id>/close/", views.chat_close, name="chat_close"),
     path("chat/<uuid:conversation_id>/fork/", views.chat_fork, name="chat_fork"),
+    path("chat/<uuid:conversation_id>/title/", views.chat_conversation_title, name="chat_conversation_title"),
+    path("chat/<uuid:conversation_id>/cost/", views.chat_conversation_cost, name="chat_conversation_cost"),
 ]

@@ -11,6 +11,7 @@ from .security import (
     security_permissions_editor_refresh_resources,
     security_permissions_editor_service_group,
     security_permissions_editor_update_statement,
+    security_permissions_statements,
 )
 from .settings import (
     settings,
@@ -36,6 +37,8 @@ from .chat import (
     chat_messages,
     chat_close,
     chat_fork,
+    chat_conversation_title,
+    chat_conversation_cost,
 )
 from .waitlist_views import waitlist_signup
 
@@ -59,6 +62,7 @@ __all__ = [
     "security_permissions_editor_refresh_resources",
     "security_permissions_editor_service_group",
     "security_permissions_editor_update_statement",
+    "security_permissions_statements",
     "settings",
     "settings_organization",
     "settings_members",
@@ -86,5 +90,7 @@ __all__ = [
     "chat_messages",
     "chat_close",
     "chat_fork",
+    "chat_conversation_title",
+    "chat_conversation_cost",
     "waitlist_signup",
 ]

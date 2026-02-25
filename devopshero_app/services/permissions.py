@@ -98,6 +98,27 @@ def update_statements(app_permission_request, *, action: str, service: str, leve
     app_permission_request.save(update_fields=["statements", "updated_at"])
 
 
+async def aupsert_statement(app_permission_request, service, access_levels, resources):
+    """Merge access_levels and resources into the statement for `service`, creating it if absent."""
+    statements = app_permission_request.statements or []
+    existing = None
+    for stmt in statements:
+        if stmt.get("service") == service:
+            existing = stmt
+            break
+    if existing is None:
+        existing = {"service": service, "effect": "Allow", "access_levels": [], "resources": []}
+        statements.append(existing)
+    for level in access_levels:
+        if level not in existing["access_levels"]:
+            existing["access_levels"].append(level)
+    for arn in resources:
+        if arn not in existing["resources"]:
+            existing["resources"].append(arn)
+    app_permission_request.statements = statements
+    await app_permission_request.asave(update_fields=["statements", "updated_at"])
+
+
 def approve(app_permission_request, app_permissions):
     """Set AppPermissionRequest status to APPROVED_PENDING_APPLY and update the baseline."""
     app_permission_request.status = models.AppPermissionRequest.Status.APPROVED_PENDING_APPLY

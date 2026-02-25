@@ -6,7 +6,10 @@
     <div class="border-b border-gray-200 dark:border-gray-700 px-6">
         <div class="flex items-center justify-between py-3">
             <div>
-                <h1 id="conversation-title" class="text-lg font-semibold text-gray-900 dark:text-white">
+                <h1 id="conversation-title" class="text-lg font-semibold text-gray-900 dark:text-white"
+                    hx-get="{% url 'chat_conversation_title' conversation_id=conversation.id %}"
+                    hx-trigger="doh:title-changed-{{ conversation.id }} from:document"
+                    hx-swap="innerHTML">
                     {{ conversation.title|default:"New Conversation" }}
                 </h1>
                 {% if conversation.context_workspace %}
@@ -47,7 +50,7 @@
                  hx-ext="sse"
                  sse-connect="{% url 'chat_stream' conversation_id=conversation.id %}"
                  sse-close="sse-close"
-                 sse-swap="sse-thinking,sse-start,sse-text-delta,sse-text-flush,sse-tool-start,sse-tool-result,sse-complete,sse-error"
+                 sse-swap="sse-thinking,sse-start,sse-text-delta,sse-text-flush,sse-tool-start,sse-tool-result,sse-complete,sse-error,sse-notify"
                  hx-swap="beforeend">
                 {% for message in messages %}
                     {% include "devopshero_app/chat/_message.html" %}
@@ -227,28 +230,9 @@ function processOobElements(fragment) {
         if (target) {
             oob.removeAttribute('hx-swap-oob');
             target.outerHTML = oob.outerHTML;
-
-            // Also update sidebar title when main title changes
-            if (targetId === 'conversation-title') {
-                updateSidebarTitle(oob.textContent.trim());
-            }
         }
         oob.remove();
     });
-}
-
-/**
- * Update the conversation title in the sidebar list.
- */
-function updateSidebarTitle(newTitle) {
-    const match = window.location.pathname.match(/\/chat\/([^/]+)\//);
-    if (match) {
-        const conversationId = match[1];
-        const sidebarTitle = document.getElementById('sidebar-title-' + conversationId);
-        if (sidebarTitle) {
-            sidebarTitle.textContent = newTitle;
-        }
-    }
 }
 
 /**
@@ -276,6 +260,7 @@ function handleStart(data) {
     template.innerHTML = data;
     const fragment = template.content;
 
+    // _streaming_start.html includes an empty #thinking-indicator OOB to clear the "Thinking..." state
     processOobElements(fragment);
 
     const streamingMessage = fragment.firstElementChild;
@@ -367,15 +352,21 @@ function handleComplete(data) {
         const streamingText = streamingMessage.querySelector('#streaming-text');
         if (streamingText) streamingText.removeAttribute('id');
     }
-
-    // Process OOB elements (e.g., title update) if present
-    if (data && data.trim()) {
-        const template = document.createElement('template');
-        template.innerHTML = data;
-        processOobElements(template.content);
-    }
-
     maybeScrollToBottomSmooth();
+}
+
+/**
+ * Handle sse-notify events: dispatch as custom DOM events so any
+ * component on the page can react (via hx-trigger or JS listeners).
+ */
+function handleNotify(data) {
+    try {
+        const payload = JSON.parse(data);
+        const suffix = payload.id ? `-${payload.id}` : '';
+        document.dispatchEvent(new CustomEvent(`doh:${payload.type}${suffix}`, { detail: payload }));
+    } catch (e) {
+        console.error('Failed to parse sse-notify:', e);
+    }
 }
 
 // Initialize on page load
@@ -427,6 +418,12 @@ messages.addEventListener('htmx:sseBeforeMessage', function(event) {
         handleToolResult(event.detail.data);
         return;
     }
+
+    if (eventType === 'sse-notify') {
+        event.preventDefault();
+        handleNotify(event.detail.data);
+        return;
+    }
 });
 
 /**
@@ -438,7 +435,7 @@ function handleToolStart(data) {
     template.innerHTML = data;
     const fragment = template.content;
 
-    // Process any OOB elements (e.g., thinking indicator reset)
+    // _streaming_tool_start.html includes an empty #thinking-indicator OOB to clear the "Thinking..." state
     processOobElements(fragment);
 
     // Skip if tool already exists (SSE reconnection replay)
@@ -455,14 +452,14 @@ function handleToolStart(data) {
 }
 
 /**
- * Handle sse-tool-result events (process OOB swaps and append tool result).
+ * Handle sse-tool-result events.
  */
 function handleToolResult(data) {
     const template = document.createElement('template');
     template.innerHTML = data;
     const fragment = template.content;
 
-    // Process any OOB elements (e.g., conversation title update)
+    // _streaming_tool_result.html wraps its content in hx-swap-oob="outerHTML" to replace the spinner
     processOobElements(fragment);
 
     // Append remaining content to messages

@@ -5,6 +5,7 @@ from urllib.parse import urlencode
 from django.contrib.auth.decorators import login_required
 from django.http import HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, render
+from django.template.loader import render_to_string
 from django.views.decorators.http import require_POST
 from policy_sentry.shared import iam_data as policy_sentry_iam_data
 
@@ -120,6 +121,26 @@ def _fetch_available_resources(app_permission_request):
     if not services:
         return {}
     return permissions_service.get_resources_for_services(app_permission_request.environment, services)
+
+
+@login_required
+def security_permissions_statements(request, app_permission_request_id):
+    """Return rendered permission statements for HTMX refetch (triggered by SSE notify)."""
+    organization = request.user.current_organization
+    app_permission_request = get_object_or_404(
+        models.AppPermissionRequest.objects.select_related(
+            "app", "environment", "environment__aws_account",
+        ),
+        id=app_permission_request_id,
+        app__organization=organization,
+    )
+    available_resources = _fetch_available_resources(app_permission_request)
+    service_groups = _group_statements_by_service(app_permission_request.statements or [], available_resources)
+    return render(
+        request=request,
+        template_name="devopshero_app/security/_permission_statements.html",
+        context={"service_groups": service_groups, "app_permission_request": app_permission_request},
+    )
 
 
 def _get_all_service_options():

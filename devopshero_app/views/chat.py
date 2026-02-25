@@ -272,12 +272,6 @@ async def chat_stream(request, conversation_id):
     return response
 
 
-def _format_sse(event_name: str, data: str) -> str:
-    """Format data as SSE event."""
-    sse_data = "\n".join(f"data: {line}" for line in data.split("\n"))
-    return f"event: {event_name}\n{sse_data}\n\n"
-
-
 def _render_streaming_tool_start(agent_streaming_event_data: dict) -> str:
     """Render HTML for tool execution start."""
     tool_full_name = agent_streaming_event_data.get("name", "unknown")
@@ -296,7 +290,7 @@ def _render_streaming_tool_start(agent_streaming_event_data: dict) -> str:
 
 
 def _render_streaming_tool_result(agent_streaming_event_data: dict) -> str:
-    """Render HTML for tool execution result (OOB swap)."""
+    """Render HTML for tool execution result."""
     tool_full_name = agent_streaming_event_data.get("name", "unknown")
     parameters = agent_streaming_event_data.get("input", {})
     result = agent_streaming_event_data.get("result", "")
@@ -323,7 +317,7 @@ def _render_streaming_tool_result(agent_streaming_event_data: dict) -> str:
     if status == "success" and isinstance(result_parsed, dict) and result_parsed.get("success") is False:
         status = "error"
 
-    html = render_to_string("devopshero_app/chat/_streaming_tool_result.html", context={
+    return render_to_string("devopshero_app/chat/_streaming_tool_result.html", context={
         "tool_name": tool_name,
         "tool_main_param": tool_main_param,
         "tool_use_id": agent_streaming_event_data.get("tool_use_id", ""),
@@ -333,8 +327,6 @@ def _render_streaming_tool_result(agent_streaming_event_data: dict) -> str:
         "tool_result": result_parsed,
         "custom_result_template": chat_filters.TOOL_RESULT_TEMPLATES.get(tool_full_name, ""),
     })
-
-    return html
 
 
 def _render_streaming_thinking() -> str:
@@ -354,28 +346,15 @@ def _render_streaming_error(error_msg: str) -> str:
     })
 
 
-def _render_title_update(title: str, conversation_id: str) -> str:
-    """Render OOB swap HTML to update conversation title in header and sidebar."""
-    # OOB swap for main header title
-    header_html = (
-        f'<h1 id="conversation-title" hx-swap-oob="true" '
-        f'class="text-lg font-semibold text-gray-900 dark:text-white">{title}</h1>'
-    )
-    # OOB swap for sidebar title
-    sidebar_html = (
-        f'<h3 id="sidebar-title-{conversation_id}" hx-swap-oob="true" '
-        f'class="text-sm font-medium text-gray-900 dark:text-white truncate">{title}</h3>'
-    )
-    return header_html + sidebar_html
+def _format_sse(event_name: str, data: str) -> str:
+    """Format data as SSE event."""
+    sse_data = "\n".join(f"data: {line}" for line in data.split("\n"))
+    return f"event: {event_name}\n{sse_data}\n\n"
 
 
-def _render_cost_update(total_cost: str, conversation_id: str) -> str:
-    """Render OOB swap HTML to update conversation cost in sidebar."""
-    return (
-        f'<p id="sidebar-cost-{conversation_id}" hx-swap-oob="true" '
-        f'class="text-xs text-gray-500 dark:text-gray-400">'
-        f'<span class="text-gray-400 dark:text-gray-500">Agent Cost:</span> ${total_cost}</p>'
-    )
+def _format_sse_notify(notification_type: str, **kwargs) -> str:
+    """Format an sse-notify event that tells clients to refetch data."""
+    return _format_sse(event_name="sse-notify", data=json.dumps({"type": notification_type, **kwargs}))
 
 
 def _format_sse_event(event: agent_service.AgentStreamEvent, show_costs: bool) -> str:
@@ -391,14 +370,24 @@ def _format_sse_event(event: agent_service.AgentStreamEvent, show_costs: bool) -
     elif event.type == "tool_start":
         return _format_sse(event_name="sse-tool-start", data=_render_streaming_tool_start(event.data))
     elif event.type == "tool_result":
-        return _format_sse(event_name="sse-tool-result", data=_render_streaming_tool_result(event.data))
+        result = _format_sse(event_name="sse-tool-result", data=_render_streaming_tool_result(event.data))
+        if event.data.get("name") == "mcp__devopshero__update_permission_draft":
+            try:
+                raw = event.data.get("result", "")
+                parsed = json.loads(raw) if isinstance(raw, str) else raw
+                parsed = chat_filters.extract_mcp_text_content(parsed)
+                if isinstance(parsed, dict) and "app_permission_request_id" in parsed:
+                    result += _format_sse_notify("permissions-changed", id=parsed["app_permission_request_id"])
+            except (json.JSONDecodeError, TypeError):
+                pass
+        return result
     elif event.type == "complete":
-        # Include title OOB swap if a title was generated
-        data = _render_title_update(title=event.data["title"], conversation_id=event.data["conversation_id"]) if event.data.get("title") else ""
-        # Include cost OOB swap for admin users
+        result = _format_sse(event_name="sse-complete", data="")
+        if event.data.get("title"):
+            result += _format_sse_notify("title-changed", id=str(event.data["conversation_id"]))
         if show_costs and event.data.get("total_cost"):
-            data += _render_cost_update(total_cost=event.data["total_cost"], conversation_id=event.data["conversation_id"])
-        return _format_sse(event_name="sse-complete", data=data)
+            result += _format_sse_notify("cost-changed", id=str(event.data["conversation_id"]))
+        return result
     elif event.type == "error":
         error_msg = event.data.get("error", "Unknown error") if event.data else "Unknown error"
         return _format_sse(event_name="sse-error", data=_render_streaming_error(error_msg=error_msg))
@@ -478,3 +467,31 @@ def chat_fork(request, conversation_id):
         status=Conversation.Status.ACTIVE,
     )
     return redirect("chat_view", conversation_id=forked.id)
+
+
+@login_required
+def chat_conversation_title(request, conversation_id):
+    """Return conversation title text for HTMX refetch."""
+    conversation = get_object_or_404(
+        Conversation,
+        id=conversation_id,
+        user=request.user,
+        organization=request.user.current_organization,
+    )
+    return HttpResponse(conversation.title or "New Conversation")
+
+
+@login_required
+def chat_conversation_cost(request, conversation_id):
+    """Return conversation cost HTML fragment for HTMX refetch."""
+    conversation = get_object_or_404(
+        Conversation.objects.annotate(total_cost=Sum("llm_usage_logs__cost_usd")),
+        id=conversation_id,
+        user=request.user,
+        organization=request.user.current_organization,
+    )
+    if conversation.total_cost:
+        return HttpResponse(
+            f'<span class="text-gray-400 dark:text-gray-500">Agent Cost:</span> ${conversation.total_cost:.4f}'
+        )
+    return HttpResponse("")

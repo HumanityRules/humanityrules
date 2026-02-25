@@ -119,13 +119,14 @@
  *
  * All mutations (add/remove service, level, resource) POST to the server
  * via htmx attributes on the template elements. Agent changes arrive as
- * OOB swaps in SSE tool_result / sse-complete events.
+ * SSE notifications that trigger a refetch of the statements.
  *
  * JS only handles: service picker UI and resource dropdown population.
  */
 
 const SERVICE_OPTIONS = JSON.parse(document.getElementById('service-options-data').textContent);
 const UPDATE_URL = "{% url 'security_permissions_editor_update_statement' app_permission_request_id=app_permission_request.id %}";
+const STATEMENTS_URL = "{% url 'security_permissions_statements' app_permission_request_id=app_permission_request.id %}";
 
 // ─── Service Picker ───────────────────────────────────────────────
 
@@ -205,6 +206,18 @@ document.body.addEventListener('htmx:afterRequest', (e) => {
         if (cancel) cancel.disabled = false;
         if (apply) apply.disabled = false;
     }
+});
+
+// ─── Refetch statements and enable buttons when agent updates the draft ────
+document.addEventListener('doh:permissions-changed-{{ app_permission_request.id }}', () => {
+    htmx.ajax('GET', STATEMENTS_URL, {
+        target: '#statements-container',
+        swap: 'innerHTML',
+    });
+    const cancel = document.getElementById('cancel-btn');
+    const apply = document.getElementById('apply-btn');
+    if (cancel) cancel.disabled = false;
+    if (apply) apply.disabled = false;
 });
 
 </script>
