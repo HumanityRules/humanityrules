@@ -49,5 +49,5 @@ class DevopsheroAppConfig(AppConfig):
             return
 
         # Import here because job_worker imports models, which aren't ready at module load time
-        from .services.deployment import job_worker
+        from .services.jobs import job_worker
         job_worker.start_worker()

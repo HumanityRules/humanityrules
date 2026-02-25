@@ -13,7 +13,7 @@ import sys
 
 from django.core.management.base import BaseCommand
 
-from devopshero_app.services.deployment import job_worker
+from devopshero_app.services.jobs import job_worker
 
 
 class Command(BaseCommand):

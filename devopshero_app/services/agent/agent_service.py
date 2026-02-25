@@ -44,7 +44,7 @@ from django.db.models import Sum
 
 from devopshero_app.models import AWSAccount, AppPermissionRequest, Conversation, Environment, LLMUsageLog, Message, Repository, Workspace
 from devopshero_app.services.gitproviders import repo_service
-from devopshero_app.services.llm import llm_client, title_generator
+from devopshero_app.services.agent import llm_client, title_generator
 
 from .agent_client import get_claude_env
 from .mcp_tools import (

@@ -63,7 +63,7 @@ def _map_environment_level(levelno: int) -> str:
 # Prefixes for loggers that should be captured by job log handlers.
 # This excludes async code paths (views, agent) that would cause SynchronousOnlyOperation errors.
 _JOB_LOG_PREFIXES = (
-    "devopshero_app.services.deployment",
+    "devopshero_app.services.jobs",
     "devopshero_app.services.infra_customer",
 )
 

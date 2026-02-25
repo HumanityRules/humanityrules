@@ -39,7 +39,7 @@ from pydantic import ValidationError
 from devopshero_app.services.agent.agent_client import get_claude_env
 from devopshero_app.services.agent.repo_analysis.repo_analyzer_config import get_analyze_repository_agent
 from devopshero_app.services.agent.repo_analysis.repo_analysis_schema import RepoAnalysisOutput
-from devopshero_app.services.llm import llm_client
+from devopshero_app.services.agent import llm_client
 
 
 # Reference app expectations
