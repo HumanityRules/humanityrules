@@ -208,10 +208,10 @@ AWS_BEDROCK_REGION = os.environ.get("AWS_BEDROCK_REGION")
 AWS_BEDROCK_ACCESS_KEY_ID = os.environ.get("AWS_BEDROCK_ACCESS_KEY_ID")
 AWS_BEDROCK_SECRET_ACCESS_KEY = os.environ.get("AWS_BEDROCK_SECRET_ACCESS_KEY")
 
-# Claude model aliases per conversation mode (opus-4.6, opus-4.5, sonnet-4.5, haiku-4.5)
-CLAUDE_MODEL_GENERAL = os.environ.get("CLAUDE_MODEL_GENERAL", "sonnet-4.5")
-CLAUDE_MODEL_ENVIRONMENT = os.environ.get("CLAUDE_MODEL_ENVIRONMENT", "sonnet-4.5")
-CLAUDE_MODEL_APP_DEPLOYMENT = os.environ.get("CLAUDE_MODEL_APP_DEPLOYMENT", "sonnet-4.5")
+# Claude model aliases per conversation mode (opus-4.6, sonnet-4.6, opus-4.5, sonnet-4.5, haiku-4.5)
+CLAUDE_MODEL_GENERAL = os.environ.get("CLAUDE_MODEL_GENERAL", "sonnet-4.6")
+CLAUDE_MODEL_ENVIRONMENT = os.environ.get("CLAUDE_MODEL_ENVIRONMENT", "sonnet-4.6")
+CLAUDE_MODEL_APP_DEPLOYMENT = os.environ.get("CLAUDE_MODEL_APP_DEPLOYMENT", "sonnet-4.6")
 
 # Claude Agent Sandbox: Base directory for agent sandbox (cloned repos, temp files, etc.)
 CLAUDE_SANDBOX_DIR = BASE_DIR / "sandbox"

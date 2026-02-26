@@ -50,6 +50,8 @@ The main developer documentation lives in the docs/ subdirectory. **When creatin
 
 - **`docs/domain_model.md`** — Core domain concepts and entity relationships. Defines Workspace, App, Environment, Datastore, Deployment, etc entities with their attributes and how they relate. Read this when implementing features that touch the domain model or when clarifying entity boundaries.
 
+- **`docs/authorization_design.md`** — Authorization system design. Defines the RBAC + Groups model, role bindings, pre-defined roles per resource type, and UI flows for managing access. Read this when implementing authorization features or when understanding how users, groups, roles, and resources relate.
+
 **Subsystem AGENTS.md files:**
 - **`devopshero_app/views/AGENTS.md`** — HTMX navigation paradigm, view patterns, adding pages
 - **`infra_devopshero/AGENTS.md`** — Control plane CDK infrastructure, deployment operations, AWS credentials setup
