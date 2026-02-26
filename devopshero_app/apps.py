@@ -20,6 +20,7 @@ class DevopsheroAppConfig(AppConfig):
     def ready(self):
         """Initialize services on app startup."""
         self._init_posthog()
+        self._init_posthog_logs()
         self._init_job_worker()
 
     def _init_posthog(self):
@@ -39,6 +40,30 @@ class DevopsheroAppConfig(AppConfig):
                 enable_exception_autocapture=True,
             )
             posthog_module.default_client = client
+
+    def _init_posthog_logs(self):
+        """Ship Python logs to PostHog via OpenTelemetry. Disabled in DEBUG mode."""
+        posthog_key = getattr(settings, 'POSTHOG_API_KEY', None)
+        if not posthog_key or settings.DEBUG:
+            return
+
+        import logging
+        from opentelemetry._logs import set_logger_provider
+        from opentelemetry.sdk._logs import LoggerProvider, LoggingHandler
+        from opentelemetry.sdk._logs.export import BatchLogRecordProcessor
+        from opentelemetry.exporter.otlp.proto.http._log_exporter import OTLPLogExporter
+
+        logger_provider = LoggerProvider()
+        set_logger_provider(logger_provider)
+
+        otlp_exporter = OTLPLogExporter(
+            endpoint="https://us.i.posthog.com/i/v1/logs",
+            headers={"Authorization": f"Bearer {posthog_key}"},
+        )
+        logger_provider.add_log_record_processor(BatchLogRecordProcessor(otlp_exporter))
+
+        otel_handler = LoggingHandler(logger_provider=logger_provider)
+        logging.getLogger("devopshero_app").addHandler(otel_handler)
 
     def _init_job_worker(self):
         """Start the job worker for web server processes only."""
