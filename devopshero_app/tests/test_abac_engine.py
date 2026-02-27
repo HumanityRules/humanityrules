@@ -1,5 +1,6 @@
 """Tests for the ABAC policy evaluation engine (devopshero_app/services/abac.py)."""
 
+from django.db.models import QuerySet
 from django.test import TestCase
 
 from devopshero_app.models import (
@@ -702,7 +703,7 @@ class TestFilterPermittedResources(TestCase):
             key="domain", value="hr",
         )
 
-    def _all_workspaces(self) -> "QuerySet[Workspace]":
+    def _all_workspaces(self) -> QuerySet[Workspace]:
         return Workspace.objects.filter(
             organization=self.org, pk__in=[self.ws_eng.pk, self.ws_fin.pk, self.ws_hr.pk],
         )
