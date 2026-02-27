@@ -1,15 +1,16 @@
 from django.contrib.auth.decorators import login_required
 from django.db.models import Max, OuterRef, Subquery
+from django.http import HttpRequest, HttpResponse
 from django.shortcuts import render
 
 from ..models import App, Datastore, Deployment
-from .base import get_app_shell_context
+from . import base
 
 
 @login_required
-def dashboard(request):
+def dashboard(request: HttpRequest) -> HttpResponse:
     if not request.htmx:
-        context = get_app_shell_context(request=request, current_page="dashboard")
+        context = base.get_app_shell_context(request=request, current_page="dashboard")
         context["content_url"] = "/dashboard/"
         return render(request, "devopshero_app/app_shell.html", context=context)
 
@@ -37,7 +38,7 @@ def dashboard(request):
     )
     datastores = Datastore.objects.filter(workspace__organization=org).select_related("workspace").order_by("-created_at")
 
-    context = get_app_shell_context(request=request, current_page="dashboard")
+    context = base.get_app_shell_context(request=request, current_page="dashboard")
     context["apps"] = apps
     context["datastores"] = datastores
 

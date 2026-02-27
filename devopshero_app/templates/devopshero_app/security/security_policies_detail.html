@@ -1,0 +1,311 @@
+{% extends "devopshero_app/security/security.html" %}
+{% load i18n %}
+
+{% block security_content %}
+<div>
+    <div class="flex items-center space-x-2 text-sm text-gray-500 dark:text-gray-400 mb-4">
+        <a href="/security/policies/"
+           hx-get="/security/policies/"
+           hx-target="#main-content"
+           hx-swap="innerHTML"
+           hx-push-url="true"
+           class="hover:text-indigo-600 dark:hover:text-indigo-400">Policies</a>
+        <span>/</span>
+    </div>
+
+    <h2 class="text-lg font-semibold text-gray-900 dark:text-white mb-6">
+        {% if policy %}Edit Policy{% else %}New Policy{% endif %}
+    </h2>
+
+    <div x-data="policyForm()" class="max-w-2xl">
+        <form method="POST"
+              action="{% if policy %}/security/policies/{{ policy.id }}/{% else %}/security/policies/create/{% endif %}"
+              @submit.prevent="submitForm($el)">
+            {% csrf_token %}
+
+            {# Hidden JSON fields #}
+            <input type="hidden" name="identity_conditions" :value="JSON.stringify(identityWildcard ? [{key: '*', value: '*'}] : identityConditions)">
+            <input type="hidden" name="resource_conditions" :value="JSON.stringify(resourceWildcard ? [{key: '*', value: '*'}] : resourceConditions)">
+            <input type="hidden" name="actions" :value="JSON.stringify(computedActions())">
+
+            {# Name #}
+            <div class="mb-6">
+                <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Name</label>
+                <input type="text" name="name" required
+                       value="{% if policy %}{{ policy.name }}{% endif %}"
+                       class="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white">
+            </div>
+
+            {# Resource type #}
+            <div class="mb-6">
+                <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Resource Type</label>
+                <select name="resource_type" required x-model="resourceType"
+                        class="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white">
+                    <option value="">Select...</option>
+                    <option value="workspace" {% if policy.resource_type == 'workspace' %}selected{% endif %}>Workspace</option>
+                    <option value="environment" {% if policy.resource_type == 'environment' %}selected{% endif %}>Environment</option>
+                    <option value="app" {% if policy.resource_type == 'app' %}selected{% endif %}>App</option>
+                </select>
+            </div>
+
+            {# Identity conditions #}
+            <div class="mb-6">
+                <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Identity Conditions</label>
+                <label class="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-400 mb-2">
+                    <input type="checkbox" x-model="identityWildcard"
+                           class="rounded border-gray-300 dark:border-gray-600 text-indigo-600">
+                    Match any identity
+                </label>
+                <template x-if="!identityWildcard">
+                    <div>
+                        <template x-for="(cond, i) in identityConditions" :key="i">
+                            <div class="flex items-center gap-2 mb-2">
+                                <input type="text" x-model="cond.key" placeholder="key"
+                                       list="identity-keys"
+                                       class="w-32 px-2 py-1 text-sm border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800 text-gray-900 dark:text-white">
+                                <span class="text-sm text-gray-400">=</span>
+                                <input type="text" x-model="cond.value" placeholder="value"
+                                       list="identity-values"
+                                       class="w-40 px-2 py-1 text-sm border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800 text-gray-900 dark:text-white">
+                                <button type="button" @click="identityConditions.splice(i, 1)"
+                                        class="text-red-500 hover:text-red-700">
+                                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+                                    </svg>
+                                </button>
+                            </div>
+                        </template>
+                        <button type="button" @click="identityConditions.push({key: '', value: ''})"
+                                class="text-sm text-indigo-600 dark:text-indigo-400 hover:text-indigo-800">+ Add condition</button>
+                    </div>
+                </template>
+            </div>
+
+            {# Resource conditions #}
+            <div class="mb-6">
+                <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Resource Conditions</label>
+                <label class="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-400 mb-2">
+                    <input type="checkbox" x-model="resourceWildcard"
+                           class="rounded border-gray-300 dark:border-gray-600 text-indigo-600">
+                    Match any resource
+                </label>
+                <template x-if="!resourceWildcard">
+                    <div>
+                        <template x-for="(cond, i) in resourceConditions" :key="i">
+                            <div class="flex items-center gap-2 mb-2">
+                                <input type="text" x-model="cond.key" placeholder="key"
+                                       list="resource-keys"
+                                       class="w-32 px-2 py-1 text-sm border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800 text-gray-900 dark:text-white">
+                                <span class="text-sm text-gray-400">=</span>
+                                <input type="text" x-model="cond.value" placeholder="value"
+                                       list="resource-values"
+                                       class="w-40 px-2 py-1 text-sm border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800 text-gray-900 dark:text-white">
+                                <button type="button" @click="resourceConditions.splice(i, 1)"
+                                        class="text-red-500 hover:text-red-700">
+                                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+                                    </svg>
+                                </button>
+                            </div>
+                        </template>
+                        <button type="button" @click="resourceConditions.push({key: '', value: ''})"
+                                class="text-sm text-indigo-600 dark:text-indigo-400 hover:text-indigo-800">+ Add condition</button>
+                    </div>
+                </template>
+            </div>
+
+            {# Actions #}
+            <div class="mb-6">
+                <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Actions</label>
+
+                {# Workspace actions #}
+                <template x-if="resourceType === 'workspace'">
+                    <div class="space-y-2">
+                        <template x-for="action in ['workspace:view', 'workspace:edit', 'workspace:admin']" :key="action">
+                            <div class="flex items-center gap-3">
+                                <label class="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
+                                    <input type="checkbox" :value="action"
+                                           :checked="actionGrants.includes(action)"
+                                           @change="toggleAction(action, $event.target.checked)"
+                                           class="rounded border-gray-300 dark:border-gray-600 text-indigo-600">
+                                    <span x-text="action"></span>
+                                </label>
+                                <label class="flex items-center gap-1 text-xs text-red-600 dark:text-red-400">
+                                    <input type="checkbox"
+                                           :checked="actionDenials.includes(action)"
+                                           @change="toggleDeny(action, $event.target.checked)"
+                                           class="rounded border-red-300 dark:border-red-600 text-red-600">
+                                    deny
+                                </label>
+                            </div>
+                        </template>
+                    </div>
+                </template>
+
+                {# Environment actions #}
+                <template x-if="resourceType === 'environment'">
+                    <div class="space-y-2">
+                        <template x-for="action in ['environment:view', 'environment:deploy', 'environment:approve', 'environment:admin']" :key="action">
+                            <div class="flex items-center gap-3">
+                                <label class="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
+                                    <input type="checkbox" :value="action"
+                                           :checked="actionGrants.includes(action)"
+                                           @change="toggleAction(action, $event.target.checked)"
+                                           class="rounded border-gray-300 dark:border-gray-600 text-indigo-600">
+                                    <span x-text="action"></span>
+                                </label>
+                                <label class="flex items-center gap-1 text-xs text-red-600 dark:text-red-400">
+                                    <input type="checkbox"
+                                           :checked="actionDenials.includes(action)"
+                                           @change="toggleDeny(action, $event.target.checked)"
+                                           class="rounded border-red-300 dark:border-red-600 text-red-600">
+                                    deny
+                                </label>
+                            </div>
+                        </template>
+                    </div>
+                </template>
+
+                {# App actions #}
+                <template x-if="resourceType === 'app'">
+                    <div class="space-y-2">
+                        <template x-for="action in ['app:use']" :key="action">
+                            <div class="flex items-center gap-3">
+                                <label class="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
+                                    <input type="checkbox" :value="action"
+                                           :checked="actionGrants.includes(action)"
+                                           @change="toggleAction(action, $event.target.checked)"
+                                           class="rounded border-gray-300 dark:border-gray-600 text-indigo-600">
+                                    <span x-text="action"></span>
+                                </label>
+                                <label class="flex items-center gap-1 text-xs text-red-600 dark:text-red-400">
+                                    <input type="checkbox"
+                                           :checked="actionDenials.includes(action)"
+                                           @change="toggleDeny(action, $event.target.checked)"
+                                           class="rounded border-red-300 dark:border-red-600 text-red-600">
+                                    deny
+                                </label>
+                            </div>
+                        </template>
+                    </div>
+                </template>
+
+                <template x-if="!resourceType">
+                    <p class="text-sm text-gray-400 dark:text-gray-500">Select a resource type to see available actions.</p>
+                </template>
+            </div>
+
+            {# Submit #}
+            <div class="flex items-center gap-3">
+                <button type="submit"
+                        class="px-4 py-2 text-sm font-medium text-white bg-indigo-600 rounded-lg hover:bg-indigo-700">
+                    {% if policy %}Save Changes{% else %}Create Policy{% endif %}
+                </button>
+                {% if policy %}
+                <form method="POST" action="/security/policies/{{ policy.id }}/delete/" class="inline">
+                    {% csrf_token %}
+                    <button type="submit"
+                            onclick="return confirm('Delete this policy?')"
+                            class="px-4 py-2 text-sm font-medium text-red-600 dark:text-red-400 border border-red-300 dark:border-red-600 rounded-lg hover:bg-red-50 dark:hover:bg-red-500/10">
+                        Delete
+                    </button>
+                </form>
+                {% endif %}
+            </div>
+        </form>
+
+        {# Datalists for autocompletion #}
+        <datalist id="identity-keys">
+            {% for key in existing_keys %}<option value="{{ key }}">{% endfor %}
+        </datalist>
+        <datalist id="identity-values">
+            {% for val in existing_values %}<option value="{{ val }}">{% endfor %}
+        </datalist>
+        <datalist id="resource-keys">
+            {% for key in existing_keys %}<option value="{{ key }}">{% endfor %}
+        </datalist>
+        <datalist id="resource-values">
+            {% for val in existing_values %}<option value="{{ val }}">{% endfor %}
+        </datalist>
+    </div>
+</div>
+
+<script>
+function policyForm() {
+    {% if policy %}
+    const existingPolicy = {
+        resourceType: '{{ policy.resource_type }}',
+        identityConditions: {{ policy.identity_conditions|safe }},
+        resourceConditions: {{ policy.resource_conditions|safe }},
+        actions: {{ policy.actions|safe }},
+    };
+    {% else %}
+    const existingPolicy = {
+        resourceType: '',
+        identityConditions: [{key: '*', value: '*'}],
+        resourceConditions: [{key: '*', value: '*'}],
+        actions: [],
+    };
+    {% endif %}
+
+    const isWildcard = (conds) => conds.length === 1 && conds[0].key === '*' && conds[0].value === '*';
+
+    // Separate grants and denials
+    const grants = existingPolicy.actions.filter(a => !a.startsWith('!'));
+    const denials = existingPolicy.actions.filter(a => a.startsWith('!')).map(a => a.slice(1));
+
+    return {
+        resourceType: existingPolicy.resourceType,
+        identityWildcard: isWildcard(existingPolicy.identityConditions),
+        identityConditions: isWildcard(existingPolicy.identityConditions)
+            ? []
+            : existingPolicy.identityConditions.map(c => ({...c})),
+        resourceWildcard: isWildcard(existingPolicy.resourceConditions),
+        resourceConditions: isWildcard(existingPolicy.resourceConditions)
+            ? []
+            : existingPolicy.resourceConditions.map(c => ({...c})),
+        actionGrants: grants,
+        actionDenials: denials,
+
+        toggleAction(action, checked) {
+            if (checked) {
+                if (!this.actionGrants.includes(action)) this.actionGrants.push(action);
+                // Remove from denials if granting
+                this.actionDenials = this.actionDenials.filter(a => a !== action);
+            } else {
+                this.actionGrants = this.actionGrants.filter(a => a !== action);
+            }
+        },
+
+        toggleDeny(action, checked) {
+            if (checked) {
+                if (!this.actionDenials.includes(action)) this.actionDenials.push(action);
+                // Remove from grants if denying
+                this.actionGrants = this.actionGrants.filter(a => a !== action);
+            } else {
+                this.actionDenials = this.actionDenials.filter(a => a !== action);
+            }
+        },
+
+        computedActions() {
+            return [
+                ...this.actionGrants,
+                ...this.actionDenials.map(a => '!' + a),
+            ];
+        },
+
+        submitForm(el) {
+            // Update hidden fields before submit
+            el.querySelector('[name=identity_conditions]').value = JSON.stringify(
+                this.identityWildcard ? [{key: '*', value: '*'}] : this.identityConditions.filter(c => c.key && c.value)
+            );
+            el.querySelector('[name=resource_conditions]').value = JSON.stringify(
+                this.resourceWildcard ? [{key: '*', value: '*'}] : this.resourceConditions.filter(c => c.key && c.value)
+            );
+            el.querySelector('[name=actions]').value = JSON.stringify(this.computedActions());
+            el.submit();
+        },
+    };
+}
+</script>
+{% endblock %}

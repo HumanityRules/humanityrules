@@ -29,7 +29,7 @@ class User(AbstractUser):
         help_text="The organization the user is currently working in",
     )
 
-    def __str__(self):
+    def __str__(self) -> str:
         return self.email or self.username
 
 
@@ -47,7 +47,7 @@ class Organization(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
-    def __str__(self):
+    def __str__(self) -> str:
         return self.name
 
 
@@ -86,7 +86,7 @@ class OrganizationMembership(models.Model):
         verbose_name = "Organization Membership"
         verbose_name_plural = "Organization Memberships"
 
-    def __str__(self):
+    def __str__(self) -> str:
         return f"{self.user} - {self.organization} ({self.role})"
 
 
@@ -157,10 +157,10 @@ class AWSAccount(models.Model):
             )
         ]
 
-    def __str__(self):
+    def __str__(self) -> str:
         return f"{self.name} ({self.aws_account_id or 'pending'})"
 
-    def get_cloudformation_url(self):
+    def get_cloudformation_url(self) -> str:
         """Generate the AWS CloudFormation quick-create URL for this account."""
         params = {
             "stackName": f"DevOpsHero-{self.id.hex[:8]}",
@@ -222,7 +222,7 @@ class GitProviderIntegration(models.Model):
         verbose_name_plural = "Git Provider Integrations"
         ordering = ["-created_at"]
 
-    def __str__(self):
+    def __str__(self) -> str:
         return f"{self.organization.name} - {self.get_provider_display()}"
 
 
@@ -294,7 +294,7 @@ class Repository(models.Model):
             )
         ]
 
-    def __str__(self):
+    def __str__(self) -> str:
         return self.full_name
 
 
@@ -376,7 +376,7 @@ class Environment(models.Model):
         ordering = ["name"]
         unique_together = [["aws_account", "slug"]]
 
-    def __str__(self):
+    def __str__(self) -> str:
         return f"{self.name} ({self.aws_account.name})"
 
 
@@ -409,7 +409,7 @@ class Workspace(models.Model):
         unique_together = [["organization", "slug"]]
         ordering = ["-created_at"]
 
-    def __str__(self):
+    def __str__(self) -> str:
         return self.name
 
 
@@ -511,7 +511,7 @@ class Datastore(models.Model):
         unique_together = [["workspace", "slug"]]
         ordering = ["-created_at"]
 
-    def __str__(self):
+    def __str__(self) -> str:
         return f"{self.name} ({self.engine})"
 
 
@@ -624,7 +624,7 @@ class App(models.Model):
             )
         ]
 
-    def __str__(self):
+    def __str__(self) -> str:
         return self.name
 
 
@@ -723,7 +723,7 @@ class Conversation(models.Model):
     class Meta:
         ordering = ["-updated_at"]
 
-    def __str__(self):
+    def __str__(self) -> str:
         return self.title or f"Conversation {self.id}"
 
 
@@ -776,7 +776,7 @@ class Message(models.Model):
     class Meta:
         ordering = ["created_at"]
 
-    def __str__(self):
+    def __str__(self) -> str:
         return f"{self.role}: {self.content[:50]}..."
 
 
@@ -878,7 +878,7 @@ class Deployment(models.Model):
     class Meta:
         ordering = ["-created_at"]
 
-    def __str__(self):
+    def __str__(self) -> str:
         return f"{self.app.name} - {self.git_ref} ({self.status})"
 
 
@@ -928,7 +928,7 @@ class DeploymentLog(models.Model):
         verbose_name = "Deployment Log"
         verbose_name_plural = "Deployment Logs"
 
-    def __str__(self):
+    def __str__(self) -> str:
         return f"[{self.source}] {self.level}: {self.message[:50]}..."
 
 
@@ -977,7 +977,7 @@ class EnvironmentLog(models.Model):
         verbose_name = "Environment Log"
         verbose_name_plural = "Environment Logs"
 
-    def __str__(self):
+    def __str__(self) -> str:
         return f"[{self.source}] {self.level}: {self.message[:50]}..."
 
 
@@ -1001,7 +1001,7 @@ class WaitlistSignup(models.Model):
         verbose_name = "Waitlist Signup"
         verbose_name_plural = "Waitlist Signups"
 
-    def __str__(self):
+    def __str__(self) -> str:
         return self.email
 
 
@@ -1079,7 +1079,7 @@ class LLMUsageLog(models.Model):
             models.Index(fields=["conversation", "created_at"]),
         ]
 
-    def __str__(self):
+    def __str__(self) -> str:
         return f"{self.source} — {self.model_alias} — ${self.cost_usd or 0:.4f}"
 
 
@@ -1095,7 +1095,7 @@ class AppPermissions(models.Model):
     class Meta:
         unique_together = [("app", "environment")]
 
-    def __str__(self):
+    def __str__(self) -> str:
         return f"AppPermissions {self.app.slug}/{self.environment.slug}"
 
 
@@ -1123,7 +1123,7 @@ class AppPermissionRequest(models.Model):
     class Meta:
         ordering = ["-created_at"]
 
-    def __str__(self):
+    def __str__(self) -> str:
         return f"AppPermissionRequest {self.id} ({self.status})"
 
 
@@ -1137,8 +1137,166 @@ class AwsResourceCache(models.Model):
     class Meta:
         unique_together = [("environment", "service")]
 
-    def __str__(self):
+    def __str__(self) -> str:
         return f"{self.environment} / {self.service} ({len(self.resources)} resources)"
+
+
+# =============================================================================
+# ABAC Models
+# =============================================================================
+
+
+class IdentityAttribute(models.Model):
+    """Direct attribute on a user, scoped to an organization."""
+    id = models.UUIDField(primary_key=True, default=uuid.uuid7, editable=False)
+    organization = models.ForeignKey(
+        Organization, on_delete=models.CASCADE, related_name="identity_attributes",
+    )
+    user = models.ForeignKey(
+        User, on_delete=models.CASCADE, related_name="identity_attributes",
+    )
+    key = models.CharField(max_length=100)
+    value = models.CharField(max_length=255)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = [("organization", "user", "key", "value")]
+
+    def __str__(self) -> str:
+        return f"{self.user} — {self.key}={self.value}"
+
+
+class Group(models.Model):
+    """Attribute container, org-scoped. Members inherit group attributes."""
+    id = models.UUIDField(primary_key=True, default=uuid.uuid7, editable=False)
+    organization = models.ForeignKey(
+        Organization, on_delete=models.CASCADE, related_name="groups",
+    )
+    name = models.CharField(max_length=255)
+    description = models.TextField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        unique_together = [("organization", "name")]
+
+    def __str__(self) -> str:
+        return self.name
+
+
+class GroupMembership(models.Model):
+    """User-to-group link."""
+    id = models.UUIDField(primary_key=True, default=uuid.uuid7, editable=False)
+    group = models.ForeignKey(
+        Group, on_delete=models.CASCADE, related_name="memberships",
+    )
+    user = models.ForeignKey(
+        User, on_delete=models.CASCADE, related_name="group_memberships",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = [("group", "user")]
+
+    def __str__(self) -> str:
+        return f"{self.user} in {self.group}"
+
+
+class GroupAttribute(models.Model):
+    """Key-value on a group, inherited by all members."""
+    id = models.UUIDField(primary_key=True, default=uuid.uuid7, editable=False)
+    group = models.ForeignKey(
+        Group, on_delete=models.CASCADE, related_name="attributes",
+    )
+    key = models.CharField(max_length=100)
+    value = models.CharField(max_length=255)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = [("group", "key", "value")]
+
+    def __str__(self) -> str:
+        return f"{self.group} — {self.key}={self.value}"
+
+
+class ResourceTag(models.Model):
+    """Tag on a resource (workspace, environment, or app). Exactly one FK must be set."""
+
+    class ResourceType(models.TextChoices):
+        WORKSPACE = "workspace", "Workspace"
+        ENVIRONMENT = "environment", "Environment"
+        APP = "app", "App"
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid7, editable=False)
+    organization = models.ForeignKey(
+        Organization, on_delete=models.CASCADE, related_name="resource_tags",
+    )
+    resource_type = models.CharField(max_length=20, choices=ResourceType.choices)
+    workspace = models.ForeignKey(
+        Workspace, on_delete=models.CASCADE, null=True, blank=True, related_name="tags",
+    )
+    environment = models.ForeignKey(
+        Environment, on_delete=models.CASCADE, null=True, blank=True, related_name="tags",
+    )
+    app = models.ForeignKey(
+        App, on_delete=models.CASCADE, null=True, blank=True, related_name="tags",
+    )
+    key = models.CharField(max_length=100)
+    value = models.CharField(max_length=255)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [
+            models.CheckConstraint(
+                condition=(
+                    models.Q(resource_type="workspace", workspace__isnull=False, environment__isnull=True, app__isnull=True)
+                    | models.Q(resource_type="environment", workspace__isnull=True, environment__isnull=False, app__isnull=True)
+                    | models.Q(resource_type="app", workspace__isnull=True, environment__isnull=True, app__isnull=False)
+                ),
+                name="resource_tag_exactly_one_fk",
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.resource_type}:{self.key}={self.value}"
+
+
+class Policy(models.Model):
+    """ABAC policy with JSON conditions mapping identity attributes + resource tags to actions."""
+
+    class ResourceType(models.TextChoices):
+        WORKSPACE = "workspace", "Workspace"
+        ENVIRONMENT = "environment", "Environment"
+        APP = "app", "App"
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid7, editable=False)
+    organization = models.ForeignKey(
+        Organization, on_delete=models.CASCADE, related_name="policies",
+    )
+    name = models.CharField(max_length=255)
+    resource_type = models.CharField(max_length=20, choices=ResourceType.choices)
+    identity_conditions = models.JSONField(
+        default=list,
+        help_text='List of {"key": "...", "value": "..."} dicts, AND-ed. [{"key": "*", "value": "*"}] for wildcard.',
+    )
+    resource_conditions = models.JSONField(
+        default=list,
+        help_text='List of {"key": "...", "value": "..."} dicts, AND-ed. [{"key": "*", "value": "*"}] for wildcard.',
+    )
+    actions = models.JSONField(
+        default=list,
+        help_text='List of action strings. Prefix with "!" for deny.',
+    )
+    is_system = models.BooleanField(default=False, help_text="Display-only flag for seed policies")
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        unique_together = [("organization", "name")]
+        verbose_name_plural = "Policies"
+
+    def __str__(self) -> str:
+        return self.name
 
 
 # =============================================================================
@@ -1150,7 +1308,12 @@ from django.dispatch import receiver
 
 
 @receiver(post_save, sender=Organization)
-def create_default_workspace(sender, instance, created, **kwargs):
+def create_default_workspace(
+    sender: type[Organization],
+    instance: Organization,
+    created: bool,
+    **kwargs: object,
+) -> None:
     """Create a Default workspace when an Organization is created."""
     if created:
         Workspace.objects.create(
@@ -1159,3 +1322,42 @@ def create_default_workspace(sender, instance, created, **kwargs):
             slug="default",
             description="Your starting workspace for apps and datastores. Rename or create additional workspaces to organize by team or project.",
         )
+
+
+@receiver(post_save, sender=Workspace)
+def create_default_workspace_tag(
+    sender: type[Workspace],
+    instance: Workspace,
+    created: bool,
+    **kwargs: object,
+) -> None:
+    """Create a workspace-name tag when a new Workspace is created."""
+    if created:
+        from devopshero_app.services import abac
+        abac.create_default_workspace_tag(instance)
+
+
+@receiver(post_save, sender=Environment)
+def create_default_environment_tag(
+    sender: type[Environment],
+    instance: Environment,
+    created: bool,
+    **kwargs: object,
+) -> None:
+    """Create an environment-name tag when a new Environment is created."""
+    if created:
+        from devopshero_app.services import abac
+        abac.create_default_environment_tag(instance)
+
+
+@receiver(post_save, sender=App)
+def create_default_app_policy(
+    sender: type[App],
+    instance: App,
+    created: bool,
+    **kwargs: object,
+) -> None:
+    """Create a default app:use policy and app-name tag when a new App is created."""
+    if created:
+        from devopshero_app.services.abac import create_default_app_policy as _create_policy
+        _create_policy(instance)

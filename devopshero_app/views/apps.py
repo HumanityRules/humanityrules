@@ -1,16 +1,20 @@
 from datetime import datetime
+from typing import Any
+from uuid import UUID
 
 from django.contrib.auth.decorators import login_required
-from django.http import HttpResponse
+from django.http import HttpRequest, HttpResponse
 from django.shortcuts import get_object_or_404, render
 from django.views.decorators.http import require_GET, require_POST
 
-from devopshero_app.models import App, Deployment
+from devopshero_app.models import App, Deployment, ResourceTag
+from devopshero_app.services import abac
 
-from .base import get_app_shell_context
+from . import abac_view_checks
+from . import base
 
 
-def _get_app_for_user(request, app_slug):
+def _get_app_for_user(request: HttpRequest, app_slug: str) -> App:
     """Get an app that belongs to the current user's organization."""
     return get_object_or_404(
         App.objects.select_related("workspace", "repository", "datastore", "created_by"),
@@ -19,7 +23,7 @@ def _get_app_for_user(request, app_slug):
     )
 
 
-def _get_deployment_for_app(app, deployment_id):
+def _get_deployment_for_app(app: App, deployment_id: UUID) -> Deployment:
     """Get a deployment that belongs to the given app, with related environment."""
     return get_object_or_404(
         Deployment.objects.select_related("environment", "environment__aws_account"),
@@ -28,9 +32,9 @@ def _get_deployment_for_app(app, deployment_id):
     )
 
 
-def _build_app_detail_context(request, app):
+def _build_app_detail_context(request: HttpRequest, app: App) -> dict[str, Any]:
     """Build the shared context dict for app detail rendering."""
-    context = get_app_shell_context(request=request, current_page="workspaces")
+    context = base.get_app_shell_context(request=request, current_page="workspaces")
 
     deployments = Deployment.objects.filter(
         app=app,
@@ -49,33 +53,51 @@ def _build_app_detail_context(request, app):
     secret_keys = list(app.app_secrets.keys()) if app.app_secrets else []
     cpu_vcpu = app.cpu / 1024
 
+    # Tags
+    direct_tags = ResourceTag.objects.filter(app=app).order_by("key", "value")
+    inherited_tags = ResourceTag.objects.filter(workspace=app.workspace).order_by("key", "value")
+    can_admin = abac.check_action(request.user.current_organization, request.user, app.workspace, "workspace", "workspace:admin")
+
     context["app"] = app
     context["deployments"] = deployments
     context["environment_rows"] = environment_rows
     context["secret_keys"] = secret_keys
     context["cpu_vcpu"] = cpu_vcpu
+    context["direct_tags"] = direct_tags
+    context["inherited_tags"] = inherited_tags
+    context["can_admin"] = can_admin
 
     return context
 
 
 @login_required
-def app_detail(request, app_slug):
+def app_detail(request: HttpRequest, app_slug: str) -> HttpResponse:
     """Show app detail with configuration and deployments."""
     if not request.htmx:
-        context = get_app_shell_context(request=request, current_page="workspaces")
+        context = base.get_app_shell_context(request=request, current_page="workspaces")
         context["content_url"] = f"/apps/{app_slug}/"
         return render(request, "devopshero_app/app_shell.html", context=context)
 
     app = _get_app_for_user(request, app_slug)
+
+    denied = abac_view_checks.check_abac(request, app.workspace, "workspace", "workspace:view")
+    if denied:
+        return denied
+
     context = _build_app_detail_context(request, app)
     return render(request, "devopshero_app/apps/app_detail.html", context=context)
 
 
 @login_required
 @require_POST
-def app_deployment_teardown(request, app_slug, deployment_id):
+def app_deployment_teardown(request: HttpRequest, app_slug: str, deployment_id: UUID) -> HttpResponse:
     """Trigger teardown for a deployment."""
     app = _get_app_for_user(request, app_slug)
+
+    denied = abac_view_checks.check_abac(request, app.workspace, "workspace", "workspace:edit")
+    if denied:
+        return denied
+
     deployment = _get_deployment_for_app(app, deployment_id)
 
     teardownable_statuses = [
@@ -94,7 +116,7 @@ def app_deployment_teardown(request, app_slug, deployment_id):
 
 @login_required
 @require_GET
-def app_deployment_status(request, app_slug, deployment_id):
+def app_deployment_status(request: HttpRequest, app_slug: str, deployment_id: UUID) -> HttpResponse:
     """Return updated deployment row HTML for polling."""
     app = _get_app_for_user(request, app_slug)
     deployment = _get_deployment_for_app(app, deployment_id)
@@ -106,7 +128,7 @@ def app_deployment_status(request, app_slug, deployment_id):
 
 @login_required
 @require_GET
-def app_teardown_confirm(request, app_slug, deployment_id):
+def app_teardown_confirm(request: HttpRequest, app_slug: str, deployment_id: UUID) -> HttpResponse:
     """Return the teardown confirmation modal HTML."""
     app = _get_app_for_user(request, app_slug)
     deployment = _get_deployment_for_app(app, deployment_id)
@@ -117,9 +139,14 @@ def app_teardown_confirm(request, app_slug, deployment_id):
 
 @login_required
 @require_POST
-def app_deployment_redeploy(request, app_slug, deployment_id):
+def app_deployment_redeploy(request: HttpRequest, app_slug: str, deployment_id: UUID) -> HttpResponse:
     """Create a new PENDING deployment to redeploy an app to the same environment."""
     app = _get_app_for_user(request, app_slug)
+
+    denied = abac_view_checks.check_abac(request, app.workspace, "workspace", "workspace:edit")
+    if denied:
+        return denied
+
     deployment = _get_deployment_for_app(app, deployment_id)
 
     if deployment.status != Deployment.Status.DEPLOYED:
@@ -152,3 +179,50 @@ def app_deployment_redeploy(request, app_slug, deployment_id):
 
     context = _build_app_detail_context(request, app)
     return render(request, "devopshero_app/apps/app_detail.html", context=context)
+
+
+@login_required
+@require_POST
+def app_tag_add(request: HttpRequest, app_slug: str) -> HttpResponse:
+    """Add a tag to an app. Returns updated tag partial."""
+    app = _get_app_for_user(request, app_slug)
+
+    denied = abac_view_checks.check_abac(request, app.workspace, "workspace", "workspace:admin")
+    if denied:
+        return denied
+
+    key = request.POST.get("key", "").strip()
+    value = request.POST.get("value", "").strip()
+    if key and value:
+        ResourceTag.objects.get_or_create(
+            organization=request.user.current_organization,
+            resource_type="app",
+            app=app,
+            key=key,
+            value=value,
+        )
+
+    direct_tags = ResourceTag.objects.filter(app=app).order_by("key", "value")
+    inherited_tags = ResourceTag.objects.filter(workspace=app.workspace).order_by("key", "value")
+    return render(request, "devopshero_app/apps/_app_tags.html", {
+        "direct_tags": direct_tags, "inherited_tags": inherited_tags, "app": app, "can_admin": True,
+    })
+
+
+@login_required
+@require_POST
+def app_tag_remove(request: HttpRequest, app_slug: str, tag_id: UUID) -> HttpResponse:
+    """Remove a tag from an app. Returns updated tag partial."""
+    app = _get_app_for_user(request, app_slug)
+
+    denied = abac_view_checks.check_abac(request, app.workspace, "workspace", "workspace:admin")
+    if denied:
+        return denied
+
+    ResourceTag.objects.filter(id=tag_id, app=app).delete()
+
+    direct_tags = ResourceTag.objects.filter(app=app).order_by("key", "value")
+    inherited_tags = ResourceTag.objects.filter(workspace=app.workspace).order_by("key", "value")
+    return render(request, "devopshero_app/apps/_app_tags.html", {
+        "direct_tags": direct_tags, "inherited_tags": inherited_tags, "app": app, "can_admin": True,
+    })

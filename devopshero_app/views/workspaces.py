@@ -1,20 +1,25 @@
+from uuid import UUID
+
 from django.contrib.auth.decorators import login_required
 from django.db.models import Max, OuterRef, Prefetch, Subquery, Sum, Value
 from django.db.models.functions import Coalesce
+from django.http import HttpRequest, HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils.text import slugify
 from django.views.decorators.http import require_POST
 
-from devopshero_app.models import App, Conversation, Deployment, Repository, Workspace
+from devopshero_app.models import App, Conversation, Deployment, Repository, ResourceTag, Workspace
+from devopshero_app.services import abac
 
-from .base import get_app_shell_context
+from . import abac_view_checks
+from . import base
 
 
 @login_required
-def workspaces(request):
+def workspaces(request: HttpRequest) -> HttpResponse:
     """List all workspaces in the current organization."""
     if not request.htmx:
-        context = get_app_shell_context(request=request, current_page="workspaces")
+        context = base.get_app_shell_context(request=request, current_page="workspaces")
         context["content_url"] = "/workspaces/"
         return render(request, "devopshero_app/app_shell.html", context=context)
 
@@ -33,17 +38,20 @@ def workspaces(request):
     workspace_list = Workspace.objects.filter(
         organization=request.user.current_organization,
     ).prefetch_related(apps_prefetch).order_by("name")
+    workspace_list = abac.filter_permitted_resources(
+        request.user.current_organization, request.user, workspace_list, "workspace", "workspace:view",
+    )
 
-    context = get_app_shell_context(request=request, current_page="workspaces")
+    context = base.get_app_shell_context(request=request, current_page="workspaces")
     context["workspaces"] = workspace_list
     return render(request, "devopshero_app/workspaces/workspaces.html", context=context)
 
 
 @login_required
-def workspace_detail(request, workspace_slug):
+def workspace_detail(request: HttpRequest, workspace_slug: str) -> HttpResponse:
     """Show workspace detail with apps, datastores, and conversations."""
     if not request.htmx:
-        context = get_app_shell_context(request=request, current_page="workspaces")
+        context = base.get_app_shell_context(request=request, current_page="workspaces")
         context["content_url"] = f"/workspaces/{workspace_slug}/"
         return render(request, "devopshero_app/app_shell.html", context=context)
 
@@ -52,6 +60,10 @@ def workspace_detail(request, workspace_slug):
         slug=workspace_slug,
         organization=request.user.current_organization,
     )
+
+    denied = abac_view_checks.check_abac(request, workspace, "workspace", "workspace:view")
+    if denied:
+        return denied
 
     # Prefetch active deployments (deployed, not being torn down) with their environments
     active_deployments_prefetch = Prefetch(
@@ -92,21 +104,30 @@ def workspace_detail(request, workspace_slug):
         organization=request.user.current_organization,
     ).order_by("full_name")
 
-    context = get_app_shell_context(request=request, current_page="workspaces")
+    tags = ResourceTag.objects.filter(workspace=workspace).order_by("key", "value")
+    can_admin = abac.check_action(request.user.current_organization, request.user, workspace, "workspace", "workspace:admin")
+
+    context = base.get_app_shell_context(request=request, current_page="workspaces")
     context["workspace"] = workspace
     context["apps"] = apps
     context["datastores"] = datastores
     context["conversations"] = conversations
     context["repositories"] = repositories
     context["show_costs"] = show_costs
+    context["tags"] = tags
+    context["can_admin"] = can_admin
 
     return render(request, "devopshero_app/workspaces/workspace_detail.html", context=context)
 
 
 @login_required
 @require_POST
-def workspace_create(request):
+def workspace_create(request: HttpRequest) -> HttpResponse:
     """Create a new workspace and redirect to it."""
+    denied = abac_view_checks.check_abac_create(request, "workspace", "workspace:edit")
+    if denied:
+        return denied
+
     name = request.POST.get("name", "").strip()
     if not name:
         return redirect("workspaces")
@@ -126,4 +147,45 @@ def workspace_create(request):
         created_by=request.user,
     )
     return redirect("workspace_detail", workspace_slug=workspace.slug)
+
+
+@login_required
+@require_POST
+def workspace_tag_add(request: HttpRequest, workspace_slug: str) -> HttpResponse:
+    """Add a tag to a workspace. Returns updated tag partial."""
+    workspace = get_object_or_404(Workspace, slug=workspace_slug, organization=request.user.current_organization)
+
+    denied = abac_view_checks.check_abac(request, workspace, "workspace", "workspace:admin")
+    if denied:
+        return denied
+
+    key = request.POST.get("key", "").strip()
+    value = request.POST.get("value", "").strip()
+    if key and value:
+        ResourceTag.objects.get_or_create(
+            organization=request.user.current_organization,
+            resource_type="workspace",
+            workspace=workspace,
+            key=key,
+            value=value,
+        )
+
+    tags = ResourceTag.objects.filter(workspace=workspace).order_by("key", "value")
+    return render(request, "devopshero_app/workspaces/_workspace_tags.html", {"tags": tags, "workspace": workspace, "can_admin": True})
+
+
+@login_required
+@require_POST
+def workspace_tag_remove(request: HttpRequest, workspace_slug: str, tag_id: UUID) -> HttpResponse:
+    """Remove a tag from a workspace. Returns updated tag partial."""
+    workspace = get_object_or_404(Workspace, slug=workspace_slug, organization=request.user.current_organization)
+
+    denied = abac_view_checks.check_abac(request, workspace, "workspace", "workspace:admin")
+    if denied:
+        return denied
+
+    ResourceTag.objects.filter(id=tag_id, workspace=workspace).delete()
+
+    tags = ResourceTag.objects.filter(workspace=workspace).order_by("key", "value")
+    return render(request, "devopshero_app/workspaces/_workspace_tags.html", {"tags": tags, "workspace": workspace, "can_admin": True})
 

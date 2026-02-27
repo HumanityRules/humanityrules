@@ -1,0 +1,42 @@
+{% extends "devopshero_app/security/security.html" %}
+
+{% block security_content %}
+<div>
+    <h2 class="text-lg font-semibold text-gray-900 dark:text-white mb-4">People</h2>
+    <p class="text-sm text-gray-500 dark:text-gray-400 mb-6">Manage identity attributes for organization members.</p>
+
+    <div class="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg divide-y divide-gray-200 dark:divide-gray-700">
+        {% for row in member_rows %}
+        <a href="/security/people/{{ row.user.id }}/"
+           hx-get="/security/people/{{ row.user.id }}/"
+           hx-target="#main-content"
+           hx-swap="innerHTML"
+           hx-push-url="true"
+           class="block px-4 py-3 hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors first:rounded-t-lg last:rounded-b-lg">
+            <div class="flex items-center justify-between">
+                <div>
+                    <span class="text-sm font-medium text-gray-900 dark:text-white">{{ row.user.email }}</span>
+                    {% if row.user.first_name or row.user.last_name %}
+                    <span class="text-sm text-gray-500 dark:text-gray-400 ml-2">{{ row.user.first_name }} {{ row.user.last_name }}</span>
+                    {% endif %}
+                </div>
+                <div class="flex flex-wrap gap-1">
+                    {% for key, value, source in row.attributes %}
+                    <span class="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium
+                        {% if source == 'system' %}bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-400
+                        {% elif source == 'direct' %}bg-indigo-50 text-indigo-700 dark:bg-indigo-500/10 dark:text-indigo-400
+                        {% else %}bg-purple-50 text-purple-700 dark:bg-purple-500/10 dark:text-purple-400{% endif %}">
+                        {{ key }}={{ value }}
+                    </span>
+                    {% endfor %}
+                </div>
+            </div>
+        </a>
+        {% empty %}
+        <div class="px-4 py-6 text-center text-sm text-gray-500 dark:text-gray-400">
+            No members found.
+        </div>
+        {% endfor %}
+    </div>
+</div>
+{% endblock %}
