@@ -3,8 +3,8 @@ from .dashboard import dashboard
 from .workspaces import workspaces, workspace_detail, workspace_create, workspace_tag_add, workspace_tag_remove
 from .apps import app_detail, app_deployment_teardown, app_deployment_redeploy, app_deployment_status, app_teardown_confirm, app_tag_add, app_tag_remove
 from .environments import environments, environment_detail, environment_tag_add, environment_tag_remove
-from .security import (
-    security,
+from .security_hub import security_hub
+from .security_permissions_editor import (
     security_permissions_editor,
     security_permissions_editor_apply,
     security_permissions_editor_cancel,
@@ -82,7 +82,7 @@ __all__ = [
     "environment_detail",
     "environment_tag_add",
     "environment_tag_remove",
-    "security",
+    "security_hub",
     "security_permissions_editor",
     "security_permissions_editor_apply",
     "security_permissions_editor_cancel",

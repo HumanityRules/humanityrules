@@ -9,8 +9,8 @@
     {# Header with breadcrumb #}
     <div class="border-b border-gray-200 px-6 py-3 dark:border-gray-700">
         <div class="flex items-center space-x-2 text-sm text-gray-500 dark:text-gray-400 mb-1">
-            <a href="{% url 'security' %}{% if security_querystring %}?{{ security_querystring }}{% endif %}"
-               hx-get="{% url 'security' %}{% if security_querystring %}?{{ security_querystring }}{% endif %}"
+            <a href="{% url 'security_hub' %}{% if security_querystring %}?{{ security_querystring }}{% endif %}"
+               hx-get="{% url 'security_hub' %}{% if security_querystring %}?{{ security_querystring }}{% endif %}"
                hx-target="#main-content"
                hx-swap="innerHTML"
                hx-push-url="true"

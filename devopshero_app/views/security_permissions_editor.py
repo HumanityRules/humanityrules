@@ -7,7 +7,6 @@ from uuid import UUID
 from django.contrib.auth.decorators import login_required
 from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, render
-from django.template.loader import render_to_string
 from django.views.decorators.http import require_POST
 from policy_sentry.shared import iam_data as policy_sentry_iam_data
 
@@ -19,35 +18,6 @@ from . import base
 
 logger = logging.getLogger(__name__)
 
-
-# =============================================================================
-# Security Hub
-# =============================================================================
-
-
-@login_required
-def security(request: HttpRequest) -> HttpResponse:
-    if not request.htmx:
-        context = base.get_app_shell_context(request=request, current_page="security")
-        context["content_url"] = request.get_full_path()
-        return render(request=request, template_name="devopshero_app/app_shell.html", context=context)
-
-    organization = request.user.current_organization
-    context = base.get_app_shell_context(request=request, current_page="security")
-    context["active_tab"] = "hub"
-    context["permission_issue_rows"] = []
-    context["app_permission_request_rows"] = list(
-        models.AppPermissionRequest.objects.filter(app__organization=organization)
-        .select_related("app", "environment", "created_by")
-        .order_by("-created_at")[:20]
-    )
-
-    return render(request=request, template_name="devopshero_app/security/security_hub.html", context=context)
-
-
-# =============================================================================
-# Permissions Editor
-# =============================================================================
 
 CURATED_SERVICES = {"s3", "sqs", "dynamodb", "secretsmanager", "kms", "sns", "ssm", "logs", "ecs", "ecr", "lambda", "ses"}
 
@@ -219,7 +189,6 @@ def security_permissions_editor(request: HttpRequest) -> HttpResponse:
     app_permissions = permissions_service.get_or_create_app_permissions(app=app, environment=environment)
     app_permission_request = permissions_service.get_or_create_draft(app=app, environment=environment, user=request.user, app_permissions=app_permissions)
 
-    # Ensure a conversation exists for the agent chat panel
     conversation = models.Conversation.objects.filter(
         context_app_permission_request=app_permission_request,
     ).first()
