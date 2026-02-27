@@ -1,5 +1,19 @@
 # DevOpsHero Development Journal
 
+## 2026-02-27 16:15 - [Bugfix] Cross-Org Conversation Context Validation in create_conversation
+
+**Conversation:** [2026-02-27-1537-d6d5245f.md](conversations/2026-02-27-1537-d6d5245f.md)
+
+Conversation creation accepted raw context IDs (workspace, repo, aws_account, app_permission_request) from the request without verifying they belonged to the user's organization. A user could hit `/chat/new/?workspace=<other-org-workspace-uuid>` and create a conversation whose context pointed at another org's workspace; the agent service then loaded that workspace by ID alone (no org filter) for prompts and MCP tools, leaking cross-tenant data.
+
+Fixed by validating all context IDs at write time in `create_conversation`. A new helper `_validate_context_ownership(org, workspace_id, repo_id, aws_account_id, app_permission_request_id)` runs before creating the conversation: for each non-None ID it checks existence and org membership via `.filter(id=..., organization=org).exists()` (Workspace, Repository, AWSAccount); for AppPermissionRequest it uses `app__organization=org`. On any mismatch it raises `PermissionError` with a clear message, so the conversation is never created and downstream `aget(id=...)` calls in the agent service and MCP tools only ever see validated IDs.
+
+**Key points:**
+- Defense at write time: invalid context is rejected in `create_conversation`; no change to read paths (agent_service/mcp_tools) beyond relying on validated data
+- All four context resource types validated: Workspace, Repository, AWSAccount, AppPermissionRequest (org via `app__organization`)
+- Explicit `PermissionError` keeps this distinguishable from 404-style "not found" and makes cross-org attempts loud for logging/monitoring
+- All 61 existing tests pass; no new tests added (validation is straightforward existence + org filter)
+
 ## 2026-02-27 15:33 - [DomainModel] ABAC Engine Cross-Org Hardening — Loud Assertions over Silent Filters
 
 **Conversation:** [2026-02-27-1535-435457fd.md](conversations/2026-02-27-1535-435457fd.md)
