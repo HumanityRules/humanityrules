@@ -1,5 +1,25 @@
 # DevOpsHero Development Journal
 
+## 2026-02-27 15:33 - [DomainModel] ABAC Engine Cross-Org Hardening — Loud Assertions over Silent Filters
+
+**Conversation:** [2026-02-27-1535-435457fd.md](conversations/2026-02-27-1535-435457fd.md)
+
+Addressed two tenant-isolation gaps in the ABAC engine identified during code review: `get_effective_tags()` didn't filter ResourceTag queries by organization (so a malformed row with mismatched org FK could influence evaluation), and `filter_permitted_resources()` had a wildcard shortcut that returned the caller's queryset unchanged (so a mixed-org queryset would leak resources).
+
+The initial fix silently filtered — `_scope_queryset_to_org` narrowed the queryset with `.filter(organization=org)`. This was changed after review to `_assert_queryset_org_scope`, which raises `ValueError` if any foreign-org resources are present. The reasoning: a mixed-org queryset reaching the engine is always a caller bug, and silently correcting it hides the defect. The engine is the right place for this assertion because it's the authorization boundary — if this check passes silently, the bug stays hidden until it manifests as a real cross-org leak.
+
+Two assertion helpers now guard every resource-accepting entry point:
+- `_assert_resource_belongs_to_org` — compares `resource.organization_id` against `organization.pk` (zero-cost FK check, no DB query). Called from `get_effective_tags`, which propagates to `evaluate_policies`, `check_action`, and `filter_permitted_resources`'s per-resource loop.
+- `_assert_queryset_org_scope` — `.exclude(organization=org).count()` on the queryset. Called at the top of `filter_permitted_resources`, catching mixed-org querysets before the wildcard shortcut can return them.
+
+Decided against user-org membership assertions on `evaluate_policies_unscoped` and `is_org_admin`: these take `(org, user)` but no resource. A membership check would require a DB query against `OrganizationMembership`, and deny-by-default already provides safety (no attributes match → no access). Cost/benefit didn't justify it.
+
+**Key points:**
+- Design decision: assertions (raise on violation) over defensive filters (silent correction) at the authorization boundary — caller bugs must be loud
+- `get_effective_tags` now takes `organization` and adds it to all ResourceTag queries, closing the malformed-row data integrity gap
+- `_assert_resource_belongs_to_org` uses FK IDs already on the model instance — no extra queries for workspace/app, one potential lazy load for environment's `aws_account`
+- 10 new cross-org isolation tests covering: malformed tags excluded from evaluation, queryset assertion raises on mixed-org input, resource-org mismatch raises on every entry point, foreign-org policies ignored
+
 ## 2026-02-27 15:28 - [DomainModel] ABAC Test Suite and Engine Bug Fix
 
 **Conversation:** [2026-02-27-1529-c3607d40.md](conversations/2026-02-27-1529-c3607d40.md)

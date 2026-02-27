@@ -939,6 +939,30 @@ class TestCrossOrgIsolation(TestCase):
         )
         self.assertNotIn("workspace:admin", result)
 
+    def test_evaluate_policies_raises_on_resource_org_mismatch(self) -> None:
+        """Passing a resource from a different org is a caller bug — must raise."""
+        with self.assertRaises(ValueError) as cm:
+            abac.evaluate_policies(
+                organization=self.org_a, user=self.user_a,
+                resource=self.ws_b, resource_type="workspace",
+            )
+        self.assertIn("belongs to organization", str(cm.exception))
+
+    def test_check_action_raises_on_resource_org_mismatch(self) -> None:
+        """check_action inherits the resource-org assertion from evaluate_policies."""
+        with self.assertRaises(ValueError):
+            abac.check_action(
+                organization=self.org_a, user=self.user_a,
+                resource=self.ws_b, resource_type="workspace", action="workspace:view",
+            )
+
+    def test_get_effective_tags_raises_on_resource_org_mismatch(self) -> None:
+        """get_effective_tags rejects a resource from a foreign org."""
+        with self.assertRaises(ValueError):
+            abac.get_effective_tags(
+                organization=self.org_a, resource=self.ws_b, resource_type="workspace",
+            )
+
 
 # ---------------------------------------------------------------------------
 # 1.7 Org Admin Check
