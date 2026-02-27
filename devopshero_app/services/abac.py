@@ -68,11 +68,28 @@ def get_effective_attributes(organization: Organization, user: User) -> list[tup
 # Effective tags
 # ---------------------------------------------------------------------------
 
+def _assert_resource_belongs_to_org(organization: Organization, resource: App | Environment | Workspace, resource_type: str) -> None:
+    """Raise if resource does not belong to the given organization."""
+    if resource_type in ("workspace", "app"):
+        actual_org_id = resource.organization_id
+    elif resource_type == "environment":
+        actual_org_id = resource.aws_account.organization_id
+    else:
+        return
+    if actual_org_id != organization.pk:
+        raise ValueError(
+            f"Resource {resource_type} {resource.pk!r} belongs to organization "
+            f"{actual_org_id!r}, not {organization.slug!r} ({organization.pk!r}). "
+            f"Callers must pass the resource's own organization."
+        )
+
+
 def get_effective_tags(organization: Organization, resource: App | Environment | Workspace, resource_type: str) -> list[tuple[str, str, str]]:
     """
     Return list of (key, value, source) tuples for a resource.
     Apps inherit workspace tags (source="inherited:<WorkspaceName>").
     """
+    _assert_resource_belongs_to_org(organization, resource, resource_type)
     tags = []
 
     if resource_type == "app":
