@@ -1295,6 +1295,13 @@ class Policy(models.Model):
         unique_together = [("organization", "name")]
         verbose_name_plural = "Policies"
 
+    def clean(self) -> None:
+        from devopshero_app.services import abac
+        abac.validate_policy_conditions(
+            identity_conditions=self.identity_conditions or [],
+            resource_conditions=self.resource_conditions or [],
+        )
+
     def __str__(self) -> str:
         return self.name
 
