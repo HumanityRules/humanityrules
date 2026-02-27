@@ -1,9 +1,11 @@
 import json
 import logging
+from typing import Any
 from urllib.parse import urlencode
+from uuid import UUID
 
 from django.contrib.auth.decorators import login_required
-from django.http import HttpResponse, JsonResponse
+from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, render
 from django.template.loader import render_to_string
 from django.views.decorators.http import require_POST
@@ -12,6 +14,7 @@ from policy_sentry.shared import iam_data as policy_sentry_iam_data
 from .. import models
 from ..services.agent import agent_service
 from ..services import permissions as permissions_service
+from . import abac_view_checks
 from . import base
 
 logger = logging.getLogger(__name__)
@@ -23,7 +26,7 @@ logger = logging.getLogger(__name__)
 
 
 @login_required
-def security(request):
+def security(request: HttpRequest) -> HttpResponse:
     if not request.htmx:
         context = base.get_app_shell_context(request=request, current_page="security")
         context["content_url"] = request.get_full_path()
@@ -31,6 +34,7 @@ def security(request):
 
     organization = request.user.current_organization
     context = base.get_app_shell_context(request=request, current_page="security")
+    context["active_tab"] = "hub"
     context["permission_issue_rows"] = []
     context["app_permission_request_rows"] = list(
         models.AppPermissionRequest.objects.filter(app__organization=organization)
@@ -63,7 +67,12 @@ RESOURCE_PLACEHOLDERS = {
 }
 
 
-def _build_service_group_data(service, selected_levels, resources, available_resources):
+def _build_service_group_data(
+    service: str,
+    selected_levels: list[str] | set[str],
+    resources: list[str],
+    available_resources: list[dict[str, str]],
+) -> dict[str, Any]:
     """Build a template-ready dict for a single service group with access-level toggles."""
     try:
         service_data = policy_sentry_iam_data.get_service_prefix_data(service)
@@ -106,7 +115,10 @@ def _build_service_group_data(service, selected_levels, resources, available_res
     }
 
 
-def _group_statements_by_service(statements, available_resources_by_service):
+def _group_statements_by_service(
+    statements: list[dict[str, Any]],
+    available_resources_by_service: dict[str, list[dict[str, str]]],
+) -> list[dict[str, Any]]:
     """Merge multiple statements for the same service into one group."""
     available = available_resources_by_service
     grouped = {}
@@ -139,7 +151,7 @@ def _group_statements_by_service(statements, available_resources_by_service):
     return service_groups
 
 
-def _fetch_available_resources(app_permission_request):
+def _fetch_available_resources(app_permission_request: models.AppPermissionRequest) -> dict[str, list[dict[str, str]]]:
     """Fetch available AWS resources for all services in a permission request (cache-backed)."""
     services = [stmt.get("service") for stmt in (app_permission_request.statements or []) if stmt.get("service")]
     if not services:
@@ -148,7 +160,7 @@ def _fetch_available_resources(app_permission_request):
 
 
 @login_required
-def security_permissions_statements(request, app_permission_request_id):
+def security_permissions_statements(request: HttpRequest, app_permission_request_id: UUID) -> HttpResponse:
     """Return rendered permission statements for HTMX refetch (triggered by SSE notify)."""
     organization = request.user.current_organization
     app_permission_request = get_object_or_404(
@@ -167,7 +179,7 @@ def security_permissions_statements(request, app_permission_request_id):
     )
 
 
-def _get_all_service_options():
+def _get_all_service_options() -> list[dict[str, str | bool]]:
     """Return sorted list of all IAM services for the picker dropdown."""
     iam_def = policy_sentry_iam_data.load_iam_definition()
     options = []
@@ -184,7 +196,7 @@ def _get_all_service_options():
 
 
 @login_required
-def security_permissions_editor(request):
+def security_permissions_editor(request: HttpRequest) -> HttpResponse:
     """Permissions editor: two-panel UI with policy editor + agent chat."""
     if not request.htmx:
         context = base.get_app_shell_context(request=request, current_page="security")
@@ -246,14 +258,18 @@ def security_permissions_editor(request):
 
 @login_required
 @require_POST
-def security_permissions_editor_apply(request, app_permission_request_id):
+def security_permissions_editor_apply(request: HttpRequest, app_permission_request_id: UUID) -> HttpResponse:
     """Set AppPermissionRequest status to APPROVED_PENDING_APPLY. Statements are already in DB."""
     organization = request.user.current_organization
     app_permission_request = get_object_or_404(
-        models.AppPermissionRequest,
+        models.AppPermissionRequest.objects.select_related("environment"),
         id=app_permission_request_id,
         app__organization=organization,
     )
+
+    denied = abac_view_checks.check_abac(request, app_permission_request.environment, "environment", "environment:approve")
+    if denied:
+        return denied
 
     permissions_service.approve(app_permission_request)
 
@@ -262,7 +278,7 @@ def security_permissions_editor_apply(request, app_permission_request_id):
 
 @login_required
 @require_POST
-def security_permissions_editor_cancel(request, app_permission_request_id):
+def security_permissions_editor_cancel(request: HttpRequest, app_permission_request_id: UUID) -> HttpResponse:
     """Reset the draft's statements back to the AppPermissions baseline and re-render statements."""
     organization = request.user.current_organization
     app_permission_request = get_object_or_404(
@@ -288,7 +304,7 @@ def security_permissions_editor_cancel(request, app_permission_request_id):
 
 @login_required
 @require_POST
-def security_permissions_editor_update_statement(request, app_permission_request_id):
+def security_permissions_editor_update_statement(request: HttpRequest, app_permission_request_id: UUID) -> HttpResponse:
     """Mutate a single aspect of AppPermissionRequest.statements and return fresh HTML."""
     organization = request.user.current_organization
     app_permission_request = get_object_or_404(
@@ -352,7 +368,7 @@ def security_permissions_editor_update_statement(request, app_permission_request
 
 
 @login_required
-def security_permissions_editor_service_group(request, app_permission_request_id):
+def security_permissions_editor_service_group(request: HttpRequest, app_permission_request_id: UUID) -> HttpResponse:
     """HTMX endpoint: return a rendered service group partial for a new service."""
     organization = request.user.current_organization
     app_permission_request = get_object_or_404(
@@ -380,7 +396,7 @@ def security_permissions_editor_service_group(request, app_permission_request_id
 
 
 @login_required
-def security_permissions_editor_description(request, app_permission_request_id):
+def security_permissions_editor_description(request: HttpRequest, app_permission_request_id: UUID) -> HttpResponse:
     """Return the current description as plain text (for SSE refetch)."""
     organization = request.user.current_organization
     app_permission_request = get_object_or_404(
@@ -393,7 +409,7 @@ def security_permissions_editor_description(request, app_permission_request_id):
 
 @login_required
 @require_POST
-def security_permissions_editor_update_description(request, app_permission_request_id):
+def security_permissions_editor_update_description(request: HttpRequest, app_permission_request_id: UUID) -> HttpResponse:
     """Save the description textarea content (debounced from client)."""
     organization = request.user.current_organization
     app_permission_request = get_object_or_404(
@@ -409,7 +425,7 @@ def security_permissions_editor_update_description(request, app_permission_reque
 
 @login_required
 @require_POST
-def security_permissions_editor_refresh_resources(request, app_permission_request_id):
+def security_permissions_editor_refresh_resources(request: HttpRequest, app_permission_request_id: UUID) -> HttpResponse:
     """Clear and re-fetch AWS resource cache, then re-render the statements partial."""
     organization = request.user.current_organization
     app_permission_request = get_object_or_404(

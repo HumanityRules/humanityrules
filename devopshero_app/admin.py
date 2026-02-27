@@ -1,5 +1,6 @@
 from django.contrib import admin
 from django.contrib.auth.admin import UserAdmin as BaseUserAdmin
+from django.http import HttpRequest
 
 from devopshero_app.models import (
     AWSAccount,
@@ -12,13 +13,19 @@ from devopshero_app.models import (
     Environment,
     EnvironmentLog,
     GitProviderIntegration,
+    Group,
+    GroupAttribute,
+    GroupMembership,
+    IdentityAttribute,
     LLMUsageLog,
     Message,
     Organization,
     OrganizationMembership,
     AwsResourceCache,
     AppPermissionRequest,
+    Policy,
     Repository,
+    ResourceTag,
     User,
     WaitlistSignup,
     Workspace,
@@ -175,7 +182,7 @@ class MessageAdmin(admin.ModelAdmin):
     autocomplete_fields = ["conversation"]
 
     @admin.display(description="Content")
-    def short_content(self, obj):
+    def short_content(self, obj: Message) -> str:
         if not obj.content:
             return ""
         return obj.content[:120]
@@ -207,7 +214,7 @@ class DeploymentLogAdmin(admin.ModelAdmin):
     autocomplete_fields = ["deployment"]
 
     @admin.display(description="Message")
-    def short_message(self, obj):
+    def short_message(self, obj: DeploymentLog) -> str:
         if not obj.message:
             return ""
         return obj.message[:120]
@@ -222,7 +229,7 @@ class EnvironmentLogAdmin(admin.ModelAdmin):
     autocomplete_fields = ["environment"]
 
     @admin.display(description="Message")
-    def short_message(self, obj):
+    def short_message(self, obj: EnvironmentLog) -> str:
         if not obj.message:
             return ""
         return obj.message[:120]
@@ -240,13 +247,13 @@ class LLMUsageLogAdmin(admin.ModelAdmin):
     ]
     autocomplete_fields = []
 
-    def has_add_permission(self, request):
+    def has_add_permission(self, request: HttpRequest) -> bool:
         return False
 
-    def has_change_permission(self, request, obj=None):
+    def has_change_permission(self, request: HttpRequest, obj: LLMUsageLog | None = None) -> bool:
         return False
 
-    def has_delete_permission(self, request, obj=None):
+    def has_delete_permission(self, request: HttpRequest, obj: LLMUsageLog | None = None) -> bool:
         return False
 
 
@@ -282,3 +289,62 @@ class WaitlistSignupAdmin(admin.ModelAdmin):
     list_filter = ["source", "created_at"]
     search_fields = ["email"]
     readonly_fields = ["id", "created_at"]
+
+
+# =============================================================================
+# ABAC Models
+# =============================================================================
+
+
+@admin.register(IdentityAttribute)
+class IdentityAttributeAdmin(admin.ModelAdmin):
+    list_display = ["user", "organization", "key", "value", "created_at"]
+    list_filter = ["organization", "key"]
+    search_fields = ["user__email", "key", "value"]
+    readonly_fields = ["id", "created_at"]
+    autocomplete_fields = ["organization", "user"]
+
+
+@admin.register(Group)
+class GroupAdmin(admin.ModelAdmin):
+    list_display = ["name", "organization", "created_at", "updated_at"]
+    list_filter = ["organization"]
+    search_fields = ["name", "organization__name"]
+    readonly_fields = ["id", "created_at", "updated_at"]
+    autocomplete_fields = ["organization"]
+
+
+@admin.register(GroupMembership)
+class GroupMembershipAdmin(admin.ModelAdmin):
+    list_display = ["user", "group", "created_at"]
+    list_filter = ["group__organization"]
+    search_fields = ["user__email", "group__name"]
+    readonly_fields = ["id", "created_at"]
+    autocomplete_fields = ["group", "user"]
+
+
+@admin.register(GroupAttribute)
+class GroupAttributeAdmin(admin.ModelAdmin):
+    list_display = ["group", "key", "value", "created_at"]
+    list_filter = ["group__organization", "key"]
+    search_fields = ["group__name", "key", "value"]
+    readonly_fields = ["id", "created_at"]
+    autocomplete_fields = ["group"]
+
+
+@admin.register(ResourceTag)
+class ResourceTagAdmin(admin.ModelAdmin):
+    list_display = ["resource_type", "key", "value", "organization", "workspace", "environment", "app", "created_at"]
+    list_filter = ["resource_type", "organization", "key"]
+    search_fields = ["key", "value", "workspace__name", "environment__name", "app__name"]
+    readonly_fields = ["id", "created_at"]
+    autocomplete_fields = ["organization", "workspace", "environment", "app"]
+
+
+@admin.register(Policy)
+class PolicyAdmin(admin.ModelAdmin):
+    list_display = ["name", "organization", "resource_type", "is_system", "created_at", "updated_at"]
+    list_filter = ["resource_type", "is_system", "organization"]
+    search_fields = ["name", "organization__name"]
+    readonly_fields = ["id", "created_at", "updated_at"]
+    autocomplete_fields = ["organization"]

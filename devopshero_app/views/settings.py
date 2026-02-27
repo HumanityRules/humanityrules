@@ -1,17 +1,18 @@
 import logging
 
 from django.contrib.auth.decorators import login_required
+from django.http import HttpRequest, HttpResponse
 from django.shortcuts import render
 
 from ..models import AWSAccount, GitProviderIntegration, Repository
-from .base import get_app_shell_context
+from . import base
 
 logger = logging.getLogger(__name__)
 
 
 @login_required
-def settings(request):
-    context = get_app_shell_context(request=request, current_page="settings")
+def settings(request: HttpRequest) -> HttpResponse:
+    context = base.get_app_shell_context(request=request, current_page="settings")
     context["active_tab"] = "organization"
     
     if request.htmx:
@@ -22,8 +23,8 @@ def settings(request):
 
 
 @login_required
-def settings_organization(request):
-    context = get_app_shell_context(request=request, current_page="settings")
+def settings_organization(request: HttpRequest) -> HttpResponse:
+    context = base.get_app_shell_context(request=request, current_page="settings")
     context["active_tab"] = "organization"
     
     if request.htmx:
@@ -34,27 +35,15 @@ def settings_organization(request):
 
 
 @login_required
-def settings_members(request):
-    context = get_app_shell_context(request=request, current_page="settings")
-    context["active_tab"] = "members"
-    
-    if request.htmx:
-        return render(request, "devopshero_app/settings/members.html", context=context)
-    
-    context["content_url"] = "/settings/members/"
-    return render(request, "devopshero_app/app_shell.html", context=context)
-
-
-@login_required
-def settings_aws_accounts(request):
+def settings_aws_accounts(request: HttpRequest) -> HttpResponse:
     if not request.htmx:
-        context = get_app_shell_context(request=request, current_page="settings")
+        context = base.get_app_shell_context(request=request, current_page="settings")
         context["content_url"] = "/settings/aws-accounts/"
         return render(request, "devopshero_app/app_shell.html", context=context)
 
     org = request.user.current_organization
 
-    context = get_app_shell_context(request=request, current_page="settings")
+    context = base.get_app_shell_context(request=request, current_page="settings")
     context["active_tab"] = "aws-accounts"
     context["aws_accounts"] = AWSAccount.objects.filter(organization=org)
 
@@ -62,10 +51,8 @@ def settings_aws_accounts(request):
 
 
 @login_required
-def settings_aws_accounts_add(request):
+def settings_aws_accounts_add(request: HttpRequest) -> HttpResponse:
     """Render the Add AWS Account modal dialog and handle account creation."""
-    from django.http import HttpResponse
-    
     if request.method == "POST":
         name = request.POST.get("name", "").strip()
         
@@ -107,8 +94,8 @@ def settings_aws_accounts_add(request):
 
 
 @login_required
-def settings_billing(request):
-    context = get_app_shell_context(request=request, current_page="settings")
+def settings_billing(request: HttpRequest) -> HttpResponse:
+    context = base.get_app_shell_context(request=request, current_page="settings")
     context["active_tab"] = "billing"
     
     if request.htmx:
@@ -119,10 +106,10 @@ def settings_billing(request):
 
 
 @login_required
-def settings_git_integrations(request):
+def settings_git_integrations(request: HttpRequest) -> HttpResponse:
     """Render the Git Integrations settings tab and handle sync requests."""
     if not request.htmx:
-        context = get_app_shell_context(request=request, current_page="settings")
+        context = base.get_app_shell_context(request=request, current_page="settings")
         context["content_url"] = "/settings/git-integrations/"
         return render(request, "devopshero_app/app_shell.html", context=context)
 
@@ -155,7 +142,7 @@ def settings_git_integrations(request):
         provider=GitProviderIntegration.Provider.GITHUB,
     ).first()
 
-    context = get_app_shell_context(request=request, current_page="settings")
+    context = base.get_app_shell_context(request=request, current_page="settings")
     context["active_tab"] = "git-integrations"
     context["github_integration"] = github_integration
 

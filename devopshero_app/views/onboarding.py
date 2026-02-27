@@ -1,12 +1,14 @@
 from django.contrib.auth import login
 from django.db import transaction
+from django.http import HttpRequest, HttpResponse
 from django.shortcuts import render, redirect
 from django.utils.text import slugify
 
 from ..models import User, Organization, OrganizationMembership
+from ..services import abac
 
 
-def onboarding(request):
+def onboarding(request: HttpRequest) -> HttpResponse:
     """
     Handles new user onboarding - collects organization name and creates
     User + Organization + Membership in a single transaction.
@@ -50,6 +52,8 @@ def onboarding(request):
                     organization=org,
                     role=OrganizationMembership.Role.ADMIN,
                 )
+
+                abac.bootstrap_organization(organization=org, admin_user=user)
             
             # Clear session data and log in
             del request.session["pending_workos_user"]

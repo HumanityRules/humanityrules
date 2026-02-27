@@ -258,6 +258,23 @@ async def _aget_last_user_message(conversation: Conversation) -> str:
 - Public API functions where discoverability matters
 - Unusual parameter constraints not captured by types
 
+### 7. Require Type Hints on New/Modified Functions and Methods
+* **Directive:** Every new or modified function/method must include type hints for all parameters and the return type.
+* **Reasoning:** Complete signatures improve readability, reduce ambiguity, and make refactoring/tooling safer.
+* **Implementation:** Annotate all parameters and returns explicitly. Use `-> None` for no-return functions. Keep annotations concrete when possible.
+
+**Bad (missing annotations):**
+```python
+def check_access(request, resource, action):
+    ...
+```
+
+**Good (fully annotated):**
+```python
+def check_access(request: HttpRequest, resource: Workspace, action: str) -> bool:
+    ...
+```
+
 
 # Logging
 
