@@ -4,7 +4,6 @@ from django.shortcuts import render, redirect
 from django.utils.text import slugify
 
 from ..models import User, Organization, OrganizationMembership
-from ..services import abac
 
 
 def onboarding(request):
@@ -51,8 +50,6 @@ def onboarding(request):
                     organization=org,
                     role=OrganizationMembership.Role.ADMIN,
                 )
-
-                abac.bootstrap_organization(organization=org, admin_user=user)
             
             # Clear session data and log in
             del request.session["pending_workos_user"]

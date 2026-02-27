@@ -1,8 +1,8 @@
 from .landing import landing
 from .dashboard import dashboard
-from .workspaces import workspaces, workspace_detail, workspace_create, workspace_tag_add, workspace_tag_remove
-from .apps import app_detail, app_deployment_teardown, app_deployment_redeploy, app_deployment_status, app_teardown_confirm, app_tag_add, app_tag_remove
-from .environments import environments, environment_detail, environment_tag_add, environment_tag_remove
+from .workspaces import workspaces, workspace_detail, workspace_create
+from .apps import app_detail, app_deployment_teardown, app_deployment_redeploy, app_deployment_status, app_teardown_confirm
+from .environments import environments, environment_detail
 from .security import (
     security,
     security_permissions_editor,
@@ -18,6 +18,7 @@ from .security import (
 from .settings import (
     settings,
     settings_organization,
+    settings_members,
     settings_aws_accounts,
     settings_aws_accounts_add,
     settings_billing,
@@ -42,26 +43,6 @@ from .chat import (
     chat_conversation_cost,
 )
 from .waitlist_views import waitlist_signup
-from .security_abac import (
-    security_people,
-    security_people_detail,
-    security_people_attribute_add,
-    security_people_attribute_remove,
-    security_people_group_add,
-    security_people_group_remove,
-    security_groups,
-    security_group_create,
-    security_group_detail,
-    security_group_delete,
-    security_group_attribute_add,
-    security_group_attribute_remove,
-    security_group_member_add,
-    security_group_member_remove,
-    security_policies,
-    security_policy_create,
-    security_policy_detail,
-    security_policy_delete,
-)
 
 __all__ = [
     "landing",
@@ -69,19 +50,13 @@ __all__ = [
     "workspaces",
     "workspace_detail",
     "workspace_create",
-    "workspace_tag_add",
-    "workspace_tag_remove",
     "app_detail",
     "app_deployment_teardown",
     "app_deployment_redeploy",
     "app_deployment_status",
     "app_teardown_confirm",
-    "app_tag_add",
-    "app_tag_remove",
     "environments",
     "environment_detail",
-    "environment_tag_add",
-    "environment_tag_remove",
     "security",
     "security_permissions_editor",
     "security_permissions_editor_apply",
@@ -94,6 +69,7 @@ __all__ = [
     "security_permissions_statements",
     "settings",
     "settings_organization",
+    "settings_members",
     "settings_aws_accounts",
     "settings_aws_accounts_add",
     "settings_billing",
@@ -121,22 +97,4 @@ __all__ = [
     "chat_conversation_title",
     "chat_conversation_cost",
     "waitlist_signup",
-    "security_people",
-    "security_people_detail",
-    "security_people_attribute_add",
-    "security_people_attribute_remove",
-    "security_people_group_add",
-    "security_people_group_remove",
-    "security_groups",
-    "security_group_create",
-    "security_group_detail",
-    "security_group_delete",
-    "security_group_attribute_add",
-    "security_group_attribute_remove",
-    "security_group_member_add",
-    "security_group_member_remove",
-    "security_policies",
-    "security_policy_create",
-    "security_policy_detail",
-    "security_policy_delete",
 ]
