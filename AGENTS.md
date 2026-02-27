@@ -52,6 +52,8 @@ The main developer documentation lives in the docs/ subdirectory. **When creatin
 
 - **`docs/authorization_design.md`** — Authorization system design. Defines the RBAC + Groups model, role bindings, pre-defined roles per resource type, and UI flows for managing access. Read this when implementing authorization features or when understanding how users, groups, roles, and resources relate.
 
+- **`docs/abac_test_plan.md`** — Test plan for the ABAC authorization system. Covers the policy evaluation engine, view-level endpoint access, bootstrapping, cross-org isolation, realistic scenarios, and edge cases.
+
 **Subsystem AGENTS.md files:**
 - **`devopshero_app/views/AGENTS.md`** — HTMX navigation paradigm, view patterns, adding pages
 - **`infra_devopshero/AGENTS.md`** — Control plane CDK infrastructure, deployment operations, AWS credentials setup
