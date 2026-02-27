@@ -4,26 +4,20 @@ from . import views
 urlpatterns = [
     # Health check for ALB/ECS
     path("health/", views.health_check, name="health_check"),
-
+    
     path("", views.landing, name="landing"),
     path("waitlist/signup/", views.waitlist_signup, name="waitlist_signup"),
     path("dashboard/", views.dashboard, name="dashboard"),
     path("workspaces/", views.workspaces, name="workspaces"),
     path("workspaces/create/", views.workspace_create, name="workspace_create"),
     path("workspaces/<slug:workspace_slug>/", views.workspace_detail, name="workspace_detail"),
-    path("workspaces/<slug:workspace_slug>/tags/add/", views.workspace_tag_add, name="workspace_tag_add"),
-    path("workspaces/<slug:workspace_slug>/tags/<uuid:tag_id>/remove/", views.workspace_tag_remove, name="workspace_tag_remove"),
     path("apps/<slug:app_slug>/", views.app_detail, name="app_detail"),
-    path("apps/<slug:app_slug>/tags/add/", views.app_tag_add, name="app_tag_add"),
-    path("apps/<slug:app_slug>/tags/<uuid:tag_id>/remove/", views.app_tag_remove, name="app_tag_remove"),
     path("apps/<slug:app_slug>/deployments/<uuid:deployment_id>/teardown/", views.app_deployment_teardown, name="app_deployment_teardown"),
     path("apps/<slug:app_slug>/deployments/<uuid:deployment_id>/redeploy/", views.app_deployment_redeploy, name="app_deployment_redeploy"),
     path("apps/<slug:app_slug>/deployments/<uuid:deployment_id>/status/", views.app_deployment_status, name="app_deployment_status"),
     path("apps/<slug:app_slug>/deployments/<uuid:deployment_id>/teardown-confirm/", views.app_teardown_confirm, name="app_teardown_confirm"),
     path("environments/", views.environments, name="environments"),
     path("environments/<slug:environment_slug>/", views.environment_detail, name="environment_detail"),
-    path("environments/<slug:environment_slug>/tags/add/", views.environment_tag_add, name="environment_tag_add"),
-    path("environments/<slug:environment_slug>/tags/<uuid:tag_id>/remove/", views.environment_tag_remove, name="environment_tag_remove"),
     path("security/", views.security, name="security"),
     path("security/permissions/editor/", views.security_permissions_editor, name="security_permissions_editor"),
     path("security/permissions/<uuid:app_permission_request_id>/apply/", views.security_permissions_editor_apply, name="security_permissions_editor_apply"),
@@ -34,42 +28,24 @@ urlpatterns = [
     path("security/permissions/<uuid:app_permission_request_id>/refresh-resources/", views.security_permissions_editor_refresh_resources, name="security_permissions_editor_refresh_resources"),
     path("security/permissions/<uuid:app_permission_request_id>/service-group/", views.security_permissions_editor_service_group, name="security_permissions_editor_service_group"),
     path("security/permissions/<uuid:app_permission_request_id>/statements/", views.security_permissions_statements, name="security_permissions_statements"),
-    # ABAC security
-    path("security/people/", views.security_people, name="security_people"),
-    path("security/people/<uuid:user_id>/", views.security_people_detail, name="security_people_detail"),
-    path("security/people/<uuid:user_id>/attributes/add/", views.security_people_attribute_add, name="security_people_attribute_add"),
-    path("security/people/<uuid:user_id>/attributes/<uuid:attribute_id>/remove/", views.security_people_attribute_remove, name="security_people_attribute_remove"),
-    path("security/people/<uuid:user_id>/groups/add/", views.security_people_group_add, name="security_people_group_add"),
-    path("security/people/<uuid:user_id>/groups/<uuid:membership_id>/remove/", views.security_people_group_remove, name="security_people_group_remove"),
-    path("security/groups/", views.security_groups, name="security_groups"),
-    path("security/groups/create/", views.security_group_create, name="security_group_create"),
-    path("security/groups/<uuid:group_id>/", views.security_group_detail, name="security_group_detail"),
-    path("security/groups/<uuid:group_id>/delete/", views.security_group_delete, name="security_group_delete"),
-    path("security/groups/<uuid:group_id>/attributes/add/", views.security_group_attribute_add, name="security_group_attribute_add"),
-    path("security/groups/<uuid:group_id>/attributes/<uuid:attribute_id>/remove/", views.security_group_attribute_remove, name="security_group_attribute_remove"),
-    path("security/groups/<uuid:group_id>/members/add/", views.security_group_member_add, name="security_group_member_add"),
-    path("security/groups/<uuid:group_id>/members/<uuid:membership_id>/remove/", views.security_group_member_remove, name="security_group_member_remove"),
-    path("security/policies/", views.security_policies, name="security_policies"),
-    path("security/policies/create/", views.security_policy_create, name="security_policy_create"),
-    path("security/policies/<uuid:policy_id>/", views.security_policy_detail, name="security_policy_detail"),
-    path("security/policies/<uuid:policy_id>/delete/", views.security_policy_delete, name="security_policy_delete"),
     path("settings/", views.settings, name="settings"),
     path("settings/organization/", views.settings_organization, name="settings_organization"),
+    path("settings/members/", views.settings_members, name="settings_members"),
     path("settings/aws-accounts/", views.settings_aws_accounts, name="settings_aws_accounts"),
     path("settings/aws-accounts/add/", views.settings_aws_accounts_add, name="settings_aws_accounts_add"),
     path("settings/billing/", views.settings_billing, name="settings_billing"),
     path("settings/git-integrations/", views.settings_git_integrations, name="settings_git_integrations"),
     path("random-quote/", views.random_quote, name="random_quote"),
     path("switch-organization/", views.switch_organization, name="switch_organization"),
-
+    
     # Authentication
     path("auth/login/", views.auth_login, name="login"),
     path("auth/callback/", views.auth_callback, name="auth_callback"),
     path("auth/logout/", views.auth_logout, name="logout"),
-
+    
     # Onboarding
     path("onboarding/", views.onboarding, name="onboarding"),
-
+    
     # GitHub App OAuth
     path("github/connect", views.github_connect, name="github_connect"),
     path("github/callback", views.github_callback, name="github_callback"),

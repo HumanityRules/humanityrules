@@ -12,19 +12,13 @@ from devopshero_app.models import (
     Environment,
     EnvironmentLog,
     GitProviderIntegration,
-    Group,
-    GroupAttribute,
-    GroupMembership,
-    IdentityAttribute,
     LLMUsageLog,
     Message,
     Organization,
     OrganizationMembership,
     AwsResourceCache,
     AppPermissionRequest,
-    Policy,
     Repository,
-    ResourceTag,
     User,
     WaitlistSignup,
     Workspace,
@@ -288,62 +282,3 @@ class WaitlistSignupAdmin(admin.ModelAdmin):
     list_filter = ["source", "created_at"]
     search_fields = ["email"]
     readonly_fields = ["id", "created_at"]
-
-
-# =============================================================================
-# ABAC Models
-# =============================================================================
-
-
-@admin.register(IdentityAttribute)
-class IdentityAttributeAdmin(admin.ModelAdmin):
-    list_display = ["user", "organization", "key", "value", "created_at"]
-    list_filter = ["organization", "key"]
-    search_fields = ["user__email", "key", "value"]
-    readonly_fields = ["id", "created_at"]
-    autocomplete_fields = ["organization", "user"]
-
-
-@admin.register(Group)
-class GroupAdmin(admin.ModelAdmin):
-    list_display = ["name", "organization", "created_at", "updated_at"]
-    list_filter = ["organization"]
-    search_fields = ["name", "organization__name"]
-    readonly_fields = ["id", "created_at", "updated_at"]
-    autocomplete_fields = ["organization"]
-
-
-@admin.register(GroupMembership)
-class GroupMembershipAdmin(admin.ModelAdmin):
-    list_display = ["user", "group", "created_at"]
-    list_filter = ["group__organization"]
-    search_fields = ["user__email", "group__name"]
-    readonly_fields = ["id", "created_at"]
-    autocomplete_fields = ["group", "user"]
-
-
-@admin.register(GroupAttribute)
-class GroupAttributeAdmin(admin.ModelAdmin):
-    list_display = ["group", "key", "value", "created_at"]
-    list_filter = ["group__organization", "key"]
-    search_fields = ["group__name", "key", "value"]
-    readonly_fields = ["id", "created_at"]
-    autocomplete_fields = ["group"]
-
-
-@admin.register(ResourceTag)
-class ResourceTagAdmin(admin.ModelAdmin):
-    list_display = ["resource_type", "key", "value", "organization", "workspace", "environment", "app", "created_at"]
-    list_filter = ["resource_type", "organization", "key"]
-    search_fields = ["key", "value", "workspace__name", "environment__name", "app__name"]
-    readonly_fields = ["id", "created_at"]
-    autocomplete_fields = ["organization", "workspace", "environment", "app"]
-
-
-@admin.register(Policy)
-class PolicyAdmin(admin.ModelAdmin):
-    list_display = ["name", "organization", "resource_type", "is_system", "created_at", "updated_at"]
-    list_filter = ["resource_type", "is_system", "organization"]
-    search_fields = ["name", "organization__name"]
-    readonly_fields = ["id", "created_at", "updated_at"]
-    autocomplete_fields = ["organization"]
