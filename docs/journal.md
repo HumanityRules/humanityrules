@@ -1,5 +1,51 @@
 # DevOpsHero Development Journal
 
+## 2026-02-26 21:00 - [DomainModel] ABAC Authorization System — Full Implementation
+
+**Conversation:** [2026-02-26-2237-a9564a38.md](conversations/2026-02-26-2237-a9564a38.md)
+
+Implemented the complete ABAC (Attribute-Based Access Control) authorization system based on the design doc in `docs/authorization_design_abac.md`. This replaces the zero-authorization state where only `@login_required` existed. The previous RBAC attempt (role bindings, group memberships) left orphan tables in SQLite that had to be dropped before migration.
+
+**Domain model — 6 new models:**
+
+- **IdentityAttribute** — direct key=value on a user, org-scoped. `unique_together: (org, user, key, value)` allows multiple values per key (e.g., `team=frontend` AND `team=backend`).
+- **Group** / **GroupMembership** / **GroupAttribute** — groups are attribute containers. Members inherit all group attributes. This avoids duplicating attributes across many users.
+- **ResourceTag** — single polymorphic model with nullable FKs to workspace/environment/app + a `CheckConstraint` ensuring exactly one FK is set (matching `resource_type`). Django 6.0 uses `condition=` instead of `check=` for `CheckConstraint` — this was caught at migration time.
+- **Policy** — JSON conditions (`identity_conditions`, `resource_conditions`) with AND semantics. `[{"key": "*", "value": "*"}]` is the wildcard. Actions list supports `!` prefix for deny.
+
+**Policy evaluation engine (`services/abac.py`):**
+
+The core algorithm: load org policies for resource_type → compute effective attributes (system + direct + group-inherited) → compute effective tags (direct + inherited from workspace for apps) → match each policy's identity AND resource conditions → collect grants/denials → expand action hierarchy (`workspace:admin` → also `workspace:view`, `workspace:edit`) → deny-overrides (remove denied from grants).
+
+`filter_permitted_resources()` is the list-view optimization: loads policies once, pre-filters by identity conditions, and if any matching policy has wildcard resource conditions, returns the entire queryset without per-resource evaluation. Only falls back to per-resource evaluation for non-wildcard policies.
+
+**Bootstrapping strategy:**
+
+New orgs (via onboarding): `abac.bootstrap_organization()` creates `org-role=admin` attribute on the admin user + 3 seed policies (workspace:admin, environment:admin, app:use for org admins). Data migration `0021` does the same for existing orgs by finding the first admin membership.
+
+App post_save signal creates an `app-name=<slug>` ResourceTag and a wildcard-identity policy scoped to that tag, giving all authenticated users `app:use` by default. Admins can narrow this later.
+
+**View enforcement pattern:**
+
+Three helpers in `views/abac_helpers.py`: `check_abac(request, resource, resource_type, action)` returns `None` or `HttpResponseForbidden`, `check_abac_create()` for resource creation (evaluates with empty tags), `require_org_admin()` for settings pages. Called inline after `get_object_or_404` — early return on denial.
+
+**Tag editors on resource pages:**
+
+Workspace, app, and environment detail pages got tag sections with HTMX inline add/remove. App tags show both inherited workspace tags (read-only, gray badge with "inherited" label) and direct tags (editable, indigo badge). Tag add/remove views check `workspace:admin` or `environment:admin` respectively.
+
+**Settings tabs (People, Groups, Policies):**
+
+Added 3 new tabs to settings navigation. All require `require_org_admin`. People tab shows members with their effective attributes as colored badges (gray=system, indigo=direct, purple=group-inherited). People detail lets admins add/remove direct attributes and group memberships. Groups tab has CRUD for groups with attribute and member management. Policies tab shows policy list with IF/AND/THEN summary and an Alpine.js-powered editor with dynamic condition lists, resource-type-filtered action checkboxes, and deny toggles.
+
+**Key points:**
+- Django 6.0 `CheckConstraint` uses `condition=` not `check=` — the old parameter name raises `TypeError`
+- Leftover RBAC tables from a previous design attempt (`devopshero_app_group`, `devopshero_app_approlebinding`, etc.) had to be manually dropped from SQLite before the migration could run
+- Action hierarchy expansion happens after grant collection but before deny removal — so denying `workspace:view` blocks view even if `workspace:admin` is granted (deny-overrides)
+- `filter_permitted_resources()` short-circuits on wildcard-resource policies to avoid N+1 tag lookups on list views
+- Policy editor form uses Alpine.js for dynamic condition add/remove and serializes to hidden JSON fields on submit — no raw JSON editing for users
+- The `{% load i18n %}` in the policy detail template is needed for `pluralize` filter usage in groups template (inherited via extends)
+- 24 new URL routes, 6 new models, 2 migrations (schema + data), ~18 new view functions
+
 ## 2026-02-25 - [Deployment] Description field for AppPermissionRequest in Permissions Editor
 
 **Conversation:** [2026-02-25-1358-64e65289.md](conversations/2026-02-25-1358-64e65289.md)

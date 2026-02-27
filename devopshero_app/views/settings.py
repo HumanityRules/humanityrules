@@ -34,18 +34,6 @@ def settings_organization(request):
 
 
 @login_required
-def settings_members(request):
-    context = get_app_shell_context(request=request, current_page="settings")
-    context["active_tab"] = "members"
-    
-    if request.htmx:
-        return render(request, "devopshero_app/settings/members.html", context=context)
-    
-    context["content_url"] = "/settings/members/"
-    return render(request, "devopshero_app/app_shell.html", context=context)
-
-
-@login_required
 def settings_aws_accounts(request):
     if not request.htmx:
         context = get_app_shell_context(request=request, current_page="settings")

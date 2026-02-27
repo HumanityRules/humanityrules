@@ -5,8 +5,10 @@ from django.shortcuts import get_object_or_404, redirect, render
 from django.utils.text import slugify
 from django.views.decorators.http import require_POST
 
-from devopshero_app.models import App, Conversation, Deployment, Repository, Workspace
+from devopshero_app.models import App, Conversation, Deployment, Repository, ResourceTag, Workspace
+from devopshero_app.services import abac
 
+from .abac_helpers import check_abac, check_abac_create
 from .base import get_app_shell_context
 
 
@@ -33,6 +35,9 @@ def workspaces(request):
     workspace_list = Workspace.objects.filter(
         organization=request.user.current_organization,
     ).prefetch_related(apps_prefetch).order_by("name")
+    workspace_list = abac.filter_permitted_resources(
+        request.user.current_organization, request.user, workspace_list, "workspace", "workspace:view",
+    )
 
     context = get_app_shell_context(request=request, current_page="workspaces")
     context["workspaces"] = workspace_list
@@ -52,6 +57,10 @@ def workspace_detail(request, workspace_slug):
         slug=workspace_slug,
         organization=request.user.current_organization,
     )
+
+    denied = check_abac(request, workspace, "workspace", "workspace:view")
+    if denied:
+        return denied
 
     # Prefetch active deployments (deployed, not being torn down) with their environments
     active_deployments_prefetch = Prefetch(
@@ -92,6 +101,9 @@ def workspace_detail(request, workspace_slug):
         organization=request.user.current_organization,
     ).order_by("full_name")
 
+    tags = ResourceTag.objects.filter(workspace=workspace).order_by("key", "value")
+    can_admin = abac.check_action(request.user.current_organization, request.user, workspace, "workspace", "workspace:admin")
+
     context = get_app_shell_context(request=request, current_page="workspaces")
     context["workspace"] = workspace
     context["apps"] = apps
@@ -99,6 +111,8 @@ def workspace_detail(request, workspace_slug):
     context["conversations"] = conversations
     context["repositories"] = repositories
     context["show_costs"] = show_costs
+    context["tags"] = tags
+    context["can_admin"] = can_admin
 
     return render(request, "devopshero_app/workspaces/workspace_detail.html", context=context)
 
@@ -107,6 +121,10 @@ def workspace_detail(request, workspace_slug):
 @require_POST
 def workspace_create(request):
     """Create a new workspace and redirect to it."""
+    denied = check_abac_create(request, "workspace", "workspace:edit")
+    if denied:
+        return denied
+
     name = request.POST.get("name", "").strip()
     if not name:
         return redirect("workspaces")
@@ -126,4 +144,45 @@ def workspace_create(request):
         created_by=request.user,
     )
     return redirect("workspace_detail", workspace_slug=workspace.slug)
+
+
+@login_required
+@require_POST
+def workspace_tag_add(request, workspace_slug):
+    """Add a tag to a workspace. Returns updated tag partial."""
+    workspace = get_object_or_404(Workspace, slug=workspace_slug, organization=request.user.current_organization)
+
+    denied = check_abac(request, workspace, "workspace", "workspace:admin")
+    if denied:
+        return denied
+
+    key = request.POST.get("key", "").strip()
+    value = request.POST.get("value", "").strip()
+    if key and value:
+        ResourceTag.objects.get_or_create(
+            organization=request.user.current_organization,
+            resource_type="workspace",
+            workspace=workspace,
+            key=key,
+            value=value,
+        )
+
+    tags = ResourceTag.objects.filter(workspace=workspace).order_by("key", "value")
+    return render(request, "devopshero_app/workspaces/_workspace_tags.html", {"tags": tags, "workspace": workspace, "can_admin": True})
+
+
+@login_required
+@require_POST
+def workspace_tag_remove(request, workspace_slug, tag_id):
+    """Remove a tag from a workspace. Returns updated tag partial."""
+    workspace = get_object_or_404(Workspace, slug=workspace_slug, organization=request.user.current_organization)
+
+    denied = check_abac(request, workspace, "workspace", "workspace:admin")
+    if denied:
+        return denied
+
+    ResourceTag.objects.filter(id=tag_id, workspace=workspace).delete()
+
+    tags = ResourceTag.objects.filter(workspace=workspace).order_by("key", "value")
+    return render(request, "devopshero_app/workspaces/_workspace_tags.html", {"tags": tags, "workspace": workspace, "can_admin": True})
 
