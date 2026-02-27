@@ -12,6 +12,7 @@ from policy_sentry.shared import iam_data as policy_sentry_iam_data
 from .. import models
 from ..services.agent import agent_service
 from ..services import permissions as permissions_service
+from .abac_helpers import check_abac
 from . import base
 
 logger = logging.getLogger(__name__)
@@ -31,6 +32,7 @@ def security(request):
 
     organization = request.user.current_organization
     context = base.get_app_shell_context(request=request, current_page="security")
+    context["active_tab"] = "hub"
     context["permission_issue_rows"] = []
     context["app_permission_request_rows"] = list(
         models.AppPermissionRequest.objects.filter(app__organization=organization)
@@ -250,10 +252,14 @@ def security_permissions_editor_apply(request, app_permission_request_id):
     """Set AppPermissionRequest status to APPROVED_PENDING_APPLY. Statements are already in DB."""
     organization = request.user.current_organization
     app_permission_request = get_object_or_404(
-        models.AppPermissionRequest,
+        models.AppPermissionRequest.objects.select_related("environment"),
         id=app_permission_request_id,
         app__organization=organization,
     )
+
+    denied = check_abac(request, app_permission_request.environment, "environment", "environment:approve")
+    if denied:
+        return denied
 
     permissions_service.approve(app_permission_request)
 

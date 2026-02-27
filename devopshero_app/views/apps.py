@@ -5,8 +5,10 @@ from django.http import HttpResponse
 from django.shortcuts import get_object_or_404, render
 from django.views.decorators.http import require_GET, require_POST
 
-from devopshero_app.models import App, Deployment
+from devopshero_app.models import App, Deployment, ResourceTag
+from devopshero_app.services import abac
 
+from .abac_helpers import check_abac
 from .base import get_app_shell_context
 
 
@@ -49,11 +51,19 @@ def _build_app_detail_context(request, app):
     secret_keys = list(app.app_secrets.keys()) if app.app_secrets else []
     cpu_vcpu = app.cpu / 1024
 
+    # Tags
+    direct_tags = ResourceTag.objects.filter(app=app).order_by("key", "value")
+    inherited_tags = ResourceTag.objects.filter(workspace=app.workspace).order_by("key", "value")
+    can_admin = abac.check_action(request.user.current_organization, request.user, app.workspace, "workspace", "workspace:admin")
+
     context["app"] = app
     context["deployments"] = deployments
     context["environment_rows"] = environment_rows
     context["secret_keys"] = secret_keys
     context["cpu_vcpu"] = cpu_vcpu
+    context["direct_tags"] = direct_tags
+    context["inherited_tags"] = inherited_tags
+    context["can_admin"] = can_admin
 
     return context
 
@@ -67,6 +77,11 @@ def app_detail(request, app_slug):
         return render(request, "devopshero_app/app_shell.html", context=context)
 
     app = _get_app_for_user(request, app_slug)
+
+    denied = check_abac(request, app.workspace, "workspace", "workspace:view")
+    if denied:
+        return denied
+
     context = _build_app_detail_context(request, app)
     return render(request, "devopshero_app/apps/app_detail.html", context=context)
 
@@ -76,6 +91,11 @@ def app_detail(request, app_slug):
 def app_deployment_teardown(request, app_slug, deployment_id):
     """Trigger teardown for a deployment."""
     app = _get_app_for_user(request, app_slug)
+
+    denied = check_abac(request, app.workspace, "workspace", "workspace:edit")
+    if denied:
+        return denied
+
     deployment = _get_deployment_for_app(app, deployment_id)
 
     teardownable_statuses = [
@@ -120,6 +140,11 @@ def app_teardown_confirm(request, app_slug, deployment_id):
 def app_deployment_redeploy(request, app_slug, deployment_id):
     """Create a new PENDING deployment to redeploy an app to the same environment."""
     app = _get_app_for_user(request, app_slug)
+
+    denied = check_abac(request, app.workspace, "workspace", "workspace:edit")
+    if denied:
+        return denied
+
     deployment = _get_deployment_for_app(app, deployment_id)
 
     if deployment.status != Deployment.Status.DEPLOYED:
@@ -152,3 +177,50 @@ def app_deployment_redeploy(request, app_slug, deployment_id):
 
     context = _build_app_detail_context(request, app)
     return render(request, "devopshero_app/apps/app_detail.html", context=context)
+
+
+@login_required
+@require_POST
+def app_tag_add(request, app_slug):
+    """Add a tag to an app. Returns updated tag partial."""
+    app = _get_app_for_user(request, app_slug)
+
+    denied = check_abac(request, app.workspace, "workspace", "workspace:admin")
+    if denied:
+        return denied
+
+    key = request.POST.get("key", "").strip()
+    value = request.POST.get("value", "").strip()
+    if key and value:
+        ResourceTag.objects.get_or_create(
+            organization=request.user.current_organization,
+            resource_type="app",
+            app=app,
+            key=key,
+            value=value,
+        )
+
+    direct_tags = ResourceTag.objects.filter(app=app).order_by("key", "value")
+    inherited_tags = ResourceTag.objects.filter(workspace=app.workspace).order_by("key", "value")
+    return render(request, "devopshero_app/apps/_app_tags.html", {
+        "direct_tags": direct_tags, "inherited_tags": inherited_tags, "app": app, "can_admin": True,
+    })
+
+
+@login_required
+@require_POST
+def app_tag_remove(request, app_slug, tag_id):
+    """Remove a tag from an app. Returns updated tag partial."""
+    app = _get_app_for_user(request, app_slug)
+
+    denied = check_abac(request, app.workspace, "workspace", "workspace:admin")
+    if denied:
+        return denied
+
+    ResourceTag.objects.filter(id=tag_id, app=app).delete()
+
+    direct_tags = ResourceTag.objects.filter(app=app).order_by("key", "value")
+    inherited_tags = ResourceTag.objects.filter(workspace=app.workspace).order_by("key", "value")
+    return render(request, "devopshero_app/apps/_app_tags.html", {
+        "direct_tags": direct_tags, "inherited_tags": inherited_tags, "app": app, "can_admin": True,
+    })
