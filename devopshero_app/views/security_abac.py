@@ -6,6 +6,7 @@ import json
 from uuid import UUID
 
 from django.contrib.auth.decorators import login_required
+from django.core.exceptions import ValidationError
 from django.http import HttpRequest, HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.views.decorators.http import require_POST
@@ -441,6 +442,22 @@ def security_policy_create(request: HttpRequest) -> HttpResponse:
         resource_conditions = json.loads(request.POST.get("resource_conditions", "[]"))
         actions = json.loads(request.POST.get("actions", "[]"))
 
+        try:
+            abac.validate_policy_conditions(
+                identity_conditions=identity_conditions,
+                resource_conditions=resource_conditions,
+            )
+        except ValidationError as e:
+            existing_keys = _get_existing_tag_keys(org)
+            existing_values = _get_existing_tag_values(org)
+            context = base.get_app_shell_context(request=request, current_page="security")
+            context["active_tab"] = "policies"
+            context["policy"] = None
+            context["existing_keys"] = existing_keys
+            context["existing_values"] = existing_values
+            context["error"] = e.message
+            return render(request, "devopshero_app/security/security_policies_detail.html", context=context)
+
         if name and resource_type:
             Policy.objects.create(
                 organization=org,
@@ -480,10 +497,29 @@ def security_policy_detail(request: HttpRequest, policy_id: UUID) -> HttpRespons
     policy = get_object_or_404(Policy, id=policy_id, organization=org)
 
     if request.method == "POST":
+        identity_conditions = json.loads(request.POST.get("identity_conditions", "[]"))
+        resource_conditions = json.loads(request.POST.get("resource_conditions", "[]"))
+
+        try:
+            abac.validate_policy_conditions(
+                identity_conditions=identity_conditions,
+                resource_conditions=resource_conditions,
+            )
+        except ValidationError as e:
+            existing_keys = _get_existing_tag_keys(org)
+            existing_values = _get_existing_tag_values(org)
+            context = base.get_app_shell_context(request=request, current_page="security")
+            context["active_tab"] = "policies"
+            context["policy"] = policy
+            context["existing_keys"] = existing_keys
+            context["existing_values"] = existing_values
+            context["error"] = e.message
+            return render(request, "devopshero_app/security/security_policies_detail.html", context=context)
+
         policy.name = request.POST.get("name", "").strip() or policy.name
         policy.resource_type = request.POST.get("resource_type", "").strip() or policy.resource_type
-        policy.identity_conditions = json.loads(request.POST.get("identity_conditions", "[]"))
-        policy.resource_conditions = json.loads(request.POST.get("resource_conditions", "[]"))
+        policy.identity_conditions = identity_conditions
+        policy.resource_conditions = resource_conditions
         policy.actions = json.loads(request.POST.get("actions", "[]"))
         policy.save()
         return redirect("security_policies")

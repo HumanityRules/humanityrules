@@ -1,5 +1,23 @@
 # DevOpsHero Development Journal
 
+## 2026-02-27 15:28 - [DomainModel] ABAC Test Suite and Engine Bug Fix
+
+**Conversation:** [2026-02-27-1529-c3607d40.md](conversations/2026-02-27-1529-c3607d40.md)
+
+Implemented the first automated test suite for the project — 58 tests covering the full ABAC policy evaluation engine (Section 1 of `docs/abac_test_plan.md`). The ABAC engine is security-critical, so it was the right place to start.
+
+Replaced the empty `devopshero_app/tests.py` stub with a `tests/` package to accommodate the multi-section test plan. Seven test classes cover: effective attributes, effective tags, condition matching, policy evaluation, unscoped evaluation, resource filtering, org admin check, policy condition validation, and cross-org tag isolation.
+
+Writing the tests uncovered a real bug in `filter_permitted_resources`: the wildcard optimization shortcut (lines 242-259) was short-circuiting without considering tag-scoped deny policies. If a user had a wildcard grant (e.g., org admin's seed policy granting `workspace:view` on all resources) and a tag-scoped deny existed (e.g., deny `!workspace:view` on `domain=finance`), the deny was silently ignored because the optimization only collected grants/denials from wildcard policies. The fix adds a `has_scoped_denials` check — if any matching policy has non-wildcard resource conditions with deny actions, the optimization is skipped and per-resource evaluation runs instead, where all policies are correctly evaluated together.
+
+Also discovered and documented a behavioral inconsistency between `evaluate_policies` and `evaluate_policies_unscoped` with empty conditions: `evaluate_policies` treats `resource_conditions=[]` as vacuously true (matches everything via `_conditions_match([], set)` → `all()` on empty iterable), while `evaluate_policies_unscoped` treats it as non-matching (it checks `_is_wildcard([])` which returns `False`). The database schema prevents `None` values (JSONField has NOT NULL), so this only applies to empty lists. Tests now pin both behaviors.
+
+**Key points:**
+- First test suite in the project — structured as `devopshero_app/tests/` package for multi-section expansion
+- Bug found and fixed: `filter_permitted_resources` wildcard optimization ignored tag-scoped deny policies, breaking the deny-override semantics that `evaluate_policies` correctly implemented
+- Empty conditions `[]` behave differently across functions — pinned with tests rather than "fixed" since the inconsistency may be intentional (unscoped evaluation is specifically for "can user create?" checks where explicit wildcards are expected)
+- All 58 tests run against SQLite in-memory in ~6 seconds — pure engine logic, no HTTP
+
 ## 2026-02-27 00:00 - [DomainModel] ABAC Refinement — Auto-tag resources with type-prefixed name on creation
 
 **Conversation:** (active session — link TBD)

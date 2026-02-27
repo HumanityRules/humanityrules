@@ -6,6 +6,7 @@ Evaluates access by matching identity attributes against resource tags via polic
 
 from typing import TypeVar
 
+from django.core.exceptions import ValidationError
 from django.db.models import QuerySet
 
 from devopshero_app.models import (
@@ -67,7 +68,7 @@ def get_effective_attributes(organization: Organization, user: User) -> list[tup
 # Effective tags
 # ---------------------------------------------------------------------------
 
-def get_effective_tags(resource: App | Environment | Workspace, resource_type: str) -> list[tuple[str, str, str]]:
+def get_effective_tags(organization: Organization, resource: App | Environment | Workspace, resource_type: str) -> list[tuple[str, str, str]]:
     """
     Return list of (key, value, source) tuples for a resource.
     Apps inherit workspace tags (source="inherited:<WorkspaceName>").
@@ -75,17 +76,15 @@ def get_effective_tags(resource: App | Environment | Workspace, resource_type: s
     tags = []
 
     if resource_type == "app":
-        # Direct app tags
-        for t in ResourceTag.objects.filter(app=resource):
+        for t in ResourceTag.objects.filter(organization=organization, app=resource):
             tags.append((t.key, t.value, "direct"))
-        # Inherited workspace tags
-        for t in ResourceTag.objects.filter(workspace=resource.workspace):
+        for t in ResourceTag.objects.filter(organization=organization, workspace=resource.workspace):
             tags.append((t.key, t.value, f"inherited:{resource.workspace.name}"))
     elif resource_type == "workspace":
-        for t in ResourceTag.objects.filter(workspace=resource):
+        for t in ResourceTag.objects.filter(organization=organization, workspace=resource):
             tags.append((t.key, t.value, "direct"))
     elif resource_type == "environment":
-        for t in ResourceTag.objects.filter(environment=resource):
+        for t in ResourceTag.objects.filter(organization=organization, environment=resource):
             tags.append((t.key, t.value, "direct"))
 
     return tags
@@ -95,9 +94,27 @@ def get_effective_tags(resource: App | Environment | Workspace, resource_type: s
 # Policy evaluation
 # ---------------------------------------------------------------------------
 
+def validate_policy_conditions(identity_conditions: list[dict], resource_conditions: list[dict]) -> None:
+    """Raise ValidationError if wildcard is mixed with other conditions."""
+    _validate_no_mixed_wildcard(identity_conditions, "Identity")
+    _validate_no_mixed_wildcard(resource_conditions, "Resource")
+
+
+def _validate_no_mixed_wildcard(conditions: list[dict], label: str) -> None:
+    """Raise ValidationError if a wildcard entry coexists with non-wildcard entries."""
+    if len(conditions) <= 1:
+        return
+    has_wildcard = any(c.get("key") == "*" and c.get("value") == "*" for c in conditions)
+    if has_wildcard:
+        raise ValidationError(
+            f"{label} conditions: wildcard (*) cannot be combined with other conditions. "
+            f"Use wildcard as the sole condition, or remove it.",
+        )
+
+
 def _is_wildcard(conditions: list[dict[str, str]]) -> bool:
-    """Check if conditions list is a wildcard (matches everything)."""
-    return any(c.get("key") == "*" and c.get("value") == "*" for c in conditions)
+    """Check if conditions list is a wildcard (matches everything). Only valid as sole entry."""
+    return len(conditions) == 1 and conditions[0].get("key") == "*" and conditions[0].get("value") == "*"
 
 
 def _conditions_match(conditions: list[dict[str, str]], attribute_set: set[tuple[str, str]]) -> bool:
@@ -132,7 +149,7 @@ def evaluate_policies(
     effective_attrs = get_effective_attributes(organization, user)
     attr_set = {(k, v) for k, v, _ in effective_attrs}
 
-    effective_tags = get_effective_tags(resource, resource_type)
+    effective_tags = get_effective_tags(organization, resource, resource_type)
     tag_set = {(k, v) for k, v, _ in effective_tags}
 
     grants = set()
@@ -208,6 +225,22 @@ def check_action(
 ResourceTypeT = TypeVar("ResourceTypeT", App, Environment, Workspace)
 
 
+def _assert_queryset_org_scope(queryset: QuerySet[ResourceTypeT], organization: Organization, resource_type: str) -> None:
+    """Raise if queryset contains resources outside the given organization."""
+    if resource_type in ("workspace", "app"):
+        foreign_count = queryset.exclude(organization=organization).count()
+    elif resource_type == "environment":
+        foreign_count = queryset.exclude(aws_account__organization=organization).count()
+    else:
+        return
+    if foreign_count > 0:
+        raise ValueError(
+            f"filter_permitted_resources received {foreign_count} resource(s) "
+            f"outside organization {organization.slug!r}. "
+            f"Callers must pre-scope querysets to a single organization."
+        )
+
+
 def filter_permitted_resources(
     organization: Organization,
     user: User,
@@ -219,6 +252,7 @@ def filter_permitted_resources(
     Given a queryset of resources, return only those the user has `action` on.
     Loads all matching policies once, then evaluates per-resource.
     """
+    _assert_queryset_org_scope(queryset, organization, resource_type)
     policies = list(Policy.objects.filter(organization=organization, resource_type=resource_type))
 
     effective_attrs = get_effective_attributes(organization, user)
@@ -255,13 +289,18 @@ def filter_permitted_resources(
             expanded.add(a)
             if a in ACTION_HIERARCHY:
                 expanded.update(ACTION_HIERARCHY[a])
-        if action in (expanded - denials):
+        has_scoped_denials = any(
+            not _is_wildcard(p.resource_conditions or [])
+            and any(a.startswith("!") for a in (p.actions or []))
+            for p in matching_policies
+        )
+        if action in (expanded - denials) and not has_scoped_denials:
             return queryset  # All resources permitted via wildcard
 
     # Per-resource evaluation for non-wildcard policies
     permitted_ids = []
     for resource in queryset:
-        tags = get_effective_tags(resource, resource_type)
+        tags = get_effective_tags(organization, resource, resource_type)
         tag_set = {(k, v) for k, v, _ in tags}
 
         grants = set()
