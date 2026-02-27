@@ -264,8 +264,28 @@ def _load_prompt_file(filename: str) -> str:
     return prompt_path.read_text()
 
 
+def _validate_context_ownership(org, workspace_id, repo_id, aws_account_id, app_permission_request_id) -> None:
+    """Verify all context resource IDs belong to the given organization. Raises PermissionError on cross-org access."""
+    if workspace_id and not Workspace.objects.filter(id=workspace_id, organization=org).exists():
+        raise PermissionError(f"Workspace {workspace_id} does not belong to your organization.")
+    if repo_id and not Repository.objects.filter(id=repo_id, organization=org).exists():
+        raise PermissionError(f"Repository {repo_id} does not belong to your organization.")
+    if aws_account_id and not AWSAccount.objects.filter(id=aws_account_id, organization=org).exists():
+        raise PermissionError(f"AWS account {aws_account_id} does not belong to your organization.")
+    if app_permission_request_id and not AppPermissionRequest.objects.filter(id=app_permission_request_id, app__organization=org).exists():
+        raise PermissionError(f"Permission request {app_permission_request_id} does not belong to your organization.")
+
+
 def create_conversation(user, workspace_id, repo_id, aws_account_id, mode: str | None, app_permission_request_id) -> Conversation:
     """Create a conversation with context, auto-derived mode, and trigger message."""
+    _validate_context_ownership(
+        org=user.current_organization,
+        workspace_id=workspace_id,
+        repo_id=repo_id,
+        aws_account_id=aws_account_id,
+        app_permission_request_id=app_permission_request_id,
+    )
+
     trigger_content = {
         Conversation.Mode.ENVIRONMENT_SETUP: "Hi! I'm your friendly user who would like to set up a new environment in my AWS account.",
         Conversation.Mode.APP_DEPLOYMENT: "Hi! I'm your friendly user who would like to deploy this repository.",
