@@ -1,5 +1,24 @@
 # DevOpsHero Development Journal
 
+## 2026-02-28 23:15 - [DomainModel] Standard Org-Roles (member, viewer) and Suggestion Palette for Tag/Attribute Forms
+
+**Conversation:** [2026-02-28-1444-b97cb274.md](conversations/2026-02-28-1444-b97cb274.md)
+
+Previously `org-role=admin` was the only standard identity attribute. New orgs got a blank slate beyond admin, forcing manual policy setup. Added two new standard org-roles (`member`, `viewer`) with seed policies, and a suggestion palette so all tag/attribute input forms offer autocomplete.
+
+**Org-roles and seed policies:** Discussed which roles fit the product. Considered "developer" but rejected it as too narrow for DOH's audience (data scientists, ML engineers, business staff). Settled on three roles: `admin` (existing), `member` (can view/edit workspaces, view/deploy environments, use apps), `viewer` (read-only platform access, can use apps). Each role gets 3 seed policies (one per resource type: workspace, environment, app), for 9 total system policies at bootstrap. These are normal ABAC policies with `is_system=True` — admins can edit or delete them.
+
+**Suggestion palette:** Added pre-defined attribute keys (`org-role`, `authenticated`, `team`, `role`) and values (`admin`, `member`, `viewer`, `true`) that appear in datalist autocomplete on all key/value input forms. The palette is merged with existing org-specific keys/values from the database.
+
+**Domain separation of suggestions:** Initially built a single `get_suggestion_keys/values` that merged everything (resource tags + identity attributes + group attributes). When testing, browser autocomplete cache made it look like resource tag keys (like `opensearch_username`) were leaking into identity attribute forms. While that turned out to be browser cache, the domain separation is correct: identity attribute forms should only suggest identity-sourced values, and resource tag forms should only suggest tag-sourced values. Split into four functions: `get_identity_attribute_suggestion_keys/values` and `get_resource_tag_suggestion_keys/values`. The policy editor template already had separate datalist IDs for identity and resource conditions — now they're properly wired to different data sources.
+
+**Key points:**
+- Org-roles are pre-populated suggestions with seed policies, not hard-coded code paths — `is_org_admin()` still only checks `org-role=admin`, the new roles work purely through standard ABAC policy evaluation
+- `member` vs `viewer` distinction: member can `workspace:edit` and `environment:deploy`, viewer is read-only — neither can approve permission requests or manage tags
+- Data migration (0022) adds the 6 new seed policies to existing orgs using `get_or_create` for idempotency
+- Suggestion palette keys chosen to match examples already in `authorization_design_abac.md` — `department` was considered but dropped as too org-specific; `role` chosen over `job-function` for simplicity
+- Browser autocomplete on `name="key"` / `name="value"` inputs can masquerade as datalist suggestions — verify the actual source before reacting
+
 ## 2026-02-28 22:10 - [DevEx] Fix staticfiles directory warning in tests
 
 **Conversation:**

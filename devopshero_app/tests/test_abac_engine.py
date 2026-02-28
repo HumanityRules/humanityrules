@@ -1856,28 +1856,44 @@ class TestSuggestionPalette(TestCase):
         self.org = Organization.objects.create(name="Suggest Org", slug="suggest-org")
         self.user = User.objects.create_user(username="suggest_user", password="testpass", current_organization=self.org)
 
-    def test_palette_keys_included(self) -> None:
-        keys = abac.get_suggestion_keys(self.org)
+    def test_identity_palette_keys_included(self) -> None:
+        keys = abac.get_identity_attribute_suggestion_keys(self.org)
         for expected in abac.SUGGESTED_KEYS:
             self.assertIn(expected, keys)
 
-    def test_palette_values_included(self) -> None:
-        values = abac.get_suggestion_values(self.org)
+    def test_identity_palette_values_included(self) -> None:
+        values = abac.get_identity_attribute_suggestion_values(self.org)
         for expected in abac.SUGGESTED_VALUES:
             self.assertIn(expected, values)
 
-    def test_includes_org_specific_keys(self) -> None:
+    def test_identity_includes_attribute_keys(self) -> None:
         IdentityAttribute.objects.create(organization=self.org, user=self.user, key="custom-key", value="x")
-        keys = abac.get_suggestion_keys(self.org)
+        keys = abac.get_identity_attribute_suggestion_keys(self.org)
         self.assertIn("custom-key", keys)
 
-    def test_includes_org_specific_values(self) -> None:
-        IdentityAttribute.objects.create(organization=self.org, user=self.user, key="k", value="custom-value")
-        values = abac.get_suggestion_values(self.org)
-        self.assertIn("custom-value", values)
+    def test_identity_excludes_resource_tag_keys(self) -> None:
+        workspace = Workspace.objects.get(organization=self.org, slug="default")
+        ResourceTag.objects.create(
+            organization=self.org, resource_type="workspace", workspace=workspace, key="infra-key", value="x",
+        )
+        keys = abac.get_identity_attribute_suggestion_keys(self.org)
+        self.assertNotIn("infra-key", keys)
+
+    def test_tag_includes_resource_tag_keys(self) -> None:
+        workspace = Workspace.objects.get(organization=self.org, slug="default")
+        ResourceTag.objects.create(
+            organization=self.org, resource_type="workspace", workspace=workspace, key="infra-key", value="x",
+        )
+        keys = abac.get_resource_tag_suggestion_keys(self.org)
+        self.assertIn("infra-key", keys)
+
+    def test_tag_excludes_identity_attribute_keys(self) -> None:
+        IdentityAttribute.objects.create(organization=self.org, user=self.user, key="custom-key", value="x")
+        keys = abac.get_resource_tag_suggestion_keys(self.org)
+        self.assertNotIn("custom-key", keys)
 
     def test_results_are_sorted(self) -> None:
-        keys = abac.get_suggestion_keys(self.org)
+        keys = abac.get_identity_attribute_suggestion_keys(self.org)
         self.assertEqual(keys, sorted(keys))
-        values = abac.get_suggestion_values(self.org)
+        values = abac.get_resource_tag_suggestion_values(self.org)
         self.assertEqual(values, sorted(values))

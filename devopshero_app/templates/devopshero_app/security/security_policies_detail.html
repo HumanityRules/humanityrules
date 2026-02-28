@@ -216,16 +216,16 @@
 
         {# Datalists for autocompletion #}
         <datalist id="identity-keys">
-            {% for key in existing_keys %}<option value="{{ key }}">{% endfor %}
+            {% for key in existing_identity_keys %}<option value="{{ key }}">{% endfor %}
         </datalist>
         <datalist id="identity-values">
-            {% for val in existing_values %}<option value="{{ val }}">{% endfor %}
+            {% for val in existing_identity_values %}<option value="{{ val }}">{% endfor %}
         </datalist>
         <datalist id="resource-keys">
-            {% for key in existing_keys %}<option value="{{ key }}">{% endfor %}
+            {% for key in existing_tag_keys %}<option value="{{ key }}">{% endfor %}
         </datalist>
         <datalist id="resource-values">
-            {% for val in existing_values %}<option value="{{ val }}">{% endfor %}
+            {% for val in existing_tag_values %}<option value="{{ val }}">{% endfor %}
         </datalist>
     </div>
 </div>
