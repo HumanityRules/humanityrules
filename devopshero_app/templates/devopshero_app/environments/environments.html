@@ -42,8 +42,8 @@
         </a>
         {% endfor %}
 
-        {# New Environment card - only show if AWS accounts exist #}
-        {% if aws_accounts %}
+        {# New Environment card - org-admin only, requires AWS accounts #}
+        {% if user_is_org_admin and aws_accounts %}
         <button type="button"
                 onclick="document.getElementById('aws-account-picker-modal').classList.remove('hidden')"
                 class="flex flex-col items-center justify-center p-4 border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-lg hover:border-indigo-500 dark:hover:border-indigo-400 hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors group min-h-[104px]">

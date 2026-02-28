@@ -119,6 +119,11 @@ def app_deployment_teardown(request: HttpRequest, app_slug: str, deployment_id: 
 def app_deployment_status(request: HttpRequest, app_slug: str, deployment_id: UUID) -> HttpResponse:
     """Return updated deployment row HTML for polling."""
     app = _get_app_for_user(request, app_slug)
+
+    denied = abac_view_checks.check_abac(request, app.workspace, "workspace", "workspace:view")
+    if denied:
+        return denied
+
     deployment = _get_deployment_for_app(app, deployment_id)
 
     mode = request.GET.get("mode", "")
@@ -131,6 +136,11 @@ def app_deployment_status(request: HttpRequest, app_slug: str, deployment_id: UU
 def app_teardown_confirm(request: HttpRequest, app_slug: str, deployment_id: UUID) -> HttpResponse:
     """Return the teardown confirmation modal HTML."""
     app = _get_app_for_user(request, app_slug)
+
+    denied = abac_view_checks.check_abac(request, app.workspace, "workspace", "workspace:view")
+    if denied:
+        return denied
+
     deployment = _get_deployment_for_app(app, deployment_id)
 
     context = {"app": app, "deployment": deployment}

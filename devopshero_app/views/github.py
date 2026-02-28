@@ -9,12 +9,13 @@ import logging
 
 from django.conf import settings
 from django.contrib.auth.decorators import login_required
-from django.http import HttpResponse, HttpResponseBadRequest
+from django.http import HttpResponse, HttpResponseBadRequest, HttpResponseForbidden
 from django.shortcuts import redirect
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_POST
 
 from devopshero_app.models import GitProviderIntegration
+from devopshero_app.services import abac
 from devopshero_app.services.gitproviders import github_client
 
 logger = logging.getLogger(__name__)
@@ -23,8 +24,11 @@ logger = logging.getLogger(__name__)
 @login_required
 def github_connect(request):
     """Redirect user to GitHub App installation page."""
-    # Store the organization ID in session so we know which org to connect on callback
     org = request.user.current_organization
+    if not abac.is_org_admin(organization=org, user=request.user):
+        return HttpResponseForbidden("You must be an organization admin to connect GitHub.")
+
+    # Store the organization ID in session so we know which org to connect on callback
     request.session["github_connect_org_id"] = str(org.id)
 
     installation_url = github_client.get_app_installation_url()
@@ -34,6 +38,10 @@ def github_connect(request):
 @login_required
 def github_callback(request):
     """Handle GitHub App installation callback."""
+    org = request.user.current_organization
+    if not abac.is_org_admin(organization=org, user=request.user):
+        return HttpResponseForbidden("You must be an organization admin to connect GitHub.")
+
     installation_id = request.GET.get("installation_id")
     setup_action = request.GET.get("setup_action")
 

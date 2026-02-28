@@ -1,6 +1,7 @@
 from django.templatetags.static import static
 
 from ..models import OrganizationMembership
+from ..services import abac
 
 
 def get_app_shell_context(request, current_page):
@@ -34,7 +35,7 @@ def get_app_shell_context(request, current_page):
     ]
     
     profile_menu_items = [
-        {"name": "Your profile", "url": "/profile/"},
+        {"name": "Your profile", "url": "/settings/personal/"},
         {"name": "Sign out", "url": "/auth/logout/"},
     ]
     
@@ -61,4 +62,5 @@ def get_app_shell_context(request, current_page):
         "search_url": "/search/",
         "site_logo_url": static('devopshero_app/devops-hero-logo-large.png'),
         "site_name": "DevOps Hero",
+        "user_is_org_admin": abac.is_org_admin(organization=current_org, user=user),
     }

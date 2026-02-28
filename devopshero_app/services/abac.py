@@ -7,15 +7,18 @@ Evaluates access by matching identity attributes against resource tags via polic
 from typing import TypeVar
 
 from django.core.exceptions import ValidationError
+from django.db import models
 from django.db.models import QuerySet
 
 from devopshero_app.models import (
     App,
+    AppPermissionRequest,
     Environment,
     GroupAttribute,
     GroupMembership,
     IdentityAttribute,
     Organization,
+    OrganizationMembership,
     Policy,
     ResourceTag,
     User,
@@ -346,6 +349,34 @@ def is_org_admin(organization: Organization, user: User) -> bool:
     """Check if user has org-role=admin attribute (direct or group-inherited)."""
     attrs = get_effective_attributes(organization, user)
     return any(k == "org-role" and v == "admin" for k, v, _ in attrs)
+
+
+def filter_visible_app_permission_requests(
+    organization: Organization,
+    user: User,
+    queryset: QuerySet[AppPermissionRequest],
+) -> QuerySet[AppPermissionRequest]:
+    """Filter app permission requests to those the user should see: own, approvable, or all (org-admin)."""
+    if not OrganizationMembership.objects.filter(organization=organization, user=user).exists():
+        raise ValueError(
+            f"filter_visible_app_permission_requests called for user {user.email!r} "
+            f"who is not a member of organization {organization.slug!r}."
+        )
+
+    if is_org_admin(organization, user):
+        return queryset
+
+    approvable_envs = filter_permitted_resources(
+        organization=organization,
+        user=user,
+        queryset=Environment.objects.filter(aws_account__organization=organization),
+        resource_type="environment",
+        action="environment:approve",
+    )
+
+    return queryset.filter(
+        models.Q(created_by=user) | models.Q(environment__in=approvable_envs)
+    )
 
 
 # ---------------------------------------------------------------------------
