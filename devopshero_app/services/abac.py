@@ -387,7 +387,7 @@ def bootstrap_organization(organization: Organization, admin_user: User) -> None
     """
     Create seed ABAC data for a new organization:
     1. IdentityAttribute org-role=admin on admin_user
-    2. Three seed policies (workspace:admin, environment:admin, app:use) for org admins
+    2. Nine seed policies for admin/member/viewer org-roles
     """
     IdentityAttribute.objects.get_or_create(
         organization=organization,
@@ -397,19 +397,61 @@ def bootstrap_organization(organization: Organization, admin_user: User) -> None
     )
 
     seed_policies = [
+        # Admin: full control over everything
         {
             "name": "Org admins: full workspace access",
             "resource_type": "workspace",
+            "identity_conditions": [{"key": "org-role", "value": "admin"}],
             "actions": ["workspace:admin"],
         },
         {
             "name": "Org admins: full environment access",
             "resource_type": "environment",
+            "identity_conditions": [{"key": "org-role", "value": "admin"}],
             "actions": ["environment:admin"],
         },
         {
             "name": "Org admins: app usage",
             "resource_type": "app",
+            "identity_conditions": [{"key": "org-role", "value": "admin"}],
+            "actions": ["app:use"],
+        },
+        # Member: view/edit workspaces, view/deploy environments, use apps
+        {
+            "name": "Org members: workspace access",
+            "resource_type": "workspace",
+            "identity_conditions": [{"key": "org-role", "value": "member"}],
+            "actions": ["workspace:view", "workspace:edit"],
+        },
+        {
+            "name": "Org members: environment access",
+            "resource_type": "environment",
+            "identity_conditions": [{"key": "org-role", "value": "member"}],
+            "actions": ["environment:view", "environment:deploy"],
+        },
+        {
+            "name": "Org members: app usage",
+            "resource_type": "app",
+            "identity_conditions": [{"key": "org-role", "value": "member"}],
+            "actions": ["app:use"],
+        },
+        # Viewer: read-only platform access, use apps
+        {
+            "name": "Org viewers: workspace access",
+            "resource_type": "workspace",
+            "identity_conditions": [{"key": "org-role", "value": "viewer"}],
+            "actions": ["workspace:view"],
+        },
+        {
+            "name": "Org viewers: environment access",
+            "resource_type": "environment",
+            "identity_conditions": [{"key": "org-role", "value": "viewer"}],
+            "actions": ["environment:view"],
+        },
+        {
+            "name": "Org viewers: app usage",
+            "resource_type": "app",
+            "identity_conditions": [{"key": "org-role", "value": "viewer"}],
             "actions": ["app:use"],
         },
     ]
@@ -420,7 +462,7 @@ def bootstrap_organization(organization: Organization, admin_user: User) -> None
             name=seed["name"],
             defaults={
                 "resource_type": seed["resource_type"],
-                "identity_conditions": [{"key": "org-role", "value": "admin"}],
+                "identity_conditions": seed["identity_conditions"],
                 "resource_conditions": [{"key": "*", "value": "*"}],
                 "actions": seed["actions"],
                 "is_system": True,
@@ -478,3 +520,53 @@ def create_default_environment_tag(environment: Environment) -> None:
         key="environment-name",
         value=environment.slug,
     )
+
+
+# ---------------------------------------------------------------------------
+# Suggestion palette for tag/attribute input forms
+# ---------------------------------------------------------------------------
+
+SUGGESTED_KEYS = {"org-role", "authenticated", "team", "role"}
+SUGGESTED_VALUES = {"admin", "member", "viewer", "true"}
+
+
+def get_identity_suggestion_keys(org: Organization) -> list[str]:
+    """Suggestion keys for identity attribute forms (people, groups)."""
+    attr_keys = set(IdentityAttribute.objects.filter(organization=org).values_list("key", flat=True).distinct())
+    group_attr_keys = set(GroupAttribute.objects.filter(group__organization=org).values_list("key", flat=True).distinct())
+    return sorted(attr_keys | group_attr_keys | SUGGESTED_KEYS)
+
+
+def get_identity_suggestion_values(org: Organization) -> list[str]:
+    """Suggestion values for identity attribute forms (people, groups)."""
+    attr_vals = set(IdentityAttribute.objects.filter(organization=org).values_list("value", flat=True).distinct())
+    group_attr_vals = set(GroupAttribute.objects.filter(group__organization=org).values_list("value", flat=True).distinct())
+    return sorted(attr_vals | group_attr_vals | SUGGESTED_VALUES)
+
+
+def get_tag_suggestion_keys(org: Organization) -> list[str]:
+    """Suggestion keys for resource tag forms (workspaces, apps, environments)."""
+    tag_keys = set(ResourceTag.objects.filter(organization=org).values_list("key", flat=True).distinct())
+    return sorted(tag_keys | SUGGESTED_KEYS)
+
+
+def get_tag_suggestion_values(org: Organization) -> list[str]:
+    """Suggestion values for resource tag forms (workspaces, apps, environments)."""
+    tag_vals = set(ResourceTag.objects.filter(organization=org).values_list("value", flat=True).distinct())
+    return sorted(tag_vals | SUGGESTED_VALUES)
+
+
+def get_suggestion_keys(org: Organization) -> list[str]:
+    """All suggestion keys (identity + resource). Used by the policy editor."""
+    tag_keys = set(ResourceTag.objects.filter(organization=org).values_list("key", flat=True).distinct())
+    attr_keys = set(IdentityAttribute.objects.filter(organization=org).values_list("key", flat=True).distinct())
+    group_attr_keys = set(GroupAttribute.objects.filter(group__organization=org).values_list("key", flat=True).distinct())
+    return sorted(tag_keys | attr_keys | group_attr_keys | SUGGESTED_KEYS)
+
+
+def get_suggestion_values(org: Organization) -> list[str]:
+    """All suggestion values (identity + resource). Used by the policy editor."""
+    tag_vals = set(ResourceTag.objects.filter(organization=org).values_list("value", flat=True).distinct())
+    attr_vals = set(IdentityAttribute.objects.filter(organization=org).values_list("value", flat=True).distinct())
+    group_attr_vals = set(GroupAttribute.objects.filter(group__organization=org).values_list("value", flat=True).distinct())
+    return sorted(tag_vals | attr_vals | group_attr_vals | SUGGESTED_VALUES)

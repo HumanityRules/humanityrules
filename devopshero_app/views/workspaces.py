@@ -116,6 +116,8 @@ def workspace_detail(request: HttpRequest, workspace_slug: str) -> HttpResponse:
     context["show_costs"] = show_costs
     context["tags"] = tags
     context["can_admin"] = can_admin
+    context["suggested_keys"] = abac.get_tag_suggestion_keys(request.user.current_organization)
+    context["suggested_values"] = abac.get_tag_suggestion_values(request.user.current_organization)
 
     return render(request, "devopshero_app/workspaces/workspace_detail.html", context=context)
 
@@ -170,8 +172,12 @@ def workspace_tag_add(request: HttpRequest, workspace_slug: str) -> HttpResponse
             value=value,
         )
 
+    org = request.user.current_organization
     tags = ResourceTag.objects.filter(workspace=workspace).order_by("key", "value")
-    return render(request, "devopshero_app/workspaces/_workspace_tags.html", {"tags": tags, "workspace": workspace, "can_admin": True})
+    return render(request, "devopshero_app/workspaces/_workspace_tags.html", {
+        "tags": tags, "workspace": workspace, "can_admin": True,
+        "suggested_keys": abac.get_tag_suggestion_keys(org), "suggested_values": abac.get_tag_suggestion_values(org),
+    })
 
 
 @login_required
@@ -186,6 +192,10 @@ def workspace_tag_remove(request: HttpRequest, workspace_slug: str, tag_id: UUID
 
     ResourceTag.objects.filter(id=tag_id, workspace=workspace).delete()
 
+    org = request.user.current_organization
     tags = ResourceTag.objects.filter(workspace=workspace).order_by("key", "value")
-    return render(request, "devopshero_app/workspaces/_workspace_tags.html", {"tags": tags, "workspace": workspace, "can_admin": True})
+    return render(request, "devopshero_app/workspaces/_workspace_tags.html", {
+        "tags": tags, "workspace": workspace, "can_admin": True,
+        "suggested_keys": abac.get_tag_suggestion_keys(org), "suggested_values": abac.get_tag_suggestion_values(org),
+    })
 

@@ -19,7 +19,6 @@ from ..models import (
     Organization,
     OrganizationMembership,
     Policy,
-    ResourceTag,
     User,
 )
 from ..services import abac
@@ -105,6 +104,8 @@ def security_people_detail(request: HttpRequest, user_id: UUID) -> HttpResponse:
     context["group_attrs"] = group_attrs
     context["group_memberships"] = group_memberships
     context["available_groups"] = available_groups
+    context["suggested_keys"] = abac.get_identity_suggestion_keys(org)
+    context["suggested_values"] = abac.get_identity_suggestion_values(org)
     return render(request, "devopshero_app/security/security_people_detail.html", context=context)
 
 
@@ -202,6 +203,8 @@ def _render_people_attributes_partial(request: HttpRequest, org: Organization, m
         "group_attrs": group_attrs,
         "group_memberships": group_memberships,
         "available_groups": available_groups,
+        "suggested_keys": abac.get_identity_suggestion_keys(org),
+        "suggested_values": abac.get_identity_suggestion_values(org),
     })
 
 
@@ -291,6 +294,8 @@ def security_group_detail(request: HttpRequest, group_id: UUID) -> HttpResponse:
     context["attributes"] = attributes
     context["members"] = members
     context["available_users"] = available_users
+    context["suggested_keys"] = abac.get_identity_suggestion_keys(org)
+    context["suggested_values"] = abac.get_identity_suggestion_values(org)
     return render(request, "devopshero_app/security/security_groups_detail.html", context=context)
 
 
@@ -378,9 +383,13 @@ def security_group_member_remove(request: HttpRequest, group_id: UUID, membershi
 
 
 def _render_group_attributes_partial(request: HttpRequest, group: Group) -> HttpResponse:
+    org = group.organization
     attributes = group.attributes.order_by("key", "value")
     return render(request, "devopshero_app/security/_group_attributes.html", {
-        "group": group, "attributes": attributes,
+        "group": group,
+        "attributes": attributes,
+        "suggested_keys": abac.get_identity_suggestion_keys(org),
+        "suggested_values": abac.get_identity_suggestion_values(org),
     })
 
 
@@ -448,8 +457,8 @@ def security_policy_create(request: HttpRequest) -> HttpResponse:
                 resource_conditions=resource_conditions,
             )
         except ValidationError as e:
-            existing_keys = _get_existing_tag_keys(org)
-            existing_values = _get_existing_tag_values(org)
+            existing_keys = abac.get_suggestion_keys(org)
+            existing_values = abac.get_suggestion_values(org)
             context = base.get_app_shell_context(request=request, current_page="security")
             context["active_tab"] = "policies"
             context["policy"] = None
@@ -470,8 +479,8 @@ def security_policy_create(request: HttpRequest) -> HttpResponse:
         return redirect("security_policies")
 
     # GET — show form
-    existing_keys = _get_existing_tag_keys(org)
-    existing_values = _get_existing_tag_values(org)
+    existing_keys = abac.get_suggestion_keys(org)
+    existing_values = abac.get_suggestion_values(org)
 
     context = base.get_app_shell_context(request=request, current_page="security")
     context["active_tab"] = "policies"
@@ -506,8 +515,8 @@ def security_policy_detail(request: HttpRequest, policy_id: UUID) -> HttpRespons
                 resource_conditions=resource_conditions,
             )
         except ValidationError as e:
-            existing_keys = _get_existing_tag_keys(org)
-            existing_values = _get_existing_tag_values(org)
+            existing_keys = abac.get_suggestion_keys(org)
+            existing_values = abac.get_suggestion_values(org)
             context = base.get_app_shell_context(request=request, current_page="security")
             context["active_tab"] = "policies"
             context["policy"] = policy
@@ -524,8 +533,8 @@ def security_policy_detail(request: HttpRequest, policy_id: UUID) -> HttpRespons
         policy.save()
         return redirect("security_policies")
 
-    existing_keys = _get_existing_tag_keys(org)
-    existing_values = _get_existing_tag_values(org)
+    existing_keys = abac.get_suggestion_keys(org)
+    existing_values = abac.get_suggestion_values(org)
 
     context = base.get_app_shell_context(request=request, current_page="security")
     context["active_tab"] = "policies"
@@ -549,17 +558,3 @@ def security_policy_delete(request: HttpRequest, policy_id: UUID) -> HttpRespons
     return redirect("security_policies")
 
 
-def _get_existing_tag_keys(org: Organization) -> list[str]:
-    """Get distinct resource tag keys and identity attribute keys for datalist suggestions."""
-    tag_keys = set(ResourceTag.objects.filter(organization=org).values_list("key", flat=True).distinct())
-    attr_keys = set(IdentityAttribute.objects.filter(organization=org).values_list("key", flat=True).distinct())
-    group_attr_keys = set(GroupAttribute.objects.filter(group__organization=org).values_list("key", flat=True).distinct())
-    return sorted(tag_keys | attr_keys | group_attr_keys | {"org-role", "authenticated"})
-
-
-def _get_existing_tag_values(org: Organization) -> list[str]:
-    """Get distinct resource tag values and identity attribute values for datalist suggestions."""
-    tag_vals = set(ResourceTag.objects.filter(organization=org).values_list("value", flat=True).distinct())
-    attr_vals = set(IdentityAttribute.objects.filter(organization=org).values_list("value", flat=True).distinct())
-    group_attr_vals = set(GroupAttribute.objects.filter(group__organization=org).values_list("value", flat=True).distinct())
-    return sorted(tag_vals | attr_vals | group_attr_vals | {"admin", "true"})
