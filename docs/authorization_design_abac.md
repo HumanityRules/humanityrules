@@ -154,6 +154,14 @@ Actions describe what someone can do. They are resource-type-specific. The actio
 
 Some actions are supersets of others (as noted above). When a policy grants `workspace:admin`, the identity implicitly has all other workspace actions. The action catalog can grow over time without restructuring the authorization model.
 
+### Platform Visibility vs. App Access
+
+`app:use` is exclusively a runtime action evaluated by the sidecar proxy. It controls who can open and use the deployed application, not who can see the app listed in the DOH platform.
+
+Currently, platform visibility of apps and datastores is derived from `workspace:view` on the parent workspace. If a user has `workspace:view`, they can see all apps and datastores within that workspace on the dashboard and workspace detail pages. There is no `app:view` action — visibility is all-or-nothing at the workspace level.
+
+**Limitation:** There is no way to hide a specific app from a user who has `workspace:view` on its workspace. A future `app:view` action would allow per-app platform visibility control — for example, denying a user or group from seeing sensitive apps inside workspaces they otherwise have access to. Until then, the workspace boundary is the finest granularity for platform visibility.
+
 
 ## Policies
 
