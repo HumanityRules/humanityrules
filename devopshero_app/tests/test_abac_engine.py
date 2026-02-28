@@ -591,6 +591,50 @@ class TestEvaluatePolicies(TestCase):
         )
         self.assertNotIn("workspace:view", result)
 
+    def test_deny_on_admin_action_leaves_implied_actions(self) -> None:
+        """Denying !workspace:admin must not strip the implied view+edit.
+
+        Grant hierarchy expansion is one-way: grants expand downward but denials
+        are literal. If denials were also expanded, a single !workspace:admin would
+        nuke all workspace actions, which is not the intended semantics.
+        """
+        Policy.objects.create(
+            organization=self.org, name="Admin grant",
+            resource_type="workspace",
+            identity_conditions=[{"key": "role", "value": "developer"}],
+            resource_conditions=[{"key": "domain", "value": "engineering"}],
+            actions=["workspace:admin"],
+        )
+        Policy.objects.create(
+            organization=self.org, name="Deny admin",
+            resource_type="workspace",
+            identity_conditions=[{"key": "role", "value": "developer"}],
+            resource_conditions=[{"key": "domain", "value": "engineering"}],
+            actions=["!workspace:admin"],
+        )
+        result = abac.evaluate_policies(
+            organization=self.org, user=self.user,
+            resource=self.workspace, resource_type="workspace",
+        )
+        self.assertNotIn("workspace:admin", result)
+        self.assertIn("workspace:view", result)
+        self.assertIn("workspace:edit", result)
+
+    def test_deny_only_policy_grants_nothing(self) -> None:
+        """A policy with only deny actions and no matching grants yields empty set."""
+        Policy.objects.create(
+            organization=self.org, name="Deny only",
+            resource_type="workspace",
+            identity_conditions=[{"key": "role", "value": "developer"}],
+            resource_conditions=[{"key": "domain", "value": "engineering"}],
+            actions=["!workspace:view", "!workspace:edit"],
+        )
+        result = abac.evaluate_policies(
+            organization=self.org, user=self.user,
+            resource=self.workspace, resource_type="workspace",
+        )
+        self.assertEqual(result, set())
+
 
 # ---------------------------------------------------------------------------
 # 1.5 Unscoped Evaluation
@@ -840,6 +884,73 @@ class TestFilterPermittedResources(TestCase):
         self.assertIn(self.ws_hr.pk, result_pks)
         self.assertNotIn(self.ws_fin.pk, result_pks)
 
+    def test_hierarchy_from_scoped_grant_in_per_resource_path(self) -> None:
+        """Scoped admin grant must expand to edit in the per-resource fallback path.
+
+        Wildcard grants view on everything. Scoped grants admin on engineering only.
+        Asking for edit: the wildcard shortcut only sees view (not edit), so it falls
+        through to per-resource evaluation. The per-resource path must expand the
+        scoped admin grant on engineering to include edit.
+        """
+        Policy.objects.create(
+            organization=self.org, name="View all",
+            resource_type="workspace",
+            identity_conditions=[{"key": "role", "value": "developer"}],
+            resource_conditions=[{"key": "*", "value": "*"}],
+            actions=["workspace:view"],
+        )
+        Policy.objects.create(
+            organization=self.org, name="Admin engineering",
+            resource_type="workspace",
+            identity_conditions=[{"key": "role", "value": "developer"}],
+            resource_conditions=[{"key": "domain", "value": "engineering"}],
+            actions=["workspace:admin"],
+        )
+        qs = self._all_workspaces()
+        result = abac.filter_permitted_resources(
+            organization=self.org, user=self.user,
+            queryset=qs, resource_type="workspace", action="workspace:edit",
+        )
+        self.assertEqual(set(result.values_list("pk", flat=True)), {self.ws_eng.pk})
+
+    def test_wildcard_deny_on_hierarchy_expanded_action(self) -> None:
+        """Wildcard deny on an expanded action must block the shortcut for that action.
+
+        Wildcard grants admin (expands to admin+view+edit), wildcard denies edit.
+        Asking for view should take the shortcut (view is in expanded-denials).
+        Asking for edit should fall through and be denied on all resources.
+        """
+        Policy.objects.create(
+            organization=self.org, name="Admin all",
+            resource_type="workspace",
+            identity_conditions=[{"key": "role", "value": "developer"}],
+            resource_conditions=[{"key": "*", "value": "*"}],
+            actions=["workspace:admin"],
+        )
+        Policy.objects.create(
+            organization=self.org, name="Deny edit globally",
+            resource_type="workspace",
+            identity_conditions=[{"key": "role", "value": "developer"}],
+            resource_conditions=[{"key": "*", "value": "*"}],
+            actions=["!workspace:edit"],
+        )
+        qs = self._all_workspaces()
+
+        view_result = abac.filter_permitted_resources(
+            organization=self.org, user=self.user,
+            queryset=qs, resource_type="workspace", action="workspace:view",
+        )
+        self.assertEqual(
+            set(view_result.values_list("pk", flat=True)),
+            set(qs.values_list("pk", flat=True)),
+        )
+
+        edit_result = abac.filter_permitted_resources(
+            organization=self.org, user=self.user,
+            queryset=qs, resource_type="workspace", action="workspace:edit",
+        )
+        self.assertEqual(edit_result.count(), 0)
+
 
 # ---------------------------------------------------------------------------
 # 1.6b Cross-Org Isolation
@@ -966,6 +1077,75 @@ class TestCrossOrgIsolation(TestCase):
 
 
 # ---------------------------------------------------------------------------
+# 4. Cross-Organization Isolation
+# ---------------------------------------------------------------------------
+
+
+class TestCrossOrgIsolationEndToEnd(TestCase):
+    """Section 4: Full cross-org isolation scenarios from the test plan.
+
+    Lower-level cross-org assertions live in TestCrossOrgIsolation (1.6b) and
+    TestCrossOrgAttributeIsolation (1.7b). These tests exercise the full engine
+    chain: bootstrapping, attributes, policies, and evaluation across two orgs.
+    """
+
+    def setUp(self) -> None:
+        self.org_a = Organization.objects.create(name="Org A", slug="cross-org-a")
+        self.org_b = Organization.objects.create(name="Org B", slug="cross-org-b")
+
+        self.user = User.objects.create_user(
+            username="cross_org_user", password="testpass", current_organization=self.org_a,
+        )
+        abac.bootstrap_organization(organization=self.org_a, admin_user=self.user)
+
+        self.ws_b = Workspace.objects.create(organization=self.org_b, name="WS-B", slug="ws-b")
+        ResourceTag.objects.create(
+            organization=self.org_b, resource_type="workspace", workspace=self.ws_b,
+            key="domain", value="engineering",
+        )
+
+    def test_org_a_admin_gets_no_access_evaluating_org_b_workspace(self) -> None:
+        """Fully bootstrapped admin in org A gets empty set when evaluating org B's workspace."""
+        self.assertTrue(abac.is_org_admin(organization=self.org_a, user=self.user))
+
+        result = abac.evaluate_policies(
+            organization=self.org_b, user=self.user,
+            resource=self.ws_b, resource_type="workspace",
+        )
+        self.assertEqual(result, set())
+
+    def test_org_a_policies_do_not_influence_org_b_evaluation(self) -> None:
+        """Policy in org A granting access to matching tags has no effect in org B."""
+        Policy.objects.create(
+            organization=self.org_a, name="Eng access",
+            resource_type="workspace",
+            identity_conditions=[{"key": "role", "value": "developer"}],
+            resource_conditions=[{"key": "domain", "value": "engineering"}],
+            actions=["workspace:view"],
+        )
+        IdentityAttribute.objects.create(
+            organization=self.org_a, user=self.user, key="role", value="developer",
+        )
+
+        result = abac.evaluate_policies(
+            organization=self.org_b, user=self.user,
+            resource=self.ws_b, resource_type="workspace",
+        )
+        self.assertEqual(result, set())
+
+    def test_filter_permitted_resources_returns_empty_for_cross_org_user(self) -> None:
+        """filter_permitted_resources with properly-scoped org B queryset returns nothing for org A admin."""
+        self.assertTrue(abac.is_org_admin(organization=self.org_a, user=self.user))
+
+        org_b_qs = Workspace.objects.filter(organization=self.org_b)
+        result = abac.filter_permitted_resources(
+            organization=self.org_b, user=self.user,
+            queryset=org_b_qs, resource_type="workspace", action="workspace:view",
+        )
+        self.assertEqual(result.count(), 0)
+
+
+# ---------------------------------------------------------------------------
 # 1.7 Org Admin Check
 # ---------------------------------------------------------------------------
 
@@ -992,3 +1172,655 @@ class TestIsOrgAdmin(TestCase):
 
     def test_no_admin_attribute(self) -> None:
         self.assertFalse(abac.is_org_admin(organization=self.org, user=self.user))
+
+    def test_admin_in_one_org_not_admin_in_another(self) -> None:
+        """org-role=admin in org A must not leak into org B."""
+        org_b = Organization.objects.create(name="Other Org", slug="other-org")
+        IdentityAttribute.objects.create(
+            organization=self.org, user=self.user, key="org-role", value="admin",
+        )
+        self.assertTrue(abac.is_org_admin(organization=self.org, user=self.user))
+        self.assertFalse(abac.is_org_admin(organization=org_b, user=self.user))
+
+
+# ---------------------------------------------------------------------------
+# 1.7b Cross-Org Attribute Isolation
+# ---------------------------------------------------------------------------
+
+
+class TestCrossOrgAttributeIsolation(TestCase):
+    """Attributes from one org must never appear when querying another."""
+
+    def setUp(self) -> None:
+        self.org_a = Organization.objects.create(name="Attr Org A", slug="attr-org-a")
+        self.org_b = Organization.objects.create(name="Attr Org B", slug="attr-org-b")
+        self.user = User.objects.create_user(
+            username="cross_attr_user", password="testpass", current_organization=self.org_a,
+        )
+
+    def test_direct_attribute_scoped_to_org(self) -> None:
+        IdentityAttribute.objects.create(
+            organization=self.org_a, user=self.user, key="role", value="developer",
+        )
+        attrs_a = abac.get_effective_attributes(organization=self.org_a, user=self.user)
+        attrs_b = abac.get_effective_attributes(organization=self.org_b, user=self.user)
+
+        self.assertIn(("role", "developer", "direct"), attrs_a)
+        self.assertNotIn(("role", "developer", "direct"), attrs_b)
+
+    def test_group_attribute_scoped_to_org(self) -> None:
+        group = Group.objects.create(organization=self.org_a, name="Engineers")
+        GroupMembership.objects.create(group=group, user=self.user)
+        GroupAttribute.objects.create(group=group, key="team", value="backend")
+
+        attrs_a = abac.get_effective_attributes(organization=self.org_a, user=self.user)
+        attrs_b = abac.get_effective_attributes(organization=self.org_b, user=self.user)
+
+        self.assertIn(("team", "backend", "group:Engineers"), attrs_a)
+        self.assertNotIn(("team", "backend", "group:Engineers"), attrs_b)
+
+    def test_system_attribute_present_in_both_orgs(self) -> None:
+        """authenticated=true is context-free and appears regardless of org."""
+        attrs_a = abac.get_effective_attributes(organization=self.org_a, user=self.user)
+        attrs_b = abac.get_effective_attributes(organization=self.org_b, user=self.user)
+
+        self.assertIn(("authenticated", "true", "system"), attrs_a)
+        self.assertIn(("authenticated", "true", "system"), attrs_b)
+
+
+# ---------------------------------------------------------------------------
+# 3.1 Organization Bootstrap
+# ---------------------------------------------------------------------------
+
+
+class TestBootstrapOrganization(TestCase):
+
+    def setUp(self) -> None:
+        self.org = Organization.objects.create(name="Bootstrap Org", slug="bootstrap-org")
+        self.admin_user = User.objects.create_user(
+            username="bootstrap_admin", password="testpass", current_organization=self.org,
+        )
+
+    def test_creates_admin_attribute(self) -> None:
+        abac.bootstrap_organization(organization=self.org, admin_user=self.admin_user)
+        self.assertTrue(
+            IdentityAttribute.objects.filter(
+                organization=self.org, user=self.admin_user, key="org-role", value="admin",
+            ).exists()
+        )
+
+    def test_creates_three_seed_policies(self) -> None:
+        abac.bootstrap_organization(organization=self.org, admin_user=self.admin_user)
+        seed_policies = Policy.objects.filter(organization=self.org, is_system=True)
+        self.assertEqual(seed_policies.count(), 3)
+
+        resource_types = set(seed_policies.values_list("resource_type", flat=True))
+        self.assertEqual(resource_types, {"workspace", "environment", "app"})
+
+        for policy in seed_policies:
+            self.assertEqual(policy.identity_conditions, [{"key": "org-role", "value": "admin"}])
+            self.assertEqual(policy.resource_conditions, [{"key": "*", "value": "*"}])
+
+    def test_seed_policy_actions(self) -> None:
+        abac.bootstrap_organization(organization=self.org, admin_user=self.admin_user)
+        ws_policy = Policy.objects.get(organization=self.org, resource_type="workspace", is_system=True)
+        env_policy = Policy.objects.get(organization=self.org, resource_type="environment", is_system=True)
+        app_policy = Policy.objects.get(organization=self.org, resource_type="app", is_system=True)
+
+        self.assertEqual(ws_policy.actions, ["workspace:admin"])
+        self.assertEqual(env_policy.actions, ["environment:admin"])
+        self.assertEqual(app_policy.actions, ["app:use"])
+
+    def test_idempotent(self) -> None:
+        abac.bootstrap_organization(organization=self.org, admin_user=self.admin_user)
+        abac.bootstrap_organization(organization=self.org, admin_user=self.admin_user)
+
+        self.assertEqual(
+            IdentityAttribute.objects.filter(
+                organization=self.org, user=self.admin_user, key="org-role", value="admin",
+            ).count(),
+            1,
+        )
+        self.assertEqual(
+            Policy.objects.filter(organization=self.org, is_system=True).count(),
+            3,
+        )
+
+
+# ---------------------------------------------------------------------------
+# 3.2 App Default Policy
+# ---------------------------------------------------------------------------
+
+
+class TestCreateDefaultAppPolicy(TestCase):
+
+    def setUp(self) -> None:
+        self.org = Organization.objects.create(name="AppDefault Org", slug="appdefault-org")
+        self.workspace = Workspace.objects.get(organization=self.org, slug="default")
+        self.repo = Repository.objects.create(
+            organization=self.org, provider="github", name="repo",
+            full_name="org/repo", clone_url="https://github.com/org/repo.git",
+        )
+
+    def _make_app(self, name: str, slug: str) -> App:
+        return App.objects.create(
+            organization=self.org, workspace=self.workspace, repository=self.repo,
+            name=name, slug=slug, app_type="web", build_strategy="dockerfile",
+            branch="main", container_port=8000, cpu=256, memory=512,
+            health_check_path="/health",
+        )
+
+    def test_creates_app_name_tag(self) -> None:
+        app = self._make_app(name="My Dashboard", slug="my-dashboard")
+        self.assertTrue(
+            ResourceTag.objects.filter(
+                organization=self.org, resource_type="app", app=app,
+                key="app-name", value="my-dashboard",
+            ).exists()
+        )
+
+    def test_creates_wildcard_app_use_policy(self) -> None:
+        app = self._make_app(name="My Dashboard", slug="my-dashboard")
+        policy = Policy.objects.get(
+            organization=self.org, resource_type="app",
+            name=f"Default: {app.name} open access",
+        )
+        self.assertEqual(policy.identity_conditions, [{"key": "*", "value": "*"}])
+        self.assertEqual(policy.resource_conditions, [{"key": "app-name", "value": "my-dashboard"}])
+        self.assertEqual(policy.actions, ["app:use"])
+        self.assertTrue(policy.is_system)
+
+    def test_idempotent(self) -> None:
+        app = self._make_app(name="My Dashboard", slug="my-dashboard")
+        abac.create_default_app_policy(app)
+
+        self.assertEqual(
+            ResourceTag.objects.filter(
+                organization=self.org, resource_type="app", app=app,
+                key="app-name", value="my-dashboard",
+            ).count(),
+            1,
+        )
+        self.assertEqual(
+            Policy.objects.filter(
+                organization=self.org, resource_type="app",
+                name=f"Default: {app.name} open access",
+            ).count(),
+            1,
+        )
+
+
+# ---------------------------------------------------------------------------
+# 3.3 Auto-Tags via Signals
+# ---------------------------------------------------------------------------
+
+
+class TestAutoTagSignals(TestCase):
+
+    def setUp(self) -> None:
+        self.org = Organization.objects.create(name="Signal Org", slug="signal-org")
+        self.aws_account = AWSAccount.objects.create(
+            organization=self.org, name="Test Account",
+        )
+
+    def test_workspace_creation_produces_name_tag(self) -> None:
+        ws = Workspace.objects.create(
+            organization=self.org, name="Data Platform", slug="data-platform",
+        )
+        self.assertTrue(
+            ResourceTag.objects.filter(
+                organization=self.org, resource_type="workspace", workspace=ws,
+                key="workspace-name", value="data-platform",
+            ).exists()
+        )
+
+    def test_default_workspace_gets_name_tag(self) -> None:
+        """The auto-created 'Default' workspace from the Organization signal also gets tagged."""
+        default_ws = Workspace.objects.get(organization=self.org, slug="default")
+        self.assertTrue(
+            ResourceTag.objects.filter(
+                organization=self.org, resource_type="workspace", workspace=default_ws,
+                key="workspace-name", value="default",
+            ).exists()
+        )
+
+    def test_environment_creation_produces_name_tag(self) -> None:
+        env = Environment.objects.create(
+            aws_account=self.aws_account, name="Production", slug="production",
+            aws_region="us-east-1",
+        )
+        self.assertTrue(
+            ResourceTag.objects.filter(
+                organization=self.org, resource_type="environment", environment=env,
+                key="environment-name", value="production",
+            ).exists()
+        )
+
+
+# ---------------------------------------------------------------------------
+# 5.1 Team Onboarding
+# ---------------------------------------------------------------------------
+
+
+class TestTeamOnboardingScenario(TestCase):
+    """Replicate the 'onboarding a new team' flow from authorization_design_abac.md.
+
+    1. Create org, bootstrap, create a group with team=data-platform
+    2. Add users to the group (they inherit the attribute)
+    3. Create workspace tagged domain=data-platform
+    4. Create policy: IF identity team=data-platform AND resource domain=data-platform THEN workspace:view, workspace:edit
+    5. Verify group members can access the workspace
+    6. Verify a user outside the group cannot access the workspace
+    7. Add a new user to the group — they gain access without any policy change
+    """
+
+    def setUp(self) -> None:
+        self.org = Organization.objects.create(name="Onboarding Org", slug="onboarding-org")
+        self.admin = User.objects.create_user(
+            username="onboard_admin", password="testpass", current_organization=self.org,
+        )
+        abac.bootstrap_organization(organization=self.org, admin_user=self.admin)
+
+        self.group = Group.objects.create(organization=self.org, name="Data Platform Team")
+        GroupAttribute.objects.create(group=self.group, key="team", value="data-platform")
+
+        self.alice = User.objects.create_user(
+            username="onboard_alice", password="testpass", current_organization=self.org,
+        )
+        self.bob = User.objects.create_user(
+            username="onboard_bob", password="testpass", current_organization=self.org,
+        )
+        GroupMembership.objects.create(group=self.group, user=self.alice)
+        GroupMembership.objects.create(group=self.group, user=self.bob)
+
+        self.workspace = Workspace.objects.create(
+            organization=self.org, name="Data Platform", slug="data-platform",
+        )
+        ResourceTag.objects.create(
+            organization=self.org, resource_type="workspace", workspace=self.workspace,
+            key="domain", value="data-platform",
+        )
+
+        Policy.objects.create(
+            organization=self.org, name="Data team workspace access",
+            resource_type="workspace",
+            identity_conditions=[{"key": "team", "value": "data-platform"}],
+            resource_conditions=[{"key": "domain", "value": "data-platform"}],
+            actions=["workspace:view", "workspace:edit"],
+        )
+
+        self.outsider = User.objects.create_user(
+            username="onboard_outsider", password="testpass", current_organization=self.org,
+        )
+
+    def test_group_members_can_view_workspace(self) -> None:
+        for user in [self.alice, self.bob]:
+            result = abac.evaluate_policies(
+                organization=self.org, user=user,
+                resource=self.workspace, resource_type="workspace",
+            )
+            self.assertIn("workspace:view", result, f"{user.username} should have workspace:view")
+            self.assertIn("workspace:edit", result, f"{user.username} should have workspace:edit")
+
+    def test_outsider_cannot_access_workspace(self) -> None:
+        result = abac.evaluate_policies(
+            organization=self.org, user=self.outsider,
+            resource=self.workspace, resource_type="workspace",
+        )
+        self.assertNotIn("workspace:view", result)
+        self.assertNotIn("workspace:edit", result)
+
+    def test_outsider_excluded_from_filtered_queryset(self) -> None:
+        qs = Workspace.objects.filter(pk=self.workspace.pk)
+        result = abac.filter_permitted_resources(
+            organization=self.org, user=self.outsider,
+            queryset=qs, resource_type="workspace", action="workspace:view",
+        )
+        self.assertEqual(result.count(), 0)
+
+    def test_new_member_gains_access_without_policy_change(self) -> None:
+        carol = User.objects.create_user(
+            username="onboard_carol", password="testpass", current_organization=self.org,
+        )
+        result_before = abac.evaluate_policies(
+            organization=self.org, user=carol,
+            resource=self.workspace, resource_type="workspace",
+        )
+        self.assertNotIn("workspace:view", result_before)
+
+        GroupMembership.objects.create(group=self.group, user=carol)
+
+        result_after = abac.evaluate_policies(
+            organization=self.org, user=carol,
+            resource=self.workspace, resource_type="workspace",
+        )
+        self.assertIn("workspace:view", result_after)
+        self.assertIn("workspace:edit", result_after)
+
+    def test_filter_returns_workspace_for_members_only(self) -> None:
+        qs = Workspace.objects.filter(pk=self.workspace.pk)
+        for user in [self.alice, self.bob]:
+            result = abac.filter_permitted_resources(
+                organization=self.org, user=user,
+                queryset=qs, resource_type="workspace", action="workspace:view",
+            )
+            self.assertIn(
+                self.workspace.pk,
+                set(result.values_list("pk", flat=True)),
+                f"{user.username} should see workspace in filtered results",
+            )
+
+
+# ---------------------------------------------------------------------------
+# 5.2 Deny-Override Scenario
+# ---------------------------------------------------------------------------
+
+
+class TestDenyOverrideScenario(TestCase):
+    """Contractor-developer deny interaction from the design doc.
+
+    1. Grant environment:deploy to job-function=developer on tier=staging
+    2. Deny !environment:deploy to employment-type=contractor on tier=staging
+    3. A developer-contractor (both attributes) is denied despite the grant
+    4. A developer-employee (only job-function=developer) can deploy normally
+    """
+
+    def setUp(self) -> None:
+        self.org = Organization.objects.create(name="Deny Org", slug="deny-org")
+        self.aws_account = AWSAccount.objects.create(organization=self.org, name="Deny Account")
+
+        self.staging = Environment.objects.create(
+            aws_account=self.aws_account, name="Staging", slug="staging",
+            aws_region="us-east-1",
+        )
+        ResourceTag.objects.create(
+            organization=self.org, resource_type="environment", environment=self.staging,
+            key="tier", value="staging",
+        )
+
+        Policy.objects.create(
+            organization=self.org, name="Developers can deploy to staging",
+            resource_type="environment",
+            identity_conditions=[{"key": "job-function", "value": "developer"}],
+            resource_conditions=[{"key": "tier", "value": "staging"}],
+            actions=["environment:deploy"],
+        )
+        Policy.objects.create(
+            organization=self.org, name="No contractor deploys to staging",
+            resource_type="environment",
+            identity_conditions=[{"key": "employment-type", "value": "contractor"}],
+            resource_conditions=[{"key": "tier", "value": "staging"}],
+            actions=["!environment:deploy"],
+        )
+
+        self.contractor_dev = User.objects.create_user(
+            username="deny_contractor_dev", password="testpass", current_organization=self.org,
+        )
+        IdentityAttribute.objects.create(
+            organization=self.org, user=self.contractor_dev,
+            key="job-function", value="developer",
+        )
+        IdentityAttribute.objects.create(
+            organization=self.org, user=self.contractor_dev,
+            key="employment-type", value="contractor",
+        )
+
+        self.employee_dev = User.objects.create_user(
+            username="deny_employee_dev", password="testpass", current_organization=self.org,
+        )
+        IdentityAttribute.objects.create(
+            organization=self.org, user=self.employee_dev,
+            key="job-function", value="developer",
+        )
+
+    def test_contractor_developer_denied_deploy(self) -> None:
+        result = abac.evaluate_policies(
+            organization=self.org, user=self.contractor_dev,
+            resource=self.staging, resource_type="environment",
+        )
+        self.assertNotIn("environment:deploy", result)
+
+    def test_employee_developer_can_deploy(self) -> None:
+        result = abac.evaluate_policies(
+            organization=self.org, user=self.employee_dev,
+            resource=self.staging, resource_type="environment",
+        )
+        self.assertIn("environment:deploy", result)
+
+    def test_check_action_reflects_deny_override(self) -> None:
+        self.assertFalse(abac.check_action(
+            organization=self.org, user=self.contractor_dev,
+            resource=self.staging, resource_type="environment", action="environment:deploy",
+        ))
+        self.assertTrue(abac.check_action(
+            organization=self.org, user=self.employee_dev,
+            resource=self.staging, resource_type="environment", action="environment:deploy",
+        ))
+
+    def test_filter_excludes_staging_for_contractor(self) -> None:
+        qs = Environment.objects.filter(pk=self.staging.pk)
+        result = abac.filter_permitted_resources(
+            organization=self.org, user=self.contractor_dev,
+            queryset=qs, resource_type="environment", action="environment:deploy",
+        )
+        self.assertEqual(result.count(), 0)
+
+    def test_filter_includes_staging_for_employee(self) -> None:
+        qs = Environment.objects.filter(pk=self.staging.pk)
+        result = abac.filter_permitted_resources(
+            organization=self.org, user=self.employee_dev,
+            queryset=qs, resource_type="environment", action="environment:deploy",
+        )
+        self.assertEqual(set(result.values_list("pk", flat=True)), {self.staging.pk})
+
+
+# ---------------------------------------------------------------------------
+# 5.3 Tag Inheritance Consistency
+# ---------------------------------------------------------------------------
+
+
+class TestTagInheritanceConsistency(TestCase):
+    """Workspace tag removal propagates to app access via tag inheritance.
+
+    1. Create a workspace with tag domain=finance
+    2. Create an app in that workspace — app inherits domain=finance
+    3. Create a policy granting app:use when resource has domain=finance
+    4. Verify the app is accessible
+    5. Remove the domain=finance tag from the workspace
+    6. Verify the app is no longer accessible via that policy
+    """
+
+    def setUp(self) -> None:
+        self.org = Organization.objects.create(name="TagInherit Org", slug="taginherit-org")
+        self.workspace = Workspace.objects.create(
+            organization=self.org, name="Finance", slug="finance",
+        )
+        self.ws_tag = ResourceTag.objects.create(
+            organization=self.org, resource_type="workspace", workspace=self.workspace,
+            key="domain", value="finance",
+        )
+        self.repo = Repository.objects.create(
+            organization=self.org, provider="github", name="finrepo",
+            full_name="org/finrepo", clone_url="https://github.com/org/finrepo.git",
+        )
+        self.app = App.objects.create(
+            organization=self.org, workspace=self.workspace, repository=self.repo,
+            name="FinReports", slug="finreports", app_type="web",
+            build_strategy="dockerfile", branch="main", container_port=8000,
+            cpu=256, memory=512, health_check_path="/health",
+        )
+
+        # Remove the auto-created open-access policy from post_save signal
+        # so this test isolates the domain=finance tag inheritance pathway.
+        Policy.objects.filter(
+            organization=self.org, name=f"Default: {self.app.name} open access",
+        ).delete()
+
+        self.user = User.objects.create_user(
+            username="taginherit_user", password="testpass", current_organization=self.org,
+        )
+        IdentityAttribute.objects.create(
+            organization=self.org, user=self.user,
+            key="department", value="finance",
+        )
+
+        Policy.objects.create(
+            organization=self.org, name="Finance apps",
+            resource_type="app",
+            identity_conditions=[{"key": "department", "value": "finance"}],
+            resource_conditions=[{"key": "domain", "value": "finance"}],
+            actions=["app:use"],
+        )
+
+    def test_app_inherits_workspace_tag(self) -> None:
+        tags = abac.get_effective_tags(
+            organization=self.org, resource=self.app, resource_type="app",
+        )
+        inherited_keys = {k for k, _, s in tags if s.startswith("inherited:")}
+        self.assertIn("domain", inherited_keys)
+
+    def test_app_accessible_via_inherited_tag(self) -> None:
+        result = abac.evaluate_policies(
+            organization=self.org, user=self.user,
+            resource=self.app, resource_type="app",
+        )
+        self.assertIn("app:use", result)
+
+    def test_removing_workspace_tag_revokes_app_access(self) -> None:
+        self.assertIn("app:use", abac.evaluate_policies(
+            organization=self.org, user=self.user,
+            resource=self.app, resource_type="app",
+        ))
+
+        self.ws_tag.delete()
+
+        tags_after = abac.get_effective_tags(
+            organization=self.org, resource=self.app, resource_type="app",
+        )
+        inherited_domain = [(k, v) for k, v, s in tags_after if k == "domain" and s.startswith("inherited:")]
+        self.assertEqual(inherited_domain, [])
+
+        result = abac.evaluate_policies(
+            organization=self.org, user=self.user,
+            resource=self.app, resource_type="app",
+        )
+        self.assertNotIn("app:use", result)
+
+    def test_direct_app_tag_unaffected_by_workspace_tag_removal(self) -> None:
+        """An app with its own domain=finance tag keeps access after workspace tag removal."""
+        ResourceTag.objects.create(
+            organization=self.org, resource_type="app", app=self.app,
+            key="domain", value="finance",
+        )
+
+        self.ws_tag.delete()
+
+        result = abac.evaluate_policies(
+            organization=self.org, user=self.user,
+            resource=self.app, resource_type="app",
+        )
+        self.assertIn("app:use", result)
+
+    def test_filter_reflects_tag_inheritance_change(self) -> None:
+        qs = App.objects.filter(pk=self.app.pk)
+
+        result_before = abac.filter_permitted_resources(
+            organization=self.org, user=self.user,
+            queryset=qs, resource_type="app", action="app:use",
+        )
+        self.assertEqual(set(result_before.values_list("pk", flat=True)), {self.app.pk})
+
+        self.ws_tag.delete()
+
+        result_after = abac.filter_permitted_resources(
+            organization=self.org, user=self.user,
+            queryset=qs, resource_type="app", action="app:use",
+        )
+        self.assertEqual(result_after.count(), 0)
+
+
+# ---------------------------------------------------------------------------
+# 6. Edge Cases
+# ---------------------------------------------------------------------------
+
+
+class TestEdgeCases(TestCase):
+
+    def setUp(self) -> None:
+        self.org = Organization.objects.create(name="Edge Org", slug="edge-org")
+        self.user = User.objects.create_user(
+            username="edgeuser", password="testpass", current_organization=self.org,
+        )
+        IdentityAttribute.objects.create(
+            organization=self.org, user=self.user, key="team", value="frontend",
+        )
+        IdentityAttribute.objects.create(
+            organization=self.org, user=self.user, key="team", value="backend",
+        )
+        self.workspace = Workspace.objects.create(
+            organization=self.org, name="EdgeWS", slug="edgews",
+        )
+        ResourceTag.objects.create(
+            organization=self.org, resource_type="workspace", workspace=self.workspace,
+            key="domain", value="engineering",
+        )
+
+    def test_empty_actions_grants_nothing(self) -> None:
+        """Policy with actions=[] should grant nothing even when conditions match."""
+        Policy.objects.create(
+            organization=self.org, name="Empty actions policy",
+            resource_type="workspace",
+            identity_conditions=[{"key": "team", "value": "frontend"}],
+            resource_conditions=[{"key": "domain", "value": "engineering"}],
+            actions=[],
+        )
+        result = abac.evaluate_policies(
+            organization=self.org, user=self.user,
+            resource=self.workspace, resource_type="workspace",
+        )
+        self.assertEqual(result, set())
+
+    def test_multi_value_same_key_policy_matches_one_value(self) -> None:
+        """User with team=frontend AND team=backend — a policy requiring team=frontend matches."""
+        Policy.objects.create(
+            organization=self.org, name="Frontend team access",
+            resource_type="workspace",
+            identity_conditions=[{"key": "team", "value": "frontend"}],
+            resource_conditions=[{"key": "domain", "value": "engineering"}],
+            actions=["workspace:view"],
+        )
+        result = abac.evaluate_policies(
+            organization=self.org, user=self.user,
+            resource=self.workspace, resource_type="workspace",
+        )
+        self.assertIn("workspace:view", result)
+
+    def test_multi_value_same_key_policy_matches_other_value(self) -> None:
+        """Same multi-value user — a policy requiring team=backend also matches."""
+        Policy.objects.create(
+            organization=self.org, name="Backend team access",
+            resource_type="workspace",
+            identity_conditions=[{"key": "team", "value": "backend"}],
+            resource_conditions=[{"key": "domain", "value": "engineering"}],
+            actions=["workspace:edit"],
+        )
+        result = abac.evaluate_policies(
+            organization=self.org, user=self.user,
+            resource=self.workspace, resource_type="workspace",
+        )
+        self.assertIn("workspace:edit", result)
+
+    def test_multi_value_same_key_no_match_for_absent_value(self) -> None:
+        """User with team=frontend and team=backend does NOT match team=security."""
+        Policy.objects.create(
+            organization=self.org, name="Security team access",
+            resource_type="workspace",
+            identity_conditions=[{"key": "team", "value": "security"}],
+            resource_conditions=[{"key": "domain", "value": "engineering"}],
+            actions=["workspace:view"],
+        )
+        result = abac.evaluate_policies(
+            organization=self.org, user=self.user,
+            resource=self.workspace, resource_type="workspace",
+        )
+        self.assertNotIn("workspace:view", result)
