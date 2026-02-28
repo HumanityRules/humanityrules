@@ -1,5 +1,48 @@
 # DevOpsHero Development Journal
 
+## 2026-02-28 13:27 - [DomainModel] Missing ABAC Checks in App Views and Test Suite Gaps
+
+**Conversation:** [2026-02-28-1327-032eb58f.md](conversations/2026-02-28-1327-032eb58f.md)
+
+Audited workspace and app views for missing ABAC permission checks. Found two unprotected endpoints in `apps.py` — `app_deployment_status` (polling) and `app_teardown_confirm` (modal fetch). Both are GET endpoints returning HTML partials that expose app/deployment information without verifying `workspace:view` on the parent workspace. Any authenticated org member could access them by guessing the app slug and deployment UUID.
+
+Root cause for why this wasn't caught: the test suite (`test_abac_views.py`) had zero test coverage for these two endpoints. The tests were written around the main detail view and mutating actions (teardown, redeploy, tags) but the "supporting" read endpoints were overlooked. Additionally, several tested endpoints only asserted one direction — e.g. `app_tag_remove` only had an allow test with no deny test.
+
+Added `workspace:view` checks to both endpoints, then split the monolithic `test_abac_views.py` (796 lines, 5 test classes) into four domain-specific files: `test_abac_views_workspaces.py`, `test_abac_views_apps.py`, `test_abac_views_environments.py`, `test_abac_views_security.py`. Added 8 new tests to close the gaps: allow+deny for both new endpoints, plus missing deny tests for teardown, redeploy, and tag remove. Total: 82 tests, all passing.
+
+**Key points:**
+- HTML partial endpoints (polling, modals) need the same ABAC checks as their parent views — they return the same sensitive data
+- The test gap pattern was "only test the primary page + mutating endpoints" — auxiliary GET partials were missed
+- Every view function should have at least one allow and one deny test to catch missing checks early
+- Split large test files by domain (workspaces, apps, environments, security) rather than keeping a single monolith — easier to maintain and identify coverage gaps per area
+
+## 2026-02-28 16:45 - [DomainModel] ABAC View Audit — Org-Admin Gates for Resource Creation and GitHub Integration
+
+**Conversation:** [2026-02-28-1316-ec6b86a1.md](conversations/2026-02-28-1316-ec6b86a1.md)
+
+Full audit of all view files to identify missing ABAC checks, particularly for operations that should be restricted to org-admins.
+
+**Background:** User spotted a "New Environment" card visible to non-admin members. Investigation confirmed that the ABAC design document defines no `:create` actions for any resource type. The environment actions are `environment:view`, `environment:deploy`, `environment:approve`, and `environment:admin`. Resource creation (workspaces, environments, apps) is an org-level privilege outside ABAC policy scope — only org-admins should be able to create them.
+
+**Template gate for New Environment card:** Changed the condition in `environments/environments.html` from `{% if aws_accounts %}` to `{% if user_is_org_admin and aws_accounts %}`. The `user_is_org_admin` context variable is already provided by `base.get_app_shell_context()`, so no backend changes were needed.
+
+**Full view audit findings:** Reviewed all 15 view files. Every file was properly protected except `github.py`:
+- `settings.py` — All admin tabs use `_require_org_admin`; personal settings open to all members
+- `workspaces.py` — List filters by `workspace:view`, detail checks `workspace:view`, create checks `workspace:edit` (unscoped), tags check `workspace:admin`
+- `environments.py` — List filters by `environment:view`, detail checks `environment:view`, tags check `environment:admin`
+- `apps.py` — All endpoints check via parent workspace
+- `security_abac.py` — Every endpoint checks `require_org_admin`
+- `security_permissions_editor.py` — `apply` checks `environment:approve`; other editor endpoints scoped to user's own draft
+- `chat.py` — Conversations scoped to `user=request.user`
+- `dashboard.py` — Filters by `workspace:view`
+
+**GitHub views fix:** `github_connect` and `github_callback` only had `@login_required`, meaning any org member could install or reconnect the GitHub App for the organization. Added `abac.is_org_admin()` checks to both endpoints, returning 403 for non-admins.
+
+**Key points:**
+- No `:create` ABAC actions exist by design — resource creation is always an org-admin privilege
+- Template-level gates using `user_is_org_admin` are the correct approach for hiding creation UI from non-admins
+- GitHub OAuth endpoints are org-level operations and must be org-admin gated, same as AWS account management in settings
+
 ## 2026-02-28 10:30 - [DomainModel] Dashboard ABAC Filtering — Platform Visibility Derived from workspace:view
 
 **Conversation:** [2026-02-27-1819-f240c4b1.md](conversations/2026-02-27-1819-f240c4b1.md)

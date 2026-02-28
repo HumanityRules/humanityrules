@@ -5,6 +5,7 @@ from django.http import HttpRequest, HttpResponse
 from django.shortcuts import render
 
 from .. import models
+from ..services import abac
 from . import base
 
 logger = logging.getLogger(__name__)
@@ -18,13 +19,20 @@ def security_hub(request: HttpRequest) -> HttpResponse:
         return render(request=request, template_name="devopshero_app/app_shell.html", context=context)
 
     organization = request.user.current_organization
+    all_requests = (
+        models.AppPermissionRequest.objects.filter(app__organization=organization)
+        .select_related("app", "environment", "created_by")
+        .order_by("-created_at")
+    )
+    visible_requests = abac.filter_visible_app_permission_requests(
+        organization=organization,
+        user=request.user,
+        queryset=all_requests,
+    )
+
     context = base.get_app_shell_context(request=request, current_page="security")
     context["active_tab"] = "hub"
     context["permission_issue_rows"] = []
-    context["app_permission_request_rows"] = list(
-        models.AppPermissionRequest.objects.filter(app__organization=organization)
-        .select_related("app", "environment", "created_by")
-        .order_by("-created_at")[:20]
-    )
+    context["app_permission_request_rows"] = list(visible_requests[:20])
 
     return render(request=request, template_name="devopshero_app/security/security_hub.html", context=context)

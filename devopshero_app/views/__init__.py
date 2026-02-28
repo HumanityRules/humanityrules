@@ -17,6 +17,7 @@ from .security_permissions_editor import (
 )
 from .settings import (
     settings,
+    settings_personal,
     settings_organization,
     settings_aws_accounts,
     settings_aws_accounts_add,
@@ -93,6 +94,7 @@ __all__ = [
     "security_permissions_editor_update_statement",
     "security_permissions_statements",
     "settings",
+    "settings_personal",
     "settings_organization",
     "settings_aws_accounts",
     "settings_aws_accounts_add",

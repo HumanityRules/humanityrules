@@ -54,6 +54,7 @@ urlpatterns = [
     path("security/policies/<uuid:policy_id>/", views.security_policy_detail, name="security_policy_detail"),
     path("security/policies/<uuid:policy_id>/delete/", views.security_policy_delete, name="security_policy_delete"),
     path("settings/", views.settings, name="settings"),
+    path("settings/personal/", views.settings_personal, name="settings_personal"),
     path("settings/organization/", views.settings_organization, name="settings_organization"),
     path("settings/aws-accounts/", views.settings_aws_accounts, name="settings_aws_accounts"),
     path("settings/aws-accounts/add/", views.settings_aws_accounts_add, name="settings_aws_accounts_add"),
