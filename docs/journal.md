@@ -1,5 +1,18 @@
 # DevOpsHero Development Journal
 
+## 2026-02-28 22:10 - [DevEx] Fix staticfiles directory warning in tests
+
+**Conversation:**
+
+Django's `WhiteNoiseMiddleware` emits a `UserWarning: No directory at: .../staticfiles/` on the first HTTP request in the test suite. The warning appeared attached to whichever test made the first request (e.g. `test_admin_can_view_app_detail`) because Python's `warnings` module deduplicates identical warnings — the middleware is only instantiated once, on the first request, so the warning fires once and gets silenced for all subsequent tests.
+
+Fix: created `staticfiles/.gitkeep` so the directory is tracked in git and always exists after clone. This avoids the alternative of adding `STATICFILES_DIRS` workarounds or suppressing warnings in test settings.
+
+**Key points:**
+- The warning fires during middleware instantiation on the first HTTP request, not per-test — it only appears to be test-specific due to deduplication
+- Git doesn't track empty directories, so `.gitkeep` is needed to ensure `staticfiles/` exists in fresh clones
+- Committed the `.gitkeep` rather than gitignoring the directory, so CI and other developers get the fix automatically
+
 ## 2026-02-28 13:27 - [DomainModel] Missing ABAC Checks in App Views and Test Suite Gaps
 
 **Conversation:** [2026-02-28-1327-032eb58f.md](conversations/2026-02-28-1327-032eb58f.md)

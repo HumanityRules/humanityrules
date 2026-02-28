@@ -1249,27 +1249,46 @@ class TestBootstrapOrganization(TestCase):
             ).exists()
         )
 
-    def test_creates_three_seed_policies(self) -> None:
+    def test_creates_nine_seed_policies(self) -> None:
         abac.bootstrap_organization(organization=self.org, admin_user=self.admin_user)
         seed_policies = Policy.objects.filter(organization=self.org, is_system=True)
-        self.assertEqual(seed_policies.count(), 3)
+        self.assertEqual(seed_policies.count(), 9)
 
         resource_types = set(seed_policies.values_list("resource_type", flat=True))
         self.assertEqual(resource_types, {"workspace", "environment", "app"})
 
         for policy in seed_policies:
-            self.assertEqual(policy.identity_conditions, [{"key": "org-role", "value": "admin"}])
             self.assertEqual(policy.resource_conditions, [{"key": "*", "value": "*"}])
 
-    def test_seed_policy_actions(self) -> None:
+    def test_seed_policy_actions_admin(self) -> None:
         abac.bootstrap_organization(organization=self.org, admin_user=self.admin_user)
-        ws_policy = Policy.objects.get(organization=self.org, resource_type="workspace", is_system=True)
-        env_policy = Policy.objects.get(organization=self.org, resource_type="environment", is_system=True)
-        app_policy = Policy.objects.get(organization=self.org, resource_type="app", is_system=True)
+        admin_condition = [{"key": "org-role", "value": "admin"}]
+        ws = Policy.objects.get(organization=self.org, identity_conditions=admin_condition, resource_type="workspace")
+        env = Policy.objects.get(organization=self.org, identity_conditions=admin_condition, resource_type="environment")
+        app = Policy.objects.get(organization=self.org, identity_conditions=admin_condition, resource_type="app")
+        self.assertEqual(ws.actions, ["workspace:admin"])
+        self.assertEqual(env.actions, ["environment:admin"])
+        self.assertEqual(app.actions, ["app:use"])
 
-        self.assertEqual(ws_policy.actions, ["workspace:admin"])
-        self.assertEqual(env_policy.actions, ["environment:admin"])
-        self.assertEqual(app_policy.actions, ["app:use"])
+    def test_seed_policy_actions_member(self) -> None:
+        abac.bootstrap_organization(organization=self.org, admin_user=self.admin_user)
+        member_condition = [{"key": "org-role", "value": "member"}]
+        ws = Policy.objects.get(organization=self.org, identity_conditions=member_condition, resource_type="workspace")
+        env = Policy.objects.get(organization=self.org, identity_conditions=member_condition, resource_type="environment")
+        app = Policy.objects.get(organization=self.org, identity_conditions=member_condition, resource_type="app")
+        self.assertEqual(ws.actions, ["workspace:view", "workspace:edit"])
+        self.assertEqual(env.actions, ["environment:view", "environment:deploy"])
+        self.assertEqual(app.actions, ["app:use"])
+
+    def test_seed_policy_actions_viewer(self) -> None:
+        abac.bootstrap_organization(organization=self.org, admin_user=self.admin_user)
+        viewer_condition = [{"key": "org-role", "value": "viewer"}]
+        ws = Policy.objects.get(organization=self.org, identity_conditions=viewer_condition, resource_type="workspace")
+        env = Policy.objects.get(organization=self.org, identity_conditions=viewer_condition, resource_type="environment")
+        app = Policy.objects.get(organization=self.org, identity_conditions=viewer_condition, resource_type="app")
+        self.assertEqual(ws.actions, ["workspace:view"])
+        self.assertEqual(env.actions, ["environment:view"])
+        self.assertEqual(app.actions, ["app:use"])
 
     def test_idempotent(self) -> None:
         abac.bootstrap_organization(organization=self.org, admin_user=self.admin_user)
@@ -1283,7 +1302,7 @@ class TestBootstrapOrganization(TestCase):
         )
         self.assertEqual(
             Policy.objects.filter(organization=self.org, is_system=True).count(),
-            3,
+            9,
         )
 
 
@@ -1824,3 +1843,41 @@ class TestEdgeCases(TestCase):
             resource=self.workspace, resource_type="workspace",
         )
         self.assertNotIn("workspace:view", result)
+
+
+# ---------------------------------------------------------------------------
+# Suggestion palette
+# ---------------------------------------------------------------------------
+
+
+class TestSuggestionPalette(TestCase):
+
+    def setUp(self) -> None:
+        self.org = Organization.objects.create(name="Suggest Org", slug="suggest-org")
+        self.user = User.objects.create_user(username="suggest_user", password="testpass", current_organization=self.org)
+
+    def test_palette_keys_included(self) -> None:
+        keys = abac.get_suggestion_keys(self.org)
+        for expected in abac.SUGGESTED_KEYS:
+            self.assertIn(expected, keys)
+
+    def test_palette_values_included(self) -> None:
+        values = abac.get_suggestion_values(self.org)
+        for expected in abac.SUGGESTED_VALUES:
+            self.assertIn(expected, values)
+
+    def test_includes_org_specific_keys(self) -> None:
+        IdentityAttribute.objects.create(organization=self.org, user=self.user, key="custom-key", value="x")
+        keys = abac.get_suggestion_keys(self.org)
+        self.assertIn("custom-key", keys)
+
+    def test_includes_org_specific_values(self) -> None:
+        IdentityAttribute.objects.create(organization=self.org, user=self.user, key="k", value="custom-value")
+        values = abac.get_suggestion_values(self.org)
+        self.assertIn("custom-value", values)
+
+    def test_results_are_sorted(self) -> None:
+        keys = abac.get_suggestion_keys(self.org)
+        self.assertEqual(keys, sorted(keys))
+        values = abac.get_suggestion_values(self.org)
+        self.assertEqual(values, sorted(values))
