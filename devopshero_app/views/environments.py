@@ -67,8 +67,8 @@ def environment_detail(request: HttpRequest, environment_slug: str) -> HttpRespo
     org = request.user.current_organization
     context["tags"] = tags
     context["can_admin"] = can_admin
-    context["suggested_keys"] = abac.get_tag_suggestion_keys(org)
-    context["suggested_values"] = abac.get_tag_suggestion_values(org)
+    context["suggested_keys"] = abac.get_resource_tag_suggestion_keys(org)
+    context["suggested_values"] = abac.get_resource_tag_suggestion_values(org)
 
     if request.htmx:
         return render(request, "devopshero_app/environments/environment_detail.html", context=context)
@@ -106,7 +106,7 @@ def environment_tag_add(request: HttpRequest, environment_slug: str) -> HttpResp
     tags = ResourceTag.objects.filter(environment=environment).order_by("key", "value")
     return render(request, "devopshero_app/environments/_environment_tags.html", {
         "tags": tags, "environment": environment, "can_admin": True,
-        "suggested_keys": abac.get_tag_suggestion_keys(org), "suggested_values": abac.get_tag_suggestion_values(org),
+        "suggested_keys": abac.get_resource_tag_suggestion_keys(org), "suggested_values": abac.get_resource_tag_suggestion_values(org),
     })
 
 
@@ -130,5 +130,5 @@ def environment_tag_remove(request: HttpRequest, environment_slug: str, tag_id: 
     tags = ResourceTag.objects.filter(environment=environment).order_by("key", "value")
     return render(request, "devopshero_app/environments/_environment_tags.html", {
         "tags": tags, "environment": environment, "can_admin": True,
-        "suggested_keys": abac.get_tag_suggestion_keys(org), "suggested_values": abac.get_tag_suggestion_values(org),
+        "suggested_keys": abac.get_resource_tag_suggestion_keys(org), "suggested_values": abac.get_resource_tag_suggestion_values(org),
     })

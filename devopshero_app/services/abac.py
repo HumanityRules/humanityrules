@@ -530,43 +530,29 @@ SUGGESTED_KEYS = {"org-role", "authenticated", "team", "role"}
 SUGGESTED_VALUES = {"admin", "member", "viewer", "true"}
 
 
-def get_identity_suggestion_keys(org: Organization) -> list[str]:
+def get_identity_attribute_suggestion_keys(org: Organization) -> list[str]:
     """Suggestion keys for identity attribute forms (people, groups)."""
     attr_keys = set(IdentityAttribute.objects.filter(organization=org).values_list("key", flat=True).distinct())
     group_attr_keys = set(GroupAttribute.objects.filter(group__organization=org).values_list("key", flat=True).distinct())
     return sorted(attr_keys | group_attr_keys | SUGGESTED_KEYS)
 
 
-def get_identity_suggestion_values(org: Organization) -> list[str]:
+def get_identity_attribute_suggestion_values(org: Organization) -> list[str]:
     """Suggestion values for identity attribute forms (people, groups)."""
     attr_vals = set(IdentityAttribute.objects.filter(organization=org).values_list("value", flat=True).distinct())
     group_attr_vals = set(GroupAttribute.objects.filter(group__organization=org).values_list("value", flat=True).distinct())
     return sorted(attr_vals | group_attr_vals | SUGGESTED_VALUES)
 
 
-def get_tag_suggestion_keys(org: Organization) -> list[str]:
+def get_resource_tag_suggestion_keys(org: Organization) -> list[str]:
     """Suggestion keys for resource tag forms (workspaces, apps, environments)."""
     tag_keys = set(ResourceTag.objects.filter(organization=org).values_list("key", flat=True).distinct())
     return sorted(tag_keys | SUGGESTED_KEYS)
 
 
-def get_tag_suggestion_values(org: Organization) -> list[str]:
+def get_resource_tag_suggestion_values(org: Organization) -> list[str]:
     """Suggestion values for resource tag forms (workspaces, apps, environments)."""
     tag_vals = set(ResourceTag.objects.filter(organization=org).values_list("value", flat=True).distinct())
     return sorted(tag_vals | SUGGESTED_VALUES)
 
 
-def get_suggestion_keys(org: Organization) -> list[str]:
-    """All suggestion keys (identity + resource). Used by the policy editor."""
-    tag_keys = set(ResourceTag.objects.filter(organization=org).values_list("key", flat=True).distinct())
-    attr_keys = set(IdentityAttribute.objects.filter(organization=org).values_list("key", flat=True).distinct())
-    group_attr_keys = set(GroupAttribute.objects.filter(group__organization=org).values_list("key", flat=True).distinct())
-    return sorted(tag_keys | attr_keys | group_attr_keys | SUGGESTED_KEYS)
-
-
-def get_suggestion_values(org: Organization) -> list[str]:
-    """All suggestion values (identity + resource). Used by the policy editor."""
-    tag_vals = set(ResourceTag.objects.filter(organization=org).values_list("value", flat=True).distinct())
-    attr_vals = set(IdentityAttribute.objects.filter(organization=org).values_list("value", flat=True).distinct())
-    group_attr_vals = set(GroupAttribute.objects.filter(group__organization=org).values_list("value", flat=True).distinct())
-    return sorted(tag_vals | attr_vals | group_attr_vals | SUGGESTED_VALUES)

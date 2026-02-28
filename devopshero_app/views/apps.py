@@ -67,8 +67,8 @@ def _build_app_detail_context(request: HttpRequest, app: App) -> dict[str, Any]:
     context["direct_tags"] = direct_tags
     context["inherited_tags"] = inherited_tags
     context["can_admin"] = can_admin
-    context["suggested_keys"] = abac.get_tag_suggestion_keys(org)
-    context["suggested_values"] = abac.get_tag_suggestion_values(org)
+    context["suggested_keys"] = abac.get_resource_tag_suggestion_keys(org)
+    context["suggested_values"] = abac.get_resource_tag_suggestion_values(org)
 
     return context
 
@@ -220,7 +220,7 @@ def app_tag_add(request: HttpRequest, app_slug: str) -> HttpResponse:
     inherited_tags = ResourceTag.objects.filter(workspace=app.workspace).order_by("key", "value")
     return render(request, "devopshero_app/apps/_app_tags.html", {
         "direct_tags": direct_tags, "inherited_tags": inherited_tags, "app": app, "can_admin": True,
-        "suggested_keys": abac.get_tag_suggestion_keys(org), "suggested_values": abac.get_tag_suggestion_values(org),
+        "suggested_keys": abac.get_resource_tag_suggestion_keys(org), "suggested_values": abac.get_resource_tag_suggestion_values(org),
     })
 
 
@@ -241,5 +241,5 @@ def app_tag_remove(request: HttpRequest, app_slug: str, tag_id: UUID) -> HttpRes
     inherited_tags = ResourceTag.objects.filter(workspace=app.workspace).order_by("key", "value")
     return render(request, "devopshero_app/apps/_app_tags.html", {
         "direct_tags": direct_tags, "inherited_tags": inherited_tags, "app": app, "can_admin": True,
-        "suggested_keys": abac.get_tag_suggestion_keys(org), "suggested_values": abac.get_tag_suggestion_values(org),
+        "suggested_keys": abac.get_resource_tag_suggestion_keys(org), "suggested_values": abac.get_resource_tag_suggestion_values(org),
     })
