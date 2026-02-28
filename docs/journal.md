@@ -1,5 +1,23 @@
 # DevOpsHero Development Journal
 
+## 2026-02-28 10:30 - [DomainModel] Dashboard ABAC Filtering — Platform Visibility Derived from workspace:view
+
+**Conversation:** [2026-02-27-1819-f240c4b1.md](conversations/2026-02-27-1819-f240c4b1.md)
+
+The dashboard view was returning all apps and datastores in the org without any ABAC filtering. Added permission checks so the dashboard only shows resources the current user is authorized to see.
+
+The key design question was which action to filter apps by: `app:use` or `workspace:view`. The initial implementation used `app:use` (the only app-level action), but after reviewing `authorization_design_abac.md` this was wrong. The design doc defines two authorization domains: **platform access** (workspace/environment actions) governs who can see and manage resources in the DOH UI, while **app access** (`app:use`) governs who can use deployed tools through the sidecar. The dashboard is platform access, so visibility should come from `workspace:view` — defined as "See the workspace and its contents."
+
+Both apps and datastores now filter through `workspace:view` on their parent workspace: one `filter_permitted_resources` call computes visible workspaces, then both querysets filter by `workspace__in=visible_workspaces`. This matches how the workspaces list view already uses `workspace:view`.
+
+Updated `authorization_design_abac.md` with a new "Platform Visibility vs. App Access" subsection that makes this design decision explicit and documents the limitation: there's currently no per-app platform visibility control. A future `app:view` action could allow hiding specific apps from users who have `workspace:view` on the parent workspace, but for now the workspace boundary is the finest granularity.
+
+**Key points:**
+- `app:use` is sidecar-only; platform UI visibility is derived from `workspace:view` on the parent workspace — this wasn't explicitly documented before
+- Single `visible_workspaces` queryset used for both apps and datastores, avoiding redundant ABAC evaluation
+- Datastores have no ABAC resource type of their own; workspace visibility is the only access control mechanism for them
+- Documented the limitation that per-app visibility control isn't possible without a future `app:view` action
+
 ## 2026-02-27 16:15 - [Bugfix] Cross-Org Conversation Context Validation in create_conversation
 
 **Conversation:** [2026-02-27-1537-d6d5245f.md](conversations/2026-02-27-1537-d6d5245f.md)

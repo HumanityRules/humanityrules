@@ -3,7 +3,8 @@ from django.db.models import Max, OuterRef, Subquery
 from django.http import HttpRequest, HttpResponse
 from django.shortcuts import render
 
-from ..models import App, Datastore, Deployment
+from ..models import App, Datastore, Deployment, Workspace
+from ..services import abac
 from . import base
 
 
@@ -26,8 +27,13 @@ def dashboard(request: HttpRequest) -> HttpResponse:
         .order_by("-created_at")
         .values("service_url")[:1]
     )
+    visible_workspaces = Workspace.objects.filter(organization=org)
+    visible_workspaces = abac.filter_permitted_resources(
+        org, request.user, visible_workspaces, "workspace", "workspace:view",
+    )
+
     apps = (
-        App.objects.filter(organization=org)
+        App.objects.filter(workspace__in=visible_workspaces)
         .select_related("workspace", "repository")
         .annotate(
             last_deployed_at=Max("deployments__created_at"),
@@ -36,7 +42,7 @@ def dashboard(request: HttpRequest) -> HttpResponse:
         )
         .order_by("-created_at")
     )
-    datastores = Datastore.objects.filter(workspace__organization=org).select_related("workspace").order_by("-created_at")
+    datastores = Datastore.objects.filter(workspace__in=visible_workspaces).select_related("workspace").order_by("-created_at")
 
     context = base.get_app_shell_context(request=request, current_page="dashboard")
     context["apps"] = apps

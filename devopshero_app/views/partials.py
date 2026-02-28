@@ -21,9 +21,8 @@ def switch_organization(request):
         if OrganizationMembership.objects.filter(user=user, organization_id=org_id).exists():
             user.current_organization = Organization.objects.get(id=org_id)
             user.save(update_fields=["current_organization"])
-            # Return HX-Refresh header to reload the page with new org context
             response = HttpResponse()
-            response["HX-Refresh"] = "true"
+            response["HX-Redirect"] = "/dashboard/"
             return response
     
     # No change needed
