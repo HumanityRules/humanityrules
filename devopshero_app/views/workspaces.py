@@ -116,8 +116,8 @@ def workspace_detail(request: HttpRequest, workspace_slug: str) -> HttpResponse:
     context["show_costs"] = show_costs
     context["tags"] = tags
     context["can_admin"] = can_admin
-    context["suggested_keys"] = abac.get_resource_tag_suggestion_keys(request.user.current_organization)
-    context["suggested_values"] = abac.get_resource_tag_suggestion_values(request.user.current_organization)
+    context["url_base"] = f"/workspaces/{workspace.slug}/tags/"
+    context["suggested_keys"], context["suggested_values"] = abac.get_resource_tag_suggestions(request.user.current_organization)
 
     return render(request, "devopshero_app/workspaces/workspace_detail.html", context=context)
 
@@ -174,9 +174,10 @@ def workspace_tag_add(request: HttpRequest, workspace_slug: str) -> HttpResponse
 
     org = request.user.current_organization
     tags = ResourceTag.objects.filter(workspace=workspace).order_by("key", "value")
-    return render(request, "devopshero_app/workspaces/_workspace_tags.html", {
-        "tags": tags, "workspace": workspace, "can_admin": True,
-        "suggested_keys": abac.get_resource_tag_suggestion_keys(org), "suggested_values": abac.get_resource_tag_suggestion_values(org),
+    url_base = f"/workspaces/{workspace.slug}/tags/"
+    return render(request, "devopshero_app/partials/_kv_tag_editor.html", {
+        "items": tags, "can_edit": True, "url_base": url_base, "hx_target": "#workspace-tags", "empty_text": "No tags",
+        **dict(zip(("suggested_keys", "suggested_values"), abac.get_resource_tag_suggestions(org))),
     })
 
 
@@ -194,8 +195,9 @@ def workspace_tag_remove(request: HttpRequest, workspace_slug: str, tag_id: UUID
 
     org = request.user.current_organization
     tags = ResourceTag.objects.filter(workspace=workspace).order_by("key", "value")
-    return render(request, "devopshero_app/workspaces/_workspace_tags.html", {
-        "tags": tags, "workspace": workspace, "can_admin": True,
-        "suggested_keys": abac.get_resource_tag_suggestion_keys(org), "suggested_values": abac.get_resource_tag_suggestion_values(org),
+    url_base = f"/workspaces/{workspace.slug}/tags/"
+    return render(request, "devopshero_app/partials/_kv_tag_editor.html", {
+        "items": tags, "can_edit": True, "url_base": url_base, "hx_target": "#workspace-tags", "empty_text": "No tags",
+        **dict(zip(("suggested_keys", "suggested_values"), abac.get_resource_tag_suggestions(org))),
     })
 

@@ -1,5 +1,29 @@
 # DevOpsHero Development Journal
 
+## 2026-03-02 13:45 - [UI] Shared _kv_tag_editor.html component and _combobox_input.html Alpine.js dropdown
+
+**Conversation:** [2026-03-02-1025-b0fb9be3.md](conversations/2026-03-02-1025-b0fb9be3.md)
+
+Replaced all HTML5 `<datalist>` autocomplete inputs with a custom Alpine.js combobox dropdown (`_combobox_input.html`), then extracted a shared `_kv_tag_editor.html` component to eliminate duplicated chip-list + add-form markup across 5 tag/attribute templates.
+
+**Why replace datalist:** Browser-native `<datalist>` has inconsistent rendering across browsers, zero CSS styling control, and browser autocomplete cache pollution that makes stale suggestions appear as if they're app data (see journal 2026-02-28). Alpine.js is already loaded globally so a custom dropdown is cost-free.
+
+**Combobox architecture:** `_combobox_input.html` is a self-contained Alpine.js `x-data="{ open: false }"` scope with a filtered dropdown. The actual model variable (`key`, `value`, `cond.key`, etc.) lives in the parent Alpine scope — nested scopes inherit, so the include works in both simple tag forms and the policy editor's `x-for` loops. Suggestion values stored as `data-value` attributes (safe HTML escaping, avoids JS string quoting) — same pattern as `_permission_service_group.html`.
+
+**Key-filtered value suggestions:** Value dropdowns don't show options until a key is selected. Suggestions are rendered as `(key, value)` pairs with `data-for-key` attributes, filtered client-side via `x-show="$el.dataset.forKey === keyModel"`. This required consolidating 4 suggestion getter functions into 2: `get_identity_attribute_suggestions(org, include_system)` and `get_resource_tag_suggestions(org)`, each returning `(sorted_keys, sorted_pairs)` tuples.
+
+**System attribute exclusion:** `authenticated:true` is a system attribute auto-assigned to all logged-in users. Excluded from manual attribute forms (people/group) but included in policy editor conditions via `include_system=True` parameter.
+
+**Shared component design:** `_kv_tag_editor.html` handles the common pattern: indigo chip list with remove buttons + add form with combobox inputs. Parameters: `items`, `url_base`, `hx_target`, `suggested_keys`, `suggested_values`, `can_edit`, `empty_text`, `key_width`, `value_width`. Views compute `url_base` (e.g. `/workspaces/<slug>/tags/`) to avoid Django `|add` filter issues with UUID objects.
+
+Three simple templates (workspace tags, environment tags, group attributes) became single `{% include %}` lines. Two complex templates (app tags with inherited+direct sections, people attributes with system/direct/group-inherited/memberships) use the shared component for their editable section only.
+
+**Key points:**
+- Django `|add` filter silently returns `""` for UUID objects (str + UUID raises TypeError) — always compute URL bases in views for UUID-based entities
+- Django multi-line comments must use `{% comment %}...{% endcomment %}`, not `{# ... #}` (documented in `templates/AGENTS.md`)
+- `x-cloak` + `x-transition.opacity.duration.50ms` prevents dropdown flash on page load
+- Chevron rotates via Alpine `:class="open && 'rotate-180'"` with CSS `transition-transform duration-200`
+
 ## 2026-03-02 09:53 - [DomainModel] Default Org-Role for New Members
 
 **Conversation:** [2026-03-02-0953-62160c7d.md](conversations/2026-03-02-0953-62160c7d.md)
