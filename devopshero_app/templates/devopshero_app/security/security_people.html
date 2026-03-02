@@ -5,6 +5,10 @@
     <h2 class="text-lg font-semibold text-gray-900 dark:text-white mb-4">People</h2>
     <p class="text-sm text-gray-500 dark:text-gray-400 mb-6">Manage identity attributes for organization members.</p>
 
+    <div id="default-role-section" class="mb-8">
+        {% partial default_role_form %}
+    </div>
+
     <div class="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg divide-y divide-gray-200 dark:divide-gray-700">
         {% for row in member_rows %}
         <a href="/security/people/{{ row.user.id }}/"
@@ -39,4 +43,31 @@
         {% endfor %}
     </div>
 </div>
+
+{% partialdef default_role_form %}
+<div class="rounded-lg border border-gray-200 dark:border-white/10 p-4">
+    <div class="flex items-start gap-3 mb-3">
+        <div>
+            <h3 class="text-sm font-semibold text-gray-900 dark:text-white">Default org-role for new members</h3>
+            <p class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">Automatically assigned when a new identity joins the organization.</p>
+        </div>
+    </div>
+    <form hx-post="/security/people/default-role/"
+          hx-target="#default-role-section"
+          hx-swap="innerHTML">
+        <div class="flex items-center gap-3">
+            <div class="w-48">
+                {% include "devopshero_app/partials/_dropdown_select.html#dropdown_select" with dropdown_id="default-org-role" dropdown_name="default_org_role" dropdown_value=org.default_org_role dropdown_selected_label=selected_role_label dropdown_options=role_options %}
+            </div>
+            <button type="submit"
+                    class="rounded-md bg-indigo-600 px-3 py-1.5 text-sm font-semibold text-white shadow-xs hover:bg-indigo-500 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600">
+                Save
+            </button>
+            {% if save_success %}
+            <span class="text-sm text-green-600 dark:text-green-400">Saved.</span>
+            {% endif %}
+        </div>
+    </form>
+</div>
+{% endpartialdef %}
 {% endblock %}

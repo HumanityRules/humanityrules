@@ -49,14 +49,17 @@ def settings_organization(request: HttpRequest) -> HttpResponse:
     if forbidden:
         return forbidden
 
+    if not request.htmx:
+        context = base.get_app_shell_context(request=request, current_page="settings")
+        context["content_url"] = "/settings/organization/"
+        return render(request, "devopshero_app/app_shell.html", context=context)
+
+    org = request.user.current_organization
+
     context = base.get_app_shell_context(request=request, current_page="settings")
     context["active_tab"] = "organization"
-
-    if request.htmx:
-        return render(request, "devopshero_app/settings/organization.html", context=context)
-
-    context["content_url"] = "/settings/organization/"
-    return render(request, "devopshero_app/app_shell.html", context=context)
+    context["org"] = org
+    return render(request, "devopshero_app/settings/organization.html", context=context)
 
 
 @login_required
