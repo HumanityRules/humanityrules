@@ -30,7 +30,7 @@
     <div class="mb-6">
         <h2 class="text-sm font-medium text-gray-500 dark:text-gray-400 mb-2">Tags</h2>
         <div id="environment-tags">
-            {% include "devopshero_app/environments/_environment_tags.html" %}
+            {% include "devopshero_app/partials/_kv_tag_editor.html" with items=tags url_base=url_base hx_target="#environment-tags" can_edit=can_admin empty_text="No tags" %}
         </div>
     </div>
 

@@ -60,13 +60,9 @@
                     <div>
                         <template x-for="(cond, i) in identityConditions" :key="i">
                             <div class="flex items-center gap-2 mb-2">
-                                <input type="text" x-model="cond.key" placeholder="key"
-                                       list="identity-keys"
-                                       class="w-32 px-2 py-1 text-sm border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800 text-gray-900 dark:text-white">
+                                {% include "devopshero_app/partials/_combobox_input.html" with suggestions=existing_identity_keys model="cond.key" placeholder="key" input_class="w-32 px-2 py-1 text-sm border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800 text-gray-900 dark:text-white" %}
                                 <span class="text-sm text-gray-400">=</span>
-                                <input type="text" x-model="cond.value" placeholder="value"
-                                       list="identity-values"
-                                       class="w-40 px-2 py-1 text-sm border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800 text-gray-900 dark:text-white">
+                                {% include "devopshero_app/partials/_combobox_input.html" with suggestions=existing_identity_values model="cond.value" for_key_model="cond.key" placeholder="value" input_class="w-40 px-2 py-1 text-sm border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800 text-gray-900 dark:text-white" %}
                                 <button type="button" @click="identityConditions.splice(i, 1)"
                                         class="text-red-500 hover:text-red-700">
                                     <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -93,13 +89,9 @@
                     <div>
                         <template x-for="(cond, i) in resourceConditions" :key="i">
                             <div class="flex items-center gap-2 mb-2">
-                                <input type="text" x-model="cond.key" placeholder="key"
-                                       list="resource-keys"
-                                       class="w-32 px-2 py-1 text-sm border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800 text-gray-900 dark:text-white">
+                                {% include "devopshero_app/partials/_combobox_input.html" with suggestions=existing_tag_keys model="cond.key" placeholder="key" input_class="w-32 px-2 py-1 text-sm border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800 text-gray-900 dark:text-white" %}
                                 <span class="text-sm text-gray-400">=</span>
-                                <input type="text" x-model="cond.value" placeholder="value"
-                                       list="resource-values"
-                                       class="w-40 px-2 py-1 text-sm border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800 text-gray-900 dark:text-white">
+                                {% include "devopshero_app/partials/_combobox_input.html" with suggestions=existing_tag_values model="cond.value" for_key_model="cond.key" placeholder="value" input_class="w-40 px-2 py-1 text-sm border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800 text-gray-900 dark:text-white" %}
                                 <button type="button" @click="resourceConditions.splice(i, 1)"
                                         class="text-red-500 hover:text-red-700">
                                     <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -214,19 +206,6 @@
             </div>
         </form>
 
-        {# Datalists for autocompletion #}
-        <datalist id="identity-keys">
-            {% for key in existing_identity_keys %}<option value="{{ key }}">{% endfor %}
-        </datalist>
-        <datalist id="identity-values">
-            {% for val in existing_identity_values %}<option value="{{ val }}">{% endfor %}
-        </datalist>
-        <datalist id="resource-keys">
-            {% for key in existing_tag_keys %}<option value="{{ key }}">{% endfor %}
-        </datalist>
-        <datalist id="resource-values">
-            {% for val in existing_tag_values %}<option value="{{ val }}">{% endfor %}
-        </datalist>
     </div>
 </div>
 

@@ -67,8 +67,8 @@ def _build_app_detail_context(request: HttpRequest, app: App) -> dict[str, Any]:
     context["direct_tags"] = direct_tags
     context["inherited_tags"] = inherited_tags
     context["can_admin"] = can_admin
-    context["suggested_keys"] = abac.get_resource_tag_suggestion_keys(org)
-    context["suggested_values"] = abac.get_resource_tag_suggestion_values(org)
+    context["url_base"] = f"/apps/{app.slug}/tags/"
+    context["suggested_keys"], context["suggested_values"] = abac.get_resource_tag_suggestions(org)
 
     return context
 
@@ -218,9 +218,10 @@ def app_tag_add(request: HttpRequest, app_slug: str) -> HttpResponse:
     org = request.user.current_organization
     direct_tags = ResourceTag.objects.filter(app=app).order_by("key", "value")
     inherited_tags = ResourceTag.objects.filter(workspace=app.workspace).order_by("key", "value")
+    url_base = f"/apps/{app.slug}/tags/"
     return render(request, "devopshero_app/apps/_app_tags.html", {
-        "direct_tags": direct_tags, "inherited_tags": inherited_tags, "app": app, "can_admin": True,
-        "suggested_keys": abac.get_resource_tag_suggestion_keys(org), "suggested_values": abac.get_resource_tag_suggestion_values(org),
+        "direct_tags": direct_tags, "inherited_tags": inherited_tags, "can_admin": True, "url_base": url_base,
+        **dict(zip(("suggested_keys", "suggested_values"), abac.get_resource_tag_suggestions(org))),
     })
 
 
@@ -239,7 +240,8 @@ def app_tag_remove(request: HttpRequest, app_slug: str, tag_id: UUID) -> HttpRes
     org = request.user.current_organization
     direct_tags = ResourceTag.objects.filter(app=app).order_by("key", "value")
     inherited_tags = ResourceTag.objects.filter(workspace=app.workspace).order_by("key", "value")
+    url_base = f"/apps/{app.slug}/tags/"
     return render(request, "devopshero_app/apps/_app_tags.html", {
-        "direct_tags": direct_tags, "inherited_tags": inherited_tags, "app": app, "can_admin": True,
-        "suggested_keys": abac.get_resource_tag_suggestion_keys(org), "suggested_values": abac.get_resource_tag_suggestion_values(org),
+        "direct_tags": direct_tags, "inherited_tags": inherited_tags, "can_admin": True, "url_base": url_base,
+        **dict(zip(("suggested_keys", "suggested_values"), abac.get_resource_tag_suggestions(org))),
     })

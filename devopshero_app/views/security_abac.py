@@ -135,6 +135,7 @@ def security_people_detail(request: HttpRequest, user_id: UUID) -> HttpResponse:
     context["group_attrs"] = group_attrs
     context["group_memberships"] = group_memberships
     context["available_groups"] = available_groups
+    context["url_base"] = f"/security/people/{member.id}/attributes/"
     context["suggested_keys"], context["suggested_values"] = abac.get_identity_attribute_suggestions(org)
     return render(request, "devopshero_app/security/security_people_detail.html", context=context)
 
@@ -234,6 +235,7 @@ def _render_people_attributes_partial(request: HttpRequest, org: Organization, m
         "group_attrs": group_attrs,
         "group_memberships": group_memberships,
         "available_groups": available_groups,
+        "url_base": f"/security/people/{member.id}/attributes/",
         "suggested_keys": suggested_keys,
         "suggested_values": suggested_values,
     })
@@ -325,6 +327,7 @@ def security_group_detail(request: HttpRequest, group_id: UUID) -> HttpResponse:
     context["attributes"] = attributes
     context["members"] = members
     context["available_users"] = available_users
+    context["url_base"] = f"/security/groups/{group.id}/attributes/"
     context["suggested_keys"], context["suggested_values"] = abac.get_identity_attribute_suggestions(org)
     return render(request, "devopshero_app/security/security_groups_detail.html", context=context)
 
@@ -416,9 +419,14 @@ def _render_group_attributes_partial(request: HttpRequest, group: Group) -> Http
     org = group.organization
     attributes = group.attributes.order_by("key", "value")
     suggested_keys, suggested_values = abac.get_identity_attribute_suggestions(org)
-    return render(request, "devopshero_app/security/_group_attributes.html", {
-        "group": group,
-        "attributes": attributes,
+    return render(request, "devopshero_app/partials/_kv_tag_editor.html", {
+        "items": attributes,
+        "url_base": f"/security/groups/{group.id}/attributes/",
+        "hx_target": "#group-attributes",
+        "can_edit": True,
+        "empty_text": "None",
+        "key_width": "w-24",
+        "value_width": "w-28",
         "suggested_keys": suggested_keys,
         "suggested_values": suggested_values,
     })

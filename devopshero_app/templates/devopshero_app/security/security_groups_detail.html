@@ -33,7 +33,7 @@
     <div class="mb-8">
         <h3 class="text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">Attributes</h3>
         <div id="group-attributes">
-            {% include "devopshero_app/security/_group_attributes.html" %}
+            {% include "devopshero_app/partials/_kv_tag_editor.html" with items=attributes url_base=url_base hx_target="#group-attributes" can_edit=True empty_text="None" key_width="w-24" value_width="w-28" %}
         </div>
     </div>
 
