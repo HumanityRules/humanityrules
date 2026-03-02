@@ -44,6 +44,11 @@ class Organization(models.Model):
     )
     name = models.CharField(max_length=255)
     slug = models.SlugField(max_length=255, unique=True)
+    default_org_role = models.CharField(
+        max_length=100,
+        default="viewer",
+        help_text="Org-role automatically assigned to new identities joining this organization",
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

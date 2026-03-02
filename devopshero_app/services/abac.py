@@ -470,6 +470,16 @@ def bootstrap_organization(organization: Organization, admin_user: User) -> None
         )
 
 
+def assign_default_org_role(organization: Organization, user: User) -> None:
+    """Assign the organization's default org-role as an IdentityAttribute on a new member."""
+    IdentityAttribute.objects.get_or_create(
+        organization=organization,
+        user=user,
+        key="org-role",
+        value=organization.default_org_role,
+    )
+
+
 def create_default_app_policy(app: App) -> None:
     """
     Create a default app:use policy and app-name tag when a new App is created.
@@ -526,33 +536,63 @@ def create_default_environment_tag(environment: Environment) -> None:
 # Suggestion palette for tag/attribute input forms
 # ---------------------------------------------------------------------------
 
-SUGGESTED_KEYS = {"org-role", "authenticated", "team", "role"}
-SUGGESTED_VALUES = {"admin", "member", "viewer", "true"}
+SEED_ORG_ROLES = {"admin", "member", "viewer"}
 
 
-def get_identity_attribute_suggestion_keys(org: Organization) -> list[str]:
-    """Suggestion keys for identity attribute forms (people, groups)."""
-    attr_keys = set(IdentityAttribute.objects.filter(organization=org).values_list("key", flat=True).distinct())
-    group_attr_keys = set(GroupAttribute.objects.filter(group__organization=org).values_list("key", flat=True).distinct())
-    return sorted(attr_keys | group_attr_keys | SUGGESTED_KEYS)
+def get_known_org_role_values(organization: Organization) -> list[str]:
+    """Return all org-role values known for this organization (from attributes + seeds), sorted."""
+    db_values = set(
+        IdentityAttribute.objects.filter(
+            organization=organization, key="org-role",
+        ).values_list("value", flat=True).distinct()
+    ) | set(
+        GroupAttribute.objects.filter(
+            group__organization=organization, key="org-role",
+        ).values_list("value", flat=True).distinct()
+    )
+    return sorted(db_values | SEED_ORG_ROLES)
 
 
-def get_identity_attribute_suggestion_values(org: Organization) -> list[str]:
-    """Suggestion values for identity attribute forms (people, groups)."""
-    attr_vals = set(IdentityAttribute.objects.filter(organization=org).values_list("value", flat=True).distinct())
-    group_attr_vals = set(GroupAttribute.objects.filter(group__organization=org).values_list("value", flat=True).distinct())
-    return sorted(attr_vals | group_attr_vals | SUGGESTED_VALUES)
+SUGGESTED_KEYS = {"org-role", "team", "role"}
+SUGGESTED_PAIRS = {
+    ("org-role", "admin"),
+    ("org-role", "member"),
+    ("org-role", "viewer"),
+}
+
+# System attributes — not manually assignable, but valid in policy identity conditions
+SYSTEM_ATTRIBUTE_KEYS = {"authenticated"}
+SYSTEM_ATTRIBUTE_PAIRS = {("authenticated", "true")}
 
 
-def get_resource_tag_suggestion_keys(org: Organization) -> list[str]:
-    """Suggestion keys for resource tag forms (workspaces, apps, environments)."""
-    tag_keys = set(ResourceTag.objects.filter(organization=org).values_list("key", flat=True).distinct())
-    return sorted(tag_keys | SUGGESTED_KEYS)
+def get_identity_attribute_suggestions(
+    org: Organization, include_system: bool = False,
+) -> tuple[list[str], list[tuple[str, str]]]:
+    """Returns (sorted_keys, sorted_key_value_pairs) for identity attribute suggestions.
+
+    Set include_system=True for policy identity conditions (includes system
+    attributes like ``authenticated``).  Leave False for people/group attribute
+    forms where only manually-assignable attributes should be suggested.
+    """
+    db_pairs = set(
+        IdentityAttribute.objects.filter(organization=org).values_list("key", "value").distinct()
+    ) | set(
+        GroupAttribute.objects.filter(group__organization=org).values_list("key", "value").distinct()
+    )
+    extra_keys = SUGGESTED_KEYS | (SYSTEM_ATTRIBUTE_KEYS if include_system else set())
+    extra_pairs = SUGGESTED_PAIRS | (SYSTEM_ATTRIBUTE_PAIRS if include_system else set())
+    all_pairs = db_pairs | extra_pairs
+    all_keys = {k for k, _ in all_pairs} | extra_keys
+    return sorted(all_keys), sorted(all_pairs)
 
 
-def get_resource_tag_suggestion_values(org: Organization) -> list[str]:
-    """Suggestion values for resource tag forms (workspaces, apps, environments)."""
-    tag_vals = set(ResourceTag.objects.filter(organization=org).values_list("value", flat=True).distinct())
-    return sorted(tag_vals | SUGGESTED_VALUES)
+def get_resource_tag_suggestions(org: Organization) -> tuple[list[str], list[tuple[str, str]]]:
+    """Returns (sorted_keys, sorted_key_value_pairs) for resource tag suggestions."""
+    db_pairs = set(
+        ResourceTag.objects.filter(organization=org).values_list("key", "value").distinct()
+    )
+    all_pairs = db_pairs | SUGGESTED_PAIRS
+    all_keys = {k for k, _ in all_pairs} | SUGGESTED_KEYS
+    return sorted(all_keys), sorted(all_pairs)
 
 

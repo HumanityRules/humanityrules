@@ -36,6 +36,7 @@ urlpatterns = [
     path("security/permissions/<uuid:app_permission_request_id>/statements/", views.security_permissions_statements, name="security_permissions_statements"),
     # ABAC security
     path("security/people/", views.security_people, name="security_people"),
+    path("security/people/default-role/", views.security_people_default_role, name="security_people_default_role"),
     path("security/people/<uuid:user_id>/", views.security_people_detail, name="security_people_detail"),
     path("security/people/<uuid:user_id>/attributes/add/", views.security_people_attribute_add, name="security_people_attribute_add"),
     path("security/people/<uuid:user_id>/attributes/<uuid:attribute_id>/remove/", views.security_people_attribute_remove, name="security_people_attribute_remove"),

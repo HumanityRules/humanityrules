@@ -45,6 +45,7 @@ from .chat import (
 from .waitlist_views import waitlist_signup
 from .security_abac import (
     security_people,
+    security_people_default_role,
     security_people_detail,
     security_people_attribute_add,
     security_people_attribute_remove,
@@ -124,6 +125,7 @@ __all__ = [
     "chat_conversation_cost",
     "waitlist_signup",
     "security_people",
+    "security_people_default_role",
     "security_people_detail",
     "security_people_attribute_add",
     "security_people_attribute_remove",

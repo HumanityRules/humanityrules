@@ -1,5 +1,25 @@
 # DevOpsHero Development Journal
 
+## 2026-03-02 09:53 - [DomainModel] Default Org-Role for New Members
+
+**Conversation:** [2026-03-02-0953-62160c7d.md](conversations/2026-03-02-0953-62160c7d.md)
+
+Admins can configure which org-role is assigned automatically when a new identity joins the organization. Implemented as `Organization.default_org_role` (CharField, default `"viewer"`), editable in Security > People.
+
+**Placement decision:** Initially placed in Settings > Organization as the natural home for org-level configuration. User requested moving it to Security > People — the People tab already manages identity attributes and org-roles per member, so the default setting fits there as a banner above the member list.
+
+**Dynamic org-roles:** Originally modeled with hardcoded choices `(admin, member, viewer)`. User clarified that org-roles are user-created ABAC identity attributes — admins can define custom roles (e.g. `contractor`, `data-scientist`). Removed `choices` from the model; the dropdown is now populated dynamically via `get_known_org_role_values(organization)` which queries `IdentityAttribute` and `GroupAttribute` for `key="org-role"` plus the seed roles `admin`, `member`, `viewer`. POST validation accepts any value in that set.
+
+**Implementation details:**
+- `assign_default_org_role(organization, user)` in `abac.py` creates the IdentityAttribute when a new member joins — hook point for future "join existing org" flow
+- Dedicated `security_people_default_role` POST endpoint; form uses HTMX `hx-target="#default-role-section"` for in-place swap
+- Settings > Organization reverted to org name/slug display only
+
+**Key points:**
+- Org-roles are arbitrary attribute values, not a fixed enum — UI must derive options from data
+- `SEED_ORG_ROLES` in abac.py ensures admin/member/viewer always appear even in fresh orgs with no attributes yet
+- Migration 0023 added the field; 0024 removed choices and increased max_length to 100 for custom role names
+
 ## 2026-02-28 23:15 - [DomainModel] Standard Org-Roles (member, viewer) and Suggestion Palette for Tag/Attribute Forms
 
 **Conversation:** [2026-02-28-1444-b97cb274.md](conversations/2026-02-28-1444-b97cb274.md)

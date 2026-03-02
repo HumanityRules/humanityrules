@@ -1,8 +1,22 @@
 {% extends "devopshero_app/settings/settings.html" %}
 
 {% block settings_content %}
-<div>
-    <h2 class="text-lg font-semibold text-gray-900 dark:text-white mb-4">Organization Settings</h2>
-    <p class="text-gray-600 dark:text-gray-400">Manage your organization's general settings and preferences.</p>
+<div class="max-w-2xl space-y-8">
+
+    <section>
+        <h2 class="text-base font-semibold text-gray-900 dark:text-white mb-1">Organization</h2>
+        <p class="text-sm text-gray-500 dark:text-gray-400 mb-4">General information about your organization.</p>
+        <dl class="divide-y divide-gray-100 dark:divide-white/10 rounded-lg border border-gray-200 dark:border-white/10">
+            <div class="px-4 py-3 sm:grid sm:grid-cols-3 sm:gap-4">
+                <dt class="text-sm font-medium text-gray-500 dark:text-gray-400">Name</dt>
+                <dd class="mt-1 text-sm text-gray-900 dark:text-white sm:col-span-2 sm:mt-0">{{ org.name }}</dd>
+            </div>
+            <div class="px-4 py-3 sm:grid sm:grid-cols-3 sm:gap-4">
+                <dt class="text-sm font-medium text-gray-500 dark:text-gray-400">Slug</dt>
+                <dd class="mt-1 text-sm text-gray-900 dark:text-white sm:col-span-2 sm:mt-0">{{ org.slug }}</dd>
+            </div>
+        </dl>
+    </section>
+
 </div>
 {% endblock %}
