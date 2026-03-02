@@ -1,5 +1,20 @@
 # DevOpsHero Development Journal
 
+## 2026-03-02 14:04 - [Bugfix] Deduplicate attribute chips in People list view
+
+**Conversation:**
+
+When both a user and their group have the same attribute (e.g., `org-role=admin`), the People list view showed two chips with identical text — one indigo (direct) and one purple (group-inherited). Without source labels in the list view, this looked like a bug.
+
+**Fix:** Added `(key, value)` deduplication in `security_people()` view when building `member_rows`. Keeps the first source encountered per pair (system > direct > group, which is the natural append order from `get_effective_attributes()`).
+
+**Why deduplicate in the view, not the service:** `get_effective_attributes()` is also used by the People detail view, which splits attributes into separate sections by source (system/direct/group-inherited). Deduplicating at the service level would silently hide group-inherited attributes from the detail view when a matching direct attribute exists — removing useful provenance information that helps admins decide whether a redundant direct attribute can be removed.
+
+**Key points:**
+- Policy evaluation already handles this correctly — `evaluate_policies()` collapses to a `{(k, v)}` set before matching
+- The detail view intentionally shows duplicates across sections (different colors + group name labels make provenance clear)
+- The list view only shows summary chips with no source labels, so duplicates are confusing there
+
 ## 2026-03-02 13:45 - [UI] Shared _kv_tag_editor.html component and _combobox_input.html Alpine.js dropdown
 
 **Conversation:** [2026-03-02-1025-b0fb9be3.md](conversations/2026-03-02-1025-b0fb9be3.md)

@@ -52,10 +52,17 @@ def security_people(request: HttpRequest) -> HttpResponse:
     member_rows = []
     for membership in memberships:
         attrs = abac.get_effective_attributes(org, membership.user)
+        # Deduplicate by (key, value), keeping first source (system > direct > group)
+        seen = set()
+        unique_attrs = []
+        for k, v, s in attrs:
+            if (k, v) not in seen:
+                seen.add((k, v))
+                unique_attrs.append((k, v, s))
         member_rows.append({
             "user": membership.user,
             "membership": membership,
-            "attributes": attrs,
+            "attributes": unique_attrs,
         })
 
     known_roles = abac.get_known_org_role_values(organization=org)
