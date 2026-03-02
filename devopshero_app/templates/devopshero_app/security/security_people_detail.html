@@ -11,12 +11,14 @@
            class="hover:text-indigo-600 dark:hover:text-indigo-400">People</a>
         <span>/</span>
     </div>
-    <h2 class="text-lg font-semibold text-gray-900 dark:text-white mb-1">{{ member.email }}</h2>
-    {% if member.first_name or member.last_name %}
-    <p class="text-sm text-gray-500 dark:text-gray-400 mb-6">{{ member.first_name }} {{ member.last_name }}</p>
-    {% else %}
-    <div class="mb-6"></div>
-    {% endif %}
+    <div class="mb-6">
+        <p class="text-xs font-medium text-gray-500 dark:text-gray-400">Email</p>
+        <h2 class="text-lg font-semibold text-gray-900 dark:text-white">{{ member.email }}</h2>
+        {% if member.first_name or member.last_name %}
+        <p class="text-xs font-medium text-gray-500 dark:text-gray-400 mt-2">Name</p>
+        <p class="text-sm text-gray-900 dark:text-white">{{ member.first_name }} {{ member.last_name }}</p>
+        {% endif %}
+    </div>
 
     <div id="people-attributes">
         {% include "devopshero_app/security/_people_attributes.html" %}
