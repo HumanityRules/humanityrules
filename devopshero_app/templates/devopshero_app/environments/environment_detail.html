@@ -11,12 +11,7 @@
             <span>/</span>
         </div>
         <div class="flex items-center justify-between">
-            <div>
-                <h1 class="text-2xl font-bold text-gray-900 dark:text-white">{{ environment.name }}</h1>
-                <p class="mt-1 text-sm text-gray-600 dark:text-gray-400">
-                    {{ environment.aws_account.name }} · {{ environment.aws_region }}
-                </p>
-            </div>
+            <h1 class="text-2xl font-bold text-gray-900 dark:text-white">{{ environment.name }}</h1>
             <span class="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium
                 {% if environment.status == 'ready' %}bg-green-100 text-green-700 dark:bg-green-500/10 dark:text-green-400
                 {% elif environment.status == 'pending' or environment.status == 'provisioning' %}bg-yellow-100 text-yellow-700 dark:bg-yellow-500/10 dark:text-yellow-400
