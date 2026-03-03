@@ -68,7 +68,7 @@ def _build_app_detail_context(request: HttpRequest, app: App) -> dict[str, Any]:
     context["inherited_tags"] = inherited_tags
     context["can_admin"] = can_admin
     context["url_base"] = f"/apps/{app.slug}/tags/"
-    context["suggested_keys"], context["suggested_values"] = abac.get_resource_tag_suggestions(org)
+    context["suggested_keys"], context["suggested_values"] = abac.get_resource_tag_suggestions(org, "app")
 
     return context
 
@@ -221,7 +221,7 @@ def app_tag_add(request: HttpRequest, app_slug: str) -> HttpResponse:
     url_base = f"/apps/{app.slug}/tags/"
     return render(request, "devopshero_app/apps/_app_tags.html", {
         "direct_tags": direct_tags, "inherited_tags": inherited_tags, "can_admin": True, "url_base": url_base,
-        **dict(zip(("suggested_keys", "suggested_values"), abac.get_resource_tag_suggestions(org))),
+        **dict(zip(("suggested_keys", "suggested_values"), abac.get_resource_tag_suggestions(org, "app"))),
     })
 
 
@@ -243,5 +243,5 @@ def app_tag_remove(request: HttpRequest, app_slug: str, tag_id: UUID) -> HttpRes
     url_base = f"/apps/{app.slug}/tags/"
     return render(request, "devopshero_app/apps/_app_tags.html", {
         "direct_tags": direct_tags, "inherited_tags": inherited_tags, "can_admin": True, "url_base": url_base,
-        **dict(zip(("suggested_keys", "suggested_values"), abac.get_resource_tag_suggestions(org))),
+        **dict(zip(("suggested_keys", "suggested_values"), abac.get_resource_tag_suggestions(org, "app"))),
     })

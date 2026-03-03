@@ -553,16 +553,37 @@ def get_known_org_role_values(organization: Organization) -> list[str]:
     return sorted(db_values | SEED_ORG_ROLES)
 
 
-SUGGESTED_KEYS = {"org-role", "team", "role"}
-SUGGESTED_PAIRS = {
-    ("org-role", "admin"),
-    ("org-role", "member"),
-    ("org-role", "viewer"),
+# Seed suggestions: dict of key → set of suggested values.
+# Keys with empty sets still appear as key suggestions (just no value dropdown).
+
+IDENTITY_SUGGESTIONS: dict[str, set[str]] = {
+    "org-role": {"admin", "member", "viewer"},
+    "team": set(),
+    "role": set(),
+}
+
+RESOURCE_SUGGESTIONS: dict[str, dict[str, set[str]]] = {
+    "workspace": {
+        "project": set(),
+        "team": set(),
+    },
+    "environment": {
+        "stage": {"production", "staging", "development"},
+    },
+    "app": {},
 }
 
 # System attributes — not manually assignable, but valid in policy identity conditions
-SYSTEM_ATTRIBUTE_KEYS = {"authenticated"}
-SYSTEM_ATTRIBUTE_PAIRS = {("authenticated", "true")}
+SYSTEM_ATTRIBUTES: dict[str, set[str]] = {
+    "authenticated": {"true"},
+}
+
+
+def _expand_suggestions(suggestions: dict[str, set[str]]) -> tuple[set[str], set[tuple[str, str]]]:
+    """Expand a {key: {values}} dict into (keys, pairs) sets."""
+    keys = set(suggestions.keys())
+    pairs = {(k, v) for k, vals in suggestions.items() for v in vals}
+    return keys, pairs
 
 
 def get_identity_attribute_suggestions(
@@ -579,20 +600,41 @@ def get_identity_attribute_suggestions(
     ) | set(
         GroupAttribute.objects.filter(group__organization=org).values_list("key", "value").distinct()
     )
-    extra_keys = SUGGESTED_KEYS | (SYSTEM_ATTRIBUTE_KEYS if include_system else set())
-    extra_pairs = SUGGESTED_PAIRS | (SYSTEM_ATTRIBUTE_PAIRS if include_system else set())
-    all_pairs = db_pairs | extra_pairs
-    all_keys = {k for k, _ in all_pairs} | extra_keys
+    seed_keys, seed_pairs = _expand_suggestions(IDENTITY_SUGGESTIONS)
+    if include_system:
+        sys_keys, sys_pairs = _expand_suggestions(SYSTEM_ATTRIBUTES)
+        seed_keys |= sys_keys
+        seed_pairs |= sys_pairs
+    all_pairs = db_pairs | seed_pairs
+    all_keys = {k for k, _ in all_pairs} | seed_keys
     return sorted(all_keys), sorted(all_pairs)
 
 
-def get_resource_tag_suggestions(org: Organization) -> tuple[list[str], list[tuple[str, str]]]:
-    """Returns (sorted_keys, sorted_key_value_pairs) for resource tag suggestions."""
-    db_pairs = set(
-        ResourceTag.objects.filter(organization=org).values_list("key", "value").distinct()
-    )
-    all_pairs = db_pairs | SUGGESTED_PAIRS
-    all_keys = {k for k, _ in all_pairs} | SUGGESTED_KEYS
+def get_resource_tag_suggestions(
+    org: Organization, resource_type: str | None = None,
+) -> tuple[list[str], list[tuple[str, str]]]:
+    """Returns (sorted_keys, sorted_key_value_pairs) for resource tag suggestions.
+
+    When *resource_type* is given, only tags for that type are included.
+    When ``None``, all resource tags across the org are returned (useful for
+    the policy editor where the resource type may not be known yet).
+    """
+    qs = ResourceTag.objects.filter(organization=org)
+    if resource_type:
+        qs = qs.filter(resource_type=resource_type)
+    db_pairs = set(qs.values_list("key", "value").distinct())
+
+    if resource_type:
+        seed = RESOURCE_SUGGESTIONS.get(resource_type, {})
+    else:
+        seed: dict[str, set[str]] = {}
+        for type_suggestions in RESOURCE_SUGGESTIONS.values():
+            for k, vals in type_suggestions.items():
+                seed.setdefault(k, set()).update(vals)
+    seed_keys, seed_pairs = _expand_suggestions(seed)
+
+    all_pairs = db_pairs | seed_pairs
+    all_keys = {k for k, _ in all_pairs} | seed_keys
     return sorted(all_keys), sorted(all_pairs)
 
 
