@@ -11,9 +11,15 @@
      for_key_model  — Alpine expression for the associated key (e.g. "key", "cond.key").
                       When set, suggestions must be (key, value) tuples and the dropdown
                       only opens / shows items when the key has a value.
+     value_model    — Alpine expression for a separate "selected value" (e.g. "selectedId").
+                      When set, suggestions must be (value, label) tuples. The text input
+                      displays/filters by label (bound to model), while on selection
+                      value_model is set to the tuple's value. Typing clears value_model.
+     value_name     — input name for the hidden value field (for form submission with value_model).
    The actual model variable lives in the PARENT Alpine scope (nested scopes inherit).
 {% endcomment %}
-<div x-data="{ open: false }" @click.outside="open = false" class="relative flex-1 min-w-0">
+<div x-data="{ open: false }" @click.outside="open = false" class="relative min-w-0">
+    {% if value_model %}<input type="hidden" {% if value_name %}name="{{ value_name }}"{% endif %} :value="{{ value_model }}">{% endif %}
     <input type="text"
            {% if name %}name="{{ name }}"{% endif %}
            x-model="{{ model }}"
@@ -21,7 +27,7 @@
            autocomplete="off"
            {% if required %}required{% endif %}
            @focus="open = {% if for_key_model %}!!{{ for_key_model }}{% else %}true{% endif %}"
-           @input="open = {% if for_key_model %}!!{{ for_key_model }}{% else %}true{% endif %}"
+           @input="open = {% if for_key_model %}!!{{ for_key_model }}{% else %}true{% endif %}{% if value_model %}; {{ value_model }} = ''{% endif %}"
            @keydown.escape="open = false; $el.blur()"
            class="{% if input_class %}{{ input_class }}{% else %}{{ width }} px-2 py-0.5 text-xs border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800 text-gray-900 dark:text-white placeholder-gray-400{% endif %} pr-5">
     {% if suggestions %}
@@ -29,8 +35,15 @@
         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
     </svg>
     <div x-show="open {% if for_key_model %}&& !!{{ for_key_model }}{% endif %}" x-cloak x-transition.opacity.duration.50ms
-         class="absolute z-50 mt-1 min-w-full rounded-md border border-gray-200 bg-white shadow-lg dark:border-gray-600 dark:bg-gray-800 max-h-48 overflow-y-auto py-1 dark-scrollbar">
-        {% if for_key_model %}
+         class="absolute z-50 min-w-full rounded-md border border-gray-200 bg-white shadow-lg dark:border-gray-600 dark:bg-gray-800 max-h-48 overflow-y-auto dark-scrollbar">
+        {% if value_model %}
+        {% for val, label in suggestions %}
+        <button type="button" data-value="{{ val }}" data-label="{{ label }}"
+                x-show="!{{ model }} || $el.dataset.label.toLowerCase().includes({{ model }}.toLowerCase())"
+                @click="{{ value_model }} = $el.dataset.value; {{ model }} = $el.dataset.label; open = false"
+                class="block w-full text-left px-3 py-1.5 text-xs text-gray-700 hover:bg-gray-50 dark:text-gray-300 dark:hover:bg-gray-700 truncate">{{ label }}</button>
+        {% endfor %}
+        {% elif for_key_model %}
         {% for for_key, value in suggestions %}
         <button type="button" data-value="{{ value }}" data-for-key="{{ for_key }}"
                 x-show="$el.dataset.forKey === {{ for_key_model }} && (!{{ model }} || $el.dataset.value.toLowerCase().includes({{ model }}.toLowerCase()))"

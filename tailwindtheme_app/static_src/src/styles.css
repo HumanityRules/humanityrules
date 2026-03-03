@@ -374,19 +374,6 @@ el-options[popover] {
   scrollbar-color: rgb(55 65 81) transparent; /* gray-700 thumb, transparent track */
 }
 
-.dark-scrollbar::-webkit-scrollbar {
-  width: 12px;
-}
-
-.dark-scrollbar::-webkit-scrollbar-track {
-  background: transparent;
-}
-
-.dark-scrollbar::-webkit-scrollbar-thumb {
-  background-color: rgb(55 65 81); /* gray-700 */
-  border-radius: 6px;
-}
-
 /* ===== Shimmer/shine animation for thinking indicator ===== */
 @keyframes shimmer {
   0% {

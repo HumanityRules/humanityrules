@@ -324,9 +324,9 @@ def security_group_detail(request: HttpRequest, group_id: UUID) -> HttpResponse:
 
     # Users not in this group
     member_user_ids = members.values_list("user_id", flat=True)
-    available_users = User.objects.filter(
+    available_users = list(User.objects.filter(
         organization_memberships__organization=org,
-    ).exclude(id__in=member_user_ids).order_by("email")
+    ).exclude(id__in=member_user_ids).order_by("email").values_list("id", "email"))
 
     context = base.get_app_shell_context(request=request, current_page="security")
     context["active_tab"] = "groups"
@@ -442,9 +442,9 @@ def _render_group_attributes_partial(request: HttpRequest, group: Group) -> Http
 def _render_group_members_partial(request: HttpRequest, org: Organization, group: Group) -> HttpResponse:
     members = group.memberships.select_related("user").order_by("user__email")
     member_user_ids = members.values_list("user_id", flat=True)
-    available_users = User.objects.filter(
+    available_users = list(User.objects.filter(
         organization_memberships__organization=org,
-    ).exclude(id__in=member_user_ids).order_by("email")
+    ).exclude(id__in=member_user_ids).order_by("email").values_list("id", "email"))
     return render(request, "devopshero_app/security/_group_members.html", {
         "group": group, "members": members, "available_users": available_users,
     })

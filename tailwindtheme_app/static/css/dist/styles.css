@@ -806,6 +806,9 @@
   .w-50 {
     width: calc(var(--spacing) * 50);
   }
+  .w-56 {
+    width: calc(var(--spacing) * 56);
+  }
   .w-72 {
     width: calc(var(--spacing) * 72);
   }
@@ -823,9 +826,6 @@
   }
   .w-auto {
     width: auto;
-  }
-  .w-fit {
-    width: fit-content;
   }
   .w-full {
     width: 100%;
@@ -854,9 +854,6 @@
   .max-w-\[80\%\] {
     max-width: 80%;
   }
-  .max-w-full {
-    max-width: 100%;
-  }
   .max-w-lg {
     max-width: var(--container-lg);
   }
@@ -872,8 +869,14 @@
   .min-w-0 {
     min-width: calc(var(--spacing) * 0);
   }
+  .min-w-20 {
+    min-width: calc(var(--spacing) * 20);
+  }
   .min-w-full {
     min-width: 100%;
+  }
+  .min-w-md {
+    min-width: var(--container-md);
   }
   .flex-1 {
     flex: 1;
@@ -952,6 +955,9 @@
   }
   .grid-cols-3 {
     grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+  .grid-cols-5 {
+    grid-template-columns: repeat(5, minmax(0, 1fr));
   }
   .grid-cols-\[1fr_auto_5rem\] {
     grid-template-columns: 1fr auto 5rem;
@@ -1118,9 +1124,6 @@
       margin-inline-start: calc(calc(var(--spacing) * 8) * var(--tw-space-x-reverse));
       margin-inline-end: calc(calc(var(--spacing) * 8) * calc(1 - var(--tw-space-x-reverse)));
     }
-  }
-  .gap-y-2 {
-    row-gap: calc(var(--spacing) * 2);
   }
   .gap-y-4 {
     row-gap: calc(var(--spacing) * 4);
@@ -2754,6 +2757,13 @@
       }
     }
   }
+  .hover\:text-red-500 {
+    &:hover {
+      @media (hover: hover) {
+        color: var(--color-red-500);
+      }
+    }
+  }
   .hover\:text-red-700 {
     &:hover {
       @media (hover: hover) {
@@ -4008,6 +4018,15 @@
       }
     }
   }
+  .dark\:hover\:text-red-400 {
+    &:where(.dark, .dark *) {
+      &:hover {
+        @media (hover: hover) {
+          color: var(--color-red-400);
+        }
+      }
+    }
+  }
   .dark\:hover\:text-white {
     &:where(.dark, .dark *) {
       &:hover {
@@ -4346,16 +4365,6 @@ el-options[popover] {
 .dark-scrollbar {
   scrollbar-width: auto;
   scrollbar-color: rgb(55 65 81) transparent;
-}
-.dark-scrollbar::-webkit-scrollbar {
-  width: 12px;
-}
-.dark-scrollbar::-webkit-scrollbar-track {
-  background: transparent;
-}
-.dark-scrollbar::-webkit-scrollbar-thumb {
-  background-color: rgb(55 65 81);
-  border-radius: 6px;
 }
 @keyframes shimmer {
   0% {
