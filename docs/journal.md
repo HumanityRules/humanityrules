@@ -1,5 +1,22 @@
 # DevOpsHero Development Journal
 
+## 2026-03-02 19:03 - [UI] Combobox UX improvements: focus ring fix, select-on-focus, key-value linkage
+
+**Conversation:**
+
+Three improvements to the `_combobox_input.html` and `_kv_tag_editor.html` components:
+
+1. **Focus ring removal (correct fix):** The previous session's approach of adding `focus:outline-none focus:ring-0` to buttons and containers didn't work because the browser's default focus indicator uses `:focus-visible`, not `:focus`. The actual fix was appending `focus-visible:outline-none` (along with `focus:outline-none focus:ring-0`) directly to the `<input>` element inside `_combobox_input.html`. These classes are appended outside the `input_class` conditional so they apply universally. Reverted all the scattered focus-ring classes from the previous session's failed attempts on buttons, container divs, and form elements.
+
+2. **Select-all on focus:** Added `$el.select()` to the `@focus` handler on the combobox input, so clicking into a field selects its existing content for easy replacement.
+
+3. **Clear value when key changes:** In `_kv_tag_editor.html`, added `x-init="$watch('key', () => value = '')"` to the form. This ensures the value field is cleared whenever the key changes (typed or selected from dropdown), so the value suggestions dropdown refreshes to show options relevant to the new key. Without this, stale value text would filter out the new key's suggestions.
+
+**Key points:**
+- `focus:outline-none` targets `:focus` but browsers use `:focus-visible` for default outlines — need both
+- Alpine's `$watch` doesn't fire on init, only on changes — safe for clearing dependent fields
+- Focus ring classes appended outside the `{% if input_class %}` block so they apply regardless of caller
+
 ## 2026-03-02 18:56 - [UI] Policy editor button layout and focus ring cleanup
 
 **Conversation:** [2026-03-02-1856-ce71facc.md](conversations/2026-03-02-1856-ce71facc.md)

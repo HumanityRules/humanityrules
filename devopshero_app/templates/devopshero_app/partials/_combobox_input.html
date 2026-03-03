@@ -18,7 +18,7 @@
      value_name     — input name for the hidden value field (for form submission with value_model).
    The actual model variable lives in the PARENT Alpine scope (nested scopes inherit).
 {% endcomment %}
-<div x-data="{ open: false }" @click.outside="open = false" class="relative min-w-0 focus:outline-none focus-within:outline-none" tabindex="-1">
+<div x-data="{ open: false }" @click.outside="open = false" class="relative min-w-0">
     {% if value_model %}<input type="hidden" {% if value_name %}name="{{ value_name }}"{% endif %} :value="{{ value_model }}">{% endif %}
     <input type="text"
            {% if name %}name="{{ name }}"{% endif %}
@@ -26,10 +26,10 @@
            placeholder="{{ placeholder }}"
            autocomplete="off"
            {% if required %}required{% endif %}
-           @focus="open = {% if for_key_model %}!!{{ for_key_model }}{% else %}true{% endif %}"
+           @focus="open = {% if for_key_model %}!!{{ for_key_model }}{% else %}true{% endif %}; $el.select()"
            @input="open = {% if for_key_model %}!!{{ for_key_model }}{% else %}true{% endif %}{% if value_model %}; {{ value_model }} = ''{% endif %}"
            @keydown.escape="open = false; $el.blur()"
-           class="{% if input_class %}{{ input_class }}{% else %}{{ width }} px-2 py-0.5 text-xs border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800 text-gray-900 dark:text-white placeholder-gray-400{% endif %} pr-5">
+           class="{% if input_class %}{{ input_class }}{% else %}{{ width }} px-2 py-0.5 text-xs border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800 text-gray-900 dark:text-white placeholder-gray-400{% endif %} pr-5 focus:outline-none focus:ring-0 focus-visible:outline-none">
     {% if suggestions %}
     <svg @click="open = !open" class="pointer-events-auto cursor-pointer absolute right-1 top-1/2 -translate-y-1/2 h-3 w-3 text-gray-400 transition-transform duration-200" :class="open && 'rotate-180'" fill="none" stroke="currentColor" viewBox="0 0 24 24">
         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
@@ -41,21 +41,21 @@
         <button type="button" data-value="{{ val }}" data-label="{{ label }}"
                 x-show="!{{ model }} || $el.dataset.label.toLowerCase().includes({{ model }}.toLowerCase())"
                 @click="{{ value_model }} = $el.dataset.value; {{ model }} = $el.dataset.label; open = false"
-                class="block w-full text-left px-3 py-1.5 text-xs text-gray-700 hover:bg-gray-50 dark:text-gray-300 dark:hover:bg-gray-700 truncate focus:outline-none focus:ring-0">{{ label }}</button>
+                class="block w-full text-left px-3 py-1.5 text-xs text-gray-700 hover:bg-gray-50 dark:text-gray-300 dark:hover:bg-gray-700 truncate">{{ label }}</button>
         {% endfor %}
         {% elif for_key_model %}
         {% for for_key, value in suggestions %}
         <button type="button" data-value="{{ value }}" data-for-key="{{ for_key }}"
                 x-show="$el.dataset.forKey === {{ for_key_model }} && (!{{ model }} || $el.dataset.value.toLowerCase().includes({{ model }}.toLowerCase()))"
                 @click="{{ model }} = $el.dataset.value; open = false"
-                class="block w-full text-left px-3 py-1.5 text-xs text-gray-700 hover:bg-gray-50 dark:text-gray-300 dark:hover:bg-gray-700 truncate focus:outline-none focus:ring-0">{{ value }}</button>
+                class="block w-full text-left px-3 py-1.5 text-xs text-gray-700 hover:bg-gray-50 dark:text-gray-300 dark:hover:bg-gray-700 truncate">{{ value }}</button>
         {% endfor %}
         {% else %}
         {% for s in suggestions %}
         <button type="button" data-value="{{ s }}"
                 x-show="!{{ model }} || $el.dataset.value.toLowerCase().includes({{ model }}.toLowerCase())"
                 @click="{{ model }} = $el.dataset.value; open = false"
-                class="block w-full text-left px-3 py-1.5 text-xs text-gray-700 hover:bg-gray-50 dark:text-gray-300 dark:hover:bg-gray-700 truncate focus:outline-none focus:ring-0">{{ s }}</button>
+                class="block w-full text-left px-3 py-1.5 text-xs text-gray-700 hover:bg-gray-50 dark:text-gray-300 dark:hover:bg-gray-700 truncate">{{ s }}</button>
         {% endfor %}
         {% endif %}
     </div>

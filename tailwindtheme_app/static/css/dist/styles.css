@@ -2964,6 +2964,12 @@
       outline-color: var(--color-red-600);
     }
   }
+  .focus-visible\:outline-none {
+    &:focus-visible {
+      --tw-outline-style: none;
+      outline-style: none;
+    }
+  }
   .disabled\:cursor-not-allowed {
     &:disabled {
       cursor: not-allowed;
