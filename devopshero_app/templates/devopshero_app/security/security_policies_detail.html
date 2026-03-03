@@ -27,9 +27,18 @@
         {% endif %}
     </div>
 
+    {% if error %}
+    <div class="mb-4 rounded-lg border border-red-300 dark:border-red-600 bg-red-50 dark:bg-red-500/10 px-4 py-3 text-sm text-red-700 dark:text-red-400">
+        {{ error }}
+    </div>
+    {% endif %}
+
     <div x-data="policyForm()" class="max-w-2xl">
         <form method="POST"
-              action="{% if policy %}/security/policies/{{ policy.id }}/{% else %}/security/policies/create/{% endif %}"
+              hx-post="{% if policy %}/security/policies/{{ policy.id }}/{% else %}/security/policies/create/{% endif %}"
+              hx-target="#main-content"
+              hx-swap="innerHTML"
+              hx-trigger="do-submit"
               @submit.prevent="submitForm($el)"
               @keydown.enter="if ($event.target.tagName === 'INPUT') $event.preventDefault()">
             {% csrf_token %}
@@ -43,7 +52,7 @@
             <div class="mb-6">
                 <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Name</label>
                 <input type="text" name="name" required autocomplete="off"
-                       value="{% if policy %}{{ policy.name }}{% endif %}"
+                       x-model="policyName"
                        class="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white">
             </div>
 
@@ -52,7 +61,7 @@
                 <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Resource Type</label>
                 <input type="hidden" name="resource_type" :value="resourceType">
                 <div class="w-64" @change="resourceType = $event.target.value">
-                    {% include "devopshero_app/partials/_dropdown_select.html#dropdown_select" with dropdown_id="resource-type-select" dropdown_name="" dropdown_value=policy.resource_type dropdown_selected_label=selected_resource_type_label dropdown_options=resource_type_options %}
+                    {% include "devopshero_app/partials/_dropdown_select.html#dropdown_select" with dropdown_id="resource-type-select" dropdown_name="" dropdown_value=form_resource_type dropdown_selected_label=selected_resource_type_label dropdown_options=resource_type_options %}
                 </div>
             </div>
 
@@ -166,7 +175,8 @@
             {# Submit #}
             <div class="flex items-center gap-3">
                 <button type="submit"
-                        class="px-4 py-2 text-sm font-medium text-white bg-indigo-600 rounded-lg hover:bg-indigo-700">
+                        :disabled="!policyName.trim() || !resourceType"
+                        class="px-4 py-2 text-sm font-medium text-white bg-indigo-600 rounded-lg hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed">
                     {% if policy %}Save Changes{% else %}Create Policy{% endif %}
                 </button>
                 <a href="/security/policies/"
@@ -194,10 +204,10 @@ function policyForm() {
     };
     {% else %}
     const existingPolicy = {
-        resourceType: '',
-        identityConditions: [{key: '*', value: '*'}],
-        resourceConditions: [{key: '*', value: '*'}],
-        actions: [],
+        resourceType: '{{ initial_resource_type|default:""|escapejs }}',
+        identityConditions: {{ initial_identity_conditions|default:'[{"key": "*", "value": "*"}]'|safe }},
+        resourceConditions: {{ initial_resource_conditions|default:'[{"key": "*", "value": "*"}]'|safe }},
+        actions: {{ initial_actions|default:'[]'|safe }},
     };
     {% endif %}
 
@@ -208,6 +218,7 @@ function policyForm() {
     const denials = existingPolicy.actions.filter(a => a.startsWith('!')).map(a => a.slice(1));
 
     return {
+        policyName: '{% if policy %}{{ policy.name|escapejs }}{% elif initial_name %}{{ initial_name|escapejs }}{% endif %}',
         resourceType: existingPolicy.resourceType,
         identityWildcard: isWildcard(existingPolicy.identityConditions),
         identityConditions: isWildcard(existingPolicy.identityConditions)
@@ -256,7 +267,7 @@ function policyForm() {
                 this.resourceWildcard ? [{key: '*', value: '*'}] : this.resourceConditions.filter(c => c.key && c.value)
             );
             el.querySelector('[name=actions]').value = JSON.stringify(this.computedActions());
-            el.submit();
+            htmx.trigger(el, 'do-submit');
         },
     };
 }

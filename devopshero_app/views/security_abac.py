@@ -7,6 +7,7 @@ from uuid import UUID
 
 from django.contrib.auth.decorators import login_required
 from django.core.exceptions import ValidationError
+from django.db import IntegrityError
 from django.http import HttpRequest, HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.views.decorators.http import require_GET, require_POST
@@ -40,8 +41,10 @@ def _add_resource_type_context(context: dict, policy: Policy | None) -> None:
     """Add resource type dropdown options and selected label to template context."""
     context["resource_type_options"] = RESOURCE_TYPE_OPTIONS
     if policy:
+        context["form_resource_type"] = policy.resource_type
         context["selected_resource_type_label"] = RESOURCE_TYPE_LABELS.get(policy.resource_type, "Select...")
     else:
+        context["form_resource_type"] = ""
         context["selected_resource_type_label"] = "Select..."
 
 
@@ -536,12 +539,7 @@ def security_policy_create(request: HttpRequest) -> HttpResponse:
         resource_conditions = json.loads(request.POST.get("resource_conditions", "[]"))
         actions = json.loads(request.POST.get("actions", "[]"))
 
-        try:
-            abac.validate_policy_conditions(
-                identity_conditions=identity_conditions,
-                resource_conditions=resource_conditions,
-            )
-        except ValidationError as e:
+        def _render_create_form_error(error_message: str) -> HttpResponse:
             existing_identity_keys, existing_identity_values = abac.get_identity_attribute_suggestions(org, include_system=True)
             existing_tag_keys, existing_tag_values = abac.get_resource_tag_suggestions(org)
             context = base.get_app_shell_context(request=request, current_page="security")
@@ -551,11 +549,30 @@ def security_policy_create(request: HttpRequest) -> HttpResponse:
             context["existing_identity_values"] = existing_identity_values
             context["existing_tag_keys"] = existing_tag_keys
             context["existing_tag_values"] = existing_tag_values
-            context["error"] = e.message
+            context["error"] = error_message
+            context["initial_name"] = name
+            context["initial_resource_type"] = resource_type
+            context["initial_identity_conditions"] = json.dumps(identity_conditions)
+            context["initial_resource_conditions"] = json.dumps(resource_conditions)
+            context["initial_actions"] = json.dumps(actions)
             _add_resource_type_context(context, policy=None)
+            if resource_type:
+                context["form_resource_type"] = resource_type
+                context["selected_resource_type_label"] = RESOURCE_TYPE_LABELS.get(resource_type, "Select...")
             return render(request, "devopshero_app/security/security_policies_detail.html", context=context)
 
-        if name and resource_type:
+        try:
+            abac.validate_policy_conditions(
+                identity_conditions=identity_conditions,
+                resource_conditions=resource_conditions,
+            )
+        except ValidationError as e:
+            return _render_create_form_error(e.message)
+
+        if not name or not resource_type:
+            return _render_create_form_error("Name and resource type are required.")
+
+        try:
             Policy.objects.create(
                 organization=org,
                 name=name,
@@ -564,7 +581,11 @@ def security_policy_create(request: HttpRequest) -> HttpResponse:
                 resource_conditions=resource_conditions,
                 actions=actions,
             )
-        return redirect("security_policies")
+        except IntegrityError:
+            return _render_create_form_error("A policy with this name already exists.")
+        response = HttpResponse(status=204)
+        response["HX-Redirect"] = "/security/policies/"
+        return response
 
     # GET — show form
     existing_identity_keys, existing_identity_values = abac.get_identity_attribute_suggestions(org, include_system=True)
@@ -624,8 +645,24 @@ def security_policy_detail(request: HttpRequest, policy_id: UUID) -> HttpRespons
         policy.identity_conditions = identity_conditions
         policy.resource_conditions = resource_conditions
         policy.actions = json.loads(request.POST.get("actions", "[]"))
-        policy.save()
-        return redirect("security_policies")
+        try:
+            policy.save()
+        except IntegrityError:
+            existing_identity_keys, existing_identity_values = abac.get_identity_attribute_suggestions(org, include_system=True)
+            existing_tag_keys, existing_tag_values = abac.get_resource_tag_suggestions(org)
+            context = base.get_app_shell_context(request=request, current_page="security")
+            context["active_tab"] = "policies"
+            context["policy"] = policy
+            context["existing_identity_keys"] = existing_identity_keys
+            context["existing_identity_values"] = existing_identity_values
+            context["existing_tag_keys"] = existing_tag_keys
+            context["existing_tag_values"] = existing_tag_values
+            context["error"] = "A policy with this name already exists."
+            _add_resource_type_context(context, policy=policy)
+            return render(request, "devopshero_app/security/security_policies_detail.html", context=context)
+        response = HttpResponse(status=204)
+        response["HX-Redirect"] = "/security/policies/"
+        return response
 
     existing_identity_keys, existing_identity_values = abac.get_identity_attribute_suggestions(org, include_system=True)
     existing_tag_keys, existing_tag_values = abac.get_resource_tag_suggestions(org)
