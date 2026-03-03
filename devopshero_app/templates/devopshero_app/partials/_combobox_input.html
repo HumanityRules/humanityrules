@@ -16,6 +16,8 @@
                       displays/filters by label (bound to model), while on selection
                       value_model is set to the tuple's value. Typing clears value_model.
      value_name     — input name for the hidden value field (for form submission with value_model).
+     clear_model    — Alpine expression to reset to '' on input/selection (e.g. "item.value").
+                      Useful for clearing a paired value field when the key changes.
    The actual model variable lives in the PARENT Alpine scope (nested scopes inherit).
 {% endcomment %}
 <div x-data="{ open: false }" @click.outside="open = false" class="relative min-w-0">
@@ -27,7 +29,7 @@
            autocomplete="off"
            {% if required %}required{% endif %}
            @focus="open = {% if for_key_model %}!!{{ for_key_model }}{% else %}true{% endif %}; $el.select()"
-           @input="open = {% if for_key_model %}!!{{ for_key_model }}{% else %}true{% endif %}{% if value_model %}; {{ value_model }} = ''{% endif %}"
+           @input="open = {% if for_key_model %}!!{{ for_key_model }}{% else %}true{% endif %}{% if value_model %}; {{ value_model }} = ''{% endif %}{% if clear_model %}; {{ clear_model }} = ''{% endif %}"
            @keydown.escape="open = false; $el.blur()"
            class="{% if input_class %}{{ input_class }}{% else %}{{ width }} px-2 py-0.5 text-xs border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800 text-gray-900 dark:text-white placeholder-gray-400{% endif %} pr-5 focus:outline-none focus:ring-0 focus-visible:outline-none">
     {% if suggestions %}
@@ -40,21 +42,21 @@
         {% for val, label in suggestions %}
         <button type="button" data-value="{{ val }}" data-label="{{ label }}"
                 x-show="!{{ model }} || $el.dataset.label.toLowerCase().includes({{ model }}.toLowerCase())"
-                @click="{{ value_model }} = $el.dataset.value; {{ model }} = $el.dataset.label; open = false"
+                @click="{{ value_model }} = $el.dataset.value; {{ model }} = $el.dataset.label; open = false{% if clear_model %}; {{ clear_model }} = ''{% endif %}"
                 class="block w-full text-left px-3 py-1.5 text-xs text-gray-700 hover:bg-gray-50 dark:text-gray-300 dark:hover:bg-gray-700 truncate">{{ label }}</button>
         {% endfor %}
         {% elif for_key_model %}
         {% for for_key, value in suggestions %}
         <button type="button" data-value="{{ value }}" data-for-key="{{ for_key }}"
                 x-show="$el.dataset.forKey === {{ for_key_model }} && (!{{ model }} || $el.dataset.value.toLowerCase().includes({{ model }}.toLowerCase()))"
-                @click="{{ model }} = $el.dataset.value; open = false"
+                @click="{{ model }} = $el.dataset.value; open = false{% if clear_model %}; {{ clear_model }} = ''{% endif %}"
                 class="block w-full text-left px-3 py-1.5 text-xs text-gray-700 hover:bg-gray-50 dark:text-gray-300 dark:hover:bg-gray-700 truncate">{{ value }}</button>
         {% endfor %}
         {% else %}
         {% for s in suggestions %}
         <button type="button" data-value="{{ s }}"
                 x-show="!{{ model }} || $el.dataset.value.toLowerCase().includes({{ model }}.toLowerCase())"
-                @click="{{ model }} = $el.dataset.value; open = false"
+                @click="{{ model }} = $el.dataset.value; open = false{% if clear_model %}; {{ clear_model }} = ''{% endif %}"
                 class="block w-full text-left px-3 py-1.5 text-xs text-gray-700 hover:bg-gray-50 dark:text-gray-300 dark:hover:bg-gray-700 truncate">{{ s }}</button>
         {% endfor %}
         {% endif %}

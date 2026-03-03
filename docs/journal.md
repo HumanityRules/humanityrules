@@ -1,5 +1,25 @@
 # DevOpsHero Development Journal
 
+## 2026-03-02 19:49 - [UI] Parametrize _kv_tag_editor with rows mode for policy conditions
+
+**Conversation:** [2026-03-02-1950-6eb535f9.md](conversations/2026-03-02-1950-6eb535f9.md)
+
+The policy editor (`security_policies_detail.html`) had inline key-value condition editing code that duplicated logic from the reusable `_kv_tag_editor.html` component. The editor used Alpine-only state (arrays of `{key, value}` objects) while the kv_tag_editor used HTMX POST endpoints — fundamentally different data flows that prevented code sharing.
+
+Parametrized `_kv_tag_editor.html` to support two modes via a new `array_model` parameter:
+- **Chips mode** (default, existing): HTMX-based, shows key=value chips with inline add form. Triggered when `url_base`/`can_edit` are set.
+- **Rows mode** (new): Alpine-only, one editable input row per array element with combobox dropdowns, remove button per row, and "Add" button at the bottom. Triggered when `array_model` is set (e.g., `array_model="identityConditions"`).
+
+The policy detail page's two condition sections (identity + resource) were replaced with single `{% include %}` calls passing `array_model`, `suggested_keys`, `suggested_values`, and `add_label`.
+
+Also added a `clear_model` parameter to `_combobox_input.html` — resets the given Alpine expression to `''` on both typing and suggestion selection. The key combobox in rows mode passes `clear_model="item.value"` so changing the key clears the value field. This was needed because chips mode had a form-level `$watch('key', () => value = '')` but rows mode had no equivalent per-row watcher.
+
+**Key points:**
+- `array_model` presence is the discriminator — no separate "mode" flag needed
+- Rows mode uses `x-for="(item, i) in {{ array_model }}"` with `item.key`/`item.value` as combobox models, inheriting from parent Alpine scope
+- `clear_model` is a generic combobox feature (added to `@input` and all `@click` handlers) not specific to rows mode — could be reused anywhere a paired field needs clearing
+- Policy form's `submitForm()` and hidden JSON fields remain unchanged — rows mode is purely a UI refactor
+
 ## 2026-03-02 19:03 - [UI] Combobox UX improvements: focus ring fix, select-on-focus, key-value linkage
 
 **Conversation:**

@@ -64,23 +64,7 @@
                     Match any identity
                 </label>
                 <template x-if="!identityWildcard">
-                    <div>
-                        <template x-for="(cond, i) in identityConditions" :key="i">
-                            <div class="flex items-center gap-2 mb-2">
-                                {% include "devopshero_app/partials/_combobox_input.html" with suggestions=existing_identity_keys model="cond.key" placeholder="key" input_class="w-32 px-2 py-1 text-sm border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800 text-gray-900 dark:text-white" %}
-                                <span class="text-sm text-gray-400">=</span>
-                                {% include "devopshero_app/partials/_combobox_input.html" with suggestions=existing_identity_values model="cond.value" for_key_model="cond.key" placeholder="value" input_class="w-40 px-2 py-1 text-sm border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800 text-gray-900 dark:text-white" %}
-                                <button type="button" @click="identityConditions.splice(i, 1)"
-                                        class="text-red-500 hover:text-red-700">
-                                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
-                                    </svg>
-                                </button>
-                            </div>
-                        </template>
-                        <button type="button" @click="identityConditions.push({key: '', value: ''})"
-                                class="text-sm text-indigo-600 dark:text-indigo-400 hover:text-indigo-800">+ Add condition</button>
-                    </div>
+                    {% include "devopshero_app/partials/_kv_tag_editor.html" with array_model="identityConditions" suggested_keys=existing_identity_keys suggested_values=existing_identity_values add_label="Add condition" %}
                 </template>
             </div>
 
@@ -93,23 +77,7 @@
                     Match any resource
                 </label>
                 <template x-if="!resourceWildcard">
-                    <div>
-                        <template x-for="(cond, i) in resourceConditions" :key="i">
-                            <div class="flex items-center gap-2 mb-2">
-                                {% include "devopshero_app/partials/_combobox_input.html" with suggestions=existing_tag_keys model="cond.key" placeholder="key" input_class="w-32 px-2 py-1 text-sm border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800 text-gray-900 dark:text-white" %}
-                                <span class="text-sm text-gray-400">=</span>
-                                {% include "devopshero_app/partials/_combobox_input.html" with suggestions=existing_tag_values model="cond.value" for_key_model="cond.key" placeholder="value" input_class="w-40 px-2 py-1 text-sm border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800 text-gray-900 dark:text-white" %}
-                                <button type="button" @click="resourceConditions.splice(i, 1)"
-                                        class="text-red-500 hover:text-red-700">
-                                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
-                                    </svg>
-                                </button>
-                            </div>
-                        </template>
-                        <button type="button" @click="resourceConditions.push({key: '', value: ''})"
-                                class="text-sm text-indigo-600 dark:text-indigo-400 hover:text-indigo-800">+ Add condition</button>
-                    </div>
+                    {% include "devopshero_app/partials/_kv_tag_editor.html" with array_model="resourceConditions" suggested_keys=existing_tag_keys suggested_values=existing_tag_values add_label="Add condition" %}
                 </template>
             </div>
 
