@@ -38,9 +38,17 @@
             <p class="text-xs text-gray-500 dark:text-gray-400 mt-1 line-clamp-2">{{ row.group.description }}</p>
             {% endif %}
             <div class="mt-3 flex items-center gap-3 text-xs text-gray-500 dark:text-gray-400">
-                <span>{{ row.attribute_count }} attribute{{ row.attribute_count|pluralize }}</span>
                 <span>{{ row.member_count }} member{{ row.member_count|pluralize }}</span>
             </div>
+            {% if row.attributes %}
+            <div class="mt-2 flex flex-wrap gap-1 -mx-2">
+                {% for attr in row.attributes %}
+                <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-purple-50 text-purple-700 dark:bg-purple-500/10 dark:text-purple-400">
+                    {{ attr.key }}={{ attr.value }}
+                </span>
+                {% endfor %}
+            </div>
+            {% endif %}
         </a>
         {% endfor %}
     </div>

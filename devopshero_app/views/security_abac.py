@@ -266,14 +266,15 @@ def security_groups(request: HttpRequest) -> HttpResponse:
         return denied
 
     org = request.user.current_organization
-    groups = Group.objects.filter(organization=org).order_by("name")
+    groups = Group.objects.filter(organization=org).prefetch_related("attributes").order_by("name")
 
-    # Annotate with counts
     group_rows = []
     for group in groups:
+        attrs = list(group.attributes.all())
         group_rows.append({
             "group": group,
-            "attribute_count": group.attributes.count(),
+            "attributes": attrs,
+            "attribute_count": len(attrs),
             "member_count": group.memberships.count(),
         })
 
