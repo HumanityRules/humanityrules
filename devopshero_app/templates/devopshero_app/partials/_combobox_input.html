@@ -18,7 +18,7 @@
      value_name     — input name for the hidden value field (for form submission with value_model).
    The actual model variable lives in the PARENT Alpine scope (nested scopes inherit).
 {% endcomment %}
-<div x-data="{ open: false }" @click.outside="open = false" class="relative min-w-0">
+<div x-data="{ open: false }" @click.outside="open = false" class="relative min-w-0 focus:outline-none focus-within:outline-none" tabindex="-1">
     {% if value_model %}<input type="hidden" {% if value_name %}name="{{ value_name }}"{% endif %} :value="{{ value_model }}">{% endif %}
     <input type="text"
            {% if name %}name="{{ name }}"{% endif %}
@@ -41,21 +41,21 @@
         <button type="button" data-value="{{ val }}" data-label="{{ label }}"
                 x-show="!{{ model }} || $el.dataset.label.toLowerCase().includes({{ model }}.toLowerCase())"
                 @click="{{ value_model }} = $el.dataset.value; {{ model }} = $el.dataset.label; open = false"
-                class="block w-full text-left px-3 py-1.5 text-xs text-gray-700 hover:bg-gray-50 dark:text-gray-300 dark:hover:bg-gray-700 truncate">{{ label }}</button>
+                class="block w-full text-left px-3 py-1.5 text-xs text-gray-700 hover:bg-gray-50 dark:text-gray-300 dark:hover:bg-gray-700 truncate focus:outline-none focus:ring-0">{{ label }}</button>
         {% endfor %}
         {% elif for_key_model %}
         {% for for_key, value in suggestions %}
         <button type="button" data-value="{{ value }}" data-for-key="{{ for_key }}"
                 x-show="$el.dataset.forKey === {{ for_key_model }} && (!{{ model }} || $el.dataset.value.toLowerCase().includes({{ model }}.toLowerCase()))"
                 @click="{{ model }} = $el.dataset.value; open = false"
-                class="block w-full text-left px-3 py-1.5 text-xs text-gray-700 hover:bg-gray-50 dark:text-gray-300 dark:hover:bg-gray-700 truncate">{{ value }}</button>
+                class="block w-full text-left px-3 py-1.5 text-xs text-gray-700 hover:bg-gray-50 dark:text-gray-300 dark:hover:bg-gray-700 truncate focus:outline-none focus:ring-0">{{ value }}</button>
         {% endfor %}
         {% else %}
         {% for s in suggestions %}
         <button type="button" data-value="{{ s }}"
                 x-show="!{{ model }} || $el.dataset.value.toLowerCase().includes({{ model }}.toLowerCase())"
                 @click="{{ model }} = $el.dataset.value; open = false"
-                class="block w-full text-left px-3 py-1.5 text-xs text-gray-700 hover:bg-gray-50 dark:text-gray-300 dark:hover:bg-gray-700 truncate">{{ s }}</button>
+                class="block w-full text-left px-3 py-1.5 text-xs text-gray-700 hover:bg-gray-50 dark:text-gray-300 dark:hover:bg-gray-700 truncate focus:outline-none focus:ring-0">{{ s }}</button>
         {% endfor %}
         {% endif %}
     </div>
