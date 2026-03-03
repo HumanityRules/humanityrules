@@ -117,7 +117,7 @@ def workspace_detail(request: HttpRequest, workspace_slug: str) -> HttpResponse:
     context["tags"] = tags
     context["can_admin"] = can_admin
     context["url_base"] = f"/workspaces/{workspace.slug}/tags/"
-    context["suggested_keys"], context["suggested_values"] = abac.get_resource_tag_suggestions(request.user.current_organization)
+    context["suggested_keys"], context["suggested_values"] = abac.get_resource_tag_suggestions(request.user.current_organization, "workspace")
 
     return render(request, "devopshero_app/workspaces/workspace_detail.html", context=context)
 
@@ -177,7 +177,7 @@ def workspace_tag_add(request: HttpRequest, workspace_slug: str) -> HttpResponse
     url_base = f"/workspaces/{workspace.slug}/tags/"
     return render(request, "devopshero_app/partials/_kv_tag_editor.html", {
         "items": tags, "can_edit": True, "url_base": url_base, "hx_target": "#workspace-tags", "empty_text": "No tags",
-        **dict(zip(("suggested_keys", "suggested_values"), abac.get_resource_tag_suggestions(org))),
+        **dict(zip(("suggested_keys", "suggested_values"), abac.get_resource_tag_suggestions(org, "workspace"))),
     })
 
 
@@ -198,6 +198,6 @@ def workspace_tag_remove(request: HttpRequest, workspace_slug: str, tag_id: UUID
     url_base = f"/workspaces/{workspace.slug}/tags/"
     return render(request, "devopshero_app/partials/_kv_tag_editor.html", {
         "items": tags, "can_edit": True, "url_base": url_base, "hx_target": "#workspace-tags", "empty_text": "No tags",
-        **dict(zip(("suggested_keys", "suggested_values"), abac.get_resource_tag_suggestions(org))),
+        **dict(zip(("suggested_keys", "suggested_values"), abac.get_resource_tag_suggestions(org, "workspace"))),
     })
 

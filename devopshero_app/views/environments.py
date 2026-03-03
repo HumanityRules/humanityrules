@@ -68,7 +68,7 @@ def environment_detail(request: HttpRequest, environment_slug: str) -> HttpRespo
     context["tags"] = tags
     context["can_admin"] = can_admin
     context["url_base"] = f"/environments/{environment.slug}/tags/"
-    context["suggested_keys"], context["suggested_values"] = abac.get_resource_tag_suggestions(org)
+    context["suggested_keys"], context["suggested_values"] = abac.get_resource_tag_suggestions(org, "environment")
 
     if request.htmx:
         return render(request, "devopshero_app/environments/environment_detail.html", context=context)
@@ -107,7 +107,7 @@ def environment_tag_add(request: HttpRequest, environment_slug: str) -> HttpResp
     url_base = f"/environments/{environment.slug}/tags/"
     return render(request, "devopshero_app/partials/_kv_tag_editor.html", {
         "items": tags, "can_edit": True, "url_base": url_base, "hx_target": "#environment-tags", "empty_text": "No tags",
-        **dict(zip(("suggested_keys", "suggested_values"), abac.get_resource_tag_suggestions(org))),
+        **dict(zip(("suggested_keys", "suggested_values"), abac.get_resource_tag_suggestions(org, "environment"))),
     })
 
 
@@ -132,5 +132,5 @@ def environment_tag_remove(request: HttpRequest, environment_slug: str, tag_id: 
     url_base = f"/environments/{environment.slug}/tags/"
     return render(request, "devopshero_app/partials/_kv_tag_editor.html", {
         "items": tags, "can_edit": True, "url_base": url_base, "hx_target": "#environment-tags", "empty_text": "No tags",
-        **dict(zip(("suggested_keys", "suggested_values"), abac.get_resource_tag_suggestions(org))),
+        **dict(zip(("suggested_keys", "suggested_values"), abac.get_resource_tag_suggestions(org, "environment"))),
     })

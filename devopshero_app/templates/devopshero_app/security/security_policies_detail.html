@@ -39,13 +39,10 @@
             {# Resource type #}
             <div class="mb-6">
                 <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Resource Type</label>
-                <select name="resource_type" required x-model="resourceType"
-                        class="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white">
-                    <option value="">Select...</option>
-                    <option value="workspace" {% if policy.resource_type == 'workspace' %}selected{% endif %}>Workspace</option>
-                    <option value="environment" {% if policy.resource_type == 'environment' %}selected{% endif %}>Environment</option>
-                    <option value="app" {% if policy.resource_type == 'app' %}selected{% endif %}>App</option>
-                </select>
+                <input type="hidden" name="resource_type" :value="resourceType">
+                <div class="w-64" @change="resourceType = $event.target.value">
+                    {% include "devopshero_app/partials/_dropdown_select.html#dropdown_select" with dropdown_id="resource-type-select" dropdown_name="" dropdown_value=policy.resource_type dropdown_selected_label=selected_resource_type_label dropdown_options=resource_type_options %}
+                </div>
             </div>
 
             {# Identity conditions #}

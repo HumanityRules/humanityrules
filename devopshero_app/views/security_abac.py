@@ -26,6 +26,25 @@ from . import abac_view_checks
 from . import base
 
 
+RESOURCE_TYPE_OPTIONS = [
+    {"id": "", "name": "Select..."},
+    {"id": "workspace", "name": "Workspace"},
+    {"id": "environment", "name": "Environment"},
+    {"id": "app", "name": "App"},
+]
+
+RESOURCE_TYPE_LABELS = {"workspace": "Workspace", "environment": "Environment", "app": "App"}
+
+
+def _add_resource_type_context(context: dict, policy: Policy | None) -> None:
+    """Add resource type dropdown options and selected label to template context."""
+    context["resource_type_options"] = RESOURCE_TYPE_OPTIONS
+    if policy:
+        context["selected_resource_type_label"] = RESOURCE_TYPE_LABELS.get(policy.resource_type, "Select...")
+    else:
+        context["selected_resource_type_label"] = "Select..."
+
+
 # =============================================================================
 # People
 # =============================================================================
@@ -533,6 +552,7 @@ def security_policy_create(request: HttpRequest) -> HttpResponse:
             context["existing_tag_keys"] = existing_tag_keys
             context["existing_tag_values"] = existing_tag_values
             context["error"] = e.message
+            _add_resource_type_context(context, policy=None)
             return render(request, "devopshero_app/security/security_policies_detail.html", context=context)
 
         if name and resource_type:
@@ -557,6 +577,7 @@ def security_policy_create(request: HttpRequest) -> HttpResponse:
     context["existing_identity_values"] = existing_identity_values
     context["existing_tag_keys"] = existing_tag_keys
     context["existing_tag_values"] = existing_tag_values
+    _add_resource_type_context(context, policy=None)
     return render(request, "devopshero_app/security/security_policies_detail.html", context=context)
 
 
@@ -595,6 +616,7 @@ def security_policy_detail(request: HttpRequest, policy_id: UUID) -> HttpRespons
             context["existing_tag_keys"] = existing_tag_keys
             context["existing_tag_values"] = existing_tag_values
             context["error"] = e.message
+            _add_resource_type_context(context, policy=policy)
             return render(request, "devopshero_app/security/security_policies_detail.html", context=context)
 
         policy.name = request.POST.get("name", "").strip() or policy.name
@@ -615,6 +637,7 @@ def security_policy_detail(request: HttpRequest, policy_id: UUID) -> HttpRespons
     context["existing_identity_values"] = existing_identity_values
     context["existing_tag_keys"] = existing_tag_keys
     context["existing_tag_values"] = existing_tag_values
+    _add_resource_type_context(context, policy=policy)
     return render(request, "devopshero_app/security/security_policies_detail.html", context=context)
 
 

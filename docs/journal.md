@@ -1,5 +1,23 @@
 # DevOpsHero Development Journal
 
+## 2026-03-02 18:42 - [DomainModel] Per-resource-type tag suggestions
+
+**Conversation:** [2026-03-02-1842-8a9fd1aa.md](conversations/2026-03-02-1842-8a9fd1aa.md)
+
+The tag editor's key/value suggestions were showing identity concepts (`org-role`, `team`, `role`) in resource tag editors (workspaces, environments, apps). These came from shared `SUGGESTED_KEYS`/`SUGGESTED_PAIRS` constants used by both `get_identity_attribute_suggestions()` and `get_resource_tag_suggestions()`.
+
+**Two changes made:**
+
+1. **Separated identity vs resource suggestions and made resource suggestions per-type.** Environments now suggest `stage → production/staging/development`, workspaces suggest `project`/`team`, apps have no seed suggestions yet. The DB query in `get_resource_tag_suggestions()` also filters by `resource_type` now — no schema change needed since `ResourceTag` already has that field. The policy editor passes `resource_type=None` to get the union of all types (since policies can target any resource type).
+
+2. **Consolidated duplicated KEYS/PAIRS constants into single dicts.** Instead of separate `SUGGESTED_KEYS` and `SUGGESTED_PAIRS` sets (where keys were derivable from pairs, except for keys with no suggested values), each concept is now a single `dict[str, set[str]]` mapping keys to their value sets. A shared `_expand_suggestions()` helper derives the `(keys, pairs)` tuples the functions return. This applies to identity suggestions, resource suggestions, and system attributes.
+
+**Key points:**
+- `IDENTITY_SUGGESTIONS = {"org-role": {"admin", "member", "viewer"}, "team": set(), ...}` — keys with empty sets still appear as key suggestions
+- `RESOURCE_SUGGESTIONS` is nested: `{"environment": {"stage": {"production", ...}}, ...}` — outer key is resource type
+- `get_resource_tag_suggestions(org, resource_type=None)` — `None` unions all types (for the policy editor)
+- No migration needed — just filtering on an existing `resource_type` column
+
 ## 2026-03-02 14:04 - [Bugfix] Deduplicate attribute chips in People list view
 
 **Conversation:**

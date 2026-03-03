@@ -1858,12 +1858,13 @@ class TestSuggestionPalette(TestCase):
 
     def test_identity_palette_keys_included(self) -> None:
         keys, _ = abac.get_identity_attribute_suggestions(self.org)
-        for expected in abac.SUGGESTED_KEYS:
+        for expected in abac.IDENTITY_SUGGESTIONS:
             self.assertIn(expected, keys)
 
     def test_identity_palette_pairs_included(self) -> None:
         _, pairs = abac.get_identity_attribute_suggestions(self.org)
-        for expected_pair in abac.SUGGESTED_PAIRS:
+        expected_keys, expected_pairs = abac._expand_suggestions(abac.IDENTITY_SUGGESTIONS)
+        for expected_pair in expected_pairs:
             self.assertIn(expected_pair, pairs)
 
     def test_system_attributes_excluded_by_default(self) -> None:
@@ -1890,7 +1891,25 @@ class TestSuggestionPalette(TestCase):
         keys, _ = abac.get_identity_attribute_suggestions(self.org)
         self.assertNotIn("infra-key", keys)
 
-    def test_tag_includes_resource_tag_keys(self) -> None:
+    def test_tag_includes_resource_tag_keys_for_matching_type(self) -> None:
+        workspace = Workspace.objects.get(organization=self.org, slug="default")
+        ResourceTag.objects.create(
+            organization=self.org, resource_type="workspace", workspace=workspace, key="infra-key", value="x",
+        )
+        keys, pairs = abac.get_resource_tag_suggestions(self.org, "workspace")
+        self.assertIn("infra-key", keys)
+        self.assertIn(("infra-key", "x"), pairs)
+
+    def test_tag_excludes_resource_tag_keys_for_other_type(self) -> None:
+        workspace = Workspace.objects.get(organization=self.org, slug="default")
+        ResourceTag.objects.create(
+            organization=self.org, resource_type="workspace", workspace=workspace, key="infra-key", value="x",
+        )
+        keys, pairs = abac.get_resource_tag_suggestions(self.org, "environment")
+        self.assertNotIn("infra-key", keys)
+        self.assertNotIn(("infra-key", "x"), pairs)
+
+    def test_tag_no_type_returns_all(self) -> None:
         workspace = Workspace.objects.get(organization=self.org, slug="default")
         ResourceTag.objects.create(
             organization=self.org, resource_type="workspace", workspace=workspace, key="infra-key", value="x",
@@ -1898,6 +1917,12 @@ class TestSuggestionPalette(TestCase):
         keys, pairs = abac.get_resource_tag_suggestions(self.org)
         self.assertIn("infra-key", keys)
         self.assertIn(("infra-key", "x"), pairs)
+
+    def test_tag_per_type_seed_suggestions(self) -> None:
+        keys, pairs = abac.get_resource_tag_suggestions(self.org, "environment")
+        self.assertIn("stage", keys)
+        self.assertIn(("stage", "production"), pairs)
+        self.assertNotIn("project", keys)
 
     def test_tag_excludes_identity_attribute_keys(self) -> None:
         IdentityAttribute.objects.create(organization=self.org, user=self.user, key="custom-key", value="x")
