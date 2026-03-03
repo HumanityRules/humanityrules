@@ -19,14 +19,12 @@
             <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">{{ group.description }}</p>
             {% endif %}
         </div>
-        <form method="POST" action="/security/groups/{{ group.id }}/delete/">
-            {% csrf_token %}
-            <button type="submit"
-                    onclick="return confirm('Delete this group?')"
-                    class="px-3 py-1.5 text-sm font-medium text-red-600 dark:text-red-400 border border-red-300 dark:border-red-600 rounded-lg hover:bg-red-50 dark:hover:bg-red-500/10">
-                Delete Group
-            </button>
-        </form>
+        <button hx-get="/security/groups/{{ group.id }}/delete-confirm/"
+                hx-target="#modal-container"
+                hx-swap="innerHTML"
+                class="px-3 py-1.5 text-sm font-medium text-red-600 dark:text-red-400 border border-red-300 dark:border-red-600 rounded-lg hover:bg-red-50 dark:hover:bg-red-500/10">
+            Delete Group
+        </button>
     </div>
 
     {# Attributes section #}

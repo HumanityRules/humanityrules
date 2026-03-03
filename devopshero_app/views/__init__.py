@@ -55,6 +55,7 @@ from .security_abac import (
     security_group_create,
     security_group_detail,
     security_group_delete,
+    security_group_delete_confirm,
     security_group_attribute_add,
     security_group_attribute_remove,
     security_group_member_add,
@@ -63,6 +64,7 @@ from .security_abac import (
     security_policy_create,
     security_policy_detail,
     security_policy_delete,
+    security_policy_delete_confirm,
 )
 
 __all__ = [
@@ -135,6 +137,7 @@ __all__ = [
     "security_group_create",
     "security_group_detail",
     "security_group_delete",
+    "security_group_delete_confirm",
     "security_group_attribute_add",
     "security_group_attribute_remove",
     "security_group_member_add",
@@ -143,4 +146,5 @@ __all__ = [
     "security_policy_create",
     "security_policy_detail",
     "security_policy_delete",
+    "security_policy_delete_confirm",
 ]
