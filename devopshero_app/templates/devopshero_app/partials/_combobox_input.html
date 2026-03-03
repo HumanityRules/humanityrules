@@ -30,6 +30,7 @@
            {% if required %}required{% endif %}
            @focus="open = {% if for_key_model %}!!{{ for_key_model }}{% else %}true{% endif %}; $el.select()"
            @input="open = {% if for_key_model %}!!{{ for_key_model }}{% else %}true{% endif %}{% if value_model %}; {{ value_model }} = ''{% endif %}{% if clear_model %}; {{ clear_model }} = ''{% endif %}"
+           @keydown.enter.prevent="open = false"
            @keydown.escape="open = false; $el.blur()"
            class="{% if input_class %}{{ input_class }}{% else %}{{ width }} px-2 py-0.5 text-xs border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800 text-gray-900 dark:text-white placeholder-gray-400{% endif %} pr-5 focus:outline-none focus:ring-0 focus-visible:outline-none">
     {% if suggestions %}
