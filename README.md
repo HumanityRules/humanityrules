@@ -26,7 +26,7 @@ uv run manage.py tailwind dev
 # Start Django without Tailwind reload
 uv run run_dev.py
 
-# The job worker needs to be run explicitly, unless you set DOH_RUN_JOB_WORKER=0 in .env
+# The job worker needs to be run explicitly, unless you set DOH_RUN_JOB_WORKER=1 in .env
 uv run manage.py run_job_worker
 
 # Migrations
