@@ -17,21 +17,22 @@
            hx-swap="innerHTML"
            hx-push-url="true"
            class="block px-4 py-3 hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors first:rounded-t-lg last:rounded-b-lg">
-            <div class="flex items-center justify-between">
-                <div>
-                    <span class="text-sm font-medium text-gray-900 dark:text-white">{{ row.user.email }}</span>
+            <div class="grid grid-cols-4 gap-4 items-start">
+                <div class="min-w-0">
+                    <span class="text-sm font-medium text-gray-900 dark:text-white truncate block">{{ row.user.email }}</span>
                     {% if row.user.first_name or row.user.last_name %}
-                    <span class="text-sm text-gray-500 dark:text-gray-400 ml-2">{{ row.user.first_name }} {{ row.user.last_name }}</span>
+                    <span class="text-sm text-gray-500 dark:text-gray-400 truncate block">{{ row.user.first_name }} {{ row.user.last_name }}</span>
                     {% endif %}
                 </div>
-                <div class="flex flex-wrap gap-1">
+                <div class="col-span-3 flex flex-wrap gap-1 items-start">
                     {% for key, value, source in row.attributes %}
+                    {% if source != 'system' %}
                     <span class="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium
-                        {% if source == 'system' %}bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-400
-                        {% elif source == 'direct' %}bg-indigo-50 text-indigo-700 dark:bg-indigo-500/10 dark:text-indigo-400
+                        {% if source == 'direct' %}bg-indigo-50 text-indigo-700 dark:bg-indigo-500/10 dark:text-indigo-400
                         {% else %}bg-purple-50 text-purple-700 dark:bg-purple-500/10 dark:text-purple-400{% endif %}">
                         {{ key }}={{ value }}
                     </span>
+                    {% endif %}
                     {% endfor %}
                 </div>
             </div>
