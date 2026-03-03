@@ -881,6 +881,15 @@
   .flex-1 {
     flex: 1;
   }
+  .flex-\[1\] {
+    flex: 1;
+  }
+  .flex-\[3\] {
+    flex: 3;
+  }
+  .flex-\[4\] {
+    flex: 4;
+  }
   .flex-auto {
     flex: auto;
   }
@@ -2644,6 +2653,13 @@
     &:hover {
       @media (hover: hover) {
         background-color: var(--color-red-500);
+      }
+    }
+  }
+  .hover\:bg-red-700 {
+    &:hover {
+      @media (hover: hover) {
+        background-color: var(--color-red-700);
       }
     }
   }

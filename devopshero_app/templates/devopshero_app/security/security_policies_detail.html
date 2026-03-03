@@ -194,14 +194,12 @@
                     {% if policy %}Save Changes{% else %}Create Policy{% endif %}
                 </button>
                 {% if policy %}
-                <form method="POST" action="/security/policies/{{ policy.id }}/delete/" class="inline">
-                    {% csrf_token %}
-                    <button type="submit"
-                            onclick="return confirm('Delete this policy?')"
-                            class="px-4 py-2 text-sm font-medium text-red-600 dark:text-red-400 border border-red-300 dark:border-red-600 rounded-lg hover:bg-red-50 dark:hover:bg-red-500/10">
-                        Delete
-                    </button>
-                </form>
+                <button hx-get="/security/policies/{{ policy.id }}/delete-confirm/"
+                        hx-target="#modal-container"
+                        hx-swap="innerHTML"
+                        class="px-4 py-2 text-sm font-medium text-red-600 dark:text-red-400 border border-red-300 dark:border-red-600 rounded-lg hover:bg-red-50 dark:hover:bg-red-500/10">
+                    Delete
+                </button>
                 {% endif %}
             </div>
         </form>

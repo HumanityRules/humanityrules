@@ -9,7 +9,7 @@ from django.contrib.auth.decorators import login_required
 from django.core.exceptions import ValidationError
 from django.http import HttpRequest, HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
-from django.views.decorators.http import require_POST
+from django.views.decorators.http import require_GET, require_POST
 
 from ..models import (
     Group,
@@ -340,6 +340,25 @@ def security_group_detail(request: HttpRequest, group_id: UUID) -> HttpResponse:
 
 
 @login_required
+@require_GET
+def security_group_delete_confirm(request: HttpRequest, group_id: UUID) -> HttpResponse:
+    """Return the group delete confirmation modal HTML."""
+    denied = abac_view_checks.require_org_admin(request)
+    if denied:
+        return denied
+
+    org = request.user.current_organization
+    group = get_object_or_404(Group, id=group_id, organization=org)
+
+    return render(request, "devopshero_app/partials/_confirm_modal.html", {
+        "modal_title": "Delete Group",
+        "modal_message": f'Are you sure you want to delete the group "{group.name}"? All attributes and memberships in this group will be removed.',
+        "confirm_url": f"/security/groups/{group.id}/delete/",
+        "confirm_label": "Delete",
+    })
+
+
+@login_required
 @require_POST
 def security_group_delete(request: HttpRequest, group_id: UUID) -> HttpResponse:
     """Delete a group."""
@@ -596,6 +615,25 @@ def security_policy_detail(request: HttpRequest, policy_id: UUID) -> HttpRespons
     context["existing_tag_keys"] = existing_tag_keys
     context["existing_tag_values"] = existing_tag_values
     return render(request, "devopshero_app/security/security_policies_detail.html", context=context)
+
+
+@login_required
+@require_GET
+def security_policy_delete_confirm(request: HttpRequest, policy_id: UUID) -> HttpResponse:
+    """Return the policy delete confirmation modal HTML."""
+    denied = abac_view_checks.require_org_admin(request)
+    if denied:
+        return denied
+
+    org = request.user.current_organization
+    policy = get_object_or_404(Policy, id=policy_id, organization=org)
+
+    return render(request, "devopshero_app/partials/_confirm_modal.html", {
+        "modal_title": "Delete Policy",
+        "modal_message": f'Are you sure you want to delete the policy "{policy.name}"? This action cannot be undone.',
+        "confirm_url": f"/security/policies/{policy.id}/delete/",
+        "confirm_label": "Delete",
+    })
 
 
 @login_required
