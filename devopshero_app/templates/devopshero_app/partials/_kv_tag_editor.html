@@ -1,17 +1,50 @@
 {% comment %}
-  Reusable key=value tag/attribute chip list with inline add form.
-  Template variables:
+  Reusable key=value editor. Supports two modes:
+
+  ── Chips mode (default) ──────────────────────────────────────
     items            — queryset/list with .key, .value, .id
     url_base         — URL prefix (e.g. "/workspaces/ws/tags/")
                        Add form POSTs to {url_base}add/
                        Remove buttons POST to {url_base}{id}/remove/
     hx_target        — HTMX swap target selector (e.g. "#workspace-tags")
+    can_edit         — show remove buttons and add form
+    empty_text       — text when no items and not editable
+
+  ── Rows mode (for inline forms) ──────────────────────────────
+    array_model      — Alpine array model (e.g. "identityConditions")
+                       Each element must be {key, value}.
+                       Presence of this param activates rows mode.
+    add_label        — text for the add button (default "Add")
+
+  ── Shared ────────────────────────────────────────────────────
     suggested_keys   — key suggestion list for combobox
     suggested_values — value suggestion pairs for combobox
-    can_edit         — show remove buttons and add form
-    empty_text       — text when no items and not editable (omit to show nothing)
 {% endcomment %}
-{% if can_edit %}
+{% if array_model %}
+{# ── Rows mode ────────────────────────────────────────────── #}
+<div>
+    <template x-for="(item, i) in {{ array_model }}" :key="i">
+        <div class="flex items-center gap-2 mb-2">
+            <div class="w-36 min-w-0">
+            {% include "devopshero_app/partials/_combobox_input.html" with suggestions=suggested_keys model="item.key" placeholder="key" clear_model="item.value" input_class="w-full px-2 py-1 text-sm border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800 text-gray-900 dark:text-white placeholder-gray-400 focus:outline-none focus:ring-0" %}
+            </div>
+            <span class="text-sm text-gray-400">=</span>
+            <div class="w-44 min-w-0">
+            {% include "devopshero_app/partials/_combobox_input.html" with suggestions=suggested_values model="item.value" for_key_model="item.key" placeholder="value" input_class="w-full px-2 py-1 text-sm border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800 text-gray-900 dark:text-white placeholder-gray-400 focus:outline-none focus:ring-0" %}
+            </div>
+            <button type="button" @click="{{ array_model }}.splice(i, 1)"
+                    class="text-red-500 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+                </svg>
+            </button>
+        </div>
+    </template>
+    <button type="button" @click="{{ array_model }}.push({key: '', value: ''})"
+            class="text-sm text-indigo-600 dark:text-indigo-400 hover:text-indigo-800 dark:hover:text-indigo-300">+ {{ add_label|default:"Add" }}</button>
+</div>
+{% elif can_edit %}
+{# ── Chips mode (editable) ───────────────────────────────── #}
 <form hx-post="{{ url_base }}add/"
       hx-target="{{ hx_target }}"
       hx-swap="innerHTML"
@@ -51,6 +84,7 @@
     {% endif %}
 </form>
 {% else %}
+{# ── Chips mode (read-only) ──────────────────────────────── #}
 <div class="flex flex-wrap items-center gap-2">
     {% for item in items %}
     <span class="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium bg-indigo-50 text-indigo-700 dark:bg-indigo-500/10 dark:text-indigo-400">
