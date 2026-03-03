@@ -2504,6 +2504,12 @@
       --tw-ring-color: var(--color-indigo-500);
     }
   }
+  .focus-within\:outline-none {
+    &:focus-within {
+      --tw-outline-style: none;
+      outline-style: none;
+    }
+  }
   .hover\:scale-105 {
     &:hover {
       @media (hover: hover) {

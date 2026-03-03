@@ -1,5 +1,19 @@
 # DevOpsHero Development Journal
 
+## 2026-03-02 18:56 - [UI] Policy editor button layout and focus ring cleanup
+
+**Conversation:** [2026-03-02-1856-ce71facc.md](conversations/2026-03-02-1856-ce71facc.md)
+
+Improved the policy editor page layout: the Delete button was sitting right next to Save Changes at the bottom, which is a UX anti-pattern (destructive action adjacent to the primary action). Moved Delete to the top-right corner of the page header and added a Cancel button next to Save that navigates back to the Policies list via HTMX.
+
+Also cleaned up unwanted focus outline rings on the combobox dropdown buttons and the KV tag editor components — browser default focus outlines were appearing on interactive elements within these composites, creating visual noise.
+
+**Key points:**
+- Delete button now in a flex row with the page title (`justify-between`), only shown when editing (not creating)
+- Cancel button uses the same HTMX pattern as the breadcrumb link (`hx-get`, `hx-target="#main-content"`, `hx-push-url`)
+- Added `focus:outline-none focus:ring-0` to combobox suggestion buttons and tag editor buttons
+- Added `focus-within:outline-none` to combobox container div and tag editor form to suppress composite focus rings
+
 ## 2026-03-02 18:42 - [DomainModel] Per-resource-type tag suggestions
 
 **Conversation:** [2026-03-02-1842-8a9fd1aa.md](conversations/2026-03-02-1842-8a9fd1aa.md)

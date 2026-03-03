@@ -13,9 +13,19 @@
         <span>/</span>
     </div>
 
-    <h2 class="text-lg font-semibold text-gray-900 dark:text-white mb-6">
-        {% if policy %}Edit Policy{% else %}New Policy{% endif %}
-    </h2>
+    <div class="flex items-center justify-between mb-6">
+        <h2 class="text-lg font-semibold text-gray-900 dark:text-white">
+            {% if policy %}Edit Policy{% else %}New Policy{% endif %}
+        </h2>
+        {% if policy %}
+        <button hx-get="/security/policies/{{ policy.id }}/delete-confirm/"
+                hx-target="#modal-container"
+                hx-swap="innerHTML"
+                class="px-4 py-2 text-sm font-medium text-red-600 dark:text-red-400 border border-red-300 dark:border-red-600 rounded-lg hover:bg-red-50 dark:hover:bg-red-500/10">
+            Delete
+        </button>
+        {% endif %}
+    </div>
 
     <div x-data="policyForm()" class="max-w-2xl">
         <form method="POST"
@@ -190,14 +200,14 @@
                         class="px-4 py-2 text-sm font-medium text-white bg-indigo-600 rounded-lg hover:bg-indigo-700">
                     {% if policy %}Save Changes{% else %}Create Policy{% endif %}
                 </button>
-                {% if policy %}
-                <button hx-get="/security/policies/{{ policy.id }}/delete-confirm/"
-                        hx-target="#modal-container"
-                        hx-swap="innerHTML"
-                        class="px-4 py-2 text-sm font-medium text-red-600 dark:text-red-400 border border-red-300 dark:border-red-600 rounded-lg hover:bg-red-50 dark:hover:bg-red-500/10">
-                    Delete
-                </button>
-                {% endif %}
+                <a href="/security/policies/"
+                   hx-get="/security/policies/"
+                   hx-target="#main-content"
+                   hx-swap="innerHTML"
+                   hx-push-url="true"
+                   class="px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700">
+                    Cancel
+                </a>
             </div>
         </form>
 
