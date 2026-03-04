@@ -258,6 +258,126 @@ class MainAgent:
         await self._client.disconnect()
 
 
+async def _handle_sdk_stream_event(message: SDKStreamEvent, ctx: StreamingContext) -> AsyncGenerator[AgentStreamEvent, None]:
+    """Handle token-level streaming events."""
+    event_type = message.event.get("type")
+
+    if event_type == "content_block_delta":
+        delta = message.event.get("delta", {})
+        if delta.get("type") == "text_delta":
+            text_chunk = delta.get("text", "")
+            if text_chunk:
+                # Create streaming container on first text (replaces thinking indicator)
+                if not ctx.has_started_streaming:
+                    yield AgentStreamEvent(type="start", data=None)
+                    ctx.has_started_streaming = True
+                ctx.accumulated_content += text_chunk
+                yield AgentStreamEvent(type="text_delta", data={"text": text_chunk})
+
+
+async def _handle_assistant_message(message: AssistantMessage, ctx: StreamingContext) -> AsyncGenerator[AgentStreamEvent, None]:
+    """Handle assistant messages containing tool use blocks."""
+
+    # Handle API-level errors (rate_limit, invalid_request, server_error, etc.)
+    # When message.error is set, the TextBlock content was NOT streamed — it contains the error description.
+    if message.error:
+        error_text = " ".join(block.text for block in message.content if isinstance(block, TextBlock))
+        error_description = error_text or message.error
+        logger.error(f"[SDK] AssistantMessage error ({message.error}): {error_description}")
+        await _persist_error(conversation=ctx.conversation, error_type=message.error, error_description=error_description)
+        yield AgentStreamEvent(type="error", data={"error": error_description})
+        return
+    
+    # Persist any accumulated text before tool calls
+    if ctx.accumulated_content:
+        await _persist_text_message(conversation=ctx.conversation, content=ctx.accumulated_content)
+        ctx.accumulated_content = ""
+
+    # Flush to release streaming element IDs (only if we were streaming text)
+    if ctx.has_started_streaming:
+        yield AgentStreamEvent(type="text_flush", data=None)
+        ctx.has_started_streaming = False
+
+    for block in message.content:
+        if not isinstance(block, ToolUseBlock):
+            # TextBlocks have already been streamed via SDKStreamEvent, so we skip them.
+            # ThinkingBlocks are intentionally not surfaced to the user.
+            continue
+
+        # Enrich input with display-friendly data (e.g., app_name from app_id)
+        enriched_input = await _enrich_tool_input(block.name, block.input)
+
+        # Record pending tool call
+        ctx.pending_tool_calls[block.id] = {
+            "name": block.name,
+            "input": enriched_input,
+            "start_time": time.time(),
+        }
+
+        yield AgentStreamEvent(
+            type="tool_start",
+            data={
+                "tool_use_id": block.id,
+                "name": block.name,
+                "input": enriched_input,
+            },
+        )
+
+
+
+async def _handle_tool_results(message: UserMessage, ctx: StreamingContext) -> AsyncGenerator[AgentStreamEvent, None]:
+    """Handle tool results from synthetic user messages."""
+    if not isinstance(message.content, list):
+        return
+
+    for block in message.content:
+        if not isinstance(block, ToolResultBlock):
+            # Non-ToolResultBlock content (e.g., TextBlock) can appear in synthetic
+            # UserMessages from the SDK. These are informational and can be skipped.
+            continue
+
+        call_info = ctx.pending_tool_calls.pop(block.tool_use_id, None)
+        if not call_info:
+            logger.error(f"No call info found for tool use ID: {block.tool_use_id}")
+            continue
+
+        tool_name = call_info["name"]
+        duration_ms = int((time.time() - call_info["start_time"]) * 1000)
+        status = "error" if block.is_error else "success"
+
+        # MCP tools return content as [{"type": "text", "text": "<json>"}]; built-in SDK tools return a plain string.
+        if tool_name.startswith("mcp__"):
+            result = _unwrap_mcp_content(block.content)
+        else:
+            result = block.content
+
+        await _persist_tool_call(
+            conversation=ctx.conversation,
+            tool_name=tool_name,
+            parameters=call_info["input"],
+            result=result,
+            status=status,
+            duration_ms=duration_ms,
+        )
+
+        yield AgentStreamEvent(
+            type="tool_result",
+            data={
+                "tool_use_id": block.tool_use_id,
+                "name": tool_name,
+                "input": call_info["input"],
+                "result": result,
+                "status": status,
+                "duration_ms": duration_ms,
+            },
+        )
+
+    # Show thinking indicator while waiting for next response (text or another tool)
+    ctx.has_started_streaming = False
+    yield AgentStreamEvent(type="thinking", data=None)
+
+
+
 def _validate_context_ownership(org, workspace_id, repo_id, aws_account_id, app_permission_request_id) -> None:
     """Verify all context resource IDs belong to the given organization. Raises PermissionError on cross-org access."""
     if workspace_id and not Workspace.objects.filter(id=workspace_id, organization=org).exists():
@@ -363,6 +483,36 @@ async def _persist_error(conversation: Conversation, error_type: str, error_desc
         metadata={"error_type": error_type},
     )
 
+async def _enrich_tool_input(tool_name: str, tool_input: dict) -> dict:
+    """
+    Enrich tool input with display-friendly data looked up from the database.
+
+    Originally added (2026-01-15) to resolve UUIDs to friendly names for UI display.
+    For example, when deploy_app was called with app_id, we'd look up the app name
+    so the UI could show "Deploy App: my-cool-app" instead of a UUID.
+
+    As of 2026-01-27, the two original use cases are obsolete:
+    - deploy_app now takes 'name' directly (upsert by name, not app_id)
+    - select_workspace tool was removed
+
+    Kept as a hook for future enrichment needs.
+    """
+    return tool_input
+
+
+def _unwrap_mcp_content(content: list) -> dict | str:
+    """Unwrap MCP content blocks into a plain dict or string.
+
+    MCP tool results arrive as [{"type": "text", "text": "<json>"}].
+    This extracts the text and parses it as JSON when possible, so downstream
+    consumers receive clean domain data instead of MCP wire format.
+    """
+    text = content[0]["text"]
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        return text
+
 
 async def _maybe_generate_title(conversation: Conversation, user_message: str, agent_response: str) -> str | None:
     """Generate using an LLM, and return conversation title if not already set."""
@@ -420,155 +570,6 @@ async def _maybe_generate_title(conversation: Conversation, user_message: str, a
         # Don't fail the conversation if title generation fails
         logger.error(f"Failed to generate title for conversation {conversation.id}: {e}")
         return None
-
-
-async def _handle_sdk_stream_event(message: SDKStreamEvent, ctx: StreamingContext) -> AsyncGenerator[AgentStreamEvent, None]:
-    """Handle token-level streaming events."""
-    event_type = message.event.get("type")
-
-    if event_type == "content_block_delta":
-        delta = message.event.get("delta", {})
-        if delta.get("type") == "text_delta":
-            text_chunk = delta.get("text", "")
-            if text_chunk:
-                # Create streaming container on first text (replaces thinking indicator)
-                if not ctx.has_started_streaming:
-                    yield AgentStreamEvent(type="start", data=None)
-                    ctx.has_started_streaming = True
-                ctx.accumulated_content += text_chunk
-                yield AgentStreamEvent(type="text_delta", data={"text": text_chunk})
-
-
-async def _enrich_tool_input(tool_name: str, tool_input: dict) -> dict:
-    """
-    Enrich tool input with display-friendly data looked up from the database.
-
-    Originally added (2026-01-15) to resolve UUIDs to friendly names for UI display.
-    For example, when deploy_app was called with app_id, we'd look up the app name
-    so the UI could show "Deploy App: my-cool-app" instead of a UUID.
-
-    As of 2026-01-27, the two original use cases are obsolete:
-    - deploy_app now takes 'name' directly (upsert by name, not app_id)
-    - select_workspace tool was removed
-
-    Kept as a hook for future enrichment needs.
-    """
-    return tool_input
-
-
-async def _handle_assistant_message(message: AssistantMessage, ctx: StreamingContext) -> AsyncGenerator[AgentStreamEvent, None]:
-    """Handle assistant messages containing tool use blocks."""
-
-    # Handle API-level errors (rate_limit, invalid_request, server_error, etc.)
-    # When message.error is set, the TextBlock content was NOT streamed — it contains the error description.
-    if message.error:
-        error_text = " ".join(block.text for block in message.content if isinstance(block, TextBlock))
-        error_description = error_text or message.error
-        logger.error(f"[SDK] AssistantMessage error ({message.error}): {error_description}")
-        await _persist_error(conversation=ctx.conversation, error_type=message.error, error_description=error_description)
-        yield AgentStreamEvent(type="error", data={"error": error_description})
-        return
-    
-    # Persist any accumulated text before tool calls
-    if ctx.accumulated_content:
-        await _persist_text_message(conversation=ctx.conversation, content=ctx.accumulated_content)
-        ctx.accumulated_content = ""
-
-    # Flush to release streaming element IDs (only if we were streaming text)
-    if ctx.has_started_streaming:
-        yield AgentStreamEvent(type="text_flush", data=None)
-        ctx.has_started_streaming = False
-
-    for block in message.content:
-        if not isinstance(block, ToolUseBlock):
-            # TextBlocks have already been streamed via SDKStreamEvent, so we skip them.
-            # ThinkingBlocks are intentionally not surfaced to the user.
-            continue
-
-        # Enrich input with display-friendly data (e.g., app_name from app_id)
-        enriched_input = await _enrich_tool_input(block.name, block.input)
-
-        # Record pending tool call
-        ctx.pending_tool_calls[block.id] = {
-            "name": block.name,
-            "input": enriched_input,
-            "start_time": time.time(),
-        }
-
-        yield AgentStreamEvent(
-            type="tool_start",
-            data={
-                "tool_use_id": block.id,
-                "name": block.name,
-                "input": enriched_input,
-            },
-        )
-        
-
-def _unwrap_mcp_content(content: list) -> dict | str:
-    """Unwrap MCP content blocks into a plain dict or string.
-
-    MCP tool results arrive as [{"type": "text", "text": "<json>"}].
-    This extracts the text and parses it as JSON when possible, so downstream
-    consumers receive clean domain data instead of MCP wire format.
-    """
-    text = content[0]["text"]
-    try:
-        return json.loads(text)
-    except json.JSONDecodeError:
-        return text
-
-
-async def _handle_tool_results(message: UserMessage, ctx: StreamingContext) -> AsyncGenerator[AgentStreamEvent, None]:
-    """Handle tool results from synthetic user messages."""
-    if not isinstance(message.content, list):
-        return
-
-    for block in message.content:
-        if not isinstance(block, ToolResultBlock):
-            # Non-ToolResultBlock content (e.g., TextBlock) can appear in synthetic
-            # UserMessages from the SDK. These are informational and can be skipped.
-            continue
-
-        call_info = ctx.pending_tool_calls.pop(block.tool_use_id, None)
-        if not call_info:
-            logger.error(f"No call info found for tool use ID: {block.tool_use_id}")
-            continue
-
-        tool_name = call_info["name"]
-        duration_ms = int((time.time() - call_info["start_time"]) * 1000)
-        status = "error" if block.is_error else "success"
-
-        # MCP tools return content as [{"type": "text", "text": "<json>"}]; built-in SDK tools return a plain string.
-        if tool_name.startswith("mcp__"):
-            result = _unwrap_mcp_content(block.content)
-        else:
-            result = block.content
-
-        await _persist_tool_call(
-            conversation=ctx.conversation,
-            tool_name=tool_name,
-            parameters=call_info["input"],
-            result=result,
-            status=status,
-            duration_ms=duration_ms,
-        )
-
-        yield AgentStreamEvent(
-            type="tool_result",
-            data={
-                "tool_use_id": block.tool_use_id,
-                "name": tool_name,
-                "input": call_info["input"],
-                "result": result,
-                "status": status,
-                "duration_ms": duration_ms,
-            },
-        )
-
-    # Show thinking indicator while waiting for next response (text or another tool)
-    ctx.has_started_streaming = False
-    yield AgentStreamEvent(type="thinking", data=None)
 
 
 def _create_agent_options(conversation: Conversation, 
