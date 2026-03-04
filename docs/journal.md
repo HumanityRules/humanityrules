@@ -1,5 +1,24 @@
 # DevOpsHero Development Journal
 
+## 2026-03-03 19:58 - [UI] Hide admin-only actions from non-admin users
+
+**Conversation:**
+
+Two places in the UI exposed admin-only actions (connecting AWS accounts and GitHub) to all users, regardless of org role. Non-admin users seeing these links is confusing since they lack the permissions to perform the actions.
+
+Fixed both locations to gate on the existing `user_is_org_admin` template variable (set in `views/base.py` from `abac.is_org_admin()`):
+
+1. **Environments page empty state** (`environments/environments.html`): The "Connect AWS Account" link that appears when no environments exist and no AWS accounts are connected. Non-admins now see "No AWS account has been connected yet. Ask your organization admin to connect one."
+
+2. **Repository picker modal** (`workspaces/_repo_picker_modal.html`): The "Connect GitHub" link shown when no repositories are connected. Non-admins now see "Ask your organization admin to connect a repository."
+
+Note: the "New Environment" button was already correctly gated behind `user_is_org_admin` — these two empty-state links were the only ones missed.
+
+**Key points:**
+- `user_is_org_admin` is available in all templates via the base context processor, so no view changes were needed
+- Follows the same pattern already used for the "New Environment" button (`{% if user_is_org_admin %}`)
+- Non-admin messaging directs users to their org admin rather than showing a dead-end
+
 ## 2026-03-03 19:43 - [Onboarding] Bootstrap admin email for OIDC orgs
 
 **Conversation:** [2026-03-03-1943-2fb605cb.md](conversations/2026-03-03-1943-2fb605cb.md)
