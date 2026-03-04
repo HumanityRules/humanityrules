@@ -4,7 +4,7 @@ Seed mock organizations, workspaces, environments, and apps for UI testing.
 Uses real GitHub repos from the vmendi account.
 
 Usage:
-    uv run manage.py seed_mock_data --user=vmendi@gmail.com
+    uv run manage.py seed_test_apps --user=vmendi@gmail.com
 """
 
 import uuid
@@ -13,6 +13,7 @@ from django.core.management.base import BaseCommand, CommandError
 from django.db import connection
 from django.utils import timezone
 
+from devopshero_app.services import abac
 from devopshero_app.models import (
     AWSAccount,
     App,
@@ -299,7 +300,8 @@ class Command(BaseCommand):
         OrganizationMembership.objects.create(
             user=user, organization=org, role=OrganizationMembership.Role.ADMIN,
         )
-        self.stdout.write(f"    Membership: {user.email} as admin")
+        abac.bootstrap_organization(organization=org, admin_user=user)
+        self.stdout.write(f"    Membership: {user.email} as admin (bootstrapped)")
 
         for ws_data in org_data["workspaces"]:
             Workspace.objects.create(

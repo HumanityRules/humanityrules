@@ -1,5 +1,18 @@
 # DevOpsHero Development Journal
 
+## 2026-03-03 21:05 - [DevEx] Rename seed script and bootstrap ABAC properly
+
+**Conversation:** [2026-03-03-2037-a31fb710.md](conversations/2026-03-03-2037-a31fb710.md)
+
+Renamed `seed_mock_data.py` to `seed_test_apps.py` and fixed a critical gap: the seed script was creating `OrganizationMembership(role=ADMIN)` but never calling `abac.bootstrap_organization()`. The membership role alone is not sufficient — the ABAC engine relies on `IdentityAttribute(key="org-role", value="admin")` and the 9 seed policies that `bootstrap_organization` creates. Without these, the seeded orgs had no working permission system.
+
+The fix mirrors exactly what the real auth flows do (both WorkOS onboarding and OIDC callback): after creating the membership, call `abac.bootstrap_organization(organization=org, admin_user=user)` which creates the admin identity attribute and the 9 seed policies (3 resource types x 3 roles).
+
+**Key points:**
+- `OrganizationMembership.Role.ADMIN` is a legacy/informational field; the actual permission checks go through ABAC identity attributes (`org-role=admin`)
+- `bootstrap_organization` is the canonical way to set up a new org — it's what both the WorkOS onboarding and OIDC callback use
+- The rename from `seed_mock_data` to `seed_test_apps` better reflects the script's purpose
+
 ## 2026-03-03 19:58 - [UI] Hide admin-only actions from non-admin users
 
 **Conversation:**
