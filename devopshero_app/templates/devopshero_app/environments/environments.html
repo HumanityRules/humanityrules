@@ -65,6 +65,7 @@
         {% if aws_accounts %}
         <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">Create your first environment to start deploying apps.</p>
         {% else %}
+        {% if user_is_org_admin %}
         <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">Connect an AWS account first, then create an environment.</p>
         <a href="{% url 'settings_aws_accounts' %}"
            hx-get="{% url 'settings_aws_accounts' %}"
@@ -77,6 +78,9 @@
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" />
             </svg>
         </a>
+        {% else %}
+        <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">No AWS account has been connected yet. Ask your organization admin to connect one.</p>
+        {% endif %}
         {% endif %}
     </div>
     {% endif %}
