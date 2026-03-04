@@ -278,10 +278,20 @@ class Command(BaseCommand):
         self.stdout.write(self.style.SUCCESS("Mock data seeded successfully."))
 
     def _delete_mock_orgs(self) -> None:
+        mock_slugs = {o["slug"] for o in MOCK_ORGS}
         for org_data in MOCK_ORGS:
             slug = org_data["slug"]
             try:
                 org = Organization.objects.get(slug=slug)
+                for user in User.objects.filter(current_organization=org):
+                    other_org = (
+                        Organization.objects.filter(memberships__user=user)
+                        .exclude(slug__in=mock_slugs)
+                        .first()
+                    )
+                    if other_org:
+                        user.current_organization = other_org
+                        user.save()
                 with connection.cursor() as cursor:
                     cursor.execute("DELETE FROM devopshero_app_app WHERE organization_id = %s", [org.pk.hex])
                 org.delete()
@@ -356,16 +366,16 @@ class Command(BaseCommand):
                        (id, organization_id, workspace_id, repository_id, name, slug,
                         app_type, build_strategy, repo_subpath, branch, dockerfile_path,
                         container_port, cpu, memory, health_check_path, health_check_command,
-                        environment_variables, app_secrets, access_level,
+                        environment_variables, app_secrets,
                         created_by_id, datastore_id, created_at, updated_at)
-                       VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
+                       VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
                     [
                         app_id, org.pk.hex, workspace.pk.hex, repository.pk.hex,
                         app_data["name"], app_data["slug"],
                         app_data["app_type"], app_data["build_strategy"], "", app_data["branch"], "",
                         app_data["container_port"], app_data["cpu"], app_data["memory"],
                         app_data["health_check_path"], "",
-                        "[]", None, "authenticated",
+                        "[]", None,
                         user.pk.hex, None, now, now,
                     ],
                 )

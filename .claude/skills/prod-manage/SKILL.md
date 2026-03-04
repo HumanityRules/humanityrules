@@ -7,6 +7,8 @@ description: Run Django management commands on the production ECS container. Use
 
 Run Django management commands on the production ECS container via `infra_devopshero/prod_manage.sh`.
 
+For a list of all available commands and what they do, see the `manage-commands` skill. This skill focuses on prod-specific execution details and examples.
+
 ## Usage
 
 ```bash

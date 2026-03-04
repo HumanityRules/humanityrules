@@ -1,6 +1,6 @@
 # Authorization Design: ABAC
 
-This document describes the ABAC (Attribute-Based Access Control) authorization system for DevOps Hero. It replaces the RBAC with Permissions + Groups model described in `authorization_design.md`.
+This document describes the ABAC (Attribute-Based Access Control) authorization system for DevOps Hero.
 
 All concepts in this document — policies, identity attributes, resource tags, groups, and grants — are organization-scoped. A policy in one organization never affects resources or identities in another.
 
