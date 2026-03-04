@@ -69,6 +69,7 @@ class Organization(models.Model):
     oidc_issuer_url = models.CharField(max_length=500, blank=True)
     oidc_client_id = models.CharField(max_length=255, blank=True)
     oidc_client_secret = models.CharField(max_length=500, blank=True)
+    bootstrap_admin_email = models.EmailField(blank=True, default="")
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

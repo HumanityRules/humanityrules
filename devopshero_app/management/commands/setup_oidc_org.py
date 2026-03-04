@@ -14,6 +14,7 @@ class Command(BaseCommand):
         parser.add_argument("--issuer-url", help="OIDC issuer URL (e.g. https://dev-123.okta.com/oauth2/default)")
         parser.add_argument("--client-id", help="OIDC client ID")
         parser.add_argument("--client-secret", help="OIDC client secret")
+        parser.add_argument("--bootstrap-admin-email", help="Email of first admin user (triggers org bootstrap on first login)")
 
     def _ask(self, label, default=""):
         prompt = f"  {label}"
@@ -32,6 +33,7 @@ class Command(BaseCommand):
         issuer_url = options["issuer_url"] or self._ask("Issuer URL")
         client_id = options["client_id"] or self._ask("Client ID")
         client_secret = options["client_secret"] or self._ask("Client Secret")
+        bootstrap_admin_email = options["bootstrap_admin_email"] or self._ask("Bootstrap admin email")
 
         org, created = Organization.objects.update_or_create(
             slug=slug,
@@ -41,6 +43,7 @@ class Command(BaseCommand):
                 "oidc_issuer_url": issuer_url,
                 "oidc_client_id": client_id,
                 "oidc_client_secret": client_secret,
+                "bootstrap_admin_email": bootstrap_admin_email,
             },
         )
 

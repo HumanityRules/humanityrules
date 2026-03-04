@@ -71,6 +71,7 @@ It will prompt for:
 - **Issuer URL**: from step 3
 - **Client ID**: from step 1
 - **Client Secret**: from step 1
+- **Bootstrap admin email**: the email of the customer's first admin user — when this user logs in for the first time, the org gets fully bootstrapped (seed ABAC policies + admin role)
 
 Or pass everything as flags:
 
@@ -80,7 +81,8 @@ uv run manage.py setup_oidc_org \
   --name "Acme Corp" \
   --issuer-url "https://acme.okta.com/oauth2/default" \
   --client-id "0oa..." \
-  --client-secret "..."
+  --client-secret "..." \
+  --bootstrap-admin-email "admin@acme.com"
 ```
 
 ### 5. Give the customer their login URL
@@ -89,7 +91,7 @@ uv run manage.py setup_oidc_org \
 https://devopshero.ai/oidc/login/?org=acme
 ```
 
-This is the only URL they need. First-time users are auto-created in the org with the default role (viewer).
+This is the only URL they need. The bootstrap admin's first login will fully initialize the org (seed ABAC policies + admin role). Subsequent users are auto-created with the default role (viewer).
 
 ## Troubleshooting
 
