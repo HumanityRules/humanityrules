@@ -70,6 +70,8 @@ urlpatterns = [
     path("auth/login/", views.auth_login, name="login"),
     path("auth/callback/", views.auth_callback, name="auth_callback"),
     path("auth/logout/", views.auth_logout, name="logout"),
+    path("oidc/login/", views.oidc_login, name="oidc_login"),
+    path("oidc/callback/", views.oidc_callback, name="oidc_callback"),
 
     # Onboarding
     path("onboarding/", views.onboarding, name="onboarding"),

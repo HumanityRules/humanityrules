@@ -1,5 +1,36 @@
 # DevOpsHero Development Journal
 
+## 2026-03-03 19:30 - [Integrations] Okta OIDC as second auth provider (bypass WorkOS for SSO customers)
+
+**Conversation:** [2026-03-03-1834-1186483b.md](conversations/2026-03-03-1834-1186483b.md)
+
+Added Okta OIDC as a second authentication provider alongside WorkOS. Motivation: WorkOS charges $125/customer for SSO, and customers who already use Okta can authenticate via standard OIDC directly, bypassing WorkOS entirely. The OIDC config (issuer URL, client ID, client secret) is stored per-organization in the database — no global settings needed.
+
+The initial plan had several layers of indirection (email-based domain routing, per-org login endpoints that dispatched between providers, session-based callback routing) that were iteratively stripped away during implementation:
+
+1. **Separate callback URLs instead of session dispatch** — started with a single `/auth/callback/` that checked `session["auth_provider"]` to decide between WorkOS and OIDC. Replaced with two dedicated URLs: `/auth/callback/` (WorkOS) and `/oidc/callback/` (OIDC). Cleaner because the URL itself determines the provider — no session state to manage.
+
+2. **Removed `email_domain` field and email login form** — the plan included an email input form where we'd look up the org by domain to route to the right provider. Once we had URL-based routing, this was redundant. Removed the field, the template, and the lookup logic.
+
+3. **Removed per-org login endpoint** — had `/auth/login/<org-slug>/` that branched on `auth_provider` (OIDC vs WorkOS). Simplified to `/oidc/login/?org=<slug>` which only handles OIDC. WorkOS login stays at `/auth/login/`. No conditional routing needed anywhere.
+
+Final URL structure:
+- `/auth/login/` — WorkOS (unchanged)
+- `/auth/callback/` — WorkOS callback (unchanged)
+- `/oidc/login/?org=<slug>` — starts OIDC login for an org
+- `/oidc/callback/` — OIDC callback (shared by all OIDC orgs, `state` param ties back to the right org)
+
+Created `setup_oidc_org` management command with interactive prompts for onboarding new OIDC customers. Also wrote operational docs (`docs/okta_oidc_setup.md`) covering the full Okta setup process — including two Okta gotchas we hit during testing:
+- Users must be **assigned** to the app in Okta (Applications > Assignments)
+- The authorization server needs an **access policy with at least one rule** — an empty policy blocks everything ("Policy evaluation failed")
+
+**Key points:**
+- OIDC config is per-org on the `Organization` model (`auth_provider`, `oidc_issuer_url`, `oidc_client_id`, `oidc_client_secret`) — no env vars or settings.py changes
+- `User.oidc_sub` field links users to their OIDC identity (like `workos_user_id` for WorkOS)
+- New OIDC users are auto-created in the org with default role — no onboarding flow needed since the org already exists
+- Token exchange uses `httpx` (already a dependency): POST to `/v1/token`, then GET `/v1/userinfo`
+- CSRF protection via `state` parameter stored in session before redirect, validated on callback
+
 ## 2026-03-02 19:49 - [UI] Parametrize _kv_tag_editor with rows mode for policy conditions
 
 **Conversation:** [2026-03-02-1950-6eb535f9.md](conversations/2026-03-02-1950-6eb535f9.md)

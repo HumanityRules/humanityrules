@@ -22,6 +22,13 @@ class User(AbstractUser):
         blank=True,
         help_text="The user ID from WorkOS",
     )
+    oidc_sub = models.CharField(
+        max_length=255,
+        unique=True,
+        null=True,
+        blank=True,
+        help_text="OIDC subject identifier",
+    )
     current_organization = models.ForeignKey(
         "Organization",
         on_delete=models.PROTECT,
@@ -37,6 +44,11 @@ class Organization(models.Model):
     """
     Top-level tenant. Users belong to organizations, and organizations own workspaces.
     """
+
+    class AuthProvider(models.TextChoices):
+        WORKOS = "workos"
+        OIDC = "oidc"
+
     id = models.UUIDField(
         primary_key=True,
         default=uuid.uuid7,
@@ -49,6 +61,14 @@ class Organization(models.Model):
         default="viewer",
         help_text="Org-role automatically assigned to new identities joining this organization",
     )
+    auth_provider = models.CharField(
+        max_length=10,
+        choices=AuthProvider.choices,
+        default=AuthProvider.WORKOS,
+    )
+    oidc_issuer_url = models.CharField(max_length=500, blank=True)
+    oidc_client_id = models.CharField(max_length=255, blank=True)
+    oidc_client_secret = models.CharField(max_length=500, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
