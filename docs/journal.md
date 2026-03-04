@@ -1,5 +1,21 @@
 # DevOpsHero Development Journal
 
+## 2026-03-03 19:43 - [Onboarding] Bootstrap admin email for OIDC orgs
+
+**Conversation:** [2026-03-03-1943-2fb605cb.md](conversations/2026-03-03-1943-2fb605cb.md)
+
+OIDC orgs are created via `setup_oidc_org` before any user logs in, so `bootstrap_organization()` (which creates the 9 seed ABAC policies + admin identity attribute) never runs. The designated admin's first login just got `default_org_role` (viewer) like everyone else — meaning the org had no policies and no admin.
+
+Fix: store `bootstrap_admin_email` on the `Organization` model. When an OIDC user logs in for the first time and their email matches (case-insensitive), the callback creates their membership with ADMIN role, runs `bootstrap_organization()`, and clears the field so it only fires once. Non-matching users get the existing default-role behavior.
+
+The `setup_oidc_org` management command now prompts for the bootstrap admin email (with `--bootstrap-admin-email` flag for non-interactive use). Updated `docs/okta_oidc_setup.md` with the new field in both the prompt list and the flags example.
+
+**Key points:**
+- `bootstrap_admin_email` is an `EmailField(blank=True, default="")` — empty means no bootstrap pending, so existing orgs are unaffected
+- Comparison is case-insensitive (`lower()` on both sides) since email casing varies between Okta configs
+- Field is cleared after bootstrap so it's a one-shot mechanism — subsequent logins by the same email go through normal flow
+- `save(update_fields=["bootstrap_admin_email"])` to avoid touching `updated_at` or racing with other org updates
+
 ## 2026-03-03 19:30 - [Integrations] Okta OIDC as second auth provider (bypass WorkOS for SSO customers)
 
 **Conversation:** [2026-03-03-1834-1186483b.md](conversations/2026-03-03-1834-1186483b.md)

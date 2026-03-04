@@ -11,6 +11,7 @@ from django.http import HttpResponseBadRequest
 from workos import WorkOSClient
 
 from ..models import Organization, OrganizationMembership, User
+from ..services import abac
 
 
 @lru_cache(maxsize=1)
@@ -88,7 +89,7 @@ def oidc_login(request):
 
 def _start_workos_login(request):
     """Redirect to WorkOS AuthKit."""
-    redirect_uri = f"{_build_base_uri(request)}/auth/callback/"
+    redirect_uri = f"{_build_base_uri(request)}/auth/callback"
     authorization_url = _get_workos_client().user_management.get_authorization_url(
         provider="authkit",
         redirect_uri=redirect_uri,
@@ -172,6 +173,8 @@ def oidc_callback(request):
         user.first_name = userinfo["first_name"]
         user.last_name = userinfo["last_name"]
         user.save()
+        login(request, user)
+        return redirect("/dashboard/")
     except User.DoesNotExist:
         user = User.objects.create_user(
             username=userinfo["email"],
@@ -181,14 +184,24 @@ def oidc_callback(request):
             oidc_sub=userinfo["sub"],
             current_organization=org,
         )
-        OrganizationMembership.objects.create(
-            user=user,
-            organization=org,
-            role=org.default_org_role,
-        )
-
-    login(request, user)
-    return redirect("/dashboard/")
+        if org.bootstrap_admin_email and userinfo["email"].lower() == org.bootstrap_admin_email.lower():
+            OrganizationMembership.objects.create(
+                user=user,
+                organization=org,
+                role=OrganizationMembership.Role.ADMIN,
+            )
+            abac.bootstrap_organization(organization=org, admin_user=user)
+            org.bootstrap_admin_email = ""
+            org.save(update_fields=["bootstrap_admin_email"])
+        else:
+            OrganizationMembership.objects.create(
+                user=user,
+                organization=org,
+                role=org.default_org_role,
+            )
+            abac.assign_default_org_role(organization=org, user=user)
+        login(request, user)
+        return redirect("/dashboard/")
 
 
 def auth_logout(request):
