@@ -23,40 +23,10 @@ We abbrebrivate the name of DevOps Hero as DOH.
 
 **Always use `uv run` to execute Python commands.** This project uses uv for dependency management — never run Python or project scripts directly.
 
-**Bad:**
-```bash
-python manage.py runserver
-python manage.py doh_raw
-```
-
-**Good:**
-```bash
-uv run manage.py runserver
-uv run manage.py doh_raw
-```
-
 
 # Documentation
 
-The main developer documentation lives in the docs/ subdirectory. **When creating a new document in `docs/`, always add a reference to it here.**
-
-- **`docs/journal.md`** — Development journal with chronological entries. Consult this when trying to understand what, when, and why decisions were made. Contains reasoning behind architectural choices, implementation decisions, and lessons learned.
-
-- **`docs/bolt_prompt.md`** — The original prompt used to generate the landing page design. Contains the product concept, target personas, and landing page section specifications.
-
-- **`docs/deployment_agent_design.md`** — Design document for the AI-powered deployment agent. Defines implementation steps (reference apps, repo analysis, Dockerfile generation, CDK constructs, deployment plan, code generation, execution UI, agent states) and guiding design principles.
-
-- **`docs/permissions_agent_design.md`** — Design document for the AI-powered permissions agent. Defines the agent's purposes (source code analysis, log analysis, transitive dependencies, blast radius assessment, draft review), required context, and open tasks (CloudTrail setup, CloudWatch access).
-
-- **`docs/domain_model.md`** — Core domain concepts and entity relationships. Defines Workspace, App, Environment, Datastore, Deployment, etc entities with their attributes and how they relate. Read this when implementing features that touch the domain model or when clarifying entity boundaries.
-
-- **`docs/authorization_design.md`** — Authorization system design. Defines the RBAC + Groups model, role bindings, pre-defined roles per resource type, and UI flows for managing access. Read this when implementing authorization features or when understanding how users, groups, roles, and resources relate.
-
-- **`docs/abac_test_plan.md`** — Test plan for the ABAC authorization system. Covers the policy evaluation engine, view-level endpoint access, bootstrapping, cross-org isolation, realistic scenarios, and edge cases.
-
-**Subsystem AGENTS.md files:**
-- **`devopshero_app/views/AGENTS.md`** — HTMX navigation paradigm, view patterns, adding pages
-- **`infra_devopshero/AGENTS.md`** — Control plane CDK infrastructure, deployment operations, AWS credentials setup
+See **`docs/AGENTS.md`** for the documentation index (main docs and subsystem AGENTS.md files).
 
 
 # Django 6.0 Async ORM
@@ -89,10 +59,6 @@ async def save_item(item):
 
 The `a`-prefixed methods are native async and don't require `sync_to_async` wrappers.
 
-
-## Browser Debugging Login for Agents
-
-When using browser tools to debug, log in via Django admin (`/admin/`) instead of the main login flow. WorkOS auth requires external redirects that don't work well with automated browser testing. Once authenticated through admin, click "View site" to access the app with an active session.
 
 
 # Python style guide
