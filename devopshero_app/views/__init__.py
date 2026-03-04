@@ -25,7 +25,7 @@ from .settings import (
     settings_git_integrations,
 )
 from .partials import random_quote, switch_organization
-from .auth import auth_login, auth_callback, auth_logout
+from .auth import auth_login, auth_callback, auth_logout, oidc_login, oidc_callback
 from .onboarding import onboarding
 from .api import aws_install_account_callback, health_check
 from .github import github_connect, github_callback, github_webhook
@@ -108,6 +108,8 @@ __all__ = [
     "auth_login",
     "auth_callback",
     "auth_logout",
+    "oidc_login",
+    "oidc_callback",
     "onboarding",
     "aws_install_account_callback",
     "health_check",
