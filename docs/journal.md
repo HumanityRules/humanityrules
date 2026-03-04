@@ -1,5 +1,27 @@
 # DevOpsHero Development Journal
 
+## 2026-03-04 23:45 - [AgentChat] Measure true tool execution time via PreToolUse hook
+
+**Conversation:** [2026-03-04-1610-70a41fb1.md](conversations/2026-03-04-1610-70a41fb1.md)
+
+The `duration_ms` field on tool calls was inaccurate. It was captured when the `AssistantMessage` arrived (containing `ToolUseBlock`), but the actual tool execution didn't start until later — the SDK sends other `AssistantMessage` and `EventStream` messages in between, creating queuing delay. The measured time included this delay, inflating the reported duration.
+
+The solution went through several iterations before landing on the cleanest approach: using the Claude Agent SDK's `PreToolUse` hook. This hook fires right before tool execution for **all** tools (both built-in SDK tools like Read/Write/Bash and our custom MCP tools), making it the single source of truth for timing.
+
+**How it works:** A `PreToolUse` hook closure captures `time.time()` into a shared `tool_start_times` dict (keyed by `tool_use_id`), which lives on `MainAgent`. When `_handle_tool_results` processes the `ToolResultBlock`, it pops the start time from the same dict and computes the true duration.
+
+**Iterations and learnings:**
+- First attempt: inject `tool_duration_ms` inside each MCP tool function via `_mcp_response`, with a `_with_timing` decorator on all 19 tools. This worked for MCP tools but not built-in SDK tools.
+- Tried placing the timing as a sibling field on the MCP content block (`{"type": "text", "text": "...", "tool_duration_ms": N}`), but **the SDK strips unknown fields from MCP content blocks** — only `type` and `text` survive. Had to move it inside the JSON payload instead.
+- Tried an envelope approach (`{"data": ..., "tool_duration_ms": N}`) inside the JSON, which worked but required `_unwrap_mcp_content` to return a tuple and handle `_data` wrapping for list responses.
+- Final approach: the `PreToolUse` hook handles all timing uniformly, so the MCP envelope, `start_time` in `_mcp_response`, and `start_time` in `pending_tool_calls` were all removed. `mcp_tools.py` is back to its original clean form.
+
+**Key points:**
+- The SDK's `PreToolUse` hook (via `HookMatcher` with no matcher = all tools) is the right place to instrument tool timing — it fires right before execution, after all queuing
+- `tool_use_id` correlates `PreToolUse` with the `ToolResultBlock` — same ID in both
+- The SDK strips unknown fields from MCP content blocks, so custom metadata must go inside the JSON text payload (or use hooks instead)
+- `pending_tool_calls` still tracks `name` and `input` for display purposes, but no longer carries `start_time`
+
 ## 2026-03-03 21:05 - [DevEx] Rename seed script and bootstrap ABAC properly
 
 **Conversation:** [2026-03-03-2037-a31fb710.md](conversations/2026-03-03-2037-a31fb710.md)

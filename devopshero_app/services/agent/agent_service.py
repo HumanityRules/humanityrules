@@ -30,6 +30,7 @@ from claude_agent_sdk import (
     UserMessage,
 )
 from claude_agent_sdk.types import (
+    HookMatcher,
     TextBlock,
     ToolUseBlock,
     ToolResultBlock,
@@ -84,6 +85,7 @@ class StreamingContext:
     """Mutable state for streaming response processing."""
 
     conversation: Conversation
+    tool_start_times: dict[str, float]
     pending_tool_calls: dict[str, dict[str, Any]] = field(default_factory=dict)
     accumulated_content: str = ""
     has_started_streaming: bool = False
@@ -118,11 +120,13 @@ class MessageChannel:
 class MainAgent:
     """Persistent Claude agent for a single conversation."""
 
-    def __init__(self, client: ClaudeSDKClient, channel: MessageChannel, sandbox_paths: SandboxPaths, model_alias: str) -> None:
+    def __init__(self, client: ClaudeSDKClient, channel: MessageChannel, sandbox_paths: SandboxPaths,
+                 model_alias: str, tool_start_times: dict[str, float]) -> None:
         self._client = client
         self._channel = channel
         self._sandbox_paths = sandbox_paths
         self._model_alias = model_alias
+        self._tool_start_times = tool_start_times
 
     @classmethod
     async def create(cls, conversation: Conversation) -> MainAgent:
@@ -151,6 +155,10 @@ class MainAgent:
         model_alias = _get_llm_model_for_conversation_mode(conversation.mode)
         logger.info(f"Using model {model_alias} for conversation {conversation.id} (mode={conversation.mode})")
 
+        # Shared dict for the PreToolUse hook to record tool start times.
+        # The hook writes here; _handle_tool_results reads from it.
+        tool_start_times: dict[str, float] = {}
+
         options = _create_agent_options(
             conversation=conversation,
             system_prompt=system_prompt,
@@ -158,20 +166,22 @@ class MainAgent:
             fork_session=fork_session,
             sandbox_paths=sandbox_paths,
             model_alias=model_alias,
+            tool_start_times=tool_start_times,
         )
 
         channel = MessageChannel()
         client = ClaudeSDKClient(options=options)
         await client.connect(prompt=channel)
 
-        return cls(client=client, channel=channel, sandbox_paths=sandbox_paths, model_alias=model_alias)
+        return cls(client=client, channel=channel, sandbox_paths=sandbox_paths,
+                   model_alias=model_alias, tool_start_times=tool_start_times)
 
 
     async def stream_turn(self, conversation: Conversation, user_message: str) -> AsyncGenerator[AgentStreamEvent, None]:
         """Process one message turn using the persistent client."""
         self._channel.send(user_message)
 
-        ctx = StreamingContext(conversation=conversation)
+        ctx = StreamingContext(conversation=conversation, tool_start_times=self._tool_start_times)
         yield AgentStreamEvent(type="thinking", data=None)
 
         try:
@@ -311,7 +321,6 @@ async def _handle_assistant_message(message: AssistantMessage, ctx: StreamingCon
         ctx.pending_tool_calls[block.id] = {
             "name": block.name,
             "input": enriched_input,
-            "start_time": time.time(),
         }
 
         yield AgentStreamEvent(
@@ -342,8 +351,11 @@ async def _handle_tool_results(message: UserMessage, ctx: StreamingContext) -> A
             continue
 
         tool_name = call_info["name"]
-        duration_ms = int((time.time() - call_info["start_time"]) * 1000)
         status = "error" if block.is_error else "success"
+
+        # Compute duration from the PreToolUse hook start time (set right before execution)
+        start_time = ctx.tool_start_times.pop(block.tool_use_id, None)
+        duration_ms = int((time.time() - start_time) * 1000) if start_time else None
 
         # MCP tools return content as [{"type": "text", "text": "<json>"}]; built-in SDK tools return a plain string.
         if tool_name.startswith("mcp__"):
@@ -507,7 +519,7 @@ def _unwrap_mcp_content(content: list) -> dict | str:
     This extracts the text and parses it as JSON when possible, so downstream
     consumers receive clean domain data instead of MCP wire format.
     """
-    text = content[0]["text"]
+    text = content[0]["text"] if isinstance(content[0], dict) else content[0].text
     try:
         return json.loads(text)
     except json.JSONDecodeError:
@@ -572,11 +584,12 @@ async def _maybe_generate_title(conversation: Conversation, user_message: str, a
         return None
 
 
-def _create_agent_options(conversation: Conversation, 
-                          system_prompt: str, resume_session_id: str | None, 
-                          fork_session: bool, 
-                          sandbox_paths: SandboxPaths, 
-                          model_alias: str) -> ClaudeAgentOptions:
+def _create_agent_options(conversation: Conversation,
+                          system_prompt: str, resume_session_id: str | None,
+                          fork_session: bool,
+                          sandbox_paths: SandboxPaths,
+                          model_alias: str,
+                          tool_start_times: dict[str, float]) -> ClaudeAgentOptions:
     # The sandbox settings are used to restrict the agent's filesystem access but only for Bash commands.
     sandbox_settings = SandboxSettings(
         enabled=False,
@@ -606,6 +619,13 @@ def _create_agent_options(conversation: Conversation,
         blocked_agents = ["Task(Bash)", "Task(statusline-setup)"]
         agents = {"analyze-repository": get_analyze_repository_agent()}
 
+    # PreToolUse hook records the start time of every tool call (built-in and MCP).
+    # _handle_tool_results reads from tool_start_times to compute true execution duration.
+    async def _pre_tool_use_hook(input_data, tool_use_id, _context):
+        if tool_use_id:
+            tool_start_times[tool_use_id] = time.time()
+        return {}
+
     return ClaudeAgentOptions(
         model=llm_client.get_model_id(alias=model_alias),
         system_prompt=system_prompt,
@@ -621,6 +641,9 @@ def _create_agent_options(conversation: Conversation,
         disallowed_tools=blocked_agents,
         env=env,
         include_partial_messages=True,
+        hooks={
+            "PreToolUse": [HookMatcher(hooks=[_pre_tool_use_hook])],
+        },
     )
 
 
