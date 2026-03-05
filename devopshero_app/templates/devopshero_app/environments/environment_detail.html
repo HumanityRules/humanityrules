@@ -1,17 +1,8 @@
 <div class="max-w-5xl">
-    {# Header with breadcrumb #}
     <div class="mb-6">
-        <div class="flex items-center space-x-2 text-sm text-gray-500 dark:text-gray-400 mb-1">
-            <a href="{% url 'environments' %}"
-               hx-get="{% url 'environments' %}"
-               hx-target="#main-content"
-               hx-swap="innerHTML"
-               hx-push-url="true"
-               class="hover:text-indigo-600 dark:hover:text-indigo-400">Environments</a>
-            <span>/</span>
-        </div>
+        {% url 'environments' as environments_url %}
         <div class="flex items-center justify-between">
-            <h1 class="text-2xl font-bold text-gray-900 dark:text-white">{{ environment.name }}</h1>
+            {% include "devopshero_app/partials/_breadcrumb.html" with p1_label="Environments" p1_url=environments_url current=environment.name %}
             <span class="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium
                 {% if environment.status == 'ready' %}bg-green-100 text-green-700 dark:bg-green-500/10 dark:text-green-400
                 {% elif environment.status == 'pending' or environment.status == 'provisioning' %}bg-yellow-100 text-yellow-700 dark:bg-yellow-500/10 dark:text-yellow-400

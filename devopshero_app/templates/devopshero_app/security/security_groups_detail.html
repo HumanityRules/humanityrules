@@ -2,21 +2,11 @@
 
 {% block security_content %}
 <div>
-    <div class="flex items-center space-x-2 text-sm text-gray-500 dark:text-gray-400 mb-4">
-        <a href="/security/groups/"
-           hx-get="/security/groups/"
-           hx-target="#main-content"
-           hx-swap="innerHTML"
-           hx-push-url="true"
-           class="hover:text-indigo-600 dark:hover:text-indigo-400">Groups</a>
-        <span>/</span>
-    </div>
-
     <div class="flex items-center justify-between mb-6">
         <div>
             <h2 class="text-lg font-semibold text-gray-900 dark:text-white">{{ group.name }}</h2>
             {% if group.description %}
-            <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">{{ group.description }}</p>
+            <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">{{ group.description }}</p>
             {% endif %}
         </div>
         <button hx-get="/security/groups/{{ group.id }}/delete-confirm/"

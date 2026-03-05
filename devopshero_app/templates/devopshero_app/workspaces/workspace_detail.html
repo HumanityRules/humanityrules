@@ -1,16 +1,7 @@
 <div class="max-w-5xl">
-    {# Header with workspace name #}
     <div class="mb-6">
-        <div class="flex items-center space-x-2 text-sm text-gray-500 dark:text-gray-400 mb-1">
-            <a href="{% url 'workspaces' %}"
-               hx-get="{% url 'workspaces' %}"
-               hx-target="#main-content"
-               hx-swap="innerHTML"
-               hx-push-url="true"
-               class="hover:text-indigo-600 dark:hover:text-indigo-400">Workspaces</a>
-            <span>/</span>
-        </div>
-        <h1 class="text-2xl font-bold text-gray-900 dark:text-white">{{ workspace.name }}</h1>
+        {% url 'workspaces' as workspaces_url %}
+        {% include "devopshero_app/partials/_breadcrumb.html" with p1_label="Workspaces" p1_url=workspaces_url current=workspace.name %}
         {% if workspace.description %}
         <p class="mt-1 text-sm text-gray-600 dark:text-gray-400 max-w-2xl">{{ workspace.description }}</p>
         {% endif %}

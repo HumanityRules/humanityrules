@@ -6,26 +6,21 @@
 </div>
 {% else %}
 <div class="flex h-full flex-col" style="height: calc(100vh - 8rem);">
-    {# Header with breadcrumb #}
     <div class="border-b border-gray-200 px-6 py-3 dark:border-gray-700">
-        <div class="flex items-center space-x-2 text-sm text-gray-500 dark:text-gray-400 mb-1">
-            <a href="{% url 'security_hub' %}{% if security_querystring %}?{{ security_querystring }}{% endif %}"
-               hx-get="{% url 'security_hub' %}{% if security_querystring %}?{{ security_querystring }}{% endif %}"
-               hx-target="#main-content"
-               hx-swap="innerHTML"
-               hx-push-url="true"
-               class="hover:text-indigo-600 dark:hover:text-indigo-400">Security</a>
-            <span>/</span>
-        </div>
-        <h1 class="text-lg font-semibold text-gray-900 dark:text-white">
-            Permissions — {{ app.name }} / {{ environment.name }}
-            {% if app_permission_request.status != "draft" %}
-            <span class="ml-2 inline-flex items-center align-middle rounded-full bg-indigo-100 px-2.5 py-0.5 text-xs font-medium text-indigo-800 dark:bg-indigo-900 dark:text-indigo-200">
-                {{ app_permission_request.get_status_display }}
-            </span>
-            {% endif %}
-        </h1>
-        <p class="text-sm text-gray-500 dark:text-gray-400">
+        {% url 'security_hub' as security_hub_url %}
+        {% with permissions_title="Permissions — "|add:app.name|add:" / "|add:environment.name %}
+        {% if security_querystring %}{% with security_url=security_hub_url|add:"?"|add:security_querystring %}
+        {% include "devopshero_app/partials/_breadcrumb.html" with p1_label="Security" p1_url=security_url current=permissions_title %}
+        {% endwith %}{% else %}
+        {% include "devopshero_app/partials/_breadcrumb.html" with p1_label="Security" p1_url=security_hub_url current=permissions_title %}
+        {% endif %}
+        {% endwith %}
+        {% if app_permission_request.status != "draft" %}
+        <span class="inline-flex items-center rounded-full bg-indigo-100 px-2.5 py-0.5 text-xs font-medium text-indigo-800 dark:bg-indigo-900 dark:text-indigo-200 mt-1">
+            {{ app_permission_request.get_status_display }}
+        </span>
+        {% endif %}
+        <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">
             Edit IAM task-role policies for this deployment.
         </p>
     </div>

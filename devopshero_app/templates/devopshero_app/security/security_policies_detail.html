@@ -3,19 +3,9 @@
 
 {% block security_content %}
 <div>
-    <div class="flex items-center space-x-2 text-sm text-gray-500 dark:text-gray-400 mb-4">
-        <a href="/security/policies/"
-           hx-get="/security/policies/"
-           hx-target="#main-content"
-           hx-swap="innerHTML"
-           hx-push-url="true"
-           class="hover:text-indigo-600 dark:hover:text-indigo-400">Policies</a>
-        <span>/</span>
-    </div>
-
     <div class="flex items-center justify-between mb-6">
         <h2 class="text-lg font-semibold text-gray-900 dark:text-white">
-            {% if policy %}Edit Policy{% else %}New Policy{% endif %}
+            {{ policy.name|default:"New Policy" }}
         </h2>
         {% if policy %}
         <button hx-get="/security/policies/{{ policy.id }}/delete-confirm/"
