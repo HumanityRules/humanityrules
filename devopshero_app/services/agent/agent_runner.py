@@ -142,7 +142,7 @@ async def _run_agent_loop(runner: AgentRunner, conversation_id: UUID) -> None:
             if pending_message is not None:
                 # Lazy-initialize the agent on first actual message
                 if runner.agent is None:
-                    runner.agent = await agent_service.MainAgent.create(conversation)
+                    runner.agent = await agent_service.MainAgent.create(conversation=conversation, event_queue=runner.event_queue)
 
                 logger.info(f"Agent processing message for conversation {conversation_id}")
                 async for event in runner.agent.stream_turn(conversation=conversation, user_message=pending_message):

@@ -158,6 +158,19 @@ def chat_send(request, conversation_id):
     if not message_text:
         return HttpResponse(status=400)
 
+    # If there's a pending AskUserQuestion, signal the answer to the blocked callback
+    pending = agent_service.get_pending_question(conversation.id)
+    if pending:
+        raw_answers = request.POST.get("question_answers")
+        if raw_answers:
+            answers = json.loads(raw_answers)
+        elif choice_id:
+            answers = {choice_id: message_text}
+        else:
+            first_q = pending.questions[0]["question"] if pending.questions else ""
+            answers = {first_q: message_text}
+        agent_service.submit_question_answer(conversation_id=conversation.id, answers=answers)
+
     # Create user message
     user_message = Message.objects.create(
         conversation=conversation,
@@ -319,6 +332,14 @@ def _render_streaming_tool_result(agent_streaming_event_data: dict) -> str:
     })
 
 
+def _render_streaming_question(agent_streaming_event_data: dict) -> str:
+    """Render HTML for an AskUserQuestion interactive choice UI."""
+    return render_to_string("devopshero_app/chat/_streaming_question.html", context={
+        "questions": agent_streaming_event_data.get("questions", []),
+        "conversation_id": agent_streaming_event_data.get("conversation_id", ""),
+    })
+
+
 def _render_streaming_thinking() -> str:
     """Render HTML for 'agent is thinking' indicator (OOB swap into placeholder)."""
     return render_to_string("devopshero_app/chat/_streaming_thinking.html")
@@ -357,6 +378,8 @@ def _format_sse_event(event: agent_service.AgentStreamEvent, show_costs: bool) -
         return _format_sse(event_name="sse-text-delta", data=json.dumps(event.data))
     elif event.type == "text_flush":
         return _format_sse(event_name="sse-text-flush", data="{}")
+    elif event.type == "question":
+        return _format_sse(event_name="sse-question", data=_render_streaming_question(event.data))
     elif event.type == "tool_start":
         return _format_sse(event_name="sse-tool-start", data=_render_streaming_tool_start(event.data))
     elif event.type == "tool_result":

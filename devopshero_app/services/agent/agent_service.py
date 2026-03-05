@@ -60,6 +60,37 @@ from .sandbox import SandboxPaths, get_sandbox_paths
 logger = logging.getLogger(__name__)
 
 
+@dataclass
+class PendingQuestion:
+    """State for an AskUserQuestion awaiting user response."""
+
+    questions: list[dict]
+    event: asyncio.Event
+    loop: asyncio.AbstractEventLoop
+    message: Message | None = None
+    answers: dict | None = None
+
+
+# Conversation ID → pending question waiting for a user answer.
+# Written by the canUseTool callback (async), read/signaled by chat_send (sync thread).
+_pending_questions: dict[Any, PendingQuestion] = {}
+
+
+def get_pending_question(conversation_id: Any) -> PendingQuestion | None:
+    """Return the pending question for a conversation, if any."""
+    return _pending_questions.get(conversation_id)
+
+
+def submit_question_answer(conversation_id: Any, answers: dict) -> bool:
+    """Signal the canUseTool callback with the user's answers. Thread-safe."""
+    pending = _pending_questions.get(conversation_id)
+    if not pending:
+        return False
+    pending.answers = answers
+    pending.loop.call_soon_threadsafe(pending.event.set)
+    return True
+
+
 AgentEventType = Literal[
     "thinking",     # Agent is thinking (before text or between tools)
     "start",        # Streaming started, create message container
@@ -67,6 +98,7 @@ AgentEventType = Literal[
     "text_flush",   # Finalize current streaming text (before tool call)
     "tool_start",   # Tool execution starting
     "tool_result",  # Tool execution completed
+    "question",     # Agent asking user a clarifying question (AskUserQuestion)
     "complete",     # Streaming finished (may include title for OOB update)
     "error",        # Error occurred
 ]
@@ -129,7 +161,7 @@ class MainAgent:
         self._tool_start_times = tool_start_times
 
     @classmethod
-    async def create(cls, conversation: Conversation) -> MainAgent:
+    async def create(cls, conversation: Conversation, event_queue: asyncio.Queue) -> MainAgent:
         """Async factory: one-time setup, returns ready-to-use agent."""
         system_prompt = await agent_build_prompt.build_system_prompt(conversation)
 
@@ -167,6 +199,7 @@ class MainAgent:
             sandbox_paths=sandbox_paths,
             model_alias=model_alias,
             tool_start_times=tool_start_times,
+            event_queue=event_queue,
         )
 
         channel = MessageChannel()
@@ -310,14 +343,14 @@ async def _handle_assistant_message(message: AssistantMessage, ctx: StreamingCon
 
     for block in message.content:
         if not isinstance(block, ToolUseBlock):
-            # TextBlocks have already been streamed via SDKStreamEvent, so we skip them.
-            # ThinkingBlocks are intentionally not surfaced to the user.
             continue
 
-        # Enrich input with display-friendly data (e.g., app_name from app_id)
+        # AskUserQuestion is rendered by the canUseTool callback as a "question" event
+        if block.name == "AskUserQuestion":
+            continue
+
         enriched_input = await _enrich_tool_input(block.name, block.input)
 
-        # Record pending tool call
         ctx.pending_tool_calls[block.id] = {
             "name": block.name,
             "input": enriched_input,
@@ -589,42 +622,89 @@ def _create_agent_options(conversation: Conversation,
                           fork_session: bool,
                           sandbox_paths: SandboxPaths,
                           model_alias: str,
-                          tool_start_times: dict[str, float]) -> ClaudeAgentOptions:
-    # The sandbox settings are used to restrict the agent's filesystem access but only for Bash commands.
+                          tool_start_times: dict[str, float],
+                          event_queue: asyncio.Queue) -> ClaudeAgentOptions:
     sandbox_settings = SandboxSettings(
         enabled=False,
         autoAllowBashIfSandboxed=True,
         allowUnsandboxedCommands=False,
     )
 
-    # TMPDIR points to the per-conversation tmp folder for isolation
     env = {
         **get_claude_env(),
         "TMPDIR": str(sandbox_paths.tmp_path),
     }
 
-    # Scope built-in tools and MCP tools by conversation mode
     if conversation.mode == Conversation.Mode.PERMISSIONS:
-        builtin_tools = ["Read", "Glob", "Grep"]
+        builtin_tools = ["Read", "Glob", "Grep", "AskUserQuestion"]
         allowed_tools = PERMISSIONS_ALLOWED_TOOLS
         blocked_agents: list[str] = []
         agents = {}
     else:
-        # Excluded built-in tools: NotebookEdit, WebFetch, KillShell, AskUserQuestion, Skill
         builtin_tools = [
             "Read", "Write", "Edit", "Glob", "Grep", "Bash",
             "Task", "TaskOutput", "TodoWrite", "EnterPlanMode", "ExitPlanMode",
+            "AskUserQuestion",
         ]
         allowed_tools = TOOL_NAMES
         blocked_agents = ["Task(Bash)", "Task(statusline-setup)"]
         agents = {"analyze-repository": get_analyze_repository_agent()}
 
-    # PreToolUse hook records the start time of every tool call (built-in and MCP).
-    # _handle_tool_results reads from tool_start_times to compute true execution duration.
     async def _pre_tool_use_hook(input_data, tool_use_id, _context):
         if tool_use_id:
             tool_start_times[tool_use_id] = time.time()
         return {}
+
+    conversation_id = conversation.id
+
+    async def _can_use_tool(tool_name: str, input_data: dict, context: ToolPermissionContext) -> PermissionResultAllow | PermissionResultDeny:
+        """Intercept AskUserQuestion to collect user answers via the UI."""
+        if tool_name != "AskUserQuestion":
+            return PermissionResultAllow(updated_input=input_data)
+
+        questions = input_data.get("questions", [])
+        logger.info(f"AskUserQuestion for conversation {conversation_id}: {len(questions)} question(s)")
+
+        question_message = await Message.objects.acreate(
+            conversation_id=conversation_id,
+            role=Message.Role.AGENT,
+            content_type=Message.ContentType.CHOICE,
+            content=questions[0]["question"] if questions else "",
+            metadata={"questions": questions},
+        )
+
+        pending = PendingQuestion(
+            questions=questions,
+            event=asyncio.Event(),
+            loop=asyncio.get_running_loop(),
+            message=question_message,
+        )
+        _pending_questions[conversation_id] = pending
+
+        event_queue.put_nowait(AgentStreamEvent(
+            type="question",
+            data={"questions": questions, "conversation_id": str(conversation_id)},
+        ))
+
+        try:
+            await asyncio.wait_for(pending.event.wait(), timeout=300)
+        except asyncio.TimeoutError:
+            _pending_questions.pop(conversation_id, None)
+            logger.error(f"AskUserQuestion timed out for conversation {conversation_id}")
+            return PermissionResultDeny(message="User did not respond in time")
+
+        answers = pending.answers or {}
+        _pending_questions.pop(conversation_id, None)
+        logger.info(f"AskUserQuestion answered for conversation {conversation_id}: {answers}")
+
+        # Mark selected options on the persisted message for read-only rendering on reload
+        for q in question_message.metadata["questions"]:
+            selected_label = answers.get(q["question"])
+            for opt in q["options"]:
+                opt["selected"] = (opt["label"] == selected_label)
+        await question_message.asave(update_fields=["metadata"])
+
+        return PermissionResultAllow(updated_input={"questions": questions, "answers": answers})
 
     return ClaudeAgentOptions(
         model=llm_client.get_model_id(alias=model_alias),
@@ -641,6 +721,7 @@ def _create_agent_options(conversation: Conversation,
         disallowed_tools=blocked_agents,
         env=env,
         include_partial_messages=True,
+        can_use_tool=_can_use_tool,
         hooks={
             "PreToolUse": [HookMatcher(hooks=[_pre_tool_use_hook])],
         },
