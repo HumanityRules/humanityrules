@@ -50,7 +50,7 @@
                  hx-ext="sse"
                  sse-connect="{% url 'chat_stream' conversation_id=conversation.id %}"
                  sse-close="sse-close"
-                 sse-swap="sse-thinking,sse-start,sse-text-delta,sse-text-flush,sse-tool-start,sse-tool-result,sse-complete,sse-error,sse-notify"
+                 sse-swap="sse-thinking,sse-start,sse-text-delta,sse-text-flush,sse-tool-start,sse-tool-result,sse-question,sse-complete,sse-error,sse-notify"
                  hx-swap="beforeend">
                 {% for message in messages %}
                     {% include "devopshero_app/chat/_message.html" %}
@@ -203,6 +203,7 @@ function resetStreamingState() {
     window.markdownStreamBuffer = '';
     window.markdownPendingBuffer = '';
     window.markdownTargetEl = null;
+    window.pendingStreamingHtml = null;
 }
 
 /**
@@ -253,28 +254,10 @@ function handleThinking(data) {
 }
 
 /**
- * Handle sse-start events (initialize streaming markdown buffers).
+ * Handle sse-start events (stash HTML for deferred insertion on first text delta).
  */
 function handleStart(data) {
-    const template = document.createElement('template');
-    template.innerHTML = data;
-    const fragment = template.content;
-
-    // _streaming_start.html includes an empty #thinking-indicator OOB to clear the "Thinking..." state
-    processOobElements(fragment);
-
-    const streamingMessage = fragment.firstElementChild;
-    if (streamingMessage) {
-        messages.appendChild(streamingMessage);
-    }
-
-    const streamingText = document.getElementById('streaming-text');
-    if (streamingText) {
-        window.markdownStreamBuffer = '';
-        window.markdownPendingBuffer = '';
-        window.markdownTargetEl = streamingText;
-    }
-    maybeScrollToBottomSmooth();
+    window.pendingStreamingHtml = data;
 }
 
 /**
@@ -283,7 +266,27 @@ function handleStart(data) {
 function handleTextDelta(data) {
     try {
         const parsed = JSON.parse(data);
-        if (!parsed.text || !window.markdownTargetEl) {
+        if (!parsed.text) {
+            return;
+        }
+        if (window.pendingStreamingHtml) {
+            const template = document.createElement('template');
+            template.innerHTML = window.pendingStreamingHtml;
+            const streamingMessage = template.content.firstElementChild;
+            if (streamingMessage) {
+                const thinkingIndicator = document.getElementById('thinking-indicator');
+                if (thinkingIndicator) {
+                    thinkingIndicator.outerHTML = '<div id="thinking-indicator"></div>';
+                }
+                messages.appendChild(streamingMessage);
+            }
+            window.pendingStreamingHtml = null;
+            window.markdownStreamBuffer = '';
+            window.markdownPendingBuffer = '';
+            window.markdownTargetEl = document.getElementById('streaming-text');
+            maybeScrollToBottomSmooth();
+        }
+        if (!window.markdownTargetEl) {
             return;
         }
         let pendingBuffer = window.markdownPendingBuffer || '';
@@ -407,6 +410,12 @@ messages.addEventListener('htmx:sseBeforeMessage', function(event) {
         return;
     }
 
+    if (eventType === 'sse-question') {
+        event.preventDefault();
+        handleQuestion(event.detail.data);
+        return;
+    }
+
     if (eventType === 'sse-tool-start') {
         event.preventDefault();
         handleToolStart(event.detail.data);
@@ -459,10 +468,83 @@ function handleToolResult(data) {
     template.innerHTML = data;
     const fragment = template.content;
 
-    // _streaming_tool_result.html wraps its content in hx-swap-oob="outerHTML" to replace the spinner
     processOobElements(fragment);
 
-    // Append remaining content to messages
+    while (fragment.firstChild) {
+        messages.appendChild(fragment.firstChild);
+    }
+    maybeScrollToBottomSmooth();
+}
+
+/**
+ * Handle sse-question events (AskUserQuestion interactive choices).
+ * Buttons toggle selection state; confirm button submits all answers at once.
+ */
+function handleQuestion(data) {
+    const template = document.createElement('template');
+    template.innerHTML = data;
+    const fragment = template.content;
+
+    processOobElements(fragment);
+
+    const containerEl = fragment.querySelector('[data-question-container]');
+    if (!containerEl) { return; }
+
+    const totalQuestions = parseInt(containerEl.dataset.totalQuestions, 10);
+    const sendUrl = containerEl.dataset.sendUrl;
+    const confirmBtn = containerEl.querySelector('[data-confirm-btn]');
+
+    function updateConfirmState() {
+        const answered = containerEl.querySelectorAll('[data-question-group][data-selected]').length;
+        confirmBtn.disabled = (answered < totalQuestions);
+    }
+
+    const selectedClasses = ['border-indigo-500', 'bg-indigo-50', 'text-indigo-700', 'dark:border-indigo-400', 'dark:bg-indigo-600/80', 'dark:text-white'];
+    const defaultClasses = ['border-gray-200', 'dark:border-gray-600', 'bg-white', 'dark:bg-gray-800', 'text-gray-900', 'dark:text-gray-100'];
+
+    containerEl.querySelectorAll('[data-option-btn]').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const group = btn.closest('[data-question-group]');
+            group.querySelectorAll('[data-option-btn]').forEach(b => {
+                b.classList.remove(...selectedClasses);
+                b.classList.add(...defaultClasses);
+            });
+            btn.classList.remove(...defaultClasses);
+            btn.classList.add(...selectedClasses);
+            group.dataset.selected = btn.dataset.label;
+            updateConfirmState();
+        });
+    });
+
+    // Confirm: collect all answers and POST via htmx
+    confirmBtn.addEventListener('click', () => {
+        const answers = {};
+        const labels = [];
+        containerEl.querySelectorAll('[data-question-group][data-selected]').forEach(g => {
+            answers[g.dataset.question] = g.dataset.selected;
+            labels.push(g.dataset.selected);
+        });
+
+        containerEl.querySelectorAll('[data-option-btn]').forEach(b => {
+            b.disabled = true;
+            b.classList.add('cursor-not-allowed');
+            if (!b.classList.contains('border-indigo-500')) {
+                b.classList.add('opacity-40');
+            }
+        });
+        confirmBtn.disabled = true;
+        confirmBtn.textContent = 'Submitted';
+
+        htmx.ajax('POST', sendUrl, {
+            target: '#messages',
+            swap: 'beforeend',
+            values: {
+                message: labels.join(', '),
+                question_answers: JSON.stringify(answers),
+            },
+        });
+    });
+
     while (fragment.firstChild) {
         messages.appendChild(fragment.firstChild);
     }

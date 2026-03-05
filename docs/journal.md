@@ -1,5 +1,27 @@
 # DevOpsHero Development Journal
 
+## 2026-03-05 - [AgentChat] Implement AskUserQuestion UI for human-in-the-loop agent decisions
+
+**Conversation:** [2026-03-05-1213-d61c8e2f.md](conversations/2026-03-05-1213-d61c8e2f.md)
+
+Implemented the SDK's built-in `AskUserQuestion` tool so agents can present interactive multiple-choice questions to users during conversations. This enables a human-in-the-loop pattern where the agent pauses, asks the user to choose (environment, container size, database strategy, etc.), and continues with their answer.
+
+**Architecture — `canUseTool` callback as the control point:** The Claude Agent SDK provides a `can_use_tool` callback that intercepts tool execution requests. When the agent calls `AskUserQuestion`, our callback: (1) persists a CHOICE message to the database, (2) emits a `"question"` SSE event to the frontend, (3) blocks on an `asyncio.Event` waiting for the user's answer. The callback runs in the SDK's anyio task group, so the agent turn stays open while waiting. When the user responds, `chat_send` signals the event thread-safely via `loop.call_soon_threadsafe(event.set)`, the callback resumes, stamps selected answers on the persisted message, and returns `PermissionResultAllow` with the answers — the agent continues seamlessly.
+
+**Multi-question batching:** The SDK batches 1–4 questions in a single `AskUserQuestion` call. Initial implementation had each option button immediately POST to `chat_send`, which meant only the last click registered. Fixed by making buttons pure selection toggles (JS state only) with a "Confirm selections" button that collects all answers into a JSON dict and submits once. The confirm button stays disabled until every question has a selection.
+
+**Thread-safety between async callback and sync view:** The `can_use_tool` callback runs on the asyncio event loop; `chat_send` is a sync Django view running in a thread pool. The `PendingQuestion` dataclass stores a reference to the event loop (`asyncio.get_running_loop()`) so `submit_question_answer` can call `loop.call_soon_threadsafe(event.set)` safely from the sync thread.
+
+**Persistence for page reload:** Questions are persisted as `Message.ContentType.CHOICE` with `metadata.questions` containing the full question/options structure. After the user answers, each option gets a `selected: true/false` flag stamped on the metadata. On reload, `_message_choice.html` renders the read-only answered state — selected option highlighted, others dimmed. The interactive re-wire for the rare refresh-while-pending edge case was deliberately skipped (user can type a free-text answer instead).
+
+**SSE event flow:** Added a new `"question"` event type to `AgentEventType`. The `can_use_tool` callback puts the event directly into the runner's `event_queue` (bypassing `stream_turn`'s yield), since the callback runs in a separate task. The `_handle_assistant_message` function skips `AskUserQuestion` ToolUseBlocks to prevent rendering a tool spinner alongside the question UI.
+
+**Key points:**
+- `can_use_tool` is the official SDK mechanism for interactive tools — it keeps the agent turn alive while waiting for user input
+- `asyncio.Event` + `loop.call_soon_threadsafe` bridges the async-callback / sync-view boundary safely
+- Multi-question batching requires collecting all answers client-side before submitting — individual button clicks can't trigger HTTP requests
+- System prompt updated (`<question_philosophy>`) to instruct agents to use `AskUserQuestion` for deployment decisions, grouping related questions into single calls with 2–4 options each
+
 ## 2026-03-04 23:13 - [Bugfix] Security tags: suggestion staleness, duplicate key rendering, and polish
 
 **Conversation:** [2026-03-04-2314-ec8ad7db.md](conversations/2026-03-04-2314-ec8ad7db.md)

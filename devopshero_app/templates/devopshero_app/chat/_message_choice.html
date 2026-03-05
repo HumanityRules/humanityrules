@@ -1,26 +1,20 @@
-{# Interactive choice buttons #}
-<div>
-    <p class="text-sm text-gray-900 dark:text-gray-100 mb-3">{{ message.content }}</p>
-
-    <div class="flex flex-wrap gap-2">
-        {% for choice in message.metadata.choices %}
-        <button type="button"
-                hx-post="{% url 'chat_send' conversation_id=message.conversation_id %}"
-                hx-vals='{"message": "{{ choice.label }}", "choice_id": "{{ choice.id }}"}'
-                hx-target="#messages"
-                hx-swap="beforeend"
-                class="px-4 py-2 text-sm font-medium rounded-lg transition-colors
-                       {% if choice.primary %}
-                       bg-indigo-600 text-white hover:bg-indigo-500
-                       {% else %}
-                       bg-gray-200 dark:bg-gray-700 text-gray-900 dark:text-gray-100 hover:bg-gray-300 dark:hover:bg-gray-600
-                       {% endif %}">
-            {{ choice.label }}
-        </button>
-        {% endfor %}
+{# AskUserQuestion — read-only answered state on reload #}
+<div class="space-y-3">
+    {% for q in message.metadata.questions %}
+    <div>
+        <p class="text-sm text-gray-900 dark:text-gray-100 mb-2">{{ q.question }}</p>
+        <div class="flex flex-wrap gap-2">
+            {% for option in q.options %}
+            <span class="px-4 py-2.5 text-sm font-medium rounded-lg border-1
+                         {% if option.selected %}
+                         border-indigo-500 bg-indigo-50 text-indigo-700 dark:border-indigo-400 dark:bg-indigo-600/80 dark:text-white
+                         {% else %}
+                         border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 opacity-40
+                         {% endif %}">
+                {{ option.label }}
+            </span>
+            {% endfor %}
+        </div>
     </div>
-
-    {% if message.metadata.allow_text %}
-    <p class="text-xs text-gray-500 dark:text-gray-400 mt-2">Or type your own response below</p>
-    {% endif %}
+    {% endfor %}
 </div>
