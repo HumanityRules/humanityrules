@@ -277,7 +277,7 @@ class TestSecuritySettingsEndpoints(TestCase):
             "resource_conditions": json.dumps([{"key": "domain", "value": "eng"}]),
             "actions": json.dumps(["workspace:view"]),
         })
-        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.status_code, 204)
 
     def test_non_admin_gets_403_on_create_policy(self) -> None:
         self.client.force_login(self.regular_user)
