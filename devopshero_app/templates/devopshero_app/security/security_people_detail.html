@@ -2,21 +2,10 @@
 
 {% block security_content %}
 <div>
-    <div class="flex items-center space-x-2 text-sm text-gray-500 dark:text-gray-400 mb-4">
-        <a href="/security/people/"
-           hx-get="/security/people/"
-           hx-target="#main-content"
-           hx-swap="innerHTML"
-           hx-push-url="true"
-           class="hover:text-indigo-600 dark:hover:text-indigo-400">People</a>
-        <span>/</span>
-    </div>
     <div class="mb-6">
-        <p class="text-xs font-medium text-gray-500 dark:text-gray-400">Email</p>
         <h2 class="text-lg font-semibold text-gray-900 dark:text-white">{{ member.email }}</h2>
         {% if member.first_name or member.last_name %}
-        <p class="text-xs font-medium text-gray-500 dark:text-gray-400 mt-2">Name</p>
-        <p class="text-sm text-gray-900 dark:text-white">{{ member.first_name }} {{ member.last_name }}</p>
+        <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">{{ member.first_name }} {{ member.last_name }}</p>
         {% endif %}
     </div>
 
