@@ -41,6 +41,7 @@ from .chat import (
     chat_fork,
     chat_conversation_title,
     chat_conversation_cost,
+    chat_answer_question,
 )
 from .waitlist_views import waitlist_signup
 from .security_abac import (

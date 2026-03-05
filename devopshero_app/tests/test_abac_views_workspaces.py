@@ -168,7 +168,7 @@ class TestWorkspaceEndpoints(TestCase):
             "/workspaces/engineering/tags/save/",
             {"tags": json.dumps([{"key": "env", "value": "prod"}, {"key": "team", "value": "alpha"}])},
         )
-        self.assertEqual(response.status_code, 204)
+        self.assertEqual(response.status_code, 200)
         tags = ResourceTag.objects.filter(workspace=self.ws_eng).order_by("key")
         self.assertEqual(tags.count(), 2)
         self.assertEqual(tags[0].key, "env")

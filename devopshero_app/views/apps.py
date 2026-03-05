@@ -264,13 +264,27 @@ def app_tags_save(request: HttpRequest, app_slug: str) -> HttpResponse:
     tags_data = json.loads(request.POST.get("tags", "[]"))
 
     ResourceTag.objects.filter(app=app).delete()
+    seen = set()
     for tag in tags_data:
         key = tag.get("key", "").strip()
         value = tag.get("value", "").strip()
-        if key and value:
+        if key and value and (key, value) not in seen:
+            seen.add((key, value))
             ResourceTag.objects.create(
                 organization=org, resource_type="app", app=app,
                 key=key, value=value,
             )
 
-    return HttpResponse(status=204)
+    tags = ResourceTag.objects.filter(app=app).order_by("key", "value")
+    inherited_tags = ResourceTag.objects.filter(workspace=app.workspace).order_by("key", "value")
+    suggested_keys, suggested_values = abac.get_resource_tag_suggestions(org, "app")
+    return render(request, "devopshero_app/partials/_security_tags_section.html", {
+        "can_admin": True,
+        "tags_title": "App Tags",
+        "tags_json": json.dumps([{"key": t.key, "value": t.value} for t in tags]),
+        "url_base": f"/apps/{app.slug}/tags/",
+        "suggested_keys": suggested_keys,
+        "suggested_values": suggested_values,
+        "inherited_tags": inherited_tags,
+        "empty_text": "No direct tags",
+    })
