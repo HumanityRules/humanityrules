@@ -1,5 +1,23 @@
 # DevOpsHero Development Journal
 
+## 2026-03-04 23:13 - [Bugfix] Security tags: suggestion staleness, duplicate key rendering, and polish
+
+**Conversation:** [2026-03-04-2314-ec8ad7db.md](conversations/2026-03-04-2314-ec8ad7db.md)
+
+Follow-up fixes to the security tags display/edit toggle component from the same session.
+
+**Suggestion staleness after save:** When a user added a tag with a new key and saved, the combobox suggestions didn't include the new key on the next edit. Root cause: suggestions were server-rendered `<button>` elements baked into the HTML at page load, and the save endpoint returned 204 with no HTML swap. Fix: changed save endpoints to return the rendered `_security_tags_section.html` partial with `hx-target="#security-tags" hx-swap="outerHTML"`, giving fresh suggestions, fresh tags, and a natural reset to `editing: false`. This also eliminated the HTMX-to-Alpine event bridge (`@tags-saved` / `CustomEvent`) since the entire section is replaced with server-rendered HTML.
+
+**HTMX `hx-on` handlers can't access Alpine scope:** The previous `hx-on::after-request` handler referenced Alpine variables (`tags`, `editing`) directly, but HTMX event handlers execute in global JavaScript scope via `new Function()`, not within Alpine's reactive proxy. Variables were undefined, so the handler silently failed. Initially fixed with a custom event bridge pattern (`this.dispatchEvent(new CustomEvent('tags-saved', {bubbles:true}))` caught by Alpine's `@tags-saved`), then superseded by the outerHTML swap approach which avoids the problem entirely.
+
+**Duplicate key rendering:** Tags with the same key but different values (e.g., `env=prod`, `env=staging`) disappeared in read-only mode. The `x-for` used `:key="item.key + item.value"` which can produce collisions via string concatenation ambiguity. Fix: changed to `:key="i"` (index-based), matching what edit mode already uses. Also added server-side deduplication (`seen` set) in all three save views to prevent truly identical tags.
+
+**Key points:**
+- `hx-on::*` handlers run in global scope, NOT Alpine's reactive scope — use outerHTML swap or event bridge to communicate between HTMX and Alpine
+- Alpine `x-for` `:key` using string concatenation (`item.key + item.value`) is fragile — index-based keys are safer
+- outerHTML swap on an `x-data` element is fine when you intentionally want to reset Alpine state (Alpine's MutationObserver initializes the new element)
+- Save views returning rendered partials (instead of 204) keeps suggestions fresh without extra requests
+
 ## 2026-03-04 22:43 - [UI] Security tags: display/edit toggle with reusable component
 
 **Conversation:** [2026-03-04-2244-ec8ad7db.md](conversations/2026-03-04-2244-ec8ad7db.md)

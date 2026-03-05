@@ -216,7 +216,7 @@ class TestAppEndpoints(TestCase):
             "/apps/myapp/tags/save/",
             {"tags": json.dumps([{"key": "env", "value": "prod"}])},
         )
-        self.assertEqual(response.status_code, 204)
+        self.assertEqual(response.status_code, 200)
         tags = ResourceTag.objects.filter(app=self.app)
         self.assertEqual(tags.count(), 1)
         self.assertEqual(tags[0].key, "env")

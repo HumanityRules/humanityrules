@@ -148,7 +148,7 @@ class TestEnvironmentEndpoints(TestCase):
             "/environments/staging/tags/save/",
             {"tags": json.dumps([{"key": "tier", "value": "staging"}, {"key": "region", "value": "us-east-1"}])},
         )
-        self.assertEqual(response.status_code, 204)
+        self.assertEqual(response.status_code, 200)
         tags = ResourceTag.objects.filter(environment=self.env_staging).order_by("key")
         self.assertEqual(tags.count(), 2)
         self.assertEqual(tags[0].key, "region")
