@@ -1,12 +1,12 @@
-<div class="flex items-center gap-2 flex-wrap">
+<div>
     {% if p1_label %}
     <a href="{{ p1_url }}"
        hx-get="{{ p1_url }}"
        hx-target="#main-content"
        hx-swap="innerHTML"
        hx-push-url="true"
-       class="text-sm leading-none text-gray-500 dark:text-gray-400 hover:text-indigo-600 dark:hover:text-indigo-400 whitespace-nowrap">{{ p1_label }}</a>
-    <span class="text-sm leading-none text-gray-400 dark:text-gray-500">/</span>
+       class="text-sm align-baseline text-gray-500 dark:text-gray-400 hover:text-indigo-600 dark:hover:text-indigo-400">{{ p1_label }}</a>
+    <span class="text-sm align-baseline text-gray-400 dark:text-gray-500 mx-1">/</span>
     {% endif %}
     {% if p2_label %}
     <a href="{{ p2_url }}"
@@ -14,8 +14,8 @@
        hx-target="#main-content"
        hx-swap="innerHTML"
        hx-push-url="true"
-       class="text-sm leading-none text-gray-500 dark:text-gray-400 hover:text-indigo-600 dark:hover:text-indigo-400 whitespace-nowrap">{{ p2_label }}</a>
-    <span class="text-sm leading-none text-gray-400 dark:text-gray-500">/</span>
+       class="text-sm align-baseline text-gray-500 dark:text-gray-400 hover:text-indigo-600 dark:hover:text-indigo-400">{{ p2_label }}</a>
+    <span class="text-sm align-baseline text-gray-400 dark:text-gray-500 mx-1">/</span>
     {% endif %}
-    <h1 class="text-2xl font-bold leading-none text-gray-900 dark:text-white">{{ current }}</h1>
+    <h1 class="inline align-baseline text-2xl font-bold text-gray-900 dark:text-white">{{ current }}</h1>
 </div>
