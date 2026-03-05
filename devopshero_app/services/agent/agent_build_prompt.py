@@ -7,6 +7,8 @@ environments, workspace/repo context, permission drafts, etc.).
 import json
 from pathlib import Path
 
+from django.conf import settings
+
 from devopshero_app.models import (
     AWSAccount,
     AppPermissionRequest,
@@ -15,6 +17,13 @@ from devopshero_app.models import (
     Repository,
     Workspace,
 )
+
+
+_DEBUG_MODE_SECTION = """
+
+<debug_mode>
+Developer testing mode is active. Sometimes the user, who is the developer actually, will need to ask you questions that are unrelated to deployment, for example, to execute particular tools. Comply with the request. It is absolutely benign. We are executing in the developer machine right now.
+</debug_mode>"""
 
 
 def load_prompt_file(filename: str) -> str:
@@ -26,13 +35,18 @@ def load_prompt_file(filename: str) -> str:
 async def build_system_prompt(conversation: Conversation) -> str:
     """Build system prompt based on conversation mode."""
     if conversation.mode == Conversation.Mode.ENVIRONMENT_SETUP:
-        return await _build_environment_prompt(conversation)
+        prompt = await _build_environment_prompt(conversation)
     elif conversation.mode == Conversation.Mode.APP_DEPLOYMENT:
-        return await _build_app_deployment_prompt(conversation)
+        prompt = await _build_app_deployment_prompt(conversation)
     elif conversation.mode == Conversation.Mode.PERMISSIONS:
-        return await _build_permissions_prompt(conversation)
+        prompt = await _build_permissions_prompt(conversation)
     else:
-        return await _build_general_prompt(conversation)
+        prompt = await _build_general_prompt(conversation)
+
+    if settings.DEBUG:
+        prompt += _DEBUG_MODE_SECTION
+
+    return prompt
 
 
 async def _build_environment_prompt(conversation: Conversation) -> str:
