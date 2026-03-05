@@ -1,5 +1,20 @@
 # DevOpsHero Development Journal
 
+## 2026-03-04 22:43 - [UI] Security tags: display/edit toggle with reusable component
+
+**Conversation:** [2026-03-04-2244-ec8ad7db.md](conversations/2026-03-04-2244-ec8ad7db.md)
+
+Replaced always-editable security tags with a read-only display by default and an Edit/Save/Cancel toggle for admins. Evolved through several iterations from per-row HTMX saves to a bulk Alpine array approach (matching the policy conditions editor pattern), then extracted everything into a shared `_security_tags_section.html` component used by workspace, environment, and app detail views.
+
+The `_kv_tag_editor.html` partial was simplified to just two modes: read-only chips (server-rendered `{% for %}`) and editable rows (Alpine `x-for` over an array model). Save/Cancel buttons live in the parent component, not in the editor — same pattern as policies. Display chips are Alpine-driven (`x-for` over the `tags` array) so they stay in sync after save without needing an HTMX swap. Save endpoints return 204 No Content with `hx-swap="none"`.
+
+**HTMX + Alpine scope bug and the event bridge pattern:** `hx-on::after-request` handlers execute in global JavaScript scope, NOT within Alpine's reactive scope. Referencing Alpine variables like `tags` or `editing` directly in `hx-on` handlers silently fails (they're undefined). The fix is an event bridge: the HTMX handler dispatches a custom DOM event (`this.dispatchEvent(new CustomEvent('tags-saved', {bubbles:true}))`), and the Alpine `x-data` element catches it with `@tags-saved="..."` where the reactive scope is available. This is the correct pattern for HTMX-to-Alpine communication.
+
+**Other learnings:**
+- `x-data='...'` must use single quotes when the value contains JSON with double quotes — otherwise the HTML attribute gets truncated at the first JSON `"`
+- Alpine display chips (`x-for`) eliminate the need for HTMX swaps after save — just update the Alpine array and the UI reflects it immediately
+- `{% include ... with x=y %}` (without `only`) passes all parent context plus overrides, so nested includes inherit `suggested_keys` etc. without explicit forwarding
+
 ## 2026-03-04 23:45 - [AgentChat] Measure true tool execution time via PreToolUse hook
 
 **Conversation:** [2026-03-04-1610-70a41fb1.md](conversations/2026-03-04-1610-70a41fb1.md)

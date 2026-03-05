@@ -1,3 +1,4 @@
+import json
 from uuid import UUID
 
 from django.contrib.auth.decorators import login_required
@@ -115,6 +116,7 @@ def workspace_detail(request: HttpRequest, workspace_slug: str) -> HttpResponse:
     context["repositories"] = repositories
     context["show_costs"] = show_costs
     context["tags"] = tags
+    context["tags_json"] = json.dumps([{"key": t.key, "value": t.value} for t in tags])
     context["can_admin"] = can_admin
     context["url_base"] = f"/workspaces/{workspace.slug}/tags/"
     context["suggested_keys"], context["suggested_values"] = abac.get_resource_tag_suggestions(request.user.current_organization, "workspace")
@@ -200,4 +202,31 @@ def workspace_tag_remove(request: HttpRequest, workspace_slug: str, tag_id: UUID
         "items": tags, "can_edit": True, "url_base": url_base, "hx_target": "#workspace-tags", "empty_text": "No tags",
         **dict(zip(("suggested_keys", "suggested_values"), abac.get_resource_tag_suggestions(org, "workspace"))),
     })
+
+
+@login_required
+@require_POST
+def workspace_tags_save(request: HttpRequest, workspace_slug: str) -> HttpResponse:
+    """Bulk-save workspace tags. Replaces all existing tags with the submitted array."""
+
+    workspace = get_object_or_404(Workspace, slug=workspace_slug, organization=request.user.current_organization)
+
+    denied = abac_view_checks.check_abac(request, workspace, "workspace", "workspace:admin")
+    if denied:
+        return denied
+
+    org = request.user.current_organization
+    tags_data = json.loads(request.POST.get("tags", "[]"))
+
+    ResourceTag.objects.filter(workspace=workspace).delete()
+    for tag in tags_data:
+        key = tag.get("key", "").strip()
+        value = tag.get("value", "").strip()
+        if key and value:
+            ResourceTag.objects.create(
+                organization=org, resource_type="workspace", workspace=workspace,
+                key=key, value=value,
+            )
+
+    return HttpResponse(status=204)
 

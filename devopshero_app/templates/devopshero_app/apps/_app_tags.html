@@ -1,4 +1,4 @@
-{# Inherited workspace tags (read-only) #}
+{# Inherited workspace tags (always read-only) #}
 <div class="flex flex-wrap gap-2 mb-2">
     {% for tag in inherited_tags %}
     <span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-400">
@@ -10,5 +10,5 @@
     {% endfor %}
 </div>
 
-{# Direct app tags (editable) #}
+{# Direct app tags (editable with display/edit toggle) #}
 {% include "devopshero_app/partials/_kv_tag_editor.html" with items=direct_tags url_base=url_base hx_target="#app-tags" can_edit=can_admin empty_text="No direct tags" %}

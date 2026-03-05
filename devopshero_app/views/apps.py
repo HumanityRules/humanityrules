@@ -1,3 +1,4 @@
+import json
 from datetime import datetime
 from typing import Any
 from uuid import UUID
@@ -66,6 +67,7 @@ def _build_app_detail_context(request: HttpRequest, app: App) -> dict[str, Any]:
     org = request.user.current_organization
     context["direct_tags"] = direct_tags
     context["inherited_tags"] = inherited_tags
+    context["tags_json"] = json.dumps([{"key": t.key, "value": t.value} for t in direct_tags])
     context["can_admin"] = can_admin
     context["url_base"] = f"/apps/{app.slug}/tags/"
     context["suggested_keys"], context["suggested_values"] = abac.get_resource_tag_suggestions(org, "app")
@@ -245,3 +247,30 @@ def app_tag_remove(request: HttpRequest, app_slug: str, tag_id: UUID) -> HttpRes
         "direct_tags": direct_tags, "inherited_tags": inherited_tags, "can_admin": True, "url_base": url_base,
         **dict(zip(("suggested_keys", "suggested_values"), abac.get_resource_tag_suggestions(org, "app"))),
     })
+
+
+@login_required
+@require_POST
+def app_tags_save(request: HttpRequest, app_slug: str) -> HttpResponse:
+    """Bulk-save app tags. Replaces all direct tags with the submitted array."""
+
+    app = _get_app_for_user(request, app_slug)
+
+    denied = abac_view_checks.check_abac(request, app.workspace, "workspace", "workspace:admin")
+    if denied:
+        return denied
+
+    org = request.user.current_organization
+    tags_data = json.loads(request.POST.get("tags", "[]"))
+
+    ResourceTag.objects.filter(app=app).delete()
+    for tag in tags_data:
+        key = tag.get("key", "").strip()
+        value = tag.get("value", "").strip()
+        if key and value:
+            ResourceTag.objects.create(
+                organization=org, resource_type="app", app=app,
+                key=key, value=value,
+            )
+
+    return HttpResponse(status=204)

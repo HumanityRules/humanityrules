@@ -160,3 +160,24 @@ class TestWorkspaceEndpoints(TestCase):
         self.client.force_login(self.viewer_user)
         response = self.client.post(f"/workspaces/engineering/tags/{self.removable_tag.id}/remove/")
         self.assertEqual(response.status_code, 403)
+
+    def test_admin_can_bulk_save_workspace_tags(self) -> None:
+        import json
+        self.client.force_login(self.admin_user)
+        response = self.client.post(
+            "/workspaces/engineering/tags/save/",
+            {"tags": json.dumps([{"key": "env", "value": "prod"}, {"key": "team", "value": "alpha"}])},
+        )
+        self.assertEqual(response.status_code, 204)
+        tags = ResourceTag.objects.filter(workspace=self.ws_eng).order_by("key")
+        self.assertEqual(tags.count(), 2)
+        self.assertEqual(tags[0].key, "env")
+
+    def test_viewer_gets_403_on_workspace_tags_save(self) -> None:
+        import json
+        self.client.force_login(self.viewer_user)
+        response = self.client.post(
+            "/workspaces/engineering/tags/save/",
+            {"tags": json.dumps([{"key": "env", "value": "prod"}])},
+        )
+        self.assertEqual(response.status_code, 403)

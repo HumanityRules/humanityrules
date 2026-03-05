@@ -208,3 +208,24 @@ class TestAppEndpoints(TestCase):
         self.client.force_login(self.ws_editor)
         response = self.client.post(f"/apps/myapp/tags/{self.app_tag.id}/remove/")
         self.assertEqual(response.status_code, 403)
+
+    def test_ws_admin_can_bulk_save_app_tags(self) -> None:
+        import json
+        self.client.force_login(self.ws_admin)
+        response = self.client.post(
+            "/apps/myapp/tags/save/",
+            {"tags": json.dumps([{"key": "env", "value": "prod"}])},
+        )
+        self.assertEqual(response.status_code, 204)
+        tags = ResourceTag.objects.filter(app=self.app)
+        self.assertEqual(tags.count(), 1)
+        self.assertEqual(tags[0].key, "env")
+
+    def test_ws_viewer_gets_403_on_app_tags_save(self) -> None:
+        import json
+        self.client.force_login(self.ws_viewer)
+        response = self.client.post(
+            "/apps/myapp/tags/save/",
+            {"tags": json.dumps([{"key": "env", "value": "prod"}])},
+        )
+        self.assertEqual(response.status_code, 403)

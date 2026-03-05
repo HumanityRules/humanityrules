@@ -1,3 +1,4 @@
+import json
 from uuid import UUID
 
 from django.contrib.auth.decorators import login_required
@@ -66,6 +67,7 @@ def environment_detail(request: HttpRequest, environment_slug: str) -> HttpRespo
     context["deployments"] = deployments
     org = request.user.current_organization
     context["tags"] = tags
+    context["tags_json"] = json.dumps([{"key": t.key, "value": t.value} for t in tags])
     context["can_admin"] = can_admin
     context["url_base"] = f"/environments/{environment.slug}/tags/"
     context["suggested_keys"], context["suggested_values"] = abac.get_resource_tag_suggestions(org, "environment")
@@ -134,3 +136,34 @@ def environment_tag_remove(request: HttpRequest, environment_slug: str, tag_id: 
         "items": tags, "can_edit": True, "url_base": url_base, "hx_target": "#environment-tags", "empty_text": "No tags",
         **dict(zip(("suggested_keys", "suggested_values"), abac.get_resource_tag_suggestions(org, "environment"))),
     })
+
+
+@login_required
+@require_POST
+def environment_tags_save(request: HttpRequest, environment_slug: str) -> HttpResponse:
+    """Bulk-save environment tags. Replaces all existing tags with the submitted array."""
+
+    environment = get_object_or_404(
+        Environment.objects.select_related("aws_account"),
+        slug=environment_slug,
+        aws_account__organization=request.user.current_organization,
+    )
+
+    denied = abac_view_checks.check_abac(request, environment, "environment", "environment:admin")
+    if denied:
+        return denied
+
+    org = request.user.current_organization
+    tags_data = json.loads(request.POST.get("tags", "[]"))
+
+    ResourceTag.objects.filter(environment=environment).delete()
+    for tag in tags_data:
+        key = tag.get("key", "").strip()
+        value = tag.get("value", "").strip()
+        if key and value:
+            ResourceTag.objects.create(
+                organization=org, resource_type="environment", environment=environment,
+                key=key, value=value,
+            )
+
+    return HttpResponse(status=204)

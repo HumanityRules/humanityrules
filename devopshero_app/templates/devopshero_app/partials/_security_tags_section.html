@@ -1,0 +1,68 @@
+{% comment %}
+  Security Tags section with read-only display and optional edit mode.
+
+  Parameters:
+    can_admin        — show Edit button + Save/Cancel (requires tags_json, url_base)
+    tags_json        — JSON array for Alpine init, e.g. [{"key":"k","value":"v"}]
+    url_base         — URL prefix for save endpoint (POSTs to {url_base}save/)
+    items            — queryset/list for read-only display (non-admin fallback)
+    suggested_keys   — key suggestions for combobox
+    suggested_values — value suggestions for combobox
+    empty_text       — text when no tags (default "No tags")
+    inherited_tags   — optional queryset of inherited tags (renders as gray chips)
+{% endcomment %}
+{% if can_admin %}
+<div x-data='{ editing: false, tags: {{ tags_json|safe }}, _orig: {{ tags_json|safe }} }'
+     @tags-saved="tags = tags.filter(t => t.key.trim() && t.value.trim()); _orig = JSON.parse(JSON.stringify(tags)); editing = false">
+    <div class="flex items-center gap-2 mb-2">
+        <h2 class="text-sm font-medium text-gray-500 dark:text-gray-400">Security Tags</h2>
+        <button x-show="!editing" @click="_orig = JSON.parse(JSON.stringify(tags)); editing = true" type="button"
+                class="text-xs text-indigo-600 dark:text-indigo-400 hover:text-indigo-800 dark:hover:text-indigo-300">Edit</button>
+    </div>
+    {% if inherited_tags %}
+    <div class="flex flex-wrap gap-2 mb-2">
+        {% for tag in inherited_tags %}
+        <span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-400">
+            {{ tag.key }}={{ tag.value }}
+            <span class="text-[10px] text-gray-400 dark:text-gray-500">inherited</span>
+        </span>
+        {% endfor %}
+    </div>
+    {% endif %}
+    <div x-show="!editing" class="flex flex-wrap items-center gap-2">
+        <template x-for="item in tags" :key="item.key + item.value">
+            <span class="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium bg-indigo-50 text-indigo-700 dark:bg-indigo-500/10 dark:text-indigo-400"
+                  x-text="item.key + '=' + item.value"></span>
+        </template>
+        <span x-show="tags.length === 0" class="text-xs text-gray-400 dark:text-gray-500">{{ empty_text|default:"No tags" }}</span>
+    </div>
+    <div x-show="editing" x-cloak>
+        {% include "devopshero_app/partials/_kv_tag_editor.html" with array_model="tags" add_label="Add tag" %}
+        <div class="flex items-center gap-3 mt-3">
+            <form hx-post="{{ url_base }}save/" hx-swap="none"
+                  hx-on::after-request="if(event.detail.successful) this.dispatchEvent(new CustomEvent('tags-saved', {bubbles:true}))">
+                <input type="hidden" name="tags" :value="JSON.stringify(tags.filter(t => t.key.trim() && t.value.trim()))">
+                <button type="submit"
+                        class="px-3 py-1 text-xs font-medium text-white bg-indigo-600 rounded hover:bg-indigo-700 cursor-pointer">Save</button>
+            </form>
+            <button type="button" @click="editing = false; tags = JSON.parse(JSON.stringify(_orig))"
+                    class="px-3 py-1 text-xs font-medium text-gray-600 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200 cursor-pointer">Cancel</button>
+        </div>
+    </div>
+</div>
+{% else %}
+<div>
+    <h2 class="text-sm font-medium text-gray-500 dark:text-gray-400 mb-2">Security Tags</h2>
+    {% if inherited_tags %}
+    <div class="flex flex-wrap gap-2 mb-2">
+        {% for tag in inherited_tags %}
+        <span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-400">
+            {{ tag.key }}={{ tag.value }}
+            <span class="text-[10px] text-gray-400 dark:text-gray-500">inherited</span>
+        </span>
+        {% endfor %}
+    </div>
+    {% endif %}
+    {% include "devopshero_app/partials/_kv_tag_editor.html" with items=items empty_text=empty_text|default:"No tags" %}
+</div>
+{% endif %}
