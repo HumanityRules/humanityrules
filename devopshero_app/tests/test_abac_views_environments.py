@@ -140,3 +140,24 @@ class TestEnvironmentEndpoints(TestCase):
         self.client.force_login(self.viewer_user)
         response = self.client.post(f"/environments/staging/tags/{self.removable_tag.id}/remove/")
         self.assertEqual(response.status_code, 403)
+
+    def test_admin_can_bulk_save_environment_tags(self) -> None:
+        import json
+        self.client.force_login(self.admin_user)
+        response = self.client.post(
+            "/environments/staging/tags/save/",
+            {"tags": json.dumps([{"key": "tier", "value": "staging"}, {"key": "region", "value": "us-east-1"}])},
+        )
+        self.assertEqual(response.status_code, 204)
+        tags = ResourceTag.objects.filter(environment=self.env_staging).order_by("key")
+        self.assertEqual(tags.count(), 2)
+        self.assertEqual(tags[0].key, "region")
+
+    def test_viewer_gets_403_on_environment_tags_save(self) -> None:
+        import json
+        self.client.force_login(self.viewer_user)
+        response = self.client.post(
+            "/environments/staging/tags/save/",
+            {"tags": json.dumps([{"key": "tier", "value": "staging"}])},
+        )
+        self.assertEqual(response.status_code, 403)
