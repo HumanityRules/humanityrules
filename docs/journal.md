@@ -1,5 +1,18 @@
 # DevOpsHero Development Journal
 
+## 2026-03-05 - [Bugfix] Chat: scroll to bottom after user sends a message
+
+**Conversation:** [2026-03-05-2218-27625072.md](conversations/2026-03-05-2218-27625072.md)
+
+When the messages list was long and the user sent a new message, the user message was appended via HTMX (`hx-target="#messages"` / `hx-swap="beforeend"`) but the scroll position of `#messages-container` was not updated, so the new message could sit below the visible area. The existing scroll logic (`scrollToBottom`, `maybeScrollToBottom`, etc.) only ran for SSE-driven updates (thinking, text deltas, tool start/result, question, complete); the initial POST response from `chat_send` was not hooked.
+
+**Fix:** Listen for `htmx:afterSettle` on `#messages`. When the event corresponds to a POST to the chat send URL (identified via `event.detail.requestConfig.path === messageSendUrl` and `verb === 'post'`), call `enableAutoScrollAndScroll()` so we re-enable auto-scroll (in case the user had scrolled up), hide the "scroll to bottom" button, and scroll the container to the true bottom. Using `afterSettle` ensures the new message DOM is in place and laid out before we read `scrollHeight` and set `scrollTop`.
+
+**Key points:**
+- User message insert is a plain HTMX POST response; no SSE event fires for it, so we need an explicit HTMX lifecycle listener
+- `htmx:afterSettle` runs after the swap and any settling (e.g. script execution), so scrollHeight is correct when we scroll
+- Matching on request path (and verb) avoids reacting to other HTMX requests that might target the same element
+
 ## 2026-03-05 - [AgentChat] MainAgent refactor: callbacks as instance methods, remove dead choice_id
 
 **Conversation:** (current session)

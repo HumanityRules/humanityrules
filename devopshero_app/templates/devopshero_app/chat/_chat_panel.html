@@ -122,6 +122,8 @@ import { marked } from 'https://cdn.jsdelivr.net/npm/marked@12.0.2/+esm';
 
 const container = document.getElementById('messages-container');
 const messages = document.getElementById('messages');
+const messageForm = document.querySelector('#chat-panel-content form[hx-post]');
+const messageSendUrl = messageForm?.getAttribute('hx-post');
 
 function getScrollTargetTop() {
     return Math.max(0, container.scrollHeight - container.clientHeight);
@@ -167,6 +169,11 @@ function maybeScrollToBottom() {
 
 function maybeScrollToBottomSmooth() {
     if (autoScrollEnabled) scrollToBottomSmooth();
+}
+
+function isMessageAppendRequest(event) {
+    const requestConfig = event.detail.requestConfig;
+    return Boolean(messageSendUrl) && requestConfig?.verb === 'post' && requestConfig.path === messageSendUrl;
 }
 
 // Re-enable auto-scroll when user reaches bottom
@@ -375,6 +382,13 @@ function handleNotify(data) {
 // Initialize on page load
 renderStoredMarkdown();
 scrollToBottom();
+
+messages.addEventListener('htmx:afterSettle', function(event) {
+    if (!isMessageAppendRequest(event)) {
+        return;
+    }
+    enableAutoScrollAndScroll();
+});
 
 // Handle custom SSE events
 messages.addEventListener('htmx:sseBeforeMessage', function(event) {
