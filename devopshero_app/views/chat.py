@@ -153,31 +153,28 @@ def chat_send(request, conversation_id):
     )
 
     message_text = request.POST.get("message", "").strip()
-    choice_id = request.POST.get("choice_id")
 
     if not message_text:
         return HttpResponse(status=400)
 
     # If there's a pending AskUserQuestion, signal the answer to the blocked callback
-    pending = agent_service.get_pending_question(conversation.id)
+    runner = agent_runner.get_runner(conversation.id)
+    agent = runner.agent if runner else None
+    pending = agent.pending_question if agent else None
     if pending:
         raw_answers = request.POST.get("question_answers")
         if raw_answers:
             answers = json.loads(raw_answers)
-        elif choice_id:
-            answers = {choice_id: message_text}
         else:
             first_q = pending.questions[0]["question"] if pending.questions else ""
             answers = {first_q: message_text}
-        agent_service.submit_question_answer(conversation_id=conversation.id, answers=answers)
+        agent.submit_question_answer(answers=answers)
 
-    # Create user message
     user_message = Message.objects.create(
         conversation=conversation,
         role=Message.Role.USER,
         content_type=Message.ContentType.TEXT,
         content=message_text,
-        metadata={"choice_id": choice_id} if choice_id else {},
     )
 
     # Update conversation timestamp
