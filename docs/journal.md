@@ -1,5 +1,24 @@
 # DevOpsHero Development Journal
 
+## 2026-03-05 - [AgentChat] MainAgent refactor: callbacks as instance methods, remove dead choice_id
+
+**Conversation:** (current session)
+
+Refactored AskUserQuestion and agent options so that pending-question state and SDK callbacks live on `MainAgent` instead of module-level globals. Removed the legacy single-choice (`choice_id`) path that was never used by the new AskUserQuestion flow.
+
+**Pending question state on MainAgent:** The original implementation used a module-level `_pending_questions: dict[conversation_id, PendingQuestion]` so that the sync `chat_send` view could look up and signal the answer by conversation ID. We first moved that into the agent by having `MainAgent` hold a shared mutable slot (a list) passed into `_create_agent_options` and into `__init__`, so the closure and the instance both referenced the same slot. That removed the global dict but was still a hack.
+
+**Callbacks as instance methods:** We then refactored so that all options-building runs inside `MainAgent`: the constructor takes `conversation`, `system_prompt`, `event_queue`, etc., and calls `self._build_options()` to build `ClaudeAgentOptions` with `can_use_tool=self._can_use_tool` and `hooks={"PreToolUse": [HookMatcher(hooks=[self._pre_tool_use_hook])]}`. The callbacks are now real instance methods (`_can_use_tool`, `_pre_tool_use_hook`) and use `self._pending_question`, `self._tool_start_times`, `self._event_queue`, `self._conversation_id` directly. No slot and no module-level `_create_agent_options`. The only async step left outside the constructor is `await client.connect(prompt=channel)`, which lives in `_connect()`; `create()` does the async prep (prompt, repo clone, fork detection), constructs the agent, then calls `await agent._connect()`.
+
+**chat_send access path:** `chat_send` already had been updated to reach the agent via `agent_runner.get_runner(conversation.id).agent` and call `agent.submit_question_answer(answers)`. That path is unchanged; it simply now hits instance state.
+
+**Dead choice_id cleanup:** The old template had used `choice_id` and `message` POST params for a single-choice button flow. After we removed the legacy branch from `_message_choice.html`, nothing ever sent `choice_id` anymore (AskUserQuestion sends `question_answers` JSON). We removed the `choice_id` POST read, the `elif choice_id` branch when building answers, and the `metadata={"choice_id": choice_id}` on the created user message.
+
+**Key points:**
+- Putting callbacks and their state on the agent instance avoids module-level dicts and slot hacks; the constructor can do all sync setup including building options with bound callbacks
+- Keeping only `await client.connect()` out of the constructor keeps the SDK’s async connection in one place and the rest of the agent creation synchronous
+- Legacy choice_id / metadata.choices code was dead after AskUserQuestion; remove it when cleaning up to avoid confusion
+
 ## 2026-03-05 - [AgentChat] Implement AskUserQuestion UI for human-in-the-loop agent decisions
 
 **Conversation:** [2026-03-05-1213-d61c8e2f.md](conversations/2026-03-05-1213-d61c8e2f.md)
