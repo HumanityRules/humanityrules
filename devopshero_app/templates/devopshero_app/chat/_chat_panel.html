@@ -366,8 +366,10 @@ function handleComplete(data) {
 function handleNotify(data) {
     try {
         const payload = JSON.parse(data);
-        const suffix = payload.id ? `-${payload.id}` : '';
-        document.dispatchEvent(new CustomEvent(`doh:${payload.type}${suffix}`, { detail: payload }));
+        document.dispatchEvent(new CustomEvent(`doh:${payload.type}`, { detail: payload }));
+        if (payload.id) {
+            document.dispatchEvent(new CustomEvent(`doh:${payload.type}-${payload.id}`, { detail: payload }));
+        }
     } catch (e) {
         console.error('Failed to parse sse-notify:', e);
     }
