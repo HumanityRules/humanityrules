@@ -8,7 +8,7 @@ from django.http import HttpRequest, HttpResponse
 from django.shortcuts import get_object_or_404, render
 from django.views.decorators.http import require_GET, require_POST
 
-from devopshero_app.models import App, Deployment, ResourceTag
+from devopshero_app.models import App, Deployment, DeploymentBlueprint, ResourceTag
 from devopshero_app.services import abac
 
 from . import abac_view_checks
@@ -40,6 +40,12 @@ def _build_app_detail_context(request: HttpRequest, app: App) -> dict[str, Any]:
     deployments = Deployment.objects.filter(
         app=app,
     ).select_related("environment", "environment__aws_account").order_by("-created_at")[:20]
+    latest_blueprint = (
+        DeploymentBlueprint.objects.filter(app=app)
+        .select_related("environment", "datastore")
+        .order_by("-created_at")
+        .first()
+    )
 
     # Build per-environment summary (first occurrence = latest, since ordered by -created_at)
     seen_environments = {}
@@ -54,15 +60,18 @@ def _build_app_detail_context(request: HttpRequest, app: App) -> dict[str, Any]:
     # Tags
     direct_tags = ResourceTag.objects.filter(app=app).order_by("key", "value")
     inherited_tags = ResourceTag.objects.filter(workspace=app.workspace).order_by("key", "value")
+    can_edit = abac.check_action(request.user.current_organization, request.user, app.workspace, "workspace", "workspace:edit")
     can_admin = abac.check_action(request.user.current_organization, request.user, app.workspace, "workspace", "workspace:admin")
 
     context["app"] = app
     context["deployments"] = deployments
     context["environment_rows"] = environment_rows
+    context["latest_blueprint"] = latest_blueprint
     org = request.user.current_organization
     context["direct_tags"] = direct_tags
     context["inherited_tags"] = inherited_tags
     context["tags_json"] = json.dumps([{"key": t.key, "value": t.value} for t in direct_tags])
+    context["can_edit"] = can_edit
     context["can_admin"] = can_admin
     context["url_base"] = f"/apps/{app.slug}/tags/"
     context["suggested_keys"], context["suggested_values"] = abac.get_resource_tag_suggestions(org, "app")

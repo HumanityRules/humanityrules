@@ -7,6 +7,9 @@ from django.test import TestCase
 
 from devopshero_app.models import (
     AWSAccount,
+    App,
+    DeploymentBlueprint,
+    Environment,
     IdentityAttribute,
     Organization,
     OrganizationMembership,
@@ -75,6 +78,36 @@ class TestWorkspaceEndpoints(TestCase):
             key="removable", value="yes",
         )
 
+    def _create_draft_app(self) -> App:
+        app = App.objects.create(
+            organization=self.org,
+            workspace=self.ws_eng,
+            repository=self.repo,
+            name="Draft App",
+            slug="draft-app",
+            app_type="web",
+            build_strategy="dockerfile",
+            branch="main",
+            container_port=8000,
+            health_check_path="/health",
+        )
+        environment = Environment.objects.create(
+            aws_account=self.aws_account,
+            name="Staging",
+            slug="staging",
+            aws_region="us-east-1",
+        )
+        DeploymentBlueprint.objects.create(
+            app=app,
+            environment=environment,
+            status=DeploymentBlueprint.Status.DRAFT,
+            cpu=256,
+            memory=512,
+            subdomain="draft-app-staging",
+            created_by=None,
+        )
+        return app
+
     # --- Workspace List (filter_permitted_resources) ---
 
     def test_admin_workspace_list_shows_all(self) -> None:
@@ -110,6 +143,21 @@ class TestWorkspaceEndpoints(TestCase):
         self.client.force_login(self.viewer_user)
         response = self.client.get("/workspaces/engineering/", **HTMX)
         self.assertEqual(response.status_code, 200)
+
+    def test_editor_sees_resume_deployment_for_draft_app(self) -> None:
+        self._create_draft_app()
+        self.client.force_login(self.editor_user)
+        response = self.client.get("/workspaces/engineering/", **HTMX)
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Resume Deployment")
+        self.assertContains(response, "Draft")
+
+    def test_viewer_does_not_see_resume_deployment_for_draft_app(self) -> None:
+        self._create_draft_app()
+        self.client.force_login(self.viewer_user)
+        response = self.client.get("/workspaces/engineering/", **HTMX)
+        self.assertEqual(response.status_code, 200)
+        self.assertNotContains(response, "Resume Deployment")
 
     def test_viewer_cannot_view_unmatched_workspace(self) -> None:
         self.client.force_login(self.viewer_user)

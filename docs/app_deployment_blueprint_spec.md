@@ -208,7 +208,7 @@ That is why repository analysis must happen before `App` creation, and `App` cre
 
 Agreed behavior:
 
-- `Resume Setup` should take the user back into the deployment editor/conversation for that app.
+- `Resume Deployment` should take the user back into the deployment editor/conversation for that app.
 
 Discard/delete behavior is deferred.
 
