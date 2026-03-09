@@ -1,12 +1,10 @@
 """
-Deployment workspace view: two-panel UI with app/blueprint config + agent chat.
+Deployment editor view: two-panel UI with app/blueprint config + agent chat.
 
 Entry points:
-- New app: /deploy/new/?workspace=<slug>&repo=<id> — creates App + Blueprint via agent
-- Existing app: /deploy/<app_slug>/ — resume or start a new blueprint
+- New app: /deploy/new/?workspace=<slug>&repo=<id> - creates App + Blueprint via agent
+- Existing app: /deploy/<app_slug>/ - resume or start a new blueprint
 """
-
-import logging
 
 from django.contrib.auth.decorators import login_required
 from django.http import HttpRequest, HttpResponse
@@ -17,11 +15,9 @@ from ..services.agent import agent_service
 from . import abac_view_checks
 from . import base
 
-logger = logging.getLogger(__name__)
-
 
 @login_required
-def deployment_workspace_new(request: HttpRequest) -> HttpResponse:
+def deployment_editor_new(request: HttpRequest) -> HttpResponse:
     """Entry point for deploying a new app from a repository."""
     if not request.htmx:
         context = base.get_app_shell_context(request=request, current_page="workspaces")
@@ -35,7 +31,7 @@ def deployment_workspace_new(request: HttpRequest) -> HttpResponse:
     if not workspace_slug or not repo_id:
         context = base.get_app_shell_context(request=request, current_page="workspaces")
         context["error_message"] = "Missing workspace or repository. Navigate here from a workspace."
-        return render(request=request, template_name="devopshero_app/deploy/deployment_workspace.html", context=context)
+        return render(request=request, template_name="devopshero_app/deploy/deployment_editor.html", context=context)
 
     workspace = get_object_or_404(models.Workspace, slug=workspace_slug, organization=organization)
 
@@ -68,12 +64,12 @@ def deployment_workspace_new(request: HttpRequest) -> HttpResponse:
         "messages": messages,
     })
 
-    return render(request=request, template_name="devopshero_app/deploy/deployment_workspace.html", context=context)
+    return render(request=request, template_name="devopshero_app/deploy/deployment_editor.html", context=context)
 
 
 @login_required
-def deployment_workspace(request: HttpRequest, app_slug: str) -> HttpResponse:
-    """Deployment workspace for an existing app."""
+def deployment_editor(request: HttpRequest, app_slug: str) -> HttpResponse:
+    """Deployment editor for an existing app."""
     if not request.htmx:
         context = base.get_app_shell_context(request=request, current_page="workspaces")
         context["content_url"] = request.get_full_path()
@@ -128,12 +124,12 @@ def deployment_workspace(request: HttpRequest, app_slug: str) -> HttpResponse:
         "messages": messages,
     })
 
-    return render(request=request, template_name="devopshero_app/deploy/deployment_workspace.html", context=context)
+    return render(request=request, template_name="devopshero_app/deploy/deployment_editor.html", context=context)
 
 
 @login_required
-def deployment_workspace_app_section(request: HttpRequest, app_slug: str) -> HttpResponse:
-    """Return the app section partial for HTMX refresh (SSE-triggered)."""
+def deployment_editor_app_section(request: HttpRequest, app_slug: str) -> HttpResponse:
+    """Return the app section partial for HTMX refresh in the editor."""
     organization = request.user.current_organization
     app = get_object_or_404(
         models.App.objects.select_related("repository", "workspace"),
@@ -147,8 +143,8 @@ def deployment_workspace_app_section(request: HttpRequest, app_slug: str) -> Htt
 
 
 @login_required
-def deployment_workspace_blueprint_section(request: HttpRequest, app_slug: str) -> HttpResponse:
-    """Return the latest blueprint section partial for HTMX refresh."""
+def deployment_editor_blueprint_section(request: HttpRequest, app_slug: str) -> HttpResponse:
+    """Return the latest blueprint section partial for HTMX refresh in the editor."""
     organization = request.user.current_organization
     app = get_object_or_404(
         models.App.objects.select_related("workspace"),

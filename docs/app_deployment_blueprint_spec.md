@@ -84,7 +84,7 @@ It answers: "How should this app run in this environment?"
 - subdomain
 - other environment-specific runtime settings
 
-The blueprint is the environment-specific artifact within the left panel of the deployment workspace.
+The blueprint is the environment-specific artifact within the left panel of the deployment editor.
 
 ### Deployment
 
@@ -188,7 +188,7 @@ The default workspace detail page does not contain a permanent chat panel.
 8. The agent selects the target environment based on workspace and account context.
 9. Once the target environment is known and deployment configuration is ready, the system creates the `DeploymentBlueprint`.
 10. The conversation becomes blueprint-scoped.
-11. The user and agent continue in the deployment workspace: app section plus blueprint section on the left, conversation on the right.
+11. The user and agent continue in the deployment editor: app section plus blueprint section on the left, conversation on the right.
 12. When deployment is triggered, the system creates a `Deployment` from that blueprint.
 
 ### Important Constraint
@@ -208,7 +208,7 @@ That is why repository analysis must happen before `App` creation, and `App` cre
 
 Agreed behavior:
 
-- `Resume Setup` should take the user back into the blueprint workspace/conversation for that app.
+- `Resume Setup` should take the user back into the deployment editor/conversation for that app.
 
 Discard/delete behavior is deferred.
 
@@ -218,7 +218,7 @@ Discard/delete behavior is deferred.
 
 - The default app detail page does not have a permanent chat panel.
 - The app detail page remains the stable page for an existing app: configuration, environments, history, and management.
-- Deployment work should happen in the dedicated deployment workspace, not inline on the app detail page.
+- Deployment work should happen in the dedicated deployment editor, not inline on the app detail page.
 
 The redeployment branch for already-existing apps is intentionally deferred from this specification, except where it affects naming and entity boundaries.
 
@@ -228,7 +228,7 @@ The redeployment branch for already-existing apps is intentionally deferred from
 
 ### During Deployment
 
-After deployment is triggered from the blueprint workspace:
+After deployment is triggered from the deployment editor:
 
 - The user stays in the same workspace.
 - The blueprint remains the active task surface.
@@ -241,7 +241,7 @@ Do not auto-redirect to app detail.
 
 Instead:
 
-- Keep the user in the deployment workspace.
+- Keep the user in the deployment editor.
 - The agent should summarize what happened.
 - The UI should provide explicit links to:
   - the deployed app
@@ -251,7 +251,7 @@ This preserves continuity and keeps the deployment task readable after completio
 
 ### On Failure
 
-- Keep the user in the same deployment workspace.
+- Keep the user in the same deployment editor.
 - The same blueprint remains editable and retryable.
 - Retries happen from the same blueprint.
 
