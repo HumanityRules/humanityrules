@@ -1,5 +1,28 @@
 # DevOpsHero Development Journal
 
+## 2026-03-09 13:54 - [UI] Rename "deployment workspace" to "deployment editor"
+
+**Conversation:** (current session)
+
+Renamed the two-panel deploy UI from "deployment workspace" to "deployment editor" across the entire codebase. The motivation was that `Workspace` already has a concrete domain meaning in DOH (a `Workspace` model with its own pages and permissions), so "deployment workspace" was ambiguous — it sounded like either a subtype of `Workspace` or a nested area inside one. The correct conceptual framing is that this page is an *editor* for a specific artifact pair (`App` + `DeploymentBlueprint`), which mirrors the existing "Permissions Editor" pattern precisely: artifact panel on the left, conversation panel on the right.
+
+The rename touched every layer consistently:
+
+- Renamed `devopshero_app/views/deployment_workspace.py` → `deployment_editor.py`, with all four view functions updated (`deployment_editor`, `deployment_editor_new`, `deployment_editor_app_section`, `deployment_editor_blueprint_section`).
+- Renamed `devopshero_app/templates/devopshero_app/deploy/deployment_workspace.html` → `deployment_editor.html`. Also renamed the JS helper function inside from `reloadWorkspace` to `reloadEditor`.
+- Updated `devopshero_app/urls.py` — all four URL names now use `deployment_editor*`.
+- Updated `devopshero_app/views/__init__.py` — import and `__all__` both updated.
+- Updated all template call sites: `app_detail.html` (New Deployment button) and `workspaces/_repo_picker_modal.html` (repo picker link).
+- Updated `docs/app_deployment_blueprint_spec.md` — all prose references updated to "deployment editor". Left historical mentions in `docs/journal.md` and `docs/conversations/` intact.
+
+The URL path (`/deploy/...`) was intentionally left unchanged — the rename is a naming/concept fix, not a routing change.
+
+**Key points:**
+- "Deployment editor" mirrors "Permissions Editor" cleanly — both are task-native two-panel surfaces for authoring a specific draft artifact with AI assistance.
+- `Workspace` being a domain entity made "deployment workspace" a loaded term; "editor" is neutral and describes the function.
+- The `__all__` list in `views/__init__.py` was missing the old `deployment_workspace*` names too; added the new `deployment_editor*` names while fixing that.
+- Django `manage.py check` passed after the rename with no issues.
+
 ## 2026-03-09 20:15 - [UI] Deployment workspace breadcrumb and subtitle
 
 **Conversation:** (current session)

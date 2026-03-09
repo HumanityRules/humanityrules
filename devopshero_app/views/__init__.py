@@ -42,11 +42,11 @@ from .chat import (
     chat_conversation_title,
     chat_conversation_cost,
 )
-from .deployment_workspace import (
-    deployment_workspace,
-    deployment_workspace_new,
-    deployment_workspace_app_section,
-    deployment_workspace_blueprint_section,
+from .deployment_editor import (
+    deployment_editor,
+    deployment_editor_new,
+    deployment_editor_app_section,
+    deployment_editor_blueprint_section,
 )
 from .waitlist_views import waitlist_signup
 from .security_abac import (
@@ -136,6 +136,10 @@ __all__ = [
     "chat_fork",
     "chat_conversation_title",
     "chat_conversation_cost",
+    "deployment_editor",
+    "deployment_editor_new",
+    "deployment_editor_app_section",
+    "deployment_editor_blueprint_section",
     "waitlist_signup",
     "security_people",
     "security_people_default_role",

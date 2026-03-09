@@ -14,7 +14,7 @@
         {% else %}
         {% include "devopshero_app/partials/_breadcrumb.html" with p1_label="Workspaces" p1_url=workspaces_url p2_label=workspace.name p2_url=workspace_url current="New App" %}
         {% endif %}
-        <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">
+        <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
             {% if app %}Define the app and its deployment blueprint.{% else %}Set up and deploy a new application from <strong>{{ repository.full_name }}</strong>.{% endif %}
         </p>
     </div>
@@ -22,11 +22,11 @@
     <div class="flex flex-1 overflow-hidden">
         {# LEFT PANEL: App & Blueprint config #}
         <div class="w-1/2 overflow-y-auto border-r border-gray-200 dark:border-gray-700 dark-scrollbar">
-            <div class="p-5 space-y-6">
+            <div class="space-y-6 p-5">
                 {# App section #}
                 <div id="app-section"
                     {% if app %}
-                    hx-get="{% url 'deployment_workspace_app_section' app_slug=app.slug %}"
+                    hx-get="{% url 'deployment_editor_app_section' app_slug=app.slug %}"
                     hx-trigger="doh:app-changed-{{ app.id }} from:document"
                     hx-swap="innerHTML"
                     {% endif %}>
@@ -36,7 +36,7 @@
                 {# Blueprint section #}
                 <div id="blueprint-section"
                     {% if app %}
-                    hx-get="{% url 'deployment_workspace_blueprint_section' app_slug=app.slug %}"
+                    hx-get="{% url 'deployment_editor_blueprint_section' app_slug=app.slug %}"
                     hx-trigger="doh:blueprint-changed-{{ app.id }} from:document"
                     hx-swap="innerHTML"
                     {% endif %}>
@@ -46,7 +46,7 @@
         </div>
 
         {# RIGHT PANEL: Agent Chat #}
-        <div class="w-1/2 flex flex-col">
+        <div class="flex w-1/2 flex-col">
             {% if conversation %}
             {% include "devopshero_app/chat/_chat_panel.html" %}
             {% else %}
@@ -59,14 +59,14 @@
 </div>
 
 <script type="module">
-function reloadWorkspace(url) {
+function reloadEditor(url) {
     htmx.ajax('GET', url, { target: '#main-content', swap: 'innerHTML' });
     history.pushState({}, '', url);
 }
 
 document.addEventListener('doh:app-created', (e) => {
     if (e.detail.slug) {
-        reloadWorkspace(`/deploy/${e.detail.slug}/`);
+        reloadEditor(`/deploy/${e.detail.slug}/`);
     }
 });
 </script>
