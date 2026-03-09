@@ -1,5 +1,20 @@
 # DevOpsHero Development Journal
 
+## 2026-03-09 20:15 - [UI] Deployment workspace breadcrumb and subtitle
+
+**Conversation:** (current session)
+
+After the blueprint refactor, the deployment workspace breadcrumb showed "Default / Deploy — Simple Dashboard" once the agent called save_app. That read like a page title in the breadcrumb slot rather than a stable hierarchy. We aligned the breadcrumb with the app-as-identity model from app_deployment_blueprint_spec.md and reduced redundant copy.
+
+**Breadcrumb:** Switched from "Workspace name / Deploy — App name" to "Workspaces / Workspace name / App name" (reusing the breadcrumb partial's p1/p2/current pattern). For the new-app state we use "Workspaces / Workspace name / New App". The breadcrumb now answers "where am I?" with a consistent object hierarchy; the app detail page already uses "Workspaces / Workspace / App name", so the deploy workspace matches that convention.
+
+**Subtitle:** The line under the breadcrumb previously said "Configure and deploy **Simple Dashboard**." Once the breadcrumb already shows the app name, that repeated the same information. We changed the app-scoped subtitle to "Define the app and its deployment blueprint." so it describes the current task instead of restating the breadcrumb. The new-app state still uses "Set up and deploy a new application from **repo**." since the breadcrumb doesn't yet identify an app.
+
+**Key points:**
+- Breadcrumb: Workspaces / workspace / app name (or "New App"); no verb in the crumb, task lives in subtitle or heading
+- Subtitle when app exists: "Define the app and its deployment blueprint." (stage-oriented, non-redundant)
+- New-app subtitle unchanged: repo-scoped copy remains until save_app
+
 ## 2026-03-09 19:45 - [AgentChat] Chat markdown: preserve single newlines in agent messages
 
 **Conversation:** (current session)
