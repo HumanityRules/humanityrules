@@ -7,16 +7,15 @@
 {% else %}
 <div class="flex h-full flex-col" style="height: calc(100vh - 8rem);">
     <div class="border-b border-gray-200 px-6 py-3 dark:border-gray-700">
+        {% url 'workspaces' as workspaces_url %}
         {% url 'workspace_detail' workspace_slug=workspace.slug as workspace_url %}
         {% if app %}
-        {% with deploy_title="Deploy — "|add:app.name %}
-        {% include "devopshero_app/partials/_breadcrumb.html" with p1_label=workspace.name p1_url=workspace_url current=deploy_title %}
-        {% endwith %}
+        {% include "devopshero_app/partials/_breadcrumb.html" with p1_label="Workspaces" p1_url=workspaces_url p2_label=workspace.name p2_url=workspace_url current=app.name %}
         {% else %}
-        {% include "devopshero_app/partials/_breadcrumb.html" with p1_label=workspace.name p1_url=workspace_url current="New App" %}
+        {% include "devopshero_app/partials/_breadcrumb.html" with p1_label="Workspaces" p1_url=workspaces_url p2_label=workspace.name p2_url=workspace_url current="New App" %}
         {% endif %}
         <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">
-            {% if app %}Configure and deploy <strong>{{ app.name }}</strong>.{% else %}Set up and deploy a new application from <strong>{{ repository.full_name }}</strong>.{% endif %}
+            {% if app %}Define the app and its deployment blueprint.{% else %}Set up and deploy a new application from <strong>{{ repository.full_name }}</strong>.{% endif %}
         </p>
     </div>
 
