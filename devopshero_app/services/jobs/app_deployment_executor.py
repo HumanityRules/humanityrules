@@ -54,10 +54,16 @@ def run_deployment(deployment_id: str) -> bool:
     """
     try:
         deployment = models.Deployment.objects.select_related(
+            "blueprint",
+            "blueprint__app",
+            "blueprint__app__repository",
+            "blueprint__environment",
+            "blueprint__environment__aws_account",
+            "blueprint__datastore",
             "app",
             "app__workspace",
             "app__repository",
-            "app__datastore",
+            
             "environment",
             "environment__aws_account",
         ).get(id=deployment_id)
@@ -65,6 +71,7 @@ def run_deployment(deployment_id: str) -> bool:
         logger.error("Deployment %(deployment_id)s not found", {"deployment_id": deployment_id})
         return False
 
+    blueprint = deployment.blueprint
     environment = deployment.environment
     app = deployment.app
 
@@ -109,10 +116,8 @@ def run_deployment(deployment_id: str) -> bool:
         try:
             session = _get_aws_session(deployment)
 
-            # Build AppConfig with cloned repo path
-            app_config = app_config_builder.build_app_config(
-                app=app,
-                environment=environment,
+            app_config = app_config_builder.build_app_config_from_blueprint(
+                blueprint=blueprint,
                 repo_path=cloned_repo_path,
             )
 
@@ -133,7 +138,7 @@ def run_deployment(deployment_id: str) -> bool:
             )
 
             if result.success:
-                deployment.status = models.Deployment.Status.DEPLOYED
+                deployment.status = models.Deployment.Status.SUCCEEDED
                 deployment.status_message = "Deployment completed successfully"
                 deployment.completed_at = timezone.now()
                 deployment.service_url = result.service_url
@@ -141,28 +146,24 @@ def run_deployment(deployment_id: str) -> bool:
 
                 deployment.save()
 
-                # Mark previous deployed deployments for this app+environment as superseded
-                models.Deployment.objects.filter(
-                    app=deployment.app,
-                    environment=deployment.environment,
-                    status=models.Deployment.Status.DEPLOYED,
-                ).exclude(
-                    id=deployment.id,
-                ).update(
-                    status=models.Deployment.Status.SUPERSEDED,
-                    status_message="Superseded by new deployment",
-                )
+                if blueprint:
+                    blueprint.status = models.DeploymentBlueprint.Status.ACTIVE
+                    blueprint.status_message = "Deployment succeeded"
+                    blueprint.save(update_fields=["status", "status_message", "updated_at"])
 
-                logger.info("Deployment completed successfully")
                 logger.info("Deployment %(deployment_id)s completed successfully", {"deployment_id": str(deployment_id)})
-                return True      
+                return True
             else:
                 deployment.status = models.Deployment.Status.FAILED
                 deployment.status_message = result.error or "Deployment failed"
                 deployment.completed_at = timezone.now()
                 deployment.save()
 
-                logger.error("Deployment failed")
+                if blueprint:
+                    blueprint.status = models.DeploymentBlueprint.Status.FAILED
+                    blueprint.status_message = result.error or "Deployment failed"
+                    blueprint.save(update_fields=["status", "status_message", "updated_at"])
+
                 logger.error("Deployment %(deployment_id)s failed", {"deployment_id": str(deployment_id)})
                 return False
 
@@ -173,6 +174,12 @@ def run_deployment(deployment_id: str) -> bool:
             deployment.status_message = f"Deployment error: {e}"
             deployment.completed_at = timezone.now()
             deployment.save()
+
+            if blueprint:
+                blueprint.status = models.DeploymentBlueprint.Status.FAILED
+                blueprint.status_message = f"Deployment error: {e}"
+                blueprint.save(update_fields=["status", "status_message", "updated_at"])
+
             return False
 
         finally:

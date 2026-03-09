@@ -42,6 +42,12 @@ from .chat import (
     chat_conversation_title,
     chat_conversation_cost,
 )
+from .deployment_workspace import (
+    deployment_workspace,
+    deployment_workspace_new,
+    deployment_workspace_app_section,
+    deployment_workspace_blueprint_section,
+)
 from .waitlist_views import waitlist_signup
 from .security_abac import (
     security_people,

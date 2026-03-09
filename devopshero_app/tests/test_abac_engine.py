@@ -109,8 +109,7 @@ class TestGetEffectiveTags(TestCase):
         return App.objects.create(
             organization=self.org, workspace=self.workspace, repository=self.repo,
             name=name, slug=slug, app_type="web", build_strategy="dockerfile",
-            branch="main", container_port=8000, cpu=256, memory=512,
-            health_check_path="/health",
+            branch="main", container_port=8000, health_check_path="/health",
         )
 
     def test_app_direct_tags_source_is_direct(self) -> None:
@@ -1325,8 +1324,7 @@ class TestCreateDefaultAppPolicy(TestCase):
         return App.objects.create(
             organization=self.org, workspace=self.workspace, repository=self.repo,
             name=name, slug=slug, app_type="web", build_strategy="dockerfile",
-            branch="main", container_port=8000, cpu=256, memory=512,
-            health_check_path="/health",
+            branch="main", container_port=8000, health_check_path="/health",
         )
 
     def test_creates_app_name_tag(self) -> None:
@@ -1666,7 +1664,7 @@ class TestTagInheritanceConsistency(TestCase):
             organization=self.org, workspace=self.workspace, repository=self.repo,
             name="FinReports", slug="finreports", app_type="web",
             build_strategy="dockerfile", branch="main", container_port=8000,
-            cpu=256, memory=512, health_check_path="/health",
+            health_check_path="/health",
         )
 
         # Remove the auto-created open-access policy from post_save signal

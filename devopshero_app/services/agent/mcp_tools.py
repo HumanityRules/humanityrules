@@ -22,7 +22,9 @@ from devopshero_app.services.gitproviders import repo_service
 from .tools import (
     create_datastore as _create_datastore,
     provision_environment as _provision_environment,
-    deploy_app as _deploy_app,
+    save_app as _save_app,
+    save_blueprint as _save_blueprint,
+    deploy_blueprint as _deploy_blueprint,
     get_deployment_status as _get_deployment_status,
     get_environment_status as _get_environment_status,
     initiate_aws_connection as _initiate_aws_connection,
@@ -88,7 +90,9 @@ TOOL_DISPLAY_NAMES = {
     # Workspace tools
     "mcp__devopshero__list_apps": "List Apps",
     "mcp__devopshero__create_datastore": "Create Datastore",
-    "mcp__devopshero__deploy_app": "Deploy App",
+    "mcp__devopshero__save_app": "Save App",
+    "mcp__devopshero__save_blueprint": "Save Blueprint",
+    "mcp__devopshero__deploy_blueprint": "Deploy Blueprint",
     "mcp__devopshero__get_deployment_status": "Get Deployment Status",
     "mcp__devopshero__teardown_deployment": "Teardown Deployment",
     "mcp__devopshero__test_docker_build": "Test Docker Build",
@@ -119,7 +123,8 @@ TOOL_INPUT_PARAMS_FOR_TITLE = {
     "mcp__devopshero__get_environment_status": "environment_id",
     "mcp__devopshero__scan_repository": "repository_id",
     "mcp__devopshero__create_datastore": "name",
-    "mcp__devopshero__deploy_app": "name",
+    "mcp__devopshero__save_app": "name",
+    "mcp__devopshero__save_blueprint": "environment_slug",
     "mcp__devopshero__get_deployment_status": "deployment_id",
     "mcp__devopshero__teardown_deployment": "app_id",
     "mcp__devopshero__git_ops": "action",
@@ -522,49 +527,30 @@ def create_devopshero_mcp_server(conversation: Conversation):
         return _mcp_response(result)
 
     @tool(
-        "deploy_app",
+        "save_app",
         (
-            "Deploy an application to AWS infrastructure. "
-            "Creates the app if it doesn't exist, updates config if it does, then deploys. "
-            "Requires a workspace and repository in the conversation context. "
-            "The job worker will build the Docker image, push to ECR, and deploy via CDK. "
-            "Use get_deployment_status to check progress. "
-            "For cpu: ECS CPU units (256=0.25vCPU, 512=0.5vCPU, 1024=1vCPU, 2048=2vCPU). "
-            "For memory: MiB (512, 1024, 2048, 4096). "
-            "For environment_variables: omit to keep existing, pass [] to clear, or [{\"name\": \"FOO\", \"value\": \"bar\"}] to replace. "
-            "For app_secrets: omit to keep existing, pass {} to clear, or {\"key\": \"value\"} to replace. "
-            "Secrets are stored in Secrets Manager and injected as env vars at container startup. "
-            "Use null values for auto-generated secrets (e.g., {\"SECRET_KEY\": null}), "
-            "use \"PLACEHOLDER\" for third-party keys the user must fill in (e.g., {\"STRIPE_SECRET_KEY\": \"PLACEHOLDER\"}). "
-            "For subdomain: Route53 subdomain for the app. Defaults to app slug. "
-            "If deploying the same app to multiple environments that share a domain, the subdomain is auto-suffixed with -{env_slug}."
+            "Create or update the application definition. "
+            "On first call, creates the App and pins it to the conversation. "
+            "On subsequent calls, updates the existing App. "
+            "Use this after analyzing the repository to define the app identity and build configuration."
         ),
         {
             "type": "object",
             "properties": {
-                "name": {"type": "string", "description": "Human-readable name for the app (used to derive slug for matching)"},
-                "branch": {"type": "string", "description": "Git branch to deploy from. Omit to use repository's default branch."},
-                "app_type": {"type": "string", "description": "Type of app: web, worker, or scheduled"},
+                "name": {"type": "string", "description": "Human-readable name for the app"},
+                "app_type": {"type": "string", "enum": ["web", "worker", "scheduled"], "description": "Type of app"},
+                "build_strategy": {"type": "string", "enum": ["dockerfile", "nixpacks", "buildpack"], "description": "How to build the container image"},
                 "container_port": {"type": "integer", "description": "Port the container listens on (e.g., 8000)"},
-                "cpu": {"type": "integer", "description": "Fargate CPU units (256, 512, 1024, 2048)"},
-                "memory": {"type": "integer", "description": "Fargate memory in MiB (512, 1024, 2048, 4096)"},
                 "health_check_path": {"type": "string", "description": "HTTP path for health checks (e.g., /health)"},
-                "git_ref": {"type": "string", "description": "Git reference (tag or commit SHA) to deploy. Omit to deploy HEAD of branch."},
-                "environment_slug": {"type": "string", "description": "Target environment slug"},
-                "environment_variables": {"type": "array", "description": "List of {name, value} dicts. Omit to keep existing, [] to clear."},
-                "datastore_id": {"type": "string", "description": "UUID of datastore to bind. Omit if app doesn't need a database."},
-                "dockerfile_path": {"type": "string", "description": "Path to Dockerfile relative to repo root (e.g., 'Dockerfile')."},
-                "app_secrets": {"type": "object", "description": "Dict of secret field names to values. Stored in Secrets Manager, injected as env vars. Use null for auto-generated, 'PLACEHOLDER' for user-provided. Omit to keep existing, {} to clear."},
-                "subdomain": {"type": "string", "description": "Route53 subdomain override. Defaults to app slug, auto-suffixed with -{env_slug} if conflict."},
+                "dockerfile_path": {"type": "string", "description": "Path to Dockerfile relative to repo root"},
+                "health_check_command": {"type": "string", "description": "Health check command for non-HTTP health checks"},
+                "repo_subpath": {"type": "string", "description": "Subdirectory within repository for monorepos"},
             },
-            "required": [
-                "name", "app_type", "container_port", "dockerfile_path",
-                "cpu", "memory", "health_check_path", "environment_slug"
-            ],
+            "required": ["name", "app_type", "build_strategy", "container_port", "health_check_path"],
         },
     )
-    async def deploy_app(args: dict[str, Any]) -> dict[str, Any]:
-        """Deploy an application (creates if new, updates if exists)."""
+    async def save_app(args: dict[str, Any]) -> dict[str, Any]:
+        """Create or update the app definition."""
         workspace = await _require_workspace(conversation)
 
         repository_id = conversation.context_repository_id
@@ -572,59 +558,105 @@ def create_devopshero_mcp_server(conversation: Conversation):
             raise ValueError(
                 "No repository selected. Start the conversation from a workspace with a selected repository."
             )
+        repository = await Repository.objects.aget(
+            id=repository_id,
+            organization=conversation.organization,
+        )
 
-        try:
-            repository = await Repository.objects.aget(
-                id=repository_id,
-                organization=conversation.organization,
-            )
-        except Repository.DoesNotExist:
-            raise ValueError(f"Repository {repository_id} not found in organization.")
-
-        # Default branch to repository's default_branch
-        branch = args.get("branch") or repository.default_branch
-
-        result = await _deploy_app(
+        result = await _save_app(
+            conversation=conversation,
             workspace=workspace,
             repository=repository,
-            name=args["name"],
-            branch=branch,
-            app_type=args["app_type"],
-            build_strategy="dockerfile",  # Hard-default; nixpacks/buildpack not yet implemented
-            container_port=args["container_port"],
-            cpu=args["cpu"],
-            memory=args["memory"],
-            health_check_path=args["health_check_path"],
             user=conversation.user,
-            environment_slug=args["environment_slug"],
-            git_ref=args.get("git_ref") or branch,  # Default to branch HEAD
-            environment_variables=args.get("environment_variables"),
-            datastore_id=args.get("datastore_id"),
+            name=args["name"],
+            app_type=args["app_type"],
+            build_strategy=args["build_strategy"],
+            container_port=args["container_port"],
+            health_check_path=args["health_check_path"],
             dockerfile_path=args.get("dockerfile_path"),
+            health_check_command=args.get("health_check_command"),
+            repo_subpath=args.get("repo_subpath"),
+        )
+
+        action = "created" if result.created else "updated"
+        return _mcp_response({
+            **result.to_dict(),
+            "note": f"App '{result.name}' {action}. Use save_blueprint next to configure deployment.",
+        })
+
+    @tool(
+        "save_blueprint",
+        (
+            "Create or update a deployment blueprint for the current app. "
+            "On first call, creates a draft blueprint for the specified environment. "
+            "On subsequent calls, updates the existing blueprint. "
+            "Requires save_app to have been called first. "
+            "For cpu: ECS CPU units (256=0.25vCPU, 512=0.5vCPU, 1024=1vCPU, 2048=2vCPU). "
+            "For memory: MiB (512, 1024, 2048, 4096). "
+            "For environment_variables: omit to keep existing, pass [] to clear, or [{\"name\": \"FOO\", \"value\": \"bar\"}] to replace. "
+            "For app_secrets: omit to keep existing, pass {} to clear, or {\"key\": \"value\"} to replace. "
+            "Use null values for auto-generated secrets (e.g., {\"SECRET_KEY\": null})."
+        ),
+        {
+            "type": "object",
+            "properties": {
+                "environment_slug": {"type": "string", "description": "Target environment slug (required on first call)"},
+                "branch": {"type": "string", "description": "Git branch override. Omit to use repository default."},
+                "cpu": {"type": "integer", "description": "Fargate CPU units (256, 512, 1024, 2048)"},
+                "memory": {"type": "integer", "description": "Fargate memory in MiB (512, 1024, 2048, 4096)"},
+                "environment_variables": {"type": "array", "description": "List of {name, value} dicts. Omit to keep existing, [] to clear."},
+                "app_secrets": {"type": "object", "description": "Dict of secret names to values. Omit to keep existing, {} to clear."},
+                "datastore_id": {"type": "string", "description": "UUID of datastore to bind. Omit if app doesn't need a database."},
+                "subdomain": {"type": "string", "description": "Route53 subdomain override. Defaults to app slug."},
+            },
+            "required": [],
+        },
+    )
+    async def save_blueprint(args: dict[str, Any]) -> dict[str, Any]:
+        """Create or update a deployment blueprint."""
+        workspace = await _require_workspace(conversation)
+
+        result = await _save_blueprint(
+            conversation=conversation,
+            workspace=workspace,
+            user=conversation.user,
+            environment_slug=args.get("environment_slug"),
+            branch=args.get("branch"),
+            cpu=args.get("cpu"),
+            memory=args.get("memory"),
+            environment_variables=args.get("environment_variables"),
             app_secrets=args.get("app_secrets"),
+            datastore_id=args.get("datastore_id"),
             subdomain=args.get("subdomain"),
         )
 
-        # Link deployment to conversation via M2M
-        from devopshero_app.models import Deployment
-        deployment = await Deployment.objects.aget(id=result.id)
-        await conversation.deployments.aadd(deployment)
+        action = "created" if result.created else "updated"
+        return _mcp_response({
+            **result.to_dict(),
+            "note": f"Blueprint {action}. Use deploy_blueprint to trigger deployment.",
+        })
 
-        # Customize note based on whether app was created or updated
-        if result.app_created:
-            note = (
-                f"App '{result.app_name}' created and deployment queued. "
-                "The job worker will build/push/deploy. Use get_deployment_status to check progress."
-            )
-        else:
-            note = (
-                f"App '{result.app_name}' config updated and deployment queued. "
-                "The job worker will build/push/deploy. Use get_deployment_status to check progress."
-            )
+    @tool(
+        "deploy_blueprint",
+        (
+            "Trigger deployment of the current blueprint. "
+            "Creates a pending deployment from the blueprint configuration. "
+            "The job worker will build the Docker image, push to ECR, and deploy via CDK. "
+            "Use get_deployment_status to check progress. "
+            "Requires save_app and save_blueprint to have been called first."
+        ),
+        {},
+    )
+    async def deploy_blueprint_tool(args: dict[str, Any]) -> dict[str, Any]:
+        """Trigger deployment from the current blueprint."""
+        result = await _deploy_blueprint(conversation=conversation)
 
         return _mcp_response({
             **result.to_dict(),
-            "note": note,
+            "note": (
+                f"Deployment queued for '{result.app_name}' in '{result.environment_name}'. "
+                "The job worker will build/push/deploy. Use get_deployment_status to check progress."
+            ),
         })
 
     @tool(
@@ -653,7 +685,7 @@ def create_devopshero_mcp_server(conversation: Conversation):
             "Tear down (destroy) a deployed application. "
             "Deletes all app-specific AWS infrastructure: ECS service, ALB listener rules, "
             "Aurora database (if any), and ECR repository. "
-            "The app must be in DEPLOYED or FAILED state. Cannot teardown in-progress deployments. "
+            "The app must be in SUCCEEDED or FAILED state. Cannot teardown in-progress deployments. "
             "Use get_deployment_status to monitor teardown progress."
         ),
         {
@@ -964,7 +996,9 @@ def create_devopshero_mcp_server(conversation: Conversation):
             # Workspace tools
             list_apps,
             create_datastore,
-            deploy_app,
+            save_app,
+            save_blueprint,
+            deploy_blueprint_tool,
             get_deployment_status,
             teardown_deployment,
             test_docker_build,
@@ -994,7 +1028,9 @@ TOOL_NAMES = [
     # Workspace tools
     "mcp__devopshero__list_apps",
     "mcp__devopshero__create_datastore",
-    "mcp__devopshero__deploy_app",
+    "mcp__devopshero__save_app",
+    "mcp__devopshero__save_blueprint",
+    "mcp__devopshero__deploy_blueprint",
     "mcp__devopshero__get_deployment_status",
     "mcp__devopshero__teardown_deployment",
     "mcp__devopshero__test_docker_build",

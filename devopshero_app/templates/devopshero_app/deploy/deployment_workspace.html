@@ -1,0 +1,90 @@
+{% if error_message %}
+<div class="max-w-2xl py-12">
+    <div class="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 dark:border-amber-500/40 dark:bg-amber-500/10 dark:text-amber-200">
+        {{ error_message }}
+    </div>
+</div>
+{% else %}
+<div class="flex h-full flex-col" style="height: calc(100vh - 8rem);">
+    <div class="border-b border-gray-200 px-6 py-3 dark:border-gray-700">
+        {% url 'workspace_detail' workspace_slug=workspace.slug as workspace_url %}
+        {% if app %}
+        {% with deploy_title="Deploy — "|add:app.name %}
+        {% include "devopshero_app/partials/_breadcrumb.html" with p1_label=workspace.name p1_url=workspace_url current=deploy_title %}
+        {% endwith %}
+        {% else %}
+        {% include "devopshero_app/partials/_breadcrumb.html" with p1_label=workspace.name p1_url=workspace_url current="New App" %}
+        {% endif %}
+        <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">
+            {% if app %}Configure and deploy <strong>{{ app.name }}</strong>.{% else %}Set up and deploy a new application from <strong>{{ repository.full_name }}</strong>.{% endif %}
+        </p>
+    </div>
+
+    <div class="flex flex-1 overflow-hidden">
+        {# LEFT PANEL: App & Blueprint config #}
+        <div class="w-1/2 overflow-y-auto border-r border-gray-200 dark:border-gray-700 dark-scrollbar">
+            <div class="p-5 space-y-6">
+                {# App section #}
+                <div id="app-section">
+                    {% include "devopshero_app/deploy/_app_section.html" %}
+                </div>
+
+                {# Blueprint section #}
+                <div id="blueprint-section">
+                    {% include "devopshero_app/deploy/_blueprint_section.html" %}
+                </div>
+            </div>
+        </div>
+
+        {# RIGHT PANEL: Agent Chat #}
+        <div class="w-1/2 flex flex-col">
+            {% if conversation %}
+            {% include "devopshero_app/chat/_chat_panel.html" %}
+            {% else %}
+            <div class="flex flex-1 items-center justify-center text-gray-500 dark:text-gray-400">
+                <p class="text-sm">No conversation linked to this session.</p>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+</div>
+
+<script type="module">
+const APP_SECTION_URL = {% if app %}"{% url 'deployment_workspace_app_section' app_slug=app.slug %}"{% else %}null{% endif %};
+const BLUEPRINT_SECTION_URL = {% if blueprint %}"{% url 'deployment_workspace_blueprint_section' blueprint_id=blueprint.id %}"{% else %}null{% endif %};
+
+document.addEventListener('doh:app-changed', (e) => {
+    if (!APP_SECTION_URL) return;
+    htmx.ajax('GET', APP_SECTION_URL, {
+        target: '#app-section',
+        swap: 'innerHTML',
+    });
+});
+
+document.addEventListener('doh:blueprint-changed', (e) => {
+    if (!BLUEPRINT_SECTION_URL) return;
+    htmx.ajax('GET', BLUEPRINT_SECTION_URL, {
+        target: '#blueprint-section',
+        swap: 'innerHTML',
+    });
+});
+
+{% if app %}
+document.addEventListener('doh:app-changed-{{ app.id }}', (e) => {
+    htmx.ajax('GET', APP_SECTION_URL, {
+        target: '#app-section',
+        swap: 'innerHTML',
+    });
+});
+{% endif %}
+
+{% if blueprint %}
+document.addEventListener('doh:blueprint-changed-{{ blueprint.id }}', (e) => {
+    htmx.ajax('GET', BLUEPRINT_SECTION_URL, {
+        target: '#blueprint-section',
+        swap: 'innerHTML',
+    });
+});
+{% endif %}
+</script>
+{% endif %}

@@ -9,6 +9,7 @@ from devopshero_app.models import (
     Conversation,
     Datastore,
     Deployment,
+    DeploymentBlueprint,
     DeploymentLog,
     Environment,
     EnvironmentLog,
@@ -150,7 +151,16 @@ class AppAdmin(admin.ModelAdmin):
     search_fields = ["name", "slug", "workspace__name", "organization__name", "repository__full_name", "branch"]
     prepopulated_fields = {"slug": ("name",)}
     readonly_fields = ["id", "created_at", "updated_at"]
-    autocomplete_fields = ["organization", "workspace", "repository", "datastore", "created_by"]
+    autocomplete_fields = ["organization", "workspace", "repository", "created_by"]
+
+
+@admin.register(DeploymentBlueprint)
+class DeploymentBlueprintAdmin(admin.ModelAdmin):
+    list_display = ["app", "environment", "status", "cpu", "memory", "subdomain", "updated_at"]
+    list_filter = ["status"]
+    search_fields = ["app__name", "app__slug", "environment__name"]
+    readonly_fields = ["id", "created_at", "updated_at"]
+    autocomplete_fields = ["app", "environment", "datastore", "created_by"]
 
 
 @admin.register(Datastore)

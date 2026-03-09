@@ -64,18 +64,10 @@
     {# Container section #}
     <div class="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-4 mb-6">
         <h2 class="text-base font-semibold text-gray-900 dark:text-white mb-4">Container</h2>
-        <dl class="grid grid-cols-2 gap-4 sm:grid-cols-5 text-sm">
+        <dl class="grid grid-cols-2 gap-4 sm:grid-cols-3 text-sm">
             <div>
                 <dt class="text-gray-500 dark:text-gray-400">Port</dt>
                 <dd class="mt-1 font-medium text-gray-900 dark:text-white">{{ app.container_port }}</dd>
-            </div>
-            <div>
-                <dt class="text-gray-500 dark:text-gray-400">CPU</dt>
-                <dd class="mt-1 font-medium text-gray-900 dark:text-white">{{ app.cpu }} units ({{ cpu_vcpu }} vCPU)</dd>
-            </div>
-            <div>
-                <dt class="text-gray-500 dark:text-gray-400">Memory</dt>
-                <dd class="mt-1 font-medium text-gray-900 dark:text-white">{{ app.memory }} MiB</dd>
             </div>
             <div>
                 <dt class="text-gray-500 dark:text-gray-400">Health Check Path</dt>
@@ -86,41 +78,6 @@
                 <dd class="mt-1 font-medium text-gray-900 dark:text-white font-mono text-xs">{{ app.health_check_command|default:"—" }}</dd>
             </div>
         </dl>
-    </div>
-
-    {# Connections & Environment Variables side by side #}
-    <div class="grid gap-6 sm:grid-cols-2 mb-6">
-        {# Connections section #}
-        <div class="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-4">
-            <h2 class="text-base font-semibold text-gray-900 dark:text-white mb-4">Connections</h2>
-            <dl class="space-y-3 text-sm">
-                <div>
-                    <dt class="text-gray-500 dark:text-gray-400">Datastore</dt>
-                    <dd class="mt-1 font-medium text-gray-900 dark:text-white">{% if app.datastore %}{{ app.datastore.name }} ({{ app.datastore.get_engine_display }}){% else %}—{% endif %}</dd>
-                </div>
-                <div>
-                    <dt class="text-gray-500 dark:text-gray-400">Secrets</dt>
-                    <dd class="mt-1 font-medium text-gray-900 dark:text-white font-mono text-xs">{% if secret_keys %}{{ secret_keys|join:", " }}{% else %}—{% endif %}</dd>
-                </div>
-            </dl>
-        </div>
-
-        {# Environment Variables section #}
-        <div class="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-4">
-            <h2 class="text-base font-semibold text-gray-900 dark:text-white mb-4">Environment Variables</h2>
-            {% if app.environment_variables %}
-            <div class="divide-y divide-gray-200 dark:divide-gray-700 -mx-4">
-                {% for env_var in app.environment_variables %}
-                <div class="px-4 py-2 flex items-center justify-between">
-                    <span class="font-mono text-sm text-gray-900 dark:text-white">{{ env_var.name }}</span>
-                    <span class="font-mono text-xs text-gray-500 dark:text-gray-400 truncate max-w-xs">{{ env_var.value|truncatechars:40 }}</span>
-                </div>
-                {% endfor %}
-            </div>
-            {% else %}
-            <p class="text-sm text-gray-500 dark:text-gray-400">No environment variables configured.</p>
-            {% endif %}
-        </div>
     </div>
 
     {# Deployed to Environments section #}

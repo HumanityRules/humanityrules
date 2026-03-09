@@ -383,6 +383,10 @@ def _format_sse_event(event: agent_service.AgentStreamEvent, show_costs: bool) -
         result = _format_sse(event_name="sse-tool-result", data=_render_streaming_tool_result(event.data))
         if event.data["name"] == "mcp__devopshero__update_permission_draft":
             result += _format_sse_notify("permissions-changed", id=event.data["result"]["app_permission_request_id"])
+        if event.data["name"] == "mcp__devopshero__save_app":
+            result += _format_sse_notify("app-changed", id=event.data["result"].get("id", ""))
+        if event.data["name"] in ("mcp__devopshero__save_blueprint", "mcp__devopshero__deploy_blueprint"):
+            result += _format_sse_notify("blueprint-changed", id=event.data["result"].get("blueprint_id", event.data["result"].get("id", "")))
         return result
     elif event.type == "complete":
         result = _format_sse(event_name="sse-complete", data="")

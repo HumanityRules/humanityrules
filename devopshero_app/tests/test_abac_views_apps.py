@@ -10,6 +10,7 @@ from devopshero_app.models import (
     AWSAccount,
     App,
     Deployment,
+    DeploymentBlueprint,
     Environment,
     IdentityAttribute,
     Organization,
@@ -45,17 +46,20 @@ class TestAppEndpoints(TestCase):
         self.app = App.objects.create(
             organization=self.org, workspace=self.workspace, repository=self.repo,
             name="MyApp", slug="myapp", app_type="web", build_strategy="dockerfile",
-            branch="main", container_port=8000, cpu=256, memory=512,
-            health_check_path="/health",
+            branch="main", container_port=8000, health_check_path="/health",
         )
 
         self.env = Environment.objects.create(
             aws_account=self.aws_account, name="Staging", slug="staging", aws_region="us-east-1",
         )
+        self.blueprint = DeploymentBlueprint.objects.create(
+            app=self.app, environment=self.env, status=DeploymentBlueprint.Status.ACTIVE,
+            cpu=256, memory=512, subdomain="myapp-staging", created_by=None,
+        )
         self.deployment = Deployment.objects.create(
-            app=self.app, environment=self.env,
+            blueprint=self.blueprint, app=self.app, environment=self.env,
             subdomain="myapp-staging", git_ref="main", image_tag="myapp-main-20260227",
-            status=Deployment.Status.DEPLOYED, status_message="Running",
+            status=Deployment.Status.SUCCEEDED, status_message="Running",
         )
 
         self.admin_user = User.objects.create_user(username="app_admin", password="x", current_organization=self.org)
