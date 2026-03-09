@@ -9,7 +9,7 @@ from django.shortcuts import get_object_or_404, redirect, render
 from django.utils.text import slugify
 from django.views.decorators.http import require_POST
 
-from devopshero_app.models import App, Conversation, Deployment, Repository, ResourceTag, Workspace
+from devopshero_app.models import App, Conversation, Deployment, DeploymentBlueprint, Repository, ResourceTag, Workspace
 from devopshero_app.services import abac
 
 from . import abac_view_checks
@@ -29,10 +29,16 @@ def workspaces(request: HttpRequest) -> HttpResponse:
         .order_by("-created_at")
         .values("status")[:1]
     )
+    latest_blueprint_status = (
+        DeploymentBlueprint.objects.filter(app=OuterRef("pk"))
+        .order_by("-created_at")
+        .values("status")[:1]
+    )
     apps_prefetch = Prefetch(
         "apps",
         queryset=App.objects.annotate(
             latest_status=Coalesce(Subquery(latest_deployment_status), Value("never_deployed")),
+            latest_blueprint_status=Coalesce(Subquery(latest_blueprint_status), Value("")),
         ).order_by("name"),
         to_attr="annotated_apps",
     )
@@ -79,6 +85,11 @@ def workspace_detail(request: HttpRequest, workspace_slug: str) -> HttpResponse:
         .order_by("-created_at")
         .values("status")[:1]
     )
+    latest_blueprint_status = (
+        DeploymentBlueprint.objects.filter(app=OuterRef("pk"))
+        .order_by("-created_at")
+        .values("status")[:1]
+    )
     latest_deployed_service_url = (
         Deployment.objects.filter(app=OuterRef("pk"), status=Deployment.Status.SUCCEEDED)
         .order_by("-created_at")
@@ -89,6 +100,7 @@ def workspace_detail(request: HttpRequest, workspace_slug: str) -> HttpResponse:
     ).annotate(
         last_deployed_at=Max("deployments__created_at"),
         latest_status=Subquery(latest_deployment_status),
+        latest_blueprint_status=Coalesce(Subquery(latest_blueprint_status), Value("")),
         deployed_service_url=Subquery(latest_deployed_service_url),
     ).order_by("name")
     datastores = workspace.datastores.order_by("name")
@@ -106,6 +118,7 @@ def workspace_detail(request: HttpRequest, workspace_slug: str) -> HttpResponse:
     ).order_by("full_name")
 
     tags = ResourceTag.objects.filter(workspace=workspace).order_by("key", "value")
+    can_edit = abac.check_action(request.user.current_organization, request.user, workspace, "workspace", "workspace:edit")
     can_admin = abac.check_action(request.user.current_organization, request.user, workspace, "workspace", "workspace:admin")
 
     context = base.get_app_shell_context(request=request, current_page="workspaces")
@@ -117,6 +130,7 @@ def workspace_detail(request: HttpRequest, workspace_slug: str) -> HttpResponse:
     context["show_costs"] = show_costs
     context["tags"] = tags
     context["tags_json"] = json.dumps([{"key": t.key, "value": t.value} for t in tags])
+    context["can_edit"] = can_edit
     context["can_admin"] = can_admin
     context["url_base"] = f"/workspaces/{workspace.slug}/tags/"
     context["suggested_keys"], context["suggested_values"] = abac.get_resource_tag_suggestions(request.user.current_organization, "workspace")

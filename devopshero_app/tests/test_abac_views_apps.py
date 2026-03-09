@@ -104,6 +104,11 @@ class TestAppEndpoints(TestCase):
             key="removable", value="yes",
         )
 
+    def _set_latest_blueprint_to_draft(self) -> None:
+        self.deployment.delete()
+        self.blueprint.status = DeploymentBlueprint.Status.DRAFT
+        self.blueprint.save(update_fields=["status", "updated_at"])
+
     # --- App Detail (requires workspace:view on parent workspace) ---
 
     def test_admin_can_view_app_detail(self) -> None:
@@ -115,6 +120,21 @@ class TestAppEndpoints(TestCase):
         self.client.force_login(self.ws_viewer)
         response = self.client.get("/apps/myapp/", **HTMX)
         self.assertEqual(response.status_code, 200)
+
+    def test_ws_editor_sees_resume_deployment_for_draft_blueprint(self) -> None:
+        self._set_latest_blueprint_to_draft()
+        self.client.force_login(self.ws_editor)
+        response = self.client.get("/apps/myapp/", **HTMX)
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Resume Deployment")
+        self.assertNotContains(response, "New Deployment")
+
+    def test_ws_viewer_does_not_see_resume_deployment_for_draft_blueprint(self) -> None:
+        self._set_latest_blueprint_to_draft()
+        self.client.force_login(self.ws_viewer)
+        response = self.client.get("/apps/myapp/", **HTMX)
+        self.assertEqual(response.status_code, 200)
+        self.assertNotContains(response, "Resume Deployment")
 
     def test_no_access_gets_403_on_app_detail(self) -> None:
         self.client.force_login(self.no_access_user)

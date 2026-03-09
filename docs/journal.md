@@ -1,5 +1,26 @@
 # DevOpsHero Development Journal
 
+## 2026-03-09 14:19 - [UI] Resume draft deployments from workspace app cards
+
+**Conversation:** [2026-03-09-1420-753f8fed.md](conversations/2026-03-09-1420-753f8fed.md)
+
+We closed the gap in the deployment story for `DeploymentBlueprint(status='draft')`: users could already be returned to the deployment editor at `/deploy/<app_slug>/`, but there was no explicit UI entrypoint that surfaced an unfinished draft after they left the editor. The specification already said unfinished apps should remain in the normal workspace Apps list with a clear resume action, so the right fix was not a new Blueprints section or a special sidebar destination. Instead, the existing app surfaces needed to become blueprint-aware.
+
+The main product decision was to use `Resume Deployment` rather than `Resume Setup`. "Setup" was not an existing product term in this flow and diluted the vocabulary we had just normalized around the dedicated deployment editor. `Resume Deployment` keeps the CTA aligned with `New Deployment`, makes it clear that the user is re-entering the same deployment task, and avoids exposing `DeploymentBlueprint` as UI jargon.
+
+The implementation made app summaries aware of the latest blueprint state in addition to deployment history. Before this change, the workspace app card status came only from `Deployment`, which meant a draft blueprint with no successful deployment still looked like a generic never-deployed app. We annotated apps with `latest_blueprint_status`, and when that value is `draft` we now show a blue `Draft` badge plus a `Resume Deployment` action that links to the deployment editor. The app detail page's top-right action was updated with the same state-aware label so the app page and workspace page agree about what the next step is.
+
+There were a few important UX refinements after the initial implementation. Putting the resume action in a bottom footer row made the card feel visually lopsided, so we moved the CTA into the top-right slot previously used by the app-type pill and moved app type into the card body as a labeled `Type` row. We also changed the card hover behavior so hovering the `Resume Deployment` button does not light up the entire card; only hovering the main card link should trigger the card highlight. Finally, the workspace-card action intentionally uses a quieter indigo secondary treatment than the primary app-detail button: same color family to signal the same action, but reduced emphasis because it lives inside a dense summary card.
+
+Permission boundaries also mattered here. We show the draft status to readers, but the resume CTA is only rendered for users with `workspace:edit`, so viewers are not invited into a flow that would immediately 403. Added ABAC view tests for both app detail and workspace detail to cover the draft-blueprint state and the `Resume Deployment` visibility rules.
+
+**Key points:**
+- Draft blueprints now surface in the normal workspace Apps list instead of requiring a separate Blueprints destination.
+- `Resume Deployment` replaced `Resume Setup` to stay aligned with the deployment editor vocabulary and avoid introducing a new term.
+- App summaries now look at blueprint state as well as deployment state, fixing the invisibility of draft-first-deploy apps.
+- The workspace-card CTA is intentionally smaller and quieter than the app-detail primary button, but stays in the same indigo action family.
+- Hover behavior was refined so the card highlights only when hovering the main card target, not when hovering the nested resume button.
+
 ## 2026-03-09 13:54 - [UI] Rename "deployment workspace" to "deployment editor"
 
 **Conversation:** (current session)
