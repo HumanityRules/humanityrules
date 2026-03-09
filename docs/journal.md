@@ -1,5 +1,20 @@
 # DevOpsHero Development Journal
 
+## 2026-03-09 19:45 - [AgentChat] Chat markdown: preserve single newlines in agent messages
+
+**Conversation:** (current session)
+
+The deployment summary in the simple-dashboard deploy conversation rendered with "Build:", "Health check:", "Resources:", and "Database:" concatenated on the same line instead of on separate lines. Investigation showed the issue was markdown rendering, not transport or storage.
+
+**Root cause:** The LLM sent the summary with single newlines between lines (e.g. `**Build:** Dockerfile → port 8501\n**Health check:** ...`). The stored `Message.content` in the database contained those `\n` characters verbatim — `_persist_text_message` in `agent_service.py` saves content as-is. The chat UI renders markdown with `marked.parse()` and had `marked.setOptions({ gfm: true, breaks: false })`. In standard Markdown (and with `breaks: false`), a single newline is a "soft line break" and is collapsed to a space, so those lines were merged into one paragraph.
+
+**Fix:** In `devopshero_app/templates/devopshero_app/chat/_chat_panel.html`, set `breaks: true` so that single newlines are rendered as `<br>` and visible line breaks. The same `renderMarkdown` path is used for both stored messages (on load via `renderStoredMarkdown`) and streamed text (via `handleTextDelta` / `finalizeStreamingRender`), so existing and future agent messages with single-newline formatting (e.g. deployment summaries, lists of items) now display with one line per item.
+
+**Key points:**
+- Agent markdown is persisted verbatim; no newlines were lost in SSE or DB
+- `marked` with `breaks: false` collapses single newlines to spaces per CommonMark; deployment summaries looked concatenated
+- `breaks: true` preserves single newlines as `<br>`, fixing deployment summary and similar agent output without changing prompts or persistence
+
 ## 2026-03-09 12:21 - [Deployment] Blueprint refactor post-implementation cleanup
 
 **Conversation:** [2026-03-09-1222-9e2c5d24.md](conversations/2026-03-09-1222-9e2c5d24.md)

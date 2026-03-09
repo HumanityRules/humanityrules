@@ -191,7 +191,8 @@ container.addEventListener('touchstart', disableAutoScroll, { passive: true });
 // Button click handler
 document.getElementById('scroll-to-bottom-btn').addEventListener('click', enableAutoScrollAndScroll);
 
-marked.setOptions({ gfm: true, breaks: false });
+// Preserve single newlines from agent markdown like deployment summaries.
+marked.setOptions({ gfm: true, breaks: true });
 
 function renderMarkdown(targetEl, markdownText) {
     if (!targetEl) {
