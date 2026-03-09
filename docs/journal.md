@@ -1,5 +1,18 @@
 # DevOpsHero Development Journal
 
+## 2026-03-09 18:00 - [Bugfix] PostHog middleware only when API key is set
+
+**Conversation:** (current session)
+
+Any exception (e.g. Http404 for a missing Environment) was being masked by a second exception: PostHog's `process_exception` middleware called `capture_exception()`, which triggered lazy `setup()` and raised `ValueError("API key is required")` when no API key was configured. Locally, `POSTHOG_API_KEY` is unset and `_init_posthog()` in `apps.py` correctly skips initializing the client (when `DEBUG` or no key), but the middleware was always registered, so exception handling still hit the middleware and tried to use an uninitialized PostHog.
+
+**Fix:** Register PostHog middleware only when PostHog is configured. In `devopshero_site/settings.py`, moved `POSTHOG_API_KEY`, `POSTHOG_HOST`, and `POSTHOG_PROXY_HOST` above the `MIDDLEWARE` list, then made the middleware conditional: `if POSTHOG_API_KEY: MIDDLEWARE.append("posthog.integrations.django.PosthogContextMiddleware")`. Removed the duplicate PostHog config block that was lower in the file. Without the key, the middleware is never added, so its `process_exception` never runs and the original exception (e.g. 404) is returned as expected.
+
+**Key points:**
+- Middleware runs for every request/exception; if it depends on optional config, register it only when that config is present
+- PostHog's Django integration captures exceptions in `process_exception` and assumes a client exists — lazy setup then fails when API key is missing
+- Aligning middleware registration with `_init_posthog()` (key + non-DEBUG) keeps local dev free of PostHog and production behavior unchanged
+
 ## 2026-03-05 - [Bugfix] Chat: scroll to bottom after user sends a message
 
 **Conversation:** [2026-03-05-2218-27625072.md](conversations/2026-03-05-2218-27625072.md)

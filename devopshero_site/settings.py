@@ -66,6 +66,11 @@ INSTALLED_APPS = [
 
 TAILWIND_APP_NAME = "tailwindtheme_app"
 
+# PostHog Analytics Configuration
+POSTHOG_API_KEY = os.environ.get("POSTHOG_API_KEY")
+POSTHOG_HOST = os.environ.get("POSTHOG_HOST", "https://us.i.posthog.com")
+POSTHOG_PROXY_HOST = os.environ.get("POSTHOG_PROXY_HOST")
+
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
     'servestatic.middleware.ServeStaticMiddleware',
@@ -77,8 +82,10 @@ MIDDLEWARE = [
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
     "django_browser_reload.middleware.BrowserReloadMiddleware",
     "django_htmx.middleware.HtmxMiddleware",
-    "posthog.integrations.django.PosthogContextMiddleware",
 ]
+
+if POSTHOG_API_KEY:
+    MIDDLEWARE.append("posthog.integrations.django.PosthogContextMiddleware")
 
 ROOT_URLCONF = 'devopshero_site.urls'
 
@@ -216,14 +223,6 @@ CLAUDE_MODEL_APP_DEPLOYMENT = os.environ.get("CLAUDE_MODEL_APP_DEPLOYMENT", "son
 # Claude Agent Sandbox: Base directory for agent sandbox (cloned repos, temp files, etc.)
 CLAUDE_SANDBOX_DIR = BASE_DIR / "sandbox"
 SANITIZE_SANDBOX_PATHS = True
-
-# PostHog Analytics Configuration
-POSTHOG_API_KEY = os.environ.get("POSTHOG_API_KEY")
-POSTHOG_HOST = os.environ.get("POSTHOG_HOST", "https://us.i.posthog.com")
-# Reverse proxy URL (bypasses ad blockers). Set to https://devopshero.ai/doh-ph in production.
-# When set, frontend loads SDK from /doh-ph-static/* and sends events to /doh-ph/*
-POSTHOG_PROXY_HOST = os.environ.get("POSTHOG_PROXY_HOST")
-
 
 def posthog_request_filter(request):
     """Skip PostHog tracking for admin, health checks, and static files."""
