@@ -360,16 +360,15 @@ function handleComplete(data) {
 }
 
 /**
- * Handle sse-notify events: dispatch as custom DOM events so any
- * component on the page can react (via hx-trigger or JS listeners).
+ * Handle sse-notify events by dispatching the final DOM event name on document.
  */
 function handleNotify(data) {
     try {
         const payload = JSON.parse(data);
-        document.dispatchEvent(new CustomEvent(`doh:${payload.type}`, { detail: payload }));
-        if (payload.id) {
-            document.dispatchEvent(new CustomEvent(`doh:${payload.type}-${payload.id}`, { detail: payload }));
+        if (!payload.event) {
+            return;
         }
+        document.dispatchEvent(new CustomEvent(`doh:${payload.event}`, { detail: payload }));
     } catch (e) {
         console.error('Failed to parse sse-notify:', e);
     }

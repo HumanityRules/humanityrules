@@ -1,5 +1,26 @@
 # DevOpsHero Development Journal
 
+## 2026-03-09 12:45 - [AgentChat] Simplify doh: event contract: one event per notify, declarative deployment refresh
+
+**Conversation:** [2026-03-09-1218-95726d25.md](conversations/2026-03-09-1218-95726d25.md)
+
+Simplified the SSE-notify → DOM event flow so the server sends a single final event name per notification and the deployment workspace uses declarative HTMX triggers instead of page-level JS for app/blueprint section refreshes.
+
+**Server-defined event names:** Previously the server sent `{"type": "title-changed", "id": "abc123"}` and the chat panel dispatched two DOM events: `doh:title-changed` (broad) and `doh:title-changed-abc123` (targeted). Consumers were inconsistent (deployment workspace listened to broad `doh:app-changed` / `doh:blueprint-changed`; chat sidebar and permissions editor used targeted events). We changed the notify payload to `{"event": "title-changed-abc123"}` (or `app-created`, `app-changed-{id}`, `blueprint-changed-{app_id}`, etc.) so the server owns the final event name. The client (`handleNotify` in `_chat_panel.html`) now dispatches exactly one `doh:${payload.event}` per notify — no fan-out, no redundant listeners.
+
+**Create vs update for app:** The server now distinguishes app creation from update using the `created` flag from `SaveAppResult`. It emits `app-created` (with `slug` for redirect) when the agent creates a new app, and `app-changed-{app_id}` when updating an existing app. The deployment workspace only needs one imperative listener: `doh:app-created` → `reloadWorkspace(/deploy/${slug}/)` to transition from the "new app" page to the app-scoped URL. App and blueprint section refreshes are fully declarative via `hx-trigger="doh:app-changed-{{ app.id }}"` and `doh:blueprint-changed-{{ app.id }}` with `hx-get` on the section wrappers.
+
+**Blueprint section endpoint app-scoped:** The blueprint section refetch URL was changed from `/deploy/<blueprint_id>/blueprint-section/` to `/deploy/<app_slug>/blueprint-section/`. The view now loads the app by slug and returns the latest blueprint for that app (`.order_by("-created_at").first()`). That way the same `hx-get` URL works before and after the first blueprint exists — no need to reload the whole workspace when the agent creates a blueprint. `SaveBlueprintResult` and `DeployBlueprintResult` now include `app_id` so the server can emit `blueprint-changed-{app_id}` for targeted refresh.
+
+**ABAC on fragment endpoints:** When adding the app/blueprint section endpoints we enforced ABAC; both use `workspace:edit` to match the parent deployment workspace view. The deploy page is an edit surface (configure and deploy), and fragment URLs are still normal HTTP endpoints, so using the same permission avoids letting view-only users read deploy state by calling the section URLs directly.
+
+**Key points:**
+- One notify payload → one DOM event name; server sends `event` with the final name (e.g. `title-changed-{id}`), client just dispatches `doh:${payload.event}`
+- App create vs update: `app-created` (with slug) for redirect from /deploy/new/; `app-changed-{app_id}` for in-place section refresh
+- Blueprint section is app-scoped so the HTMX trigger and URL are stable before/after first blueprint; tool results include `app_id` for the event
+- Deployment workspace keeps a single imperative listener (`doh:app-created` → reload); app and blueprint sections use `hx-trigger` + `hx-get` like title/cost in chat
+- Fragment endpoints use `workspace:edit` for consistency with the deploy page and to avoid exposing deploy config to view-only users
+
 ## 2026-03-09 18:00 - [Bugfix] PostHog middleware only when API key is set
 
 **Conversation:** (current session)

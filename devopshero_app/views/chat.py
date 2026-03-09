@@ -360,9 +360,9 @@ def _format_sse(event_name: str, data: str) -> str:
     return f"event: {event_name}\n{sse_data}\n\n"
 
 
-def _format_sse_notify(notification_type: str, **kwargs) -> str:
-    """Format an sse-notify event that tells clients to refetch data."""
-    return _format_sse(event_name="sse-notify", data=json.dumps({"type": notification_type, **kwargs}))
+def _format_sse_notify(notification_event: str, **kwargs) -> str:
+    """Format an sse-notify event with the final DOM event name."""
+    return _format_sse(event_name="sse-notify", data=json.dumps({"event": notification_event, **kwargs}))
 
 
 def _format_sse_event(event: agent_service.AgentStreamEvent, show_costs: bool) -> str:
@@ -380,20 +380,26 @@ def _format_sse_event(event: agent_service.AgentStreamEvent, show_costs: bool) -
     elif event.type == "tool_start":
         return _format_sse(event_name="sse-tool-start", data=_render_streaming_tool_start(event.data))
     elif event.type == "tool_result":
+        tool_name = event.data["name"]
+        tool_result = event.data["result"]
         result = _format_sse(event_name="sse-tool-result", data=_render_streaming_tool_result(event.data))
-        if event.data["name"] == "mcp__devopshero__update_permission_draft":
-            result += _format_sse_notify("permissions-changed", id=event.data["result"]["app_permission_request_id"])
-        if event.data["name"] == "mcp__devopshero__save_app":
-            result += _format_sse_notify("app-changed", id=event.data["result"].get("id", ""), slug=event.data["result"].get("slug", ""))
-        if event.data["name"] in ("mcp__devopshero__save_blueprint", "mcp__devopshero__deploy_blueprint"):
-            result += _format_sse_notify("blueprint-changed", id=event.data["result"].get("blueprint_id", event.data["result"].get("id", "")))
+        if tool_name == "mcp__devopshero__update_permission_draft":
+            result += _format_sse_notify(f"permissions-changed-{tool_result['app_permission_request_id']}")
+        if tool_name == "mcp__devopshero__save_app":
+            if tool_result.get("created"):
+                result += _format_sse_notify("app-created", slug=tool_result.get("slug", ""))
+            else:
+                result += _format_sse_notify(f"app-changed-{tool_result['id']}")
+        if tool_name in ("mcp__devopshero__save_blueprint", "mcp__devopshero__deploy_blueprint"):
+            result += _format_sse_notify(f"blueprint-changed-{tool_result['app_id']}")
         return result
     elif event.type == "complete":
         result = _format_sse(event_name="sse-complete", data="")
+        conversation_id = str(event.data["conversation_id"])
         if event.data.get("title"):
-            result += _format_sse_notify("title-changed", id=str(event.data["conversation_id"]))
+            result += _format_sse_notify(f"title-changed-{conversation_id}")
         if show_costs and event.data.get("total_cost"):
-            result += _format_sse_notify("cost-changed", id=str(event.data["conversation_id"]))
+            result += _format_sse_notify(f"cost-changed-{conversation_id}")
         return result
     elif event.type == "error":
         error_msg = event.data.get("error", "Unknown error") if event.data else "Unknown error"

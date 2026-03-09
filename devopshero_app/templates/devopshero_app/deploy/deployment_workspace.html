@@ -25,12 +25,22 @@
         <div class="w-1/2 overflow-y-auto border-r border-gray-200 dark:border-gray-700 dark-scrollbar">
             <div class="p-5 space-y-6">
                 {# App section #}
-                <div id="app-section">
+                <div id="app-section"
+                    {% if app %}
+                    hx-get="{% url 'deployment_workspace_app_section' app_slug=app.slug %}"
+                    hx-trigger="doh:app-changed-{{ app.id }} from:document"
+                    hx-swap="innerHTML"
+                    {% endif %}>
                     {% include "devopshero_app/deploy/_app_section.html" %}
                 </div>
 
                 {# Blueprint section #}
-                <div id="blueprint-section">
+                <div id="blueprint-section"
+                    {% if app %}
+                    hx-get="{% url 'deployment_workspace_blueprint_section' app_slug=app.slug %}"
+                    hx-trigger="doh:blueprint-changed-{{ app.id }} from:document"
+                    hx-swap="innerHTML"
+                    {% endif %}>
                     {% include "devopshero_app/deploy/_blueprint_section.html" %}
                 </div>
             </div>
@@ -50,28 +60,14 @@
 </div>
 
 <script type="module">
-const WORKSPACE_URL = {% if app %}"{% url 'deployment_workspace' app_slug=app.slug %}"{% else %}null{% endif %};
-const APP_SECTION_URL = {% if app %}"{% url 'deployment_workspace_app_section' app_slug=app.slug %}"{% else %}null{% endif %};
-const BLUEPRINT_SECTION_URL = {% if blueprint %}"{% url 'deployment_workspace_blueprint_section' blueprint_id=blueprint.id %}"{% else %}null{% endif %};
-
 function reloadWorkspace(url) {
     htmx.ajax('GET', url, { target: '#main-content', swap: 'innerHTML' });
     history.pushState({}, '', url);
 }
 
-document.addEventListener('doh:app-changed', (e) => {
-    if (APP_SECTION_URL) {
-        htmx.ajax('GET', APP_SECTION_URL, { target: '#app-section', swap: 'innerHTML' });
-    } else if (e.detail.slug) {
+document.addEventListener('doh:app-created', (e) => {
+    if (e.detail.slug) {
         reloadWorkspace(`/deploy/${e.detail.slug}/`);
-    }
-});
-
-document.addEventListener('doh:blueprint-changed', (e) => {
-    if (BLUEPRINT_SECTION_URL) {
-        htmx.ajax('GET', BLUEPRINT_SECTION_URL, { target: '#blueprint-section', swap: 'innerHTML' });
-    } else if (WORKSPACE_URL) {
-        reloadWorkspace(WORKSPACE_URL);
     }
 });
 </script>

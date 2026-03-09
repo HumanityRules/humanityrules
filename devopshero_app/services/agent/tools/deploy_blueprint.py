@@ -23,6 +23,7 @@ class DeployBlueprintResult:
 
     deployment_id: str
     blueprint_id: str
+    app_id: str
     app_name: str
     environment_name: str
     git_ref: str
@@ -116,6 +117,7 @@ async def deploy_blueprint(conversation: Conversation) -> DeployBlueprintResult:
     return DeployBlueprintResult(
         deployment_id=str(deployment.id),
         blueprint_id=str(blueprint.id),
+        app_id=str(blueprint.app_id),
         app_name=blueprint.app.name,
         environment_name=blueprint.environment.name,
         git_ref=git_ref,
