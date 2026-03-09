@@ -135,17 +135,33 @@ def deployment_workspace(request: HttpRequest, app_slug: str) -> HttpResponse:
 def deployment_workspace_app_section(request: HttpRequest, app_slug: str) -> HttpResponse:
     """Return the app section partial for HTMX refresh (SSE-triggered)."""
     organization = request.user.current_organization
-    app = get_object_or_404(models.App.objects.select_related("repository"), organization=organization, slug=app_slug)
+    app = get_object_or_404(
+        models.App.objects.select_related("repository", "workspace"),
+        organization=organization,
+        slug=app_slug,
+    )
+    denied = abac_view_checks.check_abac(request, app.workspace, "workspace", "workspace:edit")
+    if denied:
+        return denied
     return render(request=request, template_name="devopshero_app/deploy/_app_section.html", context={"app": app})
 
 
 @login_required
-def deployment_workspace_blueprint_section(request: HttpRequest, blueprint_id: str) -> HttpResponse:
-    """Return the blueprint section partial for HTMX refresh (SSE-triggered)."""
+def deployment_workspace_blueprint_section(request: HttpRequest, app_slug: str) -> HttpResponse:
+    """Return the latest blueprint section partial for HTMX refresh."""
     organization = request.user.current_organization
-    blueprint = get_object_or_404(
-        models.DeploymentBlueprint.objects.select_related("app", "environment", "datastore"),
-        id=blueprint_id,
-        app__organization=organization,
+    app = get_object_or_404(
+        models.App.objects.select_related("workspace"),
+        organization=organization,
+        slug=app_slug,
+    )
+    denied = abac_view_checks.check_abac(request, app.workspace, "workspace", "workspace:edit")
+    if denied:
+        return denied
+    blueprint = (
+        models.DeploymentBlueprint.objects.filter(app=app)
+        .select_related("app", "environment", "datastore")
+        .order_by("-created_at")
+        .first()
     )
     return render(request=request, template_name="devopshero_app/deploy/_blueprint_section.html", context={"blueprint": blueprint})

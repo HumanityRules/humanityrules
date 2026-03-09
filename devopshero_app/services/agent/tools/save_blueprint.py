@@ -82,6 +82,7 @@ class SaveBlueprintResult:
     """Result of save_blueprint operation."""
 
     id: str
+    app_id: str
     app_name: str
     environment_name: str
     status: str
@@ -224,6 +225,7 @@ async def save_blueprint(
 
     return SaveBlueprintResult(
         id=str(blueprint.id),
+        app_id=str(blueprint.app_id),
         app_name=blueprint.app.name,
         environment_name=blueprint.environment.name,
         status=blueprint.status,
