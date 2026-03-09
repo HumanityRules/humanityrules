@@ -11,7 +11,9 @@ from .list_apps import AppSummary as ListAppSummary
 from .provision_environment import provision_environment
 from .provision_environment import EnvironmentSummary as ProvisionEnvironmentSummary
 from .get_environment_status import get_environment_status, EnvironmentStatus, EnvironmentLogEntry
-from .deploy_app import deploy_app, DeploymentSummary
+from .save_app import save_app, SaveAppResult
+from .save_blueprint import save_blueprint, SaveBlueprintResult
+from .deploy_blueprint import deploy_blueprint, DeployBlueprintResult
 from .get_deployment_status import get_deployment_status, DeploymentStatus, DeploymentLogEntry
 from .initiate_aws_connection import initiate_aws_connection, AWSConnectionInfo
 from .list_aws_accounts import list_aws_accounts, AWSAccountSummary
@@ -42,8 +44,12 @@ __all__ = [
     "list_environments",
     "ListEnvironmentSummary",
     # Deployment
-    "deploy_app",
-    "DeploymentSummary",
+    "save_app",
+    "SaveAppResult",
+    "save_blueprint",
+    "SaveBlueprintResult",
+    "deploy_blueprint",
+    "DeployBlueprintResult",
     "get_deployment_status",
     "DeploymentStatus",
     "DeploymentLogEntry",

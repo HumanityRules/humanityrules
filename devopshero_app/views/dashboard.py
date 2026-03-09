@@ -23,7 +23,7 @@ def dashboard(request: HttpRequest) -> HttpResponse:
         .values("status")[:1]
     )
     latest_deployed_service_url = (
-        Deployment.objects.filter(app=OuterRef("pk"), status=Deployment.Status.DEPLOYED)
+        Deployment.objects.filter(app=OuterRef("pk"), status=Deployment.Status.SUCCEEDED)
         .order_by("-created_at")
         .values("service_url")[:1]
     )

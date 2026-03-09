@@ -599,37 +599,13 @@ class App(models.Model):
         help_text="Path to Dockerfile if using dockerfile build strategy",
     )
 
-    # Container configuration
+    # Container configuration (identity/build — runtime fields moved to DeploymentBlueprint)
     container_port = models.IntegerField()
-    cpu = models.IntegerField(help_text="Fargate CPU units (256, 512, 1024, etc.)")
-    memory = models.IntegerField(help_text="Fargate memory in MiB")
     health_check_path = models.CharField(max_length=255)
     health_check_command = models.CharField(
         max_length=500,
         blank=True,
         help_text="Health check command for non-HTTP health checks",
-    )
-
-    # Environment
-    environment_variables = models.JSONField(
-        default=list,
-        help_text="List of {name, value} environment variable objects",
-    )
-
-    # Database binding
-    datastore = models.ForeignKey(
-        Datastore,
-        on_delete=models.SET_NULL,
-        null=True,
-        blank=True,
-        related_name="apps",
-    )
-
-    # App secrets for AWS Secrets Manager
-    app_secrets = models.JSONField(
-        null=True,
-        blank=True,
-        help_text="Dict mapping secret field names to values. Use null value to auto-generate.",
     )
 
     created_by = models.ForeignKey(
@@ -706,6 +682,22 @@ class Conversation(models.Model):
         blank=True,
         related_name="conversations",
         help_text="AWS account context for this conversation (set via UI for environment creation)",
+    )
+    context_app = models.ForeignKey(
+        "App",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="conversations",
+        help_text="App context for deployment-mode conversations",
+    )
+    context_deployment_blueprint = models.ForeignKey(
+        "DeploymentBlueprint",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="conversations",
+        help_text="DeploymentBlueprint context for deployment-mode conversations",
     )
     context_app_permission_request = models.ForeignKey(
         "AppPermissionRequest",
@@ -806,8 +798,88 @@ class Message(models.Model):
         return f"{self.role}: {self.content[:50]}..."
 
 
+class DeploymentBlueprint(models.Model):
+    """Desired deployable state for one (app, environment) pair."""
+
+    class Status(models.TextChoices):
+        DRAFT = "draft", "Draft"
+        DEPLOYING = "deploying", "Deploying"
+        FAILED = "failed", "Failed"
+        ACTIVE = "active", "Active"
+        DISCARDED = "discarded", "Discarded"
+
+    id = models.UUIDField(
+        primary_key=True,
+        default=uuid.uuid7,
+        editable=False,
+    )
+    app = models.ForeignKey(
+        App,
+        on_delete=models.CASCADE,
+        related_name="blueprints",
+    )
+    environment = models.ForeignKey(
+        Environment,
+        on_delete=models.PROTECT,
+        related_name="blueprints",
+    )
+    status = models.CharField(
+        max_length=20,
+        choices=Status.choices,
+        default=Status.DRAFT,
+    )
+    status_message = models.TextField(blank=True)
+
+    branch = models.CharField(
+        max_length=255,
+        blank=True,
+        help_text="Branch override for this environment. Blank = use Repository.default_branch.",
+    )
+    cpu = models.IntegerField(help_text="Fargate CPU units (256, 512, 1024, etc.)")
+    memory = models.IntegerField(help_text="Fargate memory in MiB")
+
+    environment_variables = models.JSONField(
+        default=list,
+        help_text="List of {name, value} environment variable objects",
+    )
+    app_secrets = models.JSONField(
+        null=True,
+        blank=True,
+        help_text="Dict mapping secret field names to values. Use null value to auto-generate.",
+    )
+
+    datastore = models.ForeignKey(
+        Datastore,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="blueprints",
+    )
+
+    subdomain = models.CharField(
+        max_length=63,
+        blank=True,
+        help_text="Route53 subdomain. Defaults to app slug, auto-suffixed with -env if conflict.",
+    )
+
+    created_by = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        related_name="created_blueprints",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    def __str__(self) -> str:
+        return f"{self.app.name} -> {self.environment.name} ({self.status})"
+
+
 class Deployment(models.Model):
-    """A deployment of an app to infrastructure."""
+    """An execution record for one attempt to apply a blueprint."""
 
     class Status(models.TextChoices):
         PENDING = "pending", "Pending"
@@ -815,10 +887,9 @@ class Deployment(models.Model):
         PUSHING = "pushing", "Pushing to ECR"
         DEPLOYING = "deploying", "Deploying Infrastructure"
         STARTING = "starting", "Starting Service"
-        DEPLOYED = "deployed", "Deployed"
+        SUCCEEDED = "succeeded", "Succeeded"
         FAILED = "failed", "Failed"
         ROLLED_BACK = "rolled_back", "Rolled Back"
-        SUPERSEDED = "superseded", "Superseded"
         TORN_DOWN = "torn_down", "Torn Down"
         TEARDOWN_PENDING = "teardown_pending", "Teardown Pending"
         TEARING_DOWN = "tearing_down", "Tearing Down"
@@ -827,6 +898,11 @@ class Deployment(models.Model):
         primary_key=True,
         default=uuid.uuid7,
         editable=False,
+    )
+    blueprint = models.ForeignKey(
+        DeploymentBlueprint,
+        on_delete=models.CASCADE,
+        related_name="deployments",
     )
     app = models.ForeignKey(
         App,

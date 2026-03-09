@@ -33,27 +33,20 @@ def _get_aws_session(deployment: models.Deployment):
 
 
 def _build_teardown_app_config(
-    app: models.App,
-    environment: models.Environment,
+    deployment: models.Deployment,
 ) -> infra_customer.appconfig.AppConfig:
-    """
-    Build a minimal AppConfig for teardown.
-
-    For teardown we only need app_name, ecr_repo_name, and database_config
-    to identify which stacks to delete.
-    """
-    # Build ECR repo name (same as in app_config_builder)
+    """Build a minimal AppConfig for teardown — only needs app_name, ecr_repo_name, database_config."""
+    app = deployment.app
+    environment = deployment.environment
     ecr_repo_name = f"doh/{environment.slug}/{app.slug}"
 
-    # Check if app has a datastore (needed to know if Aurora stack exists)
     database_config = None
-    if app.datastore:
-        # For teardown we just need to signal that a database exists
-        # The actual config doesn't matter since we're just deleting stacks
+    datastore = deployment.blueprint.datastore
+    if datastore:
         database_config = infra_customer.appconfig.DatabaseConfig(
-            name=app.datastore.database_name,
+            name=datastore.database_name,
             engine=infra_customer.appconfig.EngineConfig(
-                family=app.datastore.engine,
+                family=datastore.engine,
                 version=None,
                 auto_minor_version_upgrade=False,
             ),
@@ -78,12 +71,15 @@ def _build_teardown_app_config(
             ),
         )
 
+    cpu = deployment.blueprint.cpu
+    memory = deployment.blueprint.memory
+
     return infra_customer.appconfig.AppConfig(
         app_name=app.slug,
         ecr_repo_name=ecr_repo_name,
         container_port=app.container_port,
-        cpu=app.cpu,
-        memory=app.memory,
+        cpu=cpu,
+        memory=memory,
         health_check_path=app.health_check_path,
         health_check_command=None,
         environment_variables=[],
@@ -113,9 +109,10 @@ def run_teardown(deployment_id: str) -> bool:
     """
     try:
         deployment = models.Deployment.objects.select_related(
+            "blueprint",
+            "blueprint__datastore",
             "app",
             "app__workspace",
-            "app__datastore",
             "environment",
             "environment__aws_account",
         ).get(id=deployment_id)
@@ -145,10 +142,7 @@ def run_teardown(deployment_id: str) -> bool:
             session = _get_aws_session(deployment)
 
             # Build minimal AppConfig for teardown
-            app_config = _build_teardown_app_config(
-                app=app,
-                environment=environment,
-            )
+            app_config = _build_teardown_app_config(deployment=deployment)
 
             # Execute teardown
             logger.info(

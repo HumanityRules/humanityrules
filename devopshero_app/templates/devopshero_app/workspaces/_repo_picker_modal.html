@@ -44,7 +44,11 @@
                 {% if repositories %}
                 <div id="repo-list" class="space-y-1">
                     {% for repo in repositories %}
-                    <a href="{% url 'chat_new' %}?workspace={{ workspace.id }}&repo={{ repo.id }}"
+                    <a href="{% url 'deployment_workspace_new' %}?workspace={{ workspace.slug }}&repo={{ repo.id }}"
+                       hx-get="{% url 'deployment_workspace_new' %}?workspace={{ workspace.slug }}&repo={{ repo.id }}"
+                       hx-target="#main-content"
+                       hx-swap="innerHTML"
+                       hx-push-url="true"
                        class="repo-item flex items-center px-4 py-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
                        data-repo-name="{{ repo.name|lower }}"
                        data-repo-fullname="{{ repo.full_name|lower }}">

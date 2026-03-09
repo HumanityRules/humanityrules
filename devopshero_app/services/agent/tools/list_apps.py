@@ -11,7 +11,7 @@ from devopshero_app.models import App, Deployment, Workspace
 
 # Statuses that represent "active" deployments (deployed or in-progress)
 ACTIVE_DEPLOYMENT_STATUSES = [
-    Deployment.Status.DEPLOYED,
+    Deployment.Status.SUCCEEDED,
     Deployment.Status.PENDING,
     Deployment.Status.BUILDING,
     Deployment.Status.PUSHING,
@@ -45,7 +45,6 @@ class AppSummary:
     name: str
     slug: str
     app_type: str
-    branch: str
     repository_name: str
     deployments: list[DeploymentInfo]
 
@@ -106,7 +105,6 @@ async def list_apps(workspace: Workspace) -> list[AppSummary]:
                 name=app.name,
                 slug=app.slug,
                 app_type=app.app_type,
-                branch=app.branch,
                 repository_name=app.repository.name,
                 deployments=deployments_info,
             )

@@ -70,7 +70,7 @@ def workspace_detail(request: HttpRequest, workspace_slug: str) -> HttpResponse:
     active_deployments_prefetch = Prefetch(
         "deployments",
         queryset=Deployment.objects.filter(
-            status=Deployment.Status.DEPLOYED,
+            status=Deployment.Status.SUCCEEDED,
         ).select_related("environment", "environment__aws_account").order_by("environment__name"),
         to_attr="active_deployments",
     )
@@ -80,7 +80,7 @@ def workspace_detail(request: HttpRequest, workspace_slug: str) -> HttpResponse:
         .values("status")[:1]
     )
     latest_deployed_service_url = (
-        Deployment.objects.filter(app=OuterRef("pk"), status=Deployment.Status.DEPLOYED)
+        Deployment.objects.filter(app=OuterRef("pk"), status=Deployment.Status.SUCCEEDED)
         .order_by("-created_at")
         .values("service_url")[:1]
     )

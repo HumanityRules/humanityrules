@@ -47,7 +47,7 @@ def _teardown_all_deployments(environment: models.Environment) -> bool:
     deployments = list(
         models.Deployment.objects
         .filter(environment=environment)
-        .select_related("app", "app__workspace", "app__datastore", "environment", "environment__aws_account")
+        .select_related("app", "app__workspace", "environment", "environment__aws_account")
         .order_by("created_at")
     )
 

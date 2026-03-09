@@ -5,10 +5,11 @@
 - **Organization** — Top-level tenant. Users belong to organizations, and organizations own all other resources.
 - **Workspace** — Governance and policy container. Groups apps and datastores for access control and organizational purposes. A "Default" workspace is auto-created when an Organization is created.
 - **Repository** — A Git repository connected to an organization via GitHub App integration. Apps source their code from repositories.
-- **App** — Compute workloads users deploy. Apps belong to a workspace and source from a repository.
+- **App** — Stable identity and build configuration for a deployable application. Apps belong to a workspace and source from a repository.
+- **DeploymentBlueprint** — Desired deployable state for one (app, environment) pair. Owns runtime configuration: cpu, memory, env vars, secrets, datastore, subdomain.
 - **Datastore** — Managed databases (Aurora in v1) provisioned and managed by the platform.
 - **Environment** — Deployment target with its own VPC and ECS cluster. Account-scoped: multiple workspaces can deploy apps to the same environment.
-- **Deployment** — Binds an app to an environment with a specific git ref. Tracks build and deploy status.
+- **Deployment** — An execution record for one attempt to apply a blueprint. Tracks build and deploy status.
 
 
 ## High-Level Mental Model
@@ -17,9 +18,10 @@
 - AWS Account has Environments (shared infrastructure: VPC, ECS cluster, shared ALB).
 - Organization has Repositories (synced from GitHub).
 - Workspace contains definitions (Apps, Datastores) — the "what" to deploy.
-- App sources code from a Repository.
+- App sources code from a Repository and defines identity + build config.
+- DeploymentBlueprint pairs an App with an Environment and configures runtime settings — the "desired state".
 - Environment is where things run (AWS account + region + VPC + ECS cluster) — the "where".
-- Deployment binds an App to an Environment and selects the git ref.
+- Deployment is an execution record for one attempt to apply a Blueprint.
 - Multiple workspaces can deploy to the same environment, sharing VPC and cluster while having isolated app resources (ECR, ECS service, secrets).
 
 
@@ -42,8 +44,9 @@ Organization
 │   └── Repositories
 ├── Workspaces
 │   ├── Apps → Repository (source)
-│   │   └── Deployments → Environment (target)
-│   │       └── DeploymentLogs
+│   │   └── DeploymentBlueprints → Environment (target)
+│   │       └── Deployments
+│   │           └── DeploymentLogs
 │   └── Datastores
 └── Conversations
     └── Messages
@@ -160,7 +163,7 @@ Relationships:
 A "Default" workspace is auto-created when an Organization is created.
 
 ### App
-A deployable application.
+Stable identity and build configuration for a deployable application.
 - **id** — UUID primary key
 - **organization** — FK to Organization (denormalized for unique constraint)
 - **workspace** — FK to Workspace
@@ -170,22 +173,37 @@ A deployable application.
 - **app_type** — web / worker / scheduled
 - **build_strategy** — dockerfile / nixpacks / buildpack
 - **repo_subpath** — Subdirectory within repository (for monorepos)
-- **branch** — Git branch to deploy
+- **branch** — Default git branch
 - **dockerfile_path** — Path to Dockerfile if using dockerfile strategy
 - **container_port** — Port the container listens on
-- **cpu** — Fargate CPU units (256, 512, 1024, etc.)
-- **memory** — Fargate memory in MiB
 - **health_check_path** — HTTP path for health checks
 - **health_check_command** — Command for non-HTTP health checks
+- **created_by** — FK to User
+- **created_at, updated_at** — Timestamps
+
+Relationships:
+- Has many DeploymentBlueprints
+- Unique constraint: (organization, slug)
+
+### DeploymentBlueprint
+Desired deployable state for one (app, environment) pair.
+- **id** — UUID primary key
+- **app** — FK to App
+- **environment** — FK to Environment
+- **status** — draft / deploying / failed / active / discarded
+- **status_message** — Status details
+- **branch** — Branch override for this environment (blank = use repository default)
+- **cpu** — Fargate CPU units (256, 512, 1024, etc.)
+- **memory** — Fargate memory in MiB
 - **environment_variables** — List of {name, value} objects
-- **datastore** — FK to Datastore (optional binding)
 - **app_secrets** — Dict mapping secret field names to values (null = auto-generate)
+- **datastore** — FK to Datastore (optional binding)
+- **subdomain** — Route53 subdomain (blank = use app slug)
 - **created_by** — FK to User
 - **created_at, updated_at** — Timestamps
 
 Relationships:
 - Has many Deployments
-- Unique constraint: (organization, slug)
 
 ### Datastore
 Managed database definition.
@@ -216,8 +234,9 @@ Relationships:
 - Unique constraint: (workspace, slug)
 
 ### Deployment
-A deployment of an app to an environment.
+An execution record for one attempt to apply a blueprint.
 - **id** — UUID primary key
+- **blueprint** — FK to DeploymentBlueprint (nullable for legacy deployments)
 - **app** — FK to App
 - **environment** — FK to Environment (target)
 - **git_ref** — Branch, tag, or commit SHA
@@ -225,7 +244,7 @@ A deployment of an app to an environment.
 - **git_commit_message** — Commit message
 - **image_tag** — Docker image tag
 - **image_uri** — Full ECR image URI (set after push)
-- **status** — pending / building / pushing / deploying / starting / deployed / failed / rolled_back / superseded / torn_down / teardown_pending / tearing_down
+- **status** — pending / building / pushing / deploying / starting / succeeded / failed / rolled_back / torn_down / teardown_pending / tearing_down
 - **status_message** — Status details
 - **started_at** — When deployment started
 - **completed_at** — When deployment completed
@@ -268,13 +287,17 @@ A conversation between a user and the AI deployment agent.
 - **organization** — FK to Organization
 - **context_workspace** — FK to Workspace (set via UI, optional)
 - **context_repository** — FK to Repository (set via UI, optional)
+- **context_app** — FK to App (set by save_app tool, optional)
+- **context_deployment_blueprint** — FK to DeploymentBlueprint (set by save_blueprint tool, optional)
+- **context_app_permission_request** — FK to AppPermissionRequest (permissions mode, optional)
 - **status** — active / completed / abandoned
+- **mode** — general / environment_setup / app_deployment / permissions
 - **title** — Conversation title
 - **session_id** — Claude Agent SDK session ID
 - **deployments** — M2M to Deployment
 - **created_at, updated_at** — Timestamps
 
-Context is set via UI before conversation starts (user clicks "New Conversation" or "New App" from workspace page).
+Context is set via UI before conversation starts (user clicks "New App" from workspace page) and enriched by agent tools during the conversation.
 
 ### Message
 A single message in a conversation.

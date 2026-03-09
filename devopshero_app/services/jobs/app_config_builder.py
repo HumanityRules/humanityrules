@@ -7,7 +7,7 @@ into an appconfig.AppConfig suitable for CDK deployment.
 
 from pathlib import Path
 
-from devopshero_app.models import App, Datastore, Environment
+from devopshero_app.models import Datastore, DeploymentBlueprint
 from devopshero_app.services import infra_customer
 
 
@@ -57,41 +57,31 @@ def build_database_config(datastore: Datastore) -> infra_customer.appconfig.Data
     )
 
 
-def build_app_config(app: App, environment: Environment, repo_path: Path) -> infra_customer.appconfig.AppConfig:
-    """
-    Build an AppConfig from Django App model.
+def build_app_config_from_blueprint(blueprint: DeploymentBlueprint, repo_path: Path) -> infra_customer.appconfig.AppConfig:
+    """Build an AppConfig sourcing identity/build from App and runtime from DeploymentBlueprint."""
+    app = blueprint.app
+    environment = blueprint.environment
 
-    Args:
-        app: The Django App model with related repository and datastore.
-        environment: The target Environment for deployment.
-        repo_path: Path to the cloned repository directory.
-
-    Returns:
-        An AppConfig ready for CDK deployment.
-    """
-    # Build ECR repo name (app slugs are unique per org, environments are per-account, no collision)
     ecr_repo_name = f"doh/{environment.slug}/{app.slug}"
 
-    # Use provided repo path, applying subpath if configured
     app_source_path = repo_path
     if app.repo_subpath:
         app_source_path = repo_path / app.repo_subpath
 
-    # Build database config if app has a datastore
     database_config = None
-    if app.datastore:
-        database_config = build_database_config(app.datastore)
+    if blueprint.datastore:
+        database_config = build_database_config(blueprint.datastore)
 
     return infra_customer.appconfig.AppConfig(
         app_name=app.slug,
         ecr_repo_name=ecr_repo_name,
         container_port=app.container_port,
-        cpu=app.cpu,
-        memory=app.memory,
+        cpu=blueprint.cpu,
+        memory=blueprint.memory,
         health_check_path=app.health_check_path,
         health_check_command=app.health_check_command or None,
-        environment_variables=app.environment_variables or [],
+        environment_variables=blueprint.environment_variables or [],
         app_source_path=app_source_path,
         database_config=database_config,
-        app_secrets=app.app_secrets,
+        app_secrets=blueprint.app_secrets,
     )

@@ -101,7 +101,7 @@ async def teardown_deployment(
 
     # Check if deployment is in a teardownable state
     teardownable_statuses = [
-        Deployment.Status.DEPLOYED,
+        Deployment.Status.SUCCEEDED,
         Deployment.Status.FAILED,
     ]
     if deployment.status not in teardownable_statuses:

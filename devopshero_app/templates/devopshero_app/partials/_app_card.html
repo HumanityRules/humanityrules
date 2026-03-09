@@ -51,7 +51,7 @@
             <span class="text-gray-500 dark:text-gray-400">Status</span>
             {% if app.latest_status %}
             <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium
-                {% if app.latest_status == 'deployed' %}bg-green-100 text-green-700 dark:bg-green-500/10 dark:text-green-400
+                {% if app.latest_status == 'succeeded' %}bg-green-100 text-green-700 dark:bg-green-500/10 dark:text-green-400
                 {% elif app.latest_status == 'failed' or app.latest_status == 'rolled_back' %}bg-red-100 text-red-700 dark:bg-red-500/10 dark:text-red-400
                 {% elif app.latest_status in 'pending,building,pushing,deploying,starting' %}bg-yellow-100 text-yellow-700 dark:bg-yellow-500/10 dark:text-yellow-400
                 {% else %}bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-300{% endif %}">

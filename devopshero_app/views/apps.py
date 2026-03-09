@@ -18,7 +18,7 @@ from . import base
 def _get_app_for_user(request: HttpRequest, app_slug: str) -> App:
     """Get an app that belongs to the current user's organization."""
     return get_object_or_404(
-        App.objects.select_related("workspace", "repository", "datastore", "created_by"),
+        App.objects.select_related("workspace", "repository", "created_by"),
         slug=app_slug,
         organization=request.user.current_organization,
     )
@@ -51,9 +51,6 @@ def _build_app_detail_context(request: HttpRequest, app: App) -> dict[str, Any]:
             }
     environment_rows = list(seen_environments.values())
 
-    secret_keys = list(app.app_secrets.keys()) if app.app_secrets else []
-    cpu_vcpu = app.cpu / 1024
-
     # Tags
     direct_tags = ResourceTag.objects.filter(app=app).order_by("key", "value")
     inherited_tags = ResourceTag.objects.filter(workspace=app.workspace).order_by("key", "value")
@@ -62,8 +59,6 @@ def _build_app_detail_context(request: HttpRequest, app: App) -> dict[str, Any]:
     context["app"] = app
     context["deployments"] = deployments
     context["environment_rows"] = environment_rows
-    context["secret_keys"] = secret_keys
-    context["cpu_vcpu"] = cpu_vcpu
     org = request.user.current_organization
     context["direct_tags"] = direct_tags
     context["inherited_tags"] = inherited_tags
@@ -106,7 +101,7 @@ def app_deployment_teardown(request: HttpRequest, app_slug: str, deployment_id: 
     deployment = _get_deployment_for_app(app, deployment_id)
 
     teardownable_statuses = [
-        Deployment.Status.DEPLOYED,
+        Deployment.Status.SUCCEEDED,
     ]
     if deployment.status not in teardownable_statuses:
         return HttpResponse(status=422)
@@ -164,7 +159,7 @@ def app_deployment_redeploy(request: HttpRequest, app_slug: str, deployment_id: 
 
     deployment = _get_deployment_for_app(app, deployment_id)
 
-    if deployment.status != Deployment.Status.DEPLOYED:
+    if deployment.status != Deployment.Status.SUCCEEDED:
         return HttpResponse(status=422)
 
     active_statuses = [
@@ -177,15 +172,17 @@ def app_deployment_redeploy(request: HttpRequest, app_slug: str, deployment_id: 
     if Deployment.objects.filter(app=app, status__in=active_statuses).exists():
         return HttpResponse(status=422)
 
+    git_ref = deployment.git_ref or app.branch
     timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
-    short_ref = app.branch[:8] if len(app.branch) > 8 else app.branch
+    short_ref = git_ref[:8] if len(git_ref) > 8 else git_ref
     image_tag = f"{app.slug}-{short_ref}-{timestamp}"
 
     Deployment.objects.create(
+        blueprint=deployment.blueprint,
         app=app,
         environment=deployment.environment,
         subdomain=deployment.subdomain,
-        git_ref=app.branch,
+        git_ref=git_ref,
         image_tag=image_tag,
         status=Deployment.Status.PENDING,
         status_message="Redeploy triggered via web UI",

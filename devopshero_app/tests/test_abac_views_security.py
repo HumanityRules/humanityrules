@@ -331,8 +331,7 @@ class TestPermissionsEditorEndpoints(TestCase):
         self.app = App.objects.create(
             organization=self.org, workspace=self.workspace, repository=self.repo,
             name="PEApp", slug="peapp", app_type="web", build_strategy="dockerfile",
-            branch="main", container_port=8000, cpu=256, memory=512,
-            health_check_path="/health",
+            branch="main", container_port=8000, health_check_path="/health",
         )
         self.env = Environment.objects.create(
             aws_account=self.aws_account, name="Production", slug="production", aws_region="us-east-1",
