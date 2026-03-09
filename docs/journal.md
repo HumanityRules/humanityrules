@@ -1,5 +1,24 @@
 # DevOpsHero Development Journal
 
+## 2026-03-09 12:21 - [Deployment] Blueprint refactor post-implementation cleanup
+
+**Conversation:** [2026-03-09-1222-9e2c5d24.md](conversations/2026-03-09-1222-9e2c5d24.md)
+
+After completing all five phases of the blueprint refactor in the prior session, this session cleaned up backward-compatibility provisions, fixed the "New Deployment" entry point, and wired up the deployment workspace's left panel to refresh when the agent creates or updates entities.
+
+**Non-nullable blueprint FK:** The `Deployment.blueprint` FK was left nullable during the refactor for backward compatibility with legacy deployments. Since we don't need that compatibility, we removed `null=True, blank=True` and the "Nullable for legacy deployments" help_text. The teardown executor had three `if deployment.blueprint else <fallback>` guards for datastore, cpu, and memory — these were simplified to direct attribute access. Migration `0030_blueprint_fk_non_nullable` enforces the constraint at the DB level. Test setUp in `test_abac_views_apps.py` was updated to create a `DeploymentBlueprint` before creating the `Deployment`.
+
+**New Deployment button:** The "New Deployment" button on the app detail page still pointed to `chat_new` (the old monolithic chat entry point). Updated it to link to `deployment_workspace` at `/deploy/<app_slug>/`, which is the new two-panel UI where the agent guides blueprint creation and deployment.
+
+**SSE notify for left panel refresh:** The deployment workspace left panel wasn't updating when the agent called `save_app`. Root cause was two-fold: (1) `handleNotify` in `_chat_panel.html` only dispatched the ID-suffixed event (`doh:app-changed-<uuid>`), never the generic `doh:app-changed`, so the template's generic listener never fired; (2) for the new-app flow where `app` is None at render time, both `APP_SECTION_URL` and the ID-specific listener were absent. Fix: made `handleNotify` dispatch both the generic and ID-specific events, added the app slug to the `app-changed` SSE payload, and updated the workspace template to handle the new-app case by reloading the entire workspace at `/deploy/<slug>/`. Same pattern applied to `blueprint-changed` — when `BLUEPRINT_SECTION_URL` is null (first blueprint creation), the workspace reloads from the app-scoped URL.
+
+**Key points:**
+- `Deployment.blueprint` is now non-nullable; no fallback logic for legacy deployments without blueprints
+- "New Deployment" on app detail goes to `/deploy/<app_slug>/` instead of `/chat/new/`
+- `handleNotify` dispatches both generic (`doh:app-changed`) and ID-specific (`doh:app-changed-<uuid>`) events
+- New-app SSE flow: server includes `slug` in the `app-changed` notify, template uses it to navigate from `/deploy/new/` to `/deploy/<slug>/`
+- New-blueprint SSE flow: when `BLUEPRINT_SECTION_URL` is null, workspace reloads from `WORKSPACE_URL` so the template re-renders with the blueprint
+
 ## 2026-03-09 12:45 - [AgentChat] Simplify doh: event contract: one event per notify, declarative deployment refresh
 
 **Conversation:** [2026-03-09-1218-95726d25.md](conversations/2026-03-09-1218-95726d25.md)
