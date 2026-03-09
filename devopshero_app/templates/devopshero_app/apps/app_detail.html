@@ -16,8 +16,8 @@
     {# Tags section + New Deployment button #}
     <div class="mb-6 flex items-end justify-between">
         {% include "devopshero_app/partials/_security_tags_section.html" with tags_title="App Tags" items=direct_tags empty_text="No direct tags" %}
-        <a href="{% url 'chat_new' %}?workspace={{ app.workspace.id }}&repo={{ app.repository.id }}"
-           hx-get="{% url 'chat_new' %}?workspace={{ app.workspace.id }}&repo={{ app.repository.id }}"
+        <a href="{% url 'deployment_workspace' app_slug=app.slug %}"
+           hx-get="{% url 'deployment_workspace' app_slug=app.slug %}"
            hx-target="#main-content"
            hx-swap="innerHTML"
            hx-push-url="true"
