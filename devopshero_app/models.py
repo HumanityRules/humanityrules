@@ -872,6 +872,8 @@ class DeploymentBlueprint(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
+        verbose_name = "Deployment Blueprint"
+        verbose_name_plural = "Deployment Blueprints"
         ordering = ["-created_at"]
 
     def __str__(self) -> str:
