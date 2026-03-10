@@ -4,6 +4,7 @@ from asgiref.sync import async_to_sync
 from django.test import TestCase
 
 import devopshero_app.models as models
+import devopshero_app.services.agent.agent_build_prompt as agent_build_prompt
 import devopshero_app.services.agent.tools as agent_tools
 import devopshero_app.services.deployment_blueprint_effective_values as deployment_blueprint_effective_values
 
@@ -287,3 +288,10 @@ class TestDeploymentBlueprintEffectiveValues(TestCase):
 
         self.conversation.refresh_from_db()
         self.assertIsNone(self.conversation.context_deployment_blueprint_id)
+
+    def test_app_deployment_prompt_requires_saved_draft_review_before_deploy(self) -> None:
+        prompt = async_to_sync(agent_build_prompt.build_system_prompt)(conversation=self.conversation)
+
+        self.assertIn("call `save_app` and `save_blueprint` immediately", prompt)
+        self.assertIn("Everything looks good. Deploy this draft now?", prompt)
+        self.assertIn("Do NOT call `deploy_blueprint` in the same turn as `save_blueprint`", prompt)

@@ -31,15 +31,16 @@ Follow the <deployment_flow> sequence.
 
 1. **Check environments** — Review the <aws_infrastructure> section for READY environments (see <environment_selection> rules)
 2. **Check existing apps** — Use `list_apps` to see if an app for this repository already exists
-3. **If app exists** — Present options using the format in <existing_apps>, then skip to step 11
+3. **If app exists** — Present options using the format in <existing_apps>, then continue from step 6 using the user's chosen environment
 4. **Analyze the repository** — Use analyze-repository sub-agent to understand it deeply
 5. **Ask clarifying questions** — Based on analysis results
-6. **Generate Dockerfile if needed** — See <dockerfile_generation>
-7. **Submit changes via pull request** — If any files were created or modified, see <pull_request_workflow>
-8. **Save app** — Use `save_app` to define the app identity and build/interface config (repository from <conversation_context>)
-9. **Create datastore** — If the analysis detected database needs
-10. **Save blueprint** — Use `save_blueprint` to configure the environment-specific deployment settings (cpu, memory, env vars, secrets, subdomain)
-11. **Confirm and deploy** — Summarize configuration and use `deploy_blueprint` to trigger deployment
+6. **Save initial drafts** — Use `save_app` and `save_blueprint` as soon as you have enough information to persist the app + deployment draft
+7. **Create datastore if needed** — If the analysis detected database needs, then update the saved blueprint with the datastore binding
+8. **Generate Dockerfile if needed** — See <dockerfile_generation>; update the saved app draft if build config changes
+9. **Submit changes via pull request** — If any files were created or modified, see <pull_request_workflow>
+10. **Refresh the saved draft if needed** — If steps 7–9 changed the app or blueprint config, call `save_app` / `save_blueprint` again
+11. **Review the saved draft** — Summarize the saved app + blueprint and ask for deployment approval (see <wait_for_deploy_confirmation>)
+12. **Deploy after explicit approval** — Use `deploy_blueprint` only after the user confirms the saved draft
 
 </deployment_flow>
 
@@ -86,6 +87,15 @@ Use this information to:
 - Route secrets to `app_secrets` (see <app_secrets>)
 - Surface any concerns before deployment
 </repository_analysis>
+
+<draft_persistence>
+As soon as repository analysis plus any necessary clarifications give you enough information to define
+the app and deployment draft, call `save_app` and `save_blueprint` immediately.
+
+- Do this before the final deployment confirmation step so the left panel shows a saved draft
+- Do NOT wait until the last possible moment to persist the app/blueprint
+- If you later refine the configuration, call `save_app` and/or `save_blueprint` again to update the draft
+</draft_persistence>
 
 <dockerfile_generation>
 After repository analysis, check the `dockerfile_path` field in the analysis results:
@@ -193,7 +203,7 @@ This makes it crystal clear what each action does and avoids confusion about whe
 updating existing infrastructure or creating new resources.
 
 **Note:** If you modify or create any files during a re-deploy (e.g., updating the Dockerfile or adding
-a health check), you must still follow the <pull_request_workflow> before calling `deploy_app`.
+a health check), you must still follow the <pull_request_workflow> before calling `deploy_blueprint`.
 
 **Executing a re-deploy:**
 - Use `list_apps` to find the existing app by name or slug
@@ -283,7 +293,7 @@ If you can't easily modify the force_ssl config, don't worry — the 301 fallbac
 
 <pre_deployment_checklist>
 - **Before deploying**, verify the environment is READY (use get_environment_status if unsure)
-- **Before deploying**, summarize the configuration and ask for confirmation:
+- **Before deploying**, summarize the saved draft and ask for confirmation:
   - App name and workspace
   - Environment (and its status)
   - Domain (if configured) — clearly show the full URL (e.g., "myapp.example.com")
@@ -292,6 +302,21 @@ If you can't easily modify the force_ssl config, don't worry — the 301 fallbac
   - Resources (e.g., "XS — 0.25 vCPU, 512 MB")
 - `deploy_blueprint` returns immediately with PENDING status
 </pre_deployment_checklist>
+
+<wait_for_deploy_confirmation>
+After `save_app` and `save_blueprint`, summarize the saved draft and ask exactly:
+
+`Everything looks good. Deploy this draft now?`
+
+Use the **AskUserQuestion** tool with these options:
+- `Deploy now`
+- `Keep editing`
+
+Rules:
+- Do NOT call `deploy_blueprint` in the same turn as `save_blueprint`
+- Do NOT call `deploy_blueprint` until the user explicitly confirms in a later turn or clicks `Deploy now`
+- If the user asks for changes, update the saved draft first, then ask the confirmation question again
+</wait_for_deploy_confirmation>
 
 <polling>
 CRITICAL: After initiating deployment, you MUST keep polling until the deployment reaches a terminal state:

@@ -532,7 +532,8 @@ def create_devopshero_mcp_server(conversation: Conversation):
             "Create or update the application definition. "
             "On first call, creates the App and pins it to the conversation. "
             "On subsequent calls, updates the existing App. "
-            "Use this after analyzing the repository to define the app identity and build configuration."
+            "Use this as soon as repository analysis and clarifications give you enough information "
+            "to save the app draft. Do not wait until the final deployment step."
         ),
         {
             "type": "object",
@@ -591,6 +592,8 @@ def create_devopshero_mcp_server(conversation: Conversation):
             "On first call, creates a draft blueprint for the specified environment. "
             "On subsequent calls, updates the existing blueprint. "
             "Requires save_app to have been called first. "
+            "Use this as soon as you know the environment and core deployment settings so the draft is saved "
+            "before asking for final deployment approval. "
             "For cpu: ECS CPU units (256=0.25vCPU, 512=0.5vCPU, 1024=1vCPU, 2048=2vCPU). "
             "For memory: MiB (512, 1024, 2048, 4096). "
             "For environment_variables: omit to keep existing, pass [] to clear, or [{\"name\": \"FOO\", \"value\": \"bar\"}] to replace. "
@@ -633,7 +636,10 @@ def create_devopshero_mcp_server(conversation: Conversation):
         action = "created" if result.created else "updated"
         return _mcp_response({
             **result.to_dict(),
-            "note": f"Blueprint {action}. Use deploy_blueprint to trigger deployment.",
+            "note": (
+                f"Blueprint {action}. Review the saved draft with the user and wait for explicit "
+                "confirmation before calling deploy_blueprint."
+            ),
         })
 
     @tool(
@@ -643,7 +649,9 @@ def create_devopshero_mcp_server(conversation: Conversation):
             "Creates a pending deployment from the blueprint configuration. "
             "The job worker will build the Docker image, push to ECR, and deploy via CDK. "
             "Use get_deployment_status to check progress. "
-            "Requires save_app and save_blueprint to have been called first."
+            "Requires save_app and save_blueprint to have been called first. "
+            "CRITICAL: only call this after reviewing the saved draft with the user and receiving "
+            "explicit confirmation to deploy."
         ),
         {},
     )

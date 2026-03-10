@@ -1,5 +1,21 @@
 # DevOpsHero Development Journal
 
+## 2026-03-09 23:15 - [Deployment] Agent flow: save drafts early, confirm before deploy; trust LLM (no backend guard)
+
+**Conversation:** (current session)
+
+We changed the deployment agent so it saves the app and blueprint drafts as soon as analysis (and any clarifications) provide enough data, then confirms with the user that the saved draft looks good before calling `deploy_blueprint`. The agent was launching into deployment too fast; the fix is prompt and tool-description guidance, with no backend enforcement.
+
+**What we did:**
+- **System prompt (`system_prompt_app_deployment.md`):** Reordered the deployment flow so "Save initial drafts" (save_app + save_blueprint) happens early (step 6), before Dockerfile/PR work. Added `<draft_persistence>` (call save_app/save_blueprint as soon as you have enough info; don't wait until the last moment) and `<wait_for_deploy_confirmation>` (after saving, summarize the draft, ask "Everything looks good. Deploy this draft now?" via AskUserQuestion with "Deploy now" / "Keep editing", and do not call deploy_blueprint in the same turn as save_blueprint). Steps 11–12 are "Review the saved draft" and "Deploy after explicit approval."
+- **MCP tool descriptions (`mcp_tools.py`):** save_app and save_blueprint now say to use them as soon as you have enough information to persist the draft; save_blueprint's result note says to review the draft and wait for explicit confirmation before deploy_blueprint. deploy_blueprint description says to call it only after reviewing the saved draft with the user and receiving explicit confirmation.
+- **Backend guard removed:** We initially added a hard check in `deploy_blueprint`: it refused to run unless the conversation had a recent AskUserQuestion with the exact confirmation text and either a selected "Deploy now"/"Yes, deploy" or a user text reply matching a list of affirmative phrases. The user asked to remove that and trust the LLM. We removed the confirmation check, constants, and helper functions from `deploy_blueprint.py` and dropped the tests that asserted the guard (require confirmation, require reconfirmation after blueprint update). Prompt and tool wording still direct the agent to save early and confirm before deploying; behavior is guidance-only.
+
+**Key points:**
+- Agent is instructed to save app + blueprint drafts as soon as analysis gives enough data, then review the draft and ask for deployment approval before calling deploy_blueprint.
+- No backend enforcement: we rely on the LLM to follow the prompt and tool descriptions rather than blocking deploy_blueprint when no confirmation message is found.
+- Draft persistence and wait_for_deploy_confirmation sections in the prompt define the desired flow; deploy_blueprint has no Message/CHOICE checks.
+
 ## 2026-03-09 22:45 - [Deployment] Blueprint panel: effective values, subdomain conflict resolution, URL and CPU display
 
 **Conversation:** (current session)
