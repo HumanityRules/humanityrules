@@ -1,5 +1,22 @@
 # DevOpsHero Development Journal
 
+## 2026-03-10 21:30 - [Bugfix] AskUserQuestion tool use ID missing in pending_tool_calls
+
+**Conversation:** [2026-03-10-1439-ffa1caa9.md](conversations/2026-03-10-1439-ffa1caa9.md)
+
+During a deployment flow, after the user answered an AskUserQuestion ("Everything looks good. Deploy this draft now?" → "Deploy now"), the logs showed: `No call info found for tool use ID: toolu_bdrk_013i527ph8vKYvRcjk3hcYL9`. The deployment still completed; the error was cosmetic but noisy.
+
+**Root cause:** Asymmetry in how AskUserQuestion is handled in the agent stream:
+
+- In `_handle_tool_use_blocks`, when the SDK sends an AssistantMessage with an AskUserQuestion tool use block, we intentionally skip adding it to `ctx.pending_tool_calls` (and skip emitting a `tool_start` event) because the question is rendered via the `_can_use_tool` callback instead.
+- After the user answers, the SDK sends a synthetic UserMessage containing a ToolResultBlock for that same tool use ID. `_handle_tool_results` looks up the ID in `pending_tool_calls` and fails because we never registered it.
+
+**Fix:** (1) In `_handle_tool_use_blocks`, still register AskUserQuestion in `pending_tool_calls` (so the result can be matched) but continue to skip emitting `tool_start`. (2) In `_handle_tool_results`, after matching the result by ID, skip persistence and `tool_result` emission for AskUserQuestion — the question/answer is already handled and persisted as a CHOICE message by `_can_use_tool`.
+
+**Key points:**
+- AskUserQuestion must be in `pending_tool_calls` when the result arrives, or we log "No call info found" and drop the result (gracefully, but noisily).
+- We do not persist or emit tool_result for AskUserQuestion; the CHOICE message and metadata updated in `_can_use_tool` are the source of truth.
+
 ## 2026-03-09 23:15 - [Deployment] Agent flow: save drafts early, confirm before deploy; trust LLM (no backend guard)
 
 **Conversation:** (current session)

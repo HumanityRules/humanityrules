@@ -440,8 +440,10 @@ async def _handle_assistant_message(message: AssistantMessage, ctx: StreamingCon
         if not isinstance(block, ToolUseBlock):
             continue
 
-        # AskUserQuestion is rendered by the canUseTool callback as a "question" event
+        # AskUserQuestion is rendered by the canUseTool callback as a "question" event.
+        # Register it so _handle_tool_results can match the result, but skip tool_start.
         if block.name == "AskUserQuestion":
+            ctx.pending_tool_calls[block.id] = {"name": block.name, "input": block.input}
             continue
 
         enriched_input = await _enrich_tool_input(block.name, block.input)
@@ -479,6 +481,11 @@ async def _handle_tool_results(message: UserMessage, ctx: StreamingContext) -> A
             continue
 
         tool_name = call_info["name"]
+
+        # AskUserQuestion results are already persisted as CHOICE messages by _can_use_tool.
+        if tool_name == "AskUserQuestion":
+            continue
+
         status = "error" if block.is_error else "success"
 
         # Compute duration from the PreToolUse hook start time (set right before execution)
