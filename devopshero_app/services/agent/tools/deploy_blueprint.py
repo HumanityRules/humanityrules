@@ -8,13 +8,7 @@ The job worker picks it up from there.
 from dataclasses import asdict, dataclass
 from datetime import datetime
 
-from devopshero_app.models import (
-    App,
-    Conversation,
-    Deployment,
-    DeploymentBlueprint,
-    DeploymentLog,
-)
+from devopshero_app.models import Conversation, Deployment, DeploymentBlueprint, DeploymentLog
 from devopshero_app.services import deployment_blueprint_effective_values
 
 
