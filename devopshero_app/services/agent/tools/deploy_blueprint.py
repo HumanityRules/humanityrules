@@ -15,6 +15,7 @@ from devopshero_app.models import (
     DeploymentBlueprint,
     DeploymentLog,
 )
+from devopshero_app.services import deployment_blueprint_effective_values
 
 
 @dataclass
@@ -76,7 +77,11 @@ async def deploy_blueprint(conversation: Conversation) -> DeployBlueprintResult:
             f"(status: {active_deployment.status}). Wait for it to complete."
         )
 
-    git_ref = blueprint.branch or blueprint.app.repository.default_branch
+    effective_values = await deployment_blueprint_effective_values.aresolve_deployment_blueprint_effective_values(
+        app=blueprint.app,
+        blueprint=blueprint,
+    )
+    git_ref = effective_values.branch
     image_tag = _generate_image_tag(
         app_slug=blueprint.app.slug,
         git_ref=git_ref,
@@ -90,7 +95,7 @@ async def deploy_blueprint(conversation: Conversation) -> DeployBlueprintResult:
         blueprint=blueprint,
         app=blueprint.app,
         environment=blueprint.environment,
-        subdomain=blueprint.subdomain or blueprint.app.slug,
+        subdomain=effective_values.subdomain,
         git_ref=git_ref,
         git_commit_sha="",
         git_commit_message="",

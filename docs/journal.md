@@ -1,5 +1,30 @@
 # DevOpsHero Development Journal
 
+## 2026-03-09 22:45 - [Deployment] Blueprint panel: effective values, subdomain conflict resolution, URL and CPU display
+
+**Conversation:** (current session)
+
+We improved the deployment editor left-panel blueprint section so branch and subdomain show actual resolved values instead of "(default)", restored the previously lost conflict-aware subdomain resolution, and added full-URL and CPU vCPU display.
+
+**Effective values (shared helper):**
+- Added `devopshero_app/services/deployment_blueprint_effective_values.py` as the single place that resolves display and runtime values for a blueprint: branch (blank → `repository.default_branch`), subdomain (blank → `app.slug` with conflict handling), and derived `url` and `cpu_display`.
+- View (`_build_blueprint_section_context`), `save_blueprint`, and `deploy_blueprint` all use this helper so the panel and tool/deploy behavior stay in sync. We initially showed "Inherited from repository default branch" / "Inherited from app slug" then simplified to just the resolved value per user preference.
+
+**Subdomain conflict resolution (restored):**
+- The old `deploy_app` tool (removed in the blueprint refactor) had `_check_subdomain_conflict` and `_resolve_subdomain`: default to `app.slug`, auto-suffix to `app_slug-environment_slug` when that hostname was already in use in the same hosted zone, and exclude the same (app, environment) when replacing a deployment. That logic was ported into the shared resolver so we don't lose the solved multi-environment same-hosted-zone behavior.
+- `save_blueprint` now validates subdomain (including conflict check) before creating or updating a blueprint; an explicit conflicting subdomain raises and no blueprint is persisted. `deploy_blueprint` uses the same async resolver so the created `Deployment.subdomain` matches what the panel shows.
+- We removed the view-layer try/except fallback for `ValueError` (user: we're a fresh app, no stale data); resolution errors now bubble.
+
+**Panel display:**
+- **URL:** When the environment has a hosted zone, the panel shows full URL (`https://{subdomain}.{hosted_zone}`) and a separate Subdomain row (subdomain before URL). When there is no hosted zone, only Subdomain is shown.
+- **CPU:** The panel shows both ECS units and vCPU equivalent (e.g. "256 units (0.25 vCPU)", "2048 units (2 vCPU)") via `cpu_display` from the helper; 1024 units = 1 vCPU.
+
+**Key points:**
+- Single source of truth for blueprint effective values: `deployment_blueprint_effective_values` (sync `resolve_*`, async `aresolve_*`) used by view, save_blueprint, and deploy_blueprint.
+- Conflict-aware subdomain resolution is back: same hosted zone + conflict → auto-suffix `-{env_slug}`; same app+environment excluded when replacing; explicit conflict raises before persist.
+- Blueprint section shows URL (when hosted zone set), Subdomain, and CPU with vCPU; no "(default)" placeholders.
+- Tests cover fallback values, auto-suffix on conflict, same-app-same-env exclusion, explicit conflict rejection without persist, deploy-time persisted subdomain, and CPU display for 256 and 2048 units.
+
 ## 2026-03-09 21:40 - [Deployment] New vs resume deployment: explicit entrypoints and discard draft
 
 **Conversation:** [2026-03-09-2136-753f8fed.md](conversations/2026-03-09-2136-753f8fed.md)

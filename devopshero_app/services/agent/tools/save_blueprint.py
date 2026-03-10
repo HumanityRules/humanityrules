@@ -17,6 +17,7 @@ from devopshero_app.models import (
     Workspace,
     User,
 )
+from devopshero_app.services import deployment_blueprint_effective_values
 
 
 def _normalize_environment_variables(value: Any, existing: list | None) -> list[dict[str, str]]:
@@ -145,7 +146,7 @@ async def save_blueprint(
 
     if existing_blueprint_id:
         blueprint = await DeploymentBlueprint.objects.select_related(
-            "app", "environment",
+            "app__repository", "environment",
         ).aget(id=existing_blueprint_id)
 
         if blueprint.status not in (DeploymentBlueprint.Status.DRAFT, DeploymentBlueprint.Status.FAILED):
@@ -180,6 +181,10 @@ async def save_blueprint(
             blueprint.status = DeploymentBlueprint.Status.DRAFT
             blueprint.status_message = ""
 
+        effective_values = await deployment_blueprint_effective_values.aresolve_deployment_blueprint_effective_values(
+            app=blueprint.app,
+            blueprint=blueprint,
+        )
         await blueprint.asave()
         created = False
     else:
@@ -216,6 +221,24 @@ async def save_blueprint(
             except Datastore.DoesNotExist:
                 raise ValueError(f"Datastore {datastore_id} not found in workspace.")
 
+        draft_blueprint = DeploymentBlueprint(
+            app=app,
+            environment=environment,
+            status=DeploymentBlueprint.Status.DRAFT,
+            branch=branch or "",
+            cpu=cpu or 256,
+            memory=memory or 512,
+            environment_variables=_normalize_environment_variables(environment_variables, None),
+            app_secrets=_normalize_app_secrets(app_secrets, None),
+            datastore=datastore,
+            subdomain=subdomain or "",
+            created_by=user,
+        )
+        effective_values = await deployment_blueprint_effective_values.aresolve_deployment_blueprint_effective_values(
+            app=app,
+            blueprint=draft_blueprint,
+        )
+
         blueprint = await DeploymentBlueprint.objects.acreate(
             app_id=conversation.context_app_id,
             environment=environment,
@@ -243,10 +266,10 @@ async def save_blueprint(
         app_name=blueprint.app.name,
         environment_name=blueprint.environment.name,
         status=blueprint.status,
-        branch=blueprint.branch or "(default)",
+        branch=effective_values.branch,
         cpu=blueprint.cpu,
         memory=blueprint.memory,
-        subdomain=blueprint.subdomain or "(default)",
+        subdomain=effective_values.subdomain,
         has_env_vars=bool(blueprint.environment_variables),
         has_secrets=bool(blueprint.app_secrets),
         has_datastore=blueprint.datastore_id is not None,
