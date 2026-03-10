@@ -188,6 +188,50 @@ class TestAppEndpoints(TestCase):
         conversation.refresh_from_db()
         self.assertEqual(conversation.status, Conversation.Status.ACTIVE)
 
+    def test_ws_editor_resume_deployment_shows_effective_branch_and_url_values(self) -> None:
+        self.repo.default_branch = "master"
+        self.repo.save()
+        self.env.shared_alb_hosted_zone = "example.com"
+        self.env.save(update_fields=["shared_alb_hosted_zone", "updated_at"])
+        self.blueprint.branch = ""
+        self.blueprint.subdomain = ""
+        self.blueprint.save()
+        self._set_open_blueprint_status(status=DeploymentBlueprint.Status.DRAFT)
+        self.client.force_login(self.ws_editor)
+        response = self.client.get("/deploy/myapp/resume/", **HTMX)
+        self.assertEqual(response.status_code, 200)
+        effective_values = response.context["blueprint_effective_values"]
+        self.assertEqual(effective_values.branch, "master")
+        self.assertEqual(effective_values.cpu_display, "256 units (0.25 vCPU)")
+        self.assertEqual(effective_values.subdomain, "myapp")
+        self.assertEqual(effective_values.url, "https://myapp.example.com")
+        self.assertContains(response, "master")
+        self.assertContains(response, "256 units (0.25 vCPU)")
+        self.assertContains(response, "https://myapp.example.com")
+        self.assertContains(response, "myapp")
+        self.assertNotContains(response, "Inherited from repository default branch")
+        self.assertNotContains(response, "Inherited from app slug")
+
+    def test_ws_editor_resume_deployment_shows_explicit_url_value(self) -> None:
+        self.env.shared_alb_hosted_zone = "example.com"
+        self.env.save(update_fields=["shared_alb_hosted_zone", "updated_at"])
+        self.blueprint.branch = "release-2026"
+        self.blueprint.subdomain = "preview-myapp"
+        self.blueprint.save()
+        self._set_open_blueprint_status(status=DeploymentBlueprint.Status.DRAFT)
+        self.client.force_login(self.ws_editor)
+        response = self.client.get("/deploy/myapp/resume/", **HTMX)
+        self.assertEqual(response.status_code, 200)
+        effective_values = response.context["blueprint_effective_values"]
+        self.assertEqual(effective_values.branch, "release-2026")
+        self.assertEqual(effective_values.subdomain, "preview-myapp")
+        self.assertEqual(effective_values.url, "https://preview-myapp.example.com")
+        self.assertContains(response, "release-2026")
+        self.assertContains(response, "https://preview-myapp.example.com")
+        self.assertContains(response, "preview-myapp")
+        self.assertNotContains(response, "Inherited from repository default branch")
+        self.assertNotContains(response, "Inherited from app slug")
+
     def test_ws_editor_can_discard_open_draft_from_editor(self) -> None:
         self._set_open_blueprint_status(status=DeploymentBlueprint.Status.DRAFT)
         conversation = Conversation.objects.create(

@@ -8,6 +8,8 @@ Entry points:
 - Existing app fallback: /deploy/<app_slug>/ - preserves the current deployment task after app creation
 """
 
+from typing import Any
+
 from django.contrib.auth.decorators import login_required
 from django.http import HttpRequest, HttpResponse
 from django.shortcuts import get_object_or_404, render
@@ -17,6 +19,7 @@ from django.views.decorators.http import require_POST
 
 from .. import models
 from ..services.agent import agent_service
+from ..services import deployment_blueprint_effective_values
 from . import abac_view_checks
 from . import apps as apps_views
 from . import base
@@ -44,6 +47,24 @@ def _get_editor_messages(conversation: models.Conversation):
     ).order_by("created_at")
 
 
+def _build_blueprint_section_context(
+    app: models.App | None,
+    blueprint: models.DeploymentBlueprint | None,
+) -> dict[str, Any]:
+    """Build shared context for blueprint section rendering."""
+    context: dict[str, Any] = {
+        "app": app,
+        "blueprint": blueprint,
+        "blueprint_effective_values": None,
+    }
+    if app and blueprint:
+        context["blueprint_effective_values"] = deployment_blueprint_effective_values.resolve_deployment_blueprint_effective_values(
+            app=app,
+            blueprint=blueprint,
+        )
+    return context
+
+
 def _render_existing_app_editor(
     request: HttpRequest,
     app: models.App,
@@ -55,11 +76,10 @@ def _render_existing_app_editor(
     context.update({
         "workspace": app.workspace,
         "repository": app.repository,
-        "app": app,
-        "blueprint": blueprint,
         "conversation": conversation,
         "messages": _get_editor_messages(conversation=conversation),
     })
+    context.update(_build_blueprint_section_context(app=app, blueprint=blueprint))
     return render(request=request, template_name="devopshero_app/deploy/deployment_editor.html", context=context)
 
 
@@ -168,11 +188,10 @@ def deployment_editor_new(request: HttpRequest) -> HttpResponse:
     context.update({
         "workspace": workspace,
         "repository": repository,
-        "app": None,
-        "blueprint": None,
         "conversation": conversation,
         "messages": messages,
     })
+    context.update(_build_blueprint_section_context(app=None, blueprint=None))
 
     return render(request=request, template_name="devopshero_app/deploy/deployment_editor.html", context=context)
 
@@ -308,7 +327,7 @@ def deployment_editor_blueprint_section(request: HttpRequest, app_slug: str) -> 
     return render(
         request=request,
         template_name="devopshero_app/deploy/_blueprint_section.html",
-        context={"app": app, "blueprint": blueprint},
+        context=_build_blueprint_section_context(app=app, blueprint=blueprint),
     )
 
 

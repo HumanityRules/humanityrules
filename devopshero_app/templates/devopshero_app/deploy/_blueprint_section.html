@@ -1,7 +1,7 @@
 <div class="rounded-lg border border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-800/60">
     <div class="flex items-center justify-between px-4 py-3 bg-gray-50 dark:bg-gray-800 rounded-t-lg">
         <h2 class="text-sm font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">Deployment Blueprint</h2>
-        <div class="flex items-center gap-3">
+        <div class="flex items-baseline gap-3">
             {% if blueprint %}
             <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium
                 {% if blueprint.status == 'active' %}bg-green-100 text-green-700 dark:bg-green-500/10 dark:text-green-400
@@ -16,7 +16,7 @@
                   hx-target="#main-content"
                   hx-swap="innerHTML"
                   hx-confirm="Discard this deployment draft?">
-                <button type="submit" class="text-xs font-medium text-red-600 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300">
+                <button type="submit" class="text-xs font-medium text-red-600 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300 cursor-pointer">
                     Discard Draft
                 </button>
             </form>
@@ -34,13 +34,19 @@
             <dt class="text-gray-500 dark:text-gray-400">Environment</dt>
             <dd class="text-gray-900 dark:text-white font-medium">{{ blueprint.environment.name }}</dd>
             <dt class="text-gray-500 dark:text-gray-400">Branch</dt>
-            <dd class="text-gray-900 dark:text-white">{{ blueprint.branch|default:"(default)" }}</dd>
+            <dd class="text-gray-900 dark:text-white">{{ blueprint_effective_values.branch }}</dd>
             <dt class="text-gray-500 dark:text-gray-400">CPU</dt>
-            <dd class="text-gray-900 dark:text-white">{{ blueprint.cpu }} units</dd>
+            <dd class="text-gray-900 dark:text-white">{{ blueprint_effective_values.cpu_display }}</dd>
             <dt class="text-gray-500 dark:text-gray-400">Memory</dt>
             <dd class="text-gray-900 dark:text-white">{{ blueprint.memory }} MiB</dd>
             <dt class="text-gray-500 dark:text-gray-400">Subdomain</dt>
-            <dd class="text-gray-900 dark:text-white">{{ blueprint.subdomain|default:"(default)" }}</dd>
+            <dd class="text-gray-900 dark:text-white">{{ blueprint_effective_values.subdomain }}</dd>
+            {% if blueprint_effective_values.url %}
+            <dt class="text-gray-500 dark:text-gray-400">URL</dt>
+            <dd class="text-gray-900 dark:text-white break-all">
+                {{ blueprint_effective_values.url }}
+            </dd>
+            {% endif %}
             {% if blueprint.datastore %}
             <dt class="text-gray-500 dark:text-gray-400">Datastore</dt>
             <dd class="text-gray-900 dark:text-white">{{ blueprint.datastore.name }}</dd>
