@@ -1,20 +1,32 @@
 <div class="rounded-lg border border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-800/60">
     <div class="flex items-center justify-between px-4 py-3 bg-gray-50 dark:bg-gray-800 rounded-t-lg">
         <h2 class="text-sm font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">Deployment Blueprint</h2>
-        {% if blueprint %}
-        <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium
-            {% if blueprint.status == 'active' %}bg-green-100 text-green-700 dark:bg-green-500/10 dark:text-green-400
-            {% elif blueprint.status == 'deploying' %}bg-yellow-100 text-yellow-700 dark:bg-yellow-500/10 dark:text-yellow-400
-            {% elif blueprint.status == 'failed' %}bg-red-100 text-red-700 dark:bg-red-500/10 dark:text-red-400
-            {% elif blueprint.status == 'draft' %}bg-blue-100 text-blue-700 dark:bg-blue-500/10 dark:text-blue-400
-            {% else %}bg-gray-100 text-gray-500 dark:bg-gray-700 dark:text-gray-400{% endif %}">
-            {{ blueprint.get_status_display }}
-        </span>
-        {% else %}
-        <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-500 dark:bg-gray-700 dark:text-gray-400">
-            Pending
-        </span>
-        {% endif %}
+        <div class="flex items-center gap-3">
+            {% if blueprint %}
+            <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium
+                {% if blueprint.status == 'active' %}bg-green-100 text-green-700 dark:bg-green-500/10 dark:text-green-400
+                {% elif blueprint.status == 'deploying' %}bg-yellow-100 text-yellow-700 dark:bg-yellow-500/10 dark:text-yellow-400
+                {% elif blueprint.status == 'failed' %}bg-red-100 text-red-700 dark:bg-red-500/10 dark:text-red-400
+                {% elif blueprint.status == 'draft' %}bg-blue-100 text-blue-700 dark:bg-blue-500/10 dark:text-blue-400
+                {% else %}bg-gray-100 text-gray-500 dark:bg-gray-700 dark:text-gray-400{% endif %}">
+                {{ blueprint.get_status_display }}
+            </span>
+            {% if blueprint.status == 'draft' or blueprint.status == 'failed' %}
+            <form hx-post="{% url 'deployment_editor_discard_draft' app_slug=app.slug %}"
+                  hx-target="#main-content"
+                  hx-swap="innerHTML"
+                  hx-confirm="Discard this deployment draft?">
+                <button type="submit" class="text-xs font-medium text-red-600 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300">
+                    Discard Draft
+                </button>
+            </form>
+            {% endif %}
+            {% else %}
+            <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-500 dark:bg-gray-700 dark:text-gray-400">
+                Pending
+            </span>
+            {% endif %}
+        </div>
     </div>
     <div class="border-t border-gray-200 dark:border-gray-700 px-4 py-3">
         {% if blueprint %}

@@ -1,5 +1,36 @@
 # DevOpsHero Development Journal
 
+## 2026-03-09 21:40 - [Deployment] New vs resume deployment: explicit entrypoints and discard draft
+
+**Conversation:** [2026-03-09-2136-753f8fed.md](conversations/2026-03-09-2136-753f8fed.md)
+
+We implemented the product contract agreed in the deployment story: the app-detail and workspace app-card deployment buttons now share one source of truth (open blueprint or not), and "New Deployment" creates a fresh app-scoped conversation with no blueprint until the agent selects an environment, while "Resume Deployment" reopens the open deployment task (blueprint as source of truth, conversation resumed or created for that blueprint). We also added a "Discard Draft" action in the deployment editor and enforced one open blueprint per app in the backend.
+
+**Product decisions (from conversation):**
+- No parallel drafts per app: at most one open blueprint (draft, failed, or deploying) at a time.
+- Open = draft, failed, or deploying. All three show "Resume"; only when there is no open blueprint do we show "New".
+- Resume uses the blueprint as source of truth: find or create a conversation bound to that blueprint; reactivate if completed/abandoned.
+- New creates a new conversation with `context_app` set and no `context_deployment_blueprint`; the agent creates the draft blueprint later when the user selects an environment.
+- Discard is only in the deployment editor (not on app detail), only for draft and failed (not deploying), and returns the user to app detail with "New Deployment" available.
+- App detail and workspace app card use the same logic so both resume buttons behave identically.
+
+**Implementation:**
+- **Shared open-blueprint logic:** In `views/apps.py`, added `OPEN_BLUEPRINT_STATUSES`, `get_open_blueprint(app)`, `get_open_blueprint_status_subquery()`, and `populate_deployment_entrypoint(app, open_blueprint_status)` so app detail and workspace/dashboard app lists get a single computed `has_open_deployment_task`, `open_blueprint_status`, `deployment_primary_action_label`, and `deployment_primary_action_url`. Replaced the previous "latest blueprint by created_at" and "draft-only" rules with "latest open blueprint" (draft/failed/deploying).
+- **Explicit routes:** Added `deployment_editor_app_new` (`/deploy/<app_slug>/new/`) and `deployment_editor_resume` (`/deploy/<app_slug>/resume/`). App detail and app card buttons point to these URLs based on the shared entrypoint fields. The existing `deployment_editor` (`/deploy/<app_slug>/`) remains as a backward-compatible entrypoint: it resumes if there is an open blueprint, otherwise uses or creates a no-blueprint conversation (e.g. after new-app flow redirects to app-scoped URL).
+- **Resume flow:** Resume loads the open blueprint, then finds the current user's latest conversation for that blueprint (or creates one and binds it). Completed/abandoned conversations are reactivated so the user can continue in the same thread.
+- **New flow:** New always creates a fresh app-scoped conversation with no blueprint. If the user had hit "New" while an open blueprint existed, we redirect to the resume URL and push that in history so the URL matches the actual state.
+- **Discard draft:** New POST endpoint `deployment_editor_discard_draft` marks the open draft/failed blueprint as discarded and abandons conversations tied to it, then returns app detail HTML with `HX-Push-Url` so the client shows app detail with "New Deployment". Discard button lives in the blueprint section header in the editor (draft or failed only).
+- **Backend guard:** `save_blueprint` now checks for an existing open blueprint for the app before creating a new one; if one exists, it raises a clear error so the agent cannot create a second open draft (enforces "no parallel drafts" at creation time).
+- **Templates:** App detail and `_app_card` use `app.deployment_primary_action_label` and `app.deployment_primary_action_url`. App card shows open status (draft/failed/deploying) with appropriate badge styling. Workspace list view was updated to use `open_blueprint_status` for app status display where relevant.
+- **Tests:** Extended app and workspace ABAC view tests for new/resume/discard entrypoints, for "New Deployment" when no open blueprint, for "Resume Deployment" for both draft and failed blueprints, and for discard updating blueprint and conversation status.
+
+**Key points:**
+- One source of truth for "resume vs new" on both app detail and workspace app card, driven by open blueprint (draft/failed/deploying).
+- Explicit `/deploy/<app>/new/` and `/deploy/<app>/resume/` routes keep semantics clear; legacy `/deploy/<app>/` still works and chooses resume or no-blueprint flow by state.
+- Blueprint is the source of truth for resume; conversation is (re)bound to that blueprint and reactivated if needed.
+- Discard draft only in editor, only for draft/failed; server-side guard in `save_blueprint` prevents parallel open blueprints per app.
+- By design: if the user starts "New Deployment" and leaves before the agent creates the first blueprint, the app still shows "New Deployment" (no open blueprint yet); we did not add a separate "resume no-blueprint conversation" signal.
+
 ## 2026-03-09 14:19 - [UI] Resume draft deployments from workspace app cards
 
 **Conversation:** [2026-03-09-1420-753f8fed.md](conversations/2026-03-09-1420-753f8fed.md)

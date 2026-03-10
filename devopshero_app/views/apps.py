@@ -4,8 +4,10 @@ from typing import Any
 from uuid import UUID
 
 from django.contrib.auth.decorators import login_required
+from django.db.models import OuterRef
 from django.http import HttpRequest, HttpResponse
 from django.shortcuts import get_object_or_404, render
+from django.urls import reverse
 from django.views.decorators.http import require_GET, require_POST
 
 from devopshero_app.models import App, Deployment, DeploymentBlueprint, ResourceTag
@@ -13,6 +15,12 @@ from devopshero_app.services import abac
 
 from . import abac_view_checks
 from . import base
+
+OPEN_BLUEPRINT_STATUSES = (
+    DeploymentBlueprint.Status.DRAFT,
+    DeploymentBlueprint.Status.FAILED,
+    DeploymentBlueprint.Status.DEPLOYING,
+)
 
 
 def _get_app_for_user(request: HttpRequest, app_slug: str) -> App:
@@ -33,19 +41,47 @@ def _get_deployment_for_app(app: App, deployment_id: UUID) -> Deployment:
     )
 
 
-def _build_app_detail_context(request: HttpRequest, app: App) -> dict[str, Any]:
+def get_open_blueprint(app: App) -> DeploymentBlueprint | None:
+    """Return the latest in-progress blueprint for an app, if any."""
+    return (
+        DeploymentBlueprint.objects.filter(app=app, status__in=OPEN_BLUEPRINT_STATUSES)
+        .select_related("app", "environment", "datastore")
+        .order_by("-created_at")
+        .first()
+    )
+
+
+def get_open_blueprint_status_subquery():
+    """Return a subquery for the latest in-progress blueprint status per app."""
+    return (
+        DeploymentBlueprint.objects.filter(app=OuterRef("pk"), status__in=OPEN_BLUEPRINT_STATUSES)
+        .order_by("-created_at")
+        .values("status")[:1]
+    )
+
+
+def populate_deployment_entrypoint(app: App, open_blueprint_status: str) -> App:
+    """Attach shared deployment action fields used by app summary templates."""
+    has_open_deployment_task = bool(open_blueprint_status)
+    app.has_open_deployment_task = has_open_deployment_task
+    app.open_blueprint_status = open_blueprint_status
+    if has_open_deployment_task:
+        app.deployment_primary_action_label = "Resume Deployment"
+        app.deployment_primary_action_url = reverse("deployment_editor_resume", kwargs={"app_slug": app.slug})
+    else:
+        app.deployment_primary_action_label = "New Deployment"
+        app.deployment_primary_action_url = reverse("deployment_editor_app_new", kwargs={"app_slug": app.slug})
+    return app
+
+
+def build_app_detail_context(request: HttpRequest, app: App) -> dict[str, Any]:
     """Build the shared context dict for app detail rendering."""
     context = base.get_app_shell_context(request=request, current_page="workspaces")
 
     deployments = Deployment.objects.filter(
         app=app,
     ).select_related("environment", "environment__aws_account").order_by("-created_at")[:20]
-    latest_blueprint = (
-        DeploymentBlueprint.objects.filter(app=app)
-        .select_related("environment", "datastore")
-        .order_by("-created_at")
-        .first()
-    )
+    open_blueprint = get_open_blueprint(app=app)
 
     # Build per-environment summary (first occurrence = latest, since ordered by -created_at)
     seen_environments = {}
@@ -63,10 +99,15 @@ def _build_app_detail_context(request: HttpRequest, app: App) -> dict[str, Any]:
     can_edit = abac.check_action(request.user.current_organization, request.user, app.workspace, "workspace", "workspace:edit")
     can_admin = abac.check_action(request.user.current_organization, request.user, app.workspace, "workspace", "workspace:admin")
 
+    populate_deployment_entrypoint(
+        app=app,
+        open_blueprint_status=open_blueprint.status if open_blueprint else "",
+    )
+
     context["app"] = app
     context["deployments"] = deployments
     context["environment_rows"] = environment_rows
-    context["latest_blueprint"] = latest_blueprint
+    context["open_blueprint"] = open_blueprint
     org = request.user.current_organization
     context["direct_tags"] = direct_tags
     context["inherited_tags"] = inherited_tags
@@ -93,7 +134,7 @@ def app_detail(request: HttpRequest, app_slug: str) -> HttpResponse:
     if denied:
         return denied
 
-    context = _build_app_detail_context(request, app)
+    context = build_app_detail_context(request, app)
     return render(request, "devopshero_app/apps/app_detail.html", context=context)
 
 
@@ -198,7 +239,7 @@ def app_deployment_redeploy(request: HttpRequest, app_slug: str, deployment_id: 
         created_by=request.user,
     )
 
-    context = _build_app_detail_context(request, app)
+    context = build_app_detail_context(request, app)
     return render(request, "devopshero_app/apps/app_detail.html", context=context)
 
 

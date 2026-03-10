@@ -78,7 +78,7 @@ class TestWorkspaceEndpoints(TestCase):
             key="removable", value="yes",
         )
 
-    def _create_draft_app(self) -> App:
+    def _create_open_blueprint_app(self, status: str) -> App:
         app = App.objects.create(
             organization=self.org,
             workspace=self.ws_eng,
@@ -100,7 +100,7 @@ class TestWorkspaceEndpoints(TestCase):
         DeploymentBlueprint.objects.create(
             app=app,
             environment=environment,
-            status=DeploymentBlueprint.Status.DRAFT,
+            status=status,
             cpu=256,
             memory=512,
             subdomain="draft-app-staging",
@@ -145,15 +145,23 @@ class TestWorkspaceEndpoints(TestCase):
         self.assertEqual(response.status_code, 200)
 
     def test_editor_sees_resume_deployment_for_draft_app(self) -> None:
-        self._create_draft_app()
+        self._create_open_blueprint_app(status=DeploymentBlueprint.Status.DRAFT)
         self.client.force_login(self.editor_user)
         response = self.client.get("/workspaces/engineering/", **HTMX)
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Resume Deployment")
         self.assertContains(response, "Draft")
 
+    def test_editor_sees_resume_deployment_for_failed_app(self) -> None:
+        self._create_open_blueprint_app(status=DeploymentBlueprint.Status.FAILED)
+        self.client.force_login(self.editor_user)
+        response = self.client.get("/workspaces/engineering/", **HTMX)
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Resume Deployment")
+        self.assertContains(response, "Failed")
+
     def test_viewer_does_not_see_resume_deployment_for_draft_app(self) -> None:
-        self._create_draft_app()
+        self._create_open_blueprint_app(status=DeploymentBlueprint.Status.DRAFT)
         self.client.force_login(self.viewer_user)
         response = self.client.get("/workspaces/engineering/", **HTMX)
         self.assertEqual(response.status_code, 200)
