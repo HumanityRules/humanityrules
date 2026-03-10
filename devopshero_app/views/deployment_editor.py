@@ -15,7 +15,7 @@ from django.http import HttpRequest, HttpResponse
 from django.shortcuts import get_object_or_404, render
 from django.urls import reverse
 from django.utils import timezone
-from django.views.decorators.http import require_POST
+from django.views.decorators.http import require_GET, require_POST
 
 from .. import models
 from ..services.agent import agent_service
@@ -63,6 +63,14 @@ def _build_blueprint_section_context(
             blueprint=blueprint,
         )
     return context
+
+
+def _get_discardable_blueprint(app: models.App) -> models.DeploymentBlueprint | None:
+    """Return the app's open blueprint when it can still be discarded."""
+    blueprint = apps_views.get_open_blueprint(app=app)
+    if not blueprint or blueprint.status not in DISCARDABLE_BLUEPRINT_STATUSES:
+        return None
+    return blueprint
 
 
 def _render_existing_app_editor(
@@ -332,6 +340,34 @@ def deployment_editor_blueprint_section(request: HttpRequest, app_slug: str) -> 
 
 
 @login_required
+@require_GET
+def deployment_editor_discard_draft_confirm(request: HttpRequest, app_slug: str) -> HttpResponse:
+    """Return the discard-draft confirmation modal HTML."""
+    app = _get_existing_app(request=request, app_slug=app_slug)
+    denied = abac_view_checks.check_abac(request, app.workspace, "workspace", "workspace:edit")
+    if denied:
+        return denied
+
+    blueprint = _get_discardable_blueprint(app=app)
+    if blueprint is None:
+        return HttpResponse(status=422)
+
+    return render(
+        request=request,
+        template_name="devopshero_app/partials/_confirm_modal.html",
+        context={
+            "modal_title": "Discard Deployment Draft",
+            "modal_message": (
+                f"Discard the current deployment draft for {blueprint.environment.name}? "
+                "This abandons the draft blueprint and its conversation."
+            ),
+            "confirm_url": reverse("deployment_editor_discard_draft", kwargs={"app_slug": app.slug}),
+            "confirm_label": "Discard Draft",
+        },
+    )
+
+
+@login_required
 @require_POST
 def deployment_editor_discard_draft(request: HttpRequest, app_slug: str) -> HttpResponse:
     """Discard the app's open draft or failed blueprint and return to app detail."""
@@ -340,8 +376,8 @@ def deployment_editor_discard_draft(request: HttpRequest, app_slug: str) -> Http
     if denied:
         return denied
 
-    blueprint = apps_views.get_open_blueprint(app=app)
-    if not blueprint or blueprint.status not in DISCARDABLE_BLUEPRINT_STATUSES:
+    blueprint = _get_discardable_blueprint(app=app)
+    if blueprint is None:
         return HttpResponse(status=422)
 
     blueprint.status = models.DeploymentBlueprint.Status.DISCARDED
