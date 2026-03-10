@@ -49,6 +49,7 @@ from .deployment_editor import (
     deployment_editor_resume,
     deployment_editor_app_section,
     deployment_editor_blueprint_section,
+    deployment_editor_discard_draft_confirm,
     deployment_editor_discard_draft,
 )
 from .waitlist_views import waitlist_signup
@@ -145,6 +146,7 @@ __all__ = [
     "deployment_editor_resume",
     "deployment_editor_app_section",
     "deployment_editor_blueprint_section",
+    "deployment_editor_discard_draft_confirm",
     "deployment_editor_discard_draft",
     "waitlist_signup",
     "security_people",

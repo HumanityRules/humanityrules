@@ -15,7 +15,7 @@
         {% include "devopshero_app/partials/_breadcrumb.html" with p1_label="Workspaces" p1_url=workspaces_url p2_label=workspace.name p2_url=workspace_url current="New App" %}
         {% endif %}
         <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
-            {% if app %}Define the app and its deployment blueprint.{% else %}Set up and deploy a new application from <strong>{{ repository.full_name }}</strong>.{% endif %}
+            {% if app %}Define the app and its deployment blueprint. The blueprint is the environment-specific deployable state for this app.{% endif %}
         </p>
     </div>
 

@@ -232,6 +232,14 @@ class TestAppEndpoints(TestCase):
         self.assertNotContains(response, "Inherited from repository default branch")
         self.assertNotContains(response, "Inherited from app slug")
 
+    def test_ws_editor_can_fetch_discard_draft_confirm_modal(self) -> None:
+        self._set_open_blueprint_status(status=DeploymentBlueprint.Status.DRAFT)
+        self.client.force_login(self.ws_editor)
+        response = self.client.get("/deploy/myapp/discard-draft/confirm/", **HTMX)
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Discard Deployment Draft")
+        self.assertContains(response, "Discard Draft")
+
     def test_ws_editor_can_discard_open_draft_from_editor(self) -> None:
         self._set_open_blueprint_status(status=DeploymentBlueprint.Status.DRAFT)
         conversation = Conversation.objects.create(
@@ -269,6 +277,12 @@ class TestAppEndpoints(TestCase):
         self._set_open_blueprint_status(status=DeploymentBlueprint.Status.DRAFT)
         self.client.force_login(self.ws_viewer)
         response = self.client.post("/deploy/myapp/discard-draft/", **HTMX)
+        self.assertEqual(response.status_code, 403)
+
+    def test_ws_viewer_gets_403_on_discard_draft_confirm(self) -> None:
+        self._set_open_blueprint_status(status=DeploymentBlueprint.Status.DRAFT)
+        self.client.force_login(self.ws_viewer)
+        response = self.client.get("/deploy/myapp/discard-draft/confirm/", **HTMX)
         self.assertEqual(response.status_code, 403)
 
     # --- App Deployment Status Polling (requires workspace:view) ---
