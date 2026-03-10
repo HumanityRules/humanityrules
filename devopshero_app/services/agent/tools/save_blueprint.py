@@ -190,6 +190,20 @@ async def save_blueprint(
 
         from devopshero_app.models import App
         app = await App.objects.select_related("repository").aget(id=conversation.context_app_id)
+        open_blueprint_statuses = [
+            DeploymentBlueprint.Status.DRAFT,
+            DeploymentBlueprint.Status.FAILED,
+            DeploymentBlueprint.Status.DEPLOYING,
+        ]
+        open_blueprint = await DeploymentBlueprint.objects.filter(
+            app_id=conversation.context_app_id,
+            status__in=open_blueprint_statuses,
+        ).order_by("-created_at").afirst()
+        if open_blueprint:
+            raise ValueError(
+                "This app already has an open deployment blueprint. "
+                "Resume or discard it before starting a new deployment."
+            )
         environment = await _get_environment(
             organization_id=str(workspace.organization_id),
             environment_slug=environment_slug,

@@ -45,8 +45,11 @@ from .chat import (
 from .deployment_editor import (
     deployment_editor,
     deployment_editor_new,
+    deployment_editor_app_new,
+    deployment_editor_resume,
     deployment_editor_app_section,
     deployment_editor_blueprint_section,
+    deployment_editor_discard_draft,
 )
 from .waitlist_views import waitlist_signup
 from .security_abac import (
@@ -138,8 +141,11 @@ __all__ = [
     "chat_conversation_cost",
     "deployment_editor",
     "deployment_editor_new",
+    "deployment_editor_app_new",
+    "deployment_editor_resume",
     "deployment_editor_app_section",
     "deployment_editor_blueprint_section",
+    "deployment_editor_discard_draft",
     "waitlist_signup",
     "security_people",
     "security_people_default_role",

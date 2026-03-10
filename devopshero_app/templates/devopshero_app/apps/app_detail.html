@@ -17,12 +17,12 @@
     <div class="mb-6 flex items-end justify-between">
         {% include "devopshero_app/partials/_security_tags_section.html" with tags_title="App Tags" items=direct_tags empty_text="No direct tags" %}
         {% if can_edit %}
-        <a href="{% url 'deployment_editor' app_slug=app.slug %}"
-           hx-get="{% url 'deployment_editor' app_slug=app.slug %}"
+        <a href="{{ app.deployment_primary_action_url }}"
+           hx-get="{{ app.deployment_primary_action_url }}"
            hx-target="#main-content"
            hx-swap="innerHTML"
            hx-push-url="true"
-           class="px-3 py-1.5 bg-indigo-600 text-white text-sm font-medium rounded-lg hover:bg-indigo-700">{% if latest_blueprint and latest_blueprint.status == 'draft' %}Resume Deployment{% else %}New Deployment{% endif %}</a>
+           class="px-3 py-1.5 bg-indigo-600 text-white text-sm font-medium rounded-lg hover:bg-indigo-700">{{ app.deployment_primary_action_label }}</a>
         {% endif %}
     </div>
 

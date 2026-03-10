@@ -3,8 +3,9 @@ from django.db.models import Max, OuterRef, Subquery
 from django.http import HttpRequest, HttpResponse
 from django.shortcuts import render
 
-from ..models import App, Datastore, Deployment, DeploymentBlueprint, Workspace
+from ..models import App, Datastore, Deployment, Workspace
 from ..services import abac
+from . import apps as apps_views
 from . import base
 
 
@@ -19,11 +20,6 @@ def dashboard(request: HttpRequest) -> HttpResponse:
 
     latest_deployment_status = (
         Deployment.objects.filter(app=OuterRef("pk"))
-        .order_by("-created_at")
-        .values("status")[:1]
-    )
-    latest_blueprint_status = (
-        DeploymentBlueprint.objects.filter(app=OuterRef("pk"))
         .order_by("-created_at")
         .values("status")[:1]
     )
@@ -43,11 +39,17 @@ def dashboard(request: HttpRequest) -> HttpResponse:
         .annotate(
             last_deployed_at=Max("deployments__created_at"),
             latest_status=Subquery(latest_deployment_status),
-            latest_blueprint_status=Subquery(latest_blueprint_status),
+            open_blueprint_status=Subquery(apps_views.get_open_blueprint_status_subquery()),
             deployed_service_url=Subquery(latest_deployed_service_url),
         )
         .order_by("-created_at")
     )
+    apps = list(apps)
+    for app in apps:
+        apps_views.populate_deployment_entrypoint(
+            app=app,
+            open_blueprint_status=app.open_blueprint_status or "",
+        )
     datastores = Datastore.objects.filter(workspace__in=visible_workspaces).select_related("workspace").order_by("-created_at")
 
     context = base.get_app_shell_context(request=request, current_page="dashboard")

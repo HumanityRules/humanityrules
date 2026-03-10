@@ -9,10 +9,11 @@ from django.shortcuts import get_object_or_404, redirect, render
 from django.utils.text import slugify
 from django.views.decorators.http import require_POST
 
-from devopshero_app.models import App, Conversation, Deployment, DeploymentBlueprint, Repository, ResourceTag, Workspace
+from devopshero_app.models import App, Conversation, Deployment, Repository, ResourceTag, Workspace
 from devopshero_app.services import abac
 
 from . import abac_view_checks
+from . import apps as apps_views
 from . import base
 
 
@@ -29,16 +30,11 @@ def workspaces(request: HttpRequest) -> HttpResponse:
         .order_by("-created_at")
         .values("status")[:1]
     )
-    latest_blueprint_status = (
-        DeploymentBlueprint.objects.filter(app=OuterRef("pk"))
-        .order_by("-created_at")
-        .values("status")[:1]
-    )
     apps_prefetch = Prefetch(
         "apps",
         queryset=App.objects.annotate(
             latest_status=Coalesce(Subquery(latest_deployment_status), Value("never_deployed")),
-            latest_blueprint_status=Coalesce(Subquery(latest_blueprint_status), Value("")),
+            open_blueprint_status=Coalesce(Subquery(apps_views.get_open_blueprint_status_subquery()), Value("")),
         ).order_by("name"),
         to_attr="annotated_apps",
     )
@@ -50,6 +46,9 @@ def workspaces(request: HttpRequest) -> HttpResponse:
     )
 
     context = base.get_app_shell_context(request=request, current_page="workspaces")
+    for workspace in workspace_list:
+        for app in workspace.annotated_apps:
+            apps_views.populate_deployment_entrypoint(app=app, open_blueprint_status=app.open_blueprint_status)
     context["workspaces"] = workspace_list
     return render(request, "devopshero_app/workspaces/workspaces.html", context=context)
 
@@ -85,11 +84,6 @@ def workspace_detail(request: HttpRequest, workspace_slug: str) -> HttpResponse:
         .order_by("-created_at")
         .values("status")[:1]
     )
-    latest_blueprint_status = (
-        DeploymentBlueprint.objects.filter(app=OuterRef("pk"))
-        .order_by("-created_at")
-        .values("status")[:1]
-    )
     latest_deployed_service_url = (
         Deployment.objects.filter(app=OuterRef("pk"), status=Deployment.Status.SUCCEEDED)
         .order_by("-created_at")
@@ -100,9 +94,12 @@ def workspace_detail(request: HttpRequest, workspace_slug: str) -> HttpResponse:
     ).annotate(
         last_deployed_at=Max("deployments__created_at"),
         latest_status=Subquery(latest_deployment_status),
-        latest_blueprint_status=Coalesce(Subquery(latest_blueprint_status), Value("")),
+        open_blueprint_status=Coalesce(Subquery(apps_views.get_open_blueprint_status_subquery()), Value("")),
         deployed_service_url=Subquery(latest_deployed_service_url),
     ).order_by("name")
+    apps = list(apps)
+    for app in apps:
+        apps_views.populate_deployment_entrypoint(app=app, open_blueprint_status=app.open_blueprint_status)
     datastores = workspace.datastores.order_by("name")
     show_costs = request.user.is_staff
     conversations_qs = Conversation.objects.filter(

@@ -11,9 +11,9 @@
         <span class="min-w-0 font-medium text-gray-900 dark:text-white peer-hover:text-indigo-600 dark:peer-hover:text-indigo-400 truncate">
             {{ app.name }}
         </span>
-        {% if can_edit and app.latest_blueprint_status == 'draft' %}
-        <a href="{% url 'deployment_editor' app_slug=app.slug %}"
-           hx-get="{% url 'deployment_editor' app_slug=app.slug %}"
+        {% if can_edit and app.has_open_deployment_task %}
+        <a href="{{ app.deployment_primary_action_url }}"
+           hx-get="{{ app.deployment_primary_action_url }}"
            hx-target="#main-content"
            hx-swap="innerHTML"
            hx-push-url="true"
@@ -60,9 +60,12 @@
         </div>
         <div class="flex items-center justify-between">
             <span class="text-gray-500 dark:text-gray-400">Status</span>
-            {% if app.latest_blueprint_status == 'draft' %}
-            <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-700 dark:bg-blue-500/10 dark:text-blue-400">
-                Draft
+            {% if app.open_blueprint_status %}
+            <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium
+                {% if app.open_blueprint_status == 'draft' %}bg-blue-100 text-blue-700 dark:bg-blue-500/10 dark:text-blue-400
+                {% elif app.open_blueprint_status == 'failed' %}bg-red-100 text-red-700 dark:bg-red-500/10 dark:text-red-400
+                {% else %}bg-yellow-100 text-yellow-700 dark:bg-yellow-500/10 dark:text-yellow-400{% endif %}">
+                {{ app.open_blueprint_status|title }}
             </span>
             {% elif app.latest_status %}
             <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium
