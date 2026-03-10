@@ -179,7 +179,8 @@ async def save_blueprint(
 
         if blueprint.status == DeploymentBlueprint.Status.FAILED:
             blueprint.status = DeploymentBlueprint.Status.DRAFT
-            blueprint.status_message = ""
+
+        blueprint.status_message = "Ready to deploy"
 
         effective_values = await deployment_blueprint_effective_values.aresolve_deployment_blueprint_effective_values(
             app=blueprint.app,
@@ -243,6 +244,7 @@ async def save_blueprint(
             app_id=conversation.context_app_id,
             environment=environment,
             status=DeploymentBlueprint.Status.DRAFT,
+            status_message="Ready to deploy",
             branch=branch or "",
             cpu=cpu or 256,
             memory=memory or 512,

@@ -67,12 +67,11 @@
             <dt class="text-gray-500 dark:text-gray-400">Secrets</dt>
             <dd class="text-gray-900 dark:text-white">{{ blueprint.app_secrets|length }} configured</dd>
             {% endif %}
+            {% if blueprint.status_message %}
+            <dt class="text-gray-500 dark:text-gray-400">Status</dt>
+            <dd class="text-gray-900 dark:text-white">{{ blueprint.status_message }}</dd>
+            {% endif %}
         </dl>
-        {% if blueprint.status_message %}
-        <div class="mt-3 rounded-md bg-gray-50 dark:bg-gray-900 px-3 py-2 text-xs text-gray-600 dark:text-gray-400">
-            {{ blueprint.status_message }}
-        </div>
-        {% endif %}
         {% else %}
         <p class="text-sm text-gray-400 dark:text-gray-500">The agent will configure the blueprint after defining the app and selecting an environment.</p>
         {% endif %}
