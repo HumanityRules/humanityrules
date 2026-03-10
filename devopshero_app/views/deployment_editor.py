@@ -349,18 +349,21 @@ def deployment_editor_discard_draft_confirm(request: HttpRequest, app_slug: str)
         return denied
 
     blueprint = _get_discardable_blueprint(app=app)
-    if blueprint is None:
-        return HttpResponse(status=422)
+
+    if blueprint:
+        modal_message = (
+            f"Discard the current deployment draft for {blueprint.environment.name}? "
+            "This abandons the draft blueprint and its conversation."
+        )
+    else:
+        modal_message = "Abandon the current deployment session? You can start a new deployment later."
 
     return render(
         request=request,
         template_name="devopshero_app/partials/_confirm_modal.html",
         context={
             "modal_title": "Discard Deployment Draft",
-            "modal_message": (
-                f"Discard the current deployment draft for {blueprint.environment.name}? "
-                "This abandons the draft blueprint and its conversation."
-            ),
+            "modal_message": modal_message,
             "confirm_url": reverse("deployment_editor_discard_draft", kwargs={"app_slug": app.slug}),
             "confirm_label": "Discard Draft",
         },
@@ -377,20 +380,29 @@ def deployment_editor_discard_draft(request: HttpRequest, app_slug: str) -> Http
         return denied
 
     blueprint = _get_discardable_blueprint(app=app)
-    if blueprint is None:
-        return HttpResponse(status=422)
 
-    blueprint.status = models.DeploymentBlueprint.Status.DISCARDED
-    blueprint.status_message = "Draft discarded"
-    blueprint.save(update_fields=["status", "status_message", "updated_at"])
+    if blueprint:
+        blueprint.status = models.DeploymentBlueprint.Status.DISCARDED
+        blueprint.status_message = "Draft discarded"
+        blueprint.save(update_fields=["status", "status_message", "updated_at"])
 
-    models.Conversation.objects.filter(
-        context_deployment_blueprint=blueprint,
-        mode=models.Conversation.Mode.APP_DEPLOYMENT,
-    ).update(
-        status=models.Conversation.Status.ABANDONED,
-        updated_at=timezone.now(),
-    )
+        models.Conversation.objects.filter(
+            context_deployment_blueprint=blueprint,
+            mode=models.Conversation.Mode.APP_DEPLOYMENT,
+        ).update(
+            status=models.Conversation.Status.ABANDONED,
+            updated_at=timezone.now(),
+        )
+    else:
+        models.Conversation.objects.filter(
+            context_app=app,
+            context_deployment_blueprint__isnull=True,
+            mode=models.Conversation.Mode.APP_DEPLOYMENT,
+            status=models.Conversation.Status.ACTIVE,
+        ).update(
+            status=models.Conversation.Status.ABANDONED,
+            updated_at=timezone.now(),
+        )
 
     context = apps_views.build_app_detail_context(request=request, app=app)
     response = render(request=request, template_name="devopshero_app/apps/app_detail.html", context=context)
