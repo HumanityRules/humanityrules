@@ -353,6 +353,12 @@ def create_devopshero_mcp_server(conversation: Conversation):
             organization=conversation.organization,
             user=conversation.user,
         )
+
+        if not conversation.context_environment_id:
+            from devopshero_app.models import Environment
+            conversation.context_environment_id = result.id
+            await conversation.asave(update_fields=["context_environment", "updated_at"])
+
         return _mcp_response({
             **result.to_dict(),
             "note": (

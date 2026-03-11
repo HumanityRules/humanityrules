@@ -25,7 +25,11 @@
             {# Account list #}
             <div class="p-2 max-h-[60vh] overflow-y-auto">
                 {% for account in aws_accounts %}
-                <a href="{% url 'chat_new' %}?aws_account={{ account.id }}"
+                <a href="{% url 'environment_editor_new' %}?aws_account={{ account.id }}"
+                   hx-get="{% url 'environment_editor_new' %}?aws_account={{ account.id }}"
+                   hx-target="#main-content"
+                   hx-swap="innerHTML"
+                   hx-push-url="true"
                    class="flex items-center px-4 py-3 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
                     {# AWS icon #}
                     <div class="flex-shrink-0 mr-3">

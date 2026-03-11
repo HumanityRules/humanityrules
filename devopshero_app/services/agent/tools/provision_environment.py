@@ -28,6 +28,7 @@ class EnvironmentSummary:
     shared_alb_hosted_zone: str | None
     aws_account_id: str
     aws_account_name: str
+    created: bool
 
     def to_dict(self) -> dict:
         """Convert to dictionary for JSON serialization."""
@@ -118,6 +119,7 @@ async def provision_environment(
                 shared_alb_hosted_zone=existing.shared_alb_hosted_zone or None,
                 aws_account_id=str(aws_account.id),
                 aws_account_name=aws_account.name,
+                created=False,
             )
 
     # Create new environment record with PENDING status
@@ -141,4 +143,5 @@ async def provision_environment(
         shared_alb_hosted_zone=environment.shared_alb_hosted_zone or None,
         aws_account_id=str(aws_account.id),
         aws_account_name=aws_account.name,
+        created=True,
     )
