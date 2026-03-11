@@ -619,19 +619,25 @@ def create_devopshero_mcp_server(conversation: Conversation):
         """Create or update a deployment blueprint."""
         workspace = await _require_workspace(conversation)
 
-        result = await _save_blueprint(
-            conversation=conversation,
-            workspace=workspace,
-            user=conversation.user,
-            environment_slug=args.get("environment_slug"),
-            branch=args.get("branch"),
-            cpu=args.get("cpu"),
-            memory=args.get("memory"),
-            environment_variables=args.get("environment_variables"),
-            app_secrets=args.get("app_secrets"),
-            datastore_id=args.get("datastore_id"),
-            subdomain=args.get("subdomain"),
-        )
+        try:
+            result = await _save_blueprint(
+                conversation=conversation,
+                workspace=workspace,
+                user=conversation.user,
+                environment_slug=args.get("environment_slug"),
+                branch=args.get("branch"),
+                cpu=args.get("cpu"),
+                memory=args.get("memory"),
+                environment_variables=args.get("environment_variables"),
+                app_secrets=args.get("app_secrets"),
+                datastore_id=args.get("datastore_id"),
+                subdomain=args.get("subdomain"),
+            )
+        except ValueError as e:
+            return _mcp_response({
+                "error": str(e),
+                "app_id": str(conversation.context_app_id) if conversation.context_app_id else None,
+            })
 
         action = "created" if result.created else "updated"
         return _mcp_response({

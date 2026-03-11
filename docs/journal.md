@@ -1,5 +1,18 @@
 # DevOpsHero Development Journal
 
+## 2026-03-11 02:30 - [Bugfix] SSE crash when save_blueprint returns error string instead of dict
+
+**Conversation:** [2026-03-10-1915-867cb58c.md](conversations/2026-03-10-1915-867cb58c.md)
+
+When `save_blueprint` raised a `ValueError` (e.g., "This app already has an open deployment blueprint"), the MCP error handler returned a plain text string. `_unwrap_mcp_content` couldn't parse this as JSON, so `tool_result` in `_format_sse_event` was a string. The code then did `tool_result['app_id']` on that string, causing `TypeError: string indices must be integers, not 'str'` and crashing the SSE stream.
+
+Traced the actual failure to conversation `019cda97-fd0c` (untitled, updated 01:53:25) — not the most recent conversation. The save_blueprint tool had `status=success` but `result_type=str` in the DB, confirming the error path. The successful conversation (`019cda97-b460`, "Simple Dashboard Deployment Setup") was a red herring — its save_blueprint worked fine.
+
+**Key points:**
+- `chat.py`: Added `isinstance(tool_result, dict)` guard before accessing dict keys on tool results. All notification handlers (`update_permission_draft`, `save_app`, `save_blueprint`, `deploy_blueprint`) were vulnerable to the same crash. Added `logger.error` when non-dict results are detected.
+- `mcp_tools.py`: Catch `ValueError` from `_save_blueprint` and return a structured `_mcp_response` with `{"error": str(e), "app_id": ...}` instead of letting the exception propagate as an unstructured string. This ensures the SSE formatter can still extract `app_id` and fire `blueprint-changed-{app_id}` to reload the blueprint section in the UI.
+- The `@tool` decorator's error handling for `ValueError` was returning `is_error=False` (SDK recorded `status=success` in the DB for a failed tool call), so catching the error ourselves and returning structured data doesn't change error semantics for the LLM.
+
 ## 2026-03-10 19:09 - [Deployment] Add app detail page link to deployment success message
 
 **Conversation:** [2026-03-10-1910-9bccc8d0.md](conversations/2026-03-10-1910-9bccc8d0.md)
