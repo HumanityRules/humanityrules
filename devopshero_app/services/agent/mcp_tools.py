@@ -1032,7 +1032,6 @@ TOOL_NAMES = [
     "mcp__devopshero__provision_environment",
     "mcp__devopshero__get_environment_status",
     "mcp__devopshero__list_repositories",
-    "mcp__devopshero__scan_repository",
     # Workspace tools
     "mcp__devopshero__list_apps",
     "mcp__devopshero__create_datastore",
@@ -1043,10 +1042,7 @@ TOOL_NAMES = [
     "mcp__devopshero__teardown_deployment",
     "mcp__devopshero__test_docker_build",
     "mcp__devopshero__git_ops",
-    # Permissions
     "mcp__devopshero__query_app_logs",
-    "mcp__devopshero__lookup_access_denied_events",
-    "mcp__devopshero__update_permission_draft",
     # Utility
     "mcp__devopshero__wait",
 ]
