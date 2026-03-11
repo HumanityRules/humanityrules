@@ -1,5 +1,20 @@
 # DevOpsHero Development Journal
 
+## 2026-03-10 22:15 - [Deployment] Blueprint section polling when status is "Deploying"
+
+**Conversation:** [2026-03-10-1724-a6dd5872.md](conversations/2026-03-10-1724-a6dd5872.md)
+
+After the agent finished deploying from the deployment editor, the blueprint panel stayed on "Deploying" because the frontend was never notified when the job worker updated the blueprint to `active` or `failed`.
+
+**Analysis:** The established pattern is SSE-driven: on `tool_result` for `save_blueprint` or `deploy_blueprint`, `chat.py` emits `sse-notify` with `blueprint-changed-{app_id}`; the chat panel dispatches `doh:blueprint-changed-{app_id}`; the blueprint section's `hx-trigger` refreshes the partial. That works for the initial transition to "Deploying" when the agent calls `deploy_blueprint`. When the deployment job completes (in `app_deployment_executor`), the worker only updates the DB — it does not push any event, so the UI never refreshes.
+
+**Fix:** Add HTMX self-polling in the blueprint section partial: when `blueprint.status == 'deploying'`, render a small div with `hx-get` to the blueprint section URL, `hx-trigger="load delay:5s"`, `hx-target="#blueprint-section"`, `hx-swap="innerHTML"`. Every 5 seconds the section re-fetches; once the status is `active` or `failed`, the re-rendered partial no longer includes the polling div, so polling stops. Template-only change, no backend or new infrastructure; mirrors the existing teardown polling in `_app_deployment_row.html`.
+
+**Key points:**
+- Blueprint status updates from the job worker are DB-only; the chat/streaming layer is not involved, so we need a way for the UI to notice completion.
+- Polling every 5 seconds while deploying is the simplest approach; alternatives (Redis pub/sub from worker, or emitting on `get_deployment_status` tool result) are more complex.
+- Discard Draft: conversations tied to the discarded blueprint (or active app-only conversations when no blueprint exists) are set to `Conversation.Status.ABANDONED`; user is redirected to app detail.
+
 ## 2026-03-10 21:30 - [Bugfix] AskUserQuestion tool use ID missing in pending_tool_calls
 
 **Conversation:** [2026-03-10-1439-ffa1caa9.md](conversations/2026-03-10-1439-ffa1caa9.md)
