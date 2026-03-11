@@ -1,68 +1,23 @@
 # DevOpsHero Development Journal
 
-## 2026-03-11 01:30 - [Deployment] Debug deployment mode: simulated success, simulator module, no web-process fallback
-
-**Conversation:** [2026-03-10-1827-91063a53.md](conversations/2026-03-10-1827-91063a53.md)
-
-Added an opt-in debug path so `deploy_blueprint` can "succeed" after ~10 seconds with no repository clone or AWS calls, for testing the UI and agent flow locally. Debug logic lives in a dedicated module; the web process no longer starts a background thread — only the job worker runs deployments (real or simulated).
-
-**What we did:**
-- **Setting:** `DOH_DEBUG_DEPLOYMENTS = DEBUG and os.environ.get("DOH_DEBUG_DEPLOYMENTS") == "1"` in `devopshero_site/settings.py`. When True, `app_deployment_executor.run_deployment` skips clone/AWS and calls the simulator instead: BUILDING → 5s sleep → DEPLOYING → 5s sleep → SUCCEEDED, with synthetic `service_url` and `alb_dns` and blueprint set to ACTIVE.
-- **Simulator module:** `devopshero_app/services/jobs/app_deployment_debug_simulator.py` holds `run_debug_deployment`, `_build_debug_service_url`, `_build_debug_alb_dns`, and `DEBUG_DEPLOYMENT_STEP_DELAY_SECONDS`. Executor imports and delegates to it when `settings.DOH_DEBUG_DEPLOYMENTS` is True.
-- **Removed web-process fallback:** Initially we had `maybe_start_debug_deployment()` in the simulator: when `DOH_DEBUG_DEPLOYMENTS=1` and `DOH_RUN_JOB_WORKER=0`, `deploy_blueprint` started a daemon thread to run the simulated deployment. That caused a race when the user runs the worker as a separate process (same .env): both the web-started thread and the external worker could claim the same pending deployment. We removed the fallback; `deploy_blueprint` now only creates a PENDING deployment and returns. The only process that executes it is the one running the job worker (with `DOH_RUN_JOB_WORKER=1` in-app or `uv run manage.py run_job_worker`). If no worker is running, deployments stay pending.
-- **Tests:** `test_app_deployment_executor.py` asserts debug path succeeds without clone/cleanup/deploy/AWS, and checks deployment/blueprint state and log message. `test_deployment_blueprint_effective_values` is pinned with `@override_settings(DOH_DEBUG_DEPLOYMENTS=False)` so env doesn’t leak into unrelated tests.
-
-**Key points:**
-- Single place for debug deployment behavior: simulator module; executor is the only caller. Clean separation and no duplicate execution.
-- Debug mode must be enabled on the process that runs the worker (e.g. `DOH_DEBUG_DEPLOYMENTS=1` in the env for `run_job_worker`), not only on the web app.
-- Trust the operator to start the worker or set DOH_RUN_JOB_WORKER=1; no in-web fallback avoids races and keeps the contract simple.
-
-## 2026-03-10 23:55 - [Deployment] Permissions guidance in deployment agent: concrete URL, timing rule, section rename
-
-**Conversation:** [2026-03-10-1813-6e374a00.md](conversations/2026-03-10-1813-6e374a00.md)
-
-Updated the deployment agent system prompt so it can link directly to the Permissions editor and only mentions permissions after deployment succeeds.
-
-**What we did:**
-- **Concrete URL:** In `system_prompt_app_deployment.md`, the permissions section now documents the URL pattern `/security/permissions/editor/?context_app={app_slug}&context_environment={environment_slug}` and instructs the agent to render an HTML anchor (with `target="_blank"`) using the actual app and environment slugs from the deployment, instead of a vague "head to the Permissions editor for this app."
-- **Timing rule:** The agent was surfacing permission notes (e.g. S3 access needed for Sales Analytics) too early — in the pre-deploy draft summary and confirmation step. We added an explicit rule: do NOT mention permission issues, access-denied risks, or missing IAM at any point before the app is live. The only allowed place is the final success message after `get_deployment_status` returns SUCCEEDED. We spelled out the forbidden phases: repository analysis summary, clarifying questions, pre-deploy draft review, and deploy confirmation.
-- **Section rename:** The block was named `<permissions_boundary>`, which collides with the AWS IAM concept of a "permissions boundary." Renamed to `<permissions_guidance>` so the prompt is clearly about how to talk about permissions in the deployment flow, not the IAM feature.
-
-**Key points:**
-- Agent has app_slug and environment_slug in context during deployment, so it can build the Permissions editor link without extra tooling.
-- Tightening the timing rule (listing specific phases where permissions must not appear) reduces the chance the agent mentions S3/IAM in the "Deploy this draft now?" summary.
-- Avoiding AWS-term overload in prompt tag names reduces confusion for models trained on AWS docs.
-
-## 2026-03-10 23:30 - [UI] Reusable status pill partial; standardized app/deployment status display
-
-**Conversation:** [2026-03-10-1747-c31a780c.md](conversations/2026-03-10-1747-c31a780c.md)
-
-App and deployment status was rendered in four separate places with copy-pasted pill markup. Only the app-detail deployment row showed a spinning icon for "tearing down"; workspaces list and app cards showed a static pill for the same status. We introduced a single reusable partial and use it everywhere status appears.
-
-**What we did:**
-- **New partial:** `devopshero_app/templates/devopshero_app/partials/_status_pill.html` accepts `status` (raw value) and `label` (display text). It maps status to one of five color buckets (green success, red failure, blue draft, yellow in-progress, gray neutral) and shows an `animate-spin` SVG for actively-working states: `building`, `pushing`, `deploying`, `starting`, `tearing_down`, `provisioning`, `creating`, `applying`. Waiting states like `pending` and `teardown_pending` stay yellow but without a spinner.
-- **Replaced inline pills** in: `apps/_app_deployment_row.html`, `partials/_app_card.html`, `workspaces/workspaces.html`, `deploy/_blueprint_section.html`, `environments/environments.html`, `dashboard.html` (datastore status). Callers pass `status` and `label` (e.g. `deployment.get_status_display` or `app.latest_status|title`) and `include` the partial with `only` to avoid leaking context.
-- **Fixed inconsistencies:** App card previously sent `tearing_down`/`teardown_pending` to the gray else-branch; workspaces and app card had different catch-all colors. All now use the same mapping. Spinner appears for all in-progress "active work" states everywhere, not only tearing_down on the deployment row.
-
-**Key points:**
-- One source of truth for status pill appearance and animation; new status values or models (e.g. AppPermissionRequest) can reuse the partial by passing status + label.
-- Generic name `_status_pill.html` is intentional: the partial is a UI primitive used across deployment, blueprint, environment, and datastore statuses.
-- Label remains caller responsibility: deployment/blueprint use `get_status_display`; app card and workspaces use `|title` on annotated fields that have no model display method (e.g. `latest_status`, `open_blueprint_status`).
-
-## 2026-03-10 22:15 - [Deployment] Blueprint section polling when status is "Deploying"
+## 2026-03-10 22:15 - [Deployment] Blueprint section: polling while deploying, fix query to show terminal states
 
 **Conversation:** [2026-03-10-1724-a6dd5872.md](conversations/2026-03-10-1724-a6dd5872.md)
 
-After the agent finished deploying from the deployment editor, the blueprint panel stayed on "Deploying" because the frontend was never notified when the job worker updated the blueprint to `active` or `failed`.
+After the agent finished deploying from the deployment editor, the blueprint panel was stuck on "Deploying" (or reverted to "Pending"). Two issues found and fixed.
 
-**Analysis:** The established pattern is SSE-driven: on `tool_result` for `save_blueprint` or `deploy_blueprint`, `chat.py` emits `sse-notify` with `blueprint-changed-{app_id}`; the chat panel dispatches `doh:blueprint-changed-{app_id}`; the blueprint section's `hx-trigger` refreshes the partial. That works for the initial transition to "Deploying" when the agent calls `deploy_blueprint`. When the deployment job completes (in `app_deployment_executor`), the worker only updates the DB — it does not push any event, so the UI never refreshes.
+**Issue 1 — No frontend notification when deployment completes:** The established pattern is SSE-driven: on `tool_result` for `save_blueprint` or `deploy_blueprint`, `chat.py` emits `sse-notify` with `blueprint-changed-{app_id}`, the chat panel dispatches a DOM event, and the blueprint section refreshes. This works for the initial "Deploying" transition. But when the job worker finishes (`app_deployment_executor`), it only updates the DB — no event is emitted, so the UI never refreshes.
 
-**Fix:** Add HTMX self-polling in the blueprint section partial: when `blueprint.status == 'deploying'`, render a small div with `hx-get` to the blueprint section URL, `hx-trigger="load delay:5s"`, `hx-target="#blueprint-section"`, `hx-swap="innerHTML"`. Every 5 seconds the section re-fetches; once the status is `active` or `failed`, the re-rendered partial no longer includes the polling div, so polling stops. Template-only change, no backend or new infrastructure; mirrors the existing teardown polling in `_app_deployment_row.html`.
+**Fix 1 — HTMX self-polling:** When `blueprint.status == 'deploying'`, `_blueprint_section.html` now renders a hidden div with `hx-get` to the blueprint section URL, `hx-trigger="load delay:5s"`, targeting `#blueprint-section`. Every 5s the section re-fetches; once status is `active` or `failed`, the re-rendered partial drops the polling div and it stops. The div is inside the main card (single root element) to avoid HTMX innerHTML swap issues with multiple roots. Mirrors the existing teardown polling pattern in `_app_deployment_row.html`.
+
+**Issue 2 — Blueprint disappears after deployment succeeds:** `deployment_editor_blueprint_section` used `get_open_blueprint()`, which filters by `OPEN_BLUEPRINT_STATUSES = (draft, failed, deploying)`. Once the job worker sets the blueprint to `active`, it falls out of that filter, so the view returns `blueprint=None` and the template renders "Pending". The `get_open_blueprint` filter is correct for editor entry points (deciding resume vs new) but wrong for the section partial that must show the blueprint in any state.
+
+**Fix 2 — Broader query in section endpoint:** `deployment_editor_blueprint_section` now queries for the latest non-discarded blueprint for the app, instead of using `get_open_blueprint`. This shows the blueprint regardless of status (draft, deploying, active, failed).
 
 **Key points:**
-- Blueprint status updates from the job worker are DB-only; the chat/streaming layer is not involved, so we need a way for the UI to notice completion.
-- Polling every 5 seconds while deploying is the simplest approach; alternatives (Redis pub/sub from worker, or emitting on `get_deployment_status` tool result) are more complex.
-- Discard Draft: conversations tied to the discarded blueprint (or active app-only conversations when no blueprint exists) are set to `Conversation.Status.ABANDONED`; user is redirected to app detail.
+- Blueprint status updates from the job worker are DB-only; HTMX self-polling (5s, only while deploying) is the simplest notification mechanism.
+- `get_open_blueprint` is for routing decisions (resume vs new), not for rendering the current state. The section partial needs the latest non-discarded blueprint.
+- Polling div must be inside the partial's single root element, not a sibling — multiple roots break HTMX innerHTML swap.
 
 ## 2026-03-10 21:30 - [Bugfix] AskUserQuestion tool use ID missing in pending_tool_calls
 
