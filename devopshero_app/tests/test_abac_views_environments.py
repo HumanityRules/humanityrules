@@ -4,6 +4,7 @@ Environment list, detail, and tag management access control.
 """
 
 from django.test import TestCase
+from django.urls import reverse
 
 from devopshero_app.models import (
     AWSAccount,
@@ -76,11 +77,30 @@ class TestEnvironmentEndpoints(TestCase):
 
     # --- Environment List (filter_permitted_resources) ---
 
+    def _detail_url(self, environment: Environment) -> str:
+        """Build the environment detail URL."""
+        return reverse("environment_detail", kwargs={"environment_id": environment.id})
+
+    def _tag_add_url(self, environment: Environment) -> str:
+        """Build the environment tag-add URL."""
+        return reverse("environment_tag_add", kwargs={"environment_id": environment.id})
+
+    def _tag_remove_url(self, environment: Environment) -> str:
+        """Build the environment tag-remove URL."""
+        return reverse(
+            "environment_tag_remove",
+            kwargs={"environment_id": environment.id, "tag_id": self.removable_tag.id},
+        )
+
+    def _tag_save_url(self, environment: Environment) -> str:
+        """Build the environment tag-save URL."""
+        return reverse("environment_tags_save", kwargs={"environment_id": environment.id})
+
     def test_admin_environment_list_shows_all(self) -> None:
         self.client.force_login(self.admin_user)
         response = self.client.get("/environments/", **HTMX)
         self.assertEqual(response.status_code, 200)
-        pks = set(response.context["environments"].values_list("pk", flat=True))
+        pks = {environment.pk for environment in response.context["environments"]}
         self.assertIn(self.env_staging.pk, pks)
         self.assertIn(self.env_production.pk, pks)
 
@@ -88,7 +108,7 @@ class TestEnvironmentEndpoints(TestCase):
         self.client.force_login(self.viewer_user)
         response = self.client.get("/environments/", **HTMX)
         self.assertEqual(response.status_code, 200)
-        pks = set(response.context["environments"].values_list("pk", flat=True))
+        pks = {environment.pk for environment in response.context["environments"]}
         self.assertIn(self.env_staging.pk, pks)
         self.assertNotIn(self.env_production.pk, pks)
 
@@ -96,56 +116,56 @@ class TestEnvironmentEndpoints(TestCase):
 
     def test_admin_can_view_environment_detail(self) -> None:
         self.client.force_login(self.admin_user)
-        response = self.client.get("/environments/staging/", **HTMX)
+        response = self.client.get(self._detail_url(environment=self.env_staging), **HTMX)
         self.assertEqual(response.status_code, 200)
 
     def test_viewer_can_view_environment_detail(self) -> None:
         self.client.force_login(self.viewer_user)
-        response = self.client.get("/environments/staging/", **HTMX)
+        response = self.client.get(self._detail_url(environment=self.env_staging), **HTMX)
         self.assertEqual(response.status_code, 200)
 
     def test_viewer_cannot_view_unmatched_environment(self) -> None:
         self.client.force_login(self.viewer_user)
-        response = self.client.get("/environments/production/", **HTMX)
+        response = self.client.get(self._detail_url(environment=self.env_production), **HTMX)
         self.assertEqual(response.status_code, 403)
 
     def test_no_access_gets_403_on_environment_detail(self) -> None:
         self.client.force_login(self.no_access_user)
-        response = self.client.get("/environments/staging/", **HTMX)
+        response = self.client.get(self._detail_url(environment=self.env_staging), **HTMX)
         self.assertEqual(response.status_code, 403)
 
     # --- Environment Tag Management (requires environment:admin) ---
 
     def test_admin_can_add_environment_tag(self) -> None:
         self.client.force_login(self.admin_user)
-        response = self.client.post("/environments/staging/tags/add/", {"key": "env", "value": "test"})
+        response = self.client.post(self._tag_add_url(environment=self.env_staging), {"key": "env", "value": "test"})
         self.assertEqual(response.status_code, 200)
 
     def test_viewer_gets_403_on_environment_tag_add(self) -> None:
         self.client.force_login(self.viewer_user)
-        response = self.client.post("/environments/staging/tags/add/", {"key": "env", "value": "test"})
+        response = self.client.post(self._tag_add_url(environment=self.env_staging), {"key": "env", "value": "test"})
         self.assertEqual(response.status_code, 403)
 
     def test_env_admin_can_add_environment_tag(self) -> None:
         self.client.force_login(self.env_admin_user)
-        response = self.client.post("/environments/staging/tags/add/", {"key": "env", "value": "test"})
+        response = self.client.post(self._tag_add_url(environment=self.env_staging), {"key": "env", "value": "test"})
         self.assertEqual(response.status_code, 200)
 
     def test_admin_can_remove_environment_tag(self) -> None:
         self.client.force_login(self.admin_user)
-        response = self.client.post(f"/environments/staging/tags/{self.removable_tag.id}/remove/")
+        response = self.client.post(self._tag_remove_url(environment=self.env_staging))
         self.assertEqual(response.status_code, 200)
 
     def test_viewer_gets_403_on_environment_tag_remove(self) -> None:
         self.client.force_login(self.viewer_user)
-        response = self.client.post(f"/environments/staging/tags/{self.removable_tag.id}/remove/")
+        response = self.client.post(self._tag_remove_url(environment=self.env_staging))
         self.assertEqual(response.status_code, 403)
 
     def test_admin_can_bulk_save_environment_tags(self) -> None:
         import json
         self.client.force_login(self.admin_user)
         response = self.client.post(
-            "/environments/staging/tags/save/",
+            self._tag_save_url(environment=self.env_staging),
             {"tags": json.dumps([{"key": "tier", "value": "staging"}, {"key": "region", "value": "us-east-1"}])},
         )
         self.assertEqual(response.status_code, 200)
@@ -157,7 +177,7 @@ class TestEnvironmentEndpoints(TestCase):
         import json
         self.client.force_login(self.viewer_user)
         response = self.client.post(
-            "/environments/staging/tags/save/",
+            self._tag_save_url(environment=self.env_staging),
             {"tags": json.dumps([{"key": "tier", "value": "staging"}])},
         )
         self.assertEqual(response.status_code, 403)

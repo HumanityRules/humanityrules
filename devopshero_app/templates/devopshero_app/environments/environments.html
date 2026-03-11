@@ -10,8 +10,8 @@
 
     <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
         {% for env in environments %}
-        <a href="{% url 'environment_detail' environment_slug=env.slug %}"
-           hx-get="{% url 'environment_detail' environment_slug=env.slug %}"
+        <a href="{{ env.primary_url }}"
+           hx-get="{{ env.primary_url }}"
            hx-target="#main-content"
            hx-swap="innerHTML"
            hx-push-url="true"

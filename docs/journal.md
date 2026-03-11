@@ -1,5 +1,26 @@
 # DevOpsHero Development Journal
 
+## 2026-03-11 11:31 - [Deployment] Environment setup editor mirrors deployment editor with draft-first provisioning
+
+**Conversation:** [2026-03-11-1131-384413c1.md](conversations/2026-03-11-1131-384413c1.md)
+
+Implemented the environment provisioning editor by explicitly mirroring the app deployment editor pattern instead of extending generic chat. The core product decision was to treat environment setup as its own task-native surface: left panel for the server-owned environment artifact, right panel for one continuous agent conversation, and stable routing that keeps the user inside the setup flow until the environment is either ready or intentionally abandoned.
+
+The most important domain change was splitting environment persistence from environment execution. Previously `provision_environment` both created the `Environment` row and queued provisioning, which meant there was no reviewable draft state and no clean way to resume one environment task. The fix was to add `Conversation.context_environment`, introduce `draft` and `discarded` environment statuses, create a new `save_environment` tool with upsert semantics, and narrow `provision_environment` so it only transitions an existing draft or failed environment into `pending`. That keeps the job worker contract simple: only `pending` environments are claimable, while `draft` remains UI-visible but inert.
+
+Routing and identity also needed tightening. The old environment detail route looked environments up by org plus slug even though environment slugs are only unique within an AWS account, which was risky once the editor started depending on stable resume semantics. The environment editor and environment detail flows were moved to UUID-based routes, and `save_blueprint` was hardened to reject ambiguous environment slugs across AWS accounts rather than silently picking the first match. This keeps the environment setup UI safe in multi-account organizations while preserving name/slug convenience for agent-facing prompts and listings.
+
+The UI implementation deliberately reused the same HTMX/SSE pattern as deployment editing. `save_environment` now emits `environment-created` plus `environment-changed-{id}` notifications, and the editor uses those DOM events to move from account-scoped `/environments/new/?aws_account=...` into the stable environment-scoped setup URL and to refresh the environment setup section as the artifact changes. While provisioning is in progress, the section self-polls just like the deployment blueprint panel. Success stays inside the editor and shows a prominent callout linking to the stable environment detail page; the same success-callout style was later copied into the deployment blueprint panel for the `active` state so both task editors end with the same visual pattern.
+
+The agent guardrails were tightened as part of the same change. Environment conversations now load `context_environment` everywhere conversation context is selected or forked, environment mode uses a narrower tool allowlist instead of the shared non-permissions tool set, and the system prompt was updated to require early draft persistence plus explicit approval before provisioning. After implementation, the prompt was tightened further to require `AskUserQuestion` not just for the final "Provision now / Keep editing" approval, but also for hosted-zone selection once the available domains are known. The intent is to make environment setup feel task-native and button-driven rather than a loose free-text chat that happens to call provisioning tools.
+
+**Key points:**
+- `Environment` is now treated like a first-class setup artifact, not an implicit side effect of provisioning. The draft-first model is what makes the environment editor resumable and reviewable.
+- `Conversation.context_environment` is the environment-side equivalent of `context_deployment_blueprint`: the conversation begins account-scoped, then becomes environment-scoped once the draft exists.
+- UUID routes were not just cosmetic. They were required to avoid ambiguous environment identity once a resumable editor and multi-account slug collisions became part of the design.
+- SSE/HTMX remains the canonical editor refresh mechanism: tools mutate backend state, `chat.py` emits domain events, and the left panel re-renders server-owned partials instead of trusting optimistic frontend state.
+- Environment mode should not rely only on prompt discipline. The narrow tool allowlist and stricter `AskUserQuestion` instructions are part of the architecture, not just UX polish.
+
 ## 2026-03-11 02:30 - [Bugfix] SSE crash when save_blueprint returns error string instead of dict
 
 **Conversation:** [2026-03-10-1915-867cb58c.md](conversations/2026-03-10-1915-867cb58c.md)

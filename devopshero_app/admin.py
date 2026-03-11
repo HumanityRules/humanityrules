@@ -175,11 +175,20 @@ class DatastoreAdmin(admin.ModelAdmin):
 
 @admin.register(Conversation)
 class ConversationAdmin(admin.ModelAdmin):
-    list_display = ["title", "mode", "status", "user", "organization", "context_workspace", "context_repository", "updated_at"]
+    list_display = [
+        "title", "mode", "status", "user", "organization", "context_workspace",
+        "context_repository", "context_aws_account", "context_environment", "updated_at",
+    ]
     list_filter = ["mode", "status", "organization", "context_workspace"]
-    search_fields = ["title", "user__email", "user__username", "organization__name", "context_workspace__name", "context_repository__full_name", "session_id"]
+    search_fields = [
+        "title", "user__email", "user__username", "organization__name", "context_workspace__name",
+        "context_repository__full_name", "context_aws_account__name", "context_environment__name", "session_id",
+    ]
     readonly_fields = ["id", "created_at", "updated_at"]
-    autocomplete_fields = ["user", "organization", "context_workspace", "context_repository", "context_app_permission_request"]
+    autocomplete_fields = [
+        "user", "organization", "context_workspace", "context_repository", "context_aws_account",
+        "context_environment", "context_app_permission_request",
+    ]
     filter_horizontal = ["deployments"]
 
 

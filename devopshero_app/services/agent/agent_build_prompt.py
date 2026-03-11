@@ -54,7 +54,6 @@ async def _build_environment_prompt(conversation: Conversation) -> str:
     base_prompt = load_prompt_file("system_prompt_environment.md")
     sections = []
 
-    # Conversation context - AWS account
     account = await AWSAccount.objects.aget(id=conversation.context_aws_account_id)
     context_lines = [
         "<aws_account>",
@@ -64,11 +63,26 @@ async def _build_environment_prompt(conversation: Conversation) -> str:
         f"  <status>{account.status}</status>",
         "</aws_account>",
     ]
+    if conversation.context_environment_id:
+        environment = await Environment.objects.aget(id=conversation.context_environment_id)
+        context_lines.extend([
+            "<environment>",
+            f"  <name>{environment.name}</name>",
+            f"  <id>{environment.id}</id>",
+            f"  <slug>{environment.slug}</slug>",
+            f"  <region>{environment.aws_region}</region>",
+            f"  <status>{environment.status}</status>",
+            f"  <domain>{environment.shared_alb_hosted_zone or 'http-only'}</domain>",
+            "</environment>",
+        ])
     sections.append("<conversation_context>\n" + "\n".join(context_lines) + "\n</conversation_context>")
 
-    # Existing environments and naming guidance
     existing_envs = [
-        env async for env in Environment.objects.filter(aws_account_id=account.id).values("name", "aws_region", "status")
+        env async for env in Environment.objects.filter(
+            aws_account_id=account.id,
+        ).exclude(
+            status=Environment.Status.DISCARDED,
+        ).values("name", "aws_region", "status")
     ]
     existing_names = {env["name"] for env in existing_envs}
 

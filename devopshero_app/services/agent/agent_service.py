@@ -51,6 +51,7 @@ from . import agent_build_prompt
 from .agent_client import get_claude_env
 from .mcp_tools import (
     create_devopshero_mcp_server,
+    ENVIRONMENT_ALLOWED_TOOLS,
     PERMISSIONS_ALLOWED_TOOLS,
     TOOL_NAMES,
 )
@@ -272,6 +273,11 @@ class MainAgent:
             builtin_tools = ["Read", "Glob", "Grep", "AskUserQuestion"]
             allowed_tools = PERMISSIONS_ALLOWED_TOOLS
             blocked_agents: list[str] = []
+            agents = {}
+        elif conversation.mode == Conversation.Mode.ENVIRONMENT_SETUP:
+            builtin_tools = ["Read", "Glob", "Grep", "AskUserQuestion"]
+            allowed_tools = ENVIRONMENT_ALLOWED_TOOLS
+            blocked_agents = ["Task(Bash)", "Task(statusline-setup)"]
             agents = {}
         else:
             builtin_tools = [

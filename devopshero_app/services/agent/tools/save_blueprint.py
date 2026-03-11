@@ -103,16 +103,28 @@ class SaveBlueprintResult:
 
 async def _get_environment(organization_id: str, environment_slug: str) -> Environment:
     """Get and validate target environment."""
-    environment = await Environment.objects.filter(
-        aws_account__organization_id=organization_id,
-        slug=environment_slug,
-    ).afirst()
+    environments = [
+        environment async for environment in Environment.objects.filter(
+            aws_account__organization_id=organization_id,
+            slug=environment_slug,
+        ).exclude(
+            status=Environment.Status.DISCARDED,
+        ).select_related("aws_account")
+    ]
 
-    if not environment:
+    if not environments:
         raise ValueError(
             f"Environment '{environment_slug}' does not exist. "
             "Use list_environments to see available environments."
         )
+
+    if len(environments) > 1:
+        raise ValueError(
+            f"Multiple environments share the slug '{environment_slug}' across different AWS accounts. "
+            "Choose a uniquely named environment."
+        )
+
+    environment = environments[0]
 
     if environment.status != Environment.Status.READY:
         raise ValueError(

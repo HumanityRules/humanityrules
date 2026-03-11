@@ -68,7 +68,11 @@ async def list_environments(aws_account_uuid: str, organization: Organization) -
 
     # Get all environments for this AWS account
     environments = []
-    async for env in Environment.objects.filter(aws_account=aws_account).order_by("name"):
+    async for env in Environment.objects.filter(
+        aws_account=aws_account,
+    ).exclude(
+        status=Environment.Status.DISCARDED,
+    ).order_by("name"):
         environments.append(
             EnvironmentSummary(
                 id=str(env.id),

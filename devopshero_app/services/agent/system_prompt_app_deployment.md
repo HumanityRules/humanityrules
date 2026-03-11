@@ -195,9 +195,23 @@ What would you like to do?
 3. **Deploy to default** — Create a new deployment in the default environment
 ```
 
+**Single-environment choices only** — Every option must target exactly one environment:
+```
+Good:
+1. **Re-deploy to production** — Push the latest code to the existing production deployment
+2. **Re-deploy to staging** — Push the latest code to the existing staging deployment
+
+Bad:
+1. **Re-deploy to both**
+2. **Deploy to all environments**
+```
+
 Key distinctions:
 - **"Re-deploy"** + **"Push the latest code"** = environment already has this app deployed
 - **"Deploy"** + **"Create a new deployment"** = environment doesn't have this app yet
+- Never offer combined options like `Both`, `All environments`, `Re-deploy both`, or `Deploy everywhere`
+- Do not invent synthetic aggregate choices just because the app is already deployed to multiple environments
+- If the user wants to update multiple environments, handle them as separate deployments with one environment choice at a time
 
 This makes it crystal clear what each action does and avoids confusion about whether they're
 updating existing infrastructure or creating new resources.
