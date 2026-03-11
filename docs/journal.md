@@ -1,5 +1,21 @@
 # DevOpsHero Development Journal
 
+## 2026-03-10 23:55 - [Deployment] Permissions guidance in deployment agent: concrete URL, timing rule, section rename
+
+**Conversation:** [2026-03-10-1813-6e374a00.md](conversations/2026-03-10-1813-6e374a00.md)
+
+Updated the deployment agent system prompt so it can link directly to the Permissions editor and only mentions permissions after deployment succeeds.
+
+**What we did:**
+- **Concrete URL:** In `system_prompt_app_deployment.md`, the permissions section now documents the URL pattern `/security/permissions/editor/?context_app={app_slug}&context_environment={environment_slug}` and instructs the agent to render an HTML anchor (with `target="_blank"`) using the actual app and environment slugs from the deployment, instead of a vague "head to the Permissions editor for this app."
+- **Timing rule:** The agent was surfacing permission notes (e.g. S3 access needed for Sales Analytics) too early — in the pre-deploy draft summary and confirmation step. We added an explicit rule: do NOT mention permission issues, access-denied risks, or missing IAM at any point before the app is live. The only allowed place is the final success message after `get_deployment_status` returns SUCCEEDED. We spelled out the forbidden phases: repository analysis summary, clarifying questions, pre-deploy draft review, and deploy confirmation.
+- **Section rename:** The block was named `<permissions_boundary>`, which collides with the AWS IAM concept of a "permissions boundary." Renamed to `<permissions_guidance>` so the prompt is clearly about how to talk about permissions in the deployment flow, not the IAM feature.
+
+**Key points:**
+- Agent has app_slug and environment_slug in context during deployment, so it can build the Permissions editor link without extra tooling.
+- Tightening the timing rule (listing specific phases where permissions must not appear) reduces the chance the agent mentions S3/IAM in the "Deploy this draft now?" summary.
+- Avoiding AWS-term overload in prompt tag names reduces confusion for models trained on AWS docs.
+
 ## 2026-03-10 23:30 - [UI] Reusable status pill partial; standardized app/deployment status display
 
 **Conversation:** [2026-03-10-1747-c31a780c.md](conversations/2026-03-10-1747-c31a780c.md)
