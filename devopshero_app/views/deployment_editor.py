@@ -326,12 +326,19 @@ def deployment_editor_app_section(request: HttpRequest, app_slug: str) -> HttpRe
 
 @login_required
 def deployment_editor_blueprint_section(request: HttpRequest, app_slug: str) -> HttpResponse:
-    """Return the open blueprint section partial for HTMX refresh in the editor."""
+    """Return the blueprint section partial for HTMX refresh in the editor."""
     app = _get_existing_app(request=request, app_slug=app_slug)
     denied = abac_view_checks.check_abac(request, app.workspace, "workspace", "workspace:edit")
     if denied:
         return denied
-    blueprint = apps_views.get_open_blueprint(app=app)
+    blueprint = (
+        models.DeploymentBlueprint.objects
+        .filter(app=app)
+        .exclude(status=models.DeploymentBlueprint.Status.DISCARDED)
+        .select_related("app", "environment", "datastore")
+        .order_by("-created_at")
+        .first()
+    )
     return render(
         request=request,
         template_name="devopshero_app/deploy/_blueprint_section.html",
