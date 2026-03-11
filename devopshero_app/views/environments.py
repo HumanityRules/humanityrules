@@ -6,7 +6,7 @@ from django.http import HttpRequest, HttpResponse
 from django.shortcuts import get_object_or_404, render
 from django.views.decorators.http import require_POST
 
-from devopshero_app.models import AWSAccount, Environment, ResourceTag
+from devopshero_app.models import AWSAccount, Deployment, Environment, ResourceTag
 from devopshero_app.services import abac
 
 from . import abac_view_checks
@@ -40,6 +40,43 @@ def environments(request: HttpRequest) -> HttpResponse:
     context["content_url"] = "/environments/"
     return render(request, "devopshero_app/app_shell.html", context=context)
 
+
+@login_required
+def environment_detail(request: HttpRequest, environment_slug: str) -> HttpResponse:
+    """Show environment detail with deployments."""
+    context = base.get_app_shell_context(request=request, current_page="environments")
+
+    environment = get_object_or_404(
+        Environment.objects.select_related("aws_account"),
+        slug=environment_slug,
+        aws_account__organization=request.user.current_organization,
+    )
+
+    denied = abac_view_checks.check_abac(request, environment, "environment", "environment:view")
+    if denied:
+        return denied
+
+    deployments = Deployment.objects.filter(
+        environment=environment,
+    ).select_related("app", "app__workspace").order_by("-created_at")[:20]
+
+    tags = ResourceTag.objects.filter(environment=environment).order_by("key", "value")
+    can_admin = abac.check_action(request.user.current_organization, request.user, environment, "environment", "environment:admin")
+
+    context["environment"] = environment
+    context["deployments"] = deployments
+    org = request.user.current_organization
+    context["tags"] = tags
+    context["tags_json"] = json.dumps([{"key": t.key, "value": t.value} for t in tags])
+    context["can_admin"] = can_admin
+    context["url_base"] = f"/environments/{environment.slug}/tags/"
+    context["suggested_keys"], context["suggested_values"] = abac.get_resource_tag_suggestions(org, "environment")
+
+    if request.htmx:
+        return render(request, "devopshero_app/environments/environment_detail.html", context=context)
+
+    context["content_url"] = f"/environments/{environment_slug}/"
+    return render(request, "devopshero_app/app_shell.html", context=context)
 
 
 @login_required
