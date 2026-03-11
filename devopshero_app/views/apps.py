@@ -1,10 +1,11 @@
 import json
+from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 from uuid import UUID
 
 from django.contrib.auth.decorators import login_required
-from django.db.models import OuterRef
+from django.db.models import OuterRef, Subquery
 from django.http import HttpRequest, HttpResponse
 from django.shortcuts import get_object_or_404, render
 from django.urls import reverse
@@ -21,6 +22,14 @@ OPEN_BLUEPRINT_STATUSES = (
     DeploymentBlueprint.Status.FAILED,
     DeploymentBlueprint.Status.DEPLOYING,
 )
+
+
+@dataclass
+class DeployedEnvironmentRow:
+    """Blueprint-backed summary row for one deployed environment."""
+
+    blueprint: DeploymentBlueprint
+    current_deployment: Deployment
 
 
 def _get_app_for_user(request: HttpRequest, app_slug: str) -> App:
@@ -74,6 +83,90 @@ def populate_deployment_entrypoint(app: App, open_blueprint_status: str) -> App:
     return app
 
 
+def _get_current_launched_blueprint(blueprints: list[DeploymentBlueprint]) -> DeploymentBlueprint | None:
+    """Return the current launched blueprint for one environment."""
+    current_blueprints = [
+        blueprint
+        for blueprint in blueprints
+        if getattr(blueprint, "current_deployment_created_at", None) is not None
+    ]
+    if current_blueprints:
+        current_blueprints.sort(
+            key=lambda blueprint: (
+                blueprint.current_deployment_created_at,
+                blueprint.created_at,
+            ),
+            reverse=True,
+        )
+        return current_blueprints[0]
+    return None
+
+
+def _build_deployed_environment_rows(app: App) -> list[DeployedEnvironmentRow]:
+    """Build one current blueprint-backed summary row per environment."""
+    current_deployment_statuses = [
+        Deployment.Status.SUCCEEDED,
+        Deployment.Status.TEARDOWN_PENDING,
+        Deployment.Status.TEARING_DOWN,
+    ]
+    current_deployment_id_subquery = (
+        Deployment.objects.filter(blueprint=OuterRef("pk"))
+        .filter(status__in=current_deployment_statuses)
+        .order_by("-created_at")
+        .values("id")[:1]
+    )
+    current_deployment_created_at_subquery = (
+        Deployment.objects.filter(blueprint=OuterRef("pk"))
+        .filter(status__in=current_deployment_statuses)
+        .order_by("-created_at")
+        .values("created_at")[:1]
+    )
+
+    blueprints = list(
+        DeploymentBlueprint.objects.filter(app=app)
+        .exclude(status=DeploymentBlueprint.Status.DISCARDED)
+        .select_related("environment", "environment__aws_account")
+        .annotate(
+            current_deployment_id=Subquery(current_deployment_id_subquery),
+            current_deployment_created_at=Subquery(current_deployment_created_at_subquery),
+        )
+    )
+
+    blueprints_by_environment_id: dict[UUID, list[DeploymentBlueprint]] = {}
+    for blueprint in blueprints:
+        blueprints_by_environment_id.setdefault(blueprint.environment_id, []).append(blueprint)
+
+    current_blueprints = []
+    for environment_blueprints in blueprints_by_environment_id.values():
+        current_blueprint = _get_current_launched_blueprint(blueprints=environment_blueprints)
+        if current_blueprint:
+            current_blueprints.append(current_blueprint)
+
+    current_deployment_ids = [
+        blueprint.current_deployment_id
+        for blueprint in current_blueprints
+        if getattr(blueprint, "current_deployment_id", None)
+    ]
+    current_deployments_by_id = {
+        deployment.id: deployment
+        for deployment in Deployment.objects.filter(id__in=current_deployment_ids).select_related(
+            "app",
+            "environment",
+            "environment__aws_account",
+        )
+    }
+
+    environment_rows = [
+        DeployedEnvironmentRow(
+            blueprint=blueprint,
+            current_deployment=current_deployments_by_id[blueprint.current_deployment_id],
+        )
+        for blueprint in current_blueprints
+    ]
+    environment_rows.sort(key=lambda row: row.current_deployment.created_at, reverse=True)
+    return environment_rows
+
+
 def build_app_detail_context(request: HttpRequest, app: App) -> dict[str, Any]:
     """Build the shared context dict for app detail rendering."""
     context = base.get_app_shell_context(request=request, current_page="workspaces")
@@ -82,16 +175,7 @@ def build_app_detail_context(request: HttpRequest, app: App) -> dict[str, Any]:
         app=app,
     ).select_related("environment", "environment__aws_account").order_by("-created_at")[:20]
     open_blueprint = get_open_blueprint(app=app)
-
-    # Build per-environment summary (first occurrence = latest, since ordered by -created_at)
-    seen_environments = {}
-    for deployment in deployments:
-        if deployment.environment_id not in seen_environments:
-            seen_environments[deployment.environment_id] = {
-                "environment": deployment.environment,
-                "latest_deployment": deployment,
-            }
-    environment_rows = list(seen_environments.values())
+    environment_rows = _build_deployed_environment_rows(app=app)
 
     # Tags
     direct_tags = ResourceTag.objects.filter(app=app).order_by("key", "value")
@@ -160,7 +244,13 @@ def app_deployment_teardown(request: HttpRequest, app_slug: str, deployment_id: 
     deployment.status_message = "Teardown triggered via web UI"
     deployment.save(update_fields=["status", "status_message", "updated_at"])
 
-    context = {"app": app, "deployment": deployment}
+    render_mode = request.GET.get("render", "")
+    mode = request.GET.get("mode", "")
+    if render_mode == "app_detail":
+        context = build_app_detail_context(request=request, app=app)
+        return render(request, "devopshero_app/apps/app_detail.html", context=context)
+
+    context = {"app": app, "deployment": deployment, "mode": mode}
     return render(request, "devopshero_app/apps/_app_deployment_row.html", context=context)
 
 
@@ -193,7 +283,29 @@ def app_teardown_confirm(request: HttpRequest, app_slug: str, deployment_id: UUI
 
     deployment = _get_deployment_for_app(app, deployment_id)
 
-    context = {"app": app, "deployment": deployment}
+    mode = request.GET.get("mode", "")
+    render_mode = request.GET.get("render", "")
+    post_url = reverse("app_deployment_teardown", kwargs={"app_slug": app.slug, "deployment_id": deployment.id})
+    response_target = f"#deployment-{deployment.id}"
+    response_swap = "outerHTML"
+
+    query_params = []
+    if mode:
+        query_params.append(f"mode={mode}")
+    if render_mode == "app_detail":
+        query_params.append("render=app_detail")
+        response_target = "#main-content"
+        response_swap = "innerHTML"
+    if query_params:
+        post_url = f"{post_url}?{'&'.join(query_params)}"
+
+    context = {
+        "app": app,
+        "deployment": deployment,
+        "post_url": post_url,
+        "response_target": response_target,
+        "response_swap": response_swap,
+    }
     return render(request, "devopshero_app/apps/_app_teardown_confirm_modal.html", context=context)
 
 

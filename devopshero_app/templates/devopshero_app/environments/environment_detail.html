@@ -55,10 +55,30 @@
     <div>
         <h2 class="text-lg font-semibold text-gray-900 dark:text-white mb-4">Recent Deployments</h2>
         {% if deployments %}
-        <div class="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg divide-y divide-gray-200 dark:divide-gray-700">
-            {% for deployment in deployments %}
-                {% include "devopshero_app/apps/_app_deployment_row.html" with mode="environment" %}
-            {% endfor %}
+        <div class="overflow-x-auto bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg">
+            <table class="min-w-full table-auto">
+                <colgroup>
+                    <col>
+                    <col class="w-full">
+                    <col>
+                    <col>
+                    <col>
+                </colgroup>
+                <thead class="sr-only">
+                    <tr>
+                        <th class="px-4 py-3 text-left">App</th>
+                        <th aria-hidden="true"></th>
+                        <th class="px-4 py-3 text-center">Status</th>
+                        <th class="px-4 py-3 text-center">Updated</th>
+                        <th class="px-4 py-3 text-left">Actions</th>
+                    </tr>
+                </thead>
+                <tbody class="[&_tr:not(:last-child)>td]:border-b [&_tr:not(:last-child)>td]:border-gray-200 dark:[&_tr:not(:last-child)>td]:border-gray-700">
+                    {% for deployment in deployments %}
+                        {% include "devopshero_app/apps/_app_deployment_row.html" with mode="environment" %}
+                    {% endfor %}
+                </tbody>
+            </table>
         </div>
         {% else %}
         <div class="bg-gray-50 dark:bg-gray-800/50 border border-gray-200 dark:border-gray-700 border-dashed rounded-lg p-6 text-center">

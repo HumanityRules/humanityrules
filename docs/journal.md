@@ -1,5 +1,26 @@
 # DevOpsHero Development Journal
 
+## 2026-03-11 16:56 - [Deployment] App detail deployment lists now separate current environment state from attempt history
+
+**Conversation:** [2026-03-11-1656-2f0c5789.md](conversations/2026-03-11-1656-2f0c5789.md)
+
+Refined the app detail page so its two deployment lists now reflect the blueprint/deployment split from the deployment blueprint spec instead of treating all deployment rows as interchangeable history. The main product decision was that the top list, `Deployed to Environments`, should represent the app's current launched state per environment, while the bottom list, `Recent Deployments`, should remain pure attempt history. That sounds small in the UI, but it required tightening the row selection semantics and cleaning up which actions belong to which surface.
+
+The first correction was conceptual: the old top list was built by taking the app's last 20 `Deployment` rows and deduplicating by environment, which meant the section was actually "environments seen in recent attempts", not "current deployed environments". The fix was to make the top list blueprint-backed. For each environment we now choose the current launched blueprint and require a corresponding current deployment record. That keeps the row count bounded by environments, ignores unlaunched drafts, and prevents recent failed attempts from replacing the current launched row in the summary. Once that invariant was established, `_app_blueprint_row.html` no longer needed defensive fallbacks to blueprint status/time fields and was simplified to assume `current_deployment` is always present.
+
+The second correction was about action ownership. `Recent Deployments` is now treated as history-only, so destructive lifecycle actions no longer belong there. `Tear Down` was first moved onto the current per-environment row in the app detail page, because teardown semantically acts on the currently launched footprint in an environment rather than on an arbitrary historical attempt. After that, the shared deployment-row partial was cleaned up further so the environment detail page no longer exposes teardown either. The result is a clearer split: app detail top list is the current-state management surface, while history-style deployment tables are informational.
+
+The third part of the session was layout stabilization. Fixed per-row grid widths solved overlap but looked too rigid; separate auto-sized row grids also could not align columns consistently. The final approach was to convert the app detail and environment deployment lists to real `table-auto` tables, render row partials as `<tr>/<td>` elements, add a spacer column that absorbs free width, and give the time cell a minimum width so long `timesince` strings do not collide with the actions column. This keeps status/time/actions visually aligned within each list without hard-coding the final spacing too aggressively.
+
+Finally, the row-template API was simplified to match the new reality. `_app_deployment_row.html` no longer carries the obsolete `app_summary` branch that used to render the app detail top list before the blueprint-row split. The template now has only explicit `environment` and `app_history` modes, making it much easier to reason about which view owns which deployment-row behavior.
+
+**Key points:**
+- `Deployed to Environments` should be sourced from current launched blueprint state, not from a recent-deployments dedupe heuristic. That keeps the UI aligned with the domain model where `DeploymentBlueprint` owns the `(app, environment)` state and `Deployment` is attempt history.
+- Current-environment summary rows need a current deployment invariant. Once the backend guarantees that, the template can stop branching between blueprint and deployment fields for status/time/ref rendering.
+- Lifecycle actions should live on current-state surfaces, not history surfaces. `Recent Deployments` became cleaner once it stopped pretending to be a management surface.
+- For column alignment across repeated rich rows, real tables with auto layout plus a spacer column were more robust than per-row CSS grids with guessed widths.
+- Removing stale template modes matters. The unused `app_summary` branch had become misleading after the top list moved to `_app_blueprint_row.html`.
+
 ## 2026-03-11 11:31 - [Deployment] Environment setup editor mirrors deployment editor with draft-first provisioning
 
 **Conversation:** [2026-03-11-1131-384413c1.md](conversations/2026-03-11-1131-384413c1.md)
