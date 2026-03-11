@@ -30,6 +30,7 @@ class DeploymentStatus:
     id: str
     app_id: str
     app_name: str
+    app_slug: str
     git_ref: str
     status: str
     status_message: str
@@ -99,6 +100,7 @@ async def get_deployment_status(
         id=str(deployment.id),
         app_id=str(deployment.app.id),
         app_name=deployment.app.name,
+        app_slug=deployment.app.slug,
         git_ref=deployment.git_ref,
         status=deployment.status,
         status_message=deployment.status_message,

@@ -1,5 +1,17 @@
 # DevOpsHero Development Journal
 
+## 2026-03-10 19:09 - [Deployment] Add app detail page link to deployment success message
+
+**Conversation:** [2026-03-10-1910-9bccc8d0.md](conversations/2026-03-10-1910-9bccc8d0.md)
+
+After a successful deployment, the agent only provided the live app URL. Added an app detail page link so users can quickly navigate to the app's management page (deployments, settings, actions) from the success message.
+
+Two changes: added `app_slug` to the `DeploymentStatus` dataclass returned by `get_deployment_status`, and updated the deployment agent system prompt to instruct the agent to render a "View app details" link (`/apps/{app_slug}/`) alongside the live app URL on SUCCEEDED status.
+
+**Key points:**
+- `get_deployment_status` previously lacked `app_slug`, which meant the agent couldn't construct the app detail URL from the tool response alone. Now included via `deployment.app.slug`.
+- System prompt `<polling>` section updated: on SUCCEEDED, agent now provides both the live service URL and an app detail page link as HTML anchors with `target="_blank"`.
+
 ## 2026-03-10 22:15 - [Deployment] Blueprint section: polling while deploying, fix query to show terminal states
 
 **Conversation:** [2026-03-10-1724-a6dd5872.md](conversations/2026-03-10-1724-a6dd5872.md)

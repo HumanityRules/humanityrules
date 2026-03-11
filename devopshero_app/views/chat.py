@@ -383,6 +383,8 @@ def _format_sse_event(event: agent_service.AgentStreamEvent, show_costs: bool) -
         tool_name = event.data["name"]
         tool_result = event.data["result"]
         result = _format_sse(event_name="sse-tool-result", data=_render_streaming_tool_result(event.data))
+        if not isinstance(tool_result, dict):
+            return result
         if tool_name == "mcp__devopshero__update_permission_draft":
             result += _format_sse_notify(f"permissions-changed-{tool_result['app_permission_request_id']}")
         if tool_name == "mcp__devopshero__save_app":
