@@ -1,5 +1,21 @@
 # DevOpsHero Development Journal
 
+## 2026-03-10 23:30 - [UI] Reusable status pill partial; standardized app/deployment status display
+
+**Conversation:** [2026-03-10-1747-c31a780c.md](conversations/2026-03-10-1747-c31a780c.md)
+
+App and deployment status was rendered in four separate places with copy-pasted pill markup. Only the app-detail deployment row showed a spinning icon for "tearing down"; workspaces list and app cards showed a static pill for the same status. We introduced a single reusable partial and use it everywhere status appears.
+
+**What we did:**
+- **New partial:** `devopshero_app/templates/devopshero_app/partials/_status_pill.html` accepts `status` (raw value) and `label` (display text). It maps status to one of five color buckets (green success, red failure, blue draft, yellow in-progress, gray neutral) and shows an `animate-spin` SVG for actively-working states: `building`, `pushing`, `deploying`, `starting`, `tearing_down`, `provisioning`, `creating`, `applying`. Waiting states like `pending` and `teardown_pending` stay yellow but without a spinner.
+- **Replaced inline pills** in: `apps/_app_deployment_row.html`, `partials/_app_card.html`, `workspaces/workspaces.html`, `deploy/_blueprint_section.html`, `environments/environments.html`, `dashboard.html` (datastore status). Callers pass `status` and `label` (e.g. `deployment.get_status_display` or `app.latest_status|title`) and `include` the partial with `only` to avoid leaking context.
+- **Fixed inconsistencies:** App card previously sent `tearing_down`/`teardown_pending` to the gray else-branch; workspaces and app card had different catch-all colors. All now use the same mapping. Spinner appears for all in-progress "active work" states everywhere, not only tearing_down on the deployment row.
+
+**Key points:**
+- One source of truth for status pill appearance and animation; new status values or models (e.g. AppPermissionRequest) can reuse the partial by passing status + label.
+- Generic name `_status_pill.html` is intentional: the partial is a UI primitive used across deployment, blueprint, environment, and datastore statuses.
+- Label remains caller responsibility: deployment/blueprint use `get_status_display`; app card and workspaces use `|title` on annotated fields that have no model display method (e.g. `latest_status`, `open_blueprint_status`).
+
 ## 2026-03-10 22:15 - [Deployment] Blueprint section polling when status is "Deploying"
 
 **Conversation:** [2026-03-10-1724-a6dd5872.md](conversations/2026-03-10-1724-a6dd5872.md)

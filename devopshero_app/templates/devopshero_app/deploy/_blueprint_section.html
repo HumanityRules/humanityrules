@@ -3,14 +3,7 @@
         <h2 class="text-sm font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">Deployment Blueprint</h2>
         <div class="flex items-baseline gap-3">
             {% if blueprint %}
-            <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium
-                {% if blueprint.status == 'active' %}bg-green-100 text-green-700 dark:bg-green-500/10 dark:text-green-400
-                {% elif blueprint.status == 'deploying' %}bg-yellow-100 text-yellow-700 dark:bg-yellow-500/10 dark:text-yellow-400
-                {% elif blueprint.status == 'failed' %}bg-red-100 text-red-700 dark:bg-red-500/10 dark:text-red-400
-                {% elif blueprint.status == 'draft' %}bg-blue-100 text-blue-700 dark:bg-blue-500/10 dark:text-blue-400
-                {% else %}bg-gray-100 text-gray-500 dark:bg-gray-700 dark:text-gray-400{% endif %}">
-                {{ blueprint.get_status_display }}
-            </span>
+            {% include "devopshero_app/partials/_status_pill.html" with status=blueprint.status label=blueprint.get_status_display only %}
             {% if blueprint.status == 'draft' or blueprint.status == 'failed' %}
             <button type="button"
                     hx-get="{% url 'deployment_editor_discard_draft_confirm' app_slug=app.slug %}"
@@ -76,10 +69,12 @@
         <p class="text-sm text-gray-400 dark:text-gray-500">The agent will configure the blueprint after defining the app and selecting an environment.</p>
         {% endif %}
     </div>
+    {% if blueprint.status == 'deploying' and app %}
+    <div class="sr-only"
+         hx-get="{% url 'deployment_editor_blueprint_section' app_slug=app.slug %}"
+         hx-trigger="load delay:5s"
+         hx-target="#blueprint-section"
+         hx-swap="innerHTML"
+         aria-hidden="true"></div>
+    {% endif %}
 </div>
-{% if blueprint.status == 'deploying' and app %}
-<div hx-get="{% url 'deployment_editor_blueprint_section' app_slug=app.slug %}"
-     hx-trigger="load delay:5s"
-     hx-target="#blueprint-section"
-     hx-swap="innerHTML"></div>
-{% endif %}

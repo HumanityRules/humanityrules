@@ -1,0 +1,14 @@
+<span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium shrink-0
+    {% if status == 'succeeded' or status == 'active' or status == 'available' or status == 'connected' or status == 'ready' %}bg-green-100 text-green-700 dark:bg-green-500/10 dark:text-green-400
+    {% elif status == 'failed' or status == 'rolled_back' or status == 'error' %}bg-red-100 text-red-700 dark:bg-red-500/10 dark:text-red-400
+    {% elif status == 'draft' %}bg-blue-100 text-blue-700 dark:bg-blue-500/10 dark:text-blue-400
+    {% elif status == 'pending' or status == 'building' or status == 'pushing' or status == 'deploying' or status == 'starting' or status == 'teardown_pending' or status == 'tearing_down' or status == 'provisioning' or status == 'creating' or status == 'applying' or status == 'approved_pending_apply' %}bg-yellow-100 text-yellow-700 dark:bg-yellow-500/10 dark:text-yellow-400
+    {% else %}bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-300{% endif %}">
+    {% if status == 'building' or status == 'pushing' or status == 'deploying' or status == 'starting' or status == 'tearing_down' or status == 'provisioning' or status == 'creating' or status == 'applying' %}
+    <svg class="animate-spin -ml-0.5 mr-1.5 h-3 w-3" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+    </svg>
+    {% endif %}
+    {{ label }}
+</span>
