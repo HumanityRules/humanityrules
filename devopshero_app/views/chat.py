@@ -394,15 +394,6 @@ def _format_sse_event(event: agent_service.AgentStreamEvent, show_costs: bool) -
                 result += _format_sse_notify(f"app-changed-{tool_result['id']}")
         if tool_name in ("mcp__devopshero__save_blueprint", "mcp__devopshero__deploy_blueprint"):
             result += _format_sse_notify(f"blueprint-changed-{tool_result['app_id']}")
-        if tool_name == "mcp__devopshero__provision_environment":
-            if tool_result.get("created"):
-                result += _format_sse_notify("environment-created", slug=tool_result.get("slug", ""))
-            else:
-                result += _format_sse_notify(f"environment-changed-{tool_result['id']}")
-        if tool_name == "mcp__devopshero__get_environment_status":
-            env_id = tool_result.get("id")
-            if env_id:
-                result += _format_sse_notify(f"environment-changed-{env_id}")
         return result
     elif event.type == "complete":
         result = _format_sse(event_name="sse-complete", data="")
@@ -487,7 +478,6 @@ def chat_fork(request, conversation_id):
         context_workspace=source.context_workspace,
         context_repository=source.context_repository,
         context_aws_account=source.context_aws_account,
-        context_environment=source.context_environment,
         session_id=source.session_id,
         status=Conversation.Status.ACTIVE,
     )

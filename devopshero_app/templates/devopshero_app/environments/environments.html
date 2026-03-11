@@ -34,11 +34,6 @@
                     <dd class="text-gray-700 dark:text-gray-300">{{ env.aws_region }}</dd>
                 </div>
             </dl>
-            {% if env.status == 'pending' or env.status == 'provisioning' or env.status == 'error' %}
-            <div class="mt-3 pt-2 border-t border-gray-100 dark:border-gray-700">
-                <span class="text-xs font-medium text-indigo-600 dark:text-indigo-400">Resume provisioning &rarr;</span>
-            </div>
-            {% endif %}
         </a>
         {% endfor %}
 

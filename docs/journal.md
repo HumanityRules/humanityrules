@@ -1,25 +1,5 @@
 # DevOpsHero Development Journal
 
-## 2026-03-11 08:10 - [UI] Environment editor: integrated chat panel for environment provisioning
-
-**Conversation:** [2026-03-11-0811-1037e2be.md](conversations/2026-03-11-0811-1037e2be.md)
-
-Applied the same "chat-in-UI" pattern from the deployment editor to environment provisioning. Previously, creating a new environment sent users to the generic `/chat/` page with an `ENVIRONMENT_SETUP` conversation. Now the environment detail page itself is a two-panel editor (left: environment info, right: conversation), consistent with the deployment editor and permissions editor.
-
-The design is simpler than app deployment because the domain model is flatter — no intermediate "blueprint" concept. The progression is: AWS account context -> Environment context (vs. app deployment's repo -> App -> DeploymentBlueprint).
-
-**Key points:**
-
-- Added `context_environment` FK on `Conversation` model, following the same pattern as `context_app` and `context_deployment_blueprint`. Conversations start scoped to `context_aws_account` (new environment), then gain `context_environment` once the agent calls `provision_environment`.
-- New `environment_editor.py` view with three entry points: `environment_editor_new` (from AWS account picker), `environment_editor` (replaces old `environment_detail` — existing environments get the chat panel), and `environment_editor_environment_section` (HTMX partial refresh).
-- The old `environment_detail` view was removed. The editor serves both new provisioning and ongoing management of existing environments. Tag management views remain unchanged.
-- SSE event wiring: `provision_environment` dispatches `doh:environment-created` (with slug) for new environments, triggering a full editor reload to `/environments/<slug>/`. `get_environment_status` dispatches `doh:environment-changed-<id>` so the left panel refreshes during polling. Same pattern as `app-created`/`blueprint-changed`.
-- The `provision_environment` tool now sets `conversation.context_environment` after creating/retrying the environment, same as `save_blueprint` sets `context_deployment_blueprint`.
-- Added `created` boolean to `EnvironmentSummary` dataclass so the SSE handler can distinguish new creation (needs full editor reload) from retry (needs section refresh).
-- `agent_build_prompt.py` now injects `<current_environment>` context into the system prompt when `context_environment` is set, so the agent knows the environment's state on resume.
-- Environment section auto-refreshes every 5s during `PENDING`/`PROVISIONING` status (same pattern as blueprint section during `deploying`). Shows "Deploy your first app" link when `READY`.
-- Environments list shows "Resume provisioning" indicator on cards for `PENDING`/`PROVISIONING`/`ERROR` environments.
-
 ## 2026-03-11 02:30 - [Bugfix] SSE crash when save_blueprint returns error string instead of dict
 
 **Conversation:** [2026-03-10-1915-867cb58c.md](conversations/2026-03-10-1915-867cb58c.md)

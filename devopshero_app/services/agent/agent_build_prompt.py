@@ -97,23 +97,6 @@ async def _build_environment_prompt(conversation: Conversation) -> str:
 
     sections.append("<existing_environments>\n" + "\n".join(env_lines) + "\n</existing_environments>")
 
-    if conversation.context_environment_id:
-        env = await Environment.objects.aget(id=conversation.context_environment_id)
-        env_context_lines = [
-            "<current_environment>",
-            f"  <id>{env.id}</id>",
-            f"  <name>{env.name}</name>",
-            f"  <slug>{env.slug}</slug>",
-            f"  <region>{env.aws_region}</region>",
-            f"  <status>{env.status}</status>",
-            f"  <status_message>{env.status_message or ''}</status_message>",
-            f"  <domain>{env.shared_alb_hosted_zone or 'HTTP only'}</domain>",
-            f"  <vpc_id>{env.vpc_id or 'not yet provisioned'}</vpc_id>",
-            f"  <cluster_arn>{env.cluster_arn or 'not yet provisioned'}</cluster_arn>",
-            "</current_environment>",
-        ]
-        sections.append("\n".join(env_context_lines))
-
     if sections:
         return base_prompt + "\n\n" + "\n\n".join(sections)
     return base_prompt
