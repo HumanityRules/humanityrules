@@ -699,6 +699,14 @@ class Conversation(models.Model):
         related_name="conversations",
         help_text="DeploymentBlueprint context for deployment-mode conversations",
     )
+    context_environment = models.ForeignKey(
+        "Environment",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="conversations",
+        help_text="Environment context for environment-setup conversations",
+    )
     context_app_permission_request = models.ForeignKey(
         "AppPermissionRequest",
         on_delete=models.SET_NULL,

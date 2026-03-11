@@ -1,0 +1,67 @@
+{% if error_message %}
+<div class="max-w-2xl py-12">
+    <div class="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 dark:border-amber-500/40 dark:bg-amber-500/10 dark:text-amber-200">
+        {{ error_message }}
+    </div>
+</div>
+{% else %}
+<div class="flex h-full flex-col" style="height: calc(100vh - 8rem);">
+    <div class="border-b border-gray-200 px-6 py-3 dark:border-gray-700">
+        {% url 'environments' as environments_url %}
+        {% if environment %}
+        {% include "devopshero_app/partials/_breadcrumb.html" with p1_label="Environments" p1_url=environments_url current=environment.name %}
+        {% else %}
+        {% include "devopshero_app/partials/_breadcrumb.html" with p1_label="Environments" p1_url=environments_url current="New Environment" %}
+        {% endif %}
+        <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
+            {% if environment %}Manage environment infrastructure and settings.{% endif %}
+        </p>
+    </div>
+
+    <div class="flex flex-1 overflow-hidden">
+        {# LEFT PANEL: AWS Account & Environment info #}
+        <div class="w-1/2 overflow-y-auto border-r border-gray-200 dark:border-gray-700 dark-scrollbar">
+            <div class="space-y-6 p-5">
+                {# AWS Account section #}
+                <div id="aws-account-section">
+                    {% include "devopshero_app/environments/_aws_account_section.html" %}
+                </div>
+
+                {# Environment section #}
+                <div id="environment-section"
+                    {% if environment %}
+                    hx-get="{% url 'environment_editor_environment_section' environment_slug=environment.slug %}"
+                    hx-trigger="doh:environment-changed-{{ environment.id }} from:document"
+                    hx-swap="innerHTML"
+                    {% endif %}>
+                    {% include "devopshero_app/environments/_environment_section.html" %}
+                </div>
+            </div>
+        </div>
+
+        {# RIGHT PANEL: Agent Chat #}
+        <div class="flex w-1/2 flex-col">
+            {% if conversation %}
+            {% include "devopshero_app/chat/_chat_panel.html" %}
+            {% else %}
+            <div class="flex flex-1 items-center justify-center text-gray-500 dark:text-gray-400">
+                <p class="text-sm">No conversation linked to this session.</p>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+</div>
+
+<script type="module">
+function reloadEditor(url) {
+    htmx.ajax('GET', url, { target: '#main-content', swap: 'innerHTML' });
+    history.pushState({}, '', url);
+}
+
+document.addEventListener('doh:environment-created', (e) => {
+    if (e.detail.slug) {
+        reloadEditor(`/environments/${e.detail.slug}/`);
+    }
+});
+</script>
+{% endif %}
