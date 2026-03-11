@@ -1,5 +1,22 @@
 # DevOpsHero Development Journal
 
+## 2026-03-11 01:30 - [Deployment] Debug deployment mode: simulated success, simulator module, no web-process fallback
+
+**Conversation:** [2026-03-10-1827-91063a53.md](conversations/2026-03-10-1827-91063a53.md)
+
+Added an opt-in debug path so `deploy_blueprint` can "succeed" after ~10 seconds with no repository clone or AWS calls, for testing the UI and agent flow locally. Debug logic lives in a dedicated module; the web process no longer starts a background thread — only the job worker runs deployments (real or simulated).
+
+**What we did:**
+- **Setting:** `DOH_DEBUG_DEPLOYMENTS = DEBUG and os.environ.get("DOH_DEBUG_DEPLOYMENTS") == "1"` in `devopshero_site/settings.py`. When True, `app_deployment_executor.run_deployment` skips clone/AWS and calls the simulator instead: BUILDING → 5s sleep → DEPLOYING → 5s sleep → SUCCEEDED, with synthetic `service_url` and `alb_dns` and blueprint set to ACTIVE.
+- **Simulator module:** `devopshero_app/services/jobs/app_deployment_debug_simulator.py` holds `run_debug_deployment`, `_build_debug_service_url`, `_build_debug_alb_dns`, and `DEBUG_DEPLOYMENT_STEP_DELAY_SECONDS`. Executor imports and delegates to it when `settings.DOH_DEBUG_DEPLOYMENTS` is True.
+- **Removed web-process fallback:** Initially we had `maybe_start_debug_deployment()` in the simulator: when `DOH_DEBUG_DEPLOYMENTS=1` and `DOH_RUN_JOB_WORKER=0`, `deploy_blueprint` started a daemon thread to run the simulated deployment. That caused a race when the user runs the worker as a separate process (same .env): both the web-started thread and the external worker could claim the same pending deployment. We removed the fallback; `deploy_blueprint` now only creates a PENDING deployment and returns. The only process that executes it is the one running the job worker (with `DOH_RUN_JOB_WORKER=1` in-app or `uv run manage.py run_job_worker`). If no worker is running, deployments stay pending.
+- **Tests:** `test_app_deployment_executor.py` asserts debug path succeeds without clone/cleanup/deploy/AWS, and checks deployment/blueprint state and log message. `test_deployment_blueprint_effective_values` is pinned with `@override_settings(DOH_DEBUG_DEPLOYMENTS=False)` so env doesn’t leak into unrelated tests.
+
+**Key points:**
+- Single place for debug deployment behavior: simulator module; executor is the only caller. Clean separation and no duplicate execution.
+- Debug mode must be enabled on the process that runs the worker (e.g. `DOH_DEBUG_DEPLOYMENTS=1` in the env for `run_job_worker`), not only on the web app.
+- Trust the operator to start the worker or set DOH_RUN_JOB_WORKER=1; no in-web fallback avoids races and keeps the contract simple.
+
 ## 2026-03-10 23:55 - [Deployment] Permissions guidance in deployment agent: concrete URL, timing rule, section rename
 
 **Conversation:** [2026-03-10-1813-6e374a00.md](conversations/2026-03-10-1813-6e374a00.md)

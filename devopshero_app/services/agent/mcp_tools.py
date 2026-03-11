@@ -647,7 +647,7 @@ def create_devopshero_mcp_server(conversation: Conversation):
         (
             "Trigger deployment of the current blueprint. "
             "Creates a pending deployment from the blueprint configuration. "
-            "The job worker will build the Docker image, push to ECR, and deploy via CDK. "
+            "The job worker will execute the deployment workflow. "
             "Use get_deployment_status to check progress. "
             "Requires save_app and save_blueprint to have been called first. "
             "CRITICAL: only call this after reviewing the saved draft with the user and receiving "
@@ -663,7 +663,7 @@ def create_devopshero_mcp_server(conversation: Conversation):
             **result.to_dict(),
             "note": (
                 f"Deployment queued for '{result.app_name}' in '{result.environment_name}'. "
-                "The job worker will build/push/deploy. Use get_deployment_status to check progress."
+                "The job worker will process it. Use get_deployment_status to check progress."
             ),
         })
 

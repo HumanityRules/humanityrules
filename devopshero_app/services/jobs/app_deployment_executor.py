@@ -13,6 +13,7 @@ from django.utils import timezone
 from devopshero_app import models
 from devopshero_app.services import infra_customer
 from devopshero_app.services.gitproviders import repo_service
+import devopshero_app.services.jobs.app_deployment_debug_simulator as app_deployment_debug_simulator
 
 from . import app_config_builder
 from . import job_logging
@@ -93,6 +94,9 @@ def run_deployment(deployment_id: str) -> bool:
             deployment.completed_at = timezone.now()
             deployment.save()
             return False
+
+        if settings.DOH_DEBUG_DEPLOYMENTS:
+            return app_deployment_debug_simulator.run_debug_deployment(deployment=deployment, blueprint=blueprint)
 
         # Update status to BUILDING
         deployment.status = models.Deployment.Status.BUILDING
