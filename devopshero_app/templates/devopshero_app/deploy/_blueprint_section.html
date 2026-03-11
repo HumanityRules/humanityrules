@@ -65,6 +65,16 @@
             <dd class="text-gray-900 dark:text-white">{{ blueprint.status_message }}</dd>
             {% endif %}
         </dl>
+        {% if blueprint.status == 'active' %}
+        <div class="mt-4 rounded-md border border-green-200 bg-green-50 px-3 py-2 text-sm text-green-800 dark:border-green-500/30 dark:bg-green-500/10 dark:text-green-200">
+            Deployment active. <a href="{% url 'app_detail' app_slug=app.slug %}"
+                hx-get="{% url 'app_detail' app_slug=app.slug %}"
+                hx-target="#main-content"
+                hx-swap="innerHTML"
+                hx-push-url="true"
+                class="font-medium underline">Open app details</a>.
+        </div>
+        {% endif %}
         {% else %}
         <p class="text-sm text-gray-400 dark:text-gray-500">The agent will configure the blueprint after defining the app and selecting an environment.</p>
         {% endif %}

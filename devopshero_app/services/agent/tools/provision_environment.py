@@ -1,19 +1,14 @@
 """
 Tool for provisioning environments.
 
-This tool provisions an Environment by creating (or resetting) a record with
-PENDING status. The job worker picks up pending environments and provisions
-them via the environment_executor.
-
-Retry semantics: if the environment previously failed (ERROR status), calling
-this tool again resets it to PENDING and retries provisioning.
+This tool queues provisioning for a saved Environment draft.
+The job worker picks up pending environments and provisions them via the
+environment_executor.
 """
 
 from dataclasses import dataclass, asdict
 
-from django.utils.text import slugify
-
-from devopshero_app.models import AWSAccount, Environment, Organization, User
+import devopshero_app.models as models
 
 
 @dataclass
@@ -29,108 +24,69 @@ class EnvironmentSummary:
     aws_account_id: str
     aws_account_name: str
 
-    def to_dict(self) -> dict:
+    def to_dict(self) -> dict[str, str | None]:
         """Convert to dictionary for JSON serialization."""
         return asdict(self)
 
 
 async def provision_environment(
-    aws_account_uuid: str,
-    environment_name: str,
-    aws_region: str,
-    hosted_zone_name: str | None,
-    organization: Organization,
-    user: User,
+    conversation: models.Conversation,
+    organization: models.Organization,
 ) -> EnvironmentSummary:
     """
-    Provision an environment in an AWS account.
-
-    Creates an Environment record with status PENDING (or resets a failed one).
-    The job worker picks it up and provisions VPC, ECS cluster, and shared ALB.
-    If hosted_zone_name is provided, also creates wildcard cert for HTTPS.
-
-    Retry semantics: if the environment previously failed (ERROR status),
-    resets it to PENDING and allows the job worker to retry provisioning.
+    Queue provisioning for the conversation's current environment draft.
 
     Use get_environment_status to poll for provisioning progress.
     """
-    # Validate AWS account exists and belongs to organization
-    try:
-        aws_account = await AWSAccount.objects.aget(
-            id=aws_account_uuid,
-            organization=organization,
-        )
-    except AWSAccount.DoesNotExist:
+    if not conversation.context_environment_id:
         raise ValueError(
-            f"AWS account {aws_account_uuid} not found or doesn't belong to your organization."
+            "No environment context set. Use save_environment first to create or update the draft."
         )
 
-    # Check account is connected
-    if aws_account.status != AWSAccount.Status.CONNECTED:
+    try:
+        environment = await models.Environment.objects.select_related("aws_account").aget(
+            id=conversation.context_environment_id,
+            aws_account__organization=organization,
+        )
+    except models.Environment.DoesNotExist:
+        raise ValueError(
+            f"Environment {conversation.context_environment_id} not found or doesn't belong to your organization."
+        )
+
+    aws_account = environment.aws_account
+    if aws_account.status != models.AWSAccount.Status.CONNECTED:
         raise ValueError(
             f"AWS account '{aws_account.name}' is not connected (status: {aws_account.status}). "
             "Please complete the AWS account connection first."
         )
 
-    # Generate slug from name
-    slug = slugify(environment_name)
-    if not slug:
-        slug = "default"
+    if environment.status == models.Environment.Status.READY:
+        raise ValueError(
+            f"Environment '{environment.name}' is already ready. "
+            "Use it directly for deployments."
+        )
 
-    # Check if environment already exists
-    existing = await Environment.objects.filter(
-        aws_account=aws_account,
-        slug=slug,
-    ).afirst()
+    if environment.status == models.Environment.Status.PROVISIONING:
+        raise ValueError(
+            f"Environment '{environment.name}' is currently being provisioned. "
+            "Use get_environment_status to check progress."
+        )
 
-    if existing:
-        if existing.status == Environment.Status.READY:
-            raise ValueError(
-                f"Environment '{environment_name}' already exists and is ready. "
-                "Use it directly for deployments."
-            )
-        if existing.status == Environment.Status.PROVISIONING:
-            raise ValueError(
-                f"Environment '{environment_name}' is currently being provisioned. "
-                "Use get_environment_status to check progress."
-            )
-        if existing.status == Environment.Status.PENDING:
-            raise ValueError(
-                f"Environment '{environment_name}' is already queued for provisioning. "
-                "Use get_environment_status to check progress."
-            )
-        if existing.status == Environment.Status.ERROR:
-            # Reset to PENDING so the job worker retries provisioning.
-            # Allow updating config (region, hosted zone) on retry.
-            existing.status = Environment.Status.PENDING
-            existing.status_message = ""
-            existing.name = environment_name
-            existing.aws_region = aws_region
-            existing.shared_alb_hosted_zone = hosted_zone_name or ""
-            await existing.asave()
+    if environment.status == models.Environment.Status.PENDING:
+        raise ValueError(
+            f"Environment '{environment.name}' is already queued for provisioning. "
+            "Use get_environment_status to check progress."
+        )
 
-            return EnvironmentSummary(
-                id=str(existing.id),
-                name=existing.name,
-                slug=existing.slug,
-                aws_region=existing.aws_region,
-                status=existing.status,
-                shared_alb_hosted_zone=existing.shared_alb_hosted_zone or None,
-                aws_account_id=str(aws_account.id),
-                aws_account_name=aws_account.name,
-            )
+    if environment.status not in (models.Environment.Status.DRAFT, models.Environment.Status.ERROR):
+        raise ValueError(
+            f"Environment '{environment.name}' is in '{environment.status}' state and cannot be provisioned. "
+            "Only draft or error environments can be queued."
+        )
 
-    # Create new environment record with PENDING status
-    environment = await Environment.objects.acreate(
-        aws_account=aws_account,
-        name=environment_name,
-        slug=slug,
-        aws_region=aws_region,
-        status=Environment.Status.PENDING,
-        vpc_stack_name=f"devopshero-{slug}-vpc",
-        cluster_stack_name=f"devopshero-{slug}-cluster",
-        shared_alb_hosted_zone=hosted_zone_name or "",
-    )
+    environment.status = models.Environment.Status.PENDING
+    environment.status_message = "Queued for provisioning"
+    await environment.asave(update_fields=["status", "status_message", "updated_at"])
 
     return EnvironmentSummary(
         id=str(environment.id),

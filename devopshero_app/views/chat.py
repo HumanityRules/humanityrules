@@ -44,7 +44,9 @@ def _get_conversations(user, annotate_costs):
     qs = Conversation.objects.filter(
         user=user,
         organization=user.current_organization,
-    ).select_related("context_workspace", "context_repository", "context_aws_account").order_by("-updated_at")
+    ).select_related(
+        "context_workspace", "context_repository", "context_aws_account", "context_environment",
+    ).order_by("-updated_at")
     if annotate_costs:
         qs = qs.annotate(total_cost=Sum("llm_usage_logs__cost_usd"))
     return qs
@@ -116,7 +118,9 @@ def chat_view(request, conversation_id):
         return render(request, "devopshero_app/app_shell.html", context=context)
 
     conversation = get_object_or_404(
-        Conversation.objects.select_related("context_workspace", "context_repository", "context_aws_account"),
+        Conversation.objects.select_related(
+            "context_workspace", "context_repository", "context_aws_account", "context_environment",
+        ),
         id=conversation_id,
         user=request.user,
         organization=request.user.current_organization,
@@ -392,6 +396,12 @@ def _format_sse_event(event: agent_service.AgentStreamEvent, show_costs: bool) -
                 result += _format_sse_notify("app-created", slug=tool_result.get("slug", ""))
             else:
                 result += _format_sse_notify(f"app-changed-{tool_result['id']}")
+        if tool_name == "mcp__devopshero__save_environment":
+            if tool_result.get("created"):
+                result += _format_sse_notify("environment-created", environment_id=tool_result.get("id", ""))
+            result += _format_sse_notify(f"environment-changed-{tool_result['id']}")
+        if tool_name == "mcp__devopshero__provision_environment":
+            result += _format_sse_notify(f"environment-changed-{tool_result['id']}")
         if tool_name in ("mcp__devopshero__save_blueprint", "mcp__devopshero__deploy_blueprint"):
             result += _format_sse_notify(f"blueprint-changed-{tool_result['app_id']}")
         return result
@@ -478,6 +488,7 @@ def chat_fork(request, conversation_id):
         context_workspace=source.context_workspace,
         context_repository=source.context_repository,
         context_aws_account=source.context_aws_account,
+        context_environment=source.context_environment,
         session_id=source.session_id,
         status=Conversation.Status.ACTIVE,
     )

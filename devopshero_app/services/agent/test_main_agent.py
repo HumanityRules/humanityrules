@@ -287,6 +287,7 @@ async def _resolve_conversation_for_fork(user, source_id: str):
         context_workspace_id=source.context_workspace_id,
         context_repository_id=source.context_repository_id,
         context_aws_account_id=source.context_aws_account_id,
+        context_environment_id=source.context_environment_id,
         session_id=source.session_id,
         status=Conversation.Status.ACTIVE,
     )
@@ -475,6 +476,8 @@ async def _run(args: argparse.Namespace, run_db_path: Path) -> int:
         print(f"Repository: {conversation.context_repository_id}")
     if conversation.context_aws_account_id:
         print(f"AWS Account: {conversation.context_aws_account_id}")
+    if conversation.context_environment_id:
+        print(f"Environment: {conversation.context_environment_id}")
     if conversation.session_id:
         print(f"Resume session: {conversation.session_id}")
 

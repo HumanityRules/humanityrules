@@ -15,13 +15,14 @@ from typing import Any
 from claude_agent_sdk import tool, create_sdk_mcp_server
 from django.conf import settings
 
-from devopshero_app.models import AppPermissionRequest, Conversation, Repository, Workspace
+from devopshero_app.models import AWSAccount, AppPermissionRequest, Conversation, Repository, Workspace
 from devopshero_app.services import permissions as permissions_service
 from devopshero_app.services.gitproviders import repo_service
 
 from .tools import (
     create_datastore as _create_datastore,
     provision_environment as _provision_environment,
+    save_environment as _save_environment,
     save_app as _save_app,
     save_blueprint as _save_blueprint,
     deploy_blueprint as _deploy_blueprint,
@@ -51,6 +52,16 @@ async def _require_workspace(conversation: Conversation) -> Workspace:
             "Start a new conversation from a workspace page to set the context."
         )
     return await Workspace.objects.select_related("organization").aget(id=conversation.context_workspace_id)
+
+
+async def _require_aws_account(conversation: Conversation) -> AWSAccount:
+    """Get AWS account from conversation or raise helpful error."""
+    if conversation.context_aws_account_id is None:
+        raise ValueError(
+            "No AWS account context for this conversation. "
+            "Start a new conversation from the environment setup flow to set the context."
+        )
+    return await AWSAccount.objects.aget(id=conversation.context_aws_account_id, organization=conversation.organization)
 
 
 async def _require_app_permission_request(conversation: Conversation) -> AppPermissionRequest:
@@ -83,6 +94,7 @@ TOOL_DISPLAY_NAMES = {
     "mcp__devopshero__list_hosted_zones": "List Hosted Zones",
     "mcp__devopshero__list_environments": "List Environments",
     "mcp__devopshero__initiate_aws_connection": "Initiate AWS Connection",
+    "mcp__devopshero__save_environment": "Save Environment",
     "mcp__devopshero__provision_environment": "Provision Environment",
     "mcp__devopshero__get_environment_status": "Get Environment Status",
     "mcp__devopshero__list_repositories": "List Repositories",
@@ -119,7 +131,7 @@ TOOL_INPUT_PARAMS_FOR_TITLE = {
     "mcp__devopshero__initiate_aws_connection": "account_name",
     "mcp__devopshero__list_hosted_zones": "aws_account_uuid",
     "mcp__devopshero__list_environments": "aws_account_uuid",
-    "mcp__devopshero__provision_environment": "environment_name",
+    "mcp__devopshero__save_environment": "environment_name",
     "mcp__devopshero__get_environment_status": "environment_id",
     "mcp__devopshero__scan_repository": "repository_id",
     "mcp__devopshero__create_datastore": "name",
@@ -321,37 +333,66 @@ def create_devopshero_mcp_server(conversation: Conversation):
         return _mcp_response(environments)
 
     @tool(
-        "provision_environment",
+        "save_environment",
         (
-            "Provision an environment in a connected AWS account. "
-            "Queues provisioning of VPC, ECS cluster, and shared ALB infrastructure. "
-            "IMPORTANT: Before calling this tool, you MUST confirm name, region, and domain with the user. "
-            "Present settings and wait for explicit user confirmation before calling this tool. "
-            "If hosted_zone_name is provided, enables HTTPS using a wildcard SSL certificate "
-            "(creates one if none exists for the domain, otherwise reuses the existing certificate). "
-            "Returns immediately with PENDING status - use get_environment_status to poll for progress. "
-            "Provisioning typically takes 5-10 minutes. "
-            "Retry semantics: if the environment previously failed (ERROR status), calling this tool "
-            "again with the same name resets it to PENDING and retries provisioning. "
-            "The aws_account_uuid is the internal UUID from list_aws_accounts (the 'id' field), "
-            "not the 12-digit AWS account number."
+            "Create or update the environment setup draft for the current AWS account. "
+            "On first call, creates the Environment draft and pins it to the conversation. "
+            "On subsequent calls, updates the existing draft or failed environment. "
+            "Use this as soon as you know the name, region, and domain choice so the draft is visible "
+            "before asking for final provisioning approval. "
+            "Pass an empty hosted_zone_name for HTTP-only environments."
         ),
         {
-            "aws_account_uuid": str,
-            "environment_name": str,
-            "aws_region": str,
-            "hosted_zone_name": str,
+            "type": "object",
+            "properties": {
+                "environment_name": {"type": "string", "description": "Human-readable name for the environment"},
+                "aws_region": {"type": "string", "description": "AWS region for this environment, e.g. us-east-1"},
+                "hosted_zone_name": {
+                    "type": "string",
+                    "description": "Route53 hosted zone for HTTPS. Use an empty string for HTTP-only.",
+                },
+            },
+            "required": ["environment_name", "aws_region", "hosted_zone_name"],
         },
+    )
+    async def save_environment(args: dict[str, Any]) -> dict[str, Any]:
+        """Create or update the environment setup draft."""
+        aws_account = await _require_aws_account(conversation=conversation)
+        result = await _save_environment(
+            conversation=conversation,
+            aws_account=aws_account,
+            environment_name=args["environment_name"],
+            aws_region=args["aws_region"],
+            hosted_zone_name=args["hosted_zone_name"],
+        )
+        action = "created" if result.created else "updated"
+        return _mcp_response({
+            **result.to_dict(),
+            "note": (
+                f"Environment draft {action}. Review the saved draft with the user and wait for explicit "
+                "confirmation before calling provision_environment."
+            ),
+        })
+
+    @tool(
+        "provision_environment",
+        (
+            "Queue provisioning for the conversation's saved environment draft. "
+            "Provisioning creates the VPC, ECS cluster, and shared ALB infrastructure for that draft. "
+            "IMPORTANT: Before calling this tool, you MUST review the saved draft with the user and wait "
+            "for explicit confirmation. "
+            "Returns immediately with PENDING status - use get_environment_status to poll for progress. "
+            "Provisioning typically takes 5-10 minutes. "
+            "Retry semantics: if the environment previously failed (ERROR status), update the draft with "
+            "save_environment and then call this tool again."
+        ),
+        {},
     )
     async def provision_environment(args: dict[str, Any]) -> dict[str, Any]:
         """Provision an environment (queues provisioning)."""
         result = await _provision_environment(
-            aws_account_uuid=args["aws_account_uuid"],
-            environment_name=args["environment_name"],
-            aws_region=args.get("aws_region", "us-east-1"),
-            hosted_zone_name=args.get("hosted_zone_name"),
+            conversation=conversation,
             organization=conversation.organization,
-            user=conversation.user,
         )
         return _mcp_response({
             **result.to_dict(),
@@ -1003,6 +1044,7 @@ def create_devopshero_mcp_server(conversation: Conversation):
             list_hosted_zones,
             list_environments,
             initiate_aws_connection,
+            save_environment,
             provision_environment,
             get_environment_status,
             list_repositories,
@@ -1035,6 +1077,7 @@ TOOL_NAMES = [
     "mcp__devopshero__list_hosted_zones",
     "mcp__devopshero__list_environments",
     "mcp__devopshero__initiate_aws_connection",
+    "mcp__devopshero__save_environment",
     "mcp__devopshero__provision_environment",
     "mcp__devopshero__get_environment_status",
     "mcp__devopshero__list_repositories",
@@ -1050,6 +1093,17 @@ TOOL_NAMES = [
     "mcp__devopshero__git_ops",
     "mcp__devopshero__query_app_logs",
     # Utility
+    "mcp__devopshero__wait",
+]
+
+
+# Subset of MCP tools allowed in ENVIRONMENT_SETUP mode
+ENVIRONMENT_ALLOWED_TOOLS = [
+    "mcp__devopshero__list_hosted_zones",
+    "mcp__devopshero__list_environments",
+    "mcp__devopshero__save_environment",
+    "mcp__devopshero__provision_environment",
+    "mcp__devopshero__get_environment_status",
     "mcp__devopshero__wait",
 ]
 

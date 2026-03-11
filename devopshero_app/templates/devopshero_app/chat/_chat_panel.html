@@ -19,9 +19,14 @@
                     <span><span class="text-gray-400 dark:text-gray-500">Repository:</span> {{ conversation.context_repository.full_name }}</span>
                     {% endif %}
                 </div>
-                {% elif conversation.context_aws_account %}
+                {% elif conversation.context_aws_account or conversation.context_environment %}
                 <div class="flex items-center text-sm text-gray-500 dark:text-gray-400 space-x-4 mt-1">
+                    {% if conversation.context_aws_account %}
                     <span><span class="text-gray-400 dark:text-gray-500">AWS Account:</span> {{ conversation.context_aws_account.name }}</span>
+                    {% endif %}
+                    {% if conversation.context_environment %}
+                    <span><span class="text-gray-400 dark:text-gray-500">Environment:</span> {{ conversation.context_environment.name }}</span>
+                    {% endif %}
                 </div>
                 {% endif %}
             </div>

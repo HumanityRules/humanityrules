@@ -54,9 +54,9 @@
                                hx-trigger="doh:cost-changed-{{ conv.id }} from:document"
                                hx-swap="innerHTML">{% if conv.total_cost %}<span class="text-gray-400 dark:text-gray-500">Agent Cost:</span> ${{ conv.total_cost|floatformat:4 }}{% endif %}</p>
                             {% endif %}
-                            {% if conv.context_workspace or conv.context_repository or conv.context_aws_account %}
+                            {% if conv.context_workspace or conv.context_repository or conv.context_aws_account or conv.context_environment %}
                             <p class="text-xs text-gray-500 dark:text-gray-400 truncate">
-                                {% if conv.context_workspace %}<span class="text-gray-400 dark:text-gray-500">Workspace:</span> {{ conv.context_workspace.name }}{% endif %}{% if conv.context_workspace and conv.context_repository %} &nbsp; {% endif %}{% if conv.context_repository %}<span class="text-gray-400 dark:text-gray-500">Repository:</span> {{ conv.context_repository.name }}{% endif %}{% if conv.context_aws_account %}<span class="text-gray-400 dark:text-gray-500">AWS Account:</span> {{ conv.context_aws_account.name }}{% endif %}
+                                {% if conv.context_workspace %}<span class="text-gray-400 dark:text-gray-500">Workspace:</span> {{ conv.context_workspace.name }}{% endif %}{% if conv.context_workspace and conv.context_repository %} &nbsp; {% endif %}{% if conv.context_repository %}<span class="text-gray-400 dark:text-gray-500">Repository:</span> {{ conv.context_repository.name }}{% endif %}{% if conv.context_aws_account %}<span class="text-gray-400 dark:text-gray-500">AWS Account:</span> {{ conv.context_aws_account.name }}{% endif %}{% if conv.context_environment %} &nbsp; <span class="text-gray-400 dark:text-gray-500">Environment:</span> {{ conv.context_environment.name }}{% endif %}
                             </p>
                             {% endif %}
                         </div>

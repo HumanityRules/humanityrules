@@ -3,12 +3,21 @@
         {% url 'environments' as environments_url %}
         <div class="flex items-center justify-between">
             {% include "devopshero_app/partials/_breadcrumb.html" with p1_label="Environments" p1_url=environments_url current=environment.name %}
-            <span class="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium
-                {% if environment.status == 'ready' %}bg-green-100 text-green-700 dark:bg-green-500/10 dark:text-green-400
-                {% elif environment.status == 'pending' or environment.status == 'provisioning' %}bg-yellow-100 text-yellow-700 dark:bg-yellow-500/10 dark:text-yellow-400
-                {% else %}bg-red-100 text-red-700 dark:bg-red-500/10 dark:text-red-400{% endif %}">
-                {{ environment.get_status_display }}
-            </span>
+            <div class="flex items-center gap-3">
+                {% if user_is_org_admin %}
+                {% if environment.status == 'draft' or environment.status == 'pending' or environment.status == 'provisioning' or environment.status == 'error' %}
+                <a href="{% url 'environment_editor' environment_id=environment.id %}"
+                   hx-get="{% url 'environment_editor' environment_id=environment.id %}"
+                   hx-target="#main-content"
+                   hx-swap="innerHTML"
+                   hx-push-url="true"
+                   class="rounded-lg bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-700">
+                    Resume Setup
+                </a>
+                {% endif %}
+                {% endif %}
+                {% include "devopshero_app/partials/_status_pill.html" with status=environment.status label=environment.get_status_display only %}
+            </div>
         </div>
     </div>
 

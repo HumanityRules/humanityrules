@@ -290,6 +290,34 @@ class TestDeploymentBlueprintEffectiveValues(TestCase):
         self.conversation.refresh_from_db()
         self.assertIsNone(self.conversation.context_deployment_blueprint_id)
 
+    def test_save_blueprint_rejects_ambiguous_environment_slug_across_accounts(self) -> None:
+        second_account = models.AWSAccount.objects.create(
+            organization=self.organization,
+            name="Second AWS",
+        )
+        models.Environment.objects.create(
+            aws_account=second_account,
+            name="Staging Copy",
+            slug=self.environment.slug,
+            aws_region="us-west-2",
+            status=models.Environment.Status.READY,
+        )
+
+        with self.assertRaisesMessage(ValueError, "Multiple environments share the slug 'staging'"):
+            async_to_sync(agent_tools.save_blueprint)(
+                conversation=self.conversation,
+                workspace=self.workspace,
+                user=self.user,
+                environment_slug=self.environment.slug,
+                branch=None,
+                cpu=256,
+                memory=512,
+                environment_variables=None,
+                app_secrets=None,
+                datastore_id=None,
+                subdomain=None,
+            )
+
     def test_app_deployment_prompt_requires_saved_draft_review_before_deploy(self) -> None:
         prompt = async_to_sync(agent_build_prompt.build_system_prompt)(conversation=self.conversation)
 

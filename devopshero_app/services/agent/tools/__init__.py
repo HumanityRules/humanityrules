@@ -11,6 +11,7 @@ from .list_apps import AppSummary as ListAppSummary
 from .provision_environment import provision_environment
 from .provision_environment import EnvironmentSummary as ProvisionEnvironmentSummary
 from .get_environment_status import get_environment_status, EnvironmentStatus, EnvironmentLogEntry
+from .save_environment import save_environment, SaveEnvironmentResult
 from .save_app import save_app, SaveAppResult
 from .save_blueprint import save_blueprint, SaveBlueprintResult
 from .deploy_blueprint import deploy_blueprint, DeployBlueprintResult
@@ -41,6 +42,8 @@ __all__ = [
     "get_environment_status",
     "EnvironmentStatus",
     "EnvironmentLogEntry",
+    "save_environment",
+    "SaveEnvironmentResult",
     "list_environments",
     "ListEnvironmentSummary",
     # Deployment

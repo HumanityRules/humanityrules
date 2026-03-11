@@ -332,10 +332,12 @@ class Environment(models.Model):
     """
 
     class Status(models.TextChoices):
+        DRAFT = "draft", "Draft"  # Editable setup draft, not yet queued
         PENDING = "pending", "Pending"  # Created, no infra yet
         PROVISIONING = "provisioning", "Provisioning"  # Base infra deploying
         READY = "ready", "Ready"  # VPC + cluster exist
         ERROR = "error", "Error"  # Provisioning failed
+        DISCARDED = "discarded", "Discarded"  # Abandoned setup draft
         TEARDOWN_PENDING = "teardown_pending", "Teardown Pending"  # Queued for teardown
         TEARING_DOWN = "tearing_down", "Tearing Down"  # Teardown in progress
 
@@ -682,6 +684,14 @@ class Conversation(models.Model):
         blank=True,
         related_name="conversations",
         help_text="AWS account context for this conversation (set via UI for environment creation)",
+    )
+    context_environment = models.ForeignKey(
+        "Environment",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="conversations",
+        help_text="Environment context for environment-setup conversations",
     )
     context_app = models.ForeignKey(
         "App",
