@@ -207,6 +207,9 @@ DOH_AWS_SECRET_KEY = os.environ.get("DOH_AWS_SECRET_KEY")
 # Job Worker - enable with DOH_RUN_JOB_WORKER=1
 DOH_RUN_JOB_WORKER = os.environ.get("DOH_RUN_JOB_WORKER") == "1"
 
+# Local-only debug deployment mode - simulated success after ~10 seconds with no repo clone or AWS calls
+DOH_DEBUG_DEPLOYMENTS = DEBUG and os.environ.get("DOH_DEBUG_DEPLOYMENTS") == "1"
+
 # Claude Agent Configuration
 # Priority: ANTHROPIC_API_KEY > AWS_BEDROCK_REGION
 # Bedrock credentials: AWS_BEDROCK_ACCESS_KEY_ID + AWS_BEDROCK_SECRET_ACCESS_KEY (optional, falls back to boto3 chain)

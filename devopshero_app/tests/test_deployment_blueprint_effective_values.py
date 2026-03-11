@@ -1,7 +1,7 @@
 """Tests for effective deployment blueprint value resolution."""
 
 from asgiref.sync import async_to_sync
-from django.test import TestCase
+from django.test import TestCase, override_settings
 
 import devopshero_app.models as models
 import devopshero_app.services.agent.agent_build_prompt as agent_build_prompt
@@ -9,6 +9,7 @@ import devopshero_app.services.agent.tools as agent_tools
 import devopshero_app.services.deployment_blueprint_effective_values as deployment_blueprint_effective_values
 
 
+@override_settings(DOH_DEBUG_DEPLOYMENTS=False)
 class TestDeploymentBlueprintEffectiveValues(TestCase):
     """Verify effective blueprint values resolve consistently across UI and tool paths."""
 
