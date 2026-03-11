@@ -1,26 +1,18 @@
-<div id="deployment-{{ deployment.id }}" class="px-4 py-3"
+<tr id="deployment-{{ deployment.id }}"
     {% if deployment.status == 'teardown_pending' or deployment.status == 'tearing_down' %}
         hx-get="{% url 'app_deployment_status' app_slug=deployment.app.slug deployment_id=deployment.id %}{% if mode %}?mode={{ mode }}{% endif %}"
         hx-trigger="load delay:3s"
         hx-target="#deployment-{{ deployment.id }}"
         hx-swap="morph:outerHTML"
     {% endif %}>
-    <div class="grid grid-cols-[1fr_auto_5rem] items-center gap-x-4">
+    <td class="px-4 py-3 align-middle">
         <div class="min-w-0">
-            {% if mode == 'app_summary' %}
-            <h3 class="text-sm font-medium text-gray-900 dark:text-white"><span class="text-xs text-gray-400 dark:text-gray-500">Environment:</span> <a href="{% url 'environment_detail' environment_id=deployment.environment.id %}" hx-get="{% url 'environment_detail' environment_id=deployment.environment.id %}" hx-target="#main-content" hx-swap="innerHTML" hx-push-url="true" class="text-indigo-600 dark:text-indigo-400 hover:underline">{{ deployment.environment.name }}</a></h3>
-            <p class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
-                <span class="text-gray-400 dark:text-gray-500">Account:</span> {{ deployment.environment.aws_account.name }} · <span class="text-gray-400 dark:text-gray-500">Region:</span> {{ deployment.environment.aws_region }}
-            </p>
-            <p class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
-                <span class="text-gray-400 dark:text-gray-500">Ref:</span> {{ deployment.git_ref }}{% if deployment.git_commit_sha %} · {{ deployment.git_commit_sha|slice:":7" }}{% endif %}
-            </p>
-            {% elif mode == 'environment' %}
+            {% if mode == 'environment' %}
             <h3 class="text-sm font-medium text-gray-900 dark:text-white"><span class="text-xs text-gray-400 dark:text-gray-500">App:</span> <a href="{% url 'app_detail' app_slug=deployment.app.slug %}" hx-get="{% url 'app_detail' app_slug=deployment.app.slug %}" hx-target="#main-content" hx-swap="innerHTML" hx-push-url="true" class="text-indigo-600 dark:text-indigo-400 hover:underline">{{ deployment.app.name }}</a></h3>
             <p class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
                 <span class="text-gray-400 dark:text-gray-500">Workspace:</span> <a href="{% url 'workspace_detail' workspace_slug=deployment.app.workspace.slug %}" hx-get="{% url 'workspace_detail' workspace_slug=deployment.app.workspace.slug %}" hx-target="#main-content" hx-swap="innerHTML" hx-push-url="true" class="text-indigo-600 dark:text-indigo-400 hover:underline">{{ deployment.app.workspace.name }}</a> · <span class="text-gray-400 dark:text-gray-500">Ref:</span> {{ deployment.git_ref }}{% if deployment.git_commit_sha %} · {{ deployment.git_commit_sha|slice:":7" }}{% endif %}
             </p>
-            {% else %}
+            {% elif mode == 'app_history' %}
             <h3 class="text-sm font-medium text-gray-900 dark:text-white"><span class="text-xs text-gray-400 dark:text-gray-500">Environment:</span> <a href="{% url 'environment_detail' environment_id=deployment.environment.id %}" hx-get="{% url 'environment_detail' environment_id=deployment.environment.id %}" hx-target="#main-content" hx-swap="innerHTML" hx-push-url="true" class="text-indigo-600 dark:text-indigo-400 hover:underline">{{ deployment.environment.name }}</a></h3>
             <p class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
                 <span class="text-gray-400 dark:text-gray-500">Account:</span> {{ deployment.environment.aws_account.name }} · <span class="text-gray-400 dark:text-gray-500">Region:</span> {{ deployment.environment.aws_region }}
@@ -28,6 +20,8 @@
             <p class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
                 <span class="text-gray-400 dark:text-gray-500">Ref:</span> {{ deployment.git_ref }}{% if deployment.git_commit_sha %} · {{ deployment.git_commit_sha|slice:":7" }}{% endif %}
             </p>
+            {% else %}
+            <span class="text-xs text-red-600 dark:text-red-400">Unknown deployment row mode: {{ mode }}</span>
             {% endif %}
             {% if deployment.service_url %}
             <p class="mt-1 text-xs text-indigo-600 dark:text-indigo-400 truncate">
@@ -35,36 +29,14 @@
             </p>
             {% endif %}
         </div>
-        <div class="flex items-center gap-2">
-            {% include "devopshero_app/partials/_status_pill.html" with status=deployment.status label=deployment.get_status_display only %}
-            <span class="text-xs text-gray-400 dark:text-gray-500">&middot;</span>
-            <span class="text-xs text-gray-500 dark:text-gray-400 whitespace-nowrap">{{ deployment.created_at|timesince }} ago</span>
+    </td>
+    <td class="w-full" aria-hidden="true"></td>
+    <td class="px-0 py-3 text-center align-middle whitespace-nowrap">
+        {% include "devopshero_app/partials/_status_pill.html" with status=deployment.status label=deployment.get_status_display only %}
+    </td>
+    <td class="px-4 py-3 text-center align-middle">
+        <div class="min-w-[9rem]">
+            <span class="text-xs leading-4 whitespace-nowrap text-gray-500 dark:text-gray-400">{{ deployment.created_at|timesince }} ago</span>
         </div>
-        <div class="flex flex-col items-start gap-0.5">
-            {% if mode == 'app_summary' %}
-                {% if deployment.status == 'succeeded' %}
-                <button hx-post="{% url 'app_deployment_redeploy' app_slug=deployment.app.slug deployment_id=deployment.id %}"
-                        hx-target="#main-content"
-                        hx-swap="innerHTML"
-                        class="text-xs text-indigo-600 dark:text-indigo-400 hover:underline cursor-pointer">Redeploy</button>
-                <a href="{% url 'security_permissions_editor' %}?context_app={{ deployment.app.slug }}&context_environment={{ deployment.environment.slug }}"
-                   hx-get="{% url 'security_permissions_editor' %}?context_app={{ deployment.app.slug }}&context_environment={{ deployment.environment.slug }}"
-                   hx-target="#main-content"
-                   hx-swap="innerHTML"
-                   hx-push-url="true"
-                   class="text-xs text-indigo-600 dark:text-indigo-400 hover:underline">Permissions</a>
-                {% endif %}
-            {% else %}
-                {% if deployment.status == 'succeeded' %}
-                <button type="button"
-                        hx-get="{% url 'app_teardown_confirm' app_slug=deployment.app.slug deployment_id=deployment.id %}"
-                        hx-target="#modal-container"
-                        hx-swap="innerHTML"
-                        class="text-xs text-indigo-600 dark:text-indigo-400 hover:underline cursor-pointer">Tear Down</button>
-                {% else %}
-                <span class="text-xs text-gray-300 dark:text-gray-600 w-full text-center">&mdash;&mdash;&mdash;</span>
-                {% endif %}
-            {% endif %}
-        </div>
-    </div>
-</div>
+    </td>
+</tr>

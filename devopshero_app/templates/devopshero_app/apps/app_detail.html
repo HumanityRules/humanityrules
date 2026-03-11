@@ -86,10 +86,30 @@
     <div class="mb-6">
         <h2 class="text-lg font-semibold text-gray-900 dark:text-white mb-4">Deployed to Environments</h2>
         {% if environment_rows %}
-        <div class="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg divide-y divide-gray-200 dark:divide-gray-700">
-            {% for row in environment_rows %}
-                {% include "devopshero_app/apps/_app_deployment_row.html" with deployment=row.latest_deployment mode="app_summary" %}
-            {% endfor %}
+        <div class="overflow-x-auto bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg">
+            <table class="min-w-full table-auto">
+                <colgroup>
+                    <col>
+                    <col class="w-full">
+                    <col>
+                    <col>
+                    <col>
+                </colgroup>
+                <thead class="sr-only">
+                    <tr>
+                        <th class="px-4 py-3 text-left">Environment</th>
+                        <th aria-hidden="true"></th>
+                        <th class="px-4 py-3 text-center">Status</th>
+                        <th class="px-4 py-3 text-center">Updated</th>
+                        <th class="px-4 py-3 text-left">Actions</th>
+                    </tr>
+                </thead>
+                <tbody class="[&_tr:not(:last-child)>td]:border-b [&_tr:not(:last-child)>td]:border-gray-200 dark:[&_tr:not(:last-child)>td]:border-gray-700">
+                    {% for row in environment_rows %}
+                        {% include "devopshero_app/apps/_app_blueprint_row.html" with blueprint=row.blueprint current_deployment=row.current_deployment %}
+                    {% endfor %}
+                </tbody>
+            </table>
         </div>
         {% else %}
         <div class="bg-gray-50 dark:bg-gray-800/50 border border-gray-200 dark:border-gray-700 border-dashed rounded-lg p-4 text-center">
@@ -102,10 +122,30 @@
     <div>
         <h2 class="text-lg font-semibold text-gray-900 dark:text-white mb-4">Recent Deployments</h2>
         {% if deployments %}
-        <div id="deployments-list" class="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg divide-y divide-gray-200 dark:divide-gray-700">
-            {% for deployment in deployments %}
-                {% include "devopshero_app/apps/_app_deployment_row.html" %}
-            {% endfor %}
+        <div id="deployments-list" class="overflow-x-auto bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg">
+            <table class="min-w-full table-auto">
+                <colgroup>
+                    <col>
+                    <col class="w-full">
+                    <col>
+                    <col>
+                    <col>
+                </colgroup>
+                <thead class="sr-only">
+                    <tr>
+                        <th class="px-4 py-3 text-left">Deployment</th>
+                        <th aria-hidden="true"></th>
+                        <th class="px-4 py-3 text-center">Status</th>
+                        <th class="px-4 py-3 text-center">Updated</th>
+                        <th class="px-4 py-3 text-left">Actions</th>
+                    </tr>
+                </thead>
+                <tbody class="[&_tr:not(:last-child)>td]:border-b [&_tr:not(:last-child)>td]:border-gray-200 dark:[&_tr:not(:last-child)>td]:border-gray-700">
+                    {% for deployment in deployments %}
+                        {% include "devopshero_app/apps/_app_deployment_row.html" with mode="app_history" %}
+                    {% endfor %}
+                </tbody>
+            </table>
         </div>
         {% else %}
         {% include "devopshero_app/apps/_app_deployments_empty.html" %}

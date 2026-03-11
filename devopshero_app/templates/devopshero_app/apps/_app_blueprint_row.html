@@ -1,0 +1,56 @@
+<tr id="blueprint-{{ blueprint.id }}"
+    {% if current_deployment.status == 'teardown_pending' or current_deployment.status == 'tearing_down' %}
+        hx-get="{% url 'app_detail' app_slug=app.slug %}"
+        hx-trigger="load delay:3s"
+        hx-target="#main-content"
+        hx-swap="innerHTML"
+    {% endif %}>
+    <td class="px-4 py-3 align-middle">
+        <div class="min-w-0">
+            <h3 class="text-sm font-medium text-gray-900 dark:text-white"><span class="text-xs text-gray-400 dark:text-gray-500">Environment:</span> <a href="{% url 'environment_detail' environment_id=blueprint.environment.id %}" hx-get="{% url 'environment_detail' environment_id=blueprint.environment.id %}" hx-target="#main-content" hx-swap="innerHTML" hx-push-url="true" class="text-indigo-600 dark:text-indigo-400 hover:underline">{{ blueprint.environment.name }}</a></h3>
+            <p class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                <span class="text-gray-400 dark:text-gray-500">Account:</span> {{ blueprint.environment.aws_account.name }} · <span class="text-gray-400 dark:text-gray-500">Region:</span> {{ blueprint.environment.aws_region }}
+            </p>
+            <p class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                <span class="text-gray-400 dark:text-gray-500">Ref:</span> {{ current_deployment.git_ref }}{% if current_deployment.git_commit_sha %} · {{ current_deployment.git_commit_sha|slice:":7" }}{% endif %}
+            </p>
+            {% if current_deployment.service_url %}
+            <p class="mt-1 text-xs text-indigo-600 dark:text-indigo-400 truncate">
+                <a href="{{ current_deployment.service_url }}" target="_blank" rel="noopener noreferrer" class="hover:underline">{{ current_deployment.service_url }}</a>
+            </p>
+            {% endif %}
+        </div>
+    </td>
+    <td class="w-full" aria-hidden="true"></td>
+    <td class="px-2 py-3 text-center align-middle whitespace-nowrap">
+        {% include "devopshero_app/partials/_status_pill.html" with status=current_deployment.status label=current_deployment.get_status_display only %}
+    </td>
+    <td class="px-2 py-3 text-center align-middle">
+        <div>
+            <span class="text-xs leading-4 whitespace-nowrap text-gray-500 dark:text-gray-400">{{ current_deployment.created_at|timesince }} ago</span>
+        </div>
+    </td>
+    <td class="px-4 py-3 align-middle whitespace-nowrap">
+        <div class="flex min-w-0 flex-col items-start gap-1">
+            {% if current_deployment.status == 'succeeded' %}
+            <button hx-post="{% url 'app_deployment_redeploy' app_slug=app.slug deployment_id=current_deployment.id %}"
+                    hx-target="#main-content"
+                    hx-swap="innerHTML"
+                    class="text-xs text-indigo-600 dark:text-indigo-400 hover:underline cursor-pointer">Redeploy</button>
+            <a href="{% url 'security_permissions_editor' %}?context_app={{ app.slug }}&context_environment={{ blueprint.environment.slug }}"
+               hx-get="{% url 'security_permissions_editor' %}?context_app={{ app.slug }}&context_environment={{ blueprint.environment.slug }}"
+               hx-target="#main-content"
+               hx-swap="innerHTML"
+               hx-push-url="true"
+               class="text-xs text-indigo-600 dark:text-indigo-400 hover:underline">Permissions</a>
+            <button type="button"
+                    hx-get="{% url 'app_teardown_confirm' app_slug=app.slug deployment_id=current_deployment.id %}?render=app_detail"
+                    hx-target="#modal-container"
+                    hx-swap="innerHTML"
+                    class="text-xs text-indigo-600 dark:text-indigo-400 hover:underline cursor-pointer">Tear Down</button>
+            {% else %}
+            <span class="text-xs text-gray-300 dark:text-gray-600 w-full text-left">&mdash;&mdash;&mdash;</span>
+            {% endif %}
+        </div>
+    </td>
+</tr>

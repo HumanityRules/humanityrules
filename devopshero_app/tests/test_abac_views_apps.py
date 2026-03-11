@@ -145,6 +145,128 @@ class TestAppEndpoints(TestCase):
         self.assertContains(response, "Resume Deployment")
         self.assertNotContains(response, "New Deployment")
 
+    def test_app_detail_deployed_environments_uses_blueprints_outside_recent_deployments_window(self) -> None:
+        legacy_env = Environment.objects.create(
+            aws_account=self.aws_account,
+            name="Legacy",
+            slug="legacy",
+            aws_region="us-east-1",
+        )
+        legacy_blueprint = DeploymentBlueprint.objects.create(
+            app=self.app,
+            environment=legacy_env,
+            status=DeploymentBlueprint.Status.ACTIVE,
+            cpu=256,
+            memory=512,
+            subdomain="myapp-legacy",
+            created_by=None,
+        )
+        Deployment.objects.create(
+            blueprint=legacy_blueprint,
+            app=self.app,
+            environment=legacy_env,
+            subdomain="myapp-legacy",
+            git_ref="main",
+            image_tag="myapp-legacy-20260311",
+            status=Deployment.Status.SUCCEEDED,
+            status_message="Running",
+        )
+        for index in range(25):
+            Deployment.objects.create(
+                blueprint=self.blueprint,
+                app=self.app,
+                environment=self.env,
+                subdomain="myapp-staging",
+                git_ref="main",
+                image_tag=f"myapp-main-{index}",
+                status=Deployment.Status.SUCCEEDED,
+                status_message="Running",
+            )
+
+        self.client.force_login(self.ws_editor)
+        response = self.client.get("/apps/myapp/", **HTMX)
+
+        self.assertEqual(response.status_code, 200)
+        row_blueprint_ids = {row.blueprint.id for row in response.context["environment_rows"]}
+        self.assertIn(self.blueprint.id, row_blueprint_ids)
+        self.assertIn(legacy_blueprint.id, row_blueprint_ids)
+        self.assertEqual(len(response.context["deployments"]), 20)
+        self.assertContains(response, "Legacy")
+
+    def test_app_detail_deployed_environments_excludes_unlaunched_blueprints(self) -> None:
+        preview_env = Environment.objects.create(
+            aws_account=self.aws_account,
+            name="Preview",
+            slug="preview",
+            aws_region="us-east-1",
+        )
+        preview_blueprint = DeploymentBlueprint.objects.create(
+            app=self.app,
+            environment=preview_env,
+            status=DeploymentBlueprint.Status.DRAFT,
+            cpu=256,
+            memory=512,
+            subdomain="myapp-preview",
+            created_by=None,
+        )
+
+        self.client.force_login(self.ws_editor)
+        response = self.client.get("/apps/myapp/", **HTMX)
+
+        self.assertEqual(response.status_code, 200)
+        row_blueprint_ids = {row.blueprint.id for row in response.context["environment_rows"]}
+        self.assertIn(self.blueprint.id, row_blueprint_ids)
+        self.assertNotIn(preview_blueprint.id, row_blueprint_ids)
+
+    def test_app_detail_deployed_environments_uses_latest_launched_blueprint_per_environment(self) -> None:
+        newer_blueprint = DeploymentBlueprint.objects.create(
+            app=self.app,
+            environment=self.env,
+            status=DeploymentBlueprint.Status.FAILED,
+            cpu=256,
+            memory=512,
+            subdomain="myapp-staging-v2",
+            created_by=None,
+        )
+        Deployment.objects.create(
+            blueprint=newer_blueprint,
+            app=self.app,
+            environment=self.env,
+            subdomain="myapp-staging-v2",
+            git_ref="release",
+            image_tag="myapp-release-1",
+            status=Deployment.Status.SUCCEEDED,
+            status_message="Running",
+        )
+        failed_attempt = Deployment.objects.create(
+            blueprint=newer_blueprint,
+            app=self.app,
+            environment=self.env,
+            subdomain="myapp-staging-v2",
+            git_ref="release",
+            image_tag="myapp-release-2",
+            status=Deployment.Status.FAILED,
+            status_message="Rollback required",
+        )
+
+        self.client.force_login(self.ws_editor)
+        response = self.client.get("/apps/myapp/", **HTMX)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.context["environment_rows"]), 1)
+        row = response.context["environment_rows"][0]
+        self.assertEqual(row.blueprint.id, newer_blueprint.id)
+        self.assertNotEqual(row.current_deployment.id, failed_attempt.id)
+        self.assertEqual(row.current_deployment.status, Deployment.Status.SUCCEEDED)
+
+    def test_app_detail_shows_teardown_in_deployed_environments_not_recent_deployments(self) -> None:
+        self.client.force_login(self.ws_editor)
+        response = self.client.get("/apps/myapp/", **HTMX)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Tear Down", count=1)
+        self.assertContains(response, "?render=app_detail")
+
     def test_ws_viewer_does_not_see_resume_deployment_for_draft_blueprint(self) -> None:
         self._set_open_blueprint_status(status=DeploymentBlueprint.Status.DRAFT)
         self.client.force_login(self.ws_viewer)
