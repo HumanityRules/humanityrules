@@ -77,3 +77,9 @@
         {% endif %}
     </div>
 </div>
+{% if blueprint.status == 'deploying' and app %}
+<div hx-get="{% url 'deployment_editor_blueprint_section' app_slug=app.slug %}"
+     hx-trigger="load delay:5s"
+     hx-target="#blueprint-section"
+     hx-swap="innerHTML"></div>
+{% endif %}
