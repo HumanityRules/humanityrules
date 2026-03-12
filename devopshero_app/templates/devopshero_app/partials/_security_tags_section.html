@@ -12,10 +12,12 @@
     inherited_tags   — optional queryset of inherited tags (renders as gray chips)
 {% endcomment %}
 {% if can_admin %}
-<div id="security-tags" x-data='{ editing: false, tags: {{ tags_json|safe }}, _orig: {{ tags_json|safe }} }'>
+<div id="security-tags"
+     x-data='{ editing: false, tags: {{ tags_json|safe }}, _orig: {{ tags_json|safe }} }'
+     class="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-4">
     <h2 class="text-lg font-semibold text-gray-900 dark:text-white mb-4">{{ tags_title }}
         <button x-show="!editing" @click="_orig = JSON.parse(JSON.stringify(tags)); editing = true" type="button"
-                class="text-sm font-normal ml-2 text-indigo-600 dark:text-indigo-400 hover:text-indigo-800 dark:hover:text-indigo-300 hover:underline cursor-pointer">Edit</button>
+                class="text-sm font-normal ml-4 text-indigo-600 dark:text-indigo-400 hover:text-indigo-800 dark:hover:text-indigo-300 hover:underline cursor-pointer">Edit</button>
     </h2>
     {% if inherited_tags %}
     <div class="flex flex-wrap gap-2 mb-3">
@@ -48,7 +50,7 @@
     </div>
 </div>
 {% else %}
-<div>
+<div class="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-4">
     <h2 class="text-lg font-semibold text-gray-900 dark:text-white mb-4">{{ tags_title }}</h2>
     {% if inherited_tags %}
     <div class="flex flex-wrap gap-2 mb-2">

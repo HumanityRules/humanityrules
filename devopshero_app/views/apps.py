@@ -23,6 +23,29 @@ OPEN_BLUEPRINT_STATUSES = (
     DeploymentBlueprint.Status.DEPLOYING,
 )
 
+CURRENT_LAUNCHED_DEPLOYMENT_STATUSES = (
+    Deployment.Status.SUCCEEDED,
+    Deployment.Status.TEARDOWN_PENDING,
+    Deployment.Status.TEARING_DOWN,
+)
+
+CURRENT_LIVE_DEPLOYMENT_STATUSES = (
+    Deployment.Status.PENDING,
+    Deployment.Status.BUILDING,
+    Deployment.Status.PUSHING,
+    Deployment.Status.DEPLOYING,
+    Deployment.Status.STARTING,
+    *CURRENT_LAUNCHED_DEPLOYMENT_STATUSES,
+)
+
+IN_PROGRESS_DEPLOYMENT_STATUSES = (
+    Deployment.Status.PENDING,
+    Deployment.Status.BUILDING,
+    Deployment.Status.PUSHING,
+    Deployment.Status.DEPLOYING,
+    Deployment.Status.STARTING,
+)
+
 
 @dataclass
 class DeployedEnvironmentRow:
@@ -88,12 +111,12 @@ def _get_current_launched_blueprint(blueprints: list[DeploymentBlueprint]) -> De
     current_blueprints = [
         blueprint
         for blueprint in blueprints
-        if getattr(blueprint, "current_deployment_created_at", None) is not None
+        if getattr(blueprint, "current_launched_deployment_created_at", None) is not None
     ]
     if current_blueprints:
         current_blueprints.sort(
             key=lambda blueprint: (
-                blueprint.current_deployment_created_at,
+                blueprint.current_launched_deployment_created_at,
                 blueprint.created_at,
             ),
             reverse=True,
@@ -104,20 +127,21 @@ def _get_current_launched_blueprint(blueprints: list[DeploymentBlueprint]) -> De
 
 def _build_deployed_environment_rows(app: App) -> list[DeployedEnvironmentRow]:
     """Build one current blueprint-backed summary row per environment."""
-    current_deployment_statuses = [
-        Deployment.Status.SUCCEEDED,
-        Deployment.Status.TEARDOWN_PENDING,
-        Deployment.Status.TEARING_DOWN,
-    ]
     current_deployment_id_subquery = (
         Deployment.objects.filter(blueprint=OuterRef("pk"))
-        .filter(status__in=current_deployment_statuses)
+        .filter(status__in=CURRENT_LIVE_DEPLOYMENT_STATUSES)
         .order_by("-created_at")
         .values("id")[:1]
     )
     current_deployment_created_at_subquery = (
         Deployment.objects.filter(blueprint=OuterRef("pk"))
-        .filter(status__in=current_deployment_statuses)
+        .filter(status__in=CURRENT_LIVE_DEPLOYMENT_STATUSES)
+        .order_by("-created_at")
+        .values("created_at")[:1]
+    )
+    current_launched_deployment_created_at_subquery = (
+        Deployment.objects.filter(blueprint=OuterRef("pk"))
+        .filter(status__in=CURRENT_LAUNCHED_DEPLOYMENT_STATUSES)
         .order_by("-created_at")
         .values("created_at")[:1]
     )
@@ -129,6 +153,7 @@ def _build_deployed_environment_rows(app: App) -> list[DeployedEnvironmentRow]:
         .annotate(
             current_deployment_id=Subquery(current_deployment_id_subquery),
             current_deployment_created_at=Subquery(current_deployment_created_at_subquery),
+            current_launched_deployment_created_at=Subquery(current_launched_deployment_created_at_subquery),
         )
     )
 
@@ -174,6 +199,7 @@ def build_app_detail_context(request: HttpRequest, app: App) -> dict[str, Any]:
     deployments = Deployment.objects.filter(
         app=app,
     ).select_related("environment", "environment__aws_account").order_by("-created_at")[:20]
+    should_auto_refresh = Deployment.objects.filter(app=app, status__in=IN_PROGRESS_DEPLOYMENT_STATUSES).exists()
     open_blueprint = get_open_blueprint(app=app)
     environment_rows = _build_deployed_environment_rows(app=app)
 
@@ -191,6 +217,7 @@ def build_app_detail_context(request: HttpRequest, app: App) -> dict[str, Any]:
     context["app"] = app
     context["deployments"] = deployments
     context["environment_rows"] = environment_rows
+    context["should_auto_refresh"] = should_auto_refresh
     context["open_blueprint"] = open_blueprint
     org = request.user.current_organization
     context["direct_tags"] = direct_tags

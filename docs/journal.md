@@ -1,5 +1,24 @@
 # DevOpsHero Development Journal
 
+## 2026-03-11 17:19 - [Bugfix] App detail rows now follow live redeploy state
+
+**Conversation:** [2026-03-11-1719-a157c661.md](conversations/2026-03-11-1719-a157c661.md)
+
+This session started from a regression in the app detail page: clicking `Redeploy` from the `Deployed to Environments` row could end in `422 Unprocessable Content` even though the action was being offered in the UI. The underlying bug was a subtle mismatch introduced by the earlier blueprint-backed rewrite of that section. The page was correctly choosing the row owner as the latest launched blueprint for each environment, but the row contents were still anchored to the last launched deployment on that blueprint rather than the latest live deployment state. As a result, after a redeploy started, the top row could keep rendering the old `succeeded` deployment and continue to show `Redeploy`, while the backend quite reasonably rejected the second click because an active deployment already existed for that app.
+
+The correction was to split two concerns that had been conflated in `views/apps.py`. First, the app detail page still needs a stable rule for which blueprint owns a row: pick the blueprint whose latest launched deployment is the newest successful/currently-launched record for that environment. Second, once that blueprint is chosen, the row should render from the latest live deployment on that blueprint, including in-progress statuses like `pending`, `building`, `pushing`, `deploying`, and `starting`, while still ignoring failed attempts when determining the currently launched blueprint. That keeps the top list faithful to the domain model, but it also lets the user immediately see that a redeploy is in progress and removes the stale action that caused the 422 loop.
+
+The second part of the fix was about freshness. A deployment finishing changes more than one small fragment on `app_detail`: the top environment row can change status and actions, the `Recent Deployments` table can change status text, and the primary `New Deployment`/`Resume Deployment` action can also flip depending on whether an open blueprint still exists. Because those changes are page-wide, row-level polling would leave parts of the page out of sync. The better tradeoff was page-level HTMX polling of `app_detail` itself while any deployment for the app is in an in-progress status. The initial version used a 3-second interval, but it was intentionally relaxed to 10 seconds to reduce UI churn while still refreshing soon after a deployment succeeds or fails.
+
+Regression coverage was expanded along the same lines. The tests now distinguish between three cases that matter for this screen: a newer failed attempt on the current blueprint should not replace the current launched state; an in-progress redeploy on that same blueprint should become the visible row state immediately; and the page should only emit the auto-refresh HTMX attributes while such an in-progress deployment exists. That test shape is important because the bug only appeared when the selector and renderer answered slightly different questions.
+
+**Key points:**
+- The top app-detail row needs two selectors, not one: one to choose the current environment blueprint and another to choose the latest live deployment state to render from that blueprint.
+- Failed attempts should not displace the current launched environment row, but in-progress redeploy attempts should become visible immediately so actions and status stay honest.
+- App-detail refresh is a page-level concern because deployment completion changes multiple surfaces at once, not just a single status pill.
+- A 10-second HTMX poll is sufficient here; it keeps the view eventually consistent without the visual churn of tighter polling.
+- Regression tests are most valuable when they encode the domain distinction that caused the bug, not just the specific HTML that happened to break.
+
 ## 2026-03-11 16:56 - [Deployment] App detail deployment lists now separate current environment state from attempt history
 
 **Conversation:** [2026-03-11-1656-2f0c5789.md](conversations/2026-03-11-1656-2f0c5789.md)
