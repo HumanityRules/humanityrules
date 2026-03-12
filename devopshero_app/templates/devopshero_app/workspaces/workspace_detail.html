@@ -2,13 +2,30 @@
     <div class="mb-6">
         {% url 'workspaces' as workspaces_url %}
         {% include "devopshero_app/partials/_breadcrumb.html" with p1_label="Workspaces" p1_url=workspaces_url current=workspace.name %}
-        {% if workspace.description %}
-        <p class="mt-1 text-sm text-gray-600 dark:text-gray-400 max-w-2xl">{{ workspace.description }}</p>
-        {% endif %}
     </div>
 
-    <div class="mb-6">
-        {% include "devopshero_app/partials/_security_tags_section.html" with tags_title="Workspace Tags" items=tags %}
+    {# Workspace details card #}
+    <div class="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-4 mb-6">
+        <dl class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 text-sm">
+            {% if workspace.description %}
+            <div class="sm:col-span-2 lg:col-span-3">
+                <dt class="text-gray-500 dark:text-gray-400">Description</dt>
+                <dd class="mt-1 text-gray-900 dark:text-white">{{ workspace.description }}</dd>
+            </div>
+            {% endif %}
+            <div>
+                <dt class="text-gray-500 dark:text-gray-400">Slug</dt>
+                <dd class="mt-1 font-medium text-gray-900 dark:text-white font-mono text-xs">{{ workspace.slug }}</dd>
+            </div>
+            <div>
+                <dt class="text-gray-500 dark:text-gray-400">Created</dt>
+                <dd class="mt-1 font-medium text-gray-900 dark:text-white">{{ workspace.created_at|date:"M j, Y" }}</dd>
+            </div>
+            <div>
+                <dt class="text-gray-500 dark:text-gray-400">Apps</dt>
+                <dd class="mt-1 font-medium text-gray-900 dark:text-white">{{ apps|length }}</dd>
+            </div>
+        </dl>
     </div>
 
     {# Apps section #}
@@ -57,6 +74,10 @@
             <p class="text-sm text-gray-500 dark:text-gray-400">No datastores configured.</p>
         </div>
         {% endif %}
+    </div>
+
+    <div class="mb-8">
+        {% include "devopshero_app/partials/_security_tags_section.html" with tags_title="Workspace Tags" items=tags %}
     </div>
 
     {# Recent conversations section #}
