@@ -1,5 +1,19 @@
 # DevOpsHero Development Journal
 
+## 2026-03-12 23:15 - [Bugfix] Teardown executor discards blueprint so UI shows correct status
+
+**Conversation:** (current session — extract when saved)
+
+After tearing down a deployment (e.g. simple-dashboard in dev), the app detail UI could still show "succeeded" for that environment. The deployment record was correctly updated to `torn_down` by `app_deployment_teardown_executor.run_teardown()`, but the associated `DeploymentBlueprint` was never updated and stayed `active`.
+
+The app detail view builds "current" environment rows via `_build_deployed_environment_rows`: it loads non-DISCARDED blueprints and, for each, finds the latest deployment whose status is in `CURRENT_LIVE_DEPLOYMENT_STATUSES` (succeeded, teardown_pending, tearing_down — torn_down is excluded). It then picks the blueprint with the most recent such deployment per environment. Because the torn-down deployment's blueprint remained active and had no "live" deployment (torn_down doesn't count), the query fell back to an older blueprint in the same environment whose deployment was still `succeeded`, so the UI showed that stale deployment's status.
+
+**Fix:** In `app_deployment_teardown_executor.run_teardown()`, after successfully setting the deployment to `TORN_DOWN`, we now set the deployment's blueprint to `DeploymentBlueprint.Status.DISCARDED` with `status_message="Discarded after teardown"`. That blueprint is then excluded by the view's `.exclude(status=DISCARDED)`, so it no longer appears as a candidate and the UI no longer falls back to an older succeeded deployment. No one-off data cleanup was added; the user planned to reset the environment.
+
+**Key points:**
+- Teardown is tracked on `Deployment.status` (TEARDOWN_PENDING → TEARING_DOWN → TORN_DOWN); the blueprint was never updated, which caused the UI to use "current" logic that ignored torn_down deployments and picked an older blueprint.
+- Discarding the blueprint on teardown is the correct ongoing behavior; cleaning up historically stale active blueprints (from past teardowns) would be a one-off migration only if not resetting data.
+
 ## 2026-03-12 22:30 - [Deployment] Deployment editor helper consolidation and small cleanups
 
 **Conversation:** (current session — extract when saved)
