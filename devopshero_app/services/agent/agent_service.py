@@ -334,8 +334,6 @@ class MainAgent:
 
                 elif isinstance(message, ResultMessage):
                     logger.info(f"[SDK] ResultMessage: turns={message.num_turns}, cost=${message.total_cost_usd or 0:.4f}")
-                    if message.session_id and not conversation.session_id:
-                        conversation.session_id = message.session_id
 
                     usage = message.usage or {}
                     await LLMUsageLog.objects.acreate(
@@ -354,6 +352,9 @@ class MainAgent:
 
                 elif isinstance(message, SystemMessage):
                     logger.info(f"[SDK] SystemMessage: subtype={message.subtype}, cwd={message.data.get('cwd')}, session_id={message.data.get('session_id')}")
+                    if not conversation.session_id:
+                        conversation.session_id = message.data["session_id"]
+                        await conversation.asave(update_fields=["session_id", "updated_at"])
 
             if ctx.accumulated_content:
                 await _persist_text_message(conversation=conversation, content=ctx.accumulated_content)
@@ -366,7 +367,7 @@ class MainAgent:
             if generated_title is not None:
                 conversation.title = generated_title
 
-            # Persist conversation — session_id and title may have been set above (typically turn 1)
+            # Persist conversation — title may have been set above (typically turn 1)
             await conversation.asave()
 
             total_cost = await LLMUsageLog.objects.filter(
@@ -729,7 +730,7 @@ async def _detect_and_prepare_fork(conversation: Conversation, target_cwd: Path)
     """Detect if this conversation is a fork and prepare the session file if so.
 
     A fork is detected when session_id is already set but no agent messages exist — impossible
-    for normal conversations where session_id is only set after the first agent turn completes.
+    for normal conversations where session_id is set from the initial SystemMessage.
 
     The Claude CLI indexes session files by cwd at ~/.claude/projects/{cwd-with-slashes-as-dashes}/.
     Since forked conversations get a new sandbox (different cwd), the source session file must be

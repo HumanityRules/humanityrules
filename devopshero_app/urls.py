@@ -26,6 +26,7 @@ urlpatterns = [
     path("deploy/<slug:app_slug>/blueprint-section/", views.deployment_editor_blueprint_section, name="deployment_editor_blueprint_section"),
     path("deploy/<slug:app_slug>/discard-draft/confirm/", views.deployment_editor_discard_draft_confirm, name="deployment_editor_discard_draft_confirm"),
     path("deploy/<slug:app_slug>/discard-draft/", views.deployment_editor_discard_draft, name="deployment_editor_discard_draft"),
+    path("deploy/fork/<uuid:conversation_id>/", views.deployment_editor_fork, name="deployment_editor_fork"),
     path("apps/<slug:app_slug>/deployments/<uuid:deployment_id>/teardown/", views.app_deployment_teardown, name="app_deployment_teardown"),
     path("apps/<slug:app_slug>/deployments/<uuid:deployment_id>/redeploy/", views.app_deployment_redeploy, name="app_deployment_redeploy"),
     path("apps/<slug:app_slug>/deployments/<uuid:deployment_id>/status/", views.app_deployment_status, name="app_deployment_status"),
@@ -33,21 +34,9 @@ urlpatterns = [
     path("environments/", views.environments, name="environments"),
     path("environments/new/", views.environment_editor_new, name="environment_editor_new"),
     path("environments/<uuid:environment_id>/setup/", views.environment_editor, name="environment_editor"),
-    path(
-        "environments/<uuid:environment_id>/setup/section/",
-        views.environment_editor_environment_section,
-        name="environment_editor_environment_section",
-    ),
-    path(
-        "environments/setup/<uuid:conversation_id>/discard-draft/confirm/",
-        views.environment_editor_discard_draft_confirm,
-        name="environment_editor_discard_draft_confirm",
-    ),
-    path(
-        "environments/setup/<uuid:conversation_id>/discard-draft/",
-        views.environment_editor_discard_draft,
-        name="environment_editor_discard_draft",
-    ),
+    path("environments/<uuid:environment_id>/setup/section/", views.environment_editor_environment_section, name="environment_editor_environment_section"),
+    path("environments/setup/<uuid:conversation_id>/discard-draft/confirm/", views.environment_editor_discard_draft_confirm, name="environment_editor_discard_draft_confirm"),
+    path("environments/setup/<uuid:conversation_id>/discard-draft/", views.environment_editor_discard_draft, name="environment_editor_discard_draft"),
     path("environments/<uuid:environment_id>/", views.environment_detail, name="environment_detail"),
     path("environments/<uuid:environment_id>/tags/add/", views.environment_tag_add, name="environment_tag_add"),
     path("environments/<uuid:environment_id>/tags/<uuid:tag_id>/remove/", views.environment_tag_remove, name="environment_tag_remove"),
@@ -95,6 +84,7 @@ urlpatterns = [
     path("switch-organization/", views.switch_organization, name="switch_organization"),
 
     # Authentication
+    path("auth/dev-login/", views.dev_login, name="dev_login"),
     path("auth/login/", views.auth_login, name="login"),
     path("auth/callback/", views.auth_callback, name="auth_callback"),
     path("auth/logout/", views.auth_logout, name="logout"),
