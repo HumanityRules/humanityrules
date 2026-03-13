@@ -1,5 +1,31 @@
 # DevOpsHero Development Journal
 
+## 2026-03-13 00:25 - [Deployment] Environment editor helper consolidation and template cleanups
+
+**Conversation:** [2026-03-12-2230-10e72632.md](conversations/2026-03-12-2230-10e72632.md)
+
+Applied the same style of simplification as the deployment editor (see "Deployment editor helper consolidation and small cleanups") to the environment setup editor. The view had small single-purpose helpers, redundant context building, and a section-refresh endpoint that performed conversation lookup/mutation even though the partial only needed the environment. The template had dead branches around the reset button and modal.
+
+**View changes:**
+- Replaced the previous mix of `_get_resume_conversation`, `_reactivate_conversation`, `_create_account_scoped_conversation`, and `_build_environment_section_context` with two helpers: `_create_environment_editor_conversation(request, aws_account, environment=None)` and `_get_or_create_environment_editor_conversation(request, environment)`. Create optionally sets `context_environment` when resuming an existing environment; get-or-create finds or creates and reactivates in one place.
+- Inlined the messages query into `_render_environment_editor()` (single line, only used there) and removed `_build_environment_section_context` — the full editor context already had the same keys, so the extra `context.update(...)` was redundant.
+- `environment_editor_environment_section` now only loads the environment and renders the setup partial with `context={"environment": environment}`. It no longer calls `_get_resume_conversation`, so HTMX refreshes of the setup card do not create or reactivate conversations.
+- Introduced `_reset_and_render_fresh_editor(request, aws_account)` so both `environment_editor_reset` and `environment_editor_reset_new` share the same "abandon + create fresh + render + HX-Replace-Url" logic.
+
+**Template changes:**
+- Removed the unreachable `{% if conversation %}` / `{% else %} No conversation linked {% endif %}` around the chat panel; the editor success path always has a conversation.
+- Removed the outer `{% if conversation %}` around the reset button and the reset-confirm modal block. The success path always has a conversation; the only branch that matters is `{% if environment %}` vs `{% else %}` to choose `environment_editor_reset` vs `environment_editor_reset_new` for the modal's confirm URL.
+
+**Tests:**
+- Added `test_environment_editor_section_refresh_does_not_create_conversation` to assert that GET to the setup-section endpoint returns 200 and creates zero ENVIRONMENT_SETUP conversations.
+- Added `test_reset_new_abandons_pre_environment_conversation_and_creates_fresh_conversation` to cover the pre-environment reset endpoint: abandon conversation, fresh conversation, correct HX-Replace-Url, no environment in context.
+
+**Key points:**
+- One "create environment-editor conversation" and one "get or create for existing environment" helper keep the flow readable and match the deployment editor pattern.
+- Section refresh should be side-effect-free when the partial only needs the environment; otherwise every HTMX poll or event-driven refresh could create or reactivate conversations.
+- Dead template branches (conversation always present on success path) were removed; the reset modal still correctly switches URL by environment vs pre-environment via the existing `environment` conditional.
+- Deferred for a later pass: moving `aws_account` from query string to path (`/environments/new/<aws_account_id>/`), and optionally making environment cards always link to detail with a single "Resume Setup" on the detail page (like deployment editor card simplification).
+
 ## 2026-03-13 00:10 - [Deployment] Environment editor: replace "Discard Draft" with "Reset Conversation"
 
 **Conversation:** [2026-03-12-2222-31a8e550.md](conversations/2026-03-12-2222-31a8e550.md)
