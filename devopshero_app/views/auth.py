@@ -97,6 +97,18 @@ def _start_workos_login(request):
     return redirect(authorization_url)
 
 
+def dev_login(request):
+    """Auto-login as superuser for local development. Only available when DEBUG=True."""
+    if not settings.DEBUG:
+        return HttpResponseBadRequest("Not available")
+    user = User.objects.filter(is_superuser=True).first()
+    if not user:
+        return HttpResponseBadRequest("No superuser found")
+    login(request, user, backend="django.contrib.auth.backends.ModelBackend")
+    next_url = request.GET.get("next", "/dashboard/")
+    return redirect(next_url)
+
+
 def auth_login(request):
     """Redirects to WorkOS AuthKit for authentication."""
     if request.user.is_authenticated:
