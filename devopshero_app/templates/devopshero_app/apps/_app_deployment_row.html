@@ -5,7 +5,7 @@
         hx-target="#deployment-{{ deployment.id }}"
         hx-swap="morph:outerHTML"
     {% endif %}>
-    <td class="px-4 py-3 align-middle">
+    <td class="w-full px-4 py-3 align-middle">
         <div class="min-w-0">
             {% if mode == 'environment' %}
             <h3 class="text-sm font-medium text-gray-900 dark:text-white"><span class="text-xs text-gray-400 dark:text-gray-500">App:</span> <a href="{% url 'app_detail' app_slug=deployment.app.slug %}" hx-get="{% url 'app_detail' app_slug=deployment.app.slug %}" hx-target="#main-content" hx-swap="innerHTML" hx-push-url="true" class="text-indigo-600 dark:text-indigo-400 hover:underline">{{ deployment.app.name }}</a></h3>
@@ -30,7 +30,6 @@
             {% endif %}
         </div>
     </td>
-    <td class="w-full" aria-hidden="true"></td>
     <td class="px-0 py-3 text-center align-middle whitespace-nowrap">
         {% include "devopshero_app/partials/_status_pill.html" with status=deployment.status label=deployment.get_status_display only %}
     </td>

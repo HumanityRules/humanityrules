@@ -5,7 +5,7 @@
         hx-target="#main-content"
         hx-swap="innerHTML"
     {% endif %}>
-    <td class="px-4 py-3 align-middle">
+    <td class="w-full px-4 py-3 align-middle">
         <div class="min-w-0">
             <h3 class="text-sm font-medium text-gray-900 dark:text-white"><span class="text-xs text-gray-400 dark:text-gray-500">Environment:</span> <a href="{% url 'environment_detail' environment_id=blueprint.environment.id %}" hx-get="{% url 'environment_detail' environment_id=blueprint.environment.id %}" hx-target="#main-content" hx-swap="innerHTML" hx-push-url="true" class="text-indigo-600 dark:text-indigo-400 hover:underline">{{ blueprint.environment.name }}</a></h3>
             <p class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
@@ -21,7 +21,6 @@
             {% endif %}
         </div>
     </td>
-    <td class="w-full" aria-hidden="true"></td>
     <td class="px-2 py-3 text-center align-middle whitespace-nowrap">
         {% include "devopshero_app/partials/_status_pill.html" with status=current_deployment.status label=current_deployment.get_status_display only %}
     </td>
