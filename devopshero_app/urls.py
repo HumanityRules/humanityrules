@@ -37,6 +37,7 @@ urlpatterns = [
     path("environments/<uuid:environment_id>/setup/", views.environment_editor, name="environment_editor"),
     path("environments/<uuid:environment_id>/setup/section/", views.environment_editor_environment_section, name="environment_editor_environment_section"),
     path("environments/<uuid:environment_id>/setup/reset/", views.environment_editor_reset, name="environment_editor_reset"),
+    path("environments/new/reset/<uuid:conversation_id>/", views.environment_editor_reset_new, name="environment_editor_reset_new"),
     path("environments/<uuid:environment_id>/", views.environment_detail, name="environment_detail"),
     path("environments/<uuid:environment_id>/tags/add/", views.environment_tag_add, name="environment_tag_add"),
     path("environments/<uuid:environment_id>/tags/<uuid:tag_id>/remove/", views.environment_tag_remove, name="environment_tag_remove"),

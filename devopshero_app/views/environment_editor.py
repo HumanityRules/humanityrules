@@ -202,6 +202,20 @@ def environment_editor_environment_section(request: HttpRequest, environment_id:
     )
 
 
+def _reset_and_render_fresh_editor(request: HttpRequest, aws_account: models.AWSAccount) -> HttpResponse:
+    """Create a fresh conversation and render the editor at the new-environment entry point."""
+    fresh_conversation = _create_account_scoped_conversation(request=request, aws_account=aws_account)
+    response = _render_environment_editor(
+        request=request,
+        aws_account=aws_account,
+        conversation=fresh_conversation,
+        environment=None,
+    )
+    new_url = f"{reverse('environment_editor_new')}?aws_account={aws_account.id}"
+    response["HX-Replace-Url"] = new_url
+    return response
+
+
 @login_required
 @require_POST
 def environment_editor_reset(request: HttpRequest, environment_id: UUID) -> HttpResponse:
@@ -211,7 +225,6 @@ def environment_editor_reset(request: HttpRequest, environment_id: UUID) -> Http
         return denied
 
     environment = _get_environment(request=request, environment_id=environment_id)
-    aws_account = environment.aws_account
 
     if environment.status in DISCARDABLE_ENVIRONMENT_STATUSES:
         environment.status = models.Environment.Status.DISCARDED
@@ -226,13 +239,25 @@ def environment_editor_reset(request: HttpRequest, environment_id: UUID) -> Http
         updated_at=timezone.now(),
     )
 
-    fresh_conversation = _create_account_scoped_conversation(request=request, aws_account=aws_account)
-    response = _render_environment_editor(
-        request=request,
-        aws_account=aws_account,
-        conversation=fresh_conversation,
-        environment=None,
+    return _reset_and_render_fresh_editor(request=request, aws_account=environment.aws_account)
+
+
+@login_required
+@require_POST
+def environment_editor_reset_new(request: HttpRequest, conversation_id: UUID) -> HttpResponse:
+    """Abandon the current pre-environment conversation and start fresh."""
+    denied = abac_view_checks.require_org_admin(request)
+    if denied:
+        return denied
+
+    conversation = get_object_or_404(
+        models.Conversation.objects.select_related("context_aws_account"),
+        id=conversation_id,
+        user=request.user,
+        organization=request.user.current_organization,
+        mode=models.Conversation.Mode.ENVIRONMENT_SETUP,
     )
-    new_url = f"{reverse('environment_editor_new')}?aws_account={aws_account.id}"
-    response["HX-Replace-Url"] = new_url
-    return response
+    conversation.status = models.Conversation.Status.ABANDONED
+    conversation.save(update_fields=["status", "updated_at"])
+
+    return _reset_and_render_fresh_editor(request=request, aws_account=conversation.context_aws_account)
