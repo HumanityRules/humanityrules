@@ -1,5 +1,15 @@
 # DevOpsHero Development Journal
 
+## 2026-03-13 01:05 - [Bugfix] Clear app URL on teardown so UI no longer shows dead links
+
+**Conversation:**
+
+After tearing down a deployment, the app URL was still visible in the UI across multiple templates (`_app_card.html`, `_app_blueprint_row.html`, `_app_deployment_row.html`). Clicking the link led to a page that no longer existed, which was confusing. The root cause was that the teardown executor updated the deployment status to `TORN_DOWN` but never cleared the `service_url` field. The templates conditionally display the URL based on `{% if deployment.service_url %}`, so a non-empty value kept showing the link regardless of teardown status. Fix: clear `service_url` to `""` in the success path of `app_deployment_teardown_executor.run_teardown()`. This is the simplest single-point fix that covers all display locations, and is semantically correct — the URL is no longer valid once the infrastructure is destroyed.
+
+**Key points:**
+- The app card subquery already filtered by `status=SUCCEEDED`, so it was mostly safe, but the blueprint row and deployment history row had no status guard around the URL display
+- Clearing the field at the source (teardown executor) is preferable to adding status checks in every template
+
 ## 2026-03-13 00:25 - [Deployment] Environment editor helper consolidation and template cleanups
 
 **Conversation:** [2026-03-12-2230-10e72632.md](conversations/2026-03-12-2230-10e72632.md)

@@ -159,6 +159,7 @@ def run_teardown(deployment_id: str) -> bool:
             if success:
                 deployment.status = models.Deployment.Status.TORN_DOWN
                 deployment.status_message = "Teardown completed successfully"
+                deployment.service_url = ""
                 deployment.completed_at = timezone.now()
                 deployment.save()
 
