@@ -1,5 +1,23 @@
 # DevOpsHero Development Journal
 
+## 2026-03-13 00:10 - [Deployment] Environment editor: replace "Discard Draft" with "Reset Conversation"
+
+**Conversation:** [2026-03-12-2208-31a8e550.md](conversations/2026-03-12-2208-31a8e550.md)
+
+Applied the same simplification from the deployment editor (see "Simplify deployment editor entry points") to the environment setup editor. The old flow had two endpoints: a GET that fetched a confirmation modal from the server (`/environments/setup/<conversation_id>/discard-draft/confirm/`) and a POST that performed the discard (`/environments/setup/<conversation_id>/discard-draft/`). After discard, the user was redirected to the environments list page, losing the editor context.
+
+The new flow mirrors the deployment editor: a single POST endpoint (`/environments/<environment_id>/setup/reset/`) that discards the DRAFT/ERROR environment, abandons all related conversations, creates a fresh account-scoped conversation, and re-renders the editor in place. The confirmation modal uses the `<template>` + `htmx.process()` pattern for client-side rendering (no server round-trip), reusing the shared `_confirm_modal.html` partial.
+
+The button moved from inside `_environment_editor_setup_section.html` (the left-panel setup card) to the editor header bar in `environment_editor.html`, matching the deployment editor's layout. It's gated on `{% if environment %}` — when no environment draft exists yet, there's nothing to discard and the user can simply navigate away.
+
+An initial implementation used `conversation_id` as the URL parameter (since conversations always exist even before an environment draft is saved). This was corrected to use `environment_id` to keep the URL symmetrical with the other `/setup/` endpoints (`/environments/<uuid>/setup/`, `/environments/<uuid>/setup/section/`). The gate on `{% if environment %}` makes `conversation_id` unnecessary since the environment is always available when the button renders.
+
+**Key points:**
+- The `<template>` + `htmx.process()` pattern avoids a dedicated confirm endpoint while reusing the standard modal partial — same pattern established in the deployment editor
+- Reset re-renders the editor in place (with `HX-Replace-Url` pointing to `/environments/new/?aws_account=<id>`) instead of navigating to the environments list, keeping the user in the setup flow
+- URL parameters should match the resource being acted on (`environment_id`), not the session artifact (`conversation_id`), even when the session artifact is technically sufficient — consistency with sibling endpoints matters more
+- The button is correctly gated on the environment existing, not just the conversation — pre-draft conversations have nothing to reset
+
 ## 2026-03-12 23:15 - [Bugfix] Teardown executor discards blueprint so UI shows correct status
 
 **Conversation:** (current session — extract when saved)

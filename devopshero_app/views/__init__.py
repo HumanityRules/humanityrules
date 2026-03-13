@@ -7,8 +7,7 @@ from .environment_editor import (
     environment_editor,
     environment_editor_new,
     environment_editor_environment_section,
-    environment_editor_discard_draft_confirm,
-    environment_editor_discard_draft,
+    environment_editor_reset,
 )
 from .security_hub import security_hub
 from .security_permissions_editor import (
@@ -107,8 +106,7 @@ __all__ = [
     "environment_editor",
     "environment_editor_new",
     "environment_editor_environment_section",
-    "environment_editor_discard_draft_confirm",
-    "environment_editor_discard_draft",
+    "environment_editor_reset",
     "security_hub",
     "security_permissions_editor",
     "security_permissions_editor_apply",

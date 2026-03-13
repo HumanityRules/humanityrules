@@ -36,12 +36,13 @@ urlpatterns = [
     path("environments/new/", views.environment_editor_new, name="environment_editor_new"),
     path("environments/<uuid:environment_id>/setup/", views.environment_editor, name="environment_editor"),
     path("environments/<uuid:environment_id>/setup/section/", views.environment_editor_environment_section, name="environment_editor_environment_section"),
-    path("environments/setup/<uuid:conversation_id>/discard-draft/confirm/", views.environment_editor_discard_draft_confirm, name="environment_editor_discard_draft_confirm"),
-    path("environments/setup/<uuid:conversation_id>/discard-draft/", views.environment_editor_discard_draft, name="environment_editor_discard_draft"),
+    path("environments/<uuid:environment_id>/setup/reset/", views.environment_editor_reset, name="environment_editor_reset"),
     path("environments/<uuid:environment_id>/", views.environment_detail, name="environment_detail"),
     path("environments/<uuid:environment_id>/tags/add/", views.environment_tag_add, name="environment_tag_add"),
     path("environments/<uuid:environment_id>/tags/<uuid:tag_id>/remove/", views.environment_tag_remove, name="environment_tag_remove"),
     path("environments/<uuid:environment_id>/tags/save/", views.environment_tags_save, name="environment_tags_save"),
+
+    # Security
     path("security/hub/", views.security_hub, name="security_hub"),
     path("security/permissions/editor/", views.security_permissions_editor, name="security_permissions_editor"),
     path("security/permissions/<uuid:app_permission_request_id>/apply/", views.security_permissions_editor_apply, name="security_permissions_editor_apply"),

@@ -1,26 +1,13 @@
 <div class="rounded-lg border border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-800/60">
     <div class="flex items-center justify-between rounded-t-lg bg-gray-50 px-4 py-3 dark:bg-gray-800">
         <h2 class="text-sm font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">Environment Setup</h2>
-        <div class="flex items-baseline gap-3">
-            {% if environment %}
-            {% include "devopshero_app/partials/_status_pill.html" with status=environment.status label=environment.get_status_display only %}
-            {% else %}
-            <span class="inline-flex items-center rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-500 dark:bg-gray-700 dark:text-gray-400">
-                Pending
-            </span>
-            {% endif %}
-            {% if conversation %}
-            {% if not environment or environment.status == 'draft' or environment.status == 'error' %}
-            <button type="button"
-                    hx-get="{% url 'environment_editor_discard_draft_confirm' conversation_id=conversation.id %}"
-                    hx-target="#modal-container"
-                    hx-swap="innerHTML"
-                    class="cursor-pointer text-xs font-medium text-red-600 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300">
-                Discard Draft
-            </button>
-            {% endif %}
-            {% endif %}
-        </div>
+        {% if environment %}
+        {% include "devopshero_app/partials/_status_pill.html" with status=environment.status label=environment.get_status_display only %}
+        {% else %}
+        <span class="inline-flex items-center rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-500 dark:bg-gray-700 dark:text-gray-400">
+            Pending
+        </span>
+        {% endif %}
     </div>
     <div class="border-t border-gray-200 px-4 py-3 dark:border-gray-700">
         {% if environment %}

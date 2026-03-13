@@ -6,16 +6,25 @@
 </div>
 {% else %}
 <div class="flex h-full flex-col" style="height: calc(100vh - 8rem);">
-    <div class="border-b border-gray-200 px-6 py-3 dark:border-gray-700">
-        {% url 'environments' as environments_url %}
+    <div class="flex items-start justify-between border-b border-gray-200 px-6 py-3 dark:border-gray-700">
+        <div>
+            {% url 'environments' as environments_url %}
+            {% if environment %}
+            {% include "devopshero_app/partials/_breadcrumb.html" with p1_label="Environments" p1_url=environments_url current=environment.name %}
+            {% else %}
+            {% include "devopshero_app/partials/_breadcrumb.html" with p1_label="Environments" p1_url=environments_url current="New Environment" %}
+            {% endif %}
+            <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
+                Define the environment draft, review it with the agent, and provision it when you're ready.
+            </p>
+        </div>
         {% if environment %}
-        {% include "devopshero_app/partials/_breadcrumb.html" with p1_label="Environments" p1_url=environments_url current=environment.name %}
-        {% else %}
-        {% include "devopshero_app/partials/_breadcrumb.html" with p1_label="Environments" p1_url=environments_url current="New Environment" %}
+        <button type="button"
+                onclick="var mc = document.getElementById('modal-container'); mc.innerHTML = document.getElementById('reset-confirm-tpl').innerHTML; htmx.process(mc);"
+                class="shrink-0 rounded-lg bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-700">
+            Reset Conversation
+        </button>
         {% endif %}
-        <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
-            Define the environment draft, review it with the agent, and provision it when you're ready.
-        </p>
     </div>
 
     <div class="flex flex-1 overflow-hidden">
@@ -47,6 +56,13 @@
         </div>
     </div>
 </div>
+
+{% if environment %}
+{% url 'environment_editor_reset' environment_id=environment.id as environment_editor_reset_url %}
+<template id="reset-confirm-tpl">
+    {% include "devopshero_app/partials/_confirm_modal.html" with modal_title="Reset Conversation" modal_message="Start a new conversation? This will close the current conversation and discard any environment draft." confirm_url=environment_editor_reset_url confirm_label="Reset Conversation" %}
+</template>
+{% endif %}
 
 <script type="module">
 function reloadEditor(url) {
