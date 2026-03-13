@@ -32,7 +32,7 @@ from .settings import (
     settings_git_integrations,
 )
 from .partials import random_quote, switch_organization
-from .auth import auth_login, auth_callback, auth_logout, oidc_login, oidc_callback
+from .auth import auth_login, auth_callback, auth_logout, oidc_login, oidc_callback, dev_login
 from .onboarding import onboarding
 from .api import aws_install_account_callback, health_check
 from .github import github_connect, github_callback, github_webhook
@@ -58,6 +58,7 @@ from .deployment_editor import (
     deployment_editor_blueprint_section,
     deployment_editor_discard_draft_confirm,
     deployment_editor_discard_draft,
+    deployment_editor_fork,
 )
 from .waitlist_views import waitlist_signup
 from .security_abac import (
@@ -160,6 +161,7 @@ __all__ = [
     "deployment_editor_blueprint_section",
     "deployment_editor_discard_draft_confirm",
     "deployment_editor_discard_draft",
+    "deployment_editor_fork",
     "waitlist_signup",
     "security_people",
     "security_people_default_role",

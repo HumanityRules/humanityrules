@@ -10,9 +10,11 @@ Entry points:
 
 from typing import Any
 
+from urllib.parse import urlencode
+
 from django.contrib.auth.decorators import login_required
 from django.http import HttpRequest, HttpResponse
-from django.shortcuts import get_object_or_404, render
+from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils import timezone
 from django.views.decorators.http import require_GET, require_POST
@@ -179,14 +181,26 @@ def deployment_editor_new(request: HttpRequest) -> HttpResponse:
 
     repository = get_object_or_404(models.Repository, id=repo_id, organization=organization)
 
-    conversation = agent_service.create_conversation(
-        user=request.user,
-        workspace_id=str(workspace.id),
-        repo_id=str(repository.id),
-        aws_account_id=None,
-        mode=models.Conversation.Mode.APP_DEPLOYMENT,
-        app_permission_request_id=None,
-    )
+    conversation_id = request.GET.get("conversation", "").strip()
+    created_new = False
+    if conversation_id:
+        conversation = get_object_or_404(
+            models.Conversation,
+            id=conversation_id,
+            user=request.user,
+            organization=organization,
+            mode=models.Conversation.Mode.APP_DEPLOYMENT,
+        )
+    else:
+        conversation = agent_service.create_conversation(
+            user=request.user,
+            workspace_id=str(workspace.id),
+            repo_id=str(repository.id),
+            aws_account_id=None,
+            mode=models.Conversation.Mode.APP_DEPLOYMENT,
+            app_permission_request_id=None,
+        )
+        created_new = True
 
     messages = conversation.messages.exclude(
         content_type=models.Message.ContentType.SYSTEM_TRIGGER,
@@ -201,7 +215,12 @@ def deployment_editor_new(request: HttpRequest) -> HttpResponse:
     })
     context.update(_build_blueprint_section_context(app=None, blueprint=None))
 
-    return render(request=request, template_name="devopshero_app/deploy/deployment_editor.html", context=context)
+    response = render(request=request, template_name="devopshero_app/deploy/deployment_editor.html", context=context)
+    if created_new:
+        updated_params = request.GET.copy()
+        updated_params["conversation"] = str(conversation.id)
+        response["HX-Replace-Url"] = f"{request.path}?{updated_params.urlencode()}"
+    return response
 
 
 @login_required
@@ -265,12 +284,14 @@ def deployment_editor_app_new(request: HttpRequest, app_slug: str) -> HttpRespon
         return response
 
     conversation = _create_app_scoped_conversation(request=request, app=app)
-    return _render_existing_app_editor(
+    response = _render_existing_app_editor(
         request=request,
         app=app,
         blueprint=None,
         conversation=conversation,
     )
+    response["HX-Replace-Url"] = reverse("deployment_editor", kwargs={"app_slug": app.slug})
+    return response
 
 
 @login_required
@@ -415,3 +436,46 @@ def deployment_editor_discard_draft(request: HttpRequest, app_slug: str) -> Http
     response = render(request=request, template_name="devopshero_app/apps/app_detail.html", context=context)
     response["HX-Push-Url"] = reverse("app_detail", kwargs={"app_slug": app.slug})
     return response
+
+
+@login_required
+@require_GET
+def deployment_editor_fork(request: HttpRequest, conversation_id) -> HttpResponse:
+    """Fork a deployment conversation and redirect back into the deployment editor."""
+    source = get_object_or_404(
+        models.Conversation,
+        id=conversation_id,
+        user=request.user,
+        organization=request.user.current_organization,
+        mode=models.Conversation.Mode.APP_DEPLOYMENT,
+    )
+    if not source.session_id:
+        return HttpResponse("Cannot fork: conversation has no agent session yet.", status=400)
+
+    forked = models.Conversation.objects.create(
+        user=request.user,
+        organization=request.user.current_organization,
+        mode=source.mode,
+        context_workspace=source.context_workspace,
+        context_repository=source.context_repository,
+        context_aws_account=source.context_aws_account,
+        context_environment=source.context_environment,
+        context_app=source.context_app,
+        context_deployment_blueprint=source.context_deployment_blueprint,
+        session_id=source.session_id,
+        status=models.Conversation.Status.ACTIVE,
+    )
+
+    if source.context_app:
+        app = source.context_app
+        if source.context_deployment_blueprint:
+            return redirect("deployment_editor_resume", app_slug=app.slug)
+        return redirect("deployment_editor", app_slug=app.slug)
+
+    params = {}
+    if source.context_workspace:
+        params["workspace"] = source.context_workspace.slug
+    if source.context_repository:
+        params["repo"] = str(source.context_repository_id)
+    params["conversation"] = str(forked.id)
+    return redirect(f"{reverse('deployment_editor_new')}?{urlencode(params)}")

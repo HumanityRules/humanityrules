@@ -1,3 +1,4 @@
+from django.conf import settings as django_settings
 from django.templatetags.static import static
 
 from ..models import OrganizationMembership
@@ -62,4 +63,5 @@ def get_app_shell_context(request, current_page):
         "site_logo_url": static('devopshero_app/devops-hero-logo-large.png'),
         "site_name": "DevOps Hero",
         "user_is_org_admin": abac.is_org_admin(organization=current_org, user=user),
+        "debug": django_settings.DEBUG,
     }

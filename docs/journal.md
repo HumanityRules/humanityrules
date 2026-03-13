@@ -1,5 +1,21 @@
 # DevOpsHero Development Journal
 
+## 2026-03-12 19:54 - [AgentChat] Fork conversation for the deployment editor
+
+**Conversation:** [2026-03-12-1954-c668fa4d.md](conversations/2026-03-12-1954-c668fa4d.md)
+
+Added the ability to fork a deployment editor conversation, branching from the same agent session state. The old `/chat/<id>/fork/` endpoint only worked with the legacy chat UI and was missing `context_app` and `context_deployment_blueprint` fields. The new `/deploy/fork/<conversation_id>/` endpoint copies all conversation context and redirects back into the correct deployment editor view depending on the state (new app, existing app with/without blueprint).
+
+The main discovery during implementation was that `session_id` was only being captured from `ResultMessage`, which arrives at the very end of the full agentic loop. In the deployment editor flow, the agent's first turn can be long (repo analysis, multiple tool calls, questions to the user), and `ResultMessage` only fires after the entire multi-turn interaction completes — not after the first response. This made fork unavailable for most of the conversation's useful lifetime. The fix was to capture `session_id` from `SystemMessage` instead, which fires at stream start and always carries it. The `ResultMessage` capture was removed since it was now redundant.
+
+A `debug` context variable was also added to `get_app_shell_context` (from `settings.DEBUG`) so templates can conditionally show debug-only UI. The fork button in the chat panel header is gated on this, keeping it invisible in production.
+
+**Key points:**
+- `session_id` should be captured from `SystemMessage` at stream start, not from `ResultMessage` at stream end — the latter blocks forking during long multi-turn agent loops.
+- The `SystemMessage.data` dict always includes `session_id` in practice, despite the generic `dict[str, Any]` typing. Direct key access (`message.data["session_id"]`) is appropriate.
+- For existing-app forks, the deployment editor's "find latest conversation" logic naturally picks up the fork since it's the newest. Only the new-app flow (`/deploy/new/`) needs an explicit `?conversation=` query param because it always creates a fresh conversation.
+- Debug-only UI features should be gated on `settings.DEBUG` via template context, not hardcoded or unconditionally rendered.
+
 ## 2026-03-11 17:19 - [Bugfix] App detail rows now follow live redeploy state
 
 **Conversation:** [2026-03-11-1719-a157c661.md](conversations/2026-03-11-1719-a157c661.md)
