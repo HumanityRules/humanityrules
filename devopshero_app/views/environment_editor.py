@@ -14,14 +14,13 @@ from django.http import HttpRequest, HttpResponse
 from django.shortcuts import get_object_or_404, render
 from django.urls import reverse
 from django.utils import timezone
-from django.views.decorators.http import require_GET, require_POST
+from django.views.decorators.http import require_POST
 
 import devopshero_app.models as models
 from devopshero_app.services.agent import agent_service
 
 from . import abac_view_checks
 from . import base
-from .environments import build_environments_context
 
 DISCARDABLE_ENVIRONMENT_STATUSES = (
     models.Environment.Status.DRAFT,
@@ -203,87 +202,37 @@ def environment_editor_environment_section(request: HttpRequest, environment_id:
     )
 
 
-def _get_discardable_environment(conversation: models.Conversation) -> models.Environment | None:
-    """Return the environment draft when it can still be discarded."""
-    environment = conversation.context_environment
-    if not environment:
-        return None
-    if environment.status not in DISCARDABLE_ENVIRONMENT_STATUSES:
-        return None
-    return environment
-
-
-@login_required
-@require_GET
-def environment_editor_discard_draft_confirm(request: HttpRequest, conversation_id: UUID) -> HttpResponse:
-    """Return the discard-draft confirmation modal HTML."""
-    denied = abac_view_checks.require_org_admin(request)
-    if denied:
-        return denied
-
-    conversation = get_object_or_404(
-        models.Conversation.objects.select_related("context_environment", "context_aws_account"),
-        id=conversation_id,
-        user=request.user,
-        organization=request.user.current_organization,
-        mode=models.Conversation.Mode.ENVIRONMENT_SETUP,
-    )
-    environment = _get_discardable_environment(conversation=conversation)
-
-    if environment:
-        modal_message = (
-            f"Discard the current environment setup draft for {environment.name}? "
-            "This abandons the draft and its conversation."
-        )
-    else:
-        modal_message = "Abandon the current environment setup session? You can start a new setup later."
-
-    return render(
-        request=request,
-        template_name="devopshero_app/partials/_confirm_modal.html",
-        context={
-            "modal_title": "Discard Environment Draft",
-            "modal_message": modal_message,
-            "confirm_url": reverse("environment_editor_discard_draft", kwargs={"conversation_id": conversation.id}),
-            "confirm_label": "Discard Draft",
-        },
-    )
-
-
 @login_required
 @require_POST
-def environment_editor_discard_draft(request: HttpRequest, conversation_id: UUID) -> HttpResponse:
-    """Discard the environment draft or abandon the current setup session."""
+def environment_editor_reset(request: HttpRequest, environment_id: UUID) -> HttpResponse:
+    """Close current conversation, discard draft environment if present, and start fresh."""
     denied = abac_view_checks.require_org_admin(request)
     if denied:
         return denied
 
-    conversation = get_object_or_404(
-        models.Conversation.objects.select_related("context_environment"),
-        id=conversation_id,
-        user=request.user,
-        organization=request.user.current_organization,
-        mode=models.Conversation.Mode.ENVIRONMENT_SETUP,
-    )
-    environment = _get_discardable_environment(conversation=conversation)
+    environment = _get_environment(request=request, environment_id=environment_id)
+    aws_account = environment.aws_account
 
-    if environment:
+    if environment.status in DISCARDABLE_ENVIRONMENT_STATUSES:
         environment.status = models.Environment.Status.DISCARDED
         environment.status_message = "Draft discarded"
         environment.save(update_fields=["status", "status_message", "updated_at"])
 
-        models.Conversation.objects.filter(
-            context_environment=environment,
-            mode=models.Conversation.Mode.ENVIRONMENT_SETUP,
-        ).update(
-            status=models.Conversation.Status.ABANDONED,
-            updated_at=timezone.now(),
-        )
-    else:
-        conversation.status = models.Conversation.Status.ABANDONED
-        conversation.save(update_fields=["status", "updated_at"])
+    models.Conversation.objects.filter(
+        context_environment=environment,
+        mode=models.Conversation.Mode.ENVIRONMENT_SETUP,
+    ).update(
+        status=models.Conversation.Status.ABANDONED,
+        updated_at=timezone.now(),
+    )
 
-    context = build_environments_context(request=request)
-    response = render(request=request, template_name="devopshero_app/environments/environments.html", context=context)
-    response["HX-Push-Url"] = reverse("environments")
+    fresh_conversation = _create_account_scoped_conversation(request=request, aws_account=aws_account)
+    response = _render_environment_editor(
+        request=request,
+        aws_account=aws_account,
+        conversation=fresh_conversation,
+        environment=None,
+    )
+    new_url = f"{reverse('environment_editor_new')}?aws_account={aws_account.id}"
+    response["HX-Replace-Url"] = new_url
     return response

@@ -139,7 +139,7 @@ class TestEnvironmentEditor(TestCase):
             reverse("environment_detail", kwargs={"environment_id": self.env_draft.id}),
         )
 
-    def test_discard_draft_marks_environment_discarded_and_abandons_conversations(self) -> None:
+    def test_reset_discards_draft_environment_and_creates_fresh_conversation(self) -> None:
         conversation = models.Conversation.objects.create(
             user=self.admin_user,
             organization=self.organization,
@@ -150,13 +150,21 @@ class TestEnvironmentEditor(TestCase):
 
         self.client.force_login(self.admin_user)
         response = self.client.post(
-            reverse("environment_editor_discard_draft", kwargs={"conversation_id": conversation.id}),
+            reverse("environment_editor_reset", kwargs={"environment_id": self.env_draft.id}),
             **HTMX,
         )
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.headers["HX-Push-Url"], reverse("environments"))
+        expected_url = f"{reverse('environment_editor_new')}?aws_account={self.aws_account.id}"
+        self.assertEqual(response.headers["HX-Replace-Url"], expected_url)
+
         self.env_draft.refresh_from_db()
         conversation.refresh_from_db()
         self.assertEqual(self.env_draft.status, models.Environment.Status.DISCARDED)
         self.assertEqual(conversation.status, models.Conversation.Status.ABANDONED)
+
+        fresh_conversation = response.context["conversation"]
+        self.assertNotEqual(fresh_conversation.id, conversation.id)
+        self.assertEqual(fresh_conversation.context_aws_account, self.aws_account)
+        self.assertIsNone(fresh_conversation.context_environment)
+        self.assertIsNone(response.context["environment"])
