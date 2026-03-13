@@ -18,19 +18,20 @@ urlpatterns = [
     path("apps/<slug:app_slug>/tags/add/", views.app_tag_add, name="app_tag_add"),
     path("apps/<slug:app_slug>/tags/<uuid:tag_id>/remove/", views.app_tag_remove, name="app_tag_remove"),
     path("apps/<slug:app_slug>/tags/save/", views.app_tags_save, name="app_tags_save"),
-    path("deploy/new/", views.deployment_editor_new, name="deployment_editor_new"),
+
+    path("deploy/new/<slug:workspace_slug>/<uuid:repo_id>/", views.deployment_editor_new, name="deployment_editor_new"),
     path("deploy/<slug:app_slug>/", views.deployment_editor, name="deployment_editor"),
-    path("deploy/<slug:app_slug>/new/", views.deployment_editor_app_new, name="deployment_editor_app_new"),
-    path("deploy/<slug:app_slug>/resume/", views.deployment_editor_resume, name="deployment_editor_resume"),
+    path("deploy/<slug:app_slug>/reset/", views.deployment_editor_reset, name="deployment_editor_reset"),
     path("deploy/<slug:app_slug>/app-section/", views.deployment_editor_app_section, name="deployment_editor_app_section"),
     path("deploy/<slug:app_slug>/blueprint-section/", views.deployment_editor_blueprint_section, name="deployment_editor_blueprint_section"),
-    path("deploy/<slug:app_slug>/discard-draft/confirm/", views.deployment_editor_discard_draft_confirm, name="deployment_editor_discard_draft_confirm"),
-    path("deploy/<slug:app_slug>/discard-draft/", views.deployment_editor_discard_draft, name="deployment_editor_discard_draft"),
     path("deploy/fork/<uuid:conversation_id>/", views.deployment_editor_fork, name="deployment_editor_fork"),
+
     path("apps/<slug:app_slug>/deployments/<uuid:deployment_id>/teardown/", views.app_deployment_teardown, name="app_deployment_teardown"),
     path("apps/<slug:app_slug>/deployments/<uuid:deployment_id>/redeploy/", views.app_deployment_redeploy, name="app_deployment_redeploy"),
     path("apps/<slug:app_slug>/deployments/<uuid:deployment_id>/status/", views.app_deployment_status, name="app_deployment_status"),
     path("apps/<slug:app_slug>/deployments/<uuid:deployment_id>/teardown-confirm/", views.app_teardown_confirm, name="app_teardown_confirm"),
+
+    # Environments
     path("environments/", views.environments, name="environments"),
     path("environments/new/", views.environment_editor_new, name="environment_editor_new"),
     path("environments/<uuid:environment_id>/setup/", views.environment_editor, name="environment_editor"),

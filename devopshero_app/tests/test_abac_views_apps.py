@@ -122,30 +122,14 @@ class TestAppEndpoints(TestCase):
         response = self.client.get("/apps/myapp/", **HTMX)
         self.assertEqual(response.status_code, 200)
 
-    def test_ws_editor_sees_new_deployment_when_no_open_blueprint_exists(self) -> None:
+    def test_ws_editor_sees_deployment_button(self) -> None:
         self.client.force_login(self.ws_editor)
         response = self.client.get("/apps/myapp/", **HTMX)
         self.assertEqual(response.status_code, 200)
         self.assertFalse(response.context["should_auto_refresh"])
-        self.assertContains(response, "New Deployment")
-        self.assertNotContains(response, "Resume Deployment")
+        self.assertContains(response, "Deployment")
+        self.assertContains(response, "/deploy/myapp/")
         self.assertNotContains(response, 'hx-trigger="load delay:10s"')
-
-    def test_ws_editor_sees_resume_deployment_for_draft_blueprint(self) -> None:
-        self._set_open_blueprint_status(status=DeploymentBlueprint.Status.DRAFT)
-        self.client.force_login(self.ws_editor)
-        response = self.client.get("/apps/myapp/", **HTMX)
-        self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "Resume Deployment")
-        self.assertNotContains(response, "New Deployment")
-
-    def test_ws_editor_sees_resume_deployment_for_failed_blueprint(self) -> None:
-        self._set_open_blueprint_status(status=DeploymentBlueprint.Status.FAILED)
-        self.client.force_login(self.ws_editor)
-        response = self.client.get("/apps/myapp/", **HTMX)
-        self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "Resume Deployment")
-        self.assertNotContains(response, "New Deployment")
 
     def test_app_detail_deployed_environments_uses_blueprints_outside_recent_deployments_window(self) -> None:
         legacy_env = Environment.objects.create(
@@ -295,12 +279,11 @@ class TestAppEndpoints(TestCase):
         self.assertContains(response, "Tear Down", count=1)
         self.assertContains(response, "?render=app_detail")
 
-    def test_ws_viewer_does_not_see_resume_deployment_for_draft_blueprint(self) -> None:
-        self._set_open_blueprint_status(status=DeploymentBlueprint.Status.DRAFT)
+    def test_ws_viewer_does_not_see_deployment_button(self) -> None:
         self.client.force_login(self.ws_viewer)
         response = self.client.get("/apps/myapp/", **HTMX)
         self.assertEqual(response.status_code, 200)
-        self.assertNotContains(response, "Resume Deployment")
+        self.assertNotContains(response, "/deploy/myapp/")
 
     def test_no_access_gets_403_on_app_detail(self) -> None:
         self.client.force_login(self.no_access_user)
@@ -309,16 +292,16 @@ class TestAppEndpoints(TestCase):
 
     # --- Deployment Editor Entry Points (requires workspace:edit) ---
 
-    def test_ws_editor_new_deployment_entrypoint_creates_fresh_conversation_without_blueprint(self) -> None:
+    def test_ws_editor_deployment_editor_creates_conversation_without_blueprint(self) -> None:
         self.client.force_login(self.ws_editor)
-        response = self.client.get("/deploy/myapp/new/", **HTMX)
+        response = self.client.get("/deploy/myapp/", **HTMX)
         self.assertEqual(response.status_code, 200)
         conversation = response.context["conversation"]
         self.assertEqual(conversation.context_app_id, self.app.id)
         self.assertIsNone(conversation.context_deployment_blueprint_id)
         self.assertIsNone(response.context["blueprint"])
 
-    def test_ws_editor_resume_deployment_entrypoint_reuses_blueprint_conversation(self) -> None:
+    def test_ws_editor_deployment_editor_reuses_blueprint_conversation(self) -> None:
         self._set_open_blueprint_status(status=DeploymentBlueprint.Status.DRAFT)
         conversation = Conversation.objects.create(
             user=self.ws_editor,
@@ -331,14 +314,14 @@ class TestAppEndpoints(TestCase):
             status=Conversation.Status.COMPLETED,
         )
         self.client.force_login(self.ws_editor)
-        response = self.client.get("/deploy/myapp/resume/", **HTMX)
+        response = self.client.get("/deploy/myapp/", **HTMX)
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.context["conversation"].id, conversation.id)
         self.assertEqual(response.context["blueprint"].id, self.blueprint.id)
         conversation.refresh_from_db()
         self.assertEqual(conversation.status, Conversation.Status.ACTIVE)
 
-    def test_ws_editor_resume_deployment_shows_effective_branch_and_url_values(self) -> None:
+    def test_ws_editor_deployment_editor_shows_effective_branch_and_url_values(self) -> None:
         self.repo.default_branch = "master"
         self.repo.save()
         self.env.shared_alb_hosted_zone = "example.com"
@@ -348,7 +331,7 @@ class TestAppEndpoints(TestCase):
         self.blueprint.save()
         self._set_open_blueprint_status(status=DeploymentBlueprint.Status.DRAFT)
         self.client.force_login(self.ws_editor)
-        response = self.client.get("/deploy/myapp/resume/", **HTMX)
+        response = self.client.get("/deploy/myapp/", **HTMX)
         self.assertEqual(response.status_code, 200)
         effective_values = response.context["blueprint_effective_values"]
         self.assertEqual(effective_values.branch, "master")
@@ -362,7 +345,7 @@ class TestAppEndpoints(TestCase):
         self.assertNotContains(response, "Inherited from repository default branch")
         self.assertNotContains(response, "Inherited from app slug")
 
-    def test_ws_editor_resume_deployment_shows_explicit_url_value(self) -> None:
+    def test_ws_editor_deployment_editor_shows_explicit_url_value(self) -> None:
         self.env.shared_alb_hosted_zone = "example.com"
         self.env.save(update_fields=["shared_alb_hosted_zone", "updated_at"])
         self.blueprint.branch = "release-2026"
@@ -370,7 +353,7 @@ class TestAppEndpoints(TestCase):
         self.blueprint.save()
         self._set_open_blueprint_status(status=DeploymentBlueprint.Status.DRAFT)
         self.client.force_login(self.ws_editor)
-        response = self.client.get("/deploy/myapp/resume/", **HTMX)
+        response = self.client.get("/deploy/myapp/", **HTMX)
         self.assertEqual(response.status_code, 200)
         effective_values = response.context["blueprint_effective_values"]
         self.assertEqual(effective_values.branch, "release-2026")
@@ -382,15 +365,7 @@ class TestAppEndpoints(TestCase):
         self.assertNotContains(response, "Inherited from repository default branch")
         self.assertNotContains(response, "Inherited from app slug")
 
-    def test_ws_editor_can_fetch_discard_draft_confirm_modal(self) -> None:
-        self._set_open_blueprint_status(status=DeploymentBlueprint.Status.DRAFT)
-        self.client.force_login(self.ws_editor)
-        response = self.client.get("/deploy/myapp/discard-draft/confirm/", **HTMX)
-        self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "Discard Deployment Draft")
-        self.assertContains(response, "Discard Draft")
-
-    def test_ws_editor_can_discard_open_draft_from_editor(self) -> None:
+    def test_ws_editor_can_reset_deployment_with_draft_blueprint(self) -> None:
         self._set_open_blueprint_status(status=DeploymentBlueprint.Status.DRAFT)
         conversation = Conversation.objects.create(
             user=self.ws_editor,
@@ -403,36 +378,26 @@ class TestAppEndpoints(TestCase):
             status=Conversation.Status.ACTIVE,
         )
         self.client.force_login(self.ws_editor)
-        response = self.client.post("/deploy/myapp/discard-draft/", **HTMX)
+        response = self.client.post("/deploy/myapp/reset/", **HTMX)
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.headers["HX-Push-Url"], "/apps/myapp/")
-        self.assertContains(response, "New Deployment")
+        self.assertEqual(response.headers["HX-Replace-Url"], "/deploy/myapp/")
         self.blueprint.refresh_from_db()
         self.assertEqual(self.blueprint.status, DeploymentBlueprint.Status.DISCARDED)
         conversation.refresh_from_db()
         self.assertEqual(conversation.status, Conversation.Status.ABANDONED)
+        new_conversation = response.context["conversation"]
+        self.assertNotEqual(new_conversation.id, conversation.id)
+        self.assertEqual(new_conversation.context_app_id, self.app.id)
 
-    def test_ws_viewer_gets_403_on_new_deployment_entrypoint(self) -> None:
+    def test_ws_viewer_gets_403_on_deployment_editor(self) -> None:
         self.client.force_login(self.ws_viewer)
-        response = self.client.get("/deploy/myapp/new/", **HTMX)
+        response = self.client.get("/deploy/myapp/", **HTMX)
         self.assertEqual(response.status_code, 403)
 
-    def test_ws_viewer_gets_403_on_resume_deployment_entrypoint(self) -> None:
+    def test_ws_viewer_gets_403_on_deployment_reset(self) -> None:
         self._set_open_blueprint_status(status=DeploymentBlueprint.Status.DRAFT)
         self.client.force_login(self.ws_viewer)
-        response = self.client.get("/deploy/myapp/resume/", **HTMX)
-        self.assertEqual(response.status_code, 403)
-
-    def test_ws_viewer_gets_403_on_discard_draft(self) -> None:
-        self._set_open_blueprint_status(status=DeploymentBlueprint.Status.DRAFT)
-        self.client.force_login(self.ws_viewer)
-        response = self.client.post("/deploy/myapp/discard-draft/", **HTMX)
-        self.assertEqual(response.status_code, 403)
-
-    def test_ws_viewer_gets_403_on_discard_draft_confirm(self) -> None:
-        self._set_open_blueprint_status(status=DeploymentBlueprint.Status.DRAFT)
-        self.client.force_login(self.ws_viewer)
-        response = self.client.get("/deploy/myapp/discard-draft/confirm/", **HTMX)
+        response = self.client.post("/deploy/myapp/reset/", **HTMX)
         self.assertEqual(response.status_code, 403)
 
     # --- App Deployment Status Polling (requires workspace:view) ---

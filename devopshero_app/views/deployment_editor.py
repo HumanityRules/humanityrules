@@ -2,15 +2,12 @@
 Deployment editor view: two-panel UI with app/blueprint config + agent chat.
 
 Entry points:
-- New app: /deploy/new/?workspace=<slug>&repo=<id> - creates a repo-scoped deployment conversation
-- Existing app new: /deploy/<app_slug>/new/ - starts a fresh app-scoped deployment conversation
-- Existing app resume: /deploy/<app_slug>/resume/ - resumes the app's open deployment task
-- Existing app fallback: /deploy/<app_slug>/ - preserves the current deployment task after app creation
+- New app: /deploy/new/<workspace_slug>/<repo_id>/ - creates a repo-scoped deployment conversation
+- Existing app: /deploy/<app_slug>/ - resumes or creates the app's deployment conversation
+- Reset: /deploy/<app_slug>/reset/ - closes current conversation, discards draft, starts fresh
 """
 
 from typing import Any
-
-from urllib.parse import urlencode
 
 from django.contrib.auth.decorators import login_required
 from django.http import HttpRequest, HttpResponse
@@ -67,14 +64,6 @@ def _build_blueprint_section_context(
     return context
 
 
-def _get_discardable_blueprint(app: models.App) -> models.DeploymentBlueprint | None:
-    """Return the app's open blueprint when it can still be discarded."""
-    blueprint = apps_views.get_open_blueprint(app=app)
-    if not blueprint or blueprint.status not in DISCARDABLE_BLUEPRINT_STATUSES:
-        return None
-    return blueprint
-
-
 def _render_existing_app_editor(
     request: HttpRequest,
     app: models.App,
@@ -88,6 +77,7 @@ def _render_existing_app_editor(
         "repository": app.repository,
         "conversation": conversation,
         "messages": _get_editor_messages(conversation=conversation),
+        "reset_url": reverse("deployment_editor_reset", kwargs={"app_slug": app.slug}),
     })
     context.update(_build_blueprint_section_context(app=app, blueprint=blueprint))
     return render(request=request, template_name="devopshero_app/deploy/deployment_editor.html", context=context)
@@ -120,19 +110,6 @@ def _create_app_scoped_conversation(request: HttpRequest, app: models.App) -> mo
     return conversation
 
 
-def _get_latest_app_conversation_without_blueprint(request: HttpRequest, app: models.App) -> models.Conversation | None:
-    """Return the latest app-scoped deployment conversation that has no blueprint yet."""
-    conversation = models.Conversation.objects.filter(
-        context_app=app,
-        context_deployment_blueprint__isnull=True,
-        user=request.user,
-        mode=models.Conversation.Mode.APP_DEPLOYMENT,
-    ).order_by("-updated_at").first()
-    if not conversation:
-        return None
-    return _reactivate_conversation(conversation=conversation)
-
-
 def _get_resume_conversation(
     request: HttpRequest,
     app: models.App,
@@ -156,8 +133,21 @@ def _get_resume_conversation(
     return conversation
 
 
+def _get_latest_app_conversation_without_blueprint(request: HttpRequest, app: models.App) -> models.Conversation | None:
+    """Return the latest app-scoped deployment conversation that has no blueprint yet."""
+    conversation = models.Conversation.objects.filter(
+        context_app=app,
+        context_deployment_blueprint__isnull=True,
+        user=request.user,
+        mode=models.Conversation.Mode.APP_DEPLOYMENT,
+    ).order_by("-updated_at").first()
+    if not conversation:
+        return None
+    return _reactivate_conversation(conversation=conversation)
+
+
 @login_required
-def deployment_editor_new(request: HttpRequest) -> HttpResponse:
+def deployment_editor_new(request: HttpRequest, workspace_slug: str, repo_id) -> HttpResponse:
     """Entry point for deploying a new app from a repository."""
     if not request.htmx:
         context = base.get_app_shell_context(request=request, current_page="workspaces")
@@ -165,14 +155,6 @@ def deployment_editor_new(request: HttpRequest) -> HttpResponse:
         return render(request=request, template_name="devopshero_app/app_shell.html", context=context)
 
     organization = request.user.current_organization
-    workspace_slug = request.GET.get("workspace", "").strip()
-    repo_id = request.GET.get("repo", "").strip()
-
-    if not workspace_slug or not repo_id:
-        context = base.get_app_shell_context(request=request, current_page="workspaces")
-        context["error_message"] = "Missing workspace or repository. Navigate here from a workspace."
-        return render(request=request, template_name="devopshero_app/deploy/deployment_editor.html", context=context)
-
     workspace = get_object_or_404(models.Workspace, slug=workspace_slug, organization=organization)
 
     denied = abac_view_checks.check_abac(request, workspace, "workspace", "workspace:edit")
@@ -190,6 +172,8 @@ def deployment_editor_new(request: HttpRequest) -> HttpResponse:
             user=request.user,
             organization=organization,
             mode=models.Conversation.Mode.APP_DEPLOYMENT,
+            context_workspace=workspace,
+            context_repository=repository,
         )
     else:
         conversation = agent_service.create_conversation(
@@ -217,15 +201,13 @@ def deployment_editor_new(request: HttpRequest) -> HttpResponse:
 
     response = render(request=request, template_name="devopshero_app/deploy/deployment_editor.html", context=context)
     if created_new:
-        updated_params = request.GET.copy()
-        updated_params["conversation"] = str(conversation.id)
-        response["HX-Replace-Url"] = f"{request.path}?{updated_params.urlencode()}"
+        response["HX-Replace-Url"] = f"{request.path}?conversation={conversation.id}"
     return response
 
 
 @login_required
 def deployment_editor(request: HttpRequest, app_slug: str) -> HttpResponse:
-    """Backward-compatible existing-app deployment entrypoint."""
+    """Single entry point for the existing-app deployment editor."""
     if not request.htmx:
         context = base.get_app_shell_context(request=request, current_page="workspaces")
         context["content_url"] = request.get_full_path()
@@ -259,29 +241,37 @@ def deployment_editor(request: HttpRequest, app_slug: str) -> HttpResponse:
 
 
 @login_required
-def deployment_editor_app_new(request: HttpRequest, app_slug: str) -> HttpResponse:
-    """Start a fresh deployment conversation for an existing app."""
-    if not request.htmx:
-        context = base.get_app_shell_context(request=request, current_page="workspaces")
-        context["content_url"] = request.get_full_path()
-        return render(request=request, template_name="devopshero_app/app_shell.html", context=context)
-
+@require_POST
+def deployment_editor_reset(request: HttpRequest, app_slug: str) -> HttpResponse:
+    """Close current conversation, discard draft if present, and start fresh."""
     app = _get_existing_app(request=request, app_slug=app_slug)
     denied = abac_view_checks.check_abac(request, app.workspace, "workspace", "workspace:edit")
     if denied:
         return denied
 
-    open_blueprint = apps_views.get_open_blueprint(app=app)
-    if open_blueprint:
-        conversation = _get_resume_conversation(request=request, app=app, blueprint=open_blueprint)
-        response = _render_existing_app_editor(
-            request=request,
-            app=app,
-            blueprint=open_blueprint,
-            conversation=conversation,
+    blueprint = apps_views.get_open_blueprint(app=app)
+    if blueprint and blueprint.status in DISCARDABLE_BLUEPRINT_STATUSES:
+        blueprint.status = models.DeploymentBlueprint.Status.DISCARDED
+        blueprint.status_message = "Draft discarded"
+        blueprint.save(update_fields=["status", "status_message", "updated_at"])
+
+        models.Conversation.objects.filter(
+            context_deployment_blueprint=blueprint,
+            mode=models.Conversation.Mode.APP_DEPLOYMENT,
+        ).update(
+            status=models.Conversation.Status.ABANDONED,
+            updated_at=timezone.now(),
         )
-        response["HX-Push-Url"] = reverse("deployment_editor_resume", kwargs={"app_slug": app.slug})
-        return response
+
+    models.Conversation.objects.filter(
+        context_app=app,
+        context_deployment_blueprint__isnull=True,
+        mode=models.Conversation.Mode.APP_DEPLOYMENT,
+        status=models.Conversation.Status.ACTIVE,
+    ).update(
+        status=models.Conversation.Status.ABANDONED,
+        updated_at=timezone.now(),
+    )
 
     conversation = _create_app_scoped_conversation(request=request, app=app)
     response = _render_existing_app_editor(
@@ -292,42 +282,6 @@ def deployment_editor_app_new(request: HttpRequest, app_slug: str) -> HttpRespon
     )
     response["HX-Replace-Url"] = reverse("deployment_editor", kwargs={"app_slug": app.slug})
     return response
-
-
-@login_required
-def deployment_editor_resume(request: HttpRequest, app_slug: str) -> HttpResponse:
-    """Resume the current deployment task for an existing app."""
-    if not request.htmx:
-        context = base.get_app_shell_context(request=request, current_page="workspaces")
-        context["content_url"] = request.get_full_path()
-        return render(request=request, template_name="devopshero_app/app_shell.html", context=context)
-
-    app = _get_existing_app(request=request, app_slug=app_slug)
-    denied = abac_view_checks.check_abac(request, app.workspace, "workspace", "workspace:edit")
-    if denied:
-        return denied
-
-    open_blueprint = apps_views.get_open_blueprint(app=app)
-    if not open_blueprint:
-        conversation = _get_latest_app_conversation_without_blueprint(request=request, app=app)
-        if not conversation:
-            conversation = _create_app_scoped_conversation(request=request, app=app)
-        response = _render_existing_app_editor(
-            request=request,
-            app=app,
-            blueprint=None,
-            conversation=conversation,
-        )
-        response["HX-Push-Url"] = reverse("deployment_editor_app_new", kwargs={"app_slug": app.slug})
-        return response
-
-    conversation = _get_resume_conversation(request=request, app=app, blueprint=open_blueprint)
-    return _render_existing_app_editor(
-        request=request,
-        app=app,
-        blueprint=open_blueprint,
-        conversation=conversation,
-    )
 
 
 @login_required
@@ -369,77 +323,6 @@ def deployment_editor_blueprint_section(request: HttpRequest, app_slug: str) -> 
 
 @login_required
 @require_GET
-def deployment_editor_discard_draft_confirm(request: HttpRequest, app_slug: str) -> HttpResponse:
-    """Return the discard-draft confirmation modal HTML."""
-    app = _get_existing_app(request=request, app_slug=app_slug)
-    denied = abac_view_checks.check_abac(request, app.workspace, "workspace", "workspace:edit")
-    if denied:
-        return denied
-
-    blueprint = _get_discardable_blueprint(app=app)
-
-    if blueprint:
-        modal_message = (
-            f"Discard the current deployment draft for {blueprint.environment.name}? "
-            "This abandons the draft blueprint and its conversation."
-        )
-    else:
-        modal_message = "Abandon the current deployment session? You can start a new deployment later."
-
-    return render(
-        request=request,
-        template_name="devopshero_app/partials/_confirm_modal.html",
-        context={
-            "modal_title": "Discard Deployment Draft",
-            "modal_message": modal_message,
-            "confirm_url": reverse("deployment_editor_discard_draft", kwargs={"app_slug": app.slug}),
-            "confirm_label": "Discard Draft",
-        },
-    )
-
-
-@login_required
-@require_POST
-def deployment_editor_discard_draft(request: HttpRequest, app_slug: str) -> HttpResponse:
-    """Discard the app's open draft or failed blueprint and return to app detail."""
-    app = _get_existing_app(request=request, app_slug=app_slug)
-    denied = abac_view_checks.check_abac(request, app.workspace, "workspace", "workspace:edit")
-    if denied:
-        return denied
-
-    blueprint = _get_discardable_blueprint(app=app)
-
-    if blueprint:
-        blueprint.status = models.DeploymentBlueprint.Status.DISCARDED
-        blueprint.status_message = "Draft discarded"
-        blueprint.save(update_fields=["status", "status_message", "updated_at"])
-
-        models.Conversation.objects.filter(
-            context_deployment_blueprint=blueprint,
-            mode=models.Conversation.Mode.APP_DEPLOYMENT,
-        ).update(
-            status=models.Conversation.Status.ABANDONED,
-            updated_at=timezone.now(),
-        )
-    else:
-        models.Conversation.objects.filter(
-            context_app=app,
-            context_deployment_blueprint__isnull=True,
-            mode=models.Conversation.Mode.APP_DEPLOYMENT,
-            status=models.Conversation.Status.ACTIVE,
-        ).update(
-            status=models.Conversation.Status.ABANDONED,
-            updated_at=timezone.now(),
-        )
-
-    context = apps_views.build_app_detail_context(request=request, app=app)
-    response = render(request=request, template_name="devopshero_app/apps/app_detail.html", context=context)
-    response["HX-Push-Url"] = reverse("app_detail", kwargs={"app_slug": app.slug})
-    return response
-
-
-@login_required
-@require_GET
 def deployment_editor_fork(request: HttpRequest, conversation_id) -> HttpResponse:
     """Fork a deployment conversation and redirect back into the deployment editor."""
     source = get_object_or_404(
@@ -467,15 +350,10 @@ def deployment_editor_fork(request: HttpRequest, conversation_id) -> HttpRespons
     )
 
     if source.context_app:
-        app = source.context_app
-        if source.context_deployment_blueprint:
-            return redirect("deployment_editor_resume", app_slug=app.slug)
-        return redirect("deployment_editor", app_slug=app.slug)
+        return redirect("deployment_editor", app_slug=source.context_app.slug)
 
-    params = {}
-    if source.context_workspace:
-        params["workspace"] = source.context_workspace.slug
-    if source.context_repository:
-        params["repo"] = str(source.context_repository_id)
-    params["conversation"] = str(forked.id)
-    return redirect(f"{reverse('deployment_editor_new')}?{urlencode(params)}")
+    url = reverse("deployment_editor_new", kwargs={
+        "workspace_slug": source.context_workspace.slug,
+        "repo_id": source.context_repository_id,
+    })
+    return redirect(f"{url}?conversation={forked.id}")

@@ -5,7 +5,6 @@ from django.shortcuts import render
 
 from ..models import App, Datastore, Deployment, Workspace
 from ..services import abac
-from . import apps as apps_views
 from . import base
 
 
@@ -39,17 +38,11 @@ def dashboard(request: HttpRequest) -> HttpResponse:
         .annotate(
             last_deployed_at=Max("deployments__created_at"),
             latest_status=Subquery(latest_deployment_status),
-            open_blueprint_status=Subquery(apps_views.get_open_blueprint_status_subquery()),
             deployed_service_url=Subquery(latest_deployed_service_url),
         )
         .order_by("-created_at")
     )
     apps = list(apps)
-    for app in apps:
-        apps_views.populate_deployment_entrypoint(
-            app=app,
-            open_blueprint_status=app.open_blueprint_status or "",
-        )
     datastores = Datastore.objects.filter(workspace__in=visible_workspaces).select_related("workspace").order_by("-created_at")
 
     context = base.get_app_shell_context(request=request, current_page="dashboard")

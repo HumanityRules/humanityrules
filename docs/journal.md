@@ -1,5 +1,29 @@
 # DevOpsHero Development Journal
 
+## 2026-03-12 21:20 - [Deployment] Simplify deployment editor entry points
+
+**Conversation:** [2026-03-12-2121-37bed511.md](conversations/2026-03-12-2121-37bed511.md)
+
+The deployment editor had accumulated four entry points (`/deploy/new/`, `/deploy/<slug>/`, `/deploy/<slug>/new/`, `/deploy/<slug>/resume/`) that all converged to the same conversation lookup strategy (find blueprint conversation → find pre-blueprint conversation → create new). The app detail and app card had conditional "New Deployment" / "Resume Deployment" buttons backed by `populate_deployment_entrypoint()` which annotated every app in list queries with `open_blueprint_status`. The "Discard Draft" flow used a separate confirm modal endpoint plus a POST endpoint.
+
+**Simplification decisions:**
+
+- **Collapsed to two entry points:** `/deploy/new/<workspace_slug>/<repo_id>/` (pre-app) and `/deploy/<slug>/` (existing app). The existing-app endpoint is the single smart entry point that resumes or creates as needed. Removed `/deploy/<slug>/new/` and `/deploy/<slug>/resume/`.
+
+- **Moved workspace/repo from query params to path:** The pre-app URL changed from `?workspace=X&repo=Y` to path parameters. These are resource identifiers, not optional filters. The `conversation` param stays as query string since it's optional session state appended after creation. Added validation that the conversation's `context_workspace` and `context_repository` match the URL path params to prevent inconsistent state.
+
+- **Single "Deployment" button on app detail:** Replaced the conditional "New Deployment" / "Resume Deployment" button with a static "Deployment" link to `/deploy/<slug>/`. Removed `populate_deployment_entrypoint()` and `get_open_blueprint_status_subquery()` — these ran on every app list query (dashboard, workspaces) just to compute button labels.
+
+- **Removed "Resume Deployment" from app cards:** The card already shows deployment status via the status pill. One extra click (card → detail → Deployment) is negligible friction.
+
+- **"Reset Conversation" replaces "Discard Draft":** A single POST endpoint (`/deploy/<slug>/reset/`) closes the current conversation, discards any DRAFT/FAILED blueprint, and creates a fresh conversation. The confirmation modal reuses the existing `_confirm_modal.html` partial via a `<template>` tag — no server round-trip needed since all content is static. The `<template>` content is copied into `#modal-container` with `htmx.process()` on click.
+
+**Key points:**
+- Net removal of ~220 lines across views, templates, and tests
+- Removed 5 URL endpoints, added 1 (`reset`)
+- The `DEPLOYING` blueprint status is intentionally NOT discardable by reset — only DRAFT and FAILED
+- The `<template>` + `htmx.process()` pattern for client-side modal rendering avoids a dedicated confirm endpoint while reusing the standard modal partial
+
 ## 2026-03-12 19:54 - [AgentChat] Fork conversation for the deployment editor
 
 **Conversation:** [2026-03-12-1954-c668fa4d.md](conversations/2026-03-12-1954-c668fa4d.md)

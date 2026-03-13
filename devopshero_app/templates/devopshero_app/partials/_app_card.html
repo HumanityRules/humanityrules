@@ -11,14 +11,6 @@
         <span class="min-w-0 font-medium text-gray-900 dark:text-white peer-hover:text-indigo-600 dark:peer-hover:text-indigo-400 truncate">
             {{ app.name }}
         </span>
-        {% if can_edit and app.has_open_deployment_task %}
-        <a href="{{ app.deployment_primary_action_url }}"
-           hx-get="{{ app.deployment_primary_action_url }}"
-           hx-target="#main-content"
-           hx-swap="innerHTML"
-           hx-push-url="true"
-           class="relative z-10 shrink-0 inline-flex items-center rounded-md border border-indigo-400/50 bg-transparent px-2.5 py-1 text-xs font-semibold text-indigo-400 hover:bg-indigo-500/10 hover:border-indigo-300 hover:text-indigo-300">Resume Deployment</a>
-        {% endif %}
     </div>
     <div class="space-y-2 text-sm">
         <div class="flex items-center justify-between">
@@ -60,9 +52,7 @@
         </div>
         <div class="flex items-center justify-between">
             <span class="text-gray-500 dark:text-gray-400">Status</span>
-            {% if app.open_blueprint_status %}
-            {% include "devopshero_app/partials/_status_pill.html" with status=app.open_blueprint_status label=app.open_blueprint_status|title only %}
-            {% elif app.latest_status %}
+            {% if app.latest_status %}
             {% include "devopshero_app/partials/_status_pill.html" with status=app.latest_status label=app.latest_status|title only %}
             {% else %}
             <span class="text-gray-500 dark:text-gray-400">—</span>

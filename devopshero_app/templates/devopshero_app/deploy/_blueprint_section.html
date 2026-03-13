@@ -4,28 +4,10 @@
         <div class="flex items-baseline gap-3">
             {% if blueprint %}
             {% include "devopshero_app/partials/_status_pill.html" with status=blueprint.status label=blueprint.get_status_display only %}
-            {% if blueprint.status == 'draft' or blueprint.status == 'failed' %}
-            <button type="button"
-                    hx-get="{% url 'deployment_editor_discard_draft_confirm' app_slug=app.slug %}"
-                    hx-target="#modal-container"
-                    hx-swap="innerHTML"
-                    class="text-xs font-medium text-red-600 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300 cursor-pointer">
-                Discard Draft
-            </button>
-            {% endif %}
             {% else %}
             <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-500 dark:bg-gray-700 dark:text-gray-400">
                 Pending
             </span>
-            {% if app %}
-            <button type="button"
-                    hx-get="{% url 'deployment_editor_discard_draft_confirm' app_slug=app.slug %}"
-                    hx-target="#modal-container"
-                    hx-swap="innerHTML"
-                    class="text-xs font-medium text-red-600 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300 cursor-pointer">
-                Discard Draft
-            </button>
-            {% endif %}
             {% endif %}
         </div>
     </div>
