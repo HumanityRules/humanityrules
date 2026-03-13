@@ -18,11 +18,13 @@
                 Define the environment draft, review it with the agent, and provision it when you're ready.
             </p>
         </div>
+        {% if environment %}
         <button type="button"
                 onclick="var mc = document.getElementById('modal-container'); mc.innerHTML = document.getElementById('reset-confirm-tpl').innerHTML; htmx.process(mc);"
-                class="shrink-0 rounded-lg bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-700">
+                class="shrink-0 self-center rounded-lg bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-700">
             Reset Conversation
         </button>
+        {% endif %}
     </div>
 
     <div class="flex flex-1 overflow-hidden">
@@ -51,12 +53,10 @@
 
 {% if environment %}
 {% url 'environment_editor_reset' environment_id=environment.id as reset_url %}
-{% else %}
-{% url 'environment_editor_reset_new' conversation_id=conversation.id as reset_url %}
-{% endif %}
 <template id="reset-confirm-tpl">
     {% include "devopshero_app/partials/_confirm_modal.html" with modal_title="Reset Conversation" modal_message="Start a new conversation? This will close the current conversation and discard any environment draft." confirm_url=reset_url confirm_label="Reset Conversation" %}
 </template>
+{% endif %}
 
 <script type="module">
 function reloadEditor(url) {

@@ -1,5 +1,32 @@
 # DevOpsHero Development Journal
 
+## 2026-03-12 22:47 - [Bugfix] Remove pre-environment reset flow and center reset actions
+
+**Conversation:** [2026-03-12-2246-26813cdf.md](conversations/2026-03-12-2246-26813cdf.md)
+
+The environment setup editor previously exposed `Reset Conversation` even before an environment draft had been saved. That created an awkward special-case endpoint, `environment_editor_reset_new`, whose only responsibility was to abandon an account-scoped conversation with no persisted environment attached. This session aligned the environment editor with the app deployment editor: reset is now a capability of an existing saved draft, not of the initial unsaved chat. Hiding the control until `environment` exists let us delete the pre-environment reset route/view entirely and keep the lifecycle simpler.
+
+After the behavior change, the reset button still looked visually too high in the header. The cause was not an incorrect container; both editors already place the button inside the same header flex row as the breadcrumb/description block, and that row intentionally uses `items-start`. The fix was to keep the structure intact and adjust the button's own self-alignment. The final choice was `self-center` in both the environment and deployment editors so the CTA stays vertically centered relative to the header content without changing the layout contract of the rest of the editor chrome.
+
+**Key points:**
+- The environment editor now follows the same saved-only reset model as the deployment editor, which avoids exposing a reset control before there is any persisted environment draft to discard.
+- Removing `environment_editor_reset_new` from the view, URLconf, and exports eliminates a dead lifecycle branch and keeps reset semantics tied to a real `Environment`.
+- Tests now assert the UI contract directly: the unsaved environment editor does not render reset controls, while the saved environment editor does.
+- The visual alignment issue came from `items-start` on the shared header row, not from the button being outside the proper container; `self-center` on the button solved it with the smallest possible template change in both editors.
+
+## 2026-03-12 22:46 - [Deployment] Save environment drafts before asking for approval
+
+**Conversation:** [2026-03-12-2247-903833ec.md](conversations/2026-03-12-2247-903833ec.md)
+
+Adjusted the environment setup flow so draft persistence happens as soon as the agent has enough information, and only after that does it ask the user whether the saved draft looks right or needs edits. The important discovery was that the underlying implementation was already mostly draft-first: `save_environment` already creates or updates the environment immediately and the chat SSE layer already refreshes the editor when that tool runs. The confusing behavior came from the environment agent prompt and the empty-state editor copy, which still told the agent to present a "would save" preview and ask for confirmation before persisting anything.
+
+This was corrected at the instruction layer instead of the model/tool layer. The environment prompt now tells the agent to resolve the initial values, call `save_environment` without a pre-save confirmation turn, then summarize the saved draft and ask whether to `Provision now` or `Keep editing`. The empty-state setup card was updated to match this language so the UI no longer teaches the old behavior. Tests were tightened to assert both sides of the contract: the prompt must explicitly forbid pre-save confirmation, and the editor must tell the user the draft is saved as soon as name, region, and domain are known.
+
+**Key points:**
+- The bug was in workflow guidance, not persistence code: the `save_environment` tool and `environment-created` / `environment-changed-*` refresh events already supported a draft-first flow
+- The fix keeps provisioning approval separate from draft persistence, which is the safer product shape: users see a real saved environment record first, then decide whether to keep editing or proceed
+- Prompt text and UI text need to agree for agent-driven flows; if either one teaches the old sequence, users experience the product as inconsistent even when the backend behavior is correct
+
 ## 2026-03-13 01:05 - [Bugfix] Clear app URL on teardown so UI no longer shows dead links
 
 **Conversation:**
