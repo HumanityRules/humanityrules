@@ -1,5 +1,21 @@
 # DevOpsHero Development Journal
 
+## 2026-03-12 23:45 - [UI] App card status pill polling on workspace detail and status-pill audit
+
+**Conversation:** [2026-03-12-2319-7db10a42.md](conversations/2026-03-12-2319-7db10a42.md)
+
+The status pill in the App card on the workspace detail view was static; when a deployment was in progress (building, pushing, deploying, etc.) the pill did not refresh until the user navigated away and back. We added server-driven refresh every 10 seconds when the app's latest deployment status is in an in-progress state.
+
+**Implementation:** A new partial `_app_card_status.html` wraps the status row (label + pill). When `app.latest_status` is one of `pending`, `building`, `pushing`, `deploying`, `starting`, `teardown_pending`, or `tearing_down`, the wrapper div gets `hx-get="{% url 'app_card_status' app_slug=app.slug %}"`, `hx-trigger="load delay:10s"`, and `hx-swap="outerHTML"`. The response is the same partial; if the status has transitioned to a terminal state, the re-rendered HTML omits the polling attributes so HTMX stops. A lightweight view `app_card_status` in `apps.py` loads the app with a subquery for latest deployment status and renders only this partial. The app card template now includes this partial instead of inlining the status row. Dashboard also uses `_app_card.html`, so dashboard app cards get the same polling behavior without further change.
+
+**Audit of all status pill usages:** We then audited every place that includes `_status_pill.html` (10 usages across 5 entity types). App cards (workspace detail + dashboard) now use the new endpoint. App detail page already refreshes the whole `#main-content` every 10s when any deployment is in progress (`should_auto_refresh`), so deployment rows and blueprint rows there stay fresh. Deployment rows poll themselves every 3s only during teardown; build/deploy states on app detail are covered by the page-level refresh. Blueprint section (deployment editor) and environment setup section (environment editor) already poll their own section endpoints every 5s when in a transient state. Workspaces list (inline app status inside workspace cards), environment detail (environment status and deployment rows), and environments list have no polling; these are summary/navigation views where full-page or section-level refresh was deemed unnecessary for now. The new `app_card_status` endpoint is intentionally only for the app-card context (single app's latest deployment status); other contexts (specific deployment row, blueprint, environment, etc.) use or would use their own endpoints.
+
+**Key points:**
+- Polling is conditional on in-progress status and self-terminates when the server returns the partial without `hx-trigger`, matching the pattern used in `_app_deployment_row.html` and `_blueprint_section.html`.
+- The same partial is used for both initial render (from workspace detail or dashboard) and for the polling response, so one template and one view serve both.
+- Dashboard app cards inherit the behavior because they use `_app_card.html`, which includes `_app_card_status.html`; no dashboard-specific logic was added.
+- The audit confirmed no other status-pill location should use `app_card_status`; each entity type (deployment, blueprint, environment, etc.) has or would have its own refresh strategy.
+
 ## 2026-03-12 23:15 - [Bugfix] Fix squashed left column in Deployed to Environments and Recent Deployments tables
 
 **Conversation:** [2026-03-12-2304-6a251b9a.md](conversations/2026-03-12-2304-6a251b9a.md)

@@ -50,13 +50,6 @@
             <span class="text-gray-500 dark:text-gray-400">—</span>
             {% endif %}
         </div>
-        <div class="flex items-center justify-between">
-            <span class="text-gray-500 dark:text-gray-400">Status</span>
-            {% if app.latest_status %}
-            {% include "devopshero_app/partials/_status_pill.html" with status=app.latest_status label=app.latest_status|title only %}
-            {% else %}
-            <span class="text-gray-500 dark:text-gray-400">—</span>
-            {% endif %}
-        </div>
+        {% include "devopshero_app/partials/_app_card_status.html" %}
     </div>
 </div>

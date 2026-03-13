@@ -273,6 +273,23 @@ def app_deployment_status(request: HttpRequest, app_slug: str, deployment_id: UU
 
 @login_required
 @require_GET
+def app_card_status(request: HttpRequest, app_slug: str) -> HttpResponse:
+    """Return updated app card status pill for polling."""
+    latest_deployment_status = (
+        Deployment.objects.filter(app=OuterRef("pk"))
+        .order_by("-created_at")
+        .values("status")[:1]
+    )
+    app = get_object_or_404(
+        App.objects.annotate(latest_status=Subquery(latest_deployment_status)),
+        slug=app_slug,
+        organization=request.user.current_organization,
+    )
+    return render(request, "devopshero_app/partials/_app_card_status.html", {"app": app})
+
+
+@login_required
+@require_GET
 def app_teardown_confirm(request: HttpRequest, app_slug: str, deployment_id: UUID) -> HttpResponse:
     """Return the teardown confirmation modal HTML."""
     app = _get_app_for_user(request, app_slug)
