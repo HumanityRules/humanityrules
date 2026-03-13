@@ -873,6 +873,12 @@
   .max-w-\[80\%\] {
     max-width: 80%;
   }
+  .max-w-\[90\%\] {
+    max-width: 90%;
+  }
+  .max-w-\[100\%\] {
+    max-width: 100%;
+  }
   .max-w-lg {
     max-width: var(--container-lg);
   }

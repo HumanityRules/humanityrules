@@ -56,20 +56,15 @@
 
         {# RIGHT PANEL: Agent Chat #}
         <div class="flex w-1/2 flex-col">
-            {% if conversation %}
             {% include "devopshero_app/chat/_chat_panel.html" %}
-            {% else %}
-            <div class="flex flex-1 items-center justify-center text-gray-500 dark:text-gray-400">
-                <p class="text-sm">No conversation linked to this session.</p>
-            </div>
-            {% endif %}
         </div>
     </div>
 </div>
 
 {% if app %}
+{% url 'deployment_editor_reset' app_slug=app.slug as deployment_editor_reset_url %}
 <template id="reset-confirm-tpl">
-    {% include "devopshero_app/partials/_confirm_modal.html" with modal_title="Reset Conversation" modal_message="Start a new conversation? This will close the current conversation and discard any draft blueprint." confirm_url=reset_url confirm_label="Reset Conversation" %}
+    {% include "devopshero_app/partials/_confirm_modal.html" with modal_title="Reset Conversation" modal_message="Start a new conversation? This will close the current conversation and discard any draft blueprint." confirm_url=deployment_editor_reset_url confirm_label="Reset Conversation" %}
 </template>
 {% endif %}
 

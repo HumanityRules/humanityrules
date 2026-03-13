@@ -8,6 +8,7 @@ Entry points:
 """
 
 from typing import Any
+from uuid import UUID
 
 from django.contrib.auth.decorators import login_required
 from django.http import HttpRequest, HttpResponse
@@ -39,13 +40,6 @@ def _get_existing_app(request: HttpRequest, app_slug: str) -> models.App:
     )
 
 
-def _get_editor_messages(conversation: models.Conversation):
-    """Return visible messages for the deployment editor chat panel."""
-    return conversation.messages.exclude(
-        content_type=models.Message.ContentType.SYSTEM_TRIGGER,
-    ).order_by("created_at")
-
-
 def _build_blueprint_section_context(
     app: models.App | None,
     blueprint: models.DeploymentBlueprint | None,
@@ -64,20 +58,23 @@ def _build_blueprint_section_context(
     return context
 
 
-def _render_existing_app_editor(
+def _render_deployment_editor(
     request: HttpRequest,
-    app: models.App,
-    blueprint: models.DeploymentBlueprint | None,
+    workspace: models.Workspace,
+    repository: models.Repository,
     conversation: models.Conversation,
+    app: models.App | None,
+    blueprint: models.DeploymentBlueprint | None,
 ) -> HttpResponse:
-    """Render the deployment editor for an existing app."""
+    """Render the deployment editor with the current app, blueprint, and chat state."""
     context = base.get_app_shell_context(request=request, current_page="workspaces")
     context.update({
-        "workspace": app.workspace,
-        "repository": app.repository,
+        "workspace": workspace,
+        "repository": repository,
         "conversation": conversation,
-        "messages": _get_editor_messages(conversation=conversation),
-        "reset_url": reverse("deployment_editor_reset", kwargs={"app_slug": app.slug}),
+        "messages": conversation.messages.exclude(
+            content_type=models.Message.ContentType.SYSTEM_TRIGGER,
+        ).order_by("created_at"),
     })
     context.update(_build_blueprint_section_context(app=app, blueprint=blueprint))
     return render(request=request, template_name="devopshero_app/deploy/deployment_editor.html", context=context)
@@ -95,46 +92,62 @@ def _reactivate_conversation(conversation: models.Conversation) -> models.Conver
     return conversation
 
 
-def _create_app_scoped_conversation(request: HttpRequest, app: models.App) -> models.Conversation:
-    """Create a fresh app-scoped deployment conversation with no blueprint yet."""
+def _create_deployment_editor_conversation(
+    request: HttpRequest,
+    workspace: models.Workspace,
+    repository: models.Repository,
+    app: models.App | None,
+) -> models.Conversation:
+    """Create a fresh deployment-editor conversation for a repo and optional app."""
     conversation = agent_service.create_conversation(
         user=request.user,
-        workspace_id=str(app.workspace_id),
-        repo_id=str(app.repository_id),
+        workspace_id=str(workspace.id),
+        repo_id=str(repository.id),
         aws_account_id=None,
         mode=models.Conversation.Mode.APP_DEPLOYMENT,
         app_permission_request_id=None,
     )
-    conversation.context_app = app
-    conversation.save(update_fields=["context_app", "updated_at"])
+    if app:
+        conversation.context_app = app
+        conversation.save(update_fields=["context_app", "updated_at"])
     return conversation
 
 
-def _get_resume_conversation(
+def _get_or_create_existing_app_editor_conversation(
     request: HttpRequest,
     app: models.App,
-    blueprint: models.DeploymentBlueprint,
+    blueprint: models.DeploymentBlueprint | None,
 ) -> models.Conversation:
-    """Return the user's latest conversation for the open blueprint, creating one if needed."""
-    conversation = models.Conversation.objects.filter(
-        context_deployment_blueprint=blueprint,
-        user=request.user,
-        mode=models.Conversation.Mode.APP_DEPLOYMENT,
-    ).order_by("-updated_at").first()
-    if conversation:
-        if conversation.context_app_id != app.id:
-            conversation.context_app = app
-            conversation.save(update_fields=["context_app", "updated_at"])
-        return _reactivate_conversation(conversation=conversation)
+    """Return the active deployment-editor conversation for an app and optional open blueprint."""
+    if blueprint:
+        conversation = models.Conversation.objects.filter(
+            context_deployment_blueprint=blueprint,
+            user=request.user,
+            mode=models.Conversation.Mode.APP_DEPLOYMENT,
+        ).order_by("-updated_at").first()
+        if conversation:
+            update_fields: list[str] = []
+            if conversation.context_app_id != app.id:
+                conversation.context_app = app
+                update_fields.append("context_app")
+            if conversation.status != models.Conversation.Status.ACTIVE:
+                conversation.status = models.Conversation.Status.ACTIVE
+                update_fields.append("status")
+            if update_fields:
+                update_fields.append("updated_at")
+                conversation.save(update_fields=update_fields)
+            return conversation
 
-    conversation = _create_app_scoped_conversation(request=request, app=app)
-    conversation.context_deployment_blueprint = blueprint
-    conversation.save(update_fields=["context_deployment_blueprint", "updated_at"])
-    return conversation
+        conversation = _create_deployment_editor_conversation(
+            request=request,
+            workspace=app.workspace,
+            repository=app.repository,
+            app=app,
+        )
+        conversation.context_deployment_blueprint = blueprint
+        conversation.save(update_fields=["context_deployment_blueprint", "updated_at"])
+        return conversation
 
-
-def _get_latest_app_conversation_without_blueprint(request: HttpRequest, app: models.App) -> models.Conversation | None:
-    """Return the latest app-scoped deployment conversation that has no blueprint yet."""
     conversation = models.Conversation.objects.filter(
         context_app=app,
         context_deployment_blueprint__isnull=True,
@@ -142,12 +155,17 @@ def _get_latest_app_conversation_without_blueprint(request: HttpRequest, app: mo
         mode=models.Conversation.Mode.APP_DEPLOYMENT,
     ).order_by("-updated_at").first()
     if not conversation:
-        return None
+        return _create_deployment_editor_conversation(
+            request=request,
+            workspace=app.workspace,
+            repository=app.repository,
+            app=app,
+        )
     return _reactivate_conversation(conversation=conversation)
 
 
 @login_required
-def deployment_editor_new(request: HttpRequest, workspace_slug: str, repo_id) -> HttpResponse:
+def deployment_editor_new(request: HttpRequest, workspace_slug: str, repo_id: UUID) -> HttpResponse:
     """Entry point for deploying a new app from a repository."""
     if not request.htmx:
         context = base.get_app_shell_context(request=request, current_page="workspaces")
@@ -176,30 +194,22 @@ def deployment_editor_new(request: HttpRequest, workspace_slug: str, repo_id) ->
             context_repository=repository,
         )
     else:
-        conversation = agent_service.create_conversation(
-            user=request.user,
-            workspace_id=str(workspace.id),
-            repo_id=str(repository.id),
-            aws_account_id=None,
-            mode=models.Conversation.Mode.APP_DEPLOYMENT,
-            app_permission_request_id=None,
+        conversation = _create_deployment_editor_conversation(
+            request=request,
+            workspace=workspace,
+            repository=repository,
+            app=None,
         )
         created_new = True
 
-    messages = conversation.messages.exclude(
-        content_type=models.Message.ContentType.SYSTEM_TRIGGER,
-    ).order_by("created_at")
-
-    context = base.get_app_shell_context(request=request, current_page="workspaces")
-    context.update({
-        "workspace": workspace,
-        "repository": repository,
-        "conversation": conversation,
-        "messages": messages,
-    })
-    context.update(_build_blueprint_section_context(app=None, blueprint=None))
-
-    response = render(request=request, template_name="devopshero_app/deploy/deployment_editor.html", context=context)
+    response = _render_deployment_editor(
+        request=request,
+        workspace=workspace,
+        repository=repository,
+        conversation=conversation,
+        app=None,
+        blueprint=None,
+    )
     if created_new:
         response["HX-Replace-Url"] = f"{request.path}?conversation={conversation.id}"
     return response
@@ -219,24 +229,18 @@ def deployment_editor(request: HttpRequest, app_slug: str) -> HttpResponse:
         return denied
 
     open_blueprint = apps_views.get_open_blueprint(app=app)
-    if open_blueprint:
-        conversation = _get_resume_conversation(request=request, app=app, blueprint=open_blueprint)
-        return _render_existing_app_editor(
-            request=request,
-            app=app,
-            blueprint=open_blueprint,
-            conversation=conversation,
-        )
-
-    conversation = _get_latest_app_conversation_without_blueprint(request=request, app=app)
-    if not conversation:
-        conversation = _create_app_scoped_conversation(request=request, app=app)
-
-    return _render_existing_app_editor(
+    conversation = _get_or_create_existing_app_editor_conversation(
         request=request,
         app=app,
-        blueprint=None,
+        blueprint=open_blueprint,
+    )
+    return _render_deployment_editor(
+        request=request,
+        workspace=app.workspace,
+        repository=app.repository,
         conversation=conversation,
+        app=app,
+        blueprint=open_blueprint,
     )
 
 
@@ -273,12 +277,19 @@ def deployment_editor_reset(request: HttpRequest, app_slug: str) -> HttpResponse
         updated_at=timezone.now(),
     )
 
-    conversation = _create_app_scoped_conversation(request=request, app=app)
-    response = _render_existing_app_editor(
+    conversation = _create_deployment_editor_conversation(
         request=request,
+        workspace=app.workspace,
+        repository=app.repository,
+        app=app,
+    )
+    response = _render_deployment_editor(
+        request=request,
+        workspace=app.workspace,
+        repository=app.repository,
+        conversation=conversation,
         app=app,
         blueprint=None,
-        conversation=conversation,
     )
     response["HX-Replace-Url"] = reverse("deployment_editor", kwargs={"app_slug": app.slug})
     return response
@@ -287,12 +298,7 @@ def deployment_editor_reset(request: HttpRequest, app_slug: str) -> HttpResponse
 @login_required
 def deployment_editor_app_section(request: HttpRequest, app_slug: str) -> HttpResponse:
     """Return the app section partial for HTMX refresh in the editor."""
-    organization = request.user.current_organization
-    app = get_object_or_404(
-        models.App.objects.select_related("repository", "workspace"),
-        organization=organization,
-        slug=app_slug,
-    )
+    app = _get_existing_app(request=request, app_slug=app_slug)
     denied = abac_view_checks.check_abac(request, app.workspace, "workspace", "workspace:edit")
     if denied:
         return denied
