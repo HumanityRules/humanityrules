@@ -1,5 +1,20 @@
 # DevOpsHero Development Journal
 
+## 2026-03-12 23:15 - [Bugfix] Fix squashed left column in Deployed to Environments and Recent Deployments tables
+
+**Conversation:** [2026-03-12-2304-6a251b9a.md](conversations/2026-03-12-2304-6a251b9a.md)
+
+The deployment tables on the app detail page (both "Deployed to Environments" and "Recent Deployments") and the Recent Deployments table on the environment detail page had their left (environment/details) column squashed, causing text like "Region: us-east-1" to wrap mid-word. The cause was a shared layout pattern: each table used a dedicated spacer column (`<col class="w-full">` and an empty `<td class="w-full" aria-hidden="true">`) intended to push status/actions to the right. That spacer took all flexible width, so the first column was given only its minimum content width and wrapped aggressively.
+
+The fix was to remove the spacer column entirely and give the actual content cell the flexible width instead. For **Recent Deployments** (history-only, no actions): the row partial `_app_deployment_row.html` no longer renders the spacer `<td>`, and the first `<td>` got `w-full` so the environment/details content expands. The table in `app_detail.html` and `environment_detail.html` now has three columns (content, status, updated) with `<col class="w-full">` on the first; the unused "Actions" header and fifth column were removed. For **Deployed to Environments**, the same change was applied in `_app_blueprint_row.html` (remove spacer `<td>`, add `w-full` to the first `<td>`) and in `app_detail.html` (remove the spacer from the colgroup/thead but keep the real Actions column). The content column now grows to use available space, so region and ref lines no longer wrap unnecessarily.
+
+The issue was more noticeable during the "Deploying" state because when the deployment is in progress, the Actions cell is empty (or shows a placeholder dash). With the spacer still present, both the spacer and the empty actions cell consumed space while the content column stayed narrow. Once the deployment succeeds, the Actions column contains links (Redeploy, Permissions, Tear Down), so the layout looked less broken even though the spacer was still wrong. Removing the spacer fixes the layout in all states.
+
+**Key points:**
+- Both "Deployed to Environments" and "Recent Deployments" tables used a spacer column that grabbed flexible width; the real content cell needed `w-full` and the spacer `<td>`/`<col>` removed.
+- Recent Deployments has no actions, so the table was reduced to three columns (content, status, updated); Deployed to Environments keeps four columns (content, status, updated, actions).
+- The squashing was always present but more visible during Deploying because the actions column is empty then; after success, the filled actions column made the bug less obvious.
+
 ## 2026-03-12 22:47 - [Bugfix] Remove pre-environment reset flow and center reset actions
 
 **Conversation:** [2026-03-12-2246-26813cdf.md](conversations/2026-03-12-2246-26813cdf.md)
