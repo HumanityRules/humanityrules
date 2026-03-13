@@ -44,8 +44,8 @@
                 {% if repositories %}
                 <div id="repo-list" class="space-y-1">
                     {% for repo in repositories %}
-                    <a href="{% url 'deployment_editor_new' %}?workspace={{ workspace.slug }}&repo={{ repo.id }}"
-                       hx-get="{% url 'deployment_editor_new' %}?workspace={{ workspace.slug }}&repo={{ repo.id }}"
+                    <a href="{% url 'deployment_editor_new' workspace_slug=workspace.slug repo_id=repo.id %}"
+                       hx-get="{% url 'deployment_editor_new' workspace_slug=workspace.slug repo_id=repo.id %}"
                        hx-target="#main-content"
                        hx-swap="innerHTML"
                        hx-push-url="true"

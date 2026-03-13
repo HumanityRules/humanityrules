@@ -83,28 +83,6 @@ def get_open_blueprint(app: App) -> DeploymentBlueprint | None:
     )
 
 
-def get_open_blueprint_status_subquery():
-    """Return a subquery for the latest in-progress blueprint status per app."""
-    return (
-        DeploymentBlueprint.objects.filter(app=OuterRef("pk"), status__in=OPEN_BLUEPRINT_STATUSES)
-        .order_by("-created_at")
-        .values("status")[:1]
-    )
-
-
-def populate_deployment_entrypoint(app: App, open_blueprint_status: str) -> App:
-    """Attach shared deployment action fields used by app summary templates."""
-    has_open_deployment_task = bool(open_blueprint_status)
-    app.has_open_deployment_task = has_open_deployment_task
-    app.open_blueprint_status = open_blueprint_status
-    if has_open_deployment_task:
-        app.deployment_primary_action_label = "Resume Deployment"
-        app.deployment_primary_action_url = reverse("deployment_editor_resume", kwargs={"app_slug": app.slug})
-    else:
-        app.deployment_primary_action_label = "New Deployment"
-        app.deployment_primary_action_url = reverse("deployment_editor_app_new", kwargs={"app_slug": app.slug})
-    return app
-
 
 def _get_current_launched_blueprint(blueprints: list[DeploymentBlueprint]) -> DeploymentBlueprint | None:
     """Return the current launched blueprint for one environment."""
@@ -208,11 +186,6 @@ def build_app_detail_context(request: HttpRequest, app: App) -> dict[str, Any]:
     inherited_tags = ResourceTag.objects.filter(workspace=app.workspace).order_by("key", "value")
     can_edit = abac.check_action(request.user.current_organization, request.user, app.workspace, "workspace", "workspace:edit")
     can_admin = abac.check_action(request.user.current_organization, request.user, app.workspace, "workspace", "workspace:admin")
-
-    populate_deployment_entrypoint(
-        app=app,
-        open_blueprint_status=open_blueprint.status if open_blueprint else "",
-    )
 
     context["app"] = app
     context["deployments"] = deployments

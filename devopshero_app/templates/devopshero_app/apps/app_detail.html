@@ -29,12 +29,12 @@
             </dl>
             {% if can_edit %}
             <div class="flex justify-end sm:col-span-2 lg:col-span-1 lg:col-start-5 lg:self-center">
-                <a href="{{ app.deployment_primary_action_url }}"
-                   hx-get="{{ app.deployment_primary_action_url }}"
+                <a href="{% url 'deployment_editor' app_slug=app.slug %}"
+                   hx-get="{% url 'deployment_editor' app_slug=app.slug %}"
                    hx-target="#main-content"
                    hx-swap="innerHTML"
                    hx-push-url="true"
-                   class="shrink-0 rounded-lg bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-700">{{ app.deployment_primary_action_label }}</a>
+                   class="shrink-0 rounded-lg bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-700">Deployment</a>
             </div>
             {% endif %}
         </div>

@@ -35,7 +35,7 @@ http://127.0.0.1:8000/auth/dev-login/
 This auto-logs in as the first superuser and redirects to `/dashboard/`. Use the `next` query param to land on a specific page:
 
 ```
-http://127.0.0.1:8000/auth/dev-login/?next=/deploy/new/?workspace=default%26repo=<repo-id>
+http://127.0.0.1:8000/auth/dev-login/?next=/deploy/new/default/<repo-id>/
 ```
 
 For `curl` testing, create a session directly and use it as a cookie:

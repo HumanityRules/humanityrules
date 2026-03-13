@@ -6,17 +6,26 @@
 </div>
 {% else %}
 <div class="flex h-full flex-col" style="height: calc(100vh - 8rem);">
-    <div class="border-b border-gray-200 px-6 py-3 dark:border-gray-700">
-        {% url 'workspaces' as workspaces_url %}
-        {% url 'workspace_detail' workspace_slug=workspace.slug as workspace_url %}
+    <div class="flex items-start justify-between border-b border-gray-200 px-6 py-3 dark:border-gray-700">
+        <div>
+            {% url 'workspaces' as workspaces_url %}
+            {% url 'workspace_detail' workspace_slug=workspace.slug as workspace_url %}
+            {% if app %}
+            {% include "devopshero_app/partials/_breadcrumb.html" with p1_label="Workspaces" p1_url=workspaces_url p2_label=workspace.name p2_url=workspace_url current=app.name %}
+            {% else %}
+            {% include "devopshero_app/partials/_breadcrumb.html" with p1_label="Workspaces" p1_url=workspaces_url p2_label=workspace.name p2_url=workspace_url current="New App" %}
+            {% endif %}
+            <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
+                {% if app %}Define the app and its deployment blueprint. The blueprint is the environment-specific deployable state for this app.{% endif %}
+            </p>
+        </div>
         {% if app %}
-        {% include "devopshero_app/partials/_breadcrumb.html" with p1_label="Workspaces" p1_url=workspaces_url p2_label=workspace.name p2_url=workspace_url current=app.name %}
-        {% else %}
-        {% include "devopshero_app/partials/_breadcrumb.html" with p1_label="Workspaces" p1_url=workspaces_url p2_label=workspace.name p2_url=workspace_url current="New App" %}
+        <button type="button"
+                onclick="var mc = document.getElementById('modal-container'); mc.innerHTML = document.getElementById('reset-confirm-tpl').innerHTML; htmx.process(mc);"
+                class="shrink-0 rounded-lg bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-700">
+            Reset Conversation
+        </button>
         {% endif %}
-        <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
-            {% if app %}Define the app and its deployment blueprint. The blueprint is the environment-specific deployable state for this app.{% endif %}
-        </p>
     </div>
 
     <div class="flex flex-1 overflow-hidden">
@@ -57,6 +66,12 @@
         </div>
     </div>
 </div>
+
+{% if app %}
+<template id="reset-confirm-tpl">
+    {% include "devopshero_app/partials/_confirm_modal.html" with modal_title="Reset Conversation" modal_message="Start a new conversation? This will close the current conversation and discard any draft blueprint." confirm_url=reset_url confirm_label="Reset Conversation" %}
+</template>
+{% endif %}
 
 <script type="module">
 function reloadEditor(url) {

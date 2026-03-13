@@ -13,7 +13,6 @@ from devopshero_app.models import App, Conversation, Deployment, Repository, Res
 from devopshero_app.services import abac
 
 from . import abac_view_checks
-from . import apps as apps_views
 from . import base
 
 
@@ -34,7 +33,6 @@ def workspaces(request: HttpRequest) -> HttpResponse:
         "apps",
         queryset=App.objects.annotate(
             latest_status=Coalesce(Subquery(latest_deployment_status), Value("never_deployed")),
-            open_blueprint_status=Coalesce(Subquery(apps_views.get_open_blueprint_status_subquery()), Value("")),
         ).order_by("name"),
         to_attr="annotated_apps",
     )
@@ -46,9 +44,6 @@ def workspaces(request: HttpRequest) -> HttpResponse:
     )
 
     context = base.get_app_shell_context(request=request, current_page="workspaces")
-    for workspace in workspace_list:
-        for app in workspace.annotated_apps:
-            apps_views.populate_deployment_entrypoint(app=app, open_blueprint_status=app.open_blueprint_status)
     context["workspaces"] = workspace_list
     return render(request, "devopshero_app/workspaces/workspaces.html", context=context)
 
@@ -94,12 +89,9 @@ def workspace_detail(request: HttpRequest, workspace_slug: str) -> HttpResponse:
     ).annotate(
         last_deployed_at=Max("deployments__created_at"),
         latest_status=Subquery(latest_deployment_status),
-        open_blueprint_status=Coalesce(Subquery(apps_views.get_open_blueprint_status_subquery()), Value("")),
         deployed_service_url=Subquery(latest_deployed_service_url),
     ).order_by("name")
     apps = list(apps)
-    for app in apps:
-        apps_views.populate_deployment_entrypoint(app=app, open_blueprint_status=app.open_blueprint_status)
     datastores = workspace.datastores.order_by("name")
     show_costs = request.user.is_staff
     conversations_qs = Conversation.objects.filter(
