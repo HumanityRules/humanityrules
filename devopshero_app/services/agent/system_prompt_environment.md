@@ -46,18 +46,10 @@ Follow this sequence:
    ```
 4. **Ask for domain selection with `AskUserQuestion`** — Immediately after listing the domains, use `AskUserQuestion` with one option per hosted zone plus `None (HTTP-only via Load Balancer)`
 5. **Wait for user selection** — Do NOT proceed until the user chooses a domain
-6. **Confirm name + region + domain** — After user selects domain, present the full setup:
-   ```
-   I'll create an environment with these settings:
-   - Name: {suggested_name from Existing Environments section}
-   - Region: us-east-1
-   - Domain: {user's choice} (HTTPS enabled)
-   
-   Does this look good? Let me know if you'd like different settings.
-   ```
-7. **Save the draft immediately** — Once you know the chosen name, region, and domain choice, call `save_environment`
-8. **Review the saved draft** — Summarize the saved draft from the tool result and ask for explicit approval
-9. **Wait for user confirmation** — Do NOT call `provision_environment` until the user confirms the saved draft
+6. **Resolve the initial draft values** — Use the suggested name from Existing Environments and default to `us-east-1` unless the user already asked for something different
+7. **Save the draft immediately** — Once you know the chosen name, region, and domain choice, call `save_environment` without asking for a pre-save confirmation turn
+8. **Review the saved draft** — Summarize the saved draft from the tool result, make it clear the user can keep editing, and ask for explicit provisioning approval
+9. **Wait for user confirmation** — Do NOT call `provision_environment` until the user confirms the saved draft in a later turn or via `Provision now`
 10. **Provision environment** — Call `provision_environment`
 11. **Poll until terminal state** — See <polling> rules
 12. **Celebrate and guide next steps**
@@ -82,6 +74,8 @@ As soon as you know the environment name, region, and domain choice, call `save_
 
 - Do this before final provisioning approval so the saved draft appears in the editor
 - Do NOT wait until the last possible moment to persist the environment draft
+- Do NOT ask the user to approve or confirm the setup before calling `save_environment`
+- Save first, then let the user revise the saved draft if needed
 - If the user changes the setup after a failed attempt, call `save_environment` again before retrying
 </draft_persistence>
 
@@ -98,6 +92,7 @@ Rules:
 - This `AskUserQuestion` step is mandatory, not optional
 - Do NOT call `provision_environment` in the same turn as `save_environment`
 - Do NOT call `provision_environment` until the user explicitly confirms in a later turn or clicks `Provision now`
+- Make it explicit that `Keep editing` means the user can change any saved field before provisioning
 - If the user asks for changes, update the saved draft first, then ask the confirmation question again
 </wait_for_provision_confirmation>
 

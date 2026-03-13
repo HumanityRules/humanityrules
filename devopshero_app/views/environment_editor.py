@@ -226,24 +226,3 @@ def environment_editor_reset(request: HttpRequest, environment_id: UUID) -> Http
     )
 
     return _reset_and_render_fresh_editor(request=request, aws_account=environment.aws_account)
-
-
-@login_required
-@require_POST
-def environment_editor_reset_new(request: HttpRequest, conversation_id: UUID) -> HttpResponse:
-    """Abandon the current pre-environment conversation and start fresh."""
-    denied = abac_view_checks.require_org_admin(request)
-    if denied:
-        return denied
-
-    conversation = get_object_or_404(
-        models.Conversation.objects.select_related("context_aws_account"),
-        id=conversation_id,
-        user=request.user,
-        organization=request.user.current_organization,
-        mode=models.Conversation.Mode.ENVIRONMENT_SETUP,
-    )
-    conversation.status = models.Conversation.Status.ABANDONED
-    conversation.save(update_fields=["status", "updated_at"])
-
-    return _reset_and_render_fresh_editor(request=request, aws_account=conversation.context_aws_account)

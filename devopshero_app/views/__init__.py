@@ -8,7 +8,6 @@ from .environment_editor import (
     environment_editor_new,
     environment_editor_environment_section,
     environment_editor_reset,
-    environment_editor_reset_new,
 )
 from .security_hub import security_hub
 from .security_permissions_editor import (
@@ -108,7 +107,6 @@ __all__ = [
     "environment_editor_new",
     "environment_editor_environment_section",
     "environment_editor_reset",
-    "environment_editor_reset_new",
     "security_hub",
     "security_permissions_editor",
     "security_permissions_editor_apply",

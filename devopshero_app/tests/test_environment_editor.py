@@ -94,6 +94,13 @@ class TestEnvironmentEditor(TestCase):
         self.assertIsNone(response.context["environment"])
         self.assertEqual(response.context["conversation"].context_aws_account, self.aws_account)
         self.assertEqual(response.context["conversation"].mode, models.Conversation.Mode.ENVIRONMENT_SETUP)
+        self.assertContains(
+            response,
+            "The agent will save the environment draft as soon as it knows the name, region, and domain.",
+        )
+        self.assertContains(response, "You can keep editing before provisioning.")
+        self.assertNotContains(response, "Reset Conversation")
+        self.assertNotContains(response, 'id="reset-confirm-tpl"', html=False)
 
     def test_environment_editor_resumes_latest_environment_conversation(self) -> None:
         conversation = models.Conversation.objects.create(
@@ -182,29 +189,13 @@ class TestEnvironmentEditor(TestCase):
         self.assertIsNone(fresh_conversation.context_environment)
         self.assertIsNone(response.context["environment"])
 
-    def test_reset_new_abandons_pre_environment_conversation_and_creates_fresh_conversation(self) -> None:
-        conversation = models.Conversation.objects.create(
-            user=self.admin_user,
-            organization=self.organization,
-            context_aws_account=self.aws_account,
-            mode=models.Conversation.Mode.ENVIRONMENT_SETUP,
-        )
-
+    def test_saved_environment_editor_renders_reset_controls(self) -> None:
         self.client.force_login(self.admin_user)
-        response = self.client.post(
-            reverse("environment_editor_reset_new", kwargs={"conversation_id": conversation.id}),
+        response = self.client.get(
+            reverse("environment_editor", kwargs={"environment_id": self.env_draft.id}),
             **HTMX,
         )
 
         self.assertEqual(response.status_code, 200)
-        expected_url = f"{reverse('environment_editor_new')}?aws_account={self.aws_account.id}"
-        self.assertEqual(response.headers["HX-Replace-Url"], expected_url)
-
-        conversation.refresh_from_db()
-        self.assertEqual(conversation.status, models.Conversation.Status.ABANDONED)
-
-        fresh_conversation = response.context["conversation"]
-        self.assertNotEqual(fresh_conversation.id, conversation.id)
-        self.assertEqual(fresh_conversation.context_aws_account, self.aws_account)
-        self.assertIsNone(fresh_conversation.context_environment)
-        self.assertIsNone(response.context["environment"])
+        self.assertContains(response, "Reset Conversation")
+        self.assertContains(response, 'id="reset-confirm-tpl"', html=False)

@@ -83,11 +83,16 @@ class TestEnvironmentSetupFlow(TestCase):
         prompt = async_to_sync(agent_build_prompt.build_system_prompt)(conversation=self.conversation)
 
         self.assertIn("call `save_environment`", prompt)
+        self.assertIn("without asking for a pre-save confirmation turn", prompt)
+        self.assertIn("Do NOT ask the user to approve or confirm the setup before calling `save_environment`", prompt)
+        self.assertIn("Save first, then let the user revise the saved draft if needed", prompt)
         self.assertIn("Everything looks good. Provision this environment now?", prompt)
+        self.assertIn("Keep editing", prompt)
         self.assertIn("This `AskUserQuestion` step is mandatory, not optional", prompt)
         self.assertIn("MUST use `AskUserQuestion` for the domain choice once the list is known", prompt)
         self.assertIn("Do NOT ask the user to type the domain choice when you already know the available options", prompt)
         self.assertIn("Do NOT call `provision_environment` in the same turn as `save_environment`", prompt)
+        self.assertNotIn("Does this look good? Let me know if you'd like different settings.", prompt)
 
     def test_save_environment_tool_result_emits_editor_refresh_notifications(self) -> None:
         event = agent_service.AgentStreamEvent(
