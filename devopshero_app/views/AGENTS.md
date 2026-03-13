@@ -226,6 +226,18 @@ return render(request, template, context)
 ```
 
 
+## Live Update Contract
+
+Before changing live-refresh behavior, read `docs/ui_live_update_contract.md`.
+
+Use this contract for live widgets:
+
+- Give each widget one fragment endpoint and one server-rendered fragment.
+- Reuse the same fragment for initial render and refreshes whenever practical.
+- Use `doh:*` document events only as invalidation signals on pages that already include the chat panel.
+- Use self-terminating HTMX polling for background-worker transitions and other state changes that happen outside the current page interaction.
+- Let the server decide whether polling continues by rendering the fragment with or without the polling attributes.
+
 ## HTMX Swap Strategies
 
 Choose the narrowest swap target that covers the changed content:
