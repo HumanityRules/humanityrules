@@ -1,5 +1,26 @@
 # DevOpsHero Development Journal
 
+## 2026-03-12 22:30 - [Deployment] Deployment editor helper consolidation and small cleanups
+
+**Conversation:** (current session — extract when saved)
+
+Follow-up simplification of the deployment editor after the entry-point and reset changes. The view layer had accumulated several tiny single-purpose helpers that made the existing-app flow hard to follow; the template had a dead branch and redundant context; and conversation creation was duplicated in two places.
+
+**Helper consolidation (first pass):**
+- Replaced `_get_resume_conversation`, `_get_latest_app_conversation_without_blueprint`, and the scattered `_reactivate_conversation` usage with a single `_get_or_create_existing_app_editor_conversation(request, app, blueprint)` that handles both "open blueprint" and "no blueprint" in one place. The existing-app entry point now does: get app → get open blueprint → resolve conversation → render.
+- Inlined `_get_editor_messages()` into `_render_deployment_editor()`; the messages query is a single line and was only used there.
+- Renamed `_render_existing_app_editor` to `_render_deployment_editor` and gave it explicit `workspace`, `repository`, and optional `app`/`blueprint`/`reset_url` so it could serve both the new-app and existing-app (and reset) flows from one helper.
+
+**Three small cleanups (second pass):**
+- **Dead branch:** The right panel in `deployment_editor.html` had an `{% if conversation %}` with an else showing "No conversation linked to this session." The view always passes a conversation, so that else was unreachable. Removed the branch and always include the chat panel.
+- **reset_url:** The view was passing `reset_url` in context only for the reset-confirm modal. The template already has `app` when the reset button is shown, so the modal can use `{% url 'deployment_editor_reset' app_slug=app.slug %}` directly. Dropped `reset_url` from `_render_deployment_editor()` and from all call sites.
+- **Conversation creation:** Both the new-app flow and `_create_app_scoped_conversation` (used by existing-app and reset) called `agent_service.create_conversation(...)` with the same deployment-mode args. Introduced `_create_deployment_editor_conversation(request, workspace, repository, app=None)` that creates the conversation and optionally sets `context_app` when `app` is provided. New-app and existing-app/reset now both use this helper.
+
+**Key points:**
+- One "resolve conversation for existing app" helper and one "create deployment-editor conversation" helper keep the flow readable without over-splitting.
+- `deployment_editor_app_section` was changed to use `_get_existing_app()` for consistency with other app-slug views; no new endpoint.
+- All 35 `TestAppEndpoints` tests pass after both passes. The `_chat_panel.html` partial still has its own `{% if conversation %}` empty state, which is now unreachable from the deployment editor; could be removed in a later pass if the partial is only used there.
+
 ## 2026-03-12 22:15 - [AgentChat] Chat width 100% and tool-call title truncation
 
 **Conversation:** [2026-03-12-2142-cffba993.md](conversations/2026-03-12-2142-cffba993.md)
