@@ -24,3 +24,5 @@ The main developer documentation lives in the docs/ subdirectory. **When creatin
 
 - **`docs/stack_concept_analysis.md`** — Analysis of the missing "stack" concept: per-(App, Environment) configuration. Explains why DOH has no per-environment config today and the consequences (no staging vs prod differentiation, sequential deploys overwriting App state, no promotion workflow). Open when designing or implementing per-environment app configuration or deployment snapshots.
 
+- **`docs/ui_live_update_contract.md`** — The current live-update contract for HTMX polling, chat-scoped SSE invalidation, and widget fragment refresh patterns. Open when adding or changing live-refresh behavior.
+
