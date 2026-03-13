@@ -4,24 +4,35 @@
 
 <details class="border border-gray-200 dark:border-gray-700 overflow-hidden rounded-lg w-full min-w-0 group">
     {# Header with tool name and status - clickable to expand/collapse #}
-    <summary class="flex items-center justify-between px-3 py-2 bg-gray-50 dark:bg-gray-700 cursor-pointer list-none [&::-webkit-details-marker]:hidden">
-        <div class="flex items-center space-x-2">
+    <summary class="flex items-center gap-3 px-3 py-2 bg-gray-50 dark:bg-gray-700 cursor-pointer list-none [&::-webkit-details-marker]:hidden">
+        <div class="flex min-w-0 flex-1 items-center gap-2">
             {# Chevron arrow - rotates when open #}
-            <svg class="w-4 h-4 text-gray-400 transition-transform duration-200 group-open:rotate-90" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <svg class="w-4 h-4 shrink-0 text-gray-400 transition-transform duration-200 group-open:rotate-90" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
             </svg>
             {% if message.metadata|tool_effective_status == 'success' %}
-            <svg class="w-4 h-4 text-green-500" fill="currentColor" viewBox="0 0 20 20">
+            <svg class="w-4 h-4 shrink-0 text-green-500" fill="currentColor" viewBox="0 0 20 20">
                 <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"/>
             </svg>
             {% else %}
-            <svg class="w-4 h-4 text-red-500" fill="currentColor" viewBox="0 0 20 20">
+            <svg class="w-4 h-4 shrink-0 text-red-500" fill="currentColor" viewBox="0 0 20 20">
                 <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clip-rule="evenodd"/>
             </svg>
             {% endif %}
-            <span class="font-mono text-sm font-medium text-gray-900 dark:text-gray-100">{{ message.metadata|tool_display_name }}</span>{% with message.metadata|tool_input_param_for_title as input_param %}{% if input_param %}<span class="font-mono text-sm font-normal text-gray-500 dark:text-gray-400">{{ input_param }}</span>{% endif %}{% endwith %}
+            {% with message.metadata|tool_display_name as display_name %}
+            {% with message.metadata|tool_input_param_for_title as input_param %}
+            <div class="min-w-0 flex flex-1 items-center gap-1 overflow-hidden" title="{{ display_name }}{% if input_param %}{{ input_param }}{% endif %}">
+                {% if input_param %}
+                <span class="shrink-0 font-mono text-sm font-medium text-gray-900 dark:text-gray-100">{{ display_name }}</span>
+                <span class="min-w-0 truncate font-mono text-sm font-normal text-gray-500 dark:text-gray-400">{{ input_param }}</span>
+                {% else %}
+                <span class="min-w-0 truncate font-mono text-sm font-medium text-gray-900 dark:text-gray-100">{{ display_name }}</span>
+                {% endif %}
+            </div>
+            {% endwith %}
+            {% endwith %}
         </div>
-        <span class="text-xs text-gray-500">{{ message.metadata.duration_ms }}ms</span>
+        <span class="shrink-0 text-xs text-gray-500">{{ message.metadata.duration_ms }}ms</span>
     </summary>
 
     {# Parameters and Result - collapsible content #}

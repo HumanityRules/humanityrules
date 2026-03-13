@@ -1,5 +1,20 @@
 # DevOpsHero Development Journal
 
+## 2026-03-12 22:15 - [AgentChat] Chat width 100% and tool-call title truncation
+
+**Conversation:** [2026-03-12-2142-cffba993.md](conversations/2026-03-12-2142-cffba993.md)
+
+Session covered two UI changes in the agent chat: consistent full-width agent content and correct handling of long tool-call titles.
+
+**Chat response width:** Agent message width was already changed by the user to 100%. The remaining places that still used `max-w-[80%]` for agent-originated content were the streaming partials for tool start, tool result, and the interactive question (AskUserQuestion). Those three were updated to `max-w-[100%]` so tool calls and question bubbles match the full-width agent bubbles. The thinking, error, and unavailable streaming partials were left at 80% so short status messages stay visually contained.
+
+**Tool-call title overflow:** Long tool titles (e.g. "Read: src/ai_detector/lib/.../stripe_webhook_controller") were overflowing the details summary row and clipping without ellipsis, and the duration badge (e.g. "123ms") could be pushed off. The fix was to reserve space for the timing on the right and let the title text shrink and truncate. In `_message_tool_call.html`, `_streaming_tool_start.html`, and `_streaming_tool_result.html` the summary row was changed from `justify-between` with a single flexible left div to `gap-3` with: (1) a left group with `min-w-0 flex-1` containing the icons and a new wrapper div around the tool name and optional param, and (2) a `shrink-0` duration span. The wrapper has `min-w-0 flex-1 overflow-hidden` so it can shrink. When there is a main param for the title (e.g. file path), the display name (e.g. "Read: ") is `shrink-0` and the param span has `truncate`; when there is no param, the display name span has `truncate`. Icons were given `shrink-0` so they never compress. A `title` attribute on the wrapper shows the full tool name + param on hover. No max-width percentage was added to the text; the flex layout and `truncate` ensure the text clips within the remaining space while the timing stays visible.
+
+**Key points:**
+- Agent chat width is controlled by Tailwind `max-w-[80%]` or `max-w-[100%]` on the outer message wrapper in chat partials under `devopshero_app/templates/devopshero_app/chat/`. The compiled utility lives in `tailwindtheme_app/static/css/dist/styles.css`.
+- For consistent full-width agent content, update both persisted messages (`_message.html` for agent role) and all streaming partials that render agent output (streaming start, tool start/result, question); leave thinking/error/unavailable at 80% if desired.
+- Tool-call header overflow is fixed by making the summary a flex row with a shrinkable middle (title + param) and a non-shrinking timing slot. Use `min-w-0` on flex children that should shrink and `truncate` on the text node that may overflow; add `title` for full text on hover.
+
 ## 2026-03-12 21:20 - [Deployment] Simplify deployment editor entry points
 
 **Conversation:** [2026-03-12-2121-37bed511.md](conversations/2026-03-12-2121-37bed511.md)
