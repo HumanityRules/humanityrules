@@ -1,7 +1,7 @@
 <tr id="blueprint-{{ blueprint.id }}"
     {% if current_deployment.status == 'teardown_pending' or current_deployment.status == 'tearing_down' %}
         hx-get="{% url 'app_detail' app_slug=app.slug %}"
-        hx-trigger="load delay:3s"
+        hx-trigger="load delay:10s"
         hx-target="#main-content"
         hx-swap="innerHTML"
     {% endif %}>
