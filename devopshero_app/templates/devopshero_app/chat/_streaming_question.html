@@ -1,6 +1,6 @@
 {# AskUserQuestion - multi-question interactive choice UI #}
 {# Buttons are selection toggles; the confirm button submits all answers at once. #}
-<div class="flex items-start space-x-3 w-full max-w-[80%] mb-4"
+<div class="flex items-start space-x-3 w-full max-w-[100%] mb-4"
      data-question-container
      data-send-url="{% url 'chat_send' conversation_id=conversation_id %}"
      data-total-questions="{{ questions|length }}">
