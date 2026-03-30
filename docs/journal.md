@@ -1,5 +1,17 @@
 # DevOpsHero Development Journal
 
+## 2026-03-30 18:52 - [UI] Replace browser prompt() with proper modal for workspace creation
+
+**Conversation:** [2026-03-30-1653-adec5b6d.md](conversations/2026-03-30-1653-adec5b6d.md)
+
+The "New Workspace" button on the workspaces list page was using a raw `window.prompt('Workspace name')` browser dialog to collect the name, then submitting a hidden form. This was the only place in the app still using a native browser dialog — everything else uses the project's custom modal pattern. Replaced it with a proper modal that matches the rest of the UI.
+
+**Key points:**
+- **Followed the hidden-toggle modal pattern** — Used the same approach as `_repo_picker_modal.html` and `_aws_account_picker_modal.html`: a `hidden fixed inset-0 z-50` container toggled by adding/removing the `hidden` class. This was chosen over the HTMX-into-`#modal-container` pattern (used by `_confirm_modal.html`) because the form is static and doesn't need server-rendered content.
+- **Modal structure** — Header with title/subtitle/close-X, form body with labeled text input (`required`, placeholder with examples), footer with Cancel/Create buttons. All styling matches existing modals: `rounded-xl shadow-xl`, same backdrop opacity, same button classes (indigo primary, ring-inset cancel).
+- **UX touches** — Escape key closes the modal (keydown listener, same as repo picker). MutationObserver clears and auto-focuses the input each time the modal opens (same technique as repo picker's search field reset). The `required` attribute on the input prevents empty submissions — previously the `prompt()` path silently did nothing on empty input.
+- **Simplified the trigger** — The old implementation had a `<form>` wrapping the dashed card button, with a hidden `<input name="name">` and inline JS to bridge `prompt()` → hidden input → `form.submit()`. Now it's just a plain `<button>` that opens the modal; the `<form>` with CSRF token lives inside the modal partial.
+
 ## 2026-03-30 17:46 - [UI] Add Recent Deployments to workspace detail page
 
 **Conversation:** [2026-03-30-1646-cfc7d981.md](conversations/2026-03-30-1646-cfc7d981.md)

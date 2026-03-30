@@ -36,18 +36,14 @@
             {% endif %}
         </div>
         {% endfor %}
-        <form method="post" action="{% url 'workspace_create' %}" class="flex">
-            {% csrf_token %}
-            <button type="button"
-                    onclick="let n = prompt('Workspace name'); if (n) { this.closest('form').querySelector('input[name=name]').value = n; this.closest('form').submit(); }"
-                    class="flex w-full flex-1 flex-col items-center justify-center p-6 border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-lg hover:border-indigo-500 dark:hover:border-indigo-400 hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors group">
-                <svg class="w-8 h-8 text-gray-400 group-hover:text-indigo-500 dark:group-hover:text-indigo-400 transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
-                </svg>
-                <span class="mt-2 text-sm font-medium text-gray-500 dark:text-gray-400 group-hover:text-indigo-600 dark:group-hover:text-indigo-400 transition-colors">New Workspace</span>
-            </button>
-            <input type="hidden" name="name" value="" />
-        </form>
+        <button type="button"
+                onclick="document.getElementById('workspace-create-modal').classList.remove('hidden')"
+                class="flex w-full flex-1 flex-col items-center justify-center p-6 border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-lg hover:border-indigo-500 dark:hover:border-indigo-400 hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors group">
+            <svg class="w-8 h-8 text-gray-400 group-hover:text-indigo-500 dark:group-hover:text-indigo-400 transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
+            </svg>
+            <span class="mt-2 text-sm font-medium text-gray-500 dark:text-gray-400 group-hover:text-indigo-600 dark:group-hover:text-indigo-400 transition-colors">New Workspace</span>
+        </button>
     </div>
     {% else %}
     <div class="text-center py-12 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg">
@@ -59,3 +55,5 @@
     </div>
     {% endif %}
 </div>
+
+{% include "devopshero_app/workspaces/_workspace_create_modal.html" %}
