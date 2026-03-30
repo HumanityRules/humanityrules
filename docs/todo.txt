@@ -1,2 +1,3 @@
 - Lost connections, env vars, secrets in the App Detail view. Need to introduce Blueprints?
 - Env vars (and secrets) correctly displayed in the deployment editor.
+- Remove recent conversations from the workspace detail. 
