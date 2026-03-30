@@ -1,0 +1,81 @@
+{# Workspace create modal — opened by toggling "hidden" on #workspace-create-modal #}
+<div id="workspace-create-modal" class="hidden fixed inset-0 z-50">
+    {# Backdrop #}
+    <div class="fixed inset-0 bg-gray-500/75 dark:bg-gray-900/75"
+         onclick="document.getElementById('workspace-create-modal').classList.add('hidden')"></div>
+
+    {# Modal panel #}
+    <div class="fixed inset-0 flex items-center justify-center p-4">
+        <div class="relative bg-white dark:bg-gray-800 rounded-xl shadow-xl max-w-md w-full" role="dialog" aria-modal="true">
+            {# Header #}
+            <div class="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
+                <div class="flex items-center justify-between">
+                    <h2 class="text-lg font-semibold text-gray-900 dark:text-white">New Workspace</h2>
+                    <button type="button"
+                            onclick="document.getElementById('workspace-create-modal').classList.add('hidden')"
+                            class="text-gray-400 hover:text-gray-500 dark:hover:text-gray-300 cursor-pointer">
+                        <span class="sr-only">Close</span>
+                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+                        </svg>
+                    </button>
+                </div>
+                <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">Create a workspace to group apps and datastores.</p>
+            </div>
+
+            {# Form #}
+            <form method="post" action="{% url 'workspace_create' %}">
+                {% csrf_token %}
+                <div class="px-6 py-4">
+                    <label for="workspace-name-input" class="block text-sm font-medium text-gray-700 dark:text-gray-300">Workspace name</label>
+                    <input type="text"
+                           id="workspace-name-input"
+                           name="name"
+                           required
+                           autocomplete="off"
+                           placeholder="e.g. analytics, ml-tools, billing"
+                           class="mt-1 w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600
+                                  bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100
+                                  rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent
+                                  placeholder-gray-400 dark:placeholder-gray-500">
+                </div>
+
+                {# Actions #}
+                <div class="px-6 py-4 border-t border-gray-200 dark:border-gray-700 flex justify-end gap-3">
+                    <button type="button"
+                            onclick="document.getElementById('workspace-create-modal').classList.add('hidden')"
+                            class="rounded-md bg-white dark:bg-gray-700 px-3 py-2 text-sm font-semibold text-gray-900 dark:text-white shadow-xs ring-1 ring-inset ring-gray-300 dark:ring-white/10 hover:bg-gray-50 dark:hover:bg-gray-600 cursor-pointer">
+                        Cancel
+                    </button>
+                    <button type="submit"
+                            class="rounded-md bg-indigo-600 px-3 py-2 text-sm font-semibold text-white shadow-xs hover:bg-indigo-500 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600 dark:bg-indigo-500 dark:hover:bg-indigo-400 dark:focus-visible:outline-indigo-500 cursor-pointer">
+                        Create
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<script>
+(function() {
+    const modal = document.getElementById('workspace-create-modal');
+    const nameInput = document.getElementById('workspace-name-input');
+
+    document.addEventListener('keydown', function(e) {
+        if (e.key === 'Escape' && !modal.classList.contains('hidden')) {
+            modal.classList.add('hidden');
+        }
+    });
+
+    const observer = new MutationObserver(function(mutations) {
+        mutations.forEach(function(mutation) {
+            if (mutation.attributeName === 'class' && !modal.classList.contains('hidden')) {
+                nameInput.value = '';
+                nameInput.focus();
+            }
+        });
+    });
+    observer.observe(modal, { attributes: true });
+})();
+</script>
