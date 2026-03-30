@@ -1,5 +1,16 @@
 # DevOpsHero Development Journal
 
+## 2026-03-30 17:46 - [UI] Add Recent Deployments to workspace detail page
+
+**Conversation:** [2026-03-30-1646-cfc7d981.md](conversations/2026-03-30-1646-cfc7d981.md)
+
+Added a "Recent Deployments" table to the workspace detail page, matching the pattern already used on the environment detail page. Previously the workspace detail only showed apps and datastores — you had to navigate into an individual app or environment to see deployment history. Now the workspace page gives an at-a-glance view of the latest 20 deployments across all apps in that workspace.
+
+**Key points:**
+- **New deployment row mode** — Added `mode="workspace"` to `_app_deployment_row.html`. It shows the App name (linked to app detail) and Environment name (linked to environment detail) plus git ref. This is distinct from `mode="environment"` (which shows App + Workspace) and `mode="app_history"` (which shows Environment + Account/Region). In the workspace context, the workspace is already known, so the row highlights the app-to-environment relationship instead.
+- **View query** — Added a `Deployment.objects.filter(app__workspace=workspace)` query in `workspace_detail` with `select_related("app", "environment", "environment__aws_account")` to avoid N+1 queries when rendering rows. Limited to 20 most recent, same as the environment detail page.
+- **Template structure** — Reused the exact same table markup (colgroup, sr-only thead, tbody border classes) from `environment_detail.html` to keep visual consistency. Empty state shows a dashed-border box with "No deployments in this workspace yet."
+
 ## 2026-03-30 17:00 - [UI] App card name typography improvements
 
 **Conversation:** [2026-03-30-1639-a656b4d4.md](conversations/2026-03-30-1639-a656b4d4.md)
