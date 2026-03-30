@@ -1,5 +1,18 @@
 # DevOpsHero Development Journal
 
+## 2026-03-30 17:00 - [UI] App card name typography improvements
+
+**Conversation:** [2026-03-30-1639-a656b4d4.md](conversations/2026-03-30-1639-a656b4d4.md)
+
+Iterative design pass on `_app_card.html` to make app names visually prominent on the workspace detail page. The name was previously `font-medium` at default size — indistinguishable in weight from the metadata rows below it.
+
+**Key points:**
+- **Option 1 (kept): size + weight** — Changed from `font-medium` to `text-lg font-semibold`. The larger size creates clear typographic hierarchy; the name becomes the dominant element in the card at a glance.
+- **Option 2 (rejected): indigo color** — Tried always-on `text-indigo-400` to signal the name as a clickable title. Rejected — the color felt out of place against the neutral dark card and clashed with indigo's existing use as an interactive/hover cue throughout the UI.
+- **Option 3 (kept): separator line** — Added `border-b border-gray-200 dark:border-gray-700 pb-3` to the name row div. This draws a structural boundary between the title and the metadata rows, reinforcing hierarchy without relying on color. Combined with Option 1 this was the winning combination.
+- **White glow (rejected): text-shadow** — Tried `text-shadow: 0 0 12px rgba(255,255,255,0.15)` as a luminous effect on dark mode. The Tailwind arbitrary value syntax (`dark:[text-shadow:...]`) didn't produce a visible result, likely not supported in Tailwind v4's JIT scanner for that specific property. Removed.
+- **Final state**: `text-lg font-semibold text-white` + separator line — clean, structurally sound, no color tricks needed.
+
 ## 2026-03-30 16:33 - [UI] Remove Recent Conversations from workspace detail
 
 **Conversation:** [2026-03-30-1633-ab03aad1.md](conversations/2026-03-30-1633-ab03aad1.md)
