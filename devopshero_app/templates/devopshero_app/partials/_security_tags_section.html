@@ -19,22 +19,37 @@
         <button x-show="!editing" @click="_orig = JSON.parse(JSON.stringify(tags)); editing = true" type="button"
                 class="text-sm font-normal ml-4 text-indigo-600 dark:text-indigo-400 hover:text-indigo-800 dark:hover:text-indigo-300 hover:underline cursor-pointer">Edit</button>
     </h2>
-    {% if inherited_tags %}
-    <div class="flex flex-wrap gap-2 mb-3">
-        {% for tag in inherited_tags %}
-        <span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-400">
-            {{ tag.key }}={{ tag.value }}
-            <span class="text-[10px] text-gray-400 dark:text-gray-500">inherited</span>
-        </span>
-        {% endfor %}
-    </div>
-    {% endif %}
-    <div x-show="!editing" class="flex flex-wrap items-center gap-2">
-        <template x-for="(item, i) in tags" :key="i">
-            <span class="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium bg-indigo-50 text-indigo-700 dark:bg-indigo-500/10 dark:text-indigo-400"
-                  x-text="item.key + '=' + item.value"></span>
-        </template>
-        <span x-show="tags.length === 0" class="text-xs text-gray-400 dark:text-gray-500">{{ empty_text|default:"No tags" }}</span>
+    <div x-show="!editing" class="space-y-3">
+        {% if inherited_tags %}
+        <div>
+            <p class="text-[10px] font-semibold tracking-widest uppercase text-gray-400 dark:text-gray-500 mb-1.5">Inherited</p>
+            <div class="flex flex-wrap gap-2">
+                {% for tag in inherited_tags %}
+                <span class="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium border border-dashed border-gray-300 dark:border-gray-600 text-gray-500 dark:text-gray-400">
+                    {{ tag.key }}={{ tag.value }}
+                </span>
+                {% endfor %}
+            </div>
+        </div>
+        <div>
+            <p class="text-[10px] font-semibold tracking-widest uppercase text-gray-400 dark:text-gray-500 mb-1.5">Direct</p>
+            <div class="flex flex-wrap items-center gap-2">
+                <template x-for="(item, i) in tags" :key="i">
+                    <span class="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium bg-indigo-50 text-indigo-700 dark:bg-indigo-500/10 dark:text-indigo-400"
+                          x-text="item.key + '=' + item.value"></span>
+                </template>
+                <span x-show="tags.length === 0" class="text-xs text-gray-400 dark:text-gray-500">{{ empty_text|default:"No tags" }}</span>
+            </div>
+        </div>
+        {% else %}
+        <div class="flex flex-wrap items-center gap-2">
+            <template x-for="(item, i) in tags" :key="i">
+                <span class="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium bg-indigo-50 text-indigo-700 dark:bg-indigo-500/10 dark:text-indigo-400"
+                      x-text="item.key + '=' + item.value"></span>
+            </template>
+            <span x-show="tags.length === 0" class="text-xs text-gray-400 dark:text-gray-500">{{ empty_text|default:"No tags" }}</span>
+        </div>
+        {% endif %}
     </div>
     <div x-show="editing" x-cloak>
         {% include "devopshero_app/partials/_kv_tag_editor.html" with array_model="tags" add_label="Add tag" %}
@@ -53,15 +68,24 @@
 <div class="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-4">
     <h2 class="text-lg font-semibold text-gray-900 dark:text-white mb-4">{{ tags_title }}</h2>
     {% if inherited_tags %}
-    <div class="flex flex-wrap gap-2 mb-2">
-        {% for tag in inherited_tags %}
-        <span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-400">
-            {{ tag.key }}={{ tag.value }}
-            <span class="text-[10px] text-gray-400 dark:text-gray-500">inherited</span>
-        </span>
-        {% endfor %}
+    <div class="space-y-3">
+        <div>
+            <p class="text-[10px] font-semibold tracking-widest uppercase text-gray-400 dark:text-gray-500 mb-1.5">Inherited</p>
+            <div class="flex flex-wrap gap-2">
+                {% for tag in inherited_tags %}
+                <span class="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium border border-dashed border-gray-300 dark:border-gray-600 text-gray-500 dark:text-gray-400">
+                    {{ tag.key }}={{ tag.value }}
+                </span>
+                {% endfor %}
+            </div>
+        </div>
+        <div>
+            <p class="text-[10px] font-semibold tracking-widest uppercase text-gray-400 dark:text-gray-500 mb-1.5">Direct</p>
+            {% include "devopshero_app/partials/_kv_tag_editor.html" with items=items empty_text=empty_text|default:"No tags" %}
+        </div>
     </div>
-    {% endif %}
+    {% else %}
     {% include "devopshero_app/partials/_kv_tag_editor.html" with items=items empty_text=empty_text|default:"No tags" %}
+    {% endif %}
 </div>
 {% endif %}

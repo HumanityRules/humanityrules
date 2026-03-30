@@ -1,5 +1,19 @@
 # DevOpsHero Development Journal
 
+## 2026-03-30 16:20 - [UI] Detail page layout refinement: tags side-by-side, inherited tags grouping
+
+**Conversation:** [2026-03-30-1620-b6c58fac.md](conversations/2026-03-30-1620-b6c58fac.md)
+
+Refinement pass on Workspace, App, and Environment detail pages. The main theme was moving the tags panel from a standalone full-width block below the page content to a 50/50 side-by-side layout alongside the details card. Along the way we also cleaned up the inherited tags display in the shared `_security_tags_section.html` partial.
+
+**Key points:**
+- **50/50 details + tags grid** — All three detail pages (workspace, app, environment) now wrap the details card and the tags card in `grid grid-cols-1 sm:grid-cols-2 gap-6`. On mobile they stack; at `sm` and above they sit side by side. The old standalone tags sections below the page content were removed.
+- **Details card field layout** — Workspace and App details use `grid-cols-3` for their fields (Slug/Created/Apps and App Type/Created/Created By respectively) so all three appear in one row. Environment details use `grid-cols-2` (6 fields in 3 rows) because monospace values like the VPC ID are too wide for a 3-column layout at 50% card width — the arithmetic matters: ~145px per column at `grid-cols-3` isn't enough for a 22-char mono string.
+- **Deployment button moved to breadcrumb row** — Previously inside the App detail card, the Deployment button now lives at the far right of the breadcrumb/title row. This makes it a page-level action rather than a card-level one, which is the better semantic framing. Implemented by wrapping the breadcrumb include in `flex items-center justify-between` with the breadcrumb in a `flex-1` div and the button as a sibling.
+- **Inherited tags visual redesign** — Removed "inherited" text from inside pills. Added two labeled sections: INHERITED (dashed-border outlined pills) appears first, DIRECT (solid indigo pills) below. The all-caps `tracking-widest` label is 10px — small enough to be secondary but clearly present. When no `inherited_tags` are passed, labels are omitted entirely and the component behaves as before.
+- **Inheritance architecture insight** — The ABAC engine (`get_effective_tags` in `abac.py`) and the view layer (`build_app_detail_context` in `apps.py`) both independently implement the same workspace→app inheritance query. The duplication is currently acceptable because the two consumers need different shapes (flat tuples vs separate querysets), but if inheritance rules change both places need updating. A shared `get_inherited_tags(app)` helper would centralize the rule without forcing the view into tuple-splitting gymnastics.
+- **Environment detail previously used a wide table** — The original environment details card used a 6-column `<table>` with `overflow-x-auto`. This was converted to a `dl` grid to match the other detail pages and to participate cleanly in the 50/50 layout.
+
 ## 2026-03-12 23:45 - [UI] App card status pill polling on workspace detail and status-pill audit
 
 **Conversation:** [2026-03-12-2319-7db10a42.md](conversations/2026-03-12-2319-7db10a42.md)

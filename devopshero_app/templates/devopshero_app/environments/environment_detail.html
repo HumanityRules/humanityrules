@@ -19,47 +19,38 @@
             {% endif %}
         </div>
     </div>
-    {# Environment details card #}
-    <div class="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-4 mb-8">
-        <div class="overflow-x-auto">
-            <table class="w-full table-fixed text-sm">
-                <colgroup>
-                    <col>
-                    <col>
-                    <col class="w-[12%]">
-                    <col class="w-[26%]">
-                    <col>
-                    <col class="w-[14%]">
-                </colgroup>
-                <thead>
-                    <tr>
-                        <th class="pb-2 pr-8 text-center font-medium text-gray-500 dark:text-gray-400">AWS Account</th>
-                        <th class="pb-2 pr-8 text-center font-medium text-gray-500 dark:text-gray-400">Account ID</th>
-                        <th class="pb-2 pr-8 text-center font-medium text-gray-500 dark:text-gray-400">Region</th>
-                        <th class="pb-2 pr-8 text-center font-medium text-gray-500 dark:text-gray-400">VPC</th>
-                        <th class="pb-2 pr-8 text-center font-medium text-gray-500 dark:text-gray-400">Domain</th>
-                        <th class="pb-2 text-center font-medium text-gray-500 dark:text-gray-400 whitespace-nowrap">Status</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    <tr class="align-middle font-mono">
-                        <td class="pr-8 text-center font-medium text-gray-900 dark:text-white">{{ environment.aws_account.name }}</td>
-                        <td class="pr-8 text-center font-medium text-gray-900 dark:text-white break-all">{{ environment.aws_account.aws_account_id|default:"—" }}</td>
-                        <td class="pr-8 text-center font-medium text-gray-900 dark:text-white">{{ environment.aws_region }}</td>
-                        <td class="pr-8 text-center font-medium text-gray-900 dark:text-white break-all">{{ environment.vpc_id|default:"—" }}</td>
-                        <td class="pr-8 text-center font-medium text-gray-900 dark:text-white break-all">{{ environment.shared_alb_hosted_zone|default:"HTTP only" }}</td>
-                        <td class="text-center">
-                            <div class="inline-flex justify-center [&>span]:text-sm">
-                                {% include "devopshero_app/partials/_status_pill.html" with status=environment.status label=environment.get_status_display only %}
-                            </div>
-                        </td>
-                    </tr>
-                </tbody>
-            </table>
+    {# Environment details and tags side by side #}
+    <div class="grid grid-cols-1 sm:grid-cols-2 gap-6 mb-8">
+        <div class="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-4">
+            <dl class="grid grid-cols-2 gap-4 text-sm">
+                <div>
+                    <dt class="text-gray-500 dark:text-gray-400">AWS Account</dt>
+                    <dd class="mt-1 font-medium text-gray-900 dark:text-white font-mono text-xs">{{ environment.aws_account.name }}</dd>
+                </div>
+                <div>
+                    <dt class="text-gray-500 dark:text-gray-400">Account ID</dt>
+                    <dd class="mt-1 font-medium text-gray-900 dark:text-white font-mono text-xs">{{ environment.aws_account.aws_account_id|default:"—" }}</dd>
+                </div>
+                <div>
+                    <dt class="text-gray-500 dark:text-gray-400">Region</dt>
+                    <dd class="mt-1 font-medium text-gray-900 dark:text-white font-mono text-xs">{{ environment.aws_region }}</dd>
+                </div>
+                <div>
+                    <dt class="text-gray-500 dark:text-gray-400">VPC</dt>
+                    <dd class="mt-1 font-medium text-gray-900 dark:text-white font-mono text-xs">{{ environment.vpc_id|default:"—" }}</dd>
+                </div>
+                <div>
+                    <dt class="text-gray-500 dark:text-gray-400">Domain</dt>
+                    <dd class="mt-1 font-medium text-gray-900 dark:text-white font-mono text-xs">{{ environment.shared_alb_hosted_zone|default:"HTTP only" }}</dd>
+                </div>
+                <div>
+                    <dt class="text-gray-500 dark:text-gray-400">Status</dt>
+                    <dd class="mt-1">
+                        {% include "devopshero_app/partials/_status_pill.html" with status=environment.status label=environment.get_status_display only %}
+                    </dd>
+                </div>
+            </dl>
         </div>
-    </div>
-
-    <div class="mb-6">
         {% include "devopshero_app/partials/_security_tags_section.html" with tags_title="Environment Tags" items=tags %}
     </div>
 
