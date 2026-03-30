@@ -102,10 +102,15 @@ def workspace_detail(request: HttpRequest, workspace_slug: str) -> HttpResponse:
     can_edit = abac.check_action(request.user.current_organization, request.user, workspace, "workspace", "workspace:edit")
     can_admin = abac.check_action(request.user.current_organization, request.user, workspace, "workspace", "workspace:admin")
 
+    deployments = Deployment.objects.filter(
+        app__workspace=workspace,
+    ).select_related("app", "environment", "environment__aws_account").order_by("-created_at")[:20]
+
     context = base.get_app_shell_context(request=request, current_page="workspaces")
     context["workspace"] = workspace
     context["apps"] = apps
     context["datastores"] = datastores
+    context["deployments"] = deployments
     context["repositories"] = repositories
     context["tags"] = tags
     context["tags_json"] = json.dumps([{"key": t.key, "value": t.value} for t in tags])
