@@ -1,5 +1,17 @@
 # DevOpsHero Development Journal
 
+## 2026-03-30 16:33 - [UI] Remove Recent Conversations from workspace detail
+
+**Conversation:** [2026-03-30-1633-ab03aad1.md](conversations/2026-03-30-1633-ab03aad1.md)
+
+The "Recent Conversations" section at the bottom of the workspace detail page was removed. The section listed the last 10 AI conversations scoped to that workspace, but the information was redundant — conversations are accessible via the main chat navigation — and it added clutter to a page whose primary purpose is workspace infrastructure (apps, datastores).
+
+**Key points:**
+- **Template cleanup** — Removed the entire `{# Recent conversations section #}` block from `workspace_detail.html`. No other template changes were needed.
+- **View cleanup** — Removed the `conversations_qs` queryset, the conditional `Sum` annotation for staff cost visibility, and the `conversations` context variable from `workspace_detail` in `workspaces.py`.
+- **Import cleanup** — Removed the now-unused `Conversation` model import and `Sum` ORM import from `workspaces.py`. Also removed `show_costs` since it existed solely to gate cost annotation on conversations and had no other consumers on this page.
+- **No data loss** — Conversations themselves are unaffected; only the surface that displayed a subset of them was removed.
+
 ## 2026-03-30 16:20 - [UI] Detail page layout refinement: tags side-by-side, inherited tags grouping
 
 **Conversation:** [2026-03-30-1620-b6c58fac.md](conversations/2026-03-30-1620-b6c58fac.md)

@@ -2,14 +2,14 @@ import json
 from uuid import UUID
 
 from django.contrib.auth.decorators import login_required
-from django.db.models import Max, OuterRef, Prefetch, Subquery, Sum, Value
+from django.db.models import Max, OuterRef, Prefetch, Subquery, Value
 from django.db.models.functions import Coalesce
 from django.http import HttpRequest, HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils.text import slugify
 from django.views.decorators.http import require_POST
 
-from devopshero_app.models import App, Conversation, Deployment, Repository, ResourceTag, Workspace
+from devopshero_app.models import App, Deployment, Repository, ResourceTag, Workspace
 from devopshero_app.services import abac
 
 from . import abac_view_checks
@@ -93,14 +93,6 @@ def workspace_detail(request: HttpRequest, workspace_slug: str) -> HttpResponse:
     ).order_by("name")
     apps = list(apps)
     datastores = workspace.datastores.order_by("name")
-    show_costs = request.user.is_staff
-    conversations_qs = Conversation.objects.filter(
-        context_workspace=workspace,
-        user=request.user,
-    ).order_by("-updated_at")
-    if show_costs:
-        conversations_qs = conversations_qs.annotate(total_cost=Sum("llm_usage_logs__cost_usd"))
-    conversations = conversations_qs[:10]
 
     repositories = Repository.objects.filter(
         organization=request.user.current_organization,
@@ -114,9 +106,7 @@ def workspace_detail(request: HttpRequest, workspace_slug: str) -> HttpResponse:
     context["workspace"] = workspace
     context["apps"] = apps
     context["datastores"] = datastores
-    context["conversations"] = conversations
     context["repositories"] = repositories
-    context["show_costs"] = show_costs
     context["tags"] = tags
     context["tags_json"] = json.dumps([{"key": t.key, "value": t.value} for t in tags])
     context["can_edit"] = can_edit
