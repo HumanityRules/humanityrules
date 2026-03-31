@@ -1,5 +1,19 @@
 # DevOpsHero Development Journal
 
+## 2026-03-30 20:00 - [UI] Adjust column widths in Deployment and Environment editors
+
+**Conversation:** [2026-03-30-1735-78f436aa.md](conversations/2026-03-30-1735-78f436aa.md)
+
+Three layout tweaks were made to the editor pages to better use horizontal space.
+
+In both the Deployment Editor and the Environment Editor, the two-panel split (config panel / chat panel) was 50/50. Since the chat panel benefits from more room for message text, both were changed to 40% config / 60% chat (`w-2/5` / `w-3/5`).
+
+Within the Application and Deployment Blueprint cards, the label/value `<dl>` grid was an equal `grid-cols-2` split. Labels like "Name", "CPU", "Port" are short, while values can be long (URLs, paths, branch names). The grid was changed to 25% labels / 75% values using an inline `style="grid-template-columns: 25% 75%;"` since Tailwind's JIT arbitrary-value syntax (`grid-cols-[25%_75%]`) would require a build step.
+
+**Key points:**
+- **Editor panels: 40/60 instead of 50/50** — `w-1/2` replaced with `w-2/5` (config) and `w-3/5` (chat) in both `deployment_editor.html` and `environment_editor.html`. Chat panels benefit more from width; config cards are compact.
+- **Card dl grid: 25/75 instead of 50/50** — Inline style used instead of Tailwind arbitrary value to avoid needing a CSS rebuild. Applied to both `_app_section.html` and `_blueprint_section.html`.
+
 ## 2026-03-30 19:30 - [UI] Show env vars and secrets explicitly in Deployment Blueprint card
 
 **Conversation:** [2026-03-30-1724-68a7bff6.md](conversations/2026-03-30-1724-68a7bff6.md)
