@@ -36,11 +36,31 @@
             {% endif %}
             {% if blueprint.environment_variables %}
             <dt class="text-gray-500 dark:text-gray-400">Env vars</dt>
-            <dd class="text-gray-900 dark:text-white">{{ blueprint.environment_variables|length }} configured</dd>
+            <dd class="text-gray-900 dark:text-white">
+                <ul class="space-y-0.5 text-xs font-mono">
+                    {% for var in blueprint.environment_variables %}
+                    <li>
+                        <span class="text-gray-500 dark:text-gray-400">{{ var.name }}</span>
+                        <span class="text-gray-300 dark:text-gray-600">=</span>
+                        <span class="break-all">{{ var.value }}</span>
+                    </li>
+                    {% endfor %}
+                </ul>
+            </dd>
             {% endif %}
             {% if blueprint.app_secrets %}
             <dt class="text-gray-500 dark:text-gray-400">Secrets</dt>
-            <dd class="text-gray-900 dark:text-white">{{ blueprint.app_secrets|length }} configured</dd>
+            <dd class="text-gray-900 dark:text-white">
+                <ul class="space-y-0.5 text-xs font-mono">
+                    {% for key, val in blueprint.app_secrets.items %}
+                    <li>
+                        <span class="text-gray-500 dark:text-gray-400">{{ key }}</span>
+                        <span class="text-gray-300 dark:text-gray-600">=</span>
+                        <span class="text-gray-400 dark:text-gray-500">••••••••</span>
+                    </li>
+                    {% endfor %}
+                </ul>
+            </dd>
             {% endif %}
             {% if blueprint.status_message %}
             <dt class="text-gray-500 dark:text-gray-400">Status</dt>
