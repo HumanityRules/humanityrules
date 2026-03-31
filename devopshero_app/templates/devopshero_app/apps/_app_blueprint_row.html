@@ -1,11 +1,11 @@
-<tr id="blueprint-{{ blueprint.id }}"
+<tr x-data="{ open: false }" id="blueprint-{{ blueprint.id }}"
     {% if current_deployment.status == 'teardown_pending' or current_deployment.status == 'tearing_down' %}
         hx-get="{% url 'app_detail' app_slug=app.slug %}"
         hx-trigger="load delay:10s"
         hx-target="#main-content"
         hx-swap="innerHTML"
     {% endif %}>
-    <td class="w-full px-4 py-3 align-middle">
+    <td class="w-full px-4 py-3 align-top">
         <div class="min-w-0">
             <h3 class="text-sm font-medium text-gray-900 dark:text-white"><span class="text-xs text-gray-400 dark:text-gray-500">Environment:</span> <a href="{% url 'environment_detail' environment_id=blueprint.environment.id %}" hx-get="{% url 'environment_detail' environment_id=blueprint.environment.id %}" hx-target="#main-content" hx-swap="innerHTML" hx-push-url="true" class="text-indigo-600 dark:text-indigo-400 hover:underline">{{ blueprint.environment.name }}</a></h3>
             <p class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
@@ -19,17 +19,73 @@
                 <a href="{{ current_deployment.service_url }}" target="_blank" rel="noopener noreferrer" class="hover:underline">{{ current_deployment.service_url }}</a>
             </p>
             {% endif %}
+            <div class="mt-3 flex flex-wrap items-center">
+                <button @click="open = !open" type="button"
+                        class="inline-flex items-center gap-1 text-xs text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 cursor-pointer">
+                    <svg class="h-3 w-3 shrink-0 transition-transform duration-150" :class="{ 'rotate-90': open }" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7" />
+                    </svg>
+                    <span>Config</span>
+                </button>
+                <span x-show="!open" class="inline-flex items-center gap-1.5 ml-1 text-xs">
+                    {% if blueprint.datastore %}
+                    <span class="inline-flex items-center rounded bg-gray-100 dark:bg-gray-700 px-1.5 py-0.5 text-[10px] font-medium text-gray-600 dark:text-gray-300">{{ blueprint.datastore.name }}</span>
+                    {% endif %}
+                    <span class="inline-flex items-center rounded bg-gray-100 dark:bg-gray-700 px-1.5 py-0.5 text-[10px] font-medium text-gray-600 dark:text-gray-300">{{ blueprint.environment_variables|length|default:"0" }} env var{{ blueprint.environment_variables|length|pluralize }}</span>
+                    <span class="inline-flex items-center rounded bg-gray-100 dark:bg-gray-700 px-1.5 py-0.5 text-[10px] font-medium text-gray-600 dark:text-gray-300">{{ blueprint.app_secrets|length|default:"0" }} secret{{ blueprint.app_secrets|length|pluralize }}</span>
+                </span>
+                <div x-show="open" x-cloak
+                     x-transition:enter="transition ease-out duration-150"
+                     x-transition:enter-start="opacity-0"
+                     x-transition:enter-end="opacity-100"
+                     class="mt-2 w-full rounded-md border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/60 px-3 py-2">
+                    <dl class="grid gap-x-4 gap-y-1.5 text-xs" style="grid-template-columns: auto 1fr;">
+                        {% if blueprint.datastore %}
+                        <dt class="text-gray-500 dark:text-gray-400">Datastore</dt>
+                        <dd class="text-gray-900 dark:text-white font-medium">{{ blueprint.datastore.name }}</dd>
+                        {% endif %}
+                        <dt class="text-gray-500 dark:text-gray-400 pt-0.5">Env vars</dt>
+                        <dd class="text-gray-900 dark:text-white">
+                            {% if blueprint.environment_variables %}
+                            <ul class="space-y-0.5 font-mono text-[11px]">
+                                {% for var in blueprint.environment_variables %}
+                                <li>
+                                    <span class="text-gray-500 dark:text-gray-400">{{ var.name }}</span><span class="text-gray-300 dark:text-gray-600">=</span><span class="break-all">{{ var.value }}</span>
+                                </li>
+                                {% endfor %}
+                            </ul>
+                            {% else %}
+                            <span class="text-gray-400 dark:text-gray-500 italic">None</span>
+                            {% endif %}
+                        </dd>
+                        <dt class="text-gray-500 dark:text-gray-400 pt-0.5">Secrets</dt>
+                        <dd class="text-gray-900 dark:text-white">
+                            {% if blueprint.app_secrets %}
+                            <ul class="space-y-0.5 font-mono text-[11px]">
+                                {% for key, val in blueprint.app_secrets.items %}
+                                <li>
+                                    <span class="text-gray-500 dark:text-gray-400">{{ key }}</span><span class="text-gray-300 dark:text-gray-600">=</span><span class="text-gray-400 dark:text-gray-500">••••••••</span>
+                                </li>
+                                {% endfor %}
+                            </ul>
+                            {% else %}
+                            <span class="text-gray-400 dark:text-gray-500 italic">None</span>
+                            {% endif %}
+                        </dd>
+                    </dl>
+                </div>
+            </div>
         </div>
     </td>
-    <td class="px-2 py-3 text-center align-middle whitespace-nowrap">
+    <td class="px-2 py-3 text-center align-top whitespace-nowrap">
         {% include "devopshero_app/partials/_status_pill.html" with status=current_deployment.status label=current_deployment.get_status_display only %}
     </td>
-    <td class="px-2 py-3 text-center align-middle">
+    <td class="px-2 py-3 text-center align-top">
         <div>
             <span class="text-xs leading-4 whitespace-nowrap text-gray-500 dark:text-gray-400">{{ current_deployment.created_at|timesince }} ago</span>
         </div>
     </td>
-    <td class="px-4 py-3 align-middle whitespace-nowrap">
+    <td class="px-4 py-3 align-top whitespace-nowrap">
         <div class="flex min-w-0 flex-col items-start gap-1">
             {% if current_deployment.status == 'succeeded' %}
             <button hx-post="{% url 'app_deployment_redeploy' app_slug=app.slug deployment_id=current_deployment.id %}"

@@ -127,7 +127,7 @@ def _build_deployed_environment_rows(app: App) -> list[DeployedEnvironmentRow]:
     blueprints = list(
         DeploymentBlueprint.objects.filter(app=app)
         .exclude(status=DeploymentBlueprint.Status.DISCARDED)
-        .select_related("environment", "environment__aws_account")
+        .select_related("environment", "environment__aws_account", "datastore")
         .annotate(
             current_deployment_id=Subquery(current_deployment_id_subquery),
             current_deployment_created_at=Subquery(current_deployment_created_at_subquery),
