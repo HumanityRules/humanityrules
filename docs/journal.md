@@ -1,5 +1,19 @@
 # DevOpsHero Development Journal
 
+## 2026-03-30 19:30 - [UI] Show env vars and secrets explicitly in Deployment Blueprint card
+
+**Conversation:** [2026-03-30-1724-68a7bff6.md](conversations/2026-03-30-1724-68a7bff6.md)
+
+The Deployment Blueprint card in the Deployment Editor was displaying env vars and secrets as a terse "N configured" summary. The request was to show them explicitly so developers can verify the exact values being deployed.
+
+Two options were considered: (A) inline key-value lists within the existing `<dl>` grid; (B) separate full-width sub-sections below the grid. Option B was implemented first, but after visual review it felt disconnected from the rest of the card's compact grid layout. Option A was then implemented instead, keeping everything inside the `<dl>` while putting the list in the `<dd>` column.
+
+**Key points:**
+- **Option A chosen** — Env vars and secrets remain as `<dt>`/`<dd>` rows inside the `grid-cols-2 <dl>`. The `<dd>` holds a `<ul class="space-y-0.5 text-xs font-mono">` listing each entry as `name=value`. This keeps the field visually consistent with all other scalar properties (Branch, CPU, Memory, etc.) and preserves the card's compact feel.
+- **Secret values masked** — Secrets render as `key=••••••••` with a muted color (`text-gray-400`). The `app_secrets` field is a dict (key → value) while `environment_variables` is a list of `{name, value}` objects, so iteration differs: `{% for key, val in blueprint.app_secrets.items %}` vs `{% for var in blueprint.environment_variables %}`.
+- **`break-all` on env var values** — Long values (e.g. base64-encoded tokens) get `break-all` to avoid overflowing the card width.
+- **Option B trade-off** — Full-width sub-sections below the grid looked visually disconnected and added structural complexity. The grid imbalance (tall `<dd>` vs short `<dt>`) in Option A is acceptable given that the list items are tiny (`text-xs`) and the card is already variable-height.
+
 ## 2026-03-30 18:52 - [UI] Replace browser prompt() with proper modal for workspace creation
 
 **Conversation:** [2026-03-30-1653-adec5b6d.md](conversations/2026-03-30-1653-adec5b6d.md)
