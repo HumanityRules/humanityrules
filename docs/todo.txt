@@ -1,1 +1,0 @@
-- Lost connections, env vars, secrets in the App Detail view. Need to introduce Blueprints?
