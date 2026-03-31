@@ -1,5 +1,25 @@
 # DevOpsHero Development Journal
 
+## 2026-03-30 18:11 - [Deployment] App detail: blueprint config accordion (datastore, env vars, secrets)
+
+**Conversation:** [2026-03-30-1811-43994b69.md](conversations/2026-03-30-1811-43994b69.md)
+
+Runtime configuration (datastore link, environment variables, app secrets) moved from `App` to `DeploymentBlueprint`, but the app detail page still only showed source/build/container and a per-environment deployment row without that data. The deployment editor’s `_blueprint_section.html` already listed these fields for a single blueprint; the gap was read-only visibility on the app detail “Deployed to Environments” table.
+
+**Rendering options** were compared: (A) expandable rows, (B) tabs per environment, (C) merged/diff view across environments, (D) separate sections per config type, (E) link out to a dedicated page. **Option A (accordion)** was chosen — minimal layout change, one row per environment already matches one blueprint, and comparison across envs is still possible by expanding multiple rows.
+
+**Implementation:** `_app_blueprint_row.html` got Alpine `x-data="{ open: false }"` on the `<tr>`, a “Config” disclosure with chevron, collapsed summary pills (env var count, secret count, datastore name when set), and an expanded panel with the same presentation style as the deployment editor (env vars as `name=value`, secrets masked). `_build_deployed_environment_rows` in `views/apps.py` now `select_related("datastore")` to avoid N+1 queries.
+
+**Clarification:** `_app_deployment_row.html` uses `mode` (`app_history`, `workspace`, `environment`); `_app_blueprint_row.html` is only included from `app_detail.html` and has no mode parameter.
+
+**Follow-ups:** Config block is always visible — pills show “0 env vars” / “0 secrets” when empty; expanded panel shows “None” for empty lists. The summary row uses `flex items-center` so “Config” and pills align vertically; `mt-3` separates the block from the URL line above. Temporary test data on a local blueprint was used to verify the UI, then cleared.
+
+**Key points:**
+- **Option A accordion** — Per-environment blueprint config in the existing table row; no new routes or tabs.
+- **`select_related("datastore")`** — Blueprint query in `_build_deployed_environment_rows` loads datastore names in one round trip.
+- **Always-on summary** — Users always see counts (including zeros); empty expanded sections show italic “None”.
+- **`_app_blueprint_row` vs `_app_deployment_row`** — Only the deployment row partial is multi-mode; blueprint row is app-detail specific.
+
 ## 2026-03-30 20:00 - [UI] Adjust column widths in Deployment and Environment editors
 
 **Conversation:** [2026-03-30-1735-78f436aa.md](conversations/2026-03-30-1735-78f436aa.md)
