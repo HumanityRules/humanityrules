@@ -1,22 +1,22 @@
 # Project synopsis
 
-**DevOps Hero** is a platform designed to make deploying internal tools to a company's private cloud (VPC) as easy as using Heroku, Render, or Railway, while maintaining enterprise security and compliance.
+**DevOps Hero** (DOH) is an AI-native, self-serve deployment platform for internal apps. It lets anyone in the company who can vibe-code an app deploy it to the company’s AWS infrastructure in minutes — with governance, compliance, and security built in from the start.
 
-- **The Problem:** While AI has made building apps faster than ever, deploying them internally is still a bottleneck due to complex requirements like IAM permissions, SSO integration, VPC networking, and compliance checks.
-- **The Solution:** An AI-powered "co-pilot" that automates the deployment process and governance, allowing developers to ship internal apps in minutes rather than weeks.
-- **Key Features:**
-    - **Automated Infrastructure:** Deploys directly to your company’s VPC without requiring manual Terraform or YAML wrestling.
-    - **AI-Assisted Security:** Uses an AI wizard to configure IAM permissions and set up approval chains.
-    - **Built-in SDK:** Provides out-of-the-box integration for SSO, Role-Based Access Control (RBAC), and standardized logging/metrics.
-    - **Governance:** Includes approval flows for sensitive changes to ensure compliance.
-- **Target Audience:** It aims to empower Full Stack Engineers, Data Scientists, Machine Learning Engineers, and Business staff to "vibe-code" and ship tools independently, while giving DevOps teams the control and standardization they need.
+- **The Problem:** Vibe-coding has made building internal apps dramatically faster, but deploying them inside a company’s infrastructure is still a weeks-long bottleneck. Permissions, SSO, networking, approval chains, audit readiness — the gap between "it works on my laptop" and "people in the company can use it" kills momentum and buries good ideas.
+- **The Solution:** An AI-native deployment platform that handles the entire journey from code to production. The AI drives the deployment process: it configures infrastructure, sets up least-privilege IAM permissions, wires up networking, and guides users through approval workflows — all inside the company’s own AWS account.
+- **Two equal pillars:**
+    - **Fast self-serve deployment:** Deploy directly to your company’s VPC without writing Terraform, YAML, or opening tickets. The AI handles infrastructure provisioning, networking, and configuration.
+    - **Built-in governance:** Approval chains, audit trails, least-privilege IAM, and policy enforcement are automatic — not bolted on after the fact. DevOps, security, and compliance teams get the control and visibility they need without being a bottleneck.
+- **Target Audience:** Anyone in the company capable of vibe-coding an app — engineers, data scientists, operations staff, business analysts. The platform makes it possible for them to quickly deploy and share their work with the company, while keeping the DevOps team, the CIO, the CISO, and the auditors happy.
+- **Cloud:** AWS-first (ECS/Fargate, CloudFormation/CDK). Additional cloud providers may follow.
+- **Stage:** Pre-beta. Features are paused while we validate the core idea with potential customers. Ideal Customer Profile is being defined through discovery conversations.
 
-DevOps Hero is your vibe-deploying platform. With DevOps Hero, ship; let bots assist.
+With DevOps Hero, ship; let bots assist.
 Because your code deserves to be running in production, not stuck on your laptop.
 
-Built with ❤️ to make DevOps accessible to everyone.
+Built with ❤️ to make deployment accessible to everyone.
 
-We abbrebrivate the name of DevOps Hero as DOH.
+We abbreviate the name of DevOps Hero as DOH.
 
 
 # Running Python Commands
