@@ -1,6 +1,6 @@
 # Project synopsis
 
-**DevOps Hero** (DOH) is an AI-native, self-serve deployment platform for internal apps. It lets anyone in the company who can vibe-code an app deploy it to the company’s AWS infrastructure in minutes — with governance, compliance, and security built in from the start.
+**DevOps Hero** (DOH) is an AI-native, deployment platform for internal apps. It lets anyone in the company who can vibe-code an app deploy it to the company’s AWS infrastructure in minutes — with governance, compliance, and security built in from the start.
 
 - **The Problem:** Vibe-coding has made building internal apps dramatically faster, but deploying them inside a company’s infrastructure is still a weeks-long bottleneck. Permissions, SSO, networking, approval chains, audit readiness — the gap between "it works on my laptop" and "people in the company can use it" kills momentum and buries good ideas.
 - **The Solution:** An AI-native deployment platform that handles the entire journey from code to production. The AI drives the deployment process: it configures infrastructure, sets up least-privilege IAM permissions, wires up networking, and guides users through approval workflows — all inside the company’s own AWS account.
