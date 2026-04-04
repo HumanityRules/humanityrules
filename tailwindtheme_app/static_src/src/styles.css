@@ -12,6 +12,16 @@
   */
 @source "../../../**/*.{html,py,js}";
 
+/* Default pointer on interactive buttons; use cursor-default / disabled:cursor-not-allowed where needed. */
+@layer base {
+  button:enabled {
+    cursor: pointer;
+  }
+  button:disabled {
+    cursor: not-allowed;
+  }
+}
+
 /* ===== Custom Colors for Landing Page ===== */
 @theme {
   --color-navy-900: #0a0f1c;
