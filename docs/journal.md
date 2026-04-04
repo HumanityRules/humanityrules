@@ -1,5 +1,20 @@
 # DevOpsHero Development Journal
 
+## 2026-04-04 11:43 - [UI] Global button cursor (pointer / not-allowed) and cleanup
+
+**Conversation:** [2026-04-04-1143-e821ff2e.md](conversations/2026-04-04-1143-e821ff2e.md)
+
+Interactive affordance for buttons was inconsistent: many `<button>` elements lacked Tailwind `cursor-pointer`, so the default arrow cursor appeared even on clickable controls. Fixing every instance in templates would be noisy and easy to miss.
+
+**Approach:** Add a single `@layer base` block in `tailwindtheme_app/static_src/src/styles.css`: `button:enabled { cursor: pointer; }` and `button:disabled { cursor: not-allowed; }`, then rebuild with `uv run manage.py tailwind build`. Tailwind utilities such as `cursor-default` or `disabled:cursor-not-allowed` still override the base rule when needed (e.g. the custom dropdown trigger that intentionally uses `cursor-default`).
+
+**Follow-up:** After the global rule existed, redundant `cursor-pointer` classes were removed from `<button>` elements across several templates (editors, modals, security hub, tags, blueprint row, repo picker, etc.). Non-`<button>` interactive nodes still need explicit cursors where the global rule does not apply: `<summary>` for `<details>`, text inputs used as combobox triggers, clickable `<div>` wrappers, and `<svg>` chevrons.
+
+**Key points:**
+- **Base-layer `button` cursors** — One place to define default pointer for enabled buttons and not-allowed for disabled, without per-component repetition.
+- **Utilities override base** — Keep `cursor-default` or other `cursor-*` on elements that must not show a hand (e.g. select-like triggers).
+- **Strip redundant `cursor-pointer` from buttons only** — Leave `cursor-pointer` on non-button elements that are not covered by the `button` selector.
+
 ## 2026-03-30 18:11 - [Deployment] App detail: blueprint config accordion (datastore, env vars, secrets)
 
 **Conversation:** [2026-03-30-1811-43994b69.md](conversations/2026-03-30-1811-43994b69.md)

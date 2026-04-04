@@ -35,7 +35,7 @@
                     <div class="flex items-center gap-2">
                     {# Refresh resources button #}
                     <button type="button"
-                            class="refresh-resources-btn inline-flex items-center gap-1.5 rounded-md border border-gray-300 px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:text-gray-300 dark:hover:bg-gray-800 cursor-pointer"
+                            class="refresh-resources-btn inline-flex items-center gap-1.5 rounded-md border border-gray-300 px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:text-gray-300 dark:hover:bg-gray-800"
                             hx-post="{% url 'security_permissions_editor_refresh_resources' app_permission_request_id=app_permission_request.id %}"
                             hx-target="#statements-container"
                             hx-swap="innerHTML"
@@ -48,7 +48,7 @@
                     {# Add service button + picker dropdown #}
                     <div class="relative" id="service-picker-wrapper">
                         <button type="button" id="add-service-btn"
-                                class="rounded-md border border-indigo-200 px-3 py-1.5 text-xs font-medium text-indigo-700 hover:bg-indigo-50 dark:border-indigo-500/40 dark:text-indigo-300 dark:hover:bg-indigo-500/10 cursor-pointer">
+                                class="rounded-md border border-indigo-200 px-3 py-1.5 text-xs font-medium text-indigo-700 hover:bg-indigo-50 dark:border-indigo-500/40 dark:text-indigo-300 dark:hover:bg-indigo-500/10">
                             + Add service
                         </button>
                         <div id="service-picker-dropdown" class="hidden absolute right-0 top-full z-50 mt-1 w-72 rounded-lg border border-gray-200 bg-white shadow-lg dark:border-gray-700 dark:bg-gray-900">
@@ -96,7 +96,7 @@
                 {# Action buttons #}
                 <div class="mt-5 flex items-center justify-end gap-3">
                     <button type="button" id="cancel-btn"
-                            class="rounded-md border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:text-gray-300 dark:hover:bg-gray-800 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+                            class="rounded-md border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:text-gray-300 dark:hover:bg-gray-800 disabled:opacity-50 disabled:cursor-not-allowed"
                             {% if not has_changes %}disabled{% endif %}
                             hx-post="{% url 'security_permissions_editor_cancel' app_permission_request_id=app_permission_request.id %}"
                             hx-target="#statements-container"
@@ -105,7 +105,7 @@
                         Cancel
                     </button>
                     <button type="button" id="apply-btn"
-                            class="rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+                            class="rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed"
                             {% if not has_changes %}disabled{% endif %}
                             hx-post="{% url 'security_permissions_editor_apply' app_permission_request_id=app_permission_request.id %}"
                             hx-swap="none"

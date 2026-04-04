@@ -48,7 +48,7 @@
                 <div>
                     <button type="button"
                             @click="openId = openId === '{{ pr.id }}' ? null : '{{ pr.id }}'"
-                            class="flex w-full items-center justify-between gap-4 px-3 py-2.5 hover:bg-gray-50 dark:hover:bg-gray-700/40 cursor-pointer">
+                            class="flex w-full items-center justify-between gap-4 px-3 py-2.5 hover:bg-gray-50 dark:hover:bg-gray-700/40">
                         <div class="min-w-0 text-left">
                             <p class="truncate text-sm font-medium text-gray-900 dark:text-white">{{ pr.app.name }} / {{ pr.environment.name }}</p>
                             <p class="text-xs text-gray-500 dark:text-gray-400">{{ pr.statements|length }} statement{{ pr.statements|length|pluralize }} · {{ pr.created_at|timesince }} ago{% if pr.created_by %} · {{ pr.created_by }}{% endif %}</p>
