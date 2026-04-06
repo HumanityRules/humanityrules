@@ -25,10 +25,13 @@ from .settings import (
     settings,
     settings_personal,
     settings_organization,
-    settings_aws_accounts,
-    settings_aws_accounts_add,
     settings_billing,
-    settings_git_integrations,
+)
+from .integrations import (
+    integrations_root,
+    integrations_aws_accounts,
+    integrations_aws_accounts_add,
+    integrations_git_integrations,
 )
 from .partials import random_quote, switch_organization
 from .auth import auth_login, auth_callback, auth_logout, oidc_login, oidc_callback, dev_login
@@ -121,10 +124,11 @@ __all__ = [
     "settings",
     "settings_personal",
     "settings_organization",
-    "settings_aws_accounts",
-    "settings_aws_accounts_add",
     "settings_billing",
-    "settings_git_integrations",
+    "integrations_root",
+    "integrations_aws_accounts",
+    "integrations_aws_accounts_add",
+    "integrations_git_integrations",
     "random_quote",
     "switch_organization",
     "auth_login",

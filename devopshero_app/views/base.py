@@ -1,8 +1,17 @@
 from django.conf import settings as django_settings
+from django.http import HttpResponseForbidden
 from django.templatetags.static import static
 
 from ..models import OrganizationMembership
 from ..services import abac
+
+
+def require_org_admin(request):
+    """Return a 403 response if the user is not an org admin, or None if allowed."""
+    org = request.user.current_organization
+    if abac.is_org_admin(organization=org, user=request.user):
+        return None
+    return HttpResponseForbidden("You do not have permission to access this page.")
 
 
 def get_app_shell_context(request, current_page):
@@ -15,7 +24,8 @@ def get_app_shell_context(request, current_page):
     """
     user = request.user
     current_org = user.current_organization
-    
+    user_is_org_admin = abac.is_org_admin(organization=current_org, user=user)
+
     # Get user's organizations via memberships
     memberships = OrganizationMembership.objects.filter(user=user).select_related('organization')
     user_organizations = [
@@ -30,9 +40,21 @@ def get_app_shell_context(request, current_page):
         {"name": "Dashboard", "url": "/dashboard/", "icon": "dashboard", "is_active": current_page == "dashboard"},
         {"name": "Workspaces", "url": "/workspaces/", "icon": "workspaces", "is_active": current_page == "workspaces"},
         {"name": "Environments", "url": "/environments/", "icon": "environments", "is_active": current_page == "environments"},
-        {"name": "Security", "url": "/security/hub/", "icon": "security", "is_active": current_page == "security"},
-        {"name": "Settings", "url": "/settings/", "icon": "settings", "is_active": current_page == "settings"},
+        {"name": "Security", "url": "/security/hub/", "icon": "security", "is_active": current_page == "security", "nav_highlight_prefix": "/security/"},
     ]
+    if user_is_org_admin:
+        navigation_items.append(
+            {
+                "name": "Integrations",
+                "url": "/integrations/aws-accounts/",
+                "icon": "integrations",
+                "is_active": current_page == "integrations",
+                "nav_highlight_prefix": "/integrations/",
+            },
+        )
+    navigation_items.append(
+        {"name": "Settings", "url": "/settings/", "icon": "settings", "is_active": current_page == "settings"},
+    )
     
     profile_menu_items = [
         {"name": "Your profile", "url": "/settings/personal/"},
@@ -62,6 +84,6 @@ def get_app_shell_context(request, current_page):
         "search_url": "/search/",
         "site_logo_url": static('devopshero_app/devops-hero-logo-large.png'),
         "site_name": "DevOps Hero",
-        "user_is_org_admin": abac.is_org_admin(organization=current_org, user=user),
+        "user_is_org_admin": user_is_org_admin,
         "debug": django_settings.DEBUG,
     }

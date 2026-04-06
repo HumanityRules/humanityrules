@@ -62,8 +62,8 @@
         {% else %}
         {% if user_is_org_admin %}
         <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">Connect an AWS account first, then create an environment.</p>
-        <a href="{% url 'settings_aws_accounts' %}"
-           hx-get="{% url 'settings_aws_accounts' %}"
+        <a href="{% url 'integrations_aws_accounts' %}"
+           hx-get="{% url 'integrations_aws_accounts' %}"
            hx-target="#main-content"
            hx-swap="innerHTML"
            hx-push-url="true"
