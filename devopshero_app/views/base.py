@@ -40,7 +40,7 @@ def get_app_shell_context(request, current_page):
         {"name": "Dashboard", "url": "/dashboard/", "icon": "dashboard", "is_active": current_page == "dashboard"},
         {"name": "Workspaces", "url": "/workspaces/", "icon": "workspaces", "is_active": current_page == "workspaces"},
         {"name": "Environments", "url": "/environments/", "icon": "environments", "is_active": current_page == "environments"},
-        {"name": "Security", "url": "/security/hub/", "icon": "security", "is_active": current_page == "security", "nav_highlight_prefix": "/security/"},
+        {"name": "Security", "url": "/security/hub/", "icon": "security", "is_active": current_page == "security"},
     ]
     if user_is_org_admin:
         navigation_items.append(
@@ -49,7 +49,6 @@ def get_app_shell_context(request, current_page):
                 "url": "/integrations/aws-accounts/",
                 "icon": "integrations",
                 "is_active": current_page == "integrations",
-                "nav_highlight_prefix": "/integrations/",
             },
         )
     navigation_items.append(
