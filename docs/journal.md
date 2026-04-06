@@ -1,5 +1,18 @@
 # DevOpsHero Development Journal
 
+## 2026-04-05 17:54 - [UI] Simplify sidebar active-state highlighting to first-segment matching
+
+**Conversation:** [2026-04-05-1748-47685f06.md](conversations/2026-04-05-1748-47685f06.md)
+
+The sidebar JS used `location.pathname.startsWith(link.dataset.navUrl)` to highlight the active nav item. This broke for sections where the link target is deeper than the section root (e.g., Security links to `/security/hub/` but sub-pages like `/security/people/` don't start with `/security/hub/`). A `nav_highlight_prefix` override was added during the Integrations work to paper over this, but it added a field to Python nav dicts, a `|default:` filter in the template, and per-item special casing.
+
+Since every sidebar section maps to a unique first path segment, the fix is simpler: compare just the first segment (`location.pathname.split('/')[1] === link.dataset.navUrl.split('/')[1]`). This lets `nav_highlight_prefix` be removed entirely from both the Python context and the template.
+
+**Key points:**
+- **Root cause** — `startsWith` with a deep URL (`/security/hub/`) can't match sibling paths (`/security/people/`)
+- **First-segment match** — All sidebar sections have unique first segments (`dashboard`, `workspaces`, `environments`, `security`, `integrations`, `settings`), so comparing `split('/')[1]` is sufficient
+- **Removed** — `nav_highlight_prefix` from nav item dicts in `base.py`, `|default:` filter from `_sidebar_nav.html`
+
 ## 2026-04-05 17:48 - [UI] Move AWS Accounts and Git Integrations to new Integrations sidebar entry
 
 **Conversation:** [2026-04-05-1748-47685f06.md](conversations/2026-04-05-1748-47685f06.md)

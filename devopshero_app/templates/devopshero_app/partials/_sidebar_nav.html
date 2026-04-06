@@ -15,7 +15,7 @@ Expected context:
      hx-swap="innerHTML transition:true"
      hx-push-url="true"
      class="nav-link group flex gap-x-3 rounded-md p-2 text-sm/6 font-semibold {% if item.is_active %}bg-white/5 text-white{% else %}text-gray-400 hover:bg-white/5 hover:text-white{% endif %}"
-     data-nav-url="{{ item.nav_highlight_prefix|default:item.url }}">
+     data-nav-url="{{ item.url }}">
     {% include "devopshero_app/partials/icons/"|add:item.icon|add:".html" %}
     {{ item.name }}
   </a>
@@ -55,7 +55,7 @@ if (!window._navHighlightInit) {
     window._navHighlightInit = true;
     function updateNavHighlight() {
         document.querySelectorAll('.nav-link').forEach(link => {
-            const isActive = location.pathname.startsWith(link.dataset.navUrl);
+            const isActive = location.pathname.split('/')[1] === link.dataset.navUrl.split('/')[1];
             link.classList.toggle('bg-white/5', isActive);
             link.classList.toggle('text-white', isActive);
             link.classList.toggle('text-gray-400', !isActive);
