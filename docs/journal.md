@@ -1,5 +1,25 @@
 # DevOpsHero Development Journal
 
+## 2026-04-05 17:48 - [UI] Move AWS Accounts and Git Integrations to new Integrations sidebar entry
+
+**Conversation:** [2026-04-05-1748-47685f06.md](conversations/2026-04-05-1748-47685f06.md)
+
+AWS Accounts and Git Integrations were tabs under Settings, mixing org-level external-service configuration with personal/billing settings. Moved them to a new top-level "Integrations" section with its own sidebar entry, URL namespace (`/integrations/`), and tabbed UI (AWS Accounts as default tab, Git Integrations as second tab).
+
+**Key decisions:**
+
+- **Sidebar visibility gated by org-admin** — Non-admins don't see the Integrations entry, matching the previous Settings tab behavior where those tabs were inside an `{% if user_is_org_admin %}` block.
+- **No backward-compatibility redirects** — Pre-beta product, no external consumers of old URLs. Clean break: old `/settings/aws-accounts/` and `/settings/git-integrations/` routes removed entirely.
+- **`nav_highlight_prefix` for sidebar active state** — The sidebar JS uses `location.pathname.startsWith(data-nav-url)` to highlight the active item. Integrations links to `/integrations/aws-accounts/` (the default tab), but sub-pages like `/integrations/git-integrations/` wouldn't match. Added an optional `nav_highlight_prefix` field to nav items; the template uses `item.nav_highlight_prefix|default:item.url` for `data-nav-url`, so the Integrations sidebar stays active across all `/integrations/*` pages.
+- **Shared `require_org_admin` in `base.py`** — Previously `_require_org_admin` was a private helper in `settings.py`. With both `settings.py` and `integrations.py` needing it, moved to `base.py` as a public function to avoid cross-module private imports.
+
+**Key points:**
+- Settings now only has Personal, Organization, and Billing tabs (org admin gated for the latter two)
+- New `views/integrations.py` module with 4 views: root redirect, aws_accounts, aws_accounts_add, git_integrations
+- Templates under `integrations/` follow the same `extends` pattern as Settings (base tab shell + content blocks)
+- GitHub OAuth callback in `views/github.py` updated to redirect to `/integrations/git-integrations/`
+- Cross-references in `environments.html` ("Connect AWS Account") and `_repo_picker_modal.html` ("Connect GitHub") updated to new URL names
+
 ## 2026-04-04 11:43 - [UI] Global button cursor (pointer / not-allowed) and cleanup
 
 **Conversation:** [2026-04-04-1143-e821ff2e.md](conversations/2026-04-04-1143-e821ff2e.md)

@@ -102,9 +102,9 @@ def github_callback(request):
                 "status": GitProviderIntegration.Status.ERROR,
             },
         )
-        return redirect("/settings/git-integrations/?error=connection_failed")
+        return redirect("/integrations/git-integrations/?error=connection_failed")
 
-    return redirect("/settings/git-integrations/")
+    return redirect("/integrations/git-integrations/")
 
 
 @csrf_exempt

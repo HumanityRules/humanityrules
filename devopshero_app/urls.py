@@ -1,4 +1,5 @@
 from django.urls import path
+
 from . import views
 
 urlpatterns = [
@@ -79,10 +80,11 @@ urlpatterns = [
     path("settings/", views.settings, name="settings"),
     path("settings/personal/", views.settings_personal, name="settings_personal"),
     path("settings/organization/", views.settings_organization, name="settings_organization"),
-    path("settings/aws-accounts/", views.settings_aws_accounts, name="settings_aws_accounts"),
-    path("settings/aws-accounts/add/", views.settings_aws_accounts_add, name="settings_aws_accounts_add"),
     path("settings/billing/", views.settings_billing, name="settings_billing"),
-    path("settings/git-integrations/", views.settings_git_integrations, name="settings_git_integrations"),
+    path("integrations/", views.integrations_root, name="integrations_root"),
+    path("integrations/aws-accounts/", views.integrations_aws_accounts, name="integrations_aws_accounts"),
+    path("integrations/aws-accounts/add/", views.integrations_aws_accounts_add, name="integrations_aws_accounts_add"),
+    path("integrations/git-integrations/", views.integrations_git_integrations, name="integrations_git_integrations"),
     path("random-quote/", views.random_quote, name="random_quote"),
     path("switch-organization/", views.switch_organization, name="switch_organization"),
 
