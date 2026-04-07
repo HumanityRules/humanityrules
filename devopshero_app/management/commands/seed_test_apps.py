@@ -49,6 +49,7 @@ MOCK_ORGS = [
                 "environments": [
                     {"name": "production", "slug": "production", "aws_region": "us-east-1", "status": Environment.Status.READY},
                     {"name": "staging", "slug": "staging", "aws_region": "us-west-2", "status": Environment.Status.READY},
+                    {"name": "dev", "slug": "dev", "aws_region": "us-east-1", "status": Environment.Status.READY},
                 ],
             },
         ],
@@ -69,7 +70,6 @@ MOCK_ORGS = [
             },
         ],
         "repositories": [
-            _github_repo("ml-model-api"),
             _github_repo("job-processor"),
             _github_repo("file-processor"),
             _github_repo("fastapi-app"),
@@ -103,17 +103,6 @@ MOCK_ORGS = [
             },
         ],
         "apps": [
-            {
-                "workspace_slug": "data-platform",
-                "repo_full_name": "vmendi/ml-model-api",
-                "name": "Prism Scoring Engine",
-                "slug": "prism-scoring-engine",
-                "app_type": "web",
-                "build_strategy": "dockerfile",
-                "branch": "main",
-                "container_port": 8000,
-                "health_check_path": "/health",
-            },
             {
                 "workspace_slug": "data-platform",
                 "repo_full_name": "vmendi/job-processor",
@@ -167,17 +156,6 @@ MOCK_ORGS = [
                 "build_strategy": "dockerfile",
                 "branch": "main",
                 "container_port": 4000,
-                "health_check_path": "/health",
-            },
-            {
-                "workspace_slug": "finance",
-                "repo_full_name": "vmendi/django-postgres-app",
-                "name": "Ledgerline Expense Tracker",
-                "slug": "ledgerline-expense-tracker",
-                "app_type": "web",
-                "build_strategy": "dockerfile",
-                "branch": "main",
-                "container_port": 8000,
                 "health_check_path": "/health",
             },
             {
@@ -328,6 +306,8 @@ class Command(BaseCommand):
                     if other_org:
                         user.current_organization = other_org
                         user.save()
+                    else:
+                        user.delete()
                 App.objects.filter(organization=org).delete()
                 org.delete()
                 self.stdout.write(f"  Deleted org: {slug}")

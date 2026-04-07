@@ -39,6 +39,12 @@ MERIDIAN_SLUG = "meridian-systems"
 HOSTED_ZONE = "meridian.devopshero.com"
 SEED_EMAIL_DOMAIN = "meridiansystems.com"
 
+BRANCH_TO_ENV_SLUG = {
+    "main": "production",
+    "staging": "staging",
+    "dev": "dev",
+}
+
 GROUPS_FROM_SEED_TEST_GROUPS = {
     "Engineering", "Data Science", "Security", "DevOps", "Product",
     "QA", "Contractors", "Admins", "Auditors",
@@ -74,21 +80,6 @@ DEMO_POLICIES = [
 ]
 
 APP_DEPLOY_CONFIGS = {
-    "prism-scoring-engine": {
-        "cpu": 1024,
-        "memory": 2048,
-        "subdomain": "prism-scoring-engine",
-        "env_vars": [
-            {"name": "MODEL_VERSION", "value": "v2.4.1"},
-            {"name": "BATCH_SIZE", "value": "64"},
-        ],
-        "secrets": {"API_KEY": "sk-prod-xxxxx", "DB_PASSWORD": "xxxxx"},
-        "commit_message": "feat: add batch prediction endpoint",
-        "permissions": [
-            {"service": "S3", "effect": "Allow", "access_levels": ["Read"], "resources": ["arn:aws:s3:::meridian-ml-models/*"]},
-            {"service": "DynamoDB", "effect": "Allow", "access_levels": ["Read", "Write"], "resources": ["arn:aws:dynamodb:us-east-1:111222333444:table/feature-store"]},
-        ],
-    },
     "catalyst-etl-runner": {
         "cpu": 512,
         "memory": 1024,
@@ -158,21 +149,6 @@ APP_DEPLOY_CONFIGS = {
         "secrets": {"API_KEY": "sk-prod-xxxxx"},
         "commit_message": "feat: add query caching layer",
         "permissions": [],
-    },
-    "ledgerline-expense-tracker": {
-        "cpu": 512,
-        "memory": 1024,
-        "subdomain": "ledgerline-expense-tracker",
-        "env_vars": [
-            {"name": "DATABASE_URL", "value": "postgresql://ledger_db:5432/expenses"},
-            {"name": "ALLOWED_HOSTS", "value": "ledgerline-expense-tracker.meridian.devopshero.com"},
-        ],
-        "secrets": {"DB_PASSWORD": "xxxxx", "DJANGO_SECRET_KEY": "xxxxx"},
-        "commit_message": "feat: add receipt OCR upload",
-        "permissions": [
-            {"service": "S3", "effect": "Allow", "access_levels": ["Read", "Write"], "resources": ["arn:aws:s3:::meridian-expense-receipts/*"]},
-            {"service": "Textract", "effect": "Allow", "access_levels": ["Read"], "resources": ["*"]},
-        ],
     },
     "reconciliation-runner": {
         "cpu": 256,
@@ -324,19 +300,20 @@ class Command(BaseCommand):
                 self.stdout.write(self.style.WARNING(f"  Skipping {app.slug} — no deploy config"))
                 continue
 
+            branch = config.get("branch", "main")
+            env_slug = BRANCH_TO_ENV_SLUG.get(branch, "production")
+
             env = Environment.objects.filter(
                 aws_account__organization=org,
-                slug="production",
+                slug=env_slug,
             ).first()
             if env is None:
-                self.stdout.write(self.style.WARNING("  No production environment found, skipping"))
+                self.stdout.write(self.style.WARNING(f"  No '{env_slug}' environment found, skipping"))
                 return
 
             if DeploymentBlueprint.objects.filter(app=app, environment=env).exists():
                 self.stdout.write(f"  Skipping {app.slug} — blueprint already exists for {env.name}")
                 continue
-
-            branch = config.get("branch", "main")
 
             if app.branch != branch:
                 app.branch = branch

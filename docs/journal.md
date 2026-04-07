@@ -1,5 +1,19 @@
 # DevOpsHero Development Journal
 
+## 2026-04-07 09:17 - [DevEx] Meridian demo seed: slimmer app list, dev env, branch→environment, workspaces UI
+
+**Conversation:** [2026-04-07-0917-c2234d7f.md](conversations/2026-04-07-0917-c2234d7f.md)
+
+Follow-up on `seed_prepare_demo` / Meridian demo data: removed Prism Scoring Engine and Ledgerline Expense Tracker (and the unused `ml-model-api` repo) so the dashboard is less crowded. Added a third Meridian environment `dev` (slug `dev`, same AWS account as production/staging, `us-east-1`) and taught `seed_prepare_demo` to place each fake deployment on the environment that matches the app’s git branch: `main` → production, `staging` → staging, `dev` → dev. This aligns the data model with how we tell the “which branch / which environment” story in the video.
+
+**`seed_test_apps --reset` and demo users:** Deleting mock orgs failed when `seed_prepare_demo` had created `@meridiansystems.com` users whose only org was Meridian — Django blocks deleting the org while those users still point at it (`ProtectedError`), and `current_organization` is non-null (`IntegrityError` if cleared). Fix: for each user with `current_organization` set to the org being deleted, reassign to another membership’s org if any; otherwise **delete the user** (seed-only accounts).
+
+**Workspaces list:** Annotated each workspace app with `latest_environment` (name of the environment from the most recent deployment) so the UI can show where each app is “running” without opening app detail.
+
+**Key points:**
+- **Branch→env map** — `BRANCH_TO_ENV_SLUG` in `seed_prepare_demo` keeps the rule explicit at the call site.
+- **Idempotency** — Still one blueprint+deployment per app; environment slug is chosen from the app’s configured branch before the “already exists” check.
+
 ## 2026-04-07 08:46 - [DevEx] seed_prepare_demo: fake deployments + security data for video recording
 
 **Conversation:** [2026-04-07-0846-c2234d7f.md](conversations/2026-04-07-0846-c2234d7f.md)
