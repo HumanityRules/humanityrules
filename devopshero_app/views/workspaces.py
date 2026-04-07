@@ -29,10 +29,16 @@ def workspaces(request: HttpRequest) -> HttpResponse:
         .order_by("-created_at")
         .values("status")[:1]
     )
+    latest_deployment_environment = (
+        Deployment.objects.filter(app=OuterRef("pk"))
+        .order_by("-created_at")
+        .values("environment__name")[:1]
+    )
     apps_prefetch = Prefetch(
         "apps",
         queryset=App.objects.annotate(
             latest_status=Coalesce(Subquery(latest_deployment_status), Value("never_deployed")),
+            latest_environment=Subquery(latest_deployment_environment),
         ).order_by("name"),
         to_attr="annotated_apps",
     )
