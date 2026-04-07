@@ -7,17 +7,17 @@ Usage:
     uv run manage.py seed_test_apps --user=vmendi@gmail.com
 """
 
-import uuid
-
 from django.core.management.base import BaseCommand, CommandError
-from django.db import connection
-from django.utils import timezone
 
 from devopshero_app.services import abac
 from devopshero_app.models import (
     AWSAccount,
     App,
+    Datastore,
     Environment,
+    Group,
+    GroupAttribute,
+    GroupMembership,
     Organization,
     OrganizationMembership,
     Repository,
@@ -54,7 +54,19 @@ MOCK_ORGS = [
         ],
         "workspaces": [
             {"name": "Data Platform", "slug": "data-platform", "description": "ML models, data pipelines, and processing services"},
-            {"name": "Customer Portal", "slug": "customer-portal", "description": "Customer-facing web apps and APIs"},
+            {"name": "Internal Tools", "slug": "internal-tools", "description": "Internal dashboards, admin panels, and APIs"},
+            {"name": "Finance", "slug": "finance", "description": "Expense tracking, reconciliation, and financial reporting"},
+        ],
+        "groups": [
+            {
+                "name": "Finance",
+                "description": "Finance and billing",
+                "attributes": [
+                    ("department", "finance"),
+                    ("clearance", "restricted"),
+                    ("cost_center", "CC-400"),
+                ],
+            },
         ],
         "repositories": [
             _github_repo("ml-model-api"),
@@ -63,84 +75,120 @@ MOCK_ORGS = [
             _github_repo("fastapi-app"),
             _github_repo("nextjs-app"),
             _github_repo("graphql-api"),
+            _github_repo("django-postgres-app"),
+            _github_repo("scheduled-tasks"),
+        ],
+        "datastores": [
+            {
+                "workspace_slug": "data-platform",
+                "name": "ML Feature Store",
+                "slug": "ml-feature-store",
+                "engine": Datastore.Engine.AURORA_POSTGRESQL,
+                "deployment_mode": Datastore.DeploymentMode.SERVERLESS_V2,
+                "serverless_min_acu": 0.5,
+                "serverless_max_acu": 8.0,
+                "database_name": "feature_store",
+                "status": Datastore.Status.AVAILABLE,
+            },
+            {
+                "workspace_slug": "internal-tools",
+                "name": "Portal Database",
+                "slug": "portal-database",
+                "engine": Datastore.Engine.AURORA_MYSQL,
+                "deployment_mode": Datastore.DeploymentMode.SERVERLESS_V2,
+                "serverless_min_acu": 1.0,
+                "serverless_max_acu": 16.0,
+                "database_name": "portal_db",
+                "status": Datastore.Status.AVAILABLE,
+            },
         ],
         "apps": [
             {
                 "workspace_slug": "data-platform",
                 "repo_full_name": "vmendi/ml-model-api",
-                "name": "ML Model API",
-                "slug": "ml-model-api",
+                "name": "Prism Scoring Engine",
+                "slug": "prism-scoring-engine",
                 "app_type": "web",
                 "build_strategy": "dockerfile",
                 "branch": "main",
                 "container_port": 8000,
-                "cpu": 2048,
-                "memory": 4096,
                 "health_check_path": "/health",
             },
             {
                 "workspace_slug": "data-platform",
                 "repo_full_name": "vmendi/job-processor",
-                "name": "Job Processor",
-                "slug": "job-processor",
+                "name": "Catalyst ETL Runner",
+                "slug": "catalyst-etl-runner",
                 "app_type": "worker",
                 "build_strategy": "dockerfile",
                 "branch": "main",
                 "container_port": 8080,
-                "cpu": 512,
-                "memory": 1024,
                 "health_check_path": "/health",
             },
             {
                 "workspace_slug": "data-platform",
                 "repo_full_name": "vmendi/file-processor",
-                "name": "File Processor",
-                "slug": "file-processor",
+                "name": "Ingestion Service",
+                "slug": "ingestion-service",
                 "app_type": "web",
                 "build_strategy": "dockerfile",
                 "branch": "main",
                 "container_port": 8000,
-                "cpu": 1024,
-                "memory": 2048,
                 "health_check_path": "/health",
             },
             {
-                "workspace_slug": "customer-portal",
+                "workspace_slug": "internal-tools",
                 "repo_full_name": "vmendi/fastapi-app",
-                "name": "Customer API",
-                "slug": "customer-api",
+                "name": "Compass Account API",
+                "slug": "compass-account-api",
                 "app_type": "web",
                 "build_strategy": "dockerfile",
                 "branch": "main",
                 "container_port": 8000,
-                "cpu": 512,
-                "memory": 1024,
                 "health_check_path": "/health",
             },
             {
-                "workspace_slug": "customer-portal",
+                "workspace_slug": "internal-tools",
                 "repo_full_name": "vmendi/nextjs-app",
-                "name": "Portal Frontend",
-                "slug": "portal-frontend",
+                "name": "Horizon Portal",
+                "slug": "horizon-portal",
                 "app_type": "web",
                 "build_strategy": "nixpacks",
                 "branch": "main",
                 "container_port": 3000,
-                "cpu": 256,
-                "memory": 512,
                 "health_check_path": "/",
             },
             {
-                "workspace_slug": "customer-portal",
+                "workspace_slug": "internal-tools",
                 "repo_full_name": "vmendi/graphql-api",
-                "name": "GraphQL Gateway",
-                "slug": "graphql-gateway",
+                "name": "Atlas Query Gateway",
+                "slug": "atlas-query-gateway",
                 "app_type": "web",
                 "build_strategy": "dockerfile",
                 "branch": "main",
                 "container_port": 4000,
-                "cpu": 512,
-                "memory": 1024,
+                "health_check_path": "/health",
+            },
+            {
+                "workspace_slug": "finance",
+                "repo_full_name": "vmendi/django-postgres-app",
+                "name": "Ledgerline Expense Tracker",
+                "slug": "ledgerline-expense-tracker",
+                "app_type": "web",
+                "build_strategy": "dockerfile",
+                "branch": "main",
+                "container_port": 8000,
+                "health_check_path": "/health",
+            },
+            {
+                "workspace_slug": "finance",
+                "repo_full_name": "vmendi/scheduled-tasks",
+                "name": "Reconciliation Runner",
+                "slug": "reconciliation-runner",
+                "app_type": "scheduled",
+                "build_strategy": "dockerfile",
+                "branch": "main",
+                "container_port": 8080,
                 "health_check_path": "/health",
             },
         ],
@@ -175,79 +223,67 @@ MOCK_ORGS = [
             {
                 "workspace_slug": "default",
                 "repo_full_name": "vmendi/django-postgres-app",
-                "name": "Trading Ledger",
-                "slug": "trading-ledger",
+                "name": "Clearbook Ledger",
+                "slug": "clearbook-ledger",
                 "app_type": "web",
                 "build_strategy": "dockerfile",
                 "branch": "main",
                 "container_port": 8000,
-                "cpu": 1024,
-                "memory": 2048,
                 "health_check_path": "/health",
             },
             {
                 "workspace_slug": "default",
                 "repo_full_name": "vmendi/realtime-app",
-                "name": "Live Feed",
-                "slug": "live-feed",
+                "name": "Ticker Stream",
+                "slug": "ticker-stream",
                 "app_type": "web",
                 "build_strategy": "dockerfile",
                 "branch": "main",
                 "container_port": 8000,
-                "cpu": 512,
-                "memory": 1024,
                 "health_check_path": "/health",
             },
             {
                 "workspace_slug": "default",
                 "repo_full_name": "vmendi/slack-bot",
-                "name": "Slack Bot",
-                "slug": "slack-bot",
+                "name": "Watchtower Alerts",
+                "slug": "watchtower-alerts",
                 "app_type": "worker",
                 "build_strategy": "dockerfile",
                 "branch": "main",
                 "container_port": 8080,
-                "cpu": 256,
-                "memory": 512,
                 "health_check_path": "/health",
             },
             {
                 "workspace_slug": "analytics",
                 "repo_full_name": "vmendi/admin-dashboard",
-                "name": "Admin Dashboard",
-                "slug": "admin-dashboard",
+                "name": "Lakeview Dashboard",
+                "slug": "lakeview-dashboard",
                 "app_type": "web",
                 "build_strategy": "dockerfile",
                 "branch": "main",
                 "container_port": 3000,
-                "cpu": 512,
-                "memory": 1024,
                 "health_check_path": "/",
             },
             {
                 "workspace_slug": "analytics",
                 "repo_full_name": "vmendi/phoenix-app",
-                "name": "Phoenix Monitor",
-                "slug": "phoenix-monitor",
+                "name": "Osprey Health Monitor",
+                "slug": "osprey-health-monitor",
                 "app_type": "web",
                 "build_strategy": "dockerfile",
                 "branch": "main",
                 "container_port": 4000,
-                "cpu": 512,
-                "memory": 1024,
                 "health_check_path": "/health",
             },
             {
                 "workspace_slug": "analytics",
                 "repo_full_name": "vmendi/scheduled-tasks",
-                "name": "Report Generator",
-                "slug": "report-generator",
+                "name": "Tideline Reports",
+                "slug": "tideline-reports",
                 "app_type": "scheduled",
                 "build_strategy": "dockerfile",
                 "branch": "main",
                 "container_port": 8080,
-                "cpu": 256,
-                "memory": 512,
                 "health_check_path": "/health",
             },
         ],
@@ -292,8 +328,7 @@ class Command(BaseCommand):
                     if other_org:
                         user.current_organization = other_org
                         user.save()
-                with connection.cursor() as cursor:
-                    cursor.execute("DELETE FROM devopshero_app_app WHERE organization_id = %s", [org.pk.hex])
+                App.objects.filter(organization=org).delete()
                 org.delete()
                 self.stdout.write(f"  Deleted org: {slug}")
             except Organization.DoesNotExist:
@@ -305,6 +340,9 @@ class Command(BaseCommand):
             return
 
         org = Organization.objects.create(name=org_data["name"], slug=org_data["slug"])
+        apps_need_default = any(a["workspace_slug"] == "default" for a in org_data["apps"])
+        if not apps_need_default:
+            Workspace.objects.filter(organization=org, slug="default").delete()
         self.stdout.write(f"  Created org: {org.name}")
 
         OrganizationMembership.objects.create(
@@ -322,6 +360,18 @@ class Command(BaseCommand):
                 created_by=user,
             )
             self.stdout.write(f"    Workspace: {ws_data['name']}")
+
+        for group_data in org_data.get("groups", []):
+            group = Group.objects.create(
+                organization=org,
+                name=group_data["name"],
+                description=group_data["description"],
+            )
+            for key, value in group_data["attributes"]:
+                GroupAttribute.objects.create(group=group, key=key, value=value)
+            GroupMembership.objects.create(group=group, user=user)
+            attr_count = len(group_data["attributes"])
+            self.stdout.write(f"    Group: {group_data['name']} ({attr_count} attributes, 1 member)")
 
         for acct_data in org_data["aws_accounts"]:
             acct = AWSAccount.objects.create(
@@ -344,6 +394,22 @@ class Command(BaseCommand):
                 )
                 self.stdout.write(f"      Environment: {env_data['name']} ({env_data['status']})")
 
+        for ds_data in org_data.get("datastores", []):
+            workspace = Workspace.objects.get(organization=org, slug=ds_data["workspace_slug"])
+            Datastore.objects.create(
+                workspace=workspace,
+                name=ds_data["name"],
+                slug=ds_data["slug"],
+                engine=ds_data["engine"],
+                deployment_mode=ds_data["deployment_mode"],
+                serverless_min_acu=ds_data["serverless_min_acu"],
+                serverless_max_acu=ds_data["serverless_max_acu"],
+                database_name=ds_data["database_name"],
+                status=ds_data["status"],
+                created_by=user,
+            )
+            self.stdout.write(f"    Datastore: {ds_data['name']} -> {ds_data['workspace_slug']}")
+
         for repo_data in org_data["repositories"]:
             Repository.objects.create(
                 organization=org,
@@ -355,28 +421,20 @@ class Command(BaseCommand):
             )
             self.stdout.write(f"    Repository: {repo_data['full_name']}")
 
-        now = timezone.now().isoformat()
         for app_data in org_data["apps"]:
             workspace = Workspace.objects.get(organization=org, slug=app_data["workspace_slug"])
             repository = Repository.objects.get(organization=org, full_name=app_data["repo_full_name"])
-            app_id = uuid.uuid7().hex
-            with connection.cursor() as cursor:
-                cursor.execute(
-                    """INSERT INTO devopshero_app_app
-                       (id, organization_id, workspace_id, repository_id, name, slug,
-                        app_type, build_strategy, repo_subpath, branch, dockerfile_path,
-                        container_port, cpu, memory, health_check_path, health_check_command,
-                        environment_variables, app_secrets,
-                        created_by_id, datastore_id, created_at, updated_at)
-                       VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
-                    [
-                        app_id, org.pk.hex, workspace.pk.hex, repository.pk.hex,
-                        app_data["name"], app_data["slug"],
-                        app_data["app_type"], app_data["build_strategy"], "", app_data["branch"], "",
-                        app_data["container_port"], app_data["cpu"], app_data["memory"],
-                        app_data["health_check_path"], "",
-                        "[]", None,
-                        user.pk.hex, None, now, now,
-                    ],
-                )
+            App.objects.create(
+                organization=org,
+                workspace=workspace,
+                repository=repository,
+                name=app_data["name"],
+                slug=app_data["slug"],
+                app_type=app_data["app_type"],
+                build_strategy=app_data["build_strategy"],
+                branch=app_data["branch"],
+                container_port=app_data["container_port"],
+                health_check_path=app_data["health_check_path"],
+                created_by=user,
+            )
             self.stdout.write(f"    App: {app_data['name']} -> {app_data['workspace_slug']}")

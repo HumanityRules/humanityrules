@@ -1,5 +1,22 @@
 # DevOpsHero Development Journal
 
+## 2026-04-06 20:20 - [DevEx] Overhaul seed_test_apps for demo-ready Meridian Systems org
+
+**Conversation:** [2026-04-06-2018-fa02e780.md](conversations/2026-04-06-2018-fa02e780.md)
+
+Preparing the `seed_test_apps` management command to produce a realistic Meridian Systems organization for demo video recording. The seed data previously only created apps with generic names and an external-facing "Customer Portal" workspace — neither fit the narrative of an internal app deployment platform.
+
+The App model had also drifted from the raw SQL INSERT used in the command (`cpu`, `memory`, `environment_variables`, `app_secrets`, `datastore_id` columns were removed in earlier migrations), so the command was broken. Replaced all raw SQL (both INSERT and DELETE) with Django ORM calls, which also fixes FK cascade issues during `--reset`.
+
+**Key points:**
+- **Datastores added** — Two Aurora datastores (PostgreSQL Serverless for ML Feature Store, MySQL Serverless for Portal Database) seeded for Meridian Systems via `Datastore.objects.create`
+- **Finance group** — Created with attributes `department=finance`, `clearance=restricted`, `cost_center=CC-400` and the seeded user as a member, using `Group`, `GroupAttribute`, `GroupMembership`
+- **Finance workspace** — Added with two apps: Ledgerline Expense Tracker (django-postgres-app) and Reconciliation Runner (scheduled-tasks), giving the Finance group a coherent workspace to deploy to in the demo
+- **Distinctive app names** — All 12 apps renamed from generic ("ML Model API", "Job Processor") to branded codenames ("Prism Scoring Engine", "Catalyst ETL Runner", "Watchtower Alerts", etc.)
+- **Customer Portal → Internal Tools** — Renamed workspace to fit the internal-app-platform story
+- **Auto-created default workspace removal** — Organization `post_save` signal creates a "Default" workspace; the seed now deletes it for orgs that don't reference it, keeping Meridian's workspace list clean
+- **Raw SQL eliminated** — Both the App INSERT and the `_delete_mock_orgs` DELETE replaced with ORM, fixing schema drift and FK cascade issues
+
 ## 2026-04-05 17:54 - [UI] Simplify sidebar active-state highlighting to first-segment matching
 
 **Conversation:** [2026-04-05-1748-47685f06.md](conversations/2026-04-05-1748-47685f06.md)
