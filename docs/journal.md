@@ -1,5 +1,23 @@
 # DevOpsHero Development Journal
 
+## 2026-04-07 08:46 - [DevEx] seed_prepare_demo: fake deployments + security data for video recording
+
+**Conversation:** [2026-04-07-0846-c2234d7f.md](conversations/2026-04-07-0846-c2234d7f.md)
+
+New `seed_prepare_demo` management command that layers demo-ready data on top of the existing `seed_test_apps` baseline for Meridian Systems. The separation is intentional: `seed_test_apps` stays generic and reusable; `seed_prepare_demo` is deliberately video-specific.
+
+The workflow is: `seed_test_apps --reset` to get a clean baseline, then `seed_prepare_demo` to make everything look production-ready. `seed_prepare_demo --reset` cleans only its own artifacts (deployments, blueprints, permissions, users, groups, policies, hosted zones) without touching `seed_test_apps` data.
+
+**Key points:**
+- **`created_at` override via `.update()`** — Django's `auto_now_add=True` on Deployment ignores any value passed to `create()`. The only way to backdate timestamps is to call `Deployment.objects.filter(pk=...).update(created_at=...)` immediately after creation. The dashboard's "Last deployed" reads from `created_at`, not `completed_at`.
+- **App.branch must be updated too** — The dashboard card shows `app.branch` (the App model field), not the blueprint/deployment `git_ref`. Setting branch only on the blueprint and deployment had no effect on the card; the App record itself must be saved.
+- **Staggered deploy ages** — Three apps get `deployed_days_ago` overrides (Catalyst ETL Runner: 74d, Ingestion Service: 63d, Reconciliation Runner: 89d) to make the "Last deployed" column look realistically varied rather than all recent.
+- **No service_url for workers/scheduled jobs** — Only `app_type == web` apps get a `service_url` and subdomain. Workers and scheduled jobs get empty strings.
+- **`seed_test_users` made reusable** — Added `--email-domain` parameter (default: `humanityrules.io`) so the command can be called for any org. `seed_prepare_demo` calls it with `meridiansystems.com` to populate Meridian's People page.
+- **Finance group clearance fixup** — `seed_test_apps` creates Finance with `clearance=restricted`. The video script says "I'm in the Finance group with internal clearance." `_prepare_security()` patches this to `clearance=internal` and Contractors to `clearance=external` after groups are created.
+- **3 custom demo policies** — Created as `is_system=False` so they appear as deliberate governance rules in the Policies UI: Finance team workspace access (department=finance + clearance=internal → workspace:edit), Production deploys for internal admins only, and external contractors view-only.
+- **`call_command()` for reuse** — `_prepare_security()` delegates to `seed_test_groups` and `seed_test_users` via `call_command()` rather than duplicating logic. This keeps group/user generation consistent with the existing commands.
+
 ## 2026-04-06 20:20 - [DevEx] Overhaul seed_test_apps for demo-ready Meridian Systems org
 
 **Conversation:** [2026-04-06-2018-fa02e780.md](conversations/2026-04-06-2018-fa02e780.md)
