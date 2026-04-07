@@ -1,5 +1,27 @@
 # DevOpsHero Development Journal
 
+## 2026-04-07 16:22 - [Integrations] Fix GitHub App multi-org integration: OAuth picker instead of direct install redirect
+
+**Conversation:** [2026-04-07-1622-c1c540de.md](conversations/2026-04-07-1622-c1c540de.md)
+
+Diagnosed and fixed a bug where connecting GitHub to a second DOH organization would silently fail. The root cause was that `github_connect` always redirected to GitHub's static installation URL (`/apps/devops-hero-app/installations/new`). GitHub's install flow only redirects back to our Setup URL when creating a **new** installation. If the GitHub App is already installed on the user's GitHub org (from the first DOH org's connection), GitHub shows a "Configure" page instead — no redirect back, so the second DOH org can never complete the connection.
+
+The fix replaces the direct-to-install flow with a GitHub OAuth flow. Instead of sending users straight to the install page, we now:
+1. Redirect to GitHub's OAuth authorize endpoint to get a user access token
+2. Use `GET /user/installations` (scoped to the authenticated user — no cross-tenant leakage) to discover which GitHub orgs already have the app installed
+3. Show a picker page where the user selects which GitHub installation to connect to their current DOH org
+4. Also offer an "Install on a new GitHub organization" link for orgs that don't have the app yet
+
+This properly handles the case where multiple DOH orgs need to connect to the same GitHub installation, and the case where a user has multiple GitHub orgs with the app installed and needs to pick the right one.
+
+Security consideration: using `GET /app/installations` (the App JWT endpoint) would have listed **all** installations across all customers — a data leak. Using `GET /user/installations` with a user-scoped OAuth token ensures each user only sees installations they have access to on GitHub.
+
+**Key points:**
+- **OAuth state parameter** — CSRF protection via `secrets.token_urlsafe(32)` stored in session, verified on callback.
+- **Backwards compatible** — `github_callback` checks for `installation_id` in query params and delegates to the setup handler, so old direct-install redirects still work.
+- **`GITHUB_APP_CLIENT_ID` and `GITHUB_APP_CLIENT_SECRET`** were already in settings but unused — now they drive the OAuth flow.
+- **Session-based picker state** — installations list is stored in the session between the OAuth callback redirect and the picker page render, following the existing HTMX app shell pattern (non-HTMX returns shell with `content_url`, HTMX fetches content).
+
 ## 2026-04-07 09:17 - [DevEx] Meridian demo seed: slimmer app list, dev env, branch→environment, workspaces UI
 
 **Conversation:** [2026-04-07-0917-c2234d7f.md](conversations/2026-04-07-0917-c2234d7f.md)

@@ -1,11 +1,13 @@
 """
 GitHub App client for authentication and repository access.
 
-Handles JWT generation, installation token exchange, and repository listing.
+Handles JWT generation, installation token exchange, OAuth user flow,
+and repository listing/sync.
 """
 
 import logging
 import time
+import urllib.parse
 from dataclasses import dataclass
 
 import httpx
@@ -28,6 +30,16 @@ class GitHubRepo:
     full_name: str
     clone_url: str
     default_branch: str
+
+
+@dataclass
+class GitHubInstallation:
+    """Installation data visible to the authenticated GitHub user."""
+
+    id: int
+    account_name: str
+    account_type: str
+    avatar_url: str
 
 
 @dataclass
@@ -200,5 +212,69 @@ def sync_repositories(organization: Organization, integration: GitProviderIntegr
 
 
 def get_app_installation_url() -> str:
-    """Get the URL for installing the GitHub App."""
+    """Get the URL for installing the GitHub App on a new GitHub org."""
     return "https://github.com/apps/devops-hero-app/installations/new"
+
+
+def get_oauth_authorize_url(state: str) -> str:
+    """Build the GitHub OAuth authorization URL with CSRF state."""
+    params = urllib.parse.urlencode({
+        "client_id": settings.GITHUB_APP_CLIENT_ID,
+        "state": state,
+    })
+    return f"https://github.com/login/oauth/authorize?{params}"
+
+
+def exchange_code_for_user_token(code: str) -> str:
+    """Exchange an OAuth authorization code for a user access token."""
+    response = httpx.post(
+        url="https://github.com/login/oauth/access_token",
+        headers={"Accept": "application/json"},
+        data={
+            "client_id": settings.GITHUB_APP_CLIENT_ID,
+            "client_secret": settings.GITHUB_APP_CLIENT_SECRET,
+            "code": code,
+        },
+    )
+    response.raise_for_status()
+    data = response.json()
+    if "error" in data:
+        raise ValueError(f"GitHub OAuth error: {data.get('error_description', data['error'])}")
+    return data["access_token"]
+
+
+def list_user_installations(user_token: str) -> list[GitHubInstallation]:
+    """List GitHub App installations the authenticated user can access."""
+    installations: list[GitHubInstallation] = []
+    page = 1
+    per_page = 100
+
+    while True:
+        response = httpx.get(
+            url=f"{GITHUB_API_BASE}/user/installations",
+            headers={
+                "Authorization": f"Bearer {user_token}",
+                "Accept": "application/vnd.github+json",
+                "X-GitHub-Api-Version": "2022-11-28",
+            },
+            params={"page": page, "per_page": per_page},
+        )
+        response.raise_for_status()
+        data = response.json()
+
+        for inst in data.get("installations", []):
+            account = inst.get("account", {})
+            installations.append(
+                GitHubInstallation(
+                    id=inst["id"],
+                    account_name=account.get("login", "Unknown"),
+                    account_type=account.get("type", "Unknown"),
+                    avatar_url=account.get("avatar_url", ""),
+                )
+            )
+
+        if len(data.get("installations", [])) < per_page:
+            break
+        page += 1
+
+    return installations
