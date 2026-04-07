@@ -99,10 +99,11 @@ urlpatterns = [
     # Onboarding
     path("onboarding/", views.onboarding, name="onboarding"),
 
-    # GitHub App OAuth
+    # GitHub App integration
     path("github/connect", views.github_connect, name="github_connect"),
     path("github/callback", views.github_callback, name="github_callback"),
-    path("github/setup", views.github_callback, name="github_setup"),  # Setup URL uses same handler
+    path("github/setup", views.github_setup, name="github_setup"),
+    path("github/select-installation", views.github_select_installation, name="github_select_installation"),
 
     # API endpoints
     #  - aws_install_account_callback: called by Lambda after customer deploys the CloudFormation stack, not browsers

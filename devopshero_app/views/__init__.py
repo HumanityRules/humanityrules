@@ -37,7 +37,7 @@ from .partials import random_quote, switch_organization
 from .auth import auth_login, auth_callback, auth_logout, oidc_login, oidc_callback, dev_login
 from .onboarding import onboarding
 from .api import aws_install_account_callback, health_check
-from .github import github_connect, github_callback, github_webhook
+from .github import github_connect, github_callback, github_setup, github_select_installation, github_webhook
 from .chat import (
     chat_app_deploy,
     chat_list,
@@ -141,6 +141,8 @@ __all__ = [
     "health_check",
     "github_connect",
     "github_callback",
+    "github_setup",
+    "github_select_installation",
     "github_webhook",
     "chat_app_deploy",
     "chat_list",

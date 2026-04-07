@@ -1,72 +1,171 @@
 """
-GitHub App OAuth flow and webhook handling.
+GitHub App integration: OAuth user flow, installation picker, and webhooks.
+
+Flow:
+1. /github/connect → OAuth authorize redirect (stores org_id + CSRF state in session)
+2. /github/callback → exchanges code for user token, lists user's installations,
+   stores them in session, redirects to picker
+3. /github/select-installation (GET) → shows picker page
+4. /github/select-installation (POST) → connects selected installation to DOH org
+5. If user clicks "Install on new org" → GitHub's /installations/new →
+   /github/setup → connects the new installation
 """
 
 import hashlib
 import hmac
 import json
 import logging
+import secrets
 
 from django.conf import settings
 from django.contrib.auth.decorators import login_required
 from django.http import HttpResponse, HttpResponseBadRequest, HttpResponseForbidden
-from django.shortcuts import redirect
-from django.views.decorators.csrf import csrf_exempt
+from django.shortcuts import redirect, render
 from django.views.decorators.http import require_POST
 
-from devopshero_app.models import GitProviderIntegration
+from devopshero_app.models import GitProviderIntegration, Organization
 from devopshero_app.services import abac
 from devopshero_app.services.gitproviders import github_client
+
+from . import base
 
 logger = logging.getLogger(__name__)
 
 
 @login_required
 def github_connect(request):
-    """Redirect user to GitHub App installation page."""
+    """Start GitHub OAuth flow to discover the user's available installations."""
     org = request.user.current_organization
     if not abac.is_org_admin(organization=org, user=request.user):
         return HttpResponseForbidden("You must be an organization admin to connect GitHub.")
 
-    # Store the organization ID in session so we know which org to connect on callback
+    state = secrets.token_urlsafe(32)
     request.session["github_connect_org_id"] = str(org.id)
+    request.session["github_oauth_state"] = state
 
-    installation_url = github_client.get_app_installation_url()
-    return redirect(installation_url)
+    authorize_url = github_client.get_oauth_authorize_url(state=state)
+    return redirect(authorize_url)
 
 
 @login_required
 def github_callback(request):
-    """Handle GitHub App installation callback."""
+    """Handle GitHub OAuth callback: exchange code, list installations, redirect to picker."""
     org = request.user.current_organization
     if not abac.is_org_admin(organization=org, user=request.user):
         return HttpResponseForbidden("You must be an organization admin to connect GitHub.")
 
-    installation_id = request.GET.get("installation_id")
-    setup_action = request.GET.get("setup_action")
+    # Backwards compat: if GitHub sends installation_id here, delegate to setup handler
+    if request.GET.get("installation_id"):
+        return _handle_setup(request=request, org=org)
 
-    if not installation_id:
-        logger.error("GitHub callback missing installation_id")
-        return HttpResponseBadRequest("Missing installation_id")
+    code = request.GET.get("code")
+    state = request.GET.get("state")
 
-    # Get the organization from session
-    org_id = request.session.pop("github_connect_org_id", None)
-    if not org_id:
-        # Fall back to current organization if session expired
-        org = request.user.current_organization
-    else:
-        org = request.user.current_organization
-        # Verify the org ID matches (security check)
-        if str(org.id) != org_id:
-            logger.error("GitHub callback org mismatch: session=%s, current=%s", org_id, org.id)
-            return HttpResponseBadRequest("Organization mismatch")
+    if not code:
+        logger.error("GitHub OAuth callback missing code parameter")
+        return redirect("/integrations/git-integrations/?error=oauth_failed")
+
+    expected_state = request.session.pop("github_oauth_state", None)
+    if not expected_state or state != expected_state:
+        logger.error("GitHub OAuth state mismatch: expected=%s, got=%s", expected_state, state)
+        return redirect("/integrations/git-integrations/?error=oauth_failed")
 
     try:
-        # Get installation details from GitHub
+        user_token = github_client.exchange_code_for_user_token(code=code)
+        installations = github_client.list_user_installations(user_token=user_token)
+    except Exception as e:
+        logger.error("GitHub OAuth token exchange or installation listing failed: %s", str(e))
+        return redirect("/integrations/git-integrations/?error=oauth_failed")
+
+    if not installations:
+        return redirect(github_client.get_app_installation_url())
+
+    request.session["github_installations"] = [
+        {
+            "id": inst.id,
+            "account_name": inst.account_name,
+            "account_type": inst.account_type,
+            "avatar_url": inst.avatar_url,
+        }
+        for inst in installations
+    ]
+    return redirect("/github/select-installation")
+
+
+@login_required
+def github_select_installation(request):
+    """Show the installation picker (GET) or connect the selected installation (POST)."""
+    org = request.user.current_organization
+    if not abac.is_org_admin(organization=org, user=request.user):
+        return HttpResponseForbidden("You must be an organization admin to connect GitHub.")
+
+    if request.method == "POST":
+        return _handle_select_installation_post(request=request, org=org)
+
+    if not request.htmx:
+        context = base.get_app_shell_context(request=request, current_page="integrations")
+        context["content_url"] = "/github/select-installation"
+        return render(request, "devopshero_app/app_shell.html", context=context)
+
+    installations = request.session.get("github_installations", [])
+    if not installations:
+        return redirect("/integrations/git-integrations/")
+
+    context = base.get_app_shell_context(request=request, current_page="integrations")
+    context["installations"] = installations
+    context["install_new_url"] = github_client.get_app_installation_url()
+    return render(request, "devopshero_app/github/github_select_installation.html", context=context)
+
+
+def _handle_select_installation_post(request, org: Organization) -> HttpResponse:
+    """Process the user's installation choice from the picker form."""
+    installation_id = request.POST.get("installation_id")
+    if not installation_id:
+        return HttpResponseBadRequest("Missing installation_id")
+
+    request.session.pop("github_installations", None)
+
+    org_id = request.session.pop("github_connect_org_id", None)
+    if org_id and str(org.id) != org_id:
+        logger.error("GitHub select-installation org mismatch: session=%s, current=%s", org_id, org.id)
+        return HttpResponseBadRequest("Organization mismatch")
+
+    return _connect_installation(org=org, installation_id=installation_id)
+
+
+@login_required
+def github_setup(request):
+    """Handle GitHub App post-installation redirect (Setup URL)."""
+    org = request.user.current_organization
+    if not abac.is_org_admin(organization=org, user=request.user):
+        return HttpResponseForbidden("You must be an organization admin to connect GitHub.")
+
+    return _handle_setup(request=request, org=org)
+
+
+def _handle_setup(request, org: Organization) -> HttpResponse:
+    """Process a GitHub App installation callback with installation_id."""
+    installation_id = request.GET.get("installation_id")
+    if not installation_id:
+        logger.error("GitHub setup callback missing installation_id")
+        return HttpResponseBadRequest("Missing installation_id")
+
+    request.session.pop("github_installations", None)
+
+    org_id = request.session.pop("github_connect_org_id", None)
+    if org_id and str(org.id) != org_id:
+        logger.error("GitHub setup org mismatch: session=%s, current=%s", org_id, org.id)
+        return HttpResponseBadRequest("Organization mismatch")
+
+    return _connect_installation(org=org, installation_id=installation_id)
+
+
+def _connect_installation(org: Organization, installation_id: str) -> HttpResponse:
+    """Create/update GitProviderIntegration and sync repositories."""
+    try:
         installation_details = github_client.get_installation_details(installation_id=installation_id)
         account_name = installation_details.get("account", {}).get("login", "Unknown")
 
-        # Create or update the GitProviderIntegration
         integration, created = GitProviderIntegration.objects.update_or_create(
             organization=org,
             provider=GitProviderIntegration.Provider.GITHUB,
@@ -77,11 +176,10 @@ def github_callback(request):
         )
 
         if created:
-            logger.info("Created GitHub integration for org %s (installation_id=%s)", org.name, installation_id)
+            logger.info("Created GitHub integration for org %s (installation_id=%s, account=%s)", org.name, installation_id, account_name)
         else:
-            logger.info("Updated GitHub integration for org %s (installation_id=%s)", org.name, installation_id)
+            logger.info("Updated GitHub integration for org %s (installation_id=%s, account=%s)", org.name, installation_id, account_name)
 
-        # Sync repositories
         sync_result = github_client.sync_repositories(organization=org, integration=integration)
         logger.info(
             "Synced repos for org %s: added=%d, updated=%d, removed=%d",
@@ -92,8 +190,7 @@ def github_callback(request):
         )
 
     except Exception as e:
-        logger.error("GitHub callback failed: %s", str(e))
-        # Create integration in error state
+        logger.error("GitHub connection failed: %s", str(e))
         GitProviderIntegration.objects.update_or_create(
             organization=org,
             provider=GitProviderIntegration.Provider.GITHUB,
@@ -107,13 +204,19 @@ def github_callback(request):
     return redirect("/integrations/git-integrations/")
 
 
+# ---------------------------------------------------------------------------
+# Webhooks
+# ---------------------------------------------------------------------------
+
+from django.views.decorators.csrf import csrf_exempt  # noqa: E402
+
+
 @csrf_exempt
 @require_POST
 def github_webhook(request):
     """Handle GitHub webhook events (push, installation, etc.)."""
-    # Verify webhook signature
     signature = request.headers.get("X-Hub-Signature-256")
-    if not _verify_webhook_signature(request.body, signature):
+    if not _verify_webhook_signature(payload=request.body, signature=signature):
         logger.error("GitHub webhook signature verification failed")
         return HttpResponse(status=401)
 
@@ -128,13 +231,12 @@ def github_webhook(request):
 
     logger.info("GitHub webhook received: event=%s, delivery=%s", event_type, delivery_id)
 
-    # Handle different event types
     if event_type == "push":
-        _handle_push_event(payload)
+        _handle_push_event(payload=payload)
     elif event_type == "installation":
-        _handle_installation_event(payload)
+        _handle_installation_event(payload=payload)
     elif event_type == "installation_repositories":
-        _handle_installation_repositories_event(payload)
+        _handle_installation_repositories_event(payload=payload)
     elif event_type == "ping":
         logger.info("GitHub webhook ping received")
     else:
@@ -146,7 +248,6 @@ def github_webhook(request):
 def _verify_webhook_signature(payload: bytes, signature: str | None) -> bool:
     """Verify the GitHub webhook signature."""
     if not signature or not settings.GITHUB_WEBHOOK_SECRET:
-        # Skip verification if no secret configured (development)
         return True
 
     expected = "sha256=" + hmac.new(
@@ -181,7 +282,6 @@ def _handle_installation_event(payload: dict):
     logger.info("Installation event: action=%s, installation_id=%s", action, installation_id)
 
     if action == "deleted":
-        # Mark integration as disconnected
         GitProviderIntegration.objects.filter(
             installation_id=str(installation_id),
         ).update(status=GitProviderIntegration.Status.ERROR)
@@ -194,7 +294,6 @@ def _handle_installation_repositories_event(payload: dict):
 
     logger.info("Installation repositories event: action=%s, installation_id=%s", action, installation_id)
 
-    # Re-sync repositories for this installation
     try:
         integration = GitProviderIntegration.objects.get(installation_id=str(installation_id))
         github_client.sync_repositories(organization=integration.organization, integration=integration)
