@@ -165,6 +165,12 @@ APP_DEPLOY_CONFIGS = {
         "permissions": [
             {"service": "S3", "effect": "Allow", "access_levels": ["Read", "Write"], "resources": ["arn:aws:s3:::meridian-finance-reports/*"]},
         ],
+        "history": [
+            {"days_ago": 95, "status": "succeeded", "commit_message": "feat: initial nightly reconciliation job"},
+            {"days_ago": 93, "status": "failed", "commit_message": "fix: add missing DB credentials to config"},
+            {"days_ago": 92, "status": "succeeded", "commit_message": "fix: add missing DB credentials to config"},
+            {"days_ago": 91, "status": "succeeded", "commit_message": "feat: add Slack notification on completion"},
+        ],
     },
 }
 
@@ -365,6 +371,33 @@ class Command(BaseCommand):
                     statements=config["permissions"],
                 )
 
+            history = config.get("history", [])
+            for hist in history:
+                hist_at = now - timedelta(days=hist["days_ago"], hours=14, minutes=30)
+                hist_sha = _fake_commit_sha(app_slug=f"{app.slug}-{hist['days_ago']}")
+                hist_status = (
+                    Deployment.Status.SUCCEEDED if hist["status"] == "succeeded"
+                    else Deployment.Status.FAILED
+                )
+                hist_dep = Deployment.objects.create(
+                    blueprint=blueprint,
+                    app=app,
+                    environment=env,
+                    git_ref=branch,
+                    git_commit_sha=hist_sha,
+                    git_commit_message=hist["commit_message"],
+                    image_tag=_fake_image_tag(app_slug=f"{app.slug}-{hist['days_ago']}"),
+                    image_uri=_fake_image_uri(app_slug=app.slug, env_slug=env.slug),
+                    status=hist_status,
+                    subdomain="",
+                    service_url="",
+                    started_at=hist_at - timedelta(minutes=2),
+                    completed_at=hist_at,
+                    created_by=app.created_by,
+                )
+                Deployment.objects.filter(pk=hist_dep.pk).update(created_at=hist_at)
+
+            total_deployments = 1 + len(history)
             self.stdout.write(
-                f"  {app.name}: blueprint(active) + deployment(succeeded) -> {config['subdomain']}.{HOSTED_ZONE}"
+                f"  {app.name}: blueprint(active) + {total_deployments} deployment(s) -> {config['subdomain']}.{HOSTED_ZONE}"
             )
