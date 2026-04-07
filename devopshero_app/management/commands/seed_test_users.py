@@ -2,11 +2,12 @@
 Seed test users with realistic names and assign them to groups (e.g. 100-person company).
 
 Users get org membership and 1–4 group memberships at random. Use --reset to remove and re-seed.
-Seed users are identified by @coursehero.com email for --reset.
+Seed users are identified by their email domain for --reset.
 
 Usage:
     uv run manage.py seed_test_users
     uv run manage.py seed_test_users --count=100 --org=meridian-systems
+    uv run manage.py seed_test_users --email-domain=meridiansystems.com --org=meridian-systems
     uv run manage.py seed_test_users --reset
 """
 
@@ -24,7 +25,7 @@ from devopshero_app.models import (
     User,
 )
 
-SEED_EMAIL_DOMAIN = "coursehero.com"
+DEFAULT_EMAIL_DOMAIN = "coursehero.com"
 # Legacy: old seed command used this username prefix
 SEED_USERNAME_PREFIX_LEGACY = "seed_user_"
 
@@ -67,6 +68,12 @@ class Command(BaseCommand):
             help="Number of users to create (default 100).",
         )
         parser.add_argument(
+            "--email-domain",
+            type=str,
+            default=DEFAULT_EMAIL_DOMAIN,
+            help=f"Email domain for generated users (default: {DEFAULT_EMAIL_DOMAIN}).",
+        )
+        parser.add_argument(
             "--reset",
             action="store_true",
             help="Delete existing seed users for the org before creating.",
@@ -85,11 +92,12 @@ class Command(BaseCommand):
                 raise CommandError("No organization found. Create one or pass --org=slug.")
 
         count = options.get("count", 100)
+        email_domain = options.get("email_domain", DEFAULT_EMAIL_DOMAIN)
         if count < 1 or count > 1000:
             raise CommandError("--count must be between 1 and 1000.")
 
         if options.get("reset"):
-            self._delete_seed_users(org=org)
+            self._delete_seed_users(org=org, email_domain=email_domain)
 
         groups = list(Group.objects.filter(organization=org))
         if not groups:
@@ -115,7 +123,7 @@ class Command(BaseCommand):
                 username = f"{base}.{suffix}"
                 suffix += 1
             seen_usernames.add(username)
-            email = f"{username}@{SEED_EMAIL_DOMAIN}"
+            email = f"{username}@{email_domain}"
 
             user = User.objects.create_user(
                 username=username,
@@ -144,15 +152,15 @@ class Command(BaseCommand):
 
         total = User.objects.filter(
             current_organization=org,
-            email__iendswith=f"@{SEED_EMAIL_DOMAIN}",
+            email__iendswith=f"@{email_domain}",
         ).count()
         self.stdout.write(
-            self.style.SUCCESS(f"Done. Created {created} new users (total @{SEED_EMAIL_DOMAIN} in org: {total}).")
+            self.style.SUCCESS(f"Done. Created {created} new users (total @{email_domain} in org: {total}).")
         )
 
-    def _delete_seed_users(self, org: Organization) -> None:
+    def _delete_seed_users(self, org: Organization, email_domain: str) -> None:
         q = Q(current_organization=org) & (
-            Q(email__iendswith=f"@{SEED_EMAIL_DOMAIN}")
+            Q(email__iendswith=f"@{email_domain}")
             | Q(username__startswith=SEED_USERNAME_PREFIX_LEGACY)
         )
         to_delete = User.objects.filter(q)
