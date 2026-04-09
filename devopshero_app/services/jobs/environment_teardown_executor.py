@@ -151,8 +151,9 @@ def run_environment_teardown(environment_id: str) -> bool:
                     "Environment '%(env_name)s' torn down and deleted successfully",
                     {"env_name": env_name},
                 )
-                # Delete torn-down deployment records so the PROTECT FK allows environment deletion
+                # Delete torn-down deployment/blueprint records so the PROTECT FKs allow environment deletion
                 models.Deployment.objects.filter(environment=environment).delete()
+                models.DeploymentBlueprint.objects.filter(environment=environment).delete()
                 environment.delete()
                 return True
 

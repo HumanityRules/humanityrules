@@ -126,7 +126,7 @@ Scene 6: App permissions (1:50–2:10)
   - Jira/Linear tickets — mock up a few with titles like "Request VPC access for dashboard app", "IAM role setup for ECS task"
   - Slack messages — mock up a thread like "hey @platform-team, can someone provision this?" with no reply for 3 days
 
-  AI video generators (Runway, Kling, Pika) are decent for abstract/atmospheric shots but bad at UI screens and text. They'd work for a mood background behind text overlays, but   not for realistic-looking Jira tickets or code editors. For the montages, static screenshots with cross-fades and subtle zoom (Ken Burns effect) will look better and be much easier to produce.
+  AI video generators (Runway, Kling, Pika) are decent for abstract/atmospheric shots but bad at UI screens and text. They'd work for a mood background behind text overlays, but  not for realistic-looking Jira tickets or code editors. For the montages, static screenshots with cross-fades and subtle zoom (Ken Burns effect) will look better and be much easier to produce.
 
 
 
