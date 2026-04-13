@@ -58,7 +58,7 @@ class ConnectionConfig:
 @dataclass
 class DatabaseConfig:
     """Configuration for an Aurora database."""
-    name: str  # Database name, e.g., "db_portal_prod"
+    name: str  # Database name, e.g., "myapp_prod"
     engine: EngineConfig
     deployment: DeploymentConfig
     backups: BackupConfig

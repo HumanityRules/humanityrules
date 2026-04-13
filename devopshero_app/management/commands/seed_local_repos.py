@@ -3,7 +3,7 @@ Management command to seed local repositories into the database.
 
 Usage:
     python manage.py seed_local_repos --org=acme
-    python manage.py seed_local_repos --org=acme --exclude=db_portal,other_repo
+    python manage.py seed_local_repos --org=acme --exclude=phoenix_app,other_repo
     python manage.py seed_local_repos --org=acme --path=/custom/path/to/repos
 
 Scans a local directory for repository folders and creates Repository records
@@ -35,7 +35,7 @@ class Command(BaseCommand):
         parser.add_argument(
             "--exclude",
             default="",
-            help="Comma-separated list of repository names to skip (e.g., db_portal,other_repo)",
+            help="Comma-separated list of repository names to skip (e.g., phoenix_app,other_repo)",
         )
 
     def handle(self, *args, **options):

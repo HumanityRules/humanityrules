@@ -36,54 +36,9 @@ def get_simple_dashboard_config(env_slug: str) -> appconfig.AppConfig:
     )
 
 
-def get_db_portal_config(env_slug: str) -> appconfig.AppConfig:
-    """Return the AppConfig for db_portal."""
-    return appconfig.AppConfig(
-        app_name="db-portal",
-        ecr_repo_name=_build_ecr_repo_name("db-portal", env_slug),
-        container_port=4000,
-        cpu=512,
-        memory=1024,
-        health_check_path="/health",
-        health_check_command=None,
-        environment_variables=[
-            {"name": "MIX_ENV", "value": "prod"},
-            {"name": "PHX_SERVER", "value": "true"},
-            {"name": "PORT", "value": "4000"},
-            {"name": "PHX_HOST", "value": "dataengr.chsandbox.com"},
-            {"name": "DISABLE_HTTPS", "value": "true"},
-            {"name": "DISABLE_AUTH", "value": "true"},
-            {"name": "RUN_SAMPLER", "value": "N"},
-        ],
-        app_source_path=_get_deployable_repos_path() / "db_portal",
-        database_config=appconfig.DatabaseConfig(
-            name="db_portal_prod",
-            engine=appconfig.EngineConfig(
-                family="aurora-mysql",
-                version=None,
-                auto_minor_version_upgrade=True,
-            ),
-            deployment=appconfig.DeploymentConfig(
-                mode="aurora_serverless_v2",
-                serverless_v2=appconfig.ServerlessV2Config(min_acu=0.5, max_acu=2.0),
-                provisioned=None,
-            ),
-            backups=appconfig.BackupConfig(retention_days=7, copy_tags_to_snapshot=True),
-            security=appconfig.SecurityConfig(storage_encrypted=True, deletion_protection=False),
-            connection=appconfig.ConnectionConfig(env_var_name="DATABASE_URL"),
-        ),
-        app_secrets={
-            "slack_token": "disabled",
-            "secret_key_base": None,
-            "signing_salt": None,
-        },
-    )
-
-
 # Registry of all available apps
 APP_CONFIGS = {
     "simple-dashboard": get_simple_dashboard_config,
-    "db-portal": get_db_portal_config,
 }
 
 
