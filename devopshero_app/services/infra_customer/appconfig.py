@@ -99,6 +99,9 @@ class AppConfig:
     # Example: {"slack_token": "disabled", "secret_key_base": None, "signing_salt": None}
     app_secrets: dict[str, str | None] | None = None
 
+    # Override ECS health check grace period (seconds). None = use environment default.
+    health_check_grace_period: int | None = None
+
     def to_template_vars(self) -> dict:
         """Convert to dict for Jinja2 template rendering (CloudFormation)."""
         return {

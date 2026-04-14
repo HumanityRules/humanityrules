@@ -163,11 +163,6 @@ def run_teardown(deployment_id: str) -> bool:
                 deployment.completed_at = timezone.now()
                 deployment.save()
 
-                blueprint = deployment.blueprint
-                blueprint.status = models.DeploymentBlueprint.Status.DISCARDED
-                blueprint.status_message = "Discarded after teardown"
-                blueprint.save(update_fields=["status", "status_message", "updated_at"])
-
                 logger.info("Teardown %(deployment_id)s completed successfully", {"deployment_id": str(deployment_id)})
                 return True
 

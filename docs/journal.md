@@ -1,5 +1,26 @@
 # DevOpsHero Development Journal
 
+## 2026-04-14 05:30 - [Deployment] Debug OpenClaw deployment failure, fix failed/torn-down app lifecycle
+
+**Conversation:** [2026-04-13-2314-5af1a128.md](conversations/2026-04-13-2314-5af1a128.md)
+
+Diagnosed and fixed the first OpenClaw template deployment failure, then fixed several lifecycle gaps exposed by the failure.
+
+**Deployment diagnosis:** The OpenClaw ECS service failed to stabilize within DOH's 180s timeout. Root cause was the model configuration — `OPENCLAW_DEFAULT_MODEL=claude-sonnet-4-20250514` (bare name) caused OpenClaw to fall back to `openai/claude-sonnet-4-20250514`, an unknown model. The SDK model warmup then blocked the Node.js event loop for ~40 seconds waiting for a timeout, during which the `/health` HTTP endpoint couldn't respond at all. ALB health checks (2s timeout) saw "Request timed out", ECS cycled tasks, and DOH gave up at 180s — literally 1 second before the deployment actually completed (`rolloutState=COMPLETED` at 20:31:06, DOH timed out at 20:31:05). The fix: change the model to `openai/gpt-5.4-nano` (provider-qualified name) so warmup succeeds in seconds instead of blocking for 40s. Also added `health_check_grace_period` (120s for OpenClaw) as a per-app override on the ECS service, propagated through `AppTemplate` → `App` → `AppConfig` → CDK `AppStack`.
+
+**Failed deployments invisible in UI:** After the deployment failed, the app appeared in "Recent Deployments" with a failed badge but was missing from "Deployed to Environments" — despite consuming real ECS/ALB resources. The status filter (`CURRENT_LIVE_DEPLOYMENT_STATUSES`) only included success/in-progress states. Renamed to `VISIBLE_DEPLOYMENT_STATUSES` and `CONCLUDED_DEPLOYMENT_STATUSES` (replacing `CURRENT_LIVE`/`CURRENT_LAUNCHED`), adding `FAILED` and `TORN_DOWN`. Failed and torn-down deployments now appear with appropriate actions.
+
+**No retry/teardown path for failed deployments:** The "Redeploy" button, "Tear Down" button, and their backend views were all gated on `status == 'succeeded'`. Extended both view guards and the template condition to accept `failed` (and `torn_down` for redeploy). Permissions editor stays succeeded-only since it requires a running app.
+
+**Blueprint discarded on teardown killed redeploy path:** The teardown executor set the blueprint to `DISCARDED`, which excluded it from all queries. After teardown, the app vanished from "Deployed to Environments" with no way to redeploy. Analysis showed keeping the blueprint `ACTIVE` after teardown has no side effects — `ACTIVE` is not in `OPEN_BLUEPRINT_STATUSES` (won't interfere with new drafts) and not in `DISCARDABLE_BLUEPRINT_STATUSES` (won't be accidentally discarded). Removed the `DISCARDED` transition from the teardown executor. `DISCARDED` now means only "abandoned draft," matching its original intent.
+
+**Key points:**
+- **Model warmup blocks event loop** — OpenClaw's Node.js event loop is completely blocked during model warmup. Wrong model name → 40s timeout → `/health` can't respond → ALB marks unhealthy. Correct provider-qualified name makes warmup succeed in ~2s.
+- **`CONCLUDED_DEPLOYMENT_STATUSES`** — New name for the "pipeline finished" statuses (SUCCEEDED, FAILED, TEARDOWN_PENDING, TEARING_DOWN, TORN_DOWN). Used to pick which blueprint is "current" per environment.
+- **`VISIBLE_DEPLOYMENT_STATUSES`** — In-progress + concluded. Used to find the deployment to display in environment rows.
+- **Blueprint stays ACTIVE through teardown** — Config is preserved and reusable. Deployment's TORN_DOWN status conveys the infrastructure state.
+- **Blueprint config is a snapshot** — Updating the template doesn't propagate to existing blueprints. Manual DB fix needed for now; blueprint env var editing is a future feature.
+
 ## 2026-04-14 00:01 - [UI] Add "Tear Down" button to environment detail page
 
 **Conversation:** [2026-04-13-2101-62d8ea41.md](conversations/2026-04-13-2101-62d8ea41.md)

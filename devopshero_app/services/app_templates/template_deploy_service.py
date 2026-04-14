@@ -86,6 +86,7 @@ async def deploy_from_template(
         container_port=template.container_port,
         health_check_path=template.health_check_path,
         health_check_command=template.health_check_command,
+        health_check_grace_period=template.health_check_grace_period,
         branch="",
         created_by=created_by,
     )

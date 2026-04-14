@@ -27,6 +27,7 @@ OPENCLAW_TEMPLATE = {
     "container_port": 18789,
     "health_check_path": "/health",
     "health_check_command": "",
+    "health_check_grace_period": 120,
     "cpu": 1024,
     "memory": 2048,
     "runtime_variables": [
@@ -45,8 +46,8 @@ OPENCLAW_TEMPLATE = {
             "description": "Default LLM model identifier",
             "required": True,
             "auto_generate": False,
-            "default_value": "claude-sonnet-4-20250514",
-            "value": "claude-sonnet-4-20250514",
+            "default_value": "openai/gpt-5.4-nano",
+            "value": "openai/gpt-5.4-nano",
         },
         {
             "name": "OPENCLAW_GATEWAY_TOKEN",
