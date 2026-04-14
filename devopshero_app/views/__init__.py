@@ -59,6 +59,10 @@ from .deployment_editor import (
     deployment_editor_blueprint_section,
     deployment_editor_fork,
 )
+from .template_deploy import (
+    template_deploy_picker,
+    template_deploy_form,
+)
 from .waitlist_views import waitlist_signup
 from .security_abac import (
     security_people,
@@ -161,6 +165,8 @@ __all__ = [
     "deployment_editor_app_section",
     "deployment_editor_blueprint_section",
     "deployment_editor_fork",
+    "template_deploy_picker",
+    "template_deploy_form",
     "waitlist_signup",
     "security_people",
     "security_people_default_role",

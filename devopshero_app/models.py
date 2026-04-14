@@ -543,6 +543,52 @@ class Datastore(models.Model):
         return f"{self.name} ({self.engine})"
 
 
+class AppTemplate(models.Model):
+    """Pre-configured recipe for deploying a specific type of application."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid7, editable=False)
+    name = models.CharField(max_length=200)
+    slug = models.SlugField(max_length=100, unique=True)
+    description = models.TextField()
+    icon = models.CharField(max_length=50, help_text="Emoji or icon class for template picker UI")
+    category = models.CharField(max_length=50, help_text="e.g. ai-assistant, web-app, api")
+
+    # Source repository (bundled at template_repos/)
+    source_repo_path = models.CharField(max_length=500, help_text="Relative path within template_repos/, e.g. 'openclaw_agent'")
+
+    # App defaults
+    app_type = models.CharField(max_length=20)
+    build_strategy = models.CharField(max_length=20)
+    dockerfile_path = models.CharField(max_length=500, blank=True)
+    container_port = models.IntegerField()
+    health_check_path = models.CharField(max_length=255)
+    health_check_command = models.CharField(max_length=500, blank=True)
+
+    # Blueprint defaults
+    cpu = models.IntegerField()
+    memory = models.IntegerField()
+
+    # Runtime variables: env vars + secrets with full metadata
+    # Array of {name, category, description, required, auto_generate, default_value, value}
+    runtime_variables = models.JSONField()
+
+    # Datastore requirements (null = no datastore needed)
+    datastore_config = models.JSONField(null=True, blank=True)
+
+    # Which CDK deployment pattern to use
+    cdk_stack_profile = models.CharField(max_length=50, help_text="e.g. fargate_web")
+
+    is_active = models.BooleanField()
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["name"]
+
+    def __str__(self) -> str:
+        return self.name
+
+
 class App(models.Model):
     """An application within a workspace."""
 
@@ -576,6 +622,13 @@ class App(models.Model):
         Repository,
         on_delete=models.PROTECT,
         related_name="apps",
+    )
+    source_template = models.ForeignKey(
+        AppTemplate,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="deployed_apps",
     )
     name = models.CharField(max_length=255)
     slug = models.SlugField(max_length=255)

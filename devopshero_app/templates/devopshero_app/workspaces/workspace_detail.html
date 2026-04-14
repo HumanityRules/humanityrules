@@ -38,9 +38,9 @@
             {% for app in apps %}
             {% include "devopshero_app/partials/_app_card.html" %}
             {% endfor %}
-            {# New App card #}
+            {# New App #}
             <button type="button"
-                    onclick="document.getElementById('repo-picker-modal').classList.remove('hidden')"
+                    onclick="document.getElementById('new-app-source-modal').classList.remove('hidden')"
                     class="flex flex-col items-center justify-center p-4 border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-lg hover:border-indigo-500 dark:hover:border-indigo-400 hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors group min-h-[104px]">
                 <svg class="w-8 h-8 text-gray-400 group-hover:text-indigo-500 dark:group-hover:text-indigo-400 transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
@@ -111,6 +111,9 @@
         {% endif %}
     </div>
 </div>
+
+{# New App source picker modal #}
+{% include "devopshero_app/workspaces/_new_app_source_modal.html" %}
 
 {# Repository picker modal #}
 {% include "devopshero_app/workspaces/_repo_picker_modal.html" %}
