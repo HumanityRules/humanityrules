@@ -1,5 +1,22 @@
 # DevOpsHero Development Journal
 
+## 2026-04-14 10:36 - [UI] Fix expandable config state reset on app detail page — per-row polling
+
+**Conversation:** [2026-04-14-1036-e503ca26.md](conversations/2026-04-14-1036-e503ca26.md)
+
+The app detail page had a global `#main-content` HTMX refresh that violated the UI live update contract. When a deployment was in progress or tearing down, the entire page polled every 10s, destroying all Alpine.js state — most visibly, the expandable "Config" chevron on blueprint rows would collapse back to closed on every poll cycle.
+
+The fix restructures the page from one global poll to per-row self-terminating polls. Each blueprint row is now an independent polling widget: the `<tr x-data="{ open: false }">` is a stable wrapper that HTMX never replaces, and only an inner `<div>` gets swapped via `innerHTML`. Alpine's MutationObserver re-binds directives (`@click`, `x-show`) to the surviving `x-data` scope, so `open` retains its value across polls.
+
+The template uses Django 6.0 `partialdef` so the same template serves both initial render (full `<tr>` via `{% include %}`) and polling responses (just the inner content via `#blueprint_row_content` partial rendering).
+
+**Key points:**
+- **Contract violation fixed** — Moved from `hx-target="#main-content"` (global) to `hx-target="#blueprint-inner-{{ id }}"` (per-row). Only rows in transient states poll; terminal states render without polling attributes, so polling self-terminates.
+- **Status logic consolidated on the model** — Added `Deployment.IN_PROGRESS_STATUSES`, `CONCLUDED_STATUSES`, `VISIBLE_STATUSES`, `TRANSIENT_STATUSES` as class-level tuples, plus `is_in_progress`, `is_concluded`, `is_transient` properties. Removed the duplicate view-level tuples and hardcoded status strings in templates.
+- **Table layout trade-off** — Moved from 4 `<td>` columns to a single `<td>` with inner flex layout. The table was already visual-only (sr-only header, no data-table semantics), so the trade-off is minimal. This avoids OOB swap complexity.
+- **`should_auto_refresh` removed** — The top-level context variable is no longer needed since each row controls its own polling.
+- **Pre-existing test failure noted** — `test_app_detail_deployed_environments_uses_latest_launched_blueprint_per_environment` fails on main too (timestamp ordering issue with `auto_now_add` in tests). Not related to this change.
+
 ## 2026-04-13 23:14 - [Deployment] Per-app health check grace period for slow-starting containers
 
 **Conversation:** [2026-04-13-2314-9e26afad.md](conversations/2026-04-13-2314-9e26afad.md)

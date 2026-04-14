@@ -23,31 +23,6 @@ OPEN_BLUEPRINT_STATUSES = (
     DeploymentBlueprint.Status.DEPLOYING,
 )
 
-CONCLUDED_DEPLOYMENT_STATUSES = (
-    Deployment.Status.SUCCEEDED,
-    Deployment.Status.FAILED,
-    Deployment.Status.TEARDOWN_PENDING,
-    Deployment.Status.TEARING_DOWN,
-    Deployment.Status.TORN_DOWN,
-)
-
-VISIBLE_DEPLOYMENT_STATUSES = (
-    Deployment.Status.PENDING,
-    Deployment.Status.BUILDING,
-    Deployment.Status.PUSHING,
-    Deployment.Status.DEPLOYING,
-    Deployment.Status.STARTING,
-    *CONCLUDED_DEPLOYMENT_STATUSES,
-)
-
-IN_PROGRESS_DEPLOYMENT_STATUSES = (
-    Deployment.Status.PENDING,
-    Deployment.Status.BUILDING,
-    Deployment.Status.PUSHING,
-    Deployment.Status.DEPLOYING,
-    Deployment.Status.STARTING,
-)
-
 
 @dataclass
 class DeployedEnvironmentRow:
@@ -109,19 +84,19 @@ def _build_deployed_environment_rows(app: App) -> list[DeployedEnvironmentRow]:
     """Build one current blueprint-backed summary row per environment."""
     current_deployment_id_subquery = (
         Deployment.objects.filter(blueprint=OuterRef("pk"))
-        .filter(status__in=VISIBLE_DEPLOYMENT_STATUSES)
+        .filter(status__in=Deployment.VISIBLE_STATUSES)
         .order_by("-created_at")
         .values("id")[:1]
     )
     current_deployment_created_at_subquery = (
         Deployment.objects.filter(blueprint=OuterRef("pk"))
-        .filter(status__in=VISIBLE_DEPLOYMENT_STATUSES)
+        .filter(status__in=Deployment.VISIBLE_STATUSES)
         .order_by("-created_at")
         .values("created_at")[:1]
     )
     current_launched_deployment_created_at_subquery = (
         Deployment.objects.filter(blueprint=OuterRef("pk"))
-        .filter(status__in=CONCLUDED_DEPLOYMENT_STATUSES)
+        .filter(status__in=Deployment.CONCLUDED_STATUSES)
         .order_by("-created_at")
         .values("created_at")[:1]
     )
@@ -179,7 +154,6 @@ def build_app_detail_context(request: HttpRequest, app: App) -> dict[str, Any]:
     deployments = Deployment.objects.filter(
         app=app,
     ).select_related("environment", "environment__aws_account").order_by("-created_at")[:20]
-    should_auto_refresh = Deployment.objects.filter(app=app, status__in=IN_PROGRESS_DEPLOYMENT_STATUSES).exists()
     open_blueprint = get_open_blueprint(app=app)
     environment_rows = _build_deployed_environment_rows(app=app)
 
@@ -192,7 +166,6 @@ def build_app_detail_context(request: HttpRequest, app: App) -> dict[str, Any]:
     context["app"] = app
     context["deployments"] = deployments
     context["environment_rows"] = environment_rows
-    context["should_auto_refresh"] = should_auto_refresh
     context["open_blueprint"] = open_blueprint
     org = request.user.current_organization
     context["direct_tags"] = direct_tags
@@ -276,6 +249,42 @@ def app_deployment_status(request: HttpRequest, app_slug: str, deployment_id: UU
 
 @login_required
 @require_GET
+def blueprint_row_status(request: HttpRequest, blueprint_id: UUID) -> HttpResponse:
+    """Return updated blueprint row inner HTML for self-terminating polling."""
+    blueprint = get_object_or_404(
+        DeploymentBlueprint.objects.select_related(
+            "app", "app__workspace", "environment", "environment__aws_account", "datastore",
+        ),
+        id=blueprint_id,
+        app__organization=request.user.current_organization,
+    )
+
+    denied = abac_view_checks.check_abac(request, blueprint.app.workspace, "workspace", "workspace:view")
+    if denied:
+        return denied
+
+    current_deployment = (
+        Deployment.objects.filter(blueprint=blueprint, status__in=Deployment.VISIBLE_STATUSES)
+        .order_by("-created_at")
+        .first()
+    )
+    if not current_deployment:
+        return HttpResponse(status=404)
+
+    context = {
+        "app": blueprint.app,
+        "blueprint": blueprint,
+        "current_deployment": current_deployment,
+    }
+    return render(
+        request,
+        "devopshero_app/apps/_app_blueprint_row.html#blueprint_row_content",
+        context=context,
+    )
+
+
+@login_required
+@require_GET
 def app_card_status(request: HttpRequest, app_slug: str) -> HttpResponse:
     """Return updated app card status pill for polling."""
     latest_deployment_status = (
@@ -344,14 +353,7 @@ def app_deployment_redeploy(request: HttpRequest, app_slug: str, deployment_id: 
     if deployment.status not in (Deployment.Status.SUCCEEDED, Deployment.Status.FAILED, Deployment.Status.TORN_DOWN):
         return HttpResponse(status=422)
 
-    active_statuses = [
-        Deployment.Status.PENDING,
-        Deployment.Status.BUILDING,
-        Deployment.Status.PUSHING,
-        Deployment.Status.DEPLOYING,
-        Deployment.Status.STARTING,
-    ]
-    if Deployment.objects.filter(app=app, status__in=active_statuses).exists():
+    if Deployment.objects.filter(app=app, status__in=Deployment.IN_PROGRESS_STATUSES).exists():
         return HttpResponse(status=422)
 
     git_ref = deployment.git_ref or app.branch

@@ -29,6 +29,7 @@ urlpatterns = [
     path("deploy/<slug:app_slug>/app-section/", views.deployment_editor_app_section, name="deployment_editor_app_section"),
     path("deploy/<slug:app_slug>/blueprint-section/", views.deployment_editor_blueprint_section, name="deployment_editor_blueprint_section"),
 
+    path("blueprints/<uuid:blueprint_id>/row-status/", views.blueprint_row_status, name="blueprint_row_status"),
     path("apps/<slug:app_slug>/deployments/<uuid:deployment_id>/teardown/", views.app_deployment_teardown, name="app_deployment_teardown"),
     path("apps/<slug:app_slug>/deployments/<uuid:deployment_id>/redeploy/", views.app_deployment_redeploy, name="app_deployment_redeploy"),
     path("apps/<slug:app_slug>/deployments/<uuid:deployment_id>/status/", views.app_deployment_status, name="app_deployment_status"),

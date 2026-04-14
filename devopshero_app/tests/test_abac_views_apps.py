@@ -126,7 +126,6 @@ class TestAppEndpoints(TestCase):
         self.client.force_login(self.ws_editor)
         response = self.client.get("/apps/myapp/", **HTMX)
         self.assertEqual(response.status_code, 200)
-        self.assertFalse(response.context["should_auto_refresh"])
         self.assertContains(response, "Deployment")
         self.assertContains(response, "/deploy/myapp/")
         self.assertNotContains(response, 'hx-trigger="load delay:10s"')
@@ -261,14 +260,13 @@ class TestAppEndpoints(TestCase):
         response = self.client.get("/apps/myapp/", **HTMX)
 
         self.assertEqual(response.status_code, 200)
-        self.assertTrue(response.context["should_auto_refresh"])
         self.assertEqual(len(response.context["environment_rows"]), 1)
         row = response.context["environment_rows"][0]
         self.assertEqual(row.blueprint.id, self.blueprint.id)
         self.assertEqual(row.current_deployment.id, redeploy_attempt.id)
         self.assertEqual(row.current_deployment.status, Deployment.Status.PENDING)
         self.assertNotContains(response, "Redeploy")
-        self.assertContains(response, 'hx-get="/apps/myapp/"')
+        self.assertContains(response, f"/blueprints/{self.blueprint.id}/row-status/")
         self.assertContains(response, 'hx-trigger="load delay:10s"')
 
     def test_app_detail_shows_teardown_in_deployed_environments_not_recent_deployments(self) -> None:

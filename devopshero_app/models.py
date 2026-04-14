@@ -961,6 +961,33 @@ class Deployment(models.Model):
         TEARDOWN_PENDING = "teardown_pending", "Teardown Pending"
         TEARING_DOWN = "tearing_down", "Tearing Down"
 
+    IN_PROGRESS_STATUSES = (
+        Status.PENDING,
+        Status.BUILDING,
+        Status.PUSHING,
+        Status.DEPLOYING,
+        Status.STARTING,
+    )
+
+    CONCLUDED_STATUSES = (
+        Status.SUCCEEDED,
+        Status.FAILED,
+        Status.TEARDOWN_PENDING,
+        Status.TEARING_DOWN,
+        Status.TORN_DOWN,
+    )
+
+    VISIBLE_STATUSES = (
+        *IN_PROGRESS_STATUSES,
+        *CONCLUDED_STATUSES,
+    )
+
+    TRANSIENT_STATUSES = (
+        *IN_PROGRESS_STATUSES,
+        Status.TEARDOWN_PENDING,
+        Status.TEARING_DOWN,
+    )
+
     id = models.UUIDField(
         primary_key=True,
         default=uuid.uuid7,
@@ -1049,6 +1076,21 @@ class Deployment(models.Model):
 
     def __str__(self) -> str:
         return f"{self.app.name} - {self.git_ref} ({self.status})"
+
+    @property
+    def is_in_progress(self) -> bool:
+        """Actively going through the build/deploy pipeline."""
+        return self.status in self.IN_PROGRESS_STATUSES
+
+    @property
+    def is_concluded(self) -> bool:
+        """Reached a result from the pipeline's perspective."""
+        return self.status in self.CONCLUDED_STATUSES
+
+    @property
+    def is_transient(self) -> bool:
+        """Status may change via background processing."""
+        return self.status in self.TRANSIENT_STATUSES
 
 
 class DeploymentLog(models.Model):
