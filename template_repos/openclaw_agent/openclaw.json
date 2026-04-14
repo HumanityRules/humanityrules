@@ -13,7 +13,8 @@
     },
     "controlUi": {
       "dangerouslyDisableDeviceAuth": true,
-      "allowInsecureAuth": true
+      "allowInsecureAuth": true,
+      "dangerouslyAllowHostHeaderOriginFallback": true
     },
     "nodes": {
       "denyCommands": [

@@ -1,5 +1,21 @@
 # DevOpsHero Development Journal
 
+## 2026-04-14 22:38 - [Deployment] Fix OpenClaw "origin not allowed" error — add Host header origin fallback
+
+**Conversation:** [2026-04-14-1338-4bb16423.md](conversations/2026-04-14-1338-4bb16423.md)
+
+After deploying OpenClaw via DOH to `https://ai-assistant-openclaw.chsandbox.com/`, the Control UI loaded but displayed "origin not allowed (open the Control UI from the gateway host or allow it in gateway.controlUi.allowedOrigins)". The OpenClaw gateway validates the browser's `Origin` header against an allowlist, and the existing `controlUi` config only had `dangerouslyDisableDeviceAuth` and `allowInsecureAuth` — no `allowedOrigins`. By default, OpenClaw only permits connections from `localhost`/`127.0.0.1`, so the HTTPS domain was rejected.
+
+Three options were considered: (A) explicit `allowedOrigins` with the exact domain, (B) `dangerouslyAllowHostHeaderOriginFallback: true` to trust the Host header, (C) wildcard `"*"`. Chose option B because the app sits behind DOH's ALB which controls the Host header, making it reasonably safe, and it works regardless of what domain DOH assigns without needing config changes per deployment.
+
+Note: the fix was applied to `template_repos/openclaw_agent/openclaw.json` (the DOH template), not to `deployable-repos/` (the deployed copy). The initial edit was mistakenly made to the wrong location.
+
+**Key points:**
+- **Root cause** — OpenClaw gateway origin validation rejects any origin not in `controlUi.allowedOrigins`; defaults to localhost-only when unset
+- **Fix** — Added `dangerouslyAllowHostHeaderOriginFallback: true` to `gateway.controlUi` in `openclaw.json`
+- **Why Host header fallback over explicit origins** — Works for any DOH-assigned domain without per-deployment config changes; safe behind ALB
+- **Known upstream bug** — OpenClaw CLI commands that touch `openclaw.json` can reset `allowedOrigins` to defaults (issue #49950), but since the config is baked into the Docker image and not modified at runtime, this doesn't affect DOH deployments
+
 ## 2026-04-14 20:46 - [Deployment] Eliminate desired_count=0 workaround — two-phase CDK deployment
 
 **Conversation:** [2026-04-14-1147-17ecc887.md](conversations/2026-04-14-1147-17ecc887.md)
