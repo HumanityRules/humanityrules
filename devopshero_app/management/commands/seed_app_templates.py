@@ -27,7 +27,7 @@ OPENCLAW_TEMPLATE = {
     "container_port": 18789,
     "health_check_path": "/health",
     "health_check_command": "",
-    "health_check_grace_period": 120,
+    "health_check_grace_period": 60,
     "cpu": 1024,
     "memory": 2048,
     "runtime_variables": [
