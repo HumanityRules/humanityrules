@@ -1,5 +1,5 @@
 """
-Management command for ad-hoc model queries.
+Management command for ad-hoc model queries. Works against the local database, but can also be used on production via ./prod_manage.sh doh_query <args>.
 
 Usage:
     uv run manage.py doh_query <Model> [field1 field2 ...] [--filter key=value] [--limit N]
