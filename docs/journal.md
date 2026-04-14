@@ -1,5 +1,22 @@
 # DevOpsHero Development Journal
 
+## 2026-04-14 00:01 - [UI] Add "Tear Down" button to environment detail page
+
+**Conversation:** [2026-04-13-2101-62d8ea41.md](conversations/2026-04-13-2101-62d8ea41.md)
+
+Added a UI-triggered environment teardown flow to the environment detail page, matching the existing patterns for destructive actions in the system (group delete, policy delete, app deployment teardown).
+
+The button is a red outlined style consistent with the "Delete Group" button in security views, placed in the header bar next to the existing "Resume Setup" button. It only appears for org admins when the environment status is `ready` or `error` — these are the states where teardown makes practical sense. The agent tool (`teardown_environment`) is more permissive (allows any status except already-tearing-down), but the UI intentionally limits to the two most relevant states.
+
+The flow uses the standard HTMX confirmation modal pattern: button issues `hx-get` to load `_confirm_modal.html` into `#modal-container`, the confirm button in the modal issues `hx-post` to the teardown endpoint, which sets the environment to `TEARDOWN_PENDING` and re-renders the detail page (showing the updated status pill). The job worker picks up `TEARDOWN_PENDING` environments for actual infrastructure destruction.
+
+The POST view sets the status directly (same pattern as `app_deployment_teardown`) rather than calling the async `teardown_environment` agent tool — keeps the view synchronous and avoids unnecessary indirection. Both views are protected by `environment:admin` ABAC, with an additional `user_is_org_admin` template guard on button visibility.
+
+**Key points:**
+- **Status gating** — Button visible only for `ready` and `error` environments; the POST also validates this server-side (returns 422 otherwise)
+- **Two-layer auth** — Template hides button via `user_is_org_admin`; both GET (confirm) and POST (teardown) enforce `environment:admin` ABAC
+- **Reuses `_confirm_modal.html`** — No new template needed; the shared confirmation modal handles title, message, and confirm action via context variables
+
 ## 2026-04-13 22:30 - [Deployment] App Templates Phase 1: design and implement one-click deploy from bundled templates
 
 **Conversation:** [2026-04-13-2056-ae606152.md](conversations/2026-04-13-2056-ae606152.md)

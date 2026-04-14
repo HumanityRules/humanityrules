@@ -124,6 +124,48 @@ def environment_detail(request: HttpRequest, environment_id: UUID) -> HttpRespon
 
 
 @login_required
+def environment_teardown_confirm(request: HttpRequest, environment_id: UUID) -> HttpResponse:
+    """Return the environment teardown confirmation modal HTML."""
+    environment = _get_environment_for_user(request=request, environment_id=environment_id)
+
+    denied = abac_view_checks.check_abac(request, environment, "environment", "environment:admin")
+    if denied:
+        return denied
+
+    return render(request, "devopshero_app/partials/_confirm_modal.html", {
+        "modal_title": "Tear Down Environment",
+        "modal_message": f'Are you sure you want to tear down "{environment.name}"? This will destroy all deployments in the environment and delete the underlying infrastructure (VPC, ECS cluster). This action cannot be undone.',
+        "confirm_url": f"/environments/{environment.id}/teardown/",
+        "confirm_label": "Tear Down",
+    })
+
+
+@login_required
+@require_POST
+def environment_teardown(request: HttpRequest, environment_id: UUID) -> HttpResponse:
+    """Queue teardown for an environment."""
+    environment = _get_environment_for_user(request=request, environment_id=environment_id)
+
+    denied = abac_view_checks.check_abac(request, environment, "environment", "environment:admin")
+    if denied:
+        return denied
+
+    teardownable_statuses = {
+        models.Environment.Status.READY,
+        models.Environment.Status.ERROR,
+    }
+    if environment.status not in teardownable_statuses:
+        return HttpResponse(status=422)
+
+    environment.status = models.Environment.Status.TEARDOWN_PENDING
+    environment.status_message = "Teardown triggered via web UI"
+    environment.save(update_fields=["status", "status_message", "updated_at"])
+
+    context = build_environment_detail_context(request=request, environment=environment)
+    return render(request, "devopshero_app/environments/environment_detail.html", context=context)
+
+
+@login_required
 @require_POST
 def environment_tag_add(request: HttpRequest, environment_id: UUID) -> HttpResponse:
     """Add a tag to an environment. Returns updated tag partial."""
