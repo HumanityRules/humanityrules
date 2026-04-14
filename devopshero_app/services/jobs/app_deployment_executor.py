@@ -64,7 +64,7 @@ def run_deployment(deployment_id: str) -> bool:
             "app",
             "app__workspace",
             "app__repository",
-            
+            "app__source_template",
             "environment",
             "environment__aws_account",
         ).get(id=deployment_id)

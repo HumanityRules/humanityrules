@@ -72,6 +72,10 @@ def build_app_config_from_blueprint(blueprint: DeploymentBlueprint, repo_path: P
     if blueprint.datastore:
         database_config = build_database_config(blueprint.datastore)
 
+    cdk_stack_profile = "fargate_web"
+    if app.source_template:
+        cdk_stack_profile = app.source_template.cdk_stack_profile
+
     return infra_customer.appconfig.AppConfig(
         app_name=app.slug,
         ecr_repo_name=ecr_repo_name,
@@ -85,4 +89,5 @@ def build_app_config_from_blueprint(blueprint: DeploymentBlueprint, repo_path: P
         app_source_path=app_source_path,
         database_config=database_config,
         app_secrets=blueprint.app_secrets,
+        cdk_stack_profile=cdk_stack_profile,
     )

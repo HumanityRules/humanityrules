@@ -74,6 +74,10 @@ def _build_teardown_app_config(
     cpu = deployment.blueprint.cpu
     memory = deployment.blueprint.memory
 
+    cdk_stack_profile = "fargate_web"
+    if app.source_template:
+        cdk_stack_profile = app.source_template.cdk_stack_profile
+
     return infra_customer.appconfig.AppConfig(
         app_name=app.slug,
         ecr_repo_name=ecr_repo_name,
@@ -86,6 +90,7 @@ def _build_teardown_app_config(
         app_source_path=None,
         database_config=database_config,
         app_secrets=None,
+        cdk_stack_profile=cdk_stack_profile,
     )
 
 
@@ -113,6 +118,7 @@ def run_teardown(deployment_id: str) -> bool:
             "blueprint__datastore",
             "app",
             "app__workspace",
+            "app__source_template",
             "environment",
             "environment__aws_account",
         ).get(id=deployment_id)

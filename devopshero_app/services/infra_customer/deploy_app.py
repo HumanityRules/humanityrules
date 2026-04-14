@@ -10,6 +10,7 @@ from aws_cdk import App, Aws, CfnOutput, Duration, Fn, RemovalPolicy, SecretValu
 from aws_cdk import aws_ec2 as ec2
 from aws_cdk import aws_ecr as ecr
 from aws_cdk import aws_ecs as ecs
+from aws_cdk import aws_efs as efs
 from aws_cdk import aws_elasticloadbalancingv2 as elbv2
 from aws_cdk import aws_iam as iam
 from aws_cdk import aws_logs as logs
@@ -346,6 +347,30 @@ class AppStack(Stack):
                 resources=[database_connection_secret.secret_arn],
             ))
 
+        # EFS: create per-app access point and grant mount permissions
+        efs_access_point = None
+        if app_config.cdk_stack_profile == "fargate_web_efs":
+            efs_file_system = efs.FileSystem.from_file_system_attributes(
+                self, "ImportedEfs",
+                file_system_id=self.environment_infra.efs_file_system_id,
+                security_group=self.environment_infra.efs_security_group,
+            )
+            efs_access_point = efs_file_system.add_access_point(
+                "AppAccessPoint",
+                path=f"/deployments/{app_config.app_name}",
+                create_acl=efs.Acl(owner_uid="1000", owner_gid="1000", permissions="755"),
+                posix_user=efs.PosixUser(uid="1000", gid="1000"),
+            )
+            task_role.add_to_policy(iam.PolicyStatement(
+                actions=["elasticfilesystem:ClientMount", "elasticfilesystem:ClientWrite"],
+                resources=[efs_file_system.file_system_arn],
+                conditions={
+                    "StringEquals": {
+                        "elasticfilesystem:AccessPointArn": efs_access_point.access_point_arn,
+                    },
+                },
+            ))
+
         environment = {env["name"]: env["value"] for env in app_config.environment_variables}
 
         # Inject secrets from Secrets Manager as environment variables via ECS secrets
@@ -380,6 +405,19 @@ class AppStack(Stack):
             ),
         )
 
+        if efs_access_point:
+            task_definition.add_volume(
+                name="app-workspace",
+                efs_volume_configuration=ecs.EfsVolumeConfiguration(
+                    file_system_id=self.environment_infra.efs_file_system_id,
+                    transit_encryption="ENABLED",
+                    authorization_config=ecs.AuthorizationConfig(
+                        access_point_id=efs_access_point.access_point_id,
+                        iam="ENABLED",
+                    ),
+                ),
+            )
+
         container = task_definition.add_container(
             "AppContainer",
             container_name=app_config.app_name,
@@ -396,6 +434,15 @@ class AppStack(Stack):
             ) if app_config.health_check_command else None,
         )
         container.add_port_mappings(ecs.PortMapping(container_port=app_config.container_port, protocol=ecs.Protocol.TCP))
+
+        if efs_access_point:
+            container.add_mount_points(
+                ecs.MountPoint(
+                    container_path="/app/workspace",
+                    source_volume="app-workspace",
+                    read_only=False,
+                )
+            )
 
         # When DOH runs in production (DEBUG=False), use stable settings
         # When developing locally (DEBUG=True), use aggressive settings for fast deploys
