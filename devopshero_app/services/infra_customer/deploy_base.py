@@ -1,5 +1,5 @@
 """
-Deploy shared DevOpsHero infrastructure (VPC, ECS cluster, shared ALB) using AWS CDK.
+Deploy shared DevOpsHero infrastructure (VPC, ECS cluster, shared ALB, EFS) using AWS CDK.
 """
 
 from dataclasses import dataclass
@@ -10,6 +10,7 @@ from aws_cdk import App, Aws, CfnOutput, Fn, RemovalPolicy, Stack
 from aws_cdk import aws_certificatemanager as acm
 from aws_cdk import aws_ec2 as ec2
 from aws_cdk import aws_ecs as ecs
+from aws_cdk import aws_efs as efs
 from aws_cdk import aws_elasticloadbalancingv2 as elbv2
 from aws_cdk import aws_iam as iam
 from aws_cdk import aws_logs as logs
@@ -47,6 +48,9 @@ class EnvironmentInfrastructure:
     shared_alb_hosted_zone: str | None
     # Builder resources (builder_instance_id is looked up at runtime via ec2_builder_utils)
     builder_security_group: ec2.ISecurityGroup | None
+    # Shared EFS for persistent app workspaces (e.g., AI agent memory)
+    efs_file_system_id: str
+    efs_security_group: ec2.ISecurityGroup
 
 
 def import_environment_infrastructure(scope: Construct, env_slug: str, shared_alb_hosted_zone: str | None) -> EnvironmentInfrastructure:
@@ -121,6 +125,13 @@ def import_environment_infrastructure(scope: Construct, env_slug: str, shared_al
         Fn.import_value(f"{prefix}-builder-sg-id"),
     )
 
+    # Import shared EFS resources
+    efs_file_system_id = Fn.import_value(f"{prefix}-efs-id")
+    efs_security_group = ec2.SecurityGroup.from_security_group_id(
+        scope, "ImportedEfsSg",
+        Fn.import_value(f"{prefix}-efs-sg-id"),
+    )
+
     return EnvironmentInfrastructure(
         vpc=vpc,
         default_security_group=default_security_group,
@@ -132,6 +143,8 @@ def import_environment_infrastructure(scope: Construct, env_slug: str, shared_al
         shared_alb_security_group=shared_alb_security_group,
         shared_alb_hosted_zone=shared_alb_hosted_zone,
         builder_security_group=builder_security_group,
+        efs_file_system_id=efs_file_system_id,
+        efs_security_group=efs_security_group,
     )
 
 
@@ -498,6 +511,55 @@ touch /tmp/builder_ready
         CfnOutput(self, "BuilderSecurityGroupId", value=self.security_group.security_group_id, export_name=f"{prefix}-builder-sg-id")
 
 
+class EfsStack(Stack):
+    """
+    Shared EFS filesystem for persistent app workspaces (e.g., AI agent memory).
+
+    One filesystem per environment, shared by all apps that need persistent storage.
+    Each app creates its own EFS access point for path and UID isolation.
+    """
+
+    def __init__(
+        self,
+        scope: Construct,
+        construct_id: str,
+        env_slug: str,
+        vpc: ec2.IVpc,
+        vpc_cidr: str,
+        **kwargs,
+    ) -> None:
+        super().__init__(scope, construct_id, **kwargs)
+
+        prefix = f"devopshero-{env_slug}"
+
+        self.security_group = ec2.SecurityGroup(
+            self, "EfsSecurityGroup",
+            vpc=vpc,
+            security_group_name=f"{prefix}-efs-sg",
+            description="Security group for EFS mount targets - allows NFS from VPC",
+            allow_all_outbound=False,
+        )
+        self.security_group.add_ingress_rule(
+            peer=ec2.Peer.ipv4(vpc_cidr),
+            connection=ec2.Port.tcp(2049),
+            description="Allow NFS from VPC",
+        )
+
+        self.file_system = efs.FileSystem(
+            self, "SharedEfs",
+            file_system_name=f"{prefix}-shared",
+            vpc=vpc,
+            security_group=self.security_group,
+            performance_mode=efs.PerformanceMode.GENERAL_PURPOSE,
+            throughput_mode=efs.ThroughputMode.BURSTING,
+            removal_policy=RemovalPolicy.RETAIN,
+            encrypted=True,
+        )
+
+        CfnOutput(self, "EfsFileSystemId", value=self.file_system.file_system_id, export_name=f"{prefix}-efs-id")
+        CfnOutput(self, "EfsSecurityGroupId", value=self.security_group.security_group_id, export_name=f"{prefix}-efs-sg-id")
+
+
 # =============================================================================
 # HELPER FUNCTIONS
 # =============================================================================
@@ -553,8 +615,9 @@ def deploy(
     vpc_stack_name = f"devopshero-{env_slug}-vpc"
     cluster_stack_name = f"devopshero-{env_slug}-cluster"
     builder_stack_name = f"devopshero-{env_slug}-builder"
+    efs_stack_name = f"devopshero-{env_slug}-efs"
 
-    cloudformation_utils.cleanup_rollback_complete_stacks(cf_client, [vpc_stack_name, cluster_stack_name, builder_stack_name])
+    cloudformation_utils.cleanup_rollback_complete_stacks(cf_client, [vpc_stack_name, cluster_stack_name, builder_stack_name, efs_stack_name])
 
     vpc_cidr = get_or_create_vpc_cidr(session=session, env_slug=env_slug)
 
@@ -594,6 +657,9 @@ def deploy(
     )
     ecs_cluster_stack.add_dependency(vpc_stack)
 
+    efs_stack = EfsStack(cdk_app, efs_stack_name, env_slug=env_slug, vpc=vpc_stack.vpc, vpc_cidr=vpc_cidr)
+    efs_stack.add_dependency(vpc_stack)
+
     if synth_only:
         cloud_assembly = cdk_app.synth()
         logger.info("CDK templates synthesized to: %(directory)s", {"directory": cloud_assembly.directory})
@@ -614,10 +680,11 @@ def teardown(session: boto3.Session, env_slug: str) -> bool:
     """
     cf_client = session.client("cloudformation")
 
-    # Order matters: cluster has no dependencies, builder depends on VPC, VPC is base
+    # Order matters: dependent stacks first, VPC is base (deleted last)
     stacks_to_delete = [
         f"devopshero-{env_slug}-cluster",
         f"devopshero-{env_slug}-builder",
+        f"devopshero-{env_slug}-efs",
         f"devopshero-{env_slug}-vpc",
     ]
 

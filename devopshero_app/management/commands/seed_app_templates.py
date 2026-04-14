@@ -105,7 +105,7 @@ OPENCLAW_TEMPLATE = {
         },
     ],
     "datastore_config": None,
-    "cdk_stack_profile": "fargate_web",
+    "cdk_stack_profile": "fargate_web_efs",
     "is_active": True,
 }
 

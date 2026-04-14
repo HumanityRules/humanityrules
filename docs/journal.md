@@ -1,5 +1,26 @@
 # DevOpsHero Development Journal
 
+## 2026-04-14 16:02 - [Deployment] Add EFS persistent storage for AI agent workspaces
+
+**Conversation:** [2026-04-14-1603-b5ee55d1.md](conversations/2026-04-14-1603-b5ee55d1.md)
+
+OpenClaw agents store all state as files under `/app/workspace/` — session memory, runtime metadata, SQLite databases. On plain Fargate this is ephemeral: every container replacement (deploy, crash, scale event) wipes the agent's memory. We needed persistent storage that requires zero changes to OpenClaw itself.
+
+Evaluated five options: EFS, Fargate ephemeral storage (not persistent), Aurora Serverless (wrong model — OpenClaw is file-based, not SQL), S3 with FUSE (requires SYS_ADMIN capability, high latency), DynamoDB (same mismatch as Aurora). EFS was the clear winner: mount it at `/app/workspace` and OpenClaw writes files as normal without knowing the difference. DOH's own control plane already uses this exact pattern for Claude session persistence (`storage_stack.py` + `app_stack.py`).
+
+Architecture: one EFS filesystem per customer environment (created in `deploy_base`, shared infrastructure, effectively $0 cost with no data stored), one access point per agent deployment (created in `deploy_app`, path-isolated at `/deployments/{app-name}` with UID 1000 enforcement). This gives per-agent isolation at the EFS layer — agents can't see each other's files even though they share a filesystem. EFS supports up to 1,000 access points per filesystem. Using `app_name` (app slug) for the path gives human-readable browsability and a nice recovery property: tearing down and redeploying with the same name automatically recovers the previous workspace data.
+
+The implementation activates the existing `AppTemplate.cdk_stack_profile` field, which was defined but never consumed by the deployment pipeline. The OpenClaw template now uses `fargate_web_efs` instead of `fargate_web`. When `deploy_app.AppStack` sees this profile, it imports the shared EFS, creates a per-app access point, adds the EFS volume to the task definition, mounts it at `/app/workspace`, and grants scoped IAM permissions (ClientMount + ClientWrite, conditioned on the access point ARN).
+
+**Key points:**
+- **Why EFS over alternatives** — Only option requiring zero OpenClaw code changes; file-based memory model maps directly to a mounted filesystem
+- **Cost** — Effectively free for agent workspaces (text files, KBs to low MBs). EFS Standard $0.30/GB-month, Infrequent Access $0.025/GB-month. No provisioned throughput needed.
+- **Per-agent isolation** — EFS access points enforce path + UID isolation (`/deployments/{app-name}`, UID 1000/GID 1000). Chroot-like — each agent sees only its own directory.
+- **`cdk_stack_profile` activated** — Field existed on `AppTemplate` but was never read by deployment code. Now `deploy_app` dispatches on it: `fargate_web` (existing behavior) vs `fargate_web_efs` (adds EFS volume + mount)
+- **`AppConfig` extended** — New `cdk_stack_profile` field (defaults to `"fargate_web"`), threaded from `App.source_template.cdk_stack_profile` through `app_config_builder` and `teardown_executor`
+- **Recovery semantics** — Redeploying an agent with the same name reconnects to existing workspace data (access point recreated at same path). Clean slate requires deleting the EFS directory or using a new name.
+- **Container UID** — OpenClaw image runs as `node` (UID 1000), confirmed from Dockerfile `COPY --chown=node:node`. Access point enforces matching UID/GID.
+
 ## 2026-04-14 22:38 - [Deployment] Fix OpenClaw "origin not allowed" error — add Host header origin fallback
 
 **Conversation:** [2026-04-14-1338-4bb16423.md](conversations/2026-04-14-1338-4bb16423.md)
