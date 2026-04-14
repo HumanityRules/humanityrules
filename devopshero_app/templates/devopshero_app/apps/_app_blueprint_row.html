@@ -1,12 +1,20 @@
-<tr x-data="{ open: false }" id="blueprint-{{ blueprint.id }}"
-    {% if current_deployment.status == 'teardown_pending' or current_deployment.status == 'tearing_down' %}
-        hx-get="{% url 'app_detail' app_slug=app.slug %}"
-        hx-trigger="load delay:10s"
-        hx-target="#main-content"
-        hx-swap="innerHTML"
-    {% endif %}>
-    <td class="w-full px-4 py-3 align-top">
-        <div class="min-w-0">
+<tr x-data="{ open: false }" id="blueprint-{{ blueprint.id }}">
+    <td class="p-0">
+        <div id="blueprint-inner-{{ blueprint.id }}">
+            {% partial blueprint_row_content %}
+        </div>
+    </td>
+</tr>
+
+{% partialdef blueprint_row_content %}
+<div {% if current_deployment.is_transient %}
+     hx-get="{% url 'blueprint_row_status' blueprint_id=blueprint.id %}"
+     hx-trigger="load delay:10s"
+     hx-target="#blueprint-inner-{{ blueprint.id }}"
+     hx-swap="innerHTML"
+     {% endif %}>
+    <div class="flex items-start">
+        <div class="flex-1 min-w-0 px-4 py-3">
             <h3 class="text-sm font-medium text-gray-900 dark:text-white"><span class="text-xs text-gray-400 dark:text-gray-500">Environment:</span> <a href="{% url 'environment_detail' environment_id=blueprint.environment.id %}" hx-get="{% url 'environment_detail' environment_id=blueprint.environment.id %}" hx-target="#main-content" hx-swap="innerHTML" hx-push-url="true" class="text-indigo-600 dark:text-indigo-400 hover:underline">{{ blueprint.environment.name }}</a></h3>
             <p class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
                 <span class="text-gray-400 dark:text-gray-500">Account:</span> {{ blueprint.environment.aws_account.name }} · <span class="text-gray-400 dark:text-gray-500">Region:</span> {{ blueprint.environment.aws_region }}
@@ -76,40 +84,39 @@
                 </div>
             </div>
         </div>
-    </td>
-    <td class="px-2 py-3 text-center align-top whitespace-nowrap">
-        {% include "devopshero_app/partials/_status_pill.html" with status=current_deployment.status label=current_deployment.get_status_display only %}
-    </td>
-    <td class="px-2 py-3 text-center align-top">
-        <div>
+        <div class="shrink-0 px-2 py-3 text-center whitespace-nowrap">
+            {% include "devopshero_app/partials/_status_pill.html" with status=current_deployment.status label=current_deployment.get_status_display only %}
+        </div>
+        <div class="shrink-0 px-2 py-3 text-center">
             <span class="text-xs leading-4 whitespace-nowrap text-gray-500 dark:text-gray-400">{{ current_deployment.created_at|timesince }} ago</span>
         </div>
-    </td>
-    <td class="px-4 py-3 align-top whitespace-nowrap">
-        <div class="flex min-w-0 flex-col items-start gap-1">
-            {% if current_deployment.status == 'succeeded' or current_deployment.status == 'failed' or current_deployment.status == 'torn_down' %}
-            <button hx-post="{% url 'app_deployment_redeploy' app_slug=app.slug deployment_id=current_deployment.id %}"
-                    hx-target="#main-content"
-                    hx-swap="innerHTML"
-                    class="text-xs text-indigo-600 dark:text-indigo-400 hover:underline">Redeploy</button>
-            {% if current_deployment.status == 'succeeded' %}
-            <a href="{% url 'security_permissions_editor' %}?context_app={{ app.slug }}&context_environment={{ blueprint.environment.slug }}"
-               hx-get="{% url 'security_permissions_editor' %}?context_app={{ app.slug }}&context_environment={{ blueprint.environment.slug }}"
-               hx-target="#main-content"
-               hx-swap="innerHTML"
-               hx-push-url="true"
-               class="text-xs text-indigo-600 dark:text-indigo-400 hover:underline">Permissions</a>
-            {% endif %}
-            {% if current_deployment.status == 'succeeded' or current_deployment.status == 'failed' %}
-            <button type="button"
-                    hx-get="{% url 'app_teardown_confirm' app_slug=app.slug deployment_id=current_deployment.id %}?render=app_detail"
-                    hx-target="#modal-container"
-                    hx-swap="innerHTML"
-                    class="text-xs text-indigo-600 dark:text-indigo-400 hover:underline">Tear Down</button>
-            {% endif %}
-            {% else %}
-            <span class="text-xs text-gray-300 dark:text-gray-600 w-full text-left">&mdash;&mdash;&mdash;</span>
-            {% endif %}
+        <div class="shrink-0 px-4 py-3 whitespace-nowrap">
+            <div class="flex min-w-0 flex-col items-start gap-1">
+                {% if current_deployment.status == 'succeeded' or current_deployment.status == 'failed' or current_deployment.status == 'torn_down' %}
+                <button hx-post="{% url 'app_deployment_redeploy' app_slug=app.slug deployment_id=current_deployment.id %}"
+                        hx-target="#main-content"
+                        hx-swap="innerHTML"
+                        class="text-xs text-indigo-600 dark:text-indigo-400 hover:underline">Redeploy</button>
+                {% if current_deployment.status == 'succeeded' %}
+                <a href="{% url 'security_permissions_editor' %}?context_app={{ app.slug }}&context_environment={{ blueprint.environment.slug }}"
+                   hx-get="{% url 'security_permissions_editor' %}?context_app={{ app.slug }}&context_environment={{ blueprint.environment.slug }}"
+                   hx-target="#main-content"
+                   hx-swap="innerHTML"
+                   hx-push-url="true"
+                   class="text-xs text-indigo-600 dark:text-indigo-400 hover:underline">Permissions</a>
+                {% endif %}
+                {% if current_deployment.status == 'succeeded' or current_deployment.status == 'failed' %}
+                <button type="button"
+                        hx-get="{% url 'app_teardown_confirm' app_slug=app.slug deployment_id=current_deployment.id %}?render=app_detail"
+                        hx-target="#modal-container"
+                        hx-swap="innerHTML"
+                        class="text-xs text-indigo-600 dark:text-indigo-400 hover:underline">Tear Down</button>
+                {% endif %}
+                {% else %}
+                <span class="text-xs text-gray-300 dark:text-gray-600 w-full text-left">&mdash;&mdash;&mdash;</span>
+                {% endif %}
+            </div>
         </div>
-    </td>
-</tr>
+    </div>
+</div>
+{% endpartialdef %}

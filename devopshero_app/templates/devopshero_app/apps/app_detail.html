@@ -1,11 +1,5 @@
 <div id="app-detail-{{ app.id }}"
-     class="max-w-5xl"
-     {% if should_auto_refresh %}
-     hx-get="{% url 'app_detail' app_slug=app.slug %}"
-     hx-trigger="load delay:10s"
-     hx-target="#main-content"
-     hx-swap="innerHTML"
-     {% endif %}>
+     class="max-w-5xl">
     <div class="flex items-center justify-between mb-6">
         <div class="flex-1">
             {% url 'workspaces' as workspaces_url %}
@@ -102,21 +96,7 @@
         <h2 class="text-lg font-semibold text-gray-900 dark:text-white mb-4">Deployed to Environments</h2>
         {% if environment_rows %}
         <div class="overflow-x-auto bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg">
-            <table class="min-w-full table-auto">
-                <colgroup>
-                    <col class="w-full">
-                    <col>
-                    <col>
-                    <col>
-                </colgroup>
-                <thead class="sr-only">
-                    <tr>
-                        <th class="px-4 py-3 text-left">Environment</th>
-                        <th class="px-4 py-3 text-center">Status</th>
-                        <th class="px-4 py-3 text-center">Updated</th>
-                        <th class="px-4 py-3 text-left">Actions</th>
-                    </tr>
-                </thead>
+            <table class="min-w-full">
                 <tbody class="[&_tr:not(:last-child)>td]:border-b [&_tr:not(:last-child)>td]:border-gray-200 dark:[&_tr:not(:last-child)>td]:border-gray-700">
                     {% for row in environment_rows %}
                         {% include "devopshero_app/apps/_app_blueprint_row.html" with blueprint=row.blueprint current_deployment=row.current_deployment %}

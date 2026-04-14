@@ -54,16 +54,9 @@ async def deploy_blueprint(conversation: Conversation) -> DeployBlueprintResult:
             "Only draft or failed blueprints can be deployed."
         )
 
-    active_statuses = [
-        Deployment.Status.PENDING,
-        Deployment.Status.BUILDING,
-        Deployment.Status.PUSHING,
-        Deployment.Status.DEPLOYING,
-        Deployment.Status.STARTING,
-    ]
     active_deployment = await Deployment.objects.filter(
         blueprint=blueprint,
-        status__in=active_statuses,
+        status__in=Deployment.IN_PROGRESS_STATUSES,
     ).afirst()
     if active_deployment:
         raise ValueError(
