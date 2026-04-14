@@ -4,8 +4,8 @@
         <div class="flex items-center justify-between">
             {% include "devopshero_app/partials/_breadcrumb.html" with p1_label="Environments" p1_url=environments_url current=environment.name %}
             {% if user_is_org_admin %}
-            {% if environment.status == 'draft' or environment.status == 'pending' or environment.status == 'provisioning' or environment.status == 'error' %}
             <div class="flex items-center gap-3">
+                {% if environment.status == 'draft' or environment.status == 'pending' or environment.status == 'provisioning' or environment.status == 'error' %}
                 <a href="{% url 'environment_editor' environment_id=environment.id %}"
                    hx-get="{% url 'environment_editor' environment_id=environment.id %}"
                    hx-target="#main-content"
@@ -14,8 +14,16 @@
                    class="rounded-lg bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-700">
                     Resume Setup
                 </a>
+                {% endif %}
+                {% if environment.status == 'ready' or environment.status == 'error' %}
+                <button hx-get="/environments/{{ environment.id }}/teardown-confirm/"
+                        hx-target="#modal-container"
+                        hx-swap="innerHTML"
+                        class="px-3 py-1.5 text-sm font-medium text-red-600 dark:text-red-400 border border-red-300 dark:border-red-600 rounded-lg hover:bg-red-50 dark:hover:bg-red-500/10">
+                    Tear Down
+                </button>
+                {% endif %}
             </div>
-            {% endif %}
             {% endif %}
         </div>
     </div>
