@@ -1,0 +1,92 @@
+{
+  "gateway": {
+    "mode": "local",
+    "port": 18789,
+    "bind": "lan",
+    "auth": {
+      "mode": "token",
+      "token": "${OPENCLAW_GATEWAY_TOKEN}"
+    },
+    "tailscale": {
+      "mode": "off",
+      "resetOnExit": false
+    },
+    "controlUi": {
+      "dangerouslyDisableDeviceAuth": true,
+      "allowInsecureAuth": true
+    },
+    "nodes": {
+      "denyCommands": [
+        "camera.snap",
+        "camera.clip",
+        "screen.record",
+        "contacts.add",
+        "calendar.add",
+        "reminders.add",
+        "sms.send",
+        "sms.search"
+      ]
+    }
+  },
+  "agents": {
+    "defaults": {
+      "model": "${OPENCLAW_DEFAULT_MODEL}",
+      "workspace": "/app/workspace",
+      "heartbeat": {
+        "every": "30m"
+      }
+    }
+  },
+  "session": {
+    "dmScope": "per-channel-peer"
+  },
+  "tools": {
+    "profile": "coding",
+    "web": {
+      "search": {
+        "provider": "brave",
+        "enabled": true
+      }
+    }
+  },
+  "channels": {
+    "slack": {
+      "enabled": true,
+      "groupPolicy": "disabled",
+      "capabilities": {
+        "interactiveReplies": true
+      },
+      "dmPolicy": "open",
+      "allowFrom": ["*"],
+      "allowBots": false,    
+      "actions": {
+        "channelInfo": true,
+        "emojiList": true,
+        "memberInfo": true,
+        "messages": true,
+        "pins": true,
+        "reactions": true
+      }
+    }
+  },
+  "plugins": {
+    "entries": {
+      "brave": {
+        "enabled": true
+      },
+      "openai": {
+        "enabled": true
+      }
+    }
+  },
+  "hooks": {
+    "internal": {
+      "enabled": true,
+      "entries": {
+        "session-memory": {
+          "enabled": true
+        }
+      }
+    }
+  }
+}

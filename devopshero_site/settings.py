@@ -225,6 +225,9 @@ CLAUDE_MODEL_APP_DEPLOYMENT = os.environ.get("CLAUDE_MODEL_APP_DEPLOYMENT", "son
 
 # Claude Agent Sandbox: Base directory for agent sandbox (cloned repos, temp files, etc.)
 CLAUDE_SANDBOX_DIR = BASE_DIR / "sandbox"
+
+# App Templates: bundled template repositories
+TEMPLATE_REPOS_DIR = BASE_DIR / "template_repos"
 SANITIZE_SANDBOX_PATHS = True
 
 def posthog_request_filter(request):

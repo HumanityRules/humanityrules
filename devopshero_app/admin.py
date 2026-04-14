@@ -6,6 +6,7 @@ from devopshero_app.models import (
     AWSAccount,
     App,
     AppPermissions,
+    AppTemplate,
     Conversation,
     Datastore,
     Deployment,
@@ -142,6 +143,15 @@ class WorkspaceAdmin(admin.ModelAdmin):
     prepopulated_fields = {"slug": ("name",)}
     readonly_fields = ["id", "created_at", "updated_at"]
     autocomplete_fields = ["organization", "created_by"]
+
+
+@admin.register(AppTemplate)
+class AppTemplateAdmin(admin.ModelAdmin):
+    list_display = ["name", "slug", "category", "app_type", "cdk_stack_profile", "is_active", "updated_at"]
+    list_filter = ["is_active", "category", "app_type", "cdk_stack_profile"]
+    search_fields = ["name", "slug", "description"]
+    prepopulated_fields = {"slug": ("name",)}
+    readonly_fields = ["id", "created_at", "updated_at"]
 
 
 @admin.register(App)

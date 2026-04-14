@@ -1,0 +1,52 @@
+<div class="max-w-5xl">
+    <div class="mb-6">
+        <h1 class="text-2xl font-bold text-gray-900 dark:text-white">Deploy from Template</h1>
+        <p class="mt-1 text-sm text-gray-600 dark:text-gray-400">
+            Choose a pre-configured application template to deploy.
+        </p>
+    </div>
+
+    <div class="grid gap-4 sm:grid-cols-2">
+        {% for template in templates %}
+        <a href="{% url 'template_deploy_form' template_slug=template.slug %}"
+           hx-get="{% url 'template_deploy_form' template_slug=template.slug %}"
+           hx-target="#main-content"
+           hx-swap="innerHTML"
+           hx-push-url="true"
+           class="block bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-5 hover:border-indigo-500 dark:hover:border-indigo-400 transition-colors">
+            <div class="flex items-start gap-3">
+                <span class="text-2xl" role="img">{{ template.icon }}</span>
+                <div class="min-w-0">
+                    <h3 class="font-semibold text-gray-900 dark:text-white">{{ template.name }}</h3>
+                    <span class="inline-block mt-1 text-xs font-medium text-indigo-600 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-900/30 px-2 py-0.5 rounded-full">{{ template.category }}</span>
+                </div>
+            </div>
+            <p class="mt-3 text-sm text-gray-600 dark:text-gray-400">{{ template.description }}</p>
+            <dl class="mt-3 flex gap-4 text-xs text-gray-500 dark:text-gray-400">
+                <div>
+                    <dt class="sr-only">CPU</dt>
+                    <dd>{{ template.cpu }} CPU</dd>
+                </div>
+                <div>
+                    <dt class="sr-only">Memory</dt>
+                    <dd>{{ template.memory }} MiB</dd>
+                </div>
+                <div>
+                    <dt class="sr-only">Port</dt>
+                    <dd>Port {{ template.container_port }}</dd>
+                </div>
+            </dl>
+        </a>
+        {% endfor %}
+    </div>
+
+    {% if not templates %}
+    <div class="mt-6 text-center py-12 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg">
+        <svg class="mx-auto h-12 w-12 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M19.5 14.25v-2.625a3.375 3.375 0 0 0-3.375-3.375h-1.5A1.125 1.125 0 0 1 13.5 7.125v-1.5a3.375 3.375 0 0 0-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 0 0-9-9Z" />
+        </svg>
+        <h3 class="mt-2 text-sm font-semibold text-gray-900 dark:text-white">No templates available</h3>
+        <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">Templates will appear here once they are configured by an administrator.</p>
+    </div>
+    {% endif %}
+</div>

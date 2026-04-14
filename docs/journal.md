@@ -1,5 +1,29 @@
 # DevOpsHero Development Journal
 
+## 2026-04-13 22:30 - [Deployment] App Templates Phase 1: design and implement one-click deploy from bundled templates
+
+**Conversation:** [2026-04-13-2056-ae606152.md](conversations/2026-04-13-2056-ae606152.md)
+
+Designed and implemented the "App Templates" system (Phase 1) for DOH. Templates are pre-configured application recipes that let anyone deploy a governed app with a single form submission — no agent conversation, no infrastructure knowledge required. The first template is the OpenClaw AI Assistant, proving the end-to-end flow from template selection to deployment.
+
+The design session covered several key decisions that shaped the architecture:
+
+**Bundled template repositories (`file://` mechanism):** Template source code lives inside DOH's own source tree under `template_repos/`. This avoids the complexity of external Git repos, S3 buckets, or trying to create repos in the customer's GitHub org. The existing `repo_service.clone_repository` already supports `file://` URLs via `shutil.copytree`, so no changes were needed in the clone path. The `TEMPLATE_REPOS_DIR` setting resolves to `BASE_DIR / "template_repos"`, which works in both local dev and the production ECS container (where the code is baked into the Docker image).
+
+**`AppTemplate` model design:** The model captures everything needed to deploy an app: container settings (port, CPU, memory, Dockerfile path), infrastructure profile (`cdk_stack_profile`), and a `runtime_variables` JSON field. Several fields were explicitly dropped during design: `source_repo_branch` (dead field for local file repos) and `repo_subpath` (templates are self-contained). The model is platform-global — ABAC filtering happens at the workspace/environment level in the deploy form, not at the template picker.
+
+**`runtime_variables` schema:** Each variable is a dict with `name`, `category` (config vs secret), `description`, `required`, `auto_generate`, `default_value`, and `value`. The materialization logic splits these into two paths: `config` variables become `DeploymentBlueprint.environment_variables`, while `secret` variables become `DeploymentBlueprint.app_secrets` (with `auto_generate=true` producing `None` values that the deployment pipeline fills, and empty-string values being omitted). All metadata fields were included from the start to avoid future migrations.
+
+**Deployment flow (direct, no agent):** User picks a template → fills a form (app name with sensible default, workspace dropdown, environment dropdown) → submits → `deploy_from_template` service creates Repository, App, DeploymentBlueprint, and Deployment records in one transaction → redirects to app detail. The workspace dropdown is filtered by `workspace:edit` ABAC, environments by `environment:deploy` ABAC with `status=READY`. Multiple instances of the same template per org are supported (each gets its own app name/slug).
+
+**Template-to-App traceability:** A nullable `source_template` ForeignKey on `App` points back to `AppTemplate`, enabling queries like "which apps were deployed from this template" and future bulk-update scenarios.
+
+**Key points:**
+- **`seed_app_templates` management command** — Uses `update_or_create` keyed on `slug` so re-running is safe. Only creates template definitions, never deploys instances.
+- **Entry points** — "From Template" links added to both workspace detail page and dashboard empty state, both using HTMX for SPA navigation.
+- **Migration fix** — Hit `table already exists` error from a partial earlier migration attempt. Fixed by faking migration 0033 and deleting the duplicate 0034.
+- **OpenClaw template** — First template: container port 18789, 1 vCPU / 2GB RAM, `fargate_web` stack profile, four runtime variables (OPENAI_API_KEY as secret, MODEL/MAX_TOKENS/SYSTEM_PROMPT as config).
+
 ## 2026-04-07 16:22 - [Integrations] Fix GitHub App multi-org integration: OAuth picker instead of direct install redirect
 
 **Conversation:** [2026-04-07-1622-c1c540de.md](conversations/2026-04-07-1622-c1c540de.md)

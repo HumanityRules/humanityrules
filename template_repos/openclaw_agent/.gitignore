@@ -1,0 +1,19 @@
+# Environment
+.env
+
+# Python
+__pycache__/
+*.pyc
+
+# OpenClaw runtime data (generated at runtime, not committed)
+workspace/memory/
+workspace/.openclaw/
+workspace/*.db
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/

@@ -1,0 +1,119 @@
+<div class="max-w-2xl">
+    <div class="mb-6">
+        <nav class="text-sm text-gray-500 dark:text-gray-400 mb-2">
+            <a href="{% url 'template_deploy_picker' %}"
+               hx-get="{% url 'template_deploy_picker' %}"
+               hx-target="#main-content"
+               hx-swap="innerHTML"
+               hx-push-url="true"
+               class="hover:text-gray-700 dark:hover:text-gray-200">Templates</a>
+            <span class="mx-1">/</span>
+            <span class="text-gray-900 dark:text-white">{{ template.name }}</span>
+        </nav>
+        <div class="flex items-start gap-3">
+            <span class="text-3xl" role="img">{{ template.icon }}</span>
+            <div>
+                <h1 class="text-2xl font-bold text-gray-900 dark:text-white">{{ template.name }}</h1>
+                <p class="mt-1 text-sm text-gray-600 dark:text-gray-400">{{ template.description }}</p>
+            </div>
+        </div>
+    </div>
+
+    {% if errors %}
+    <div class="mb-6 rounded-lg border border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-900/20 p-4">
+        <ul class="text-sm text-red-700 dark:text-red-400 space-y-1">
+            {% for error in errors %}
+            <li>{{ error }}</li>
+            {% endfor %}
+        </ul>
+    </div>
+    {% endif %}
+
+    <form method="post" class="space-y-5">
+        {% csrf_token %}
+
+        <div>
+            <label for="app_name" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">App Name</label>
+            <input type="text"
+                   id="app_name"
+                   name="app_name"
+                   value="{{ default_app_name }}"
+                   required
+                   class="block w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2 text-sm text-gray-900 dark:text-white placeholder-gray-400 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500">
+            <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">A unique name for this app in your organization. Used as the URL slug.</p>
+        </div>
+
+        <div>
+            <label for="workspace_id" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Workspace</label>
+            <select id="workspace_id"
+                    name="workspace_id"
+                    required
+                    class="block w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2 text-sm text-gray-900 dark:text-white focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500">
+                <option value="">Select a workspace</option>
+                {% for ws in workspaces %}
+                <option value="{{ ws.id }}">{{ ws.name }}</option>
+                {% endfor %}
+            </select>
+            <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">The workspace this app belongs to (governance boundary).</p>
+        </div>
+
+        <div>
+            <label for="environment_id" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Environment</label>
+            <select id="environment_id"
+                    name="environment_id"
+                    required
+                    class="block w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2 text-sm text-gray-900 dark:text-white focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500">
+                <option value="">Select an environment</option>
+                {% for env in environments %}
+                <option value="{{ env.id }}">{{ env.name }} ({{ env.aws_account.name }})</option>
+                {% endfor %}
+            </select>
+            <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">Where the app will run. Only ready environments are shown.</p>
+        </div>
+
+        <div class="rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50 p-4">
+            <h3 class="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Configuration Summary</h3>
+            <dl class="grid grid-cols-2 gap-x-4 gap-y-1.5 text-xs">
+                <div class="flex">
+                    <dt class="text-gray-500 dark:text-gray-400 w-24">CPU</dt>
+                    <dd class="text-gray-700 dark:text-gray-300">{{ template.cpu }} units</dd>
+                </div>
+                <div class="flex">
+                    <dt class="text-gray-500 dark:text-gray-400 w-24">Memory</dt>
+                    <dd class="text-gray-700 dark:text-gray-300">{{ template.memory }} MiB</dd>
+                </div>
+                <div class="flex">
+                    <dt class="text-gray-500 dark:text-gray-400 w-24">Port</dt>
+                    <dd class="text-gray-700 dark:text-gray-300">{{ template.container_port }}</dd>
+                </div>
+                <div class="flex">
+                    <dt class="text-gray-500 dark:text-gray-400 w-24">Build</dt>
+                    <dd class="text-gray-700 dark:text-gray-300">{{ template.build_strategy }}</dd>
+                </div>
+                <div class="flex">
+                    <dt class="text-gray-500 dark:text-gray-400 w-24">Health Check</dt>
+                    <dd class="text-gray-700 dark:text-gray-300">{{ template.health_check_path }}</dd>
+                </div>
+                <div class="flex">
+                    <dt class="text-gray-500 dark:text-gray-400 w-24">Stack Profile</dt>
+                    <dd class="text-gray-700 dark:text-gray-300">{{ template.cdk_stack_profile }}</dd>
+                </div>
+            </dl>
+        </div>
+
+        <div class="flex justify-end pt-2">
+            <a href="{% url 'template_deploy_picker' %}"
+               hx-get="{% url 'template_deploy_picker' %}"
+               hx-target="#main-content"
+               hx-swap="innerHTML"
+               hx-push-url="true"
+               class="mr-3 rounded-lg px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
+                Cancel
+            </a>
+            <button type="submit"
+                    class="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 transition-colors">
+                Deploy
+            </button>
+        </div>
+    </form>
+</div>
