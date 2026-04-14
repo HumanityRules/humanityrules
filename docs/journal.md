@@ -1,5 +1,20 @@
 # DevOpsHero Development Journal
 
+## 2026-04-14 10:56 - [Bugfix] Fix deployed environment row showing failed redeploy instead of last successful deployment
+
+**Conversation:** [2026-04-14-1056-f8635f89.md](conversations/2026-04-14-1056-f8635f89.md)
+
+The `current_deployment_id_subquery` in `_build_deployed_environment_rows` ordered deployments purely by `-created_at`, so a failed redeploy attempt created after a successful deployment would become the "current" deployment shown in the environment row. This was misleading — the row should show what's actually running, not the latest failed attempt.
+
+Fixed by adding a `Case/When` priority ordering to the subquery: in-progress deployments sort first (priority 0), then SUCCEEDED (priority 1), then everything else (priority 2). Within the same priority, most recent first. This ensures active redeploys are visible while failed attempts don't mask the last successful deployment.
+
+The previous journal entry noted this as a pre-existing test failure (`test_app_detail_deployed_environments_uses_latest_launched_blueprint_per_environment`) — this fix resolves it.
+
+**Key points:**
+- **Root cause** — Subquery used `order_by("-created_at")` with no status awareness, so any VISIBLE deployment could become "current" based solely on creation time
+- **Fix** — Added `Case/When` annotation for `status_priority` to both `current_deployment_id_subquery` and `current_deployment_created_at_subquery`, ordering by priority first, then recency
+- **Both redeploy tests pass** — The in-progress redeploy test still works (PENDING has priority 0), and the failed redeploy test now correctly returns the SUCCEEDED deployment
+
 ## 2026-04-14 10:36 - [UI] Fix expandable config state reset on app detail page — per-row polling
 
 **Conversation:** [2026-04-14-1036-e503ca26.md](conversations/2026-04-14-1036-e503ca26.md)
