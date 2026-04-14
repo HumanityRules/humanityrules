@@ -66,9 +66,10 @@ def _teardown_all_deployments(environment: models.Environment) -> bool:
             {"app_name": deployment.app.name, "deployment_id": str(deployment.id)},
         )
 
-        # Force the deployment to TEARDOWN_PENDING regardless of current status
-        deployment.status = models.Deployment.Status.TEARDOWN_PENDING
-        deployment.status_message = "Queued for teardown as part of environment teardown"
+        # Set directly to TEARING_DOWN so the job worker won't claim this deployment
+        # (it only polls for TEARDOWN_PENDING). run_teardown() is called synchronously below.
+        deployment.status = models.Deployment.Status.TEARING_DOWN
+        deployment.status_message = "Teardown as part of environment teardown"
         deployment.save(update_fields=["status", "status_message", "updated_at"])
 
         # Run the teardown synchronously
