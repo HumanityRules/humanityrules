@@ -1,5 +1,18 @@
 # DevOpsHero Development Journal
 
+## 2026-04-13 23:14 - [Deployment] Per-app health check grace period for slow-starting containers
+
+**Conversation:** [2026-04-13-2314-9e26afad.md](conversations/2026-04-13-2314-9e26afad.md)
+
+Diagnosed another OpenClaw deployment failure — same root cause family as the previous session but different mechanism. This time the container was starting correctly (gateway reported "ready" after ~6s), but the ECS task itself took ~50s from creation to HTTP-ready (image pull + container boot + gateway startup). With `health_check_grace_period=0` in DEBUG mode, ALB started health-checking immediately on target registration. Three consecutive "Request timed out" failures (5s interval × 3 = 15s) caused ECS to kill the task before it could serve traffic. ECS cycled through tasks, and DOH's 180s stabilization timeout expired.
+
+The previous session's fix (setting `health_check_grace=60` for production) didn't apply to DEBUG mode, which intentionally uses `grace=0` for fast iteration on quick-starting apps. Rather than raising the global DEBUG grace period (which would slow down feedback for most apps), added a per-app `health_check_grace_period` override that flows through the full stack: `AppTemplate` → `App` model → `AppConfig` dataclass → CDK `AppStack`. When set (non-zero on model, non-None on AppConfig), it overrides the environment default. OpenClaw template now specifies 120s.
+
+**Key points:**
+- ECS task lifecycle: task creation → image pull → container boot → app startup → HTTP ready. For OpenClaw this total is ~50s, far exceeding the 15s (3 × 5s) unhealthy threshold with zero grace.
+- `health_check_grace_period=0` on both models means "use environment default" — no behavior change for existing apps. Only templates/apps that explicitly set it get the override.
+- Debugging approach: assumed role into customer AWS account (Humanity Rules Sandbox 266117665083) via the stored `role_arn`/`external_id` on `AWSAccount` model, then inspected ECS events, stopped task descriptions, and CloudWatch container logs to reconstruct the timeline.
+
 ## 2026-04-14 05:30 - [Deployment] Debug OpenClaw deployment failure, fix failed/torn-down app lifecycle
 
 **Conversation:** [2026-04-13-2314-5af1a128.md](conversations/2026-04-13-2314-5af1a128.md)
