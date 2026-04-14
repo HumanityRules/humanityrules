@@ -1,12 +1,12 @@
 ---
 name: ask-codex
-description: Query GPT-5.2 for external perspective on current problem
+description: Query GPT-5.4 for external perspective on current problem
 disable-model-invocation: true
 ---
 
 # Ask Codex
 
-Query GPT-5.2 for external perspective. Codex has NO conversation context.
+Query GPT-5.4 for external perspective. Codex has NO conversation context.
 
 ## Steps
 
@@ -34,7 +34,7 @@ OUT="$(mktemp).txt"
 
 codex exec --skip-git-repo-check \
   --full-auto \
-  --model gpt-5.2 \
+  --model gpt-5.4 \
   -c model_reasoning_effort="xhigh" \
   -o "$OUT" \
   "$QUESTION" < /dev/null
