@@ -24,7 +24,6 @@ from . import cdk_utils
 from . import cloudformation_utils
 from . import deploy_base
 from . import ecr_utils
-from . import ecs_utils
 from . import route53_utils
 from . import secrets_utils
 
@@ -453,7 +452,7 @@ class AppStack(Stack):
             service_name=resource_prefix[:255],
             cluster=self.environment_infra.cluster,
             task_definition=task_definition,
-            desired_count=0,  # Start at 0, scaled up after image push
+            desired_count=1,
             assign_public_ip=False,
             vpc_subnets=ec2.SubnetSelection(subnet_type=ec2.SubnetType.PRIVATE_WITH_EGRESS),
             security_groups=[self.environment_infra.default_security_group],
@@ -673,18 +672,21 @@ def deploy(
     if aurora_stack:
         app_stack.add_dependency(aurora_stack)
 
+    assembly_dir = cdk_utils.synth_cdk_app(cdk_app)
+
     if synth_only:
-        cloud_assembly = cdk_app.synth()
-        logger.info("CDK templates synthesized to: %(directory)s", {"directory": cloud_assembly.directory})
         return DeployResult(success=True, error="", service_url="", alb_dns="")
 
-    logger.info("Deploying CDK stacks")
-    success = cdk_utils.deploy_cdk_stacks(cdk_app, session)
+    # Phase 1: Deploy ECR repo (and Aurora if needed) so the registry exists before the image push
+    pre_app_stacks = [f"{resource_prefix}-ecr"]
+    if aurora_stack:
+        pre_app_stacks.append(f"{resource_prefix}-aurora")
 
-    if not success:
-        logger.error("CDK deployment failed")
-        return DeployResult(success=False, error="CDK deployment failed", service_url="", alb_dns="")
+    if not cdk_utils.deploy_from_assembly(assembly_dir=assembly_dir, session=session, stack_names=pre_app_stacks):
+        logger.error("CDK deployment failed (ECR/Aurora)")
+        return DeployResult(success=False, error="CDK deployment failed (ECR/Aurora)", service_url="", alb_dns="")
 
+    # Phase 2: Build and push the Docker image (ECR repo now exists)
     logger.info("Building and pushing Docker image")
     image_uri = ecr_utils.build_and_push_docker_image(
         session=session,
@@ -700,14 +702,10 @@ def deploy(
         logger.error("Docker build/push failed")
         return DeployResult(success=False, error="Docker build/push failed", service_url="", alb_dns="")
 
-    logger.info("Starting ECS service")
-    if not ecs_utils.start_ecs_service(
-        session=session,
-        service_name=resource_prefix,
-        cluster_name=app_stack.environment_infra.cluster.cluster_name,
-    ):
-        logger.error("Failed to start ECS service")
-        return DeployResult(success=False, error="Failed to start ECS service", service_url="", alb_dns="")
+    # Phase 3: Deploy the App stack (image exists, so ECS can start tasks immediately)
+    if not cdk_utils.deploy_from_assembly(assembly_dir=assembly_dir, session=session, stack_names=[f"{resource_prefix}-app"]):
+        logger.error("CDK deployment failed (App)")
+        return DeployResult(success=False, error="CDK deployment failed (App)", service_url="", alb_dns="")
 
     logger.info("Deployment of %(app_name)s completed successfully", {"app_name": app_config.app_name})
 

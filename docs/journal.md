@@ -1,5 +1,22 @@
 # DevOpsHero Development Journal
 
+## 2026-04-14 20:46 - [Deployment] Eliminate desired_count=0 workaround — two-phase CDK deployment
+
+**Conversation:** [2026-04-14-1147-17ecc887.md](conversations/2026-04-14-1147-17ecc887.md)
+
+The ECS service in `AppStack` was created with `desired_count=0` and then scaled up to 1 via `ecs_utils.start_ecs_service()` after the Docker image was pushed. This was a remnant from when the ECR repository lived inside the same stack as the ECS service — at that time you couldn't push the image before the stack deployed (no repo yet), but you also couldn't start tasks during the deploy (no image yet). Starting at 0 and scaling up after the push was the only workaround.
+
+Since `EcrStack` is now an independent stack deployed before `AppStack`, the workaround is no longer needed. Refactored `cdk_utils.py` to support deploying specific stacks from a pre-synthesized assembly, then restructured `deploy()` into three phases: (1) deploy ECR + Aurora stacks, (2) build & push the Docker image, (3) deploy the App stack with `desired_count=1`. ECS now pulls the image immediately during the CloudFormation deploy.
+
+The `start_ecs_service` / `wait_for_service_stable` functions in `ecs_utils.py` are no longer called during deployment. CloudFormation handles ECS service stabilization natively. There's a known trade-off: we lose task-level failure diagnostics (container crash reasons) and the fast early-abort behavior — CloudFormation's error messages are more generic. On first deploys, a crashing container causes CloudFormation to roll back the entire App stack, whereas the old flow left the stack at `desired_count=0` for investigation. On re-deploys, CloudFormation rolls back to the previous working version, which is acceptable. The diagnostics trade-off is documented but accepted for now in favor of a simpler deploy pipeline.
+
+**Key points:**
+- **Root cause of the workaround** — ECR repo used to be in the same stack as the ECS service; `desired_count=0` prevented ECS from pulling a non-existent image during initial deploy
+- **`cdk_utils.py` refactored** — Split into `synth_cdk_app()`, `deploy_from_assembly()`, and `deploy_cdk_stacks()` (convenience wrapper for `deploy_base.py`)
+- **`deploy_app.deploy()` now three-phase** — ECR/Aurora first → image push → App stack with `desired_count=1`
+- **`start_ecs_service` preserved but unused** — Kept in `ecs_utils.py` for potential operational use (manual restarts, retry scenarios)
+- **Trade-off accepted** — Lost task-level crash diagnostics in favor of simpler flow; CloudFormation handles stabilization
+
 ## 2026-04-14 10:56 - [Bugfix] Fix deployed environment row showing failed redeploy instead of last successful deployment
 
 **Conversation:** [2026-04-14-1056-f8635f89.md](conversations/2026-04-14-1056-f8635f89.md)

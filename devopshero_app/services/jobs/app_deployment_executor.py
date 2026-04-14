@@ -168,7 +168,7 @@ def run_deployment(deployment_id: str) -> bool:
                     blueprint.status_message = result.error or "Deployment failed"
                     blueprint.save(update_fields=["status", "status_message", "updated_at"])
 
-                logger.error("Deployment %(deployment_id)s failed", {"deployment_id": str(deployment_id)})
+                logger.error("Deployment %(deployment_id)s failed, error: %(error)s", {"deployment_id": str(deployment_id), "error": result.error})
                 return False
 
         except Exception as e:
