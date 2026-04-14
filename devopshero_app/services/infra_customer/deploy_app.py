@@ -414,6 +414,9 @@ class AppStack(Stack):
             min_healthy = 0       # Should it be 100 for "always on, zero downtime"? Make it an option for the user?
             health_check_grace = 60
 
+        if app_config.health_check_grace_period is not None:
+            health_check_grace = app_config.health_check_grace_period
+
         target_group = elbv2.ApplicationTargetGroup(
             self, "TargetGroup",
             target_group_name=f"doh-{env_slug}-{app_config.app_name}"[:32],

@@ -87,22 +87,26 @@
     </td>
     <td class="px-4 py-3 align-top whitespace-nowrap">
         <div class="flex min-w-0 flex-col items-start gap-1">
-            {% if current_deployment.status == 'succeeded' %}
+            {% if current_deployment.status == 'succeeded' or current_deployment.status == 'failed' or current_deployment.status == 'torn_down' %}
             <button hx-post="{% url 'app_deployment_redeploy' app_slug=app.slug deployment_id=current_deployment.id %}"
                     hx-target="#main-content"
                     hx-swap="innerHTML"
                     class="text-xs text-indigo-600 dark:text-indigo-400 hover:underline">Redeploy</button>
+            {% if current_deployment.status == 'succeeded' %}
             <a href="{% url 'security_permissions_editor' %}?context_app={{ app.slug }}&context_environment={{ blueprint.environment.slug }}"
                hx-get="{% url 'security_permissions_editor' %}?context_app={{ app.slug }}&context_environment={{ blueprint.environment.slug }}"
                hx-target="#main-content"
                hx-swap="innerHTML"
                hx-push-url="true"
                class="text-xs text-indigo-600 dark:text-indigo-400 hover:underline">Permissions</a>
+            {% endif %}
+            {% if current_deployment.status == 'succeeded' or current_deployment.status == 'failed' %}
             <button type="button"
                     hx-get="{% url 'app_teardown_confirm' app_slug=app.slug deployment_id=current_deployment.id %}?render=app_detail"
                     hx-target="#modal-container"
                     hx-swap="innerHTML"
                     class="text-xs text-indigo-600 dark:text-indigo-400 hover:underline">Tear Down</button>
+            {% endif %}
             {% else %}
             <span class="text-xs text-gray-300 dark:text-gray-600 w-full text-left">&mdash;&mdash;&mdash;</span>
             {% endif %}

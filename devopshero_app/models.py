@@ -563,6 +563,7 @@ class AppTemplate(models.Model):
     container_port = models.IntegerField()
     health_check_path = models.CharField(max_length=255)
     health_check_command = models.CharField(max_length=500, blank=True)
+    health_check_grace_period = models.IntegerField(default=0, help_text="ECS health check grace period in seconds. 0 = use environment default.")
 
     # Blueprint defaults
     cpu = models.IntegerField()
@@ -662,6 +663,7 @@ class App(models.Model):
         blank=True,
         help_text="Health check command for non-HTTP health checks",
     )
+    health_check_grace_period = models.IntegerField(default=0, help_text="ECS health check grace period in seconds. 0 = use environment default.")
 
     created_by = models.ForeignKey(
         User,

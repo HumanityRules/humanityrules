@@ -23,19 +23,21 @@ OPEN_BLUEPRINT_STATUSES = (
     DeploymentBlueprint.Status.DEPLOYING,
 )
 
-CURRENT_LAUNCHED_DEPLOYMENT_STATUSES = (
+CONCLUDED_DEPLOYMENT_STATUSES = (
     Deployment.Status.SUCCEEDED,
+    Deployment.Status.FAILED,
     Deployment.Status.TEARDOWN_PENDING,
     Deployment.Status.TEARING_DOWN,
+    Deployment.Status.TORN_DOWN,
 )
 
-CURRENT_LIVE_DEPLOYMENT_STATUSES = (
+VISIBLE_DEPLOYMENT_STATUSES = (
     Deployment.Status.PENDING,
     Deployment.Status.BUILDING,
     Deployment.Status.PUSHING,
     Deployment.Status.DEPLOYING,
     Deployment.Status.STARTING,
-    *CURRENT_LAUNCHED_DEPLOYMENT_STATUSES,
+    *CONCLUDED_DEPLOYMENT_STATUSES,
 )
 
 IN_PROGRESS_DEPLOYMENT_STATUSES = (
@@ -107,19 +109,19 @@ def _build_deployed_environment_rows(app: App) -> list[DeployedEnvironmentRow]:
     """Build one current blueprint-backed summary row per environment."""
     current_deployment_id_subquery = (
         Deployment.objects.filter(blueprint=OuterRef("pk"))
-        .filter(status__in=CURRENT_LIVE_DEPLOYMENT_STATUSES)
+        .filter(status__in=VISIBLE_DEPLOYMENT_STATUSES)
         .order_by("-created_at")
         .values("id")[:1]
     )
     current_deployment_created_at_subquery = (
         Deployment.objects.filter(blueprint=OuterRef("pk"))
-        .filter(status__in=CURRENT_LIVE_DEPLOYMENT_STATUSES)
+        .filter(status__in=VISIBLE_DEPLOYMENT_STATUSES)
         .order_by("-created_at")
         .values("created_at")[:1]
     )
     current_launched_deployment_created_at_subquery = (
         Deployment.objects.filter(blueprint=OuterRef("pk"))
-        .filter(status__in=CURRENT_LAUNCHED_DEPLOYMENT_STATUSES)
+        .filter(status__in=CONCLUDED_DEPLOYMENT_STATUSES)
         .order_by("-created_at")
         .values("created_at")[:1]
     )
@@ -236,6 +238,7 @@ def app_deployment_teardown(request: HttpRequest, app_slug: str, deployment_id: 
 
     teardownable_statuses = [
         Deployment.Status.SUCCEEDED,
+        Deployment.Status.FAILED,
     ]
     if deployment.status not in teardownable_statuses:
         return HttpResponse(status=422)
@@ -338,7 +341,7 @@ def app_deployment_redeploy(request: HttpRequest, app_slug: str, deployment_id: 
 
     deployment = _get_deployment_for_app(app, deployment_id)
 
-    if deployment.status != Deployment.Status.SUCCEEDED:
+    if deployment.status not in (Deployment.Status.SUCCEEDED, Deployment.Status.FAILED, Deployment.Status.TORN_DOWN):
         return HttpResponse(status=422)
 
     active_statuses = [

@@ -81,6 +81,7 @@ def build_app_config_from_blueprint(blueprint: DeploymentBlueprint, repo_path: P
         health_check_path=app.health_check_path,
         health_check_command=app.health_check_command or None,
         environment_variables=blueprint.environment_variables or [],
+        health_check_grace_period=app.health_check_grace_period or None,
         app_source_path=app_source_path,
         database_config=database_config,
         app_secrets=blueprint.app_secrets,
