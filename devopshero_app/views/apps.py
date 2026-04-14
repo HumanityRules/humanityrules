@@ -5,7 +5,7 @@ from typing import Any
 from uuid import UUID
 
 from django.contrib.auth.decorators import login_required
-from django.db.models import OuterRef, Subquery
+from django.db.models import Case, IntegerField, OuterRef, Subquery, Value, When
 from django.http import HttpRequest, HttpResponse
 from django.shortcuts import get_object_or_404, render
 from django.urls import reverse
@@ -81,17 +81,31 @@ def _get_current_launched_blueprint(blueprints: list[DeploymentBlueprint]) -> De
 
 
 def _build_deployed_environment_rows(app: App) -> list[DeployedEnvironmentRow]:
-    """Build one current blueprint-backed summary row per environment."""
+    """Build one summary row per deployed environment, showing the most relevant deployment.
+
+    For each environment the app has been deployed to, finds the latest launched blueprint
+    and pairs it with a "current" deployment chosen by priority: in-progress first (so active
+    redeploys are visible), then succeeded, then everything else. This means a failed redeploy
+    attempt won't hide the last successful deployment.
+    """
+    status_priority = Case(
+        When(status__in=Deployment.IN_PROGRESS_STATUSES, then=Value(0)),
+        When(status=Deployment.Status.SUCCEEDED, then=Value(1)),
+        default=Value(2),
+        output_field=IntegerField(),
+    )
     current_deployment_id_subquery = (
         Deployment.objects.filter(blueprint=OuterRef("pk"))
         .filter(status__in=Deployment.VISIBLE_STATUSES)
-        .order_by("-created_at")
+        .annotate(status_priority=status_priority)
+        .order_by("status_priority", "-created_at")
         .values("id")[:1]
     )
     current_deployment_created_at_subquery = (
         Deployment.objects.filter(blueprint=OuterRef("pk"))
         .filter(status__in=Deployment.VISIBLE_STATUSES)
-        .order_by("-created_at")
+        .annotate(status_priority=status_priority)
+        .order_by("status_priority", "-created_at")
         .values("created_at")[:1]
     )
     current_launched_deployment_created_at_subquery = (
