@@ -1,5 +1,17 @@
 # DevOpsHero Development Journal
 
+## 2026-04-14 20:02 - [DevEx] doh_secrets — management command replaces secrets_utils CLI
+
+**Conversation:** [2026-04-14-2002-ebec1f37.md](conversations/2026-04-14-2002-ebec1f37.md)
+
+Customer Secrets Manager utilities already exposed `list_secrets` and `purge_deleted_secrets` (boto3 session in, metadata out; purge uses `DeleteSecret` with `ForceDeleteWithoutRecovery=True` for secrets already in scheduled-deletion state). The old `python -m devopshero_app.services.infra_customer.secrets_utils` entry point duplicated Django setup, `.env` loading, and account resolution.
+
+**Decision:** Add `manage.py doh_secrets` with subcommands `list` and `purge-deleted`, matching patterns from `doh_efs_browse` (credentials from Django settings, `iam_utils.get_assumed_role_session`, connected `AWSAccount` only). Then remove `main()` and `__name__ == "__main__"` from `secrets_utils.py` so the management command is the single supported operator workflow. Documented the command in the manage-commands skill.
+
+**Key points:**
+- Purge only accelerates deletion for secrets already pending recovery-window deletion; it does not delete active secrets in one step.
+- Region remains `us-east-1` in the command, consistent with the previous module CLI.
+
 ## 2026-04-14 19:20 - [DevEx] doh_efs_browse — ECS Exec timing fix and end-to-end verification
 
 **Conversation:** [2026-04-14-1921-8e62912b.md](conversations/2026-04-14-1921-8e62912b.md)
