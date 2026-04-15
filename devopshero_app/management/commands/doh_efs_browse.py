@@ -109,12 +109,13 @@ class Command(BaseCommand):
             )
 
             _wait_for_running(ecs_client=ecs_client, cluster=cluster_name, task_arn=task_arn, stdout=self.stdout)
+            _wait_for_exec_agent(ecs_client=ecs_client, cluster=cluster_name, task_arn=task_arn, stdout=self.stdout)
 
             self.stdout.write(self.style.SUCCESS(f"\nEFS mounted at {EFS_MOUNT_PATH}"))
             self.stdout.write("App data lives under /efs/deployments/<app-name>/")
             self.stdout.write("Type 'exit' to disconnect and stop the task.\n")
 
-            _exec_interactive(session=session, cluster=cluster_name, task_arn=task_arn)
+            _exec_interactive(session=session, cluster=cluster_name, task_arn=task_arn, stdout=self.stdout)
 
         except KeyboardInterrupt:
             self.stdout.write("\nInterrupted.")
@@ -324,8 +325,35 @@ def _wait_for_running(ecs_client, cluster: str, task_arn: str, stdout) -> None:
     raise CommandError("Timed out waiting for task to start (5 minutes)")
 
 
-def _exec_interactive(session, cluster: str, task_arn: str) -> None:
-    """Open interactive bash shell via aws ecs execute-command."""
+def _wait_for_exec_agent(ecs_client, cluster: str, task_arn: str, stdout) -> None:
+    """Wait for the ECS Exec (SSM) managed agent to reach RUNNING inside the container."""
+    stdout.write("Waiting for ECS Exec agent to initialize...")
+    for i in range(36):
+        resp = ecs_client.describe_tasks(cluster=cluster, tasks=[task_arn])
+        task = resp["tasks"][0]
+
+        if not task.get("enableExecuteCommand"):
+            raise CommandError("Task was started without enableExecuteCommand — this is a bug")
+
+        for container in task.get("containers", []):
+            if container["name"] != CONTAINER_NAME:
+                continue
+            for agent in container.get("managedAgents", []):
+                if agent["name"] == "ExecuteCommandAgent":
+                    agent_status = agent["lastStatus"]
+                    if agent_status == "RUNNING":
+                        stdout.write("ECS Exec agent is ready.")
+                        return
+                    if i % 4 == 0 and i > 0:
+                        stdout.write(f"  Agent status: {agent_status}")
+
+        time.sleep(5)
+
+    raise CommandError("Timed out waiting for ECS Exec agent (3 minutes)")
+
+
+def _exec_interactive(session, cluster: str, task_arn: str, stdout) -> None:
+    """Open interactive bash shell via aws ecs execute-command, with retries."""
     creds = session.get_credentials().get_frozen_credentials()
     task_id = task_arn.split("/")[-1]
 
@@ -335,17 +363,23 @@ def _exec_interactive(session, cluster: str, task_arn: str) -> None:
     env["AWS_SESSION_TOKEN"] = creds.token
     env["AWS_DEFAULT_REGION"] = DEFAULT_REGION
 
-    subprocess.run(
-        [
-            "aws", "ecs", "execute-command",
-            "--cluster", cluster,
-            "--task", task_id,
-            "--container", CONTAINER_NAME,
-            "--interactive",
-            "--command", "/bin/bash",
-        ],
-        env=env,
-    )
+    cmd = [
+        "aws", "ecs", "execute-command",
+        "--cluster", cluster,
+        "--task", task_id,
+        "--container", CONTAINER_NAME,
+        "--interactive",
+        "--command", "/bin/bash",
+    ]
+
+    max_retries = 3
+    for attempt in range(max_retries):
+        result = subprocess.run(cmd, env=env)
+        if result.returncode == 0:
+            return
+        if attempt < max_retries - 1:
+            stdout.write(f"Connection failed (attempt {attempt + 1}/{max_retries}), retrying in 10s...")
+            time.sleep(10)
 
 
 def _stop_task(ecs_client, cluster: str, task_arn: str, stdout) -> None:

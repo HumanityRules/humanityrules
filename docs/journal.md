@@ -1,5 +1,23 @@
 # DevOpsHero Development Journal
 
+## 2026-04-14 19:20 - [DevEx] doh_efs_browse — ECS Exec timing fix and end-to-end verification
+
+**Conversation:** [2026-04-14-1921-8e62912b.md](conversations/2026-04-14-1921-8e62912b.md)
+
+Created a management command `doh_efs_browse` that spins up a temporary Fargate task with the root EFS volume mounted (no access point), then opens an interactive bash shell via ECS Exec. This gives full filesystem visibility into `/efs/deployments/<app-name>/` for any customer environment.
+
+First attempt failed with `InvalidParameterException: The execute command failed because execute command was not enabled when the task was run or the execute command agent isn't running`. The task was RUNNING and `enableExecuteCommand=True` was set — the real issue was a **timing race**: the ECS Exec managed SSM agent (`ExecuteCommandAgent`) needs time to initialize after the task reaches RUNNING state.
+
+**Fix:** Added `_wait_for_exec_agent()` which polls `describe_tasks` and checks `containers[].managedAgents[]` for the `ExecuteCommandAgent` to reach RUNNING status before attempting the connection. Also added retry logic (3 attempts, 10s apart) to `_exec_interactive()` as a safety net.
+
+Verified end-to-end: task spins up, EFS mounts at `/efs`, `deployments/` directory visible (owned by UID 1000), interactive shell connects, and cleanup (stop task, deregister task def) runs on exit. The IAM role (`devopshero-{env}-efs-browser-role`) is created once and reused across invocations.
+
+**Key points:**
+- ECS Exec on Fargate requires: `enableExecuteCommand=True` on `run_task`, `initProcessEnabled: True` in container linuxParameters, and SSM permissions (`ssmmessages:*`) on the task role. The SSM agent is managed by the Fargate platform, not bundled with the container image.
+- The `ExecuteCommandAgent` managed agent status is visible in `describe_tasks` response under `containers[].managedAgents[]`. Always wait for it to reach RUNNING before calling `execute-command`.
+- Mounting EFS without an access point (root access) requires `elasticfilesystem:ClientRootAccess` in addition to `ClientMount` and `ClientWrite`. The task runs as root so it can see all app data regardless of which UID wrote it.
+- The `--command` parameter of `aws ecs execute-command` does NOT interpret shell operators (`&&`, `>`, `|`). It passes the entire string as argv to the specified executable. Use `/bin/bash` as the command for interactive use.
+
 ## 2026-04-15 01:30 - [Deployment] Fix "auto" provider breaking Hermes onboarding skip
 
 **Conversation:** [2026-04-14-1755-410755d0.md](conversations/2026-04-14-1755-410755d0.md) (continued)
