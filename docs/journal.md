@@ -1,5 +1,22 @@
 # DevOpsHero Development Journal
 
+## 2026-04-14 17:31 - [Deployment] Add Hermes template, fix secret materialization, switch OpenClaw to Tavily
+
+**Conversation:** [2026-04-14-1731-54d30bf5.md](conversations/2026-04-14-1731-54d30bf5.md)
+
+Three related changes to the app template system:
+
+**Hermes Agent template:** Added the second app template — Hermes Agent, an AI assistant with tool execution, persistent memory, self-improving skills, and multi-channel access (Slack, web). Created the full template repo (`template_repos/hermes_agent/`) with Dockerfile, config, entrypoint, SOUL.md, and README. Added `HERMES_TEMPLATE` to the seed command with runtime variables for inference provider, model selection, WebUI password (auto-generated), and optional API keys (Anthropic, OpenAI, OpenRouter, Tavily, Slack).
+
+**Secret materialization fix:** `_materialize_app_secrets` was skipping any secret with `value: ""`, which meant optional secrets like `OPENAI_API_KEY` never made it into Secrets Manager — users had no way to fill them in post-deployment. Removed the empty-string skip so all template-defined secrets are provisioned: `None` = auto-generate random token, `""` = empty placeholder the user fills in later, `"literal"` = use as-is. This is better UX because all available secrets are visible in Secrets Manager from day one.
+
+**OpenClaw Brave→Tavily migration:** Switched the OpenClaw template's web search provider from Brave to Tavily. Updated `openclaw.json` (search provider and plugin config), `.env.example`, and the seed command (`BRAVE_API_KEY` → `TAVILY_API_KEY`).
+
+**Key points:**
+- Secret materialization was the key insight: the old `value: ""` → skip logic meant optional secrets were invisible to users post-deployment, with no way to configure them in Secrets Manager
+- The fix is backward-compatible: existing deployments keep their current secrets, new deployments get all template secrets provisioned
+- For existing deployments that need new secrets, users must either redeploy from template or manually add keys to the SM entry at `devopshero/{app-name}/secrets`
+
 ## 2026-04-14 16:02 - [Deployment] Add EFS persistent storage for AI agent workspaces
 
 **Conversation:** [2026-04-14-1603-b5ee55d1.md](conversations/2026-04-14-1603-b5ee55d1.md)

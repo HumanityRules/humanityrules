@@ -77,9 +77,9 @@ OPENCLAW_TEMPLATE = {
             "value": "",
         },
         {
-            "name": "BRAVE_API_KEY",
+            "name": "TAVILY_API_KEY",
             "category": "secret",
-            "description": "Brave Search API key for web search capability",
+            "description": "Tavily API key for web search capability",
             "required": False,
             "auto_generate": False,
             "default_value": None,
@@ -110,7 +110,117 @@ OPENCLAW_TEMPLATE = {
 }
 
 
-TEMPLATES = [OPENCLAW_TEMPLATE]
+HERMES_TEMPLATE = {
+    "name": "AI Assistant (Hermes)",
+    "slug": "ai-assistant-hermes",
+    "description": (
+        "Deploy a governed AI personal assistant powered by Hermes Agent. "
+        "Includes tool execution, persistent memory, self-improving skills, "
+        "and multi-channel access (Slack, web). Runs inside your VPC with "
+        "your choice of model provider."
+    ),
+    "icon": "⚡",
+    "category": "ai-assistant",
+    "source_repo_path": "hermes_agent",
+    "app_type": "web",
+    "build_strategy": "dockerfile",
+    "dockerfile_path": "Dockerfile",
+    "container_port": 8787,
+    "health_check_path": "/health",
+    "health_check_command": "",
+    "health_check_grace_period": 60,
+    "cpu": 1024,
+    "memory": 2048,
+    "runtime_variables": [
+        {
+            "name": "HERMES_INFERENCE_PROVIDER",
+            "category": "config",
+            "description": "LLM provider: auto, openrouter, anthropic, openai, etc.",
+            "required": True,
+            "auto_generate": False,
+            "default_value": "auto",
+            "value": "auto",
+        },
+        {
+            "name": "HERMES_MODEL",
+            "category": "config",
+            "description": "Default LLM model identifier (e.g. anthropic/claude-sonnet-4)",
+            "required": False,
+            "auto_generate": False,
+            "default_value": "openai/gpt-5.4-mini",
+            "value": "openai/gpt-5.4-mini",
+        },
+        {
+            "name": "HERMES_WEBUI_PASSWORD",
+            "category": "secret",
+            "description": "WebUI access password (auto-generated)",
+            "required": True,
+            "auto_generate": True,
+            "default_value": None,
+            "value": None,
+        },
+        {
+            "name": "ANTHROPIC_API_KEY",
+            "category": "secret",
+            "description": "Anthropic API key for Claude models",
+            "required": False,
+            "auto_generate": False,
+            "default_value": None,
+            "value": "",
+        },
+        {
+            "name": "OPENAI_API_KEY",
+            "category": "secret",
+            "description": "OpenAI API key (alternative provider)",
+            "required": False,
+            "auto_generate": False,
+            "default_value": None,
+            "value": "",
+        },
+        {
+            "name": "OPENROUTER_API_KEY",
+            "category": "secret",
+            "description": "OpenRouter API key for multi-model access (200+ models)",
+            "required": False,
+            "auto_generate": False,
+            "default_value": None,
+            "value": "",
+        },
+        {
+            "name": "TAVILY_API_KEY",
+            "category": "secret",
+            "description": "Tavily API key for web search capability",
+            "required": False,
+            "auto_generate": False,
+            "default_value": None,
+            "value": "",
+        },
+        {
+            "name": "SLACK_APP_TOKEN",
+            "category": "secret",
+            "description": "Slack app-level token (leave empty to disable Slack)",
+            "required": False,
+            "auto_generate": False,
+            "default_value": None,
+            "value": "",
+        },
+        {
+            "name": "SLACK_BOT_TOKEN",
+            "category": "secret",
+            "description": "Slack bot token (leave empty to disable Slack)",
+            "required": False,
+            "auto_generate": False,
+            "default_value": None,
+            "value": "",
+        },
+    ],
+    "datastore_config": None,
+    "cdk_stack_profile": "fargate_web_efs",
+    "is_active": True,
+}
+
+
+TEMPLATES = [OPENCLAW_TEMPLATE, HERMES_TEMPLATE]
 
 
 class Command(BaseCommand):
