@@ -38,6 +38,9 @@ terminal:
 session:
   idle_minutes: 1440
   reset_hour: 4
+
+web:
+  backend: tavily
 YAML
 fi
 

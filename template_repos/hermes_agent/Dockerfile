@@ -10,7 +10,6 @@ RUN git clone --depth 1 https://github.com/NousResearch/hermes-agent.git \
         /home/hermeswebui/.hermes/hermes-agent \
     && chown -R hermeswebui:hermeswebui /home/hermeswebui/.hermes
 
-COPY config.yaml /opt/hermes-defaults/config.yaml
 COPY SOUL.md /opt/hermes-defaults/SOUL.md
 COPY --chmod=755 entrypoint.sh /entrypoint.sh
 

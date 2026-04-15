@@ -1,5 +1,22 @@
 # DevOpsHero Development Journal
 
+## 2026-04-15 01:10 - [Deployment] Tavily web search verification and config cleanup
+
+**Conversation:** [2026-04-14-1755-410755d0.md](conversations/2026-04-14-1755-410755d0.md) (continued)
+
+Verified that the Hermes Agent container uses Tavily for web search, and cleaned up dead config.
+
+**Tavily verification:** Added `web.backend: tavily` to the generated `config.yaml` in `entrypoint.sh`. Without this, Hermes auto-detects the backend from whichever API key is present — explicit is better. Tested by sending "Search the web for: who won the 2026 Champions League final?" through the WebUI. The agent called `web_search`, got results from Wikipedia via Tavily, and answered correctly that the final is scheduled for 30 May 2026 in Budapest.
+
+**Dead config.yaml removal:** The static `config.yaml` file in the template repo was vestigial — the entrypoint generates it dynamically from Docker env vars (with the `openai→custom` provider mapping). Deleted the file and removed its `COPY` line from the Dockerfile.
+
+**EFS access point CDK fix:** `FileSystem.from_file_system_attributes()` returns an `IFileSystem` proxy that doesn't have `add_access_point()`. Switched to constructing `efs.AccessPoint()` directly. This affected all `fargate_web_efs` deployments, not just Hermes.
+
+**Key points:**
+- Hermes supports four web search backends: firecrawl (default), parallel, tavily, exa. Setting `web.backend` explicitly avoids surprises from auto-detection.
+- The static config.yaml was a leftover from the initial scaffolding — once the entrypoint took over config generation, it became dead code that would never be read.
+- CDK's `from_*_attributes()` methods return interface proxies with limited APIs — always check if the method you need exists on `IFileSystem` vs `FileSystem`.
+
 ## 2026-04-15 00:40 - [Deployment] Hermes Agent containerization — debugging the full startup chain
 
 **Conversation:** [2026-04-14-1755-410755d0.md](conversations/2026-04-14-1755-410755d0.md)
