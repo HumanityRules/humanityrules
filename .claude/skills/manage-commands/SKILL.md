@@ -16,6 +16,7 @@ All custom commands live in `devopshero_app/management/commands/`.
 - **doh_control** — Control plane ops: create/teardown environments, retry deployments.
 - **doh_raw** — Direct CDK deployment bypassing UI/DB/job-worker flow.
 - **doh_efs_browse** — Browse EFS filesystem via ECS Exec (interactive shell in customer environment).
+- **doh_app_shell** — Interactive shell in a deployed customer app container (ECS Exec / SSM), by account + env + app slug.
 - **doh_secrets** — Manage customer Secrets Manager secrets: list, purge, and shared environment secrets (shared-list/shared-set/shared-delete). All subcommands take --account and optional --org (name or slug).
 - **run_job_worker** — Background job worker for deployments and environment provisioning.
 - **seed_test_apps** — Seed orgs, workspaces, environments, and apps for UI testing.
