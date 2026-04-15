@@ -15,6 +15,19 @@ mkdir -p "$HERMES_DIR"
 #
 # Existing files (from a previous deploy on EFS) are never overwritten.
 if [ ! -f "$HERMES_DIR/config.yaml" ]; then
+    # Resolve "auto" to a concrete provider by detecting which API key is set.
+    # The WebUI onboarding check doesn't understand "auto" and will show the
+    # wizard unless config.yaml has a provider it can validate.
+    if [ "$PROVIDER" = "auto" ]; then
+        if [ -n "$OPENAI_API_KEY" ]; then
+            PROVIDER="openai"
+        elif [ -n "$ANTHROPIC_API_KEY" ]; then
+            PROVIDER="anthropic"
+        elif [ -n "$OPENROUTER_API_KEY" ]; then
+            PROVIDER="openrouter"
+        fi
+    fi
+
     # Hermes agent treats direct OpenAI as "custom" provider with base_url
     CONFIG_PROVIDER="$PROVIDER"
     BASE_URL_LINE=""

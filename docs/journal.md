@@ -1,5 +1,18 @@
 # DevOpsHero Development Journal
 
+## 2026-04-15 01:30 - [Deployment] Fix "auto" provider breaking Hermes onboarding skip
+
+**Conversation:** [2026-04-14-1755-410755d0.md](conversations/2026-04-14-1755-410755d0.md) (continued)
+
+First DOH deployment of Hermes hit the onboarding wizard despite `HERMES_WEBUI_SKIP_ONBOARDING=1`. The config had `provider: auto` because the AppTemplate defaults `HERMES_INFERENCE_PROVIDER` to `"auto"`. The WebUI's `_status_from_runtime` doesn't recognize "auto" as a provider — it's not in `_SUPPORTED_PROVIDER_SETUPS` (openrouter, anthropic, openai, custom) and it's not OAuth — so `provider_ready` is always False and `chat_ready` never becomes True.
+
+Fixed by adding auto-detection in the entrypoint: when `HERMES_INFERENCE_PROVIDER=auto`, detect which API key is present (`OPENAI_API_KEY` → openai, `ANTHROPIC_API_KEY` → anthropic, `OPENROUTER_API_KEY` → openrouter) and resolve to that concrete provider before generating config.yaml. The existing `openai→custom` mapping then kicks in as before.
+
+**Key points:**
+- The WebUI and agent runtime have different provider taxonomies. The agent runtime understands "auto" (tries providers in priority order). The WebUI onboarding doesn't — it needs a concrete provider name to validate readiness.
+- The entrypoint is now the bridge that translates between DOH's user-facing provider names and what the WebUI/agent actually need in config.yaml.
+- Kept the AppTemplate default as "auto" rather than changing to "openai" — the entrypoint auto-detection is more robust since it handles any provider key the user configures.
+
 ## 2026-04-15 01:20 - [Deployment] Hermes WebUI password flow — tracing from seed to process env
 
 **Conversation:** [2026-04-14-1820-082db88b.md](conversations/2026-04-14-1820-082db88b.md)
