@@ -667,10 +667,11 @@ def deploy(
         logger.error(msg)
         return DeployResult(success=False, error=msg, service_url="", alb_dns="")
 
-    # Ensure app secrets exist in Secrets Manager (created outside CDK for security)
+    # Resolve shared + app-level secrets in Secrets Manager (created outside CDK for security)
     if app_config.app_secrets:
         logger.info("Ensuring app secrets exist")
-        secrets_utils.ensure_app_secrets_exist(session=session, app_config=app_config)
+        shared_secrets = secrets_utils.get_shared_secrets(session=session, env_slug=env_slug)
+        secrets_utils.ensure_app_secrets_exist(session=session, app_config=app_config, shared_secrets=shared_secrets)
 
     # Look up hosted zone ID for per-app DNS record creation
     shared_hosted_zone_id = None
