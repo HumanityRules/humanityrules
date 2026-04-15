@@ -1,5 +1,21 @@
 # DevOpsHero Development Journal
 
+## 2026-04-15 11:50 - [DevEx] doh_efs_browse: Amazon Linux 2023 full image for interactive tools
+
+**Conversation:** [2026-04-15-1150-5158e361.md](conversations/2026-04-15-1150-5158e361.md)
+
+The temporary Fargate task for `doh_efs_browse` used `public.ecr.aws/amazonlinux/amazonlinux:2023`, the minimal variant, with `sleep infinity` as the only container command. That image ships almost no interactive tooling (no vim, less, tree, etc.), which made shell sessions on mounted EFS painful for debugging.
+
+We briefly considered installing packages at container start (`dnf install` before sleep), which would work but adds startup latency on every new task and depends on outbound network to package mirrors.
+
+**Decision:** Switch the task definition to `public.ecr.aws/amazonlinux/amazonlinux:2023-full`, the same distro family but with a fuller userland (editors, pagers, common utilities) while keeping the simple `sleep infinity` command. Trade-off: larger image size and a heavier first pull on a cold host; subsequent runs benefit from Fargate image caching, and there is no per-task package install step.
+
+**Key points:**
+
+- **Barebones behavior was image choice, not ECS** — The minimal `amazonlinux:2023` tag is intentionally slim; expecting vim/less without installing them or using a fuller tag was the mismatch.
+- **`2023-full` vs runtime `dnf`** — Full image avoids install-time variance (mirror availability, version drift) and keeps the task definition a single static image reference.
+- **Operational note** — First task on a fresh capacity instance may take longer while the larger image layers pull; acceptable for an operator-facing debug workflow.
+
 ## 2026-04-15 00:30 - [Deployment] Fix hermes EFS mount path, remove cdk_stack_profile
 
 **Conversation:** [2026-04-15-1147-e7c759d3.md](conversations/2026-04-15-1147-e7c759d3.md)
