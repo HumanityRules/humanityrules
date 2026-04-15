@@ -36,7 +36,7 @@ from devopshero_app.services.infra_customer import iam_utils
 DEFAULT_REGION = "us-east-1"
 
 CONTAINER_NAME = "efs-browser"
-CONTAINER_IMAGE = "public.ecr.aws/amazonlinux/amazonlinux:2023-full"
+CONTAINER_IMAGE = "public.ecr.aws/amazonlinux/amazonlinux:2023"
 EFS_MOUNT_PATH = "/efs"
 
 
@@ -265,7 +265,11 @@ def _register_task_definition(ecs_client, family: str, task_role_arn: str, execu
             "name": CONTAINER_NAME,
             "image": CONTAINER_IMAGE,
             "essential": True,
-            "command": ["sleep", "infinity"],
+            "command": [
+                "sh",
+                "-c",
+                "set -e; dnf install -y vim-minimal less tree findutils tar gzip procps-ng; exec sleep infinity",
+            ],
             "mountPoints": [{
                 "containerPath": EFS_MOUNT_PATH,
                 "sourceVolume": "efs-root",
