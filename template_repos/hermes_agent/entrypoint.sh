@@ -52,6 +52,7 @@ fi
 # Regenerated on every boot to pick up DOH config changes.
 ENV_FILE="$HERMES_DIR/.env"
 : > "$ENV_FILE"
+chmod 600 "$ENV_FILE"
 [ -n "$OPENAI_API_KEY" ] && echo "OPENAI_API_KEY=$OPENAI_API_KEY" >> "$ENV_FILE"
 if [ "$PROVIDER" = "openai" ] && [ -n "$OPENAI_API_KEY" ]; then
     echo "OPENAI_BASE_URL=https://api.openai.com/v1" >> "$ENV_FILE"
