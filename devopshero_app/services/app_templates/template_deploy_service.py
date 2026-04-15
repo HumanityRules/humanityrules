@@ -41,11 +41,8 @@ def _materialize_app_secrets(runtime_variables: list[dict]) -> dict[str, str | N
     for var in runtime_variables:
         if var["category"] != "secret":
             continue
-        value = var.get("value", "")
-        if value == "":
-            continue
-        # None means auto-generate, string means use literal value
-        secrets[var["name"]] = value
+        # None = auto-generate, "" = empty placeholder, "literal" = use as-is
+        secrets[var["name"]] = var.get("value")
     return secrets
 
 

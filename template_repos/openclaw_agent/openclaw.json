@@ -45,7 +45,7 @@
     "profile": "coding",
     "web": {
       "search": {
-        "provider": "brave",
+        "provider": "tavily",
         "enabled": true
       }
     }
@@ -72,7 +72,7 @@
   },
   "plugins": {
     "entries": {
-      "brave": {
+      "tavily": {
         "enabled": true
       },
       "openai": {

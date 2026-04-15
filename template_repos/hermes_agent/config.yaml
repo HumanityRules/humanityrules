@@ -1,0 +1,16 @@
+# Hermes Agent — DOH Enterprise Configuration
+#
+# Provider, model, and API keys are injected via environment variables
+# by DevOps Hero at deploy time. See .env.example for the full list.
+#
+# This file provides container-specific defaults. Users can customize
+# it after deployment — changes persist on the EFS volume.
+
+# Local terminal execution inside the container
+terminal:
+  env: local
+
+# Session management
+session:
+  idle_minutes: 1440
+  reset_hour: 4
