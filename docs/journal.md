@@ -1,5 +1,19 @@
 # DevOpsHero Development Journal
 
+## 2026-04-15 18:45 - [DevEx] Add --follow flag to doh_app_logs for live tailing
+
+**Conversation:** [2026-04-15-1527-3ba70195.md](conversations/2026-04-15-1527-3ba70195.md)
+
+Added `--follow` flag to the `doh_app_logs` management command so it can continuously poll CloudWatch for new log events, similar to `tail -f`. Also added `--follow-interval` to control the polling rate (defaults to 2 seconds). The initial batch of logs is printed first, then the command enters a polling loop using the `nextForwardToken` from the CloudWatch `get_log_events` API. Ctrl+C exits cleanly via KeyboardInterrupt handling.
+
+Refactored `_fetch_and_print_logs` to return the forward token (was `-> None`, now `-> str | None`), and added a separate `_follow_logs` function for the polling loop. This keeps the one-shot fetch logic clean while adding the streaming capability as a separate concern.
+
+**Key points:**
+
+- **CloudWatch forward token enables follow** — `get_log_events` returns a `nextForwardToken` that acts as a cursor; passing it back in subsequent calls returns only newer events.
+- **Clean separation** — `_fetch_and_print_logs` handles the initial batch and returns the token; `_follow_logs` handles the continuous polling loop. No mode-switching complexity in either function.
+- **Motivated by previous session** — the `doh_app_logs` command was just built; during that work it became clear that a follow mode would be essential for debugging live/crash-looping apps.
+
 ## 2026-04-15 16:30 - [DevEx] Customer debugging skills and doh_app_logs command
 
 **Conversation:** [2026-04-15-1523-e4c60e1e.md](conversations/2026-04-15-1523-e4c60e1e.md)
