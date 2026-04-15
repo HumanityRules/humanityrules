@@ -1,11 +1,13 @@
 ---
-name: prod-debug
-description: Debug DevOps Hero production infrastructure issues. Use when there's a problem with the control plane, ECS tasks are failing, deployment issues, or when examining CloudFormation stacks, ECS logs, or ALB health checks.
+name: prod-controlplane-debug
+description: Debug DOH's own production control plane (devopshero.ai). Use when the DOH platform itself is broken — its ECS service, ALB, CloudFormation stacks, or CloudWatch logs. NOT for customer app issues — use the customer-debug skill for that.
 ---
 
-# Debug Production Infrastructure
+# Debug DOH Control Plane Production Infrastructure
 
-For investigating production issues with the DevOps Hero control plane (devopshero.ai).
+For investigating production issues with DOH's own control plane (devopshero.ai) — the platform itself, not customer apps.
+
+**This skill is for DOH's own AWS account and infrastructure.** If a customer app is crashing or failing to deploy, that happens in the customer's AWS account — see the `customer-debug` skill instead.
 
 ## AWS Credentials
 
