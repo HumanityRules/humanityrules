@@ -13,7 +13,7 @@
      hx-target="#blueprint-inner-{{ blueprint.id }}"
      hx-swap="innerHTML"
      {% endif %}>
-    <div class="flex items-start">
+    <div class="flex items-center">
         <div class="flex-1 min-w-0 px-4 py-3">
             <h3 class="text-sm font-medium text-gray-900 dark:text-white"><span class="text-xs text-gray-400 dark:text-gray-500">Environment:</span> <a href="{% url 'environment_detail' environment_id=blueprint.environment.id %}" hx-get="{% url 'environment_detail' environment_id=blueprint.environment.id %}" hx-target="#main-content" hx-swap="innerHTML" hx-push-url="true" class="text-indigo-600 dark:text-indigo-400 hover:underline">{{ blueprint.environment.name }}</a></h3>
             <p class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
