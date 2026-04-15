@@ -1,5 +1,37 @@
 # DevOpsHero Development Journal
 
+## 2026-04-15 00:40 - [Deployment] Hermes Agent containerization — debugging the full startup chain
+
+**Conversation:** [2026-04-14-1755-410755d0.md](conversations/2026-04-14-1755-410755d0.md)
+
+Extended debugging session to get the Hermes Agent WebUI container fully working end-to-end: build, boot, skip onboarding, and chat with a model. The initial scaffolding (Dockerfile, entrypoint, config, AppTemplate seed) was created in the previous session — this session was about making it actually work through iterative testing against the real container.
+
+**Container startup issues (resolved in order):**
+- `USER root` left active — the init script (`hermeswebui_init.bash`) requires UID 1024 (`hermeswebui`). Added `USER hermeswebui` before ENTRYPOINT.
+- `HERMES_WEBUI_STATE_DIR` missing — required by the init script but only set in the base image's docker-compose, not as a Dockerfile default. Added as `ENV`.
+- Hermes Agent source not in image — the WebUI is just a frontend; it needs the agent source at `~/.hermes/hermes-agent/` to install deps from. Added `git clone --depth 1` during build.
+- Health check on `/` returns 302 — the WebUI redirects to login. Switched to `/health` which returns 200.
+
+**Onboarding wizard skip (the deep rabbit hole):**
+- `HERMES_WEBUI_SKIP_ONBOARDING=1` exists but only fires when `chat_ready=True`.
+- `chat_ready` requires: (1) agent installed and importable, (2) `model.provider` + `model.default` in config.yaml, (3) for "custom" provider: `model.base_url` set, (4) API key present in `~/.hermes/.env` FILE (not just Docker env vars).
+- The entrypoint now generates both `config.yaml` and `~/.hermes/.env` to satisfy all conditions.
+
+**Provider name mismatch (the other deep rabbit hole):**
+- The WebUI's onboarding knows "openai" as a provider name and writes `provider: openai` to config.yaml.
+- But the Hermes agent runtime does NOT recognize bare "openai" — it interprets it as an OpenRouter provider prefix and routes to `openrouter.ai/api/v1`, failing with 401.
+- Direct OpenAI access uses the "custom" provider with `base_url: https://api.openai.com/v1`.
+- The entrypoint maps `HERMES_INFERENCE_PROVIDER=openai` → `provider: custom` in the generated config.yaml.
+- Verified by reading the agent's `auxiliary_client.py`: `resolve_provider_client()` has handlers for "auto", "openrouter", "nous", "openai-codex", "custom", and named API-key providers — but NOT "openai".
+
+**Bug found via Codex review:**
+- `PROVIDER` variable was assigned inside the first-boot `if [ ! -f config.yaml ]` block but used later in the `.env` generation. On subsequent boots with existing EFS config, `$PROVIDER` was empty. Moved assignment to top of script.
+
+**Key points:**
+- The Hermes ecosystem has a WebUI↔Agent impedance mismatch: the WebUI writes `provider: openai`, but the agent runtime rejects it. This is likely because the WebUI's onboarding was built for interactive users who then run `hermes model`, while the agent runtime has its own provider taxonomy.
+- Three config surfaces need to be in sync: Docker env vars (for the process), `~/.hermes/.env` (for the WebUI's onboarding check), and `config.yaml` (for the agent runtime). The entrypoint bridges all three.
+- Used Codex (GPT-5.4) via the ask-codex skill for independent verification. It confirmed the logic, found the `$PROVIDER` scoping bug, and recommended pinning image/agent versions for enterprise stability.
+
 ## 2026-04-14 17:31 - [Deployment] Add Hermes template, fix secret materialization, switch OpenClaw to Tavily
 
 **Conversation:** [2026-04-14-1731-54d30bf5.md](conversations/2026-04-14-1731-54d30bf5.md)
