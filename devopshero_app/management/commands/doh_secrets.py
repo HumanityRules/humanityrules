@@ -12,8 +12,8 @@ Usage:
     uv run manage.py doh_secrets shared-set --account "Humanity Rules Sandbox" --env default OPENAI_API_KEY=sk-xxx TAVILY_API_KEY=tvly-xxx
     uv run manage.py doh_secrets shared-delete --account "Humanity Rules Sandbox" --env default OPENAI_API_KEY TAVILY_API_KEY
 
-All subcommands accept --org <slug> to disambiguate when multiple organizations
-share the same account name.
+All subcommands accept --org <name-or-slug> to disambiguate when multiple
+organizations share the same account name (e.g. --org "Humanity Rules" or --org humr).
 
 `purge-deleted` calls DeleteSecret with ForceDeleteWithoutRecovery on secrets that
 are already scheduled for deletion (skips the recovery window).
@@ -21,6 +21,13 @@ are already scheduled for deletion (skips the recovery window).
 `shared-*` subcommands manage the per-environment shared secrets store
 (devopshero/{env-slug}/shared-secrets). Values set here are automatically
 used as defaults for empty-placeholder secrets when deploying apps.
+
+Subcommands:
+    list             List all secrets in Secrets Manager
+    purge-deleted    Permanently delete secrets already in scheduled-deletion state
+    shared-list      Show key names (masked) in environment shared secrets (--reveal to unmask)
+    shared-set       Create or update keys: KEY=VALUE KEY=VALUE ...
+    shared-delete    Remove keys from environment shared secrets
 
 Requires DOH_AWS_ACCESS_KEY and DOH_AWS_SECRET_KEY (via Django settings).
 
