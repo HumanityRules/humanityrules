@@ -12,9 +12,12 @@ Usage:
     uv run manage.py doh_app_logs --account "Humanity Rules Sandbox" --app my-app-slug --head
     uv run manage.py doh_app_logs --account "Humanity Rules Sandbox" --app my-app-slug --all
     uv run manage.py doh_app_logs --account "Humanity Rules Sandbox" --app my-app-slug --org "Humanity Rules"
+    uv run manage.py doh_app_logs --account "Humanity Rules Sandbox" --app my-app-slug --follow
 
 Requires DOH_AWS_ACCESS_KEY and DOH_AWS_SECRET_KEY in .env
 """
+
+import time
 
 from django.conf import settings
 from django.core.management.base import BaseCommand, CommandError
@@ -80,11 +83,12 @@ def _print_task_info(ecs_client, cluster: str, task_arn: str, stdout) -> None:
         stdout.write(f"  Stop code:   {task['stopCode']}")
 
 
-def _fetch_and_print_logs(logs_client, log_group: str, log_stream: str, limit: int, head: bool, fetch_all: bool, stdout) -> None:
-    """Fetch log events and print them. Paginates internally when fetch_all is True."""
+def _fetch_and_print_logs(logs_client, log_group: str, log_stream: str, limit: int, head: bool, fetch_all: bool, stdout) -> str | None:
+    """Fetch log events and print them. Returns the nextForwardToken for follow mode."""
     start_from_head = head or fetch_all
     total_printed = 0
     next_token = None
+    forward_token = None
 
     while True:
         kwargs = {
@@ -107,16 +111,37 @@ def _fetch_and_print_logs(logs_client, log_group: str, log_stream: str, limit: i
             stdout.write(event.get("message", "").rstrip("\n"))
             total_printed += 1
 
+        forward_token = resp.get("nextForwardToken")
+
         if not fetch_all:
             break
 
-        new_token = resp.get("nextForwardToken")
-        if not events or new_token == next_token:
+        if not events or forward_token == next_token:
             break
-        next_token = new_token
+        next_token = forward_token
 
     if total_printed == 0:
         stdout.write("(no log events found)")
+
+    return forward_token
+
+
+def _follow_logs(logs_client, log_group: str, log_stream: str, forward_token: str, poll_interval: int, stdout) -> None:
+    """Continuously poll for new log events until interrupted."""
+    next_token = forward_token
+    while True:
+        time.sleep(poll_interval)
+        kwargs = {
+            "logGroupName": log_group,
+            "logStreamName": log_stream,
+            "nextToken": next_token,
+        }
+        resp = logs_client.get_log_events(**kwargs)
+        for event in resp.get("events", []):
+            stdout.write(event.get("message", "").rstrip("\n"))
+        new_token = resp.get("nextForwardToken")
+        if new_token:
+            next_token = new_token
 
 
 class Command(BaseCommand):
@@ -131,6 +156,8 @@ class Command(BaseCommand):
         parser.add_argument("--limit", type=int, default=100, help="Number of log events to fetch (default: 100)")
         parser.add_argument("--head", action="store_true", help="Read from the beginning instead of the tail")
         parser.add_argument("--all", action="store_true", dest="fetch_all", help="Fetch all log events (paginate until exhausted)")
+        parser.add_argument("--follow", action="store_true", help="Continuously poll for new log events (Ctrl+C to stop)")
+        parser.add_argument("--follow-interval", type=int, default=2, dest="follow_interval", help="Seconds between polls in follow mode (default: 2)")
 
     def handle(self, *args, **options):
         env_slug = options["env"]
@@ -191,7 +218,7 @@ class Command(BaseCommand):
         self.stdout.write("")
 
         logs_client = session.client("logs")
-        _fetch_and_print_logs(
+        forward_token = _fetch_and_print_logs(
             logs_client=logs_client,
             log_group=log_group,
             log_stream=log_stream,
@@ -200,3 +227,19 @@ class Command(BaseCommand):
             fetch_all=options["fetch_all"],
             stdout=self.stdout,
         )
+
+        if options["follow"]:
+            if not forward_token:
+                raise CommandError("Cannot follow: no log stream token available")
+            self.stdout.write("\n--- following (Ctrl+C to stop) ---\n")
+            try:
+                _follow_logs(
+                    logs_client=logs_client,
+                    log_group=log_group,
+                    log_stream=log_stream,
+                    forward_token=forward_token,
+                    poll_interval=options["follow_interval"],
+                    stdout=self.stdout,
+                )
+            except KeyboardInterrupt:
+                self.stdout.write("\n")
