@@ -105,7 +105,7 @@ OPENCLAW_TEMPLATE = {
         },
     ],
     "datastore_config": None,
-    "efs_mount_path": "/app/workspace",
+    "efs_config": {"mount_path": "/app/workspace", "posix_uid": 1000, "posix_gid": 1000},
     "is_active": True,
 }
 
@@ -215,7 +215,7 @@ HERMES_TEMPLATE = {
         },
     ],
     "datastore_config": None,
-    "efs_mount_path": "/home/hermeswebui/.hermes",
+    "efs_config": {"mount_path": "/home/hermeswebui/.hermes", "posix_uid": 1024, "posix_gid": 1024},
     "is_active": True,
 }
 

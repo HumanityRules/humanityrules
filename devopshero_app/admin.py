@@ -147,7 +147,7 @@ class WorkspaceAdmin(admin.ModelAdmin):
 
 @admin.register(AppTemplate)
 class AppTemplateAdmin(admin.ModelAdmin):
-    list_display = ["name", "slug", "category", "app_type", "efs_mount_path", "is_active", "updated_at"]
+    list_display = ["name", "slug", "category", "app_type", "efs_config", "is_active", "updated_at"]
     list_filter = ["is_active", "category", "app_type"]
     search_fields = ["name", "slug", "description"]
     prepopulated_fields = {"slug": ("name",)}

@@ -94,10 +94,10 @@
                     <dt class="text-gray-500 dark:text-gray-400 w-24">Health Check</dt>
                     <dd class="text-gray-700 dark:text-gray-300">{{ template.health_check_path }}</dd>
                 </div>
-                {% if template.efs_mount_path %}
+                {% if template.efs_config %}
                 <div class="flex">
                     <dt class="text-gray-500 dark:text-gray-400 w-24">EFS Mount</dt>
-                    <dd class="text-gray-700 dark:text-gray-300">{{ template.efs_mount_path }}</dd>
+                    <dd class="text-gray-700 dark:text-gray-300">{{ template.efs_config.mount_path }}</dd>
                 </div>
                 {% endif %}
             </dl>

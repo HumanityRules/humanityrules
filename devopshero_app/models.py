@@ -576,8 +576,9 @@ class AppTemplate(models.Model):
     # Datastore requirements (null = no datastore needed)
     datastore_config = models.JSONField(null=True, blank=True)
 
-    # EFS mount path inside the container (empty = no EFS volume)
-    efs_mount_path = models.CharField(max_length=255, blank=True)
+    # EFS volume config: {"mount_path": str, "posix_uid": int, "posix_gid": int}
+    # null = no EFS volume
+    efs_config = models.JSONField(null=True, blank=True)
 
     is_active = models.BooleanField()
     created_at = models.DateTimeField(auto_now_add=True)

@@ -1,5 +1,23 @@
 # DevOpsHero Development Journal
 
+## 2026-04-15 15:00 - [Deployment] Fix hermes EFS crash: uid mismatch, consolidate efs_config
+
+**Conversation:** [2026-04-15-1530-306a9944.md](conversations/2026-04-15-1530-306a9944.md)
+
+Hermes-vmendi01 was crash-looping in CH Sandbox. Diagnosed by assuming the customer role, finding the ECS task logs in CloudWatch. The upstream `hermeswebui_init.bash` script was failing at `sudo chown hermeswebui:hermeswebui /workspace` — "Operation not permitted".
+
+Root cause: the EFS access point in `deploy_app.py` hardcoded uid/gid 1000, but the hermes-webui container runs as uid 1024. EFS access points map ALL operations (even root's via sudo) to the configured POSIX user. So `chown` to uid 1024 was rejected because the NFS server saw uid 1000 attempting a non-self ownership change.
+
+The `/workspace` symlink from the previous session (pointing to EFS-backed `/home/hermeswebui/.hermes/workspace`) was correct in purpose but exposed the uid mismatch — the upstream init script chowns whatever `HERMES_WEBUI_DEFAULT_WORKSPACE` resolves to, and the symlink followed through to EFS where the chown failed.
+
+**Key points:**
+
+- **Consolidated `efs_mount_path` into `efs_config` JSONField** — Instead of adding separate `efs_posix_uid`/`efs_posix_gid` fields, replaced the CharField with a JSONField carrying `{mount_path, posix_uid, posix_gid}`. Follows the `datastore_config` pattern already in the codebase. OpenClaw gets uid 1000, hermes gets uid 1024.
+- **EFS access points override ALL client identity** — Even `sudo chown` from inside the container goes through the access point's POSIX user. This means the access point uid MUST match what the container expects. A mismatch makes chown impossible regardless of container-side privileges.
+- **Extracted the upstream `hermeswebui_init.bash`** — Pulled from `ghcr.io/nesquena/hermes-webui:latest` to read the actual script instead of guessing from log output. Confirmed the `sudo chown` on `HERMES_WEBUI_DEFAULT_WORKSPACE` is unconditional (runs whether env var was pre-set or defaulted).
+- **Added `HERMES_WEBUI_DEFAULT_WORKSPACE` env var to Dockerfile** — Points directly to `/home/hermeswebui/.hermes/workspace`. Not strictly needed for the uid fix, but avoids the symlink indirection in the init script's chown path.
+- **Redeployment requires production code update first** — The CDK runs from the production ECS container, so these changes must be pushed and deployed before tearing down and redeploying hermes-vmendi01. The CloudFormation stack (including the access point) needs full replacement.
+
 ## 2026-04-15 15:27 - [UI] Template picker cards: drop CPU, memory, port
 
 **Conversation:** [2026-04-15-1527-7eb05c6e.md](conversations/2026-04-15-1527-7eb05c6e.md)

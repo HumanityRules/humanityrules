@@ -349,18 +349,20 @@ class AppStack(Stack):
 
         # EFS: create per-app access point and grant mount permissions
         efs_access_point = None
-        if app_config.efs_mount_path:
+        if app_config.efs_config:
             efs_file_system = efs.FileSystem.from_file_system_attributes(
                 self, "ImportedEfs",
                 file_system_id=self.environment_infra.efs_file_system_id,
                 security_group=self.environment_infra.efs_security_group,
             )
+            uid = str(app_config.efs_config.posix_uid)
+            gid = str(app_config.efs_config.posix_gid)
             efs_access_point = efs.AccessPoint(
                 self, "AppAccessPoint",
                 file_system=efs_file_system,
                 path=f"/deployments/{app_config.app_name}",
-                create_acl=efs.Acl(owner_uid="1000", owner_gid="1000", permissions="755"),
-                posix_user=efs.PosixUser(uid="1000", gid="1000"),
+                create_acl=efs.Acl(owner_uid=uid, owner_gid=gid, permissions="755"),
+                posix_user=efs.PosixUser(uid=uid, gid=gid),
             )
             task_role.add_to_policy(iam.PolicyStatement(
                 actions=["elasticfilesystem:ClientMount", "elasticfilesystem:ClientWrite"],
@@ -439,7 +441,7 @@ class AppStack(Stack):
         if efs_access_point:
             container.add_mount_points(
                 ecs.MountPoint(
-                    container_path=app_config.efs_mount_path,
+                    container_path=app_config.efs_config.mount_path,
                     source_volume="app-workspace",
                     read_only=False,
                 )

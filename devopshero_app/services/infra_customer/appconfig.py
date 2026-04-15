@@ -56,6 +56,14 @@ class ConnectionConfig:
 
 
 @dataclass
+class EfsConfig:
+    """EFS volume configuration for the container."""
+    mount_path: str
+    posix_uid: int
+    posix_gid: int
+
+
+@dataclass
 class DatabaseConfig:
     """Configuration for an Aurora database."""
     name: str  # Database name, e.g., "myapp_prod"
@@ -102,8 +110,8 @@ class AppConfig:
     # Override ECS health check grace period (seconds). None = use environment default.
     health_check_grace_period: int | None = None
 
-    # EFS mount path inside the container (None = no EFS volume)
-    efs_mount_path: str | None = None
+    # EFS volume configuration (None = no EFS volume)
+    efs_config: EfsConfig | None = None
 
     def to_template_vars(self) -> dict:
         """Convert to dict for Jinja2 template rendering (CloudFormation)."""

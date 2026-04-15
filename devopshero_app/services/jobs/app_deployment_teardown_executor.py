@@ -74,9 +74,14 @@ def _build_teardown_app_config(
     cpu = deployment.blueprint.cpu
     memory = deployment.blueprint.memory
 
-    efs_mount_path = None
-    if app.source_template:
-        efs_mount_path = app.source_template.efs_mount_path or None
+    efs_config = None
+    if app.source_template and app.source_template.efs_config:
+        raw = app.source_template.efs_config
+        efs_config = infra_customer.appconfig.EfsConfig(
+            mount_path=raw["mount_path"],
+            posix_uid=raw["posix_uid"],
+            posix_gid=raw["posix_gid"],
+        )
 
     return infra_customer.appconfig.AppConfig(
         app_name=app.slug,
@@ -90,7 +95,7 @@ def _build_teardown_app_config(
         app_source_path=None,
         database_config=database_config,
         app_secrets=None,
-        efs_mount_path=efs_mount_path,
+        efs_config=efs_config,
     )
 
 

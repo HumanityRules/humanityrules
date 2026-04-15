@@ -72,9 +72,14 @@ def build_app_config_from_blueprint(blueprint: DeploymentBlueprint, repo_path: P
     if blueprint.datastore:
         database_config = build_database_config(blueprint.datastore)
 
-    efs_mount_path = None
-    if app.source_template:
-        efs_mount_path = app.source_template.efs_mount_path or None
+    efs_config = None
+    if app.source_template and app.source_template.efs_config:
+        raw = app.source_template.efs_config
+        efs_config = infra_customer.appconfig.EfsConfig(
+            mount_path=raw["mount_path"],
+            posix_uid=raw["posix_uid"],
+            posix_gid=raw["posix_gid"],
+        )
 
     return infra_customer.appconfig.AppConfig(
         app_name=app.slug,
@@ -89,5 +94,5 @@ def build_app_config_from_blueprint(blueprint: DeploymentBlueprint, repo_path: P
         app_source_path=app_source_path,
         database_config=database_config,
         app_secrets=blueprint.app_secrets,
-        efs_mount_path=efs_mount_path,
+        efs_config=efs_config,
     )

@@ -27,6 +27,7 @@ RUN for f in /app/static/index.html /apptoo/static/index.html; do \
 RUN rm -rf /workspace && ln -s /home/hermeswebui/.hermes/workspace /workspace
 
 ENV HERMES_WEBUI_STATE_DIR=/home/hermeswebui/.hermes/webui-mvp
+ENV HERMES_WEBUI_DEFAULT_WORKSPACE=/home/hermeswebui/.hermes/workspace
 ENV HERMES_WEBUI_SKIP_ONBOARDING=1
 
 EXPOSE 8787
