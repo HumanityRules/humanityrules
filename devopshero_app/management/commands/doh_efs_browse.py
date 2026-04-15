@@ -4,6 +4,7 @@ Browse EFS filesystem in a customer environment via ECS Exec.
 Usage:
     uv run manage.py doh_efs_browse --account "CH Sandbox"
     uv run manage.py doh_efs_browse --account "CH Sandbox" --env prod
+    uv run manage.py doh_efs_browse --account "CH Sandbox" --org "Course Hero"
 
 Spins up a temporary Fargate task with the root EFS volume mounted (no access
 point, so you see all app data), then opens an interactive bash shell via ECS
@@ -27,7 +28,7 @@ from botocore.exceptions import ClientError
 from django.conf import settings
 from django.core.management.base import BaseCommand, CommandError
 
-from devopshero_app.models import AWSAccount
+from devopshero_app.models import AWSAccount, Organization
 from devopshero_app.services.infra_customer import cloudformation_utils
 from devopshero_app.services.infra_customer import iam_utils
 
@@ -44,6 +45,7 @@ class Command(BaseCommand):
 
     def add_arguments(self, parser):
         parser.add_argument("--account", required=True, help="AWS account name or 12-digit account ID")
+        parser.add_argument("--org", help="Organization name or slug (required when account name is ambiguous across orgs)")
         parser.add_argument("--env", default="default", help="Environment slug (default: 'default')")
 
     def handle(self, *args, **options):
@@ -54,7 +56,7 @@ class Command(BaseCommand):
         if not access_key or not secret_key:
             raise CommandError("Missing DOH_AWS_ACCESS_KEY and/or DOH_AWS_SECRET_KEY in .env")
 
-        aws_account = _get_aws_account(options["account"])
+        aws_account = _get_aws_account(identifier=options["account"], org_slug=options.get("org"))
 
         session = iam_utils.get_assumed_role_session(
             access_key=access_key,
@@ -132,19 +134,29 @@ class Command(BaseCommand):
 # ---------------------------------------------------------------------------
 
 
-def _get_aws_account(identifier: str) -> AWSAccount:
-    """Look up an AWSAccount by name or 12-digit account ID."""
+def _get_aws_account(identifier: str, org_slug: str | None) -> AWSAccount:
+    """Look up an AWSAccount by name or 12-digit account ID, optionally scoped to an org."""
+    qs = AWSAccount.objects.all()
+
+    if org_slug:
+        org = Organization.objects.filter(slug=org_slug).first() or Organization.objects.filter(name=org_slug).first()
+        if not org:
+            raise CommandError(f"No organization matching '{org_slug}' found (tried slug and name).")
+        qs = qs.filter(organization=org)
+
     if identifier.isdigit() and len(identifier) == 12:
         try:
-            return AWSAccount.objects.get(aws_account_id=identifier)
+            return qs.get(aws_account_id=identifier)
         except AWSAccount.DoesNotExist:
             raise CommandError(f"AWS account with ID '{identifier}' not found")
+        except AWSAccount.MultipleObjectsReturned:
+            raise CommandError(f"Multiple accounts with ID '{identifier}'. Use --org to disambiguate.")
     try:
-        return AWSAccount.objects.get(name=identifier)
+        return qs.get(name=identifier)
     except AWSAccount.DoesNotExist:
         raise CommandError(f"AWS account '{identifier}' not found")
     except AWSAccount.MultipleObjectsReturned:
-        raise CommandError(f"Multiple accounts named '{identifier}'. Use the 12-digit account ID instead.")
+        raise CommandError(f"Multiple accounts named '{identifier}'. Use --org or the 12-digit account ID to disambiguate.")
 
 
 def _get_infra_info(cf_client, env_slug: str, stdout) -> dict[str, str]:
