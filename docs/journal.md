@@ -1,5 +1,19 @@
 # DevOpsHero Development Journal
 
+## 2026-04-15 12:25 - [DevEx] doh_app_shell — ECS Exec into deployed customer app tasks
+
+**Conversation:** [2026-04-15-1225-f0367a63.md](conversations/2026-04-15-1225-f0367a63.md)
+
+Fargate has no SSH; operators use **ECS Exec** (`aws ecs execute-command`) with the Session Manager plugin — SSM messaging under the hood, not a classic SSH port. For the DOH control plane, `infra_devopshero/prod_manage.sh` already wraps exec for `manage.py`; for raw shell, the repo documents `execute-command` against `doh-prod-cluster` / `doh-prod-app` / `devopshero`.
+
+Customer apps use deterministic CDK names: cluster `devopshero-{env}-cluster`, ECS service `doh-{env}-{app_slug}`, container name equal to **app slug** (`AppStack` sets `container_name=app_config.app_name`). We added **`doh_app_shell`** so operators do not hand-assemble those strings: `--account` (and optional `--org` for disambiguation), `--env`, `--app` resolve `AWSAccount`, `Environment`, and `App` in Django, assume the customer role with `environment.aws_region`, list RUNNING tasks for the service, wait for RUNNING and `ExecuteCommandAgent`, then invoke `aws ecs execute-command` interactively (default command `/bin/bash`, overridable). Same retry pattern as `doh_efs_browse`’s exec helper. Documented in the manage-commands skill.
+
+**Key points:**
+
+- **Differs from `doh_efs_browse`** — Connects to an **existing** app task; does not register a temporary task definition or mount EFS root.
+- **Validation** — Requires a matching `Environment` and `App` in the DB so typos fail before AWS calls.
+- **Multi-task deployments** — Uses the first task ARN returned by `list_tasks` (order not guaranteed); document if we later add `--task-arn`.
+
 ## 2026-04-15 11:50 - [DevEx] doh_efs_browse: AL2023 plus selective dnf packages at task start
 
 **Conversation:** [2026-04-15-1150-5158e361.md](conversations/2026-04-15-1150-5158e361.md)
