@@ -17,7 +17,7 @@ if [ "$PROVIDER" = "auto" ]; then
     fi
 fi
 
-mkdir -p "$HERMES_DIR"
+mkdir -p "$HERMES_DIR" "$HERMES_DIR/workspace"
 
 # Generate config.yaml from Docker env vars on first boot.
 #

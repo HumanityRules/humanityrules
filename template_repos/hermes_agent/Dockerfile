@@ -22,6 +22,10 @@ RUN for f in /app/static/index.html /apptoo/static/index.html; do \
         "$f"; \
     done
 
+# Hermes uses /workspace as the default cwd for terminal commands and file tools.
+# Symlink it into the EFS-backed home directory so agent work output persists.
+RUN rm -rf /workspace && ln -s /home/hermeswebui/.hermes/workspace /workspace
+
 ENV HERMES_WEBUI_STATE_DIR=/home/hermeswebui/.hermes/webui-mvp
 ENV HERMES_WEBUI_SKIP_ONBOARDING=1
 
