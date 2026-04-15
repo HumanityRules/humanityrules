@@ -1,5 +1,16 @@
 # DevOpsHero Development Journal
 
+## 2026-04-15 15:27 - [UI] Template picker cards: drop CPU, memory, port
+
+**Conversation:** [2026-04-15-1527-7eb05c6e.md](conversations/2026-04-15-1527-7eb05c6e.md)
+
+Simplified the "Deploy from Template" grid so each card shows only identity and narrative: icon, name, category pill, and description. Removed the footer row that listed CPU units, memory (MiB), and container port — those details are implementation noise on the chooser step and remain available later in the flow (e.g. configuration summary on the template deploy form).
+
+**Key points:**
+
+- **Picker vs. form** — The picker is for scanning templates; resource sizing belongs in deploy-time context, not repeated on every card.
+- **Description retained** — Still the main signal for what each template is for.
+
 ## 2026-04-15 18:45 - [DevEx] Add --follow flag to doh_app_logs for live tailing
 
 **Conversation:** [2026-04-15-1527-3ba70195.md](conversations/2026-04-15-1527-3ba70195.md)
