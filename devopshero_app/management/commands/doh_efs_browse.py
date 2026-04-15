@@ -36,7 +36,7 @@ from devopshero_app.services.infra_customer import iam_utils
 DEFAULT_REGION = "us-east-1"
 
 CONTAINER_NAME = "efs-browser"
-CONTAINER_IMAGE = "public.ecr.aws/amazonlinux/amazonlinux:2023"
+CONTAINER_IMAGE = "public.ecr.aws/amazonlinux/amazonlinux:2023-full"
 EFS_MOUNT_PATH = "/efs"
 
 
