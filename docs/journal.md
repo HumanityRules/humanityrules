@@ -1,5 +1,24 @@
 # DevOpsHero Development Journal
 
+## 2026-04-15 16:30 - [DevEx] Customer debugging skills and doh_app_logs command
+
+**Conversation:** [2026-04-15-1523-e4c60e1e.md](conversations/2026-04-15-1523-e4c60e1e.md)
+
+Retro on a previous session where debugging a crashing customer app (hermes in CH Sandbox) was painfully slow — the agent wandered through architecture docs, tried prod-manage, and couldn't figure out how to access the customer's AWS account. Root cause: no documentation explaining the two-plane model (DOH control plane vs customer accounts), no "localhost by default" convention, and no command for fetching customer app logs.
+
+Renamed `prod-debug` skill to `prod-controlplane-debug` with a clear disambiguation note — it's for DOH's own infrastructure only, not customer apps. Created a new `customer-debug` skill covering: localhost-by-default convention, the IAM role assumption pattern (`.env` credentials -> STS AssumeRole -> customer account session), pointers to `doh_query` and existing management commands, and an AWS CLI escape hatch for ad-hoc access. Added customer resource naming conventions (cluster, service, container, log group, log stream patterns).
+
+Built `doh_app_logs` management command — the missing tool that would have made the original debugging session fast. Same argument pattern as `doh_app_shell` (`--account`, `--org`, `--env`, `--app`), handles the assume-role dance internally. By default tries running tasks first, then falls back to stopped/crashed tasks. Supports `--stopped` (skip to crashed tasks), `--head` (read from beginning), `--all` (paginate until exhausted), and `--limit`.
+
+Tested in a fresh conversation: "Debug in customer's account CH Sandbox the app hermes-vmendi00" — agent loaded `customer-debug`, loaded `manage-commands`, ran `doh_app_logs`, got logs, gave diagnosis. Straight shot, no wandering.
+
+**Key points:**
+
+- **Two-plane model was undocumented** — DOH control plane vs customer accounts. The agent had no way to know which plane to target. Now explicit in `customer-debug` skill.
+- **"Localhost by default" convention** — unless user says "in production," use `uv run manage.py`. For production, swap to `./prod_manage.sh`. Same commands, same arguments.
+- **Cross-account access was only visible in code** — the `.env` -> `settings.DOH_AWS_*` -> STS AssumeRole -> customer session chain was buried in `iam_utils`. Now documented in the skill, plus an AWS CLI recipe for ad-hoc access.
+- **`doh_app_logs` fills the tooling gap** — `doh_app_shell` can't help when a task is crashed. `doh_app_logs` fetches CloudWatch logs for both running and stopped tasks.
+
 ## 2026-04-15 13:15 - [Deployment] Hermes EFS: fix mount path, /workspace symlink, remove cdk_stack_profile
 
 **Conversation:** [2026-04-15-1414-e7c759d3.md](conversations/2026-04-15-1414-e7c759d3.md)
