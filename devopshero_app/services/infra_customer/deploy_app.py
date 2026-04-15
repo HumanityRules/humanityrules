@@ -355,8 +355,9 @@ class AppStack(Stack):
                 file_system_id=self.environment_infra.efs_file_system_id,
                 security_group=self.environment_infra.efs_security_group,
             )
-            efs_access_point = efs_file_system.add_access_point(
-                "AppAccessPoint",
+            efs_access_point = efs.AccessPoint(
+                self, "AppAccessPoint",
+                file_system=efs_file_system,
                 path=f"/deployments/{app_config.app_name}",
                 create_acl=efs.Acl(owner_uid="1000", owner_gid="1000", permissions="755"),
                 posix_user=efs.PosixUser(uid="1000", gid="1000"),
