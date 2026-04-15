@@ -2,14 +2,19 @@
 set -e
 
 HERMES_DIR="/home/hermeswebui/.hermes"
+PROVIDER="${HERMES_INFERENCE_PROVIDER:-openai}"
+MODEL="${HERMES_MODEL:-gpt-5.4-mini}"
+
 mkdir -p "$HERMES_DIR"
 
 # Generate config.yaml from Docker env vars on first boot.
+#
+# If want to avoid the onboarding wizard (HERMES_WEBUI_SKIP_ONBOARDING=1), which is 
+# shown unless chat_ready=True, then config.yaml needs model.provider, model.default, 
+# and model.base_url, plus the API key must be present in ~/.hermes/.env.
+#
 # Existing files (from a previous deploy on EFS) are never overwritten.
 if [ ! -f "$HERMES_DIR/config.yaml" ]; then
-    PROVIDER="${HERMES_INFERENCE_PROVIDER:-openai}"
-    MODEL="${HERMES_MODEL:-gpt-5.4-mini}"
-
     # Hermes agent treats direct OpenAI as "custom" provider with base_url
     CONFIG_PROVIDER="$PROVIDER"
     BASE_URL_LINE=""
