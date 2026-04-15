@@ -1,5 +1,30 @@
 # DevOpsHero Development Journal
 
+## 2026-04-15 13:15 - [Deployment] Hermes EFS: fix mount path, /workspace symlink, remove cdk_stack_profile
+
+**Conversation:** [2026-04-15-1414-e7c759d3.md](conversations/2026-04-15-1414-e7c759d3.md)
+
+Deep session rethinking how EFS integrates with the Hermes container. Started with the observation that EFS was mounted at `/app/workspace` (the OpenClaw convention) but hermes stores everything under `/home/hermeswebui/.hermes`. The mount was useless — hermes state was ephemeral.
+
+**What changed:**
+
+Made the EFS container mount path configurable per template via a new `efs_mount_path` field on `AppTemplate` and `AppConfig`. OpenClaw keeps `/app/workspace`, hermes gets `/home/hermeswebui/.hermes`. The EFS decision in `deploy_app.py` now keys off `efs_mount_path` being set, which made `cdk_stack_profile` dead code — removed it from the model, AppConfig, admin, seed data, deploy form, config builder, and teardown executor.
+
+Mounting EFS at the hermes home directory means the Dockerfile can't pre-populate it (EFS overlays at runtime). Moved the `hermes-agent` git clone to `/opt/hermes-defaults/` staging area; entrypoint copies it on first boot.
+
+Discovered that hermes uses `/workspace` as its default working directory for terminal commands and file tools — which was NOT on EFS. Any files the agent created there were ephemeral. Fixed by replacing `/workspace` with a symlink to `/home/hermeswebui/.hermes/workspace` in the Dockerfile, and creating the target directory in the entrypoint.
+
+Fixed a pre-existing bug: the `auto` -> concrete provider resolution was inside the `config.yaml` first-boot guard, so on second boot `PROVIDER` stayed as `"auto"` and `OPENAI_BASE_URL` was silently dropped from `.env`. Moved the resolution to run unconditionally.
+
+**Key design decisions from the discussion:**
+
+- **Hermes has a built-in `hermes update` command** — downloads latest agent framework while preserving user data. This means the `hermes-agent/` directory on EFS should be seeded once and never overwritten by us; the user manages framework updates.
+- **Three categories of EFS content, all seed-once for different reasons** — config/SOUL.md (user-editable), hermes-agent (framework-managed via `hermes update`), skills/memory (runtime-generated).
+- **WebUI and agent framework are independently versioned** — Docker image pins the WebUI binary; agent framework lives on EFS. Image bumps should be tested against existing EFS volumes.
+- **`/workspace` symlink is the right approach** — catches all code paths (terminal, file browser, search_files) without needing to know every internal reference to `/workspace`. Created at build time as root; target directory created by entrypoint on boot.
+
+Also added comprehensive documentation to `template_repos/hermes_agent/README.md` covering the storage architecture (what's ephemeral vs persistent, how EFS is mounted, the `/workspace` symlink, first boot vs reboot behavior, update strategy) and how environment variables flow from the DOH template system to the hermes container (config vs secret categories, Secrets Manager chain, entrypoint bridging to config.yaml and .env).
+
 ## 2026-04-15 12:25 - [DevEx] doh_app_shell — ECS Exec into deployed customer app tasks
 
 **Conversation:** [2026-04-15-1225-f0367a63.md](conversations/2026-04-15-1225-f0367a63.md)
@@ -31,7 +56,7 @@ An earlier write-up here referred to `2023-full`; **that tag does not exist** on
 
 ## 2026-04-15 00:30 - [Deployment] Fix hermes EFS mount path, remove cdk_stack_profile
 
-**Conversation:** [2026-04-15-1147-e7c759d3.md](conversations/2026-04-15-1147-e7c759d3.md)
+**Conversation:** [2026-04-15-1414-e7c759d3.md](conversations/2026-04-15-1414-e7c759d3.md) (same session, continued above)
 
 The EFS volume for hermes was mounted at `/app/workspace` (copied from OpenClaw's convention), but hermes stores all state under `/home/hermeswebui/.hermes` — config, conversations, webui data, skills, memory. The mount was useless; hermes state was ephemeral and lost on every ECS task replacement.
 
