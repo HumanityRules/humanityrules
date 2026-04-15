@@ -1,5 +1,21 @@
 # DevOpsHero Development Journal
 
+## 2026-04-15 01:20 - [Deployment] Hermes WebUI password flow — tracing from seed to process env
+
+**Conversation:** [2026-04-14-1820-082db88b.md](conversations/2026-04-14-1820-082db88b.md)
+
+Investigated how `HERMES_WEBUI_PASSWORD` flows from DOH seed data to the running Hermes container. The question started as "is this how I set up the default password?" and led to tracing the full chain: seed data `value` field → `_materialize_app_secrets()` → Secrets Manager → ECS container env var → `os.getenv()` in the Hermes WebUI.
+
+Read the upstream `api/auth.py` from `nesquena/hermes-webui` to confirm the WebUI reads the password directly from the **process environment** via `os.getenv('HERMES_WEBUI_PASSWORD')`, not from the `$HERMES_DIR/.env` file. This means the entrypoint doesn't need to write it to `.env` — that file is specifically for model provider API keys that the Hermes agent subprocess reads via dotenv.
+
+Also clarified the three behaviors of the `value` field in `runtime_variables`: `None` = auto-generate at deploy time, `""` = empty placeholder, `"literal"` = use as-is. The `auto_generate` field in seed data is metadata only — not consumed by `template_deploy_service.py`.
+
+**Key points:**
+- The upstream Hermes WebUI uses `os.getenv()` for the password (priority: env var > `settings.json` hash) — no `.env` file involvement needed.
+- The entrypoint's `.env` file serves a different purpose: writing API keys for the Hermes agent subprocess, which loads them via dotenv. The WebUI server reads its own config from process env and `settings.json`.
+- Fixed the seed data: changed description from "auto-generated" to just "WebUI access password", set `auto_generate: False`, and hardcoded `value: "mysquirrel"` for all deployments.
+- Added `chmod 600` on the generated `.env` file in entrypoint.sh since it contains API keys.
+
 ## 2026-04-15 01:10 - [Deployment] Tavily web search verification and config cleanup
 
 **Conversation:** [2026-04-14-1755-410755d0.md](conversations/2026-04-14-1755-410755d0.md) (continued)

@@ -153,11 +153,11 @@ HERMES_TEMPLATE = {
         {
             "name": "HERMES_WEBUI_PASSWORD",
             "category": "secret",
-            "description": "WebUI access password (auto-generated)",
+            "description": "WebUI access password",
             "required": True,
-            "auto_generate": True,
+            "auto_generate": False,
             "default_value": None,
-            "value": None,
+            "value": "mysquirrel",
         },
         {
             "name": "ANTHROPIC_API_KEY",
