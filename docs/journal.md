@@ -1,5 +1,26 @@
 # DevOpsHero Development Journal
 
+## 2026-04-14 20:53 - [Deployment] Shared secrets per environment
+
+**Conversation:** [2026-04-14-2054-879a27e5.md](conversations/2026-04-14-2054-879a27e5.md)
+
+When deploying template apps (Hermes, OpenClaw), each new app gets its own Secrets Manager entry (`devopshero/{app-name}/secrets`) with empty placeholders for API keys like `OPENAI_API_KEY`, `TAVILY_API_KEY`, `SLACK_BOT_TOKEN`. Deploying N apps means filling the same keys N times in the AWS console.
+
+**Solution:** A shared secrets store per environment — a single Secrets Manager entry at `devopshero/{env-slug}/shared-secrets` holds common API keys configured once. At deploy time, the control plane reads the shared secret and copies matching values into app-level secrets for any key that is an empty placeholder (`value=""`). The ECS task never knows shared secrets exist — it only reads from `devopshero/{app-name}/secrets` as before.
+
+**Design discussion and key decisions:**
+- Shared secrets are a **control-plane-only concept**. Values are copied into app-level secrets at `ensure_app_secrets_exist` time, before CDK runs. No IAM changes needed — neither for the task role (doesn't need to read shared secrets) nor the control plane (already has full Secrets Manager access via the assumed role).
+- **Merge priority:** App-level always wins. If a template declares a literal value (like `HERMES_WEBUI_PASSWORD = "mysquirrel"`) or `auto_generate=True`, the shared secret is ignored for that key. Only empty-placeholder keys (`value=""`, `auto_generate=False`) are candidates for shared resolution.
+- **Lazy creation:** The `devopshero/{env-slug}/shared-secrets` entry is created on first `shared-set` call, not during environment provisioning.
+- The shared secret name is deterministic from `env_slug`, so no new Django model or migration is needed.
+- `aws_account_id` is not unique at the DB level — two organizations can connect the same AWS account. Added `--org` (name or slug) to `doh_secrets` to disambiguate.
+
+**Key points:**
+- `secrets_utils.get_shared_secrets()` reads the shared secret, returning `{}` if it doesn't exist (fully backward compatible).
+- `secrets_utils.ensure_app_secrets_exist()` now takes a `shared_secrets` parameter. A new `_resolve_secret_value()` function handles the three-way resolution: auto-generate for `None`, shared fallback for `""`, literal pass-through otherwise.
+- `deploy_app.deploy()` calls `get_shared_secrets` before `ensure_app_secrets_exist` and passes the result through.
+- `doh_secrets` management command gained `shared-list`, `shared-set`, `shared-delete` subcommands, plus `--org` on all subcommands.
+
 ## 2026-04-14 20:02 - [DevEx] doh_secrets — management command replaces secrets_utils CLI
 
 **Conversation:** [2026-04-14-2002-ebec1f37.md](conversations/2026-04-14-2002-ebec1f37.md)
