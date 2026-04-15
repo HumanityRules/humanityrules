@@ -576,8 +576,8 @@ class AppTemplate(models.Model):
     # Datastore requirements (null = no datastore needed)
     datastore_config = models.JSONField(null=True, blank=True)
 
-    # Which CDK deployment pattern to use
-    cdk_stack_profile = models.CharField(max_length=50, help_text="e.g. fargate_web")
+    # EFS mount path inside the container (empty = no EFS volume)
+    efs_mount_path = models.CharField(max_length=255, blank=True)
 
     is_active = models.BooleanField()
     created_at = models.DateTimeField(auto_now_add=True)

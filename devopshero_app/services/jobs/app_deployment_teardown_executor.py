@@ -74,9 +74,9 @@ def _build_teardown_app_config(
     cpu = deployment.blueprint.cpu
     memory = deployment.blueprint.memory
 
-    cdk_stack_profile = "fargate_web"
+    efs_mount_path = None
     if app.source_template:
-        cdk_stack_profile = app.source_template.cdk_stack_profile
+        efs_mount_path = app.source_template.efs_mount_path or None
 
     return infra_customer.appconfig.AppConfig(
         app_name=app.slug,
@@ -90,7 +90,7 @@ def _build_teardown_app_config(
         app_source_path=None,
         database_config=database_config,
         app_secrets=None,
-        cdk_stack_profile=cdk_stack_profile,
+        efs_mount_path=efs_mount_path,
     )
 
 

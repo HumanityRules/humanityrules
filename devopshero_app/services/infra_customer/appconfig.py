@@ -102,8 +102,8 @@ class AppConfig:
     # Override ECS health check grace period (seconds). None = use environment default.
     health_check_grace_period: int | None = None
 
-    # CDK stack profile — selects the deployment pattern (e.g., "fargate_web", "fargate_web_efs")
-    cdk_stack_profile: str = "fargate_web"
+    # EFS mount path inside the container (None = no EFS volume)
+    efs_mount_path: str | None = None
 
     def to_template_vars(self) -> dict:
         """Convert to dict for Jinja2 template rendering (CloudFormation)."""
