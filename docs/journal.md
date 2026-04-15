@@ -1,5 +1,23 @@
 # DevOpsHero Development Journal
 
+## 2026-04-15 00:30 - [Deployment] Fix hermes EFS mount path, remove cdk_stack_profile
+
+**Conversation:** [2026-04-15-1147-e7c759d3.md](conversations/2026-04-15-1147-e7c759d3.md)
+
+The EFS volume for hermes was mounted at `/app/workspace` (copied from OpenClaw's convention), but hermes stores all state under `/home/hermeswebui/.hermes` — config, conversations, webui data, skills, memory. The mount was useless; hermes state was ephemeral and lost on every ECS task replacement.
+
+The fix makes the EFS container mount path configurable per app template via a new `efs_mount_path` field. OpenClaw keeps `/app/workspace`, hermes gets `/home/hermeswebui/.hermes`. The EFS decision in the CDK now keys off `efs_mount_path` being set, which made `cdk_stack_profile` dead weight — it was the only thing that field ever controlled — so we removed it entirely from the model, AppConfig, admin, seed data, and deploy form.
+
+Mounting EFS at the hermes home directory means the Dockerfile can't pre-populate it (EFS overlays the directory at runtime). The hermes-agent git clone was moved to a staging location (`/opt/hermes-defaults/`) and the entrypoint copies it on first boot, matching the existing seed-once pattern for SOUL.md and config.yaml.
+
+**Key points:**
+
+- **`efs_mount_path` replaces `cdk_stack_profile` as the EFS trigger** — The profile field was introduced to select deployment patterns but only ever controlled EFS. A concrete path is more explicit: "mount EFS here" vs "use this abstract profile name."
+- **Three categories of EFS content, all seed-once** — Config/SOUL.md (user-editable, don't overwrite customizations), hermes-agent framework (managed by `hermes update`, don't regress their version), skills/memory (runtime-generated, never touched by us).
+- **Hermes has a built-in `hermes update` command** — It downloads the latest agent framework release while preserving user data. This means we should NOT overwrite the hermes-agent directory on reboot; the user or hermes manages its own framework version.
+- **Provider auto-resolution bug fixed** — The `auto` -> concrete provider resolution (e.g. `auto` -> `openai`) was inside the config.yaml guard, so on second boot it was skipped. `PROVIDER` stayed as `"auto"` and `OPENAI_BASE_URL` was silently dropped from `.env`. Moved the resolution to run unconditionally.
+- **WebUI vs agent framework are independently versioned** — The Docker image pins the WebUI binary; the agent framework version lives on EFS and is updated via `hermes update`. A WebUI image bump could theoretically require an agent framework update, but upstream claims backward compatibility.
+
 ## 2026-04-14 20:53 - [Deployment] Shared secrets per environment
 
 **Conversation:** [2026-04-14-2054-879a27e5.md](conversations/2026-04-14-2054-879a27e5.md)

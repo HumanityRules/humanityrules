@@ -5,6 +5,18 @@ HERMES_DIR="/home/hermeswebui/.hermes"
 PROVIDER="${HERMES_INFERENCE_PROVIDER:-openai}"
 MODEL="${HERMES_MODEL:-gpt-5.4-mini}"
 
+# Resolve "auto" to a concrete provider by detecting which API key is set.
+# Runs unconditionally — needed by both config.yaml generation and .env generation.
+if [ "$PROVIDER" = "auto" ]; then
+    if [ -n "$OPENAI_API_KEY" ]; then
+        PROVIDER="openai"
+    elif [ -n "$ANTHROPIC_API_KEY" ]; then
+        PROVIDER="anthropic"
+    elif [ -n "$OPENROUTER_API_KEY" ]; then
+        PROVIDER="openrouter"
+    fi
+fi
+
 mkdir -p "$HERMES_DIR"
 
 # Generate config.yaml from Docker env vars on first boot.
@@ -15,19 +27,6 @@ mkdir -p "$HERMES_DIR"
 #
 # Existing files (from a previous deploy on EFS) are never overwritten.
 if [ ! -f "$HERMES_DIR/config.yaml" ]; then
-    # Resolve "auto" to a concrete provider by detecting which API key is set.
-    # The WebUI onboarding check doesn't understand "auto" and will show the
-    # wizard unless config.yaml has a provider it can validate.
-    if [ "$PROVIDER" = "auto" ]; then
-        if [ -n "$OPENAI_API_KEY" ]; then
-            PROVIDER="openai"
-        elif [ -n "$ANTHROPIC_API_KEY" ]; then
-            PROVIDER="anthropic"
-        elif [ -n "$OPENROUTER_API_KEY" ]; then
-            PROVIDER="openrouter"
-        fi
-    fi
-
     # Hermes agent treats direct OpenAI as "custom" provider with base_url
     CONFIG_PROVIDER="$PROVIDER"
     BASE_URL_LINE=""
@@ -55,6 +54,10 @@ session:
 web:
   backend: tavily
 YAML
+fi
+
+if [ ! -d "$HERMES_DIR/hermes-agent" ]; then
+    cp -r /opt/hermes-defaults/hermes-agent "$HERMES_DIR/hermes-agent"
 fi
 
 if [ ! -f "$HERMES_DIR/SOUL.md" ]; then

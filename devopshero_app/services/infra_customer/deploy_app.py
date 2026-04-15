@@ -349,7 +349,7 @@ class AppStack(Stack):
 
         # EFS: create per-app access point and grant mount permissions
         efs_access_point = None
-        if app_config.cdk_stack_profile == "fargate_web_efs":
+        if app_config.efs_mount_path:
             efs_file_system = efs.FileSystem.from_file_system_attributes(
                 self, "ImportedEfs",
                 file_system_id=self.environment_infra.efs_file_system_id,
@@ -439,7 +439,7 @@ class AppStack(Stack):
         if efs_access_point:
             container.add_mount_points(
                 ecs.MountPoint(
-                    container_path="/app/workspace",
+                    container_path=app_config.efs_mount_path,
                     source_volume="app-workspace",
                     read_only=False,
                 )

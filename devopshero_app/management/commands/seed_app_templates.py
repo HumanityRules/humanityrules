@@ -105,7 +105,7 @@ OPENCLAW_TEMPLATE = {
         },
     ],
     "datastore_config": None,
-    "cdk_stack_profile": "fargate_web_efs",
+    "efs_mount_path": "/app/workspace",
     "is_active": True,
 }
 
@@ -215,7 +215,7 @@ HERMES_TEMPLATE = {
         },
     ],
     "datastore_config": None,
-    "cdk_stack_profile": "fargate_web_efs",
+    "efs_mount_path": "/home/hermeswebui/.hermes",
     "is_active": True,
 }
 
