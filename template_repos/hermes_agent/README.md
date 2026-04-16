@@ -31,7 +31,7 @@ The Hermes template defines its variables in `seed_app_templates.py` under `runt
 
 **Config vars** (`category: "config"`) become plain ECS environment variables. `template_deploy_service._materialize_environment_variables()` extracts them into `[{"name": ..., "value": ...}]` and stores them on the `DeploymentBlueprint`. The CDK then passes them as the `environment` dict on the ECS container definition. They arrive as regular `os.environ` in the container.
 
-For hermes, this covers `HERMES_INFERENCE_PROVIDER` and `HERMES_MODEL`.
+For hermes, this covers `DOH_LLM_PROVIDER` and `DOH_LLM_MODEL`.
 
 **Secret vars** (`category: "secret"`) go through AWS Secrets Manager. `template_deploy_service._materialize_app_secrets()` extracts them into `{"KEY": value}` and stores them on the blueprint's `app_secrets` field. Before CDK runs, `secrets_utils.ensure_app_secrets_exist()` creates (or merges into) a Secrets Manager entry at `devopshero/{app-name}/secrets` as a JSON blob with all the keys. The CDK then wires each key as an `ecs.Secret.from_secrets_manager(field=...)` reference, so ECS resolves them at task startup — the container sees them as regular env vars, but they never appear in the CloudFormation template.
 
@@ -45,7 +45,7 @@ For hermes, this covers `HERMES_WEBUI_PASSWORD`, `ANTHROPIC_API_KEY`, `OPENAI_AP
 
 **Inside the container**, the entrypoint bridges these ECS env vars to the two places hermes reads them from:
 
-- **`config.yaml`** — generated on first boot from `HERMES_INFERENCE_PROVIDER` and `HERMES_MODEL`. Persists on EFS; not regenerated on reboot.
+- **`config.yaml`** — generated on first boot from `DOH_LLM_PROVIDER` and `DOH_LLM_MODEL`. Persists on EFS; not regenerated on reboot.
 - **`.env` file** — regenerated every boot by writing each API key env var into `/home/hermeswebui/.hermes/.env`. The hermes agent subprocess loads this via dotenv. The WebUI server reads its own config (`HERMES_WEBUI_PASSWORD`) from the process environment directly — it's not in the `.env` file.
 
 

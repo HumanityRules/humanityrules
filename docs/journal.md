@@ -1,5 +1,21 @@
 # DevOpsHero Development Journal
 
+## 2026-04-15 - [Hermes] Add Slack gateway, simplify LLM config vars
+
+Added Slack integration support to the Hermes template. The upstream Hermes WebUI only serves the web interface — Slack/Discord/Telegram are handled by a separate gateway process (`python -m gateway.run`) that needs `slack-bolt` and `slack-sdk` installed.
+
+**New file: `start_with_gateway.sh`** — orchestrates both processes. When Slack tokens are present, starts WebUI in background, waits for venv, installs Slack deps, waits for health check, then starts the gateway. If either process dies, the other is killed and ECS restarts the task. When no Slack tokens are set, falls through to WebUI-only mode.
+
+**New file: `config.yaml.template`** — full Hermes config with `__CONFIG_PROVIDER__`, `__MODEL__`, `__BASE_URL__` placeholders, replacing the inline heredoc that was in the old entrypoint. Includes Slack platform toolsets, memory, compression, skills, and all auxiliary provider configs.
+
+**Simplified LLM config vars** — renamed `HERMES_INFERENCE_PROVIDER` / `HERMES_MODEL` to `DOH_LLM_PROVIDER` / `DOH_LLM_MODEL` / `DOH_LLM_BASE_URL`. This eliminates a namespace collision where Hermes gateway's `resolve_runtime_provider()` reads `HERMES_INFERENCE_PROVIDER` from the environment and overrides `config.yaml`. With `DOH_*` namespacing, the entrypoint consumes these vars to generate config files but they never leak to child processes. Values are now Hermes-native (e.g. `custom` not `openai`), removing the provider translation logic and auto-detection. The entrypoint went from ~80 lines with conditionals to ~50 lines of straight passthrough.
+
+**Key lessons:**
+- Hermes doesn't recognize "openai" as a provider — direct OpenAI uses `provider: custom` with `base_url`.
+- Model names with `/` (e.g. `openai/gpt-5.4-mini`) trigger OpenRouter routing even when not using OpenRouter.
+- The gateway reads env vars before config.yaml, so any `HERMES_*` env var silently overrides config.
+- `SLACK_ALLOW_ALL_USERS=true` must be in the process environment, not just `.env` — added to seed template as a config var so ECS injects it directly.
+
 ## 2026-04-15 15:00 - [Deployment] Fix hermes EFS crash: uid mismatch, consolidate efs_config
 
 **Conversation:** [2026-04-15-1530-306a9944.md](conversations/2026-04-15-1530-306a9944.md)
