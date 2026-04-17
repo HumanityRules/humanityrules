@@ -87,6 +87,63 @@ else:
 PYEOF
 fi
 
+# --- Upstream bug workaround: Bedrock Claude prompt caching ---
+# Hermes decides whether to inject Anthropic cache_control breakpoints based on
+# `is_native_anthropic = api_mode == "anthropic_messages" and provider == "anthropic"`.
+# That excludes the Bedrock+Claude path (where provider == "bedrock" but api_mode
+# is still "anthropic_messages" because hermes uses the AnthropicBedrock SDK).
+# Result: no cache_control is ever sent to Bedrock → Bedrock caches nothing
+# → input tokens are billed in full on every turn, missing the ~75-90% savings.
+#
+# We rewrite the three `is_native_anthropic = ... provider == "anthropic"` sites
+# to also accept `"bedrock"`. Matchers are strict (verbatim upstream lines) and
+# idempotent, so if upstream ships a fix later, this becomes a no-op.
+# Verified in-container: with this patch, Sonnet 4.5 on Bedrock reports
+# cache_creation_input_tokens>0 on turn 1 and cache_read_input_tokens>0 on turn 2.
+if [ -f "$AGENT_RUN_PY" ]; then
+    python3 - "$AGENT_RUN_PY" <<'PYEOF'
+import sys
+path = sys.argv[1]
+with open(path, encoding="utf-8") as f: src = f.read()
+
+# Three verbatim upstream lines that gate prompt caching. Each patched form
+# replaces the strict `== "anthropic"` check with an `in {"anthropic","bedrock"}`.
+patches = [
+    # __init__: initial decision
+    (
+        'is_native_anthropic = self.api_mode == "anthropic_messages" and self.provider == "anthropic"',
+        'is_native_anthropic = self.api_mode == "anthropic_messages" and self.provider in {"anthropic", "bedrock"}',
+    ),
+    # Provider-switch path (in-session model change)
+    (
+        'is_native_anthropic = api_mode == "anthropic_messages" and new_provider == "anthropic"',
+        'is_native_anthropic = api_mode == "anthropic_messages" and new_provider in {"anthropic", "bedrock"}',
+    ),
+    # Fallback-provider path
+    (
+        'is_native_anthropic = fb_api_mode == "anthropic_messages" and fb_provider == "anthropic"',
+        'is_native_anthropic = fb_api_mode == "anthropic_messages" and fb_provider in {"anthropic", "bedrock"}',
+    ),
+]
+
+changed = 0
+for old, new in patches:
+    if new in src:
+        continue  # already patched
+    if old in src:
+        src = src.replace(old, new, 1)
+        changed += 1
+    else:
+        print(f"[entrypoint] prompt-caching matcher not found (upstream may have fixed this): {old[:70]}...", file=sys.stderr)
+
+if changed:
+    with open(path, "w", encoding="utf-8") as f: f.write(src)
+    print(f"[entrypoint] Patched run_agent.py: enabled Bedrock prompt caching at {changed} site(s).")
+else:
+    print(f"[entrypoint] run_agent.py prompt caching already enabled for Bedrock (no patch needed).")
+PYEOF
+fi
+
 # Write .env from Docker env vars so the WebUI detects provider credentials.
 # Regenerated on every boot to pick up DOH config changes.
 ENV_FILE="$HERMES_DIR/.env"
