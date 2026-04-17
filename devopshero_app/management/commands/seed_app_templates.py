@@ -110,17 +110,9 @@ OPENCLAW_TEMPLATE = {
 }
 
 
-HERMES_TEMPLATE = {
-    "name": "AI Assistant (Hermes)",
-    "slug": "ai-assistant-hermes",
-    "description": (
-        "Deploy a governed AI personal assistant powered by Hermes Agent. "
-        "Includes tool execution, persistent memory, self-improving skills, "
-        "and multi-channel access (Slack, web). Runs inside your VPC with "
-        "your choice of model provider."
-    ),
-    "icon": "⚡",
-    "category": "ai-assistant",
+# -- Hermes shared building blocks ------------------------------------------
+
+_HERMES_BASE = {
     "source_repo_path": "hermes_agent",
     "app_type": "web",
     "build_strategy": "dockerfile",
@@ -131,123 +123,162 @@ HERMES_TEMPLATE = {
     "health_check_grace_period": 60,
     "cpu": 1024,
     "memory": 2048,
-    "runtime_variables": [
-        {
-            "name": "DOH_LLM_PROVIDER",
-            "category": "config",
-            "description": "Hermes provider name: custom, anthropic, or openrouter",
-            "required": True,
-            "auto_generate": False,
-            "default_value": "custom",
-            "value": "custom",
-        },
-        {
-            "name": "DOH_LLM_MODEL",
-            "category": "config",
-            "description": "LLM model identifier (e.g. gpt-5.4-mini, claude-sonnet-4)",
-            "required": True,
-            "auto_generate": False,
-            "default_value": "gpt-5.4-mini",
-            "value": "gpt-5.4-mini",
-        },
-        {
-            "name": "DOH_LLM_BASE_URL",
-            "category": "config",
-            "description": "Provider API base URL (required for custom provider, empty otherwise)",
-            "required": False,
-            "auto_generate": False,
-            "default_value": "https://api.openai.com/v1",
-            "value": "https://api.openai.com/v1",
-        },
-        {
-            "name": "HERMES_WEBUI_PASSWORD",
-            "category": "secret",
-            "description": "WebUI access password",
-            "required": True,
-            "auto_generate": False,
-            "default_value": None,
-            "value": "mysquirrel",
-        },
-        {
-            "name": "ANTHROPIC_API_KEY",
-            "category": "secret",
-            "description": "Anthropic API key for Claude models",
-            "required": False,
-            "auto_generate": False,
-            "default_value": None,
-            "value": "",
-        },
-        {
-            "name": "OPENAI_API_KEY",
-            "category": "secret",
-            "description": "OpenAI API key (alternative provider)",
-            "required": False,
-            "auto_generate": False,
-            "default_value": None,
-            "value": "",
-        },
-        {
-            "name": "OPENROUTER_API_KEY",
-            "category": "secret",
-            "description": "OpenRouter API key for multi-model access (200+ models)",
-            "required": False,
-            "auto_generate": False,
-            "default_value": None,
-            "value": "",
-        },
-        {
-            "name": "TAVILY_API_KEY",
-            "category": "secret",
-            "description": "Tavily API key for web search capability",
-            "required": False,
-            "auto_generate": False,
-            "default_value": None,
-            "value": "",
-        },
-        {
-            "name": "SLACK_APP_TOKEN",
-            "category": "secret",
-            "description": "Slack app-level token (leave empty to disable Slack)",
-            "required": False,
-            "auto_generate": False,
-            "default_value": None,
-            "value": "",
-        },
-        {
-            "name": "SLACK_BOT_TOKEN",
-            "category": "secret",
-            "description": "Slack bot token (leave empty to disable Slack)",
-            "required": False,
-            "auto_generate": False,
-            "default_value": None,
-            "value": "",
-        },
-        {
-            "name": "SLACK_ALLOW_ALL_USERS",
-            "category": "config",
-            "description": "Allow all Slack users to interact with the bot (true/false)",
-            "required": False,
-            "auto_generate": False,
-            "default_value": "true",
-            "value": "true",
-        },
-        {
-            "name": "SLACK_ALLOWED_USERS",
-            "category": "config",
-            "description": "Comma-separated Slack Member IDs (overrides allow-all when set)",
-            "required": False,
-            "auto_generate": False,
-            "default_value": "",
-            "value": "",
-        },
-    ],
     "datastore_config": None,
     "efs_config": {"mount_path": "/home/hermeswebui/.hermes", "posix_uid": 1024, "posix_gid": 1024},
     "is_active": True,
 }
 
+_HERMES_LLM_VARS = [
+    {
+        "name": "DOH_LLM_PROVIDER",
+        "category": "config",
+        "description": "Hermes provider name: custom, anthropic, or openrouter",
+        "required": True,
+        "auto_generate": False,
+        "default_value": "custom",
+        "value": "custom",
+    },
+    {
+        "name": "DOH_LLM_MODEL",
+        "category": "config",
+        "description": "LLM model identifier (e.g. gpt-5.4-mini, claude-sonnet-4)",
+        "required": True,
+        "auto_generate": False,
+        "default_value": "gpt-5.4-mini",
+        "value": "gpt-5.4-mini",
+    },
+    {
+        "name": "DOH_LLM_BASE_URL",
+        "category": "config",
+        "description": "Provider API base URL (required for custom provider, empty otherwise)",
+        "required": False,
+        "auto_generate": False,
+        "default_value": "https://api.openai.com/v1",
+        "value": "https://api.openai.com/v1",
+    },
+]
 
-TEMPLATES = [OPENCLAW_TEMPLATE, HERMES_TEMPLATE]
+_HERMES_CREDENTIAL_VARS = [
+    {
+        "name": "HERMES_WEBUI_PASSWORD",
+        "category": "secret",
+        "description": "WebUI access password",
+        "required": True,
+        "auto_generate": False,
+        "default_value": None,
+        "value": "mysquirrel",
+    },
+    {
+        "name": "ANTHROPIC_API_KEY",
+        "category": "secret",
+        "description": "Anthropic API key for Claude models",
+        "required": False,
+        "auto_generate": False,
+        "default_value": None,
+        "value": "",
+    },
+    {
+        "name": "OPENAI_API_KEY",
+        "category": "secret",
+        "description": "OpenAI API key (alternative provider)",
+        "required": False,
+        "auto_generate": False,
+        "default_value": None,
+        "value": "",
+    },
+    {
+        "name": "OPENROUTER_API_KEY",
+        "category": "secret",
+        "description": "OpenRouter API key for multi-model access (200+ models)",
+        "required": False,
+        "auto_generate": False,
+        "default_value": None,
+        "value": "",
+    },
+    {
+        "name": "TAVILY_API_KEY",
+        "category": "secret",
+        "description": "Tavily API key for web search capability",
+        "required": False,
+        "auto_generate": False,
+        "default_value": None,
+        "value": "",
+    },
+]
+
+_HERMES_SLACK_VARS = [
+    {
+        "name": "SLACK_APP_TOKEN",
+        "category": "secret",
+        "description": "Slack app-level token",
+        "required": True,
+        "auto_generate": False,
+        "default_value": None,
+        "value": "",
+    },
+    {
+        "name": "SLACK_BOT_TOKEN",
+        "category": "secret",
+        "description": "Slack bot token",
+        "required": True,
+        "auto_generate": False,
+        "default_value": None,
+        "value": "",
+    },
+    {
+        "name": "SLACK_ALLOW_ALL_USERS",
+        "category": "config",
+        "description": "Allow all Slack users to interact with the bot (true/false)",
+        "required": False,
+        "auto_generate": False,
+        "default_value": "true",
+        "value": "true",
+    },
+    {
+        "name": "SLACK_ALLOWED_USERS",
+        "category": "config",
+        "description": "Comma-separated Slack Member IDs (overrides allow-all when set)",
+        "required": False,
+        "auto_generate": False,
+        "default_value": "",
+        "value": "",
+    },
+]
+
+# -- Hermes Personal (web only, one per user) -------------------------------
+
+HERMES_PERSONAL_TEMPLATE = {
+    **_HERMES_BASE,
+    "name": "AI Assistant — Hermes (Personal)",
+    "slug": "hermes-personal",
+    "description": (
+        "Personal AI assistant powered by Hermes Agent. Web UI with tool "
+        "execution, persistent memory, and self-improving skills. Deploy one "
+        "per user for isolated conversations and settings."
+    ),
+    "icon": "⚡",
+    "category": "ai-assistant",
+    "runtime_variables": _HERMES_LLM_VARS + _HERMES_CREDENTIAL_VARS,
+}
+
+# -- Hermes Slack (shared, one per org) -------------------------------------
+
+HERMES_SLACK_TEMPLATE = {
+    **_HERMES_BASE,
+    "name": "AI Assistant — Hermes (Slack)",
+    "slug": "hermes-slack",
+    "description": (
+        "Shared AI assistant powered by Hermes Agent with Slack integration. "
+        "Deploy one per organization — all workspace users can DM the bot "
+        "with isolated conversations. Also includes the web UI."
+    ),
+    "icon": "💬",
+    "category": "ai-assistant",
+    "runtime_variables": _HERMES_LLM_VARS + _HERMES_CREDENTIAL_VARS + _HERMES_SLACK_VARS,
+}
+
+
+TEMPLATES = [OPENCLAW_TEMPLATE, HERMES_PERSONAL_TEMPLATE, HERMES_SLACK_TEMPLATE]
 
 
 class Command(BaseCommand):
