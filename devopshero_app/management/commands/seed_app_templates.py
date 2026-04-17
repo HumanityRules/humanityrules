@@ -150,7 +150,7 @@ _HERMES_LLM_VARS = [
     {
         "name": "DOH_LLM_MODEL",
         "category": "config",
-        "description": "LLM model identifier (e.g. us.anthropic.claude-opus-4-6-v1, gpt-5.4-mini)",
+        "description": "LLM model identifier (e.g. us.anthropic.claude-opus-4-7, us.anthropic.claude-opus-4-6-v1, gpt-5.4-mini)",
         "required": True,
         "auto_generate": False,
         "default_value": "us.anthropic.claude-opus-4-6-v1",
