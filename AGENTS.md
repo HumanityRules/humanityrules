@@ -62,6 +62,11 @@ Then pass the printed session key: `curl -b "sessionid=<key>" http://127.0.0.1:8
 See **`docs/AGENTS.md`** for the documentation index (main docs and subsystem AGENTS.md files).
 
 
+# Journal
+
+**Do not write to `docs/journal.md` unless explicitly ordered.** The journal is updated only when the user asks (e.g., `/journal` or `/journal commit`). Never add entries proactively at the end of a task.
+
+
 # Django 6.0 Async ORM
 
 **Use native async ORM methods instead of `sync_to_async`.** Django 6.0 has full async ORM support — don't wrap sync methods.

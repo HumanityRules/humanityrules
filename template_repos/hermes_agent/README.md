@@ -41,12 +41,21 @@ The `value` field in seed data controls initial resolution:
 - `""` — empty placeholder; if a shared secret exists for this environment with the same key, that value is copied in; otherwise stays empty for the user to fill in via AWS console
 - `"literal"` — use as-is (e.g. `HERMES_WEBUI_PASSWORD: "mysquirrel"`)
 
-For hermes, this covers `HERMES_WEBUI_PASSWORD`, `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `OPENROUTER_API_KEY`, `TAVILY_API_KEY`, `SLACK_APP_TOKEN`, and `SLACK_BOT_TOKEN`.
+For hermes, this covers `HERMES_WEBUI_PASSWORD`, `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `OPENROUTER_API_KEY`, `TAVILY_API_KEY`, `AWS_BEDROCK_ACCESS_KEY_ID`, `AWS_BEDROCK_SECRET_ACCESS_KEY`, `SLACK_APP_TOKEN`, and `SLACK_BOT_TOKEN`.
 
 **Inside the container**, the entrypoint bridges these ECS env vars to the two places hermes reads them from:
 
 - **`config.yaml`** — generated on first boot from `DOH_LLM_PROVIDER` and `DOH_LLM_MODEL`. Persists on EFS; not regenerated on reboot.
 - **`.env` file** — regenerated every boot by writing each API key env var into `/home/hermeswebui/.hermes/.env`. The hermes agent subprocess loads this via dotenv. The WebUI server reads its own config (`HERMES_WEBUI_PASSWORD`) from the process environment directly — it's not in the `.env` file.
+
+
+## AWS Bedrock Provider
+
+Hermes supports AWS Bedrock natively (via the Converse API for most models, and the `AnthropicBedrock` SDK for Claude models with full feature parity — prompt caching, thinking budgets, adaptive thinking) DOH wires it up with three deploy-time variables:
+
+- **`DOH_LLM_PROVIDER=bedrock`**
+- **`DOH_LLM_MODEL`** — any bedrock model ID or inference profile (e.g. `us.anthropic.claude-opus-4-6-v1`, `anthropic.claude-sonnet-4-20250514-v1:0`, `amazon.nova-pro-v1:0`). Regional inference-profile prefixes (`us.`, `eu.`, `global.`) are supported.
+- **`AWS_BEDROCK_ACCESS_KEY_ID`** / **`A.WS_BEDROCK_SECRET_ACCESS_KEY`** / **`AWS_BEDROCK_REGION`** — static IAM user credentials for an account that has Bedrock model access enabled.
 
 
 ## Storage Architecture: What's Ephemeral, What's Persistent

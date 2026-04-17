@@ -12,7 +12,7 @@ RUN git clone --depth 1 https://github.com/NousResearch/hermes-agent.git \
 COPY SOUL.md /opt/hermes-defaults/SOUL.md
 COPY config.yaml.template /opt/hermes-defaults/config.yaml.template
 COPY --chmod=755 entrypoint.sh /entrypoint.sh
-COPY --chmod=755 start_with_gateway.sh /start_with_gateway.sh
+COPY --chmod=755 start.sh /start.sh
 
 # Hermes uses /workspace as the default cwd for terminal commands and file tools.
 # Symlink it into the EFS-backed home directory so agent work output persists.
@@ -30,4 +30,4 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
 USER hermeswebui
 
 ENTRYPOINT ["/entrypoint.sh"]
-CMD ["/start_with_gateway.sh"]
+CMD ["/start.sh"]
