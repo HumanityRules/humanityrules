@@ -33,6 +33,7 @@ OPENCLAW_TEMPLATE = {
     "runtime_variables": [
         {
             "name": "OPENCLAW_LOG_LEVEL",
+            "group": "Configuration",
             "category": "config",
             "description": "Log level: debug, info, warn, error",
             "required": True,
@@ -43,6 +44,7 @@ OPENCLAW_TEMPLATE = {
         },
         {
             "name": "OPENCLAW_DEFAULT_MODEL",
+            "group": "Configuration",
             "category": "config",
             "description": "Default LLM model identifier",
             "required": True,
@@ -53,6 +55,7 @@ OPENCLAW_TEMPLATE = {
         },
         {
             "name": "OPENCLAW_GATEWAY_TOKEN",
+            "group": "Authentication",
             "category": "secret",
             "description": "Gateway authentication token (auto-generated)",
             "required": True,
@@ -63,6 +66,7 @@ OPENCLAW_TEMPLATE = {
         },
         {
             "name": "ANTHROPIC_API_KEY",
+            "group": "LLM Providers",
             "category": "secret",
             "description": "Anthropic API key for Claude models",
             "required": False,
@@ -73,6 +77,7 @@ OPENCLAW_TEMPLATE = {
         },
         {
             "name": "OPENAI_API_KEY",
+            "group": "LLM Providers",
             "category": "secret",
             "description": "OpenAI API key (alternative provider)",
             "required": False,
@@ -83,6 +88,7 @@ OPENCLAW_TEMPLATE = {
         },
         {
             "name": "TAVILY_API_KEY",
+            "group": "Integrations",
             "category": "secret",
             "description": "Tavily API key for web search capability",
             "required": False,
@@ -93,6 +99,7 @@ OPENCLAW_TEMPLATE = {
         },
         {
             "name": "SLACK_APP_TOKEN",
+            "group": "Slack",
             "category": "secret",
             "description": "Slack app-level token (leave empty to disable Slack)",
             "required": False,
@@ -103,6 +110,7 @@ OPENCLAW_TEMPLATE = {
         },
         {
             "name": "SLACK_BOT_TOKEN",
+            "group": "Slack",
             "category": "secret",
             "description": "Slack bot token (leave empty to disable Slack)",
             "required": False,
@@ -139,6 +147,7 @@ _HERMES_BASE = {
 _HERMES_LLM_VARS = [
     {
         "name": "DOH_LLM_PROVIDER",
+        "group": "Main LLM",
         "category": "config",
         "description": "Hermes provider name: bedrock, custom, anthropic, or openrouter",
         "required": True,
@@ -149,6 +158,7 @@ _HERMES_LLM_VARS = [
     },
     {
         "name": "DOH_LLM_MODEL",
+        "group": "Main LLM",
         "category": "config",
         "description": "LLM model identifier (e.g. us.anthropic.claude-opus-4-7, us.anthropic.claude-opus-4-6-v1, gpt-5.4-mini)",
         "required": True,
@@ -159,8 +169,42 @@ _HERMES_LLM_VARS = [
     },
     {
         "name": "DOH_LLM_BASE_URL",
+        "group": "Main LLM",
         "category": "config",
         "description": "Provider API base URL (required for custom provider, auto-derived for bedrock, empty otherwise)",
+        "required": False,
+        "auto_generate": False,
+        "default_value": "",
+        "value": "",
+        "user_editable": True,
+    },
+    {
+        "name": "DOH_AUX_PROVIDER",
+        "group": "Auxiliary LLM",
+        "category": "config",
+        "description": "Auxiliary LLM provider for vision, compression, session_search, skills_hub, approval, mcp, flush_memories, web_extract (defaults to main provider when unset)",
+        "required": False,
+        "auto_generate": False,
+        "default_value": "bedrock",
+        "value": "bedrock",
+        "user_editable": True,
+    },
+    {
+        "name": "DOH_AUX_MODEL",
+        "group": "Auxiliary LLM",
+        "category": "config",
+        "description": "Auxiliary LLM model — cheaper/faster than main (e.g. us.anthropic.claude-sonnet-4-6, gpt-5.4-mini)",
+        "required": False,
+        "auto_generate": False,
+        "default_value": "us.anthropic.claude-sonnet-4-6",
+        "value": "us.anthropic.claude-sonnet-4-6",
+        "user_editable": True,
+    },
+    {
+        "name": "DOH_AUX_BASE_URL",
+        "group": "Auxiliary LLM",
+        "category": "config",
+        "description": "Auxiliary provider API base URL (required for custom, auto-derived for bedrock, empty otherwise)",
         "required": False,
         "auto_generate": False,
         "default_value": "",
@@ -172,6 +216,7 @@ _HERMES_LLM_VARS = [
 _HERMES_CREDENTIAL_VARS = [
     {
         "name": "HERMES_WEBUI_PASSWORD",
+        "group": "Authentication",
         "category": "secret",
         "description": "WebUI access password",
         "required": True,
@@ -182,6 +227,7 @@ _HERMES_CREDENTIAL_VARS = [
     },
     {
         "name": "ANTHROPIC_API_KEY",
+        "group": "API Keys",
         "category": "secret",
         "description": "Anthropic API key for Claude models",
         "required": False,
@@ -192,6 +238,7 @@ _HERMES_CREDENTIAL_VARS = [
     },
     {
         "name": "OPENAI_API_KEY",
+        "group": "API Keys",
         "category": "secret",
         "description": "OpenAI API key (alternative provider)",
         "required": False,
@@ -202,6 +249,7 @@ _HERMES_CREDENTIAL_VARS = [
     },
     {
         "name": "OPENROUTER_API_KEY",
+        "group": "API Keys",
         "category": "secret",
         "description": "OpenRouter API key for multi-model access (200+ models)",
         "required": False,
@@ -212,6 +260,7 @@ _HERMES_CREDENTIAL_VARS = [
     },
     {
         "name": "TAVILY_API_KEY",
+        "group": "API Keys",
         "category": "secret",
         "description": "Tavily API key for web search capability",
         "required": False,
@@ -225,6 +274,7 @@ _HERMES_CREDENTIAL_VARS = [
 _HERMES_BEDROCK_VARS = [
     {
         "name": "AWS_BEDROCK_ACCESS_KEY_ID",
+        "group": "Bedrock",
         "category": "secret",
         "description": "AWS access key ID for Bedrock (required when DOH_LLM_PROVIDER=bedrock)",
         "required": False,
@@ -235,6 +285,7 @@ _HERMES_BEDROCK_VARS = [
     },
     {
         "name": "AWS_BEDROCK_SECRET_ACCESS_KEY",
+        "group": "Bedrock",
         "category": "secret",
         "description": "AWS secret access key for Bedrock (required when DOH_LLM_PROVIDER=bedrock)",
         "required": False,
@@ -245,6 +296,7 @@ _HERMES_BEDROCK_VARS = [
     },
     {
         "name": "AWS_BEDROCK_REGION",
+        "group": "Bedrock",
         "category": "config",
         "description": "AWS region for Bedrock (e.g. us-east-1)",
         "required": False,
@@ -258,6 +310,7 @@ _HERMES_BEDROCK_VARS = [
 _HERMES_SLACK_VARS = [
     {
         "name": "SLACK_APP_TOKEN",
+        "group": "Slack",
         "category": "secret",
         "description": "Slack app-level token",
         "required": True,
@@ -268,6 +321,7 @@ _HERMES_SLACK_VARS = [
     },
     {
         "name": "SLACK_BOT_TOKEN",
+        "group": "Slack",
         "category": "secret",
         "description": "Slack bot token",
         "required": True,
@@ -278,6 +332,7 @@ _HERMES_SLACK_VARS = [
     },
     {
         "name": "SLACK_ALLOW_ALL_USERS",
+        "group": "Slack",
         "category": "config",
         "description": "Allow all Slack users to interact with the bot (true/false)",
         "required": False,
@@ -288,6 +343,7 @@ _HERMES_SLACK_VARS = [
     },
     {
         "name": "SLACK_ALLOWED_USERS",
+        "group": "Slack",
         "category": "config",
         "description": "Comma-separated Slack Member IDs (overrides allow-all when set)",
         "required": False,

@@ -26,6 +26,21 @@ def _editable_variables(template: models.AppTemplate) -> list[dict]:
     return [v for v in template.runtime_variables if v.get("user_editable")]
 
 
+def _group_editable_variables(editable_vars: list[dict]) -> list[dict]:
+    """Group variables by their `group` field, preserving first-appearance order.
+
+    Each group is expanded if any variable in it is required and has no input_value.
+    """
+    groups: dict[str, dict] = {}
+    for var in editable_vars:
+        name = var.get("group") or "General"
+        group = groups.setdefault(name, {"name": name, "variables": [], "expanded": False})
+        group["variables"].append(var)
+        if var.get("required") and not var.get("input_value"):
+            group["expanded"] = True
+    return list(groups.values())
+
+
 def _input_value_from_template(var: dict) -> str:
     """Initial value shown in the form input for an editable variable."""
     if var["category"] == "secret":
@@ -35,6 +50,24 @@ def _input_value_from_template(var: dict) -> str:
         default = var.get("default_value")
         return "" if default is None else default
     return value
+
+
+def _workspace_options(workspaces) -> list[dict]:
+    return [{"id": str(ws.id), "name": ws.name} for ws in workspaces]
+
+
+def _environment_options(environments) -> list[dict]:
+    return [
+        {"id": str(env.id), "name": f"{env.name} ({env.aws_account.name})"}
+        for env in environments
+    ]
+
+
+def _selected_label(options: list[dict], value: str, placeholder: str) -> str:
+    for opt in options:
+        if opt["id"] == value:
+            return opt["name"]
+    return placeholder
 
 
 @login_required
@@ -80,12 +113,19 @@ def template_deploy_form(request: HttpRequest, template_slug: str) -> HttpRespon
     for var in editable_vars:
         var["input_value"] = _input_value_from_template(var)
 
+    workspace_options = _workspace_options(workspaces)
+    environment_options = _environment_options(environments)
+
     context = base.get_app_shell_context(request=request, current_page="workspaces")
     context["template"] = template
-    context["workspaces"] = workspaces
-    context["environments"] = environments
+    context["workspace_options"] = workspace_options
+    context["environment_options"] = environment_options
+    context["selected_workspace_id"] = ""
+    context["selected_environment_id"] = ""
+    context["selected_workspace_label"] = "Select a workspace"
+    context["selected_environment_label"] = "Select an environment"
     context["default_app_name"] = template.name
-    context["editable_variables"] = editable_vars
+    context["variable_groups"] = _group_editable_variables(editable_vars)
     return render(request, "devopshero_app/deploy/template_deploy_form.html", context=context)
 
 
@@ -143,12 +183,19 @@ def _handle_deploy(request: HttpRequest, template: models.AppTemplate, org: mode
         environments = abac.filter_permitted_resources(
             org, request.user, environments, "environment", "environment:deploy",
         )
+        workspace_options = _workspace_options(workspaces)
+        environment_options = _environment_options(environments)
+
         context = base.get_app_shell_context(request=request, current_page="workspaces")
         context["template"] = template
-        context["workspaces"] = workspaces
-        context["environments"] = environments
+        context["workspace_options"] = workspace_options
+        context["environment_options"] = environment_options
+        context["selected_workspace_id"] = workspace_id
+        context["selected_environment_id"] = environment_id
+        context["selected_workspace_label"] = _selected_label(workspace_options, workspace_id, "Select a workspace")
+        context["selected_environment_label"] = _selected_label(environment_options, environment_id, "Select an environment")
         context["default_app_name"] = app_name
-        context["editable_variables"] = editable_vars
+        context["variable_groups"] = _group_editable_variables(editable_vars)
         context["errors"] = errors
         return render(request, "devopshero_app/deploy/template_deploy_form.html", context=context)
 

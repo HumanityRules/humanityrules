@@ -1,4 +1,4 @@
-<div class="max-w-2xl">
+<div class="max-w-3xl">
     <div class="mb-6">
         <nav class="text-sm text-gray-500 dark:text-gray-400 mb-2">
             <a href="{% url 'template_deploy_picker' %}"
@@ -45,53 +45,52 @@
 
         <div>
             <label for="workspace_id" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Workspace</label>
-            <select id="workspace_id"
-                    name="workspace_id"
-                    required
-                    class="block w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2 text-sm text-gray-900 dark:text-white focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500">
-                <option value="">Select a workspace</option>
-                {% for ws in workspaces %}
-                <option value="{{ ws.id }}">{{ ws.name }}</option>
-                {% endfor %}
-            </select>
+            {% include "devopshero_app/partials/_dropdown_select.html#dropdown_select" with dropdown_id="workspace_id" dropdown_name="workspace_id" dropdown_value=selected_workspace_id dropdown_selected_label=selected_workspace_label dropdown_options=workspace_options %}
             <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">The workspace this app belongs to (governance boundary).</p>
         </div>
 
         <div>
             <label for="environment_id" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Environment</label>
-            <select id="environment_id"
-                    name="environment_id"
-                    required
-                    class="block w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2 text-sm text-gray-900 dark:text-white focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500">
-                <option value="">Select an environment</option>
-                {% for env in environments %}
-                <option value="{{ env.id }}">{{ env.name }} ({{ env.aws_account.name }})</option>
-                {% endfor %}
-            </select>
+            {% include "devopshero_app/partials/_dropdown_select.html#dropdown_select" with dropdown_id="environment_id" dropdown_name="environment_id" dropdown_value=selected_environment_id dropdown_selected_label=selected_environment_label dropdown_options=environment_options %}
             <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">Where the app will run. Only ready environments are shown.</p>
         </div>
 
-        {% if editable_variables %}
-        <div class="space-y-4 rounded-lg border border-gray-200 dark:border-gray-700 p-4">
+        {% if variable_groups %}
+        <div class="space-y-3">
             <h3 class="text-sm font-medium text-gray-700 dark:text-gray-300">Variables</h3>
-            {% for var in editable_variables %}
-            <div>
-                <label for="var_{{ var.name }}" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                    {{ var.name }}
-                    {% if var.required %}<span class="text-red-500">*</span>{% endif %}
-                    <span class="ml-1 text-xs font-normal text-gray-400 dark:text-gray-500">({{ var.category }})</span>
-                </label>
-                <input type="{% if var.category == 'secret' %}password{% else %}text{% endif %}"
-                       id="var_{{ var.name }}"
-                       name="var_{{ var.name }}"
-                       value="{{ var.input_value|default_if_none:'' }}"
-                       {% if var.required %}required{% endif %}
-                       autocomplete="off"
-                       class="block w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2 text-sm text-gray-900 dark:text-white placeholder-gray-400 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500">
-                {% if var.description %}
-                <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ var.description }}</p>
-                {% endif %}
-            </div>
+            {% for group in variable_groups %}
+            <details class="group rounded-lg border border-gray-200 dark:border-gray-700" {% if group.expanded %}open{% endif %}>
+                <summary class="flex cursor-pointer items-center justify-between px-4 py-3 text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800/50 rounded-lg">
+                    <span class="flex items-center gap-2">
+                        {{ group.name }}
+                        <span class="text-xs font-normal text-gray-400 dark:text-gray-500">({{ group.variables|length }})</span>
+                    </span>
+                    <svg class="h-4 w-4 text-gray-400 transition-transform group-open:rotate-180" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
+                    </svg>
+                </summary>
+                <div class="space-y-4 border-t border-gray-200 dark:border-gray-700 px-4 py-4">
+                    {% for var in group.variables %}
+                    <div>
+                        <label for="var_{{ var.name }}" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                            {{ var.name }}
+                            {% if var.required %}<span class="text-red-500">*</span>{% endif %}
+                            <span class="ml-1 text-xs font-normal text-gray-400 dark:text-gray-500">({{ var.category }})</span>
+                        </label>
+                        <input type="{% if var.category == 'secret' %}password{% else %}text{% endif %}"
+                               id="var_{{ var.name }}"
+                               name="var_{{ var.name }}"
+                               value="{{ var.input_value|default_if_none:'' }}"
+                               {% if var.required %}required{% endif %}
+                               autocomplete="off"
+                               class="block w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2 text-sm text-gray-900 dark:text-white placeholder-gray-400 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500">
+                        {% if var.description %}
+                        <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ var.description }}</p>
+                        {% endif %}
+                    </div>
+                    {% endfor %}
+                </div>
+            </details>
             {% endfor %}
         </div>
         {% endif %}
