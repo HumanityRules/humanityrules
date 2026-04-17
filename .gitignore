@@ -11,3 +11,4 @@ test_db/**
 tmp/
 sandbox/**
 !sandbox/.gitkeep
+/template_repos/hermes_agent/.env.backup

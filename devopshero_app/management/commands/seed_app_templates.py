@@ -132,29 +132,29 @@ _HERMES_LLM_VARS = [
     {
         "name": "DOH_LLM_PROVIDER",
         "category": "config",
-        "description": "Hermes provider name: custom, anthropic, or openrouter",
+        "description": "Hermes provider name: bedrock, custom, anthropic, or openrouter",
         "required": True,
         "auto_generate": False,
-        "default_value": "custom",
-        "value": "custom",
+        "default_value": "bedrock",
+        "value": "bedrock",
     },
     {
         "name": "DOH_LLM_MODEL",
         "category": "config",
-        "description": "LLM model identifier (e.g. gpt-5.4-mini, claude-sonnet-4)",
+        "description": "LLM model identifier (e.g. us.anthropic.claude-opus-4-6-v1, gpt-5.4-mini)",
         "required": True,
         "auto_generate": False,
-        "default_value": "gpt-5.4-mini",
-        "value": "gpt-5.4-mini",
+        "default_value": "us.anthropic.claude-opus-4-6-v1",
+        "value": "us.anthropic.claude-opus-4-6-v1",
     },
     {
         "name": "DOH_LLM_BASE_URL",
         "category": "config",
-        "description": "Provider API base URL (required for custom provider, empty otherwise)",
+        "description": "Provider API base URL (required for custom provider, auto-derived for bedrock, empty otherwise)",
         "required": False,
         "auto_generate": False,
-        "default_value": "https://api.openai.com/v1",
-        "value": "https://api.openai.com/v1",
+        "default_value": "",
+        "value": "",
     },
 ]
 
@@ -203,6 +203,36 @@ _HERMES_CREDENTIAL_VARS = [
         "auto_generate": False,
         "default_value": None,
         "value": "",
+    },
+]
+
+_HERMES_BEDROCK_VARS = [
+    {
+        "name": "AWS_BEDROCK_ACCESS_KEY_ID",
+        "category": "secret",
+        "description": "AWS access key ID for Bedrock (required when DOH_LLM_PROVIDER=bedrock)",
+        "required": False,
+        "auto_generate": False,
+        "default_value": None,
+        "value": "",
+    },
+    {
+        "name": "AWS_BEDROCK_SECRET_ACCESS_KEY",
+        "category": "secret",
+        "description": "AWS secret access key for Bedrock (required when DOH_LLM_PROVIDER=bedrock)",
+        "required": False,
+        "auto_generate": False,
+        "default_value": None,
+        "value": "",
+    },
+    {
+        "name": "AWS_BEDROCK_REGION",
+        "category": "config",
+        "description": "AWS region for Bedrock (e.g. us-east-1)",
+        "required": False,
+        "auto_generate": False,
+        "default_value": "us-east-1",
+        "value": "us-east-1",
     },
 ]
 
@@ -258,7 +288,7 @@ HERMES_PERSONAL_TEMPLATE = {
     ),
     "icon": "⚡",
     "category": "ai-assistant",
-    "runtime_variables": _HERMES_LLM_VARS + _HERMES_CREDENTIAL_VARS,
+    "runtime_variables": _HERMES_LLM_VARS + _HERMES_CREDENTIAL_VARS + _HERMES_BEDROCK_VARS,
 }
 
 # -- Hermes Slack (shared, one per org) -------------------------------------
@@ -274,7 +304,7 @@ HERMES_SLACK_TEMPLATE = {
     ),
     "icon": "💬",
     "category": "ai-assistant",
-    "runtime_variables": _HERMES_LLM_VARS + _HERMES_CREDENTIAL_VARS + _HERMES_SLACK_VARS,
+    "runtime_variables": _HERMES_LLM_VARS + _HERMES_CREDENTIAL_VARS + _HERMES_BEDROCK_VARS + _HERMES_SLACK_VARS,
 }
 
 
