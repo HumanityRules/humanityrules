@@ -1,5 +1,28 @@
 # DevOpsHero Development Journal
 
+## 2026-04-17 15:08 - [UI] Template deploy form: grouped variables, shared dropdown, light-mode fix
+
+**Conversation:** [2026-04-17-1509-437e723e.md](conversations/2026-04-17-1509-437e723e.md)
+
+Reworked `template_deploy_form.html` to stop wasting vertical space and use the project's standard dropdown component. Three intertwined changes: variables are now rendered inside collapsible groups; Workspace/Environment `<select>`s were replaced with the shared `_dropdown_select` partial; the partial itself was made light-mode-friendly.
+
+**Design choices:**
+
+- **Explicit `group` field on each variable, not derivation from `category`**. We already had `category` (`config`/`secret`) and could have grouped by that, but the user wanted semantic groupings under template-author control (e.g., "Main LLM" vs "Auxiliary LLM" — both `config`). Added `group: str` to every entry in `runtime_variables`. No migration: `runtime_variables` is a `JSONField`, so just reseed. The fallback when `group` is absent is `"General"`.
+- **Group order = first-appearance order** in `runtime_variables`. Template authors already control the variable ordering in seed data; making group order derive from that is zero extra config. No separate `variable_groups` array with explicit ordering/descriptions — kept it minimal.
+- **Expand groups that contain a required-and-empty variable; collapse the rest**. `_group_editable_variables` walks each var, builds groups (via `setdefault` to preserve insertion order), and sets `expanded=True` on any group that has `required=True` + empty `input_value`. This surfaces the fields the user *must* fill in, while keeping optional noise collapsed.
+- **Rendered via native `<details>` / `<summary>`**, not Alpine. No JS for expand/collapse — browser handles state, the chevron rotates with `group-open:rotate-180`. Simpler than wiring `x-data={open}` just to toggle visibility.
+- **Container width set to `max-w-3xl`** (user's final pick). Started at `max-w-2xl`, bumped to `max-w-5xl` to match `environment_detail.html`, but 5xl left the form feeling sparse at the top — 3xl (768px) is tighter and closer to a typical form width.
+- **Switched Workspace/Environment `<select>`s to the shared dropdown partial** (`_dropdown_select.html`). The native chevron sits flush-right and felt cramped; more importantly, every other page uses the `el-select`/`el-options` Tailwind Plus Elements component. Diagnosed via grep that this was the only remaining raw `<select>` in the deploy flow (the other hit was `_people_attributes.html`, unrelated).
+- **Made the shared dropdown partial light-mode-friendly**. It was authored dark-mode-first: `bg-white/5`, `text-white`, `outline-white/10` on the button, and `text-white` on option rows — unreadable in light mode. Changed to `bg-white dark:bg-white/5`, `text-gray-900 dark:text-white`, `outline-gray-300 dark:outline-white/10`, and option rows to `text-gray-900 dark:text-white focus:text-white` (so the indigo hover highlight stays legible). Touching this partial affected every page that includes it (sidebar org switcher, security people, policy editor) — verified by grep that all existing callers work in both themes.
+
+**Key points:**
+
+- View builds `workspace_options` / `environment_options` as `[{id, name}]` lists and resolves `selected_workspace_label` / `selected_environment_label` via a `_selected_label(options, value, placeholder)` helper. Needed because the partial expects a pre-rendered label string, not a value/options pair — `<el-select>` doesn't compute the displayed label on its own.
+- Both GET and POST-with-errors paths were updated symmetrically. Forgetting the error path would have made the form re-render without dropdowns after a validation failure.
+- Required-and-empty check for auto-expanding groups uses `var.get("input_value")` — on fresh GET this is the prefilled template value (so a required var with a sensible default stays collapsed), on POST-error it's the user's submitted value (so a group they tried to submit empty stays open showing the error context).
+- The partial's existing callers all worked in dark mode; the light-mode fix was additive (dark variants preserved) so no regressions.
+
 ## 2026-04-17 12:02 - [DomainModel] Add user_editable to AppTemplate runtime variables
 
 **Conversation:** [2026-04-17-1202-5f732343.md](conversations/2026-04-17-1202-5f732343.md)
