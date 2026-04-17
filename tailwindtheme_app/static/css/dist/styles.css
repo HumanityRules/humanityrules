@@ -3138,6 +3138,11 @@
       rotate: 90deg;
     }
   }
+  .group-open\:rotate-180 {
+    &:is(:where(.group):is([open], :popover-open, :open) *) {
+      rotate: 180deg;
+    }
+  }
   .group-hover\:translate-x-0\.5 {
     &:is(:where(.group):hover *) {
       @media (hover: hover) {
@@ -3766,6 +3771,11 @@
   .focus\:bg-indigo-500 {
     &:focus {
       background-color: var(--color-indigo-500);
+    }
+  }
+  .focus\:text-white {
+    &:focus {
+      color: var(--color-white);
     }
   }
   .focus\:ring-0 {

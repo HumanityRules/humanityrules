@@ -1,5 +1,24 @@
 # DevOpsHero Development Journal
 
+## 2026-04-17 - [Hermes] Auxiliary LLM config: DOH_AUX_* vars, preseeded to Bedrock Sonnet 4.6
+
+Added a shared auxiliary LLM configuration to `hermes_agent`. Hermes' `config.yaml` has eight auxiliary slots (`vision`, `web_extract`, `compression`, `session_search`, `skills_hub`, `approval`, `mcp`, `flush_memories`) that handle everything outside the main agent loop — memory flushing, web extraction, vision, etc. Until now they were all left as `provider: auto, model: ''`, which means Hermes silently falls back to the main model for every aux call. With Opus 4.6 as the default main, that's expensive for what are mostly cheap summarization/extraction calls.
+
+**Design choices:**
+
+- **One shared aux config, fanned out into all 8 slots**. Same provider/model/base_url substituted via `sed` into every slot. Simpler UX (one knob in the deploy form) at the cost of per-task tuning. If we later need (say) a vision-capable model separate from the compression model, we can split into groups — but YAGNI for now.
+- **Reuse the main provider's API key, no separate `AUX_*` secret var**. In practice users will either run everything on Bedrock (AWS creds already there) or set one `OPENAI_API_KEY` / `ANTHROPIC_API_KEY` shared across main+aux. A separate aux key would be paper-shuffling 99% of the time.
+- **Preseeded defaults: `bedrock` + `us.anthropic.claude-sonnet-4-6`**. The main default is Bedrock Opus 4.6, and Sonnet 4.6 is the obvious cheaper-but-capable companion on the same provider. No AWS cred juggling, no second vendor relationship.
+- **Defaults to main provider when unset**. `: "${DOH_AUX_PROVIDER:=$DOH_LLM_PROVIDER}"` — if someone deploys with `DOH_LLM_PROVIDER=custom` and doesn't touch the aux vars, aux inherits main. Sensible because provider mismatch is the most common misconfiguration (aux needs its own creds).
+- **Bedrock base_url derived from region, same as main**. Unconditional overwrite if aux=bedrock (not a user-supplied fallback) — matches how `DOH_LLM_BASE_URL` is handled for the main path at entrypoint.sh:27. Fails fast if aux=bedrock but `AWS_BEDROCK_REGION` is unset.
+- **Three vars user-editable in the deploy form** (`DOH_AUX_PROVIDER` / `DOH_AUX_MODEL` / `DOH_AUX_BASE_URL`), grouped under "Auxiliary LLM" alongside the existing "Main LLM" group. No new secrets exposed — all credential plumbing stays in the hidden `_HERMES_CREDENTIAL_VARS` / `_HERMES_BEDROCK_VARS` lists.
+
+**Key points:**
+
+- `config.yaml.template` substitutes three new placeholders (`__AUX_PROVIDER__` / `__AUX_MODEL__` / `__AUX_BASE_URL__`) in every auxiliary slot — the `api_key: ''` field stays empty because the auxiliary_client resolves the key from the provider config, not from the slot.
+- Hermes' upstream auxiliary_client doesn't handle `auth_type == "aws_sdk"` (the Bedrock provider). The existing `BedrockAuxiliaryClient` patch in `entrypoint.sh` (injected in the 2026-04-15 Bedrock round) is what actually makes a Bedrock aux work — without it, configuring aux=bedrock would log `unhandled auth_type aws_sdk` and silently disable aux. The new vars assume that patch is in place.
+- Reseed-only change — `runtime_variables` is a JSONField, no migration. `python manage.py seed_app_templates` on Opus's side and a redeploy on Hermes's side is the rollout.
+
 ## 2026-04-17 15:08 - [UI] Template deploy form: grouped variables, shared dropdown, light-mode fix
 
 **Conversation:** [2026-04-17-1509-437e723e.md](conversations/2026-04-17-1509-437e723e.md)
