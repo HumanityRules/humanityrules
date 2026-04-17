@@ -1,5 +1,28 @@
 # DevOpsHero Development Journal
 
+## 2026-04-17 12:02 - [DomainModel] Add user_editable to AppTemplate runtime variables
+
+**Conversation:** [2026-04-17-1202-5f732343.md](conversations/2026-04-17-1202-5f732343.md)
+
+Added a `user_editable` boolean to each entry in `AppTemplate.runtime_variables` so the template deploy form can expose only the subset of variables the user actually needs to supply (e.g., API keys, per-deploy overrides), while keeping infra-fixed values and auto-generated secrets hidden behind the template defaults.
+
+Before this change the deploy form at `template_deploy_form.html` collected only App Name / Workspace / Environment and deployed using the template's stored `value`s verbatim — there was no way for a user to supply deployment-time values at all. This locked every API key and per-deploy credential to whatever was seeded, which is unusable for anything that varies per-tenant.
+
+**Design choices:**
+
+- **Name + default**: `user_editable` (boolean). Default `False` on every seeded variable. The user preferred an opt-in posture — safer default is "hidden", flip specific vars to `True` manually. Only `DOH_LLM_PROVIDER` / `DOH_LLM_MODEL` / `DOH_LLM_BASE_URL` on Hermes templates were flipped to `True` in this pass.
+- **Override plumbing, not mutation**: the service accepts a `runtime_variable_overrides: dict[str, str] | None` and produces a new merged list via `_apply_variable_overrides`, rather than mutating `template.runtime_variables` in place. Templates are shared across deploys — mutating them would corrupt subsequent launches.
+- **Secret inputs start blank, config inputs prefill**: secrets in the DB may hold a placeholder or a literal; echoing them back as the initial form value would either leak or mislead the user into thinking the placeholder is real. Config vars prefill from `value`, falling back to `default_value`.
+- **Required validation reuses the existing `required` flag**: no new "required at deploy" axis. If a var is marked `required=True` and `user_editable=True`, the form enforces it at submit; otherwise the template's default flows through.
+- **Error-path preservation**: on validation failure we re-render the form with the user's entered values in `input_value` so they don't lose typing — this matches the existing pattern for `app_name`.
+
+**Key points:**
+
+- The deploy view (`_handle_deploy`) reads `var_<NAME>` POST fields, builds an overrides dict containing only the non-empty submitted values, and forwards it to `deploy_from_template`. Empty submitted strings are dropped from the dict rather than overriding the template — this preserves the "None = auto-generate" semantics for secrets that are marked auto-generate but also happen to be user-editable.
+- Input type is driven by `category`: `secret` → `<input type="password">` with `autocomplete="off"`, `config` → plain text. This is the only place where `category` affects UI today.
+- Model docstring at `models.py:573` updated to list the new field, so readers of the JSON schema know it exists without grepping the seed file.
+- `seed_app_templates.py` was intentionally modified after my pass to set the three Hermes LLM config vars to `user_editable: True` — everything else stays hidden by default.
+
 ## 2026-04-15 - [Hermes] Add Slack gateway, simplify LLM config vars
 
 Added Slack integration support to the Hermes template. The upstream Hermes WebUI only serves the web interface — Slack/Discord/Telegram are handled by a separate gateway process (`python -m gateway.run`) that needs `slack-bolt` and `slack-sdk` installed.
