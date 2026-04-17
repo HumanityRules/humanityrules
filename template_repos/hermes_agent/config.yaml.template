@@ -1,5 +1,6 @@
 # Hermes Agent — DOH Enterprise Configuration
-# Variables: __CONFIG_PROVIDER__, __MODEL__, __BASE_URL__
+# Variables: __CONFIG_PROVIDER__, __MODEL__, __BASE_URL__,
+#            __AUX_PROVIDER__, __AUX_MODEL__, __AUX_BASE_URL__
 # Seeded to ~/.hermes/config.yaml on first boot; never overwritten after that.
 # API keys live in .env, not here.
 
@@ -63,52 +64,52 @@ smart_model_routing:
 
 auxiliary:
   vision:
-    provider: auto
-    model: ''
-    base_url: ''
+    provider: __AUX_PROVIDER__
+    model: __AUX_MODEL__
+    base_url: __AUX_BASE_URL__
     api_key: ''
     timeout: 30
     download_timeout: 30
   web_extract:
-    provider: auto
-    model: ''
-    base_url: ''
+    provider: __AUX_PROVIDER__
+    model: __AUX_MODEL__
+    base_url: __AUX_BASE_URL__
     api_key: ''
     timeout: 30
   compression:
-    provider: auto
-    model: ''
-    base_url: ''
+    provider: __AUX_PROVIDER__
+    model: __AUX_MODEL__
+    base_url: __AUX_BASE_URL__
     api_key: ''
     timeout: 120
   session_search:
-    provider: auto
-    model: ''
-    base_url: ''
+    provider: __AUX_PROVIDER__
+    model: __AUX_MODEL__
+    base_url: __AUX_BASE_URL__
     api_key: ''
     timeout: 30
   skills_hub:
-    provider: auto
-    model: ''
-    base_url: ''
+    provider: __AUX_PROVIDER__
+    model: __AUX_MODEL__
+    base_url: __AUX_BASE_URL__
     api_key: ''
     timeout: 30
   approval:
-    provider: auto
-    model: ''
-    base_url: ''
+    provider: __AUX_PROVIDER__
+    model: __AUX_MODEL__
+    base_url: __AUX_BASE_URL__
     api_key: ''
     timeout: 30
   mcp:
-    provider: auto
-    model: ''
-    base_url: ''
+    provider: __AUX_PROVIDER__
+    model: __AUX_MODEL__
+    base_url: __AUX_BASE_URL__
     api_key: ''
     timeout: 30
   flush_memories:
-    provider: auto
-    model: ''
-    base_url: ''
+    provider: __AUX_PROVIDER__
+    model: __AUX_MODEL__
+    base_url: __AUX_BASE_URL__
     api_key: ''
     timeout: 30
 
