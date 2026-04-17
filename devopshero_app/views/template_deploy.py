@@ -22,6 +22,21 @@ from devopshero_app.views import base
 logger = logging.getLogger(__name__)
 
 
+def _editable_variables(template: models.AppTemplate) -> list[dict]:
+    return [v for v in template.runtime_variables if v.get("user_editable")]
+
+
+def _input_value_from_template(var: dict) -> str:
+    """Initial value shown in the form input for an editable variable."""
+    if var["category"] == "secret":
+        return ""
+    value = var.get("value")
+    if value in (None, ""):
+        default = var.get("default_value")
+        return "" if default is None else default
+    return value
+
+
 @login_required
 def template_deploy_picker(request: HttpRequest) -> HttpResponse:
     """Show a grid of all active templates."""
@@ -61,11 +76,16 @@ def template_deploy_form(request: HttpRequest, template_slug: str) -> HttpRespon
         org, request.user, environments, "environment", "environment:deploy",
     )
 
+    editable_vars = _editable_variables(template)
+    for var in editable_vars:
+        var["input_value"] = _input_value_from_template(var)
+
     context = base.get_app_shell_context(request=request, current_page="workspaces")
     context["template"] = template
     context["workspaces"] = workspaces
     context["environments"] = environments
     context["default_app_name"] = template.name
+    context["editable_variables"] = editable_vars
     return render(request, "devopshero_app/deploy/template_deploy_form.html", context=context)
 
 
@@ -89,6 +109,16 @@ def _handle_deploy(request: HttpRequest, template: models.AppTemplate, org: mode
 
     if not errors and models.App.objects.filter(organization=org, slug=app_slug).exists():
         errors.append(f"An app with the slug '{app_slug}' already exists in this organization.")
+
+    editable_vars = _editable_variables(template)
+    variable_overrides: dict[str, str] = {}
+    for var in editable_vars:
+        submitted = request.POST.get(f"var_{var['name']}", "").strip()
+        var["input_value"] = submitted
+        if var.get("required") and not submitted:
+            errors.append(f"{var['name']} is required.")
+        if submitted:
+            variable_overrides[var["name"]] = submitted
 
     workspace = None
     environment = None
@@ -118,6 +148,7 @@ def _handle_deploy(request: HttpRequest, template: models.AppTemplate, org: mode
         context["workspaces"] = workspaces
         context["environments"] = environments
         context["default_app_name"] = app_name
+        context["editable_variables"] = editable_vars
         context["errors"] = errors
         return render(request, "devopshero_app/deploy/template_deploy_form.html", context=context)
 
@@ -129,6 +160,7 @@ def _handle_deploy(request: HttpRequest, template: models.AppTemplate, org: mode
         app_name=app_name,
         app_slug=app_slug,
         created_by=request.user,
+        runtime_variable_overrides=variable_overrides,
     )
 
     return redirect("app_detail", app_slug=deployment.app.slug)

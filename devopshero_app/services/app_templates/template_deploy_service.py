@@ -46,6 +46,21 @@ def _materialize_app_secrets(runtime_variables: list[dict]) -> dict[str, str | N
     return secrets
 
 
+def _apply_variable_overrides(
+    runtime_variables: list[dict], overrides: dict[str, str] | None,
+) -> list[dict]:
+    """Return a new runtime_variables list with user-supplied values merged in by name."""
+    if not overrides:
+        return runtime_variables
+    result = []
+    for var in runtime_variables:
+        if var["name"] in overrides:
+            result.append({**var, "value": overrides[var["name"]]})
+        else:
+            result.append(var)
+    return result
+
+
 async def deploy_from_template(
     template: models.AppTemplate,
     organization: models.Organization,
@@ -54,6 +69,7 @@ async def deploy_from_template(
     app_name: str,
     app_slug: str,
     created_by: models.User,
+    runtime_variable_overrides: dict[str, str] | None = None,
 ) -> models.Deployment:
     """Create Repository + App + Blueprint + Deployment from a template and queue for deployment."""
     clone_url = f"file://{settings.TEMPLATE_REPOS_DIR / template.source_repo_path}"
@@ -88,8 +104,9 @@ async def deploy_from_template(
         created_by=created_by,
     )
 
-    environment_variables = _materialize_environment_variables(template.runtime_variables)
-    app_secrets = _materialize_app_secrets(template.runtime_variables)
+    runtime_variables = _apply_variable_overrides(template.runtime_variables, runtime_variable_overrides)
+    environment_variables = _materialize_environment_variables(runtime_variables)
+    app_secrets = _materialize_app_secrets(runtime_variables)
 
     blueprint = await models.DeploymentBlueprint.objects.acreate(
         app=app,

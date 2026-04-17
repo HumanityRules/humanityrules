@@ -570,7 +570,8 @@ class AppTemplate(models.Model):
     memory = models.IntegerField()
 
     # Runtime variables: env vars + secrets with full metadata
-    # Array of {name, category, description, required, auto_generate, default_value, value}
+    # Array of {name, category, description, required, auto_generate, default_value, value, user_editable}
+    # user_editable: when True the variable is shown as an input on the template deploy form
     runtime_variables = models.JSONField()
 
     # Datastore requirements (null = no datastore needed)

@@ -71,6 +71,31 @@
             <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">Where the app will run. Only ready environments are shown.</p>
         </div>
 
+        {% if editable_variables %}
+        <div class="space-y-4 rounded-lg border border-gray-200 dark:border-gray-700 p-4">
+            <h3 class="text-sm font-medium text-gray-700 dark:text-gray-300">Variables</h3>
+            {% for var in editable_variables %}
+            <div>
+                <label for="var_{{ var.name }}" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                    {{ var.name }}
+                    {% if var.required %}<span class="text-red-500">*</span>{% endif %}
+                    <span class="ml-1 text-xs font-normal text-gray-400 dark:text-gray-500">({{ var.category }})</span>
+                </label>
+                <input type="{% if var.category == 'secret' %}password{% else %}text{% endif %}"
+                       id="var_{{ var.name }}"
+                       name="var_{{ var.name }}"
+                       value="{{ var.input_value|default_if_none:'' }}"
+                       {% if var.required %}required{% endif %}
+                       autocomplete="off"
+                       class="block w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2 text-sm text-gray-900 dark:text-white placeholder-gray-400 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500">
+                {% if var.description %}
+                <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ var.description }}</p>
+                {% endif %}
+            </div>
+            {% endfor %}
+        </div>
+        {% endif %}
+
         <div class="rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50 p-4">
             <h3 class="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Configuration Summary</h3>
             <dl class="grid grid-cols-2 gap-x-4 gap-y-1.5 text-xs">

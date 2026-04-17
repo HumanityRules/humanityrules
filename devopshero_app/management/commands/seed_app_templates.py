@@ -39,6 +39,7 @@ OPENCLAW_TEMPLATE = {
             "auto_generate": False,
             "default_value": "info",
             "value": "info",
+            "user_editable": False,
         },
         {
             "name": "OPENCLAW_DEFAULT_MODEL",
@@ -48,6 +49,7 @@ OPENCLAW_TEMPLATE = {
             "auto_generate": False,
             "default_value": "openai/gpt-5.4-nano",
             "value": "openai/gpt-5.4-nano",
+            "user_editable": False,
         },
         {
             "name": "OPENCLAW_GATEWAY_TOKEN",
@@ -57,6 +59,7 @@ OPENCLAW_TEMPLATE = {
             "auto_generate": True,
             "default_value": None,
             "value": None,
+            "user_editable": False,
         },
         {
             "name": "ANTHROPIC_API_KEY",
@@ -66,6 +69,7 @@ OPENCLAW_TEMPLATE = {
             "auto_generate": False,
             "default_value": None,
             "value": "",
+            "user_editable": False,
         },
         {
             "name": "OPENAI_API_KEY",
@@ -75,6 +79,7 @@ OPENCLAW_TEMPLATE = {
             "auto_generate": False,
             "default_value": None,
             "value": "",
+            "user_editable": False,
         },
         {
             "name": "TAVILY_API_KEY",
@@ -84,6 +89,7 @@ OPENCLAW_TEMPLATE = {
             "auto_generate": False,
             "default_value": None,
             "value": "",
+            "user_editable": False,
         },
         {
             "name": "SLACK_APP_TOKEN",
@@ -93,6 +99,7 @@ OPENCLAW_TEMPLATE = {
             "auto_generate": False,
             "default_value": None,
             "value": "",
+            "user_editable": False,
         },
         {
             "name": "SLACK_BOT_TOKEN",
@@ -102,6 +109,7 @@ OPENCLAW_TEMPLATE = {
             "auto_generate": False,
             "default_value": None,
             "value": "",
+            "user_editable": False,
         },
     ],
     "datastore_config": None,
@@ -137,6 +145,7 @@ _HERMES_LLM_VARS = [
         "auto_generate": False,
         "default_value": "bedrock",
         "value": "bedrock",
+        "user_editable": True,
     },
     {
         "name": "DOH_LLM_MODEL",
@@ -146,6 +155,7 @@ _HERMES_LLM_VARS = [
         "auto_generate": False,
         "default_value": "us.anthropic.claude-opus-4-6-v1",
         "value": "us.anthropic.claude-opus-4-6-v1",
+        "user_editable": True,
     },
     {
         "name": "DOH_LLM_BASE_URL",
@@ -155,6 +165,7 @@ _HERMES_LLM_VARS = [
         "auto_generate": False,
         "default_value": "",
         "value": "",
+        "user_editable": True,
     },
 ]
 
@@ -167,6 +178,7 @@ _HERMES_CREDENTIAL_VARS = [
         "auto_generate": False,
         "default_value": None,
         "value": "mysquirrel",
+        "user_editable": False,
     },
     {
         "name": "ANTHROPIC_API_KEY",
@@ -176,6 +188,7 @@ _HERMES_CREDENTIAL_VARS = [
         "auto_generate": False,
         "default_value": None,
         "value": "",
+        "user_editable": False,
     },
     {
         "name": "OPENAI_API_KEY",
@@ -185,6 +198,7 @@ _HERMES_CREDENTIAL_VARS = [
         "auto_generate": False,
         "default_value": None,
         "value": "",
+        "user_editable": False,
     },
     {
         "name": "OPENROUTER_API_KEY",
@@ -194,6 +208,7 @@ _HERMES_CREDENTIAL_VARS = [
         "auto_generate": False,
         "default_value": None,
         "value": "",
+        "user_editable": False,
     },
     {
         "name": "TAVILY_API_KEY",
@@ -203,6 +218,7 @@ _HERMES_CREDENTIAL_VARS = [
         "auto_generate": False,
         "default_value": None,
         "value": "",
+        "user_editable": False,
     },
 ]
 
@@ -215,6 +231,7 @@ _HERMES_BEDROCK_VARS = [
         "auto_generate": False,
         "default_value": None,
         "value": "",
+        "user_editable": False,
     },
     {
         "name": "AWS_BEDROCK_SECRET_ACCESS_KEY",
@@ -224,6 +241,7 @@ _HERMES_BEDROCK_VARS = [
         "auto_generate": False,
         "default_value": None,
         "value": "",
+        "user_editable": False,
     },
     {
         "name": "AWS_BEDROCK_REGION",
@@ -233,6 +251,7 @@ _HERMES_BEDROCK_VARS = [
         "auto_generate": False,
         "default_value": "us-east-1",
         "value": "us-east-1",
+        "user_editable": False,
     },
 ]
 
@@ -245,6 +264,7 @@ _HERMES_SLACK_VARS = [
         "auto_generate": False,
         "default_value": None,
         "value": "",
+        "user_editable": False,
     },
     {
         "name": "SLACK_BOT_TOKEN",
@@ -254,6 +274,7 @@ _HERMES_SLACK_VARS = [
         "auto_generate": False,
         "default_value": None,
         "value": "",
+        "user_editable": False,
     },
     {
         "name": "SLACK_ALLOW_ALL_USERS",
@@ -263,6 +284,7 @@ _HERMES_SLACK_VARS = [
         "auto_generate": False,
         "default_value": "true",
         "value": "true",
+        "user_editable": False,
     },
     {
         "name": "SLACK_ALLOWED_USERS",
@@ -272,6 +294,7 @@ _HERMES_SLACK_VARS = [
         "auto_generate": False,
         "default_value": "",
         "value": "",
+        "user_editable": False,
     },
 ]
 
