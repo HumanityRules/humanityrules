@@ -1,5 +1,24 @@
 # DevOpsHero Development Journal
 
+## 2026-04-17 15:22 - [Deployment] Expose SLACK_HOME_CHANNEL on hermes-slack template
+
+**Conversation:** [2026-04-17-1524-042edb83.md](conversations/2026-04-17-1524-042edb83.md)
+
+Added `SLACK_HOME_CHANNEL` as a user-editable runtime variable on the `hermes-slack` AppTemplate. This is an optional Slack channel ID (e.g. `C01234567890`) that the Hermes gateway uses as the destination for proactive messages: cron job results, scheduled messages, and other notifications that aren't a direct reply to a user. Upstream Hermes reads it from `~/.hermes/.env`; it wasn't wired through DOH, so there was no way to set it on a deployed `hermes-slack` app without shelling in.
+
+**Design choices:**
+
+- **`group="Slack"`, `user_editable=True`** — sits alongside the existing Slack vars (`SLACK_APP_TOKEN`, `SLACK_BOT_TOKEN`, `SLACK_ALLOW_ALL_USERS`, `SLACK_ALLOWED_USERS`) in the deploy form's Slack group. Unlike those (kept hidden because tokens are secrets and allow-list is an admin concern), the home channel is something a workspace owner genuinely wants to pick per-deployment, so it's the first Slack var surfaced in the form.
+- **Default value `"test-channel"`** — per user request. This is deliberately a placeholder that will fail politely at runtime (not a valid Slack channel ID), forcing the operator to replace it with a real `C0...` ID before cron jobs can deliver. An empty default would have been more "honest", but seeing the field populated in the form is a stronger prompt to fill it in.
+- **Env-var passthrough only; no `config.yaml` template wiring** — Hermes reads `SLACK_HOME_CHANNEL` from `.env` directly via the gateway's Slack platform adapter, so the entrypoint just appends it to `$HERMES_DIR/.env` (same pattern as the four other `SLACK_*` vars at entrypoint.sh:360-364). No new placeholder in `config.yaml.template`.
+- **Reseed-only change** — `runtime_variables` is a JSONField on AppTemplate, so `seed_app_templates` is idempotent and no migration is needed. Ran locally; prod seed is the rollout step.
+
+**Key points:**
+
+- Documented in upstream Hermes at `website/docs/user-guide/messaging/slack.md` ("Home Channel" section). There is **no upstream default** — if unset, Hermes has no home channel at all. `test-channel` is a DOH-side convention, not an upstream one.
+- The companion var `SLACK_HOME_CHANNEL_NAME` (human-readable label) is NOT exposed. It's cosmetic and would just clutter the form.
+- Bot must be `/invite`d to the channel for delivery to succeed. This is a runtime concern, not a config concern — the template can't enforce it.
+
 ## 2026-04-17 - [Hermes] Auxiliary LLM config: DOH_AUX_* vars, preseeded to Bedrock Sonnet 4.6
 
 Added a shared auxiliary LLM configuration to `hermes_agent`. Hermes' `config.yaml` has eight auxiliary slots (`vision`, `web_extract`, `compression`, `session_search`, `skills_hub`, `approval`, `mcp`, `flush_memories`) that handle everything outside the main agent loop — memory flushing, web extraction, vision, etc. Until now they were all left as `provider: auto, model: ''`, which means Hermes silently falls back to the main model for every aux call. With Opus 4.6 as the default main, that's expensive for what are mostly cheap summarization/extraction calls.
