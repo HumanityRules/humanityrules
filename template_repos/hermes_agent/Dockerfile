@@ -11,6 +11,7 @@ RUN git clone --depth 1 https://github.com/NousResearch/hermes-agent.git \
 
 COPY SOUL.md /opt/hermes-defaults/SOUL.md
 COPY config.yaml.template /opt/hermes-defaults/config.yaml.template
+COPY patches /opt/hermes-defaults/patches
 COPY --chmod=755 entrypoint.sh /entrypoint.sh
 COPY --chmod=755 start.sh /start.sh
 
