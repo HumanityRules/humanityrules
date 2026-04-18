@@ -1,5 +1,34 @@
 # DevOpsHero Development Journal
 
+## 2026-04-18 09:59 - [Deployment] Restructure hermes-agent upstream patches as overlay + unified diffs
+
+**Conversation:** [2026-04-18-1000-62302632.md](conversations/2026-04-18-1000-62302632.md)
+
+Replaced the three inline Python-in-Bash heredoc patches in `template_repos/hermes_agent/entrypoint.sh` with a proper `patches/` directory: three unified-diff `.patch` files, one `overlay/agent/bedrock_aux_client.py` module, and an `apply.py` orchestrator. entrypoint.sh shrank from 366 lines to 106; the patch section is now a single `python3 /opt/hermes-defaults/patches/apply.py "$HERMES_DIR/hermes-agent"` call. Net behavior is identical — same three upstream bugs worked around (Bedrock dot-preservation in model IDs, Bedrock prompt caching, Bedrock aux client `aws_sdk` support).
+
+**Why this structure specifically:**
+
+- **Runtime patching, not build-time.** The obvious clean alternative — bake patched files into the image at build time — would silently stop fixing already-deployed EFS volumes. `$HERMES_DIR/hermes-agent` is copied from `/opt/hermes-defaults/` only on *first* boot (entrypoint.sh:70). All subsequent boots run against the EFS copy. If a new image ships a patch fix, it has to be applied on every boot against that existing EFS tree. This constraint is load-bearing and rules out the "just ship patched files" approach.
+- **Unified diffs, not string replacement.** GNU `patch` with `-N --forward` gives us idempotency for free: already-applied patches are no-ops. The previous inline approach had to hand-roll "is this already patched?" string searches (e.g. `if patched in src:`) in each heredoc. `patch -N` handles it, and the stdout "Ignoring previously applied (or reversed) patch" message is what we detect to suppress false failures.
+- **Overlay for new files.** `BedrockAuxiliaryClient` is ~70 lines of wrapper classes. Inline, it was a Python heredoc inside a Bash heredoc — no syntax highlighting, no linting, no way to test it independently. As a real `.py` file under `overlay/agent/`, it's a regular module. `apply.py` just `shutil.copy2`s it into place.
+- **`patch -N --dry-run` followed by the real apply.** Dry-run lets me distinguish "already applied" (exit 1 + "previously applied" in stdout) from "real mismatch" (exit 1 + "FAILED" in stdout). First implementation matched on "Reversed (or previously applied)" — wrong phrase, GNU patch emits "Ignoring previously applied (or reversed) patch". Caught during the idempotency verification run.
+
+**Verification:**
+
+- Clean upstream clone → all 3 patches apply cleanly, overlay file copied, exit 0.
+- Same tree, second run → all "already applied", exit 0 (idempotent).
+- Corrupted anchor (renamed provider set) → exact patch name reported in stderr, exit 1 (fails loudly, not silently).
+- AST-parsed all four touched Python files post-apply — no syntax errors.
+- Every line the old inline patches touched was grep-confirmed to land at the same file:line after the new apply.py run.
+
+**Key points:**
+
+- Three `.patch` files use `-p1` style and `diff -u --label a/... --label b/...` headers, so they apply from the hermes-agent root with `patch -p1`.
+- `apply.py` shells out to the system `patch` binary rather than pure-Python diff-apply (e.g. `whatthepatch`) to keep the orchestrator dependency-free. `patch` is already in the base image.
+- `overlay/` is processed first, *then* patches. This matters because patch 03 imports `from agent.bedrock_aux_client` — the module has to exist before the patched `auxiliary_client.py` ever loads. (Import is at module scope, so it's evaluated on first import, not on first call to `resolve_provider_client`.)
+- Patch 03 previously injected the Bedrock classes inline into `auxiliary_client.py`. Now it only adds an import, a 2-line `_to_async_client` hook, and a 20-line `aws_sdk` handler. Smaller diff surface = less likely to break on upstream drift.
+- If upstream ships PR #11700, each `.patch` naturally becomes a no-op (already-applied) without any code changes on our side. The overlay file stays — it's harmless dead code if upstream provides its own `BedrockAuxiliaryClient`, and removing it would require the patch to *also* delete its import, which is more churn than the upstream-lands case is worth.
+
 ## 2026-04-17 15:22 - [Deployment] Expose SLACK_HOME_CHANNEL on hermes-slack template
 
 **Conversation:** [2026-04-17-1524-042edb83.md](conversations/2026-04-17-1524-042edb83.md)
