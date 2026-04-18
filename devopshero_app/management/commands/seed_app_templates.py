@@ -352,6 +352,17 @@ _HERMES_SLACK_VARS = [
         "value": "",
         "user_editable": False,
     },
+    {
+        "name": "SLACK_HOME_CHANNEL",
+        "group": "Slack",
+        "category": "config",
+        "description": "Slack channel ID for scheduled messages, cron results, and proactive notifications (e.g. C01234567890). Bot must be invited to this channel.",
+        "required": False,
+        "auto_generate": False,
+        "default_value": "test-channel",
+        "value": "test-channel",
+        "user_editable": True,
+    },
 ]
 
 # -- Hermes Personal (web only, one per user) -------------------------------
