@@ -3,7 +3,7 @@ FROM ghcr.io/nesquena/hermes-webui:latest
 USER root
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends git \
+    && apt-get install -y --no-install-recommends git patch \
     && rm -rf /var/lib/apt/lists/*
 
 RUN git clone --depth 1 https://github.com/NousResearch/hermes-agent.git \
