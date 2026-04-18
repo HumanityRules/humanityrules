@@ -497,6 +497,10 @@ class AppStack(Stack):
             shared_hosted_zone_id=shared_hosted_zone_id,
         )
 
+        # Circuit breaker: for desired_count=1, ECS trips after 3 consecutive
+        # failed task starts (~3-6 min) instead of CFN's 3h stabilization wait.
+        # rollback=True auto-reverts to the prior COMPLETED deployment on trip;
+        # on first deploy there is none, so the stack simply rolls back via CFN.
         service = ecs.FargateService(
             self, "EcsService",
             service_name=resource_prefix[:255],
@@ -510,6 +514,7 @@ class AppStack(Stack):
             min_healthy_percent=min_healthy,
             max_healthy_percent=200,
             health_check_grace_period=Duration.seconds(health_check_grace),
+            circuit_breaker=ecs.DeploymentCircuitBreaker(enable=True, rollback=True),
         )
         service.attach_to_application_target_group(target_group)
 

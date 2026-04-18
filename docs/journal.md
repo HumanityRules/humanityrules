@@ -1,5 +1,36 @@
 # DevOpsHero Development Journal
 
+## 2026-04-18 11:18 - [Deployment] Fix `patch` missing from hermes image + enable ECS deployment circuit breaker
+
+**Conversation:** [2026-04-18-1119-62302632.md](conversations/2026-04-18-1119-62302632.md)
+
+Two related changes from one debugging session on `hermes-slack07` (CH Sandbox, default env), which had been stuck in `CREATE_IN_PROGRESS` on its `AWS::ECS::Service` for ~2 min and climbing when the user flagged it:
+
+1. **Missing `patch` binary in the hermes-agent image.** The overlay/unified-diff refactor from earlier this morning added `apply.py`, which shells out to GNU `patch`. The base image `ghcr.io/nesquena/hermes-webui:latest` doesn't include `patch` — our Dockerfile only `apt-get install`s `git`. First container boot → `FileNotFoundError: [Errno 2] No such file or directory: 'patch'` from `subprocess.run` in `apply.py:61` → entrypoint exits non-zero (`set -e`) → task stops with `EssentialContainerExited`. ECS restarts it, same crash, forever. Fix: add `patch` to the apt-get list in `template_repos/hermes_agent/Dockerfile:6`. I missed it during verification because I ran apply.py on my Mac, where `patch` is part of the base system.
+
+2. **Enabled the ECS deployment circuit breaker on customer app services.** Without it, a crash-looping task leaves the CFN stack waiting on `AWS::ECS::Service` for the full ~3h CFN stabilization timeout — `hermes-slack07` was on track for exactly that. Added `circuit_breaker=ecs.DeploymentCircuitBreaker(enable=True, rollback=True)` to the `FargateService` in `devopshero_app/services/infra_customer/deploy_app.py:518`. Now the deployment trips after ~3-6 min on first-deploy failures.
+
+**AWS doc deep-dive (verified with WebFetch, not memory):**
+
+- **The circuit-breaker threshold is not user-configurable.** Formula: `threshold = ceil(0.5 * desired_count)`, clamped to `[3, 200]`. For `desired_count=1` this pins to the minimum of **3 consecutive failed task starts**, not the "~10" I initially said from memory. Quote from AWS: *"You cannot change either of the threshold values."*
+- **Two-stage detection.** Stage 1 counts tasks that never reach `RUNNING`. Stage 2 (only entered if at least one task reaches `RUNNING`) counts health-check failures. Our crash happens in stage 1 — fast path.
+- **`SERVICE_DEPLOYMENT_FAILED` EventBridge event is only emitted when the circuit breaker is on.** Without it, you don't get the failure signal at all — just CFN timing out hours later. This was a second reason to enable it beyond the time-saving.
+- **Other loop-detection signals confirmed via docs** (for future reference, not enabled here):
+  - `SERVICE_TASK_START_IMPAIRED` (WARN) — fires regardless of circuit breaker when the service consistently fails to start tasks. Good alerting target.
+  - `SERVICE_TASK_PLACEMENT_FAILURE` / `SERVICE_TASK_CONFIGURATION_FAILURE` (ERROR) — scheduler-side failures (resources, IAM config).
+  - `ECS Task State Change` events with `stopCode=EssentialContainerExited` — every individual crash, unconditionally.
+- **Corrected a name I invented from memory:** `SERVICE_TASK_START_IMPOSSIBLE` does not exist. The real event is `SERVICE_TASK_START_IMPAIRED`.
+
+**Rollback semantics on first deploy:** `rollback=True` auto-reverts to the prior `COMPLETED` deployment on trip. On a *first* deployment there is none, so the service deployment simply transitions to `FAILED` and the enclosing CloudFormation stack rolls back on its own — which is still a huge win vs. the 3h CFN timeout.
+
+**Key points:**
+
+- I verified the CDK API names (`ecs.DeploymentCircuitBreaker`, `FargateService.circuit_breaker` kwarg) by introspecting `aws_cdk.aws_ecs` in the project's venv before committing. Catching a typo here would have been a nasty second round of debugging.
+- The fix to `deploy_app.py` applies to *new* app stack deployments. Existing CFN stacks don't pick it up until their next `cdk deploy` — every customer app that redeploys goes through this code path, so coverage is automatic over time.
+- For the stuck `hermes-slack07` stack specifically, canceling/deleting the CFN stack manually is faster than waiting. It can then be re-created once the Dockerfile+`patch` fix is in the rebuilt image.
+- The inline comment next to the circuit-breaker argument documents the 3-attempt threshold for `desired_count=1` — load-bearing context because someone reading the code later would not otherwise know the ceil/0.5/clamp formula.
+- **Process learning:** when I claimed "~10 attempts" from memory, the user pushed back twice before I finally checked docs. Next time a factual claim about an AWS API / threshold / event name comes up, fetch the docs first. Memory-based claims about specific numeric thresholds or event names in AWS services are especially unreliable.
+
 ## 2026-04-18 09:59 - [Deployment] Restructure hermes-agent upstream patches as overlay + unified diffs
 
 **Conversation:** [2026-04-18-1000-62302632.md](conversations/2026-04-18-1000-62302632.md)
