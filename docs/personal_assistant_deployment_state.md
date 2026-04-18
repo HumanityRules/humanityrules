@@ -19,8 +19,7 @@ DOH deploys **Hermes Agent** — a governed AI personal assistant — into a cus
 
 - The Bedrock support depends on the local patch stack; if upstream Hermes ships PR #11700, the patches become no-ops automatically.
 - Aux LLM assumes one shared provider/model across all 8 slots (simple knob; not per-task tunable yet).
-- `SLACK_HOME_CHANNEL` default is a placeholder that fails politely until the operator sets a real channel ID.
-- Deploy rollback granularity: CloudFormation-native since the two-phase deploy refactor; we lose task-level crash diagnostics on first-deploy failures.
+- WebUI base image is pinned (currently `ghcr.io/nesquena/hermes-webui:0.50.43`). Bumps are manual: edit the `FROM` in `template_repos/hermes_agent/Dockerfile` and redeploy each customer app individually. No cross-deployment rollout mechanism yet.
 
 ## Where the governance story stands
 

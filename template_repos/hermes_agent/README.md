@@ -117,6 +117,14 @@ The container image and the agent framework are **independently versioned**:
 
 When bumping the base image version, test against an existing EFS volume to verify compatibility. Most WebUI updates are backward-compatible, but major version bumps could require running `hermes update` to sync the agent framework.
 
+### How to bump the WebUI base image
+
+The Dockerfile pins a specific WebUI release (`ghcr.io/nesquena/hermes-webui:X.Y.Z`) rather than `:latest`, so customer deployments are reproducible. To roll out a newer WebUI:
+
+1. Check the published tags at `https://github.com/nesquena/hermes-webui/pkgs/container/hermes-webui`.
+2. Edit the `FROM` line in `template_repos/hermes_agent/Dockerfile` to the new tag, test, and commit.
+3. Each customer app needs to be redeployed individually (via the *Redeploy* button) to pick up the new image — there is no auto-rollout.
+
 ## Port
 
 This application runs on port **8787**.

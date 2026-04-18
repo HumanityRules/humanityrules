@@ -1,5 +1,52 @@
 # DevOpsHero Development Journal
 
+## 2026-04-18 13:06 - [Deployment] Pin Hermes WebUI base image + verify 0.50.87 locally
+
+**Conversation:** [2026-04-18-1307-62302632.md](conversations/2026-04-18-1307-62302632.md)
+
+Pinned the Hermes WebUI base image from `:latest` to a specific version and verified the pin works end-to-end (build, boot, patches, chat). The path forward for rolling out new WebUI versions is now reproducible rather than drifting.
+
+**Why pin:**
+
+- `FROM ghcr.io/nesquena/hermes-webui:latest` in `template_repos/hermes_agent/Dockerfile:1` meant two customers redeploying on different days could land on different WebUI builds — no reproducibility.
+- The builder EC2 doesn't pass `--pull` to `docker build` (see `ec2_builder_utils.py`), so long-lived builders would keep serving a stale cached `:latest` layer anyway.
+- DOH stores only the app's ECR tag on `Deployment`, not the base image digest — we have no record of what WebUI a given customer is running.
+- A pinned `FROM` tag turns "what webui?" into a grep of the Dockerfile and turns bumps into a git-visible action.
+
+**Version landscape on GHCR at pin time:**
+
+- Newest published tag: `0.50.87` (user picked it). Discovery: hit GHCR's v2 manifest API with a pull token to enumerate tags and resolve digests.
+- `:latest` on GHCR was drifted — its digest matched an older build, not the newest semver. Another argument for pinning.
+
+**Verification that 0.50.87 is a safe bump** (ran locally, not in a customer account):
+
+1. **Build** — `docker build --pull -t hermes-agent-test:0.50.87 .` against the pinned Dockerfile. Clean.
+2. **Boot** — ran with the local `.env` (Bedrock Haiku 4.5, us-east-1), `/health` returned `{"status":"ok"}` in ~8s.
+3. **Patches** — all three applied fresh against the freshly-cloned upstream `hermes-agent`: `01-run_agent-bedrock-dots`, `02-run_agent-bedrock-caching`, `03-auxiliary_client-wire-bedrock`. Overlay file `agent/bedrock_aux_client.py` landed. `apply.py`'s `patch -N` dry-run strategy worked as intended.
+4. **Caching patch (patch 02) specifically verified** — the whole point of this patch is the prompt-caching guard. Two checkpoints:
+   - Both hunks present in patched `run_agent.py` at lines 885 and 1826: `provider in {"anthropic", "bedrock"}`.
+   - Runtime dispatch in `hermes_cli/runtime_provider.py:914-918` shows that for `is_anthropic_bedrock_model(...)` (Claude-on-Bedrock), the `AIAgent` is instantiated with `api_mode="anthropic_messages"` and `provider="bedrock"` — exactly the combination patch 02 unlocks. `_use_prompt_caching` evaluates True.
+5. **Chat round-trip** — created a session via `/api/session/new`, sent two turns via `/api/chat/start`, got expected responses from Bedrock Haiku ("PING-OK", "PONG-OK"). Token totals grew, session persisted.
+
+**Odd thing worth flagging (not a blocker):** the `Server` HTTP header still reports `HermesWebUI/0.50.38` even though the image tag is `0.50.87`. Upstream's version string in the binary is likely hardcoded and not synced to the release tag. Something to ask upstream about if we start depending on that header for version detection.
+
+**Docs updated so the pin + bump flow is discoverable:**
+
+- `README.md` — added a "How to bump the WebUI base image" subsection with the 3-step flow (check GHCR tags → edit `FROM` → redeploy each customer app).
+- `docs/personal_assistant_deployment_state.md` — added a known-constraint line noting the pin and that bumps require per-app redeploys.
+
+**Rollout implications for existing customers:**
+
+- Existing customer apps are still running whatever `:latest` resolved to at their last build. They won't pick up `0.50.87` until someone hits *Redeploy* on each one individually.
+- There is no bulk "sync all hermes deployments" command yet. Two future options if that becomes painful: (a) a `manage.py redeploy_template_apps --template=hermes-personal` that loops Deployments, or (b) record `base_image_digest` on `Deployment` so we at least know who's drifted.
+
+**Key points:**
+
+- Pinning forces every bump to be a git-visible commit. No more silent drift.
+- The in-repo `patches/` stack is robust across WebUI versions: `apply.py` uses `patch -N --dry-run` to distinguish "already applied" from "real failure," so once upstream ships a fix, the patch becomes a no-op on the next rebuild. Confirmed again here against the fresh `hermes-agent` clone in 0.50.87.
+- Verification steps worth reusing on future bumps: (1) `docker build --pull`, (2) boot with local `.env`, (3) grep patched source for both caching hunks, (4) two-turn chat through `/api/session/new` + `/api/chat/start` + `/api/session?session_id=…`.
+- GHCR tag discovery: `curl` the `v2/<repo>/tags/list` endpoint with an anonymous pull token (`ghcr.io/token?scope=repository:<repo>:pull`). Compare digests across tags via `HEAD /v2/<repo>/manifests/<tag>`.
+
 ## 2026-04-18 11:18 - [Deployment] Fix `patch` missing from hermes image + enable ECS deployment circuit breaker
 
 **Conversation:** [2026-04-18-1119-62302632.md](conversations/2026-04-18-1119-62302632.md)
