@@ -1,14 +1,15 @@
 """FastAPI application for the sidecar proxy."""
 
 import logging
-from urllib.parse import quote, urlparse
+from contextlib import asynccontextmanager
+from urllib.parse import quote
 
 import httpx
+import jwt
 from fastapi import FastAPI, Request
 from fastapi.responses import PlainTextResponse, RedirectResponse, Response
 
 from . import config as config_mod
-from . import jwks as jwks_mod
 from . import jwt_verify
 from . import pdp as pdp_mod
 from . import proxy as proxy_mod
@@ -37,23 +38,20 @@ def _redirect_to_auth(request: Request, cfg: config_mod.SidecarConfig) -> Respon
 
 
 def create_app(cfg: config_mod.SidecarConfig) -> FastAPI:
-    """Build the FastAPI app. Broken out for testability — tests call this directly."""
-    app = FastAPI()
-    upstream_base = f"http://{cfg.upstream_host}:{cfg.upstream_port}"
+    """Build the FastAPI app. Dependencies live on app.state so tests can swap them."""
 
-    jwks_cache = jwks_mod.JwksCache.empty(
-        jwks_url=cfg.jwks_url, ttl_seconds=JWKS_CACHE_TTL_SECONDS,
-    )
-    http_client = httpx.AsyncClient()
+    @asynccontextmanager
+    async def lifespan(app: FastAPI):
+        yield
+        await app.state.http_client.aclose()
 
+    app = FastAPI(lifespan=lifespan)
     app.state.config = cfg
-    app.state.jwks_cache = jwks_cache
-    app.state.http_client = http_client
-    app.state.upstream_base = upstream_base
-
-    @app.on_event("shutdown")
-    async def _close_http_client() -> None:
-        await http_client.aclose()
+    app.state.upstream_base = f"http://{cfg.upstream_host}:{cfg.upstream_port}"
+    app.state.http_client = httpx.AsyncClient()
+    app.state.jwks_client = jwt.PyJWKClient(
+        uri=cfg.jwks_url, cache_keys=True, lifespan=JWKS_CACHE_TTL_SECONDS,
+    )
 
     @app.get(f"{INTERNAL_PATH_PREFIX}/healthz")
     async def healthz() -> Response:
@@ -64,57 +62,46 @@ def create_app(cfg: config_mod.SidecarConfig) -> FastAPI:
         if request.url.path.startswith(INTERNAL_PATH_PREFIX):
             return PlainTextResponse(content="not found", status_code=404)
 
+        state = request.app.state
+
         cookie_value = request.cookies.get(jwt_verify.SESSION_COOKIE_NAME)
         if not cookie_value:
-            return _redirect_to_auth(request=request, cfg=cfg)
+            return _redirect_to_auth(request=request, cfg=state.config)
 
-        identity = await jwt_verify.verify_session_cookie(
-            jwt_value=cookie_value,
-            jwks_cache=jwks_cache,
-            http_client=http_client,
+        identity = jwt_verify.verify_session_cookie(
+            jwt_value=cookie_value, jwks_client=state.jwks_client,
         )
         if identity is None:
-            return _redirect_to_auth(request=request, cfg=cfg)
+            return _redirect_to_auth(request=request, cfg=state.config)
 
         decision = await pdp_mod.evaluate(
-            http_client=http_client,
-            pdp_url=cfg.pdp_url,
-            sidecar_token=cfg.sidecar_token,
-            app_id=cfg.app_id,
+            http_client=state.http_client,
+            pdp_url=state.config.pdp_url,
+            sidecar_token=state.config.sidecar_token,
+            app_id=state.config.app_id,
             oidc_sub=identity.oidc_sub,
             username=identity.username,
             path=request.url.path,
         )
         if decision is None:
             return PlainTextResponse(
-                content="authorization service unavailable",
-                status_code=503,
+                content="authorization service unavailable", status_code=503,
             )
         if decision.decision != "allow":
             logger.info(
                 "sidecar deny reason=%s env=%s app=%s user=%s path=%s",
-                decision.reason, cfg.env_slug, cfg.app_id, identity.username, request.url.path,
+                decision.reason, state.config.env_slug, state.config.app_id,
+                identity.username, request.url.path,
             )
             return PlainTextResponse(
-                content="you do not have access to this application",
-                status_code=403,
+                content="you do not have access to this application", status_code=403,
             )
 
         return await proxy_mod.proxy_to_upstream(
             request=request,
             identity=identity,
-            upstream_base=upstream_base,
-            http_client=http_client,
+            upstream_base=state.upstream_base,
+            http_client=state.http_client,
         )
 
     return app
-
-
-def validate_rd(rd_url: str, env_domain: str) -> bool:
-    """Check that a redirect-destination URL stays within the env's parent domain."""
-    parsed = urlparse(rd_url)
-    if parsed.scheme != "https":
-        return False
-    host = (parsed.hostname or "").lower()
-    parent = env_domain.lower()
-    return host == parent or host.endswith("." + parent)

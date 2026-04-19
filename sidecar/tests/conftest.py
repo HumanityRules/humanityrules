@@ -1,16 +1,14 @@
 """Shared test fixtures: a test keypair, a JWT minter, and a SidecarConfig."""
 
 import time
-from dataclasses import replace
+from dataclasses import dataclass
+from typing import Any
 
-import httpx
 import jwt
 import pytest
 from cryptography.hazmat.primitives.asymmetric import rsa
 
-from sidecar import app as app_mod
 from sidecar import config as config_mod
-from sidecar import jwks as jwks_mod
 
 
 TEST_KID = "test-key"
@@ -65,13 +63,27 @@ def sidecar_config() -> config_mod.SidecarConfig:
     )
 
 
+@dataclass
+class _FakeSigningKey:
+    key: Any
+
+
+class FakeJwksClient:
+    """Minimal stand-in for jwt.PyJWKClient: serves a single test key by any kid."""
+
+    def __init__(self, public_key: Any, known_kid: str) -> None:
+        self._public_key = public_key
+        self._known_kid = known_kid
+
+    def get_signing_key_from_jwt(self, token: str) -> _FakeSigningKey:
+        header = jwt.get_unverified_header(token)
+        kid = header.get("kid")
+        if kid != self._known_kid:
+            raise jwt.PyJWKClientError(f"unknown kid {kid!r}")
+        return _FakeSigningKey(key=self._public_key)
+
+
 @pytest.fixture
-def primed_jwks_cache(rsa_keypair, sidecar_config):
-    """A JwksCache pre-populated with the test public key (no network)."""
+def fake_jwks_client(rsa_keypair) -> FakeJwksClient:
     _, public_key = rsa_keypair
-    cache = jwks_mod.JwksCache.empty(
-        jwks_url=sidecar_config.jwks_url, ttl_seconds=900,
-    )
-    # Mark it freshly populated so get_public_key doesn't trigger a refresh.
-    cache.replace(keys_by_kid={TEST_KID: public_key}, now=time.time())
-    return cache
+    return FakeJwksClient(public_key=public_key, known_kid=TEST_KID)
