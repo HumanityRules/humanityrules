@@ -4,6 +4,7 @@ Deploy DevOpsHero apps (ECR, ALB, ECS service) using AWS CDK.
 
 import logging
 from dataclasses import dataclass
+from pathlib import Path
 
 import boto3
 from aws_cdk import App, Aws, CfnOutput, Duration, Fn, RemovalPolicy, SecretValue, Stack, Tags
@@ -21,12 +22,39 @@ from aws_cdk import aws_secretsmanager as secretsmanager
 from constructs import Construct
 
 from . import appconfig
+from . import auth_lambda
 from . import cdk_utils
 from . import cloudformation_utils
 from . import deploy_base
 from . import ecr_utils
 from . import route53_utils
 from . import secrets_utils
+
+
+# Sidecar image published once per env into doh/{env_slug}/sidecar:{tag}. Keep
+# this pinned here rather than on AppConfig: the sidecar is DOH-owned, not
+# AppTemplate-driven, and a version bump is a platform operation.
+SIDECAR_IMAGE_VERSION = "0.1.0"
+SIDECAR_SOURCE_DIR = Path(__file__).resolve().parents[3] / "sidecar"
+
+
+def sidecar_ecr_repo_name(env_slug: str) -> str:
+    """Per-env ECR repo for the sidecar image: doh/{env_slug}/sidecar."""
+    return f"doh/{env_slug}/sidecar"
+
+
+def _resolve_pdp_url() -> str:
+    """Resolve the PDP URL the sidecar should call. DOH_PDP_URL wins if set."""
+    import os
+    from django.conf import settings
+    explicit = os.environ.get("DOH_PDP_URL")
+    if explicit:
+        return explicit
+    # In prod the app runs at devopshero.ai; in local dev the sidecar inside
+    # a customer VPC can't reach the developer's laptop, so the orchestration
+    # caller is expected to set DOH_PDP_URL to a reachable tunnel URL.
+    base = "https://devopshero.ai" if not settings.DEBUG else "http://host.docker.internal:8000"
+    return f"{base}/api/pdp/evaluate"
 
 logger = logging.getLogger(__name__)
 
@@ -115,6 +143,46 @@ class EcrStack(Stack):
 
         CfnOutput(self, "EcrRepositoryUri", value=self.repository.repository_uri, export_name=f"{resource_prefix}-ecr-uri")
         CfnOutput(self, "EcrRepositoryArn", value=self.repository.repository_arn, export_name=f"{resource_prefix}-ecr-arn")
+
+
+class SidecarEcrStack(Stack):
+    """Per-env ECR repo for the DOH sidecar image.
+
+    One repo per environment: doh/{env_slug}/sidecar. Shared by every
+    sidecar-enabled app in the env. Created once per env on the first
+    sidecar-enabled deploy and then imported from subsequent deploys.
+    """
+
+    def __init__(
+        self,
+        scope: Construct,
+        construct_id: str,
+        env_slug: str,
+        **kwargs,
+    ) -> None:
+        super().__init__(scope, construct_id, **kwargs)
+
+        repo_name = sidecar_ecr_repo_name(env_slug)
+        self.repository = ecr.Repository(
+            self, "SidecarEcrRepository",
+            repository_name=repo_name,
+            image_scan_on_push=True,
+            # Keep older sidecar images around: a sidecar version bump that
+            # needs to be rolled back mustn't be blocked by the lifecycle policy.
+            lifecycle_rules=[ecr.LifecycleRule(
+                description="Keep last 20 sidecar images", max_image_count=20, rule_priority=1,
+            )],
+            # Shared resource — tie it to the env, not an individual app.
+            removal_policy=RemovalPolicy.RETAIN,
+        )
+        Tags.of(self.repository).add("Env", env_slug)
+        Tags.of(self.repository).add("Component", "sidecar")
+
+        CfnOutput(
+            self, "SidecarEcrRepositoryUri",
+            value=self.repository.repository_uri,
+            export_name=f"devopshero-{env_slug}-sidecar-ecr-uri",
+        )
 
 
 class AuroraClusterStack(Stack):
@@ -318,9 +386,30 @@ class AppStack(Stack):
         database_connection_secret: secretsmanager.ISecret | None,
         shared_alb_hosted_zone: str | None,
         shared_hosted_zone_id: str | None,
+        sidecar_shared_secrets_arn: str | None,
+        sidecar_image_version: str | None,
+        auth_base_url: str | None,
         **kwargs,
     ) -> None:
         super().__init__(scope, construct_id, **kwargs)
+
+        # Sidecar is opt-in per AppTemplate. When enabled the task def adds a
+        # second container in front of the app, ALB routes to that sidecar,
+        # and the sidecar proxies to the app container over localhost.
+        sidecar_enabled = bool(app_config.sidecar_enabled)
+        if sidecar_enabled and not (
+            sidecar_shared_secrets_arn and sidecar_image_version and auth_base_url
+        ):
+            raise RuntimeError(
+                "Sidecar-enabled deploy requires sidecar_shared_secrets_arn, "
+                "sidecar_image_version, and auth_base_url. One or more were missing — "
+                "did the orchestration skip ensure_env_sidecar_secrets_exist?",
+            )
+        # Sidecar listens on container_port + 1; the app keeps its original port.
+        sidecar_listen_port = app_config.container_port + 1 if sidecar_enabled else None
+        # The target group port (= ALB forwarding port) points at whichever
+        # container should receive inbound traffic.
+        target_port = sidecar_listen_port if sidecar_enabled else app_config.container_port
 
         # Import environment infrastructure
         self.environment_infra = deploy_base.import_environment_infrastructure(
@@ -345,6 +434,13 @@ class AppStack(Stack):
             task_role.add_to_policy(iam.PolicyStatement(
                 actions=["secretsmanager:GetSecretValue"],
                 resources=[database_connection_secret.secret_arn],
+            ))
+        if sidecar_enabled:
+            # The sidecar container reads DOH_SIDECAR_TOKEN from the env's
+            # shared-secrets entry via ECS secret injection.
+            task_role.add_to_policy(iam.PolicyStatement(
+                actions=["secretsmanager:GetSecretValue"],
+                resources=[sidecar_shared_secrets_arn],
             ))
 
         # EFS: create per-app access point and grant mount permissions
@@ -447,6 +543,56 @@ class AppStack(Stack):
                 )
             )
 
+        if sidecar_enabled:
+            # Side-car container: receives ALB traffic on sidecar_listen_port,
+            # validates the doh_session cookie, calls DOH's PDP, and proxies
+            # to the app container over localhost:container_port. See
+            # sidecar/sidecar/app.py.
+            sidecar_image_uri = (
+                f"{self.account}.dkr.ecr.{self.region}.amazonaws.com/"
+                f"{sidecar_ecr_repo_name(env_slug)}:{sidecar_image_version}"
+            )
+            sidecar_shared_secret = secretsmanager.Secret.from_secret_complete_arn(
+                self, "SidecarSharedSecret", sidecar_shared_secrets_arn,
+            )
+            pdp_url = _resolve_pdp_url()
+            sidecar_environment = {
+                "DOH_APP_ID": app_config.app_name,
+                "DOH_ENV_SLUG": env_slug,
+                "DOH_ENV_DOMAIN": shared_alb_hosted_zone or "",
+                "DOH_AUTH_BASE_URL": auth_base_url,
+                "DOH_JWKS_URL": f"{auth_base_url.rstrip('/')}/.well-known/jwks.json",
+                "DOH_PDP_URL": pdp_url,
+                "DOH_UPSTREAM_HOST": "127.0.0.1",
+                "DOH_UPSTREAM_PORT": str(app_config.container_port),
+                "DOH_LISTEN_PORT": str(sidecar_listen_port),
+            }
+            sidecar_container = task_definition.add_container(
+                "SidecarContainer",
+                container_name=f"{app_config.app_name}-sidecar",
+                image=ecs.ContainerImage.from_registry(sidecar_image_uri),
+                logging=ecs.LogDrivers.aws_logs(
+                    stream_prefix=f"{app_config.app_name}-sidecar",
+                    log_group=self.environment_infra.log_group,
+                ),
+                environment=sidecar_environment,
+                secrets={
+                    "DOH_SIDECAR_TOKEN": ecs.Secret.from_secrets_manager(
+                        sidecar_shared_secret, field="DOH_SIDECAR_TOKEN",
+                    ),
+                },
+            )
+            sidecar_container.add_port_mappings(
+                ecs.PortMapping(container_port=sidecar_listen_port, protocol=ecs.Protocol.TCP),
+            )
+            # App must be listening before the sidecar accepts traffic.
+            sidecar_container.add_container_dependencies(
+                ecs.ContainerDependency(
+                    container=container,
+                    condition=ecs.ContainerDependencyCondition.START,
+                ),
+            )
+
         # When DOH runs in production (DEBUG=False), use stable settings
         # When developing locally (DEBUG=True), use aggressive settings for fast deploys
         from django.conf import settings
@@ -466,23 +612,35 @@ class AppStack(Stack):
         if app_config.health_check_grace_period is not None:
             health_check_grace = app_config.health_check_grace_period
 
-        target_group = elbv2.ApplicationTargetGroup(
-            self, "TargetGroup",
-            target_group_name=f"doh-{env_slug}-{app_config.app_name}"[:32],
-            vpc=self.environment_infra.vpc,
-            port=app_config.container_port,
-            protocol=elbv2.ApplicationProtocol.HTTP,
-            target_type=elbv2.TargetType.IP,
-            deregistration_delay=Duration.seconds(deregistration_delay),
+        # When the sidecar is the ALB target, the ALB's health check must hit
+        # a route the sidecar handles locally (bypassing the PDP), otherwise
+        # ALB probes would all 302 to auth and never go healthy. The sidecar
+        # exposes /__sidecar/healthz for exactly this.
+        if sidecar_enabled:
+            target_health_check_path = "/__sidecar/healthz"
+            target_health_check_codes = "200"
+        else:
+            target_health_check_path = app_config.health_check_path
             # 301 accepted: the ALB terminates SSL and forwards to the container over HTTP, adding
             # X-Forwarded-Proto: https so the app knows the original request was secure. Frameworks like
             # Phoenix (force_ssl) and Rails (force_ssl) check this header and pass traffic through.
             # But ALB health checks are synthetic HTTP requests without X-Forwarded-Proto, so apps
             # with force_ssl redirect them to HTTPS (301). Accepting 301 as healthy handles this.
+            target_health_check_codes = "200,301"
+
+        target_group = elbv2.ApplicationTargetGroup(
+            self, "TargetGroup",
+            target_group_name=f"doh-{env_slug}-{app_config.app_name}"[:32],
+            vpc=self.environment_infra.vpc,
+            port=target_port,
+            protocol=elbv2.ApplicationProtocol.HTTP,
+            target_type=elbv2.TargetType.IP,
+            deregistration_delay=Duration.seconds(deregistration_delay),
             health_check=elbv2.HealthCheck(
-                enabled=True, path=app_config.health_check_path, protocol=elbv2.Protocol.HTTP,
+                enabled=True, path=target_health_check_path, protocol=elbv2.Protocol.HTTP,
                 interval=Duration.seconds(health_check_interval), timeout=Duration.seconds(2),
-                healthy_threshold_count=healthy_threshold, unhealthy_threshold_count=3, healthy_http_codes="200,301",
+                healthy_threshold_count=healthy_threshold, unhealthy_threshold_count=3,
+                healthy_http_codes=target_health_check_codes,
             ),
         )
 
@@ -690,6 +848,26 @@ def deploy(
         else:
             logger.error("Could not find hosted zone ID for '%(hosted_zone)s', DNS record will not be created", {"hosted_zone": shared_alb_hosted_zone})
 
+    # Sidecar prerequisites: per-env secrets + ECR repo + image push + auth Lambda.
+    # All idempotent, safe to run on every sidecar-enabled deploy. The first
+    # sidecar-enabled deploy in an env does the heavy lift; subsequent deploys
+    # are fast because the secrets, stacks, and image already exist.
+    sidecar_secret_arns: dict[str, str] = {}
+    sidecar_auth_base_url: str | None = None
+    if app_config.sidecar_enabled:
+        if not shared_alb_hosted_zone or not shared_hosted_zone_id:
+            msg = "Sidecar-enabled apps require a hosted zone (HTTPS)"
+            logger.error(msg)
+            return DeployResult(success=False, error=msg, service_url="", alb_dns="")
+
+        logger.info("Ensuring per-env sidecar infrastructure exists")
+        from devopshero_app.models import Environment
+        env_obj = Environment.objects.get(slug=env_slug)
+        sidecar_secret_arns = secrets_utils.ensure_env_sidecar_secrets_exist(
+            session=session, env=env_obj,
+        )
+        sidecar_auth_base_url = f"https://auth.{shared_alb_hosted_zone}"
+
     cdk_app = App(outdir=str(cdk_utils.CDK_OUT_DIR))
 
     ecr_stack = EcrStack(
@@ -698,6 +876,33 @@ def deploy(
         app_config=app_config,
         resource_prefix=resource_prefix,
     )
+
+    sidecar_ecr_stack = None
+    auth_lambda_stack = None
+    if app_config.sidecar_enabled:
+        sidecar_ecr_stack = SidecarEcrStack(
+            cdk_app,
+            f"devopshero-{env_slug}-sidecar-ecr",
+            env_slug=env_slug,
+        )
+        auth_lambda_stack = auth_lambda.AuthLambdaStack(
+            cdk_app,
+            f"devopshero-{env_slug}-auth-lambda",
+            inputs=auth_lambda.AuthLambdaInputs(
+                env_slug=env_slug,
+                env_domain=shared_alb_hosted_zone,
+                shared_alb_https_listener_arn=Fn.import_value(
+                    f"devopshero-{env_slug}-shared-alb-https-listener-arn",
+                ),
+                shared_alb_security_group_id=Fn.import_value(
+                    f"devopshero-{env_slug}-shared-alb-sg-id",
+                ),
+                shared_hosted_zone_id=shared_hosted_zone_id,
+                shared_hosted_zone_name=shared_alb_hosted_zone,
+                oidc_secret_arn=sidecar_secret_arns["oidc_config_arn"],
+                jwt_key_secret_arn=sidecar_secret_arns["jwt_key_arn"],
+            ),
+        )
 
     # Optionally create Aurora cluster (imports VPC from environment's VPC stack exports)
     aurora_stack = None
@@ -723,6 +928,9 @@ def deploy(
         database_connection_secret=aurora_connection_secret,
         shared_alb_hosted_zone=shared_alb_hosted_zone,
         shared_hosted_zone_id=shared_hosted_zone_id,
+        sidecar_shared_secrets_arn=sidecar_secret_arns.get("shared_secrets_arn") if app_config.sidecar_enabled else None,
+        sidecar_image_version=SIDECAR_IMAGE_VERSION if app_config.sidecar_enabled else None,
+        auth_base_url=sidecar_auth_base_url,
     )
     app_stack.add_dependency(ecr_stack)
     if aurora_stack:
@@ -733,7 +941,34 @@ def deploy(
     if synth_only:
         return DeployResult(success=True, error="", service_url="", alb_dns="")
 
-    # Phase 1: Deploy ECR repo (and Aurora if needed) so the registry exists before the image push
+    # Phase 1a: Sidecar ECR + auth Lambda stacks (sidecar-enabled apps only).
+    if app_config.sidecar_enabled:
+        sidecar_pre_stacks = [
+            f"devopshero-{env_slug}-sidecar-ecr",
+            f"devopshero-{env_slug}-auth-lambda",
+        ]
+        if not cdk_utils.deploy_from_assembly(assembly_dir=assembly_dir, session=session, stack_names=sidecar_pre_stacks):
+            logger.error("CDK deployment failed (sidecar-ecr/auth-lambda)")
+            return DeployResult(success=False, error="CDK deployment failed (sidecar infra)", service_url="", alb_dns="")
+
+        # Push the DOH-owned sidecar image into the per-env repo. This is
+        # idempotent: if the tag already exists in ECR the push is a no-op.
+        logger.info("Building and pushing sidecar image (%s)", SIDECAR_IMAGE_VERSION)
+        sidecar_image_uri = ecr_utils.build_and_push_docker_image(
+            session=session,
+            account_id=account_id,
+            region=region,
+            env_slug=env_slug,
+            app_name="sidecar",
+            ecr_repo_name=sidecar_ecr_repo_name(env_slug),
+            app_source_path=SIDECAR_SOURCE_DIR,
+            image_tag=SIDECAR_IMAGE_VERSION,
+        )
+        if not sidecar_image_uri:
+            logger.error("Sidecar image build/push failed")
+            return DeployResult(success=False, error="Sidecar image build/push failed", service_url="", alb_dns="")
+
+    # Phase 1b: Deploy ECR repo (and Aurora if needed) so the registry exists before the app image push
     pre_app_stacks = [f"{resource_prefix}-ecr"]
     if aurora_stack:
         pre_app_stacks.append(f"{resource_prefix}-aurora")
