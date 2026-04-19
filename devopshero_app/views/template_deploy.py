@@ -208,6 +208,10 @@ def _handle_deploy(request: HttpRequest, template: models.AppTemplate, org: mode
         app_slug=app_slug,
         created_by=request.user,
         runtime_variable_overrides=variable_overrides,
+        # The Owner field on the deploy form will fill this in for PAs (see
+        # workstream (h) in sequential-hugging-crab.md). Until then the tag
+        # simply isn't stamped and PAs remain inaccessible — fail-closed.
+        owner_username=None,
     )
 
     return redirect("app_detail", app_slug=deployment.app.slug)
