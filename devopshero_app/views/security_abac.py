@@ -510,7 +510,7 @@ def security_policies(request: HttpRequest) -> HttpResponse:
         return denied
 
     org = request.user.current_organization
-    policies = Policy.objects.filter(organization=org).order_by("-is_system", "name")
+    policies = Policy.objects.filter(organization=org).order_by("-is_system", "created_at")
 
     context = base.get_app_shell_context(request=request, current_page="security")
     context["active_tab"] = "policies"
