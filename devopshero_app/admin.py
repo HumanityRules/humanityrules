@@ -36,17 +36,18 @@ from devopshero_app.models import (
 
 @admin.register(User)
 class UserAdmin(BaseUserAdmin):
-    list_display = ["email", "username", "workos_user_id", "is_staff", "is_active"]
+    list_display = ["email", "username", "workos_user_id", "oidc_sub", "is_staff", "is_active"]
     list_filter = ["is_staff", "is_active"]
-    search_fields = ["email", "username", "workos_user_id"]
+    search_fields = ["email", "username", "workos_user_id", "oidc_sub"]
     ordering = ["email"]
 
-    # Add workos_user_id to the fieldsets
     fieldsets = BaseUserAdmin.fieldsets + (
         ("WorkOS", {"fields": ("workos_user_id",)}),
+        ("OIDC", {"fields": ("oidc_sub",)}),
     )
     add_fieldsets = BaseUserAdmin.add_fieldsets + (
         ("WorkOS", {"fields": ("workos_user_id",)}),
+        ("OIDC", {"fields": ("oidc_sub",)}),
     )
 
 
