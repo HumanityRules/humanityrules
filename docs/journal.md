@@ -1,5 +1,60 @@
 # DevOpsHero Development Journal
 
+## 2026-04-19 01:19 - [Deployment] Sidecar proxy for Personal Assistants: design + full implementation
+
+**Conversation:** [2026-04-19-0121-c8212365.md](conversations/2026-04-19-0121-c8212365.md)
+
+Designed and implemented the runtime access control for Personal Assistants (Hermes) end-to-end — the SSO + ABAC gate that makes per-employee URLs like `vmendi-hermes.chsandbox.com` only reachable by their owner. Started from a design conversation, landed a detailed plan, then shipped it across 12 commits. All unit tests green (284 Django + 15 sidecar + 12 Lambda = 311), and verified against the live dev server using a new `sidecar_simulate` management command that mints a realistic JWT and calls `/api/pdp/evaluate` locally with the full ABAC engine in the loop.
+
+**Problem shape:** PAs are the first deployable that needs per-user authorization at runtime. The Hermes WebUI only has a shared password today; we need Okta-backed SSO + ABAC decisions in front of it, preferably in a way that generalizes to any future internal-tool deployment.
+
+### Design decisions made during the conversation (these matter months from now)
+
+- **Auth flow: single central auth endpoint per env, not per-app Okta redirects.** The cookie lives on the parent domain `.chsandbox.com`, so one login covers every sidecar'd app in the env. Okta registers exactly one redirect URI per env (`https://auth.<env-domain>/callback`); the original destination URL travels in the OAuth `state` parameter signed as a JWT, not in the redirect URI. Whitelisting per-user URLs doesn't scale and encourages open-redirect vulnerabilities.
+- **Auth endpoint implementation: Lambda behind the existing ALB.** Started at "Fargate service" — cost and operational footprint arguments walked it down to Lambda, then Function URL, then **ALB-as-target-for-Lambda** which reuses the env's existing ALB, cert, and Route53 zone. No API Gateway. Payload cap is 1 MB — irrelevant for OAuth.
+- **PDP: per-request call with in-memory cache, not embedded.** Considered embedding the ABAC engine in the sidecar with a shared library, rejected: centralizing the decision in DOH keeps semantics in one place, gives an audit trail for free, and eliminates the version-skew-between-two-codebases problem. Cache is fail-static on DOH outages.
+- **Trust anchors, v1: two secrets per env, not two per app.** Key #1: JWT signing keypair (private held by auth Lambda, public served via JWKS). Key #2: `DOH_SIDECAR_TOKEN` bearer token the sidecar sends to the PDP — shared per env, since all sidecars in an env sit inside the same VPC trust boundary. User's explicit call: "Why would the sidecar lie? If it's compromised, we have bigger problems."
+- **ABAC needed a new primitive.** Expressing "Alice can use alice-hermes" globally (one policy, N apps) needed a self-referential condition `username = $resource.owner`. Added as a small value-side reference in `abac.py:_conditions_match`. Rejected alternatives: (A) N per-user policies — noisy; (C) bolt "owner" on outside ABAC — undermines "ABAC is the single decision point."
+- **Okta cardinality for v1: one app per org; restrict to single-env orgs.** Multiple envs would each need their own callback URI and thus their own Okta app. Deferred the `EnvironmentOIDCConfig` table; Humanity Rules Sandbox is single-env, so this doesn't block the pilot.
+- **Sidecar language: Python, not Go.** User pushed back on Go — Python fits the rest of the repo. FastAPI + uvicorn + httpx + pyjwt. Slightly larger image (~80 MB) and slightly higher per-request overhead, but trivial at pilot scale and zero second toolchain.
+- **Sidecar image distribution: per-env ECR repo, not per-app.** Storage waste + O(N) pushes made per-app wrong. `doh/{env_slug}/sidecar:{version}` is pushed once on the first sidecar-enabled deploy and reused by every sidecar'd app in the env. Keeps the existing "DOH customer-account ECR" pattern intact, no cross-account IAM gymnastics.
+- **Fail-closed semantics.** Sidecar fails closed when PDP unreachable and cache miss; auth Lambda secrets read at cold start with warm-cache reuse; `rd` URL validated to require `https://` + the env's registrable parent domain. Session JWT TTL is 1 hour.
+- **Fixed the per-app open-access policy collision.** `bootstrap_organization` previously seeded member/viewer wildcard `app:use` grants that would have over-allowed access to every PA in the org. Dropped those wildcards; `create_default_app_policy` skips the open-access grant when the template opts into the sidecar; PAs rely solely on the new global owner policy. Admins still have a wildcard override by design.
+- **`username` locked post-creation.** Since `username` is the ABAC anchor for `$resource.owner`, letting it drift would enable takeover of owned-by resources. Override of `User.save()` raises on any post-insert change. Had to confirm no Django forms surface it (they don't — only display-only in personal settings).
+
+### Architecture in one paragraph
+
+On every request to `<slug>-hermes.<env-domain>`, the ALB host-header-routes to a two-container ECS task. The sidecar container owns the public port; the app container listens on `container_port + 1` internally. The sidecar checks the `doh_session` cookie (JWT verified against a cached JWKS from `auth.<env-domain>/.well-known/jwks.json`), redirects to the env's auth Lambda on `auth.<env-domain>/start` if absent/invalid, then POSTs `{app_id, oidc_sub, username, path}` to DOH's `/api/pdp/evaluate` with a bearer token. DOH runs `abac.evaluate_policies` with the new `$resource.owner` condition form and returns allow/deny. On allow, the sidecar injects `X-Auth-User`/`X-Auth-Sub`/`X-Auth-Email` and proxies to `127.0.0.1:<container_port>`. ALB health checks hit `/__sidecar/healthz` so probes succeed without cookies. Three per-env Secrets Manager entries back it: `devopshero/{env}/shared-secrets` (holds `DOH_SIDECAR_TOKEN`, hashed in the new `SidecarToken` DB row), `devopshero/{env}/sidecar-jwt-key` (RSA keypair for the session JWTs), `devopshero/{env}/oidc-config` (Okta config sourced from the parent Organization). Auth Lambda + sidecar ECR repo + image push all happen lazily on the first sidecar-enabled deploy per env.
+
+### Non-obvious implementation details worth capturing
+
+- **ALB listener rule priority for the auth Lambda is reserved at 10.** App rule priorities hash into 1000..41000 (`_compute_listener_rule_priority`), so anything under 1000 is safe. Pick 10, leave 1..9 for future infra rules. If any app ever starts hashing below 1000, that's a bug.
+- **Sidecar health check path — `/__sidecar/healthz` — matters.** The ALB doesn't send cookies on health probes; if the target group's health path hit the app it would 302-to-auth and never go healthy. The sidecar handles this path locally in `sidecar/sidecar/app.py` before any cookie check.
+- **`state` JWT is signed with the *same* keypair as session JWTs.** Keeps the Lambda to one signing key, no separate state-encryption secret. State TTL is 10 min, session TTL 1 hour.
+- **PDP endpoint authenticates via `SidecarToken` row, not the `app_id`.** The token → env mapping is authoritative; `app_id` in the request body is self-reported but trusted because we're already inside a per-env trust boundary. DOH still verifies `app_id ∈ env` via the `DeploymentBlueprint` existence check to guard against typos/confused deputy within the env.
+- **Lambda bundling.** Used `lambda_.Code.from_asset(..., bundling={"image": Runtime.PYTHON_3_12.bundling_image, ...})` so `cryptography` native wheels come from the Lambda-compatible image, not the developer's laptop. Verified synth in local CDK run.
+- **Image pushed with `build_and_push_docker_image` from `ecr_utils.py`.** Reused unchanged. Sidecar source lives at repo-root `sidecar/` subdirectory; its `pyproject.toml` is separate from the main project's.
+- **`sidecar_simulate` management command was invaluable.** Mints an ephemeral RSA keypair in-memory, signs a realistic session JWT, writes a `SidecarToken` row (replacing any existing one — can't recover the raw token once hashed), and POSTs to the live PDP. Three-way verification of owner-allow, non-owner-deny, admin-override took ~30 seconds against the live dev server. If we ever regret something about the decision pipeline, this is the first thing to reach for.
+- **Existing `bootstrap_organization` test had to be updated** from "9 seed policies" to "8" because member/viewer `app:use` wildcards were removed. Any new org going forward has the PA owner policy pre-seeded.
+
+### Risks and open items flagged for the pilot
+
+- **ALB priority 10 has not yet been audited against existing hashed app priorities.** Worth a sanity check against Humanity Rules Sandbox state before first deploy.
+- **Multi-env orgs will need `EnvironmentOIDCConfig`.** Deferred. Pilot envs are single-env.
+- **`HERMES_WEBUI_PASSWORD` not removed.** Still present as a second auth path; disabling it is a follow-up.
+- **Hermes WebUI header contract unspiked.** The sidecar injects `X-Auth-*` headers but we don't yet know if Hermes WebUI consumes them or needs a patch. User deferred this; deal with it when we first test the full UI.
+- **JWKS cold start on fresh env.** First sidecar container in a new env may outrace the auth Lambda. Sidecar retries on unknown-kid + generous ECS health check grace should cover it; observe in practice.
+- **Log volume.** `logger.info` per PDP decision will saturate CloudWatch under real use. Sample in v1.1 — not v1-blocking.
+
+**Key points:**
+
+- **Design → plan → code → verify, in that order.** Design doc (`docs/sidecar_proxy_design.md`) agreed with user first. Plan doc (`~/.claude/plans/sequential-hugging-crab.md`) broke it into 11 workstreams with file-level granularity. User approved the plan, then coding happened in tight commit cadence with tests first.
+- **The `$resource.<key>` / `$identity.<key>` primitive is a small engine extension with large policy-model leverage.** One global policy now handles N personal assistants. Future owned-by patterns (personal notebooks, sandbox envs) fit the same form.
+- **`bootstrap_organization` is now the single place that installs the PA policy** — new orgs get it automatically; existing orgs (like humr in dev) need a one-shot backfill. Did this manually during verification.
+- **Per-env trust boundary was the load-bearing simplification.** Turned a per-app token/secret sprawl into three per-env Secrets Manager entries + one DB row per env. Kept the rest of the design approachable.
+- **CDK synth passed locally with the Lambda bundling image actually running pip** — good signal the AWS deploy will work on first attempt, though real verification is pending Humanity Rules Sandbox deploy.
+- **Session had ~311 total tests green at the end.** Every workstream landed with its own tests; the `sidecar_simulate` command gave an integration-test shaped feedback loop without needing AWS.
+
 ## 2026-04-18 19:59 - [Onboarding] End-to-end Okta OIDC test against existing Humanity Rules org
 
 **Conversation:** [2026-04-18-1959-ee5cf47f.md](conversations/2026-04-18-1959-ee5cf47f.md)
