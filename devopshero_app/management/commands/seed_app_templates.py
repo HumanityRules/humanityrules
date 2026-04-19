@@ -379,6 +379,11 @@ HERMES_PERSONAL_TEMPLATE = {
     "icon": "⚡",
     "category": "ai-assistant",
     "runtime_variables": _HERMES_LLM_VARS + _HERMES_CREDENTIAL_VARS + _HERMES_BEDROCK_VARS,
+    # Runs behind the sidecar proxy: SSO + ABAC gate the WebUI.
+    "sidecar_enabled": True,
+    # The "app-type" tag is what the global PA ABAC policy matches on.
+    # The "owner" tag is stamped per-deployment from the deploy form.
+    "default_tags": [{"key": "app-type", "value": "personal-assistant"}],
 }
 
 # -- Hermes Slack (shared, one per org) -------------------------------------

@@ -527,7 +527,13 @@ def bootstrap_organization(organization: Organization, admin_user: User) -> None
     """
     Create seed ABAC data for a new organization:
     1. IdentityAttribute org-role=admin on admin_user
-    2. Nine seed policies for admin/member/viewer org-roles
+    2. Wildcard-resource seed policies for admin/member/viewer org-roles
+    3. Personal-Assistant owner policy (self-referential, global per org)
+
+    The member and viewer roles intentionally do NOT get a wildcard "app:use"
+    grant. Per-app access is governed by each app's own default policy (see
+    create_default_app_policy), which is created when the App is saved and
+    which the deploy flow may suppress for restricted apps like PAs.
     """
     IdentityAttribute.objects.get_or_create(
         organization=organization,
@@ -537,61 +543,68 @@ def bootstrap_organization(organization: Organization, admin_user: User) -> None
     )
 
     seed_policies = [
-        # Admin: full control over everything
+        # Admin: full control over everything, including every app.
         {
             "name": "Org admins: full workspace access",
             "resource_type": "workspace",
             "identity_conditions": [{"key": "org-role", "value": "admin"}],
+            "resource_conditions": [{"key": "*", "value": "*"}],
             "actions": ["workspace:admin"],
         },
         {
             "name": "Org admins: full environment access",
             "resource_type": "environment",
             "identity_conditions": [{"key": "org-role", "value": "admin"}],
+            "resource_conditions": [{"key": "*", "value": "*"}],
             "actions": ["environment:admin"],
         },
         {
             "name": "Org admins: app usage",
             "resource_type": "app",
             "identity_conditions": [{"key": "org-role", "value": "admin"}],
+            "resource_conditions": [{"key": "*", "value": "*"}],
             "actions": ["app:use"],
         },
-        # Member: view/edit workspaces, view/deploy environments, use apps
+        # Member: view/edit workspaces, view/deploy environments. App access is
+        # governed per-app (see create_default_app_policy) so member-only apps
+        # and owner-only apps (Personal Assistants) can coexist.
         {
             "name": "Org members: workspace access",
             "resource_type": "workspace",
             "identity_conditions": [{"key": "org-role", "value": "member"}],
+            "resource_conditions": [{"key": "*", "value": "*"}],
             "actions": ["workspace:view", "workspace:edit"],
         },
         {
             "name": "Org members: environment access",
             "resource_type": "environment",
             "identity_conditions": [{"key": "org-role", "value": "member"}],
+            "resource_conditions": [{"key": "*", "value": "*"}],
             "actions": ["environment:view", "environment:deploy"],
         },
-        {
-            "name": "Org members: app usage",
-            "resource_type": "app",
-            "identity_conditions": [{"key": "org-role", "value": "member"}],
-            "actions": ["app:use"],
-        },
-        # Viewer: read-only platform access, use apps
+        # Viewer: read-only platform access. Same reasoning as member for apps.
         {
             "name": "Org viewers: workspace access",
             "resource_type": "workspace",
             "identity_conditions": [{"key": "org-role", "value": "viewer"}],
+            "resource_conditions": [{"key": "*", "value": "*"}],
             "actions": ["workspace:view"],
         },
         {
             "name": "Org viewers: environment access",
             "resource_type": "environment",
             "identity_conditions": [{"key": "org-role", "value": "viewer"}],
+            "resource_conditions": [{"key": "*", "value": "*"}],
             "actions": ["environment:view"],
         },
+        # Personal Assistant owner: one global self-referential policy replaces
+        # N per-PA policies. Only the user whose username matches the app's
+        # owner tag gets app:use on apps tagged app-type=personal-assistant.
         {
-            "name": "Org viewers: app usage",
+            "name": "Personal Assistant: owner access",
             "resource_type": "app",
-            "identity_conditions": [{"key": "org-role", "value": "viewer"}],
+            "identity_conditions": [{"key": "username", "value": "$resource.owner"}],
+            "resource_conditions": [{"key": "app-type", "value": "personal-assistant"}],
             "actions": ["app:use"],
         },
     ]
@@ -603,7 +616,7 @@ def bootstrap_organization(organization: Organization, admin_user: User) -> None
             defaults={
                 "resource_type": seed["resource_type"],
                 "identity_conditions": seed["identity_conditions"],
-                "resource_conditions": [{"key": "*", "value": "*"}],
+                "resource_conditions": seed["resource_conditions"],
                 "actions": seed["actions"],
                 "is_system": True,
             },
@@ -624,6 +637,10 @@ def create_default_app_policy(app: App) -> None:
     """
     Create a default app:use policy and app-name tag when a new App is created.
     Called from App post_save signal.
+
+    Apps whose source template opts into the sidecar proxy (e.g. Personal
+    Assistants) are NOT given the open-access default — their access is
+    governed by purpose-built policies (e.g. the global PA owner policy).
     """
     org = app.organization
 
@@ -635,6 +652,9 @@ def create_default_app_policy(app: App) -> None:
         key="app-name",
         value=app.slug,
     )
+
+    if app.source_template and app.source_template.sidecar_enabled:
+        return
 
     # Create open-access policy for this app
     Policy.objects.get_or_create(

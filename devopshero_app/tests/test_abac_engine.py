@@ -6,6 +6,7 @@ from django.test import TestCase
 from devopshero_app.models import (
     AWSAccount,
     App,
+    AppTemplate,
     Environment,
     Group,
     GroupAttribute,
@@ -1258,16 +1259,14 @@ class TestBootstrapOrganization(TestCase):
             ).exists()
         )
 
-    def test_creates_nine_seed_policies(self) -> None:
+    def test_creates_expected_seed_policies(self) -> None:
         abac.bootstrap_organization(organization=self.org, admin_user=self.admin_user)
         seed_policies = Policy.objects.filter(organization=self.org, is_system=True)
-        self.assertEqual(seed_policies.count(), 9)
+        # 3 admin (ws/env/app) + 2 member (ws/env) + 2 viewer (ws/env) + 1 PA owner.
+        self.assertEqual(seed_policies.count(), 8)
 
         resource_types = set(seed_policies.values_list("resource_type", flat=True))
         self.assertEqual(resource_types, {"workspace", "environment", "app"})
-
-        for policy in seed_policies:
-            self.assertEqual(policy.resource_conditions, [{"key": "*", "value": "*"}])
 
     def test_seed_policy_actions_admin(self) -> None:
         abac.bootstrap_organization(organization=self.org, admin_user=self.admin_user)
@@ -1284,20 +1283,38 @@ class TestBootstrapOrganization(TestCase):
         member_condition = [{"key": "org-role", "value": "member"}]
         ws = Policy.objects.get(organization=self.org, identity_conditions=member_condition, resource_type="workspace")
         env = Policy.objects.get(organization=self.org, identity_conditions=member_condition, resource_type="environment")
-        app = Policy.objects.get(organization=self.org, identity_conditions=member_condition, resource_type="app")
         self.assertEqual(ws.actions, ["workspace:view", "workspace:edit"])
         self.assertEqual(env.actions, ["environment:view", "environment:deploy"])
-        self.assertEqual(app.actions, ["app:use"])
+        # Members do not get a wildcard app:use grant — per-app policies govern
+        # app access (see create_default_app_policy).
+        self.assertFalse(
+            Policy.objects.filter(
+                organization=self.org, identity_conditions=member_condition, resource_type="app",
+            ).exists(),
+        )
 
     def test_seed_policy_actions_viewer(self) -> None:
         abac.bootstrap_organization(organization=self.org, admin_user=self.admin_user)
         viewer_condition = [{"key": "org-role", "value": "viewer"}]
         ws = Policy.objects.get(organization=self.org, identity_conditions=viewer_condition, resource_type="workspace")
         env = Policy.objects.get(organization=self.org, identity_conditions=viewer_condition, resource_type="environment")
-        app = Policy.objects.get(organization=self.org, identity_conditions=viewer_condition, resource_type="app")
         self.assertEqual(ws.actions, ["workspace:view"])
         self.assertEqual(env.actions, ["environment:view"])
-        self.assertEqual(app.actions, ["app:use"])
+        self.assertFalse(
+            Policy.objects.filter(
+                organization=self.org, identity_conditions=viewer_condition, resource_type="app",
+            ).exists(),
+        )
+
+    def test_pa_owner_policy_is_seeded(self) -> None:
+        abac.bootstrap_organization(organization=self.org, admin_user=self.admin_user)
+        pa = Policy.objects.get(
+            organization=self.org, name="Personal Assistant: owner access",
+        )
+        self.assertEqual(pa.resource_type, "app")
+        self.assertEqual(pa.identity_conditions, [{"key": "username", "value": "$resource.owner"}])
+        self.assertEqual(pa.resource_conditions, [{"key": "app-type", "value": "personal-assistant"}])
+        self.assertEqual(pa.actions, ["app:use"])
 
     def test_idempotent(self) -> None:
         abac.bootstrap_organization(organization=self.org, admin_user=self.admin_user)
@@ -1311,7 +1328,7 @@ class TestBootstrapOrganization(TestCase):
         )
         self.assertEqual(
             Policy.objects.filter(organization=self.org, is_system=True).count(),
-            9,
+            8,
         )
 
 
@@ -1374,6 +1391,36 @@ class TestCreateDefaultAppPolicy(TestCase):
                 name=f"Default: {app.name} open access",
             ).count(),
             1,
+        )
+
+    def test_sidecar_template_skips_open_access_policy(self) -> None:
+        # PAs (and any sidecar'd app) must not get the wildcard open-access grant —
+        # their access is governed by the global Personal Assistant owner policy.
+        template = AppTemplate.objects.create(
+            name="PA", slug="pa-fixture", description="", icon="x", category="x",
+            source_repo_path="x", app_type="web", build_strategy="dockerfile",
+            container_port=8000, health_check_path="/health",
+            cpu=256, memory=512, runtime_variables=[],
+            sidecar_enabled=True, is_active=True,
+        )
+        app = App.objects.create(
+            organization=self.org, workspace=self.workspace, repository=self.repo,
+            name="Vmendi PA", slug="vmendi-pa", app_type="web",
+            build_strategy="dockerfile", branch="main", container_port=8000,
+            health_check_path="/health", source_template=template,
+        )
+        # app-name tag still created (used elsewhere for visibility).
+        self.assertTrue(
+            ResourceTag.objects.filter(
+                organization=self.org, resource_type="app", app=app,
+                key="app-name", value="vmendi-pa",
+            ).exists()
+        )
+        # But no open-access policy.
+        self.assertFalse(
+            Policy.objects.filter(
+                organization=self.org, name=f"Default: {app.name} open access",
+            ).exists(),
         )
 
 

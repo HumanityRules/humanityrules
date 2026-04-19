@@ -61,6 +61,31 @@ def _apply_variable_overrides(
     return result
 
 
+async def _stamp_template_tags(
+    organization: models.Organization,
+    app: models.App,
+    template: models.AppTemplate,
+    owner_username: str | None,
+) -> None:
+    """Write ResourceTag rows for template.default_tags, plus the owner tag for PAs."""
+    for tag in (template.default_tags or []):
+        await models.ResourceTag.objects.aget_or_create(
+            organization=organization,
+            resource_type="app",
+            app=app,
+            key=tag["key"],
+            value=tag["value"],
+        )
+    if owner_username:
+        await models.ResourceTag.objects.aget_or_create(
+            organization=organization,
+            resource_type="app",
+            app=app,
+            key="owner",
+            value=owner_username,
+        )
+
+
 async def deploy_from_template(
     template: models.AppTemplate,
     organization: models.Organization,
@@ -69,7 +94,8 @@ async def deploy_from_template(
     app_name: str,
     app_slug: str,
     created_by: models.User,
-    runtime_variable_overrides: dict[str, str] | None = None,
+    runtime_variable_overrides: dict[str, str] | None,
+    owner_username: str | None,
 ) -> models.Deployment:
     """Create Repository + App + Blueprint + Deployment from a template and queue for deployment."""
     clone_url = f"file://{settings.TEMPLATE_REPOS_DIR / template.source_repo_path}"
@@ -102,6 +128,11 @@ async def deploy_from_template(
         health_check_grace_period=template.health_check_grace_period,
         branch="",
         created_by=created_by,
+    )
+
+    await _stamp_template_tags(
+        organization=organization, app=app, template=template,
+        owner_username=owner_username,
     )
 
     runtime_variables = _apply_variable_overrides(template.runtime_variables, runtime_variable_overrides)
