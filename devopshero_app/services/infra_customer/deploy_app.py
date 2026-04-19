@@ -674,7 +674,17 @@ class AppStack(Stack):
             health_check_grace_period=Duration.seconds(health_check_grace),
             circuit_breaker=ecs.DeploymentCircuitBreaker(enable=True, rollback=True),
         )
-        service.attach_to_application_target_group(target_group)
+        if sidecar_enabled:
+            # Two containers — attach_to_application_target_group would pick the
+            # first container with a port mapping (the app at container_port),
+            # which is the wrong one. Point the target group explicitly at the
+            # sidecar container on sidecar_listen_port.
+            target_group.add_target(service.load_balancer_target(
+                container_name=f"{app_config.app_name}-sidecar",
+                container_port=sidecar_listen_port,
+            ))
+        else:
+            service.attach_to_application_target_group(target_group)
 
         Tags.of(service).add("App", app_config.app_name)
         Tags.of(task_definition).add("App", app_config.app_name)

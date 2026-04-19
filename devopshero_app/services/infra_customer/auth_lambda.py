@@ -11,7 +11,7 @@ See docs/sidecar_proxy_design.md and lambdas/sidecar_auth/README.md.
 from dataclasses import dataclass
 from pathlib import Path
 
-from aws_cdk import Aws, CfnOutput, Duration, RemovalPolicy, Stack
+from aws_cdk import Aws, CfnOutput, DockerImage, Duration, RemovalPolicy, Stack
 from aws_cdk import aws_ec2 as ec2
 from aws_cdk import aws_elasticloadbalancingv2 as elbv2
 from aws_cdk import aws_elasticloadbalancingv2_targets as elbv2_targets
@@ -85,13 +85,19 @@ class AuthLambdaStack(Stack):
             removal_policy=RemovalPolicy.DESTROY,
         )
 
-        # Bundle the Lambda code + dependencies. The bundling step runs pip
-        # in a Lambda-compatible image, so cryptography's native wheels are
-        # picked up for the correct runtime and arch.
+        # Bundle the Lambda code + dependencies. The bundling image and the
+        # Lambda function must both be ARM64 so cryptography's native wheels
+        # (_rust.abi3.so) get pip-resolved for the right arch; running the
+        # bundler on an x86 image and the function on ARM (or vice-versa)
+        # yields a cold-start ImportModuleError.
+        # Use the SAM ARM64 build image explicitly so pip resolves ARM64
+        # wheels — matches the Architecture.ARM_64 set on the function below.
         code = lambda_.Code.from_asset(
             str(AUTH_LAMBDA_SOURCE_DIR),
             bundling={
-                "image": lambda_.Runtime.PYTHON_3_12.bundling_image,
+                "image": DockerImage.from_registry(
+                    "public.ecr.aws/sam/build-python3.12:latest-arm64",
+                ),
                 "command": [
                     "bash", "-c",
                     (
@@ -106,6 +112,11 @@ class AuthLambdaStack(Stack):
             self, "AuthLambda",
             function_name=f"{prefix}",
             runtime=lambda_.Runtime.PYTHON_3_12,
+            # Run on Graviton so pip-installed native wheels (cryptography's Rust
+            # bindings) match the architecture of the local bundling image that
+            # produced them. Without this, x86_64 Lambda can't load the ARM64
+            # .so the bundler pulled in and import handler crashes at cold start.
+            architecture=lambda_.Architecture.ARM_64,
             handler="handler.handler",
             code=code,
             role=lambda_role,
