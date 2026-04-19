@@ -81,13 +81,20 @@ def mint_session_jwt(
             f"Environment {env_slug!r} not found in account {aws_account_name!r}.",
         )
 
-    session = iam_utils.get_assumed_role_session(
-        access_key=settings.DOH_AWS_ACCESS_KEY,
-        secret_key=settings.DOH_AWS_SECRET_KEY,
-        account_id=aws_account.aws_account_id,
-        external_id=str(aws_account.external_id),
-        region=env.aws_region,
-    )
+    # iam_utils prints "🔑 Assuming role" banners to stdout; this command's
+    # stdout is supposed to be the JWT (so callers can pipe it). Silence the
+    # banners by redirecting stdout during role assumption only.
+    import contextlib
+    import io
+    import sys
+    with contextlib.redirect_stdout(sys.stderr):
+        session = iam_utils.get_assumed_role_session(
+            access_key=settings.DOH_AWS_ACCESS_KEY,
+            secret_key=settings.DOH_AWS_SECRET_KEY,
+            account_id=aws_account.aws_account_id,
+            external_id=str(aws_account.external_id),
+            region=env.aws_region,
+        )
 
     secret_name = f"devopshero/{env_slug}/sidecar-jwt-key"
     sm = session.client("secretsmanager")

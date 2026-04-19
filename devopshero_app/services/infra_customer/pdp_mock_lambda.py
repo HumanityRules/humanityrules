@@ -82,6 +82,7 @@ class PdpMockLambdaStack(Stack):
             self, "PdpMockLambda",
             function_name=prefix,
             runtime=lambda_.Runtime.PYTHON_3_12,
+            architecture=lambda_.Architecture.ARM_64,
             handler="handler.handler",
             code=lambda_.Code.from_asset(str(PDP_MOCK_SOURCE_DIR)),
             role=lambda_role,
