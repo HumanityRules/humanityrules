@@ -1,4 +1,5 @@
 import hashlib
+import logging
 import secrets
 from functools import lru_cache
 from urllib.parse import urlencode
@@ -12,6 +13,8 @@ from workos import WorkOSClient
 
 from ..models import Organization, OrganizationMembership, User
 from ..services import abac
+
+logger = logging.getLogger(__name__)
 
 
 @lru_cache(maxsize=1)
@@ -173,6 +176,8 @@ def oidc_callback(request):
         userinfo = _exchange_oidc_code(org, code, redirect_uri)
     except Exception as e:
         return HttpResponseBadRequest(f"OIDC authentication failed: {e}")
+
+    logger.info("oidc login org=%s sub=%s email=%s", org.slug, userinfo["sub"], userinfo["email"])
 
     # Clean up session state
     request.session.pop("oidc_state", None)
