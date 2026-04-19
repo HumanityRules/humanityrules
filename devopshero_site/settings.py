@@ -84,7 +84,7 @@ MIDDLEWARE = [
     "django_htmx.middleware.HtmxMiddleware",
 ]
 
-if POSTHOG_API_KEY:
+if POSTHOG_API_KEY and not DEBUG:
     MIDDLEWARE.append("posthog.integrations.django.PosthogContextMiddleware")
 
 ROOT_URLCONF = 'devopshero_site.urls'

@@ -1,5 +1,28 @@
 # DevOpsHero Development Journal
 
+## 2026-04-18 19:40 - [Bugfix] Gate PostHog middleware on DEBUG to match client/context-processor
+
+**Conversation:** [2026-04-18-1941-c4978add.md](conversations/2026-04-18-1941-c4978add.md)
+
+A local OIDC-callback flow hit a legitimate `UNIQUE constraint failed` error on `User.username`, but Django's error page was being replaced by a second exception from PostHog: `ValueError: API key is required` raised from `posthog/__init__.py:850` inside `PosthogContextMiddleware.process_exception`. The middleware was trying to `capture_exception`, which lazy-calls `setup()`, which re-validates the API key and blows up if the default client was never initialized.
+
+Root cause: inconsistent DEBUG-gating across the three PostHog integration points.
+
+- `devopshero_app/apps.py:29` — client init: gated on `posthog_key and not settings.DEBUG`. ✅
+- `devopshero_app/context_processors.py:10` — template config: gated on `not api_key or settings.DEBUG`. ✅
+- `devopshero_site/settings.py:87` — middleware registration: **only** gated on `POSTHOG_API_KEY`. ❌
+
+In local dev, `.env` has a real `POSTHOG_API_KEY` (so infra and prod work), so on dev boxes the middleware was being added to `MIDDLEWARE` but the default client was never set (because `apps.py` correctly skipped init in DEBUG). First unhandled exception → middleware tries to report it → PostHog's lazy `setup()` rechecks the module-level `api_key` var (unset) and raises. The secondary exception masks the real one in the debug page.
+
+Fix: one-line change in `devopshero_site/settings.py:87` to `if POSTHOG_API_KEY and not DEBUG:`. All three sites now agree: PostHog is fully off in DEBUG.
+
+**Key points:**
+
+- The `process_exception` hook inside analytics middleware is a footgun: if it throws, it replaces the original traceback — exactly when you most need the original. Worth remembering if we ever add another exception-reporting middleware.
+- PostHog's SDK has lazy module-level `setup()` that re-validates env at first call, *not* at process start. So "no errors at boot" doesn't prove the integration is wired up correctly — it only proves nothing has tried to use it yet.
+- The pattern "guard every integration site on the same condition" is the right shape. The bug wasn't that DEBUG-gating was wrong conceptually — it was that one of three sites forgot to do it. If we ever add a fourth PostHog hook, it needs the same guard. Consider a single helper like `posthog_enabled()` in `settings.py` to collapse the three checks into one.
+- Confirmed there's nothing else to gate: the infra stacks (`app_stack.py`, `cdn_stack.py`, `sync_secrets.py`) are CDK-only and don't execute in the Django runtime; the template partial `_posthog.html` already short-circuits on `{% if posthog_config_json %}` which the context processor sets to `None` in DEBUG.
+
 ## 2026-04-18 13:06 - [Deployment] Pin Hermes WebUI base image + verify 0.50.87 locally
 
 **Conversation:** [2026-04-18-1307-62302632.md](conversations/2026-04-18-1307-62302632.md)
