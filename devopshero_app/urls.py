@@ -115,6 +115,8 @@ urlpatterns = [
     path("api/aws/install-account-callback", views.aws_install_account_callback, name="aws_install_account_callback"),
     #  - github_webhook: receives push/installation events from GitHub
     path("api/github/webhook", views.github_webhook, name="github_webhook"),
+    #  - pdp_evaluate: called by sidecar proxies to authorize each request against ABAC
+    path("api/pdp/evaluate", views.pdp_evaluate, name="pdp_evaluate"),
 
     # Chat / Agent
     path("chat/app_deploy/<slug:workspace_slug>/<str:repo_owner>/<str:repo_name>/", views.chat_app_deploy, name="chat_app_deploy_with_owner"),

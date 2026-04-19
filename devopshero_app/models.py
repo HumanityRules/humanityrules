@@ -1543,6 +1543,31 @@ class Policy(models.Model):
         return self.name
 
 
+class SidecarToken(models.Model):
+    """
+    Per-environment bearer token used by sidecar proxies to authenticate calls to
+    the DOH PDP endpoint. One active token per environment; the token itself lives
+    in the customer's AWS Secrets Manager (devopshero/{env-slug}/shared-secrets,
+    key DOH_SIDECAR_TOKEN). Only the hash is stored here so DOH can authenticate
+    incoming PDP requests without ever seeing the raw value after issue.
+    """
+    id = models.UUIDField(primary_key=True, default=uuid.uuid7, editable=False)
+    environment = models.OneToOneField(
+        Environment,
+        on_delete=models.CASCADE,
+        related_name="sidecar_token",
+    )
+    token_hash = models.CharField(
+        max_length=128,
+        unique=True,
+        help_text="SHA-256 hex digest of the raw bearer token.",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self) -> str:
+        return f"SidecarToken({self.environment.slug})"
+
+
 # =============================================================================
 # Signals
 # =============================================================================
