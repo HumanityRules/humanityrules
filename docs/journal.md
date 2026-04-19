@@ -1,5 +1,40 @@
 # DevOpsHero Development Journal
 
+## 2026-04-18 19:59 - [Onboarding] End-to-end Okta OIDC test against existing Course Hero org
+
+**Conversation:** [2026-04-18-1959-ee5cf47f.md](conversations/2026-04-18-1959-ee5cf47f.md)
+
+First real end-to-end validation of the OIDC / Okta login path against a real Okta trial tenant, on local dev (SQLite). Goal wasn't to ship anything — it was to confirm the flow works and surface friction that the `docs/okta_oidc_setup.md` playbook doesn't cover. Ended with `vmendi@gmail.com` successfully logging in via Okta and landing on the existing superuser/admin row (keeping Course Hero admin + ABAC policies intact), while WorkOS login continues to work for the same account.
+
+**What was exercised:**
+
+- `setup_oidc_org --slug course-hero ...` flipped the existing WorkOS org to OIDC in place. The command is `update_or_create(slug=...)`, so reusing an already-bootstrapped slug just swaps `auth_provider` WorkOS → OIDC and stores creds. Bootstrap path doesn't re-run (correct — the org already has admin + seeded ABAC).
+- Left `--bootstrap-admin-email` empty on purpose: the org is already bootstrapped, there's no meaningful "first admin" to seed.
+- `/oidc/login/?org=course-hero` → Okta → `/oidc/callback/` flow works against a free Okta trial.
+
+**Key learnings (what the playbook misses):**
+
+- **`auth_provider` is not exclusive.** The field is only read in `oidc_login` (auth.py:83) to filter which orgs the OIDC entrypoint accepts. `auth_callback` (WorkOS) never reads it — it looks up purely by `workos_user_id`. So flipping an org to OIDC does *not* break WorkOS for users already linked to it. A user can effectively have two providers if both ID fields are populated on their row. Worth calling out in the doc — customers piloting Okta don't need a hard cutover.
+- **Redirect URI on localhost.** The doc only shows the prod redirect (`https://devopshero.ai/oidc/callback/`). On the laptop it must be `http://127.0.0.1:8000/oidc/callback/` (or `localhost` — must match the browser host exactly, with trailing slash, http not https). Okta does exact-string matching and returned a clear "redirect_uri parameter must be a Login redirect URI" error.
+- **Callback blows up on username collision** (auth.py:191). `oidc_callback` keys on `oidc_sub`, and when the lookup misses it unconditionally `create_user(username=email, ...)`. If a user with that email already exists (e.g. legacy WorkOS row), `username` UNIQUE fires. There is no email-fallback and no onboarding gate — unlike `auth_callback` which routes unknown WorkOS users through `/onboarding/`. For any future real customer piloting Okta whose employees' emails happen to collide with pre-existing DOH usernames, this will crash. Worth a proper fix: either an email-fallback link, or route to an onboarding page that merges identities.
+- **Nothing logs the Okta `sub`.** The `sub` is extracted in `_exchange_oidc_code` (auth.py:69) as a local var, never logged, never stored. To pre-link an existing user you have to go fish the `sub` out of Okta's admin UI (`Directory → People → user → URL contains `00u…`), which is the `sub`). Adding a `logger.info("oidc login sub=%s email=%s", ...)` in the callback would've saved real debugging time.
+- **`oidc_sub` wasn't exposed in Django admin.** `devopshero_app/admin.py:38-50` only surfaced `workos_user_id`. Added `oidc_sub` to `list_display`, `search_fields`, and both `fieldsets` / `add_fieldsets` ("OIDC" section). That gave a UI path to paste the sub onto the existing vmendi user row — after which retrying the login lands on the existing superuser and the callback's `update` path (auth.py:184-187) refreshes email/first/last from Okta.
+
+**Resolution path for this specific test:**
+
+1. Flip `course-hero` via `setup_oidc_org` (no `--bootstrap-admin-email`).
+2. Add `http://127.0.0.1:8000/oidc/callback/` to Okta app's Sign-in redirect URIs.
+3. Assign Okta user → app; ensure default authorization server has at least one access-policy rule (otherwise "Policy evaluation failed").
+4. First login attempt to get `sub`… except there's no log for it, so either use a non-colliding email OR look up the Okta user's `00u…` ID in Okta admin and paste it into the now-visible `oidc_sub` field on the existing User row via Django admin.
+5. Retry — works. Callback hits `User.objects.get(oidc_sub=...)`, refreshes name fields, logs in.
+
+**Things worth doing next:**
+
+- Log the `sub`/email in `oidc_callback` so operators can debug without digging in Okta.
+- Add email-fallback (or onboarding route) for OIDC users whose email matches an existing user — right now a collision produces a 500 with no recovery path.
+- Update `docs/okta_oidc_setup.md` with the localhost redirect URI note and with the "flipping an existing WorkOS org doesn't break WorkOS login" clarification.
+- Consider a `link_oidc_sub` management command to formalize the pre-link workflow (vs. pasting in admin).
+
 ## 2026-04-18 19:40 - [Bugfix] Gate PostHog middleware on DEBUG to match client/context-processor
 
 **Conversation:** [2026-04-18-1941-c4978add.md](conversations/2026-04-18-1941-c4978add.md)
