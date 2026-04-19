@@ -336,7 +336,7 @@ A request to `/executive-dashboards/q1` requires `authenticated = true` (from th
 1. Sidecar starts up and fetches the app's policies from the PDP
 2. If the app has a `*` policy (unconditional `app:use` grant): sidecar enters passthrough mode, all requests proxy directly to the app container, done
 3. Request arrives at the sidecar
-4. Is the user authenticated? If not, redirect to WorkOS SSO flow
+4. Is the user authenticated? If not, redirect to SSO flow
 5. On successful auth, resolve the identity and its attributes
 6. Send policy evaluation request to the PDP: identity attributes, app tags (direct + inherited), request path, requested action (`app:use`)
 7. PDP evaluates the base app policies. If denied, return deny.
