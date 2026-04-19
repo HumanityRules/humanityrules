@@ -39,6 +39,21 @@ class User(AbstractUser):
     def __str__(self) -> str:
         return self.email or self.username
 
+    def save(self, *args, **kwargs) -> None:
+        # Lock username against post-creation mutation. ABAC policies use
+        # username as a stable identity anchor (see docs/sidecar_proxy_design.md
+        # and the $resource.owner self-referential policy form); letting it
+        # drift would invalidate those policies or enable takeover of
+        # owned-by resources (e.g. Personal Assistants).
+        if self.pk is not None:
+            current = type(self).objects.filter(pk=self.pk).values_list("username", flat=True).first()
+            if current is not None and current != self.username:
+                raise ValueError(
+                    f"User.username is immutable after creation "
+                    f"(attempted {current!r} -> {self.username!r}).",
+                )
+        super().save(*args, **kwargs)
+
 
 class Organization(models.Model):
     """
