@@ -182,6 +182,25 @@ A policy applies when the identity's attributes satisfy the identity condition A
 
 Both identity conditions and resource conditions support multiple clauses, AND-ed together. For example, a policy can require `department = finance AND clearance = sensitive`. OR is expressed by creating multiple policies.
 
+### Self-Referential Conditions
+
+Policies can also express a constraint that links an identity attribute to a resource tag — "the identity's attribute X must equal the resource's tag Y." This is written with the special `$identity.<key>` and `$resource.<key>` references in place of a literal value:
+
+- **Identity condition:** `username = $resource.owner`
+- **Resource condition:** `app-type = personal-assistant`
+- **Actions:** `app:use`
+
+This single policy grants every person access to resources tagged as their own — the canonical "owned-by" pattern. Without self-referential conditions, expressing this requires one policy per (identity, resource) pair.
+
+Semantics:
+
+- Either side of a clause can be a literal or a reference. `username = $resource.owner` and `$identity.username = owner-placeholder` are different constructs; use `$resource.<key>` on the value side of an identity clause.
+- The reference is evaluated per-request, against the concrete identity and resource being checked.
+- If the referenced attribute or tag is absent, the clause does not match.
+- All other evaluation rules apply unchanged (deny-overrides, union-of-grants, multiple clauses AND-ed).
+
+The policy editor exposes `$resource.<key>` as a value choice in the identity condition's value dropdown, populated from the set of tag keys that exist on the selected resource type.
+
 ### Examples
 
 Grant all finance department members view access to finance workspaces:
@@ -219,6 +238,12 @@ Prevent contractors from deploying to or approving changes in production, regard
 - **Identity condition:** `employment-type = contractor`
 - **Resource condition:** `tier = production` (on environment)
 - **Actions:** `!environment:deploy`, `!environment:approve`
+
+Grant every employee access to their own personal assistant, via one global policy:
+
+- **Identity condition:** `username = $resource.owner`
+- **Resource condition:** `app-type = personal-assistant` (on app)
+- **Actions:** `app:use`
 
 ### Evaluation
 
