@@ -78,7 +78,7 @@ Redirect validation:
 
 Runtime shape:
 
-- **Image:** `ghcr.io/devopshero/sidecar:x.y.z`, published by DOH.
+- **Image:** published to ECR by DOH. Distribution shape (single DOH-owned ECR with cross-account pull vs per-customer-account mirror via the existing `build_and_push_docker_image` flow) is unresolved — see the implementation plan.
 - **Placement:** same ECS task as the app container. Sidecar listens on the task's public port; app container listens on localhost. Task definition is produced by DOH when the AppTemplate opts in.
 - **Opt-in flag:** AppTemplate declares `sidecar: true` (or equivalent). Without it, the task is deployed without a sidecar and retains its existing behavior.
 

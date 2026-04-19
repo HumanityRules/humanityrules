@@ -21,7 +21,17 @@ from devopshero_app.models import (
 from django.core.exceptions import ValidationError
 
 from devopshero_app.services import abac
-from devopshero_app.services.abac import _conditions_match
+from devopshero_app.services.abac import _conditions_match as _raw_conditions_match
+
+
+def _conditions_match(conditions: list[dict], self_side: set[tuple[str, str]]) -> bool:
+    """Test helper: the historical two-arg form, with references disallowed (no other side)."""
+    return _raw_conditions_match(
+        conditions=conditions,
+        self_side=self_side,
+        other_side_label="resource",
+        other_side_map=None,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -1931,3 +1941,198 @@ class TestSuggestionPalette(TestCase):
         keys, pairs = abac.get_identity_attribute_suggestions(self.org)
         self.assertEqual(keys, sorted(keys))
         self.assertEqual(pairs, sorted(pairs))
+
+
+# ---------------------------------------------------------------------------
+# Self-referential conditions ($identity.<key> / $resource.<key>)
+# ---------------------------------------------------------------------------
+
+
+class TestSelfReferentialValidation(TestCase):
+
+    def test_resource_ref_in_identity_value_is_valid(self) -> None:
+        abac.validate_policy_conditions(
+            identity_conditions=[{"key": "username", "value": "$resource.owner"}],
+            resource_conditions=[{"key": "app-type", "value": "personal-assistant"}],
+        )
+
+    def test_identity_ref_in_resource_value_is_valid(self) -> None:
+        abac.validate_policy_conditions(
+            identity_conditions=[{"key": "username", "value": "alice"}],
+            resource_conditions=[{"key": "owner", "value": "$identity.username"}],
+        )
+
+    def test_identity_ref_in_identity_value_raises(self) -> None:
+        with self.assertRaises(ValidationError) as cm:
+            abac.validate_policy_conditions(
+                identity_conditions=[{"key": "username", "value": "$identity.email"}],
+                resource_conditions=[],
+            )
+        self.assertIn("Identity", str(cm.exception))
+
+    def test_resource_ref_in_resource_value_raises(self) -> None:
+        with self.assertRaises(ValidationError) as cm:
+            abac.validate_policy_conditions(
+                identity_conditions=[],
+                resource_conditions=[{"key": "owner", "value": "$resource.other"}],
+            )
+        self.assertIn("Resource", str(cm.exception))
+
+    def test_reference_in_key_is_rejected(self) -> None:
+        with self.assertRaises(ValidationError):
+            abac.validate_policy_conditions(
+                identity_conditions=[{"key": "$resource.owner", "value": "alice"}],
+                resource_conditions=[],
+            )
+
+
+class TestSelfReferentialEvaluation(TestCase):
+
+    def setUp(self) -> None:
+        self.org = Organization.objects.create(name="Owner Org", slug="owner-org")
+        self.workspace = Workspace.objects.create(
+            organization=self.org, name="PAs", slug="pas",
+        )
+        self.repo = Repository.objects.create(
+            organization=self.org, provider="github", name="hermes",
+            full_name="org/hermes", clone_url="https://github.com/org/hermes.git",
+        )
+        self.owner = User.objects.create_user(
+            username="vmendi", password="pw", current_organization=self.org,
+        )
+        self.stranger = User.objects.create_user(
+            username="alice", password="pw", current_organization=self.org,
+        )
+        self.pa_app = App.objects.create(
+            organization=self.org, workspace=self.workspace, repository=self.repo,
+            name="VmendiPA", slug="vmendi-hermes", app_type="web",
+            build_strategy="dockerfile", branch="main", container_port=8000,
+            health_check_path="/health",
+        )
+        # Drop the auto-created open-access policy so only the self-ref policy is in play.
+        Policy.objects.filter(
+            organization=self.org, name=f"Default: {self.pa_app.name} open access",
+        ).delete()
+        ResourceTag.objects.create(
+            organization=self.org, resource_type="app", app=self.pa_app,
+            key="app-type", value="personal-assistant",
+        )
+        ResourceTag.objects.create(
+            organization=self.org, resource_type="app", app=self.pa_app,
+            key="owner", value="vmendi",
+        )
+        # Identity attribute carrying the username so it enters the effective-attr set.
+        IdentityAttribute.objects.create(
+            organization=self.org, user=self.owner, key="username", value="vmendi",
+        )
+        IdentityAttribute.objects.create(
+            organization=self.org, user=self.stranger, key="username", value="alice",
+        )
+        Policy.objects.create(
+            organization=self.org, name="PA owner access",
+            resource_type="app",
+            identity_conditions=[{"key": "username", "value": "$resource.owner"}],
+            resource_conditions=[{"key": "app-type", "value": "personal-assistant"}],
+            actions=["app:use"],
+        )
+
+    def test_owner_is_granted_app_use(self) -> None:
+        allowed = abac.evaluate_policies(
+            organization=self.org, user=self.owner,
+            resource=self.pa_app, resource_type="app",
+        )
+        self.assertIn("app:use", allowed)
+
+    def test_non_owner_is_denied(self) -> None:
+        allowed = abac.evaluate_policies(
+            organization=self.org, user=self.stranger,
+            resource=self.pa_app, resource_type="app",
+        )
+        self.assertNotIn("app:use", allowed)
+
+    def test_missing_owner_tag_denies_owner(self) -> None:
+        ResourceTag.objects.filter(
+            organization=self.org, app=self.pa_app, key="owner",
+        ).delete()
+        allowed = abac.evaluate_policies(
+            organization=self.org, user=self.owner,
+            resource=self.pa_app, resource_type="app",
+        )
+        self.assertNotIn("app:use", allowed)
+
+    def test_missing_username_attribute_denies(self) -> None:
+        IdentityAttribute.objects.filter(
+            organization=self.org, user=self.owner, key="username",
+        ).delete()
+        allowed = abac.evaluate_policies(
+            organization=self.org, user=self.owner,
+            resource=self.pa_app, resource_type="app",
+        )
+        self.assertNotIn("app:use", allowed)
+
+    def test_identity_side_reference_evaluates(self) -> None:
+        # Policy uses $identity.<key> on the resource side. Owner tag refers to
+        # the identity's username attribute.
+        Policy.objects.filter(organization=self.org, name="PA owner access").delete()
+        Policy.objects.create(
+            organization=self.org, name="PA owner (resource-side ref)",
+            resource_type="app",
+            identity_conditions=[{"key": "app-type", "value": "personal-assistant"}],
+            # Intentional: identity conditions here are purely attribute literals;
+            # we put the reference on the resource side instead.
+            resource_conditions=[{"key": "owner", "value": "$identity.username"}],
+            actions=["app:use"],
+        )
+        # The identity condition needs to match against attributes of the user.
+        # Give both users the "app-type=personal-assistant" identity attribute so
+        # only the resource-side ref discriminates.
+        IdentityAttribute.objects.create(
+            organization=self.org, user=self.owner,
+            key="app-type", value="personal-assistant",
+        )
+        IdentityAttribute.objects.create(
+            organization=self.org, user=self.stranger,
+            key="app-type", value="personal-assistant",
+        )
+        owner_allowed = abac.evaluate_policies(
+            organization=self.org, user=self.owner,
+            resource=self.pa_app, resource_type="app",
+        )
+        stranger_allowed = abac.evaluate_policies(
+            organization=self.org, user=self.stranger,
+            resource=self.pa_app, resource_type="app",
+        )
+        self.assertIn("app:use", owner_allowed)
+        self.assertNotIn("app:use", stranger_allowed)
+
+    def test_filter_permitted_resources_respects_self_ref(self) -> None:
+        # Second PA owned by a different user.
+        other_app = App.objects.create(
+            organization=self.org, workspace=self.workspace, repository=self.repo,
+            name="AlicePA", slug="alice-hermes", app_type="web",
+            build_strategy="dockerfile", branch="main", container_port=8000,
+            health_check_path="/health",
+        )
+        Policy.objects.filter(
+            organization=self.org, name=f"Default: {other_app.name} open access",
+        ).delete()
+        ResourceTag.objects.create(
+            organization=self.org, resource_type="app", app=other_app,
+            key="app-type", value="personal-assistant",
+        )
+        ResourceTag.objects.create(
+            organization=self.org, resource_type="app", app=other_app,
+            key="owner", value="alice",
+        )
+        visible_for_owner = abac.filter_permitted_resources(
+            organization=self.org, user=self.owner,
+            queryset=App.objects.filter(organization=self.org),
+            resource_type="app", action="app:use",
+        )
+        self.assertEqual(list(visible_for_owner.values_list("slug", flat=True)), ["vmendi-hermes"])
+        visible_for_stranger = abac.filter_permitted_resources(
+            organization=self.org, user=self.stranger,
+            queryset=App.objects.filter(organization=self.org),
+            resource_type="app", action="app:use",
+        )
+        self.assertEqual(list(visible_for_stranger.values_list("slug", flat=True)), ["alice-hermes"])
