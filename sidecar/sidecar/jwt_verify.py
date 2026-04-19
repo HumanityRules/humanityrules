@@ -1,12 +1,9 @@
-"""JWT verification for the doh_session cookie."""
+"""JWT verification for the doh_session cookie, backed by PyJWKClient."""
 
 import logging
 from dataclasses import dataclass
 
-import httpx
 import jwt
-
-from . import jwks as jwks_mod
 
 logger = logging.getLogger(__name__)
 
@@ -26,34 +23,18 @@ class SessionIdentity:
     email: str
 
 
-async def verify_session_cookie(
-    jwt_value: str,
-    jwks_cache: jwks_mod.JwksCache,
-    http_client: httpx.AsyncClient,
-) -> SessionIdentity | None:
+def verify_session_cookie(jwt_value: str, jwks_client: jwt.PyJWKClient) -> SessionIdentity | None:
     """Verify a JWT cookie. Returns claims on success, None on failure (log + redirect)."""
     try:
-        unverified_header = jwt.get_unverified_header(jwt_value)
+        signing_key = jwks_client.get_signing_key_from_jwt(jwt_value).key
     except jwt.PyJWTError as exc:
-        logger.error("jwt reject reason=malformed-header err=%s", exc)
-        return None
-
-    kid = unverified_header.get("kid")
-    if not kid:
-        logger.error("jwt reject reason=missing-kid")
-        return None
-
-    public_key = await jwks_mod.get_public_key(
-        cache=jwks_cache, http_client=http_client, kid=kid,
-    )
-    if public_key is None:
-        logger.error("jwt reject reason=unknown-kid kid=%s", kid)
+        logger.error("jwt reject reason=jwks-lookup err=%s", exc)
         return None
 
     try:
         claims = jwt.decode(
             jwt_value,
-            key=public_key,
+            key=signing_key,
             algorithms=ACCEPTED_ALGORITHMS,
             leeway=LEEWAY_SECONDS,
             options={"require": ["exp", "iat", "sub"]},
