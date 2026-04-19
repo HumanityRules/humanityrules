@@ -113,6 +113,11 @@ class AppConfig:
     # EFS volume configuration (None = no EFS volume)
     efs_config: EfsConfig | None = None
 
+    # Sidecar proxy: when True, the task definition gets a second container
+    # that enforces SSO + ABAC in front of the app container. See
+    # docs/sidecar_proxy_design.md.
+    sidecar_enabled: bool = False
+
     def to_template_vars(self) -> dict:
         """Convert to dict for Jinja2 template rendering (CloudFormation)."""
         return {
