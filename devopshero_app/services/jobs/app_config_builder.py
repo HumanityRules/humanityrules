@@ -81,6 +81,8 @@ def build_app_config_from_blueprint(blueprint: DeploymentBlueprint, repo_path: P
             posix_gid=raw["posix_gid"],
         )
 
+    sidecar_enabled = bool(app.source_template and app.source_template.sidecar_enabled)
+
     return infra_customer.appconfig.AppConfig(
         app_name=app.slug,
         ecr_repo_name=ecr_repo_name,
@@ -95,4 +97,5 @@ def build_app_config_from_blueprint(blueprint: DeploymentBlueprint, repo_path: P
         database_config=database_config,
         app_secrets=blueprint.app_secrets,
         efs_config=efs_config,
+        sidecar_enabled=sidecar_enabled,
     )

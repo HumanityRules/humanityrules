@@ -581,6 +581,15 @@ class AppTemplate(models.Model):
     # null = no EFS volume
     efs_config = models.JSONField(null=True, blank=True)
 
+    # When True, deployed apps from this template run behind the sidecar proxy
+    # (SSO + ABAC at the edge). See docs/sidecar_proxy_design.md.
+    sidecar_enabled = models.BooleanField(default=False)
+
+    # Default resource tags stamped on every app deployed from this template.
+    # List of {key, value}. Used by the deploy flow to write ResourceTag rows
+    # at app creation time — e.g. [{"key": "app-type", "value": "personal-assistant"}].
+    default_tags = models.JSONField(default=list, blank=True)
+
     is_active = models.BooleanField()
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
