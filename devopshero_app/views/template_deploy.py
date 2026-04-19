@@ -70,6 +70,33 @@ def _selected_label(options: list[dict], value: str, placeholder: str) -> str:
     return placeholder
 
 
+def _template_requires_owner(template: models.AppTemplate) -> bool:
+    """True iff the template's default_tags mark it as a Personal Assistant."""
+    if not template.sidecar_enabled:
+        return False
+    for tag in (template.default_tags or []):
+        if tag.get("key") == "app-type" and tag.get("value") == "personal-assistant":
+            return True
+    return False
+
+
+def _owner_options_for(request: HttpRequest, org: models.Organization) -> list[dict]:
+    """Users the current requester may pick as an owner.
+
+    Org admins may deploy a PA on behalf of any member of the organization.
+    Everyone else is locked to themselves.
+    """
+    if abac.is_org_admin(organization=org, user=request.user):
+        memberships = models.OrganizationMembership.objects.filter(
+            organization=org,
+        ).select_related("user").order_by("user__username")
+        return [
+            {"id": m.user.username, "name": f"{m.user.username} ({m.user.email})"}
+            for m in memberships
+        ]
+    return [{"id": request.user.username, "name": f"{request.user.username} ({request.user.email})"}]
+
+
 @login_required
 def template_deploy_picker(request: HttpRequest) -> HttpResponse:
     """Show a grid of all active templates."""
@@ -116,6 +143,12 @@ def template_deploy_form(request: HttpRequest, template_slug: str) -> HttpRespon
     workspace_options = _workspace_options(workspaces)
     environment_options = _environment_options(environments)
 
+    requires_owner = _template_requires_owner(template)
+    owner_options = _owner_options_for(request=request, org=org) if requires_owner else []
+    # Non-admins are locked to themselves; the dropdown is visible but has only
+    # one option. Pre-select it so submission works without extra clicks.
+    default_owner = request.user.username if requires_owner else ""
+
     context = base.get_app_shell_context(request=request, current_page="workspaces")
     context["template"] = template
     context["workspace_options"] = workspace_options
@@ -126,6 +159,11 @@ def template_deploy_form(request: HttpRequest, template_slug: str) -> HttpRespon
     context["selected_environment_label"] = "Select an environment"
     context["default_app_name"] = template.name
     context["variable_groups"] = _group_editable_variables(editable_vars)
+    context["requires_owner"] = requires_owner
+    context["owner_options"] = owner_options
+    context["selected_owner_id"] = default_owner
+    context["selected_owner_label"] = _selected_label(owner_options, default_owner, "Select an owner")
+    context["owner_locked"] = requires_owner and not abac.is_org_admin(organization=org, user=request.user)
     return render(request, "devopshero_app/deploy/template_deploy_form.html", context=context)
 
 
@@ -134,6 +172,7 @@ def _handle_deploy(request: HttpRequest, template: models.AppTemplate, org: mode
     app_name = request.POST.get("app_name", "").strip()
     workspace_id = request.POST.get("workspace_id", "")
     environment_id = request.POST.get("environment_id", "")
+    submitted_owner = request.POST.get("owner_id", "").strip()
 
     errors = []
     if not app_name:
@@ -149,6 +188,26 @@ def _handle_deploy(request: HttpRequest, template: models.AppTemplate, org: mode
 
     if not errors and models.App.objects.filter(organization=org, slug=app_slug).exists():
         errors.append(f"An app with the slug '{app_slug}' already exists in this organization.")
+
+    # Owner field: required for PA templates. Non-admins are always themselves.
+    requires_owner = _template_requires_owner(template)
+    owner_username: str | None = None
+    if requires_owner:
+        is_admin = abac.is_org_admin(organization=org, user=request.user)
+        if is_admin:
+            if not submitted_owner:
+                errors.append("Owner is required.")
+            else:
+                owner_exists = models.OrganizationMembership.objects.filter(
+                    organization=org, user__username=submitted_owner,
+                ).exists()
+                if not owner_exists:
+                    errors.append("Selected owner is not a member of this organization.")
+                else:
+                    owner_username = submitted_owner
+        else:
+            # Non-admin deploys are always owner=self. Ignore any submitted value.
+            owner_username = request.user.username
 
     editable_vars = _editable_variables(template)
     variable_overrides: dict[str, str] = {}
@@ -185,6 +244,7 @@ def _handle_deploy(request: HttpRequest, template: models.AppTemplate, org: mode
         )
         workspace_options = _workspace_options(workspaces)
         environment_options = _environment_options(environments)
+        owner_options = _owner_options_for(request=request, org=org) if requires_owner else []
 
         context = base.get_app_shell_context(request=request, current_page="workspaces")
         context["template"] = template
@@ -197,6 +257,11 @@ def _handle_deploy(request: HttpRequest, template: models.AppTemplate, org: mode
         context["default_app_name"] = app_name
         context["variable_groups"] = _group_editable_variables(editable_vars)
         context["errors"] = errors
+        context["requires_owner"] = requires_owner
+        context["owner_options"] = owner_options
+        context["selected_owner_id"] = submitted_owner
+        context["selected_owner_label"] = _selected_label(owner_options, submitted_owner, "Select an owner")
+        context["owner_locked"] = requires_owner and not abac.is_org_admin(organization=org, user=request.user)
         return render(request, "devopshero_app/deploy/template_deploy_form.html", context=context)
 
     deployment = async_to_sync(template_deploy_service.deploy_from_template)(
@@ -208,10 +273,7 @@ def _handle_deploy(request: HttpRequest, template: models.AppTemplate, org: mode
         app_slug=app_slug,
         created_by=request.user,
         runtime_variable_overrides=variable_overrides,
-        # The Owner field on the deploy form will fill this in for PAs (see
-        # workstream (h) in sequential-hugging-crab.md). Until then the tag
-        # simply isn't stamped and PAs remain inaccessible — fail-closed.
-        owner_username=None,
+        owner_username=owner_username,
     )
 
     return redirect("app_detail", app_slug=deployment.app.slug)
