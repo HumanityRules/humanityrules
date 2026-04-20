@@ -10,6 +10,7 @@ Usage:
 
     uv run manage.py doh_secrets shared-list --account "CH Sandbox" --env default
     uv run manage.py doh_secrets shared-set --account "CH Sandbox" --env default OPENAI_API_KEY=sk-xxx TAVILY_API_KEY=tvly-xxx
+    uv run manage.py doh_secrets shared-set-from-env --account "CH Sandbox" --env default --file ./.env OPENAI_API_KEY TAVILY_API_KEY
     uv run manage.py doh_secrets shared-delete --account "CH Sandbox" --env default OPENAI_API_KEY TAVILY_API_KEY
 
     uv run manage.py doh_secrets delete-by-prefix --account "CH Sandbox" --subprefix devopshero/default/old-app
@@ -35,8 +36,9 @@ Subcommands:
     purge-deleted    Permanently delete secrets already in scheduled-deletion state
     delete-by-prefix Delete all active secrets whose names start with --subprefix
     shared-list      Show key names (masked) in environment shared secrets (--reveal to unmask)
-    shared-set       Create or update keys: KEY=VALUE KEY=VALUE ...
-    shared-delete    Remove keys from environment shared secrets
+    shared-set            Create or update keys: KEY=VALUE KEY=VALUE ...
+    shared-set-from-env   Create or update keys from a local .env file (--file, KEY names)
+    shared-delete         Remove keys from environment shared secrets
 
 Requires DOH_AWS_ACCESS_KEY and DOH_AWS_SECRET_KEY (via Django settings).
 
@@ -44,9 +46,11 @@ For production: ./prod_manage.sh doh_secrets <subcommand> ...
 """
 
 import json
+from pathlib import Path
 
 from django.conf import settings
 from django.core.management.base import BaseCommand, CommandError
+from dotenv import dotenv_values
 
 from devopshero_app.models import AWSAccount, Environment, Organization
 from devopshero_app.services.infra_customer import iam_utils
@@ -111,6 +115,21 @@ class Command(BaseCommand):
         shared_set_cmd.add_argument("--env", required=True, help="Environment slug (e.g. default, prod)")
         shared_set_cmd.add_argument("pairs", nargs="+", metavar="KEY=VALUE", help="Key-value pairs to set")
 
+        shared_from_env_cmd = subparsers.add_parser(
+            "shared-set-from-env",
+            help="Set keys in environment shared secrets from a local .env file",
+        )
+        _add_account_args(shared_from_env_cmd)
+        shared_from_env_cmd.add_argument("--env", required=True, help="Environment slug (e.g. default, prod)")
+        shared_from_env_cmd.add_argument(
+            "--file",
+            required=True,
+            type=Path,
+            metavar="PATH",
+            help="Path to .env file (relative to current working directory if not absolute)",
+        )
+        shared_from_env_cmd.add_argument("keys", nargs="+", metavar="KEY", help="Environment variable names to read from the file")
+
         shared_del_cmd = subparsers.add_parser("shared-delete", help="Delete keys from environment shared secrets")
         _add_account_args(shared_del_cmd)
         shared_del_cmd.add_argument("--env", required=True, help="Environment slug (e.g. default, prod)")
@@ -156,6 +175,10 @@ class Command(BaseCommand):
         elif operation == "shared-set":
             env = _get_environment(aws_account=aws_account, env_slug=options["env"])
             self._run_shared_set(session=session, env_slug=env.slug, pairs=options["pairs"])
+        elif operation == "shared-set-from-env":
+            env = _get_environment(aws_account=aws_account, env_slug=options["env"])
+            pairs = _shared_set_pairs_from_env_file(env_path=options["file"], keys=options["keys"])
+            self._run_shared_set(session=session, env_slug=env.slug, pairs=pairs)
         elif operation == "shared-delete":
             env = _get_environment(aws_account=aws_account, env_slug=options["env"])
             self._run_shared_delete(session=session, env_slug=env.slug, keys=options["keys"])
@@ -256,6 +279,26 @@ def _add_account_args(subparser) -> None:
     """Add --account and --org arguments to a subparser."""
     subparser.add_argument("--account", required=True, help="Connected AWS account name or 12-digit account ID")
     subparser.add_argument("--org", help="Organization name or slug (required when account name is ambiguous across orgs)")
+
+
+def _shared_set_pairs_from_env_file(env_path: Path, keys: list[str]) -> list[str]:
+    """Build KEY=VALUE strings from a .env file for the given key names."""
+    if not env_path.is_file():
+        raise CommandError(f"Env file not found: {env_path}")
+
+    raw = dotenv_values(env_path)
+    pairs: list[str] = []
+    missing: list[str] = []
+    for key in keys:
+        if key not in raw or raw[key] is None:
+            missing.append(key)
+        else:
+            pairs.append(f"{key}={raw[key]}")
+
+    if missing:
+        raise CommandError(f"Missing or unset key(s) in {env_path}: {', '.join(missing)}")
+
+    return pairs
 
 
 def _mask_value(value: str) -> str:

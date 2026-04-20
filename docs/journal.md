@@ -1,5 +1,18 @@
 # DevOpsHero Development Journal
 
+## 2026-04-19 20:04 - [DevEx] `doh_secrets shared-set-from-env`: push shared secrets from a local `.env`
+
+**Conversation:** [2026-04-19-2004-cf6b48f6.md](conversations/2026-04-19-2004-cf6b48f6.md)
+
+The first idea was a bash helper under `template_repos/hermes_agent` that would read named keys from a `.env` and shell out to `doh_secrets shared-set`. That would duplicate flag parsing, path handling, and quoting rules. Moving the behavior into Django keeps one entry point (`uv run manage.py doh_secrets`), reuses the same assumed-role session and `_run_shared_set` merge path as `shared-set`, and can use `python-dotenv` already in the project (same pattern as `infra_devopshero/sync_secrets.py`).
+
+**`shared-set-from-env`** takes `--account`, `--env`, optional `--org` (identical targeting to `shared-set`), plus `--file` and one or more **key names**. Values are loaded with `dotenv_values`; any requested key missing from the file or present with a `None` value raises `CommandError` (empty string is allowed so `KEY=` matches CLI semantics). The command builds `KEY=VALUE` strings and delegates to `_run_shared_set` so `devopshero/{env}/shared-secrets` behavior stays identical.
+
+**Key points:**
+
+- Operators sync Hermes (or any) local secrets into shared env defaults without pasting values on the command line or maintaining a separate shell script in the template repo.
+- No new dependencies; `Path` + `dotenv_values` only.
+
 ## 2026-04-19 19:00 - [Deployment] Enforce `devopshero/{env}/{app}/*` naming for all app-owned secrets
 
 **Conversation:** [2026-04-19-1901-9f9d01b3.md](conversations/2026-04-19-1901-9f9d01b3.md)
