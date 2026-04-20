@@ -10,6 +10,14 @@ from sidecar import app as app_mod
 from sidecar import jwt_verify
 
 
+def _streamed_body(*chunks: bytes):
+    """Wrap *chunks* as an async generator so MockTransport serves them via aiter_raw."""
+    async def _gen():
+        for chunk in chunks:
+            yield chunk
+    return _gen()
+
+
 def _mk_client(cfg, fake_jwks_client, pdp_handler, upstream_handler) -> TestClient:
     """Build a real create_app() + swap http_client and jwks_client on app.state."""
 
@@ -58,7 +66,7 @@ def test_allow_proxies_to_upstream(sidecar_config, fake_jwks_client, jwt_minter)
         # Validate the sidecar forwarded the identity headers.
         assert request.headers["x-auth-user"] == "vmendi"
         assert request.headers["x-auth-sub"] == "okta|vmendi"
-        return httpx.Response(200, text="hello from upstream")
+        return httpx.Response(200, content=_streamed_body(b"hello from upstream"))
 
     client = _mk_client(sidecar_config, fake_jwks_client, pdp, upstream)
     token = jwt_minter()
@@ -152,7 +160,7 @@ def test_cache_enabled_reuses_first_decision(sidecar_config, fake_jwks_client, j
         return httpx.Response(200, json={"decision": "allow", "reason": "ok"})
 
     async def upstream(request: httpx.Request) -> httpx.Response:
-        return httpx.Response(200, text="ok")
+        return httpx.Response(200, content=_streamed_body(b"ok"))
 
     client = _mk_client(cfg, fake_jwks_client, pdp, upstream)
     token = jwt_minter()
@@ -177,7 +185,7 @@ def test_cache_misses_across_different_users(sidecar_config, fake_jwks_client, j
         return httpx.Response(200, json={"decision": "allow", "reason": "ok"})
 
     async def upstream(request: httpx.Request) -> httpx.Response:
-        return httpx.Response(200, text="ok")
+        return httpx.Response(200, content=_streamed_body(b"ok"))
 
     client = _mk_client(cfg, fake_jwks_client, pdp, upstream)
     alice = jwt_minter(sub="okta|alice", username="alice")
@@ -191,6 +199,77 @@ def test_cache_misses_across_different_users(sidecar_config, fake_jwks_client, j
     assert pdp_calls == ["okta|alice", "okta|bob"]
 
 
+def test_streaming_sse_body_flows_through(sidecar_config, fake_jwks_client, jwt_minter) -> None:
+    """SSE-style upstream (no Content-Length) streams through and producer runs to completion."""
+    chunks_produced: list[bytes] = []
+
+    async def pdp(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"decision": "allow", "reason": "ok"})
+
+    async def upstream(request: httpx.Request) -> httpx.Response:
+        async def body():
+            chunks_produced.append(b"a")
+            yield b"data: first\n\n"
+            chunks_produced.append(b"b")
+            yield b"data: second\n\n"
+
+        return httpx.Response(
+            200,
+            headers={"content-type": "text/event-stream"},
+            content=body(),
+        )
+
+    client = _mk_client(sidecar_config, fake_jwks_client, pdp, upstream)
+    token = jwt_minter()
+
+    with client.stream(
+        "GET", "/events", cookies={jwt_verify.SESSION_COOKIE_NAME: token},
+    ) as response:
+        assert response.status_code == 200
+        assert response.headers["content-type"] == "text/event-stream"
+        # SSE responses must not carry Content-Length — they stream indefinitely.
+        assert "content-length" not in response.headers
+        body_bytes = b"".join(response.iter_raw())
+
+    assert body_bytes == b"data: first\n\ndata: second\n\n"
+    assert chunks_produced == [b"a", b"b"]
+
+
+def test_fixed_length_response_preserves_content_length(
+    sidecar_config, fake_jwks_client, jwt_minter,
+) -> None:
+    """A static asset with Content-Length must pass that header through verbatim.
+
+    Stripping it would force Starlette to re-frame as chunked, which breaks
+    ALB → HTTP/2 translation for small fixed-length assets (CSS/JS).
+    """
+    css_bytes = b"body { color: red; }"
+
+    async def pdp(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"decision": "allow", "reason": "ok"})
+
+    async def upstream(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            headers={
+                "content-type": "text/css",
+                "content-length": str(len(css_bytes)),
+            },
+            content=_streamed_body(css_bytes),
+        )
+
+    client = _mk_client(sidecar_config, fake_jwks_client, pdp, upstream)
+    token = jwt_minter()
+
+    response = client.get(
+        "/static/style.css", cookies={jwt_verify.SESSION_COOKIE_NAME: token},
+    )
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "text/css"
+    assert response.headers["content-length"] == str(len(css_bytes))
+    assert response.content == css_bytes
+
+
 def test_cache_disabled_when_ttl_zero(sidecar_config, fake_jwks_client, jwt_minter) -> None:
     """Confirm the default (ttl=0) still calls PDP on every request — existing prod behavior."""
     pdp_calls = 0
@@ -201,7 +280,7 @@ def test_cache_disabled_when_ttl_zero(sidecar_config, fake_jwks_client, jwt_mint
         return httpx.Response(200, json={"decision": "allow", "reason": "ok"})
 
     async def upstream(request: httpx.Request) -> httpx.Response:
-        return httpx.Response(200, text="ok")
+        return httpx.Response(200, content=_streamed_body(b"ok"))
 
     client = _mk_client(sidecar_config, fake_jwks_client, pdp, upstream)
     token = jwt_minter()

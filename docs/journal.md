@@ -1,6 +1,46 @@
 # DevOpsHero Development Journal
 
-## 2026-04-20 14:00 - [Deployment] Fold per-env auth Lambda secrets into one `sidecar-auth-config` entry
+## 2026-04-20 16:36 - [Bugfix] Sidecar broke Hermes WebUI — streaming and HTTP/1.0 framing
+
+**Conversation:** [2026-04-20-1638-d5543321.md](conversations/2026-04-20-1638-d5543321.md)
+
+First real end-to-end use of the sidecar in front of Hermes exposed two independent proxy bugs. The WebUI streaming reply arrived as a blob instead of tokens trickling in, and static assets (`style.css`, `i18n.js`) failed with intermittent `ERR_HTTP2_PROTOCOL_ERROR`. Both were in `sidecar/sidecar/proxy.py` — the PDP path, JWT verification, and per-env trust anchors were fine.
+
+### Bug 1 — buffered response killed streaming
+
+The original `proxy_to_upstream` did `upstream_response = await http_client.request(...)` followed by `Response(content=upstream_response.content, ...)`. `httpx.AsyncClient.request()` reads the entire body before returning, so SSE from Hermes was fully accumulated and shipped as one chunk. For a 500-token reply at ~10 tok/s that meant ~50s with zero bytes, then all bytes at once — the UI looked dead until generation finished.
+
+**Fix:** switched to `http_client.build_request(...)` + `http_client.send(..., stream=True)`, then returned Starlette `StreamingResponse` wrapping `upstream_response.aiter_raw()`, with `BackgroundTask(upstream_response.aclose)` to release the upstream connection after the body drains.
+
+Before implementing, we ranked the whole perf surface (uvloop/httptools, split httpx pools, PDP cold-call latency, JWKS sync fetch on cold start). For single-user Hermes — one WebUI, one sidecar, one task — only the response-streaming fix was mandatory. Everything else was optimization that doesn't matter at concurrency=1. Decided explicitly to skip them. Worth revisiting if we put multiple users behind one sidecar (not the current shape).
+
+### Bug 2 — outbound chunked encoding against HTTP/1.0 upstream
+
+After shipping Fix 1, static CSS/JS started failing. First stab: I had stripped `Content-Length` from response headers, forcing Starlette to re-frame everything as chunked. Browser asked ALB, a second question: why do small fixed-length assets fail? Partial fix: stopped stripping `Content-Length`. Didn't solve it.
+
+Pulled the sidecar's CloudWatch logs (had to add a `--sidecar` flag to `doh_app_logs` — the existing command hardcoded the app-container log stream as `{app_slug}/{app_slug}/{task_id}`; sidecar lives at `{app_slug}-sidecar/{app_slug}-sidecar/{task_id}`). Logs showed the smoking gun:
+
+```
+httpx HTTP Request: GET http://127.0.0.1:8787/static/icons.js "HTTP/1.0 200 OK"
+```
+
+plus `httpcore.ReadError` mid-`aiter_raw`. Hermes's embedded HTTP server speaks HTTP/1.0, which does not support `Transfer-Encoding: chunked`. When I switched to streaming, I always passed `content=request.stream()` to `build_request` — even on bodyless GETs for CSS/JS. httpx reacts to any async-iterator content by setting `Transfer-Encoding: chunked` on the outbound request. Hermes got request framing it couldn't parse and closed the connection in the middle of the response.
+
+**Fix:** only pass `content=request.stream()` when the inbound request actually has a body, detected via `content-length` / `transfer-encoding` on the inbound headers. GET/HEAD go out clean.
+
+### HTTP/2 ALB→target tangent
+
+Considered whether making the ALB → sidecar leg HTTP/2 would have helped. Answer: no, for four reasons: (1) wouldn't have fixed either bug, since the broken leg was sidecar → Hermes; (2) uvicorn+h11 is HTTP/1.1-only, HTTP/2 means switching to Hypercorn; (3) no real wins at concurrency=1; (4) the upstream hop stays HTTP/1.x regardless — sidecar is always the translation boundary. The simplest stack that works is the right one for "transparent and fast."
+
+**Key points:**
+- **Streaming is mandatory; everything else on the perf list is not** — at single-user, only `aiter_raw` + `StreamingResponse` materially changes behavior.
+- **httpx adds `Transfer-Encoding: chunked` whenever request `content` is an iterator** — even for GETs. Only pass `content=` when the inbound request has a body (`content-length` or `transfer-encoding` header present). Applies to anything proxying to HTTP/1.0 targets.
+- **Don't strip `Content-Length` from response headers** — forcing chunked re-framing on fixed-length bodies triggers `ERR_HTTP2_PROTOCOL_ERROR` when ALB translates to HTTP/2. Pass the upstream framing through verbatim; SSE responses have no `Content-Length` so Starlette emits chunked naturally.
+- **Hop-by-hop stripping stays** — RFC 7230 hop-by-hop set (`transfer-encoding`, `connection`, etc.) must still be stripped both directions; `Content-Length` is not hop-by-hop.
+- **`doh_app_logs --sidecar`** — the sidecar container's log stream segment is `{app_slug}-sidecar`, matching `container_name=f"{app_config.app_name}-sidecar"` in `deploy_app.py`. New flag avoids duplicating the command.
+- **Test-transport quirk** — `httpx.MockTransport` pre-materializes `httpx.Response(200, text=...)` bodies, which trips `StreamConsumed` when the proxy calls `aiter_raw()` after `stream=True`. Tests now use a `_streamed_body(*chunks)` helper returning an async generator.
+
+
 
 **Conversation:** [2026-04-20-1934-978400ed.md](conversations/2026-04-20-1934-978400ed.md)
 
