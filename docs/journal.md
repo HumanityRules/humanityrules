@@ -1,5 +1,18 @@
 # DevOpsHero Development Journal
 
+## 2026-04-19 18:53 - [DevEx] `doh_secrets delete-by-prefix`: bulk delete by Secrets Manager name prefix
+
+**Conversation:** [2026-04-19-1853-23d4c42f.md](conversations/2026-04-19-1853-23d4c42f.md)
+
+Operators sometimes need to remove many related secrets at once (e.g. after renaming an app slug, or cleaning up test data) without clicking through the console or scripting boto3 ad hoc. Added **`delete-by-prefix`** so the same cross-account assumed-role session as `list` / `purge-deleted` can target every **active** secret whose name **starts with** a given string, using AWS’s native name-prefix filter on `ListSecrets` (not a full client-side scan).
+
+**Behavior:** `--subprefix` is required and must be non-empty after trim. Default deletion uses a **7-day recovery window**; **`--force`** matches `purge-deleted` semantics (`ForceDeleteWithoutRecovery`). **`--dry-run`** lists matches only. Implementation lives in `secrets_utils.delete_secrets_matching_prefix`; `IncludePlannedDeletion=False` so secrets already in the deletion queue are out of scope (those are handled by `purge-deleted`).
+
+**Key points:**
+
+- Prefix semantics are AWS’s: `subprefix` is the filter value for `Filters=[{"Key": "name", "Values": [subprefix]}]`, i.e. secret **name starts with** that string. That is a prefix in the string sense, so a value like `devopshero/default/foo` also matches `devopshero/default/foobar` (because `foobar` begins with `foo`). Operators should choose the longest unambiguous prefix for their intent (often including a trailing `/` when the naming scheme uses path segments).
+- Safer default is recoverable delete; immediate wipe is explicit so a mistake on `--subprefix` still allows recovery during the window unless `--force` was used.
+
 ## 2026-04-19 18:23 - [DevEx] `doh_reset_org_abac`: full factory reset of org ABAC policies
 
 **Conversation:** [2026-04-19-1823-836cd8f3.md](conversations/2026-04-19-1823-836cd8f3.md)
