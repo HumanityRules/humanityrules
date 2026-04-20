@@ -19,6 +19,7 @@ All custom commands live in `devopshero_app/management/commands/`.
 - **doh_app_logs** — Fetch CloudWatch logs for a customer app (works for running and crashed/stopped tasks), by account + env + app slug.
 - **doh_app_shell** — Interactive shell in a deployed customer app container (ECS Exec / SSM), by account + env + app slug.
 - **doh_secrets** — Manage customer Secrets Manager secrets: list, purge, and shared environment secrets (shared-list/shared-set/shared-delete). All subcommands take --account and optional --org (name or slug).
+- **doh_reset_org_abac** — Full factory reset of ABAC Policy rows for one organization (`--org` slug or name; optional `--admin-email`). Deletes all org policies, re-runs seed bootstrap, recreates default per-app open-access policies.
 - **run_job_worker** — Background job worker for deployments and environment provisioning.
 - **seed_test_apps** — Seed orgs, workspaces, environments, and apps for UI testing.
 - **seed_test_groups** — Seed test groups with attributes for ABAC testing.
