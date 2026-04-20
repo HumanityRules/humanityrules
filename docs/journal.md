@@ -1,5 +1,18 @@
 # DevOpsHero Development Journal
 
+## 2026-04-19 18:23 - [DevEx] `doh_reset_org_abac`: full factory reset of org ABAC policies
+
+**Conversation:** [2026-04-19-1823-836cd8f3.md](conversations/2026-04-19-1823-836cd8f3.md)
+
+ABAC policy rows (`Policy`) for an org can drift after experiments in the Security UI, broken seeds, or demo scripts. Ad-hoc `shell -c` snippets are easy to get wrong (especially remembering to re-run `create_default_app_policy` for each app after a full wipe). Added **`doh_reset_org_abac`** so the same reset runs locally (`uv run manage.py`) and in production (`prod_manage.sh`).
+
+**Behavior:** resolve `--org` by slug then name (same pattern as `doh_secrets` / `doh_app_shell`). Resolve bootstrap user via `--admin-email` (must be an org member) or the first `OrganizationMembership` with `Role.ADMIN`. Delete **all** policies for the org, call `abac.bootstrap_organization`, then `abac.create_default_app_policy` for every `App` (sidecar-enabled templates skip open-access inside that helper). Documented in the manage-commands skill.
+
+**Key points:**
+
+- Full factory means deleting every `Policy` for the org, not only `is_system=False`, so seed rows and per-app defaults are recreated cleanly; `bootstrap_organization` alone would not overwrite edited seed rows.
+- Smoke run on local `course-hero` deleted 34 policies and restored 8 seed policies; the org had no apps so zero default app policies were created — expected.
+
 ## 2026-04-19 18:22 - [Deployment] Environment teardown discovers stacks dynamically by prefix
 
 **Conversation:** [2026-04-19-1822-1bdc74aa.md](conversations/2026-04-19-1822-1bdc74aa.md)
