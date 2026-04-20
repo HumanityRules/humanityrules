@@ -60,6 +60,7 @@ def sidecar_config() -> config_mod.SidecarConfig:
         upstream_host="127.0.0.1",
         upstream_port=8787,
         listen_port=8443,
+        pdp_cache_ttl_seconds=0,  # disabled by default; tests opt in explicitly
     )
 
 
