@@ -331,6 +331,53 @@ def ensure_env_sidecar_secrets_exist(session: boto3.Session, env) -> dict[str, s
     }
 
 
+def delete_secrets_matching_prefix(session: boto3.Session, subprefix: str, dry_run: bool, force_immediate: bool) -> int:
+    """Delete secrets whose names start with *subprefix* (AWS name-prefix filter).
+
+    When *force_immediate* is False, each secret is scheduled for deletion with a
+    7-day recovery window. When True, uses ForceDeleteWithoutRecovery (same as purge-deleted).
+    """
+    sm_client = session.client("secretsmanager")
+    paginator = sm_client.get_paginator("list_secrets")
+
+    secrets_list: list[dict[str, str]] = []
+    for page in paginator.paginate(
+        Filters=[{"Key": "name", "Values": [subprefix]}],
+        IncludePlannedDeletion=False,
+    ):
+        for secret in page["SecretList"]:
+            secrets_list.append({"name": secret["Name"], "arn": secret["ARN"]})
+
+    if not secrets_list:
+        print(f"No active secrets found with name prefix '{subprefix}'.")
+        return 0
+
+    plan = "permanent removal" if force_immediate else "scheduled deletion (7-day recovery window)"
+    print(f"Found {len(secrets_list)} secret(s) matching prefix '{subprefix}' — {plan}:")
+    for secret in secrets_list:
+        print(f"  🗑️  {secret['name']}")
+    print()
+
+    if dry_run:
+        print("Dry run — no secrets were deleted.")
+        return len(secrets_list)
+
+    deleted_count = 0
+    for secret in secrets_list:
+        try:
+            if force_immediate:
+                sm_client.delete_secret(SecretId=secret["arn"], ForceDeleteWithoutRecovery=True)
+                print(f"✅ Permanently deleted: {secret['name']}")
+            else:
+                sm_client.delete_secret(SecretId=secret["arn"], RecoveryWindowInDays=7)
+                print(f"✅ Scheduled for deletion: {secret['name']}")
+            deleted_count += 1
+        except ClientError as e:
+            print(f"❌ Failed to delete {secret['name']}: {e}")
+
+    return deleted_count
+
+
 def purge_deleted_secrets(session: boto3.Session, dry_run: bool) -> int:
     """Permanently delete all secrets that are scheduled for deletion."""
     sm_client = session.client("secretsmanager")

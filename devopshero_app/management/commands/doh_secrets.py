@@ -12,11 +12,19 @@ Usage:
     uv run manage.py doh_secrets shared-set --account "Humanity Rules Sandbox" --env default OPENAI_API_KEY=sk-xxx TAVILY_API_KEY=tvly-xxx
     uv run manage.py doh_secrets shared-delete --account "Humanity Rules Sandbox" --env default OPENAI_API_KEY TAVILY_API_KEY
 
+    uv run manage.py doh_secrets delete-by-prefix --account "Humanity Rules Sandbox" --subprefix devopshero/default/old-app
+    uv run manage.py doh_secrets delete-by-prefix --account "Humanity Rules Sandbox" --subprefix devopshero/default/old-app --dry-run
+    uv run manage.py doh_secrets delete-by-prefix --account "Humanity Rules Sandbox" --subprefix devopshero/default/old-app --force
+
 All subcommands accept --org <name-or-slug> to disambiguate when multiple
 organizations share the same account name (e.g. --org "Humanity Rules" or --org humr).
 
 `purge-deleted` calls DeleteSecret with ForceDeleteWithoutRecovery on secrets that
 are already scheduled for deletion (skips the recovery window).
+
+`delete-by-prefix` deletes every *active* secret whose name starts with `--subprefix`
+(AWS Secrets Manager name-prefix filter). By default secrets are scheduled for deletion
+with a 7-day recovery window; pass `--force` for immediate permanent deletion.
 
 `shared-*` subcommands manage the per-environment shared secrets store
 (devopshero/{env-slug}/shared-secrets). Values set here are automatically
@@ -25,6 +33,7 @@ used as defaults for empty-placeholder secrets when deploying apps.
 Subcommands:
     list             List all secrets in Secrets Manager
     purge-deleted    Permanently delete secrets already in scheduled-deletion state
+    delete-by-prefix Delete all active secrets whose names start with --subprefix
     shared-list      Show key names (masked) in environment shared secrets (--reveal to unmask)
     shared-set       Create or update keys: KEY=VALUE KEY=VALUE ...
     shared-delete    Remove keys from environment shared secrets
@@ -47,7 +56,7 @@ DEFAULT_REGION = "us-east-1"
 
 
 class Command(BaseCommand):
-    help = "Manage customer Secrets Manager secrets (list, purge, shared environment secrets)"
+    help = "Manage customer Secrets Manager secrets (list, purge, delete-by-prefix, shared environment secrets)"
 
     def add_arguments(self, parser):
         subparsers = parser.add_subparsers(dest="operation", required=True)
@@ -69,6 +78,27 @@ class Command(BaseCommand):
             "--dry-run",
             action="store_true",
             help="Show what would be purged without deleting",
+        )
+
+        delete_prefix_cmd = subparsers.add_parser(
+            "delete-by-prefix",
+            help="Delete all active secrets whose names start with the given prefix",
+        )
+        _add_account_args(delete_prefix_cmd)
+        delete_prefix_cmd.add_argument(
+            "--subprefix",
+            required=True,
+            help="Non-empty name prefix; every matching active secret is deleted (AWS prefix filter)",
+        )
+        delete_prefix_cmd.add_argument(
+            "--dry-run",
+            action="store_true",
+            help="List matches without deleting",
+        )
+        delete_prefix_cmd.add_argument(
+            "--force",
+            action="store_true",
+            help="Permanently delete immediately (skip recovery window)",
         )
 
         shared_list_cmd = subparsers.add_parser("shared-list", help="List key names in environment shared secrets")
@@ -110,6 +140,16 @@ class Command(BaseCommand):
             self._run_list(session=session, include_deleted=options["include_deleted"])
         elif operation == "purge-deleted":
             secrets_utils.purge_deleted_secrets(session=session, dry_run=options["dry_run"])
+        elif operation == "delete-by-prefix":
+            subprefix = (options["subprefix"] or "").strip()
+            if not subprefix:
+                raise CommandError("--subprefix must be a non-empty string.")
+            secrets_utils.delete_secrets_matching_prefix(
+                session=session,
+                subprefix=subprefix,
+                dry_run=options["dry_run"],
+                force_immediate=options["force"],
+            )
         elif operation == "shared-list":
             env = _get_environment(aws_account=aws_account, env_slug=options["env"])
             self._run_shared_list(session=session, env_slug=env.slug, reveal=options["reveal"])
