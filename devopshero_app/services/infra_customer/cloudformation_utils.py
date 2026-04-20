@@ -223,6 +223,25 @@ def delete_stack_and_wait(cf_client, stack_name: str) -> bool:
         return False
 
 
+def list_stacks_by_prefix(cf_client, prefix: str) -> list[str]:
+    """Return the names of all non-deleted stacks whose name starts with ``prefix``.
+
+    ``list_stacks`` includes DELETE_COMPLETE stacks for 90 days after deletion, so we
+    filter those out. Everything else (including DELETE_FAILED, DELETE_IN_PROGRESS,
+    and transient states) is treated as "still present".
+    """
+    stack_names: list[str] = []
+    paginator = cf_client.get_paginator("list_stacks")
+    for page in paginator.paginate():
+        for summary in page.get("StackSummaries", []):
+            if summary.get("StackStatus") == "DELETE_COMPLETE":
+                continue
+            name = summary["StackName"]
+            if name.startswith(prefix):
+                stack_names.append(name)
+    return stack_names
+
+
 def get_stack_output(cf_client, stack_name: str, output_key: str) -> str | None:
     """Get a specific output value from a CloudFormation stack."""
     try:
