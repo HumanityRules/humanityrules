@@ -48,6 +48,24 @@ def test_start_with_valid_rd_redirects_to_okta() -> None:
 
     # state must be a JWT we can decode and pull rd back out of.
     state = qs["state"][0]
+
+
+def test_start_percent_encoded_rd_still_accepted() -> None:
+    # Regression: ALB -> Lambda delivers queryStringParameters values as
+    # percent-encoded strings. Before the decode fix, urlparse saw scheme=''
+    # for "https%3A%2F%2F..." and _validate_rd rejected every real request.
+    import urllib.parse
+    rd = f"https://vmendi-hermes.{TEST_ENV_DOMAIN}/chat"
+    encoded_rd = urllib.parse.quote(rd, safe="")
+    response = handler.handler(
+        make_alb_event(path="/start", query={"rd": encoded_rd}),
+        None,
+    )
+    assert response["statusCode"] == 302, response
+    # rd carried through the state JWT should be the decoded original URL.
+    location = response["headers"]["location"]
+    state = parse_qs(urlparse(location).query)["state"][0]
+    assert handler._verify_state(state) == rd
     rd_back = handler._verify_state(state)
     assert rd_back == rd
 

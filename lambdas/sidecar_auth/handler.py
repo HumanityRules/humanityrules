@@ -148,16 +148,18 @@ def _redirect(location: str) -> dict:
 
 
 def _query_params(event: dict) -> dict[str, str]:
-    # ALB passes them under queryStringParameters (single-value) or
-    # multiValueQueryStringParameters depending on target group config. We
-    # accept either; tests use the simple single-value form.
+    # ALB -> Lambda passes query-string values PERCENT-ENCODED in
+    # queryStringParameters (e.g. "https%3A%2F%2Fapp..."). If we forward them
+    # raw to urlparse, scheme comes out as "" and host as None, which made
+    # _validate_rd reject every subdomain redirect. Always decode here so
+    # callers get a clean URL regardless of which ALB target-group flavor is
+    # in use.
     params = event.get("queryStringParameters") or {}
-    # Normalize any multi-value entries to the first value.
     multi = event.get("multiValueQueryStringParameters") or {}
     for k, v in multi.items():
         if k not in params and isinstance(v, list) and v:
             params[k] = v[0]
-    return params
+    return {k: urllib.parse.unquote(v) for k, v in params.items()}
 
 
 def _path(event: dict) -> str:
