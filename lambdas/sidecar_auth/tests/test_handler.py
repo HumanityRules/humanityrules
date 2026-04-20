@@ -133,7 +133,7 @@ def test_callback_happy_path(mock_http) -> None:
     # Decode the session JWT with the public key and confirm claims.
     claims = jwt.decode(
         cookie_value,
-        key=handler._cached_jwt_key.public_pem,
+        key=handler._cached_config.jwt_key.public_pem,
         algorithms=["RS256"],
     )
     assert claims["sub"] == "okta|vmendi"

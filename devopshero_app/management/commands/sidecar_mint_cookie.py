@@ -96,7 +96,7 @@ def mint_session_jwt(
             region=env.aws_region,
         )
 
-    secret_name = f"devopshero/{env_slug}/sidecar-jwt-key"
+    secret_name = f"devopshero/{env_slug}/sidecar-auth-config"
     sm = session.client("secretsmanager")
     try:
         response = sm.get_secret_value(SecretId=secret_name)
@@ -106,8 +106,9 @@ def mint_session_jwt(
         ) from exc
 
     payload = json.loads(response["SecretString"])
-    private_pem = payload["private_pem"].encode("utf-8")
-    kid = payload["kid"]
+    jwt_key = payload["jwt_key"]
+    private_pem = jwt_key["private_pem"].encode("utf-8")
+    kid = jwt_key["kid"]
 
     now = int(time.time())
     token = jwt.encode(

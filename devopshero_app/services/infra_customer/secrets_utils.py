@@ -273,40 +273,20 @@ def _generate_rsa_keypair_pem() -> tuple[bytes, bytes]:
     return private_pem, public_pem
 
 
-def ensure_env_sidecar_jwt_key_exists(session: boto3.Session, env_slug: str) -> str:
-    """Ensure the env's RSA keypair secret exists. Returns the ARN.
+def ensure_env_sidecar_auth_config_exists(session: boto3.Session, env) -> str:
+    """Ensure the env's auth-Lambda config secret exists and return its ARN.
 
-    Payload shape (JSON): {"private_pem": "...", "public_pem": "...", "kid": "..."}.
-    Never rotates once created — rotation requires a coordinated redeploy of
-    the auth Lambda + all sidecars in the env (see docs/sidecar_proxy_design.md).
-    """
-    secret_name = f"devopshero/{env_slug}/sidecar-jwt-key"
-    sm_client = session.client("secretsmanager")
-    if _secret_exists(sm_client, secret_name):
-        return _get_secret_arn(sm_client, secret_name)
+    Payload shape (JSON):
+        {
+          "oidc_config": {"issuer_url": "...", "client_id": "...", "client_secret": "..."},
+          "jwt_key":     {"private_pem": "...", "public_pem": "...", "kid": "..."}
+        }
 
-    private_pem, public_pem = _generate_rsa_keypair_pem()
-    payload = {
-        "private_pem": private_pem.decode("ascii"),
-        "public_pem": public_pem.decode("ascii"),
-        "kid": f"{env_slug}-{uuid.uuid4().hex[:8]}",
-    }
-    response = sm_client.create_secret(
-        Name=secret_name,
-        Description=f"Sidecar JWT signing keypair for env '{env_slug}'",
-        SecretString=json.dumps(payload),
-    )
-    logger.info("sidecar jwt keypair created for env '%s'", env_slug)
-    return response["ARN"]
-
-
-def ensure_env_oidc_config_secret_exists(session: boto3.Session, env) -> str:
-    """Write the env's Okta OIDC config to Secrets Manager and return the ARN.
-
-    For v1 we reuse the parent Organization's Okta app configuration. The
-    Lambda reads the secret at runtime rather than having the config pinned in
-    env vars, so rotating the client_secret is a matter of updating the secret
-    (see docs/sidecar_proxy_design.md; per-env Okta apps are a deferred item).
+    On re-run the oidc_config block is refreshed from the Organization (so a
+    rotated client_secret propagates on the next Lambda cold-start) but the
+    jwt_key block is carried forward unchanged — rotating it would require a
+    coordinated redeploy of the auth Lambda + all sidecars in the env (see
+    docs/sidecar_proxy_design.md).
     """
     organization = env.aws_account.organization
     if not (organization.oidc_issuer_url and organization.oidc_client_id and organization.oidc_client_secret):
@@ -315,34 +295,52 @@ def ensure_env_oidc_config_secret_exists(session: boto3.Session, env) -> str:
             f"auth Lambda for env '{env.slug}'. Run setup_oidc_org first.",
         )
 
-    secret_name = f"devopshero/{env.slug}/oidc-config"
+    secret_name = f"devopshero/{env.slug}/sidecar-auth-config"
     sm_client = session.client("secretsmanager")
+
+    existing: dict = {}
+    try:
+        response = sm_client.get_secret_value(SecretId=secret_name)
+        existing = json.loads(response["SecretString"])
+    except ClientError as e:
+        if e.response["Error"]["Code"] != "ResourceNotFoundException":
+            raise
+
+    jwt_key = existing.get("jwt_key")
+    if not jwt_key:
+        private_pem, public_pem = _generate_rsa_keypair_pem()
+        jwt_key = {
+            "private_pem": private_pem.decode("ascii"),
+            "public_pem": public_pem.decode("ascii"),
+            "kid": f"{env.slug}-{uuid.uuid4().hex[:8]}",
+        }
+
     payload = {
-        "issuer_url": organization.oidc_issuer_url,
-        "client_id": organization.oidc_client_id,
-        "client_secret": organization.oidc_client_secret,
+        "oidc_config": {
+            "issuer_url": organization.oidc_issuer_url,
+            "client_id": organization.oidc_client_id,
+            "client_secret": organization.oidc_client_secret,
+        },
+        "jwt_key": jwt_key,
     }
-    # Always upsert: if the org rotates its client_secret, we want the next
-    # Lambda cold-start to pick it up.
     return _create_or_merge_secret(
         sm_client=sm_client,
         secret_name=secret_name,
-        description=f"Okta OIDC config for env '{env.slug}' (sourced from Organization '{organization.slug}')",
+        description=f"Sidecar auth-Lambda config for env '{env.slug}' (OIDC sourced from Organization '{organization.slug}')",
         values_to_write=payload,
         merge_mode=False,
     )
 
 
 def ensure_env_sidecar_secrets_exist(session: boto3.Session, env) -> dict[str, str]:
-    """Top-level helper: provision all three per-env secrets and return their ARNs.
+    """Top-level helper: provision per-env sidecar secrets and return their ARNs.
 
-    Returns a dict with keys: 'shared_secrets_arn', 'jwt_key_arn', 'oidc_config_arn'.
+    Returns a dict with keys: 'shared_secrets_arn', 'sidecar_auth_config_arn'.
     Called from the deploy pipeline before the AuthLambdaStack runs.
     """
     return {
         "shared_secrets_arn": ensure_env_sidecar_token_exists(session=session, env=env),
-        "jwt_key_arn": ensure_env_sidecar_jwt_key_exists(session=session, env_slug=env.slug),
-        "oidc_config_arn": ensure_env_oidc_config_secret_exists(session=session, env=env),
+        "sidecar_auth_config_arn": ensure_env_sidecar_auth_config_exists(session=session, env=env),
     }
 
 

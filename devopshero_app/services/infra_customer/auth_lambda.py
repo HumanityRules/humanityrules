@@ -45,8 +45,7 @@ class AuthLambdaInputs:
     shared_alb_security_group_id: str
     shared_hosted_zone_id: str
     shared_hosted_zone_name: str
-    oidc_secret_arn: str           # Secrets Manager ARN with {issuer_url, client_id, client_secret}
-    jwt_key_secret_arn: str        # Secrets Manager ARN with {private_pem, public_pem, kid}
+    sidecar_auth_config_secret_arn: str  # Secrets Manager ARN with {oidc_config: {...}, jwt_key: {...}}
 
 
 class AuthLambdaStack(Stack):
@@ -64,7 +63,7 @@ class AuthLambdaStack(Stack):
         prefix = f"devopshero-{inputs.env_slug}-auth"
         auth_host = f"auth.{inputs.env_domain}"
 
-        # IAM role: CloudWatch logs + read the two per-env secrets.
+        # IAM role: CloudWatch logs + read the per-env auth-config secret.
         lambda_role = iam.Role(
             self, "AuthLambdaRole",
             role_name=f"{prefix}-role"[:64],
@@ -75,7 +74,7 @@ class AuthLambdaStack(Stack):
         )
         lambda_role.add_to_policy(iam.PolicyStatement(
             actions=["secretsmanager:GetSecretValue"],
-            resources=[inputs.oidc_secret_arn, inputs.jwt_key_secret_arn],
+            resources=[inputs.sidecar_auth_config_secret_arn],
         ))
 
         log_group = logs.LogGroup(
@@ -126,8 +125,7 @@ class AuthLambdaStack(Stack):
             environment={
                 "DOH_ENV_DOMAIN": inputs.env_domain,
                 "DOH_AUTH_BASE_URL": f"https://{auth_host}",
-                "DOH_OIDC_SECRET_ARN": inputs.oidc_secret_arn,
-                "DOH_SIDECAR_JWT_SECRET_ARN": inputs.jwt_key_secret_arn,
+                "DOH_SIDECAR_AUTH_CONFIG_SECRET_ARN": inputs.sidecar_auth_config_secret_arn,
             },
         )
 
