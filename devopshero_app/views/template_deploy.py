@@ -80,6 +80,25 @@ def _template_requires_owner(template: models.AppTemplate) -> bool:
     return False
 
 
+def _username_for_prefill(username: str) -> str:
+    """Lowercased, alphanumeric-only local-part — safe to drop into an App slug."""
+    local = username.split("@", 1)[0]
+    return "".join(c for c in local if c.isalnum()).lower()
+
+
+def _compute_default_app_name(*, template: models.AppTemplate, org: models.Organization, owner_username: str | None) -> str:
+    """App Name prefill. Falls back to template.name if no prefill_name or no owner."""
+    pattern = (template.prefill_name or "").strip()
+    if not pattern or not owner_username:
+        return template.name
+    username_token = _username_for_prefill(username=owner_username)
+    for index in range(100):
+        candidate = pattern.format(username=username_token, index=f"{index:02d}")
+        if not models.App.objects.filter(organization=org, slug=slugify(candidate)).exists():
+            return candidate
+    return pattern.format(username=username_token, index="99")
+
+
 def _owner_options_for(request: HttpRequest, org: models.Organization) -> list[dict]:
     """Users the current requester may pick as an owner.
 
@@ -148,6 +167,17 @@ def template_deploy_form(request: HttpRequest, template_slug: str) -> HttpRespon
     # Non-admins are locked to themselves; the dropdown is visible but has only
     # one option. Pre-select it so submission works without extra clicks.
     default_owner = request.user.username if requires_owner else ""
+    owner_locked = requires_owner and not abac.is_org_admin(organization=org, user=request.user)
+
+    default_app_name = _compute_default_app_name(
+        template=template, org=org, owner_username=default_owner or None,
+    )
+    owner_prefill_map: dict[str, str] = {}
+    if requires_owner and not owner_locked:
+        for opt in owner_options:
+            owner_prefill_map[opt["id"]] = _compute_default_app_name(
+                template=template, org=org, owner_username=opt["id"],
+            )
 
     context = base.get_app_shell_context(request=request, current_page="workspaces")
     context["template"] = template
@@ -157,13 +187,14 @@ def template_deploy_form(request: HttpRequest, template_slug: str) -> HttpRespon
     context["selected_environment_id"] = ""
     context["selected_workspace_label"] = "Select a workspace"
     context["selected_environment_label"] = "Select an environment"
-    context["default_app_name"] = template.name
+    context["default_app_name"] = default_app_name
     context["variable_groups"] = _group_editable_variables(editable_vars)
     context["requires_owner"] = requires_owner
     context["owner_options"] = owner_options
     context["selected_owner_id"] = default_owner
     context["selected_owner_label"] = _selected_label(owner_options, default_owner, "Select an owner")
-    context["owner_locked"] = requires_owner and not abac.is_org_admin(organization=org, user=request.user)
+    context["owner_locked"] = owner_locked
+    context["owner_prefill_map"] = owner_prefill_map
     return render(request, "devopshero_app/deploy/template_deploy_form.html", context=context)
 
 
@@ -262,6 +293,7 @@ def _handle_deploy(request: HttpRequest, template: models.AppTemplate, org: mode
         context["selected_owner_id"] = submitted_owner
         context["selected_owner_label"] = _selected_label(owner_options, submitted_owner, "Select an owner")
         context["owner_locked"] = requires_owner and not abac.is_org_admin(organization=org, user=request.user)
+        context["owner_prefill_map"] = {}
         return render(request, "devopshero_app/deploy/template_deploy_form.html", context=context)
 
     deployment = async_to_sync(template_deploy_service.deploy_from_template)(

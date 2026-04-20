@@ -605,6 +605,12 @@ class AppTemplate(models.Model):
     # at app creation time — e.g. [{"key": "app-type", "value": "personal-assistant"}].
     default_tags = models.JSONField(default=list, blank=True)
 
+    # Template for the default App Name shown on the deploy form. Tokens:
+    #   {username} - owner's username; email local-part with non-alnum stripped
+    #   {index}    - zero-padded (2-digit) counter that picks the lowest free slug in the org
+    # Empty string = fall back to template.name.
+    prefill_name = models.CharField(max_length=200, blank=True, default="")
+
     is_active = models.BooleanField()
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)

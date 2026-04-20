@@ -1,5 +1,30 @@
 # DevOpsHero Development Journal
 
+## 2026-04-20 12:57 - [Deployment] Per-user App Name prefill on the deploy-from-template form
+
+**Conversation:** [2026-04-20-1259-291de471.md](conversations/2026-04-20-1259-291de471.md)
+
+Added a `prefill_name` pattern field to `AppTemplate` so owner-bound templates (today: Hermes Personal) pre-populate the App Name on the deploy form as `hermes-{username}{index}`. The goal: get one-click deploys for every user in an org without asking them to hand-craft a unique slug. Value is computed server-side at GET time, picking the lowest free `{index:02d}` in the org; admins get a live-updating input when they change the Owner dropdown.
+
+### Design choices
+
+- **Prefill lives on the template, not the view.** Different owner-bound templates will want different prefixes ("hermes-...", "notes-...", etc.), so the pattern string belongs next to the rest of the template config (`prefill_name` CharField on `AppTemplate`, empty string = fall back to `template.name`). Keeps the deploy form generic.
+- **Two tokens, no template engine.** `{username}` and `{index}` via plain `str.format`. No Jinja/Django-template interpreter for three-character substitutions. If we ever need more tokens (owner's team, env, etc.) we can bolt them on without pulling in a rendering library.
+- **Username sanitization: email local-part + alphanumerics only, lowercased.** `vmendi@gmail.com` → `vmendi`; `john.doe@company.com` → `johndoe`; `Alice_99` → `alice99`. The initial plan only split on `@`, but the user pushed back: dots and other punctuation survive into the slug otherwise (`hermes-john.doe00` works but looks ugly, and `slugify` would mangle non-ASCII). Stripping to `[a-z0-9]` keeps the output tight and collision-friendly.
+- **Index collision resolution by query, not sequence count.** `_compute_default_app_name` loops `index` 0..99 and does one `App.objects.filter(organization=org, slug=slugify(candidate)).exists()` per step, returning the first free one. Using `COUNT(*)` would be cheaper but wrong when earlier users have been deleted and their slugs freed. Loop cap of 100 is deliberate — if someone has 100 hermes PAs they can type their own name.
+- **Live owner→app_name update for admins only.** Non-admins see a read-only owner (locked to self), so the value is right from the start. For admins, the view precomputes a `{owner_id: computed_name}` dict and ships it as `json_script`; a tiny inline script wires the `<el-select>` `change` event to replace `#app_name`'s value. No HTMX round-trip — the prefill is a suggestion, so ship it all on the initial render. Index is frozen at GET time; if two admins race, one eats a dup-slug error on submit, which is acceptable.
+- **Error rerender path preserves user input.** When validation fails, `_handle_deploy` passes through whatever the user typed rather than recomputing the prefill, so they don't lose their edits.
+
+### Things that bit
+
+- **Django template partials have isolated scope.** The owner dropdown uses the shared `_dropdown_select.html#dropdown_select` partial via `{% include ... %}`. The map + script had to live in the parent `template_deploy_form.html` next to the include, not inside the partial — the partial doesn't know about `owner_prefill_map`. Consistent with the `views/CLAUDE.md` note about `partialdef` isolation.
+- **`<el-select>` from Tailwind Plus Elements fires a standard DOM `change` event**, so plain `addEventListener("change", ...)` works — no custom event name needed. The hidden `<select>` it wraps exposes `value` normally on the target.
+- **Dev data already had `hermes-vmendi00`**, so the first smoke test returned `hermes-vmendi01`. Good signal that the "find next free index" path actually runs; would have been easy to miss if I'd only tested against a fresh org.
+
+### Verification path
+
+Ran migrations, re-seeded, then hit `/deploy/from-template/hermes-personal/` and `/deploy/from-template/hermes-slack/` via curl with a real session cookie. Confirmed Personal renders `value="hermes-vmendi01"` in the App Name input and the `owner-prefill-map` `<script>` JSON carries every org member → their computed prefill. Confirmed Slack falls back to `value="AI Assistant — Hermes (Slack)"` (empty `prefill_name`, no map, no script). Helper unit-checked via `manage.py shell`: `vmendi@gmail.com → vmendi`, `john.doe@company.com → johndoe`, `Alice_99 → alice99`.
+
 ## 2026-04-19 21:59 - [Deployment] End-to-end test of the sidecar proxy against real AWS, plus four fixes it surfaced and a PDP decision cache
 
 **Conversation:** [2026-04-19-2201-e2cf6c68.md](conversations/2026-04-19-2201-e2cf6c68.md)

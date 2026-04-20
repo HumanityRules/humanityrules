@@ -163,8 +163,8 @@ _HERMES_LLM_VARS = [
         "description": "LLM model identifier (e.g. us.anthropic.claude-opus-4-7, us.anthropic.claude-opus-4-6-v1, gpt-5.4-mini)",
         "required": True,
         "auto_generate": False,
-        "default_value": "us.anthropic.claude-opus-4-6-v1",
-        "value": "us.anthropic.claude-opus-4-6-v1",
+        "default_value": "us.anthropic.claude-sonnet-4-6",
+        "value": "us.anthropic.claude-sonnet-4-6",
         "user_editable": True,
     },
     {
@@ -384,6 +384,7 @@ HERMES_PERSONAL_TEMPLATE = {
     # The "app-type" tag is what the global PA ABAC policy matches on.
     # The "owner" tag is stamped per-deployment from the deploy form.
     "default_tags": [{"key": "app-type", "value": "personal-assistant"}],
+    "prefill_name": "hermes-{username}{index}",
 }
 
 # -- Hermes Slack (shared, one per org) -------------------------------------
