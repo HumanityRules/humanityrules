@@ -32,7 +32,7 @@ Three pieces, all living inside the customer's AWS account except the PDP:
 
 Two secrets are provisioned when an environment is created:
 
-- **Sidecar JWT keypair** — RSA or EdDSA. Private half kept by the auth Lambda. Public half served at `https://auth.<env-domain>/.well-known/jwks.json`. Stored in Secrets Manager at `devopshero/{env-slug}/sidecar-jwt-key`.
+- **Sidecar JWT keypair** — RSA or EdDSA. Private half kept by the auth Lambda. Public half served at `https://auth.<env-domain>/.well-known/jwks.json`. Stored in Secrets Manager at `devopshero/{env-slug}/sidecar-auth-config` under the `jwt_key` key (alongside `oidc_config`, which carries the Okta app credentials for the same Lambda).
 - **DOH sidecar token** — random 64-char bearer token. Stored in the shared-per-env secret `devopshero/{env-slug}/shared-secrets` under key `DOH_SIDECAR_TOKEN`. All sidecars in the env read it and send it on every PDP call. Rotated by redeploying the env's sidecars.
 
 Both are auto-generated at env bootstrap. No manual provisioning.
