@@ -84,13 +84,18 @@ def _build_deployed_environment_rows(app: App) -> list[DeployedEnvironmentRow]:
     """Build one summary row per deployed environment, showing the most relevant deployment.
 
     For each environment the app has been deployed to, finds the latest launched blueprint
-    and pairs it with a "current" deployment chosen by priority: in-progress first (so active
-    redeploys are visible), then succeeded, then everything else. This means a failed redeploy
-    attempt won't hide the last successful deployment.
+    and pairs it with a "current" deployment chosen by priority: transient operations first
+    (deploys and teardowns in flight), then terminal authoritative conclusions (succeeded or
+    torn down) picked by recency, then everything else. This means a failed redeploy attempt
+    won't hide the last successful deployment, while a completed teardown correctly supersedes
+    a prior success.
     """
     status_priority = Case(
-        When(status__in=Deployment.IN_PROGRESS_STATUSES, then=Value(0)),
-        When(status=Deployment.Status.SUCCEEDED, then=Value(1)),
+        When(status__in=Deployment.TRANSIENT_STATUSES, then=Value(0)),
+        When(
+            status__in=(Deployment.Status.SUCCEEDED, Deployment.Status.TORN_DOWN),
+            then=Value(1),
+        ),
         default=Value(2),
         output_field=IntegerField(),
     )

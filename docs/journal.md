@@ -1,5 +1,49 @@
 # DevOpsHero Development Journal
 
+## 2026-04-20 13:13 - [Bugfix] "Deployed to Environments" showed stale Succeeded after teardown
+
+**Conversation:** [2026-04-20-1319-330d3a27.md](conversations/2026-04-20-1319-330d3a27.md)
+
+The app detail page has two stacked sections: "Deployed to Environments" (one summary row per env) and "Recent Deployments" (chronological list). After tearing an app down, the summary row still showed a green "Succeeded" pill with a 15-hour-old timestamp, while the list below correctly showed "Torn Down" at the top. Bug report from looking at the Hermes deploy in Humanity Rules Sandbox.
+
+### Root cause
+
+`_build_deployed_environment_rows()` in `devopshero_app/views/apps.py` picks the deployment to display per blueprint using a priority `Case` expression, ordered by `(status_priority, -created_at)`:
+
+```python
+When(status__in=Deployment.IN_PROGRESS_STATUSES, then=Value(0)),
+When(status=Deployment.Status.SUCCEEDED, then=Value(1)),
+default=Value(2),  # everything else — FAILED, TORN_DOWN, TEARING_DOWN, TEARDOWN_PENDING
+```
+
+The intent of the tiering was sound: keep a failed redeploy from hiding the last success. But teardown states got lumped into the same "default" tier as `FAILED`, so an older `SUCCEEDED` (priority 1) always beat a newer `TORN_DOWN` (priority 2). That's why the pill reflected the pre-teardown state.
+
+### Fix
+
+Two tiers, re-scoped:
+
+- Tier 0 — **transient ops in flight.** Switched from `IN_PROGRESS_STATUSES` to the existing `TRANSIENT_STATUSES` tuple (models.py:1017-1021), which already bundles deploy-in-progress with `TEARDOWN_PENDING` / `TEARING_DOWN`. Active teardowns now surface the same way an active redeploy does.
+- Tier 1 — **terminal authoritative conclusions.** `SUCCEEDED` and `TORN_DOWN` together, picked by recency. So a redeploy after a teardown shows Succeeded again, and a teardown after a successful deploy shows Torn Down.
+- Default tier 2 — `FAILED` / `ROLLED_BACK`. The "failed redeploy doesn't mask last success" behavior is preserved.
+
+### What I got wrong first
+
+Initial plan put `TEARDOWN_PENDING` and `TEARING_DOWN` in tier 1 with `SUCCEEDED`/`TORN_DOWN`. User caught it: those are in-flight, not terminal — they belong with `IN_PROGRESS_STATUSES`. The repo already had `Deployment.TRANSIENT_STATUSES` doing exactly that grouping; I should have grepped for it before drafting the plan instead of inventing a new `AUTHORITATIVE_STATUSES` constant. Reuse over invent.
+
+### Verification
+
+Change is a pure query-ordering tweak; behavior table worked through by hand:
+
+| Newest → oldest                                   | Shown         |
+| ------------------------------------------------- | ------------- |
+| TORN_DOWN ← SUCCEEDED                             | Torn Down ✅  |
+| FAILED ← SUCCEEDED                                | Succeeded ✅  |
+| TEARING_DOWN ← SUCCEEDED                          | Tearing Down ✅ |
+| DEPLOYING ← TORN_DOWN                             | Deploying ✅  |
+| SUCCEEDED ← TORN_DOWN (redeploy after teardown)   | Succeeded ✅  |
+
+No template changes needed — `_app_blueprint_row.html` already handles `torn_down` in its action-button logic (line 95).
+
 ## 2026-04-20 12:57 - [Deployment] Per-user App Name prefill on the deploy-from-template form
 
 **Conversation:** [2026-04-20-1259-291de471.md](conversations/2026-04-20-1259-291de471.md)
