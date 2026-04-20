@@ -1,5 +1,68 @@
 # DevOpsHero Development Journal
 
+## 2026-04-19 21:59 - [Deployment] End-to-end test of the sidecar proxy against real AWS, plus four fixes it surfaced and a PDP decision cache
+
+**Conversation:** [2026-04-19-2201-e2cf6c68.md](conversations/2026-04-19-2201-e2cf6c68.md)
+
+Designed and ran a comprehensive end-to-end test for the sidecar proxy feature built in the previous session. The test deploys a real Hermes Personal Assistant into CH Sandbox (new env `sidecar-e2e` under the shared `chsandbox.com` hosted zone), stands up a mock PDP alongside the auth Lambda, mints `doh_session` cookies directly from the env's JWT private key (bypassing Okta), and curls the deployed app with owner / non-owner / tampered / no-cookie cases. First-real-AWS run surfaced four bugs and one real-browser visit later surfaced a fifth. Also added a PDP decision cache in the sidecar after the browser test showed ~30 PDP calls per page load.
+
+Three new management commands and a set of CDK plumbing landed: `sidecar_mint_cookie` (standalone JWT minter — reads the env's private RSA key from Secrets Manager, emits a valid `doh_session` for a given user), `sidecar_e2e_test` (the 9-phase orchestrator), and a pure-stdlib Lambda at `lambdas/pdp_mock/` with an `PdpMockLambdaStack` that mirrors the auth-Lambda pattern.
+
+### Design choices
+
+- **Mock the PDP rather than tunnel to localhost.** The sidecar inside CH Sandbox's VPC can't reach the developer's laptop, and deploying the control plane to prod just to test a feature is a big lift. An allowlist-only mock PDP (stdlib handler, ALB-as-target-for-Lambda, host-based rule on `pdp-mock.<env-domain>` at reserved priority 11) keeps the test hermetic to AWS and still exercises every wire in the sidecar → PDP path. The real ABAC engine is unit-tested separately; we aren't missing a class of failure mode by mocking here.
+- **Bypass Okta by minting JWTs directly from the env's signing key.** The auth Lambda's only job is to mint exactly that JWT after a successful OAuth round-trip. If Okta registers the correct redirect URI, the Lambda just assembles the claims and signs — unit-tested. The test loads `devopshero/{env}/sidecar-jwt-key` from Secrets Manager and signs with the private half. Means the test doesn't depend on an Okta tenant being reachable, Okta policy rules being right, or the browser's cookie handling.
+- **Run the deploy inline, not via the job worker.** `app_deployment_executor.run_deployment(deployment_id)` called directly from the orchestrator blocks until the deploy completes and surfaces errors crisply. The worker is better for real usage where the web UI enqueues and the worker drives asynchronously, but for a test we want tight feedback.
+- **9 phases with `--skip-until-phase`.** Re-running after a fix never re-provisions the env or re-builds the sidecar image. Phases are: preflight / seed-abac / create-env / pdp-mock / deploy / smoke / mint / verify / cleanup.
+- **Verify phase asserts *not-a-redirect-to-auth*, not an exact status code.** Hermes WebUI 302s to its own `/login` for unauthenticated WebUI sessions — still "sidecar allowed the request and proxied to upstream." The assertion checks that the sidecar's Location header is NOT `https://auth.<env>/start`. Deny (403) and auth-redirect cases stay exact-match.
+
+### Bugs the test surfaced (real AWS runs only — none showed up in unit tests)
+
+1. **ECS deployment circuit breaker tripping.** Sidecar-enabled task had Hermes exiting with `FATAL: DOH_LLM_PROVIDER=bedrock requires AWS_BEDROCK_ACCESS_KEY_ID, AWS_BEDROCK_SECRET_ACCESS_KEY, and AWS_BEDROCK_REGION`. Fresh env had no shared secrets for Bedrock creds. Fixed by propagating Bedrock creds (known-working values from the `default` env) into `devopshero/sidecar-e2e/shared-secrets` via `doh_secrets shared-set`. Also noted a lifecycle issue: `ensure_app_secrets_exist` preserved the first-created (empty) per-app secret, so adding shared secrets later didn't backfill — that led to a separate fix later in the conversation (see prior journal entry on `ensure_app_secrets_exist` healing behavior).
+
+2. **ECS service load-balancer binding pointed at the app container, not the sidecar.** `service.attach_to_application_target_group(target_group)` picks the first essential container with a port mapping — the app container on 8787, not the sidecar on 8788. Result: ALB landed traffic on Hermes directly, health probes hit `/__sidecar/healthz` on the app and got 302 responses, circuit breaker fired. Fix: when `sidecar_enabled`, switch to explicit `target_group.add_target(service.load_balancer_target(container_name="...-sidecar", container_port=sidecar_listen_port))`.
+
+3. **Lambda architecture / bundling-image mismatch — "Runtime.ImportModuleError: Unable to import module 'handler': /var/task/cryptography/hazmat/bindings/_rust.abi3.so".** My Mac is ARM64, so CDK's default bundling image produced ARM64 `.so` wheels for `cryptography`, but the Lambda function was deploying to x86_64 by default. Fix: pin both sides — `architecture=lambda_.Architecture.ARM_64` on the Function, and `public.ecr.aws/sam/build-python3.12:latest-arm64` as the bundling image via `DockerImage.from_registry(...)`. Confirmed via an end-to-end `curl` of the JWKS endpoint.
+
+4. **`sidecar_mint_cookie` stdout polluted by `iam_utils`'s role-assumption banner.** `get_assumed_role_session` prints `🔑 Assuming role: ...` / `✅ Assumed role ...` to stdout. The mint command's stdout was supposed to be *only* the JWT so operators could pipe it to `curl -H "Cookie: doh_session=$(...)"`. The banner went to stdout first, so the resulting "cookie" had a 🔑 emoji and a newline embedded in it. Fix: `contextlib.redirect_stdout(sys.stderr)` around the role-assumption call only.
+
+5. **Real-browser test of `https://hermes-vmendi00.chsandbox.com` — auth Lambda returning 400 "invalid rd parameter" for legitimate redirects.** ALB → Lambda integration delivers `queryStringParameters` values **percent-encoded**. The sidecar sends `rd=https%3A%2F%2F...`, the Lambda received that raw-encoded string, and `urlparse()` parsed `scheme=''` (because `:` is `%3A`) so `_validate_rd` rejected everything. The existing unit test passed `query={"rd": "https://..."}` — already-decoded — so synthetic events didn't catch it. Fix: `urllib.parse.unquote(v)` on every query-string value inside `_query_params`, plus a regression test that passes a `quote()`-d value and asserts the state JWT carries the decoded rd.
+
+### Real-world run flow (what actually works now)
+
+`sidecar_e2e_test` with `--aws-account "CH Sandbox" --org course-hero --env-slug sidecar-e2e --hosted-zone chsandbox.com --owner vmendi@gmail.com --non-owner robert.thompson --yes` takes ~7 minutes cold, ~2 minutes warm (env already exists, sidecar image cached). All four verification flows return the expected statuses:
+- Owner → HTTP 302 proxied to Hermes `/login` (sidecar allowed; Hermes does its own gate).
+- Non-owner → HTTP 403 (sidecar got deny from PDP).
+- Tampered JWT → HTTP 302 to `auth.<env>/start` (sidecar rejected invalid signature).
+- No cookie → HTTP 302 to `auth.<env>/start`.
+
+### PDP decision cache (separate sub-thread)
+
+Browser testing `hermes-vmendi00` via the **default** env (real user, local Django as PDP via ngrok reserved domain `devopshero.ngrok.io`) showed ~30 PDP calls for a single Hermes page load — every static asset, every XHR. V1 had no caching, as called out in the plan.
+
+Added a tiny in-memory cache in the sidecar: `sidecar/sidecar/pdp_cache.py`, keyed on `oidc_sub` alone (not `(sub, app_id)` — each sidecar serves exactly one app since `DOH_APP_ID` is baked in at deploy time, and v1 has no route-level overrides so path-keying would be dead weight too). 60-second TTL by default, `DOH_PDP_CACHE_TTL_SECONDS=0` disables. Deny decisions cache the same as allow. Concurrent cold lookups both hit PDP and both write — same answer, last-writer-wins, no correctness issue.
+
+Initial implementation used a `CacheKey` dataclass with both `oidc_sub` and `app_id` — user pointed out `app_id` is redundant for the one-sidecar-per-app topology and I simplified to a bare `oidc_sub` string key. Kept the design decision inline as a comment explaining when to add path-keying back.
+
+### DOH_PDP_URL for dev deploys
+
+Realization mid-session: sidecars deployed from localhost had `_resolve_pdp_url()` defaulting to `http://host.docker.internal:8000` in `DEBUG=True`, which is unreachable from inside CH Sandbox's VPC. Made the sidecar 503 on every request ("authorization service unavailable"). Hardcoded the dev fallback to `https://devopshero.ngrok.io` (user's reserved ngrok hostname — confirmed single-developer scenario, so no per-developer setting needed). Explicit `os.environ["DOH_PDP_URL"]` override still wins, so the e2e test's pdp-mock path is unaffected.
+
+Also discovered a stale-module footgun: the running `run_job_worker` process imported `deploy_app.py` once at startup and kept the old module in memory. Editing the source and clicking "Redeploy" from the UI didn't pick up the new `DOH_PDP_URL` until the worker was restarted. Worth documenting — any deploy_app.py change requires a worker restart to take effect.
+
+### Secondary: stale Repository row
+
+Pre-existing `Repository(full_name="template/hermes-personal", clone_url="file:///tmp/x")` in my dev SQLite from an earlier `sidecar_simulate` fixture blocked Phase 4 on first run. `deploy_from_template` does `aget_or_create(full_name=...)` and `defaults=` only applies on create, so the stale row was reused. Manual fix pointed `clone_url` at the real `template_repos/hermes_agent/` path. Worth a note for future devs hitting the same pattern.
+
+**Key points:**
+
+- **Mock the PDP + mint cookies directly from the env key = hermetic e2e test.** No control-plane dependency, no Okta dependency; full sidecar pipeline exercised against real AWS resources.
+- **Five bugs surfaced that unit tests didn't catch** — all of them were wire-format mismatches between synthetic test events and real AWS behavior (architecture mismatch, LB binding, percent-encoding, stdout pollution, ECS circuit breaker on missing env). This is why running against real AWS pays off even after 300+ unit tests pass.
+- **Cache key is just `oidc_sub`**, because sidecar-per-app and no route overrides. Kept a comment explaining when path-keying becomes load-bearing. `ttl_seconds=0` is the disabled sentinel — preserved as the default in the `sidecar_config` test fixture so existing app-flow tests stay cache-free.
+- **`sidecar_mint_cookie` is useful on its own** — paste the JWT into a browser's `doh_session` cookie and bypass Okta for manual UI debugging. Not a dev-mode-only command, but running it against a prod env should be gated by operator judgment.
+- **Running the worker is stateful.** Any code change to `deploy_app.py` or anything `deploy_app` imports requires a job-worker restart for the next deploy to see the change. Non-obvious and easy to miss.
+- **Hardcoding the ngrok URL is acceptable for a single-developer codebase.** A setting-based approach is correct for teams. Traded: one-line hardcode vs reading from `.env`. Both would be fine.
+
 ## 2026-04-19 21:01 - [Bugfix] `ensure_app_secrets_exist` heals empty shared-placeholder keys on redeploy
 
 **Conversation:** [2026-04-19-2102-e2cf6c68.md](conversations/2026-04-19-2102-e2cf6c68.md)
