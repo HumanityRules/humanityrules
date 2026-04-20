@@ -2,25 +2,30 @@
 
 ## What this feature is
 
-DOH deploys **Hermes Agent** — a governed AI personal assistant — into a customer's AWS VPC as a Fargate app, via the same one-click template-deploy flow used for OpenClaw. Employees get a real agent (tool execution, persistent memory, skills) reachable through WebUI and Slack. Companies keep central governance: approved model providers, per-deployment IAM, per-agent EFS isolation, secrets managed centrally.
+DOH deploys **Hermes Agent** — a governed AI personal assistant — into a customer's AWS VPC as a Fargate app, via the same one-click template-deploy flow used for OpenClaw. Employees get a real agent (tool execution, persistent memory, skills) reachable through WebUI and Slack, behind per-user SSO + ABAC. Companies keep central governance: approved model providers, per-deployment IAM, per-agent EFS isolation, secrets managed centrally, and runtime access gated by the same ABAC engine used everywhere else in DOH.
 
 ## Core pieces in place
 
-- **Hermes Agent AppTemplate** — full template repo under `template_repos/hermes_agent/` (Dockerfile, entrypoint, `config.yaml.template`, SOUL.md, README).
-- **Deploy flow** — template picker → deploy form with grouped, user-editable runtime variables (Main LLM, Auxiliary LLM, Slack groups); required-empty groups auto-expand. Workspace/Environment use the shared dropdown component (light-mode-fixed).
-- **Multi-channel** — `start_with_gateway.sh` runs WebUI + Slack gateway side-by-side when Slack tokens are present; WebUI-only otherwise. `SLACK_HOME_CHANNEL` exposed for proactive messages.
-- **Persistent state on EFS** — mount at `/home/hermeswebui/.hermes` with per-app access point (path + UID isolation, UID 1024 for hermes). `/workspace` symlinked into EFS so terminal/file-tool output survives restarts. `hermes-agent` framework staged at `/opt/hermes-defaults/`, seeded on first boot; upstream `hermes update` manages later versions.
-- **LLM configuration** — `DOH_LLM_PROVIDER` / `DOH_LLM_MODEL` / `DOH_LLM_BASE_URL` (user-editable); auxiliary slots unified under `DOH_AUX_*` and fanned out into all 8 aux positions; defaults to Bedrock Opus 4.6 main / Sonnet 4.6 aux.
-- **Bedrock governance path** — "nothing leaves our VPC" supported via Bedrock provider. Upstream Hermes gaps worked around by a runtime patch system (`patches/` dir with unified diffs + `BedrockAuxiliaryClient` overlay, applied idempotently on every boot against the EFS tree).
-- **Secrets** — per-app Secrets Manager entry + shared-per-environment store (`devopshero/{env-slug}/shared-secrets`) so common API keys are entered once per env and merged in at deploy time. Auto-generated password for WebUI (`HERMES_WEBUI_PASSWORD`).
-- **Operator tooling** — `doh_app_shell`, `doh_app_logs` (with `--follow`), `doh_efs_browse`, `doh_secrets` (incl. shared subcommands). `customer-debug` skill documents the two-plane model.
+- **Hermes Agent AppTemplate** — full template repo under `template_repos/hermes_agent/`.
+- **Deploy flow** — template picker → deploy form with grouped, user-editable runtime variables (Main LLM, Auxiliary LLM, Slack). Template authors decide what's operator-tunable per deploy vs hidden.
+- **Multi-channel** — WebUI + Slack gateway run side-by-side when Slack tokens are present; WebUI-only otherwise. Proactive messages land in a configurable Slack home channel.
+- **Persistent state on EFS** — per-app access point gives chroot-like path + UID isolation so agents can't see each other's files. Agent memory, skills, and workspace output survive task restarts.
+- **Bedrock governance path** — "nothing leaves our VPC" supported via Bedrock provider. Gaps in upstream Hermes are worked around by a runtime patch system that applies unified diffs idempotently on every boot, so the fixes naturally become no-ops if upstream lands them.
+- **Sidecar proxy for per-user SSO + ABAC** — every Hermes app ships with a two-container task where a sidecar owns the public port and gates every request. Verifies a session JWT, calls DOH's central PDP for an ABAC decision, injects `X-Auth-*` headers upstream, fails closed on PDP outage. In-memory decision cache keyed on user.
+- **Central auth endpoint per env** — single Okta redirect URI per env; one login covers every sidecar'd app in the env via a cookie on the parent env domain.
+- **ABAC owner primitive** — `$resource.owner` / `$identity.<key>` condition form lets a single global policy express "owner can use their own PA" across N apps, instead of one policy per user. `username` is locked post-creation because it's the ABAC anchor.
+- **OIDC / Okta login** — orgs can be flipped to OIDC; WorkOS and OIDC can coexist on the same user.
+- **Per-env trust anchors** — three per-env Secrets Manager entries back the whole system: shared API keys + sidecar bearer token, JWT signing keypair, Okta OIDC config. Keeps per-app secret sprawl down and scopes the trust boundary to the env's VPC.
+- **Hermes-specific operator tooling** — `sidecar_mint_cookie` (bypass Okta for manual UI debugging), `sidecar_simulate` (local PDP round-trip), `sidecar_e2e_test` (hermetic real-AWS orchestrator against a mock PDP), `setup_oidc_org`.
 
 ## Known constraints / open surface
 
-- The Bedrock support depends on the local patch stack; if upstream Hermes ships PR #11700, the patches become no-ops automatically.
-- Aux LLM assumes one shared provider/model across all 8 slots (simple knob; not per-task tunable yet).
-- WebUI base image is pinned (currently `ghcr.io/nesquena/hermes-webui:0.50.43`). Bumps are manual: edit the `FROM` in `template_repos/hermes_agent/Dockerfile` and redeploy each customer app individually. No cross-deployment rollout mechanism yet.
+- Sidecar v1: one Okta app per org, single-env orgs only. Multi-env orgs need a per-env OIDC config — deferred.
+- `HERMES_WEBUI_PASSWORD` still accepted by Hermes as a secondary auth path; not removed yet.
+- Hermes WebUI `X-Auth-*` header consumption not yet spiked — sidecar injects them but upstream integration is untested.
+- Aux LLM assumes one shared provider/model across all 8 auxiliary slots (simple knob; not per-task tunable yet).
+- WebUI base image bumps are manual per customer app — no cross-deployment rollout mechanism yet.
 
 ## Where the governance story stands
 
-ABAC / approval workflows / audit trails are inherited from DOH's existing pipeline — the Hermes template rides that infrastructure rather than adding a parallel path. The governance pieces specific to this feature are: model-provider pinning (Bedrock), per-agent EFS access point (chroot-like isolation), shared secrets (central key custody), and user-editable vs hidden runtime variables (template author decides what's operator-tunable per deploy).
+Runtime access control for Hermes is now real: per-user SSO via Okta, per-request ABAC decisions via DOH's central engine, fail-closed sidecar, per-env trust boundary. ABAC / approval workflows / audit trails are inherited from DOH's existing pipeline — the Hermes template rides that infrastructure rather than adding a parallel path. The governance pieces specific to this feature: sidecar-enforced owner-only access, model-provider pinning (Bedrock), per-agent EFS isolation, and the user-editable-vs-hidden split on runtime variables.
