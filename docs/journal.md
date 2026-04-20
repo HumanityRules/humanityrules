@@ -1,5 +1,21 @@
 # DevOpsHero Development Journal
 
+## 2026-04-19 21:01 - [Bugfix] `ensure_app_secrets_exist` heals empty shared-placeholder keys on redeploy
+
+**Conversation:** [2026-04-19-2102-e2cf6c68.md](conversations/2026-04-19-2102-e2cf6c68.md)
+
+`hermes-vmendi00` in Humanity Rules Sandbox failed first-deploy because `AWS_BEDROCK_*` were absent from `devopshero/default/shared-secrets`. `entrypoint.sh` aborts when `DOH_LLM_PROVIDER=bedrock` and those vars are unset, so ECS tripped the deployment circuit breaker. User populated the shared secret via `doh_secrets shared-set-from-env` and clicked Redeploy — it failed again for the exact same reason.
+
+Root cause was in `secrets_utils.ensure_app_secrets_exist`: the merge path only added keys **missing** from the per-app secret. On first-deploy, keys with `""` placeholders were created (via `_resolve_secret_value("")` which, with no shared value present, leaves them `""`). On the next run, those keys were *present* (just empty), so the function early-returned with "all required keys exist" and never re-resolved them from the now-populated `shared_secrets`. ECS then injected `AWS_BEDROCK_ACCESS_KEY_ID=""` and the container aborted.
+
+Fix: extend the merge path to also "heal" keys where `app_config.app_secrets[k] == ""`, `existing_values[k] == ""`, and `shared_secrets[k]` is truthy. Only those three conditions together — so non-placeholder literal `""` values (e.g. intentionally empty) aren't clobbered, and non-empty stored values are never overwritten.
+
+**Key points:**
+
+- The original `missing_keys` logic treated shared-placeholder behavior as a create-time concern only. Now shared-set + redeploy propagates values through the app secret without manual `put-secret-value`.
+- Added a regression test (`test_heals_empty_existing_value_from_shared_secrets`) that seeds an app secret with empty placeholder + a non-empty unrelated key, then verifies the placeholder gets filled from shared secrets while the non-empty key is preserved.
+- Not a bug in `doh_secrets shared-set` or `shared-set-from-env` — the shared secret side was fine. The propagation from shared → per-app is what was broken.
+
 ## 2026-04-19 20:04 - [DevEx] `doh_secrets shared-set-from-env`: push shared secrets from a local `.env`
 
 **Conversation:** [2026-04-19-2004-cf6b48f6.md](conversations/2026-04-19-2004-cf6b48f6.md)
