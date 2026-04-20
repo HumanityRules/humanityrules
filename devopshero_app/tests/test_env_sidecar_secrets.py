@@ -9,6 +9,7 @@ from django.test import TestCase
 
 from devopshero_app.models import AWSAccount, Environment, Organization, SidecarToken
 from devopshero_app.services.infra_customer import secrets_utils
+from devopshero_app.services.infra_customer.appconfig import AppConfig
 
 
 def _not_found_error() -> ClientError:
@@ -251,3 +252,82 @@ class TestEnsureEnvSidecarSecrets(SidecarSecretsTestBase):
 
         # Side effect: the SidecarToken row exists too.
         self.assertTrue(SidecarToken.objects.filter(environment=self.env).exists())
+
+
+# -----------------------------------------------------------------------------
+# ensure_app_secrets_exist
+# -----------------------------------------------------------------------------
+
+
+def _make_app_config(app_secrets: dict[str, str | None] | None) -> AppConfig:
+    return AppConfig(
+        app_name="simple-dashboard",
+        ecr_repo_name="doh/staging/simple-dashboard",
+        container_port=8000,
+        cpu=256,
+        memory=512,
+        health_check_path="/health",
+        health_check_command=None,
+        environment_variables=[],
+        app_source_path=None,
+        app_secrets=app_secrets,
+    )
+
+
+class TestEnsureAppSecretsExist(TestCase):
+
+    def test_creates_secret_under_env_app_prefix_when_missing(self) -> None:
+        fake = FakeSecretsManager()
+        session = _session_with(fake)
+        app_config = _make_app_config({"secret_key_base": None, "slack_token": "literal-token"})
+
+        secrets_utils.ensure_app_secrets_exist(
+            session=session, env_slug="staging", app_config=app_config, shared_secrets={},
+        )
+
+        self.assertIn("devopshero/staging/simple-dashboard/secrets", fake.store)
+        payload = json.loads(fake.store["devopshero/staging/simple-dashboard/secrets"]["SecretString"])
+        self.assertEqual(payload["slack_token"], "literal-token")
+        self.assertEqual(len(payload["secret_key_base"]), 64)
+
+    def test_merges_missing_keys_into_existing_secret(self) -> None:
+        fake = FakeSecretsManager()
+        session = _session_with(fake)
+        fake.create_secret(
+            Name="devopshero/staging/simple-dashboard/secrets",
+            Description="seed",
+            SecretString=json.dumps({"slack_token": "existing-value"}),
+        )
+        app_config = _make_app_config({"slack_token": "NEW-IGNORED", "secret_key_base": None})
+
+        secrets_utils.ensure_app_secrets_exist(
+            session=session, env_slug="staging", app_config=app_config, shared_secrets={},
+        )
+
+        payload = json.loads(fake.store["devopshero/staging/simple-dashboard/secrets"]["SecretString"])
+        self.assertEqual(payload["slack_token"], "existing-value")
+        self.assertEqual(len(payload["secret_key_base"]), 64)
+
+    def test_resolves_empty_placeholder_from_shared_secrets(self) -> None:
+        fake = FakeSecretsManager()
+        session = _session_with(fake)
+        app_config = _make_app_config({"OPENAI_API_KEY": ""})
+
+        secrets_utils.ensure_app_secrets_exist(
+            session=session, env_slug="staging", app_config=app_config,
+            shared_secrets={"OPENAI_API_KEY": "sk-from-shared"},
+        )
+
+        payload = json.loads(fake.store["devopshero/staging/simple-dashboard/secrets"]["SecretString"])
+        self.assertEqual(payload["OPENAI_API_KEY"], "sk-from-shared")
+
+    def test_noop_when_app_secrets_is_none(self) -> None:
+        fake = FakeSecretsManager()
+        session = _session_with(fake)
+        app_config = _make_app_config(None)
+
+        secrets_utils.ensure_app_secrets_exist(
+            session=session, env_slug="staging", app_config=app_config, shared_secrets={},
+        )
+
+        self.assertEqual(fake.store, {})

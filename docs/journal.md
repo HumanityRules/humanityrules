@@ -1,5 +1,26 @@
 # DevOpsHero Development Journal
 
+## 2026-04-19 19:00 - [Deployment] Enforce `devopshero/{env}/{app}/*` naming for all app-owned secrets
+
+**Conversation:** [2026-04-19-1901-9f9d01b3.md](conversations/2026-04-19-1901-9f9d01b3.md)
+
+App-owned secrets in customer accounts were inconsistently named: env-scoped helpers (`shared-secrets`, `sidecar-jwt-key`, `oidc-config`) already carried the env slug, but app secrets lived at `devopshero/{app}/secrets`, Aurora at `devopshero/{app}/aurora/{credentials,connection}`, and the ECS task role's `secretsmanager:GetSecretValue` resource scoped to `devopshero/{app}/*`. Without the env segment, the same app slug deployed into two environments on the same account would collide in Secrets Manager; env isolation was accidental rather than structural. Formalized the convention: **every secret an app owns lives under `devopshero/{env_slug}/{app_name}/*`**.
+
+**What changed in the runtime paths:**
+
+- `ensure_app_secrets_exist` gained an `env_slug` parameter and now writes `devopshero/{env_slug}/{app_name}/secrets`. The create-time `Description` includes the env too, so the AWS console is legible.
+- `AuroraClusterStack` (which already received `env_slug`) uses it in both the credentials secret name passed to `rds.Credentials.from_generated_secret` and the derived connection secret name.
+- `AppStack` task-role IAM statement resource is now `...:secret:devopshero/{env_slug}/{app_name}/*`, and `secretsmanager.Secret.from_secret_name_v2` imports the new name.
+- `deploy()` threads `env_slug` into the single `ensure_app_secrets_exist` call site.
+
+**Key points:**
+
+- The change is safe because the user confirmed this is effectively green-field: no live customer apps were running under the old names (confirmed no live Aurora credentials either, which was the one concern — renaming `rds.Credentials.from_generated_secret` on an existing cluster would trigger CDK to **replace** the credentials secret and rotate the Aurora master password). With a clean slate we could rename everything uniformly in one pass.
+- Out of scope: `infra_devopshero/` (DOH's own control plane) already uses `devopshero/prod/...` and stays as-is — that's the DOH server, not a customer app.
+- The `delete-by-prefix` subcommand landed earlier in this branch is the natural cleanup tool if stragglers ever appear (e.g. `doh_secrets delete-by-prefix --subprefix devopshero/<app>/`).
+- Test gap closed: `test_env_sidecar_secrets.py` had coverage for all three env-scoped sidecar helpers but nothing for `ensure_app_secrets_exist` itself. Added four cases (create, merge-preserving-existing, shared-secret placeholder resolution, noop-when-app_secrets-is-None) using the existing `FakeSecretsManager` stub.
+- Docs/examples needed sweeping too, not just code: `docs/domain_model.md` Secrets Manager naming line, the repo-analysis agent's system prompt (two references) + its schema field description, `seed_prepare_demo.py` seeded IAM policy ARN, and `template_repos/hermes_agent/README.md`. Historical docs (`docs/journal.md`, `docs/conversations/*`, `docs/deprecated/*`, `.beads/issues.jsonl`) were intentionally left untouched — they're frozen-in-time records.
+
 ## 2026-04-19 18:53 - [DevEx] `doh_secrets delete-by-prefix`: bulk delete by Secrets Manager name prefix
 
 **Conversation:** [2026-04-19-1853-23d4c42f.md](conversations/2026-04-19-1853-23d4c42f.md)

@@ -123,7 +123,7 @@ APP_DEPLOY_CONFIGS = {
         "secrets": {"DB_PASSWORD": "xxxxx", "JWT_SECRET": "xxxxx"},
         "commit_message": "feat: add account deactivation endpoint",
         "permissions": [
-            {"service": "Secrets Manager", "effect": "Allow", "access_levels": ["Read"], "resources": ["arn:aws:secretsmanager:us-east-1:111222333444:secret:devopshero/compass-account-api/*"]},
+            {"service": "Secrets Manager", "effect": "Allow", "access_levels": ["Read"], "resources": ["arn:aws:secretsmanager:us-east-1:111222333444:secret:devopshero/default/compass-account-api/*"]},
         ],
     },
     "horizon-portal": {
