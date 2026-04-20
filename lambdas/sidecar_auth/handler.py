@@ -57,8 +57,13 @@ class JwtKeyConfig:
     kid: str
 
 
-_cached_oidc: OidcConfig | None = None
-_cached_jwt_key: JwtKeyConfig | None = None
+@dataclass(frozen=True)
+class SidecarAuthConfig:
+    oidc: OidcConfig
+    jwt_key: JwtKeyConfig
+
+
+_cached_config: SidecarAuthConfig | None = None
 
 
 def _get_secrets_client():
@@ -74,32 +79,27 @@ def _load_secret_json(secret_arn: str) -> dict:
     return json.loads(response["SecretString"])
 
 
-def load_oidc_config() -> OidcConfig:
-    global _cached_oidc
-    if _cached_oidc is not None:
-        return _cached_oidc
-    arn = os.environ["DOH_OIDC_SECRET_ARN"]
+def load_sidecar_auth_config() -> SidecarAuthConfig:
+    global _cached_config
+    if _cached_config is not None:
+        return _cached_config
+    arn = os.environ["DOH_SIDECAR_AUTH_CONFIG_SECRET_ARN"]
     data = _load_secret_json(arn)
-    _cached_oidc = OidcConfig(
-        issuer_url=data["issuer_url"].rstrip("/"),
-        client_id=data["client_id"],
-        client_secret=data["client_secret"],
+    oidc_data = data["oidc_config"]
+    jwt_data = data["jwt_key"]
+    _cached_config = SidecarAuthConfig(
+        oidc=OidcConfig(
+            issuer_url=oidc_data["issuer_url"].rstrip("/"),
+            client_id=oidc_data["client_id"],
+            client_secret=oidc_data["client_secret"],
+        ),
+        jwt_key=JwtKeyConfig(
+            private_pem=jwt_data["private_pem"].encode("utf-8"),
+            public_pem=jwt_data["public_pem"].encode("utf-8"),
+            kid=jwt_data["kid"],
+        ),
     )
-    return _cached_oidc
-
-
-def load_jwt_key() -> JwtKeyConfig:
-    global _cached_jwt_key
-    if _cached_jwt_key is not None:
-        return _cached_jwt_key
-    arn = os.environ["DOH_SIDECAR_JWT_SECRET_ARN"]
-    data = _load_secret_json(arn)
-    _cached_jwt_key = JwtKeyConfig(
-        private_pem=data["private_pem"].encode("utf-8"),
-        public_pem=data["public_pem"].encode("utf-8"),
-        kid=data["kid"],
-    )
-    return _cached_jwt_key
+    return _cached_config
 
 
 def env_domain() -> str:
@@ -174,7 +174,7 @@ def _path(event: dict) -> str:
 
 def _mint_state(rd_url: str) -> str:
     now = int(time.time())
-    key = load_jwt_key()
+    key = load_sidecar_auth_config().jwt_key
     return jwt.encode(
         payload={
             "rd": rd_url,
@@ -190,7 +190,7 @@ def _mint_state(rd_url: str) -> str:
 
 def _verify_state(state: str) -> str | None:
     """Verify the state JWT and return the embedded rd URL, or None on failure."""
-    key = load_jwt_key()
+    key = load_sidecar_auth_config().jwt_key
     try:
         claims = jwt.decode(
             state, key=key.public_pem, algorithms=[JWT_ALGORITHM], leeway=5,
@@ -221,7 +221,7 @@ def _validate_rd(rd_url: str) -> bool:
 
 
 def _exchange_code_for_userinfo(code: str, redirect_uri: str) -> dict:
-    cfg = load_oidc_config()
+    cfg = load_sidecar_auth_config().oidc
 
     token_response = _http.request(
         "POST",
@@ -261,7 +261,7 @@ def _exchange_code_for_userinfo(code: str, redirect_uri: str) -> dict:
 
 def _mint_session_jwt(oidc_sub: str, username: str, email: str) -> str:
     now = int(time.time())
-    key = load_jwt_key()
+    key = load_sidecar_auth_config().jwt_key
     return jwt.encode(
         payload={
             "sub": oidc_sub,
@@ -309,7 +309,7 @@ def _b64url_uint(n: int) -> str:
 
 
 def _handle_jwks() -> dict:
-    key = load_jwt_key()
+    key = load_sidecar_auth_config().jwt_key
     body = json.dumps({"keys": [_jwk_from_pem(key.public_pem, key.kid)]})
     return _alb_response(
         status_code=200,
@@ -331,7 +331,7 @@ def _handle_start(event: dict) -> dict:
             status_code=400, body="invalid rd parameter",
         )
 
-    cfg = load_oidc_config()
+    cfg = load_sidecar_auth_config().oidc
     state = _mint_state(rd_url=rd)
     authorize_url = (
         f"{cfg.issuer_url}/v1/authorize?"

@@ -1,5 +1,20 @@
 # DevOpsHero Development Journal
 
+## 2026-04-20 14:00 - [Deployment] Fold per-env auth Lambda secrets into one `sidecar-auth-config` entry
+
+**Conversation:** [2026-04-20-1934-978400ed.md](conversations/2026-04-20-1934-978400ed.md)
+
+Each sidecar-enabled env was provisioning three Secrets Manager entries: `shared-secrets` (ECS task role reader), `sidecar-jwt-key` (auth Lambda), and `oidc-config` (auth Lambda). The two Lambda-side secrets always live and die together — the auth Lambda is the only principal that reads either of them — so keeping them split was pure boilerplate: two `create_secret` calls, two ARNs plumbed through `AuthLambdaInputs`, two IAM resources, two env vars, two cached globals in the Lambda.
+
+Collapsed them into `devopshero/{env}/sidecar-auth-config` with a nested shape: `{"oidc_config": {...}, "jwt_key": {...}}`. The ECS-side `shared-secrets` entry is deliberately left alone — it has a different reader (task role), is mutated at runtime by operators via `doh_secrets shared-set`, and holds user-supplied app env vars (`OPENAI_API_KEY`, etc.); folding it in would widen the Lambda's access over customer data for no real gain.
+
+**Key points:**
+- **Only Lambda-side secrets folded.** Kept the blast-radius line intact: sidecar task role still can't see the JWT private key or the OIDC client_secret, and the auth Lambda still can't see customer env vars.
+- **Rotation invariance preserved.** `ensure_env_sidecar_auth_config_exists` reads the existing secret first, carries `jwt_key` forward unchanged if present, and only refreshes `oidc_config` from `Organization.oidc_*` on re-run. That upholds the existing "never rotate the keypair after creation" invariant (rotation would require a coordinated Lambda + all-sidecars redeploy, documented in `docs/sidecar_proxy_design.md`).
+- **No migration shim.** User is tearing down & recreating environments, so old secret names just stop being written — dangling AWS entries get cleaned up by teardown.
+- **Single cached config object in the Lambda.** Replaced `_cached_oidc` / `_cached_jwt_key` + two loaders with one `SidecarAuthConfig(oidc, jwt_key)` dataclass and one `load_sidecar_auth_config()` call. Call sites now do `.oidc` / `.jwt_key` on the returned object.
+- **Why not fold `shared-secrets` too?** Briefly considered — rejected because: different principals (ECS task role vs Lambda role), different mutability profiles (shared-secrets is user-mutable at runtime, jwt_key is immutable, oidc_config refreshes per-deploy), and `shared-secrets` uses ECS JSON-key-scoped injection (`DOH_SIDECAR_TOKEN::` syntax) for flat scalar env vars, which doesn't compose with nested objects.
+
 ## 2026-04-20 13:13 - [Bugfix] "Deployed to Environments" showed stale Succeeded after teardown
 
 **Conversation:** [2026-04-20-1319-330d3a27.md](conversations/2026-04-20-1319-330d3a27.md)

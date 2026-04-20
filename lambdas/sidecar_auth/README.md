@@ -10,12 +10,12 @@ One per DOH environment. Handles the Okta OAuth flow and mints `doh_session` JWT
 
 ## Runtime model
 
-Triggered by ALB (not API Gateway). The Lambda is configured with two Secrets Manager ARNs passed as env vars:
+Triggered by ALB (not API Gateway). The Lambda is configured with a single Secrets Manager ARN passed as an env var:
 
-- `DOH_OIDC_SECRET_ARN` — JSON blob with `{issuer_url, client_id, client_secret}` for the org's Okta app.
-- `DOH_SIDECAR_JWT_SECRET_ARN` — JSON blob with `{private_pem, public_pem, kid}` for the env's JWT signing keypair.
+- `DOH_SIDECAR_AUTH_CONFIG_SECRET_ARN` — JSON blob with both the OIDC config and the env's JWT signing keypair:
+  `{"oidc_config": {"issuer_url", "client_id", "client_secret"}, "jwt_key": {"private_pem", "public_pem", "kid"}}`.
 
-These secrets are provisioned at env setup time (see workstream (g)).
+The secret is provisioned at env setup time (see workstream (g)).
 
 ## Dependencies
 

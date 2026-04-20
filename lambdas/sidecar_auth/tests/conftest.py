@@ -43,23 +43,23 @@ def fake_env(monkeypatch, rsa_keypair):
 
     monkeypatch.setenv("DOH_ENV_DOMAIN", TEST_ENV_DOMAIN)
     monkeypatch.setenv("DOH_AUTH_BASE_URL", f"https://auth.{TEST_ENV_DOMAIN}")
-    monkeypatch.setenv("DOH_OIDC_SECRET_ARN", "arn:aws:secretsmanager:us-east-1:0:secret:oidc")
-    monkeypatch.setenv("DOH_SIDECAR_JWT_SECRET_ARN", "arn:aws:secretsmanager:us-east-1:0:secret:jwt")
+    monkeypatch.setenv("DOH_SIDECAR_AUTH_CONFIG_SECRET_ARN", "arn:aws:secretsmanager:us-east-1:0:secret:sidecar-auth-config")
 
-    # Reset caches and inject them directly.
-    handler._cached_oidc = handler.OidcConfig(
-        issuer_url="https://okta.example.com/oauth2/default",
-        client_id="client-id-xyz",
-        client_secret="client-secret-abc",
-    )
-    handler._cached_jwt_key = handler.JwtKeyConfig(
-        private_pem=private_pem,
-        public_pem=public_pem,
-        kid=TEST_KID,
+    # Reset cache and inject directly.
+    handler._cached_config = handler.SidecarAuthConfig(
+        oidc=handler.OidcConfig(
+            issuer_url="https://okta.example.com/oauth2/default",
+            client_id="client-id-xyz",
+            client_secret="client-secret-abc",
+        ),
+        jwt_key=handler.JwtKeyConfig(
+            private_pem=private_pem,
+            public_pem=public_pem,
+            kid=TEST_KID,
+        ),
     )
     yield
-    handler._cached_oidc = None
-    handler._cached_jwt_key = None
+    handler._cached_config = None
 
 
 @pytest.fixture

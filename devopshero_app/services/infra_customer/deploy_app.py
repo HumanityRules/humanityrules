@@ -174,8 +174,8 @@ class SidecarEcrStack(Stack):
             lifecycle_rules=[ecr.LifecycleRule(
                 description="Keep last 20 sidecar images", max_image_count=20, rule_priority=1,
             )],
-            # Shared resource — tie it to the env, not an individual app.
-            removal_policy=RemovalPolicy.RETAIN,
+            removal_policy=RemovalPolicy.DESTROY,
+            empty_on_delete=True,
         )
         Tags.of(self.repository).add("Env", env_slug)
         Tags.of(self.repository).add("Component", "sidecar")
@@ -911,8 +911,7 @@ def deploy(
                 ),
                 shared_hosted_zone_id=shared_hosted_zone_id,
                 shared_hosted_zone_name=shared_alb_hosted_zone,
-                oidc_secret_arn=sidecar_secret_arns["oidc_config_arn"],
-                jwt_key_secret_arn=sidecar_secret_arns["jwt_key_arn"],
+                sidecar_auth_config_secret_arn=sidecar_secret_arns["sidecar_auth_config_arn"],
             ),
         )
 
