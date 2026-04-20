@@ -1,1 +1,1 @@
-ngrok http --region=us --url=devopshero.ngrok.io 8000
+ngrok http --url=devopshero.ngrok.io 8000

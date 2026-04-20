@@ -1,5 +1,6 @@
 """End-to-end tests for the FastAPI sidecar app, with PDP + upstream mocked."""
 
+from dataclasses import replace
 from urllib.parse import parse_qs, urlparse
 
 import httpx
@@ -133,3 +134,81 @@ def test_healthz_returns_ok_without_auth(sidecar_config, fake_jwks_client) -> No
     response = client.get("/__sidecar/healthz")
     assert response.status_code == 200
     assert response.text == "ok"
+
+
+# -----------------------------------------------------------------------------
+# PDP decision cache
+# -----------------------------------------------------------------------------
+
+
+def test_cache_enabled_reuses_first_decision(sidecar_config, fake_jwks_client, jwt_minter) -> None:
+    """Two requests from the same user hit PDP once when the cache is enabled."""
+    cfg = replace(sidecar_config, pdp_cache_ttl_seconds=60)
+    pdp_calls = 0
+
+    async def pdp(request: httpx.Request) -> httpx.Response:
+        nonlocal pdp_calls
+        pdp_calls += 1
+        return httpx.Response(200, json={"decision": "allow", "reason": "ok"})
+
+    async def upstream(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, text="ok")
+
+    client = _mk_client(cfg, fake_jwks_client, pdp, upstream)
+    token = jwt_minter()
+    cookies = {jwt_verify.SESSION_COOKIE_NAME: token}
+
+    for path in ["/", "/static/login.js", "/static/style.css", "/api/models"]:
+        resp = client.get(path, cookies=cookies)
+        assert resp.status_code == 200
+
+    assert pdp_calls == 1
+
+
+def test_cache_misses_across_different_users(sidecar_config, fake_jwks_client, jwt_minter) -> None:
+    """Two different identities each trigger their own PDP call even when cache is on."""
+    cfg = replace(sidecar_config, pdp_cache_ttl_seconds=60)
+    pdp_calls: list[str] = []
+
+    async def pdp(request: httpx.Request) -> httpx.Response:
+        import json
+        body = json.loads(request.content)
+        pdp_calls.append(body["oidc_sub"])
+        return httpx.Response(200, json={"decision": "allow", "reason": "ok"})
+
+    async def upstream(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, text="ok")
+
+    client = _mk_client(cfg, fake_jwks_client, pdp, upstream)
+    alice = jwt_minter(sub="okta|alice", username="alice")
+    bob = jwt_minter(sub="okta|bob", username="bob")
+
+    client.get("/", cookies={jwt_verify.SESSION_COOKIE_NAME: alice})
+    client.get("/", cookies={jwt_verify.SESSION_COOKIE_NAME: alice})  # hit
+    client.get("/", cookies={jwt_verify.SESSION_COOKIE_NAME: bob})
+    client.get("/", cookies={jwt_verify.SESSION_COOKIE_NAME: bob})   # hit
+
+    assert pdp_calls == ["okta|alice", "okta|bob"]
+
+
+def test_cache_disabled_when_ttl_zero(sidecar_config, fake_jwks_client, jwt_minter) -> None:
+    """Confirm the default (ttl=0) still calls PDP on every request — existing prod behavior."""
+    pdp_calls = 0
+
+    async def pdp(request: httpx.Request) -> httpx.Response:
+        nonlocal pdp_calls
+        pdp_calls += 1
+        return httpx.Response(200, json={"decision": "allow", "reason": "ok"})
+
+    async def upstream(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, text="ok")
+
+    client = _mk_client(sidecar_config, fake_jwks_client, pdp, upstream)
+    token = jwt_minter()
+    cookies = {jwt_verify.SESSION_COOKIE_NAME: token}
+
+    client.get("/", cookies=cookies)
+    client.get("/static/login.js", cookies=cookies)
+    client.get("/api/models", cookies=cookies)
+
+    assert pdp_calls == 3

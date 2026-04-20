@@ -50,10 +50,12 @@ def _resolve_pdp_url() -> str:
     explicit = os.environ.get("DOH_PDP_URL")
     if explicit:
         return explicit
-    # In prod the app runs at devopshero.ai; in local dev the sidecar inside
-    # a customer VPC can't reach the developer's laptop, so the orchestration
-    # caller is expected to set DOH_PDP_URL to a reachable tunnel URL.
-    base = "https://devopshero.ai" if not settings.DEBUG else "http://host.docker.internal:8000"
+    # In prod the sidecar calls devopshero.ai directly. In local dev the
+    # sidecar lives in a customer VPC and can't reach the laptop, so we
+    # point it at a reserved ngrok tunnel that forwards to localhost:8000.
+    # If someone else ever needs to deploy a sidecar'd app from their
+    # laptop, switch to a per-developer DOH_PDP_PUBLIC_URL setting.
+    base = "https://devopshero.ai" if not settings.DEBUG else "https://devopshero.ngrok.io"
     return f"{base}/api/pdp/evaluate"
 
 logger = logging.getLogger(__name__)

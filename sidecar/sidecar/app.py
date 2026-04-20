@@ -12,6 +12,7 @@ from fastapi.responses import PlainTextResponse, RedirectResponse, Response
 from . import config as config_mod
 from . import jwt_verify
 from . import pdp as pdp_mod
+from . import pdp_cache as pdp_cache_mod
 from . import proxy as proxy_mod
 
 logger = logging.getLogger(__name__)
@@ -52,6 +53,9 @@ def create_app(cfg: config_mod.SidecarConfig) -> FastAPI:
     app.state.jwks_client = jwt.PyJWKClient(
         uri=cfg.jwks_url, cache_keys=True, lifespan=JWKS_CACHE_TTL_SECONDS,
     )
+    app.state.pdp_cache = pdp_cache_mod.PdpDecisionCache(
+        ttl_seconds=cfg.pdp_cache_ttl_seconds,
+    )
 
     @app.get(f"{INTERNAL_PATH_PREFIX}/healthz")
     async def healthz() -> Response:
@@ -74,19 +78,22 @@ def create_app(cfg: config_mod.SidecarConfig) -> FastAPI:
         if identity is None:
             return _redirect_to_auth(request=request, cfg=state.config)
 
-        decision = await pdp_mod.evaluate(
-            http_client=state.http_client,
-            pdp_url=state.config.pdp_url,
-            sidecar_token=state.config.sidecar_token,
-            app_id=state.config.app_id,
-            oidc_sub=identity.oidc_sub,
-            username=identity.username,
-            path=request.url.path,
-        )
+        decision = state.pdp_cache.get(identity.oidc_sub)
         if decision is None:
-            return PlainTextResponse(
-                content="authorization service unavailable", status_code=503,
+            decision = await pdp_mod.evaluate(
+                http_client=state.http_client,
+                pdp_url=state.config.pdp_url,
+                sidecar_token=state.config.sidecar_token,
+                app_id=state.config.app_id,
+                oidc_sub=identity.oidc_sub,
+                username=identity.username,
+                path=request.url.path,
             )
+            if decision is None:
+                return PlainTextResponse(
+                    content="authorization service unavailable", status_code=503,
+                )
+            state.pdp_cache.put(identity.oidc_sub, decision)
         if decision.decision != "allow":
             logger.info(
                 "sidecar deny reason=%s env=%s app=%s user=%s path=%s",
