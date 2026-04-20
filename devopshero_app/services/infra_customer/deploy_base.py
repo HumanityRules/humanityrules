@@ -675,34 +675,50 @@ def deploy(
 
 def teardown(session: boto3.Session, env_slug: str) -> bool:
     """
-    Delete shared infrastructure stacks (ECS cluster, builder, VPC).
-    WARNING: This will fail if any app stacks still depend on them.
+    Delete every CloudFormation stack owned by the given environment.
+
+    Stacks are discovered dynamically by name prefix (``devopshero-{env_slug}-``)
+    rather than from a hardcoded list, so any stack added later (auth-lambda,
+    sidecar-ecr, pdp-mock, ...) is torn down as long as it follows the naming
+    convention. Deletion runs in rounds because CloudFormation blocks deletion
+    of a stack whose exports are still imported: each round deletes whatever
+    is currently leaf, which unblocks the next round.
     """
     cf_client = session.client("cloudformation")
+    prefix = f"devopshero-{env_slug}-"
 
-    # Order matters: dependent stacks first, VPC is base (deleted last)
-    stacks_to_delete = [
-        f"devopshero-{env_slug}-cluster",
-        f"devopshero-{env_slug}-builder",
-        f"devopshero-{env_slug}-efs",
-        f"devopshero-{env_slug}-vpc",
-    ]
+    logger.info("Tearing down infrastructure for environment '%(env_slug)s'", {"env_slug": env_slug})
 
-    logger.info("Tearing down shared infrastructure for environment '%(env_slug)s'", {"env_slug": env_slug})
-    logger.info("Stacks to delete (in order):")
-    for stack in stacks_to_delete:
-        logger.info("   - %(stack_name)s", {"stack_name": stack})
+    max_rounds = 5
+    for round_num in range(1, max_rounds + 1):
+        remaining = cloudformation_utils.list_stacks_by_prefix(cf_client, prefix=prefix)
+        if not remaining:
+            logger.info("All stacks for '%(env_slug)s' deleted", {"env_slug": env_slug})
+            return True
 
-    all_success = True
-    for stack_name in stacks_to_delete:
-        success = cloudformation_utils.delete_stack_and_wait(cf_client, stack_name=stack_name)
-        if not success:
-            all_success = False
+        logger.info(
+            "Teardown round %(round)d — %(count)d stack(s) remaining: %(stacks)s",
+            {"round": round_num, "count": len(remaining), "stacks": ", ".join(remaining)},
+        )
 
-    if all_success:
-        logger.info("Infrastructure stacks deleted successfully")
-        return all_success
+        progress = False
+        for stack_name in remaining:
+            if cloudformation_utils.delete_stack_and_wait(cf_client, stack_name=stack_name):
+                progress = True
 
-    logger.error("Some stacks failed to delete (apps may still depend on them)")
+        if not progress:
+            logger.error(
+                "Teardown stalled after round %(round)d — no stacks deleted this pass. Remaining: %(stacks)s",
+                {"round": round_num, "stacks": ", ".join(remaining)},
+            )
+            return False
 
-    return all_success
+    still_present = cloudformation_utils.list_stacks_by_prefix(cf_client, prefix=prefix)
+    if still_present:
+        logger.error(
+            "Teardown exceeded %(max)d rounds. Still present: %(stacks)s",
+            {"max": max_rounds, "stacks": ", ".join(still_present)},
+        )
+        return False
+
+    return True

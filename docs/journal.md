@@ -1,5 +1,35 @@
 # DevOpsHero Development Journal
 
+## 2026-04-19 18:22 - [Deployment] Environment teardown discovers stacks dynamically by prefix
+
+**Conversation:** [2026-04-19-1822-1bdc74aa.md](conversations/2026-04-19-1822-1bdc74aa.md)
+
+`sidecar_e2e_test` (landed over the last few days) was the first code path to provision stacks that aren't part of the original "VPC + EFS + builder + cluster" quartet — specifically `devopshero-{env}-auth-lambda` and `devopshero-{env}-pdp-mock`, both of which wire themselves into the env's shared ALB (a reserved listener-rule priority) and create a Route53 alias record. The hardcoded list in `deploy_base.teardown()` at `devopshero_app/services/infra_customer/deploy_base.py:684` was never updated, so any teardown would have orphaned those two stacks plus their listener rules and DNS records. `auth-lambda` in particular is created by *any* sidecar-enabled app deploy (not just the test), so this was a live gap, not a test-only one.
+
+### Options considered
+
+- **A. Dynamic discovery by CloudFormation name prefix** — every env stack already uses `devopshero-{env_slug}-*`, so the naming convention is already a de facto contract (every `Fn.import_value` assumes it). Formalize it as the discovery mechanism. Iterate rounds because CloudFormation refuses to delete stacks whose exports are still imported, which gives us natural dependency ordering for free.
+- **B. Database registry (`EnvironmentStack` model)** — explicit and debuggable, but introduces the dual-write problem (partial creates leave dangling rows or miss real stacks). Still needs a reconciliation pass against CFN. Most creation sites would have to be touched.
+- **C. CloudFormation tag-based discovery** — `ListStacks` doesn't filter by tag server-side; would still be a client-side filter plus one more thing to remember to set on every new stack. Little gained over A.
+
+Went with **A**. The naming convention was already load-bearing — there's no way to add a new env stack without adopting it because it's baked into every `Fn.import_value` used across stacks — so using it for discovery adds nothing new to remember.
+
+### Implementation
+
+- `cloudformation_utils.list_stacks_by_prefix(cf_client, prefix)` — paginated wrapper over `cf_client.list_stacks` that filters out `DELETE_COMPLETE`. AWS keeps deleted stack summaries for 90 days (verified against the boto3 `list_stacks` docs per the project's "verify AWS facts" rule), so without that filter we'd see ghost stacks from previous env lifecycles.
+- `deploy_base.teardown()` rewritten to loop up to 5 rounds. Each round: `list_stacks_by_prefix` → attempt `delete_stack_and_wait` on every match → retry. CFN's export/import dependency rules do the ordering work for us: dependents delete first because their exports aren't imported by anyone; then the base stacks (VPC, shared ALB outputs) unblock. Bails with a clear error if a whole round makes no progress — that signals either a true cycle, a non-CFN orphan (stale Route53 record, ENI), or a `DELETE_FAILED` that needs human eyes.
+
+### Non-obvious details
+
+- **Why "rounds" instead of a topological sort.** Two reasons: (1) we'd have to fetch every stack's template exports/imports, which is an extra API call per stack and still wouldn't catch implicit dependencies (like ALB listener rules referencing targets in sibling stacks). (2) CFN already enforces the rule server-side — the round loop is just "let CFN tell us what's leaf right now." Simpler and correct by construction.
+- **The `delete_stack_and_wait` 10-minute per-stack waiter is fine for this.** Worst realistic case is ~5 stacks × 10 min = 50 min, bounded. Teardown is already a long-running job worker task.
+- **DELETE_COMPLETE filtering was necessary, not defensive.** Without it, a second teardown of a slug that had ever existed before would find phantom stacks and get stuck trying to re-delete them (the `delete_stack_and_wait` call would no-op on `stack_exists=False`, so it'd "succeed" but also never make progress, tripping the stall check incorrectly).
+
+### What this unblocks
+
+- `sidecar_e2e_test` teardown now works end-to-end in CH Sandbox without manual cleanup.
+- Any future env stack (per the naming contract) is automatically included — no teardown code change needed when we add more sidecar infra, shared observability stacks, etc.
+
 ## 2026-04-19 01:19 - [Deployment] Sidecar proxy for Personal Assistants: design + full implementation
 
 **Conversation:** [2026-04-19-0121-c8212365.md](conversations/2026-04-19-0121-c8212365.md)
