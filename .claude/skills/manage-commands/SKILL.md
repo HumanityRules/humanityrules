@@ -1,6 +1,6 @@
 ---
 name: manage-commands
-description: Understand and use Django management commands. Use when you need to run a management command locally or need to know which command does what.
+description: Understand and use Django management commands. Use to troubleshoot/debug anything locally and need to know which command does what.
 ---
 
 # Django Management Commands
