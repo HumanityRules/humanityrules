@@ -67,6 +67,20 @@
             {% else %}
                 {% include "devopshero_app/partials/_dropdown_select.html#dropdown_select" with dropdown_id="owner_id" dropdown_name="owner_id" dropdown_value=selected_owner_id dropdown_selected_label=selected_owner_label dropdown_options=owner_options %}
                 <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">The user this personal assistant belongs to. Only they — plus org admins — can access it.</p>
+                {{ owner_prefill_map|json_script:"owner-prefill-map" }}
+                <script>
+                (function () {
+                    const ownerEl = document.getElementById("owner_id");
+                    const appNameEl = document.getElementById("app_name");
+                    const mapEl = document.getElementById("owner-prefill-map");
+                    if (!ownerEl || !appNameEl || !mapEl) return;
+                    const prefillMap = JSON.parse(mapEl.textContent);
+                    ownerEl.addEventListener("change", function (e) {
+                        const next = prefillMap[e.target.value];
+                        if (next !== undefined) appNameEl.value = next;
+                    });
+                })();
+                </script>
             {% endif %}
         </div>
         {% endif %}
