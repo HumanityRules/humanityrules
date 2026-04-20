@@ -65,7 +65,9 @@ def ensure_app_secrets_exist(session: boto3.Session, env_slug: str, app_config: 
     Empty-placeholder values ("") are resolved from shared_secrets when available.
 
     If the secret already exists, any new keys from app_config.app_secrets are
-    merged in without overwriting existing keys.
+    merged in without overwriting existing keys. Additionally, any shared-
+    placeholder keys ("") whose stored value is still empty will be filled in
+    from shared_secrets on subsequent runs.
     """
     if not app_config.app_secrets:
         return
@@ -77,18 +79,31 @@ def ensure_app_secrets_exist(session: boto3.Session, env_slug: str, app_config: 
     try:
         response = sm_client.get_secret_value(SecretId=secret_name)
         existing_values = json.loads(response["SecretString"])
-        
-        # Find keys that are in app_config but missing from the stored secret
+
         missing_keys = set(app_config.app_secrets.keys()) - set(existing_values.keys())
-        if not missing_keys:
+
+        # Heal shared-placeholder keys whose stored value is still "" because
+        # the shared secret wasn't populated at first-deploy. Without this,
+        # later shared-set calls wouldn't propagate to the app secret and the
+        # container would keep starting with empty credentials.
+        healed_keys = {
+            key for key, value in app_config.app_secrets.items()
+            if value == "" and existing_values.get(key) == "" and shared_secrets.get(key)
+        }
+
+        if not missing_keys and not healed_keys:
             print(f"   ✅ Secret '{secret_name}' already exists with all required keys")
             return
-        
-        # Merge new keys into existing secret, preserving existing values
-        for key in missing_keys:
+
+        for key in missing_keys | healed_keys:
             existing_values[key] = _resolve_secret_value(key=key, value=app_config.app_secrets[key], shared_secrets=shared_secrets)
-        
-        print(f"   ⏳ Adding {len(missing_keys)} new key(s) to '{secret_name}': {', '.join(sorted(missing_keys))}")
+
+        parts = []
+        if missing_keys:
+            parts.append(f"adding {len(missing_keys)} missing key(s): {', '.join(sorted(missing_keys))}")
+        if healed_keys:
+            parts.append(f"filling {len(healed_keys)} empty key(s) from shared secrets: {', '.join(sorted(healed_keys))}")
+        print(f"   ⏳ Updating '{secret_name}': {'; '.join(parts)}")
         sm_client.put_secret_value(SecretId=secret_name, SecretString=json.dumps(existing_values))
         print(f"   ✅ Secret '{secret_name}' updated")
         return

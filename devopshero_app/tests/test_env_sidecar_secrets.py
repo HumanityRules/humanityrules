@@ -321,6 +321,29 @@ class TestEnsureAppSecretsExist(TestCase):
         payload = json.loads(fake.store["devopshero/staging/simple-dashboard/secrets"]["SecretString"])
         self.assertEqual(payload["OPENAI_API_KEY"], "sk-from-shared")
 
+    def test_heals_empty_existing_value_from_shared_secrets(self) -> None:
+        # Simulates first-deploy having created the app secret with empty
+        # placeholders because shared-secrets wasn't yet populated; a later
+        # shared-set + redeploy must backfill the stored values.
+        fake = FakeSecretsManager()
+        session = _session_with(fake)
+        fake.create_secret(
+            Name="devopshero/staging/simple-dashboard/secrets",
+            Description="seed",
+            SecretString=json.dumps({"AWS_BEDROCK_ACCESS_KEY_ID": "", "HERMES_WEBUI_PASSWORD": "kept"}),
+        )
+        app_config = _make_app_config({"AWS_BEDROCK_ACCESS_KEY_ID": "", "HERMES_WEBUI_PASSWORD": ""})
+
+        secrets_utils.ensure_app_secrets_exist(
+            session=session, env_slug="staging", app_config=app_config,
+            shared_secrets={"AWS_BEDROCK_ACCESS_KEY_ID": "AKIA-from-shared"},
+        )
+
+        payload = json.loads(fake.store["devopshero/staging/simple-dashboard/secrets"]["SecretString"])
+        self.assertEqual(payload["AWS_BEDROCK_ACCESS_KEY_ID"], "AKIA-from-shared")
+        # Non-empty existing value is preserved even when shared has no entry.
+        self.assertEqual(payload["HERMES_WEBUI_PASSWORD"], "kept")
+
     def test_noop_when_app_secrets_is_none(self) -> None:
         fake = FakeSecretsManager()
         session = _session_with(fake)
