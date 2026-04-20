@@ -372,7 +372,7 @@ Apps use shared ALB with host-based routing:
 - **Base infrastructure** — `devopshero-{env_slug}-*` (VPC, cluster, execution role)
 - **App resources** — `doh-{env_slug}-{app_slug}-*` (ALB target group, ECS service, task role)
 - **ECR path** — `doh/{env_slug}/{app_slug}`
-- **Secrets Manager** — `devopshero/{app_slug}/secrets`
+- **Secrets Manager** — `devopshero/{env_slug}/{app_slug}/secrets` (and `devopshero/{env_slug}/{app_slug}/aurora/*` for apps with a database)
 
 ### Compute Substrate
 - v1 supports ECS/Fargate only

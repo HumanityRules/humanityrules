@@ -50,27 +50,27 @@ def get_shared_secrets(session: boto3.Session, env_slug: str) -> dict[str, str]:
         raise
 
 
-def ensure_app_secrets_exist(session: boto3.Session, app_config: AppConfig, shared_secrets: dict[str, str]) -> None:
+def ensure_app_secrets_exist(session: boto3.Session, env_slug: str, app_config: AppConfig, shared_secrets: dict[str, str]) -> None:
     """
     Ensure all app secrets exist in Secrets Manager. Creates or merges as needed.
-    
+
     This is called BEFORE CDK runs because CloudFormation's GenerateSecretString
     can only auto-generate ONE random field per secret. By using boto3, we can
     generate multiple random fields (e.g., secret_key_base AND signing_salt).
-    
+
     The app_config.app_secrets dict maps field names to values:
     - str value: use this literal value
     - None: generate a random 64-char alphanumeric string
-    
+
     Empty-placeholder values ("") are resolved from shared_secrets when available.
-    
+
     If the secret already exists, any new keys from app_config.app_secrets are
     merged in without overwriting existing keys.
     """
     if not app_config.app_secrets:
         return
-    
-    secret_name = f"devopshero/{app_config.app_name}/secrets"
+
+    secret_name = f"devopshero/{env_slug}/{app_config.app_name}/secrets"
     sm_client = session.client("secretsmanager")
     
     # Check if secret already exists
@@ -109,7 +109,7 @@ def ensure_app_secrets_exist(session: boto3.Session, app_config: AppConfig, shar
     print(f"   ⏳ Creating secret '{secret_name}'...")
     sm_client.create_secret(
         Name=secret_name,
-        Description=f"Application secrets for {app_config.app_name}",
+        Description=f"Application secrets for {app_config.app_name} in env '{env_slug}'",
         SecretString=json.dumps(secret_values),
     )
     print(f"   ✅ Secret '{secret_name}' created")

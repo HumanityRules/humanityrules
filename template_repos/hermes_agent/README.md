@@ -33,7 +33,7 @@ The Hermes template defines its variables in `seed_app_templates.py` under `runt
 
 For hermes, this covers `DOH_LLM_PROVIDER` and `DOH_LLM_MODEL`.
 
-**Secret vars** (`category: "secret"`) go through AWS Secrets Manager. `template_deploy_service._materialize_app_secrets()` extracts them into `{"KEY": value}` and stores them on the blueprint's `app_secrets` field. Before CDK runs, `secrets_utils.ensure_app_secrets_exist()` creates (or merges into) a Secrets Manager entry at `devopshero/{app-name}/secrets` as a JSON blob with all the keys. The CDK then wires each key as an `ecs.Secret.from_secrets_manager(field=...)` reference, so ECS resolves them at task startup — the container sees them as regular env vars, but they never appear in the CloudFormation template.
+**Secret vars** (`category: "secret"`) go through AWS Secrets Manager. `template_deploy_service._materialize_app_secrets()` extracts them into `{"KEY": value}` and stores them on the blueprint's `app_secrets` field. Before CDK runs, `secrets_utils.ensure_app_secrets_exist()` creates (or merges into) a Secrets Manager entry at `devopshero/{env-slug}/{app-name}/secrets` as a JSON blob with all the keys. The CDK then wires each key as an `ecs.Secret.from_secrets_manager(field=...)` reference, so ECS resolves them at task startup — the container sees them as regular env vars, but they never appear in the CloudFormation template.
 
 The `value` field in seed data controls initial resolution:
 
