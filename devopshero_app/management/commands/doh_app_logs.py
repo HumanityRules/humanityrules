@@ -153,6 +153,7 @@ class Command(BaseCommand):
         parser.add_argument("--env", default="default", help="Environment slug (default: default)")
         parser.add_argument("--app", required=True, help="App slug")
         parser.add_argument("--stopped", action="store_true", help="Look at stopped/crashed tasks (skip running)")
+        parser.add_argument("--sidecar", action="store_true", help="Fetch logs for the sidecar container instead of the app container")
         parser.add_argument("--limit", type=int, default=100, help="Number of log events to fetch (default: 100)")
         parser.add_argument("--head", action="store_true", help="Read from the beginning instead of the tail")
         parser.add_argument("--all", action="store_true", dest="fetch_all", help="Fetch all log events (paginate until exhausted)")
@@ -207,7 +208,8 @@ class Command(BaseCommand):
             )
 
         task_id = task_arn.split("/")[-1]
-        log_stream = f"{app_slug}/{app_slug}/{task_id}"
+        container_segment = f"{app_slug}-sidecar" if options["sidecar"] else app_slug
+        log_stream = f"{container_segment}/{container_segment}/{task_id}"
 
         self.stdout.write(f"Cluster:    {cluster_name}")
         self.stdout.write(f"Service:    {service_name}")
