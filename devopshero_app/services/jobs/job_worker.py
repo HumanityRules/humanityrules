@@ -207,8 +207,9 @@ def _run_app_removal_thread(job_id: str) -> None:
     """Thread target that runs a single app removal."""
     try:
         app_remove_executor.run_removal(job_id)
-    except Exception:
+    except Exception as e:
         logger.exception(f"Unhandled error in app removal {job_id}")
+        app_remove_executor.fail_from_worker(job_id, f"Unhandled worker error: {e}")
     finally:
         connections.close_all()
 
