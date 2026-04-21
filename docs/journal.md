@@ -1,5 +1,45 @@
 # DevOpsHero Development Journal
 
+## 2026-04-21 00:08 - [Deployment] Disable Hermes "Check for updates" banner by dropping .git
+
+**Conversation:** [2026-04-21-0008-05a010f8.md](conversations/2026-04-21-0008-05a010f8.md)
+
+The Hermes WebUI ships a "Check for updates" feature that runs `git fetch && git rev-list --count HEAD..origin/…` against two repos on every browser boot and shows an update banner if either is behind. The user wanted it off **permanently** — not just toggled off in settings, since any user can flip it back on via the Settings panel. Solved it by removing the upstream-tracking side of one repo entirely: `rm -rf /opt/hermes-defaults/hermes-agent/.git` in the Dockerfile immediately after the `git clone`.
+
+**How the upstream feature is wired** (`ghcr.io/nesquena/hermes-webui:0.50.126`, extracted under `/apptoo/`):
+
+- `api/updates.py:162` — `check_for_updates()` is the server entry point. Calls `_check_repo(REPO_ROOT, 'webui')` and `_check_repo(_AGENT_DIR, 'agent')`. Results cached 30 min.
+- `api/updates.py:125` — `_check_repo` early-returns `None` if `(path / '.git').exists()` is false. This is the kill-switch we're exploiting.
+- `api/routes.py:706-739` — `/api/updates/check` endpoint. First checks the `check_for_updates` setting (`routes.py:708`); if off, returns `{"disabled": True}`. If on, runs the update check.
+- `api/config.py:1375` — `"check_for_updates": True` in `_SETTINGS_DEFAULTS`, persisted in `STATE_DIR/settings.json`. Toggle in Settings panel writes there.
+- `static/boot.js:800-806` — on every boot the browser fires `/api/updates/check`; shows `_showUpdateBanner(d)` if `d.webui.behind > 0 || d.agent.behind > 0`.
+
+**What the image actually ships.** I first inferred (incorrectly) that `.git` lived inside the WebUI image. User pushed back; re-extracting confirmed `/apptoo/.git` does **not** exist — the WebUI image baked its version into `api/_version.py` instead. So the webui half of `_check_repo` was already a silent no-op in production. The only live check was against the hermes-agent repo, which **our** Dockerfile brings in via `git clone --depth 1 --branch v2026.4.16 …/hermes-agent.git` and then `entrypoint.sh:70-72` `cp -r`s to EFS on first boot, `.git` and all.
+
+**Why deleting `.git` is a cleaner fix than any alternative.**
+
+- **Pre-seeding `settings.json` with `check_for_updates: false`** was the first option I proposed. Rejected by user because it's user-toggleable — the whole point of the kill is "no matter the user's clicking the switch."
+- **Patching the Python source** (via a 4th entry in `template_repos/hermes_agent/patches/`) would work but the existing `apply.py` targets `$HERMES_DIR/hermes-agent`, not the WebUI `/apptoo/` tree that's baked into the image layer. Would have required extending `apply.py` or doing a Dockerfile-time sed, and we'd have to re-verify the patch after every WebUI version bump.
+- **Deleting `.git`** makes `_check_repo` short-circuit at `updates.py:125` before any network call. The Settings toggle becomes inert: flip it on, the route runs, `_check_repo` returns `None` for both repos, `boot.js:805` sees no `behind > 0`, banner never fires. Immune to upstream refactors of the update logic as long as the `.git` guard stays in place.
+
+**Where we landed.** One line added to `template_repos/hermes_agent/Dockerfile:9-11`:
+
+```Dockerfile
+RUN git clone --depth 1 --branch v2026.4.16 https://github.com/NousResearch/hermes-agent.git \
+        /opt/hermes-defaults/hermes-agent \
+    && rm -rf /opt/hermes-defaults/hermes-agent/.git
+```
+
+No `entrypoint.sh` change. Briefly added an unconditional `rm -rf "$HERMES_DIR/hermes-agent/.git"` on boot to clean up already-deployed EFS volumes, but user reverted that: "If it's only to clean up pre-existing, we don't need it." Correct call — the Personal template is early enough that there are no long-lived EFS volumes worth migrating, and keeping entrypoint.sh minimal is worth more than belt-and-suspenders.
+
+**Side effect worth knowing.** This also disables the `hermes update` self-update flow on the agent repo (documented in the template README). Since we already pin `v2026.4.16` in the Dockerfile, that's the intended behaviour — updates come from us bumping the image, not from in-app pulls.
+
+**Key points:**
+
+- The `.git` guard at `updates.py:125` is load-bearing for this approach; worth a re-verification if we ever bump the WebUI image past `0.50.126` (check that the guard still exists and the banner still requires `.git`).
+- WebUI version detection (`api/_version.py` fallback at `updates.py:75-89`) is independent of the `.git` presence, so the "Hermes vX.Y.Z" string in the UI still works after this change.
+- Didn't touch the Settings toggle UI — it stays visible, just has no effect. Hiding it would require a `static/panels.js` patch, not worth the maintenance.
+
 ## 2026-04-20 23:45 - [DomainModel] Extend Remove App with a policies-cleanup checkbox
 
 **Conversation:** [2026-04-20-2345-0f9b0797.md](conversations/2026-04-20-2345-0f9b0797.md)

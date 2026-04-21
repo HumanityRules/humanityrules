@@ -7,7 +7,8 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 
 RUN git clone --depth 1 --branch v2026.4.16 https://github.com/NousResearch/hermes-agent.git \
-        /opt/hermes-defaults/hermes-agent
+        /opt/hermes-defaults/hermes-agent \
+    && rm -rf /opt/hermes-defaults/hermes-agent/.git
 
 COPY SOUL.md /opt/hermes-defaults/SOUL.md
 COPY config.yaml.template /opt/hermes-defaults/config.yaml.template
