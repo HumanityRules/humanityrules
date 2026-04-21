@@ -1,5 +1,33 @@
 # DevOpsHero Development Journal
 
+## 2026-04-20 23:44 - [Deployment] Disconnect HERMES_WEBUI_PASSWORD for sidecar-gated Personal template
+
+**Conversation:** [2026-04-20-2344-e6df3d54.md](conversations/2026-04-20-2344-e6df3d54.md)
+
+The Hermes Personal template has been shipping two redundant auth layers: the sidecar proxy (Okta SSO + ABAC) and Hermes WebUI's own `HERMES_WEBUI_PASSWORD` check. The open item in `sidecar_proxy_design.md` and `personal_assistant_deployment_state.md` had flagged this as a v1 follow-up. Disconnected both the password and — critically — the WebUI's bind address, because disabling auth without loopback-binding would have exposed the WebUI over the task ENI to the whole VPC.
+
+**How `HERMES_WEBUI_PASSWORD` actually works upstream** (`api/auth.py` in `nesquena/hermes-webui` v0.50.126):
+
+- `get_password_hash()` reads `os.getenv('HERMES_WEBUI_PASSWORD', '').strip()`. Empty/unset falls back to a persisted `password_hash` in `state/settings.json`; if that's also `null`, `is_auth_enabled()` returns `False` and `check_auth()` short-circuits to allow everything. No separate "disable auth" flag exists — absence of a password IS the disabled state.
+- No trusted-proxy / header-auth support anywhere in the codebase. Grep for `X-Auth-User`, `X-Forwarded-User`, `Remote-User` returns zero hits. So the sidecar's injected `X-Auth-*` headers are currently unused by the WebUI; upstream integration is still deferred.
+
+**The isolation trap I caught before shipping the password removal.** The app container in a Fargate `awsvpc` task shares the ENI with the sidecar. Published image sets `ENV HERMES_WEBUI_HOST=0.0.0.0` (`api/config.py:31` reads this env var; Python default is `127.0.0.1`, Dockerfile overrides to `0.0.0.0`). Task SG is `devopshero-{env-slug}-default-sg` with ingress `all_traffic from vpc_cidr` (`deploy_base.py:193-195`). With the password gone but the WebUI still binding `0.0.0.0:8787`, anything inside the VPC could have hit it unauthenticated. Fixed by setting `HERMES_WEBUI_HOST=127.0.0.1` as a config-category runtime variable on the Personal template.
+
+**Why ECS `portMappings` don't save you here.** In Fargate awsvpc, port mappings are informational (they feed the ALB target group registration and Service Connect). They don't firewall ports or prevent a container from listening on anything else. The real isolation boundary inside a task is *what address the process binds to*. You cannot per-container firewall inside a single task; they share one network namespace. The only way to get AWS-layer isolation between two containers is two separate ECS services with their own ENIs and SGs — roughly doubles the bill per app and breaks the shared-EFS / localhost-sidecar pattern. Standard service-mesh pattern (Envoy, Istio, App Mesh) is to bind the app loopback-only and let the sidecar own the public port; that's what we're doing.
+
+**Splitting the password out by template, not removing it wholesale.** `_HERMES_CREDENTIAL_VARS` was used by both `HERMES_PERSONAL_TEMPLATE` and `HERMES_SLACK_TEMPLATE`. Slack template is ALB-exposed with no sidecar, so removing the password there would have opened its WebUI to the public internet. Extracted `HERMES_WEBUI_PASSWORD` into its own `_HERMES_WEBUI_PASSWORD_VAR` list, included it only in the Slack template. Personal drops it entirely.
+
+**Why "remove entirely" vs "set value to empty string".** Setting `"value": ""` in the seed still flows through `_materialize_app_secrets` and `secrets_utils._resolve_secret_value` (`secrets_utils.py:31-37`). That function treats `""` as a *placeholder* that should fall back to the env's shared-secret entry. If `devopshero/{env-slug}/shared-secrets` happens to contain a `HERMES_WEBUI_PASSWORD` from any prior deploy, an empty seed value would get silently rehydrated and auth would turn back on. Removing the seed entry entirely means no ECS injection, no Secrets Manager key, no resurrection path.
+
+**Key points:**
+
+- **Dockerfile `EXPOSE`, ECS `portMappings`, and process bind address are three different things.** Only the last one firewalls network access in Fargate awsvpc. `EXPOSE` is documentation. `portMappings` register with ALB/Service Connect. The kernel's `bind()` decides what's actually reachable.
+- **`HERMES_WEBUI_HOST=127.0.0.1` is load-bearing.** Without it the VPC-reachable bind plus disabled auth would have been a worse posture than before. Both go together.
+- **Upstream WebUI has no X-Auth-\* header support.** Sidecar still injects `X-Auth-User/Sub/Email` (`sidecar_proxy_design.md:98`) but nothing reads them on the WebUI side. Closing that gap requires an upstream patch or a WebUI feature — still deferred.
+- **Migration is automatic for new deploys, manual-ish for existing ones.** Removing the key from the seed stops ECS from injecting it on the next redeploy; the stale password in the per-app `devopshero/{env-slug}/{app-name}/secrets` entry just becomes an unused field. If anyone ever clicked through to the WebUI's Settings panel and saved a `password_hash` to `webui-mvp/settings.json`, it would persist on EFS — unlikely given the sidecar was in front, but a known edge case.
+- **Worker doesn't need restarting.** Deploy path reads `AppTemplate.runtime_variables` from the DB, not from the Python module at process start. `uv run manage.py seed_app_templates` is the only thing needed to land the new shape.
+- **Existing test references survive.** `test_env_sidecar_secrets.py` uses `HERMES_WEBUI_PASSWORD` as a stand-in key name in fake secret fixtures — not coupled to the seed. All 20 tests in the relevant suites still pass.
+
 ## 2026-04-20 22:59 - [Deployment] Pin Hermes WebUI and hermes-agent versions in the template Dockerfile
 
 **Conversation:** [2026-04-20-2259-d3e8c08d.md](conversations/2026-04-20-2259-d3e8c08d.md)
