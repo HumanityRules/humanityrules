@@ -1,4 +1,4 @@
-FROM ghcr.io/nesquena/hermes-webui:0.50.87
+FROM ghcr.io/nesquena/hermes-webui:0.50.126
 
 USER root
 
@@ -6,7 +6,7 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends git patch \
     && rm -rf /var/lib/apt/lists/*
 
-RUN git clone --depth 1 https://github.com/NousResearch/hermes-agent.git \
+RUN git clone --depth 1 --branch v2026.4.16 https://github.com/NousResearch/hermes-agent.git \
         /opt/hermes-defaults/hermes-agent
 
 COPY SOUL.md /opt/hermes-defaults/SOUL.md
