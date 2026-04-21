@@ -1,130 +1,64 @@
 # Hermes Agent
 
-An AI personal assistant powered by [Hermes Agent](https://github.com/NousResearch/hermes-agent) with the [Hermes WebUI](https://github.com/nesquena/hermes-webui), configured for enterprise deployment via DevOps Hero.
+[Hermes Agent](https://github.com/NousResearch/hermes-agent) with the [Hermes WebUI](https://github.com/nesquena/hermes-webui), packaged for DOH deployment on ECS + EFS.
 
 
 ## Local Setup
 
-1. Copy the environment file and configure:
-
 ```bash
-cp .env.example .env
-# Edit .env with your API keys
-```
-
-2. Build and run the agent:
-
-```bash
+cp .env.example .env   # fill in keys
 docker build -t hermes-agent .
-docker run --rm --name hermes-agent \
-    --env-file .env \
-    -p 8787:8787 \
-    hermes-agent
+docker run --rm --env-file .env -p 8787:8787 hermes-agent
 ```
 
-The WebUI will be available at `http://localhost:8787`.
+WebUI at `http://localhost:8787`.
 
 
-## How Environment Variables Reach the Container
+## Environment variables
 
-The Hermes template defines its variables in `seed_app_templates.py` under `runtime_variables`. Each variable has a `category` (`config` or `secret`) and a `value`. At deploy time, DOH splits them into two paths:
+Defined in `seed_app_templates.py` under `runtime_variables`. `category: "config"` vars land as plain ECS env vars; `category: "secret"` vars go through Secrets Manager and are wired into the task definition as `ecs.Secret` refs. See `template_deploy_service` and `secrets_utils` for the full flow.
 
-**Config vars** (`category: "config"`) become plain ECS environment variables. `template_deploy_service._materialize_environment_variables()` extracts them into `[{"name": ..., "value": ...}]` and stores them on the `DeploymentBlueprint`. The CDK then passes them as the `environment` dict on the ECS container definition. They arrive as regular `os.environ` in the container.
+Inside the container, `entrypoint.sh` bridges ECS env vars into the two places Hermes actually reads from:
 
-For hermes, this covers `DOH_LLM_PROVIDER` and `DOH_LLM_MODEL`.
-
-**Secret vars** (`category: "secret"`) go through AWS Secrets Manager. `template_deploy_service._materialize_app_secrets()` extracts them into `{"KEY": value}` and stores them on the blueprint's `app_secrets` field. Before CDK runs, `secrets_utils.ensure_app_secrets_exist()` creates (or merges into) a Secrets Manager entry at `devopshero/{env-slug}/{app-name}/secrets` as a JSON blob with all the keys. The CDK then wires each key as an `ecs.Secret.from_secrets_manager(field=...)` reference, so ECS resolves them at task startup — the container sees them as regular env vars, but they never appear in the CloudFormation template.
-
-The `value` field in seed data controls initial resolution:
-
-- `None` — auto-generate a random 64-char token at first deploy (e.g. gateway tokens)
-- `""` — empty placeholder; if a shared secret exists for this environment with the same key, that value is copied in; otherwise stays empty for the user to fill in via AWS console
-- `"literal"` — use as-is (e.g. `HERMES_WEBUI_PASSWORD: "mysquirrel"`)
-
-For hermes, this covers `HERMES_WEBUI_PASSWORD`, `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `OPENROUTER_API_KEY`, `TAVILY_API_KEY`, `AWS_BEDROCK_ACCESS_KEY_ID`, `AWS_BEDROCK_SECRET_ACCESS_KEY`, `SLACK_APP_TOKEN`, and `SLACK_BOT_TOKEN`.
-
-**Inside the container**, the entrypoint bridges these ECS env vars to the two places hermes reads them from:
-
-- **`config.yaml`** — generated on first boot from `DOH_LLM_PROVIDER` and `DOH_LLM_MODEL`. Persists on EFS; not regenerated on reboot.
-- **`.env` file** — regenerated every boot by writing each API key env var into `/home/hermeswebui/.hermes/.env`. The hermes agent subprocess loads this via dotenv. The WebUI server reads its own config (`HERMES_WEBUI_PASSWORD`) from the process environment directly — it's not in the `.env` file.
+- **`~/.hermes/config.yaml`** — rendered from `config.yaml.template` on first boot, never overwritten.
+- **`~/.hermes/.env`** — rewritten every boot from the current env, so DOH config changes propagate.
 
 
-## AWS Bedrock Provider
+## Provider config
 
-Hermes supports AWS Bedrock natively (via the Converse API for most models, and the `AnthropicBedrock` SDK for Claude models with full feature parity — prompt caching, thinking budgets, adaptive thinking) DOH wires it up with three deploy-time variables:
+DOH namespaces its own knobs as `DOH_LLM_*` (main) and `DOH_AUX_*` (auxiliary slots — vision, compression, skills hub, etc.; default to the main provider).
 
-- **`DOH_LLM_PROVIDER=bedrock`**
-- **`DOH_LLM_MODEL`** — any bedrock model ID or inference profile (e.g. `us.anthropic.claude-opus-4-6-v1`, `anthropic.claude-sonnet-4-20250514-v1:0`, `amazon.nova-pro-v1:0`). Regional inference-profile prefixes (`us.`, `eu.`, `global.`) are supported.
-- **`AWS_BEDROCK_ACCESS_KEY_ID`** / **`A.WS_BEDROCK_SECRET_ACCESS_KEY`** / **`AWS_BEDROCK_REGION`** — static IAM user credentials for an account that has Bedrock model access enabled.
+Bedrock has a few quirks handled by the entrypoint:
+
+- `AWS_BEDROCK_*` are renamed to the boto3 standard names (`AWS_ACCESS_KEY_ID` …).
+- `DOH_LLM_BASE_URL` is derived from the region.
+- `boto3` is installed into the shared venv on first boot by `start.sh` (sentinel-guarded), so switching to Bedrock later doesn't require a rebuild.
+
+For Claude on Bedrock, Hermes uses the `AnthropicBedrock` SDK (prompt caching, thinking budgets). Other models go through the Converse API.
 
 
-## Storage Architecture: What's Ephemeral, What's Persistent
+## Slack gateway
 
-The container has two layers of storage: the **ephemeral container filesystem** (lost on every ECS task replacement) and a **persistent EFS volume** (survives across reboots, redeployments, and scaling events).
+`start.sh` supervises WebUI + optional `python -m gateway.run`. Auto-enabled when `SLACK_APP_TOKEN` or `SLACK_BOT_TOKEN` is set — leave both **unset** (not empty) to disable. If either process dies the container exits and ECS restarts it.
 
-### How EFS is mounted
 
-DOH creates a shared EFS filesystem per environment. Each hermes deployment gets its own **EFS access point** scoped to `/deployments/{app-name}` with UID/GID 1000 (the `hermeswebui` user). At runtime, ECS mounts this access point at `/home/hermeswebui/.hermes` — the hermes home directory. Everything under that path is persistent.
+## Patches
 
-### What lives where
+`patches/` carries DOH-owned fixes against the pinned `hermes-agent` tree: numbered `*.patch` files applied idempotently (`patch -N --forward`) and an `overlay/` tree for whole files DOH owns. `apply.py` runs on every boot against the **EFS-backed** copy, so a new image's patches reach already-deployed volumes. Already-applied patches become no-ops, so upstream fixes soft-land on the next rebuild.
 
-**On EFS (`/home/hermeswebui/.hermes`)** — all hermes state:
 
-- `config.yaml` — agent configuration (seeded on first boot, never overwritten)
-- `SOUL.md` — agent personality (seeded on first boot, never overwritten)
-- `.env` — API keys (regenerated every boot from ECS env vars)
-- `hermes-agent/` — the agent framework code (seeded on first boot, updated via `hermes update`)
-- `skills/` — auto-written skills that hermes creates from experience
-- `memories/` — layered memory files (user profile, agent memory, session history)
-- `sessions/` — chat session data
-- `webui-mvp/` — WebUI state (the `HERMES_WEBUI_STATE_DIR`)
-- `workspace/` — the agent's working directory for file operations
+## Storage: ephemeral vs EFS
 
-**On the ephemeral container filesystem** — replaceable on every boot:
+All Hermes state (`config.yaml`, `SOUL.md`, `hermes-agent/`, `skills/`, `memories/`, `sessions/`, `workspace/`, WebUI state) lives on an EFS access point mounted at `~/.hermes`, scoped per app with UID/GID 1000. The Dockerfile symlinks `/workspace` into this path so terminal tools persist their output.
 
-- `/opt/hermes-defaults/` — staging area with build-time copies of `hermes-agent` and `SOUL.md`, used only to seed EFS on first boot
-- The WebUI binary (from the base image)
-- The entrypoint script
+Everything else (image layers, `/opt/hermes-defaults/` seeds, the WebUI binary) is ephemeral and replaced on each task. First boot seeds EFS from `/opt/hermes-defaults/`; subsequent boots only refresh `.env` and re-run patches. User edits to `config.yaml` / `SOUL.md` are preserved. Details in `entrypoint.sh`.
 
-### The `/workspace` symlink
 
-Hermes uses `/workspace` as its default working directory for terminal commands and file tools (e.g. `touch`, `search_files`, `write_file`). The Dockerfile replaces the base image's `/workspace` directory with a symlink:
+## Version pins
 
-```
-/workspace  ->  /home/hermeswebui/.hermes/workspace  (EFS)
-```
+Both upstreams are pinned in the Dockerfile and bumped manually:
 
-This means all files the agent creates via terminal commands are transparently persisted on EFS.
+- **WebUI**: `FROM ghcr.io/nesquena/hermes-webui:X.Y.Z`. Container tag drops the leading `v` of the release tag.
+- **Agent framework**: `git clone --branch vYYYY.M.D`. Uses CalVer git tags; ignore the parallel semver in release names.
 
-### First boot vs subsequent boots
-
-The entrypoint runs on every boot and does the following:
-
-1. `mkdir -p /home/hermeswebui/.hermes/ /home/hermeswebui/.hermes/workspace/` — ensures directories exist (no-op after first boot)
-2. Copies `hermes-agent` from `/opt/hermes-defaults/` — **only if `/home/hermeswebui/.hermes/hermes-agent/` doesn't exist**
-3. Generates `config.yaml` from environment variables — **only if `/home/hermeswebui/.hermes/config.yaml` doesn't exist**
-4. Copies `SOUL.md` from `/opt/hermes-defaults/` — **only if `/home/hermeswebui/.hermes/SOUL.md` doesn't exist**
-5. Writes `.env` from environment variables — **every boot** (picks up DOH config changes)
-
-On first boot all five steps do work. On subsequent boots only steps 1 and 5 are effective; 2-4 are skipped because their targets already exist on EFS. This means config changes made by the user (editing SOUL.md, running `hermes config set`, etc.) are preserved.
-
-### Updating hermes
-
-The container image and the agent framework are **independently versioned**:
-
-- **WebUI** (the server binary) — updated by rebuilding the Docker image with a newer base image tag and redeploying through DOH.
-- **Agent framework** (`hermes-agent/` on EFS) — updated via the built-in `hermes update` command, which downloads the latest release while preserving all user data. DOH does not run this automatically; it's up to the user.
-
-When bumping the base image version, test against an existing EFS volume to verify compatibility. Most WebUI updates are backward-compatible, but major version bumps could require running `hermes update` to sync the agent framework.
-
-### How to bump the WebUI base image
-
-The Dockerfile pins a specific WebUI release (`ghcr.io/nesquena/hermes-webui:X.Y.Z`) rather than `:latest`, so customer deployments are reproducible. To roll out a newer WebUI:
-
-1. Check the published tags at `https://github.com/nesquena/hermes-webui/pkgs/container/hermes-webui`.
-2. Edit the `FROM` line in `template_repos/hermes_agent/Dockerfile` to the new tag, test, and commit.
-3. Each customer app needs to be redeployed individually (via the *Redeploy* button) to pick up the new image — there is no auto-rollout.
-
-## Port
-
-This application runs on port **8787**.
+On existing deployments, only the WebUI updates on redeploy — `hermes-agent/` is frozen on EFS at the version seeded on first boot. Updating it requires user-run `hermes update` or an EFS wipe. When bumping either pin, re-run `patches/apply.py` against a fresh checkout to confirm anchors still match.
