@@ -48,5 +48,5 @@ def load_config_from_env() -> SidecarConfig:
         upstream_host=_required("DOH_UPSTREAM_HOST"),
         upstream_port=int(_required("DOH_UPSTREAM_PORT")),
         listen_port=int(_required("DOH_LISTEN_PORT")),
-        pdp_cache_ttl_seconds=_int_env("DOH_PDP_CACHE_TTL_SECONDS", 60),
+        pdp_cache_ttl_seconds=_int_env("DOH_PDP_CACHE_TTL_SECONDS", 600),
     )

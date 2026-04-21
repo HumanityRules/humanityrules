@@ -89,7 +89,7 @@ Request flow:
 3. Read the `doh_session` cookie. If missing or invalid (bad signature, expired), 302 to `https://auth.<env-domain>/start?rd=<current-url>`.
 4. Verify JWT signature against the cached JWKS. Extract `sub`, `username`.
 5. Look up `(oidc_sub, app_id, path-pattern)` in the decision cache.
-6. On cache miss, call the DOH PDP (see below). Cache the result with a 60 s TTL.
+6. On cache miss, call the DOH PDP (see below). Cache the result with a 600 s TTL.
 7. On stale-on-error (DOH unreachable and cache entry expired), fail closed — return 503 with a short explanation. Existing sessions with warm cache entries keep working for the duration of their TTL.
 8. On allow, proxy to the app container on localhost. On deny, return a 403 with a message distinguishing "you are not the owner" from "the app does not exist."
 
