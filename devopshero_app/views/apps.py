@@ -566,6 +566,7 @@ def app_remove(request: HttpRequest, app_slug: str) -> HttpResponse:
             workspace_slug_snapshot=app.workspace.slug,
             delete_secrets=request.POST.get("delete_secrets") == "on",
             delete_efs_data=has_efs and request.POST.get("delete_efs_data") == "on",
+            delete_policies=request.POST.get("delete_policies") == "on",
             created_by=request.user,
         )
         app.status = App.Status.PENDING_REMOVAL

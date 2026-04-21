@@ -115,13 +115,34 @@ def run_removal(job_id: str) -> bool:
         return False
 
     with transaction.atomic():
+        if job.delete_policies:
+            _delete_matching_policies(organization_id=app.organization_id, app_slug=app.slug)
         # Cascade deletes DeploymentBlueprint, Deployment, DeploymentLog, AppPermissions,
         # AppPermissionRequest, and ResourceTag rows that point at this app.
-        # Conversation.context_app is SET_NULL.
+        # Conversation.context_app is SET_NULL. Policy has no FK to App; matching rows
+        # are handled above when delete_policies is set.
         app.delete()
 
     _mark(job, models.AppRemovalJob.Status.SUCCEEDED, "App removed.")
     return True
+
+
+def _delete_matching_policies(organization_id, app_slug: str) -> None:
+    """Delete Policy rows whose resource_conditions target app-name=<app_slug>."""
+    candidates = models.Policy.objects.filter(
+        organization_id=organization_id,
+        resource_type=models.Policy.ResourceType.APP,
+    )
+    matching_ids = [
+        p.id for p in candidates
+        if any(
+            c.get("key") == "app-name" and c.get("value") == app_slug
+            for c in (p.resource_conditions or [])
+        )
+    ]
+    if matching_ids:
+        deleted, _ = models.Policy.objects.filter(id__in=matching_ids).delete()
+        logger.info("Deleted %d policies matching app-name=%s", deleted, app_slug)
 
 
 def _mark(job: models.AppRemovalJob, status: str, message: str) -> None:

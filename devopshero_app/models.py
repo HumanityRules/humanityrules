@@ -1400,6 +1400,7 @@ class AppRemovalJob(models.Model):
     workspace_slug_snapshot = models.SlugField(max_length=255)
     delete_secrets = models.BooleanField(default=False)
     delete_efs_data = models.BooleanField(default=False)
+    delete_policies = models.BooleanField(default=False)
     status = models.CharField(max_length=20, choices=Status.choices, default=Status.PENDING)
     status_message = models.TextField(blank=True)
     created_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True)
