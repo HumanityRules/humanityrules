@@ -35,6 +35,8 @@ urlpatterns = [
     path("apps/<slug:app_slug>/deployments/<uuid:deployment_id>/status/", views.app_deployment_status, name="app_deployment_status"),
     path("apps/<slug:app_slug>/card-status/", views.app_card_status, name="app_card_status"),
     path("apps/<slug:app_slug>/deployments/<uuid:deployment_id>/teardown-confirm/", views.app_teardown_confirm, name="app_teardown_confirm"),
+    path("apps/<slug:app_slug>/remove-confirm/", views.app_remove_confirm, name="app_remove_confirm"),
+    path("apps/<slug:app_slug>/remove/", views.app_remove, name="app_remove"),
 
     # Environments
     path("environments/", views.environments, name="environments"),

@@ -9,6 +9,7 @@ from . import app_config_builder
 from . import app_deployment_debug_simulator
 from . import app_deployment_executor
 from . import app_deployment_teardown_executor
+from . import app_remove_executor
 from . import environment_provisioning_executor
 from . import environment_teardown_executor
 from . import job_logging
@@ -19,6 +20,7 @@ __all__ = [
     "app_deployment_debug_simulator",
     "app_deployment_executor",
     "app_deployment_teardown_executor",
+    "app_remove_executor",
     "environment_provisioning_executor",
     "environment_teardown_executor",
     "job_logging",

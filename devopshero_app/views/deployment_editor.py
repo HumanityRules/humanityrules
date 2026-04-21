@@ -228,6 +228,9 @@ def deployment_editor(request: HttpRequest, app_slug: str) -> HttpResponse:
     if denied:
         return denied
 
+    if app.status == models.App.Status.PENDING_REMOVAL:
+        return HttpResponse(status=422)
+
     open_blueprint = apps_views.get_open_blueprint(app=app)
     conversation = _get_or_create_existing_app_editor_conversation(
         request=request,
@@ -252,6 +255,9 @@ def deployment_editor_reset(request: HttpRequest, app_slug: str) -> HttpResponse
     denied = abac_view_checks.check_abac(request, app.workspace, "workspace", "workspace:edit")
     if denied:
         return denied
+
+    if app.status == models.App.Status.PENDING_REMOVAL:
+        return HttpResponse(status=422)
 
     blueprint = apps_views.get_open_blueprint(app=app)
     if blueprint and blueprint.status in DISCARDABLE_BLUEPRINT_STATUSES:
