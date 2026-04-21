@@ -107,7 +107,7 @@ def run_removal(job_id: str) -> bool:
                     session=session,
                     subprefix=f"devopshero/{env.slug}/{app.slug}/",
                     dry_run=False,
-                    force_immediate=False,
+                    force_immediate=True,
                 )
     except ClientError as e:
         logger.exception("AWS cleanup failed: %s", e)
