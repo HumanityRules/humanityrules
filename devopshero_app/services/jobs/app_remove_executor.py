@@ -22,16 +22,20 @@ from devopshero_app.services.infra_customer import secrets_utils
 logger = logging.getLogger(__name__)
 
 
-def _app_is_live(app: "models.App") -> bool:
-    """Re-check: the latest deployment in any environment is not TORN_DOWN."""
+def _find_live_deployments(app: "models.App") -> list[tuple[str, str]]:
+    """Return (env_slug, deployment_status) for every env whose latest deployment isn't torn down."""
     latest_by_env: dict = {}
-    for env_id, status, created_at in models.Deployment.objects.filter(app=app).values_list(
-        "environment_id", "status", "created_at",
+    for env_id, env_slug, status, created_at in models.Deployment.objects.filter(app=app).values_list(
+        "environment_id", "environment__slug", "status", "created_at",
     ):
         existing = latest_by_env.get(env_id)
-        if existing is None or created_at > existing[1]:
-            latest_by_env[env_id] = (status, created_at)
-    return any(status != models.Deployment.Status.TORN_DOWN for status, _ in latest_by_env.values())
+        if existing is None or created_at > existing[2]:
+            latest_by_env[env_id] = (env_slug, status, created_at)
+    return [
+        (env_slug, status)
+        for env_slug, status, _ in latest_by_env.values()
+        if status != models.Deployment.Status.TORN_DOWN
+    ]
 
 
 CLEANUP_CONTAINER_NAME = "efs-remover"
@@ -72,8 +76,10 @@ def run_removal(job_id: str) -> bool:
         _mark(job, models.AppRemovalJob.Status.SUCCEEDED, "App row already gone; nothing to do.")
         return True
 
-    if _app_is_live(app):
-        _mark(job, models.AppRemovalJob.Status.FAILED, "App became live again; cannot remove.")
+    live = _find_live_deployments(app)
+    if live:
+        detail = ", ".join(f"{env}={status}" for env, status in live)
+        _fail(job, app, f"App became live again ({detail}); cannot remove.")
         return False
 
     environments = list(
@@ -91,11 +97,7 @@ def run_removal(job_id: str) -> bool:
                 for env in environments:
                     ok, message = _run_efs_cleanup_task(env=env, app_slug=app.slug)
                     if not ok:
-                        _mark(
-                            job,
-                            models.AppRemovalJob.Status.FAILED,
-                            f"EFS cleanup failed in '{env.slug}': {message}",
-                        )
+                        _fail(job, app, f"EFS cleanup failed in '{env.slug}': {message}")
                         return False
 
         if job.delete_secrets:
@@ -109,7 +111,7 @@ def run_removal(job_id: str) -> bool:
                 )
     except ClientError as e:
         logger.exception("AWS cleanup failed: %s", e)
-        _mark(job, models.AppRemovalJob.Status.FAILED, f"AWS cleanup failed: {e}")
+        _fail(job, app, f"AWS cleanup failed: {e}")
         return False
 
     with transaction.atomic():
@@ -127,6 +129,28 @@ def _mark(job: models.AppRemovalJob, status: str, message: str) -> None:
     job.status_message = message
     job.save(update_fields=["status", "status_message", "updated_at"])
     logger.info("AppRemovalJob %s -> %s: %s", job.id, status, message)
+
+
+def _fail(job: models.AppRemovalJob, app: "models.App", message: str) -> None:
+    """Mark the job as failed and revert the app out of PENDING_REMOVAL so the user can retry."""
+    with transaction.atomic():
+        _mark(job, models.AppRemovalJob.Status.FAILED, message)
+        if app.status == models.App.Status.PENDING_REMOVAL:
+            app.status = models.App.Status.ACTIVE
+            app.save(update_fields=["status", "updated_at"])
+
+
+def fail_from_worker(job_id: str, message: str) -> None:
+    """Called from the worker's top-level exception handler; best-effort revert of app state."""
+    try:
+        job = models.AppRemovalJob.objects.get(id=job_id)
+    except models.AppRemovalJob.DoesNotExist:
+        return
+    app = models.App.objects.filter(id=job.app_id_snapshot).first()
+    if app is None:
+        _mark(job, models.AppRemovalJob.Status.FAILED, message)
+    else:
+        _fail(job, app, message)
 
 
 # ---------------------------------------------------------------------------
