@@ -5,13 +5,14 @@ from typing import Any
 from uuid import UUID
 
 from django.contrib.auth.decorators import login_required
+from django.db import transaction
 from django.db.models import Case, IntegerField, OuterRef, Subquery, Value, When
 from django.http import HttpRequest, HttpResponse
 from django.shortcuts import get_object_or_404, render
 from django.urls import reverse
 from django.views.decorators.http import require_GET, require_POST
 
-from devopshero_app.models import App, Deployment, DeploymentBlueprint, ResourceTag
+from devopshero_app.models import App, AppRemovalJob, Deployment, DeploymentBlueprint, ResourceTag
 from devopshero_app.services import abac
 
 from . import abac_view_checks
@@ -22,6 +23,25 @@ OPEN_BLUEPRINT_STATUSES = (
     DeploymentBlueprint.Status.FAILED,
     DeploymentBlueprint.Status.DEPLOYING,
 )
+
+def app_is_live(app: App) -> bool:
+    """An app is 'live' if the latest deployment in any environment is not TORN_DOWN.
+
+    Historical FAILED rows in an environment whose latest deployment later went TORN_DOWN
+    don't count — the UI shows one row per environment, so this matches what the user sees.
+    """
+    latest_by_env: dict = {}
+    for env_id, status, created_at in Deployment.objects.filter(app=app).values_list(
+        "environment_id", "status", "created_at",
+    ):
+        existing = latest_by_env.get(env_id)
+        if existing is None or created_at > existing[1]:
+            latest_by_env[env_id] = (status, created_at)
+    return any(status != Deployment.Status.TORN_DOWN for status, _ in latest_by_env.values())
+
+
+def _app_has_efs(app: App) -> bool:
+    return bool(app.source_template and app.source_template.efs_config)
 
 
 @dataclass
@@ -35,7 +55,7 @@ class DeployedEnvironmentRow:
 def _get_app_for_user(request: HttpRequest, app_slug: str) -> App:
     """Get an app that belongs to the current user's organization."""
     return get_object_or_404(
-        App.objects.select_related("workspace", "repository", "created_by"),
+        App.objects.select_related("workspace", "repository", "created_by", "source_template"),
         slug=app_slug,
         organization=request.user.current_organization,
     )
@@ -190,8 +210,12 @@ def build_app_detail_context(request: HttpRequest, app: App) -> dict[str, Any]:
     context["direct_tags"] = direct_tags
     context["inherited_tags"] = inherited_tags
     context["tags_json"] = json.dumps([{"key": t.key, "value": t.value} for t in direct_tags])
+    is_pending_removal = app.status == App.Status.PENDING_REMOVAL
     context["can_edit"] = can_edit
     context["can_admin"] = can_admin
+    context["is_pending_removal"] = is_pending_removal
+    context["can_remove"] = can_edit and not is_pending_removal and not app_is_live(app)
+    context["has_efs"] = _app_has_efs(app)
     context["url_base"] = f"/apps/{app.slug}/tags/"
     context["suggested_keys"], context["suggested_values"] = abac.get_resource_tag_suggestions(org, "app")
 
@@ -225,6 +249,9 @@ def app_deployment_teardown(request: HttpRequest, app_slug: str, deployment_id: 
     denied = abac_view_checks.check_abac(request, app.workspace, "workspace", "workspace:edit")
     if denied:
         return denied
+
+    if app.status == App.Status.PENDING_REMOVAL:
+        return HttpResponse(status=422)
 
     deployment = _get_deployment_for_app(app, deployment_id)
 
@@ -367,6 +394,9 @@ def app_deployment_redeploy(request: HttpRequest, app_slug: str, deployment_id: 
     if denied:
         return denied
 
+    if app.status == App.Status.PENDING_REMOVAL:
+        return HttpResponse(status=422)
+
     deployment = _get_deployment_for_app(app, deployment_id)
 
     if deployment.status not in (Deployment.Status.SUCCEEDED, Deployment.Status.FAILED, Deployment.Status.TORN_DOWN):
@@ -488,3 +518,61 @@ def app_tags_save(request: HttpRequest, app_slug: str) -> HttpResponse:
         "inherited_tags": inherited_tags,
         "empty_text": "No direct tags",
     })
+
+
+@login_required
+@require_GET
+def app_remove_confirm(request: HttpRequest, app_slug: str) -> HttpResponse:
+    """Return the remove-app confirmation modal HTML."""
+    app = _get_app_for_user(request, app_slug)
+
+    denied = abac_view_checks.check_abac(request, app.workspace, "workspace", "workspace:view")
+    if denied:
+        return denied
+
+    if app_is_live(app):
+        return HttpResponse(status=422)
+
+    context = {
+        "app": app,
+        "post_url": reverse("app_remove", kwargs={"app_slug": app.slug}),
+        "has_efs": _app_has_efs(app),
+    }
+    return render(request, "devopshero_app/apps/_app_remove_confirm_modal.html", context=context)
+
+
+@login_required
+@require_POST
+def app_remove(request: HttpRequest, app_slug: str) -> HttpResponse:
+    """Queue an AppRemovalJob; the job worker handles cleanup and the DB cascade delete."""
+    app = _get_app_for_user(request, app_slug)
+
+    denied = abac_view_checks.check_abac(request, app.workspace, "workspace", "workspace:edit")
+    if denied:
+        return denied
+
+    if app.status == App.Status.PENDING_REMOVAL:
+        return HttpResponse(status=422)
+    if app_is_live(app):
+        return HttpResponse(status=422)
+
+    has_efs = _app_has_efs(app)
+    with transaction.atomic():
+        AppRemovalJob.objects.create(
+            organization=request.user.current_organization,
+            app_id_snapshot=app.id,
+            app_slug_snapshot=app.slug,
+            app_name_snapshot=app.name,
+            workspace_slug_snapshot=app.workspace.slug,
+            delete_secrets=request.POST.get("delete_secrets") == "on",
+            delete_efs_data=has_efs and request.POST.get("delete_efs_data") == "on",
+            created_by=request.user,
+        )
+        app.status = App.Status.PENDING_REMOVAL
+        app.save(update_fields=["status", "updated_at"])
+
+    response = HttpResponse(status=200)
+    response["HX-Redirect"] = reverse(
+        "workspace_detail", kwargs={"workspace_slug": app.workspace.slug},
+    )
+    return response

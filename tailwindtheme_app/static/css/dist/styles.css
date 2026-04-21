@@ -2954,6 +2954,9 @@
   .ring-indigo-500 {
     --tw-ring-color: var(--color-indigo-500);
   }
+  .ring-red-300 {
+    --tw-ring-color: var(--color-red-300);
+  }
   .ring-violet-200 {
     --tw-ring-color: var(--color-violet-200);
   }
@@ -4225,6 +4228,14 @@
       }
     }
   }
+  .dark\:border-amber-500\/30 {
+    &:where(.dark, .dark *) {
+      border-color: color-mix(in srgb, oklch(76.9% 0.188 70.08) 30%, transparent);
+      @supports (color: color-mix(in lab, red, red)) {
+        border-color: color-mix(in oklab, var(--color-amber-500) 30%, transparent);
+      }
+    }
+  }
   .dark\:border-amber-500\/40 {
     &:where(.dark, .dark *) {
       border-color: color-mix(in srgb, oklch(76.9% 0.188 70.08) 40%, transparent);
@@ -4992,6 +5003,14 @@
       --tw-ring-color: color-mix(in srgb, oklch(67.3% 0.182 276.935) 20%, transparent);
       @supports (color: color-mix(in lab, red, red)) {
         --tw-ring-color: color-mix(in oklab, var(--color-indigo-400) 20%, transparent);
+      }
+    }
+  }
+  .dark\:ring-red-500\/30 {
+    &:where(.dark, .dark *) {
+      --tw-ring-color: color-mix(in srgb, oklch(63.7% 0.237 25.331) 30%, transparent);
+      @supports (color: color-mix(in lab, red, red)) {
+        --tw-ring-color: color-mix(in oklab, var(--color-red-500) 30%, transparent);
       }
     }
   }

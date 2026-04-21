@@ -92,7 +92,9 @@
         </div>
         <div class="shrink-0 px-4 py-3 whitespace-nowrap">
             <div class="flex min-w-0 flex-col items-start gap-1">
-                {% if current_deployment.status == 'succeeded' or current_deployment.status == 'failed' or current_deployment.status == 'torn_down' %}
+                {% if app.status == 'pending_removal' %}
+                <span class="text-xs text-gray-300 dark:text-gray-600 w-full text-left">&mdash;&mdash;&mdash;</span>
+                {% elif current_deployment.status == 'succeeded' or current_deployment.status == 'failed' or current_deployment.status == 'torn_down' %}
                 <button hx-post="{% url 'app_deployment_redeploy' app_slug=app.slug deployment_id=current_deployment.id %}"
                         hx-target="#main-content"
                         hx-swap="innerHTML"

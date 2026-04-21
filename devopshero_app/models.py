@@ -635,6 +635,10 @@ class App(models.Model):
         NIXPACKS = "nixpacks", "Nixpacks (auto-detect)"
         BUILDPACK = "buildpack", "Cloud Native Buildpack"
 
+    class Status(models.TextChoices):
+        ACTIVE = "active", "Active"
+        PENDING_REMOVAL = "pending_removal", "Pending Removal"
+
     id = models.UUIDField(
         primary_key=True,
         default=uuid.uuid7,
@@ -696,6 +700,12 @@ class App(models.Model):
         help_text="Health check command for non-HTTP health checks",
     )
     health_check_grace_period = models.IntegerField(default=0, help_text="ECS health check grace period in seconds. 0 = use environment default.")
+
+    status = models.CharField(
+        max_length=20,
+        choices=Status.choices,
+        default=Status.ACTIVE,
+    )
 
     created_by = models.ForeignKey(
         User,
@@ -1368,6 +1378,39 @@ class AppPermissionRequest(models.Model):
 
     def __str__(self) -> str:
         return f"AppPermissionRequest {self.id} ({self.status})"
+
+
+class AppRemovalJob(models.Model):
+    """Async job to remove an App: optional EFS/secrets cleanup, then DB cascade delete."""
+
+    class Status(models.TextChoices):
+        PENDING = "pending", "Pending"
+        RUNNING = "running", "Running"
+        SUCCEEDED = "succeeded", "Succeeded"
+        FAILED = "failed", "Failed"
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid7, editable=False)
+    organization = models.ForeignKey(
+        "Organization", on_delete=models.CASCADE, related_name="app_removal_jobs",
+    )
+    # Snapshot fields so the job row remains meaningful after the App row is deleted
+    app_id_snapshot = models.UUIDField()
+    app_slug_snapshot = models.SlugField(max_length=255)
+    app_name_snapshot = models.CharField(max_length=255)
+    workspace_slug_snapshot = models.SlugField(max_length=255)
+    delete_secrets = models.BooleanField(default=False)
+    delete_efs_data = models.BooleanField(default=False)
+    status = models.CharField(max_length=20, choices=Status.choices, default=Status.PENDING)
+    status_message = models.TextField(blank=True)
+    created_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    def __str__(self) -> str:
+        return f"AppRemovalJob {self.app_slug_snapshot} ({self.status})"
 
 
 class AwsResourceCache(models.Model):

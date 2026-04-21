@@ -12,10 +12,11 @@ import time
 
 from django.db import connections, transaction
 
-from devopshero_app.models import AppPermissionRequest, Deployment, Environment
+from devopshero_app.models import AppPermissionRequest, AppRemovalJob, Deployment, Environment
 
 from . import app_deployment_executor
 from . import app_deployment_teardown_executor
+from . import app_remove_executor
 from . import environment_provisioning_executor
 from . import environment_teardown_executor
 from . import permissions_apply_executor
@@ -182,6 +183,36 @@ def _run_environment_teardown_thread(environment_id: str) -> None:
         connections.close_all()
 
 
+def _claim_pending_app_removal() -> AppRemovalJob | None:
+    """Atomically claim a pending app removal job."""
+    with transaction.atomic():
+        job = (
+            AppRemovalJob.objects
+            .select_for_update(skip_locked=True)
+            .filter(status=AppRemovalJob.Status.PENDING)
+            .first()
+        )
+
+        if job:
+            job.status = AppRemovalJob.Status.RUNNING
+            job.status_message = "Claimed by worker"
+            job.save(update_fields=["status", "status_message", "updated_at"])
+            logger.info(f"Claimed app removal {job.id} for app '{job.app_slug_snapshot}'")
+            return job
+
+    return None
+
+
+def _run_app_removal_thread(job_id: str) -> None:
+    """Thread target that runs a single app removal."""
+    try:
+        app_remove_executor.run_removal(job_id)
+    except Exception:
+        logger.exception(f"Unhandled error in app removal {job_id}")
+    finally:
+        connections.close_all()
+
+
 def _run_permissions_apply_thread(app_permission_request_id: str) -> None:
     """Thread target that runs a single permissions apply."""
     try:
@@ -245,6 +276,18 @@ def _worker_loop() -> None:
                 )
                 thread.start()
                 logger.info(f"Spawned thread for environment teardown {env_teardown.id}")
+
+            # Check for pending app removals
+            app_removal = _claim_pending_app_removal()
+            if app_removal:
+                thread = threading.Thread(
+                    target=_run_app_removal_thread,
+                    args=(str(app_removal.id),),
+                    name=f"app-remove-{app_removal.id.hex[:8]}",
+                    daemon=True,
+                )
+                thread.start()
+                logger.info(f"Spawned thread for app removal {app_removal.id}")
 
             # Check for pending permissions applies
             permissions_apply = _claim_pending_permissions_apply()
