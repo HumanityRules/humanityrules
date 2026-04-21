@@ -1,5 +1,32 @@
 # DevOpsHero Development Journal
 
+## 2026-04-21 00:19 - [Deployment] Force-purge app secrets on Remove App
+
+**Conversation:** [2026-04-21-0019-32c51e6d.md](conversations/2026-04-21-0019-32c51e6d.md)
+
+When the user ticks "Also delete AWS Secrets Manager secrets" in the Remove App modal, the removal now deletes secrets with `ForceDeleteWithoutRecovery=true` instead of the previous default 7-day recovery window. The motivation is redeploy ergonomics: AWS reserves a deleted secret's name for the full recovery window (min 7 days), so re-creating an app with the same slug in the same environment would fail with `InvalidRequestException: ... already scheduled for deletion` until the window elapsed or the user manually restored + force-deleted.
+
+**How it's wired.** The plumbing already existed — `secrets_utils.delete_secrets_matching_prefix(..., force_immediate=True)` at `secrets_utils.py:380-386` maps to `ForceDeleteWithoutRecovery=True`. The executor at `app_remove_executor.py:110` was passing `force_immediate=False`. One-line flip to `True`. No new flag on `AppRemovalJob`.
+
+**Why inherit from `delete_secrets` instead of adding a separate `purge_secrets` flag.** Three options were on the table:
+
+1. Always force-delete regardless of flag.
+2. New `AppRemovalJob.purge_secrets` toggle in the modal alongside `delete_secrets` / `delete_efs_data` / `delete_policies`.
+3. Always force-delete *when* `delete_secrets=True` — i.e. "delete secrets" implies "purge."
+
+Picked #3. The user has already explicitly opted into secret deletion via a checkbox in a confirm-destruction modal, which is the moment the safety net should be removed. Adding a second checkbox (#2) would ask the user to reason about AWS recovery-window semantics, which most deployers won't have context for. The intent signal ("I want to redeploy cleanly") is already fully captured by `delete_secrets`.
+
+**Tradeoff that's now the user's problem.** No undo. If a user accidentally ticks `delete_secrets` during Remove App, the secrets are gone immediately — no 7-day restore window. The confirm modal's existing "type the app name to confirm" gate is the sole safety net. Acceptable because (a) the checkbox is unticked by default, (b) the confirmation gate is already stronger than the recovery window for accidental clicks, and (c) the user's most common failure mode is the opposite — removing an app, trying to redeploy, and hitting the scheduled-deletion conflict.
+
+**UI copy.** Dropped "Scheduled with a 7-day recovery window." from the checkbox label in `_app_remove_confirm_modal.html:58` — no longer true and would mislead users into thinking they have a restore path. Didn't replace it with a "permanent, no recovery" warning because the modal is already framed as destructive and the type-name confirm is the real gate.
+
+**Key points:**
+
+- `secrets_utils.py` already exposed `force_immediate`; no changes to the utility layer.
+- `IncludePlannedDeletion=False` in the list call means this doesn't re-purge secrets already scheduled for deletion from a prior removal — those still need the `doh_secrets purge-deleted` management command.
+- Only affects the "Remove App" path. Bulk/env-level secret deletion via `doh_secrets delete` still defaults to the 7-day window; `--force` remains opt-in there because the CLI operator is typically reasoning about a broader blast radius.
+- If we ever surface "restore a removed app" as a product feature, this decision needs revisiting — right now there's nothing to restore the secrets *into* anyway.
+
 ## 2026-04-21 00:08 - [Deployment] Disable Hermes "Check for updates" banner by dropping .git
 
 **Conversation:** [2026-04-21-0008-05a010f8.md](conversations/2026-04-21-0008-05a010f8.md)
