@@ -28,6 +28,8 @@ Inside the container, `entrypoint.sh` bridges ECS env vars into the two places H
 
 DOH namespaces its own knobs as `DOH_LLM_*` (main) and `DOH_AUX_*` (auxiliary slots — vision, compression, skills hub, etc.; default to the main provider).
 
+### AWS Bedrock
+
 Bedrock has a few quirks handled by the entrypoint:
 
 - `AWS_BEDROCK_*` are renamed to the boto3 standard names (`AWS_ACCESS_KEY_ID` …).
@@ -35,6 +37,23 @@ Bedrock has a few quirks handled by the entrypoint:
 - `boto3` is installed into the shared venv on first boot by `start.sh` (sentinel-guarded), so switching to Bedrock later doesn't require a rebuild.
 
 For Claude on Bedrock, Hermes uses the `AnthropicBedrock` SDK (prompt caching, thinking budgets). Other models go through the Converse API.
+
+### OpenAI and OpenAI-compatible APIs (`custom`)
+
+Hermes does not treat `openai` as a runtime provider name for direct API access. Use **`custom`** with **`DOH_LLM_BASE_URL`** pointing at an OpenAI-compatible endpoint (the entrypoint maps that into `config.yaml` and, when not on Bedrock, into `OPENAI_BASE_URL` in `~/.hermes/.env`).
+
+**Example — GPT 5.4 Mini on the official OpenAI API** (e.g. from-template overrides):
+
+| Variable | Value |
+|----------|--------|
+| `DOH_LLM_PROVIDER` | `custom` |
+| `DOH_LLM_MODEL` | `gpt-5.4-mini` |
+| `DOH_LLM_BASE_URL` | `https://api.openai.com/v1` |
+| `OPENAI_API_KEY` | set via Secrets Manager (per-app or shared env secret) |
+
+**Model id:** use the bare name (`gpt-5.4-mini`). A slash in the id (e.g. `openai/gpt-5.4-mini`) follows **OpenRouter-style** routing in Hermes, not the direct OpenAI API.
+
+**Auxiliary LLM:** `DOH_AUX_PROVIDER` and `DOH_AUX_MODEL` default to the main values, but for **`custom`**, `DOH_AUX_BASE_URL` is **not** auto-filled (only Bedrock derives aux base URL). Set `DOH_AUX_BASE_URL` to the same URL as main (and optionally a different `DOH_AUX_MODEL`) if auxiliary features should hit the same API. Main and aux share **`OPENAI_API_KEY`**; there is no separate aux API key variable.
 
 
 ## Slack gateway
