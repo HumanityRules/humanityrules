@@ -1,5 +1,22 @@
 # DevOpsHero Development Journal
 
+## 2026-04-20 23:45 - [DomainModel] Extend Remove App with a policies-cleanup checkbox
+
+**Conversation:** [2026-04-20-2345-0f9b0797.md](conversations/2026-04-20-2345-0f9b0797.md)
+
+The "Remove App" action shipped yesterday (`9f83afd`) leaned on FK cascades to wipe `DeploymentBlueprint`, `Deployment`, `DeploymentLog`, `AppPermissions`, `AppPermissionRequest`, and `ResourceTag`. `Policy` was missed because it has no FK to `App` — policies reference an app only through JSON `resource_conditions` like `[{"key": "app-name", "value": "<slug>"}]`. After removal those rows linger: the auto-created `Default: {app.name} open access` policy from `abac.create_default_app_policy` (`abac.py:660`) plus any admin-authored policies scoped to the same `app-name=<slug>` tag. They're runtime-harmless (the `app-name` tag is gone so they never match) but they pile up in the Policies UI as dangling references, and a future app with the same slug would inadvertently inherit them.
+
+Added a third optional checkbox to the confirm modal ("Also delete policies targeting `app-name=<slug>`"), symmetric with the existing secrets / EFS checkboxes. Wired it through `AppRemovalJob.delete_policies` (new bool field + migration `0043`) into the executor, which runs the sweep inside the existing `transaction.atomic()` block right before `app.delete()` so the policy wipe and app deletion commit together.
+
+**Key points:**
+
+- **Why a checkbox and not an automatic sweep.** Consistent with the other two cleanup options: removal is reversible-ish (you could recreate the app with the same slug and re-grant), but policies can be shared/edited by admins, so we surface the action rather than making it implicit. Default unchecked — user has to opt in.
+- **Match criterion is intentionally broad.** Any `Policy` with `resource_type="app"`, scoped to the app's organization, where *any* entry in `resource_conditions` matches `{"key": "app-name", "value": app.slug}`. If a compound policy has `[{"key": "app-name", "value": "x"}, {"key": "owner", "value": "alice"}]`, the whole row gets deleted — it's still wholly about this app. We don't surgically edit `resource_conditions` arrays; that's harder to reason about and the user can always recreate a more general policy.
+- **Includes `is_system=True` rows.** The auto-created default open-access policy is flagged `is_system` for display purposes only, not as a deletion guard. The whole point is to clean it up.
+- **Python-side filtering, not a JSON SQL query.** `resource_conditions` is a JSON list of dicts; filtering `[{"key": "app-name", ...}]` via `resource_conditions__contains=[{...}]` works on Postgres but not SQLite, and the volume (policies per org) is trivially small. Fetching candidates with `resource_type=APP` and walking them in Python is dialect-agnostic and plenty fast.
+- **Runs inside the existing atomic block.** Placed before `app.delete()` inside the same `transaction.atomic()` — if the cascade delete fails (unlikely, but), the policy deletion rolls back too. Kept outside the earlier try/except that's scoped to `ClientError` from AWS; DB failures should propagate to the worker's top-level handler which calls `fail_from_worker` and reverts `App.status` out of `PENDING_REMOVAL`.
+- **Cascade-comment updated.** Added a note to the comment in `app_remove_executor.py` that `Policy` has no FK to `App` and is handled explicitly above — the whole reason we missed this the first time was that the cascade comment made it feel exhaustive.
+
 ## 2026-04-20 23:44 - [Deployment] Disconnect HERMES_WEBUI_PASSWORD for sidecar-gated Personal template
 
 **Conversation:** [2026-04-20-2344-e6df3d54.md](conversations/2026-04-20-2344-e6df3d54.md)

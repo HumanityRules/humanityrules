@@ -69,6 +69,14 @@
                         </span>
                     </label>
                     {% endif %}
+                    <label class="flex items-start gap-2 text-sm">
+                        <input type="checkbox" name="delete_policies"
+                               class="mt-0.5 h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500">
+                        <span class="text-gray-700 dark:text-gray-300">
+                            Also delete policies targeting
+                            <code class="text-xs">app-name={{ app.slug }}</code>.
+                        </span>
+                    </label>
                 </form>
 
                 {# Actions #}
