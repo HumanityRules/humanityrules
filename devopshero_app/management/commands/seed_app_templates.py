@@ -213,7 +213,11 @@ _HERMES_LLM_VARS = [
     },
 ]
 
-_HERMES_CREDENTIAL_VARS = [
+# The WebUI's password auth is redundant when the sidecar proxy is enforcing
+# SSO + ABAC in front of the app. The Personal template runs behind the sidecar
+# and drops this var (no env var set -> WebUI auth disabled, per api/auth.py).
+# The Slack template is ALB-exposed with no SSO gate, so it still needs it.
+_HERMES_WEBUI_PASSWORD_VAR = [
     {
         "name": "HERMES_WEBUI_PASSWORD",
         "group": "Authentication",
@@ -225,6 +229,9 @@ _HERMES_CREDENTIAL_VARS = [
         "value": "mysquirrel",
         "user_editable": False,
     },
+]
+
+_HERMES_CREDENTIAL_VARS = [
     {
         "name": "ANTHROPIC_API_KEY",
         "group": "API Keys",
@@ -378,7 +385,25 @@ HERMES_PERSONAL_TEMPLATE = {
     ),
     "icon": "⚡",
     "category": "ai-assistant",
-    "runtime_variables": _HERMES_LLM_VARS + _HERMES_CREDENTIAL_VARS + _HERMES_BEDROCK_VARS,
+    # Bind the WebUI to loopback so only the sidecar (sharing the task
+    # network namespace) can reach it. Overrides the upstream image default
+    # of HERMES_WEBUI_HOST=0.0.0.0, which would otherwise expose the WebUI on
+    # the task ENI to the whole VPC.
+    "runtime_variables": (
+        _HERMES_LLM_VARS + _HERMES_CREDENTIAL_VARS + _HERMES_BEDROCK_VARS + [
+            {
+                "name": "HERMES_WEBUI_HOST",
+                "group": "Authentication",
+                "category": "config",
+                "description": "Bind address for the WebUI (loopback-only; sidecar reaches it via 127.0.0.1)",
+                "required": True,
+                "auto_generate": False,
+                "default_value": "127.0.0.1",
+                "value": "127.0.0.1",
+                "user_editable": False,
+            },
+        ]
+    ),
     # Runs behind the sidecar proxy: SSO + ABAC gate the WebUI.
     "sidecar_enabled": True,
     # The "app-type" tag is what the global PA ABAC policy matches on.
@@ -400,7 +425,10 @@ HERMES_SLACK_TEMPLATE = {
     ),
     "icon": "💬",
     "category": "ai-assistant",
-    "runtime_variables": _HERMES_LLM_VARS + _HERMES_CREDENTIAL_VARS + _HERMES_BEDROCK_VARS + _HERMES_SLACK_VARS,
+    "runtime_variables": (
+        _HERMES_LLM_VARS + _HERMES_WEBUI_PASSWORD_VAR + _HERMES_CREDENTIAL_VARS
+        + _HERMES_BEDROCK_VARS + _HERMES_SLACK_VARS
+    ),
 }
 
 

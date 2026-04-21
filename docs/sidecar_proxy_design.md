@@ -187,7 +187,8 @@ Slack gateway:
 
 `HERMES_WEBUI_PASSWORD`:
 
-- Left in place for v1. Becomes redundant once the sidecar is enforcing access. Disabling it is a follow-up.
+- Dropped from the Personal template's runtime variables. With no env var set, the upstream WebUI's own password auth is disabled (`api/auth.py` reads it directly from process env; empty/unset → `is_auth_enabled()` returns False). The sidecar is the only gate. The Slack template still sets it, since that deployment isn't behind the sidecar.
+- Complemented by `HERMES_WEBUI_HOST=127.0.0.1` on the Personal template so the WebUI binds loopback-only. Both containers share the task ENI in Fargate awsvpc, so loopback is the actual isolation boundary; without this the WebUI's default `0.0.0.0` bind would leave port 8787 reachable from anywhere in the VPC.
 
 
 ## Opt-in Wiring

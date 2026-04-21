@@ -21,7 +21,7 @@ DOH deploys **Hermes Agent** — a governed AI personal assistant — into a cus
 ## Known constraints / open surface
 
 - Sidecar v1: one Okta app per org, single-env orgs only. Multi-env orgs need a per-env OIDC config — deferred.
-- `HERMES_WEBUI_PASSWORD` still accepted by Hermes as a secondary auth path; not removed yet.
+- `HERMES_WEBUI_PASSWORD` is no longer set on the Personal template — the WebUI's built-in password auth is disabled and the sidecar is the sole gate. Paired with `HERMES_WEBUI_HOST=127.0.0.1` so the WebUI binds loopback-only and isn't reachable from the VPC. (The Slack template still uses the password — it isn't behind the sidecar.)
 - Hermes WebUI `X-Auth-*` header consumption not yet spiked — sidecar injects them but upstream integration is untested.
 - Aux LLM assumes one shared provider/model across all 8 auxiliary slots (simple knob; not per-task tunable yet).
 - WebUI base image bumps are manual per customer app — no cross-deployment rollout mechanism yet.
