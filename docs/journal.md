@@ -1,5 +1,24 @@
 # DevOpsHero Development Journal
 
+## 2026-04-20 22:59 - [Deployment] Pin Hermes WebUI and hermes-agent versions in the template Dockerfile
+
+**Conversation:** [2026-04-20-2259-d3e8c08d.md](conversations/2026-04-20-2259-d3e8c08d.md)
+
+The Hermes template baked together two independently-versioned upstreams: `ghcr.io/nesquena/hermes-webui` (pinned at `0.50.87` via the `FROM` line) and `NousResearch/hermes-agent` (cloned with `git clone --depth 1` — no branch, no tag, no SHA). That meant image builds weren't reproducible: two builds days apart would ship different agent code, and the patches under `template_repos/hermes_agent/patches/` target specific upstream line numbers in `run_agent` and `auxiliary_client`, so silent drift could have broken the patch apply at boot. The "free upstream fixes on rebuild" property was cute but not worth the reproducibility hit.
+
+Bumped both to the latest releases and pinned the agent to a tag. New state:
+
+- `FROM ghcr.io/nesquena/hermes-webui:0.50.126` (was `0.50.87` — 39 patch versions of drift; still 0.50.x series so nominally backward-compatible).
+- `git clone --depth 1 --branch v2026.4.16 …` for hermes-agent (v0.10.0 in Nous's own versioning scheme, which maps to the CalVer git tag `v2026.4.16`).
+
+**Key points:**
+
+- hermes-agent uses CalVer tags (`v2026.4.16`, `v2026.4.13`, …). Nous also prints a semver-style label in release names ("Hermes Agent v0.10.0") but the actual git tag is the CalVer form — that's what goes in `--branch`.
+- hermes-webui release tags are `v0.50.126` but the container image tag drops the `v` (`0.50.126`). Easy foot-gun.
+- Verified the three DOH patches still apply cleanly against the pinned `v2026.4.16` tree by running `apply.py` inside a throwaway `python:3.12-slim` container with `git` + `patch`. All three succeed, plus the `bedrock_aux_client.py` overlay copies in. No drift from 0.9.0 → 0.10.0.
+- The pin does NOT roll out to existing customer deployments automatically. EFS already contains a `hermes-agent/` dir, so the entrypoint's first-boot seed (`if [ ! -d "$HERMES_DIR/hermes-agent" ]`) is a no-op. Updating existing installs still requires either `hermes update` (user-initiated) or an EFS wipe. Only the WebUI binary, which lives in the ephemeral container filesystem, updates on redeploy.
+- Cost of the pin: takes on a manual bump cadence for hermes-agent (mirroring the cadence we already have for hermes-webui). Worth it because the patch system is explicitly designed to absorb upstream changes idempotently, so the "soft-landing" property doesn't require an unpinned clone to work — it just requires periodic rebuilds against newer pins.
+
 ## 2026-04-20 16:36 - [Bugfix] Sidecar broke Hermes WebUI — streaming and HTTP/1.0 framing
 
 **Conversation:** [2026-04-20-1638-d5543321.md](conversations/2026-04-20-1638-d5543321.md)
