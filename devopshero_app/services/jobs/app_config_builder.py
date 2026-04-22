@@ -7,8 +7,9 @@ into an appconfig.AppConfig suitable for CDK deployment.
 
 from pathlib import Path
 
-from devopshero_app.models import Datastore, DeploymentBlueprint
+from devopshero_app.models import AppTemplate, Datastore, DeploymentBlueprint
 from devopshero_app.services import infra_customer
+from devopshero_app.services.infra_customer.appconfig import AppConfig, ContainerConfig
 
 
 def build_database_config(datastore: Datastore) -> infra_customer.appconfig.DatabaseConfig:
@@ -57,12 +58,89 @@ def build_database_config(datastore: Datastore) -> infra_customer.appconfig.Data
     )
 
 
-def build_app_config_from_blueprint(blueprint: DeploymentBlueprint, repo_path: Path) -> infra_customer.appconfig.AppConfig:
-    """Build an AppConfig sourcing identity/build from App and runtime from DeploymentBlueprint."""
+class ContainerSecretCollision(ValueError):
+    """Two containers declared the same secret field name with different values."""
+
+
+def _union_app_secrets(containers: list[ContainerConfig]) -> dict[str, str | None]:
+    """Collision-checked union of each container's app_secrets.
+
+    Same field name across containers must declare identical values (literal,
+    ""-placeholder, or None-auto-generate all compared by equality).
+    """
+    merged: dict[str, str | None] = {}
+    owners: dict[str, str] = {}
+    for c in containers:
+        for field_name, value in c.app_secrets.items():
+            if field_name in merged and merged[field_name] != value:
+                raise ContainerSecretCollision(
+                    f"Secret '{field_name}' declared with different values in "
+                    f"containers '{owners[field_name]}' and '{c.name}': "
+                    f"{merged[field_name]!r} vs {value!r}"
+                )
+            merged[field_name] = value
+            owners.setdefault(field_name, c.name)
+    return merged
+
+
+def _build_container_config(
+    template_container: dict,
+    blueprint_container: dict,
+    app_name: str,
+    env_slug: str,
+) -> ContainerConfig:
+    """Project a (template, blueprint) container pair into a ContainerConfig."""
+    name = template_container["name"]
+    image_source = template_container["image_source"]
+
+    common = dict(
+        name=name,
+        image_source=image_source,
+        container_port=template_container["container_port"],
+        health_check_path=template_container.get("health_check_path") or None,
+        health_check_command=template_container.get("health_check_command") or None,
+        health_check_grace_period=template_container.get("health_check_grace_period") or None,
+        environment_variables=list(blueprint_container.get("environment_variables") or []),
+        app_secrets=dict(blueprint_container.get("app_secrets") or {}),
+        efs_mount=bool(template_container.get("efs_mount", False)),
+    )
+
+    if image_source == "dockerfile":
+        return ContainerConfig(
+            **common,
+            source_repo_path=template_container["source_repo_path"],
+            dockerfile_path=template_container.get("dockerfile_path") or None,
+            ecr_repo_name=f"doh/{env_slug}/{app_name}-{name}",
+        )
+    if image_source == "prebuilt":
+        return ContainerConfig(
+            **common,
+            prebuilt_ecr_repo=template_container["ecr_repo"],
+            prebuilt_version=template_container["version"],
+        )
+    raise ValueError(f"Unknown image_source='{image_source}' on container '{name}'")
+
+
+def _match_blueprint_containers_to_template(
+    template_containers: list[dict],
+    blueprint_containers: list[dict],
+) -> dict[str, dict]:
+    """Return a {name: blueprint_container_dict} lookup, falling back to empty for missing names."""
+    by_name = {c["name"]: c for c in blueprint_containers}
+    return {c["name"]: by_name.get(c["name"], {"name": c["name"]}) for c in template_containers}
+
+
+def build_app_config_from_blueprint(blueprint: DeploymentBlueprint, repo_path: Path) -> AppConfig:
+    """Build an AppConfig sourcing identity/build from App + template and runtime from DeploymentBlueprint."""
     app = blueprint.app
     environment = blueprint.environment
+    template: AppTemplate | None = app.source_template
 
-    ecr_repo_name = f"doh/{environment.slug}/{app.slug}"
+    if template is None or not template.containers:
+        raise ValueError(
+            f"App '{app.slug}' has no source_template with containers; "
+            f"multi-container deploy path requires a template-backed app."
+        )
 
     app_source_path = repo_path
     if app.repo_subpath:
@@ -73,29 +151,40 @@ def build_app_config_from_blueprint(blueprint: DeploymentBlueprint, repo_path: P
         database_config = build_database_config(blueprint.datastore)
 
     efs_config = None
-    if app.source_template and app.source_template.efs_config:
-        raw = app.source_template.efs_config
+    if template.efs_config:
+        raw = template.efs_config
         efs_config = infra_customer.appconfig.EfsConfig(
             mount_path=raw["mount_path"],
             posix_uid=raw["posix_uid"],
             posix_gid=raw["posix_gid"],
         )
 
-    sidecar_enabled = bool(app.source_template and app.source_template.sidecar_enabled)
+    blueprint_by_name = _match_blueprint_containers_to_template(
+        template_containers=template.containers,
+        blueprint_containers=blueprint.containers or [],
+    )
 
-    return infra_customer.appconfig.AppConfig(
+    containers = [
+        _build_container_config(
+            template_container=tc,
+            blueprint_container=blueprint_by_name[tc["name"]],
+            app_name=app.slug,
+            env_slug=environment.slug,
+        )
+        for tc in template.containers
+    ]
+
+    app_secrets_union = _union_app_secrets(containers)
+
+    return AppConfig(
         app_name=app.slug,
-        ecr_repo_name=ecr_repo_name,
-        container_port=app.container_port,
         cpu=blueprint.cpu,
         memory=blueprint.memory,
-        health_check_path=app.health_check_path,
-        health_check_command=app.health_check_command or None,
-        environment_variables=blueprint.environment_variables or [],
-        health_check_grace_period=app.health_check_grace_period or None,
+        containers=containers,
         app_source_path=app_source_path,
+        alb_target_container=template.alb_target_container,
         database_config=database_config,
-        app_secrets=blueprint.app_secrets,
+        app_secrets=app_secrets_union or None,
         efs_config=efs_config,
-        sidecar_enabled=sidecar_enabled,
+        sidecar_enabled=bool(template.sidecar_enabled),
     )
