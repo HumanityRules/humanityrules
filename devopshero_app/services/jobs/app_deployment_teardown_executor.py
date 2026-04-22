@@ -35,10 +35,9 @@ def _get_aws_session(deployment: models.Deployment):
 def _build_teardown_app_config(
     deployment: models.Deployment,
 ) -> infra_customer.appconfig.AppConfig:
-    """Build a minimal AppConfig for teardown — only needs app_name, ecr_repo_name, database_config."""
+    """Build a minimal AppConfig for teardown — only needs containers (for ECR repo cleanup), database_config, and efs_config."""
     app = deployment.app
     environment = deployment.environment
-    ecr_repo_name = f"doh/{environment.slug}/{app.slug}"
 
     database_config = None
     datastore = deployment.blueprint.datastore
@@ -83,15 +82,42 @@ def _build_teardown_app_config(
             posix_gid=raw["posix_gid"],
         )
 
+    # Reconstruct the container list from the template so teardown knows which
+    # per-app ECR repos to empty. Prebuilt-container repos are per-env shared
+    # resources and are not torn down by per-app teardown (see deploy_app.teardown).
+    template = app.source_template
+    containers: list[infra_customer.appconfig.ContainerConfig] = []
+    if template and template.containers:
+        for tc in template.containers:
+            if tc["image_source"] != "dockerfile":
+                continue
+            containers.append(
+                infra_customer.appconfig.ContainerConfig(
+                    name=tc["name"],
+                    image_source="dockerfile",
+                    ecr_repo_name=f"doh/{environment.slug}/{app.slug}-{tc['name']}",
+                    container_port=tc.get("container_port") or 0,
+                )
+            )
+    if not containers:
+        # No template context (e.g. template was deleted) — fall back to a
+        # single ECR repo matching the legacy app-level naming so we still
+        # empty the right one.
+        containers = [
+            infra_customer.appconfig.ContainerConfig(
+                name=app.slug,
+                image_source="dockerfile",
+                ecr_repo_name=f"doh/{environment.slug}/{app.slug}",
+                container_port=app.container_port,
+            ),
+        ]
+
     return infra_customer.appconfig.AppConfig(
         app_name=app.slug,
-        ecr_repo_name=ecr_repo_name,
-        container_port=app.container_port,
         cpu=cpu,
         memory=memory,
-        health_check_path=app.health_check_path,
-        health_check_command=None,
-        environment_variables=[],
+        containers=containers,
+        alb_target_container=containers[0].name,
         app_source_path=None,
         database_config=database_config,
         app_secrets=None,
