@@ -568,26 +568,33 @@ class AppTemplate(models.Model):
     icon = models.CharField(max_length=50, help_text="Emoji or icon class for template picker UI")
     category = models.CharField(max_length=50, help_text="e.g. ai-assistant, web-app, api")
 
-    # Source repository (bundled at template_repos/)
-    source_repo_path = models.CharField(max_length=500, help_text="Relative path within template_repos/, e.g. 'openclaw_agent'")
-
-    # App defaults
-    app_type = models.CharField(max_length=20)
-    build_strategy = models.CharField(max_length=20)
-    dockerfile_path = models.CharField(max_length=500, blank=True)
-    container_port = models.IntegerField()
-    health_check_path = models.CharField(max_length=255)
-    health_check_command = models.CharField(max_length=500, blank=True)
-    health_check_grace_period = models.IntegerField(default=0, help_text="ECS health check grace period in seconds. 0 = use environment default.")
-
-    # Blueprint defaults
+    # Blueprint defaults (task-level)
     cpu = models.IntegerField()
     memory = models.IntegerField()
 
-    # Runtime variables: env vars + secrets with full metadata
-    # Array of {name, category, description, required, auto_generate, default_value, value, user_editable}
-    # user_editable: when True the variable is shown as an input on the template deploy form
-    runtime_variables = models.JSONField()
+    # Ordered, non-empty list of container dicts. Each entry:
+    #   {
+    #     "name": "<stable identifier>",
+    #     "image_source": "dockerfile" | "prebuilt",
+    #     # image_source == "dockerfile":
+    #     "source_repo_path": "hermes_agent",
+    #     "dockerfile_path": "Dockerfile",
+    #     # image_source == "prebuilt":
+    #     "ecr_repo": "learneo-mcp",    # within doh/{env_slug}/ namespace
+    #     "version": "0.1.0",
+    #     # common:
+    #     "container_port": 8787,
+    #     "health_check_path": "/health",
+    #     "health_check_command": "",
+    #     "health_check_grace_period": 0,
+    #     "efs_mount": true,
+    #     "runtime_variables": [ ... {name, category, value, ...} ... ],
+    #   }
+    containers = models.JSONField(default=list)
+
+    # Name of the container in `containers` that receives ALB traffic.
+    # Null = no ALB exposure (task-internal only).
+    alb_target_container = models.CharField(max_length=64, null=True, blank=True)
 
     # Datastore requirements (null = no datastore needed)
     datastore_config = models.JSONField(null=True, blank=True)
@@ -945,15 +952,13 @@ class DeploymentBlueprint(models.Model):
     cpu = models.IntegerField(help_text="Fargate CPU units (256, 512, 1024, etc.)")
     memory = models.IntegerField(help_text="Fargate memory in MiB")
 
-    environment_variables = models.JSONField(
-        default=list,
-        help_text="List of {name, value} environment variable objects",
-    )
-    app_secrets = models.JSONField(
-        null=True,
-        blank=True,
-        help_text="Dict mapping secret field names to values. Use null value to auto-generate.",
-    )
+    # Per-container materialized runtime values. Mirrors the template's
+    # `containers` shape (one entry per container, ordered), each carrying
+    # its own `environment_variables` (list of {name, value}) and
+    # `app_secrets` (dict of field -> value|""|None). Same schema that
+    # _materialize_environment_variables / _materialize_app_secrets produce
+    # from a container's runtime_variables.
+    containers = models.JSONField(default=list)
 
     datastore = models.ForeignKey(
         Datastore,
