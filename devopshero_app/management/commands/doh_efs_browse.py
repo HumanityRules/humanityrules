@@ -25,15 +25,12 @@ import subprocess
 import time
 
 from botocore.exceptions import ClientError
-from django.conf import settings
 from django.core.management.base import BaseCommand, CommandError
 
-from devopshero_app.models import AWSAccount, Organization
 from devopshero_app.services.infra_customer import cloudformation_utils
-from devopshero_app.services.infra_customer import iam_utils
 
+from ._aws_account_resolver import add_aws_target_args, resolve_aws_target
 
-DEFAULT_REGION = "us-east-1"
 
 CONTAINER_NAME = "efs-browser"
 CONTAINER_IMAGE = "public.ecr.aws/amazonlinux/amazonlinux:2023"
@@ -44,27 +41,16 @@ class Command(BaseCommand):
     help = "Browse EFS filesystem via ECS Exec (interactive shell)"
 
     def add_arguments(self, parser):
-        parser.add_argument("--account", required=True, help="AWS account name or 12-digit account ID")
-        parser.add_argument("--org", help="Organization name or slug (required when account name is ambiguous across orgs)")
-        parser.add_argument("--env", default="default", help="Environment slug (default: 'default')")
+        add_aws_target_args(parser)
 
     def handle(self, *args, **options):
-        env_slug = options["env"]
-
-        access_key = settings.DOH_AWS_ACCESS_KEY
-        secret_key = settings.DOH_AWS_SECRET_KEY
-        if not access_key or not secret_key:
-            raise CommandError("Missing DOH_AWS_ACCESS_KEY and/or DOH_AWS_SECRET_KEY in .env")
-
-        aws_account = _get_aws_account(identifier=options["account"], org_slug=options.get("org"))
-
-        session = iam_utils.get_assumed_role_session(
-            access_key=access_key,
-            secret_key=secret_key,
-            account_id=aws_account.aws_account_id,
-            external_id=str(aws_account.external_id),
-            region=DEFAULT_REGION,
+        target = resolve_aws_target(
+            account=options["account"], org=options.get("org"), env=options["env"],
         )
+        aws_account = target.aws_account
+        session = target.session
+        env_slug = target.environment.slug
+        region = target.environment.aws_region
 
         cf_client = session.client("cloudformation")
         ecs_client = session.client("ecs")
@@ -83,7 +69,7 @@ class Command(BaseCommand):
             task_role_arn = _ensure_task_role(
                 iam_client=iam_client,
                 role_name=role_name,
-                efs_filesystem_arn=f"arn:aws:elasticfilesystem:{DEFAULT_REGION}:{aws_account.aws_account_id}:file-system/{infra['efs_fs_id']}",
+                efs_filesystem_arn=f"arn:aws:elasticfilesystem:{region}:{aws_account.aws_account_id}:file-system/{infra['efs_fs_id']}",
                 stdout=self.stdout,
             )
 
@@ -98,6 +84,7 @@ class Command(BaseCommand):
                 execution_role_arn=exec_role_arn,
                 efs_fs_id=infra["efs_fs_id"],
                 log_group=f"/devopshero/{env_slug}/ecs",
+                region=region,
                 stdout=self.stdout,
             )
 
@@ -117,7 +104,7 @@ class Command(BaseCommand):
             self.stdout.write("App data lives under /efs/deployments/<app-name>/")
             self.stdout.write("Type 'exit' to disconnect and stop the task.\n")
 
-            _exec_interactive(session=session, cluster=cluster_name, task_arn=task_arn, stdout=self.stdout)
+            _exec_interactive(session=session, cluster=cluster_name, task_arn=task_arn, region=region, stdout=self.stdout)
 
         except KeyboardInterrupt:
             self.stdout.write("\nInterrupted.")
@@ -132,31 +119,6 @@ class Command(BaseCommand):
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
-
-
-def _get_aws_account(identifier: str, org_slug: str | None) -> AWSAccount:
-    """Look up an AWSAccount by name or 12-digit account ID, optionally scoped to an org."""
-    qs = AWSAccount.objects.all()
-
-    if org_slug:
-        org = Organization.objects.filter(slug=org_slug).first() or Organization.objects.filter(name=org_slug).first()
-        if not org:
-            raise CommandError(f"No organization matching '{org_slug}' found (tried slug and name).")
-        qs = qs.filter(organization=org)
-
-    if identifier.isdigit() and len(identifier) == 12:
-        try:
-            return qs.get(aws_account_id=identifier)
-        except AWSAccount.DoesNotExist:
-            raise CommandError(f"AWS account with ID '{identifier}' not found")
-        except AWSAccount.MultipleObjectsReturned:
-            raise CommandError(f"Multiple accounts with ID '{identifier}'. Use --org to disambiguate.")
-    try:
-        return qs.get(name=identifier)
-    except AWSAccount.DoesNotExist:
-        raise CommandError(f"AWS account '{identifier}' not found")
-    except AWSAccount.MultipleObjectsReturned:
-        raise CommandError(f"Multiple accounts named '{identifier}'. Use --org or the 12-digit account ID to disambiguate.")
 
 
 def _get_infra_info(cf_client, env_slug: str, stdout) -> dict[str, str]:
@@ -242,7 +204,7 @@ def _ensure_task_role(iam_client, role_name: str, efs_filesystem_arn: str, stdou
     return role_arn
 
 
-def _register_task_definition(ecs_client, family: str, task_role_arn: str, execution_role_arn: str, efs_fs_id: str, log_group: str, stdout) -> str:
+def _register_task_definition(ecs_client, family: str, task_role_arn: str, execution_role_arn: str, efs_fs_id: str, log_group: str, region: str, stdout) -> str:
     """Register a Fargate task definition with the root EFS volume."""
     resp = ecs_client.register_task_definition(
         family=family,
@@ -279,7 +241,7 @@ def _register_task_definition(ecs_client, family: str, task_role_arn: str, execu
                 "logDriver": "awslogs",
                 "options": {
                     "awslogs-group": log_group,
-                    "awslogs-region": DEFAULT_REGION,
+                    "awslogs-region": region,
                     "awslogs-stream-prefix": "efs-browser",
                 },
             },
@@ -368,7 +330,7 @@ def _wait_for_exec_agent(ecs_client, cluster: str, task_arn: str, stdout) -> Non
     raise CommandError("Timed out waiting for ECS Exec agent (3 minutes)")
 
 
-def _exec_interactive(session, cluster: str, task_arn: str, stdout) -> None:
+def _exec_interactive(session, cluster: str, task_arn: str, region: str, stdout) -> None:
     """Open interactive bash shell via aws ecs execute-command, with retries."""
     creds = session.get_credentials().get_frozen_credentials()
     task_id = task_arn.split("/")[-1]
@@ -377,7 +339,7 @@ def _exec_interactive(session, cluster: str, task_arn: str, stdout) -> None:
     env["AWS_ACCESS_KEY_ID"] = creds.access_key
     env["AWS_SECRET_ACCESS_KEY"] = creds.secret_key
     env["AWS_SESSION_TOKEN"] = creds.token
-    env["AWS_DEFAULT_REGION"] = DEFAULT_REGION
+    env["AWS_DEFAULT_REGION"] = region
 
     cmd = [
         "aws", "ecs", "execute-command",

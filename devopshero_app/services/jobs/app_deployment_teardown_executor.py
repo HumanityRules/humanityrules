@@ -32,97 +32,25 @@ def _get_aws_session(deployment: models.Deployment):
     )
 
 
-def _build_teardown_app_config(
-    deployment: models.Deployment,
-) -> infra_customer.appconfig.AppConfig:
-    """Build a minimal AppConfig for teardown — only needs containers (for ECR repo cleanup), database_config, and efs_config."""
+def _dockerfile_ecr_repo_names(deployment: models.Deployment) -> list[str]:
+    """ECR repo names for the app's dockerfile-built containers, for teardown cleanup.
+
+    Prebuilt-container repos are per-env shared resources and are not torn
+    down by per-app teardown. If the source template is gone (deleted after
+    the deploy), fall back to the legacy app-level repo name so we still
+    empty the right one.
+    """
     app = deployment.app
-    environment = deployment.environment
-
-    database_config = None
-    datastore = deployment.blueprint.datastore
-    if datastore:
-        database_config = infra_customer.appconfig.DatabaseConfig(
-            name=datastore.database_name,
-            engine=infra_customer.appconfig.EngineConfig(
-                family=datastore.engine,
-                version=None,
-                auto_minor_version_upgrade=False,
-            ),
-            deployment=infra_customer.appconfig.DeploymentConfig(
-                mode="aurora_serverless_v2",
-                serverless_v2=infra_customer.appconfig.ServerlessV2Config(
-                    min_acu=0.5,
-                    max_acu=2.0,
-                ),
-                provisioned=None,
-            ),
-            backups=infra_customer.appconfig.BackupConfig(
-                retention_days=1,
-                copy_tags_to_snapshot=False,
-            ),
-            security=infra_customer.appconfig.SecurityConfig(
-                storage_encrypted=True,
-                deletion_protection=False,
-            ),
-            connection=infra_customer.appconfig.ConnectionConfig(
-                env_var_name="DATABASE_URL",
-            ),
-        )
-
-    cpu = deployment.blueprint.cpu
-    memory = deployment.blueprint.memory
-
-    efs_config = None
-    if app.source_template and app.source_template.efs_config:
-        raw = app.source_template.efs_config
-        efs_config = infra_customer.appconfig.EfsConfig(
-            mount_path=raw["mount_path"],
-            posix_uid=raw["posix_uid"],
-            posix_gid=raw["posix_gid"],
-        )
-
-    # Reconstruct the container list from the template so teardown knows which
-    # per-app ECR repos to empty. Prebuilt-container repos are per-env shared
-    # resources and are not torn down by per-app teardown (see deploy_app.teardown).
+    env_slug = deployment.environment.slug
     template = app.source_template
-    containers: list[infra_customer.appconfig.ContainerConfig] = []
-    if template and template.containers:
-        for tc in template.containers:
-            if tc["image_source"] != "dockerfile":
-                continue
-            containers.append(
-                infra_customer.appconfig.ContainerConfig(
-                    name=tc["name"],
-                    image_source="dockerfile",
-                    ecr_repo_name=f"doh/{environment.slug}/{app.slug}-{tc['name']}",
-                    container_port=tc.get("container_port") or 0,
-                )
-            )
-    if not containers:
-        # No template context (e.g. template was deleted) — fall back to a
-        # single ECR repo matching the legacy app-level naming so we still
-        # empty the right one.
-        containers = [
-            infra_customer.appconfig.ContainerConfig(
-                name=app.slug,
-                image_source="dockerfile",
-                ecr_repo_name=f"doh/{environment.slug}/{app.slug}",
-                container_port=app.container_port,
-            ),
-        ]
 
-    return infra_customer.appconfig.AppConfig(
-        app_name=app.slug,
-        cpu=cpu,
-        memory=memory,
-        containers=containers,
-        alb_target_container=containers[0].name,
-        app_source_path=None,
-        database_config=database_config,
-        app_secrets=None,
-        efs_config=efs_config,
-    )
+    if template and template.containers:
+        return [
+            f"doh/{env_slug}/{app.slug}-{tc['name']}"
+            for tc in template.containers
+            if tc["image_source"] == "dockerfile"
+        ]
+    return [f"doh/{env_slug}/{app.slug}"]
 
 
 def run_teardown(deployment_id: str) -> bool:
@@ -175,13 +103,8 @@ def run_teardown(deployment_id: str) -> bool:
         deployment.save(update_fields=["status", "status_message", "updated_at"])
 
         try:
-            # Get AWS session
             session = _get_aws_session(deployment)
 
-            # Build minimal AppConfig for teardown
-            app_config = _build_teardown_app_config(deployment=deployment)
-
-            # Execute teardown
             logger.info(
                 "Tearing down app '%(app_name)s' stacks",
                 {"app_name": app.name},
@@ -189,8 +112,10 @@ def run_teardown(deployment_id: str) -> bool:
 
             success = infra_customer.deploy_app.teardown(
                 session=session,
-                app_config=app_config,
                 env_slug=environment.slug,
+                app_name=app.slug,
+                has_database=deployment.blueprint.datastore_id is not None,
+                dockerfile_ecr_repo_names=_dockerfile_ecr_repo_names(deployment),
             )
 
             if success:
