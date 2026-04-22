@@ -1185,38 +1185,35 @@ def deploy(
 
 def teardown(
     session: boto3.Session,
-    app_config: appconfig.AppConfig,
     env_slug: str,
+    app_name: str,
+    has_database: bool,
+    dockerfile_ecr_repo_names: list[str],
 ) -> bool:
     """
     Delete app-specific CDK stacks (ECR, ALB, ECS service, Aurora if applicable).
+
+    Prebuilt-container repos are per-env shared resources and are not torn
+    down here — only the per-app dockerfile ECR repos get emptied.
     """
     cf_client = session.client("cloudformation")
 
-    resource_prefix = f"doh-{env_slug}-{app_config.app_name}"
+    resource_prefix = f"doh-{env_slug}-{app_name}"
 
     # App-specific stacks in reverse dependency order
-    stacks_to_delete = [
-        f"{resource_prefix}-app",
-    ]
-
-    # Add Aurora stack if the app uses a database
-    if app_config.database_config:
+    stacks_to_delete = [f"{resource_prefix}-app"]
+    if has_database:
         stacks_to_delete.append(f"{resource_prefix}-aurora")
-
     stacks_to_delete.append(f"{resource_prefix}-ecr")
 
-    logger.info("Tearing down app: %(app_name)s", {"app_name": app_config.app_name})
+    logger.info("Tearing down app: %(app_name)s", {"app_name": app_name})
     logger.info("Stacks to delete (in order):")
     for stack in stacks_to_delete:
         logger.info("   - %(stack_name)s", {"stack_name": stack})
 
-    # Empty every per-app ECR repository first — CloudFormation can't delete
-    # non-empty repos. Prebuilt-container repos are per-env shared resources
-    # and are not torn down here.
-    for c in dockerfile_containers(app_config):
-        assert c.ecr_repo_name is not None
-        ecr_utils.delete_all_ecr_images(session=session, ecr_repo_name=c.ecr_repo_name)
+    # CloudFormation can't delete non-empty ECR repos.
+    for repo_name in dockerfile_ecr_repo_names:
+        ecr_utils.delete_all_ecr_images(session=session, ecr_repo_name=repo_name)
 
     all_success = True
     for stack_name in stacks_to_delete:
@@ -1225,7 +1222,7 @@ def teardown(
             all_success = False
 
     if all_success:
-        logger.info("App '%(app_name)s' stacks deleted successfully", {"app_name": app_config.app_name})
+        logger.info("App '%(app_name)s' stacks deleted successfully", {"app_name": app_name})
         return all_success
 
     logger.error("Some stacks failed to delete")
