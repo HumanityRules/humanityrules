@@ -2,8 +2,9 @@
 Application configuration dataclass for ECS deployments.
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Literal
 
 
 @dataclass
@@ -57,7 +58,7 @@ class ConnectionConfig:
 
 @dataclass
 class EfsConfig:
-    """EFS volume configuration for the container."""
+    """EFS volume configuration for the task (one volume, shared across containers that opt in)."""
     mount_path: str
     posix_uid: int
     posix_gid: int
@@ -75,58 +76,93 @@ class DatabaseConfig:
 
 
 @dataclass
+class ContainerConfig:
+    """Configuration for a single container in the ECS task definition."""
+
+    name: str  # Stable identifier, used for logs / alb target lookup
+
+    # "dockerfile": DOH builds from app_source_path into ecr_repo_name:image_tag.
+    # "prebuilt": image already pushed by an out-of-band step at prebuilt_ecr_repo:prebuilt_version.
+    image_source: Literal["dockerfile", "prebuilt"]
+
+    # Populated when image_source == "dockerfile":
+    source_repo_path: str | None = None  # Repo-relative path under template_repos/
+    dockerfile_path: str | None = None
+    ecr_repo_name: str | None = None  # Per-app + per-container ECR repo for the built image
+
+    # Populated when image_source == "prebuilt":
+    prebuilt_ecr_repo: str | None = None  # Within doh/{env_slug}/ namespace
+    prebuilt_version: str | None = None
+
+    # Network / health
+    container_port: int = 0
+    health_check_path: str | None = None  # For ALB health check when this container is the alb target
+    health_check_command: str | None = None  # For ECS container-level HEALTHCHECK
+    health_check_grace_period: int | None = None
+
+    # Runtime config
+    environment_variables: list[dict[str, str]] = field(default_factory=list)
+    # Secret field names this container consumes. Values are the per-field
+    # value semantics used by secrets_utils._resolve_secret_value:
+    #   str literal -> use as-is
+    #   "" -> fall through to env shared-secrets
+    #   None -> auto-generate a random token
+    app_secrets: dict[str, str | None] = field(default_factory=dict)
+
+    # Opt-in: mount the task-level EFS volume (AppConfig.efs_config) into this container.
+    efs_mount: bool = False
+
+
+@dataclass
 class AppConfig:
     """Configuration for deploying an app to ECS."""
 
     # Core identifiers
-    app_name: str  # e.g., "simple-dashboard" - used in resource names
-    ecr_repo_name: str  # e.g., "doh/default/simple-dashboard"
+    app_name: str  # e.g., "simple-dashboard" — used in resource names
 
-    # Container configuration
-    container_port: int
+    # Task-level resources (shared across containers)
     cpu: int  # Fargate CPU units (256, 512, 1024, etc.)
     memory: int  # Fargate memory in MiB
 
-    # Health checks
-    health_check_path: str  # For ALB health checks
-    health_check_command: str | None  # For container health checks (CMD-SHELL)
+    # Ordered, non-empty list of containers.
+    containers: list[ContainerConfig]
 
-    # Environment variables as list of {"name": str, "value": str}
-    environment_variables: list[dict[str, str]]
+    # Path to app source for the dockerfile-built containers. One path for the
+    # whole task today; all dockerfile containers build from subdirectories of
+    # this tree (per their source_repo_path/dockerfile_path).
+    app_source_path: Path | None = None
 
-    # Local paths
-    app_source_path: Path | None  # Path to app source for Docker build
+    # Name of the container in `containers` that receives ALB traffic.
+    # None = no ALB exposure.
+    alb_target_container: str | None = None
 
     # Database configuration (None = no database)
     database_config: DatabaseConfig | None = None
 
-    # App secrets configuration (optional - for apps that read secrets from Secrets Manager)
-    # Keys are secret field names, values are either:
-    #   - str: use this literal value
-    #   - None: generate a random 64-char alphanumeric value
-    # Example: {"slack_token": "disabled", "secret_key_base": None, "signing_salt": None}
+    # Task-level shared-bag app secrets. Computed as the collision-checked
+    # union of every container's app_secrets (same field across containers
+    # must declare identical values; mismatch raises at build time).
+    # Stored in Secrets Manager at devopshero/{env_slug}/{app_name}/secrets
+    # and selectively projected into each container's env.
     app_secrets: dict[str, str | None] | None = None
 
-    # Override ECS health check grace period (seconds). None = use environment default.
-    health_check_grace_period: int | None = None
-
-    # EFS volume configuration (None = no EFS volume)
+    # EFS volume configuration (None = no EFS volume). Declared once at the
+    # task level; per-container mounting is controlled by ContainerConfig.efs_mount.
     efs_config: EfsConfig | None = None
 
-    # Sidecar proxy: when True, the task definition gets a second container
-    # that enforces SSO + ABAC in front of the app container. See
-    # docs/sidecar_proxy_design.md.
+    # Sidecar proxy (SSO + ABAC). When True, the task gets an auth sidecar
+    # container wrapping whichever container is named by alb_target_container.
+    # See docs/sidecar_proxy_design.md. Orthogonal to the `containers` list.
     sidecar_enabled: bool = False
 
-    def to_template_vars(self) -> dict:
-        """Convert to dict for Jinja2 template rendering (CloudFormation)."""
-        return {
-            "app_name": self.app_name,
-            "ecr_repo_name": self.ecr_repo_name,
-            "container_port": self.container_port,
-            "cpu": str(self.cpu),  # CloudFormation expects strings
-            "memory": str(self.memory),  # CloudFormation expects strings
-            "health_check_path": self.health_check_path,
-            "health_check_command": self.health_check_command,
-            "environment_variables": self.environment_variables,
-        }
+    def alb_target(self) -> ContainerConfig | None:
+        """Return the ALB-target ContainerConfig, or None if no ALB exposure."""
+        if not self.alb_target_container:
+            return None
+        for c in self.containers:
+            if c.name == self.alb_target_container:
+                return c
+        raise ValueError(
+            f"alb_target_container='{self.alb_target_container}' not found in containers "
+            f"{[c.name for c in self.containers]}"
+        )
