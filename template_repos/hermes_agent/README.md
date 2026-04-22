@@ -61,6 +61,19 @@ Hermes does not treat `openai` as a runtime provider name for direct API access.
 `start.sh` supervises WebUI + optional `python -m gateway.run`. Auto-enabled when `SLACK_APP_TOKEN` or `SLACK_BOT_TOKEN` is set — leave both **unset** (not empty) to disable. If either process dies the container exits and ECS restarts it.
 
 
+## MCP aggregator sidecar (Slack template only)
+
+The `hermes-slack` AppTemplate ships with a second container — `learneo-mcp` — in the same ECS task. Hermes reaches it over loopback at `http://127.0.0.1:7777/mcp` via the static `mcp_servers.learneo` entry in `config.yaml.template`. No auth header is needed: loopback binding is the security boundary (no port mapping, so nothing outside the task can reach the MCP).
+
+The MCP image is referenced as a **prebuilt** container:
+
+- **Repo:** `doh/{env_slug}/learneo-mcp` (per-env ECR).
+- **Tag:** `LEARNEO_MCP_IMAGE_VERSION` in `seed_app_templates.py`.
+- **How it's built:** operator-driven from a local checkout of the `learneo-mcp` source, pushed with `manage.py doh_build_prebuilt_image --account <acct> [--env <env>] --source-dir <path-to-learneo-mcp> --ecr-repo learneo-mcp --tag <version>`.
+
+Upstream credentials (`GITHUB_TOKEN`, `JIRA_API_TOKEN`, `ATLASSIAN_*`, `DATADOG_*`, etc.) are declared on the Slack template as empty-value secrets. Ops populates them once in `devopshero/{env_slug}/shared-secrets` and every Hermes in the env inherits them via the fall-through mechanism in `secrets_utils._resolve_secret_value`.
+
+
 ## Patches
 
 `patches/` carries DOH-owned fixes against the pinned `hermes-agent` tree: numbered `*.patch` files applied idempotently (`patch -N --forward`) and an `overlay/` tree for whole files DOH owns. `apply.py` runs on every boot against the **EFS-backed** copy, so a new image's patches reach already-deployed volumes. Already-applied patches become no-ops, so upstream fixes soft-land on the next rebuild.
