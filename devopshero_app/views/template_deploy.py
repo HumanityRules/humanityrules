@@ -23,7 +23,18 @@ logger = logging.getLogger(__name__)
 
 
 def _editable_variables(template: models.AppTemplate) -> list[dict]:
-    return [v for v in template.runtime_variables if v.get("user_editable")]
+    """Flatten editable runtime_variables across every container in the template.
+
+    The deploy form renders one input per user-editable var regardless of which
+    container declares it; at deploy time, overrides are applied by name to
+    every container that has a matching variable.
+    """
+    result: list[dict] = []
+    for container in template.containers or []:
+        for v in container.get("runtime_variables") or []:
+            if v.get("user_editable"):
+                result.append(v)
+    return result
 
 
 def _group_editable_variables(editable_vars: list[dict]) -> list[dict]:
