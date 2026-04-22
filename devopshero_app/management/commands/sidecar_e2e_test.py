@@ -834,15 +834,16 @@ def _minimum_runtime_overrides(template: models.AppTemplate) -> dict[str, str]:
     required ones that have no default value.
     """
     overrides: dict[str, str] = {}
-    for var in template.runtime_variables or []:
-        if not var.get("user_editable"):
-            continue
-        if not var.get("required"):
-            continue
-        if var.get("value") or var.get("default_value"):
-            continue
-        # Required + no value + no default — supply a harmless placeholder so
-        # the test deploy actually starts. The container may fail later if the
-        # placeholder is nonsensical, but that's visible in the smoke tests.
-        overrides[var["name"]] = "sidecar-e2e-placeholder"
+    for container in template.containers or []:
+        for var in container.get("runtime_variables") or []:
+            if not var.get("user_editable"):
+                continue
+            if not var.get("required"):
+                continue
+            if var.get("value") or var.get("default_value"):
+                continue
+            # Required + no value + no default — supply a harmless placeholder so
+            # the test deploy actually starts. The container may fail later if the
+            # placeholder is nonsensical, but that's visible in the smoke tests.
+            overrides[var["name"]] = "sidecar-e2e-placeholder"
     return overrides
