@@ -39,8 +39,7 @@
                     {% if blueprint.datastore %}
                     <span class="inline-flex items-center rounded bg-gray-100 dark:bg-gray-700 px-1.5 py-0.5 text-[10px] font-medium text-gray-600 dark:text-gray-300">{{ blueprint.datastore.name }}</span>
                     {% endif %}
-                    <span class="inline-flex items-center rounded bg-gray-100 dark:bg-gray-700 px-1.5 py-0.5 text-[10px] font-medium text-gray-600 dark:text-gray-300">{{ blueprint.environment_variables|length|default:"0" }} env var{{ blueprint.environment_variables|length|pluralize }}</span>
-                    <span class="inline-flex items-center rounded bg-gray-100 dark:bg-gray-700 px-1.5 py-0.5 text-[10px] font-medium text-gray-600 dark:text-gray-300">{{ blueprint.app_secrets|length|default:"0" }} secret{{ blueprint.app_secrets|length|pluralize }}</span>
+                    <span class="inline-flex items-center rounded bg-gray-100 dark:bg-gray-700 px-1.5 py-0.5 text-[10px] font-medium text-gray-600 dark:text-gray-300">{{ blueprint.containers|length }} container{{ blueprint.containers|length|pluralize }}</span>
                 </span>
                 <div x-show="open" x-cloak
                      x-transition:enter="transition ease-out duration-150"
@@ -52,11 +51,12 @@
                         <dt class="text-gray-500 dark:text-gray-400">Datastore</dt>
                         <dd class="text-gray-900 dark:text-white font-medium">{{ blueprint.datastore.name }}</dd>
                         {% endif %}
-                        <dt class="text-gray-500 dark:text-gray-400 pt-0.5">Env vars</dt>
+                        {% for container in blueprint.containers %}
+                        <dt class="text-gray-500 dark:text-gray-400 pt-0.5">{{ container.name }} env</dt>
                         <dd class="text-gray-900 dark:text-white">
-                            {% if blueprint.environment_variables %}
+                            {% if container.environment_variables %}
                             <ul class="space-y-0.5 font-mono text-[11px]">
-                                {% for var in blueprint.environment_variables %}
+                                {% for var in container.environment_variables %}
                                 <li>
                                     <span class="text-gray-500 dark:text-gray-400">{{ var.name }}</span><span class="text-gray-300 dark:text-gray-600">=</span><span class="break-all">{{ var.value }}</span>
                                 </li>
@@ -66,11 +66,11 @@
                             <span class="text-gray-400 dark:text-gray-500 italic">None</span>
                             {% endif %}
                         </dd>
-                        <dt class="text-gray-500 dark:text-gray-400 pt-0.5">Secrets</dt>
+                        <dt class="text-gray-500 dark:text-gray-400 pt-0.5">{{ container.name }} secrets</dt>
                         <dd class="text-gray-900 dark:text-white">
-                            {% if blueprint.app_secrets %}
+                            {% if container.app_secrets %}
                             <ul class="space-y-0.5 font-mono text-[11px]">
-                                {% for key, val in blueprint.app_secrets.items %}
+                                {% for key, val in container.app_secrets.items %}
                                 <li>
                                     <span class="text-gray-500 dark:text-gray-400">{{ key }}</span><span class="text-gray-300 dark:text-gray-600">=</span><span class="text-gray-400 dark:text-gray-500">••••••••</span>
                                 </li>
@@ -80,6 +80,7 @@
                             <span class="text-gray-400 dark:text-gray-500 italic">None</span>
                             {% endif %}
                         </dd>
+                        {% endfor %}
                     </dl>
                 </div>
             </div>
