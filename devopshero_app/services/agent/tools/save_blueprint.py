@@ -78,6 +78,54 @@ def _normalize_app_secrets(value: Any, existing: dict | None) -> dict[str, str |
     return result if result else None
 
 
+def _single_container_name(blueprint_containers: list | None, app_slug: str) -> str:
+    """Return the name of the sole container in the blueprint, falling back to app_slug.
+
+    The agent-driven chat tool treats the blueprint as single-container for now; env_vars
+    + secrets updates target containers[0] by convention. Multi-container configs built
+    from templates are populated via template_deploy_service.deploy_from_template instead.
+    """
+    if blueprint_containers:
+        return blueprint_containers[0].get("name") or app_slug
+    return app_slug
+
+
+def _write_container_slot(
+    existing: list | None,
+    app_slug: str,
+    env_vars: list[dict[str, str]] | None,
+    app_secrets: dict[str, str | None] | None,
+) -> list:
+    """Produce the blueprint.containers list from the agent's flat env_vars / app_secrets inputs."""
+    name = _single_container_name(existing, app_slug)
+    slot: dict[str, Any] = {"name": name}
+    if env_vars is not None:
+        slot["environment_variables"] = env_vars
+    elif existing:
+        slot["environment_variables"] = existing[0].get("environment_variables", [])
+    else:
+        slot["environment_variables"] = []
+    if app_secrets is not None:
+        slot["app_secrets"] = app_secrets
+    elif existing:
+        slot["app_secrets"] = existing[0].get("app_secrets", {})
+    else:
+        slot["app_secrets"] = {}
+    return [slot]
+
+
+def _existing_env_vars(containers: list | None) -> list:
+    if not containers:
+        return []
+    return list(containers[0].get("environment_variables") or [])
+
+
+def _existing_app_secrets(containers: list | None) -> dict | None:
+    if not containers:
+        return None
+    return dict(containers[0].get("app_secrets") or {}) or None
+
+
 @dataclass
 class SaveBlueprintResult:
     """Result of save_blueprint operation."""
@@ -176,10 +224,18 @@ async def save_blueprint(
         if subdomain is not None:
             blueprint.subdomain = subdomain
 
-        blueprint.environment_variables = _normalize_environment_variables(
-            environment_variables, blueprint.environment_variables
+        normalized_env_vars = _normalize_environment_variables(
+            environment_variables, _existing_env_vars(blueprint.containers),
         )
-        blueprint.app_secrets = _normalize_app_secrets(app_secrets, blueprint.app_secrets)
+        normalized_secrets = _normalize_app_secrets(
+            app_secrets, _existing_app_secrets(blueprint.containers),
+        )
+        blueprint.containers = _write_container_slot(
+            existing=blueprint.containers,
+            app_slug=blueprint.app.slug,
+            env_vars=normalized_env_vars,
+            app_secrets=normalized_secrets,
+        )
 
         if datastore_id is not None:
             if datastore_id == "":
@@ -234,6 +290,13 @@ async def save_blueprint(
             except Datastore.DoesNotExist:
                 raise ValueError(f"Datastore {datastore_id} not found in workspace.")
 
+        initial_containers = _write_container_slot(
+            existing=None,
+            app_slug=app.slug,
+            env_vars=_normalize_environment_variables(environment_variables, None),
+            app_secrets=_normalize_app_secrets(app_secrets, None),
+        )
+
         draft_blueprint = DeploymentBlueprint(
             app=app,
             environment=environment,
@@ -241,8 +304,7 @@ async def save_blueprint(
             branch=branch or "",
             cpu=cpu or 256,
             memory=memory or 512,
-            environment_variables=_normalize_environment_variables(environment_variables, None),
-            app_secrets=_normalize_app_secrets(app_secrets, None),
+            containers=initial_containers,
             datastore=datastore,
             subdomain=subdomain or "",
             created_by=user,
@@ -260,8 +322,7 @@ async def save_blueprint(
             branch=branch or "",
             cpu=cpu or 256,
             memory=memory or 512,
-            environment_variables=_normalize_environment_variables(environment_variables, None),
-            app_secrets=_normalize_app_secrets(app_secrets, None),
+            containers=initial_containers,
             datastore=datastore,
             subdomain=subdomain or "",
             created_by=user,
@@ -284,8 +345,8 @@ async def save_blueprint(
         cpu=blueprint.cpu,
         memory=blueprint.memory,
         subdomain=effective_values.subdomain,
-        has_env_vars=bool(blueprint.environment_variables),
-        has_secrets=bool(blueprint.app_secrets),
+        has_env_vars=bool(_existing_env_vars(blueprint.containers)),
+        has_secrets=bool(_existing_app_secrets(blueprint.containers)),
         has_datastore=blueprint.datastore_id is not None,
         created=created,
     )
