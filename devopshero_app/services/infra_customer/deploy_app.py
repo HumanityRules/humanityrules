@@ -755,7 +755,7 @@ class AppStack(Stack):
 
         target_group = elbv2.ApplicationTargetGroup(
             self, "TargetGroup",
-            target_group_name=f"doh-{env_slug}-{app_config.app_name}"[:32],
+            target_group_name=f"doh-{env_slug}-{app_config.app_name}"[:32].rstrip("-"),
             vpc=self.environment_infra.vpc,
             port=target_port,
             protocol=elbv2.ApplicationProtocol.HTTP,
