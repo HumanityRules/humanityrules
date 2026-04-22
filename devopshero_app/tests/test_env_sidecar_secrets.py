@@ -246,15 +246,24 @@ class TestEnsureEnvSidecarSecrets(SidecarSecretsTestBase):
 
 
 def _make_app_config(app_secrets: dict[str, str | None] | None) -> AppConfig:
+    from devopshero_app.services.infra_customer.appconfig import ContainerConfig
     return AppConfig(
         app_name="simple-dashboard",
-        ecr_repo_name="doh/staging/simple-dashboard",
-        container_port=8000,
         cpu=256,
         memory=512,
-        health_check_path="/health",
-        health_check_command=None,
-        environment_variables=[],
+        containers=[
+            ContainerConfig(
+                name="app",
+                image_source="dockerfile",
+                source_repo_path="simple-dashboard",
+                dockerfile_path="Dockerfile",
+                ecr_repo_name="doh/staging/simple-dashboard-app",
+                container_port=8000,
+                health_check_path="/health",
+                app_secrets=dict(app_secrets or {}),
+            ),
+        ],
+        alb_target_container="app",
         app_source_path=None,
         app_secrets=app_secrets,
     )
