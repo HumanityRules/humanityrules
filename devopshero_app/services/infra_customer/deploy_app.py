@@ -118,9 +118,77 @@ def get_connection_env_var_name(connection_config: appconfig.ConnectionConfig) -
     return connection_config.env_var_name or "DATABASE_URL"
 
 
+def dockerfile_containers(app_config: appconfig.AppConfig) -> list[appconfig.ContainerConfig]:
+    """Return the subset of containers that DOH builds from source at deploy time."""
+    return [c for c in app_config.containers if c.image_source == "dockerfile"]
+
+
+def prebuilt_containers(app_config: appconfig.AppConfig) -> list[appconfig.ContainerConfig]:
+    """Return the subset of containers that reference a pre-pushed ECR image."""
+    return [c for c in app_config.containers if c.image_source == "prebuilt"]
+
+
+def _missing_prebuilt_images(
+    session: boto3.Session,
+    app_config: appconfig.AppConfig,
+    env_slug: str,
+) -> list[str]:
+    """Return '{repo}:{tag}' identifiers for prebuilt containers whose image is absent from ECR.
+
+    Hard-fails before CDK runs — a deploy with a dangling prebuilt reference
+    would only surface as an ECS pull error hours later.
+    """
+    from botocore.exceptions import ClientError
+
+    ecr_client = session.client("ecr")
+    missing: list[str] = []
+    for c in prebuilt_containers(app_config):
+        repo_name = f"doh/{env_slug}/{c.prebuilt_ecr_repo}"
+        try:
+            ecr_client.describe_images(
+                repositoryName=repo_name,
+                imageIds=[{"imageTag": c.prebuilt_version}],
+            )
+        except ClientError as e:
+            code = e.response["Error"]["Code"]
+            if code in ("RepositoryNotFoundException", "ImageNotFoundException"):
+                missing.append(f"{repo_name}:{c.prebuilt_version}")
+                continue
+            raise
+    return missing
+
+
+def _container_image_uri(
+    container: appconfig.ContainerConfig,
+    account: str,
+    region: str,
+    env_slug: str,
+    app_image_tag: str,
+) -> str:
+    """Resolve the ECR image URI for a container.
+
+    - `dockerfile`: {account}.dkr.ecr.{region}.amazonaws.com/{c.ecr_repo_name}:{app_image_tag}
+    - `prebuilt`:   {account}.dkr.ecr.{region}.amazonaws.com/doh/{env_slug}/{c.prebuilt_ecr_repo}:{c.prebuilt_version}
+    """
+    registry = f"{account}.dkr.ecr.{region}.amazonaws.com"
+    if container.image_source == "dockerfile":
+        assert container.ecr_repo_name, "dockerfile container must have ecr_repo_name"
+        return f"{registry}/{container.ecr_repo_name}:{app_image_tag}"
+    if container.image_source == "prebuilt":
+        assert container.prebuilt_ecr_repo and container.prebuilt_version, (
+            "prebuilt container must have prebuilt_ecr_repo + prebuilt_version"
+        )
+        return f"{registry}/doh/{env_slug}/{container.prebuilt_ecr_repo}:{container.prebuilt_version}"
+    raise ValueError(f"Unknown image_source='{container.image_source}' on container '{container.name}'")
+
+
 class EcrStack(Stack):
     """
-    DevOpsHero ECR Stack - Container Registry for the app.
+    DevOpsHero ECR Stack — one ECR repo per dockerfile-built container in the app.
+
+    Containers with image_source="prebuilt" are expected to already exist in a
+    separate per-env ECR repo (doh/{env_slug}/<repo>:<version>) and are not
+    created here.
     """
 
     def __init__(
@@ -133,18 +201,26 @@ class EcrStack(Stack):
     ) -> None:
         super().__init__(scope, construct_id, **kwargs)
 
-        self.repository = ecr.Repository(
-            self, "EcrRepository",
-            repository_name=app_config.ecr_repo_name,
-            image_scan_on_push=True,
-            removal_policy=RemovalPolicy.DESTROY,
-            empty_on_delete=True,
-            lifecycle_rules=[ecr.LifecycleRule(description="Keep last 10 images", max_image_count=10, rule_priority=1)],
-        )
-        Tags.of(self.repository).add("App", app_config.app_name)
+        self.repositories: dict[str, ecr.Repository] = {}
+        for idx, c in enumerate(dockerfile_containers(app_config)):
+            assert c.ecr_repo_name is not None, "dockerfile container must have ecr_repo_name"
+            repo = ecr.Repository(
+                self, f"EcrRepository{idx}",
+                repository_name=c.ecr_repo_name,
+                image_scan_on_push=True,
+                removal_policy=RemovalPolicy.DESTROY,
+                empty_on_delete=True,
+                lifecycle_rules=[ecr.LifecycleRule(description="Keep last 10 images", max_image_count=10, rule_priority=1)],
+            )
+            Tags.of(repo).add("App", app_config.app_name)
+            Tags.of(repo).add("Container", c.name)
+            self.repositories[c.name] = repo
 
-        CfnOutput(self, "EcrRepositoryUri", value=self.repository.repository_uri, export_name=f"{resource_prefix}-ecr-uri")
-        CfnOutput(self, "EcrRepositoryArn", value=self.repository.repository_arn, export_name=f"{resource_prefix}-ecr-arn")
+            # Export the URI/ARN for the primary (first) container under the
+            # legacy output names so consumers of the CFN exports keep working.
+            if idx == 0:
+                CfnOutput(self, "EcrRepositoryUri", value=repo.repository_uri, export_name=f"{resource_prefix}-ecr-uri")
+                CfnOutput(self, "EcrRepositoryArn", value=repo.repository_arn, export_name=f"{resource_prefix}-ecr-arn")
 
 
 class SidecarEcrStack(Stack):
@@ -395,9 +471,16 @@ class AppStack(Stack):
     ) -> None:
         super().__init__(scope, construct_id, **kwargs)
 
-        # Sidecar is opt-in per AppTemplate. When enabled the task def adds a
-        # second container in front of the app, ALB routes to that sidecar,
-        # and the sidecar proxies to the app container over localhost.
+        alb_target = app_config.alb_target()
+        if alb_target is None:
+            raise RuntimeError(
+                f"App '{app_config.app_name}' has no alb_target_container; "
+                f"ALB attachment requires one container in the list to be marked as the target."
+            )
+
+        # Auth sidecar is opt-in per AppTemplate. When enabled the task def adds a
+        # third container in front of the ALB-target container, ALB routes to
+        # that sidecar, and the sidecar proxies to the target over localhost.
         sidecar_enabled = bool(app_config.sidecar_enabled)
         if sidecar_enabled and not (
             sidecar_shared_secrets_arn and sidecar_image_version and auth_base_url
@@ -407,11 +490,11 @@ class AppStack(Stack):
                 "sidecar_image_version, and auth_base_url. One or more were missing — "
                 "did the orchestration skip ensure_env_sidecar_secrets_exist?",
             )
-        # Sidecar listens on container_port + 1; the app keeps its original port.
-        sidecar_listen_port = app_config.container_port + 1 if sidecar_enabled else None
+        # Auth sidecar listens on alb_target.container_port + 1; the app keeps its original port.
+        sidecar_listen_port = alb_target.container_port + 1 if sidecar_enabled else None
         # The target group port (= ALB forwarding port) points at whichever
         # container should receive inbound traffic.
-        target_port = sidecar_listen_port if sidecar_enabled else app_config.container_port
+        target_port = sidecar_listen_port if sidecar_enabled else alb_target.container_port
 
         # Import environment infrastructure
         self.environment_infra = deploy_base.import_environment_infrastructure(
@@ -445,7 +528,9 @@ class AppStack(Stack):
                 resources=[sidecar_shared_secrets_arn],
             ))
 
-        # EFS: create per-app access point and grant mount permissions
+        # EFS: create per-app access point and grant mount permissions. The
+        # volume is declared once at the task level; containers that opt in
+        # (c.efs_mount) each add their own MountPoint below.
         efs_access_point = None
         if app_config.efs_config:
             efs_file_system = efs.FileSystem.from_file_system_attributes(
@@ -472,26 +557,25 @@ class AppStack(Stack):
                 },
             ))
 
-        environment = {env["name"]: env["value"] for env in app_config.environment_variables}
-
-        # Inject secrets from Secrets Manager as environment variables via ECS secrets
-        secrets = {}
+        # Database env vars + secrets are projected into the ALB-target container only —
+        # sibling containers (sidecars, MCP servers, etc.) have no database contract.
+        alb_target_database_secrets: dict[str, ecs.Secret] = {}
         if database_connection_secret and app_config.database_config:
             env_var_name = get_connection_env_var_name(app_config.database_config.connection)
-            secrets[env_var_name] = ecs.Secret.from_secrets_manager(database_connection_secret, field="url")
-            secrets["DATABASE_HOST"] = ecs.Secret.from_secrets_manager(database_connection_secret, field="host")
-            secrets["DATABASE_PORT"] = ecs.Secret.from_secrets_manager(database_connection_secret, field="port")
-            secrets["DATABASE_NAME"] = ecs.Secret.from_secrets_manager(database_connection_secret, field="dbname")
-            secrets["DATABASE_USERNAME"] = ecs.Secret.from_secrets_manager(database_connection_secret, field="username")
-            secrets["DATABASE_PASSWORD"] = ecs.Secret.from_secrets_manager(database_connection_secret, field="password")
+            alb_target_database_secrets[env_var_name] = ecs.Secret.from_secrets_manager(database_connection_secret, field="url")
+            alb_target_database_secrets["DATABASE_HOST"] = ecs.Secret.from_secrets_manager(database_connection_secret, field="host")
+            alb_target_database_secrets["DATABASE_PORT"] = ecs.Secret.from_secrets_manager(database_connection_secret, field="port")
+            alb_target_database_secrets["DATABASE_NAME"] = ecs.Secret.from_secrets_manager(database_connection_secret, field="dbname")
+            alb_target_database_secrets["DATABASE_USERNAME"] = ecs.Secret.from_secrets_manager(database_connection_secret, field="username")
+            alb_target_database_secrets["DATABASE_PASSWORD"] = ecs.Secret.from_secrets_manager(database_connection_secret, field="password")
 
-        # Inject app secrets as env vars — ECS resolves them from Secrets Manager at startup
+        # Shared task-level Secrets Manager bag. Each container only sees the
+        # fields it declared in its own ContainerConfig.app_secrets.
+        app_secret_resource: secretsmanager.ISecret | None = None
         if app_config.app_secrets:
-            app_secret = secretsmanager.Secret.from_secret_name_v2(
-                self, "AppSecret", f"devopshero/{env_slug}/{app_config.app_name}/secrets"
+            app_secret_resource = secretsmanager.Secret.from_secret_name_v2(
+                self, "AppSecret", f"devopshero/{env_slug}/{app_config.app_name}/secrets",
             )
-            for field_name in app_config.app_secrets:
-                secrets[field_name] = ecs.Secret.from_secrets_manager(app_secret, field=field_name)
 
         task_definition = ecs.FargateTaskDefinition(
             self, "TaskDefinition",
@@ -519,37 +603,76 @@ class AppStack(Stack):
                 ),
             )
 
-        container = task_definition.add_container(
-            "AppContainer",
-            container_name=app_config.app_name,
-            image=ecs.ContainerImage.from_registry(f"{self.account}.dkr.ecr.{self.region}.amazonaws.com/{app_config.ecr_repo_name}:{image_tag}"),
-            logging=ecs.LogDrivers.aws_logs(stream_prefix=app_config.app_name, log_group=self.environment_infra.log_group),
-            environment=environment,
-            secrets=secrets if secrets else None,
-            health_check=ecs.HealthCheck(
-                command=["CMD-SHELL", app_config.health_check_command],
-                interval=Duration.seconds(30),
-                timeout=Duration.seconds(10),
-                retries=3,
-                start_period=Duration.seconds(60),
-            ) if app_config.health_check_command else None,
-        )
-        container.add_port_mappings(ecs.PortMapping(container_port=app_config.container_port, protocol=ecs.Protocol.TCP))
-
-        if efs_access_point:
-            container.add_mount_points(
-                ecs.MountPoint(
-                    container_path=app_config.efs_config.mount_path,
-                    source_volume="app-workspace",
-                    read_only=False,
-                )
+        # Add each configured container to the task definition.
+        containers_by_name: dict[str, ecs.ContainerDefinition] = {}
+        for idx, c in enumerate(app_config.containers):
+            image_uri = _container_image_uri(
+                container=c,
+                account=self.account,
+                region=self.region,
+                env_slug=env_slug,
+                app_image_tag=image_tag,
             )
 
+            # Environment: per-container list of {name, value}.
+            environment = {e["name"]: e["value"] for e in c.environment_variables}
+
+            # Secrets: the container's declared fields from the shared app_secrets bag,
+            # plus database_connection_secret pieces on the ALB-target container only.
+            secrets: dict[str, ecs.Secret] = {}
+            if app_secret_resource is not None and c.app_secrets:
+                for field_name in c.app_secrets:
+                    secrets[field_name] = ecs.Secret.from_secrets_manager(app_secret_resource, field=field_name)
+            if c.name == alb_target.name:
+                secrets.update(alb_target_database_secrets)
+
+            health_check = None
+            if c.health_check_command:
+                health_check = ecs.HealthCheck(
+                    command=["CMD-SHELL", c.health_check_command],
+                    interval=Duration.seconds(30),
+                    timeout=Duration.seconds(10),
+                    retries=3,
+                    start_period=Duration.seconds(c.health_check_grace_period or 60),
+                )
+
+            container = task_definition.add_container(
+                f"Container{idx}",
+                container_name=f"{app_config.app_name}-{c.name}",
+                image=ecs.ContainerImage.from_registry(image_uri),
+                logging=ecs.LogDrivers.aws_logs(
+                    stream_prefix=f"{app_config.app_name}-{c.name}",
+                    log_group=self.environment_infra.log_group,
+                ),
+                environment=environment or None,
+                secrets=secrets if secrets else None,
+                health_check=health_check,
+            )
+            # Only the ALB-target container needs a port mapping visible to ECS
+            # task-networking — sibling containers communicate over the task's
+            # shared loopback where no mapping is required.
+            if c.name == alb_target.name:
+                container.add_port_mappings(
+                    ecs.PortMapping(container_port=c.container_port, protocol=ecs.Protocol.TCP),
+                )
+
+            if efs_access_point and c.efs_mount:
+                assert app_config.efs_config is not None  # guaranteed by the `if efs_access_point` branch
+                container.add_mount_points(
+                    ecs.MountPoint(
+                        container_path=app_config.efs_config.mount_path,
+                        source_volume="app-workspace",
+                        read_only=False,
+                    ),
+                )
+
+            containers_by_name[c.name] = container
+
+        # Auth sidecar: adds a third container in front of the ALB-target
+        # container, redirects the ALB to it, and proxies to the target over
+        # localhost. Orthogonal to the `containers` list — auth sidecar stays
+        # on its own `sidecar_enabled` flag.
         if sidecar_enabled:
-            # Side-car container: receives ALB traffic on sidecar_listen_port,
-            # validates the doh_session cookie, calls DOH's PDP, and proxies
-            # to the app container over localhost:container_port. See
-            # sidecar/sidecar/app.py.
             sidecar_image_uri = (
                 f"{self.account}.dkr.ecr.{self.region}.amazonaws.com/"
                 f"{sidecar_ecr_repo_name(env_slug)}:{sidecar_image_version}"
@@ -566,7 +689,7 @@ class AppStack(Stack):
                 "DOH_JWKS_URL": f"{auth_base_url.rstrip('/')}/.well-known/jwks.json",
                 "DOH_PDP_URL": pdp_url,
                 "DOH_UPSTREAM_HOST": "127.0.0.1",
-                "DOH_UPSTREAM_PORT": str(app_config.container_port),
+                "DOH_UPSTREAM_PORT": str(alb_target.container_port),
                 "DOH_LISTEN_PORT": str(sidecar_listen_port),
             }
             sidecar_container = task_definition.add_container(
@@ -587,10 +710,10 @@ class AppStack(Stack):
             sidecar_container.add_port_mappings(
                 ecs.PortMapping(container_port=sidecar_listen_port, protocol=ecs.Protocol.TCP),
             )
-            # App must be listening before the sidecar accepts traffic.
+            # ALB-target container must be listening before the sidecar accepts traffic.
             sidecar_container.add_container_dependencies(
                 ecs.ContainerDependency(
-                    container=container,
+                    container=containers_by_name[alb_target.name],
                     condition=ecs.ContainerDependencyCondition.START,
                 ),
             )
@@ -611,8 +734,8 @@ class AppStack(Stack):
             min_healthy = 0       # Should it be 100 for "always on, zero downtime"? Make it an option for the user?
             health_check_grace = 60
 
-        if app_config.health_check_grace_period is not None:
-            health_check_grace = app_config.health_check_grace_period
+        if alb_target.health_check_grace_period is not None:
+            health_check_grace = alb_target.health_check_grace_period
 
         # When the sidecar is the ALB target, the ALB's health check must hit
         # a route the sidecar handles locally (bypassing the PDP), otherwise
@@ -622,7 +745,7 @@ class AppStack(Stack):
             target_health_check_path = "/__sidecar/healthz"
             target_health_check_codes = "200"
         else:
-            target_health_check_path = app_config.health_check_path
+            target_health_check_path = alb_target.health_check_path or "/"
             # 301 accepted: the ALB terminates SSL and forwards to the container over HTTP, adding
             # X-Forwarded-Proto: https so the app knows the original request was secure. Frameworks like
             # Phoenix (force_ssl) and Rails (force_ssl) check this header and pass traffic through.
@@ -676,17 +799,18 @@ class AppStack(Stack):
             health_check_grace_period=Duration.seconds(health_check_grace),
             circuit_breaker=ecs.DeploymentCircuitBreaker(enable=True, rollback=True),
         )
+        # Multiple containers in the task — be explicit about which one the
+        # ALB targets. The sidecar overrides this when enabled.
         if sidecar_enabled:
-            # Two containers — attach_to_application_target_group would pick the
-            # first container with a port mapping (the app at container_port),
-            # which is the wrong one. Point the target group explicitly at the
-            # sidecar container on sidecar_listen_port.
             target_group.add_target(service.load_balancer_target(
                 container_name=f"{app_config.app_name}-sidecar",
                 container_port=sidecar_listen_port,
             ))
         else:
-            service.attach_to_application_target_group(target_group)
+            target_group.add_target(service.load_balancer_target(
+                container_name=f"{app_config.app_name}-{alb_target.name}",
+                container_port=alb_target.container_port,
+            ))
 
         Tags.of(service).add("App", app_config.app_name)
         Tags.of(task_definition).add("App", app_config.app_name)
@@ -988,21 +1112,51 @@ def deploy(
         logger.error("CDK deployment failed (ECR/Aurora)")
         return DeployResult(success=False, error="CDK deployment failed (ECR/Aurora)", service_url="", alb_dns="")
 
-    # Phase 2: Build and push the Docker image (ECR repo now exists)
-    logger.info("Building and pushing Docker image")
-    image_uri = ecr_utils.build_and_push_docker_image(
+    # Phase 2a: Verify all prebuilt containers exist in ECR before we start
+    # building the dockerfile ones. Hard-fail here with a clear operator
+    # message — a missing prebuilt image would only surface as an ECS pull
+    # error hours later, long after the CDK deploy succeeded.
+    missing = _missing_prebuilt_images(
         session=session,
-        account_id=account_id,
-        region=region,
+        app_config=app_config,
         env_slug=env_slug,
-        app_name=app_config.app_name,
-        ecr_repo_name=app_config.ecr_repo_name,
-        app_source_path=app_config.app_source_path,
-        image_tag=image_tag,
     )
-    if not image_uri:
-        logger.error("Docker build/push failed")
-        return DeployResult(success=False, error="Docker build/push failed", service_url="", alb_dns="")
+    if missing:
+        msg = (
+            "Missing prebuilt images in ECR:\n  - "
+            + "\n  - ".join(missing)
+            + "\nBuild each with:\n  uv run manage.py doh_build_prebuilt_image "
+            "--account <acct> [--env <env>] --source-dir <path> --ecr-repo <repo> --tag <tag>"
+        )
+        logger.error(msg)
+        return DeployResult(success=False, error=msg, service_url="", alb_dns="")
+
+    # Phase 2b: Build and push every dockerfile container's image from the
+    # cloned source tree at app_source_path. Today all dockerfile containers
+    # in a template share the same source tree (the template's clone root) —
+    # their container.dockerfile_path distinguishes them if needed. A future
+    # monorepo multi-image use case will need per-container subpaths; that
+    # requirement doesn't exist yet.
+    for c in dockerfile_containers(app_config):
+        logger.info("Building and pushing image for container '%s'", c.name)
+        assert c.ecr_repo_name is not None
+        image_uri = ecr_utils.build_and_push_docker_image(
+            session=session,
+            account_id=account_id,
+            region=region,
+            env_slug=env_slug,
+            app_name=f"{app_config.app_name}-{c.name}",
+            ecr_repo_name=c.ecr_repo_name,
+            app_source_path=app_config.app_source_path,
+            image_tag=image_tag,
+        )
+        if not image_uri:
+            logger.error("Docker build/push failed for container '%s'", c.name)
+            return DeployResult(
+                success=False,
+                error=f"Docker build/push failed for container '{c.name}'",
+                service_url="", alb_dns="",
+            )
 
     # Phase 3: Deploy the App stack (image exists, so ECS can start tasks immediately)
     if not cdk_utils.deploy_from_assembly(assembly_dir=assembly_dir, session=session, stack_names=[f"{resource_prefix}-app"]):
@@ -1057,8 +1211,12 @@ def teardown(
     for stack in stacks_to_delete:
         logger.info("   - %(stack_name)s", {"stack_name": stack})
 
-    # Empty ECR repository first (CloudFormation can't delete non-empty repos)
-    ecr_utils.delete_all_ecr_images(session=session, ecr_repo_name=app_config.ecr_repo_name)
+    # Empty every per-app ECR repository first — CloudFormation can't delete
+    # non-empty repos. Prebuilt-container repos are per-env shared resources
+    # and are not torn down here.
+    for c in dockerfile_containers(app_config):
+        assert c.ecr_repo_name is not None
+        ecr_utils.delete_all_ecr_images(session=session, ecr_repo_name=c.ecr_repo_name)
 
     all_success = True
     for stack_name in stacks_to_delete:
