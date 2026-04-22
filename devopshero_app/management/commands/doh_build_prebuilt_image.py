@@ -124,7 +124,7 @@ class Command(BaseCommand):
             imageScanningConfiguration={"scanOnPush": True},
             tags=[{"Key": "ManagedBy", "Value": "doh_build_prebuilt_image"}],
         )
-        ecr_utils.apply_lifecycle_policy(
+        ecr_utils.apply_keep_last_n_lifecycle_policy(
             ecr_client=ecr_client,
             repository_name=repository_name,
             max_image_count=max_image_count,
