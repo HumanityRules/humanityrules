@@ -5,10 +5,6 @@ Commands take `--account [--org] [--env]` args and need:
   1. AWSAccount lookup (by name or 12-digit id, optionally scoped to an org)
   2. Environment lookup within that account (default slug "default")
   3. An assumed-role boto3 session against that account
-
-Extracted from the near-identical copies in doh_app_logs.py, doh_app_shell.py,
-and doh_efs_browse.py. New commands should route through here rather than
-duplicate the shape; existing commands migrate opportunistically.
 """
 
 import argparse

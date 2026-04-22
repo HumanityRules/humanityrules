@@ -17,33 +17,23 @@ from . import ec2_builder_utils
 logger = logging.getLogger(__name__)
 
 
-def keep_last_n_images_lifecycle_policy(max_image_count: int) -> dict:
-    """Return the ECR lifecycle policy JSON that keeps only the last N images by push-date.
-
-    Consumed by boto3's put_lifecycle_policy (which expects a JSON string).
-    CDK callers should use keep_last_n_images_lifecycle_rule() instead.
-    """
-    return {
-        "rules": [
-            {
-                "rulePriority": 1,
-                "description": f"Keep last {max_image_count} images",
-                "selection": {
-                    "tagStatus": "any",
-                    "countType": "imageCountMoreThan",
-                    "countNumber": max_image_count,
-                },
-                "action": {"type": "expire"},
+def apply_keep_last_n_lifecycle_policy(ecr_client, repository_name: str, max_image_count: int) -> None:
+    """Put a keep-last-N-by-push-date lifecycle policy onto an existing ECR repo."""
+    policy = {
+        "rules": [{
+            "rulePriority": 1,
+            "description": f"Keep last {max_image_count} images",
+            "selection": {
+                "tagStatus": "any",
+                "countType": "imageCountMoreThan",
+                "countNumber": max_image_count,
             },
-        ],
+            "action": {"type": "expire"},
+        }],
     }
-
-
-def apply_lifecycle_policy(ecr_client, repository_name: str, max_image_count: int) -> None:
-    """Idempotently put the keep-last-N lifecycle policy onto an ECR repo."""
     ecr_client.put_lifecycle_policy(
         repositoryName=repository_name,
-        lifecyclePolicyText=json.dumps(keep_last_n_images_lifecycle_policy(max_image_count)),
+        lifecyclePolicyText=json.dumps(policy),
     )
 
 

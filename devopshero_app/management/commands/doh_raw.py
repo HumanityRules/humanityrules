@@ -190,8 +190,13 @@ class Command(BaseCommand):
         if teardown:
             return deploy_app.teardown(
                 session=session,
-                app_config=app_config,
                 env_slug=env_slug,
+                app_name=app_config.app_name,
+                has_database=app_config.database_config is not None,
+                dockerfile_ecr_repo_names=[
+                    c.ecr_repo_name for c in deploy_app.dockerfile_containers(app_config)
+                    if c.ecr_repo_name
+                ],
             )
         else:
             return deploy_app.deploy(
