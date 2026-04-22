@@ -24,7 +24,7 @@ def _generate_image_tag(app_slug: str, git_ref: str) -> str:
 
 
 def _materialize_environment_variables(runtime_variables: list[dict]) -> list[dict[str, str]]:
-    """Extract config vars from runtime_variables into blueprint environment_variables format."""
+    """Extract config vars from one container's runtime_variables into {name, value} entries."""
     env_vars = []
     for var in runtime_variables:
         if var["category"] != "config":
@@ -36,7 +36,7 @@ def _materialize_environment_variables(runtime_variables: list[dict]) -> list[di
 
 
 def _materialize_app_secrets(runtime_variables: list[dict]) -> dict[str, str | None]:
-    """Extract secret vars from runtime_variables into blueprint app_secrets format."""
+    """Extract secret vars from one container's runtime_variables into a {name: value} dict."""
     secrets = {}
     for var in runtime_variables:
         if var["category"] != "secret":
@@ -46,19 +46,56 @@ def _materialize_app_secrets(runtime_variables: list[dict]) -> dict[str, str | N
     return secrets
 
 
-def _apply_variable_overrides(
-    runtime_variables: list[dict], overrides: dict[str, str] | None,
-) -> list[dict]:
-    """Return a new runtime_variables list with user-supplied values merged in by name."""
-    if not overrides:
-        return runtime_variables
+def _materialize_blueprint_containers(template_containers: list[dict]) -> list[dict]:
+    """Project template.containers into DeploymentBlueprint.containers shape.
+
+    Each entry carries `name` (the container identifier), plus the
+    materialized `environment_variables` and `app_secrets` derived from that
+    container's runtime_variables. Preserves container order.
+    """
     result = []
-    for var in runtime_variables:
-        if var["name"] in overrides:
-            result.append({**var, "value": overrides[var["name"]]})
-        else:
-            result.append(var)
+    for c in template_containers:
+        rt_vars = c.get("runtime_variables", [])
+        result.append({
+            "name": c["name"],
+            "environment_variables": _materialize_environment_variables(rt_vars),
+            "app_secrets": _materialize_app_secrets(rt_vars),
+        })
     return result
+
+
+def _apply_variable_overrides(
+    template_containers: list[dict], overrides: dict[str, str] | None,
+) -> list[dict]:
+    """Return a new containers list with user-supplied values merged into each container's runtime_variables by name."""
+    if not overrides:
+        return template_containers
+    result = []
+    for c in template_containers:
+        new_rt_vars = []
+        for var in c.get("runtime_variables", []):
+            if var["name"] in overrides:
+                new_rt_vars.append({**var, "value": overrides[var["name"]]})
+            else:
+                new_rt_vars.append(var)
+        result.append({**c, "runtime_variables": new_rt_vars})
+    return result
+
+
+def _alb_target_container(template: models.AppTemplate) -> dict:
+    """Return the container dict named by template.alb_target_container, or containers[0] if unset."""
+    containers = template.containers
+    if not containers:
+        raise ValueError(f"Template '{template.slug}' has no containers")
+    if template.alb_target_container:
+        for c in containers:
+            if c["name"] == template.alb_target_container:
+                return c
+        raise ValueError(
+            f"Template '{template.slug}' alb_target_container='{template.alb_target_container}' "
+            f"not found in containers {[c['name'] for c in containers]}"
+        )
+    return containers[0]
 
 
 async def _stamp_template_tags(
@@ -98,7 +135,18 @@ async def deploy_from_template(
     owner_username: str | None,
 ) -> models.Deployment:
     """Create Repository + App + Blueprint + Deployment from a template and queue for deployment."""
-    clone_url = f"file://{settings.TEMPLATE_REPOS_DIR / template.source_repo_path}"
+    # The App row still carries identity/build fields for a single canonical
+    # container — the ALB-target one (for multi-container templates) or the
+    # sole container (for single-container templates). The rest of the
+    # container spec lives on the template and is interpreted at deploy time.
+    primary = _alb_target_container(template)
+    if primary["image_source"] != "dockerfile":
+        raise ValueError(
+            f"Template '{template.slug}' alb_target container '{primary['name']}' must be "
+            f"image_source=dockerfile; got {primary['image_source']}"
+        )
+
+    clone_url = f"file://{settings.TEMPLATE_REPOS_DIR / primary['source_repo_path']}"
 
     repo, _created = await models.Repository.objects.aget_or_create(
         organization=organization,
@@ -119,13 +167,13 @@ async def deploy_from_template(
         source_template=template,
         name=app_name,
         slug=app_slug,
-        app_type=template.app_type,
-        build_strategy=template.build_strategy,
-        dockerfile_path=template.dockerfile_path,
-        container_port=template.container_port,
-        health_check_path=template.health_check_path,
-        health_check_command=template.health_check_command,
-        health_check_grace_period=template.health_check_grace_period,
+        app_type=models.App.AppType.WEB,
+        build_strategy=models.App.BuildStrategy.DOCKERFILE,
+        dockerfile_path=primary.get("dockerfile_path", ""),
+        container_port=primary["container_port"],
+        health_check_path=primary.get("health_check_path", ""),
+        health_check_command=primary.get("health_check_command", ""),
+        health_check_grace_period=primary.get("health_check_grace_period", 0),
         branch="",
         created_by=created_by,
     )
@@ -135,9 +183,8 @@ async def deploy_from_template(
         owner_username=owner_username,
     )
 
-    runtime_variables = _apply_variable_overrides(template.runtime_variables, runtime_variable_overrides)
-    environment_variables = _materialize_environment_variables(runtime_variables)
-    app_secrets = _materialize_app_secrets(runtime_variables)
+    containers_with_overrides = _apply_variable_overrides(template.containers, runtime_variable_overrides)
+    blueprint_containers = _materialize_blueprint_containers(containers_with_overrides)
 
     blueprint = await models.DeploymentBlueprint.objects.acreate(
         app=app,
@@ -146,8 +193,7 @@ async def deploy_from_template(
         status_message="Deployment triggered from template",
         cpu=template.cpu,
         memory=template.memory,
-        environment_variables=environment_variables,
-        app_secrets=app_secrets if app_secrets else None,
+        containers=blueprint_containers,
         subdomain="",
         created_by=created_by,
     )
