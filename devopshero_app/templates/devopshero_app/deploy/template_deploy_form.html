@@ -136,23 +136,58 @@
                     <dt class="text-gray-500 dark:text-gray-400 w-24">Memory</dt>
                     <dd class="text-gray-700 dark:text-gray-300">{{ template.memory }} MiB</dd>
                 </div>
-                <div class="flex col-span-2">
-                    <dt class="text-gray-500 dark:text-gray-400 w-24">Containers</dt>
-                    <dd class="text-gray-700 dark:text-gray-300 font-mono">
-                        {% for c in template.containers %}{{ c.name }}{% if c.image_source == "prebuilt" %} (prebuilt){% endif %}{% if not forloop.last %}, {% endif %}{% endfor %}
-                    </dd>
-                </div>
-                <div class="flex">
-                    <dt class="text-gray-500 dark:text-gray-400 w-24">ALB target</dt>
-                    <dd class="text-gray-700 dark:text-gray-300 font-mono">{{ template.alb_target_container|default:"—" }}</dd>
-                </div>
                 {% if template.efs_config %}
-                <div class="flex">
+                <div class="flex col-span-2">
                     <dt class="text-gray-500 dark:text-gray-400 w-24">EFS Mount</dt>
                     <dd class="text-gray-700 dark:text-gray-300">{{ template.efs_config.mount_path }}</dd>
                 </div>
                 {% endif %}
             </dl>
+
+            <h4 class="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wide mt-4 mb-2">Containers</h4>
+            <ul class="space-y-2">
+                {% for c in template.containers %}
+                <li class="rounded border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800/60 p-2">
+                    <div class="flex items-center gap-2 mb-1">
+                        <span class="font-mono text-xs font-medium text-gray-900 dark:text-white">{{ c.name }}</span>
+                        {% if c.image_source == "prebuilt" %}
+                        <span class="inline-flex items-center rounded bg-amber-100 dark:bg-amber-500/20 px-1.5 py-0.5 text-[10px] font-medium text-amber-700 dark:text-amber-300">prebuilt</span>
+                        {% else %}
+                        <span class="inline-flex items-center rounded bg-sky-100 dark:bg-sky-500/20 px-1.5 py-0.5 text-[10px] font-medium text-sky-700 dark:text-sky-300">dockerfile</span>
+                        {% endif %}
+                        {% if c.name == template.alb_target_container %}
+                        <span class="inline-flex items-center rounded bg-green-100 dark:bg-green-500/20 px-1.5 py-0.5 text-[10px] font-medium text-green-700 dark:text-green-300">ALB target</span>
+                        {% endif %}
+                        {% if c.efs_mount %}
+                        <span class="inline-flex items-center rounded bg-gray-100 dark:bg-gray-700 px-1.5 py-0.5 text-[10px] font-medium text-gray-600 dark:text-gray-300">EFS</span>
+                        {% endif %}
+                    </div>
+                    <dl class="space-y-1 text-xs mt-2">
+                        <div class="flex">
+                            <dt class="text-gray-500 dark:text-gray-400 w-20">Port</dt>
+                            <dd class="text-gray-700 dark:text-gray-300 font-mono">{{ c.container_port }}</dd>
+                        </div>
+                        {% if c.health_check_path %}
+                        <div class="flex">
+                            <dt class="text-gray-500 dark:text-gray-400 w-20">Health</dt>
+                            <dd class="text-gray-700 dark:text-gray-300 font-mono">{{ c.health_check_path }}</dd>
+                        </div>
+                        {% endif %}
+                        {% if c.image_source == "dockerfile" %}
+                        <div class="flex">
+                            <dt class="text-gray-500 dark:text-gray-400 w-20">Source</dt>
+                            <dd class="text-gray-700 dark:text-gray-300 font-mono">template_repos/{{ c.source_repo_path }}/{{ c.dockerfile_path }}</dd>
+                        </div>
+                        {% else %}
+                        <div class="flex">
+                            <dt class="text-gray-500 dark:text-gray-400 w-20">Image</dt>
+                            <dd class="text-gray-700 dark:text-gray-300 font-mono">doh/{env}/{{ c.ecr_repo }}:{{ c.version }}</dd>
+                        </div>
+                        {% endif %}
+                    </dl>
+                </li>
+                {% endfor %}
+            </ul>
         </div>
 
         <div class="flex justify-end pt-2">

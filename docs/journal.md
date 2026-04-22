@@ -1,5 +1,20 @@
 # DevOpsHero Development Journal
 
+## 2026-04-22 12:26 - [UI] Template deploy form: per-container card in the config summary
+
+**Conversation:** [2026-04-22-1226-a7988bb4.md](conversations/2026-04-22-1226-a7988bb4.md)
+
+After reseeding the multi-container `hermes-slack` template and opening the deploy form, the Configuration Summary read "Containers: hermes, sidecar-mcp (prebuilt)" as a single comma-joined line. Fine for one container but useless at describing a two-container task. Replaced it with a stacked list: one card per container, each carrying its name, colored badges (`dockerfile` / `prebuilt`, `ALB target`, `EFS`), and a per-field detail list (Port, Health, and either the Dockerfile path for `dockerfile` images or the `doh/{env}/{repo}:{version}` reference for `prebuilt`).
+
+First iteration used a 2-column `<dl>` grid for the detail rows. User wanted one row per field ("make Health just another row"), so dropped the grid for `space-y-1` vertical stacking. Matches the plain-bullet feel of the rest of the summary and avoids the awkward half-filled row that happens when a container has no health check.
+
+**Key points:**
+
+- The badges carry the real information density — `(prebuilt)` inline with the name was technically accurate but read as a parenthetical aside rather than a first-class signal. Moved to a colored pill and paired with a `dockerfile` pill on the sibling container so the contrast is visible even when an operator doesn't know what either term means.
+- ALB target is a per-template exactly-one, so the badge only renders on the matched container. Quick visual anchor for "which of these is the ALB-facing one" — most useful when a template grows beyond two containers and the answer stops being obvious.
+- `{env}` is kept as a literal placeholder in the prebuilt-image line. The template deploy form is pre-deploy; no environment is bound yet from the Configuration Summary's perspective. Swapping in the selected environment's slug once the env dropdown is picked would be nicer, but requires wiring the env selection back into the summary — deferred.
+- No view change needed. `template.containers` is already passed through; the template reads it directly.
+
 ## 2026-04-22 11:47 - [DomainModel] Multi-container AppTemplates + sidecar-mcp integration for Slack Hermes
 
 **Conversation:** [2026-04-22-1147-a7988bb4.md](conversations/2026-04-22-1147-a7988bb4.md)
