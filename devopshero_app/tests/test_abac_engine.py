@@ -1398,9 +1398,19 @@ class TestCreateDefaultAppPolicy(TestCase):
         # their access is governed by the global Personal Assistant owner policy.
         template = AppTemplate.objects.create(
             name="PA", slug="pa-fixture", description="", icon="x", category="x",
-            source_repo_path="x", app_type="web", build_strategy="dockerfile",
-            container_port=8000, health_check_path="/health",
-            cpu=256, memory=512, runtime_variables=[],
+            cpu=256, memory=512,
+            alb_target_container="app",
+            containers=[
+                {
+                    "name": "app",
+                    "image_source": "dockerfile",
+                    "source_repo_path": "x",
+                    "dockerfile_path": "Dockerfile",
+                    "container_port": 8000,
+                    "health_check_path": "/health",
+                    "runtime_variables": [],
+                },
+            ],
             sidecar_enabled=True, is_active=True,
         )
         app = App.objects.create(
