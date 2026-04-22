@@ -10,6 +10,11 @@ from django.core.management.base import BaseCommand
 from devopshero_app.models import AppTemplate
 
 
+# Image tag DOH expects in doh/{env_slug}/learneo-mcp. Bump in lock-step with
+# whatever the operator has built and pushed into the customer's ECR.
+LEARNEO_MCP_IMAGE_VERSION = "0.1.0"
+
+
 OPENCLAW_TEMPLATE = {
     "name": "AI Assistant (OpenClaw)",
     "slug": "ai-assistant-openclaw",
@@ -20,104 +25,110 @@ OPENCLAW_TEMPLATE = {
     ),
     "icon": "🤖",
     "category": "ai-assistant",
-    "source_repo_path": "openclaw_agent",
-    "app_type": "web",
-    "build_strategy": "dockerfile",
-    "dockerfile_path": "Dockerfile",
-    "container_port": 18789,
-    "health_check_path": "/health",
-    "health_check_command": "",
-    "health_check_grace_period": 60,
     "cpu": 1024,
     "memory": 2048,
-    "runtime_variables": [
+    "alb_target_container": "app",
+    "containers": [
         {
-            "name": "OPENCLAW_LOG_LEVEL",
-            "group": "Configuration",
-            "category": "config",
-            "description": "Log level: debug, info, warn, error",
-            "required": True,
-            "auto_generate": False,
-            "default_value": "info",
-            "value": "info",
-            "user_editable": False,
-        },
-        {
-            "name": "OPENCLAW_DEFAULT_MODEL",
-            "group": "Configuration",
-            "category": "config",
-            "description": "Default LLM model identifier",
-            "required": True,
-            "auto_generate": False,
-            "default_value": "openai/gpt-5.4-nano",
-            "value": "openai/gpt-5.4-nano",
-            "user_editable": False,
-        },
-        {
-            "name": "OPENCLAW_GATEWAY_TOKEN",
-            "group": "Authentication",
-            "category": "secret",
-            "description": "Gateway authentication token (auto-generated)",
-            "required": True,
-            "auto_generate": True,
-            "default_value": None,
-            "value": None,
-            "user_editable": False,
-        },
-        {
-            "name": "ANTHROPIC_API_KEY",
-            "group": "LLM Providers",
-            "category": "secret",
-            "description": "Anthropic API key for Claude models",
-            "required": False,
-            "auto_generate": False,
-            "default_value": None,
-            "value": "",
-            "user_editable": False,
-        },
-        {
-            "name": "OPENAI_API_KEY",
-            "group": "LLM Providers",
-            "category": "secret",
-            "description": "OpenAI API key (alternative provider)",
-            "required": False,
-            "auto_generate": False,
-            "default_value": None,
-            "value": "",
-            "user_editable": False,
-        },
-        {
-            "name": "TAVILY_API_KEY",
-            "group": "Integrations",
-            "category": "secret",
-            "description": "Tavily API key for web search capability",
-            "required": False,
-            "auto_generate": False,
-            "default_value": None,
-            "value": "",
-            "user_editable": False,
-        },
-        {
-            "name": "SLACK_APP_TOKEN",
-            "group": "Slack",
-            "category": "secret",
-            "description": "Slack app-level token (leave empty to disable Slack)",
-            "required": False,
-            "auto_generate": False,
-            "default_value": None,
-            "value": "",
-            "user_editable": False,
-        },
-        {
-            "name": "SLACK_BOT_TOKEN",
-            "group": "Slack",
-            "category": "secret",
-            "description": "Slack bot token (leave empty to disable Slack)",
-            "required": False,
-            "auto_generate": False,
-            "default_value": None,
-            "value": "",
-            "user_editable": False,
+            "name": "app",
+            "image_source": "dockerfile",
+            "source_repo_path": "openclaw_agent",
+            "dockerfile_path": "Dockerfile",
+            "container_port": 18789,
+            "health_check_path": "/health",
+            "health_check_command": "",
+            "health_check_grace_period": 60,
+            "efs_mount": True,
+            "runtime_variables": [
+                {
+                    "name": "OPENCLAW_LOG_LEVEL",
+                    "group": "Configuration",
+                    "category": "config",
+                    "description": "Log level: debug, info, warn, error",
+                    "required": True,
+                    "auto_generate": False,
+                    "default_value": "info",
+                    "value": "info",
+                    "user_editable": False,
+                },
+                {
+                    "name": "OPENCLAW_DEFAULT_MODEL",
+                    "group": "Configuration",
+                    "category": "config",
+                    "description": "Default LLM model identifier",
+                    "required": True,
+                    "auto_generate": False,
+                    "default_value": "openai/gpt-5.4-nano",
+                    "value": "openai/gpt-5.4-nano",
+                    "user_editable": False,
+                },
+                {
+                    "name": "OPENCLAW_GATEWAY_TOKEN",
+                    "group": "Authentication",
+                    "category": "secret",
+                    "description": "Gateway authentication token (auto-generated)",
+                    "required": True,
+                    "auto_generate": True,
+                    "default_value": None,
+                    "value": None,
+                    "user_editable": False,
+                },
+                {
+                    "name": "ANTHROPIC_API_KEY",
+                    "group": "LLM Providers",
+                    "category": "secret",
+                    "description": "Anthropic API key for Claude models",
+                    "required": False,
+                    "auto_generate": False,
+                    "default_value": None,
+                    "value": "",
+                    "user_editable": False,
+                },
+                {
+                    "name": "OPENAI_API_KEY",
+                    "group": "LLM Providers",
+                    "category": "secret",
+                    "description": "OpenAI API key (alternative provider)",
+                    "required": False,
+                    "auto_generate": False,
+                    "default_value": None,
+                    "value": "",
+                    "user_editable": False,
+                },
+                {
+                    "name": "TAVILY_API_KEY",
+                    "group": "Integrations",
+                    "category": "secret",
+                    "description": "Tavily API key for web search capability",
+                    "required": False,
+                    "auto_generate": False,
+                    "default_value": None,
+                    "value": "",
+                    "user_editable": False,
+                },
+                {
+                    "name": "SLACK_APP_TOKEN",
+                    "group": "Slack",
+                    "category": "secret",
+                    "description": "Slack app-level token (leave empty to disable Slack)",
+                    "required": False,
+                    "auto_generate": False,
+                    "default_value": None,
+                    "value": "",
+                    "user_editable": False,
+                },
+                {
+                    "name": "SLACK_BOT_TOKEN",
+                    "group": "Slack",
+                    "category": "secret",
+                    "description": "Slack bot token (leave empty to disable Slack)",
+                    "required": False,
+                    "auto_generate": False,
+                    "default_value": None,
+                    "value": "",
+                    "user_editable": False,
+                },
+            ],
         },
     ],
     "datastore_config": None,
@@ -127,22 +138,6 @@ OPENCLAW_TEMPLATE = {
 
 
 # -- Hermes shared building blocks ------------------------------------------
-
-_HERMES_BASE = {
-    "source_repo_path": "hermes_agent",
-    "app_type": "web",
-    "build_strategy": "dockerfile",
-    "dockerfile_path": "Dockerfile",
-    "container_port": 8787,
-    "health_check_path": "/health",
-    "health_check_command": "",
-    "health_check_grace_period": 60,
-    "cpu": 1024,
-    "memory": 2048,
-    "datastore_config": None,
-    "efs_config": {"mount_path": "/home/hermeswebui/.hermes", "posix_uid": 1024, "posix_gid": 1024},
-    "is_active": True,
-}
 
 _HERMES_LLM_VARS = [
     {
@@ -372,10 +367,67 @@ _HERMES_SLACK_VARS = [
     },
 ]
 
+_HERMES_CONTAINER_BASE = {
+    "name": "hermes",
+    "image_source": "dockerfile",
+    "source_repo_path": "hermes_agent",
+    "dockerfile_path": "Dockerfile",
+    "container_port": 8787,
+    "health_check_path": "/health",
+    "health_check_command": "",
+    "health_check_grace_period": 60,
+    "efs_mount": True,
+}
+
+# Upstream credentials consumed by the learneo-mcp aggregator. All empty
+# values — resolve from env shared-secrets via _resolve_secret_value at
+# deploy time (ops populates devopshero/{env_slug}/shared-secrets once).
+_LEARNEO_MCP_UPSTREAM_SECRET_NAMES = [
+    "GITHUB_TOKEN",
+    "GITLAB_TOKEN",
+    "ATLASSIAN_EMAIL",
+    "ATLASSIAN_API_TOKEN",
+    "JIRA_API_TOKEN",
+    "CONFLUENCE_API_TOKEN",
+    "DATADOG_API_KEY",
+    "DATADOG_APP_KEY",
+    "GROUNDCOVER_API_KEY",
+    "CONTROLMONKEY_API_TOKEN",
+    "CLOUDFLARE_API_TOKEN",
+]
+
+_LEARNEO_MCP_UPSTREAM_SECRETS = [
+    {
+        "name": name,
+        "group": "Learneo MCP upstreams",
+        "category": "secret",
+        "description": f"{name} for the learneo-mcp aggregator (inherits from env shared-secrets when empty)",
+        "required": False,
+        "auto_generate": False,
+        "default_value": None,
+        "value": "",
+        "user_editable": False,
+    }
+    for name in _LEARNEO_MCP_UPSTREAM_SECRET_NAMES
+]
+
+_LEARNEO_MCP_CONTAINER = {
+    "name": "learneo-mcp",
+    "image_source": "prebuilt",
+    "ecr_repo": "learneo-mcp",
+    "version": LEARNEO_MCP_IMAGE_VERSION,
+    "container_port": 7777,
+    "health_check_path": "/health",
+    "health_check_command": "curl -fsS http://127.0.0.1:7777/health || exit 1",
+    "health_check_grace_period": 20,
+    "efs_mount": False,
+    "runtime_variables": _LEARNEO_MCP_UPSTREAM_SECRETS,
+}
+
+
 # -- Hermes Personal (web only, one per user) -------------------------------
 
 HERMES_PERSONAL_TEMPLATE = {
-    **_HERMES_BASE,
     "name": "AI Assistant — Hermes (Personal)",
     "slug": "hermes-personal",
     "description": (
@@ -385,37 +437,47 @@ HERMES_PERSONAL_TEMPLATE = {
     ),
     "icon": "⚡",
     "category": "ai-assistant",
-    # Bind the WebUI to loopback so only the sidecar (sharing the task
-    # network namespace) can reach it. Overrides the upstream image default
-    # of HERMES_WEBUI_HOST=0.0.0.0, which would otherwise expose the WebUI on
-    # the task ENI to the whole VPC.
-    "runtime_variables": (
-        _HERMES_LLM_VARS + _HERMES_CREDENTIAL_VARS + _HERMES_BEDROCK_VARS + [
-            {
-                "name": "HERMES_WEBUI_HOST",
-                "group": "Authentication",
-                "category": "config",
-                "description": "Bind address for the WebUI (loopback-only; sidecar reaches it via 127.0.0.1)",
-                "required": True,
-                "auto_generate": False,
-                "default_value": "127.0.0.1",
-                "value": "127.0.0.1",
-                "user_editable": False,
-            },
-        ]
-    ),
+    "cpu": 1024,
+    "memory": 2048,
+    "datastore_config": None,
+    "efs_config": {"mount_path": "/home/hermeswebui/.hermes", "posix_uid": 1024, "posix_gid": 1024},
+    "alb_target_container": "hermes",
+    "containers": [
+        {
+            **_HERMES_CONTAINER_BASE,
+            # Bind the WebUI to loopback so only the sidecar (sharing the
+            # task network namespace) can reach it. Overrides the upstream
+            # image default of HERMES_WEBUI_HOST=0.0.0.0, which would
+            # otherwise expose the WebUI on the task ENI to the whole VPC.
+            "runtime_variables": (
+                _HERMES_LLM_VARS + _HERMES_CREDENTIAL_VARS + _HERMES_BEDROCK_VARS + [
+                    {
+                        "name": "HERMES_WEBUI_HOST",
+                        "group": "Authentication",
+                        "category": "config",
+                        "description": "Bind address for the WebUI (loopback-only; sidecar reaches it via 127.0.0.1)",
+                        "required": True,
+                        "auto_generate": False,
+                        "default_value": "127.0.0.1",
+                        "value": "127.0.0.1",
+                        "user_editable": False,
+                    },
+                ]
+            ),
+        },
+    ],
     # Runs behind the sidecar proxy: SSO + ABAC gate the WebUI.
     "sidecar_enabled": True,
     # The "app-type" tag is what the global PA ABAC policy matches on.
     # The "owner" tag is stamped per-deployment from the deploy form.
     "default_tags": [{"key": "app-type", "value": "personal-assistant"}],
     "prefill_name": "hermes-{username}{index}",
+    "is_active": True,
 }
 
 # -- Hermes Slack (shared, one per org) -------------------------------------
 
 HERMES_SLACK_TEMPLATE = {
-    **_HERMES_BASE,
     "name": "AI Assistant — Hermes (Slack)",
     "slug": "hermes-slack",
     "description": (
@@ -425,10 +487,25 @@ HERMES_SLACK_TEMPLATE = {
     ),
     "icon": "💬",
     "category": "ai-assistant",
-    "runtime_variables": (
-        _HERMES_LLM_VARS + _HERMES_WEBUI_PASSWORD_VAR + _HERMES_CREDENTIAL_VARS
-        + _HERMES_BEDROCK_VARS + _HERMES_SLACK_VARS
-    ),
+    # Two containers share the task's CPU/memory — bumped from 1024/2048 to
+    # cover Hermes + the learneo-mcp sidecar.
+    "cpu": 2048,
+    "memory": 4096,
+    "datastore_config": None,
+    "efs_config": {"mount_path": "/home/hermeswebui/.hermes", "posix_uid": 1024, "posix_gid": 1024},
+    "sidecar_enabled": False,
+    "alb_target_container": "hermes",
+    "containers": [
+        {
+            **_HERMES_CONTAINER_BASE,
+            "runtime_variables": (
+                _HERMES_LLM_VARS + _HERMES_WEBUI_PASSWORD_VAR + _HERMES_CREDENTIAL_VARS
+                + _HERMES_BEDROCK_VARS + _HERMES_SLACK_VARS
+            ),
+        },
+        _LEARNEO_MCP_CONTAINER,
+    ],
+    "is_active": True,
 }
 
 
