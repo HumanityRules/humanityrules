@@ -93,6 +93,7 @@ def _build_container_config(
     name = template_container["name"]
     image_source = template_container["image_source"]
 
+    command = template_container.get("command")
     common = dict(
         name=name,
         image_source=image_source,
@@ -103,6 +104,8 @@ def _build_container_config(
         environment_variables=list(blueprint_container.get("environment_variables") or []),
         app_secrets=dict(blueprint_container.get("app_secrets") or {}),
         efs_mount=bool(template_container.get("efs_mount", False)),
+        command=list(command) if command else None,
+        essential=bool(template_container.get("essential", True)),
     )
 
     if image_source == "dockerfile":

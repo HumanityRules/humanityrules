@@ -112,6 +112,17 @@ class ContainerConfig:
     # Opt-in: mount the task-level EFS volume (AppConfig.efs_config) into this container.
     efs_mount: bool = False
 
+    # Optional override for the container's CMD (the image's ENTRYPOINT is preserved).
+    # Useful for prebuilt images whose default CMD doesn't match how DOH wants to
+    # run them — e.g. learneo-mcp defaults to stdio but the sidecar integration
+    # needs ["--http", "--port", "7777", "--host", "127.0.0.1"].
+    command: list[str] | None = None
+
+    # When False, the container's exit won't stop the task. Useful for
+    # non-critical sidecars where the ALB-target container can keep serving
+    # (degraded) even if the sidecar crashes. Default True (ECS default).
+    essential: bool = True
+
 
 @dataclass
 class AppConfig:

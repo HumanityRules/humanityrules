@@ -640,6 +640,8 @@ class AppStack(Stack):
                 f"Container{idx}",
                 container_name=f"{app_config.app_name}-{c.name}",
                 image=ecs.ContainerImage.from_registry(image_uri),
+                command=c.command,
+                essential=c.essential,
                 logging=ecs.LogDrivers.aws_logs(
                     stream_prefix=f"{app_config.app_name}-{c.name}",
                     log_group=self.environment_infra.log_group,

@@ -416,10 +416,14 @@ _LEARNEO_MCP_CONTAINER = {
     "image_source": "prebuilt",
     "ecr_repo": "learneo-mcp",
     "version": LEARNEO_MCP_IMAGE_VERSION,
+    # Override the image default (stdio mode, which exits immediately on EOF
+    # under ECS awsvpc). --host 127.0.0.1 keeps the endpoint loopback-only.
+    "command": ["--http", "--port", "7777", "--host", "127.0.0.1"],
     "container_port": 7777,
-    "health_check_path": "/health",
-    "health_check_command": "curl -fsS http://127.0.0.1:7777/health || exit 1",
-    "health_check_grace_period": 20,
+    # Non-essential: an MCP crash leaves Hermes running (degraded — no tool
+    # access, but the LLM still answers). No health check either, for the
+    # same reason + there's no /health endpoint exposed.
+    "essential": False,
     "efs_mount": False,
     "runtime_variables": _LEARNEO_MCP_UPSTREAM_SECRETS,
 }

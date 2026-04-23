@@ -98,10 +98,15 @@ def _username_for_prefill(username: str) -> str:
 
 
 def _compute_default_app_name(*, template: models.AppTemplate, org: models.Organization, owner_username: str | None) -> str:
-    """App Name prefill. Falls back to template.name if no prefill_name or no owner."""
+    """App Name prefill.
+
+    Falls back to template.slug (short, already unique among templates) when
+    there's no prefill_name or no owner — keeps derived resource names short
+    enough to clear the 32-char ALB target-group limit.
+    """
     pattern = (template.prefill_name or "").strip()
     if not pattern or not owner_username:
-        return template.name
+        return template.slug
     username_token = _username_for_prefill(username=owner_username)
     for index in range(100):
         candidate = pattern.format(username=username_token, index=f"{index:02d}")
