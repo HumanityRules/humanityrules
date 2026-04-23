@@ -158,8 +158,8 @@ _HERMES_LLM_VARS = [
         "description": "LLM model identifier (e.g. us.anthropic.claude-opus-4-7, us.anthropic.claude-opus-4-6-v1, gpt-5.4-mini)",
         "required": True,
         "auto_generate": False,
-        "default_value": "us.anthropic.claude-sonnet-4-6",
-        "value": "us.anthropic.claude-sonnet-4-6",
+        "default_value": "us.anthropic.claude-opus-4-7",
+        "value": "us.anthropic.claude-opus-4-7",
         "user_editable": True,
     },
     {
