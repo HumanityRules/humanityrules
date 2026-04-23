@@ -1,5 +1,33 @@
 # DevOpsHero Development Journal
 
+## 2026-04-22 19:09 - [Deployment] Post-deploy hermes-slack debugging: CMD, essential, and short-slug prefill
+
+**Conversation:** [2026-04-22-1909-a7988bb4.md](conversations/2026-04-22-1909-a7988bb4.md)
+
+First live hermes-slack deploy after the multi-container refactor surfaced three distinct issues. Fixed in sequence; each one worth recording because the root causes were subtle enough to waste time diagnosing twice.
+
+**1. ALB target-group name ending in a hyphen.** CDK synth failed with `Target group name: "doh-default-ai-assistant-hermes-" must not begin or end with a hyphen.` The 32-char truncation at `deploy_app.py:758` landed exactly on a hyphen boundary because the default App name derived from the template is `ai-assistant-hermes-slack`. Fix was a `.rstrip("-")` on the truncation (`doh-{env_slug}-{app_name}`[:32].rstrip("-")), which produces a 31-char `doh-default-ai-assistant-hermes`. Kept the rstrip as a defense-in-depth measure even after the longer root-cause fix below — slugs can still grow past 32 chars for other templates.
+
+**2. sidecar-mcp container exited 0 before Hermes started → TaskFailedToStart.** Every stopped task showed the same pattern: `sidecar-mcp exitCode=0, hermes exitCode=null`. Because ECS containers are `essential=True` by default, the MCP's clean exit killed the pod before Hermes's first boot. Root cause: sidecar-mcp's `ENTRYPOINT ["node", "dist/index.js"]` with no CMD, so without the `--http` flag `src/index.ts:91` fell through to `startStdioServer()` which blocks on stdin. ECS Fargate tasks have no attached TTY, so stdin hits EOF immediately, the server exits 0, and the task is killed.
+
+Fix required a new per-container field `command: list[str] | None` on `ContainerConfig`, plumbed through `app_config_builder.py` to `task_definition.add_container(command=…)`. The image's `ENTRYPOINT` is preserved; only the CMD is overridden. Seeded the sidecar-mcp container with `command: ["--http", "--port", "7777", "--host", "127.0.0.1"]`. This is also a **generic mechanism** — any future prebuilt-image AppTemplate where the image's default CMD doesn't match how DOH wants to run it can now set this.
+
+Initially added a `curl -fsS http://127.0.0.1:7777/health` healthcheck too, which was wrong on three counts: (a) sidecar-mcp's HTTP transport only routes `/mcp` — `/health` would 404 every probe, (b) `node:22-slim` doesn't ship curl, and (c) coupling the MCP's liveness to the task's health via `essential=True` reintroduced the blast-radius tradeoff we'd explicitly rejected earlier. Dropped the healthcheck entirely and added another new per-container field `essential: bool = True` (defaults to ECS default), setting the sidecar-mcp container to `essential=False`. Now an MCP crash leaves the task up; Hermes gracefully degrades to a pure-LLM state, and the MCP gets restarted on the next task redeploy.
+
+**3. Long app slug propagating into every resource name.** The third iteration surfaced the underlying issue: the deploy form's default App name came from `template.name` ("AI Assistant — Hermes (Slack)") which slugified into `ai-assistant-hermes-slack` and then fed into every derived resource — CDK stacks, ECS service, task role, ECR repos, target group, log stream prefixes, Secrets Manager paths, EFS access point, DNS subdomain. The 32-char target group limit was only the loudest collision.
+
+We have `AppTemplate.slug` ("hermes-slack") already sitting there — short, already unique among templates, and it's the obvious source for the default App slug when no `prefill_name` pattern is set. Changed `_compute_default_app_name` in `views/template_deploy.py` to fall back to `template.slug` instead of `template.name`. One-line fix; catches every template uniformly. Templates that want a friendlier or auto-disambiguating default (like Personal Hermes's `hermes-{username}{index}`) keep setting `prefill_name`.
+
+After this, `doh-default-hermes-slack-*` everywhere, 24-char resource prefix at worst, well clear of AWS limits. The `rstrip("-")` from fix #1 becomes mostly dead code but stays as defense-in-depth for long custom slugs.
+
+**Key points:**
+
+- **Per-container `command` and `essential` are reusable now.** Not just sidecar-mcp-specific — any prebuilt container whose image was built for a different runtime model (stdio CLI, foreground daemon, etc.) can override its CMD; any sidecar whose crash shouldn't kill the task can set `essential=False`. Both map 1:1 to ECS primitives.
+- **Why not default `essential=False` globally?** The auth sidecar, for instance, genuinely must be up for the ALB-target container to be reachable — its crash should take the task down and trigger a restart. Per-container opt-in is right; it's a property of the integration, not a template-wide setting.
+- **`prefill_name` pattern still does disambiguation.** The fallback to `template.slug` only applies when `prefill_name` is empty. Personal Hermes's `hermes-{username}{index}` still wins because it's set. Multi-instance templates should always set `prefill_name` with an `{index}` token — otherwise the second deploy collides on `App.slug` (unique per org) and errors out. Not a new concern; just worth naming.
+- **ECS HEALTHCHECK vs ALB health check are not the same.** The ALB's target-group health check hits the ALB-target container's `health_check_path` over HTTP. A container-level HEALTHCHECK (from the Dockerfile or `task_definition.add_container(health_check=...)`) runs `CMD-SHELL` inside the container. For non-ALB-target containers, an ALB-style path is just cosmetic — only the container-level command runs. The sidecar-mcp `health_check_path` I'd initially seeded was doing literally nothing; removed.
+- **Debugging trail that was useful.** `aws ecs describe-tasks` at the container level showed `exitCode=0` + `reason=null` on sidecar-mcp and `lastStatus=STOPPED` + `exitCode=null` on hermes. "Started and exited cleanly" next to "never started" was the tell that essentiality was killing the pod, not a crash or image-pull failure. Service events were empty because the service had `runningCount=0, desiredCount=0` after the circuit breaker rolled it back. The task-level `stoppedReason: "Task failed to start"` is generic; the container-level fields are the signal.
+
 ## 2026-04-22 12:26 - [UI] Template deploy form: per-container card in the config summary
 
 **Conversation:** [2026-04-22-1226-a7988bb4.md](conversations/2026-04-22-1226-a7988bb4.md)
