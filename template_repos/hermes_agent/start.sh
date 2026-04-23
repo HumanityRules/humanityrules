@@ -14,10 +14,17 @@ VENV_DIR="/app/venv"
 BEDROCK_DEPS_MARKER="$VENV_DIR/.bedrock_deps_installed"
 GATEWAY_DEPS_MARKER="$VENV_DIR/.slack_deps_installed"
 
-SLACK_ENABLED=0
-if [ -n "$SLACK_BOT_TOKEN" ] || [ -n "$SLACK_APP_TOKEN" ]; then
-    SLACK_ENABLED=1
-fi
+# Scrub the entrypoint's secret staging dir before anything runs in this
+# sandboxed child. nono has already read & zeroized the values into its own
+# memory by this point, so removing the files closes the only remaining
+# on-disk surface. rm -f is a no-op on the Bedrock path where the dir doesn't
+# exist (entrypoint skips nono for Bedrock).
+rm -rf /tmp/doh-secrets 2>/dev/null || true
+
+# DOH_SLACK_ENABLED is computed by entrypoint.sh from the real tokens before
+# nono replaces them with phantom proxy tokens. Don't use $SLACK_*_TOKEN for
+# this check — under nono they always hold non-empty phantom values.
+SLACK_ENABLED="${DOH_SLACK_ENABLED:-0}"
 
 if [ "$SLACK_ENABLED" -eq 1 ]; then
     echo "[start] Slack tokens detected — starting WebUI + gateway."

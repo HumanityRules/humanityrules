@@ -1,0 +1,69 @@
+{
+  "$schema": "https://json.schemastore.org/nono-profile.json",
+  "meta": { "name": "hermes" },
+  "network": {
+    "custom_credentials": {
+      "openai": {
+        "upstream": "__OPENAI_UPSTREAM__",
+        "credential_key": "file:///tmp/doh-secrets/openai_api_key",
+        "env_var": "OPENAI_API_KEY",
+        "inject_mode": "header",
+        "inject_header": "Authorization",
+        "credential_format": "Bearer {}"
+      },
+      "anthropic": {
+        "upstream": "https://api.anthropic.com",
+        "credential_key": "file:///tmp/doh-secrets/anthropic_api_key",
+        "env_var": "ANTHROPIC_API_KEY",
+        "inject_mode": "header",
+        "inject_header": "x-api-key",
+        "credential_format": "{}"
+      },
+      "openrouter": {
+        "upstream": "https://openrouter.ai/api/v1",
+        "credential_key": "file:///tmp/doh-secrets/openrouter_api_key",
+        "env_var": "OPENROUTER_API_KEY",
+        "inject_mode": "header",
+        "inject_header": "Authorization",
+        "credential_format": "Bearer {}"
+      },
+      "tavily": {
+        "upstream": "https://api.tavily.com",
+        "credential_key": "file:///tmp/doh-secrets/tavily_api_key",
+        "env_var": "TAVILY_API_KEY",
+        "inject_mode": "header",
+        "inject_header": "Authorization",
+        "credential_format": "Bearer {}"
+      },
+      "slack-bot": {
+        "upstream": "https://slack.com",
+        "credential_key": "file:///tmp/doh-secrets/slack_bot_token",
+        "env_var": "SLACK_BOT_TOKEN",
+        "inject_mode": "header",
+        "inject_header": "Authorization",
+        "credential_format": "Bearer {}"
+      },
+      "slack-app": {
+        "upstream": "https://slack.com",
+        "credential_key": "file:///tmp/doh-secrets/slack_app_token",
+        "env_var": "SLACK_APP_TOKEN",
+        "inject_mode": "header",
+        "inject_header": "Authorization",
+        "credential_format": "Bearer {}"
+      }
+    },
+    "credentials": __ACTIVE_CREDENTIALS__
+  },
+  "environment": {
+    "allow_vars": [
+      "PATH", "HOME", "USER", "LOGNAME", "SHELL",
+      "LANG", "LC_*", "TERM", "TZ",
+      "TMPDIR", "TMP", "TEMP",
+      "HERMES_*", "DOH_LLM_PROVIDER", "DOH_LLM_MODEL",
+      "DOH_AUX_PROVIDER", "DOH_AUX_MODEL", "DOH_SLACK_ENABLED",
+      "SLACK_ALLOW_ALL_USERS", "SLACK_ALLOWED_USERS", "SLACK_HOME_CHANNEL",
+      "VIRTUAL_ENV", "UV_*", "PIP_*",
+      "PYTHONDONTWRITEBYTECODE", "PYTHONUNBUFFERED"
+    ]
+  }
+}
