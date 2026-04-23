@@ -71,7 +71,7 @@ The MCP image is referenced as a **prebuilt** container:
 - **Tag:** `LEARNEO_MCP_IMAGE_VERSION` in `seed_app_templates.py`.
 - **How it's built:** operator-driven from a local checkout of the `learneo-mcp` source, pushed with `manage.py doh_build_prebuilt_image --account <acct> [--env <env>] --source-dir <path-to-learneo-mcp> --ecr-repo learneo-mcp --tag <version>`.
 
-Upstream credentials (`GITHUB_TOKEN`, `JIRA_API_TOKEN`, `ATLASSIAN_*`, `DATADOG_*`, etc.) are declared on the Slack template as empty-value secrets. Ops populates them once in `devopshero/{env_slug}/shared-secrets` and every Hermes in the env inherits them via the fall-through mechanism in `secrets_utils._resolve_secret_value`.
+Upstream credentials (`LEARNEO_MCP_GITLAB_TOKEN`, `LEARNEO_MCP_ATLASSIAN_*`, `LEARNEO_MCP_DATADOG_*`, etc.) are declared on the Slack template as empty-value secrets. Ops populates them once in `devopshero/{env_slug}/shared-secrets` and every Hermes in the env inherits them via the fall-through mechanism in `secrets_utils._resolve_secret_value`.
 
 
 ## Patches

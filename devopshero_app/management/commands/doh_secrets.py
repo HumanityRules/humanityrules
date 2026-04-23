@@ -11,6 +11,7 @@ Usage:
     uv run manage.py doh_secrets shared-list --account "CH Sandbox" --env default
     uv run manage.py doh_secrets shared-set --account "CH Sandbox" --env default OPENAI_API_KEY=sk-xxx TAVILY_API_KEY=tvly-xxx
     uv run manage.py doh_secrets shared-set-from-env --account "CH Sandbox" --env default --file ./.env OPENAI_API_KEY TAVILY_API_KEY
+    uv run manage.py doh_secrets shared-set-from-env --account "CH Sandbox" --env default --file ./.env  # auto-detect all uncommented, non-empty keys
     uv run manage.py doh_secrets shared-delete --account "CH Sandbox" --env default OPENAI_API_KEY TAVILY_API_KEY
 
     uv run manage.py doh_secrets delete-by-prefix --account "CH Sandbox" --subprefix devopshero/default/old-app
@@ -128,7 +129,12 @@ class Command(BaseCommand):
             metavar="PATH",
             help="Path to .env file (relative to current working directory if not absolute)",
         )
-        shared_from_env_cmd.add_argument("keys", nargs="+", metavar="KEY", help="Environment variable names to read from the file")
+        shared_from_env_cmd.add_argument(
+            "keys",
+            nargs="*",
+            metavar="KEY",
+            help="Environment variable names to read from the file (default: all uncommented, non-empty keys)",
+        )
 
         shared_del_cmd = subparsers.add_parser("shared-delete", help="Delete keys from environment shared secrets")
         _add_account_args(shared_del_cmd)
@@ -282,11 +288,22 @@ def _add_account_args(subparser) -> None:
 
 
 def _shared_set_pairs_from_env_file(env_path: Path, keys: list[str]) -> list[str]:
-    """Build KEY=VALUE strings from a .env file for the given key names."""
+    """Build KEY=VALUE strings from a .env file for the given key names.
+
+    If `keys` is empty, auto-select every key in the file that is uncommented
+    and has a non-empty value.
+    """
     if not env_path.is_file():
         raise CommandError(f"Env file not found: {env_path}")
 
     raw = dotenv_values(env_path)
+
+    if not keys:
+        pairs = [f"{k}={v}" for k, v in raw.items() if v]
+        if not pairs:
+            raise CommandError(f"No uncommented, non-empty keys found in {env_path}.")
+        return pairs
+
     pairs: list[str] = []
     missing: list[str] = []
     for key in keys:
