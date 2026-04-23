@@ -236,7 +236,7 @@ class EcsClusterStack(Stack):
             self, "EcsCluster",
             cluster_name=f"{prefix}-cluster",
             vpc=vpc,
-            container_insights_v2=ecs.ContainerInsights.ENABLED,
+            container_insights_v2=ecs.ContainerInsights.ENHANCED,
         )
 
         # Task Execution Role
