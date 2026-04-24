@@ -1,0 +1,33 @@
+--- a/tools/web_tools.py	2026-04-24 11:00:34
++++ b/tools/web_tools.py	2026-04-24 11:00:34
+@@ -282,13 +282,15 @@
+ 
+ # ─── Tavily Client ───────────────────────────────────────────────────────────
+ 
+-_TAVILY_BASE_URL = "https://api.tavily.com"
++_TAVILY_BASE_URL = os.getenv("TAVILY_BASE_URL", "https://api.tavily.com").rstrip("/")
+ 
+ 
+ def _tavily_request(endpoint: str, payload: dict) -> dict:
+     """Send a POST request to the Tavily API.
+ 
+-    Auth is provided via ``api_key`` in the JSON body (no header-based auth).
++    Auth via ``Authorization: Bearer <TAVILY_API_KEY>``. Tavily documents both
++    body-auth (``payload["api_key"]``) and header-auth; DOH uses header-auth so
++    nono can inject the Bearer token at proxy time without touching the body.
+     Raises ``ValueError`` if ``TAVILY_API_KEY`` is not set.
+     """
+     api_key = os.getenv("TAVILY_API_KEY")
+@@ -297,10 +299,10 @@
+             "TAVILY_API_KEY environment variable not set. "
+             "Get your API key at https://app.tavily.com/home"
+         )
+-    payload["api_key"] = api_key
++    headers = {"Authorization": f"Bearer {api_key}"}
+     url = f"{_TAVILY_BASE_URL}/{endpoint.lstrip('/')}"
+     logger.info("Tavily %s request to %s", endpoint, url)
+-    response = httpx.post(url, json=payload, timeout=60)
++    response = httpx.post(url, json=payload, headers=headers, timeout=60)
+     response.raise_for_status()
+     return response.json()
+ 
