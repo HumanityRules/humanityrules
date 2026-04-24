@@ -9,6 +9,7 @@
     ],
     "read_file": [
       "/start.sh",
+      "/.within_container",
       "/etc/passwd",
       "/etc/group"
     ]
