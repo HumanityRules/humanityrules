@@ -194,26 +194,37 @@ fi
 SECRETS_DIR="/tmp/doh-secrets"
 rm -rf "$SECRETS_DIR"
 mkdir -m 0700 "$SECRETS_DIR"
+# Skip empty vars AND operator sentinels that don't have the expected prefix
+# for their service. A bogus value would make nono boot a credential route
+# whose "secret" is a non-credential string — harmless at startup (proxy loads
+# it), but the first real API call fails with an auth error that's confusing
+# to diagnose. Better to omit the route entirely.
 write_secret() {
-    local name=$1 value=$2
+    local name=$1 value=$2 prefix=$3
     [ -z "$value" ] && return 0
+    # If a prefix is specified, require the value to start with it.
+    [ -n "$prefix" ] && [[ "$value" != $prefix* ]] && return 0
     local path="$SECRETS_DIR/$name"
     umask 077
     printf '%s' "$value" > "$path"
     chmod 0400 "$path"
 }
-write_secret openai_api_key     "$OPENAI_API_KEY"
-write_secret anthropic_api_key  "$ANTHROPIC_API_KEY"
-write_secret openrouter_api_key "$OPENROUTER_API_KEY"
-write_secret tavily_api_key     "$TAVILY_API_KEY"
-write_secret slack_bot_token    "$SLACK_BOT_TOKEN"
-write_secret slack_app_token    "$SLACK_APP_TOKEN"
+write_secret openai_api_key     "$OPENAI_API_KEY"     "sk-"
+write_secret anthropic_api_key  "$ANTHROPIC_API_KEY"  "sk-"
+write_secret openrouter_api_key "$OPENROUTER_API_KEY" "sk-"
+write_secret tavily_api_key     "$TAVILY_API_KEY"     "tvly-"
+write_secret slack_bot_token    "$SLACK_BOT_TOKEN"    "xoxb-"
+write_secret slack_app_token    "$SLACK_APP_TOKEN"    "xapp-"
 
 # Slack-enabled signal — computed from the real secrets at entrypoint time
 # because under nono the child's SLACK_*_TOKEN env vars hold phantom proxy
 # tokens (non-empty regardless of whether Slack is configured). start.sh uses
 # DOH_SLACK_ENABLED to decide whether to launch the gateway alongside the WebUI.
-if [ -n "$SLACK_BOT_TOKEN" ] || [ -n "$SLACK_APP_TOKEN" ]; then
+#
+# Shape check, not presence check: operators can park sentinel values
+# ("disabled", "-", etc.) in the blueprint/shared-secrets to keep the keys
+# schema-valid while disabling Slack. Only real xoxb-/xapp- tokens count.
+if [[ "$SLACK_BOT_TOKEN" == xoxb-* ]] && [[ "$SLACK_APP_TOKEN" == xapp-* ]]; then
     export DOH_SLACK_ENABLED=1
 else
     export DOH_SLACK_ENABLED=0
