@@ -8,11 +8,7 @@
       "/tmp"
     ],
     "read": [
-      "/opt/hermes-defaults",
-      "/"
-    ],
-    "allow_file": [
-      "/workspace"
+      "/opt/hermes-defaults"
     ],
     "read_file": [
       "/start.sh",
