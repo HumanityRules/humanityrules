@@ -7,13 +7,8 @@
       "/app",
       "/tmp"
     ],
-    "read": [
-      "/opt/hermes-defaults"
-    ],
     "read_file": [
       "/start.sh",
-      "/entrypoint.sh",
-      "/hermeswebui_init.bash",
       "/etc/passwd",
       "/etc/group"
     ]

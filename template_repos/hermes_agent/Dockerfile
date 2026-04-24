@@ -43,6 +43,12 @@ COPY --chmod=755 start.sh /start.sh
 # Symlink it into the EFS-backed home directory so agent work output persists.
 RUN rm -rf /workspace && ln -s /home/hermeswebui/.hermes/workspace /workspace
 
+# Pre-create /app owned by hermeswebui so the entrypoint can rsync /apptoo/
+# into it without needing sudo. Upstream's hermeswebui_init.bash does this via
+# sudo at runtime; we skip sudo entirely (it doesn't play well with nono's
+# filesystem sandbox anyway — see start.sh).
+RUN mkdir -p /app && chown hermeswebui:hermeswebui /app
+
 ENV HERMES_WEBUI_STATE_DIR=/home/hermeswebui/.hermes/webui-mvp
 ENV HERMES_WEBUI_DEFAULT_WORKSPACE=/home/hermeswebui/.hermes/workspace
 ENV HERMES_WEBUI_SKIP_ONBOARDING=1

@@ -77,11 +77,49 @@ fi
 
 # --- Upstream bug workarounds ---
 # apply.py copies overlay files and applies each NN-*.patch to the EFS-backed
-# hermes-agent tree, before hermeswebui_init.bash runs `uv pip install`. Runs
-# on every boot so a new image's patches take effect on already-deployed EFS
-# volumes. Idempotent: already-applied patches are no-ops, so upstream fixes
-# become a soft landing. See patches/ for per-patch rationale.
+# hermes-agent tree, before the venv is populated. Runs on every boot so a
+# new image's patches take effect on already-deployed EFS volumes. Idempotent:
+# already-applied patches are no-ops, so upstream fixes become a soft landing.
+# See patches/ for per-patch rationale.
 python3 /opt/hermes-defaults/patches/apply.py "$HERMES_DIR/hermes-agent"
+
+# --- WebUI init (pre-sandbox) ---
+# Upstream's /hermeswebui_init.bash does three things: chown+rsync /apptoo/
+# into /app, create the venv, install deps. We run our own trimmed equivalent
+# before nono takes over so the sandbox profile doesn't need to cover sudo,
+# /etc/passwd, /etc/pam.d, or uv's scratch dirs. /app is pre-created by the
+# Dockerfile (owned by hermeswebui) so no sudo is needed for the rsync.
+#
+# Dep installs touch pypi.org. Running them here, outside nono, means the
+# profile stays lean: no need to allowlist package registries.
+if [ ! -f /app/server.py ]; then
+    echo "[entrypoint] Seeding /app from /apptoo/"
+    rsync -a /apptoo/ /app/
+fi
+
+if [ ! -f /app/venv/bin/activate ]; then
+    echo "[entrypoint] Creating Python venv at /app/venv"
+    uv venv /app/venv
+fi
+
+# Idempotent: first deploy installs, subsequent deploys short-circuit via
+# the sentinel file. A new Dockerfile with a bumped pinned Hermes version
+# can force a re-install by rm'ing .deps_installed in the Dockerfile layer.
+if [ ! -f /app/venv/.deps_installed ]; then
+    echo "[entrypoint] Installing WebUI + hermes-agent[honcho] + hermes-agent[bedrock] + slack-sdk into venv"
+    # shellcheck disable=SC1091
+    source /app/venv/bin/activate
+    uv pip install -r /app/requirements.txt \
+        --trusted-host pypi.org --trusted-host files.pythonhosted.org
+    uv pip install -U pip setuptools \
+        --trusted-host pypi.org --trusted-host files.pythonhosted.org
+    uv pip install "$HERMES_DIR/hermes-agent[honcho,bedrock]" \
+        --trusted-host pypi.org --trusted-host files.pythonhosted.org
+    uv pip install "slack-bolt>=1.18.0,<2" "slack-sdk>=3.27.0,<4" \
+        --trusted-host pypi.org --trusted-host files.pythonhosted.org
+    deactivate
+    touch /app/venv/.deps_installed
+fi
 
 # --- Secrecy posture ---
 #
