@@ -1,6 +1,25 @@
 {
   "$schema": "https://json.schemastore.org/nono-profile.json",
   "meta": { "name": "hermes" },
+  "filesystem": {
+    "allow": [
+      "/home/hermeswebui/.hermes",
+      "/app",
+      "/tmp"
+    ],
+    "read": [
+      "/opt/hermes-defaults",
+      "/"
+    ],
+    "allow_file": [
+      "/workspace"
+    ],
+    "read_file": [
+      "/start.sh",
+      "/entrypoint.sh",
+      "/hermeswebui_init.bash"
+    ]
+  },
   "network": {
     "custom_credentials": {
       "openai": {
