@@ -64,7 +64,8 @@
         "credential_format": "Bearer {}"
       }
     },
-    "credentials": __ACTIVE_CREDENTIALS__
+    "credentials": __ACTIVE_CREDENTIALS__,
+    "listen_port": [8787]
   },
   "environment": {
     "allow_vars": [
