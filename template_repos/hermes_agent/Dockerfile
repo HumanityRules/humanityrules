@@ -12,10 +12,12 @@ RUN apt-get update \
 # setup, then injected into outbound requests via loopback proxy routes.
 ARG NONO_VERSION=0.40.1
 ARG NONO_SHA256_AMD64=5de886cc82bc98c4af95ac6961da5dfcbe382ab877dcbc4ebdd198fccbd5367b
+ARG NONO_SHA256_ARM64=af0950d31f58ab9e9fc2a0a5b1b64a998288ae4ceb62a00f46dcb9c6234e91c8
 RUN set -eux; \
     arch="$(dpkg --print-architecture)"; \
     case "$arch" in \
-        amd64) target=x86_64-unknown-linux-gnu; sha=$NONO_SHA256_AMD64 ;; \
+        amd64) target=x86_64-unknown-linux-gnu;  sha=$NONO_SHA256_AMD64 ;; \
+        arm64) target=aarch64-unknown-linux-gnu; sha=$NONO_SHA256_ARM64 ;; \
         *) echo "unsupported arch for nono: $arch" >&2; exit 1 ;; \
     esac; \
     url="https://github.com/always-further/nono/releases/download/v${NONO_VERSION}/nono-v${NONO_VERSION}-${target}.tar.gz"; \
