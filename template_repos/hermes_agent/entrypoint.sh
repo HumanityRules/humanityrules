@@ -43,6 +43,11 @@ if [ "$DOH_AUX_PROVIDER" = "bedrock" ]; then
 fi
 
 mkdir -p "$HERMES_DIR" "$HERMES_DIR/workspace"
+# Pre-create hermeswebui's XDG_STATE_HOME so the Slack gateway's platform-lock
+# file (~/.local/state/hermes/gateway-locks) can be written under nono. The
+# gateway mkdir's this on first use, but nono's filesystem.allow list rejects
+# non-existent paths at startup.
+mkdir -p /home/hermeswebui/.local/state/hermes
 
 # Generate config.yaml from template on first boot.
 # Existing files (from a previous deploy on EFS) are never overwritten.

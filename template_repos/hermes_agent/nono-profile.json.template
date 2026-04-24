@@ -4,6 +4,7 @@
   "filesystem": {
     "allow": [
       "/home/hermeswebui/.hermes",
+      "/home/hermeswebui/.local",
       "/app",
       "/tmp"
     ],
