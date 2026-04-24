@@ -56,6 +56,7 @@ def _hermes_slack_template() -> AppTemplate:
         ],
         efs_config={"mount_path": "/home/hermeswebui/.hermes", "posix_uid": 1024, "posix_gid": 1024},
         default_tags=[],
+        platform_capabilities=["bedrock-runtime"],
         is_active=True,
     )
 
@@ -107,6 +108,7 @@ class MultiContainerBuildAppConfigTests(TestCase):
 
         self.assertEqual([c.name for c in app_config.containers], ["hermes", "sidecar-mcp"])
         self.assertEqual(app_config.alb_target_container, "hermes")
+        self.assertEqual(app_config.platform_capabilities, ["bedrock-runtime"])
         hermes = app_config.containers[0]
         mcp = app_config.containers[1]
         self.assertEqual(hermes.image_source, "dockerfile")

@@ -190,4 +190,5 @@ def build_app_config_from_blueprint(blueprint: DeploymentBlueprint, repo_path: P
         app_secrets=app_secrets_union or None,
         efs_config=efs_config,
         sidecar_enabled=bool(template.sidecar_enabled),
+        platform_capabilities=list(template.platform_capabilities or []),
     )

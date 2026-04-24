@@ -1,5 +1,30 @@
 # DevOpsHero Development Journal
 
+## 2026-04-24 12:39 - [Platform] Hermes Bedrock access moved from static keys to ECS task role
+
+Hermes no longer needs static Bedrock access keys. The current codebase had conflicting signals: `template_repos/hermes_agent/entrypoint.sh` already documented that Bedrock deploys should rely on ECS task-role credentials, but the runtime still hard-failed unless `AWS_BEDROCK_ACCESS_KEY_ID` and `AWS_BEDROCK_SECRET_ACCESS_KEY` were injected as app secrets. Meanwhile the per-app ECS task role created by `deploy_app.py` only granted platform plumbing permissions (Secrets Manager, EFS, database, sidecar token), so removing the keys without a CDK-owned task-role grant would have broken Hermes immediately.
+
+Added a template-level `platform_capabilities` JSON field on `AppTemplate`. This is intentionally platform-owned infrastructure metadata, separate from user-managed `doh-app-permissions`. Hermes Personal and Hermes Slack now declare `["bedrock-runtime"]`; `app_config_builder` propagates that into `AppConfig`; `deploy_app.AppStack` checks both the capability and the effective runtime config (`DOH_LLM_PROVIDER` or `DOH_AUX_PROVIDER` equals `bedrock`) before adding Bedrock grants to the ECS task role. That keeps the signal explicit while avoiding Bedrock permission on a Hermes deployment configured for OpenAI/custom.
+
+The Bedrock grant is deliberately generous because DOH is still pre-customer and the near-term goal is to avoid expanding IAM every time a Bedrock test path hits a new API. The task role now gets `InvokeModel`, streaming invoke, token counting, guardrail apply/read/list, model/profile/provisioned-throughput read/list, prompt read/list/render, and related Bedrock runtime discovery actions on `*`. This is broader than least privilege, but it is still scoped to the per-app ECS task role and lives in CDK-owned policy rather than in the permission editor's user-managed policy.
+
+Removed `AWS_BEDROCK_ACCESS_KEY_ID` and `AWS_BEDROCK_SECRET_ACCESS_KEY` from the Hermes seeded templates. `AWS_BEDROCK_REGION` remains config. Updated Hermes `entrypoint.sh` so Bedrock only requires the region, mirrors it into `AWS_REGION` / `AWS_DEFAULT_REGION`, derives the Bedrock runtime URL, and lets boto3/AWS SDKs get credentials from the ECS task-role credential provider. Updated the Hermes README to match.
+
+Validation added:
+
+- `test_bedrock_platform_capabilities.py` synthesizes the CDK `AppStack` and asserts the Bedrock task-role policy appears only when the template capability and effective Bedrock provider are both present.
+- Existing multi-container projection test now verifies `platform_capabilities` reaches `AppConfig`.
+- Hermes seed-template test coverage asserts the templates declare `bedrock-runtime` and no longer declare Bedrock access key secrets.
+
+Commands run:
+
+- `uv run manage.py test devopshero_app.tests.test_bedrock_platform_capabilities devopshero_app.tests.test_multi_container_app_config devopshero_app.tests.test_template_deploy_owner_field`
+- `uv run manage.py test devopshero_app.tests.test_env_sidecar_secrets`
+- `uv run manage.py makemigrations --check --dry-run`
+- `git diff --check`
+
+Operational note: deployment must run from a checkout containing the updated `template_repos/hermes_agent` because template-backed apps build from the local template repo path. After merging to `main`, update the DOH platform, run migrations, run `uv run manage.py seed_app_templates`, and redeploy Hermes apps so CloudFormation updates the ECS task role and the Docker image contains the new entrypoint.
+
 ## 2026-04-22 19:09 - [Deployment] Post-deploy hermes-slack debugging: CMD, essential, and short-slug prefill
 
 **Conversation:** [2026-04-22-1909-a7988bb4.md](conversations/2026-04-22-1909-a7988bb4.md)
