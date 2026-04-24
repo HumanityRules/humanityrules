@@ -12,16 +12,15 @@ if [ -z "$DOH_LLM_PROVIDER" ] || [ -z "$DOH_LLM_MODEL" ]; then
     exit 1
 fi
 
-# Bedrock provider: validate credentials, bridge user-facing AWS_BEDROCK_* vars
-# to boto3's standard chain names, and derive the bedrock-runtime base_url from
-# the region so the config.yaml template can be filled in uniformly.
+# Bedrock provider: set the standard AWS region vars and derive the
+# bedrock-runtime base_url from the region so the config.yaml template can be
+# filled in uniformly. Credentials come from the ECS task role via the standard
+# boto3/AWS SDK credential chain.
 if [ "$DOH_LLM_PROVIDER" = "bedrock" ]; then
-    if [ -z "$AWS_BEDROCK_ACCESS_KEY_ID" ] || [ -z "$AWS_BEDROCK_SECRET_ACCESS_KEY" ] || [ -z "$AWS_BEDROCK_REGION" ]; then
-        echo "FATAL: DOH_LLM_PROVIDER=bedrock requires AWS_BEDROCK_ACCESS_KEY_ID, AWS_BEDROCK_SECRET_ACCESS_KEY, and AWS_BEDROCK_REGION" >&2
+    if [ -z "$AWS_BEDROCK_REGION" ]; then
+        echo "FATAL: DOH_LLM_PROVIDER=bedrock requires AWS_BEDROCK_REGION" >&2
         exit 1
     fi
-    export AWS_ACCESS_KEY_ID="$AWS_BEDROCK_ACCESS_KEY_ID"
-    export AWS_SECRET_ACCESS_KEY="$AWS_BEDROCK_SECRET_ACCESS_KEY"
     export AWS_REGION="$AWS_BEDROCK_REGION"
     export AWS_DEFAULT_REGION="$AWS_BEDROCK_REGION"
     DOH_LLM_BASE_URL="https://bedrock-runtime.${AWS_BEDROCK_REGION}.amazonaws.com"
@@ -39,6 +38,8 @@ if [ "$DOH_AUX_PROVIDER" = "bedrock" ]; then
         echo "FATAL: DOH_AUX_PROVIDER=bedrock requires AWS_BEDROCK_REGION" >&2
         exit 1
     fi
+    export AWS_REGION="$AWS_BEDROCK_REGION"
+    export AWS_DEFAULT_REGION="$AWS_BEDROCK_REGION"
     DOH_AUX_BASE_URL="https://bedrock-runtime.${AWS_BEDROCK_REGION}.amazonaws.com"
 fi
 
@@ -184,7 +185,7 @@ ENV_FILE="$HERMES_DIR/.env"
 : > "$ENV_FILE"
 chmod 600 "$ENV_FILE"
 if [ "$USE_NONO" = "0" ]; then
-    # Bedrock path: no proxy, pass creds through as before.
+    # Bedrock path: no proxy. Bedrock credentials come from the ECS task role.
     [ -n "$OPENAI_API_KEY" ] && echo "OPENAI_API_KEY=$OPENAI_API_KEY" >> "$ENV_FILE"
     if [ "$DOH_LLM_PROVIDER" != "bedrock" ] && [ -n "$DOH_LLM_BASE_URL" ]; then
         echo "OPENAI_BASE_URL=$DOH_LLM_BASE_URL" >> "$ENV_FILE"

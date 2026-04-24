@@ -36,6 +36,29 @@ from . import secrets_utils
 # AppTemplate-driven, and a version bump is a platform operation.
 SIDECAR_IMAGE_VERSION = "0.1.0"
 SIDECAR_SOURCE_DIR = Path(__file__).resolve().parents[3] / "sidecar"
+PLATFORM_CAPABILITY_BEDROCK_RUNTIME = "bedrock-runtime"
+
+BEDROCK_RUNTIME_ACTIONS = [
+    "bedrock:ApplyGuardrail",
+    "bedrock:CountTokens",
+    "bedrock:GetCustomModel",
+    "bedrock:GetFoundationModel",
+    "bedrock:GetGuardrail",
+    "bedrock:GetImportedModel",
+    "bedrock:GetInferenceProfile",
+    "bedrock:GetProvisionedModelThroughput",
+    "bedrock:InvokeModel",
+    "bedrock:InvokeModelWithResponseStream",
+    "bedrock:ListCustomModels",
+    "bedrock:ListFoundationModels",
+    "bedrock:ListGuardrails",
+    "bedrock:ListImportedModels",
+    "bedrock:ListInferenceProfiles",
+    "bedrock:ListProvisionedModelThroughputs",
+    "bedrock:ListPromptRouters",
+    "bedrock:ListPrompts",
+    "bedrock:RenderPrompt",
+]
 
 
 def sidecar_ecr_repo_name(env_slug: str) -> str:
@@ -126,6 +149,19 @@ def dockerfile_containers(app_config: appconfig.AppConfig) -> list[appconfig.Con
 def prebuilt_containers(app_config: appconfig.AppConfig) -> list[appconfig.ContainerConfig]:
     """Return the subset of containers that reference a pre-pushed ECR image."""
     return [c for c in app_config.containers if c.image_source == "prebuilt"]
+
+
+def _uses_bedrock_runtime(app_config: appconfig.AppConfig) -> bool:
+    """Return True when the template permits Bedrock and effective LLM config selects it."""
+    if PLATFORM_CAPABILITY_BEDROCK_RUNTIME not in app_config.platform_capabilities:
+        return False
+
+    for c in app_config.containers:
+        for env_var in c.environment_variables:
+            if env_var.get("name") in {"DOH_LLM_PROVIDER", "DOH_AUX_PROVIDER"}:
+                if str(env_var.get("value", "")).lower() == "bedrock":
+                    return True
+    return False
 
 
 def _missing_prebuilt_images(
@@ -526,6 +562,11 @@ class AppStack(Stack):
             task_role.add_to_policy(iam.PolicyStatement(
                 actions=["secretsmanager:GetSecretValue"],
                 resources=[sidecar_shared_secrets_arn],
+            ))
+        if _uses_bedrock_runtime(app_config):
+            task_role.add_to_policy(iam.PolicyStatement(
+                actions=BEDROCK_RUNTIME_ACTIONS,
+                resources=["*"],
             ))
 
         # EFS: create per-app access point and grant mount permissions. The

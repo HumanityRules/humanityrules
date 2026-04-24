@@ -612,6 +612,11 @@ class AppTemplate(models.Model):
     # at app creation time — e.g. [{"key": "app-type", "value": "personal-assistant"}].
     default_tags = models.JSONField(default=list, blank=True)
 
+    # Platform-owned infrastructure capabilities needed by apps from this
+    # template. CDK interprets these into task-role grants and other platform
+    # wiring; they are not user-managed app permissions.
+    platform_capabilities = models.JSONField(default=list, blank=True)
+
     # Template for the default App Name shown on the deploy form. Tokens:
     #   {username} - owner's username; email local-part with non-alnum stripped
     #   {index}    - zero-padded (2-digit) counter that picks the lowest free slug in the org

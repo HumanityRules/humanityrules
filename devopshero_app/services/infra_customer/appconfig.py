@@ -166,6 +166,10 @@ class AppConfig:
     # See docs/sidecar_proxy_design.md. Orthogonal to the `containers` list.
     sidecar_enabled: bool = False
 
+    # Platform-owned capabilities requested by the source template. CDK maps
+    # these to infrastructure grants on the ECS task role.
+    platform_capabilities: list[str] = field(default_factory=list)
+
     def alb_target(self) -> ContainerConfig | None:
         """Return the ALB-target ContainerConfig, or None if no ALB exposure."""
         if not self.alb_target_container:

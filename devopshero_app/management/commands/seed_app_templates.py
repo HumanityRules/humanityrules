@@ -275,28 +275,6 @@ _HERMES_CREDENTIAL_VARS = [
 
 _HERMES_BEDROCK_VARS = [
     {
-        "name": "AWS_BEDROCK_ACCESS_KEY_ID",
-        "group": "Bedrock",
-        "category": "secret",
-        "description": "AWS access key ID for Bedrock (required when DOH_LLM_PROVIDER=bedrock)",
-        "required": False,
-        "auto_generate": False,
-        "default_value": None,
-        "value": "",
-        "user_editable": False,
-    },
-    {
-        "name": "AWS_BEDROCK_SECRET_ACCESS_KEY",
-        "group": "Bedrock",
-        "category": "secret",
-        "description": "AWS secret access key for Bedrock (required when DOH_LLM_PROVIDER=bedrock)",
-        "required": False,
-        "auto_generate": False,
-        "default_value": None,
-        "value": "",
-        "user_editable": False,
-    },
-    {
         "name": "AWS_BEDROCK_REGION",
         "group": "Bedrock",
         "category": "config",
@@ -477,6 +455,7 @@ HERMES_PERSONAL_TEMPLATE = {
     ],
     # Runs behind the sidecar proxy: SSO + ABAC gate the WebUI.
     "sidecar_enabled": True,
+    "platform_capabilities": ["bedrock-runtime"],
     # The "app-type" tag is what the global PA ABAC policy matches on.
     # The "owner" tag is stamped per-deployment from the deploy form.
     "default_tags": [{"key": "app-type", "value": "personal-assistant"}],
@@ -503,6 +482,7 @@ HERMES_SLACK_TEMPLATE = {
     "datastore_config": None,
     "efs_config": {"mount_path": "/home/hermeswebui/.hermes", "posix_uid": 1024, "posix_gid": 1024},
     "sidecar_enabled": False,
+    "platform_capabilities": ["bedrock-runtime"],
     "alb_target_container": "hermes",
     "containers": [
         {
