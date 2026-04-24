@@ -49,27 +49,52 @@ mkdir -p "$HERMES_DIR" "$HERMES_DIR/workspace"
 # non-existent paths at startup.
 mkdir -p /home/hermeswebui/.local/state/hermes
 
-# Generate config.yaml from template on first boot.
-# Existing files (from a previous deploy on EFS) are never overwritten.
-if [ ! -f "$HERMES_DIR/config.yaml" ]; then
-    sed \
-        -e "s|__CONFIG_PROVIDER__|${DOH_LLM_PROVIDER}|g" \
-        -e "s|__MODEL__|${DOH_LLM_MODEL}|g" \
-        -e "s|__BASE_URL__|${DOH_LLM_BASE_URL}|g" \
-        -e "s|__AUX_PROVIDER__|${DOH_AUX_PROVIDER}|g" \
-        -e "s|__AUX_MODEL__|${DOH_AUX_MODEL}|g" \
-        -e "s|__AUX_BASE_URL__|${DOH_AUX_BASE_URL}|g" \
-        /opt/hermes-defaults/config.yaml.template > "$HERMES_DIR/config.yaml"
+# Decide whether nono wraps the runtime. Bedrock uses SigV4 body signing,
+# which nono's header-injection proxy can't handle — skip nono for Bedrock
+# deploys. Both main and aux provider are considered; if either is Bedrock,
+# the whole process runs outside nono.
+USE_NONO=1
+if [ "$DOH_LLM_PROVIDER" = "bedrock" ] || [ "$DOH_AUX_PROVIDER" = "bedrock" ]; then
+    USE_NONO=0
+fi
 
-    # Hermes reads bedrock.region from config.yaml (runtime_provider.py:895).
-    # Appended on first boot only so user edits to config.yaml are preserved.
-    if [ "$DOH_LLM_PROVIDER" = "bedrock" ]; then
-        cat >> "$HERMES_DIR/config.yaml" <<EOF
+# Fixed proxy port under nono. Needed so the config.yaml we render below can
+# point Hermes at http://127.0.0.1:NONO_PROXY_PORT/<service> without knowing
+# nono's runtime-assigned port. Arbitrary choice, avoided 8787 (WebUI) and
+# 7777 (learneo-mcp sidecar).
+NONO_PROXY_PORT=44300
+
+# Under nono, route Hermes's provider calls at the loopback proxy rather than
+# directly to the upstream. The proxy injects the real Bearer token and
+# forwards to $DOH_LLM_BASE_URL. Config.yaml below picks up these values.
+if [ "$USE_NONO" = "1" ]; then
+    _REAL_LLM_BASE_URL="${DOH_LLM_BASE_URL:-https://api.openai.com/v1}"
+    _REAL_AUX_BASE_URL="${DOH_AUX_BASE_URL:-$_REAL_LLM_BASE_URL}"
+    DOH_LLM_BASE_URL="http://127.0.0.1:${NONO_PROXY_PORT}/openai"
+    DOH_AUX_BASE_URL="http://127.0.0.1:${NONO_PROXY_PORT}/openai"
+fi
+
+# Generate config.yaml from template on every boot. We cannot preserve a user-
+# edited config.yaml across redeploys because the proxy URL embeds a fixed
+# port and the provider config needs to match. A user-editable layer would
+# need to live outside these fields.
+sed \
+    -e "s|__CONFIG_PROVIDER__|${DOH_LLM_PROVIDER}|g" \
+    -e "s|__MODEL__|${DOH_LLM_MODEL}|g" \
+    -e "s|__BASE_URL__|${DOH_LLM_BASE_URL}|g" \
+    -e "s|__AUX_PROVIDER__|${DOH_AUX_PROVIDER}|g" \
+    -e "s|__AUX_MODEL__|${DOH_AUX_MODEL}|g" \
+    -e "s|__AUX_BASE_URL__|${DOH_AUX_BASE_URL}|g" \
+    /opt/hermes-defaults/config.yaml.template > "$HERMES_DIR/config.yaml"
+
+# Hermes reads bedrock.region from config.yaml (runtime_provider.py:895).
+# Appended only for Bedrock deploys.
+if [ "$DOH_LLM_PROVIDER" = "bedrock" ]; then
+    cat >> "$HERMES_DIR/config.yaml" <<EOF
 
 bedrock:
   region: ${AWS_BEDROCK_REGION}
 EOF
-    fi
 fi
 
 if [ ! -d "$HERMES_DIR/hermes-agent" ]; then
@@ -143,11 +168,6 @@ fi
 # bearer header — out of scope for header-injection proxies). Bedrock deploys
 # rely on IAM task roles; the short-lived, Bedrock-scoped creds fetched from
 # 169.254.170.2 are an accepted residual.
-USE_NONO=1
-if [ "$DOH_LLM_PROVIDER" = "bedrock" ] || [ "$DOH_AUX_PROVIDER" = "bedrock" ]; then
-    USE_NONO=0
-fi
-
 # Write .env from Docker env vars so the WebUI detects provider credentials.
 # Regenerated on every boot to pick up DOH config changes.
 #
@@ -238,7 +258,11 @@ fi
 #   2. credentials[] is trimmed to services whose secrets are actually present.
 #      Routes with missing secret files would fail nono's startup credential
 #      load even if the route is otherwise harmless.
-OPENAI_UPSTREAM="${DOH_LLM_BASE_URL:-https://api.openai.com/v1}"
+#
+# `upstream` is where nono forwards the request after injecting the Bearer
+# header. Hermes talks to the loopback proxy (via config.yaml.base_url rendered
+# earlier) and the proxy forwards here.
+OPENAI_UPSTREAM="$_REAL_LLM_BASE_URL"
 
 ACTIVE=()
 [ -f "$SECRETS_DIR/openai_api_key" ]     && ACTIVE+=('"openai"')
@@ -255,4 +279,4 @@ sed -e "s|__OPENAI_UPSTREAM__|${OPENAI_UPSTREAM}|g" \
     -e "s|__ACTIVE_CREDENTIALS__|${ACTIVE_JSON}|g" \
     /opt/hermes-defaults/nono-profile.json.template > "$NONO_PROFILE"
 
-exec nono run --profile "$NONO_PROFILE" -- "$@"
+exec nono run --profile "$NONO_PROFILE" --proxy-port "$NONO_PROXY_PORT" -- "$@"
