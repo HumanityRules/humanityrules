@@ -13,7 +13,9 @@
     "read_file": [
       "/start.sh",
       "/entrypoint.sh",
-      "/hermeswebui_init.bash"
+      "/hermeswebui_init.bash",
+      "/etc/passwd",
+      "/etc/group"
     ]
   },
   "network": {
