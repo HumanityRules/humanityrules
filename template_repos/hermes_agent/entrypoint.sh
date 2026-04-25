@@ -50,28 +50,31 @@ mkdir -p "$HERMES_DIR" "$HERMES_DIR/workspace"
 # non-existent paths at startup.
 mkdir -p /home/hermeswebui/.local/state/hermes
 
-# Decide whether nono wraps the runtime. Bedrock uses SigV4 body signing,
-# which nono's header-injection proxy can't handle — skip nono for Bedrock
-# deploys. Both main and aux provider are considered; if either is Bedrock,
-# the whole process runs outside nono.
-USE_NONO=1
-if [ "$DOH_LLM_PROVIDER" = "bedrock" ] || [ "$DOH_AUX_PROVIDER" = "bedrock" ]; then
-    USE_NONO=0
-fi
-
 # Fixed proxy port under nono. Needed so the config.yaml we render below can
 # point Hermes at http://127.0.0.1:NONO_PROXY_PORT/<service> without knowing
 # nono's runtime-assigned port. Arbitrary choice, avoided 8787 (WebUI) and
 # 7777 (learneo-mcp sidecar).
 NONO_PROXY_PORT=44300
 
-# Under nono, route Hermes's provider calls at the loopback proxy rather than
-# directly to the upstream. The proxy injects the real Bearer token and
-# forwards to $DOH_LLM_BASE_URL. Config.yaml below picks up these values.
-if [ "$USE_NONO" = "1" ]; then
-    _REAL_LLM_BASE_URL="${DOH_LLM_BASE_URL:-https://api.openai.com/v1}"
-    _REAL_AUX_BASE_URL="${DOH_AUX_BASE_URL:-$_REAL_LLM_BASE_URL}"
+# Fixed local port for the ECS IMDS socat forwarder (Bedrock path only).
+# Hermes's boto3 talks to nono's aws-creds route, which forwards to this port,
+# which socat forwards to 169.254.170.2:80 (the ECS creds endpoint).
+# nono can't reach 169.254/16 directly because its HostFilter deny-lists the
+# entire link-local range; socat runs outside the sandbox so has normal network.
+IMDS_LOCAL_PORT=6777
+
+# Non-Bedrock path: config.yaml's base_url points at nono's /openai route;
+# nono injects the real API key and forwards upstream. Bedrock path: keep
+# base_url at the real bedrock-runtime.<region> URL — boto3 signs requests
+# SigV4 client-side, so nono must not rewrite the URL (that would break the
+# signature). Bedrock traffic leaves the sandbox via HTTPS_PROXY (auto-set
+# by nono) as a CONNECT tunnel to the real host.
+_REAL_LLM_BASE_URL="${DOH_LLM_BASE_URL:-https://api.openai.com/v1}"
+_REAL_AUX_BASE_URL="${DOH_AUX_BASE_URL:-$_REAL_LLM_BASE_URL}"
+if [ "$DOH_LLM_PROVIDER" != "bedrock" ]; then
     DOH_LLM_BASE_URL="http://127.0.0.1:${NONO_PROXY_PORT}/openai"
+fi
+if [ "$DOH_AUX_PROVIDER" != "bedrock" ]; then
     DOH_AUX_BASE_URL="http://127.0.0.1:${NONO_PROXY_PORT}/openai"
 fi
 
@@ -165,10 +168,12 @@ fi
 #   4. sets <SERVICE>_BASE_URL=http://127.0.0.1:PORT/<service> in the child so
 #      SDKs talk to the proxy instead of the upstream.
 #
-# Bedrock is exempt (uses SigV4 signing over the entire request body, not a
-# bearer header — out of scope for header-injection proxies). Bedrock deploys
-# rely on IAM task roles; the short-lived, Bedrock-scoped creds fetched from
-# 169.254.170.2 are an accepted residual.
+# Bedrock takes a different shape: SigV4 is client-side so the child must hold
+# live AWS creds. Instead of a phantom-token route, we pair a socat sidecar
+# (below) with an aws-creds route whose upstream is loopback — the route's
+# role is auth-only (phantom-token check) and it forwards to the sidecar,
+# which forwards to IMDS. Outbound Bedrock traffic itself goes via nono's
+# HTTPS_PROXY (CONNECT tunnel) so SigV4 stays intact end-to-end.
 # Write .env from Docker env vars so the WebUI detects provider credentials.
 # Regenerated on every boot to pick up DOH config changes.
 #
@@ -184,25 +189,9 @@ fi
 ENV_FILE="$HERMES_DIR/.env"
 : > "$ENV_FILE"
 chmod 600 "$ENV_FILE"
-if [ "$USE_NONO" = "0" ]; then
-    # Bedrock path: no proxy. Bedrock credentials come from the ECS task role.
-    [ -n "$OPENAI_API_KEY" ] && echo "OPENAI_API_KEY=$OPENAI_API_KEY" >> "$ENV_FILE"
-    if [ "$DOH_LLM_PROVIDER" != "bedrock" ] && [ -n "$DOH_LLM_BASE_URL" ]; then
-        echo "OPENAI_BASE_URL=$DOH_LLM_BASE_URL" >> "$ENV_FILE"
-    fi
-    [ -n "$ANTHROPIC_API_KEY" ] && echo "ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY" >> "$ENV_FILE"
-    [ -n "$OPENROUTER_API_KEY" ] && echo "OPENROUTER_API_KEY=$OPENROUTER_API_KEY" >> "$ENV_FILE"
-    [ -n "$TAVILY_API_KEY" ] && echo "TAVILY_API_KEY=$TAVILY_API_KEY" >> "$ENV_FILE"
-    [ -n "$SLACK_APP_TOKEN" ] && echo "SLACK_APP_TOKEN=$SLACK_APP_TOKEN" >> "$ENV_FILE"
-    [ -n "$SLACK_BOT_TOKEN" ] && echo "SLACK_BOT_TOKEN=$SLACK_BOT_TOKEN" >> "$ENV_FILE"
-fi
 [ -n "$SLACK_ALLOW_ALL_USERS" ] && echo "SLACK_ALLOW_ALL_USERS=$SLACK_ALLOW_ALL_USERS" >> "$ENV_FILE"
 [ -n "$SLACK_ALLOWED_USERS" ] && echo "SLACK_ALLOWED_USERS=$SLACK_ALLOWED_USERS" >> "$ENV_FILE"
 [ -n "$SLACK_HOME_CHANNEL" ] && echo "SLACK_HOME_CHANNEL=$SLACK_HOME_CHANNEL" >> "$ENV_FILE"
-
-if [ "$USE_NONO" = "0" ]; then
-    exec "$@"
-fi
 
 # --- Stage secrets for nono ---
 # nono's custom_credentials only accepts keyring / op:// / apple-password:// /
@@ -237,6 +226,45 @@ write_secret tavily_api_key     "$TAVILY_API_KEY"     "tvly-"
 write_secret slack_bot_token    "$SLACK_BOT_TOKEN"    "xoxb-"
 write_secret slack_app_token    "$SLACK_APP_TOKEN"    "xapp-"
 
+# --- Bedrock IMDS forwarder ---
+# boto3 reads creds from ECS IMDS at 169.254.170.2:80, which nono denies at the
+# HostFilter level (link-local range, hardcoded SSRF protection). socat runs
+# outside the sandbox — so it can reach 169.254 normally — and exposes the
+# same endpoint on loopback. nono's "aws-creds" route forwards requests from
+# the child to this loopback port, and the route passes because 127.0.0.1 is
+# not link-local.
+#
+# Only set up when Bedrock is active on either provider. AWS_CONTAINER_CREDENTIALS_
+# RELATIVE_URI is set by Fargate; we rewrite it to a FULL_URI pointing at our
+# loopback route so boto3 talks to nono instead of directly to IMDS.
+BEDROCK_ACTIVE=0
+if [ "$DOH_LLM_PROVIDER" = "bedrock" ] || [ "$DOH_AUX_PROVIDER" = "bedrock" ]; then
+    BEDROCK_ACTIVE=1
+fi
+
+if [ "$BEDROCK_ACTIVE" = "1" ]; then
+    if [ -z "$AWS_CONTAINER_CREDENTIALS_RELATIVE_URI" ]; then
+        echo "FATAL: bedrock requires Fargate IMDS (AWS_CONTAINER_CREDENTIALS_RELATIVE_URI unset)" >&2
+        exit 1
+    fi
+    # socat: accept any connection on :6777, forward to ECS IMDS. reuseaddr
+    # because we may redeploy without waiting for TIME_WAIT. fork so concurrent
+    # creds refreshes don't serialize.
+    socat TCP-LISTEN:${IMDS_LOCAL_PORT},reuseaddr,fork,bind=127.0.0.1 TCP:169.254.170.2:80 &
+    IMDS_SOCAT_PID=$!
+    echo "[entrypoint] Started IMDS socat forwarder (pid=$IMDS_SOCAT_PID) on 127.0.0.1:${IMDS_LOCAL_PORT}"
+
+    # Throwaway token for the aws-creds phantom-token check. IMDS itself
+    # ignores Authorization headers, so the value doesn't matter to it — but
+    # nono requires the child to present the session token to authenticate
+    # against the reverse proxy. We write a random value; nono loads it once
+    # at startup and injects it into the child as AWS_CONTAINER_AUTHORIZATION_
+    # TOKEN (the env var boto3 uses to authenticate to FULL_URI endpoints).
+    umask 077
+    head -c 32 /dev/urandom | base64 | tr -d '=+/' > "$SECRETS_DIR/aws_creds_token"
+    chmod 0400 "$SECRETS_DIR/aws_creds_token"
+fi
+
 # Slack-enabled signal — computed from the real secrets at entrypoint time
 # because under nono the child's SLACK_*_TOKEN env vars hold phantom proxy
 # tokens (non-empty regardless of whether Slack is configured). start.sh uses
@@ -252,13 +280,19 @@ else
 fi
 
 # --- Render the nono profile ---
-# Two dynamic substitutions:
+# Three dynamic substitutions:
 #   1. openai.upstream follows DOH_LLM_BASE_URL so users pointing Hermes at an
 #      OpenAI-compatible endpoint (OpenRouter Classic, vLLM, Azure, etc. via
 #      DOH_LLM_PROVIDER=custom) keep working.
 #   2. credentials[] is trimmed to services whose secrets are actually present.
 #      Routes with missing secret files would fail nono's startup credential
 #      load even if the route is otherwise harmless.
+#   3. allow_domain lists hosts the child can reach via nono's forward proxy
+#      (CONNECT tunnels). Empty by default — an empty list plus at least one
+#      reverse-proxy route is how Hermes's standard providers work. Bedrock
+#      needs its real bedrock-runtime.<region> host here because boto3 signs
+#      requests client-side with SigV4, so nono must pass the raw CONNECT
+#      through rather than intercepting the body.
 #
 # `upstream` is where nono forwards the request after injecting the Bearer
 # header. Hermes talks to the loopback proxy (via config.yaml.base_url rendered
@@ -272,12 +306,30 @@ ACTIVE=()
 [ -f "$SECRETS_DIR/tavily_api_key" ]     && ACTIVE+=('"tavily"')
 [ -f "$SECRETS_DIR/slack_bot_token" ]    && ACTIVE+=('"slack-bot"')
 [ -f "$SECRETS_DIR/slack_app_token" ]    && ACTIVE+=('"slack-app"')
+[ -f "$SECRETS_DIR/aws_creds_token" ]    && ACTIVE+=('"aws-creds"')
 # Join with ", " — bash expands arrays with IFS, set to ", " briefly.
 _oldIFS="$IFS"; IFS=', '; ACTIVE_JSON="[${ACTIVE[*]}]"; IFS="$_oldIFS"
+
+ALLOW_DOMAINS=()
+if [ "$BEDROCK_ACTIVE" = "1" ]; then
+    # boto3 SigV4 calls go out via nono's HTTPS_PROXY CONNECT tunnel to the
+    # real bedrock-runtime host. The allow_domain entry permits that CONNECT.
+    ALLOW_DOMAINS+=("\"bedrock-runtime.${AWS_BEDROCK_REGION}.amazonaws.com\"")
+fi
+_oldIFS="$IFS"; IFS=', '; ALLOW_DOMAINS_JSON="[${ALLOW_DOMAINS[*]}]"; IFS="$_oldIFS"
 
 NONO_PROFILE="$HERMES_DIR/nono-profile.json"
 sed -e "s|__OPENAI_UPSTREAM__|${OPENAI_UPSTREAM}|g" \
     -e "s|__ACTIVE_CREDENTIALS__|${ACTIVE_JSON}|g" \
+    -e "s|__ALLOW_DOMAINS__|${ALLOW_DOMAINS_JSON}|g" \
     /opt/hermes-defaults/nono-profile.json.template > "$NONO_PROFILE"
+
+# Propagate FULL_URI to the child via an env var allowed through nono's
+# allow_vars list. boto3 sees FULL_URI → talks to nono's aws-creds route →
+# socat → real IMDS. RELATIVE_URI is scrubbed by the allow_vars filter so
+# boto3 doesn't prefer it over FULL_URI.
+if [ "$BEDROCK_ACTIVE" = "1" ]; then
+    export AWS_CONTAINER_CREDENTIALS_FULL_URI="http://127.0.0.1:${NONO_PROXY_PORT}/aws-creds${AWS_CONTAINER_CREDENTIALS_RELATIVE_URI}"
+fi
 
 exec nono run --profile "$NONO_PROFILE" --proxy-port "$NONO_PROXY_PORT" -- "$@"
