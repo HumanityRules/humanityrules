@@ -74,6 +74,14 @@ def _environment_options(environments) -> list[dict]:
     ]
 
 
+def _compute_mode_options() -> list[dict]:
+    """Return the ECS compute modes available from the template deploy form."""
+    return [
+        {"id": value, "name": label}
+        for value, label in models.EcsComputeMode.choices
+    ]
+
+
 def _selected_label(options: list[dict], value: str, placeholder: str) -> str:
     for opt in options:
         if opt["id"] == value:
@@ -177,6 +185,7 @@ def template_deploy_form(request: HttpRequest, template_slug: str) -> HttpRespon
 
     workspace_options = _workspace_options(workspaces)
     environment_options = _environment_options(environments)
+    compute_mode_options = _compute_mode_options()
 
     requires_owner = _template_requires_owner(template)
     owner_options = _owner_options_for(request=request, org=org) if requires_owner else []
@@ -199,10 +208,15 @@ def template_deploy_form(request: HttpRequest, template_slug: str) -> HttpRespon
     context["template"] = template
     context["workspace_options"] = workspace_options
     context["environment_options"] = environment_options
+    context["compute_mode_options"] = compute_mode_options
     context["selected_workspace_id"] = ""
     context["selected_environment_id"] = ""
+    context["selected_compute_mode"] = template.default_compute_mode
     context["selected_workspace_label"] = "Select a workspace"
     context["selected_environment_label"] = "Select an environment"
+    context["selected_compute_mode_label"] = _selected_label(
+        compute_mode_options, template.default_compute_mode, "Select compute",
+    )
     context["default_app_name"] = default_app_name
     context["variable_groups"] = _group_editable_variables(editable_vars)
     context["requires_owner"] = requires_owner
@@ -219,6 +233,7 @@ def _handle_deploy(request: HttpRequest, template: models.AppTemplate, org: mode
     app_name = request.POST.get("app_name", "").strip()
     workspace_id = request.POST.get("workspace_id", "")
     environment_id = request.POST.get("environment_id", "")
+    compute_mode = request.POST.get("compute_mode", template.default_compute_mode)
     submitted_owner = request.POST.get("owner_id", "").strip()
 
     errors = []
@@ -228,6 +243,8 @@ def _handle_deploy(request: HttpRequest, template: models.AppTemplate, org: mode
         errors.append("Workspace is required.")
     if not environment_id:
         errors.append("Environment is required.")
+    if compute_mode not in models.EcsComputeMode.values:
+        errors.append("Compute mode is invalid.")
 
     app_slug = slugify(app_name)
     if not app_slug:
@@ -291,16 +308,20 @@ def _handle_deploy(request: HttpRequest, template: models.AppTemplate, org: mode
         )
         workspace_options = _workspace_options(workspaces)
         environment_options = _environment_options(environments)
+        compute_mode_options = _compute_mode_options()
         owner_options = _owner_options_for(request=request, org=org) if requires_owner else []
 
         context = base.get_app_shell_context(request=request, current_page="workspaces")
         context["template"] = template
         context["workspace_options"] = workspace_options
         context["environment_options"] = environment_options
+        context["compute_mode_options"] = compute_mode_options
         context["selected_workspace_id"] = workspace_id
         context["selected_environment_id"] = environment_id
+        context["selected_compute_mode"] = compute_mode
         context["selected_workspace_label"] = _selected_label(workspace_options, workspace_id, "Select a workspace")
         context["selected_environment_label"] = _selected_label(environment_options, environment_id, "Select an environment")
+        context["selected_compute_mode_label"] = _selected_label(compute_mode_options, compute_mode, "Select compute")
         context["default_app_name"] = app_name
         context["variable_groups"] = _group_editable_variables(editable_vars)
         context["errors"] = errors
@@ -322,6 +343,7 @@ def _handle_deploy(request: HttpRequest, template: models.AppTemplate, org: mode
         created_by=request.user,
         runtime_variable_overrides=variable_overrides,
         owner_username=owner_username,
+        compute_mode=compute_mode,
     )
 
     return redirect("app_detail", app_slug=deployment.app.slug)

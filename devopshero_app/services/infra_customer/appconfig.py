@@ -7,6 +7,9 @@ from pathlib import Path
 from typing import Literal
 
 
+ComputeMode = Literal["fargate", "ec2"]
+
+
 @dataclass
 class EngineConfig:
     """Aurora engine configuration."""
@@ -132,11 +135,14 @@ class AppConfig:
     app_name: str  # e.g., "simple-dashboard" — used in resource names
 
     # Task-level resources (shared across containers)
-    cpu: int  # Fargate CPU units (256, 512, 1024, etc.)
-    memory: int  # Fargate memory in MiB
+    cpu: int  # ECS task CPU units (256, 512, 1024, etc.)
+    memory: int  # ECS task memory in MiB
 
     # Ordered, non-empty list of containers.
     containers: list[ContainerConfig]
+
+    # ECS compute backend for the service.
+    compute_mode: ComputeMode = "fargate"
 
     # Path to app source for the dockerfile-built containers. One path for the
     # whole task today; all dockerfile containers build from subdirectories of

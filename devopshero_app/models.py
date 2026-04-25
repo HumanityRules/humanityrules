@@ -558,6 +558,13 @@ class Datastore(models.Model):
         return f"{self.name} ({self.engine})"
 
 
+class EcsComputeMode(models.TextChoices):
+    """Supported ECS compute backends for customer apps."""
+
+    FARGATE = "fargate", "Fargate"
+    EC2 = "ec2", "EC2 Capacity"
+
+
 class AppTemplate(models.Model):
     """Pre-configured recipe for deploying a specific type of application."""
 
@@ -571,6 +578,12 @@ class AppTemplate(models.Model):
     # Blueprint defaults (task-level)
     cpu = models.IntegerField()
     memory = models.IntegerField()
+    default_compute_mode = models.CharField(
+        max_length=20,
+        choices=EcsComputeMode.choices,
+        default=EcsComputeMode.FARGATE,
+        help_text="Default ECS compute backend for deployments created from this template.",
+    )
 
     # Ordered, non-empty list of container dicts. Each entry:
     #   {
@@ -954,8 +967,14 @@ class DeploymentBlueprint(models.Model):
         blank=True,
         help_text="Branch override for this environment. Blank = use Repository.default_branch.",
     )
-    cpu = models.IntegerField(help_text="Fargate CPU units (256, 512, 1024, etc.)")
-    memory = models.IntegerField(help_text="Fargate memory in MiB")
+    cpu = models.IntegerField(help_text="ECS task CPU units (256, 512, 1024, etc.)")
+    memory = models.IntegerField(help_text="ECS task memory in MiB")
+    compute_mode = models.CharField(
+        max_length=20,
+        choices=EcsComputeMode.choices,
+        default=EcsComputeMode.FARGATE,
+        help_text="ECS compute backend for this app in this environment.",
+    )
 
     # Per-container materialized runtime values. Mirrors the template's
     # `containers` shape (one entry per container, ordered), each carrying

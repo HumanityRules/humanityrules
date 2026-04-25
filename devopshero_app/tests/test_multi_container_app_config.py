@@ -26,6 +26,7 @@ def _hermes_slack_template() -> AppTemplate:
         category="ai-assistant",
         cpu=2048,
         memory=4096,
+        default_compute_mode="ec2",
         alb_target_container="hermes",
         containers=[
             {
@@ -81,6 +82,7 @@ def _scaffold_blueprint(template: AppTemplate, blueprint_containers: list) -> De
     )
     return DeploymentBlueprint.objects.create(
         app=app, environment=env, branch="main", cpu=2048, memory=4096,
+        compute_mode=template.default_compute_mode,
         containers=blueprint_containers,
     )
 
@@ -108,6 +110,7 @@ class MultiContainerBuildAppConfigTests(TestCase):
 
         self.assertEqual([c.name for c in app_config.containers], ["hermes", "sidecar-mcp"])
         self.assertEqual(app_config.alb_target_container, "hermes")
+        self.assertEqual(app_config.compute_mode, "ec2")
         self.assertEqual(app_config.platform_capabilities, ["bedrock-runtime"])
         hermes = app_config.containers[0]
         mcp = app_config.containers[1]

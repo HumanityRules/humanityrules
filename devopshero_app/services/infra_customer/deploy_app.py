@@ -197,6 +197,18 @@ def _missing_prebuilt_images(
     return missing
 
 
+def _environment_has_ec2_capacity_provider(session: boto3.Session, env_slug: str) -> bool:
+    """Return True when the environment cluster is associated with the EC2 capacity provider."""
+    ecs_client = session.client("ecs")
+    cluster_name = f"devopshero-{env_slug}-cluster"
+    capacity_provider_name = deploy_base.ec2_capacity_provider_name(env_slug=env_slug)
+    response = ecs_client.describe_clusters(clusters=[cluster_name])
+    clusters = response.get("clusters", [])
+    if not clusters:
+        return False
+    return capacity_provider_name in clusters[0].get("capacityProviders", [])
+
+
 def _container_image_uri(
     container: appconfig.ContainerConfig,
     account: str,
@@ -621,18 +633,32 @@ class AppStack(Stack):
                 self, "AppSecret", f"devopshero/{env_slug}/{app_config.app_name}/secrets",
             )
 
-        task_definition = ecs.FargateTaskDefinition(
-            self, "TaskDefinition",
-            family=resource_prefix[:255],
-            cpu=app_config.cpu,
-            memory_limit_mib=app_config.memory,
-            execution_role=self.environment_infra.task_execution_role,
-            task_role=task_role,
-            runtime_platform=ecs.RuntimePlatform(
-                cpu_architecture=ecs.CpuArchitecture.ARM64,
-                operating_system_family=ecs.OperatingSystemFamily.LINUX,
-            ),
-        )
+        if app_config.compute_mode == "ec2":
+            task_definition = ecs.TaskDefinition(
+                self, "TaskDefinition",
+                compatibility=ecs.Compatibility.EC2,
+                network_mode=ecs.NetworkMode.AWS_VPC,
+                family=resource_prefix[:255],
+                cpu=str(app_config.cpu),
+                memory_mib=str(app_config.memory),
+                execution_role=self.environment_infra.task_execution_role,
+                task_role=task_role,
+            )
+        elif app_config.compute_mode == "fargate":
+            task_definition = ecs.FargateTaskDefinition(
+                self, "TaskDefinition",
+                family=resource_prefix[:255],
+                cpu=app_config.cpu,
+                memory_limit_mib=app_config.memory,
+                execution_role=self.environment_infra.task_execution_role,
+                task_role=task_role,
+                runtime_platform=ecs.RuntimePlatform(
+                    cpu_architecture=ecs.CpuArchitecture.ARM64,
+                    operating_system_family=ecs.OperatingSystemFamily.LINUX,
+                ),
+            )
+        else:
+            raise ValueError(f"Unsupported compute_mode: {app_config.compute_mode}")
 
         if efs_access_point:
             task_definition.add_volume(
@@ -830,21 +856,36 @@ class AppStack(Stack):
         # failed task starts (~3-6 min) instead of CFN's 3h stabilization wait.
         # rollback=True auto-reverts to the prior COMPLETED deployment on trip;
         # on first deploy there is none, so the stack simply rolls back via CFN.
-        service = ecs.FargateService(
-            self, "EcsService",
-            service_name=resource_prefix[:255],
-            cluster=self.environment_infra.cluster,
-            task_definition=task_definition,
-            desired_count=1,
-            assign_public_ip=False,
-            vpc_subnets=ec2.SubnetSelection(subnet_type=ec2.SubnetType.PRIVATE_WITH_EGRESS),
-            security_groups=[self.environment_infra.default_security_group],
-            enable_execute_command=True,
-            min_healthy_percent=min_healthy,
-            max_healthy_percent=200,
-            health_check_grace_period=Duration.seconds(health_check_grace),
-            circuit_breaker=ecs.DeploymentCircuitBreaker(enable=True, rollback=True),
-        )
+        service_props = {
+            "service_name": resource_prefix[:255],
+            "cluster": self.environment_infra.cluster,
+            "task_definition": task_definition,
+            "desired_count": 1,
+            "assign_public_ip": False,
+            "vpc_subnets": ec2.SubnetSelection(subnet_type=ec2.SubnetType.PRIVATE_WITH_EGRESS),
+            "security_groups": [self.environment_infra.default_security_group],
+            "enable_execute_command": True,
+            "min_healthy_percent": min_healthy,
+            "max_healthy_percent": 200,
+            "health_check_grace_period": Duration.seconds(health_check_grace),
+            "circuit_breaker": ecs.DeploymentCircuitBreaker(enable=True, rollback=True),
+        }
+        if app_config.compute_mode == "ec2":
+            service = ecs.Ec2Service(
+                self, "EcsService",
+                capacity_provider_strategies=[
+                    ecs.CapacityProviderStrategy(
+                        capacity_provider=self.environment_infra.ec2_capacity_provider_name,
+                        weight=1,
+                    ),
+                ],
+                **service_props,
+            )
+        else:
+            service = ecs.FargateService(
+                self, "EcsService",
+                **service_props,
+            )
         # Multiple containers in the task — be explicit about which one the
         # ALB targets. The sidecar overrides this when enabled.
         if sidecar_enabled:
@@ -1011,6 +1052,14 @@ def deploy(
         return DeployResult(success=False, error=msg, service_url="", alb_dns="")
     if not cloudformation_utils.stack_exists(cf_client, cluster_stack_name):
         msg = f"ECS cluster not deployed. Cluster stack '{cluster_stack_name}' not found"
+        logger.error(msg)
+        return DeployResult(success=False, error=msg, service_url="", alb_dns="")
+    if app_config.compute_mode == "ec2" and not _environment_has_ec2_capacity_provider(session=session, env_slug=env_slug):
+        capacity_provider_name = deploy_base.ec2_capacity_provider_name(env_slug=env_slug)
+        msg = (
+            f"EC2 compute requested, but capacity provider '{capacity_provider_name}' is not associated with "
+            f"cluster 'devopshero-{env_slug}-cluster'. Redeploy the environment base infrastructure first."
+        )
         logger.error(msg)
         return DeployResult(success=False, error=msg, service_url="", alb_dns="")
 

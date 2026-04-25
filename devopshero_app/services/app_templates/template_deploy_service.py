@@ -133,6 +133,7 @@ async def deploy_from_template(
     created_by: models.User,
     runtime_variable_overrides: dict[str, str] | None,
     owner_username: str | None,
+    compute_mode: str,
 ) -> models.Deployment:
     """Create Repository + App + Blueprint + Deployment from a template and queue for deployment."""
     # The App row still carries identity/build fields for a single canonical
@@ -193,6 +194,7 @@ async def deploy_from_template(
         status_message="Deployment triggered from template",
         cpu=template.cpu,
         memory=template.memory,
+        compute_mode=compute_mode,
         containers=blueprint_containers,
         subdomain="",
         created_by=created_by,

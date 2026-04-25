@@ -81,9 +81,19 @@ Upstream credentials (`SIDECAR_MCP_GITLAB_TOKEN`, `SIDECAR_MCP_ATLASSIAN_*`, `SI
 
 ## Storage: ephemeral vs EFS
 
-All Hermes state (`config.yaml`, `SOUL.md`, `hermes-agent/`, `skills/`, `memories/`, `sessions/`, `workspace/`, WebUI state) lives on an EFS access point mounted at `~/.hermes`, scoped per app with UID/GID 1000. The Dockerfile symlinks `/workspace` into this path so terminal tools persist their output.
+All Hermes state (`config.yaml`, `SOUL.md`, `hermes-agent/`, `skills/`, `memories/`, `sessions/`, `workspace/`, WebUI state) lives on an EFS access point mounted at `~/.hermes`, scoped per app with the template's UID/GID (1024 today). The Dockerfile symlinks `/workspace` into this path so terminal tools persist their output.
 
 Everything else (image layers, `/opt/hermes-defaults/` seeds, the WebUI binary) is ephemeral and replaced on each task. First boot seeds EFS from `/opt/hermes-defaults/`; subsequent boots only refresh `.env` and re-run patches. User edits to `config.yaml` / `SOUL.md` are preserved. Details in `entrypoint.sh`.
+
+
+## ECS compute
+
+Hermes supports both DOH ECS compute modes:
+
+- **Fargate:** the original serverless ECS path. The task runs in private subnets with an AWS-managed host lifecycle.
+- **EC2 capacity:** the task runs on DOH-managed ECS container instances in the customer's environment. The service still uses `awsvpc`, private subnets, the same ALB target-group model, ECS task roles, and the same EFS access point.
+
+The Hermes templates default to EC2 capacity so long-lived agents can use customer-owned compute, while the deploy form can still choose Fargate. Both modes keep Bedrock credentials on the ECS task role and keep Hermes state on EFS.
 
 
 ## Version pins

@@ -7,6 +7,7 @@ import logging
 
 import boto3
 from aws_cdk import App, Aws, CfnOutput, Fn, RemovalPolicy, Stack
+from aws_cdk import aws_autoscaling as autoscaling
 from aws_cdk import aws_certificatemanager as acm
 from aws_cdk import aws_ec2 as ec2
 from aws_cdk import aws_ecs as ecs
@@ -27,6 +28,11 @@ from . import vpc_utils
 logger = logging.getLogger(__name__)
 
 
+def ec2_capacity_provider_name(env_slug: str) -> str:
+    """Deterministic ECS EC2 capacity provider name for an environment."""
+    return f"devopshero-{env_slug}-ec2-capacity"
+
+
 # =============================================================================
 # ENVIRONMENT INFRASTRUCTURE IMPORT
 # =============================================================================
@@ -39,6 +45,7 @@ class EnvironmentInfrastructure:
     vpc: ec2.IVpc
     default_security_group: ec2.ISecurityGroup
     cluster: ecs.ICluster
+    ec2_capacity_provider_name: str
     task_execution_role: iam.IRole
     log_group: logs.ILogGroup
     # Shared ALB resources
@@ -93,6 +100,7 @@ def import_environment_infrastructure(scope: Construct, env_slug: str, shared_al
         scope, "ImportedCluster",
         cluster_name=f"{prefix}-cluster",
         vpc=vpc,
+        has_ec2_capacity=True,
         security_groups=[],
     )
 
@@ -136,6 +144,7 @@ def import_environment_infrastructure(scope: Construct, env_slug: str, shared_al
         vpc=vpc,
         default_security_group=default_security_group,
         cluster=cluster,
+        ec2_capacity_provider_name=ec2_capacity_provider_name(env_slug=env_slug),
         task_execution_role=task_execution_role,
         log_group=log_group,
         shared_alb_http_listener_arn=shared_alb_http_listener_arn,
@@ -238,6 +247,46 @@ class EcsClusterStack(Stack):
             vpc=vpc,
             container_insights_v2=ecs.ContainerInsights.ENHANCED,
         )
+
+        self.container_instance_role = iam.Role(
+            self, "ContainerInstanceRole",
+            role_name=f"{prefix}-ecs-container-instance-role",
+            assumed_by=iam.ServicePrincipal("ec2.amazonaws.com"),
+            managed_policies=[
+                iam.ManagedPolicy.from_aws_managed_policy_name("service-role/AmazonEC2ContainerServiceforEC2Role"),
+                iam.ManagedPolicy.from_aws_managed_policy_name("AmazonSSMManagedInstanceCore"),
+            ],
+        )
+        self.container_instance_security_group = ec2.SecurityGroup(
+            self, "ContainerInstanceSecurityGroup",
+            vpc=vpc,
+            security_group_name=f"{prefix}-ecs-container-instance-sg",
+            description="Security group for ECS EC2 container instances - no inbound (SSM only)",
+            allow_all_outbound=True,
+        )
+        self.container_instance_asg = autoscaling.AutoScalingGroup(
+            self, "ContainerInstanceAsg",
+            auto_scaling_group_name=f"{prefix}-ecs-container-instances",
+            vpc=vpc,
+            vpc_subnets=ec2.SubnetSelection(subnet_type=ec2.SubnetType.PRIVATE_WITH_EGRESS),
+            instance_type=ec2.InstanceType.of(ec2.InstanceClass.M8G, ec2.InstanceSize.LARGE),
+            machine_image=ecs.EcsOptimizedImage.amazon_linux2023(hardware_type=ecs.AmiHardwareType.ARM),
+            role=self.container_instance_role,
+            security_group=self.container_instance_security_group,
+            min_capacity=0,
+            desired_capacity=0,
+            max_capacity=4,
+            new_instances_protected_from_scale_in=False,
+        )
+        self.ec2_capacity_provider = ecs.AsgCapacityProvider(
+            self, "Ec2CapacityProvider",
+            capacity_provider_name=ec2_capacity_provider_name(env_slug=env_slug),
+            auto_scaling_group=self.container_instance_asg,
+            enable_managed_scaling=True,
+            enable_managed_draining=True,
+            enable_managed_termination_protection=False,
+        )
+        self.cluster.add_asg_capacity_provider(self.ec2_capacity_provider)
 
         # Task Execution Role
         self.task_execution_role = iam.Role(
@@ -362,6 +411,7 @@ class EcsClusterStack(Stack):
         CfnOutput(self, "SharedAlbSecurityGroupId", value=self.alb_security_group.security_group_id, export_name=f"{prefix}-shared-alb-sg-id")
         CfnOutput(self, "SharedAlbHttpListenerArn", value=self.http_listener.listener_arn, export_name=f"{prefix}-shared-alb-http-listener-arn")
         CfnOutput(self, "SharedAlbCanonicalHostedZoneId", value=self.shared_alb.load_balancer_canonical_hosted_zone_id, export_name=f"{prefix}-shared-alb-canonical-hz-id")
+        CfnOutput(self, "Ec2CapacityProviderName", value=self.ec2_capacity_provider.capacity_provider_name, export_name=f"{prefix}-ec2-capacity-provider-name")
 
 
 class BuilderStack(Stack):

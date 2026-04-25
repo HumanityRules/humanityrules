@@ -99,5 +99,6 @@ class BedrockPlatformCapabilityTests(SimpleTestCase):
             }
 
             self.assertEqual(template["platform_capabilities"], ["bedrock-runtime"])
+            self.assertEqual(template["default_compute_mode"], "ec2")
             self.assertNotIn("AWS_BEDROCK_ACCESS_KEY_ID", secret_names)
             self.assertNotIn("AWS_BEDROCK_SECRET_ACCESS_KEY", secret_names)
