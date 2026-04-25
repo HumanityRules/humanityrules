@@ -2,12 +2,13 @@
 Open an interactive shell in a deployed customer app container via ECS Exec.
 
 ECS Exec uses the SSM Session Manager plugin under the hood (same tooling as
-doh_efs_browse). This command connects to an existing Fargate task for the app
+doh_efs_browse). This command connects to an existing ECS task for the app
 service — it does not start a temporary task.
 
 Usage:
     uv run manage.py doh_app_shell --account "CH Sandbox" --app my-app-slug
     uv run manage.py doh_app_shell --account "CH Sandbox" --env prod --app my-app-slug
+    uv run manage.py doh_app_shell --account "CH Sandbox" --app my-app-slug --container hermes
     uv run manage.py doh_app_shell --account "CH Sandbox" --org "Course Hero" --app my-app-slug
 
 Requires:
@@ -25,6 +26,64 @@ from django.core.management.base import BaseCommand, CommandError
 from devopshero_app.models import App
 
 from ._aws_account_resolver import add_aws_target_args, resolve_aws_target
+
+
+def _template_container_names(app: App) -> list[str]:
+    """Return stable container names declared by the app's source template."""
+    template = app.source_template
+    if template is None:
+        return []
+    return [
+        c["name"]
+        for c in template.containers or []
+        if c.get("name")
+    ]
+
+
+def _default_template_container_name(app: App) -> str | None:
+    """Choose the default template container for ECS Exec."""
+    template = app.source_template
+    if template is None:
+        return None
+
+    container_names = _template_container_names(app=app)
+    if not container_names:
+        return None
+    if len(container_names) == 1:
+        return container_names[0]
+    if template.alb_target_container in container_names:
+        return template.alb_target_container
+    raise CommandError(
+        f"App '{app.slug}' has multiple template containers and no valid alb_target_container. "
+        f"Choose one with --container ({', '.join(container_names)})."
+    )
+
+
+def _resolve_ecs_container_name(app: App, requested_container: str | None) -> str:
+    """Resolve a stable template container name to the actual ECS container name."""
+    container_names = _template_container_names(app=app)
+    if not container_names:
+        return requested_container or app.slug
+
+    if requested_container:
+        if requested_container.startswith(f"{app.slug}-"):
+            return requested_container
+        if requested_container in container_names:
+            return f"{app.slug}-{requested_container}"
+        if requested_container == "sidecar" and app.source_template and app.source_template.sidecar_enabled:
+            return f"{app.slug}-sidecar"
+        valid_names = list(container_names)
+        if app.source_template and app.source_template.sidecar_enabled:
+            valid_names.append("sidecar")
+        raise CommandError(
+            f"Container '{requested_container}' is not declared by template '{app.source_template.slug}'. "
+            f"Choose one of: {', '.join(valid_names)}."
+        )
+
+    default_container = _default_template_container_name(app=app)
+    if default_container is None:
+        return app.slug
+    return f"{app.slug}-{default_container}"
 
 
 def _wait_for_task_running(ecs_client, cluster: str, task_arn: str, stdout) -> None:
@@ -131,6 +190,13 @@ class Command(BaseCommand):
         add_aws_target_args(parser)
         parser.add_argument("--app", required=True, help="App slug (same as ECS container name)")
         parser.add_argument(
+            "--container",
+            help=(
+                "Template container name to shell into. Defaults to the sole container, "
+                "or the template's ALB target when multiple containers exist."
+            ),
+        )
+        parser.add_argument(
             "--command",
             default="/bin/bash",
             help="Executable to run inside the container (default: /bin/bash)",
@@ -138,6 +204,7 @@ class Command(BaseCommand):
 
     def handle(self, *args, **options):
         app_slug = options["app"]
+        requested_container = options.get("container")
         shell_command = options["command"]
 
         target = resolve_aws_target(
@@ -148,13 +215,16 @@ class Command(BaseCommand):
         env_slug = target.environment.slug
 
         try:
-            app = App.objects.get(organization=aws_account.organization, slug=app_slug)
+            app = App.objects.select_related("source_template").get(
+                organization=aws_account.organization,
+                slug=app_slug,
+            )
         except App.DoesNotExist:
             raise CommandError(f"No app with slug '{app_slug}' in organization '{aws_account.organization.name}'.")
 
         cluster_name = f"devopshero-{env_slug}-cluster"
         service_name = f"doh-{env_slug}-{app.slug}"
-        container_name = app.slug
+        container_name = _resolve_ecs_container_name(app=app, requested_container=requested_container)
 
         ecs_client = session.client("ecs")
 

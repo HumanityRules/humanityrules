@@ -264,17 +264,23 @@ class EcsClusterStack(Stack):
             description="Security group for ECS EC2 container instances - no inbound (SSM only)",
             allow_all_outbound=True,
         )
+        container_instance_user_data = ec2.UserData.for_linux()
+        self.container_instance_launch_template = ec2.LaunchTemplate(
+            self, "ContainerInstanceLaunchTemplate",
+            launch_template_name=f"{prefix}-ecs-container-instances",
+            instance_type=ec2.InstanceType.of(ec2.InstanceClass.M8G, ec2.InstanceSize.LARGE),
+            machine_image=ecs.EcsOptimizedImage.amazon_linux2023(hardware_type=ecs.AmiHardwareType.ARM),
+            role=self.container_instance_role,
+            security_group=self.container_instance_security_group,
+            user_data=container_instance_user_data,
+        )
         self.container_instance_asg = autoscaling.AutoScalingGroup(
             self, "ContainerInstanceAsg",
             auto_scaling_group_name=f"{prefix}-ecs-container-instances",
             vpc=vpc,
             vpc_subnets=ec2.SubnetSelection(subnet_type=ec2.SubnetType.PRIVATE_WITH_EGRESS),
-            instance_type=ec2.InstanceType.of(ec2.InstanceClass.M8G, ec2.InstanceSize.LARGE),
-            machine_image=ecs.EcsOptimizedImage.amazon_linux2023(hardware_type=ecs.AmiHardwareType.ARM),
-            role=self.container_instance_role,
-            security_group=self.container_instance_security_group,
+            launch_template=self.container_instance_launch_template,
             min_capacity=0,
-            desired_capacity=0,
             max_capacity=4,
             new_instances_protected_from_scale_in=False,
         )
