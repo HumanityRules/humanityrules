@@ -32,7 +32,7 @@ DOH namespaces its own knobs as `DOH_LLM_*` (main) and `DOH_AUX_*` (auxiliary sl
 
 Bedrock has a few quirks handled by the entrypoint:
 
-- Credentials come from the ECS task role via the standard boto3 credential chain; only `AWS_BEDROCK_REGION` needs to be set.
+- `AWS_BEDROCK_REGION` is mirrored to the standard AWS region vars. Credentials come from the ECS task role.
 - `DOH_LLM_BASE_URL` is derived from the region.
 - `boto3` is installed into the shared venv on first boot by `start.sh` (sentinel-guarded), so switching to Bedrock later doesn't require a rebuild.
 
