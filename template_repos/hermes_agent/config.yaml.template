@@ -31,12 +31,16 @@ agent:
     technical: You are a technical expert. Provide detailed, accurate technical information.
 
 terminal:
-  backend: local
+  backend: __TERMINAL_BACKEND__
   modal_mode: auto
-  cwd: .
+  cwd: __TERMINAL_CWD__
   timeout: 180
   env_passthrough: []
   persistent_shell: true
+  docker_image: "nikolaik/python-nodejs:python3.11-nodejs20"
+  docker_mount_cwd_to_workspace: false
+  docker_volumes: __DOCKER_VOLUMES__
+  container_persistent: false
 
 browser:
   inactivity_timeout: 120

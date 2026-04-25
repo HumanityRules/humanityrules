@@ -3,8 +3,14 @@ FROM ghcr.io/nesquena/hermes-webui:0.50.126
 USER root
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends git patch \
+    && apt-get install -y --no-install-recommends docker-cli git patch \
     && rm -rf /var/lib/apt/lists/*
+
+# ECS-optimized EC2 hosts expose /var/run/docker.sock as root:993 with 0660.
+# Keep Hermes running as its required UID/GID while granting Docker socket access.
+RUN DOCKER_SOCK_GROUP="$(getent group 993 | cut -d: -f1)" \
+    && if [ -z "$DOCKER_SOCK_GROUP" ]; then groupadd --gid 993 dockerhost && DOCKER_SOCK_GROUP=dockerhost; fi \
+    && usermod --append --groups "$DOCKER_SOCK_GROUP" hermeswebui
 
 RUN git clone --depth 1 --branch v2026.4.16 https://github.com/NousResearch/hermes-agent.git \
         /opt/hermes-defaults/hermes-agent \

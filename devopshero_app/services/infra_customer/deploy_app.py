@@ -588,6 +588,8 @@ class AppStack(Stack):
         # volume is declared once at the task level; containers that opt in
         # (c.efs_mount) each add their own MountPoint below.
         efs_access_point = None
+        efs_docker_workspace_access_point = None
+        docker_workspace_subpath = None
         if app_config.efs_config:
             efs_file_system = efs.FileSystem.from_file_system_attributes(
                 self, "ImportedEfs",
@@ -596,6 +598,11 @@ class AppStack(Stack):
             )
             uid = str(app_config.efs_config.posix_uid)
             gid = str(app_config.efs_config.posix_gid)
+            docker_workspace_subpath = app_config.efs_config.docker_workspace_subpath
+            if docker_workspace_subpath and (
+                docker_workspace_subpath.startswith("/") or ".." in docker_workspace_subpath.split("/")
+            ):
+                raise ValueError("EFS docker workspace subpath must be a relative path without '..'")
             efs_access_point = efs.AccessPoint(
                 self, "AppAccessPoint",
                 file_system=efs_file_system,
@@ -603,12 +610,23 @@ class AppStack(Stack):
                 create_acl=efs.Acl(owner_uid=uid, owner_gid=gid, permissions="755"),
                 posix_user=efs.PosixUser(uid=uid, gid=gid),
             )
+            if docker_workspace_subpath:
+                efs_docker_workspace_access_point = efs.AccessPoint(
+                    self, "AppDockerWorkspaceAccessPoint",
+                    file_system=efs_file_system,
+                    path=f"/deployments/{app_config.app_name}/{docker_workspace_subpath}",
+                    create_acl=efs.Acl(owner_uid=uid, owner_gid=gid, permissions="755"),
+                    posix_user=efs.PosixUser(uid=uid, gid=gid),
+                )
+            efs_access_point_arns = [efs_access_point.access_point_arn]
+            if efs_docker_workspace_access_point:
+                efs_access_point_arns.append(efs_docker_workspace_access_point.access_point_arn)
             task_role.add_to_policy(iam.PolicyStatement(
                 actions=["elasticfilesystem:ClientMount", "elasticfilesystem:ClientWrite"],
                 resources=[efs_file_system.file_system_arn],
                 conditions={
                     "StringEquals": {
-                        "elasticfilesystem:AccessPointArn": efs_access_point.access_point_arn,
+                        "elasticfilesystem:AccessPointArn": efs_access_point_arns,
                     },
                 },
             ))
@@ -632,6 +650,9 @@ class AppStack(Stack):
             app_secret_resource = secretsmanager.Secret.from_secret_name_v2(
                 self, "AppSecret", f"devopshero/{env_slug}/{app_config.app_name}/secrets",
             )
+
+        if app_config.compute_mode != "ec2" and any(c.host_mounts for c in app_config.containers):
+            raise ValueError("Host bind mounts are only supported for EC2-backed ECS tasks")
 
         if app_config.compute_mode == "ec2":
             task_definition = ecs.TaskDefinition(
@@ -668,6 +689,18 @@ class AppStack(Stack):
                     transit_encryption="ENABLED",
                     authorization_config=ecs.AuthorizationConfig(
                         access_point_id=efs_access_point.access_point_id,
+                        iam="ENABLED",
+                    ),
+                ),
+            )
+        if efs_docker_workspace_access_point:
+            task_definition.add_volume(
+                name="app-docker-workspace",
+                efs_volume_configuration=ecs.EfsVolumeConfiguration(
+                    file_system_id=self.environment_infra.efs_file_system_id,
+                    transit_encryption="ENABLED",
+                    authorization_config=ecs.AuthorizationConfig(
+                        access_point_id=efs_docker_workspace_access_point.access_point_id,
                         iam="ENABLED",
                     ),
                 ),
@@ -719,6 +752,7 @@ class AppStack(Stack):
                 environment=environment or None,
                 secrets=secrets if secrets else None,
                 health_check=health_check,
+                user=c.user,
             )
             # Only the ALB-target container needs a port mapping visible to ECS
             # task-networking — sibling containers communicate over the task's
@@ -735,6 +769,28 @@ class AppStack(Stack):
                         container_path=app_config.efs_config.mount_path,
                         source_volume="app-workspace",
                         read_only=False,
+                    ),
+                )
+                if efs_docker_workspace_access_point and docker_workspace_subpath:
+                    container.add_mount_points(
+                        ecs.MountPoint(
+                            container_path=f"{app_config.efs_config.mount_path.rstrip('/')}/{docker_workspace_subpath}",
+                            source_volume="app-docker-workspace",
+                            read_only=False,
+                        ),
+                    )
+
+            for mount_idx, host_mount in enumerate(c.host_mounts):
+                volume_name = f"host-bind-{idx}-{mount_idx}"
+                task_definition.add_volume(
+                    name=volume_name,
+                    host=ecs.Host(source_path=host_mount.source_path),
+                )
+                container.add_mount_points(
+                    ecs.MountPoint(
+                        container_path=host_mount.container_path,
+                        source_volume=volume_name,
+                        read_only=host_mount.read_only,
                     ),
                 )
 
