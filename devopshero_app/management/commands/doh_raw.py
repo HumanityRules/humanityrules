@@ -7,6 +7,7 @@ Usage:
     uv run manage.py doh_raw --base --account "Humanity Rules Sandbox" --teardown
     uv run manage.py doh_raw --base --account "Humanity Rules Sandbox" --synth-only
     uv run manage.py doh_raw --base --account "Humanity Rules Sandbox" --env prod
+    uv run manage.py doh_raw --base --account "Humanity Rules Sandbox" --hosted-zone dev.example.com
 
     # Apps
     uv run manage.py doh_raw --app simple-dashboard --account "Humanity Rules Sandbox"
@@ -74,7 +75,7 @@ class Command(BaseCommand):
             help="Environment slug (default: 'default'). Controls resource naming and isolation.",
         )
 
-        # App-specific options
+        # Base/app options
         parser.add_argument(
             "--image-tag",
             default="latest",
@@ -82,7 +83,7 @@ class Command(BaseCommand):
         )
         parser.add_argument(
             "--hosted-zone",
-            help="Hosted zone for HTTPS and DNS (e.g., 'dev.example.com'). Only used with --app",
+            help="Hosted zone for HTTPS and DNS (e.g., 'dev.example.com').",
         )
 
     def handle(self, *args, **options):
@@ -90,9 +91,6 @@ class Command(BaseCommand):
         # Validate args
         if options["image_tag"] != "latest" and options["base"]:
             raise CommandError("--image-tag is only valid with --app")
-        if options["hosted_zone"] and options["base"]:
-            raise CommandError("--hosted-zone is only valid with --app")
-
         if options["synth_only"] and options["teardown"]:
             raise CommandError("--synth-only and --teardown are mutually exclusive")
 
@@ -121,6 +119,7 @@ class Command(BaseCommand):
             success = self._handle_base(
                 session=session,
                 env_slug=options["env"],
+                hosted_zone=options["hosted_zone"],
                 teardown=options["teardown"],
                 synth_only=options["synth_only"],
             )
@@ -159,7 +158,7 @@ class Command(BaseCommand):
                 "Use the 12-digit account ID instead."
             )
 
-    def _handle_base(self, session, env_slug: str, teardown: bool, synth_only: bool) -> bool:
+    def _handle_base(self, session, env_slug: str, hosted_zone: str | None, teardown: bool, synth_only: bool) -> bool:
         """Handle base layer deployment/teardown."""
         if teardown:
             return deploy_base.teardown(session=session, env_slug=env_slug)
@@ -168,6 +167,7 @@ class Command(BaseCommand):
                 session=session,
                 env_slug=env_slug,
                 synth_only=synth_only,
+                shared_alb_hosted_zone=hosted_zone,
             )
 
     def _handle_app(

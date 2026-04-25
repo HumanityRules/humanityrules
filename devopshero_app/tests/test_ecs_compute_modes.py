@@ -115,6 +115,12 @@ class EcsComputeModeTests(SimpleTestCase):
         })
         template.has_resource_properties("AWS::AutoScaling::AutoScalingGroup", {
             "MinSize": "0",
-            "DesiredCapacity": "0",
+            "DesiredCapacity": Match.absent(),
             "MaxSize": "4",
+            "LaunchTemplate": {
+                "LaunchTemplateId": Match.any_value(),
+                "Version": Match.any_value(),
+            },
         })
+        template.resource_count_is("AWS::AutoScaling::LaunchConfiguration", 0)
+        template.resource_count_is("AWS::EC2::LaunchTemplate", 1)

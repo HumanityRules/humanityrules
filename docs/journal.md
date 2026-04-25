@@ -1,5 +1,27 @@
 # DevOpsHero Development Journal
 
+## 2026-04-25 12:18 - [Deployment] Hermes EC2-backed ECS compute mode
+
+**Conversation:** [2026-04-25-1218-db633dc8.md](conversations/2026-04-25-1218-db633dc8.md)
+
+Added a second ECS compute mode so Hermes can run on EC2-backed ECS capacity as well as the existing Fargate path. The design keeps one ECS cluster per DOH environment and adds an EC2 Auto Scaling Group capacity provider to that cluster. `DeploymentBlueprint.compute_mode` is the per-app/environment selection, `AppTemplate.default_compute_mode` supplies the deploy-form default, and `AppConfig.compute_mode` carries the choice into CDK. Existing apps default to Fargate; Hermes Personal and Hermes Slack now default to EC2 capacity.
+
+The app deploy path now branches at the ECS task/service layer. Fargate deployments keep the existing `FargateTaskDefinition` + `FargateService` path. EC2 deployments use an EC2-compatible task definition with `awsvpc` networking and an `Ec2Service` capacity-provider strategy targeting `devopshero-{env_slug}-ec2-capacity`. We deliberately kept the task networking model the same: private subnets, IP target groups, the existing app security group, EFS access points, task roles, auth sidecar, and localhost sibling-container communication all continue to work the same way.
+
+The environment base stack creates a dedicated ECS container-instance role, security group, Launch Template, ASG, and ECS ASG capacity provider. The instance type is currently hardcoded as `m8g.large` (ARM64 Graviton4) so it matches the existing ARM64 image build/runtime target. The ASG has `min_capacity=0` and no explicit desired capacity; this keeps idle EC2 instance cost at zero while avoiding CDK's warning that every deploy would reset the ASG size. ECS managed scaling is responsible for scaling instances once EC2-backed services need capacity.
+
+Two deployment-time lessons came out of testing against Humanity Rules Sandbox. First, the direct `doh_raw --base` command still called the old `deploy_base.deploy` signature and did not pass `shared_alb_hosted_zone`; normal environment provisioning had the right path, but the raw operator command needed to be updated. Second, CDK's default `AutoScalingGroup` synthesis used a legacy Launch Configuration, and the account rejected it with: `The Launch Configuration creation operation is not available in your account. Use launch templates to create configuration templates for your Auto Scaling groups.` The fix was to create an explicit EC2 Launch Template and pass mutable Linux user-data into it so CDK still injects the `ECS_CLUSTER=...` registration line.
+
+`doh_app_shell` also needed to catch up with template-backed container naming. The old command assumed the ECS container name was exactly the app slug. New template-backed tasks name containers as `{app_slug}-{template_container_name}`, so the command now defaults to the sole template container when there is one, or to `source_template.alb_target_container` for multi-container templates. Operators can override with `--container hermes`, `--container sidecar-mcp`, or `--container sidecar`; full ECS container names still pass through. I initially added explicit `ssmmessages:*Channel` grants to the app task role for ECS Exec, but removed them after confirming `doh_app_shell` worked against an app that had not been redeployed. The container-name resolution was the real compatibility issue, and broadening task-role IAM was unnecessary.
+
+**Key points:**
+
+- EC2 capacity is environment infrastructure, not app infrastructure. The base stack must be redeployed before an EC2-mode app deploy can work; app deploys preflight that the capacity provider is associated with the cluster and fail clearly if not.
+- Fargate remains the compatibility default for existing rows and non-Hermes templates. Hermes defaults to EC2 because long-lived agents are the first concrete use case for customer-owned compute, but the deploy form still lets operators choose Fargate.
+- The ASG can exist with zero EC2 instances. Seeing no container instances while no EC2-backed service is running is expected; the ASG and capacity provider are the resources that prove the base stack updated.
+- `m8g.large` costs roughly `$0.0898/hour` in `us-east-1`, about `$66/month` if one instance runs 24/7. With `min_capacity=0`, idle instance cost is zero; always-on Hermes on EC2 should be budgeted around one running host unless tasks bin-pack onto an existing instance.
+- Tests now synthesize both compute modes, assert the EC2 path uses a Launch Template rather than a Launch Configuration, verify compute-mode propagation from template/blueprint into `AppConfig`, and cover `doh_app_shell` container-name resolution.
+
 ## 2026-04-24 12:39 - [Platform] Hermes Bedrock access moved from static keys to ECS task role
 
 Hermes no longer needs static Bedrock access keys. The current codebase had conflicting signals: `template_repos/hermes_agent/entrypoint.sh` already documented that Bedrock deploys should rely on ECS task-role credentials, but the runtime still hard-failed unless `AWS_BEDROCK_ACCESS_KEY_ID` and `AWS_BEDROCK_SECRET_ACCESS_KEY` were injected as app secrets. Meanwhile the per-app ECS task role created by `deploy_app.py` only granted platform plumbing permissions (Secrets Manager, EFS, database, sidecar token), so removing the keys without a CDK-owned task-role grant would have broken Hermes immediately.
