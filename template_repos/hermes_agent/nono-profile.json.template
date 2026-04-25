@@ -64,9 +64,18 @@
         "inject_mode": "header",
         "inject_header": "Authorization",
         "credential_format": "Bearer {}"
+      },
+      "aws-creds": {
+        "upstream": "http://127.0.0.1:6777",
+        "credential_key": "file:///tmp/doh-secrets/aws_creds_token",
+        "env_var": "AWS_CONTAINER_AUTHORIZATION_TOKEN",
+        "inject_mode": "header",
+        "inject_header": "Authorization",
+        "credential_format": "{}"
       }
     },
     "credentials": __ACTIVE_CREDENTIALS__,
+    "allow_domain": __ALLOW_DOMAINS__,
     "listen_port": [8787]
   },
   "environment": {
@@ -77,6 +86,8 @@
       "HERMES_*", "DOH_LLM_PROVIDER", "DOH_LLM_MODEL",
       "DOH_AUX_PROVIDER", "DOH_AUX_MODEL", "DOH_SLACK_ENABLED",
       "SLACK_ALLOW_ALL_USERS", "SLACK_ALLOWED_USERS", "SLACK_HOME_CHANNEL",
+      "AWS_REGION", "AWS_DEFAULT_REGION", "AWS_BEDROCK_REGION",
+      "AWS_CONTAINER_CREDENTIALS_FULL_URI",
       "VIRTUAL_ENV", "UV_*", "PIP_*",
       "PYTHONDONTWRITEBYTECODE", "PYTHONUNBUFFERED"
     ]

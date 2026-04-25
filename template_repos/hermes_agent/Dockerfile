@@ -3,7 +3,7 @@ FROM ghcr.io/nesquena/hermes-webui:0.50.126
 USER root
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends git patch curl ca-certificates libdbus-1-3 \
+    && apt-get install -y --no-install-recommends git patch curl ca-certificates libdbus-1-3 socat \
     && rm -rf /var/lib/apt/lists/*
 
 # nono: credential-injecting reverse proxy + env scrubbing. Hermes runs as
