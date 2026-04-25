@@ -102,3 +102,22 @@ class BedrockPlatformCapabilityTests(SimpleTestCase):
             self.assertEqual(template["default_compute_mode"], "ec2")
             self.assertNotIn("AWS_BEDROCK_ACCESS_KEY_ID", secret_names)
             self.assertNotIn("AWS_BEDROCK_SECRET_ACCESS_KEY", secret_names)
+
+    def test_hermes_templates_enable_docker_backed_tools(self) -> None:
+        for template in [
+            seed_app_templates.HERMES_PERSONAL_TEMPLATE,
+            seed_app_templates.HERMES_SLACK_TEMPLATE,
+        ]:
+            hermes_container = next(c for c in template["containers"] if c["name"] == "hermes")
+            runtime_vars = {var["name"]: var for var in hermes_container["runtime_variables"]}
+
+            self.assertEqual(template["efs_config"]["docker_workspace_subpath"], "workspace")
+            self.assertNotIn("user", hermes_container)
+            self.assertEqual(hermes_container["host_mounts"], [
+                {
+                    "source_path": "/var/run/docker.sock",
+                    "container_path": "/var/run/docker.sock",
+                    "read_only": False,
+                },
+            ])
+            self.assertEqual(runtime_vars["DOH_HERMES_REQUIRE_DOCKER"]["value"], "1")

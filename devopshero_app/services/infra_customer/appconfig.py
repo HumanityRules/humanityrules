@@ -65,6 +65,15 @@ class EfsConfig:
     mount_path: str
     posix_uid: int
     posix_gid: int
+    docker_workspace_subpath: str | None = None
+
+
+@dataclass
+class HostMountConfig:
+    """Host bind mount exposed to one container in an EC2-backed task."""
+    source_path: str
+    container_path: str
+    read_only: bool
 
 
 @dataclass
@@ -114,6 +123,14 @@ class ContainerConfig:
 
     # Opt-in: mount the task-level EFS volume (AppConfig.efs_config) into this container.
     efs_mount: bool = False
+
+    # EC2-only host bind mounts. Use sparingly: a writable Docker socket gives
+    # the container control of the container instance's Docker daemon.
+    host_mounts: list[HostMountConfig] = field(default_factory=list)
+
+    # Optional ECS container user override, e.g. "0" when a container must
+    # access a root-owned host socket.
+    user: str | None = None
 
     # Optional override for the container's CMD (the image's ENTRYPOINT is preserved).
     # Useful for prebuilt images whose default CMD doesn't match how DOH wants to

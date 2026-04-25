@@ -356,6 +356,13 @@ _HERMES_CONTAINER_BASE = {
     "health_check_command": "",
     "health_check_grace_period": 60,
     "efs_mount": True,
+    "host_mounts": [
+        {
+            "source_path": "/var/run/docker.sock",
+            "container_path": "/var/run/docker.sock",
+            "read_only": False,
+        },
+    ],
 }
 
 # Upstream credentials consumed by the learneo-mcp aggregator. All empty
@@ -429,7 +436,12 @@ HERMES_PERSONAL_TEMPLATE = {
     "memory": 2048,
     "default_compute_mode": "ec2",
     "datastore_config": None,
-    "efs_config": {"mount_path": "/home/hermeswebui/.hermes", "posix_uid": 1024, "posix_gid": 1024},
+    "efs_config": {
+        "mount_path": "/home/hermeswebui/.hermes",
+        "posix_uid": 1024,
+        "posix_gid": 1024,
+        "docker_workspace_subpath": "workspace",
+    },
     "alb_target_container": "hermes",
     "containers": [
         {
@@ -449,6 +461,17 @@ HERMES_PERSONAL_TEMPLATE = {
                         "auto_generate": False,
                         "default_value": "127.0.0.1",
                         "value": "127.0.0.1",
+                        "user_editable": False,
+                    },
+                    {
+                        "name": "DOH_HERMES_REQUIRE_DOCKER",
+                        "group": "Tools",
+                        "category": "config",
+                        "description": "Require Docker-backed Hermes tools at startup",
+                        "required": True,
+                        "auto_generate": False,
+                        "default_value": "1",
+                        "value": "1",
                         "user_editable": False,
                     },
                 ]
@@ -483,7 +506,12 @@ HERMES_SLACK_TEMPLATE = {
     "memory": 4096,
     "default_compute_mode": "ec2",
     "datastore_config": None,
-    "efs_config": {"mount_path": "/home/hermeswebui/.hermes", "posix_uid": 1024, "posix_gid": 1024},
+    "efs_config": {
+        "mount_path": "/home/hermeswebui/.hermes",
+        "posix_uid": 1024,
+        "posix_gid": 1024,
+        "docker_workspace_subpath": "workspace",
+    },
     "sidecar_enabled": False,
     "platform_capabilities": ["bedrock-runtime"],
     "alb_target_container": "hermes",
@@ -492,7 +520,19 @@ HERMES_SLACK_TEMPLATE = {
             **_HERMES_CONTAINER_BASE,
             "runtime_variables": (
                 _HERMES_LLM_VARS + _HERMES_WEBUI_PASSWORD_VAR + _HERMES_CREDENTIAL_VARS
-                + _HERMES_BEDROCK_VARS + _HERMES_SLACK_VARS
+                + _HERMES_BEDROCK_VARS + _HERMES_SLACK_VARS + [
+                    {
+                        "name": "DOH_HERMES_REQUIRE_DOCKER",
+                        "group": "Tools",
+                        "category": "config",
+                        "description": "Require Docker-backed Hermes tools at startup",
+                        "required": True,
+                        "auto_generate": False,
+                        "default_value": "1",
+                        "value": "1",
+                        "user_editable": False,
+                    },
+                ]
             ),
         },
         _LEARNEO_MCP_CONTAINER,

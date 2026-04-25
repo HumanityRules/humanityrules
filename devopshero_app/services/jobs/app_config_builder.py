@@ -104,6 +104,15 @@ def _build_container_config(
         environment_variables=list(blueprint_container.get("environment_variables") or []),
         app_secrets=dict(blueprint_container.get("app_secrets") or {}),
         efs_mount=bool(template_container.get("efs_mount", False)),
+        host_mounts=[
+            infra_customer.appconfig.HostMountConfig(
+                source_path=m["source_path"],
+                container_path=m["container_path"],
+                read_only=bool(m.get("read_only", False)),
+            )
+            for m in template_container.get("host_mounts", [])
+        ],
+        user=template_container.get("user") or None,
         command=list(command) if command else None,
         essential=bool(template_container.get("essential", True)),
     )
@@ -160,6 +169,7 @@ def build_app_config_from_blueprint(blueprint: DeploymentBlueprint, repo_path: P
             mount_path=raw["mount_path"],
             posix_uid=raw["posix_uid"],
             posix_gid=raw["posix_gid"],
+            docker_workspace_subpath=raw.get("docker_workspace_subpath"),
         )
 
     blueprint_by_name = _match_blueprint_containers_to_template(

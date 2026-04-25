@@ -43,6 +43,69 @@ fi
 
 mkdir -p "$HERMES_DIR" "$HERMES_DIR/workspace"
 
+TERMINAL_BACKEND="local"
+TERMINAL_CWD="."
+DOCKER_VOLUMES="[]"
+
+if [ -S /var/run/docker.sock ]; then
+    if DOH_HERMES_WORKSPACE_DOCKER_VOLUME="$(HERMES_DIR="$HERMES_DIR" python3 <<'PY'
+import json
+import os
+import subprocess
+import urllib.request
+
+hermes_dir = os.environ["HERMES_DIR"]
+workspace_dir = os.path.join(hermes_dir, "workspace")
+metadata_uri = os.environ.get("ECS_CONTAINER_METADATA_URI_V4")
+
+if not metadata_uri:
+    raise SystemExit("ECS_CONTAINER_METADATA_URI_V4 is not set")
+
+with urllib.request.urlopen(metadata_uri, timeout=2) as response:
+    metadata = json.load(response)
+
+docker_id = metadata.get("DockerId")
+if not docker_id:
+    raise SystemExit("ECS metadata did not include DockerId")
+
+inspect = subprocess.run(
+    ["docker", "inspect", docker_id],
+    check=True,
+    capture_output=True,
+    text=True,
+)
+container = json.loads(inspect.stdout)[0]
+for mount in container.get("Mounts", []):
+    if mount.get("Destination") == workspace_dir:
+        volume_ref = mount.get("Name") or mount.get("Source")
+        if not volume_ref:
+            raise SystemExit(f"Docker mount for {workspace_dir} has no reusable volume reference")
+        print(volume_ref)
+        break
+else:
+    raise SystemExit(f"No Docker volume found for {workspace_dir}")
+PY
+    )"; then
+        export DOH_HERMES_WORKSPACE_DOCKER_VOLUME
+        TERMINAL_BACKEND="docker"
+        TERMINAL_CWD="/workspace"
+        DOCKER_VOLUMES="$(python3 - <<'PY'
+import json
+import os
+
+print(json.dumps([f"{os.environ['DOH_HERMES_WORKSPACE_DOCKER_VOLUME']}:/workspace"]))
+PY
+        )"
+        echo "[entrypoint] Docker-backed Hermes tools enabled."
+    elif [ "$DOH_HERMES_REQUIRE_DOCKER" = "1" ]; then
+        echo "FATAL: Docker socket is mounted but Hermes could not resolve the workspace Docker volume" >&2
+        exit 1
+    fi
+elif [ "$DOH_HERMES_REQUIRE_DOCKER" = "1" ]; then
+    echo "FATAL: DOH_HERMES_REQUIRE_DOCKER=1 but /var/run/docker.sock is not mounted" >&2
+    exit 1
+fi
+
 # Generate config.yaml from template on first boot.
 # Existing files (from a previous deploy on EFS) are never overwritten.
 if [ ! -f "$HERMES_DIR/config.yaml" ]; then
@@ -53,6 +116,9 @@ if [ ! -f "$HERMES_DIR/config.yaml" ]; then
         -e "s|__AUX_PROVIDER__|${DOH_AUX_PROVIDER}|g" \
         -e "s|__AUX_MODEL__|${DOH_AUX_MODEL}|g" \
         -e "s|__AUX_BASE_URL__|${DOH_AUX_BASE_URL}|g" \
+        -e "s|__TERMINAL_BACKEND__|${TERMINAL_BACKEND}|g" \
+        -e "s|__TERMINAL_CWD__|${TERMINAL_CWD}|g" \
+        -e "s|__DOCKER_VOLUMES__|${DOCKER_VOLUMES}|g" \
         /opt/hermes-defaults/config.yaml.template > "$HERMES_DIR/config.yaml"
 
     # Hermes reads bedrock.region from config.yaml (runtime_provider.py:895).
