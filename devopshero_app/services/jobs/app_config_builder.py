@@ -184,6 +184,7 @@ def build_app_config_from_blueprint(blueprint: DeploymentBlueprint, repo_path: P
         cpu=blueprint.cpu,
         memory=blueprint.memory,
         containers=containers,
+        compute_mode=blueprint.compute_mode,
         app_source_path=app_source_path,
         alb_target_container=template.alb_target_container,
         database_config=database_config,

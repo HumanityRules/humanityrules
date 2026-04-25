@@ -27,6 +27,7 @@ OPENCLAW_TEMPLATE = {
     "category": "ai-assistant",
     "cpu": 1024,
     "memory": 2048,
+    "default_compute_mode": "fargate",
     "alb_target_container": "app",
     "containers": [
         {
@@ -426,6 +427,7 @@ HERMES_PERSONAL_TEMPLATE = {
     "category": "ai-assistant",
     "cpu": 1024,
     "memory": 2048,
+    "default_compute_mode": "ec2",
     "datastore_config": None,
     "efs_config": {"mount_path": "/home/hermeswebui/.hermes", "posix_uid": 1024, "posix_gid": 1024},
     "alb_target_container": "hermes",
@@ -479,6 +481,7 @@ HERMES_SLACK_TEMPLATE = {
     # cover Hermes + the learneo-mcp sidecar.
     "cpu": 2048,
     "memory": 4096,
+    "default_compute_mode": "ec2",
     "datastore_config": None,
     "efs_config": {"mount_path": "/home/hermeswebui/.hermes", "posix_uid": 1024, "posix_gid": 1024},
     "sidecar_enabled": False,

@@ -55,6 +55,12 @@
             <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">Where the app will run. Only ready environments are shown.</p>
         </div>
 
+        <div>
+            <label for="compute_mode" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Compute</label>
+            {% include "devopshero_app/partials/_dropdown_select.html#dropdown_select" with dropdown_id="compute_mode" dropdown_name="compute_mode" dropdown_value=selected_compute_mode dropdown_selected_label=selected_compute_mode_label dropdown_options=compute_mode_options %}
+            <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">Fargate is serverless ECS. EC2 capacity uses customer-owned ECS container instances.</p>
+        </div>
+
         {% if requires_owner %}
         <div>
             <label for="owner_id" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Owner</label>
@@ -135,6 +141,10 @@
                 <div class="flex">
                     <dt class="text-gray-500 dark:text-gray-400 w-24">Memory</dt>
                     <dd class="text-gray-700 dark:text-gray-300">{{ template.memory }} MiB</dd>
+                </div>
+                <div class="flex col-span-2">
+                    <dt class="text-gray-500 dark:text-gray-400 w-24">Compute</dt>
+                    <dd class="text-gray-700 dark:text-gray-300">{{ selected_compute_mode_label }}</dd>
                 </div>
                 {% if template.efs_config %}
                 <div class="flex col-span-2">

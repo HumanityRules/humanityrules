@@ -26,6 +26,7 @@ def _make_pa_template() -> AppTemplate:
         category="ai-assistant",
         cpu=1024,
         memory=2048,
+        default_compute_mode="ec2",
         alb_target_container="hermes",
         containers=[
             {
@@ -98,6 +99,8 @@ class TestOwnerFieldPresence(DeployFormOwnerBase):
         )
         self.assertEqual(response.status_code, 200)
         self.assertIn(b"Owner", response.content)
+        self.assertIn(b"Compute", response.content)
+        self.assertIn(b"EC2 Capacity", response.content)
         # Hidden input carries alice's username.
         self.assertIn(b'name="owner_id" value="alice"', response.content)
         # No dropdown option list that includes Bob.
@@ -149,6 +152,7 @@ class TestOwnerFieldSubmission(DeployFormOwnerBase):
         )
         self.assertEqual(response.status_code, 302)
         self.assertEqual(captured["owner_username"], "alice")
+        self.assertEqual(captured["compute_mode"], "ec2")
 
     @patch("devopshero_app.views.template_deploy.async_to_sync")
     def test_admin_can_pick_another_owner(self, mock_async_to_sync) -> None:
@@ -177,6 +181,7 @@ class TestOwnerFieldSubmission(DeployFormOwnerBase):
         )
         self.assertEqual(response.status_code, 302)
         self.assertEqual(captured["owner_username"], "bob")
+        self.assertEqual(captured["compute_mode"], "ec2")
 
     def test_admin_rejecting_unknown_owner(self) -> None:
         self._login(self.admin)
