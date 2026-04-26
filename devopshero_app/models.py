@@ -601,7 +601,8 @@ class AppTemplate(models.Model):
     #     "health_check_command": "",
     #     "health_check_grace_period": 0,
     #     "efs_mounts": ["home", "workspace"],  # names from efs_config.mounts
-    #     "runtime_variables": [ ... {name, category, value, ...} ... ],
+    #     "environment": {NAME: value, ...},     # DOH-managed platform constants
+    #     "configurable_variables": [ ... {name, category, value, user_editable, ...} ... ],
     #   }
     containers = models.JSONField(default=list)
 
@@ -985,7 +986,7 @@ class DeploymentBlueprint(models.Model):
     # its own `environment_variables` (list of {name, value}) and
     # `app_secrets` (dict of field -> value|""|None). Same schema that
     # _materialize_environment_variables / _materialize_app_secrets produce
-    # from a container's runtime_variables.
+    # from a container's configurable_variables.
     containers = models.JSONField(default=list)
 
     datastore = models.ForeignKey(
@@ -1434,6 +1435,13 @@ class AppRemovalJob(models.Model):
     delete_secrets = models.BooleanField(default=False)
     delete_efs_data = models.BooleanField(default=False)
     delete_policies = models.BooleanField(default=False)
+    # If True, the executor first tears down every live deployment of this app
+    # (calling app_deployment_teardown_executor.run_teardown inline) before
+    # running the cleanup + DB cascade delete. Set by the CLI's
+    # `doh_control teardown-app --remove-app` flow; the UI's "Remove App"
+    # button leaves this False because it only enables when the app is already
+    # not live.
+    teardown_first = models.BooleanField(default=False)
     status = models.CharField(max_length=20, choices=Status.choices, default=Status.PENDING)
     status_message = models.TextField(blank=True)
     created_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True)

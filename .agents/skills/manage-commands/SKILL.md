@@ -13,7 +13,7 @@ All custom commands live in `devopshero_app/management/commands/`.
 ## Command Reference
 
 - **doh_query** — Ad-hoc model queries (fields, filters, ordering). Use instead of `shell -c`.
-- **doh_control** — Control plane ops: create/teardown environments, retry deployments.
+- **doh_control** — Control plane ops: provision/teardown environments, deploy/redeploy/teardown apps.
 - **doh_raw** — Direct CDK deployment bypassing UI/DB/job-worker flow.
 - **doh_efs_browse** — Browse EFS filesystem via ECS Exec (interactive shell in customer environment).
 - **doh_app_logs** — Fetch CloudWatch logs for a customer app (works for running and crashed/stopped tasks), by account + env + app slug.

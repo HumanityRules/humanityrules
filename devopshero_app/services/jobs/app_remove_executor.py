@@ -19,23 +19,57 @@ from devopshero_app.services.infra_customer import cloudformation_utils
 from devopshero_app.services.infra_customer import iam_utils
 from devopshero_app.services.infra_customer import secrets_utils
 
+from . import app_deployment_teardown_executor
+
 logger = logging.getLogger(__name__)
 
 
-def _find_live_deployments(app: "models.App") -> list[tuple[str, str]]:
-    """Return (env_slug, deployment_status) for every env whose latest deployment isn't torn down."""
+# Deployment statuses that mean a deploy is mid-flight; we refuse to tear down
+# from underneath an active deploy worker.
+_IN_FLIGHT_DEPLOYMENT_STATUSES = frozenset({
+    models.Deployment.Status.PENDING,
+    models.Deployment.Status.BUILDING,
+    models.Deployment.Status.PUSHING,
+    models.Deployment.Status.DEPLOYING,
+    models.Deployment.Status.STARTING,
+    models.Deployment.Status.TEARING_DOWN,
+})
+
+
+def _find_live_deployments(app: "models.App") -> list[tuple[str, str, str]]:
+    """Return (deployment_id, env_slug, status) for every env whose latest deployment isn't torn down."""
     latest_by_env: dict = {}
-    for env_id, env_slug, status, created_at in models.Deployment.objects.filter(app=app).values_list(
-        "environment_id", "environment__slug", "status", "created_at",
+    for deployment_id, env_id, env_slug, status, created_at in models.Deployment.objects.filter(app=app).values_list(
+        "id", "environment_id", "environment__slug", "status", "created_at",
     ):
         existing = latest_by_env.get(env_id)
-        if existing is None or created_at > existing[2]:
-            latest_by_env[env_id] = (env_slug, status, created_at)
+        if existing is None or created_at > existing[3]:
+            latest_by_env[env_id] = (deployment_id, env_slug, status, created_at)
     return [
-        (env_slug, status)
-        for env_slug, status, _ in latest_by_env.values()
+        (str(deployment_id), env_slug, status)
+        for deployment_id, env_slug, status, _ in latest_by_env.values()
         if status != models.Deployment.Status.TORN_DOWN
     ]
+
+
+def _teardown_live_deployments(live: list[tuple[str, str, str]]) -> tuple[bool, str]:
+    """Tear down each live deployment serially by calling run_teardown inline.
+
+    Returns (ok, message). On failure, the deployment row already reflects
+    the FAILED status (run_teardown writes it); we just propagate a message
+    suitable for the AppRemovalJob status_message.
+    """
+    in_flight = [(env_slug, status) for _, env_slug, status in live if status in _IN_FLIGHT_DEPLOYMENT_STATUSES]
+    if in_flight:
+        detail = ", ".join(f"{env}={status}" for env, status in in_flight)
+        return False, f"Cannot tear down: deployment in progress ({detail}). Wait for it to finish."
+
+    for deployment_id, env_slug, _status in live:
+        logger.info("Tearing down deployment %s in env '%s' as part of app removal", deployment_id, env_slug)
+        ok = app_deployment_teardown_executor.run_teardown(deployment_id=deployment_id)
+        if not ok:
+            return False, f"Teardown failed for deployment in env '{env_slug}'"
+    return True, "ok"
 
 
 CLEANUP_CONTAINER_NAME = "efs-remover"
@@ -78,9 +112,15 @@ def run_removal(job_id: str) -> bool:
 
     live = _find_live_deployments(app)
     if live:
-        detail = ", ".join(f"{env}={status}" for env, status in live)
-        _fail(job, app, f"App became live again ({detail}); cannot remove.")
-        return False
+        if not job.teardown_first:
+            detail = ", ".join(f"{env}={status}" for _, env, status in live)
+            _fail(job, app, f"App became live again ({detail}); cannot remove.")
+            return False
+        logger.info("teardown_first=True: tearing down %d live deployment(s) before removal", len(live))
+        ok, message = _teardown_live_deployments(live=live)
+        if not ok:
+            _fail(job, app, message)
+            return False
 
     environments = list(
         models.Environment.objects

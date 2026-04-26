@@ -66,11 +66,24 @@ def build_database_config(datastore: Datastore) -> infra_customer.appconfig.Data
 def _merge_container_environment(
     template_container: dict, blueprint_container: dict,
 ) -> list[dict[str, str]]:
-    """Merge materialized template runtime_variables with blueprint environment (blueprint wins on name)."""
-    t_list = template_deploy_service._materialize_environment_variables(
-        template_container.get("runtime_variables", []),
+    """Merge sources of env vars for one container; later sources override earlier ones.
+
+    Precedence (low → high):
+      1. template.environment    — platform-constant env vars, a plain {name: value} dict.
+         DOH-managed, never shown in the deploy form.
+      2. template.configurable_variables — per-deployment knobs materialized into
+         {name, value} entries at deploy time (user values, defaults, or auto-generated).
+      3. blueprint.environment_variables — the snapshot of (2) taken when the blueprint
+         was created, which may already reflect operator overrides.
+    """
+    merged: dict[str, str] = {}
+    for name, value in (template_container.get("environment") or {}).items():
+        merged[name] = str(value)
+    cfg_list = template_deploy_service._materialize_environment_variables(
+        template_container.get("configurable_variables", []),
     )
-    merged: dict[str, str] = {e["name"]: e["value"] for e in t_list}
+    for e in cfg_list:
+        merged[e["name"]] = e["value"]
     for e in blueprint_container.get("environment_variables") or []:
         merged[e["name"]] = e["value"]
     return [{"name": name, "value": value} for name, value in merged.items()]

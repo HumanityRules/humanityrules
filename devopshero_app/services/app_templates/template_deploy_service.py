@@ -23,10 +23,10 @@ def _generate_image_tag(app_slug: str, git_ref: str) -> str:
     return f"{app_slug}-{short_ref}-{timestamp}"
 
 
-def _materialize_environment_variables(runtime_variables: list[dict]) -> list[dict[str, str]]:
-    """Extract config vars from one container's runtime_variables into {name, value} entries."""
+def _materialize_environment_variables(configurable_variables: list[dict]) -> list[dict[str, str]]:
+    """Extract config vars from one container's configurable_variables into {name, value} entries."""
     env_vars: list[dict[str, str]] = []
-    for var in runtime_variables:
+    for var in configurable_variables:
         if var["category"] != "config":
             continue
         if "value" not in var:
@@ -40,10 +40,10 @@ def _materialize_environment_variables(runtime_variables: list[dict]) -> list[di
     return env_vars
 
 
-def _materialize_app_secrets(runtime_variables: list[dict]) -> dict[str, str | None]:
-    """Extract secret vars from one container's runtime_variables into a {name: value} dict."""
+def _materialize_app_secrets(configurable_variables: list[dict]) -> dict[str, str | None]:
+    """Extract secret vars from one container's configurable_variables into a {name: value} dict."""
     secrets = {}
-    for var in runtime_variables:
+    for var in configurable_variables:
         if var["category"] != "secret":
             continue
         # None = auto-generate, "" = empty placeholder, "literal" = use as-is
@@ -56,15 +56,15 @@ def _materialize_blueprint_containers(template_containers: list[dict]) -> list[d
 
     Each entry carries `name` (the container identifier), plus the
     materialized `environment_variables` and `app_secrets` derived from that
-    container's runtime_variables. Preserves container order.
+    container's configurable_variables. Preserves container order.
     """
     result = []
     for c in template_containers:
-        rt_vars = c.get("runtime_variables", [])
+        cfg_vars = c.get("configurable_variables", [])
         result.append({
             "name": c["name"],
-            "environment_variables": _materialize_environment_variables(rt_vars),
-            "app_secrets": _materialize_app_secrets(rt_vars),
+            "environment_variables": _materialize_environment_variables(cfg_vars),
+            "app_secrets": _materialize_app_secrets(cfg_vars),
         })
     return result
 
@@ -72,18 +72,18 @@ def _materialize_blueprint_containers(template_containers: list[dict]) -> list[d
 def _apply_variable_overrides(
     template_containers: list[dict], overrides: dict[str, str] | None,
 ) -> list[dict]:
-    """Return a new containers list with user-supplied values merged into each container's runtime_variables by name."""
+    """Return a new containers list with user-supplied values merged into each container's configurable_variables by name."""
     if not overrides:
         return template_containers
     result = []
     for c in template_containers:
-        new_rt_vars = []
-        for var in c.get("runtime_variables", []):
+        new_cfg_vars = []
+        for var in c.get("configurable_variables", []):
             if var["name"] in overrides:
-                new_rt_vars.append({**var, "value": overrides[var["name"]]})
+                new_cfg_vars.append({**var, "value": overrides[var["name"]]})
             else:
-                new_rt_vars.append(var)
-        result.append({**c, "runtime_variables": new_rt_vars})
+                new_cfg_vars.append(var)
+        result.append({**c, "configurable_variables": new_cfg_vars})
     return result
 
 

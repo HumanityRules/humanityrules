@@ -37,7 +37,7 @@ def _hermes_slack_template() -> AppTemplate:
                 "container_port": 8787,
                 "health_check_path": "/health",
                 "efs_mounts": ["home", "workspace"],
-                "runtime_variables": [
+                "configurable_variables": [
                     {"name": "DOH_LLM_MODEL", "category": "config", "value": "model-x"},
                     {"name": "ANTHROPIC_API_KEY", "category": "secret", "value": ""},
                 ],
@@ -49,7 +49,7 @@ def _hermes_slack_template() -> AppTemplate:
                 "version": "0.1.0",
                 "container_port": 7777,
                 "health_check_command": "curl -fsS http://127.0.0.1:7777/health",
-                "runtime_variables": [
+                "configurable_variables": [
                     {"name": "GITHUB_TOKEN", "category": "secret", "value": ""},
                 ],
             },

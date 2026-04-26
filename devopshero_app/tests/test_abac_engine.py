@@ -1408,7 +1408,7 @@ class TestCreateDefaultAppPolicy(TestCase):
                     "dockerfile_path": "Dockerfile",
                     "container_port": 8000,
                     "health_check_path": "/health",
-                    "runtime_variables": [],
+                    "configurable_variables": [],
                 },
             ],
             sidecar_enabled=True, is_active=True,

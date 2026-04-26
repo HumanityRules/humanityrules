@@ -94,7 +94,7 @@ class BedrockPlatformCapabilityTests(SimpleTestCase):
             secret_names = {
                 var["name"]
                 for container in template["containers"]
-                for var in container.get("runtime_variables", [])
+                for var in container.get("configurable_variables", [])
                 if var["category"] == "secret"
             }
 
@@ -110,8 +110,6 @@ class BedrockPlatformCapabilityTests(SimpleTestCase):
         ]:
             dind = next(c for c in template["containers"] if c["name"] == "docker-dind")
             hermes_container = next(c for c in template["containers"] if c["name"] == "hermes")
-            runtime_vars = {var["name"]: var for var in hermes_container["runtime_variables"]}
-
             self.assertEqual(dind["image_source"], "registry")
             self.assertTrue(dind.get("privileged"))
             self.assertEqual(dind.get("efs_mounts"), ["workspace"])
@@ -124,6 +122,7 @@ class BedrockPlatformCapabilityTests(SimpleTestCase):
                     "--host=tcp://127.0.0.1:2375",
                 ],
             )
+            self.assertEqual(dind.get("environment", {}).get("DOCKER_TLS_CERTDIR"), "")
             self.assertEqual(
                 {dep["name"]: dep["condition"] for dep in (hermes_container.get("depends_on") or [])},
                 {"docker-dind": "HEALTHY"},
@@ -135,4 +134,6 @@ class BedrockPlatformCapabilityTests(SimpleTestCase):
             self.assertEqual(mount_names["workspace"]["container_path"], "/workspace")
             self.assertEqual(hermes_container["efs_mounts"], ["home", "workspace"])
             self.assertNotIn("user", hermes_container)
-            self.assertEqual(runtime_vars["DOCKER_HOST"]["value"], "tcp://127.0.0.1:2375")
+            # DOCKER_HOST and HERMES_WEBUI_HOST are platform constants in environment, not knobs.
+            self.assertEqual(hermes_container["environment"]["DOCKER_HOST"], "tcp://127.0.0.1:2375")
+            self.assertEqual(hermes_container["environment"]["HERMES_WEBUI_HOST"], "127.0.0.1")

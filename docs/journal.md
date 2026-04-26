@@ -1,5 +1,32 @@
 # DevOpsHero Development Journal
 
+## 2026-04-25 19:11 - [DomainModel] Split container env vars: `environment` (platform constants) vs `configurable_variables` (deploy-time inputs)
+
+Template containers had one list for all env vars — `runtime_variables` — each entry carrying a 9-field shape (`required`, `auto_generate`, `default_value`, `value`, `user_editable`, `allow_empty_value`, `description`, `group`, `category`). That shape is designed for deploy-form rendering and per-deployment variation. But a growing fraction of the entries were pure platform constants the operator never touches: `DOCKER_HOST=tcp://127.0.0.1:2375`, `HERMES_WEBUI_HOST=127.0.0.1`, `DOCKER_TLS_CERTDIR=""`. For those, 8 of the 9 fields were noise — `user_editable: False` was doing load-bearing work to hide them from the form, and we carried the entire deploy-time machinery (blueprint snapshot, override merge, required-field validation) for values that don't change deployment-to-deployment.
+
+Split the shape: each container now has an `environment: dict[str, str]` for DOH-managed constants and a `configurable_variables: list[dict]` for everything that needs per-deployment decision-making. Renamed `runtime_variables → configurable_variables` across models, services, view, template seeds, and tests. `environment` is rendered directly into `ContainerConfig.environment_variables` as `{name, value}` pairs; `configurable_variables` still goes through the materialization + blueprint-snapshot + override pipeline. The `user_editable` flag stays, because a future `configurable_variables` entry might want to be shown read-only on the deploy form (this isn't modeled yet, but the hook is preserved).
+
+**Naming.** `environment` is the AWS/Docker term for "container env var spec" — short, honest, and its contrast with `configurable_variables` makes the intent obvious at a glance. `configurable_variables` describes what these entries *are*: values that need a decision at deploy time (either from the operator, from env shared-secrets, or from auto-generation). `runtime_variables` was vague — every env var is a runtime variable.
+
+**Precedence in the merged env.** Three sources flow into `ContainerConfig.environment_variables`, low → high:
+1. `template.environment` (platform constants, never overridable)
+2. `template.configurable_variables` (materialized via `_materialize_environment_variables`)
+3. `blueprint.environment_variables` (snapshot of #2 taken when the blueprint was created, possibly reflecting operator overrides)
+
+Put differently: platform constants can't be overridden by blueprint or form input — if you need the value to vary, move it to `configurable_variables` on purpose.
+
+**Hermes templates post-refactor.** Hermes containers now carry a three-entry `environment` dict for `DOCKER_HOST` and `HERMES_WEBUI_HOST`. DinD container carries `{"DOCKER_TLS_CERTDIR": ""}`. `configurable_variables` holds only the user-facing knobs (LLM provider/model, API keys, Slack credentials, WebUI password). Net: ~40 lines of boilerplate deleted from the seeds; the "knobs" vs "wiring" distinction is visible at the schema level.
+
+**Ops note.** `configurable_variables` comes from the `AppTemplate` row in the DB; re-seed (`seed_app_templates`) after any in-code template change or the job worker will hit `KeyError`/stale values at deploy time. `template.configurable_variables` is read fresh per deploy via the app_config_builder; `blueprint.environment_variables` is the frozen snapshot — deliberate, so operator overrides are immutable once the blueprint is created.
+
+**Key points:**
+
+- `user_editable: False` was always a load-bearing lie for platform constants: the field existed to be ignored, and the deploy-form code had to iterate and skip. Splitting the schema honestly removes the lie and shrinks the form's walk.
+- Separating platform wiring from deploy-time inputs at the schema layer means every `configurable_variables` entry is, by construction, a thing that *could* appear on the form. `user_editable` is now a narrower signal ("show this on the form") rather than an escape hatch.
+- Precedence rule (platform < template-material < blueprint) mirrors how ECS tasks resolve env vars in practice. Platform constants going first and blueprint overrides going last is intuitive — rare that anyone expects a platform-constant to be overridable.
+- Tests caught the Hermes-template shape change cleanly: one `assertEqual` on `runtime_vars["DOCKER_HOST"]["value"]` had to move to `hermes_container["environment"]["DOCKER_HOST"]`, and passed on the first try.
+- Verified on `hermes-vmendi01`: after reseeding and queueing a fresh deployment, `env` inside the hermes container shows `DOCKER_HOST=tcp://127.0.0.1:2375` and `HERMES_WEBUI_HOST=127.0.0.1`, both sourced from the new `environment` dict rather than configurable_variables.
+
 ## 2026-04-25 18:56 - [Deployment] Drop DOH_HERMES_REQUIRE_DOCKER dead-weight flag
 
 Small cleanup: both Hermes templates always set `DOH_HERMES_REQUIRE_DOCKER=1` and the entrypoint's checks around that env var are redundant with the ECS `depends_on: {docker-dind, HEALTHY}` contract that already gates hermes on a healthy DinD. Removed the env var from both templates, removed the two `elif` fallbacks from `entrypoint.sh`, and tightened the probes into unconditional fatal checks — if `DOCKER_HOST` is unset or unreachable, or `/workspace` isn't mounted, boot fails loudly instead of silently dropping to `backend: local`.

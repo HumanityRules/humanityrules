@@ -827,7 +827,7 @@ class Command(BaseCommand):
 def _minimum_runtime_overrides(template: models.AppTemplate) -> dict[str, str]:
     """Build the smallest override dict that lets hermes-personal boot.
 
-    The Hermes template declares a lot of runtime variables as user-editable.
+    The Hermes template declares a lot of configurable variables as user-editable.
     Most are optional; a few are required-without-default. We fill required
     strings with placeholder values so the template-deploy form's validation
     passes. Per-variable defaults come from the template; we only override
@@ -835,7 +835,7 @@ def _minimum_runtime_overrides(template: models.AppTemplate) -> dict[str, str]:
     """
     overrides: dict[str, str] = {}
     for container in template.containers or []:
-        for var in container.get("runtime_variables") or []:
+        for var in container.get("configurable_variables") or []:
             if not var.get("user_editable"):
                 continue
             if not var.get("required"):
