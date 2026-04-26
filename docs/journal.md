@@ -1,5 +1,33 @@
 # DevOpsHero Development Journal
 
+## 2026-04-25 19:20 - [DevEx] `doh_control teardown-app --remove-app`: one-shot CLI parity with the "Remove App" UI flow
+
+**Conversation:** [2026-04-25-1921-013aa263.md](conversations/2026-04-25-1921-013aa263.md)
+
+`doh_control teardown-app` could only set the *latest* deployment to `TEARDOWN_PENDING` and walk away. The UI has a follow-up step that the CLI was missing: after every deployment is torn down, a "Remove App" button appears and opens a modal with three checkboxes (delete Secrets Manager entries, delete EFS app data, delete policies tagged with the app's slug); clicking it queues an `AppRemovalJob` that does the cleanup and the cascade-delete of the App row. The CLI now mirrors that with four new optional flags: `--remove-app`, `--delete-secrets`, `--delete-efs-data`, `--delete-policies`.
+
+**Initial design (rejected): poll on `TEARDOWN_PENDING`.** First sketch was: the CLI sets every live deployment to `TEARDOWN_PENDING` and polls until they reach `TORN_DOWN` (or any → `FAILED`), then queues the `AppRemovalJob`. Then I moved the polling into the worker — let the executor flip statuses and poll, while the CLI just queues and returns. Both versions required inventing a polling cadence (5s? 10s?) and a timeout (30 min?), plus reasoning about thread-pool starvation: the polling thread sits idle waiting for *another* worker thread to claim the teardown.
+
+**The simplification (accepted): call `run_teardown` inline.** Discarded both polling approaches once we noticed `app_deployment_teardown_executor.run_teardown(deployment_id)` is already a clean, synchronous entry point — it loads the deployment, flips it to `TEARING_DOWN`, calls the CDK teardown, sets `TORN_DOWN`/`FAILED`, returns `bool`. So the removal executor just calls it directly per live deployment. No flag-flipping, no polling, no timeout, no thread-pool starvation, and no race window where the per-deployment teardown worker and the removal executor might both target the same row.
+
+**The actual mechanism.** Added a single boolean `teardown_first` field on `AppRemovalJob` (migration 0047). When the executor runs and finds live deployments:
+- `teardown_first=False` → today's behavior (fail with "App became live again"). The UI's "Remove App" button keeps creating jobs with `teardown_first=False` because the modal is gated on `not app_is_live(app)` anyway.
+- `teardown_first=True` → walk the live-deployment list serially, call `run_teardown(deployment_id=...)` per deployment, bail on the first failure. Then proceed with the existing EFS / secrets / policies cleanup and `app.delete()`.
+
+The executor refuses to start tearing down anything if any live deployment is in an in-flight state (`PENDING`, `BUILDING`, `PUSHING`, `DEPLOYING`, `STARTING`, `TEARING_DOWN`) — that would race the deploy/teardown workers. The user is told to wait for the in-flight deploy to settle.
+
+**CLI surface.**
+- Without `--remove-app`: behaves exactly as before. The three `--delete-*` flags are rejected at parse time with a clear message — they're useless without `--remove-app`.
+- With `--remove-app`: skip the latest-deployment teardown logic entirely. Create `AppRemovalJob(teardown_first=True, delete_secrets=…, delete_efs_data=…, delete_policies=…)`, flip `app.status = PENDING_REMOVAL`, return immediately. The worker handles the whole teardown-then-remove pipeline. The `PENDING_REMOVAL` status already blocks redeploys (per existing view guards), so there's no race window where the user could re-deploy under us.
+
+**Key points:**
+
+- The user pushed back twice on overengineering: first on per-CLI polling, then on the worker-side polling. Both pushbacks led to a smaller, sturdier design. The fact that `run_teardown` was already a clean entry point is what made inline-calls workable — kudos to whoever wrote it that way.
+- "Refactor `_find_live_deployments` to also return the deployment id" was a tiny shape change but the unlock for everything downstream — without the id we couldn't have called `run_teardown` directly.
+- Default `teardown_first=False` keeps the UI's `app_remove` view *exactly* as-is. That was deliberate: the UI's "Remove App" is gated on the app already being not-live, so it never needs the new behavior.
+- The serial loop over live deployments is fine for now; most apps live in one or two envs. If we ever see apps deployed to many envs at once, we can switch to a thread pool, but premature.
+- We didn't add a parallel `AppTeardownAndRemovalJob` model — extending `AppRemovalJob` with one bool is much less surface area than a second model with overlapping fields.
+
 ## 2026-04-25 19:11 - [DomainModel] Split container env vars: `environment` (platform constants) vs `configurable_variables` (deploy-time inputs)
 
 Template containers had one list for all env vars — `runtime_variables` — each entry carrying a 9-field shape (`required`, `auto_generate`, `default_value`, `value`, `user_editable`, `allow_empty_value`, `description`, `group`, `category`). That shape is designed for deploy-form rendering and per-deployment variation. But a growing fraction of the entries were pure platform constants the operator never touches: `DOCKER_HOST=tcp://127.0.0.1:2375`, `HERMES_WEBUI_HOST=127.0.0.1`, `DOCKER_TLS_CERTDIR=""`. For those, 8 of the 9 fields were noise — `user_editable: False` was doing load-bearing work to hide them from the form, and we carried the entire deploy-time machinery (blueprint snapshot, override merge, required-field validation) for values that don't change deployment-to-deployment.
