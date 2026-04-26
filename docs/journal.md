@@ -1,5 +1,30 @@
 # DevOpsHero Development Journal
 
+## 2026-04-26 14:10 - [Bugfix] hermes-slack: unpin WebUI from loopback so the ALB can health-check it
+
+**Conversation:** [2026-04-26-1411-9ee7793c.md](conversations/2026-04-26-1411-9ee7793c.md)
+
+Deployed `hermes-slack` to CH Sandbox and the deployment hung at `CREATE_IN_PROGRESS` on the ECS service for minutes. Container logs looked perfect (`Hermes Web UI listening on http://127.0.0.1:8787`, internal `GET /health → 200` every 30s), yet the ALB target group was `unhealthy` with `Target.FailedHealthChecks`, and ECS kept replacing tasks in a loop (`"Amazon ECS replaced 1 tasks due to an unhealthy status"`). That combination — container healthy on loopback, ALB target unhealthy on the ENI IP — was the tell.
+
+**Root cause.** `_HERMES_CONTAINER_BASE` in `seed_app_templates.py` was pinning `HERMES_WEBUI_HOST=127.0.0.1` as a "platform constant." That value is only correct for templates where a policy proxy fronts the task (sharing the task network namespace) — the proxy can reach the WebUI over loopback after gating SSO+ABAC. `hermes-personal` is that shape (`alb_target_container="policy-proxy"`). `hermes-slack` is NOT: `alb_target_container="hermes"` means the ALB targets the hermes container directly on its task ENI IP, and a socket bound to `127.0.0.1` inside the container is unreachable from that IP. Docker's own `HEALTHCHECK` still passed because it uses `curl http://localhost:8787` from *inside* the container — a different network path than the ALB probe.
+
+**Why the bug slipped in.** The env var was added to `_HERMES_CONTAINER_BASE` when the two hermes templates were factored out of a shared base. At that point both templates went through a policy proxy, so loopback binding was universally correct. When `hermes-slack` later switched to direct ALB → hermes targeting (the Slack template intentionally exposes the WebUI so users can sign in — no policy proxy), the env var in the shared base stopped being a constant, but the comment still called it one.
+
+**Fix.** Removed `HERMES_WEBUI_HOST` from `_HERMES_CONTAINER_BASE.environment` and reintroduced it only inside `HERMES_PERSONAL_TEMPLATE`'s hermes container entry (via `"environment": {**_HERMES_CONTAINER_BASE["environment"], "HERMES_WEBUI_HOST": "127.0.0.1"}`). `HERMES_SLACK_TEMPLATE` inherits the base without the override, so the WebUI falls back to the upstream image default of `0.0.0.0` and the ALB health check on the task ENI succeeds. Re-deployed after re-seeding — target flipped `healthy` within the grace period, CFN stack went `CREATE_COMPLETE`, deployment ended `succeeded` at `https://hermes-slack-test.chsandbox.com`.
+
+**Test fix-up.** `test_bedrock_platform_capabilities.test_hermes_templates_enable_docker_backed_tools` had baked the old invariant in (`assertEqual(hermes_container["environment"]["HERMES_WEBUI_HOST"], "127.0.0.1")` for both templates). Changed it to branch on `alb_target_container`: expect `127.0.0.1` only when it's `"policy-proxy"`, and assert the key is absent otherwise. That keeps the test honest about the new per-template rule.
+
+**Diagnostic path that worked.** ECS service events + target group health check, not CFN events. `describe-stack-events` stalled at `EcsService … CREATE_IN_PROGRESS (Resource creation Initiated)` with no further detail — CFN just waits for the service to stabilize. `describe-services` showed the replacement loop and `describe-target-health` surfaced `Target.FailedHealthChecks` with the container's ENI IP + port, which was the fingerprint of a loopback bind. Worth remembering: a task running + healthy inside (Docker HEALTHCHECK passing) + an ALB target-group unhealthy = bind-address mismatch.
+
+**Cleanup wrinkle.** The first (broken) deployment couldn't be torn down via `doh_control teardown-app --remove-app` because the worker refused: `"Cannot tear down: deployment in progress (default=deploying)"`. The deployment couldn't finish because ECS couldn't stabilize the service inside the CFN stack. Manually deleted the `doh-default-hermes-slack-test-app` CFN stack in the customer account (assume-role into `266117665083`, `aws cloudformation delete-stack`), which let the worker mark the deployment `failed`, which let the removal job run to completion. Not a bug per se — the block on "deployment in progress" is correct for most cases — but the only escape hatch for a stuck-in-the-CFN-progress state is to kill the stack from the AWS side.
+
+**Key points:**
+- `HERMES_WEBUI_HOST` is per-template, not a platform constant: pin to `127.0.0.1` only when a policy proxy fronts the task; leave unset (upstream default `0.0.0.0`) when the ALB targets hermes directly.
+- ALB target-group health check runs against the container's task ENI IP — a loopback-bound socket is invisible to it, regardless of whether Docker's internal HEALTHCHECK passes.
+- Symptom pattern "container healthy internally + ALB target unhealthy + ECS task replacement loop + CFN stuck `CREATE_IN_PROGRESS` on the ECS service" ≈ bind-address mismatch. Check the target group, not the logs.
+- Stuck `CREATE_IN_PROGRESS` CFN stacks make the deployment un-tearable via the normal worker; breaking out requires deleting the stack directly in the customer account.
+- When a test asserts a "constant" env var on a shared container base, re-check the assertion when any template using that base starts diverging in its ALB-target topology.
+
 ## 2026-04-25 23:57 - [Deployment] Rename "sidecar" → "policy proxy" and fold it into the containers list
 
 **Conversation:** [2026-04-26-0007-dc0f4fb1.md](conversations/2026-04-26-0007-dc0f4fb1.md)

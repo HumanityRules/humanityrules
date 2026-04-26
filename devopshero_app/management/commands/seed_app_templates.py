@@ -434,14 +434,14 @@ _HERMES_CONTAINER_BASE = {
     ],
     # Platform-constant env vars the operator never touches. Kept out of
     # configurable_variables so the deploy form doesn't treat them as knobs.
+    # HERMES_WEBUI_HOST is NOT set here: it's a per-template decision.
+    # Policy-proxy-gated templates pin it to 127.0.0.1 so only the proxy
+    # (sharing the task network namespace) can reach the WebUI. Templates
+    # where the ALB targets the hermes container directly leave it at the
+    # upstream image default (0.0.0.0) so ALB health checks succeed.
     "environment": {
         # DOCKER_HOST targets the in-task DinD container over loopback.
         "DOCKER_HOST": "tcp://127.0.0.1:2375",
-        # Bind the WebUI to loopback so only the policy proxy (sharing the
-        # task network namespace) can reach it. Overrides the upstream image
-        # default of HERMES_WEBUI_HOST=0.0.0.0, which would expose the WebUI
-        # on the task ENI to the whole VPC.
-        "HERMES_WEBUI_HOST": "127.0.0.1",
         # Single source of truth for the tool container image. The hermes
         # entrypoint prewarms this on DinD at boot and bakes the same value
         # into config.yaml via __TOOL_IMAGE__, so Hermes's terminal tool
@@ -552,6 +552,12 @@ HERMES_PERSONAL_TEMPLATE = {
         {**_DOCKER_DIND_CONTAINER},
         {
             **_HERMES_CONTAINER_BASE,
+            # Policy proxy fronts the task; pin the WebUI to loopback so only
+            # the proxy (sharing the task network namespace) can reach it.
+            "environment": {
+                **_HERMES_CONTAINER_BASE["environment"],
+                "HERMES_WEBUI_HOST": "127.0.0.1",
+            },
             "configurable_variables": (
                 _HERMES_LLM_VARS + _HERMES_CREDENTIAL_VARS + _HERMES_BEDROCK_VARS
             ),
