@@ -28,7 +28,14 @@ fi
 # Start the WebUI init script in the background. It creates /app/venv, installs
 # hermes-webui + hermes-agent[honcho] deps (touching $VENV_DIR/.deps_installed
 # when done), then runs `python server.py` which blocks forever.
-/hermeswebui_init.bash &
+#
+# We route its stdout+stderr through a `grep -v` process substitution that
+# drops successful /health access-log lines (a ~2/sec firehose between the
+# Docker HEALTHCHECK and the ALB target-group probe). Non-200 /health lines
+# still pass through, so real health failures remain visible. Process
+# substitution (not a pipe) is used so `$!` stays the init script's PID —
+# with a pipe, `$!` would become grep's PID and we'd lose exit-code tracking.
+/hermeswebui_init.bash > >(grep --line-buffered -v '"path": "/health", "status": 200') 2>&1 &
 WEBUI_PID=$!
 
 # Wait for the venv and base deps to be ready before we install extras into it.
@@ -49,16 +56,19 @@ fi
 
 source "$VENV_DIR/bin/activate"
 
-# Install hermes-agent[bedrock] (= boto3) unconditionally. Gated by a sentinel
-# file so repeat boots short-circuit; `uv pip install` is also idempotent as a
-# second line of defence if the sentinel is missing but the pkg is present.
+# Install hermes-agent extras unconditionally:
+#   [bedrock] -> boto3, needed whenever DOH_LLM_PROVIDER=bedrock.
+#   [mcp]     -> the mcp python package; without it tools.mcp_tool is a no-op
+#               and the mcp_servers: block in config.yaml is silently ignored.
+#               Required because the sidecar MCP server ships by default in
+#               config.yaml.template.
 if [ ! -f "$BEDROCK_DEPS_MARKER" ]; then
-    echo "[start] Installing hermes-agent[bedrock] extras..."
-    uv pip install "$HERMES_AGENT_DIR[bedrock]" \
+    echo "[start] Installing hermes-agent[bedrock,mcp] extras..."
+    uv pip install "$HERMES_AGENT_DIR[bedrock,mcp]" \
         --trusted-host pypi.org --trusted-host files.pythonhosted.org
     touch "$BEDROCK_DEPS_MARKER"
 else
-    echo "[start] Bedrock deps already installed — skipping."
+    echo "[start] Extras already installed — skipping."
 fi
 
 if [ "$SLACK_ENABLED" -eq 0 ]; then
