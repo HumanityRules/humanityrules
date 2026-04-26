@@ -213,11 +213,17 @@ def template_deploy_form(request: HttpRequest, template_slug: str) -> HttpRespon
     context["workspace_options"] = workspace_options
     context["environment_options"] = environment_options
     context["compute_mode_options"] = compute_mode_options
-    context["selected_workspace_id"] = ""
-    context["selected_environment_id"] = ""
+    default_workspace_id = workspace_options[0]["id"] if len(workspace_options) == 1 else ""
+    default_environment_id = environment_options[0]["id"] if len(environment_options) == 1 else ""
+    context["selected_workspace_id"] = default_workspace_id
+    context["selected_environment_id"] = default_environment_id
     context["selected_compute_mode"] = template.default_compute_mode
-    context["selected_workspace_label"] = "Select a workspace"
-    context["selected_environment_label"] = "Select an environment"
+    context["selected_workspace_label"] = _selected_label(
+        workspace_options, default_workspace_id, "Select a workspace",
+    )
+    context["selected_environment_label"] = _selected_label(
+        environment_options, default_environment_id, "Select an environment",
+    )
     context["selected_compute_mode_label"] = _selected_label(
         compute_mode_options, template.default_compute_mode, "Select compute",
     )

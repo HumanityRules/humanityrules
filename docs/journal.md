@@ -1,5 +1,22 @@
 # DevOpsHero Development Journal
 
+## 2026-04-26 14:44 - [UI] Template deploy form: preselect single-option dropdowns, trim Configuration Summary
+
+**Conversation:** [2026-04-26-1445-4c25d570.md](conversations/2026-04-26-1445-4c25d570.md)
+
+Small UX pass on `/deploy/from-template/<slug>/`. Two unrelated polish items:
+
+**Preselect single-option workspace/environment.** On GET, the form was always initializing `selected_workspace_id=""` / `selected_environment_id=""` with placeholder labels, even when ABAC filtering had narrowed the options down to a single choice. Users with exactly one permitted workspace (or one ready environment) still had to click into the dropdown to pick it. Fix: in `template_deploy.template_deploy_form`, compute `default_workspace_id = workspace_options[0]["id"] if len(workspace_options) == 1 else ""` (same for environment) and feed that through `_selected_label(...)`. Mirrors the existing pattern at the owner field where non-admins are locked to themselves and the single option is pre-selected. POST-error redisplay was left alone — it correctly echoes whatever the user submitted.
+
+**Trimmed Configuration Summary.** Removed the "EFS Mount" row and the "Compute" row from the summary block in `template_deploy_form.html`. EFS mount path is an internal detail nobody reading the summary acts on; compute mode has its own labeled dropdown above the summary, so repeating the selected label below was redundant. CPU / Memory / Containers remain.
+
+**Aside — misread the user once.** First read of "compute EC2 capacity is not necessary" had me delete the EC2 option from `_compute_mode_options()`. User clarified they meant the Configuration Summary row, not the form field. Reverted the options change; the EC2 choice is still offered as a compute mode.
+
+**Key points:**
+- Auto-preselecting single-option dropdowns is a small but high-value UX win for deploy forms where ABAC often leaves exactly one permitted target. Pattern already existed for `owner_id`; extended to `workspace_id` / `environment_id` with the same shape.
+- The GET path and the POST-error redisplay path in `_handle_deploy` have different contracts: GET should help the user skip obvious clicks; the error path must echo what was submitted verbatim. Keep the preselect logic on GET only.
+- When a summary re-displays a form field that's already visible and labeled above it, the summary row is noise. Axe it.
+
 ## 2026-04-26 14:10 - [Bugfix] hermes-slack: unpin WebUI from loopback so the ALB can health-check it
 
 **Conversation:** [2026-04-26-1411-9ee7793c.md](conversations/2026-04-26-1411-9ee7793c.md)
