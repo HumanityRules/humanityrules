@@ -9,7 +9,12 @@ from pathlib import Path
 
 from devopshero_app.models import AppTemplate, Datastore, DeploymentBlueprint
 from devopshero_app.services import infra_customer
-from devopshero_app.services.infra_customer.appconfig import AppConfig, ContainerConfig
+from devopshero_app.services.app_templates import template_deploy_service
+from devopshero_app.services.infra_customer.appconfig import (
+    AppConfig,
+    ContainerConfig,
+    ContainerDependencyConfig,
+)
 
 
 def build_database_config(datastore: Datastore) -> infra_customer.appconfig.DatabaseConfig:
@@ -58,6 +63,19 @@ def build_database_config(datastore: Datastore) -> infra_customer.appconfig.Data
     )
 
 
+def _merge_container_environment(
+    template_container: dict, blueprint_container: dict,
+) -> list[dict[str, str]]:
+    """Merge materialized template runtime_variables with blueprint environment (blueprint wins on name)."""
+    t_list = template_deploy_service._materialize_environment_variables(
+        template_container.get("runtime_variables", []),
+    )
+    merged: dict[str, str] = {e["name"]: e["value"] for e in t_list}
+    for e in blueprint_container.get("environment_variables") or []:
+        merged[e["name"]] = e["value"]
+    return [{"name": name, "value": value} for name, value in merged.items()]
+
+
 class ContainerSecretCollision(ValueError):
     """Two containers declared the same secret field name with different values."""
 
@@ -101,16 +119,21 @@ def _build_container_config(
         health_check_path=template_container.get("health_check_path") or None,
         health_check_command=template_container.get("health_check_command") or None,
         health_check_grace_period=template_container.get("health_check_grace_period") or None,
-        environment_variables=list(blueprint_container.get("environment_variables") or []),
+        environment_variables=_merge_container_environment(
+            template_container=template_container, blueprint_container=blueprint_container,
+        ),
         app_secrets=dict(blueprint_container.get("app_secrets") or {}),
         efs_mount=bool(template_container.get("efs_mount", False)),
-        host_mounts=[
-            infra_customer.appconfig.HostMountConfig(
-                source_path=m["source_path"],
-                container_path=m["container_path"],
-                read_only=bool(m.get("read_only", False)),
+        efs_docker_workspace_only=bool(template_container.get("efs_docker_workspace_only", False)),
+        efs_docker_workspace_container_path=template_container.get("efs_docker_workspace_container_path")
+        or None,
+        privileged=bool(template_container.get("privileged", False)),
+        depends_on=[
+            ContainerDependencyConfig(
+                name=dep["name"],
+                condition=dep["condition"],
             )
-            for m in template_container.get("host_mounts", [])
+            for dep in template_container.get("depends_on", [])
         ],
         user=template_container.get("user") or None,
         command=list(command) if command else None,
@@ -129,6 +152,14 @@ def _build_container_config(
             **common,
             prebuilt_ecr_repo=template_container["ecr_repo"],
             prebuilt_version=template_container["version"],
+        )
+    if image_source == "registry":
+        if not template_container.get("registry_image"):
+            msg = f"Container '{name}' is image_source=registry but has no registry_image"
+            raise ValueError(msg)
+        return ContainerConfig(
+            **common,
+            registry_image=template_container["registry_image"],
         )
     raise ValueError(f"Unknown image_source='{image_source}' on container '{name}'")
 

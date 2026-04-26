@@ -346,6 +346,58 @@ _HERMES_SLACK_VARS = [
     },
 ]
 
+# Hermes tool containers (terminal backend: docker) talk to this task's DinD sidecar.
+_HERMES_DOCKER_HOST_VAR = {
+    "name": "DOCKER_HOST",
+    "group": "Tools",
+    "category": "config",
+    "description": "Task-local Docker daemon (DinD sidecar) for Hermes tools",
+    "required": True,
+    "auto_generate": False,
+    "default_value": "tcp://127.0.0.1:2375",
+    "value": "tcp://127.0.0.1:2375",
+    "user_editable": False,
+}
+
+# Privileged; mounts only the workspace EFS access point. Same repo root as other containers.
+_DOCKER_DIND_CONTAINER = {
+    "name": "docker-dind",
+    "image_source": "registry",
+    "registry_image": "docker:26.1.0-dind",
+    # docker:dind's entrypoint (dockerd-entrypoint.sh) prepends a default
+    # --host=tcp://0.0.0.0:2375 whenever the first CMD arg starts with '-',
+    # which would collide with our loopback bind on the same port. Pass
+    # 'dockerd' as the first arg to suppress that default.
+    "command": [
+        "dockerd",
+        "--host=unix:///var/run/docker.sock",
+        "--host=tcp://127.0.0.1:2375",
+    ],
+    "container_port": 0,
+    "privileged": True,
+    "essential": True,
+    "efs_mount": False,
+    "efs_docker_workspace_only": True,
+    "efs_docker_workspace_container_path": "/workspace",
+    "health_check_path": None,
+    "health_check_command": "docker info >/dev/null 2>&1",
+    "health_check_grace_period": 120,
+    "runtime_variables": [
+        {
+            "name": "DOCKER_TLS_CERTDIR",
+            "group": "Tools",
+            "category": "config",
+            "description": "Empty disables Docker TLS; required for tcp 127.0.0.1:2375",
+            "required": True,
+            "auto_generate": False,
+            "default_value": "",
+            "value": "",
+            "allow_empty_value": True,
+            "user_editable": False,
+        },
+    ],
+}
+
 _HERMES_CONTAINER_BASE = {
     "name": "hermes",
     "image_source": "dockerfile",
@@ -356,11 +408,10 @@ _HERMES_CONTAINER_BASE = {
     "health_check_command": "",
     "health_check_grace_period": 60,
     "efs_mount": True,
-    "host_mounts": [
+    "depends_on": [
         {
-            "source_path": "/var/run/docker.sock",
-            "container_path": "/var/run/docker.sock",
-            "read_only": False,
+            "name": "docker-dind",
+            "condition": "HEALTHY",
         },
     ],
 }
@@ -432,8 +483,8 @@ HERMES_PERSONAL_TEMPLATE = {
     ),
     "icon": "⚡",
     "category": "ai-assistant",
-    "cpu": 1024,
-    "memory": 2048,
+    "cpu": 2048,
+    "memory": 4096,
     "default_compute_mode": "ec2",
     "datastore_config": None,
     "efs_config": {
@@ -444,6 +495,7 @@ HERMES_PERSONAL_TEMPLATE = {
     },
     "alb_target_container": "hermes",
     "containers": [
+        {**_DOCKER_DIND_CONTAINER},
         {
             **_HERMES_CONTAINER_BASE,
             # Bind the WebUI to loopback so only the sidecar (sharing the
@@ -474,6 +526,7 @@ HERMES_PERSONAL_TEMPLATE = {
                         "value": "1",
                         "user_editable": False,
                     },
+                    _HERMES_DOCKER_HOST_VAR,
                 ]
             ),
         },
@@ -516,6 +569,7 @@ HERMES_SLACK_TEMPLATE = {
     "platform_capabilities": ["bedrock-runtime"],
     "alb_target_container": "hermes",
     "containers": [
+        {**_DOCKER_DIND_CONTAINER},
         {
             **_HERMES_CONTAINER_BASE,
             "runtime_variables": (
@@ -532,6 +586,7 @@ HERMES_SLACK_TEMPLATE = {
                         "value": "1",
                         "user_editable": False,
                     },
+                    _HERMES_DOCKER_HOST_VAR,
                 ]
             ),
         },

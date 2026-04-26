@@ -49,7 +49,12 @@ def create_app(cfg: config_mod.SidecarConfig) -> FastAPI:
     app = FastAPI(lifespan=lifespan)
     app.state.config = cfg
     app.state.upstream_base = f"http://{cfg.upstream_host}:{cfg.upstream_port}"
-    app.state.http_client = httpx.AsyncClient()
+    # read=None so long idle gaps in streaming responses (SSE, LLM output,
+    # permission prompts) don't kill the connection mid-stream. connect/write/
+    # pool stay finite so unreachable upstreams and pool saturation fail fast.
+    app.state.http_client = httpx.AsyncClient(
+        timeout=httpx.Timeout(connect=10.0, read=None, write=10.0, pool=10.0),
+    )
     app.state.jwks_client = jwt.PyJWKClient(
         uri=cfg.jwks_url, cache_keys=True, lifespan=JWKS_CACHE_TTL_SECONDS,
     )

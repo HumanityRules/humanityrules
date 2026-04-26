@@ -1,5 +1,73 @@
 # DevOpsHero Development Journal
 
+## 2026-04-25 17:52 - [Bugfix] Hermes agent writes to overlay instead of EFS with terminal.backend=docker
+
+**Conversation:** [2026-04-25-1752-afc23e32.md](conversations/2026-04-25-1752-afc23e32.md)
+
+The Docker-backed terminal on Hermes Personal looked like it was working — the agent ran `mkdir -p /home/hermeswebui/.hermes/workspace && touch .../testing && ls -la`, saw the file, and reported success. But `doh_efs_browse /efs/deployments/hermes-vmendi01/workspace` came back empty. The agent was writing into the tool container's ephemeral overlay and lying to itself about persistence.
+
+The Hermes task has three relevant mount paths that are easy to confuse:
+
+- On the `hermes` parent container, `/home/hermeswebui/.hermes` is bound to the app EFS access point, and `/home/hermeswebui/.hermes/workspace` is a subpath access point on the same filesystem.
+- On the `docker-dind` sidecar, only the workspace subpath is mounted, at `/workspace`. DinD has no view of the rest of the `.hermes` tree.
+- When Hermes uses `terminal.backend: docker`, it calls `docker run` against the DinD sidecar, which spins up a fresh `nikolaik/python-nodejs:...` tool container. That tool container is a separate image with its own filesystem; it only sees what we bind in via `docker_volumes`.
+
+The seeded config had `docker_volumes: ["/workspace:/workspace"]`, so `/workspace` in the tool container pointed at EFS, but `/home/hermeswebui/.hermes/workspace` did not exist at all. The agent happily reused the `HERMES_WEBUI_DEFAULT_WORKSPACE` path it had learned from its parent container's env — which lives only in the tool container's writable overlay and vanishes on container exit.
+
+**Primary fix.** In `template_repos/hermes_agent/entrypoint.sh`, bind the DinD `/workspace` to both container paths on every tool run:
+
+```
+DOCKER_VOLUMES='["/workspace:/workspace", "/workspace:/home/hermeswebui/.hermes/workspace"]'
+```
+
+Now either path name the agent reaches for lands on the same EFS-backed data, and the outside-world view via `doh_efs_browse` matches what the agent sees.
+
+**Secondary fix — first-boot config.yaml trap.** The entrypoint only generates `config.yaml` from the template on first boot (`if [ ! -f "$HERMES_DIR/config.yaml" ]`) so user edits on EFS are preserved. That's correct for user-owned sections, but `terminal.*` is strictly DOH-controlled: backend, cwd, and `docker_volumes` are all derived from the task's mount layout, not user preference. Without a rewrite on boot, already-deployed apps on existing EFS volumes would never pick up the fix unless the volume was wiped.
+
+Added a small Python block to the entrypoint that, on every boot, surgically rewrites only the `terminal:` block of `config.yaml` — leaving every other top-level key byte-for-byte intact. Tested locally against the template to confirm the rewrite is scoped and idempotent.
+
+**Collateral fix — DinD port collision blocked the redeploy.** The moment I triggered a redeploy to pick up the entrypoint change, every new task failed with `failed to load listeners: listen tcp 127.0.0.1:2375: bind: address already in use`. ECS circuit-breaker-rolled-back the deployment three times before I stopped it. Task definition diff between `:7` (working, currently running) and `:8` (new, failing) showed a single change: `command` went from `[]` to `["--host=unix:///var/run/docker.sock", "--host=tcp://127.0.0.1:2375"]`.
+
+Root cause: the `docker:26.1.0-dind` image's `dockerd-entrypoint.sh` checks the first CMD arg. If it starts with `-`, it interprets it as a dockerd flag and **prepends** its own defaults — including `--host=tcp://0.0.0.0:2375`. So our loopback bind was appended on top of the entrypoint's all-interfaces bind, and both fought over port 2375. The stock image works because its default CMD injects the `--host=tcp://0.0.0.0:2375` exactly once.
+
+Fix: prepend `"dockerd"` as the first CMD arg in `seed_app_templates.py`. The dind entrypoint then treats the rest as pure args with no default injection, and our two `--host` flags are the only binds. Reseeded the template and the retry succeeded.
+
+**Verification.** Post-fix `config.yaml` on the running container now reads:
+
+```
+terminal:
+  backend: docker
+  cwd: /workspace
+  docker_volumes: ["/workspace:/workspace", "/workspace:/home/hermeswebui/.hermes/workspace"]
+```
+
+User manually tested a file write from the Hermes UI against both paths and confirmed the file shows up under `doh_efs_browse /efs/deployments/hermes-vmendi01/workspace`.
+
+**Key points:**
+
+- The DinD tool-container split makes it very easy to write to a path that looks right but isn't on EFS — there's no error and no warning, just a silent overlay write that disappears. The two-path bind makes the failure mode impossible rather than relying on the agent picking the blessed path.
+- `config.yaml` is semi-user-owned on EFS, so "first-boot only" is correct for most sections. But `terminal.*` is DOH plumbing, not user config — it needs to be rewritten on every boot so fixes propagate without a fresh volume. Scope the rewrite tightly (one top-level block) so user-owned sections are preserved.
+- `docker:dind` + custom `command` is a sharp edge. If the first arg starts with `-`, `dockerd-entrypoint.sh` prepends its defaults; if it's `dockerd` (or any non-flag token), it doesn't. Always start with `dockerd` when overriding CMD. Documented inline in the template seed.
+- The existing AppTemplate seed edits were already in-flight on this branch (not committed), and the command shape was wrong before I got here — but nothing exercised it until a new task definition revision shipped. "Works on the live task" is not the same as "task def works from scratch," and we had no coverage that would have caught this; a `doh_raw --synth-only` of a Hermes template synth plus a real task-def diff would have flagged the change in command shape before rollout.
+- Debugging trail worth remembering: service events → circuit breaker; `describe-tasks` → `docker-dind exitCode=1`; log streams list → failed tasks only have `docker-dind` streams (hermes never started because dind was `essential=True` and crashed); dind log tail → "bind: address already in use"; task def diff → single-line command change. Four steps, each one narrowing the surface.
+
+## 2026-04-25 16:45 - [Bugfix] Sidecar proxy disconnects during long idle streams
+
+**Conversation:** [2026-04-25-1645-130595e3.md](conversations/2026-04-25-1645-130595e3.md)
+
+Customer apps behind the sidecar proxy were dropping connections mid-session with a browser-side "Connection lost / reconnecting" error. The sidecar logs showed an httpx `ReadTimeout` surfacing out of starlette's `StreamingResponse`, unwinding a task group and tearing down the response. Root cause: `httpx.AsyncClient()` in `sidecar/sidecar/app.py` was constructed with default timeouts, which apply a 5s read timeout to the whole stream. Any idle gap longer than 5s between chunks — very common on LLM streams or permission-prompt streams where the user is thinking — killed the connection.
+
+Fix was to construct the client with `httpx.Timeout(connect=10.0, read=None, write=10.0, pool=10.0)`. `read=None` is the one that matters: streaming responses must be allowed to go quiet without the proxy interpreting it as a dead connection. `connect`, `write`, and `pool` stay finite so an unreachable upstream or a saturated pool still fails fast. The usual concern with `read=None` — a silently dead but TCP-alive upstream hanging forever — is best addressed with TCP keepalive or an application-level heartbeat, not a read timeout; the upstream already sends SSE keepalives so we're covered.
+
+Second gotcha: the sidecar image is built and pushed by the customer app deploy pipeline (`devopshero_app/services/infra_customer/deploy_app.py`), but tagged with a hardcoded version constant `SIDECAR_IMAGE_VERSION`. ECR push is idempotent by tag, so a redeploy without a version bump would quietly re-use the old image. Bumped the constant to `0.1.1` so the next redeploy of each affected app picks up the fix.
+
+**Key points:**
+
+- `httpx.AsyncClient()` defaults apply a 5s read timeout to streams; for a streaming proxy this is wrong, use `read=None`.
+- Keep `connect`/`write`/`pool` finite — those guard against different failure modes (unreachable upstream, saturated pool) where fast failure is desirable.
+- Sidecar image rollout is not automatic on redeploy; `SIDECAR_IMAGE_VERSION` in `deploy_app.py` must be bumped to force a new push, and each customer app must then be individually redeployed.
+- No automatic fan-out across existing deployments — this is by design (platform-owned version), but worth remembering when shipping a sidecar fix.
+
 ## 2026-04-25 12:18 - [Deployment] Hermes EC2-backed ECS compute mode
 
 **Conversation:** [2026-04-25-1218-db633dc8.md](conversations/2026-04-25-1218-db633dc8.md)

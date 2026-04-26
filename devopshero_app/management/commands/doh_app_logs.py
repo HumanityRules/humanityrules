@@ -8,6 +8,7 @@ to stopped tasks (useful when the app is crash-looping).
 Usage:
     uv run manage.py doh_app_logs --account "Humanity Rules Sandbox" --app my-app-slug
     uv run manage.py doh_app_logs --account "Humanity Rules Sandbox" --app my-app-slug --stopped
+    uv run manage.py doh_app_logs --account "Humanity Rules Sandbox" --app my-app-slug --container docker-dind
     uv run manage.py doh_app_logs --account "Humanity Rules Sandbox" --env prod --app my-app-slug --limit 200
     uv run manage.py doh_app_logs --account "Humanity Rules Sandbox" --app my-app-slug --head
     uv run manage.py doh_app_logs --account "Humanity Rules Sandbox" --app my-app-slug --all
@@ -23,6 +24,7 @@ from django.core.management.base import BaseCommand, CommandError
 
 from devopshero_app.models import App
 
+from . import doh_app_shell
 from ._aws_account_resolver import add_aws_target_args, resolve_aws_target
 
 
@@ -40,6 +42,15 @@ def _find_task_arn(ecs_client, cluster: str, service: str, stopped: bool) -> str
         return tasks[0]["taskArn"]
 
     return None
+
+
+def _requested_container(options: dict) -> str | None:
+    """Resolve CLI container options into a template container name."""
+    if options.get("container") and options.get("sidecar"):
+        raise CommandError("Use either --container or --sidecar, not both.")
+    if options.get("sidecar"):
+        return "sidecar"
+    return options.get("container")
 
 
 def _print_task_info(ecs_client, cluster: str, task_arn: str, stdout) -> None:
@@ -123,8 +134,15 @@ class Command(BaseCommand):
     def add_arguments(self, parser):
         add_aws_target_args(parser)
         parser.add_argument("--app", required=True, help="App slug")
+        parser.add_argument(
+            "--container",
+            help=(
+                "Template container name to fetch logs for. Defaults to the sole container, "
+                "or the template's ALB target when multiple containers exist."
+            ),
+        )
         parser.add_argument("--stopped", action="store_true", help="Look at stopped/crashed tasks (skip running)")
-        parser.add_argument("--sidecar", action="store_true", help="Fetch logs for the sidecar container instead of the app container")
+        parser.add_argument("--sidecar", action="store_true", help="Shortcut for --container sidecar")
         parser.add_argument("--limit", type=int, default=100, help="Number of log events to fetch (default: 100)")
         parser.add_argument("--head", action="store_true", help="Read from the beginning instead of the tail")
         parser.add_argument("--all", action="store_true", dest="fetch_all", help="Fetch all log events (paginate until exhausted)")
@@ -142,13 +160,20 @@ class Command(BaseCommand):
         env_slug = target.environment.slug
 
         try:
-            App.objects.get(organization=aws_account.organization, slug=app_slug)
+            app = App.objects.select_related("source_template").get(
+                organization=aws_account.organization,
+                slug=app_slug,
+            )
         except App.DoesNotExist:
             raise CommandError(f"No app with slug '{app_slug}' in organization '{aws_account.organization.name}'.")
 
         cluster_name = f"devopshero-{env_slug}-cluster"
         service_name = f"doh-{env_slug}-{app_slug}"
         log_group = f"/devopshero/{env_slug}/ecs"
+        container_name = doh_app_shell._resolve_ecs_container_name(
+            app=app,
+            requested_container=_requested_container(options=options),
+        )
 
         ecs_client = session.client("ecs")
 
@@ -165,12 +190,12 @@ class Command(BaseCommand):
             )
 
         task_id = task_arn.split("/")[-1]
-        container_segment = f"{app_slug}-sidecar" if options["sidecar"] else app_slug
-        log_stream = f"{container_segment}/{container_segment}/{task_id}"
+        log_stream = f"{container_name}/{container_name}/{task_id}"
 
         self.stdout.write(f"Cluster:    {cluster_name}")
         self.stdout.write(f"Service:    {service_name}")
         self.stdout.write(f"Task:       {task_id}")
+        self.stdout.write(f"Container:  {container_name}")
         self.stdout.write(f"Log stream: {log_stream}")
 
         _print_task_info(ecs_client=ecs_client, cluster=cluster_name, task_arn=task_arn, stdout=self.stdout)

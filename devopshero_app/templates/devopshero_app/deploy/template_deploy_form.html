@@ -162,7 +162,9 @@
                         <span class="font-mono text-xs font-medium text-gray-900 dark:text-white">{{ c.name }}</span>
                         {% if c.image_source == "prebuilt" %}
                         <span class="inline-flex items-center rounded bg-amber-100 dark:bg-amber-500/20 px-1.5 py-0.5 text-[10px] font-medium text-amber-700 dark:text-amber-300">prebuilt</span>
-                        {% else %}
+                        {% elif c.image_source == "registry" %}
+                        <span class="inline-flex items-center rounded bg-purple-100 dark:bg-purple-500/20 px-1.5 py-0.5 text-[10px] font-medium text-purple-700 dark:text-purple-300">registry</span>
+                        {% elif c.image_source == "dockerfile" %}
                         <span class="inline-flex items-center rounded bg-sky-100 dark:bg-sky-500/20 px-1.5 py-0.5 text-[10px] font-medium text-sky-700 dark:text-sky-300">dockerfile</span>
                         {% endif %}
                         {% if c.name == template.alb_target_container %}
@@ -188,10 +190,15 @@
                             <dt class="text-gray-500 dark:text-gray-400 w-20">Source</dt>
                             <dd class="text-gray-700 dark:text-gray-300 font-mono">template_repos/{{ c.source_repo_path }}/{{ c.dockerfile_path }}</dd>
                         </div>
-                        {% else %}
+                        {% elif c.image_source == "prebuilt" %}
                         <div class="flex">
                             <dt class="text-gray-500 dark:text-gray-400 w-20">Image</dt>
                             <dd class="text-gray-700 dark:text-gray-300 font-mono">doh/{env}/{{ c.ecr_repo }}:{{ c.version }}</dd>
+                        </div>
+                        {% elif c.image_source == "registry" %}
+                        <div class="flex">
+                            <dt class="text-gray-500 dark:text-gray-400 w-20">Image</dt>
+                            <dd class="text-gray-700 dark:text-gray-300 font-mono">{{ c.registry_image }}</dd>
                         </div>
                         {% endif %}
                     </dl>

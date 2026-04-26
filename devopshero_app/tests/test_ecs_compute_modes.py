@@ -6,18 +6,15 @@ from django.test import SimpleTestCase
 
 from devopshero_app.services.infra_customer import deploy_app
 from devopshero_app.services.infra_customer import deploy_base
-from devopshero_app.services.infra_customer.appconfig import AppConfig, ContainerConfig, EfsConfig, HostMountConfig
+from devopshero_app.services.infra_customer.appconfig import (
+    AppConfig,
+    ContainerConfig,
+    ContainerDependencyConfig,
+    EfsConfig,
+)
 
 
-def _app_config(compute_mode: str, include_host_mounts: bool, include_docker_workspace: bool) -> AppConfig:
-    host_mounts = [
-        HostMountConfig(
-            source_path="/var/run/docker.sock",
-            container_path="/var/run/docker.sock",
-            read_only=False,
-        ),
-    ] if include_host_mounts else []
-
+def _app_config(compute_mode: str, include_docker_workspace: bool) -> AppConfig:
     return AppConfig(
         app_name="my-app",
         cpu=1024,
@@ -27,11 +24,10 @@ def _app_config(compute_mode: str, include_host_mounts: bool, include_docker_wor
                 name="app",
                 image_source="dockerfile",
                 ecr_repo_name="doh/staging/my-app-app",
+                source_repo_path="app",
                 container_port=8080,
                 health_check_path="/health",
-                host_mounts=host_mounts,
                 efs_mount=include_docker_workspace,
-                user="0" if include_host_mounts else None,
             ),
         ],
         compute_mode=compute_mode,
@@ -45,16 +41,71 @@ def _app_config(compute_mode: str, include_host_mounts: bool, include_docker_wor
     )
 
 
-def _app_stack_template(compute_mode: str, include_host_mounts: bool, include_docker_workspace: bool = False) -> Template:
+def _dind_hermes_stack_template() -> Template:
     cdk_app = App()
     stack = deploy_app.AppStack(
         scope=cdk_app,
         construct_id="TestAppStack",
-        app_config=_app_config(
-            compute_mode=compute_mode,
-            include_host_mounts=include_host_mounts,
-            include_docker_workspace=include_docker_workspace,
+        app_config=AppConfig(
+            app_name="my-app",
+            cpu=2048,
+            memory=4096,
+            compute_mode="ec2",
+            alb_target_container="hermes",
+            efs_config=EfsConfig(
+                mount_path="/home/app/.hermes",
+                posix_uid=1000,
+                posix_gid=1000,
+                docker_workspace_subpath="workspace",
+            ),
+            containers=[
+                ContainerConfig(
+                    name="docker-dind",
+                    image_source="registry",
+                    registry_image="docker:26.1.0-dind",
+                    container_port=0,
+                    privileged=True,
+                    efs_docker_workspace_only=True,
+                    efs_docker_workspace_container_path="/workspace",
+                    command=[
+                        "--host=unix:///var/run/docker.sock",
+                        "--host=tcp://127.0.0.1:2375",
+                    ],
+                ),
+                ContainerConfig(
+                    name="hermes",
+                    image_source="dockerfile",
+                    source_repo_path="hermes_agent",
+                    ecr_repo_name="doh/staging/my-app-hermes",
+                    container_port=8787,
+                    efs_mount=True,
+                    depends_on=[ContainerDependencyConfig(
+                        name="docker-dind",
+                        condition="HEALTHY",
+                    )],
+                ),
+            ],
         ),
+        image_tag="test",
+        env_slug="staging",
+        resource_prefix="doh-staging-my-app",
+        subdomain="my-app",
+        database_connection_secret=None,
+        shared_alb_hosted_zone=None,
+        shared_hosted_zone_id=None,
+        sidecar_shared_secrets_arn=None,
+        sidecar_image_version=None,
+        auth_base_url=None,
+    )
+    return Template.from_stack(stack)
+
+
+def _app_stack_template(compute_mode: str, include_docker_workspace: bool) -> Template:
+    cdk_app = App()
+    stack = deploy_app.AppStack(
+        scope=cdk_app,
+        construct_id="TestAppStack",
+        app_config=_app_config(compute_mode=compute_mode, include_docker_workspace=include_docker_workspace),
         image_tag="test",
         env_slug="staging",
         resource_prefix="doh-staging-my-app",
@@ -72,7 +123,7 @@ def _app_stack_template(compute_mode: str, include_host_mounts: bool, include_do
 class EcsComputeModeTests(SimpleTestCase):
 
     def test_fargate_mode_uses_fargate_service_and_task_definition(self) -> None:
-        template = _app_stack_template(compute_mode="fargate", include_host_mounts=False)
+        template = _app_stack_template(compute_mode="fargate", include_docker_workspace=False)
 
         template.has_resource_properties("AWS::ECS::TaskDefinition", {
             "RequiresCompatibilities": ["FARGATE"],
@@ -89,7 +140,7 @@ class EcsComputeModeTests(SimpleTestCase):
         })
 
     def test_ec2_mode_uses_ec2_capacity_provider_and_awsvpc_task(self) -> None:
-        template = _app_stack_template(compute_mode="ec2", include_host_mounts=False)
+        template = _app_stack_template(compute_mode="ec2", include_docker_workspace=False)
 
         template.has_resource_properties("AWS::ECS::TaskDefinition", {
             "RequiresCompatibilities": ["EC2"],
@@ -107,38 +158,114 @@ class EcsComputeModeTests(SimpleTestCase):
             ],
         })
 
-    def test_ec2_mode_can_mount_host_docker_socket(self) -> None:
-        template = _app_stack_template(compute_mode="ec2", include_host_mounts=True)
+    def test_fargate_mode_rejects_privileged(self) -> None:
+        cdk_app = App()
+        with self.assertRaisesMessage(
+            ValueError, "Privileged containers are only supported for EC2-backed ECS tasks",
+        ):
+            deploy_app.AppStack(
+                scope=cdk_app,
+                construct_id="TestAppStack",
+                app_config=AppConfig(
+                    app_name="p",
+                    cpu=1024,
+                    memory=2048,
+                    compute_mode="fargate",
+                    alb_target_container="x",
+                    containers=[
+                        ContainerConfig(
+                            name="x",
+                            image_source="dockerfile",
+                            ecr_repo_name="doh/s/x",
+                            source_repo_path="a",
+                            container_port=80,
+                            privileged=True,
+                        ),
+                    ],
+                ),
+                image_tag="t",
+                env_slug="staging",
+                resource_prefix="doh-s-p",
+                subdomain="p",
+                database_connection_secret=None,
+                shared_alb_hosted_zone=None,
+                shared_hosted_zone_id=None,
+                sidecar_shared_secrets_arn=None,
+                sidecar_image_version=None,
+                auth_base_url=None,
+            )
 
+    def test_ec2_mode_dind_privileged_and_workspace_only_efs(self) -> None:
+        template = _dind_hermes_stack_template()
         template.has_resource_properties("AWS::ECS::TaskDefinition", {
-            "Volumes": Match.array_with([
-                {
-                    "Name": "host-bind-0-0",
-                    "Host": {"SourcePath": "/var/run/docker.sock"},
-                },
-            ]),
             "ContainerDefinitions": Match.array_with([
                 Match.object_like({
-                    "User": "0",
-                    "MountPoints": Match.array_with([
+                    "Name": "my-app-docker-dind",
+                    "Command": [
+                        "--host=unix:///var/run/docker.sock",
+                        "--host=tcp://127.0.0.1:2375",
+                    ],
+                    "Privileged": True,
+                }),
+            ]),
+        })
+        template.has_resource_properties("AWS::ECS::TaskDefinition", {
+            "ContainerDefinitions": Match.array_with([
+                Match.object_like({
+                    "Name": "my-app-hermes",
+                    "DependsOn": [
                         {
-                            "ContainerPath": "/var/run/docker.sock",
-                            "SourceVolume": "host-bind-0-0",
-                            "ReadOnly": False,
+                            "ContainerName": "my-app-docker-dind",
+                            "Condition": "HEALTHY",
                         },
-                    ]),
+                    ],
                 }),
             ]),
         })
 
-    def test_fargate_mode_rejects_host_mounts(self) -> None:
-        with self.assertRaisesMessage(ValueError, "Host bind mounts are only supported for EC2-backed ECS tasks"):
-            _app_stack_template(compute_mode="fargate", include_host_mounts=True)
+    def test_unknown_container_dependency_gets_clear_error(self) -> None:
+        cdk_app = App()
+        with self.assertRaisesMessage(
+            ValueError, "Container 'app' depends_on unknown container 'missing'",
+        ):
+            deploy_app.AppStack(
+                scope=cdk_app,
+                construct_id="TestAppStack",
+                app_config=AppConfig(
+                    app_name="p",
+                    cpu=1024,
+                    memory=2048,
+                    compute_mode="ec2",
+                    alb_target_container="app",
+                    containers=[
+                        ContainerConfig(
+                            name="app",
+                            image_source="dockerfile",
+                            ecr_repo_name="doh/s/app",
+                            source_repo_path="app",
+                            container_port=80,
+                            depends_on=[ContainerDependencyConfig(
+                                name="missing",
+                                condition="START",
+                            )],
+                        ),
+                    ],
+                ),
+                image_tag="t",
+                env_slug="staging",
+                resource_prefix="doh-s-p",
+                subdomain="p",
+                database_connection_secret=None,
+                shared_alb_hosted_zone=None,
+                shared_hosted_zone_id=None,
+                sidecar_shared_secrets_arn=None,
+                sidecar_image_version=None,
+                auth_base_url=None,
+            )
 
     def test_efs_docker_workspace_mounts_subpath_volume(self) -> None:
         template = _app_stack_template(
             compute_mode="ec2",
-            include_host_mounts=True,
             include_docker_workspace=True,
         )
 
