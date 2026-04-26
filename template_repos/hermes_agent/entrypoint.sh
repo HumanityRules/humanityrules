@@ -60,19 +60,26 @@ if [ ! -d "/workspace" ]; then
     echo "FATAL: /workspace is not mounted (expected the workspace EFS access point)" >&2
     exit 1
 fi
+if [ -z "$TOOL_IMAGE" ]; then
+    echo "FATAL: TOOL_IMAGE is not set (expected from the hermes container's environment)" >&2
+    exit 1
+fi
 TERMINAL_BACKEND="docker"
 TERMINAL_CWD="/workspace"
 DOCKER_VOLUMES='["/workspace:/workspace"]'
 echo "[entrypoint] Docker-backed Hermes tools enabled (DinD via DOCKER_HOST)."
 
 # Prewarm the tool image on the DinD daemon in the background so the first
-# terminal tool call doesn't pay the ~1GB pull on the hot path. Kept in sync
-# with terminal.docker_image in config.yaml.template. Non-blocking: hermes
-# finishes booting immediately; a tool call firing during the pull window
-# just pays the pull once on that one call (DinD dedupes concurrent pulls
-# of the same image). DinD storage is per-task, so this reruns on each task
-# cold start — that's fine at this scale (one image, pulled rarely).
-TOOL_IMAGE="nikolaik/python-nodejs:python3.11-nodejs20"
+# terminal tool call doesn't pay the ~1GB pull on the hot path. $TOOL_IMAGE
+# comes from the hermes container's environment (seeded in
+# seed_app_templates.py) and is also sed'd into config.yaml as
+# terminal.docker_image below, so the image we prewarm is exactly the one
+# Hermes's terminal tool launches.
+#
+# Non-blocking: hermes finishes booting immediately; a tool call firing
+# during the pull window just pays the pull once on that one call (DinD
+# dedupes concurrent pulls of the same image). DinD storage is per-task,
+# so this reruns on each task cold start — fine at this scale.
 (
     if docker pull "$TOOL_IMAGE" >/dev/null 2>&1; then
         echo "[entrypoint] Tool image pre-pulled: $TOOL_IMAGE"
@@ -93,6 +100,7 @@ if [ ! -f "$HERMES_DIR/config.yaml" ]; then
         -e "s|__AUX_BASE_URL__|${DOH_AUX_BASE_URL}|g" \
         -e "s|__TERMINAL_BACKEND__|${TERMINAL_BACKEND}|g" \
         -e "s|__TERMINAL_CWD__|${TERMINAL_CWD}|g" \
+        -e "s|__TOOL_IMAGE__|${TOOL_IMAGE}|g" \
         -e "s|__DOCKER_VOLUMES__|${DOCKER_VOLUMES}|g" \
         /opt/hermes-defaults/config.yaml.template > "$HERMES_DIR/config.yaml"
 
