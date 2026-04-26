@@ -16,12 +16,11 @@ COPY patches /opt/hermes-defaults/patches
 COPY --chmod=755 entrypoint.sh /entrypoint.sh
 COPY --chmod=755 start.sh /start.sh
 
-# Hermes uses /workspace as the default cwd for terminal commands and file tools.
-# Symlink it into the EFS-backed home directory so agent work output persists.
-RUN rm -rf /workspace && ln -s /home/hermeswebui/.hermes/workspace /workspace
-
+# /workspace is a real top-level EFS mount, sibling to the agent home —
+# same data is mounted into the docker-dind sidecar so tool runs and the
+# hermes parent see one consistent filesystem.
 ENV HERMES_WEBUI_STATE_DIR=/home/hermeswebui/.hermes/webui-mvp
-ENV HERMES_WEBUI_DEFAULT_WORKSPACE=/home/hermeswebui/.hermes/workspace
+ENV HERMES_WEBUI_DEFAULT_WORKSPACE=/workspace
 ENV HERMES_WEBUI_SKIP_ONBOARDING=1
 
 EXPOSE 8787

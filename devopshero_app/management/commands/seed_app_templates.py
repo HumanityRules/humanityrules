@@ -39,7 +39,7 @@ OPENCLAW_TEMPLATE = {
             "health_check_path": "/health",
             "health_check_command": "",
             "health_check_grace_period": 60,
-            "efs_mount": True,
+            "efs_mounts": ["workspace"],
             "runtime_variables": [
                 {
                     "name": "OPENCLAW_LOG_LEVEL",
@@ -133,7 +133,17 @@ OPENCLAW_TEMPLATE = {
         },
     ],
     "datastore_config": None,
-    "efs_config": {"mount_path": "/app/workspace", "posix_uid": 1000, "posix_gid": 1000},
+    "efs_config": {
+        "mounts": [
+            {
+                "name": "workspace",
+                "subpath": "workspace",
+                "container_path": "/app/workspace",
+                "posix_uid": 1000,
+                "posix_gid": 1000,
+            },
+        ],
+    },
     "is_active": True,
 }
 
@@ -346,6 +356,32 @@ _HERMES_SLACK_VARS = [
     },
 ]
 
+# Two sibling access points on EFS per Hermes app: "home" holds agent state
+# (config, memory, skills, venv) and is mounted at ~/.hermes in the hermes
+# container; "workspace" holds user/agent work output and is mounted at
+# /workspace in both the hermes container and the docker-dind sidecar — same
+# data visible on both sides, so files the agent creates through tool runs
+# appear under ~/.workspace and vice versa. Flat sibling layout (not nested
+# inside home) keeps agent home and workspace data independent on disk.
+_HERMES_EFS_CONFIG = {
+    "mounts": [
+        {
+            "name": "home",
+            "subpath": "hermes",
+            "container_path": "/home/hermeswebui/.hermes",
+            "posix_uid": 1024,
+            "posix_gid": 1024,
+        },
+        {
+            "name": "workspace",
+            "subpath": "workspace",
+            "container_path": "/workspace",
+            "posix_uid": 1024,
+            "posix_gid": 1024,
+        },
+    ],
+}
+
 # Hermes tool containers (terminal backend: docker) talk to this task's DinD sidecar.
 _HERMES_DOCKER_HOST_VAR = {
     "name": "DOCKER_HOST",
@@ -376,9 +412,10 @@ _DOCKER_DIND_CONTAINER = {
     "container_port": 0,
     "privileged": True,
     "essential": True,
-    "efs_mount": False,
-    "efs_docker_workspace_only": True,
-    "efs_docker_workspace_container_path": "/workspace",
+    # DinD sees the workspace mount only — never the agent home. That keeps
+    # tool containers it spawns unable to read/modify Hermes config, memory,
+    # or skills even if an attacker escapes the tool container's namespace.
+    "efs_mounts": ["workspace"],
     "health_check_path": None,
     "health_check_command": "docker info >/dev/null 2>&1",
     "health_check_grace_period": 120,
@@ -407,7 +444,7 @@ _HERMES_CONTAINER_BASE = {
     "health_check_path": "/health",
     "health_check_command": "",
     "health_check_grace_period": 60,
-    "efs_mount": True,
+    "efs_mounts": ["home", "workspace"],
     "depends_on": [
         {
             "name": "docker-dind",
@@ -466,7 +503,6 @@ _LEARNEO_MCP_CONTAINER = {
     # access, but the LLM still answers). No health check either, for the
     # same reason + there's no /health endpoint exposed.
     "essential": False,
-    "efs_mount": False,
     "runtime_variables": _LEARNEO_MCP_UPSTREAM_SECRETS,
 }
 
@@ -487,12 +523,7 @@ HERMES_PERSONAL_TEMPLATE = {
     "memory": 4096,
     "default_compute_mode": "ec2",
     "datastore_config": None,
-    "efs_config": {
-        "mount_path": "/home/hermeswebui/.hermes",
-        "posix_uid": 1024,
-        "posix_gid": 1024,
-        "docker_workspace_subpath": "workspace",
-    },
+    "efs_config": _HERMES_EFS_CONFIG,
     "alb_target_container": "hermes",
     "containers": [
         {**_DOCKER_DIND_CONTAINER},
@@ -559,12 +590,7 @@ HERMES_SLACK_TEMPLATE = {
     "memory": 4096,
     "default_compute_mode": "ec2",
     "datastore_config": None,
-    "efs_config": {
-        "mount_path": "/home/hermeswebui/.hermes",
-        "posix_uid": 1024,
-        "posix_gid": 1024,
-        "docker_workspace_subpath": "workspace",
-    },
+    "efs_config": _HERMES_EFS_CONFIG,
     "sidecar_enabled": False,
     "platform_capabilities": ["bedrock-runtime"],
     "alb_target_container": "hermes",

@@ -600,7 +600,7 @@ class AppTemplate(models.Model):
     #     "health_check_path": "/health",
     #     "health_check_command": "",
     #     "health_check_grace_period": 0,
-    #     "efs_mount": true,
+    #     "efs_mounts": ["home", "workspace"],  # names from efs_config.mounts
     #     "runtime_variables": [ ... {name, category, value, ...} ... ],
     #   }
     containers = models.JSONField(default=list)
@@ -612,8 +612,12 @@ class AppTemplate(models.Model):
     # Datastore requirements (null = no datastore needed)
     datastore_config = models.JSONField(null=True, blank=True)
 
-    # EFS volume config: {"mount_path": str, "posix_uid": int, "posix_gid": int}
-    # null = no EFS volume
+    # EFS configuration. Shape:
+    #   {"mounts": [{"name": str, "subpath": str, "container_path": str,
+    #                "posix_uid": int, "posix_gid": int}, ...]}
+    # Each mount becomes a per-app AccessPoint on the shared EFS filesystem,
+    # rooted at /deployments/<app_slug>/<subpath>. Containers opt in by name
+    # via container["efs_mounts"]. null = no EFS.
     efs_config = models.JSONField(null=True, blank=True)
 
     # When True, deployed apps from this template run behind the sidecar proxy

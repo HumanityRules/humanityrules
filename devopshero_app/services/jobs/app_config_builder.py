@@ -123,10 +123,7 @@ def _build_container_config(
             template_container=template_container, blueprint_container=blueprint_container,
         ),
         app_secrets=dict(blueprint_container.get("app_secrets") or {}),
-        efs_mount=bool(template_container.get("efs_mount", False)),
-        efs_docker_workspace_only=bool(template_container.get("efs_docker_workspace_only", False)),
-        efs_docker_workspace_container_path=template_container.get("efs_docker_workspace_container_path")
-        or None,
+        efs_mounts=list(template_container.get("efs_mounts") or []),
         privileged=bool(template_container.get("privileged", False)),
         depends_on=[
             ContainerDependencyConfig(
@@ -197,10 +194,16 @@ def build_app_config_from_blueprint(blueprint: DeploymentBlueprint, repo_path: P
     if template.efs_config:
         raw = template.efs_config
         efs_config = infra_customer.appconfig.EfsConfig(
-            mount_path=raw["mount_path"],
-            posix_uid=raw["posix_uid"],
-            posix_gid=raw["posix_gid"],
-            docker_workspace_subpath=raw.get("docker_workspace_subpath"),
+            mounts=[
+                infra_customer.appconfig.EfsMount(
+                    name=m["name"],
+                    subpath=m["subpath"],
+                    container_path=m["container_path"],
+                    posix_uid=m["posix_uid"],
+                    posix_gid=m["posix_gid"],
+                )
+                for m in raw["mounts"]
+            ],
         )
 
     blueprint_by_name = _match_blueprint_containers_to_template(

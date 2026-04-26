@@ -41,30 +41,24 @@ if [ "$DOH_AUX_PROVIDER" = "bedrock" ]; then
     DOH_AUX_BASE_URL="https://bedrock-runtime.${AWS_BEDROCK_REGION}.amazonaws.com"
 fi
 
-mkdir -p "$HERMES_DIR" "$HERMES_DIR/workspace"
+mkdir -p "$HERMES_DIR"
 
 TERMINAL_BACKEND="local"
 TERMINAL_CWD="."
 DOCKER_VOLUMES="[]"
 
-# DOCKER_HOST points at the in-task DinD sidecar. The DinD sidecar mounts the
-# workspace EFS at /workspace, so -v /workspace:/... in tool runs refers to that
-# data on the sidecar, not a path in this Hermes container.
-#
-# We bind the same EFS source (/workspace on DinD) to two container paths in each
-# tool run: /workspace (the canonical cwd) and /home/hermeswebui/.hermes/workspace
-# (the path the agent learns from HERMES_WEBUI_DEFAULT_WORKSPACE and from the
-# hermes parent container layout). Without the second bind, any command that
-# references the ~/.hermes/workspace path inside the tool container writes to
-# the tool container's ephemeral overlay instead of EFS.
+# DOCKER_HOST points at the in-task DinD sidecar. DinD has the same EFS
+# workspace access point mounted at /workspace as this container does — so a
+# single -v /workspace:/workspace bind on each tool run puts the tool
+# container on the same shared filesystem the parent sees.
 if [ -n "${DOCKER_HOST}" ] && docker info >/dev/null 2>&1; then
-    if [ -d "$HERMES_DIR/workspace" ]; then
+    if [ -d "/workspace" ]; then
         TERMINAL_BACKEND="docker"
         TERMINAL_CWD="/workspace"
-        DOCKER_VOLUMES='["/workspace:/workspace", "/workspace:/home/hermeswebui/.hermes/workspace"]'
+        DOCKER_VOLUMES='["/workspace:/workspace"]'
         echo "[entrypoint] Docker-backed Hermes tools enabled (DinD via DOCKER_HOST)."
     elif [ "$DOH_HERMES_REQUIRE_DOCKER" = "1" ]; then
-        echo "FATAL: DOH_HERMES_REQUIRE_DOCKER=1 but ${HERMES_DIR}/workspace is missing" >&2
+        echo "FATAL: DOH_HERMES_REQUIRE_DOCKER=1 but /workspace is not mounted" >&2
         exit 1
     fi
 elif [ "$DOH_HERMES_REQUIRE_DOCKER" = "1" ]; then
@@ -97,33 +91,6 @@ bedrock:
 EOF
     fi
 fi
-
-# The terminal.* block is DOH-controlled (driven by the task's mount layout),
-# not user-tunable. Rewrite it on every boot so already-deployed apps with an
-# out-of-date config.yaml on EFS pick up fixes without a fresh volume. Other
-# top-level blocks (user-editable) are preserved byte-for-byte.
-python3 - "$HERMES_DIR/config.yaml" "$DOCKER_VOLUMES" "$TERMINAL_BACKEND" "$TERMINAL_CWD" <<'PY'
-import json, re, sys
-path, volumes_json, backend, cwd = sys.argv[1:5]
-volumes = json.loads(volumes_json)
-with open(path) as f:
-    text = f.read()
-# Scope the edit to the lines between `^terminal:` and the next top-level key.
-def rewrite_terminal_block(m):
-    block = m.group(0)
-    def sub(block, key, value):
-        pat = re.compile(rf'^(\s+){re.escape(key)}:.*$', re.MULTILINE)
-        return pat.sub(lambda mm: f'{mm.group(1)}{key}: {value}', block, count=1)
-    block = sub(block, 'backend', backend)
-    block = sub(block, 'cwd', cwd)
-    block = sub(block, 'docker_volumes', json.dumps(volumes))
-    return block
-new_text, n = re.subn(r'(?ms)^terminal:\n(?:[ \t].*\n)*', rewrite_terminal_block, text)
-if n != 1:
-    sys.exit(f"expected exactly one terminal: block, found {n}")
-with open(path, 'w') as f:
-    f.write(new_text)
-PY
 
 if [ ! -d "$HERMES_DIR/hermes-agent" ]; then
     cp -r /opt/hermes-defaults/hermes-agent "$HERMES_DIR/hermes-agent"
