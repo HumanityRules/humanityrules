@@ -8,6 +8,15 @@ from typing import Literal
 
 
 ComputeMode = Literal["fargate", "ec2"]
+ContainerDependencyCondition = Literal["START", "HEALTHY", "COMPLETE", "SUCCESS"]
+ImageSource = Literal["dockerfile", "prebuilt", "registry"]
+
+
+@dataclass
+class ContainerDependencyConfig:
+    """ECS container start ordering relative to a sibling container in the same task."""
+    name: str
+    condition: ContainerDependencyCondition
 
 
 @dataclass
@@ -69,14 +78,6 @@ class EfsConfig:
 
 
 @dataclass
-class HostMountConfig:
-    """Host bind mount exposed to one container in an EC2-backed task."""
-    source_path: str
-    container_path: str
-    read_only: bool
-
-
-@dataclass
 class DatabaseConfig:
     """Configuration for an Aurora database."""
     name: str  # Database name, e.g., "myapp_prod"
@@ -95,7 +96,8 @@ class ContainerConfig:
 
     # "dockerfile": DOH builds from app_source_path into ecr_repo_name:image_tag.
     # "prebuilt": image already pushed by an out-of-band step at prebuilt_ecr_repo:prebuilt_version.
-    image_source: Literal["dockerfile", "prebuilt"]
+    # "registry": public image reference (e.g. docker:26.1.0-dind) resolved by ECS at pull time.
+    image_source: ImageSource
 
     # Populated when image_source == "dockerfile":
     source_repo_path: str | None = None  # Repo-relative path under template_repos/
@@ -105,6 +107,9 @@ class ContainerConfig:
     # Populated when image_source == "prebuilt":
     prebuilt_ecr_repo: str | None = None  # Within doh/{env_slug}/ namespace
     prebuilt_version: str | None = None
+
+    # Populated when image_source == "registry" (e.g. docker:26.1.0-dind, docker.io/...):
+    registry_image: str | None = None
 
     # Network / health
     container_port: int = 0
@@ -124,12 +129,18 @@ class ContainerConfig:
     # Opt-in: mount the task-level EFS volume (AppConfig.efs_config) into this container.
     efs_mount: bool = False
 
-    # EC2-only host bind mounts. Use sparingly: a writable Docker socket gives
-    # the container control of the container instance's Docker daemon.
-    host_mounts: list[HostMountConfig] = field(default_factory=list)
+    # Mount only the app-docker-workspace EFS access point (workspace subpath), not the full
+    # deployment root. Used by DinD so tool daemons do not see Hermes home/config.
+    efs_docker_workspace_only: bool = False
+    efs_docker_workspace_container_path: str | None = None
 
-    # Optional ECS container user override, e.g. "0" when a container must
-    # access a root-owned host socket.
+    # When True, CDK sets privileged on the container (EC2-only; not supported on Fargate).
+    privileged: bool = False
+
+    # Sibling start ordering within the same task.
+    depends_on: list[ContainerDependencyConfig] = field(default_factory=list)
+
+    # Optional ECS container user override, e.g. "0" for legacy images.
     user: str | None = None
 
     # Optional override for the container's CMD (the image's ENTRYPOINT is preserved).

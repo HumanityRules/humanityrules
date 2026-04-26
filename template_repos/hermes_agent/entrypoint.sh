@@ -47,62 +47,28 @@ TERMINAL_BACKEND="local"
 TERMINAL_CWD="."
 DOCKER_VOLUMES="[]"
 
-if [ -S /var/run/docker.sock ]; then
-    if DOH_HERMES_WORKSPACE_DOCKER_VOLUME="$(HERMES_DIR="$HERMES_DIR" python3 <<'PY'
-import json
-import os
-import subprocess
-import urllib.request
-
-hermes_dir = os.environ["HERMES_DIR"]
-workspace_dir = os.path.join(hermes_dir, "workspace")
-metadata_uri = os.environ.get("ECS_CONTAINER_METADATA_URI_V4")
-
-if not metadata_uri:
-    raise SystemExit("ECS_CONTAINER_METADATA_URI_V4 is not set")
-
-with urllib.request.urlopen(metadata_uri, timeout=2) as response:
-    metadata = json.load(response)
-
-docker_id = metadata.get("DockerId")
-if not docker_id:
-    raise SystemExit("ECS metadata did not include DockerId")
-
-inspect = subprocess.run(
-    ["docker", "inspect", docker_id],
-    check=True,
-    capture_output=True,
-    text=True,
-)
-container = json.loads(inspect.stdout)[0]
-for mount in container.get("Mounts", []):
-    if mount.get("Destination") == workspace_dir:
-        volume_ref = mount.get("Name") or mount.get("Source")
-        if not volume_ref:
-            raise SystemExit(f"Docker mount for {workspace_dir} has no reusable volume reference")
-        print(volume_ref)
-        break
-else:
-    raise SystemExit(f"No Docker volume found for {workspace_dir}")
-PY
-    )"; then
-        export DOH_HERMES_WORKSPACE_DOCKER_VOLUME
+# DOCKER_HOST points at the in-task DinD sidecar. The DinD sidecar mounts the
+# workspace EFS at /workspace, so -v /workspace:/... in tool runs refers to that
+# data on the sidecar, not a path in this Hermes container.
+#
+# We bind the same EFS source (/workspace on DinD) to two container paths in each
+# tool run: /workspace (the canonical cwd) and /home/hermeswebui/.hermes/workspace
+# (the path the agent learns from HERMES_WEBUI_DEFAULT_WORKSPACE and from the
+# hermes parent container layout). Without the second bind, any command that
+# references the ~/.hermes/workspace path inside the tool container writes to
+# the tool container's ephemeral overlay instead of EFS.
+if [ -n "${DOCKER_HOST}" ] && docker info >/dev/null 2>&1; then
+    if [ -d "$HERMES_DIR/workspace" ]; then
         TERMINAL_BACKEND="docker"
         TERMINAL_CWD="/workspace"
-        DOCKER_VOLUMES="$(python3 - <<'PY'
-import json
-import os
-
-print(json.dumps([f"{os.environ['DOH_HERMES_WORKSPACE_DOCKER_VOLUME']}:/workspace"]))
-PY
-        )"
-        echo "[entrypoint] Docker-backed Hermes tools enabled."
+        DOCKER_VOLUMES='["/workspace:/workspace", "/workspace:/home/hermeswebui/.hermes/workspace"]'
+        echo "[entrypoint] Docker-backed Hermes tools enabled (DinD via DOCKER_HOST)."
     elif [ "$DOH_HERMES_REQUIRE_DOCKER" = "1" ]; then
-        echo "FATAL: Docker socket is mounted but Hermes could not resolve the workspace Docker volume" >&2
+        echo "FATAL: DOH_HERMES_REQUIRE_DOCKER=1 but ${HERMES_DIR}/workspace is missing" >&2
         exit 1
     fi
 elif [ "$DOH_HERMES_REQUIRE_DOCKER" = "1" ]; then
-    echo "FATAL: DOH_HERMES_REQUIRE_DOCKER=1 but /var/run/docker.sock is not mounted" >&2
+    echo "FATAL: DOH_HERMES_REQUIRE_DOCKER=1 but DOCKER_HOST is not set or no Docker server at DOCKER_HOST" >&2
     exit 1
 fi
 
@@ -131,6 +97,33 @@ bedrock:
 EOF
     fi
 fi
+
+# The terminal.* block is DOH-controlled (driven by the task's mount layout),
+# not user-tunable. Rewrite it on every boot so already-deployed apps with an
+# out-of-date config.yaml on EFS pick up fixes without a fresh volume. Other
+# top-level blocks (user-editable) are preserved byte-for-byte.
+python3 - "$HERMES_DIR/config.yaml" "$DOCKER_VOLUMES" "$TERMINAL_BACKEND" "$TERMINAL_CWD" <<'PY'
+import json, re, sys
+path, volumes_json, backend, cwd = sys.argv[1:5]
+volumes = json.loads(volumes_json)
+with open(path) as f:
+    text = f.read()
+# Scope the edit to the lines between `^terminal:` and the next top-level key.
+def rewrite_terminal_block(m):
+    block = m.group(0)
+    def sub(block, key, value):
+        pat = re.compile(rf'^(\s+){re.escape(key)}:.*$', re.MULTILINE)
+        return pat.sub(lambda mm: f'{mm.group(1)}{key}: {value}', block, count=1)
+    block = sub(block, 'backend', backend)
+    block = sub(block, 'cwd', cwd)
+    block = sub(block, 'docker_volumes', json.dumps(volumes))
+    return block
+new_text, n = re.subn(r'(?ms)^terminal:\n(?:[ \t].*\n)*', rewrite_terminal_block, text)
+if n != 1:
+    sys.exit(f"expected exactly one terminal: block, found {n}")
+with open(path, 'w') as f:
+    f.write(new_text)
+PY
 
 if [ ! -d "$HERMES_DIR/hermes-agent" ]; then
     cp -r /opt/hermes-defaults/hermes-agent "$HERMES_DIR/hermes-agent"

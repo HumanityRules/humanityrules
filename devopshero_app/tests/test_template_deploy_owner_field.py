@@ -30,6 +30,17 @@ def _make_pa_template() -> AppTemplate:
         alb_target_container="hermes",
         containers=[
             {
+                "name": "docker-dind",
+                "image_source": "registry",
+                "registry_image": "docker:26.1.0-dind",
+                "container_port": 0,
+                "health_check_path": None,
+                "health_check_command": "docker info >/dev/null 2>&1",
+                "health_check_grace_period": 120,
+                "efs_mount": False,
+                "runtime_variables": [],
+            },
+            {
                 "name": "hermes",
                 "image_source": "dockerfile",
                 "source_repo_path": "hermes_agent",
@@ -101,6 +112,9 @@ class TestOwnerFieldPresence(DeployFormOwnerBase):
         self.assertIn(b"Owner", response.content)
         self.assertIn(b"Compute", response.content)
         self.assertIn(b"EC2 Capacity", response.content)
+        self.assertIn(b"registry", response.content)
+        self.assertIn(b"docker:26.1.0-dind", response.content)
+        self.assertNotIn(b"doh/{env}/:", response.content)
         # Hidden input carries alice's username.
         self.assertIn(b'name="owner_id" value="alice"', response.content)
         # No dropdown option list that includes Bob.

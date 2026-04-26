@@ -25,13 +25,18 @@ def _generate_image_tag(app_slug: str, git_ref: str) -> str:
 
 def _materialize_environment_variables(runtime_variables: list[dict]) -> list[dict[str, str]]:
     """Extract config vars from one container's runtime_variables into {name, value} entries."""
-    env_vars = []
+    env_vars: list[dict[str, str]] = []
     for var in runtime_variables:
         if var["category"] != "config":
             continue
-        value = var.get("value", "")
-        if value:
-            env_vars.append({"name": var["name"], "value": value})
+        if "value" not in var:
+            continue
+        value = var["value"]
+        if value is None:
+            continue
+        if value == "" and not var.get("allow_empty_value", False):
+            continue
+        env_vars.append({"name": var["name"], "value": str(value)})
     return env_vars
 
 

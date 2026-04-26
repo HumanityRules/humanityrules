@@ -34,7 +34,7 @@ from . import secrets_utils
 # Sidecar image published once per env into doh/{env_slug}/sidecar:{tag}. Keep
 # this pinned here rather than on AppConfig: the sidecar is DOH-owned, not
 # AppTemplate-driven, and a version bump is a platform operation.
-SIDECAR_IMAGE_VERSION = "0.1.0"
+SIDECAR_IMAGE_VERSION = "0.1.1"
 SIDECAR_SOURCE_DIR = Path(__file__).resolve().parents[3] / "sidecar"
 
 # A single flag signals deployment-time capabilities that we need to grant to, at least, the ECS task. 
@@ -144,6 +144,19 @@ def get_connection_env_var_name(connection_config: appconfig.ConnectionConfig) -
     return connection_config.env_var_name or "DATABASE_URL"
 
 
+def _container_dependency_condition(cond: str) -> ecs.ContainerDependencyCondition:
+    mapping = {
+        "START": ecs.ContainerDependencyCondition.START,
+        "HEALTHY": ecs.ContainerDependencyCondition.HEALTHY,
+        "COMPLETE": ecs.ContainerDependencyCondition.COMPLETE,
+        "SUCCESS": ecs.ContainerDependencyCondition.SUCCESS,
+    }
+    if cond not in mapping:
+        msg = f"Invalid container depends_on condition: {cond!r}"
+        raise ValueError(msg)
+    return mapping[cond]
+
+
 def dockerfile_containers(app_config: appconfig.AppConfig) -> list[appconfig.ContainerConfig]:
     """Return the subset of containers that DOH builds from source at deploy time."""
     return [c for c in app_config.containers if c.image_source == "dockerfile"]
@@ -230,6 +243,9 @@ def _container_image_uri(
             "prebuilt container must have prebuilt_ecr_repo + prebuilt_version"
         )
         return f"{registry}/doh/{env_slug}/{container.prebuilt_ecr_repo}:{container.prebuilt_version}"
+    if container.image_source == "registry":
+        assert container.registry_image, "registry container must have registry_image"
+        return container.registry_image
     raise ValueError(f"Unknown image_source='{container.image_source}' on container '{container.name}'")
 
 
@@ -651,8 +667,8 @@ class AppStack(Stack):
                 self, "AppSecret", f"devopshero/{env_slug}/{app_config.app_name}/secrets",
             )
 
-        if app_config.compute_mode != "ec2" and any(c.host_mounts for c in app_config.containers):
-            raise ValueError("Host bind mounts are only supported for EC2-backed ECS tasks")
+        if app_config.compute_mode == "fargate" and any(c.privileged for c in app_config.containers):
+            raise ValueError("Privileged containers are only supported for EC2-backed ECS tasks")
 
         if app_config.compute_mode == "ec2":
             task_definition = ecs.TaskDefinition(
@@ -753,6 +769,7 @@ class AppStack(Stack):
                 secrets=secrets if secrets else None,
                 health_check=health_check,
                 user=c.user,
+                privileged=c.privileged or None,
             )
             # Only the ALB-target container needs a port mapping visible to ECS
             # task-networking — sibling containers communicate over the task's
@@ -762,7 +779,16 @@ class AppStack(Stack):
                     ecs.PortMapping(container_port=c.container_port, protocol=ecs.Protocol.TCP),
                 )
 
-            if efs_access_point and c.efs_mount:
+            if c.efs_docker_workspace_only and efs_docker_workspace_access_point:
+                wpath = c.efs_docker_workspace_container_path or "/workspace"
+                container.add_mount_points(
+                    ecs.MountPoint(
+                        container_path=wpath,
+                        source_volume="app-docker-workspace",
+                        read_only=False,
+                    ),
+                )
+            elif efs_access_point and c.efs_mount:
                 assert app_config.efs_config is not None  # guaranteed by the `if efs_access_point` branch
                 container.add_mount_points(
                     ecs.MountPoint(
@@ -780,21 +806,21 @@ class AppStack(Stack):
                         ),
                     )
 
-            for mount_idx, host_mount in enumerate(c.host_mounts):
-                volume_name = f"host-bind-{idx}-{mount_idx}"
-                task_definition.add_volume(
-                    name=volume_name,
-                    host=ecs.Host(source_path=host_mount.source_path),
-                )
-                container.add_mount_points(
-                    ecs.MountPoint(
-                        container_path=host_mount.container_path,
-                        source_volume=volume_name,
-                        read_only=host_mount.read_only,
+            containers_by_name[c.name] = container
+
+        for c in app_config.containers:
+            if not c.depends_on:
+                continue
+            cdefn = containers_by_name[c.name]
+            for dep in c.depends_on:
+                if dep.name not in containers_by_name:
+                    raise ValueError(f"Container '{c.name}' depends_on unknown container '{dep.name}'")
+                cdefn.add_container_dependencies(
+                    ecs.ContainerDependency(
+                        container=containers_by_name[dep.name],
+                        condition=_container_dependency_condition(cond=dep.condition),
                     ),
                 )
-
-            containers_by_name[c.name] = container
 
         # Auth sidecar: adds a third container in front of the ALB-target
         # container, redirects the ALB to it, and proxies to the target over
