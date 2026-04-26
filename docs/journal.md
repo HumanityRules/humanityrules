@@ -1,5 +1,16 @@
 # DevOpsHero Development Journal
 
+## 2026-04-25 18:56 - [Deployment] Drop DOH_HERMES_REQUIRE_DOCKER dead-weight flag
+
+Small cleanup: both Hermes templates always set `DOH_HERMES_REQUIRE_DOCKER=1` and the entrypoint's checks around that env var are redundant with the ECS `depends_on: {docker-dind, HEALTHY}` contract that already gates hermes on a healthy DinD. Removed the env var from both templates, removed the two `elif` fallbacks from `entrypoint.sh`, and tightened the probes into unconditional fatal checks — if `DOCKER_HOST` is unset or unreachable, or `/workspace` isn't mounted, boot fails loudly instead of silently dropping to `backend: local`.
+
+Previously the control flow read as "if docker is reachable and workspace is there, great; otherwise, if REQUIRE_DOCKER=1, fail; otherwise, run without tools." In practice REQUIRE_DOCKER was always `1`, so the "otherwise" branches were dead. Deleting them also kills the only place in the codebase where Hermes would have silently started without tool access, which would have been confusing to debug if it ever actually happened.
+
+**Key points:**
+
+- `depends_on: HEALTHY` on the hermes container is the primary contract; duplicating it with a per-container env-var check just creates two sources of truth that can drift. The cdk side is the one that actually blocks the task from reaching RUNNING when DinD is unhealthy; the entrypoint check now only covers the degenerate case where someone deploys Hermes without the DinD sidecar at all.
+- "Silent degraded mode" is a bad default for an AI agent: a Hermes instance without tools looks identical from the outside to one with tools until the user asks it to do something. Better to fail startup than to fail the first tool call.
+
 ## 2026-04-25 18:45 - [Deployment] Sibling EFS mounts: hermes home and workspace as peers, not nested
 
 **Conversation:** [2026-04-25-1845-afc23e32.md](conversations/2026-04-25-1845-afc23e32.md)

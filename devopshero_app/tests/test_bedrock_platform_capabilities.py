@@ -136,4 +136,3 @@ class BedrockPlatformCapabilityTests(SimpleTestCase):
             self.assertEqual(hermes_container["efs_mounts"], ["home", "workspace"])
             self.assertNotIn("user", hermes_container)
             self.assertEqual(runtime_vars["DOCKER_HOST"]["value"], "tcp://127.0.0.1:2375")
-            self.assertEqual(runtime_vars["DOH_HERMES_REQUIRE_DOCKER"]["value"], "1")

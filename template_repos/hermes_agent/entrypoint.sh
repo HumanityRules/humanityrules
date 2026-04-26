@@ -47,24 +47,26 @@ TERMINAL_BACKEND="local"
 TERMINAL_CWD="."
 DOCKER_VOLUMES="[]"
 
-# DOCKER_HOST points at the in-task DinD sidecar. DinD has the same EFS
-# workspace access point mounted at /workspace as this container does — so a
-# single -v /workspace:/workspace bind on each tool run puts the tool
-# container on the same shared filesystem the parent sees.
-if [ -n "${DOCKER_HOST}" ] && docker info >/dev/null 2>&1; then
-    if [ -d "/workspace" ]; then
-        TERMINAL_BACKEND="docker"
-        TERMINAL_CWD="/workspace"
-        DOCKER_VOLUMES='["/workspace:/workspace"]'
-        echo "[entrypoint] Docker-backed Hermes tools enabled (DinD via DOCKER_HOST)."
-    elif [ "$DOH_HERMES_REQUIRE_DOCKER" = "1" ]; then
-        echo "FATAL: DOH_HERMES_REQUIRE_DOCKER=1 but /workspace is not mounted" >&2
-        exit 1
-    fi
-elif [ "$DOH_HERMES_REQUIRE_DOCKER" = "1" ]; then
-    echo "FATAL: DOH_HERMES_REQUIRE_DOCKER=1 but DOCKER_HOST is not set or no Docker server at DOCKER_HOST" >&2
+# DOCKER_HOST points at the in-task DinD sidecar. The hermes container's
+# depends_on: {docker-dind, HEALTHY} already guarantees DinD is up before we
+# boot, and ECS launches us with DOCKER_HOST set from the template. Fail hard
+# if either is missing — we'd fall back to backend=local silently otherwise.
+if [ -z "${DOCKER_HOST}" ]; then
+    echo "FATAL: DOCKER_HOST is not set; cannot reach the DinD sidecar" >&2
     exit 1
 fi
+if ! docker info >/dev/null 2>&1; then
+    echo "FATAL: no Docker server reachable at DOCKER_HOST=${DOCKER_HOST}" >&2
+    exit 1
+fi
+if [ ! -d "/workspace" ]; then
+    echo "FATAL: /workspace is not mounted (expected the workspace EFS access point)" >&2
+    exit 1
+fi
+TERMINAL_BACKEND="docker"
+TERMINAL_CWD="/workspace"
+DOCKER_VOLUMES='["/workspace:/workspace"]'
+echo "[entrypoint] Docker-backed Hermes tools enabled (DinD via DOCKER_HOST)."
 
 # Generate config.yaml from template on first boot.
 # Existing files (from a previous deploy on EFS) are never overwritten.
