@@ -28,15 +28,18 @@ All custom commands live in `devopshero_app/management/commands/`.
 - **ensure_superuser** — Create or promote a user to superuser.
 
 
-## Local execution
+## Local execution (default — use unless user explicitly says "prod")
+
+Do not ask the user "local or prod?" — just run locally. They'll say "prod" when they mean prod.
+
 
 ```bash
 uv run manage.py <command> [args...]
 ```
 
-## Production execution
+## Production execution (only when user explicitly says "prod" / "production")
 
-All the management commands above work on production via `infra_devopshero/prod_manage.sh`, which runs them on the ECS container. See the `prod-manage` skill for setup details.
+Via `infra_devopshero/prod_manage.sh` (runs on the ECS container). See the `prod-manage` skill for setup.
 
 ```bash
 cd infra_devopshero
