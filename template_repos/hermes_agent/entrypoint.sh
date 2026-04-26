@@ -65,6 +65,22 @@ TERMINAL_CWD="/workspace"
 DOCKER_VOLUMES='["/workspace:/workspace"]'
 echo "[entrypoint] Docker-backed Hermes tools enabled (DinD via DOCKER_HOST)."
 
+# Prewarm the tool image on the DinD daemon in the background so the first
+# terminal tool call doesn't pay the ~1GB pull on the hot path. Kept in sync
+# with terminal.docker_image in config.yaml.template. Non-blocking: hermes
+# finishes booting immediately; a tool call firing during the pull window
+# just pays the pull once on that one call (DinD dedupes concurrent pulls
+# of the same image). DinD storage is per-task, so this reruns on each task
+# cold start — that's fine at this scale (one image, pulled rarely).
+TOOL_IMAGE="nikolaik/python-nodejs:python3.11-nodejs20"
+(
+    if docker pull "$TOOL_IMAGE" >/dev/null 2>&1; then
+        echo "[entrypoint] Tool image pre-pulled: $TOOL_IMAGE"
+    else
+        echo "[entrypoint] Tool image prewarm failed; first tool run will pull."
+    fi
+) &
+
 # Generate config.yaml from template on first boot.
 # Existing files (from a previous deploy on EFS) are never overwritten.
 if [ ! -f "$HERMES_DIR/config.yaml" ]; then
