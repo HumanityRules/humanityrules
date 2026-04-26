@@ -171,6 +171,15 @@ def _build_container_config(
             **common,
             registry_image=template_container["registry_image"],
         )
+    if image_source == "policy_proxy":
+        upstream = template_container.get("upstream_container")
+        if not upstream:
+            msg = f"Container '{name}' is image_source=policy_proxy but has no upstream_container"
+            raise ValueError(msg)
+        return ContainerConfig(
+            **common,
+            upstream_container=upstream,
+        )
     raise ValueError(f"Unknown image_source='{image_source}' on container '{name}'")
 
 
@@ -247,6 +256,5 @@ def build_app_config_from_blueprint(blueprint: DeploymentBlueprint, repo_path: P
         database_config=database_config,
         app_secrets=app_secrets_union or None,
         efs_config=efs_config,
-        sidecar_enabled=bool(template.sidecar_enabled),
         platform_capabilities=list(template.platform_capabilities or []),
     )

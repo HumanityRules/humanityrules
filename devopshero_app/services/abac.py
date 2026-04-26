@@ -638,7 +638,7 @@ def create_default_app_policy(app: App) -> None:
     Create a default app:use policy and app-name tag when a new App is created.
     Called from App post_save signal.
 
-    Apps whose source template opts into the sidecar proxy (e.g. Personal
+    Apps whose source template runs behind the policy proxy (e.g. Personal
     Assistants) are NOT given the open-access default — their access is
     governed by purpose-built policies (e.g. the global PA owner policy).
     """
@@ -653,7 +653,8 @@ def create_default_app_policy(app: App) -> None:
         value=app.slug,
     )
 
-    if app.source_template and app.source_template.sidecar_enabled:
+    template = app.source_template
+    if template and any(c.get("image_source") == "policy_proxy" for c in (template.containers or [])):
         return
 
     # Create open-access policy for this app

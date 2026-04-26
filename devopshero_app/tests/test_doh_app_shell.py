@@ -7,7 +7,7 @@ from devopshero_app.management.commands import doh_app_shell
 from devopshero_app.models import App, AppTemplate, Organization, Repository, Workspace
 
 
-def _template(slug: str, containers: list[dict], alb_target_container: str | None, sidecar_enabled: bool) -> AppTemplate:
+def _template(slug: str, containers: list[dict], alb_target_container: str | None) -> AppTemplate:
     return AppTemplate.objects.create(
         name=slug,
         slug=slug,
@@ -18,7 +18,6 @@ def _template(slug: str, containers: list[dict], alb_target_container: str | Non
         memory=2048,
         alb_target_container=alb_target_container,
         containers=containers,
-        sidecar_enabled=sidecar_enabled,
         is_active=True,
     )
 
@@ -62,7 +61,6 @@ class DohAppShellContainerResolutionTests(TestCase):
             slug="single",
             containers=[{"name": "app"}],
             alb_target_container="app",
-            sidecar_enabled=False,
         )
         app = _app(template=template)
 
@@ -75,7 +73,6 @@ class DohAppShellContainerResolutionTests(TestCase):
             slug="multi",
             containers=[{"name": "hermes"}, {"name": "sidecar-mcp"}],
             alb_target_container="hermes",
-            sidecar_enabled=False,
         )
         app = _app(template=template)
 
@@ -88,7 +85,6 @@ class DohAppShellContainerResolutionTests(TestCase):
             slug="multi-explicit",
             containers=[{"name": "hermes"}, {"name": "sidecar-mcp"}],
             alb_target_container="hermes",
-            sidecar_enabled=False,
         )
         app = _app(template=template)
 
@@ -96,25 +92,26 @@ class DohAppShellContainerResolutionTests(TestCase):
 
         self.assertEqual(container_name, "my-app-sidecar-mcp")
 
-    def test_requested_sidecar_resolves_when_template_has_sidecar(self) -> None:
+    def test_requested_policy_proxy_resolves_when_declared_as_container(self) -> None:
         template = _template(
-            slug="sidecar",
-            containers=[{"name": "hermes"}],
-            alb_target_container="hermes",
-            sidecar_enabled=True,
+            slug="policy-proxy",
+            containers=[
+                {"name": "hermes"},
+                {"name": "policy-proxy", "image_source": "policy_proxy"},
+            ],
+            alb_target_container="policy-proxy",
         )
         app = _app(template=template)
 
-        container_name = doh_app_shell._resolve_ecs_container_name(app=app, requested_container="sidecar")
+        container_name = doh_app_shell._resolve_ecs_container_name(app=app, requested_container="policy-proxy")
 
-        self.assertEqual(container_name, "my-app-sidecar")
+        self.assertEqual(container_name, "my-app-policy-proxy")
 
     def test_requested_full_ecs_container_name_passes_through(self) -> None:
         template = _template(
             slug="full-name",
             containers=[{"name": "hermes"}],
             alb_target_container="hermes",
-            sidecar_enabled=False,
         )
         app = _app(template=template)
 
@@ -127,7 +124,6 @@ class DohAppShellContainerResolutionTests(TestCase):
             slug="unknown",
             containers=[{"name": "hermes"}],
             alb_target_container="hermes",
-            sidecar_enabled=False,
         )
         app = _app(template=template)
 

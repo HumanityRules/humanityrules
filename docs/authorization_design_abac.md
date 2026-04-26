@@ -96,7 +96,7 @@ Attributes (both on identities and on groups) are managed manually within DOH by
 
 ### App-Only Identities
 
-Lightweight identities (auto-created on first SSO through the sidecar) receive attributes the same way as platform users — directly assigned by org admins, or inherited through group membership.
+Lightweight identities (auto-created on first SSO through the policy proxy) receive attributes the same way as platform users — directly assigned by org admins, or inherited through group membership.
 
 
 ## Resource Tags
@@ -150,13 +150,13 @@ Actions describe what someone can do. They are resource-type-specific. The actio
   - `environment:approve` — Approve AppPermissionRequests targeting this environment
   - `environment:admin` — Full environment control, including managing tags. Implies `environment:view`, `environment:deploy`, and `environment:approve`.
 - **App actions:**
-  - `app:use` — Access the deployed app through the sidecar
+  - `app:use` — Access the deployed app through the policy proxy
 
 Some actions are supersets of others (as noted above). When a policy grants `workspace:admin`, the identity implicitly has all other workspace actions. The action catalog can grow over time without restructuring the authorization model.
 
 ### Platform Visibility vs. App Access
 
-`app:use` is exclusively a runtime action evaluated by the sidecar proxy. It controls who can open and use the deployed application, not who can see the app listed in the DOH platform.
+`app:use` is exclusively a runtime action evaluated by the policy proxy. It controls who can open and use the deployed application, not who can see the app listed in the DOH platform.
 
 Currently, platform visibility of apps and datastores is derived from `workspace:view` on the parent workspace. If a user has `workspace:view`, they can see all apps and datastores within that workspace on the dashboard and workspace detail pages. There is no `app:view` action — visibility is all-or-nothing at the workspace level.
 
@@ -308,13 +308,13 @@ Org Settings -> Policy Delegation
 
 ## App Access: Sidecar Integration
 
-The sidecar proxy that protects deployed apps evaluates ABAC policies by calling a central Policy Decision Point (PDP) service, rather than evaluating policies locally.
+The policy proxy that protects deployed apps evaluates ABAC policies by calling a central Policy Decision Point (PDP) service, rather than evaluating policies locally.
 
 ### Access Levels Are Subsumed
 
 The three access levels from the RBAC model (VPC-open, authenticated, restricted) are no longer separate configuration. All three are expressed as policies:
 
-- **Equivalent of "VPC-open"** — A policy with identity condition `*` (any identity, authenticated or not) granting `app:use`. The sidecar reads this at configuration time and optimizes to passthrough mode — no per-request evaluation needed.
+- **Equivalent of "VPC-open"** — A policy with identity condition `*` (any identity, authenticated or not) granting `app:use`. The policy proxy reads this at configuration time and optimizes to passthrough mode — no per-request evaluation needed.
 - **Equivalent of "authenticated"** — A policy with identity condition `authenticated = true` granting `app:use`.
 - **Equivalent of "restricted"** — Only specific policies grant `app:use` (e.g., scoped to particular identity attributes).
 
@@ -327,7 +327,7 @@ The default policy for new apps is:
 - **Identity condition:** `*`
 - **Actions:** `app:use`
 
-This is the most permissive posture: anyone with network access can reach the app, and the sidecar operates in passthrough mode. Admins can narrow this after creation — changing `*` to `authenticated = true` to require SSO, or to specific attributes for restricted apps.
+This is the most permissive posture: anyone with network access can reach the app, and the policy proxy operates in passthrough mode. Admins can narrow this after creation — changing `*` to `authenticated = true` to require SSO, or to specific attributes for restricted apps.
 
 ### Route-Level Overrides
 
@@ -359,8 +359,8 @@ A request to `/executive-dashboards/q1` requires `authenticated = true` (from th
 ### Sidecar Request Flow
 
 1. Sidecar starts up and fetches the app's policies from the PDP
-2. If the app has a `*` policy (unconditional `app:use` grant): sidecar enters passthrough mode, all requests proxy directly to the app container, done
-3. Request arrives at the sidecar
+2. If the app has a `*` policy (unconditional `app:use` grant): policy proxy enters passthrough mode, all requests proxy directly to the app container, done
+3. Request arrives at the policy proxy
 4. Is the user authenticated? If not, redirect to SSO flow
 5. On successful auth, resolve the identity and its attributes
 6. Send policy evaluation request to the PDP: identity attributes, app tags (direct + inherited), request path, requested action (`app:use`)
@@ -369,7 +369,7 @@ A request to `/executive-dashboards/q1` requires `authenticated = true` (from th
 9. PDP returns allow or deny
 10. Sidecar proxies or rejects the request
 
-Policy changes require a sidecar restart to take effect. The sidecar does not poll or receive push updates.
+Policy changes require a policy proxy restart to take effect. The policy proxy does not poll or receive push updates.
 
 
 ## AppPermissionRequest Approval

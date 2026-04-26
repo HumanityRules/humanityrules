@@ -31,11 +31,11 @@ from . import route53_utils
 from . import secrets_utils
 
 
-# Sidecar image published once per env into doh/{env_slug}/sidecar:{tag}. Keep
-# this pinned here rather than on AppConfig: the sidecar is DOH-owned, not
+# Policy-proxy image published once per env into doh/{env_slug}/policy-proxy:{tag}.
+# Pinned here rather than on AppConfig: the policy proxy is DOH-owned, not
 # AppTemplate-driven, and a version bump is a platform operation.
-SIDECAR_IMAGE_VERSION = "0.1.1"
-SIDECAR_SOURCE_DIR = Path(__file__).resolve().parents[3] / "sidecar"
+POLICY_PROXY_IMAGE_VERSION = "0.1.1"
+POLICY_PROXY_SOURCE_DIR = Path(__file__).resolve().parents[3] / "policy_proxy"
 
 # A single flag signals deployment-time capabilities that we need to grant to, at least, the ECS task. 
 # Check the journal "Hermes Bedrock access moved from static keys to ECS task role" for more details.
@@ -64,23 +64,23 @@ BEDROCK_RUNTIME_ACTIONS = [
 ]
 
 
-def sidecar_ecr_repo_name(env_slug: str) -> str:
-    """Per-env ECR repo for the sidecar image: doh/{env_slug}/sidecar."""
-    return f"doh/{env_slug}/sidecar"
+def policy_proxy_ecr_repo_name(env_slug: str) -> str:
+    """Per-env ECR repo for the policy-proxy image: doh/{env_slug}/policy-proxy."""
+    return f"doh/{env_slug}/policy-proxy"
 
 
 def _resolve_pdp_url() -> str:
-    """Resolve the PDP URL the sidecar should call. DOH_PDP_URL wins if set."""
+    """Resolve the PDP URL the policy proxy should call. DOH_PDP_URL wins if set."""
     import os
     from django.conf import settings
     explicit = os.environ.get("DOH_PDP_URL")
     if explicit:
         return explicit
-    # In prod the sidecar calls devopshero.ai directly. In local dev the
-    # sidecar lives in a customer VPC and can't reach the laptop, so we
-    # point it at a reserved ngrok tunnel that forwards to localhost:8000.
-    # If someone else ever needs to deploy a sidecar'd app from their
-    # laptop, switch to a per-developer DOH_PDP_PUBLIC_URL setting.
+    # In prod the policy proxy calls devopshero.ai directly. In local dev the
+    # proxy lives in a customer VPC and can't reach the laptop, so we point it
+    # at a reserved ngrok tunnel that forwards to localhost:8000. If someone
+    # else ever needs to deploy a policy-proxy'd app from their laptop, switch
+    # to a per-developer DOH_PDP_PUBLIC_URL setting.
     base = "https://devopshero.ai" if not settings.DEBUG else "https://devopshero.ngrok.io"
     return f"{base}/api/pdp/evaluate"
 
@@ -231,8 +231,10 @@ def _container_image_uri(
 ) -> str:
     """Resolve the ECR image URI for a container.
 
-    - `dockerfile`: {account}.dkr.ecr.{region}.amazonaws.com/{c.ecr_repo_name}:{app_image_tag}
-    - `prebuilt`:   {account}.dkr.ecr.{region}.amazonaws.com/doh/{env_slug}/{c.prebuilt_ecr_repo}:{c.prebuilt_version}
+    - `dockerfile`:   {account}.dkr.ecr.{region}.amazonaws.com/{c.ecr_repo_name}:{app_image_tag}
+    - `prebuilt`:     {account}.dkr.ecr.{region}.amazonaws.com/doh/{env_slug}/{c.prebuilt_ecr_repo}:{c.prebuilt_version}
+    - `registry`:     c.registry_image (unmodified)
+    - `policy_proxy`: {account}.dkr.ecr.{region}.amazonaws.com/doh/{env_slug}/policy-proxy:POLICY_PROXY_IMAGE_VERSION
     """
     registry = f"{account}.dkr.ecr.{region}.amazonaws.com"
     if container.image_source == "dockerfile":
@@ -246,6 +248,8 @@ def _container_image_uri(
     if container.image_source == "registry":
         assert container.registry_image, "registry container must have registry_image"
         return container.registry_image
+    if container.image_source == "policy_proxy":
+        return f"{registry}/{policy_proxy_ecr_repo_name(env_slug)}:{POLICY_PROXY_IMAGE_VERSION}"
     raise ValueError(f"Unknown image_source='{container.image_source}' on container '{container.name}'")
 
 
@@ -290,12 +294,12 @@ class EcrStack(Stack):
                 CfnOutput(self, "EcrRepositoryArn", value=repo.repository_arn, export_name=f"{resource_prefix}-ecr-arn")
 
 
-class SidecarEcrStack(Stack):
-    """Per-env ECR repo for the DOH sidecar image.
+class PolicyProxyEcrStack(Stack):
+    """Per-env ECR repo for the DOH policy-proxy image.
 
-    One repo per environment: doh/{env_slug}/sidecar. Shared by every
-    sidecar-enabled app in the env. Created once per env on the first
-    sidecar-enabled deploy and then imported from subsequent deploys.
+    One repo per environment: doh/{env_slug}/policy-proxy. Shared by every app
+    in the env that runs behind a policy proxy. Created once per env on the
+    first policy-proxy deploy and then imported from subsequent deploys.
     """
 
     def __init__(
@@ -307,26 +311,26 @@ class SidecarEcrStack(Stack):
     ) -> None:
         super().__init__(scope, construct_id, **kwargs)
 
-        repo_name = sidecar_ecr_repo_name(env_slug)
+        repo_name = policy_proxy_ecr_repo_name(env_slug)
         self.repository = ecr.Repository(
-            self, "SidecarEcrRepository",
+            self, "PolicyProxyEcrRepository",
             repository_name=repo_name,
             image_scan_on_push=True,
-            # Keep older sidecar images around: a sidecar version bump that
-            # needs to be rolled back mustn't be blocked by the lifecycle policy.
+            # Keep older policy-proxy images around: a version bump that needs
+            # to be rolled back mustn't be blocked by the lifecycle policy.
             lifecycle_rules=[ecr.LifecycleRule(
-                description="Keep last 20 sidecar images", max_image_count=20, rule_priority=1,
+                description="Keep last 20 policy-proxy images", max_image_count=20, rule_priority=1,
             )],
             removal_policy=RemovalPolicy.DESTROY,
             empty_on_delete=True,
         )
         Tags.of(self.repository).add("Env", env_slug)
-        Tags.of(self.repository).add("Component", "sidecar")
+        Tags.of(self.repository).add("Component", "policy-proxy")
 
         CfnOutput(
-            self, "SidecarEcrRepositoryUri",
+            self, "PolicyProxyEcrRepositoryUri",
             value=self.repository.repository_uri,
-            export_name=f"devopshero-{env_slug}-sidecar-ecr-uri",
+            export_name=f"devopshero-{env_slug}-policy-proxy-ecr-uri",
         )
 
 
@@ -531,8 +535,7 @@ class AppStack(Stack):
         database_connection_secret: secretsmanager.ISecret | None,
         shared_alb_hosted_zone: str | None,
         shared_hosted_zone_id: str | None,
-        sidecar_shared_secrets_arn: str | None,
-        sidecar_image_version: str | None,
+        policy_proxy_shared_secrets_arn: str | None,
         auth_base_url: str | None,
         **kwargs,
     ) -> None:
@@ -545,23 +548,38 @@ class AppStack(Stack):
                 f"ALB attachment requires one container in the list to be marked as the target."
             )
 
-        # Auth sidecar is opt-in per AppTemplate. When enabled the task def adds a
-        # third container in front of the ALB-target container, ALB routes to
-        # that sidecar, and the sidecar proxies to the target over localhost.
-        sidecar_enabled = bool(app_config.sidecar_enabled)
-        if sidecar_enabled and not (
-            sidecar_shared_secrets_arn and sidecar_image_version and auth_base_url
-        ):
-            raise RuntimeError(
-                "Sidecar-enabled deploy requires sidecar_shared_secrets_arn, "
-                "sidecar_image_version, and auth_base_url. One or more were missing — "
-                "did the orchestration skip ensure_env_sidecar_secrets_exist?",
-            )
-        # Auth sidecar listens on alb_target.container_port + 1; the app keeps its original port.
-        sidecar_listen_port = alb_target.container_port + 1 if sidecar_enabled else None
-        # The target group port (= ALB forwarding port) points at whichever
-        # container should receive inbound traffic.
-        target_port = sidecar_listen_port if sidecar_enabled else alb_target.container_port
+        # Policy proxy (SSO + ABAC) is opt-in: a template declares a container
+        # with image_source="policy_proxy" and points alb_target_container at
+        # it. No separate flag — presence of the container drives everything.
+        policy_proxy = app_config.policy_proxy_container()
+        if policy_proxy is not None:
+            if not (policy_proxy_shared_secrets_arn and auth_base_url):
+                raise RuntimeError(
+                    "Policy-proxy deploy requires policy_proxy_shared_secrets_arn and "
+                    "auth_base_url. One or more were missing — did the orchestration "
+                    "skip ensure_env_policy_proxy_secrets_exist?",
+                )
+            if not policy_proxy.upstream_container:
+                raise RuntimeError(
+                    f"Policy-proxy container '{policy_proxy.name}' has no upstream_container",
+                )
+            upstream = next((c for c in app_config.containers if c.name == policy_proxy.upstream_container), None)
+            if upstream is None:
+                raise RuntimeError(
+                    f"Policy-proxy container '{policy_proxy.name}' references upstream "
+                    f"'{policy_proxy.upstream_container}' not present in containers "
+                    f"{[c.name for c in app_config.containers]}",
+                )
+            if alb_target.name != policy_proxy.name:
+                raise RuntimeError(
+                    f"When a policy proxy is declared it must be the alb_target_container "
+                    f"(got '{alb_target.name}', expected '{policy_proxy.name}')",
+                )
+        else:
+            upstream = None
+        # Target-group port points at whichever container owns the ALB target
+        # (which is the policy proxy itself when one is declared).
+        target_port = alb_target.container_port
 
         # Import environment infrastructure
         self.environment_infra = deploy_base.import_environment_infrastructure(
@@ -587,12 +605,12 @@ class AppStack(Stack):
                 actions=["secretsmanager:GetSecretValue"],
                 resources=[database_connection_secret.secret_arn],
             ))
-        if sidecar_enabled:
-            # The sidecar container reads DOH_SIDECAR_TOKEN from the env's
-            # shared-secrets entry via ECS secret injection.
+        if policy_proxy is not None:
+            # The policy-proxy container reads DOH_POLICY_PROXY_TOKEN from the
+            # env's shared-secrets entry via ECS secret injection.
             task_role.add_to_policy(iam.PolicyStatement(
                 actions=["secretsmanager:GetSecretValue"],
-                resources=[sidecar_shared_secrets_arn],
+                resources=[policy_proxy_shared_secrets_arn],
             ))
         if _uses_bedrock_runtime(app_config):
             task_role.add_to_policy(iam.PolicyStatement(
@@ -701,6 +719,32 @@ class AppStack(Stack):
                 ),
             )
 
+        # Platform-injected env + secrets for the policy-proxy container, if any.
+        # Computed once here so the main container loop stays uniform.
+        policy_proxy_environment_overlay: dict[str, str] = {}
+        policy_proxy_secret_overlay: dict[str, ecs.Secret] = {}
+        if policy_proxy is not None:
+            assert upstream is not None  # enforced above
+            policy_proxy_shared_secret = secretsmanager.Secret.from_secret_complete_arn(
+                self, "PolicyProxySharedSecret", policy_proxy_shared_secrets_arn,
+            )
+            policy_proxy_environment_overlay = {
+                "DOH_APP_ID": app_config.app_name,
+                "DOH_ENV_SLUG": env_slug,
+                "DOH_ENV_DOMAIN": shared_alb_hosted_zone or "",
+                "DOH_AUTH_BASE_URL": auth_base_url,
+                "DOH_JWKS_URL": f"{auth_base_url.rstrip('/')}/.well-known/jwks.json",
+                "DOH_PDP_URL": _resolve_pdp_url(),
+                "DOH_UPSTREAM_HOST": "127.0.0.1",
+                "DOH_UPSTREAM_PORT": str(upstream.container_port),
+                "DOH_LISTEN_PORT": str(policy_proxy.container_port),
+            }
+            policy_proxy_secret_overlay = {
+                "DOH_POLICY_PROXY_TOKEN": ecs.Secret.from_secrets_manager(
+                    policy_proxy_shared_secret, field="DOH_POLICY_PROXY_TOKEN",
+                ),
+            }
+
         # Add each configured container to the task definition.
         containers_by_name: dict[str, ecs.ContainerDefinition] = {}
         for idx, c in enumerate(app_config.containers):
@@ -712,17 +756,23 @@ class AppStack(Stack):
                 app_image_tag=image_tag,
             )
 
-            # Environment: per-container list of {name, value}.
+            # Environment: per-container list of {name, value}, plus the
+            # platform overlay when this is the policy-proxy container.
             environment = {e["name"]: e["value"] for e in c.environment_variables}
+            if c.image_source == "policy_proxy":
+                environment.update(policy_proxy_environment_overlay)
 
             # Secrets: the container's declared fields from the shared app_secrets bag,
-            # plus database_connection_secret pieces on the ALB-target container only.
+            # plus database_connection_secret pieces on the ALB-target container only,
+            # plus the policy-proxy token overlay when this is the policy-proxy container.
             secrets: dict[str, ecs.Secret] = {}
             if app_secret_resource is not None and c.app_secrets:
                 for field_name in c.app_secrets:
                     secrets[field_name] = ecs.Secret.from_secrets_manager(app_secret_resource, field=field_name)
             if c.name == alb_target.name:
                 secrets.update(alb_target_database_secrets)
+            if c.image_source == "policy_proxy":
+                secrets.update(policy_proxy_secret_overlay)
 
             health_check = None
             if c.health_check_command:
@@ -790,56 +840,6 @@ class AppStack(Stack):
                     ),
                 )
 
-        # Auth sidecar: adds a third container in front of the ALB-target
-        # container, redirects the ALB to it, and proxies to the target over
-        # localhost. Orthogonal to the `containers` list — auth sidecar stays
-        # on its own `sidecar_enabled` flag.
-        if sidecar_enabled:
-            sidecar_image_uri = (
-                f"{self.account}.dkr.ecr.{self.region}.amazonaws.com/"
-                f"{sidecar_ecr_repo_name(env_slug)}:{sidecar_image_version}"
-            )
-            sidecar_shared_secret = secretsmanager.Secret.from_secret_complete_arn(
-                self, "SidecarSharedSecret", sidecar_shared_secrets_arn,
-            )
-            pdp_url = _resolve_pdp_url()
-            sidecar_environment = {
-                "DOH_APP_ID": app_config.app_name,
-                "DOH_ENV_SLUG": env_slug,
-                "DOH_ENV_DOMAIN": shared_alb_hosted_zone or "",
-                "DOH_AUTH_BASE_URL": auth_base_url,
-                "DOH_JWKS_URL": f"{auth_base_url.rstrip('/')}/.well-known/jwks.json",
-                "DOH_PDP_URL": pdp_url,
-                "DOH_UPSTREAM_HOST": "127.0.0.1",
-                "DOH_UPSTREAM_PORT": str(alb_target.container_port),
-                "DOH_LISTEN_PORT": str(sidecar_listen_port),
-            }
-            sidecar_container = task_definition.add_container(
-                "SidecarContainer",
-                container_name=f"{app_config.app_name}-sidecar",
-                image=ecs.ContainerImage.from_registry(sidecar_image_uri),
-                logging=ecs.LogDrivers.aws_logs(
-                    stream_prefix=f"{app_config.app_name}-sidecar",
-                    log_group=self.environment_infra.log_group,
-                ),
-                environment=sidecar_environment,
-                secrets={
-                    "DOH_SIDECAR_TOKEN": ecs.Secret.from_secrets_manager(
-                        sidecar_shared_secret, field="DOH_SIDECAR_TOKEN",
-                    ),
-                },
-            )
-            sidecar_container.add_port_mappings(
-                ecs.PortMapping(container_port=sidecar_listen_port, protocol=ecs.Protocol.TCP),
-            )
-            # ALB-target container must be listening before the sidecar accepts traffic.
-            sidecar_container.add_container_dependencies(
-                ecs.ContainerDependency(
-                    container=containers_by_name[alb_target.name],
-                    condition=ecs.ContainerDependencyCondition.START,
-                ),
-            )
-
         # When DOH runs in production (DEBUG=False), use stable settings
         # When developing locally (DEBUG=True), use aggressive settings for fast deploys
         from django.conf import settings
@@ -859,12 +859,12 @@ class AppStack(Stack):
         if alb_target.health_check_grace_period is not None:
             health_check_grace = alb_target.health_check_grace_period
 
-        # When the sidecar is the ALB target, the ALB's health check must hit
-        # a route the sidecar handles locally (bypassing the PDP), otherwise
-        # ALB probes would all 302 to auth and never go healthy. The sidecar
-        # exposes /__sidecar/healthz for exactly this.
-        if sidecar_enabled:
-            target_health_check_path = "/__sidecar/healthz"
+        # When the policy proxy is the ALB target, the ALB's health check must
+        # hit a route the proxy handles locally (bypassing the PDP), otherwise
+        # ALB probes would all 302 to auth and never go healthy. The proxy
+        # exposes /__policy_proxy/healthz for exactly this.
+        if policy_proxy is not None:
+            target_health_check_path = "/__policy_proxy/healthz"
             target_health_check_codes = "200"
         else:
             target_health_check_path = alb_target.health_check_path or "/"
@@ -937,17 +937,12 @@ class AppStack(Stack):
                 **service_props,
             )
         # Multiple containers in the task — be explicit about which one the
-        # ALB targets. The sidecar overrides this when enabled.
-        if sidecar_enabled:
-            target_group.add_target(service.load_balancer_target(
-                container_name=f"{app_config.app_name}-sidecar",
-                container_port=sidecar_listen_port,
-            ))
-        else:
-            target_group.add_target(service.load_balancer_target(
-                container_name=f"{app_config.app_name}-{alb_target.name}",
-                container_port=alb_target.container_port,
-            ))
+        # ALB targets. alb_target_container already names it (the policy
+        # proxy when one is declared, the app container otherwise).
+        target_group.add_target(service.load_balancer_target(
+            container_name=f"{app_config.app_name}-{alb_target.name}",
+            container_port=alb_target.container_port,
+        ))
 
         Tags.of(service).add("App", app_config.app_name)
         Tags.of(task_definition).add("App", app_config.app_name)
@@ -1129,25 +1124,26 @@ def deploy(
         else:
             logger.error("Could not find hosted zone ID for '%(hosted_zone)s', DNS record will not be created", {"hosted_zone": shared_alb_hosted_zone})
 
-    # Sidecar prerequisites: per-env secrets + ECR repo + image push + auth Lambda.
-    # All idempotent, safe to run on every sidecar-enabled deploy. The first
-    # sidecar-enabled deploy in an env does the heavy lift; subsequent deploys
-    # are fast because the secrets, stacks, and image already exist.
-    sidecar_secret_arns: dict[str, str] = {}
-    sidecar_auth_base_url: str | None = None
-    if app_config.sidecar_enabled:
+    # Policy-proxy prerequisites: per-env secrets + ECR repo + image push + auth
+    # Lambda. All idempotent, safe to run on every policy-proxy deploy. The
+    # first policy-proxy deploy in an env does the heavy lift; subsequent
+    # deploys are fast because the secrets, stacks, and image already exist.
+    policy_proxy_needed = app_config.policy_proxy_container() is not None
+    policy_proxy_secret_arns: dict[str, str] = {}
+    policy_proxy_auth_base_url: str | None = None
+    if policy_proxy_needed:
         if not shared_alb_hosted_zone or not shared_hosted_zone_id:
-            msg = "Sidecar-enabled apps require a hosted zone (HTTPS)"
+            msg = "Policy-proxy apps require a hosted zone (HTTPS)"
             logger.error(msg)
             return DeployResult(success=False, error=msg, service_url="", alb_dns="")
 
-        logger.info("Ensuring per-env sidecar infrastructure exists")
+        logger.info("Ensuring per-env policy-proxy infrastructure exists")
         from devopshero_app.models import Environment
         env_obj = Environment.objects.get(slug=env_slug)
-        sidecar_secret_arns = secrets_utils.ensure_env_sidecar_secrets_exist(
+        policy_proxy_secret_arns = secrets_utils.ensure_env_policy_proxy_secrets_exist(
             session=session, env=env_obj,
         )
-        sidecar_auth_base_url = f"https://auth.{shared_alb_hosted_zone}"
+        policy_proxy_auth_base_url = f"https://auth.{shared_alb_hosted_zone}"
 
     cdk_app = App(outdir=str(cdk_utils.CDK_OUT_DIR))
 
@@ -1158,12 +1154,12 @@ def deploy(
         resource_prefix=resource_prefix,
     )
 
-    sidecar_ecr_stack = None
+    policy_proxy_ecr_stack = None
     auth_lambda_stack = None
-    if app_config.sidecar_enabled:
-        sidecar_ecr_stack = SidecarEcrStack(
+    if policy_proxy_needed:
+        policy_proxy_ecr_stack = PolicyProxyEcrStack(
             cdk_app,
-            f"devopshero-{env_slug}-sidecar-ecr",
+            f"devopshero-{env_slug}-policy-proxy-ecr",
             env_slug=env_slug,
         )
         auth_lambda_stack = auth_lambda.AuthLambdaStack(
@@ -1180,7 +1176,7 @@ def deploy(
                 ),
                 shared_hosted_zone_id=shared_hosted_zone_id,
                 shared_hosted_zone_name=shared_alb_hosted_zone,
-                sidecar_auth_config_secret_arn=sidecar_secret_arns["sidecar_auth_config_arn"],
+                policy_proxy_auth_config_secret_arn=policy_proxy_secret_arns["policy_proxy_auth_config_arn"],
             ),
         )
 
@@ -1208,9 +1204,8 @@ def deploy(
         database_connection_secret=aurora_connection_secret,
         shared_alb_hosted_zone=shared_alb_hosted_zone,
         shared_hosted_zone_id=shared_hosted_zone_id,
-        sidecar_shared_secrets_arn=sidecar_secret_arns.get("shared_secrets_arn") if app_config.sidecar_enabled else None,
-        sidecar_image_version=SIDECAR_IMAGE_VERSION if app_config.sidecar_enabled else None,
-        auth_base_url=sidecar_auth_base_url,
+        policy_proxy_shared_secrets_arn=policy_proxy_secret_arns.get("shared_secrets_arn") if policy_proxy_needed else None,
+        auth_base_url=policy_proxy_auth_base_url,
     )
     app_stack.add_dependency(ecr_stack)
     if aurora_stack:
@@ -1221,32 +1216,32 @@ def deploy(
     if synth_only:
         return DeployResult(success=True, error="", service_url="", alb_dns="")
 
-    # Phase 1a: Sidecar ECR + auth Lambda stacks (sidecar-enabled apps only).
-    if app_config.sidecar_enabled:
-        sidecar_pre_stacks = [
-            f"devopshero-{env_slug}-sidecar-ecr",
+    # Phase 1a: Policy-proxy ECR + auth Lambda stacks (policy-proxy apps only).
+    if policy_proxy_needed:
+        policy_proxy_pre_stacks = [
+            f"devopshero-{env_slug}-policy-proxy-ecr",
             f"devopshero-{env_slug}-auth-lambda",
         ]
-        if not cdk_utils.deploy_from_assembly(assembly_dir=assembly_dir, session=session, stack_names=sidecar_pre_stacks):
-            logger.error("CDK deployment failed (sidecar-ecr/auth-lambda)")
-            return DeployResult(success=False, error="CDK deployment failed (sidecar infra)", service_url="", alb_dns="")
+        if not cdk_utils.deploy_from_assembly(assembly_dir=assembly_dir, session=session, stack_names=policy_proxy_pre_stacks):
+            logger.error("CDK deployment failed (policy-proxy-ecr/auth-lambda)")
+            return DeployResult(success=False, error="CDK deployment failed (policy-proxy infra)", service_url="", alb_dns="")
 
-        # Push the DOH-owned sidecar image into the per-env repo. This is
+        # Push the DOH-owned policy-proxy image into the per-env repo. This is
         # idempotent: if the tag already exists in ECR the push is a no-op.
-        logger.info("Building and pushing sidecar image (%s)", SIDECAR_IMAGE_VERSION)
-        sidecar_image_uri = ecr_utils.build_and_push_docker_image(
+        logger.info("Building and pushing policy-proxy image (%s)", POLICY_PROXY_IMAGE_VERSION)
+        policy_proxy_image_uri = ecr_utils.build_and_push_docker_image(
             session=session,
             account_id=account_id,
             region=region,
             env_slug=env_slug,
-            app_name="sidecar",
-            ecr_repo_name=sidecar_ecr_repo_name(env_slug),
-            app_source_path=SIDECAR_SOURCE_DIR,
-            image_tag=SIDECAR_IMAGE_VERSION,
+            app_name="policy-proxy",
+            ecr_repo_name=policy_proxy_ecr_repo_name(env_slug),
+            app_source_path=POLICY_PROXY_SOURCE_DIR,
+            image_tag=POLICY_PROXY_IMAGE_VERSION,
         )
-        if not sidecar_image_uri:
-            logger.error("Sidecar image build/push failed")
-            return DeployResult(success=False, error="Sidecar image build/push failed", service_url="", alb_dns="")
+        if not policy_proxy_image_uri:
+            logger.error("Policy-proxy image build/push failed")
+            return DeployResult(success=False, error="Policy-proxy image build/push failed", service_url="", alb_dns="")
 
     # Phase 1b: Deploy ECR repo (and Aurora if needed) so the registry exists before the app image push
     pre_app_stacks = [f"{resource_prefix}-ecr"]

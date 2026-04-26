@@ -46,10 +46,10 @@ def _find_task_arn(ecs_client, cluster: str, service: str, stopped: bool) -> str
 
 def _requested_container(options: dict) -> str | None:
     """Resolve CLI container options into a template container name."""
-    if options.get("container") and options.get("sidecar"):
-        raise CommandError("Use either --container or --sidecar, not both.")
-    if options.get("sidecar"):
-        return "sidecar"
+    if options.get("container") and options.get("policy_proxy"):
+        raise CommandError("Use either --container or --policy-proxy, not both.")
+    if options.get("policy_proxy"):
+        return "policy-proxy"
     return options.get("container")
 
 
@@ -142,7 +142,7 @@ class Command(BaseCommand):
             ),
         )
         parser.add_argument("--stopped", action="store_true", help="Look at stopped/crashed tasks (skip running)")
-        parser.add_argument("--sidecar", action="store_true", help="Shortcut for --container sidecar")
+        parser.add_argument("--policy-proxy", action="store_true", dest="policy_proxy", help="Shortcut for --container policy-proxy")
         parser.add_argument("--limit", type=int, default=100, help="Number of log events to fetch (default: 100)")
         parser.add_argument("--head", action="store_true", help="Read from the beginning instead of the tail")
         parser.add_argument("--all", action="store_true", dest="fetch_all", help="Fetch all log events (paginate until exhausted)")

@@ -219,8 +219,8 @@ _HERMES_LLM_VARS = [
     },
 ]
 
-# The WebUI's password auth is redundant when the sidecar proxy is enforcing
-# SSO + ABAC in front of the app. The Personal template runs behind the sidecar
+# The WebUI's password auth is redundant when the policy proxy is enforcing
+# SSO + ABAC in front of the app. The Personal template runs behind the proxy
 # and drops this var (no env var set -> WebUI auth disabled, per api/auth.py).
 # The Slack template is ALB-exposed with no SSO gate, so it still needs it.
 _HERMES_WEBUI_PASSWORD_VAR = [
@@ -359,7 +359,7 @@ _HERMES_SLACK_VARS = [
 # Two sibling access points on EFS per Hermes app: "home" holds agent state
 # (config, memory, skills, venv) and is mounted at ~/.hermes in the hermes
 # container; "workspace" holds user/agent work output and is mounted at
-# /workspace in both the hermes container and the docker-dind sidecar — same
+# /workspace in both the hermes container and the docker-dind container — same
 # data visible on both sides, so files the agent creates through tool runs
 # appear under ~/.workspace and vice versa. Flat sibling layout (not nested
 # inside home) keeps agent home and workspace data independent on disk.
@@ -392,7 +392,7 @@ _DOCKER_DIND_CONTAINER = {
     # which would collide with our loopback bind on the same port. Pass
     # 'dockerd' as the first arg to suppress that default. Only the tcp
     # loopback host is bound — no unix socket, since nothing in the task
-    # ever connects over /var/run/docker.sock (the hermes sidecar uses
+    # ever connects over /var/run/docker.sock (the hermes container uses
     # DOCKER_HOST=tcp://127.0.0.1:2375, and we run our own healthcheck
     # against the same endpoint below).
     "command": [
@@ -435,9 +435,9 @@ _HERMES_CONTAINER_BASE = {
     # Platform-constant env vars the operator never touches. Kept out of
     # configurable_variables so the deploy form doesn't treat them as knobs.
     "environment": {
-        # DOCKER_HOST targets the in-task DinD sidecar over loopback.
+        # DOCKER_HOST targets the in-task DinD container over loopback.
         "DOCKER_HOST": "tcp://127.0.0.1:2375",
-        # Bind the WebUI to loopback so only the auth sidecar (sharing the
+        # Bind the WebUI to loopback so only the policy proxy (sharing the
         # task network namespace) can reach it. Overrides the upstream image
         # default of HERMES_WEBUI_HOST=0.0.0.0, which would expose the WebUI
         # on the task ENI to the whole VPC.
@@ -487,6 +487,30 @@ _SIDECAR_MCP_UPSTREAM_SECRETS = [
     for name in _SIDECAR_MCP_UPSTREAM_SECRET_NAMES
 ]
 
+# Policy proxy: platform-owned SSO+ABAC gate that fronts the Hermes container.
+# image_source="policy_proxy" is resolved at deploy time to the per-env ECR
+# repo (doh/{env_slug}/policy-proxy:POLICY_PROXY_IMAGE_VERSION), and its
+# presence drives env-level provisioning (auth Lambda, per-env secrets).
+# Listens on hermes.container_port + 1 to keep the upstream port free.
+_HERMES_POLICY_PROXY_CONTAINER = {
+    "name": "policy-proxy",
+    "image_source": "policy_proxy",
+    "upstream_container": "hermes",
+    "container_port": 8788,
+    "health_check_path": "/__policy_proxy/healthz",
+    "health_check_command": "",
+    "health_check_grace_period": 0,
+    "depends_on": [
+        {
+            "name": "hermes",
+            "condition": "START",
+        },
+    ],
+    "environment": {},
+    "configurable_variables": [],
+}
+
+
 _SIDECAR_MCP_CONTAINER = {
     "name": "sidecar-mcp",
     "image_source": "prebuilt",
@@ -521,7 +545,9 @@ HERMES_PERSONAL_TEMPLATE = {
     "default_compute_mode": "ec2",
     "datastore_config": None,
     "efs_config": _HERMES_EFS_CONFIG,
-    "alb_target_container": "hermes",
+    # ALB targets the policy proxy; the proxy forwards to the hermes container
+    # over loopback after SSO + ABAC gates pass.
+    "alb_target_container": "policy-proxy",
     "containers": [
         {**_DOCKER_DIND_CONTAINER},
         {
@@ -530,9 +556,8 @@ HERMES_PERSONAL_TEMPLATE = {
                 _HERMES_LLM_VARS + _HERMES_CREDENTIAL_VARS + _HERMES_BEDROCK_VARS
             ),
         },
+        {**_HERMES_POLICY_PROXY_CONTAINER},
     ],
-    # Runs behind the sidecar proxy: SSO + ABAC gate the WebUI.
-    "sidecar_enabled": True,
     "platform_capabilities": ["bedrock-runtime"],
     # The "app-type" tag is what the global PA ABAC policy matches on.
     # The "owner" tag is stamped per-deployment from the deploy form.
@@ -554,13 +579,12 @@ HERMES_SLACK_TEMPLATE = {
     "icon": "💬",
     "category": "ai-assistant",
     # Two containers share the task's CPU/memory — bumped from 1024/2048 to
-    # cover Hermes + the sidecar-mcp sidecar.
+    # cover Hermes + the sidecar-mcp container.
     "cpu": 2048,
     "memory": 4096,
     "default_compute_mode": "ec2",
     "datastore_config": None,
     "efs_config": _HERMES_EFS_CONFIG,
-    "sidecar_enabled": False,
     "platform_capabilities": ["bedrock-runtime"],
     "alb_target_container": "hermes",
     "containers": [

@@ -6,7 +6,7 @@ from django.db import migrations, models
 class Migration(migrations.Migration):
 
     dependencies = [
-        ('devopshero_app', '0039_add_sidecar_token'),
+        ('devopshero_app', '0039_add_policy_proxy_token'),
     ]
 
     operations = [

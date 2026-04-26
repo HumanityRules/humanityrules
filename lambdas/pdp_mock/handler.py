@@ -1,5 +1,5 @@
 """
-Mock PDP used by the sidecar end-to-end test.
+Mock PDP used by the policy-proxy end-to-end test.
 
 Replaces DOH's /api/pdp/evaluate with a deterministic "does this username appear
 in ALLOWED_USERNAMES?" check so the test doesn't need the real DOH control

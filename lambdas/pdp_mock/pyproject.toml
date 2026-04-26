@@ -1,7 +1,7 @@
 [project]
 name = "doh-pdp-mock-lambda"
 version = "0.1.0"
-description = "Mock PDP used by the sidecar end-to-end test."
+description = "Mock PDP used by the policy-proxy end-to-end test."
 requires-python = ">=3.11"
 dependencies = []
 

@@ -41,7 +41,7 @@ class User(AbstractUser):
 
     def save(self, *args, **kwargs) -> None:
         # Lock username against post-creation mutation. ABAC policies use
-        # username as a stable identity anchor (see docs/sidecar_proxy_design.md
+        # username as a stable identity anchor (see docs/policy_proxy_design.md
         # and the $resource.owner self-referential policy form); letting it
         # drift would invalidate those policies or enable takeover of
         # owned-by resources (e.g. Personal Assistants).
@@ -620,10 +620,6 @@ class AppTemplate(models.Model):
     # rooted at /deployments/<app_slug>/<subpath>. Containers opt in by name
     # via container["efs_mounts"]. null = no EFS.
     efs_config = models.JSONField(null=True, blank=True)
-
-    # When True, deployed apps from this template run behind the sidecar proxy
-    # (SSO + ABAC at the edge). See docs/sidecar_proxy_design.md.
-    sidecar_enabled = models.BooleanField(default=False)
 
     # Default resource tags stamped on every app deployed from this template.
     # List of {key, value}. Used by the deploy flow to write ResourceTag rows
@@ -1634,19 +1630,20 @@ class Policy(models.Model):
         return self.name
 
 
-class SidecarToken(models.Model):
+class PolicyProxyToken(models.Model):
     """
-    Per-environment bearer token used by sidecar proxies to authenticate calls to
+    Per-environment bearer token used by policy proxies to authenticate calls to
     the DOH PDP endpoint. One active token per environment; the token itself lives
     in the customer's AWS Secrets Manager (devopshero/{env-slug}/shared-secrets,
-    key DOH_SIDECAR_TOKEN). Only the hash is stored here so DOH can authenticate
-    incoming PDP requests without ever seeing the raw value after issue.
+    key DOH_POLICY_PROXY_TOKEN). Only the hash is stored here so DOH can
+    authenticate incoming PDP requests without ever seeing the raw value after
+    issue.
     """
     id = models.UUIDField(primary_key=True, default=uuid.uuid7, editable=False)
     environment = models.OneToOneField(
         Environment,
         on_delete=models.CASCADE,
-        related_name="sidecar_token",
+        related_name="policy_proxy_token",
     )
     token_hash = models.CharField(
         max_length=128,
@@ -1656,7 +1653,7 @@ class SidecarToken(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self) -> str:
-        return f"SidecarToken({self.environment.slug})"
+        return f"PolicyProxyToken({self.environment.slug})"
 
 
 # =============================================================================

@@ -9,7 +9,7 @@ from typing import Literal
 
 ComputeMode = Literal["fargate", "ec2"]
 ContainerDependencyCondition = Literal["START", "HEALTHY", "COMPLETE", "SUCCESS"]
-ImageSource = Literal["dockerfile", "prebuilt", "registry"]
+ImageSource = Literal["dockerfile", "prebuilt", "registry", "policy_proxy"]
 
 
 @dataclass
@@ -116,6 +116,10 @@ class ContainerConfig:
     # "dockerfile": DOH builds from app_source_path into ecr_repo_name:image_tag.
     # "prebuilt": image already pushed by an out-of-band step at prebuilt_ecr_repo:prebuilt_version.
     # "registry": public image reference (e.g. docker:26.1.0-dind) resolved by ECS at pull time.
+    # "policy_proxy": platform-owned SSO+ABAC proxy; image resolves from the
+    #     per-env doh/{env_slug}/policy-proxy repo at deploy time. Presence of
+    #     any "policy_proxy" container in a task triggers env-level provisioning
+    #     (ECR stack, auth Lambda, per-env auth config secret).
     image_source: ImageSource
 
     # Populated when image_source == "dockerfile":
@@ -129,6 +133,12 @@ class ContainerConfig:
 
     # Populated when image_source == "registry" (e.g. docker:26.1.0-dind, docker.io/...):
     registry_image: str | None = None
+
+    # Populated when image_source == "policy_proxy": name of the sibling
+    # container this proxy fronts. Resolved at deploy time into the
+    # DOH_UPSTREAM_HOST (always 127.0.0.1) + DOH_UPSTREAM_PORT env vars on the
+    # proxy. The upstream container's container_port is the target.
+    upstream_container: str | None = None
 
     # Network / health
     container_port: int = 0
@@ -213,11 +223,6 @@ class AppConfig:
     # ContainerConfig.efs_mounts referencing entries by name.
     efs_config: EfsConfig | None = None
 
-    # Sidecar proxy (SSO + ABAC). When True, the task gets an auth sidecar
-    # container wrapping whichever container is named by alb_target_container.
-    # See docs/sidecar_proxy_design.md. Orthogonal to the `containers` list.
-    sidecar_enabled: bool = False
-
     # Platform-owned capabilities requested by the source template. CDK maps
     # these to infrastructure grants on the ECS task role.
     platform_capabilities: list[str] = field(default_factory=list)
@@ -233,3 +238,15 @@ class AppConfig:
             f"alb_target_container='{self.alb_target_container}' not found in containers "
             f"{[c.name for c in self.containers]}"
         )
+
+    def policy_proxy_container(self) -> ContainerConfig | None:
+        """Return the policy-proxy ContainerConfig if the task includes one, else None."""
+        matches = [c for c in self.containers if c.image_source == "policy_proxy"]
+        if not matches:
+            return None
+        if len(matches) > 1:
+            raise ValueError(
+                f"App '{self.app_name}' declares multiple policy_proxy containers: "
+                f"{[c.name for c in matches]}. At most one is supported.",
+            )
+        return matches[0]

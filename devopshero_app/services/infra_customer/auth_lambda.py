@@ -1,11 +1,11 @@
 """
 Auth Lambda construct — one per DOH environment.
 
-Bundles lambdas/sidecar_auth/ with its dependencies, registers it as a Lambda
-target on the env's shared ALB under a host-based rule for auth.<env-domain>,
-and creates the Route53 alias record that points at the ALB.
+Bundles lambdas/policy_proxy_auth/ with its dependencies, registers it as a
+Lambda target on the env's shared ALB under a host-based rule for
+auth.<env-domain>, and creates the Route53 alias record that points at the ALB.
 
-See docs/sidecar_proxy_design.md and lambdas/sidecar_auth/README.md.
+See docs/policy_proxy_design.md and lambdas/policy_proxy_auth/README.md.
 """
 
 from dataclasses import dataclass
@@ -29,10 +29,10 @@ from constructs import Construct
 AUTH_LISTENER_RULE_PRIORITY = 10
 
 
-# Path to lambdas/sidecar_auth/ relative to this file, used by both the Stack
-# and the `ensure_auth_lambda_bundle_exists` helper that preps the deploy zip.
+# Path to lambdas/policy_proxy_auth/ relative to this file, used by both the
+# Stack and the `ensure_auth_lambda_bundle_exists` helper that preps the deploy zip.
 _REPO_ROOT = Path(__file__).resolve().parents[3]
-AUTH_LAMBDA_SOURCE_DIR = _REPO_ROOT / "lambdas" / "sidecar_auth"
+AUTH_LAMBDA_SOURCE_DIR = _REPO_ROOT / "lambdas" / "policy_proxy_auth"
 
 
 @dataclass
@@ -45,7 +45,7 @@ class AuthLambdaInputs:
     shared_alb_security_group_id: str
     shared_hosted_zone_id: str
     shared_hosted_zone_name: str
-    sidecar_auth_config_secret_arn: str  # Secrets Manager ARN with {oidc_config: {...}, jwt_key: {...}}
+    policy_proxy_auth_config_secret_arn: str  # Secrets Manager ARN with {oidc_config: {...}, jwt_key: {...}}
 
 
 class AuthLambdaStack(Stack):
@@ -74,7 +74,7 @@ class AuthLambdaStack(Stack):
         )
         lambda_role.add_to_policy(iam.PolicyStatement(
             actions=["secretsmanager:GetSecretValue"],
-            resources=[inputs.sidecar_auth_config_secret_arn],
+            resources=[inputs.policy_proxy_auth_config_secret_arn],
         ))
 
         log_group = logs.LogGroup(
@@ -125,7 +125,7 @@ class AuthLambdaStack(Stack):
             environment={
                 "DOH_ENV_DOMAIN": inputs.env_domain,
                 "DOH_AUTH_BASE_URL": f"https://{auth_host}",
-                "DOH_SIDECAR_AUTH_CONFIG_SECRET_ARN": inputs.sidecar_auth_config_secret_arn,
+                "DOH_POLICY_PROXY_AUTH_CONFIG_SECRET_ARN": inputs.policy_proxy_auth_config_secret_arn,
             },
         )
 
