@@ -546,17 +546,6 @@ HERMES_PERSONAL_TEMPLATE = {
                         "value": "127.0.0.1",
                         "user_editable": False,
                     },
-                    {
-                        "name": "DOH_HERMES_REQUIRE_DOCKER",
-                        "group": "Tools",
-                        "category": "config",
-                        "description": "Require Docker-backed Hermes tools at startup",
-                        "required": True,
-                        "auto_generate": False,
-                        "default_value": "1",
-                        "value": "1",
-                        "user_editable": False,
-                    },
                     _HERMES_DOCKER_HOST_VAR,
                 ]
             ),
@@ -600,20 +589,7 @@ HERMES_SLACK_TEMPLATE = {
             **_HERMES_CONTAINER_BASE,
             "runtime_variables": (
                 _HERMES_LLM_VARS + _HERMES_WEBUI_PASSWORD_VAR + _HERMES_CREDENTIAL_VARS
-                + _HERMES_BEDROCK_VARS + _HERMES_SLACK_VARS + [
-                    {
-                        "name": "DOH_HERMES_REQUIRE_DOCKER",
-                        "group": "Tools",
-                        "category": "config",
-                        "description": "Require Docker-backed Hermes tools at startup",
-                        "required": True,
-                        "auto_generate": False,
-                        "default_value": "1",
-                        "value": "1",
-                        "user_editable": False,
-                    },
-                    _HERMES_DOCKER_HOST_VAR,
-                ]
+                + _HERMES_BEDROCK_VARS + _HERMES_SLACK_VARS + [_HERMES_DOCKER_HOST_VAR]
             ),
         },
         _SIDECAR_MCP_CONTAINER,
