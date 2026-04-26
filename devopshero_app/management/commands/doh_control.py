@@ -6,7 +6,7 @@ Usage:
     uv run manage.py doh_control teardown-env --slug default --aws-account "Name"
     uv run manage.py doh_control teardown-app --app ai-detector-and-humanizer
     uv run manage.py doh_control teardown-app --app foo --remove-app --delete-secrets --delete-efs-data --delete-policies
-    uv run manage.py doh_control deploy-app-template --template hermes-agent --workspace personal --env default --app-name hermes-vmendi
+    uv run manage.py doh_control deploy-app-template --template hermes-agent --org acme-corp --workspace default --env default --app-name hermes-vmendi
     uv run manage.py doh_control retry-env-provisioning --slug default --aws-account "Name"
     uv run manage.py doh_control retry-app-deployment --app simple-dashboard
 
@@ -78,7 +78,15 @@ class Command(BaseCommand):
             help="Deploy a new app from an AppTemplate (CLI parity with the 'Deploy from template' UI flow)",
         )
         deploy_tpl.add_argument("--template", required=True, help="AppTemplate slug (must be is_active=True)")
-        deploy_tpl.add_argument("--workspace", required=True, help="Workspace slug (determines the org)")
+        deploy_tpl.add_argument(
+            "--org",
+            help="Organization slug or exact name; scopes --workspace to that org (e.g. course-hero or 'Course Hero')",
+        )
+        deploy_tpl.add_argument(
+            "--workspace",
+            required=True,
+            help="Workspace slug within the org (with --org) or unique workspace slug (legacy)",
+        )
         deploy_tpl.add_argument("--env", required=True, help="Environment slug within the workspace's org")
         deploy_tpl.add_argument(
             "--aws-account",
@@ -391,6 +399,7 @@ class Command(BaseCommand):
         Deployment chain and queue it for the job worker.
         """
         template_slug = options["template"]
+        org_identifier = options.get("org")
         workspace_slug = options["workspace"]
         env_slug = options["env"]
         aws_account_name = options.get("aws_account")
@@ -414,11 +423,32 @@ class Command(BaseCommand):
             self.stderr.write(self.style.ERROR(f"AppTemplate '{template_slug}' not found or not active"))
             return
 
-        try:
-            workspace = models.Workspace.objects.select_related("organization").get(slug=workspace_slug)
-        except models.Workspace.DoesNotExist:
-            self.stderr.write(self.style.ERROR(f"Workspace '{workspace_slug}' not found"))
-            return
+        if org_identifier:
+            org = self._resolve_organization_by_slug_or_name(identifier=org_identifier)
+            if org is None:
+                return
+            try:
+                workspace = models.Workspace.objects.select_related("organization").get(
+                    organization=org,
+                    slug=workspace_slug,
+                )
+            except models.Workspace.DoesNotExist:
+                self.stderr.write(self.style.ERROR(
+                    f"Workspace '{workspace_slug}' not found in org '{org.name}' ({org.slug})",
+                ))
+                return
+        else:
+            qs = models.Workspace.objects.select_related("organization").filter(slug=workspace_slug)
+            n = qs.count()
+            if n == 0:
+                self.stderr.write(self.style.ERROR(f"Workspace '{workspace_slug}' not found"))
+                return
+            if n > 1:
+                self.stderr.write(self.style.ERROR(
+                    f"Multiple workspaces have slug '{workspace_slug}'; pass --org to pick the organization.",
+                ))
+                return
+            workspace = qs.get()
         org = workspace.organization
 
         env = self._resolve_environment(
@@ -500,6 +530,18 @@ class Command(BaseCommand):
         self.stdout.write(f"  Variable overrides: {len(overrides)}")
         self.stdout.write(self.style.WARNING("Build/push/deploy will start automatically (job worker picks up pending deployments)"))
         self.stdout.write("")
+
+    def _resolve_organization_by_slug_or_name(self, identifier) -> "models.Organization | None":
+        """Resolve an Organization by slug or exact name. Returns None and writes to stderr on failure."""
+        org = (
+            models.Organization.objects.filter(slug=identifier).first()
+            or models.Organization.objects.filter(name=identifier).first()
+        )
+        if org is None:
+            self.stderr.write(self.style.ERROR(
+                f"No organization matching {identifier!r} (tried slug and exact name).",
+            ))
+        return org
 
     def _resolve_environment(self, env_slug, org, aws_account_name):
         """Find a single READY-or-not environment by slug within `org`.
