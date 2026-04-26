@@ -24,7 +24,7 @@ Always start by querying the DB with `doh_query` (see the `manage-commands` skil
 
 ## Step 2: Access the Customer's AWS Account
 
-Check the `manage-commands` skill first — commands like `doh_app_shell`, `doh_app_logs`, `doh_efs_browse`, and `doh_raw` handle the assume-role dance internally.
+Check the `manage-commands` skill first — commands like `doh_app_shell`, `doh_app_logs`, and `doh_efs_browse` handle the assume-role dance internally.
 
 For ad-hoc AWS CLI calls not covered by existing commands, assume the customer role and export the temporary credentials. Use `account_id` and `external_id` from Step 1:
 
