@@ -132,6 +132,13 @@ class BedrockPlatformCapabilityTests(SimpleTestCase):
             self.assertEqual(mount_names["workspace"]["container_path"], "/workspace")
             self.assertEqual(hermes_container["efs_mounts"], ["home", "workspace"])
             self.assertNotIn("user", hermes_container)
-            # DOCKER_HOST and HERMES_WEBUI_HOST are platform constants in environment, not knobs.
+            # DOCKER_HOST is a platform constant in environment, not a knob.
             self.assertEqual(hermes_container["environment"]["DOCKER_HOST"], "tcp://127.0.0.1:2375")
-            self.assertEqual(hermes_container["environment"]["HERMES_WEBUI_HOST"], "127.0.0.1")
+            # HERMES_WEBUI_HOST is per-template: pinned to loopback only when a
+            # policy proxy fronts the task. When the ALB targets hermes directly
+            # (e.g. hermes-slack), the WebUI must bind to all interfaces so the
+            # ALB health check on the task ENI succeeds.
+            if template["alb_target_container"] == "policy-proxy":
+                self.assertEqual(hermes_container["environment"]["HERMES_WEBUI_HOST"], "127.0.0.1")
+            else:
+                self.assertNotIn("HERMES_WEBUI_HOST", hermes_container["environment"])
