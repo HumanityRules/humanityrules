@@ -142,16 +142,6 @@
                     <dt class="text-gray-500 dark:text-gray-400 w-24">Memory</dt>
                     <dd class="text-gray-700 dark:text-gray-300">{{ template.memory }} MiB</dd>
                 </div>
-                <div class="flex col-span-2">
-                    <dt class="text-gray-500 dark:text-gray-400 w-24">Compute</dt>
-                    <dd class="text-gray-700 dark:text-gray-300">{{ selected_compute_mode_label }}</dd>
-                </div>
-                {% if template.efs_config %}
-                <div class="flex col-span-2">
-                    <dt class="text-gray-500 dark:text-gray-400 w-24">EFS Mount</dt>
-                    <dd class="text-gray-700 dark:text-gray-300">{{ template.efs_config.mount_path }}</dd>
-                </div>
-                {% endif %}
             </dl>
 
             <h4 class="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wide mt-4 mb-2">Containers</h4>
