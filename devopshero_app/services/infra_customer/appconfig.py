@@ -69,12 +69,31 @@ class ConnectionConfig:
 
 
 @dataclass
-class EfsConfig:
-    """EFS volume configuration for the task (one volume, shared across containers that opt in)."""
-    mount_path: str
+class EfsMount:
+    """One EFS access point on the task's shared filesystem, mountable by any container."""
+    name: str                  # Stable identifier referenced from ContainerConfig.efs_mounts
+    subpath: str               # Relative to /deployments/<app>/, e.g. "hermes" or "workspace"
+    container_path: str        # Mount target inside a container that opts in
     posix_uid: int
     posix_gid: int
-    docker_workspace_subpath: str | None = None
+
+
+@dataclass
+class EfsConfig:
+    """EFS configuration for the task: an ordered list of named access points.
+
+    Each mount becomes one EFS AccessPoint + task-level volume. Containers opt
+    in by name via ContainerConfig.efs_mounts. Different mounts can have
+    different POSIX ownership (e.g. home owned by the app UID, workspace owned
+    by root for DinD).
+    """
+    mounts: list[EfsMount]
+
+    def by_name(self, name: str) -> EfsMount:
+        for m in self.mounts:
+            if m.name == name:
+                return m
+        raise ValueError(f"EFS mount '{name}' not declared in efs_config.mounts")
 
 
 @dataclass
@@ -126,13 +145,11 @@ class ContainerConfig:
     #   None -> auto-generate a random token
     app_secrets: dict[str, str | None] = field(default_factory=dict)
 
-    # Opt-in: mount the task-level EFS volume (AppConfig.efs_config) into this container.
-    efs_mount: bool = False
-
-    # Mount only the app-docker-workspace EFS access point (workspace subpath), not the full
-    # deployment root. Used by DinD so tool daemons do not see Hermes home/config.
-    efs_docker_workspace_only: bool = False
-    efs_docker_workspace_container_path: str | None = None
+    # Names of EFS mounts (from AppConfig.efs_config.mounts) to bind into this container.
+    # Empty = container sees no EFS. Containers can pick any subset independently:
+    # Hermes takes ["home", "workspace"], DinD takes ["workspace"] so tool daemons
+    # never see agent home/config.
+    efs_mounts: list[str] = field(default_factory=list)
 
     # When True, CDK sets privileged on the container (EC2-only; not supported on Fargate).
     privileged: bool = False
@@ -191,8 +208,9 @@ class AppConfig:
     # and selectively projected into each container's env.
     app_secrets: dict[str, str | None] | None = None
 
-    # EFS volume configuration (None = no EFS volume). Declared once at the
-    # task level; per-container mounting is controlled by ContainerConfig.efs_mount.
+    # EFS configuration (None = no EFS). A list of named access points declared
+    # once at the task level; per-container mounting is controlled by
+    # ContainerConfig.efs_mounts referencing entries by name.
     efs_config: EfsConfig | None = None
 
     # Sidecar proxy (SSO + ABAC). When True, the task gets an auth sidecar

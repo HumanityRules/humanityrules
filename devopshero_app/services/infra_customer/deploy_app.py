@@ -600,49 +600,40 @@ class AppStack(Stack):
                 resources=["*"],
             ))
 
-        # EFS: create per-app access point and grant mount permissions. The
-        # volume is declared once at the task level; containers that opt in
-        # (c.efs_mount) each add their own MountPoint below.
-        efs_access_point = None
-        efs_docker_workspace_access_point = None
-        docker_workspace_subpath = None
+        # EFS: create one AccessPoint per declared mount and grant task-role
+        # permission for exactly those ARNs. Per-container mounting happens
+        # below via c.efs_mounts (names referring back into this list).
+        efs_mount_resources: dict[str, tuple[efs.AccessPoint, str]] = {}  # name -> (access_point, volume_name)
         if app_config.efs_config:
             efs_file_system = efs.FileSystem.from_file_system_attributes(
                 self, "ImportedEfs",
                 file_system_id=self.environment_infra.efs_file_system_id,
                 security_group=self.environment_infra.efs_security_group,
             )
-            uid = str(app_config.efs_config.posix_uid)
-            gid = str(app_config.efs_config.posix_gid)
-            docker_workspace_subpath = app_config.efs_config.docker_workspace_subpath
-            if docker_workspace_subpath and (
-                docker_workspace_subpath.startswith("/") or ".." in docker_workspace_subpath.split("/")
-            ):
-                raise ValueError("EFS docker workspace subpath must be a relative path without '..'")
-            efs_access_point = efs.AccessPoint(
-                self, "AppAccessPoint",
-                file_system=efs_file_system,
-                path=f"/deployments/{app_config.app_name}",
-                create_acl=efs.Acl(owner_uid=uid, owner_gid=gid, permissions="755"),
-                posix_user=efs.PosixUser(uid=uid, gid=gid),
-            )
-            if docker_workspace_subpath:
-                efs_docker_workspace_access_point = efs.AccessPoint(
-                    self, "AppDockerWorkspaceAccessPoint",
+            seen_names: set[str] = set()
+            for m in app_config.efs_config.mounts:
+                if m.name in seen_names:
+                    raise ValueError(f"Duplicate EFS mount name '{m.name}' in efs_config.mounts")
+                seen_names.add(m.name)
+                subpath = m.subpath
+                if subpath.startswith("/") or ".." in subpath.split("/"):
+                    raise ValueError(f"EFS mount subpath must be relative without '..': {subpath!r}")
+                uid = str(m.posix_uid)
+                gid = str(m.posix_gid)
+                access_point = efs.AccessPoint(
+                    self, f"AppEfs-{m.name}",
                     file_system=efs_file_system,
-                    path=f"/deployments/{app_config.app_name}/{docker_workspace_subpath}",
+                    path=f"/deployments/{app_config.app_name}/{subpath}",
                     create_acl=efs.Acl(owner_uid=uid, owner_gid=gid, permissions="755"),
                     posix_user=efs.PosixUser(uid=uid, gid=gid),
                 )
-            efs_access_point_arns = [efs_access_point.access_point_arn]
-            if efs_docker_workspace_access_point:
-                efs_access_point_arns.append(efs_docker_workspace_access_point.access_point_arn)
+                efs_mount_resources[m.name] = (access_point, f"app-efs-{m.name}")
             task_role.add_to_policy(iam.PolicyStatement(
                 actions=["elasticfilesystem:ClientMount", "elasticfilesystem:ClientWrite"],
                 resources=[efs_file_system.file_system_arn],
                 conditions={
                     "StringEquals": {
-                        "elasticfilesystem:AccessPointArn": efs_access_point_arns,
+                        "elasticfilesystem:AccessPointArn": [ap.access_point_arn for ap, _ in efs_mount_resources.values()],
                     },
                 },
             ))
@@ -697,26 +688,14 @@ class AppStack(Stack):
         else:
             raise ValueError(f"Unsupported compute_mode: {app_config.compute_mode}")
 
-        if efs_access_point:
+        for mount_name, (access_point, volume_name) in efs_mount_resources.items():
             task_definition.add_volume(
-                name="app-workspace",
+                name=volume_name,
                 efs_volume_configuration=ecs.EfsVolumeConfiguration(
                     file_system_id=self.environment_infra.efs_file_system_id,
                     transit_encryption="ENABLED",
                     authorization_config=ecs.AuthorizationConfig(
-                        access_point_id=efs_access_point.access_point_id,
-                        iam="ENABLED",
-                    ),
-                ),
-            )
-        if efs_docker_workspace_access_point:
-            task_definition.add_volume(
-                name="app-docker-workspace",
-                efs_volume_configuration=ecs.EfsVolumeConfiguration(
-                    file_system_id=self.environment_infra.efs_file_system_id,
-                    transit_encryption="ENABLED",
-                    authorization_config=ecs.AuthorizationConfig(
-                        access_point_id=efs_docker_workspace_access_point.access_point_id,
+                        access_point_id=access_point.access_point_id,
                         iam="ENABLED",
                     ),
                 ),
@@ -779,32 +758,21 @@ class AppStack(Stack):
                     ecs.PortMapping(container_port=c.container_port, protocol=ecs.Protocol.TCP),
                 )
 
-            if c.efs_docker_workspace_only and efs_docker_workspace_access_point:
-                wpath = c.efs_docker_workspace_container_path or "/workspace"
-                container.add_mount_points(
-                    ecs.MountPoint(
-                        container_path=wpath,
-                        source_volume="app-docker-workspace",
-                        read_only=False,
-                    ),
-                )
-            elif efs_access_point and c.efs_mount:
-                assert app_config.efs_config is not None  # guaranteed by the `if efs_access_point` branch
-                container.add_mount_points(
-                    ecs.MountPoint(
-                        container_path=app_config.efs_config.mount_path,
-                        source_volume="app-workspace",
-                        read_only=False,
-                    ),
-                )
-                if efs_docker_workspace_access_point and docker_workspace_subpath:
-                    container.add_mount_points(
-                        ecs.MountPoint(
-                            container_path=f"{app_config.efs_config.mount_path.rstrip('/')}/{docker_workspace_subpath}",
-                            source_volume="app-docker-workspace",
-                            read_only=False,
-                        ),
+            for mount_name in c.efs_mounts:
+                if mount_name not in efs_mount_resources:
+                    raise ValueError(
+                        f"Container '{c.name}' requests EFS mount '{mount_name}' not declared in efs_config.mounts"
                     )
+                assert app_config.efs_config is not None  # efs_mount_resources is non-empty only when set
+                mount_spec = app_config.efs_config.by_name(mount_name)
+                _, volume_name = efs_mount_resources[mount_name]
+                container.add_mount_points(
+                    ecs.MountPoint(
+                        container_path=mount_spec.container_path,
+                        source_volume=volume_name,
+                        read_only=False,
+                    ),
+                )
 
             containers_by_name[c.name] = container
 

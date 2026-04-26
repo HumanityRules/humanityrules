@@ -11,10 +11,11 @@ from devopshero_app.services.infra_customer.appconfig import (
     ContainerConfig,
     ContainerDependencyConfig,
     EfsConfig,
+    EfsMount,
 )
 
 
-def _app_config(compute_mode: str, include_docker_workspace: bool) -> AppConfig:
+def _app_config(compute_mode: str, include_workspace_efs: bool) -> AppConfig:
     return AppConfig(
         app_name="my-app",
         cpu=1024,
@@ -27,17 +28,22 @@ def _app_config(compute_mode: str, include_docker_workspace: bool) -> AppConfig:
                 source_repo_path="app",
                 container_port=8080,
                 health_check_path="/health",
-                efs_mount=include_docker_workspace,
+                efs_mounts=["workspace"] if include_workspace_efs else [],
             ),
         ],
         compute_mode=compute_mode,
         alb_target_container="app",
         efs_config=EfsConfig(
-            mount_path="/home/app/.state",
-            posix_uid=1000,
-            posix_gid=1000,
-            docker_workspace_subpath="workspace",
-        ) if include_docker_workspace else None,
+            mounts=[
+                EfsMount(
+                    name="workspace",
+                    subpath="workspace",
+                    container_path="/workspace",
+                    posix_uid=1000,
+                    posix_gid=1000,
+                ),
+            ],
+        ) if include_workspace_efs else None,
     )
 
 
@@ -53,10 +59,22 @@ def _dind_hermes_stack_template() -> Template:
             compute_mode="ec2",
             alb_target_container="hermes",
             efs_config=EfsConfig(
-                mount_path="/home/app/.hermes",
-                posix_uid=1000,
-                posix_gid=1000,
-                docker_workspace_subpath="workspace",
+                mounts=[
+                    EfsMount(
+                        name="home",
+                        subpath="hermes",
+                        container_path="/home/app/.hermes",
+                        posix_uid=1000,
+                        posix_gid=1000,
+                    ),
+                    EfsMount(
+                        name="workspace",
+                        subpath="workspace",
+                        container_path="/workspace",
+                        posix_uid=1000,
+                        posix_gid=1000,
+                    ),
+                ],
             ),
             containers=[
                 ContainerConfig(
@@ -65,9 +83,9 @@ def _dind_hermes_stack_template() -> Template:
                     registry_image="docker:26.1.0-dind",
                     container_port=0,
                     privileged=True,
-                    efs_docker_workspace_only=True,
-                    efs_docker_workspace_container_path="/workspace",
+                    efs_mounts=["workspace"],
                     command=[
+                        "dockerd",
                         "--host=unix:///var/run/docker.sock",
                         "--host=tcp://127.0.0.1:2375",
                     ],
@@ -78,7 +96,7 @@ def _dind_hermes_stack_template() -> Template:
                     source_repo_path="hermes_agent",
                     ecr_repo_name="doh/staging/my-app-hermes",
                     container_port=8787,
-                    efs_mount=True,
+                    efs_mounts=["home", "workspace"],
                     depends_on=[ContainerDependencyConfig(
                         name="docker-dind",
                         condition="HEALTHY",
@@ -100,12 +118,12 @@ def _dind_hermes_stack_template() -> Template:
     return Template.from_stack(stack)
 
 
-def _app_stack_template(compute_mode: str, include_docker_workspace: bool) -> Template:
+def _app_stack_template(compute_mode: str, include_workspace_efs: bool) -> Template:
     cdk_app = App()
     stack = deploy_app.AppStack(
         scope=cdk_app,
         construct_id="TestAppStack",
-        app_config=_app_config(compute_mode=compute_mode, include_docker_workspace=include_docker_workspace),
+        app_config=_app_config(compute_mode=compute_mode, include_workspace_efs=include_workspace_efs),
         image_tag="test",
         env_slug="staging",
         resource_prefix="doh-staging-my-app",
@@ -123,7 +141,7 @@ def _app_stack_template(compute_mode: str, include_docker_workspace: bool) -> Te
 class EcsComputeModeTests(SimpleTestCase):
 
     def test_fargate_mode_uses_fargate_service_and_task_definition(self) -> None:
-        template = _app_stack_template(compute_mode="fargate", include_docker_workspace=False)
+        template = _app_stack_template(compute_mode="fargate", include_workspace_efs=False)
 
         template.has_resource_properties("AWS::ECS::TaskDefinition", {
             "RequiresCompatibilities": ["FARGATE"],
@@ -140,7 +158,7 @@ class EcsComputeModeTests(SimpleTestCase):
         })
 
     def test_ec2_mode_uses_ec2_capacity_provider_and_awsvpc_task(self) -> None:
-        template = _app_stack_template(compute_mode="ec2", include_docker_workspace=False)
+        template = _app_stack_template(compute_mode="ec2", include_workspace_efs=False)
 
         template.has_resource_properties("AWS::ECS::TaskDefinition", {
             "RequiresCompatibilities": ["EC2"],
@@ -202,10 +220,18 @@ class EcsComputeModeTests(SimpleTestCase):
                 Match.object_like({
                     "Name": "my-app-docker-dind",
                     "Command": [
+                        "dockerd",
                         "--host=unix:///var/run/docker.sock",
                         "--host=tcp://127.0.0.1:2375",
                     ],
                     "Privileged": True,
+                    "MountPoints": [
+                        {
+                            "ContainerPath": "/workspace",
+                            "SourceVolume": "app-efs-workspace",
+                            "ReadOnly": False,
+                        },
+                    ],
                 }),
             ]),
         })
@@ -219,6 +245,18 @@ class EcsComputeModeTests(SimpleTestCase):
                             "Condition": "HEALTHY",
                         },
                     ],
+                    "MountPoints": Match.array_with([
+                        {
+                            "ContainerPath": "/home/app/.hermes",
+                            "SourceVolume": "app-efs-home",
+                            "ReadOnly": False,
+                        },
+                        {
+                            "ContainerPath": "/workspace",
+                            "SourceVolume": "app-efs-workspace",
+                            "ReadOnly": False,
+                        },
+                    ]),
                 }),
             ]),
         })
@@ -263,16 +301,16 @@ class EcsComputeModeTests(SimpleTestCase):
                 auth_base_url=None,
             )
 
-    def test_efs_docker_workspace_mounts_subpath_volume(self) -> None:
+    def test_efs_mount_drives_volume_and_mount_point(self) -> None:
         template = _app_stack_template(
             compute_mode="ec2",
-            include_docker_workspace=True,
+            include_workspace_efs=True,
         )
 
         template.has_resource_properties("AWS::ECS::TaskDefinition", {
             "Volumes": Match.array_with([
                 {
-                    "Name": "app-docker-workspace",
+                    "Name": "app-efs-workspace",
                     "EFSVolumeConfiguration": Match.object_like({
                         "TransitEncryption": "ENABLED",
                     }),
@@ -282,8 +320,8 @@ class EcsComputeModeTests(SimpleTestCase):
                 Match.object_like({
                     "MountPoints": Match.array_with([
                         {
-                            "ContainerPath": "/home/app/.state/workspace",
-                            "SourceVolume": "app-docker-workspace",
+                            "ContainerPath": "/workspace",
+                            "SourceVolume": "app-efs-workspace",
                             "ReadOnly": False,
                         },
                     ]),

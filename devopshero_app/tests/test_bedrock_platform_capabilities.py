@@ -114,11 +114,12 @@ class BedrockPlatformCapabilityTests(SimpleTestCase):
 
             self.assertEqual(dind["image_source"], "registry")
             self.assertTrue(dind.get("privileged"))
-            self.assertTrue(dind.get("efs_docker_workspace_only"))
+            self.assertEqual(dind.get("efs_mounts"), ["workspace"])
             self.assertEqual(dind.get("registry_image"), "docker:26.1.0-dind")
             self.assertEqual(
                 dind.get("command"),
                 [
+                    "dockerd",
                     "--host=unix:///var/run/docker.sock",
                     "--host=tcp://127.0.0.1:2375",
                 ],
@@ -127,7 +128,12 @@ class BedrockPlatformCapabilityTests(SimpleTestCase):
                 {dep["name"]: dep["condition"] for dep in (hermes_container.get("depends_on") or [])},
                 {"docker-dind": "HEALTHY"},
             )
-            self.assertEqual(template["efs_config"]["docker_workspace_subpath"], "workspace")
+            mount_names = {m["name"]: m for m in template["efs_config"]["mounts"]}
+            self.assertIn("home", mount_names)
+            self.assertIn("workspace", mount_names)
+            self.assertEqual(mount_names["home"]["container_path"], "/home/hermeswebui/.hermes")
+            self.assertEqual(mount_names["workspace"]["container_path"], "/workspace")
+            self.assertEqual(hermes_container["efs_mounts"], ["home", "workspace"])
             self.assertNotIn("user", hermes_container)
             self.assertEqual(runtime_vars["DOCKER_HOST"]["value"], "tcp://127.0.0.1:2375")
             self.assertEqual(runtime_vars["DOH_HERMES_REQUIRE_DOCKER"]["value"], "1")

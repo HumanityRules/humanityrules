@@ -36,7 +36,7 @@ def _hermes_slack_template() -> AppTemplate:
                 "dockerfile_path": "Dockerfile",
                 "container_port": 8787,
                 "health_check_path": "/health",
-                "efs_mount": True,
+                "efs_mounts": ["home", "workspace"],
                 "runtime_variables": [
                     {"name": "DOH_LLM_MODEL", "category": "config", "value": "model-x"},
                     {"name": "ANTHROPIC_API_KEY", "category": "secret", "value": ""},
@@ -49,13 +49,19 @@ def _hermes_slack_template() -> AppTemplate:
                 "version": "0.1.0",
                 "container_port": 7777,
                 "health_check_command": "curl -fsS http://127.0.0.1:7777/health",
-                "efs_mount": False,
                 "runtime_variables": [
                     {"name": "GITHUB_TOKEN", "category": "secret", "value": ""},
                 ],
             },
         ],
-        efs_config={"mount_path": "/home/hermeswebui/.hermes", "posix_uid": 1024, "posix_gid": 1024},
+        efs_config={
+            "mounts": [
+                {"name": "home", "subpath": "hermes", "container_path": "/home/hermeswebui/.hermes",
+                 "posix_uid": 1024, "posix_gid": 1024},
+                {"name": "workspace", "subpath": "workspace", "container_path": "/workspace",
+                 "posix_uid": 1024, "posix_gid": 1024},
+            ],
+        },
         default_tags=[],
         platform_capabilities=["bedrock-runtime"],
         is_active=True,
@@ -116,13 +122,13 @@ class MultiContainerBuildAppConfigTests(TestCase):
         mcp = app_config.containers[1]
         self.assertEqual(hermes.image_source, "dockerfile")
         self.assertEqual(hermes.ecr_repo_name, "doh/staging/my-hermes-hermes")
-        self.assertTrue(hermes.efs_mount)
+        self.assertEqual(hermes.efs_mounts, ["home", "workspace"])
         self.assertEqual(hermes.environment_variables, [{"name": "DOH_LLM_MODEL", "value": "model-x"}])
         self.assertEqual(hermes.app_secrets, {"ANTHROPIC_API_KEY": ""})
         self.assertEqual(mcp.image_source, "prebuilt")
         self.assertEqual(mcp.prebuilt_ecr_repo, "sidecar-mcp")
         self.assertEqual(mcp.prebuilt_version, "0.1.0")
-        self.assertFalse(mcp.efs_mount)
+        self.assertEqual(mcp.efs_mounts, [])
         self.assertEqual(mcp.app_secrets, {"GITHUB_TOKEN": ""})
         # Union shows every container's declared secrets, no collisions.
         self.assertEqual(set(app_config.app_secrets or {}), {"ANTHROPIC_API_KEY", "GITHUB_TOKEN"})

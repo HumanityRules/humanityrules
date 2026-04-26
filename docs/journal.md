@@ -1,5 +1,41 @@
 # DevOpsHero Development Journal
 
+## 2026-04-25 18:45 - [Deployment] Sibling EFS mounts: hermes home and workspace as peers, not nested
+
+**Conversation:** [2026-04-25-1845-afc23e32.md](conversations/2026-04-25-1845-afc23e32.md)
+
+Follow-up to the DinD fix from earlier today. That fix bound the DinD workspace access point to two container paths (`/workspace` and `/home/hermeswebui/.hermes/workspace`) so the agent would hit EFS regardless of which name it used. It worked, but the real mistake was the nested layout itself — workspace-as-a-subdir-of-the-agent-home. This entry flattens that into two sibling access points on EFS, mounted independently in the hermes container, with DinD taking only the workspace one.
+
+**Old shape.** One `EfsConfig` with `mount_path` (the whole deployment root), `posix_uid`/`posix_gid` shared across containers, and an optional `docker_workspace_subpath`. CDK created a root access point at `/deployments/<app>/` plus a second access point at `/deployments/<app>/workspace/`. The hermes container mounted both — root → `/home/hermeswebui/.hermes`, and the subpath → `/home/hermeswebui/.hermes/workspace` overlaid on top. DinD mounted only the subpath at its own `/workspace`. Per-container opt-in lived in two flags (`efs_mount: bool`, `efs_docker_workspace_only: bool`) plus a `efs_docker_workspace_container_path` override. Workable, but every name in it (`*_only`, `subpath`) was a relic of the nested model, and the branching in `deploy_app.py` reflected that — two mutually exclusive `if/elif` arms per container.
+
+**New shape.** `EfsConfig` carries a list of named `EfsMount`s, each with its own `name`, `subpath`, `container_path`, and POSIX ownership. Containers opt in with a single field `efs_mounts: list[str]` naming the mounts they want. CDK iterates the mounts list to create N access points + N task-level volumes, then per container iterates `efs_mounts` to emit the matching `MountPoint`s. The "main vs exception" asymmetry is gone; there's one code path that handles 0/1/N mounts uniformly.
+
+**Concrete layout for Hermes:**
+
+- EFS: `/deployments/<app>/hermes/` and `/deployments/<app>/workspace/` as siblings.
+- hermes container: `hermes` mount at `/home/hermeswebui/.hermes`, `workspace` mount at top-level `/workspace`. Agent home and workspace are now independent paths; removing one doesn't affect the other.
+- docker-dind sidecar: `workspace` mount at `/workspace`, nothing else. DinD never sees Hermes config, memory, skills, or the venv — even if an attacker escaped a tool container, the agent-home blast radius is closed off at the mount boundary.
+
+**Downstream simplifications from the flat layout:**
+
+- `template_repos/hermes_agent/Dockerfile`: dropped the `rm -rf /workspace && ln -s /home/hermeswebui/.hermes/workspace /workspace` symlink. `/workspace` is a real mount now; `HERMES_WEBUI_DEFAULT_WORKSPACE=/workspace` points at it directly.
+- `entrypoint.sh`: `docker_volumes` collapses to a single `["/workspace:/workspace"]` bind. The per-boot Python block that surgically rewrote the `terminal.*` section of `config.yaml` on every boot is **deleted** — it was a workaround for the earlier two-path binding and is no longer necessary. First-boot sed is enough.
+- `deploy_app.py`: the `if c.efs_docker_workspace_only: ... elif efs_access_point and c.efs_mount: ... + nested second mount ...` branch collapses into a single `for mount_name in c.efs_mounts:` loop. Access point creation symmetrizes to one loop as well.
+
+**Migration.** Destroyed and redeployed `hermes-vmendi01` from scratch instead of relocating agent-home contents on EFS. Tests (314) pass. Post-deploy verification from inside the running hermes container: `/workspace` is a top-level EFS mount, `/home/hermeswebui/.hermes/` has the agent state with no `workspace` subdir, `config.yaml` shows the expected `backend: docker`, `cwd: /workspace`, `docker_volumes: ["/workspace:/workspace"]`.
+
+**Schema shape is greenfield-compatible for future apps.** Today only Hermes uses >1 mount, but the list-of-mounts shape matches AWS's primitive 1:1 (a filesystem can back many access points, each with its own POSIX ownership and subpath). Future apps that want, say, a scratch mount + a read-only shared-library mount drop in without another schema revision.
+
+**Operational gotcha worth remembering.** After changing the in-code template, I forgot to run `seed_app_templates` before queuing the new deployment — the stale `{mount_path: ...}` dict was still in the DB, so `app_config_builder` hit `KeyError: 'mounts'` at deploy time. `template.efs_config` is read live from the AppTemplate row, not from a blueprint snapshot, so reseed-then-retry was enough. The retry creates a *new* Deployment row (not a state flip on the old one); easy to miss when polling by UUID.
+
+**Key points:**
+
+- Sibling mounts > nested mounts, even when the data on disk is identical. The container-side path layout is what the agent learns from `HERMES_WEBUI_DEFAULT_WORKSPACE` and from `pwd`; making it flat removes an entire class of "agent wrote to path X but it's not where I expected" bugs at the mount layer rather than papering them over at the bind layer.
+- The refactor deletes more code than it adds. Every place the old shape had a special case (CDK, entrypoint, Dockerfile) collapses into a uniform loop or a single bind. The one place it gets slightly more verbose is the seed template (dict-with-list instead of flat dict), which is honest about the fact that there are two mounts.
+- `efs_mounts: list[str]` is the right granularity for per-container opt-in. Boolean `efs_mount` conflates "which mounts" with "any mount," and any future "mount X but not Y" case breaks it. Named mounts scale to any mix.
+- Per-mount POSIX ownership is part of the shape even though Hermes uses 1024:1024 for both mounts today. Future apps where the tool sidecar wants root-owned workspace but the app container wants UID-owned home don't need another refactor.
+- **Open question I flagged but did not act on:** the whole `terminal.backend: docker` mechanism (DinD sidecar, privileged EC2, DOCKER_HOST plumbing, `docker-dind` in the template, extra cross-container dependency) exists to give each Hermes tool call a fresh ephemeral container. But Hermes-personal is one user per deployment and Hermes-slack is one org — there's no multi-tenancy to protect. If we moved to `backend: local` (run tools as subprocesses in the hermes container, bake Python+Node into the image), we'd delete the entire DinD container, the `depends_on` chain, `privileged: True`, the EC2-only constraint (goes back to Fargate), the `dockerd`-prepend CMD hack, the DOCKER_HOST probing in entrypoint, and ~200MB of idle memory. The trade is per-command disposability, which we don't currently exercise. Worth its own experiment; deferred.
+
 ## 2026-04-25 17:52 - [Bugfix] Hermes agent writes to overlay instead of EFS with terminal.backend=docker
 
 **Conversation:** [2026-04-25-1752-afc23e32.md](conversations/2026-04-25-1752-afc23e32.md)
