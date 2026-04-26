@@ -390,10 +390,13 @@ _DOCKER_DIND_CONTAINER = {
     # docker:dind's entrypoint (dockerd-entrypoint.sh) prepends a default
     # --host=tcp://0.0.0.0:2375 whenever the first CMD arg starts with '-',
     # which would collide with our loopback bind on the same port. Pass
-    # 'dockerd' as the first arg to suppress that default.
+    # 'dockerd' as the first arg to suppress that default. Only the tcp
+    # loopback host is bound — no unix socket, since nothing in the task
+    # ever connects over /var/run/docker.sock (the hermes sidecar uses
+    # DOCKER_HOST=tcp://127.0.0.1:2375, and we run our own healthcheck
+    # against the same endpoint below).
     "command": [
         "dockerd",
-        "--host=unix:///var/run/docker.sock",
         "--host=tcp://127.0.0.1:2375",
     ],
     "container_port": 0,
@@ -404,7 +407,7 @@ _DOCKER_DIND_CONTAINER = {
     # or skills even if an attacker escapes the tool container's namespace.
     "efs_mounts": ["workspace"],
     "health_check_path": None,
-    "health_check_command": "docker info >/dev/null 2>&1",
+    "health_check_command": "docker -H tcp://127.0.0.1:2375 info >/dev/null 2>&1",
     "health_check_grace_period": 120,
     # Empty DOCKER_TLS_CERTDIR disables TLS on the dockerd listener, which is
     # required because we bind on tcp://127.0.0.1:2375 for in-task loopback.
@@ -518,10 +521,6 @@ HERMES_PERSONAL_TEMPLATE = {
         {**_DOCKER_DIND_CONTAINER},
         {
             **_HERMES_CONTAINER_BASE,
-            # Bind the WebUI to loopback so only the sidecar (sharing the
-            # task network namespace) can reach it. Overrides the upstream
-            # image default of HERMES_WEBUI_HOST=0.0.0.0, which would
-            # otherwise expose the WebUI on the task ENI to the whole VPC.
             "configurable_variables": (
                 _HERMES_LLM_VARS + _HERMES_CREDENTIAL_VARS + _HERMES_BEDROCK_VARS
             ),

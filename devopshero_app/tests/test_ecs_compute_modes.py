@@ -86,7 +86,6 @@ def _dind_hermes_stack_template() -> Template:
                     efs_mounts=["workspace"],
                     command=[
                         "dockerd",
-                        "--host=unix:///var/run/docker.sock",
                         "--host=tcp://127.0.0.1:2375",
                     ],
                 ),
@@ -221,7 +220,6 @@ class EcsComputeModeTests(SimpleTestCase):
                     "Name": "my-app-docker-dind",
                     "Command": [
                         "dockerd",
-                        "--host=unix:///var/run/docker.sock",
                         "--host=tcp://127.0.0.1:2375",
                     ],
                     "Privileged": True,

@@ -43,14 +43,11 @@ fi
 
 mkdir -p "$HERMES_DIR"
 
-TERMINAL_BACKEND="local"
-TERMINAL_CWD="."
-DOCKER_VOLUMES="[]"
-
 # DOCKER_HOST points at the in-task DinD sidecar. The hermes container's
 # depends_on: {docker-dind, HEALTHY} already guarantees DinD is up before we
-# boot, and ECS launches us with DOCKER_HOST set from the template. Fail hard
-# if either is missing — we'd fall back to backend=local silently otherwise.
+# boot, and ECS launches us with DOCKER_HOST set from the template. Fail
+# hard on any of these invariants — backend=docker is the only supported
+# mode, so there is no fallback path.
 if [ -z "${DOCKER_HOST}" ]; then
     echo "FATAL: DOCKER_HOST is not set; cannot reach the DinD sidecar" >&2
     exit 1

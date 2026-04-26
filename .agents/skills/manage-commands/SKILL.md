@@ -1,6 +1,6 @@
 ---
 name: manage-commands
-description: Understand and use Django management commands. Use to troubleshoot/debug anything locally and need to know which command does what.
+description: Understand and use available DOH's management commands, used to manage the plaform, and to troubleshoot, debug, or run tests. If you are trying to diagnose, debug, or verify your work, you probably need this skill.
 ---
 
 # Django Management Commands
