@@ -150,11 +150,11 @@ def list_secrets(session: boto3.Session, include_deleted: bool) -> list[dict]:
 
 
 # ---------------------------------------------------------------------------
-# Sidecar / auth Lambda secrets (per-environment, see docs/sidecar_proxy_design.md)
+# Policy-proxy / auth Lambda secrets (per-environment, see docs/policy_proxy_design.md)
 # ---------------------------------------------------------------------------
 
 
-SHARED_SECRETS_KEY_DOH_SIDECAR_TOKEN = "DOH_SIDECAR_TOKEN"
+SHARED_SECRETS_KEY_DOH_POLICY_PROXY_TOKEN = "DOH_POLICY_PROXY_TOKEN"
 
 
 def _secret_exists(sm_client, secret_name: str) -> bool:
@@ -211,8 +211,8 @@ def _create_or_merge_secret(
     return response["ARN"]
 
 
-def ensure_env_sidecar_token_exists(session: boto3.Session, env) -> str:
-    """Ensure DOH_SIDECAR_TOKEN exists both in shared-secrets and as a SidecarToken row.
+def ensure_env_policy_proxy_token_exists(session: boto3.Session, env) -> str:
+    """Ensure DOH_POLICY_PROXY_TOKEN exists both in shared-secrets and as a PolicyProxyToken row.
 
     Returns the ARN of the shared-secrets entry. *env* is a Django Environment
     instance — passed in rather than imported so this module stays free of
@@ -220,15 +220,15 @@ def ensure_env_sidecar_token_exists(session: boto3.Session, env) -> str:
     """
     # Local import so test harnesses that don't have Django set up can still
     # exercise the AWS-side helpers in isolation.
-    from devopshero_app.models import SidecarToken
+    from devopshero_app.models import PolicyProxyToken
 
     env_slug = env.slug
     secret_name = f"devopshero/{env_slug}/shared-secrets"
     sm_client = session.client("secretsmanager")
 
-    existing_row = SidecarToken.objects.filter(environment=env).first()
+    existing_row = PolicyProxyToken.objects.filter(environment=env).first()
     existing_secret = get_shared_secrets(session=session, env_slug=env_slug) if _secret_exists(sm_client, secret_name) else None
-    has_token_in_secret = bool(existing_secret and existing_secret.get(SHARED_SECRETS_KEY_DOH_SIDECAR_TOKEN))
+    has_token_in_secret = bool(existing_secret and existing_secret.get(SHARED_SECRETS_KEY_DOH_POLICY_PROXY_TOKEN))
 
     # Happy path: both sides already present → trust them, no-op.
     if existing_row is not None and has_token_in_secret:
@@ -239,7 +239,7 @@ def ensure_env_sidecar_token_exists(session: boto3.Session, env) -> str:
     token_hash = hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
     values = dict(existing_secret or {})
-    values[SHARED_SECRETS_KEY_DOH_SIDECAR_TOKEN] = raw
+    values[SHARED_SECRETS_KEY_DOH_POLICY_PROXY_TOKEN] = raw
     arn = _create_or_merge_secret(
         sm_client=sm_client,
         secret_name=secret_name,
@@ -249,12 +249,12 @@ def ensure_env_sidecar_token_exists(session: boto3.Session, env) -> str:
     )
 
     if existing_row is None:
-        SidecarToken.objects.create(environment=env, token_hash=token_hash)
-        logger.info("sidecar token row created for env '%s'", env_slug)
+        PolicyProxyToken.objects.create(environment=env, token_hash=token_hash)
+        logger.info("policy-proxy token row created for env '%s'", env_slug)
     else:
         existing_row.token_hash = token_hash
         existing_row.save(update_fields=["token_hash"])
-        logger.info("sidecar token row rotated for env '%s'", env_slug)
+        logger.info("policy-proxy token row rotated for env '%s'", env_slug)
 
     return arn
 
@@ -273,7 +273,7 @@ def _generate_rsa_keypair_pem() -> tuple[bytes, bytes]:
     return private_pem, public_pem
 
 
-def ensure_env_sidecar_auth_config_exists(session: boto3.Session, env) -> str:
+def ensure_env_policy_proxy_auth_config_exists(session: boto3.Session, env) -> str:
     """Ensure the env's auth-Lambda config secret exists and return its ARN.
 
     Payload shape (JSON):
@@ -285,8 +285,8 @@ def ensure_env_sidecar_auth_config_exists(session: boto3.Session, env) -> str:
     On re-run the oidc_config block is refreshed from the Organization (so a
     rotated client_secret propagates on the next Lambda cold-start) but the
     jwt_key block is carried forward unchanged — rotating it would require a
-    coordinated redeploy of the auth Lambda + all sidecars in the env (see
-    docs/sidecar_proxy_design.md).
+    coordinated redeploy of the auth Lambda + all policy proxies in the env
+    (see docs/policy_proxy_design.md).
     """
     organization = env.aws_account.organization
     if not (organization.oidc_issuer_url and organization.oidc_client_id and organization.oidc_client_secret):
@@ -295,7 +295,7 @@ def ensure_env_sidecar_auth_config_exists(session: boto3.Session, env) -> str:
             f"auth Lambda for env '{env.slug}'. Run setup_oidc_org first.",
         )
 
-    secret_name = f"devopshero/{env.slug}/sidecar-auth-config"
+    secret_name = f"devopshero/{env.slug}/policy-proxy-auth-config"
     sm_client = session.client("secretsmanager")
 
     existing: dict = {}
@@ -326,21 +326,21 @@ def ensure_env_sidecar_auth_config_exists(session: boto3.Session, env) -> str:
     return _create_or_merge_secret(
         sm_client=sm_client,
         secret_name=secret_name,
-        description=f"Sidecar auth-Lambda config for env '{env.slug}' (OIDC sourced from Organization '{organization.slug}')",
+        description=f"Policy-proxy auth-Lambda config for env '{env.slug}' (OIDC sourced from Organization '{organization.slug}')",
         values_to_write=payload,
         merge_mode=False,
     )
 
 
-def ensure_env_sidecar_secrets_exist(session: boto3.Session, env) -> dict[str, str]:
-    """Top-level helper: provision per-env sidecar secrets and return their ARNs.
+def ensure_env_policy_proxy_secrets_exist(session: boto3.Session, env) -> dict[str, str]:
+    """Top-level helper: provision per-env policy-proxy secrets and return their ARNs.
 
-    Returns a dict with keys: 'shared_secrets_arn', 'sidecar_auth_config_arn'.
+    Returns a dict with keys: 'shared_secrets_arn', 'policy_proxy_auth_config_arn'.
     Called from the deploy pipeline before the AuthLambdaStack runs.
     """
     return {
-        "shared_secrets_arn": ensure_env_sidecar_token_exists(session=session, env=env),
-        "sidecar_auth_config_arn": ensure_env_sidecar_auth_config_exists(session=session, env=env),
+        "shared_secrets_arn": ensure_env_policy_proxy_token_exists(session=session, env=env),
+        "policy_proxy_auth_config_arn": ensure_env_policy_proxy_auth_config_exists(session=session, env=env),
     }
 
 

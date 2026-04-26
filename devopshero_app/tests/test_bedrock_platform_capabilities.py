@@ -44,8 +44,7 @@ def _bedrock_actions_from_stack(app_config: AppConfig) -> list[str]:
         database_connection_secret=None,
         shared_alb_hosted_zone=None,
         shared_hosted_zone_id=None,
-        sidecar_shared_secrets_arn=None,
-        sidecar_image_version=None,
+        policy_proxy_shared_secrets_arn=None,
         auth_base_url=None,
     )
     template = Template.from_stack(stack).to_json()

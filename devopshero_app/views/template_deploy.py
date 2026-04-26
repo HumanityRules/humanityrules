@@ -91,7 +91,11 @@ def _selected_label(options: list[dict], value: str, placeholder: str) -> str:
 
 def _template_requires_owner(template: models.AppTemplate) -> bool:
     """True iff the template's default_tags mark it as a Personal Assistant."""
-    if not template.sidecar_enabled:
+    has_policy_proxy = any(
+        c.get("image_source") == "policy_proxy"
+        for c in (template.containers or [])
+    )
+    if not has_policy_proxy:
         return False
     for tag in (template.default_tags or []):
         if tag.get("key") == "app-type" and tag.get("value") == "personal-assistant":

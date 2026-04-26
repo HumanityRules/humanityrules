@@ -15,7 +15,7 @@ from devopshero_app.models import (
     Policy,
     Repository,
     ResourceTag,
-    SidecarToken,
+    PolicyProxyToken,
     User,
     Workspace,
 )
@@ -86,7 +86,7 @@ class PDPTestBase(TestCase):
             actions=["app:use"],
         )
         self.raw_token = "t" * 64
-        SidecarToken.objects.create(
+        PolicyProxyToken.objects.create(
             environment=self.environment, token_hash=_hash(self.raw_token),
         )
         self.client = Client()
@@ -175,7 +175,7 @@ class TestPDPEvaluation(PDPTestBase):
             aws_region="us-east-1",
         )
         other_token_raw = "u" * 64
-        SidecarToken.objects.create(
+        PolicyProxyToken.objects.create(
             environment=other_env, token_hash=_hash(other_token_raw),
         )
         # The app exists in the org but has no blueprint for other_env.

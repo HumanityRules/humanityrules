@@ -1,10 +1,10 @@
 """
-Policy Decision Point (PDP) endpoint — called by sidecar proxies inside customer
-environments to authorize each request. See docs/sidecar_proxy_design.md.
+Policy Decision Point (PDP) endpoint — called by policy proxies inside customer
+environments to authorize each request. See docs/policy_proxy_design.md.
 
-Auth: Bearer token from the env's shared-secrets (DOH_SIDECAR_TOKEN). The token
-identifies the Environment; the environment's organization then scopes the
-ABAC lookup.
+Auth: Bearer token from the env's shared-secrets (DOH_POLICY_PROXY_TOKEN). The
+token identifies the Environment; the environment's organization then scopes
+the ABAC lookup.
 """
 
 import hashlib
@@ -16,7 +16,7 @@ from django.http import HttpRequest, JsonResponse
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_POST
 
-from ..models import App, DeploymentBlueprint, SidecarToken, User
+from ..models import App, DeploymentBlueprint, PolicyProxyToken, User
 from ..services import abac
 
 logger = logging.getLogger(__name__)
@@ -39,7 +39,7 @@ def _resolve_env_from_token(raw_token: str):
     # Constant-time comparison across all rows: fetch hash-matching row by index,
     # then compare digests with hmac.compare_digest to guard against any timing
     # signal in the equality test.
-    row = SidecarToken.objects.select_related(
+    row = PolicyProxyToken.objects.select_related(
         "environment", "environment__aws_account__organization",
     ).filter(token_hash=token_hash).first()
     if row is None:

@@ -2,8 +2,8 @@
 Full factory reset of ABAC Policy rows for one organization.
 
 Deletes all Policy records for the org, re-runs bootstrap_organization (seed
-policies), then create_default_app_policy for each app (non-sidecar apps get
-Default open-access policies).
+policies), then create_default_app_policy for each app (non-policy-proxy apps
+get Default open-access policies).
 
 Usage:
     uv run manage.py doh_reset_org_abac --org course-hero

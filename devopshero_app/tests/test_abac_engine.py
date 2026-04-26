@@ -1393,13 +1393,13 @@ class TestCreateDefaultAppPolicy(TestCase):
             1,
         )
 
-    def test_sidecar_template_skips_open_access_policy(self) -> None:
-        # PAs (and any sidecar'd app) must not get the wildcard open-access grant —
+    def test_policy_proxy_template_skips_open_access_policy(self) -> None:
+        # PAs (and any policy-proxy'd app) must not get the wildcard open-access grant —
         # their access is governed by the global Personal Assistant owner policy.
         template = AppTemplate.objects.create(
             name="PA", slug="pa-fixture", description="", icon="x", category="x",
             cpu=256, memory=512,
-            alb_target_container="app",
+            alb_target_container="policy-proxy",
             containers=[
                 {
                     "name": "app",
@@ -1410,8 +1410,15 @@ class TestCreateDefaultAppPolicy(TestCase):
                     "health_check_path": "/health",
                     "configurable_variables": [],
                 },
+                {
+                    "name": "policy-proxy",
+                    "image_source": "policy_proxy",
+                    "upstream_container": "app",
+                    "container_port": 8001,
+                    "configurable_variables": [],
+                },
             ],
-            sidecar_enabled=True, is_active=True,
+            is_active=True,
         )
         app = App.objects.create(
             organization=self.org, workspace=self.workspace, repository=self.repo,

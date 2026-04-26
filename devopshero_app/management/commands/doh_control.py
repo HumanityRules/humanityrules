@@ -99,7 +99,7 @@ class Command(BaseCommand):
         )
         deploy_tpl.add_argument(
             "--owner",
-            help="Owner username; required for Personal Assistant templates (app-type=personal-assistant + sidecar_enabled).",
+            help="Owner username; required for Personal Assistant templates (app-type=personal-assistant + policy-proxy container).",
         )
         deploy_tpl.add_argument(
             "--compute-mode",
@@ -638,8 +638,12 @@ class Command(BaseCommand):
         return True
 
     def _template_requires_owner(self, template):
-        """True iff the template is a Personal Assistant (sidecar_enabled + app-type=personal-assistant)."""
-        if not template.sidecar_enabled:
+        """True iff the template is a Personal Assistant (policy-proxy-fronted + app-type=personal-assistant)."""
+        has_policy_proxy = any(
+            c.get("image_source") == "policy_proxy"
+            for c in (template.containers or [])
+        )
+        if not has_policy_proxy:
             return False
         for tag in (template.default_tags or []):
             if tag.get("key") == "app-type" and tag.get("value") == "personal-assistant":

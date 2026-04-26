@@ -27,7 +27,7 @@ def _make_pa_template() -> AppTemplate:
         cpu=1024,
         memory=2048,
         default_compute_mode="ec2",
-        alb_target_container="hermes",
+        alb_target_container="policy-proxy",
         containers=[
             {
                 "name": "docker-dind",
@@ -52,6 +52,16 @@ def _make_pa_template() -> AppTemplate:
                 "efs_mounts": ["home", "workspace"],
                 "configurable_variables": [],
             },
+            {
+                "name": "policy-proxy",
+                "image_source": "policy_proxy",
+                "upstream_container": "hermes",
+                "container_port": 8788,
+                "health_check_path": "/__policy_proxy/healthz",
+                "health_check_command": "",
+                "health_check_grace_period": 0,
+                "configurable_variables": [],
+            },
         ],
         datastore_config=None,
         efs_config={
@@ -62,7 +72,6 @@ def _make_pa_template() -> AppTemplate:
                  "posix_uid": 1024, "posix_gid": 1024},
             ],
         },
-        sidecar_enabled=True,
         default_tags=[{"key": "app-type", "value": "personal-assistant"}],
         is_active=True,
     )

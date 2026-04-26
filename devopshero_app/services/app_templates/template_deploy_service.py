@@ -103,6 +103,29 @@ def _alb_target_container(template: models.AppTemplate) -> dict:
     return containers[0]
 
 
+def _primary_build_container(template: models.AppTemplate) -> dict:
+    """Return the template container that the App row's identity/build fields describe.
+
+    Normally the ALB target, except when a policy proxy fronts the task: then
+    the ALB target is the platform-owned proxy and the real primary is its
+    upstream (the dockerfile-built app container).
+    """
+    target = _alb_target_container(template)
+    if target["image_source"] != "policy_proxy":
+        return target
+    upstream = target.get("upstream_container")
+    if not upstream:
+        raise ValueError(
+            f"Template '{template.slug}' policy-proxy alb_target has no upstream_container",
+        )
+    for c in template.containers:
+        if c["name"] == upstream:
+            return c
+    raise ValueError(
+        f"Template '{template.slug}' upstream_container='{upstream}' not found in containers",
+    )
+
+
 async def _stamp_template_tags(
     organization: models.Organization,
     app: models.App,
@@ -145,10 +168,10 @@ async def deploy_from_template(
     # container — the ALB-target one (for multi-container templates) or the
     # sole container (for single-container templates). The rest of the
     # container spec lives on the template and is interpreted at deploy time.
-    primary = _alb_target_container(template)
+    primary = _primary_build_container(template)
     if primary["image_source"] != "dockerfile":
         raise ValueError(
-            f"Template '{template.slug}' alb_target container '{primary['name']}' must be "
+            f"Template '{template.slug}' primary build container '{primary['name']}' must be "
             f"image_source=dockerfile; got {primary['image_source']}"
         )
 

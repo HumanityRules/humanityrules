@@ -70,14 +70,9 @@ def _resolve_ecs_container_name(app: App, requested_container: str | None) -> st
             return requested_container
         if requested_container in container_names:
             return f"{app.slug}-{requested_container}"
-        if requested_container == "sidecar" and app.source_template and app.source_template.sidecar_enabled:
-            return f"{app.slug}-sidecar"
-        valid_names = list(container_names)
-        if app.source_template and app.source_template.sidecar_enabled:
-            valid_names.append("sidecar")
         raise CommandError(
             f"Container '{requested_container}' is not declared by template '{app.source_template.slug}'. "
-            f"Choose one of: {', '.join(valid_names)}."
+            f"Choose one of: {', '.join(container_names)}."
         )
 
     default_container = _default_template_container_name(app=app)
