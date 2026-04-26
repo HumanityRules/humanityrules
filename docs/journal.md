@@ -28,6 +28,16 @@ The executor refuses to start tearing down anything if any live deployment is in
 - The serial loop over live deployments is fine for now; most apps live in one or two envs. If we ever see apps deployed to many envs at once, we can switch to a thread pool, but premature.
 - We didn't add a parallel `AppTeardownAndRemovalJob` model — extending `AppRemovalJob` with one bool is much less surface area than a second model with overlapping fields.
 
+## 2026-04-25 19:22 - [Deployment] Drop DinD unix socket bind
+
+The dind container was binding two dockerd listeners: `unix:///var/run/docker.sock` and `tcp://127.0.0.1:2375`. Nothing in the task actually talked to the socket — the hermes sidecar reaches dockerd via `DOCKER_HOST=tcp://127.0.0.1:2375`, and the only unix-socket consumer was dind's own healthcheck (`docker info >/dev/null 2>&1` defaults to the socket path). Dropped the unix bind from the dind CMD and switched the healthcheck to `docker -H tcp://127.0.0.1:2375 info`. Same failure signal, smaller attack surface: no socket file sitting on the writable layer, no redundant listener, one path in.
+
+**Key points:**
+
+- Two listeners, one consumer is worse than one listener: the unused bind was "security theater going the wrong way" — privilege without corresponding use. Dropping it shrinks the things that can go wrong without losing any capability.
+- Healthcheck still runs inside the dind container, but explicitly via tcp. Keeps the check end-to-end (if the tcp listener ever fails to bind, the healthcheck also fails), which is what we actually want.
+- Verified on `hermes-vmendi01`: post-deploy, `/var/run/docker.sock` does not exist inside the dind container, and `docker -H tcp://127.0.0.1:2375 info` reports `ServerVersion: 26.1.0`. Hermes tool calls work unchanged (same DOCKER_HOST).
+
 ## 2026-04-25 19:11 - [DomainModel] Split container env vars: `environment` (platform constants) vs `configurable_variables` (deploy-time inputs)
 
 Template containers had one list for all env vars — `runtime_variables` — each entry carrying a 9-field shape (`required`, `auto_generate`, `default_value`, `value`, `user_editable`, `allow_empty_value`, `description`, `group`, `category`). That shape is designed for deploy-form rendering and per-deployment variation. But a growing fraction of the entries were pure platform constants the operator never touches: `DOCKER_HOST=tcp://127.0.0.1:2375`, `HERMES_WEBUI_HOST=127.0.0.1`, `DOCKER_TLS_CERTDIR=""`. For those, 8 of the 9 fields were noise — `user_editable: False` was doing load-bearing work to hide them from the form, and we carried the entire deploy-time machinery (blueprint snapshot, override merge, required-field validation) for values that don't change deployment-to-deployment.
