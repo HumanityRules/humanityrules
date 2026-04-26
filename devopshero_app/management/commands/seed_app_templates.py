@@ -40,7 +40,7 @@ OPENCLAW_TEMPLATE = {
             "health_check_command": "",
             "health_check_grace_period": 60,
             "efs_mounts": ["workspace"],
-            "runtime_variables": [
+            "configurable_variables": [
                 {
                     "name": "OPENCLAW_LOG_LEVEL",
                     "group": "Configuration",
@@ -382,19 +382,6 @@ _HERMES_EFS_CONFIG = {
     ],
 }
 
-# Hermes tool containers (terminal backend: docker) talk to this task's DinD sidecar.
-_HERMES_DOCKER_HOST_VAR = {
-    "name": "DOCKER_HOST",
-    "group": "Tools",
-    "category": "config",
-    "description": "Task-local Docker daemon (DinD sidecar) for Hermes tools",
-    "required": True,
-    "auto_generate": False,
-    "default_value": "tcp://127.0.0.1:2375",
-    "value": "tcp://127.0.0.1:2375",
-    "user_editable": False,
-}
-
 # Privileged; mounts only the workspace EFS access point. Same repo root as other containers.
 _DOCKER_DIND_CONTAINER = {
     "name": "docker-dind",
@@ -419,20 +406,11 @@ _DOCKER_DIND_CONTAINER = {
     "health_check_path": None,
     "health_check_command": "docker info >/dev/null 2>&1",
     "health_check_grace_period": 120,
-    "runtime_variables": [
-        {
-            "name": "DOCKER_TLS_CERTDIR",
-            "group": "Tools",
-            "category": "config",
-            "description": "Empty disables Docker TLS; required for tcp 127.0.0.1:2375",
-            "required": True,
-            "auto_generate": False,
-            "default_value": "",
-            "value": "",
-            "allow_empty_value": True,
-            "user_editable": False,
-        },
-    ],
+    # Empty DOCKER_TLS_CERTDIR disables TLS on the dockerd listener, which is
+    # required because we bind on tcp://127.0.0.1:2375 for in-task loopback.
+    "environment": {
+        "DOCKER_TLS_CERTDIR": "",
+    },
 }
 
 _HERMES_CONTAINER_BASE = {
@@ -451,6 +429,17 @@ _HERMES_CONTAINER_BASE = {
             "condition": "HEALTHY",
         },
     ],
+    # Platform-constant env vars the operator never touches. Kept out of
+    # configurable_variables so the deploy form doesn't treat them as knobs.
+    "environment": {
+        # DOCKER_HOST targets the in-task DinD sidecar over loopback.
+        "DOCKER_HOST": "tcp://127.0.0.1:2375",
+        # Bind the WebUI to loopback so only the auth sidecar (sharing the
+        # task network namespace) can reach it. Overrides the upstream image
+        # default of HERMES_WEBUI_HOST=0.0.0.0, which would expose the WebUI
+        # on the task ENI to the whole VPC.
+        "HERMES_WEBUI_HOST": "127.0.0.1",
+    },
 }
 
 # Upstream credentials consumed by the sidecar-mcp aggregator. All empty
@@ -503,7 +492,7 @@ _SIDECAR_MCP_CONTAINER = {
     # access, but the LLM still answers). No health check either, for the
     # same reason + there's no /health endpoint exposed.
     "essential": False,
-    "runtime_variables": _SIDECAR_MCP_UPSTREAM_SECRETS,
+    "configurable_variables": _SIDECAR_MCP_UPSTREAM_SECRETS,
 }
 
 
@@ -533,21 +522,8 @@ HERMES_PERSONAL_TEMPLATE = {
             # task network namespace) can reach it. Overrides the upstream
             # image default of HERMES_WEBUI_HOST=0.0.0.0, which would
             # otherwise expose the WebUI on the task ENI to the whole VPC.
-            "runtime_variables": (
-                _HERMES_LLM_VARS + _HERMES_CREDENTIAL_VARS + _HERMES_BEDROCK_VARS + [
-                    {
-                        "name": "HERMES_WEBUI_HOST",
-                        "group": "Authentication",
-                        "category": "config",
-                        "description": "Bind address for the WebUI (loopback-only; sidecar reaches it via 127.0.0.1)",
-                        "required": True,
-                        "auto_generate": False,
-                        "default_value": "127.0.0.1",
-                        "value": "127.0.0.1",
-                        "user_editable": False,
-                    },
-                    _HERMES_DOCKER_HOST_VAR,
-                ]
+            "configurable_variables": (
+                _HERMES_LLM_VARS + _HERMES_CREDENTIAL_VARS + _HERMES_BEDROCK_VARS
             ),
         },
     ],
@@ -587,9 +563,9 @@ HERMES_SLACK_TEMPLATE = {
         {**_DOCKER_DIND_CONTAINER},
         {
             **_HERMES_CONTAINER_BASE,
-            "runtime_variables": (
+            "configurable_variables": (
                 _HERMES_LLM_VARS + _HERMES_WEBUI_PASSWORD_VAR + _HERMES_CREDENTIAL_VARS
-                + _HERMES_BEDROCK_VARS + _HERMES_SLACK_VARS + [_HERMES_DOCKER_HOST_VAR]
+                + _HERMES_BEDROCK_VARS + _HERMES_SLACK_VARS
             ),
         },
         _SIDECAR_MCP_CONTAINER,

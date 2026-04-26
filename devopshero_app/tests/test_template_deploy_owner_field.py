@@ -38,7 +38,7 @@ def _make_pa_template() -> AppTemplate:
                 "health_check_command": "docker info >/dev/null 2>&1",
                 "health_check_grace_period": 120,
                 "efs_mounts": ["workspace"],
-                "runtime_variables": [],
+                "configurable_variables": [],
             },
             {
                 "name": "hermes",
@@ -50,7 +50,7 @@ def _make_pa_template() -> AppTemplate:
                 "health_check_command": "",
                 "health_check_grace_period": 60,
                 "efs_mounts": ["home", "workspace"],
-                "runtime_variables": [],
+                "configurable_variables": [],
             },
         ],
         datastore_config=None,
