@@ -148,6 +148,7 @@ def _build_container_config(
         user=template_container.get("user") or None,
         command=list(command) if command else None,
         essential=bool(template_container.get("essential", True)),
+        stop_timeout=template_container.get("stop_timeout") or None,
     )
 
     if image_source == "dockerfile":
