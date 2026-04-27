@@ -1,6 +1,6 @@
 ---
 name: ask-codex
-description: Query GPT-5.4 for external perspective on current problem
+description: Query GPT-5.5 for external perspective on current problem
 disable-model-invocation: true
 ---
 
@@ -11,8 +11,8 @@ Query GPT-5.4 for external perspective. Codex has NO conversation context.
 ## Steps
 
 ### 1. Synthesize
-From the current conversation (ignore resolved topics):
 - Objective and success criteria
+From the current conversation (ignore resolved topics):
 - Constraints
 - What's been tried
 - Specific blocker
@@ -34,7 +34,7 @@ OUT="$(mktemp).txt"
 
 codex exec --skip-git-repo-check \
   --full-auto \
-  --model gpt-5.4 \
+  --model gpt-5.5 \
   -c model_reasoning_effort="xhigh" \
   -o "$OUT" \
   "$QUESTION" < /dev/null
