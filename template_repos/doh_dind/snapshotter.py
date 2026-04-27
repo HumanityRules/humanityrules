@@ -77,8 +77,13 @@ def _list_tool_containers(running_only: bool) -> list[dict]:
     We can't filter by label because upstream doesn't label its tool containers;
     we can't filter by ancestor because after our first snapshot every container
     is an ancestor of doh-toolbox:latest (which we want).
+
+    --no-trunc returns the full 64-char container id — required because
+    `docker events` also emits full ids, and _reap_older_siblings compares
+    them for equality. A short id match would reap the very container that
+    just started.
     """
-    flags = ["--format", "{{.ID}}\t{{.Names}}\t{{.CreatedAt}}"]
+    flags = ["--no-trunc", "--format", "{{.ID}}\t{{.Names}}\t{{.CreatedAt}}"]
     if not running_only:
         flags.append("-a")
     out = _run(["docker", "ps", *flags]).stdout
@@ -293,7 +298,7 @@ def _stop_dockerd() -> None:
     LOG.error("dockerd (pid=%d) did not exit within 30s after SIGTERM", DOCKERD_PID)
 
 
-def _handle_sigterm(signum, frame) -> None:
+def _handle_sigterm(signum: int, _frame: object) -> None:
     LOG.info("received signal %d; starting shutdown sequence", signum)
     _shutdown.set()
     _force_snapshot_all(trigger="sigterm")
