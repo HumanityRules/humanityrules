@@ -1,5 +1,79 @@
 # DevOpsHero Development Journal
 
+## 2026-04-27 09:09 - [Bugfix] hermes-slack: MCP tools (and slack-bolt) never registered — install timing race in webui bootstrap
+
+**Conversation:** [2026-04-27-0910-9ee7793c.md](conversations/2026-04-27-0910-9ee7793c.md)
+
+Deployed `hermes-slack`, the agent said "I don't have any tools that start with `mcp_`" — no `mcp_sidecar_*` tools offered to the LLM. `config.yaml` had `mcp_servers.sidecar`, the `sidecar-mcp` sibling container answered MCP `initialize` fine, the hermes toolset aliases correctly resolved `sidecar` → `mcp-sidecar` (10 tools). End-to-end wiring was correct *in a fresh Python process*. Only the long-lived WebUI process didn't see the tools.
+
+**Root cause — why "too late" meant forever.** `tools/mcp_tool.py` in hermes-agent has this at module scope:
+
+```python
+_MCP_AVAILABLE = False
+try:
+    from mcp.client.stdio import stdio_client
+    _MCP_AVAILABLE = True
+except ImportError:
+    ...
+```
+
+Module-level code runs exactly once per Python process, on first import. `_MCP_AVAILABLE` is captured at that moment and cached for the life of the process. Later in `discover_mcp_tools()`:
+
+```python
+if not _MCP_AVAILABLE:
+    logger.debug("MCP SDK not available -- skipping MCP tool discovery")
+    return []
+```
+
+So if `mcp` isn't importable at the moment `tools.mcp_tool` first loads, every subsequent `discover_mcp_tools()` call in that process is a no-op — **even after `pip install mcp` completes**, because Python won't re-evaluate the module's top-level `try/except`. The only way to recover is to restart the process.
+
+Now overlay the webui startup sequence:
+
+1. `start.sh` launches `hermeswebui_init.bash` in the background (it creates `/app/venv`, pip-installs base deps, touches `.deps_installed`, and **immediately execs `python server.py` with no join point**).
+2. `start.sh` polls for `.deps_installed`, then runs a second `uv pip install` for `hermes-agent[bedrock,mcp]` and `slack-bolt/slack-sdk`.
+
+The second install *always* races server.py's startup. If any import chain in the webui process reaches `tools.mcp_tool` before our extras land — or, equivalently, if `mcp` isn't in site-packages the first time `tools.mcp_tool` loads later — `_MCP_AVAILABLE=False` sticks for the life of the process. Same shape for `slack-bolt`: gateway.run imports it at startup, and a late pip-install never un-breaks the import that already failed.
+
+**Proving the race, not just hypothesizing.** Process start timestamps vs. package install timestamps in the running container:
+- `/proc/239` (python server) birth time: `03:34:52`
+- `/app/venv/lib/python3.12/site-packages/mcp/__init__.py` mtime: `03:35:11` (19 seconds later)
+
+So the webui process was alive 19 seconds before `mcp` was importable. Whether or not `tools.mcp_tool` was *transitively* imported during that window, the safer claim is: the install was not guaranteed to land before any module import, and the symptom matched the cached-False failure mode exactly.
+
+**Dead ends that felt like the answer but weren't.**
+- *"`load_config()` strips unknown keys, so `mcp_servers` gets dropped."* Wrong — `_deep_merge` upstream is permissive (verified against `NousResearch/hermes-agent@v2026.4.16`). My ECS Exec shell saw `mcp_servers: None` only because the shell runs as root (`HOME=/root`), so `get_config_path()` resolved to `/root/.hermes/config.yaml` which didn't exist — a red herring caused by the exec environment, not the webui process's.
+- *"MCP toolset name mismatch."* Registry stores tools under canonical `mcp-sidecar` but we pass `sidecar` in `enabled_toolsets`. Resolver *does* follow alias chain (`validate_toolset` returns True for alias names; `get_toolset` calls `get_toolset_alias_target`). Verified via direct probe: `get_tool_definitions(enabled_toolsets=["sidecar"])` returns 10 `mcp_sidecar_*` schemas in a fresh process. Wiring is fine.
+- *"The WebUI is caching a session from a pre-fix container."* Session is persistent on EFS, but tool discovery runs per stream. Irrelevant.
+
+**Fix.** Stop trying to install after `hermeswebui_init.bash` has started the server. Instead, `sed`-patch the init script's own `uv pip install` line to include our extras, *before* it runs:
+
+```bash
+WEBUI_INIT_PATCHED=/tmp/hermeswebui_init.patched.bash
+if ! grep -q 'hermes-agent\[honcho,bedrock,mcp\]' "$WEBUI_INIT_PATCHED" 2>/dev/null; then
+    sed 's|"/home/hermeswebui/.hermes/hermes-agent\[honcho\]"|"/home/hermeswebui/.hermes/hermes-agent[honcho,bedrock,mcp]" "slack-bolt>=1.18.0,<2" "slack-sdk>=3.27.0,<4"|' /hermeswebui_init.bash > "$WEBUI_INIT_PATCHED"
+    chmod +x "$WEBUI_INIT_PATCHED"
+fi
+...
+"$WEBUI_INIT_PATCHED" > >(grep --line-buffered -v '"path": "/health", "status": 200') 2>&1 &
+```
+
+Then the post-launch install blocks in `start.sh` (both the `[bedrock]` one and the slack one) and their sentinel-file bookkeeping were deleted — the extras ride in on the same synchronous chain that feeds `.deps_installed`, so `python server.py` starts up with everything in its venv on the first import.
+
+**Non-obvious gotchas, in the order they bit us.**
+- Pattern mismatch: upstream's actual line is `uv pip install "/home/hermeswebui/.hermes/hermes-agent[honcho]"` (quoted, with `[honcho]`). My first sed anchored on `uv pip install /home/hermeswebui/.hermes/hermes-agent ` (unquoted, no extra) — a pattern that never matched. Silent failure — sed returns 0 when nothing matches. Had to pull the real `hermes-webui:0.50.126` image locally (`docker run --rm --entrypoint bash ...:0.50.126 -c "cat /hermeswebui_init.bash"`) to see what was actually there. Lesson: never write a patch-sed against imagined upstream text; always inspect the real file.
+- Permission: the container drops to `USER hermeswebui` before start.sh runs. `sed -i` on `/hermeswebui_init.bash` fails silently with `sed: couldn't open temporary file /sedXXXXXX: Permission denied` — the non-root user can't create a temp file in `/`. Switched to non-in-place `sed` writing to `/tmp/hermeswebui_init.patched.bash`, and invoke that copy instead.
+- Slack deps in the same install: the gateway imports `slack-bolt` at startup and crashes the container when it's missing (not just Slack — the whole container exits because `start.sh`'s `wait -n` treats any child death as terminal, triggering ECS to circuit-break the deployment after repeated failures). Installing Slack unconditionally (tiny deps, always safe) is simpler than a second sed pattern and removes a second race.
+- `[honcho,bedrock,mcp]` — adding `honcho` is deliberate: the upstream install was `[honcho]`, and we want to preserve that extra, not replace it. The original inline `sed` I wrote replaced the whole `[honcho]` bracket with `[bedrock,mcp]`, dropping honcho and breaking the webui. Compose the new extras as a superset: `[honcho,bedrock,mcp]`.
+
+**Key points:**
+- Python's module-level `try/except ImportError` caches its result at first import and never re-evaluates it. Any "install dep, then import it later" plumbing that races a long-lived process is a latent bug when the sequence slips.
+- If a dep install races a process start, fix it by folding the install into the process's own startup, not by sprinkling more installs after the fact.
+- Patch-sed against an upstream file requires inspecting the actual upstream file (pull the image), not guessing. Silent failure is the default; `grep -q` the marker after the sed to turn silent failure into noisy failure if needed.
+- Running as non-root in a container means `sed -i` can only patch files whose **parent directory** is writable — `-i` needs to create a sibling temp file. Use redirected sed + `chmod +x` to a writable location (`/tmp/`) and invoke the copy.
+- Docker HEALTHCHECK passing + ALB targets unhealthy + ECS task replacement loop (from the earlier hermes-slack bug this session) and agent-reports-no-mcp-tools despite correct config.yaml (this bug) are both "look like something else until you check the timing" classes of failure.
+
+**Working deployment:** https://hermes-slack-mcp4.chsandbox.com
+
 ## 2026-04-26 20:51 - [Deployment] Hermes config.yaml is now DOH-owned and regenerated every boot
 
 **Conversation:** [2026-04-26-2052-5cb55dff.md](conversations/2026-04-26-2052-5cb55dff.md)
