@@ -16,7 +16,8 @@ All custom commands live in `devopshero_app/management/commands/`.
 - **doh_control** — Control plane ops: provision/teardown environments; deploy from AppTemplate (`deploy-app-template`), redeploy, teardown, and remove apps (`teardown-app --remove-app` for full cleanup including secrets/EFS/policies).
 - **doh_efs_browse** — Browse EFS filesystem via ECS Exec (interactive shell in customer environment).
 - **doh_app_logs** — Fetch CloudWatch logs for a customer app (works for running and crashed/stopped tasks), by account + env + app slug.
-- **doh_app_shell** — Interactive shell in a deployed customer app container (ECS Exec / SSM), by account + env + app slug.
+- **doh_app_shell** — Interactive shell in a deployed customer app container (ECS Exec / SSM). For humans.
+- **doh_app_exec** — Non-interactive script execution in a customer app container. Script on stdin or `--script-file`; supports `--as USER`, `--timeout`, `--cwd`, `--set KEY=VALUE`, `--format json`. Prefer over `doh_app_shell --command` for scripted probes.
 - **doh_secrets** — Manage customer Secrets Manager secrets: list, purge, and shared environment secrets (shared-list/shared-set/shared-delete). All subcommands take --account and optional --org (name or slug).
 - **doh_reset_org_abac** — Full factory reset of ABAC Policy rows for one organization (`--org` slug or name; optional `--admin-email`). Deletes all org policies, re-runs seed bootstrap, recreates default per-app open-access policies.
 - **run_job_worker** — Background job worker for deployments and environment provisioning.
