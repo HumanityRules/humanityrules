@@ -14,6 +14,11 @@ from devopshero_app.models import AppTemplate
 # whatever the operator has built and pushed into the customer's ECR.
 SIDECAR_MCP_IMAGE_VERSION = "0.1.0"
 
+# Image tag DOH expects in doh/{env_slug}/doh-dind. Bump when we ship a new
+# snapshotter or entrypoint in template_repos/doh_dind/ and push via
+# `doh_build_prebuilt_image --source-dir template_repos/doh_dind --ecr-repo doh-dind --tag X.Y.Z`.
+DOH_DIND_IMAGE_VERSION = "0.1.0"
+
 
 OPENCLAW_TEMPLATE = {
     "name": "AI Assistant (OpenClaw)",
@@ -356,13 +361,20 @@ _HERMES_SLACK_VARS = [
     },
 ]
 
-# Two sibling access points on EFS per Hermes app: "home" holds agent state
+# Three sibling access points on EFS per Hermes app: "home" holds agent state
 # (config, memory, skills, venv) and is mounted at ~/.hermes in the hermes
 # container; "workspace" holds user/agent work output and is mounted at
 # /workspace in both the hermes container and the docker-dind container — same
 # data visible on both sides, so files the agent creates through tool runs
-# appear under ~/.workspace and vice versa. Flat sibling layout (not nested
-# inside home) keeps agent home and workspace data independent on disk.
+# appear under ~/.workspace and vice versa; "docker-persistence" holds the
+# zstd-compressed tool-container snapshots the doh-dind snapshotter writes,
+# which restore into doh-toolbox:latest on every DinD boot so pip/apt/npm
+# state survives ECS task restarts. Flat sibling layout (not nested inside
+# home) keeps each tier's data independent on disk.
+#
+# docker-persistence uses uid/gid 0 because docker-dind runs dockerd as root
+# and the snapshotter inherits that uid — the other two mounts stay on 1024
+# (hermeswebui).
 _HERMES_EFS_CONFIG = {
     "mounts": [
         {
@@ -379,40 +391,57 @@ _HERMES_EFS_CONFIG = {
             "posix_uid": 1024,
             "posix_gid": 1024,
         },
+        {
+            "name": "docker-persistence",
+            "subpath": "docker-persistence",
+            "container_path": "/var/lib/doh-dind/persistence",
+            "posix_uid": 0,
+            "posix_gid": 0,
+        },
     ],
 }
 
-# Privileged; mounts only the workspace EFS access point. Same repo root as other containers.
+# Privileged; mounts workspace (shared with hermes) and docker-persistence
+# (snapshotter-owned). DOH-owned image layered on docker:26.1.0-dind — see
+# template_repos/doh_dind/ for the Dockerfile, entrypoint, and snapshotter.
 _DOCKER_DIND_CONTAINER = {
     "name": "docker-dind",
-    "image_source": "registry",
-    "registry_image": "docker:26.1.0-dind",
-    # docker:dind's entrypoint (dockerd-entrypoint.sh) prepends a default
-    # --host=tcp://0.0.0.0:2375 whenever the first CMD arg starts with '-',
-    # which would collide with our loopback bind on the same port. Pass
-    # 'dockerd' as the first arg to suppress that default. Only the tcp
-    # loopback host is bound — no unix socket, since nothing in the task
-    # ever connects over /var/run/docker.sock (the hermes container uses
-    # DOCKER_HOST=tcp://127.0.0.1:2375, and we run our own healthcheck
-    # against the same endpoint below).
-    "command": [
-        "dockerd",
-        "--host=tcp://127.0.0.1:2375",
-    ],
+    "image_source": "prebuilt",
+    "ecr_repo": "doh-dind",
+    "version": DOH_DIND_IMAGE_VERSION,
+    # No "command" override: the doh_dind entrypoint starts dockerd itself
+    # with the right loopback bind and then exec's into snapshotter.py.
     "container_port": 0,
     "privileged": True,
     "essential": True,
-    # DinD sees the workspace mount only — never the agent home. That keeps
-    # tool containers it spawns unable to read/modify Hermes config, memory,
-    # or skills even if an attacker escapes the tool container's namespace.
-    "efs_mounts": ["workspace"],
+    # DinD sees workspace (so containers it spawns can bind /workspace) and
+    # docker-persistence (where the snapshotter reads/writes latest.tar.zst),
+    # but never the agent home — tool containers it spawns can't touch
+    # Hermes config, memory, or skills even if the tool container namespace
+    # is compromised.
+    "efs_mounts": ["workspace", "docker-persistence"],
     "health_check_path": None,
-    "health_check_command": "docker -H tcp://127.0.0.1:2375 info >/dev/null 2>&1",
-    "health_check_grace_period": 120,
+    # The marker file is touched by /entrypoint.sh after restore completes, so
+    # Hermes (depends_on: HEALTHY) can't race the first `docker run` against a
+    # missing doh-toolbox:latest tag.
+    "health_check_command": (
+        "docker -H tcp://127.0.0.1:2375 info >/dev/null 2>&1 "
+        "&& test -f /var/run/doh-restore-ready"
+    ),
+    "health_check_grace_period": 180,
+    # stop_timeout: give the snapshotter 120s to flush its SIGTERM-triggered
+    # snapshot to EFS before ECS SIGKILLs us. Default ECS stop timeout is 30s,
+    # which isn't enough to docker-export a multi-GB rootfs.
+    "stop_timeout": 120,
     # Empty DOCKER_TLS_CERTDIR disables TLS on the dockerd listener, which is
     # required because we bind on tcp://127.0.0.1:2375 for in-task loopback.
+    # TOOL_IMAGE_BASE is the fallback base image /entrypoint.sh pulls on
+    # fresh boot (when no snapshot exists on EFS yet); DOH_SNAPSHOT_RESTORE
+    # controls restore behavior (auto|skip|force_rebuild) for operator recovery.
     "environment": {
         "DOCKER_TLS_CERTDIR": "",
+        "TOOL_IMAGE_BASE": "nikolaik/python-nodejs:python3.11-nodejs20",
+        "DOH_SNAPSHOT_RESTORE": "auto",
     },
 }
 
@@ -442,12 +471,24 @@ _HERMES_CONTAINER_BASE = {
     "environment": {
         # DOCKER_HOST targets the in-task DinD container over loopback.
         "DOCKER_HOST": "tcp://127.0.0.1:2375",
-        # Single source of truth for the tool container image. The hermes
-        # entrypoint prewarms this on DinD at boot and bakes the same value
-        # into config.yaml via __TOOL_IMAGE__, so Hermes's terminal tool
-        # launches the exact image we prewarmed.
-        "TOOL_IMAGE": "nikolaik/python-nodejs:python3.11-nodejs20",
+        # Image ref Hermes's terminal tool launches via `docker run`. This
+        # is ALWAYS a local tag — the doh-dind sidecar restores it from
+        # snapshot (or pulls TOOL_IMAGE_BASE as a fallback) before its
+        # healthcheck goes green, so Hermes never pulls from a registry.
+        # Baked into config.yaml via __TOOL_IMAGE__ in the entrypoint.
+        "TOOL_IMAGE": "doh-toolbox:latest",
+        # Upstream's idle reaper in terminal_tool.py kills cached tool
+        # environments after 5 min of inactivity, which would force a fresh
+        # `docker run` (and a fresh container with fresh writable layer) on
+        # the next tool call. Bump to 24h so a single Hermes process keeps
+        # reusing the same running container across the day, letting the
+        # snapshotter capture a realistic evolving writable layer.
+        "TERMINAL_LIFETIME_SECONDS": "86400",
     },
+    # Mirror doh-dind's stop_timeout so Hermes's own atexit/SIGTERM handling
+    # has headroom. Hermes doesn't snapshot itself, but it does try to
+    # docker-stop its tool container on shutdown, which hits DinD and back.
+    "stop_timeout": 120,
 }
 
 # Upstream credentials consumed by the sidecar-mcp aggregator. All empty
