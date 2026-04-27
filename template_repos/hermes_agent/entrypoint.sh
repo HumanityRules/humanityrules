@@ -88,31 +88,27 @@ echo "[entrypoint] Docker-backed Hermes tools enabled (DinD via DOCKER_HOST)."
     fi
 ) &
 
-# Generate config.yaml from template on first boot.
-# Existing files (from a previous deploy on EFS) are never overwritten.
-if [ ! -f "$HERMES_DIR/config.yaml" ]; then
-    sed \
-        -e "s|__CONFIG_PROVIDER__|${DOH_LLM_PROVIDER}|g" \
-        -e "s|__MODEL__|${DOH_LLM_MODEL}|g" \
-        -e "s|__BASE_URL__|${DOH_LLM_BASE_URL}|g" \
-        -e "s|__AUX_PROVIDER__|${DOH_AUX_PROVIDER}|g" \
-        -e "s|__AUX_MODEL__|${DOH_AUX_MODEL}|g" \
-        -e "s|__AUX_BASE_URL__|${DOH_AUX_BASE_URL}|g" \
-        -e "s|__TERMINAL_BACKEND__|${TERMINAL_BACKEND}|g" \
-        -e "s|__TERMINAL_CWD__|${TERMINAL_CWD}|g" \
-        -e "s|__TOOL_IMAGE__|${TOOL_IMAGE}|g" \
-        -e "s|__DOCKER_VOLUMES__|${DOCKER_VOLUMES}|g" \
-        /opt/hermes-defaults/config.yaml.template > "$HERMES_DIR/config.yaml"
+# Regenerate config.yaml from template on every boot. DOH owns this file.
+sed \
+    -e "s|__CONFIG_PROVIDER__|${DOH_LLM_PROVIDER}|g" \
+    -e "s|__MODEL__|${DOH_LLM_MODEL}|g" \
+    -e "s|__BASE_URL__|${DOH_LLM_BASE_URL}|g" \
+    -e "s|__AUX_PROVIDER__|${DOH_AUX_PROVIDER}|g" \
+    -e "s|__AUX_MODEL__|${DOH_AUX_MODEL}|g" \
+    -e "s|__AUX_BASE_URL__|${DOH_AUX_BASE_URL}|g" \
+    -e "s|__TERMINAL_BACKEND__|${TERMINAL_BACKEND}|g" \
+    -e "s|__TERMINAL_CWD__|${TERMINAL_CWD}|g" \
+    -e "s|__TOOL_IMAGE__|${TOOL_IMAGE}|g" \
+    -e "s|__DOCKER_VOLUMES__|${DOCKER_VOLUMES}|g" \
+    /opt/hermes-defaults/config.yaml.template > "$HERMES_DIR/config.yaml"
 
-    # Hermes reads bedrock.region from config.yaml (runtime_provider.py:895).
-    # Appended on first boot only so user edits to config.yaml are preserved.
-    if [ "$DOH_LLM_PROVIDER" = "bedrock" ]; then
-        cat >> "$HERMES_DIR/config.yaml" <<EOF
+# Hermes reads bedrock.region from config.yaml (runtime_provider.py:895).
+if [ "$DOH_LLM_PROVIDER" = "bedrock" ]; then
+    cat >> "$HERMES_DIR/config.yaml" <<EOF
 
 bedrock:
   region: ${AWS_BEDROCK_REGION}
 EOF
-    fi
 fi
 
 if [ ! -d "$HERMES_DIR/hermes-agent" ]; then

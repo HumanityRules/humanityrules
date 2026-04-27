@@ -1,5 +1,31 @@
 # DevOpsHero Development Journal
 
+## 2026-04-26 20:51 - [Deployment] Hermes config.yaml is now DOH-owned and regenerated every boot
+
+**Conversation:** [2026-04-26-2052-5cb55dff.md](conversations/2026-04-26-2052-5cb55dff.md)
+
+Flipped `template_repos/hermes_agent/entrypoint.sh` so `~/.hermes/config.yaml` is rewritten from `config.yaml.template` on every container start, instead of the previous "first boot only, user edits preserved" behavior.
+
+**Why this changed.** The trigger was wanting a simple way to temporarily disconnect the hermes terminal from its docker sandbox for a test. `terminal.backend: docker` is sed'd into config.yaml from `TERMINAL_BACKEND="docker"` at `entrypoint.sh:67`, but since config.yaml was written once and then preserved, flipping the var on an existing workspace did nothing — the EFS-backed file kept the old value. Considered adding an env-var escape hatch that rewrites just the `terminal.*` section, but the deeper point is that `terminal.backend` is load-bearing for the sandbox: if user edits to it were respected as "preference," setting `backend: local` inside the sandboxed terminal would be a sandbox escape via config file. So "config.yaml is user-owned" was the wrong invariant to begin with.
+
+**What the swap required checking.** Verified hermes itself never writes config.yaml at runtime: README declares it read-only, entrypoint is the only writer, WebUI settings go to a separate `~/.hermes/webui-mvp/settings.json`, and the journal entry from 2026-04-25 confirms a prior surgical-rewrite approach was already deleted. With no runtime writes from hermes, always-regenerate has no data-loss surface.
+
+**Discussed but not built: a merge system.** Briefly weighed a two-file layering (template-rendered `config.yaml` + user overlay) as the "clean" path. Killed it because there's no concrete user-editable surface today — LLM provider/model/base_url are all DOH-owned env, SOUL.md and WebUI prefs already live in separate files, and MCP servers/tool lists are template-only. Building a merge system for a hypothetical user-config surface is premature; revisit only if one actually appears.
+
+**Change.** Dropped the `[ ! -f "$HERMES_DIR/config.yaml" ]` guard at `entrypoint.sh:91`. The sed block and the Bedrock region append (for `DOH_LLM_PROVIDER=bedrock`) now run unconditionally on every boot. `SOUL.md` and `hermes-agent/` keep their first-boot-only copies — those are real user state (persona edits, user-run `hermes update`). Updated README at both places that claimed config.yaml was preserved across boots.
+
+**Practical consequence.** The `TERMINAL_BACKEND` var at `entrypoint.sh:67` is now a real toggle: change the string, redeploy, and the next task boot picks it up. Left `TERMINAL_BACKEND="local"` in the entrypoint during this session as a deliberate test-state change (see the system-reminder diff in the conversation). DinD sidecar stays up either way, so the `DOCKER_HOST` / `docker info` hard-fail block at lines 51-58 keeps passing and doesn't need to be conditionalized.
+
+**Unresolved.** Did not confirm against upstream hermes source whether `backend: local` is the accepted string for "no sandbox" vs `none` or omitting the key entirely — the existing entrypoint comment ("backend=docker is the only supported mode") is a DOH statement, not a hermes one. Verify before flipping in prod.
+
+**Also this session:** removed `hermes-slack01` with full cleanup (`teardown-app --remove-app --delete-secrets --delete-efs-data --delete-policies`). Removal job `019dcd08-ae59-75f3-87a2-2252179815e5` queued successfully; worker handles the tear-down + cleanup + cascade inline.
+
+**Key points:**
+- `config.yaml` is DOH-owned and regenerated on every boot. Security-load-bearing settings (sandbox backend, docker volumes) must not be preserve-user-edits.
+- Two-file merge designs are tempting but solve a hypothetical until there's a real user-editable field. Don't build one on spec.
+- When a file on EFS is treated as "user state" but actually controls security posture, audit the writer logic — preserving edits is the wrong default.
+- `SOUL.md` and `hermes-agent/` remain first-boot-only copies; they're genuine user state and the change is scoped narrowly to config.yaml.
+
 ## 2026-04-26 14:44 - [UI] Template deploy form: preselect single-option dropdowns, trim Configuration Summary
 
 **Conversation:** [2026-04-26-1445-4c25d570.md](conversations/2026-04-26-1445-4c25d570.md)
