@@ -20,7 +20,7 @@ Defined in `seed_app_templates.py` under `runtime_variables`. `category: "config
 
 Inside the container, `entrypoint.sh` bridges ECS env vars into the two places Hermes actually reads from:
 
-- **`~/.hermes/config.yaml`** — rendered from `config.yaml.template` on first boot, never overwritten.
+- **`~/.hermes/config.yaml`** — rendered from `config.yaml.template` on every boot. DOH owns this file; `terminal.backend` and the docker volumes are load-bearing for the sandbox, so user edits are not preserved.
 - **`~/.hermes/.env`** — rewritten every boot from the current env, so DOH config changes propagate.
 
 
@@ -83,7 +83,7 @@ Upstream credentials (`SIDECAR_MCP_GITLAB_TOKEN`, `SIDECAR_MCP_ATLASSIAN_*`, `SI
 
 All Hermes state (`config.yaml`, `SOUL.md`, `hermes-agent/`, `skills/`, `memories/`, `sessions/`, `workspace/`, WebUI state) lives on an EFS access point mounted at `~/.hermes`, scoped per app with the template's UID/GID (1024 today). The Dockerfile symlinks `/workspace` into this path so terminal tools persist their output.
 
-Everything else (image layers, `/opt/hermes-defaults/` seeds, the WebUI binary) is ephemeral and replaced on each task. First boot seeds EFS from `/opt/hermes-defaults/`; subsequent boots only refresh `.env` and re-run patches. User edits to `config.yaml` / `SOUL.md` are preserved. Details in `entrypoint.sh`.
+Everything else (image layers, `/opt/hermes-defaults/` seeds, the WebUI binary) is ephemeral and replaced on each task. First boot seeds EFS from `/opt/hermes-defaults/`; subsequent boots refresh `.env` and `config.yaml` and re-run patches. User edits to `SOUL.md` are preserved; `config.yaml` is DOH-owned and regenerated on every boot. Details in `entrypoint.sh`.
 
 
 ## ECS compute
