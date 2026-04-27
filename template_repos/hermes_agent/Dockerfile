@@ -16,6 +16,22 @@ COPY patches /opt/hermes-defaults/patches
 COPY --chmod=755 entrypoint.sh /entrypoint.sh
 COPY --chmod=755 start.sh /start.sh
 
+# Append platform dependencies to the webui's requirements.txt so they're
+# installed by `hermeswebui_init.bash` before `python server.py` runs — this
+# avoids a race where tools.mcp_tool imports `mcp` at module-load time and
+# caches _MCP_AVAILABLE=False if the package isn't there yet, and where
+# gateway.run imports slack-bolt at startup.
+#   mcp          → enables MCP server auto-discovery (hermes-agent[mcp])
+#   boto3        → enables the Bedrock LLM provider (hermes-agent[bedrock])
+#   slack-{bolt,sdk} → gateway Slack adapter (hermes-agent[slack])
+RUN test -f /apptoo/requirements.txt \
+    && cat >> /apptoo/requirements.txt <<'EOF'
+mcp>=1.2.0,<2
+boto3>=1.35.0,<2
+slack-bolt>=1.18.0,<2
+slack-sdk>=3.27.0,<4
+EOF
+
 # /workspace is a real top-level EFS mount, sibling to the agent home —
 # same data is mounted into the docker-dind sidecar so tool runs and the
 # hermes parent see one consistent filesystem.

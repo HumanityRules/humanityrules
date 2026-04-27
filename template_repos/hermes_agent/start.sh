@@ -3,35 +3,14 @@
 # The WebUI (hermeswebui_init.bash -> server.py) handles the web interface.
 # The gateway (gateway/run.py) handles Slack/Discord/Telegram integrations.
 #
-# Dependency ordering: hermeswebui_init.bash creates /app/venv, runs its pip
-# installs, touches .deps_installed, then execs `python server.py` — with no
-# join point in between. Any "install more deps after it starts" runs AFTER
-# server.py has already imported modules. tools.mcp_tool in particular caches
-# `_MCP_AVAILABLE = try import mcp except False` at module-load time, so a late
-# mcp install never takes effect and no mcp_{server}_{tool} handlers register.
-# Fix: patch the init script's own `uv pip install` line to pull in the extras
-# we need ([bedrock,mcp] for hermes-agent, slack-bolt/slack-sdk for gateway),
-# so all required packages are in the venv before server.py ever runs.
+# Platform dependencies (mcp, boto3, slack-{bolt,sdk}) are appended to the
+# webui's requirements.txt in the Dockerfile, so they're installed by
+# hermeswebui_init.bash before server.py starts.
 #
 # If any launched process exits, the whole container exits so ECS can restart it.
 
 HERMES_AGENT_DIR="/home/hermeswebui/.hermes/hermes-agent"
 VENV_DIR="/app/venv"
-
-# Patch hermeswebui_init.bash to fold our extras into its own pip install.
-# Adds hermes-agent[bedrock,mcp] plus slack-bolt/slack-sdk unconditionally —
-# always installing Slack deps (they're small) is simpler than gating on token
-# presence. Idempotent: the marker string is our own grep anchor.
-#
-# We run as the non-root hermeswebui user, so we can't write to `/` (where
-# /hermeswebui_init.bash lives) and `sed -i` fails to create its temp file
-# there. Write the patched script to a writable location and have start.sh
-# invoke the patched copy instead.
-WEBUI_INIT_PATCHED=/tmp/hermeswebui_init.patched.bash
-if ! grep -q 'hermes-agent\[honcho,bedrock,mcp\]' "$WEBUI_INIT_PATCHED" 2>/dev/null; then
-    sed 's|"/home/hermeswebui/.hermes/hermes-agent\[honcho\]"|"/home/hermeswebui/.hermes/hermes-agent[honcho,bedrock,mcp]" "slack-bolt>=1.18.0,<2" "slack-sdk>=3.27.0,<4"|' /hermeswebui_init.bash > "$WEBUI_INIT_PATCHED"
-    chmod +x "$WEBUI_INIT_PATCHED"
-fi
 
 SLACK_ENABLED=0
 if [ -n "$SLACK_BOT_TOKEN" ] || [ -n "$SLACK_APP_TOKEN" ]; then
@@ -45,8 +24,8 @@ else
 fi
 
 # Start the WebUI init script in the background. It creates /app/venv, installs
-# hermes-webui + hermes-agent deps (touching $VENV_DIR/.deps_installed when
-# done), then runs `python server.py` which blocks forever.
+# hermes-webui + hermes-agent deps, then runs `python server.py` which blocks
+# forever.
 #
 # We route its stdout+stderr through a `grep -v` process substitution that
 # drops successful /health access-log lines (a ~2/sec firehose between the
@@ -54,7 +33,7 @@ fi
 # still pass through, so real health failures remain visible. Process
 # substitution (not a pipe) is used so `$!` stays the init script's PID —
 # with a pipe, `$!` would become grep's PID and we'd lose exit-code tracking.
-"$WEBUI_INIT_PATCHED" > >(grep --line-buffered -v '"path": "/health", "status": 200') 2>&1 &
+/hermeswebui_init.bash > >(grep --line-buffered -v '"path": "/health", "status": 200') 2>&1 &
 WEBUI_PID=$!
 
 if [ "$SLACK_ENABLED" -eq 0 ]; then
