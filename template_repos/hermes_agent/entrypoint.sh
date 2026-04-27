@@ -69,24 +69,11 @@ TERMINAL_CWD="/workspace"
 DOCKER_VOLUMES='["/workspace:/workspace"]'
 echo "[entrypoint] Docker-backed Hermes tools enabled (DinD via DOCKER_HOST)."
 
-# Prewarm the tool image on the DinD daemon in the background so the first
-# terminal tool call doesn't pay the ~1GB pull on the hot path. $TOOL_IMAGE
-# comes from the hermes container's environment (seeded in
-# seed_app_templates.py) and is also sed'd into config.yaml as
-# terminal.docker_image below, so the image we prewarm is exactly the one
-# Hermes's terminal tool launches.
-#
-# Non-blocking: hermes finishes booting immediately; a tool call firing
-# during the pull window just pays the pull once on that one call (DinD
-# dedupes concurrent pulls of the same image). DinD storage is per-task,
-# so this reruns on each task cold start — fine at this scale.
-(
-    if docker pull "$TOOL_IMAGE" >/dev/null 2>&1; then
-        echo "[entrypoint] Tool image pre-pulled: $TOOL_IMAGE"
-    else
-        echo "[entrypoint] Tool image prewarm failed; first tool run will pull."
-    fi
-) &
+# Image availability is owned by the doh-dind sidecar: its entrypoint either
+# restores doh-toolbox:latest from an EFS snapshot or pulls TOOL_IMAGE_BASE
+# as a fallback, and only marks itself HEALTHY after the tag exists. Our
+# depends_on: {docker-dind, HEALTHY} blocks Hermes boot until then, so the
+# first `docker run doh-toolbox:latest` is guaranteed to hit a local tag.
 
 # Regenerate config.yaml from template on every boot. DOH owns this file.
 sed \
