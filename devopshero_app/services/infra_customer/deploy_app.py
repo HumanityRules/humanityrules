@@ -799,6 +799,7 @@ class AppStack(Stack):
                 health_check=health_check,
                 user=c.user,
                 privileged=c.privileged or None,
+                stop_timeout=Duration.seconds(c.stop_timeout) if c.stop_timeout else None,
             )
             # Only the ALB-target container needs a port mapping visible to ECS
             # task-networking — sibling containers communicate over the task's

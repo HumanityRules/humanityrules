@@ -181,6 +181,12 @@ class ContainerConfig:
     # (degraded) even if the sidecar crashes. Default True (ECS default).
     essential: bool = True
 
+    # Seconds ECS waits after SIGTERM before SIGKILLing the container. None
+    # falls through to ECS's default (30s). Bump for containers that do real
+    # work in their SIGTERM handler (e.g. doh-dind snapshotting tool state
+    # to EFS, which can run 30-60s for a multi-GB rootfs).
+    stop_timeout: int | None = None
+
 
 @dataclass
 class AppConfig:
