@@ -24,7 +24,15 @@ Always start by querying the DB with `doh_query` (see the `manage-commands` skil
 
 ## Step 2: Access the Customer's AWS Account
 
-Check the `manage-commands` skill first — commands like `doh_app_shell`, `doh_app_logs`, and `doh_efs_browse` handle the assume-role dance internally.
+Check the `manage-commands` skill first — commands like `doh_app_shell`, `doh_app_exec`, `doh_app_logs`, and `doh_efs_browse` handle the assume-role dance internally.
+
+For non-interactive probes, use `doh_app_exec` (stdin script, structured output, `--as <user>`):
+
+```bash
+uv run manage.py doh_app_exec --account "CH Sandbox" --env default --app my-app --as hermeswebui --format json <<'EOF'
+/app/venv/bin/python -c "..."
+EOF
+```
 
 For ad-hoc AWS CLI calls not covered by existing commands, assume the customer role and export the temporary credentials. Use `account_id` and `external_id` from Step 1:
 

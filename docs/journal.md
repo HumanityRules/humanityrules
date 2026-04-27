@@ -1,5 +1,50 @@
 # DevOpsHero Development Journal
 
+## 2026-04-27 11:37 - [DevEx] `doh_app_exec`: non-interactive probe-in-container companion to `doh_app_shell`
+
+**Conversation:** [2026-04-27-1145-9ee7793c.md](conversations/2026-04-27-1145-9ee7793c.md)
+
+`doh_app_shell --command` was built for humans opening a live session, and an agent using it for ad-hoc probes ran into three problems over and over in the preceding hermes-slack debugging work: (1) SSM session banner lines ("Starting session with SessionId...", "Exiting session...", "Cannot perform start session: EOF") interleave with program stdout, and short probes frequently had the interesting line scroll off or never arrive because the session closed too fast; (2) the exec drops into the container as `root`, so `~` resolves to `/root` instead of the service user's home — `load_config()` in Hermes silently reads the wrong config file and returns misleading results, which burned ~20 minutes chasing a phantom "config loader strips keys" bug; (3) you pay three layers of shell quoting (host bash → SSM command → inner bash), making multi-line Python probes painful to write and easy to break.
+
+`doh_app_exec` is a sibling management command designed for scripted/agent use. Core shift: stop modeling this as "open a shell" and model it as an RPC — send a bash script, get back `(exit_code, stdout, stderr)` with no terminal noise mixed in.
+
+**Design choices that matter:**
+
+- **Input on stdin (heredoc) or `--script-file`.** No inline `--command "..."` flag at all. The agent writes the script in a `<<'EOF'` heredoc and it reaches the container verbatim.
+- **Sentinels fence the real output.** Server-side wrapper emits `___DOH_EXEC_BEGIN___` / `___DOH_EXEC_END___ RC=<N>` sentinels, and tags each line with `O:` or `E:` (stdout vs stderr) via FIFOs and backgrounded `sed` processes. Client reads the raw SSM output, finds the sentinels, separates streams cleanly. SSM banner lines fall outside the fence and are ignored.
+- **Two specific bash traps I hit:**
+  - Process substitution (`> >(sed 's/^/O:/')`) is async and `wait` does not join it, so a naïve setup lets the `RC=` line print before trailing `O:` lines. Fix: use named FIFOs with explicit `$!` PIDs and `wait "$PID_O" "$PID_E"` before echoing RC.
+  - Closing the subprocess's stdin (`stdin=DEVNULL` or `input=""` in `subprocess.run`) causes SSM to tear down the session with `Cannot perform start session: EOF` **before** the remote script finishes. Fix: pipe a long-running `sleep 3600` into stdin so SSM sees a live input side, and let the session end naturally when the remote wrapper exits.
+- **`--as USER` with sensible auto-default.** Defaults to the task definition's `containerDefinitions[].user`. Pass `--as hermeswebui` to probe as the service user so `load_config()`, `~`, env-file loading, etc. behave like the real process. `--as root` (or the default when no user is set in the task def) skips sudo entirely since ECS Exec already enters as root.
+- **`--format json` vs `text`.** JSON emits `{"exit_code": N, "stdout": "...", "stderr": "...", "stdout_truncated": bool, "stderr_truncated": bool}` — that's the default shape an agent wants to parse. Text mode prints stdout to stdout, a `--- stderr ---` block to stderr, and `--- exit_code: N` to stderr.
+- **`--timeout` uses `timeout --preserve-status`** inside the wrapper, so a runaway script is killed server-side rather than leaving a zombie session.
+- **Other ergonomics:** `--cwd`, repeatable `--set KEY=VALUE`, 1 MiB output cap with `stdout_truncated`/`stderr_truncated` flags, `--ignore-exit` to override the default "propagate inner exit code."
+- **`DOH_APP_EXEC_DEBUG=1`** prints the raw SSM output before parsing — escape hatch when a probe looks wrong and you want to see what the wire actually delivered.
+
+**What I did NOT add (and why):**
+
+- Persistent-shell mode (keep state between calls). Complicates the RPC model; agents can chain calls with `&&`. Also fights ECS task replacement.
+- Structured (JSON-input) script spec. The shell is already the API; more abstraction = more surprise.
+- Colored output. Scrapers hate it; humans have `doh_app_shell`.
+
+**Gotchas while writing it:**
+
+- Argparse collision: `--env` is already claimed by `_aws_account_resolver.add_aws_target_args()` for the environment slug. Renamed mine to `--set`.
+- Two Python module layouts coexist in the container (`/app` site-packages for the webui, EFS-mounted `/home/hermeswebui/.hermes/hermes-agent` for the agent); the `--as` user matters because `sys.path` and `HOME` both differ.
+- Heredoc examples in the docstring must use `<<'EOF'` (single-quoted) so shell variables inside the agent script aren't expanded by the outer shell reading `doh_app_exec`'s example.
+
+**Doc trimming.** First draft of the skill entries defended the design ("stdout is intermixed with SSM banner lines, frequently truncates short probes, and enters the container as root — so `~` resolves to `/root`..."); the user pushed back that it was too long. The revised entries are two lines each: what it is, and which flags it supports. The docstring at the top of the file got the same treatment — one usage example, a one-line flag list, and the "requires" note; no "key differences from doh_app_shell" section.
+
+**Verified against the live hermes-slack deployment:** a multi-statement heredoc running as `hermeswebui` returned clean JSON with all 10 `mcp_learneo_*` tool names, `exit_code: 0`, no stderr contamination. `--timeout 3` + `sleep 20` returned `exit_code: 143` with only the pre-sleep output captured. `--cwd /tmp` + `--set FOO=bar` behaved as expected.
+
+**Key points:**
+- `doh_app_shell --command` was designed for human interactive use; using it for scripted probes is painful because SSM banners, root-by-default exec, and three-layer shell quoting all fight the caller. `doh_app_exec` replaces that use case without changing `doh_app_shell`.
+- Sentinel-fenced output separation is the right pattern for any RPC-over-interactive-channel situation: fence the payload, tag each line's stream, the banner lines become discardable noise.
+- Bash process substitution is not joinable with `wait`; use named FIFOs with explicit PIDs when you need deterministic ordering between the stream consumers and a final "done" marker.
+- SSM sessions care whether the client's stdin is open, not whether bytes are flowing. Give it a live but empty stdin source (e.g. `sleep 3600 | ...`), not `DEVNULL`.
+- Default `--as` to the task-def container user (when set). Root-by-default for exec is a trap for any process whose behavior depends on `$HOME` or `$USER`.
+- Skill-entry prose should be prescriptive and short: what it is, which flags exist, one example. The "why we made it" belongs in the journal, not in the skill or the command's docstring.
+
 ## 2026-04-27 09:09 - [Bugfix] hermes-slack: MCP tools (and slack-bolt) never registered — install timing race in webui bootstrap
 
 **Conversation:** [2026-04-27-0910-9ee7793c.md](conversations/2026-04-27-0910-9ee7793c.md)
