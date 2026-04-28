@@ -17,7 +17,7 @@ LEARNEO_MCP_IMAGE_VERSION = "0.1.0"
 # Image tag DOH expects in doh/{env_slug}/doh-dind. Bump when we ship a new
 # snapshotter or entrypoint in template_repos/doh_dind/ and push via
 # `doh_build_prebuilt_image --source-dir template_repos/doh_dind --ecr-repo doh-dind --tag X.Y.Z`.
-DOH_DIND_IMAGE_VERSION = "0.2.1"
+DOH_DIND_IMAGE_VERSION = "0.2.2"
 
 
 OPENCLAW_TEMPLATE = {
@@ -442,6 +442,10 @@ _DOCKER_DIND_CONTAINER = {
         "DOCKER_TLS_CERTDIR": "",
         "TOOL_IMAGE_BASE": "nikolaik/python-nodejs:python3.11-nodejs20",
         "DOH_SNAPSHOT_RESTORE": "auto",
+        # TEMPORARY: makes dockerd log every API call so we can see which
+        # client sends stop/kill to the tool containers. Remove once the
+        # cause of mid-session container recycling is identified.
+        "DOCKERD_DEBUG": "1",
     },
 }
 
