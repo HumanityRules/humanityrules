@@ -29,14 +29,14 @@ A tiny reverse proxy that sits in front of apps deployed by DevOps Hero and enfo
 ## Local development
 
 ```bash
-cd policy_proxy
+cd template_repos/policy_proxy
 uv run python -m policy_proxy.main  # relies on the env vars above
 ```
 
 For unit tests:
 
 ```bash
-cd policy_proxy
+cd template_repos/policy_proxy
 uv run pytest
 ```
 
