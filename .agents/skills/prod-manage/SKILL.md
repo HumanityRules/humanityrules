@@ -41,8 +41,15 @@ Operations that modify state for environments and deployments.
 # Tear down an app's deployment
 ./prod_manage.sh doh_control teardown-app --app ai-detector-and-humanizer
 
-# Retry a failed app deployment
-./prod_manage.sh doh_control retry-app-deployment --app simple-dashboard
+# Redeploy an app (clones the latest concluded deployment into a new PENDING row,
+# rebuilding the image; mirrors the UI's "Redeploy" button)
+./prod_manage.sh doh_control redeploy-app --app simple-dashboard
+
+# Pick a specific environment when the app has been deployed to more than one
+./prod_manage.sh doh_control redeploy-app --app simple-dashboard --env default
+
+# Or redeploy from an exact source deployment
+./prod_manage.sh doh_control redeploy-app --app simple-dashboard --deployment <uuid>
 ```
 
 ## Ad-hoc Model Queries (`doh_query`)

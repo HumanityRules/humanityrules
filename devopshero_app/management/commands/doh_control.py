@@ -8,12 +8,17 @@ Usage:
     uv run manage.py doh_control teardown-app --app foo --remove-app --delete-secrets --delete-efs-data --delete-policies
     uv run manage.py doh_control deploy-app-template --template hermes-agent --org acme-corp --workspace default --env default --app-name hermes-vmendi
     uv run manage.py doh_control retry-env-provisioning --slug default --aws-account "Name"
-    uv run manage.py doh_control retry-app-deployment --app simple-dashboard
+    uv run manage.py doh_control redeploy-app --app simple-dashboard
+    uv run manage.py doh_control redeploy-app --app simple-dashboard --env default
+    uv run manage.py doh_control redeploy-app --app simple-dashboard --deployment <uuid>
 
 For production, use ./prod_manage.sh doh_control <operation> instead.
 
 For querying data, use doh_query instead.
 """
+
+from datetime import datetime
+from uuid import UUID
 
 from asgiref.sync import async_to_sync
 from django.core.management.base import BaseCommand
@@ -68,9 +73,28 @@ class Command(BaseCommand):
         retry_env.add_argument("--slug", required=True, help="Environment slug")
         retry_env.add_argument("--aws-account", required=True, help="AWS account name")
 
-        # retry-app-deployment
-        retry_deployment = subparsers.add_parser("retry-app-deployment", help="Retry a failed app deployment")
-        retry_deployment.add_argument("--app", required=True, help="App slug")
+        # redeploy-app
+        redeploy_app = subparsers.add_parser(
+            "redeploy-app",
+            help="Redeploy an app to the same environment (CLI parity with the UI's 'Redeploy' button)",
+        )
+        redeploy_app.add_argument("--app", required=True, help="App slug")
+        redeploy_app.add_argument(
+            "--env",
+            help="Environment slug to pick the source deployment from. Required if the app has been deployed to more than one environment.",
+        )
+        redeploy_app.add_argument(
+            "--aws-account",
+            help="AWS account name (only required to disambiguate when --env exists across multiple accounts)",
+        )
+        redeploy_app.add_argument(
+            "--deployment",
+            help="Source deployment UUID. Overrides --env/--aws-account selection and clones from this exact row.",
+        )
+        redeploy_app.add_argument(
+            "--created-by",
+            help="Username to attribute the redeploy to (audit trail). Defaults to the first admin in the app's org, then any superuser.",
+        )
 
         # deploy-app-template
         deploy_tpl = subparsers.add_parser(
@@ -121,8 +145,8 @@ class Command(BaseCommand):
             self._handle_teardown_app(options)
         elif operation == "retry-env-provisioning":
             self._handle_retry_env_provisioning(options)
-        elif operation == "retry-app-deployment":
-            self._handle_retry_app_deployment(options)
+        elif operation == "redeploy-app":
+            self._handle_redeploy_app(options)
         elif operation == "deploy-app-template":
             self._handle_deploy_app_template(options)
         else:
@@ -345,50 +369,163 @@ class Command(BaseCommand):
         ))
         self.stdout.write("")
 
-    def _handle_retry_app_deployment(self, options):
-        """Retry a failed app deployment by setting status to pending."""
-        app_slug = options["app"]
+    def _handle_redeploy_app(self, options):
+        """Redeploy an app: clone a concluded source Deployment into a new PENDING row.
 
-        # Find app
+        Mirrors the UI's 'Redeploy' button (`app_deployment_redeploy`): same blueprint,
+        environment, subdomain, and git_ref; fresh image_tag so the build is rebuilt.
+        Allowed source statuses: SUCCEEDED, FAILED, TORN_DOWN. Refuses if any deployment
+        for the app is in progress, or if the app is PENDING_REMOVAL.
+        """
+        app_slug = options["app"]
+        env_slug = options.get("env")
+        aws_account_name = options.get("aws_account")
+        deployment_id_str = options.get("deployment")
+        created_by_username = options.get("created_by")
+
         try:
-            app = models.App.objects.get(slug=app_slug)
+            app = models.App.objects.select_related("workspace", "organization").get(slug=app_slug)
         except models.App.DoesNotExist:
             self.stderr.write(self.style.ERROR(f"App '{app_slug}' not found"))
             return
 
-        # Find latest deployment
-        deployment = models.Deployment.objects.filter(app=app).order_by("-created_at").first()
-        if not deployment:
-            self.stderr.write(self.style.ERROR(f"No deployments found for app '{app_slug}'"))
+        if app.status == models.App.Status.PENDING_REMOVAL:
+            self.stderr.write(self.style.ERROR(f"App '{app_slug}' is pending removal - cannot redeploy"))
             return
 
-        if deployment.status == models.Deployment.Status.PENDING:
-            self.stdout.write(self.style.WARNING(f"Deployment is already pending"))
+        if models.Deployment.objects.filter(app=app, status__in=models.Deployment.IN_PROGRESS_STATUSES).exists():
+            self.stderr.write(self.style.ERROR(
+                f"App '{app_slug}' has a deployment in progress - wait for it to complete before redeploying"
+            ))
             return
 
-        if deployment.status == models.Deployment.Status.SUCCEEDED:
-            self.stderr.write(self.style.ERROR(f"Deployment already succeeded - nothing to retry"))
+        source = self._resolve_redeploy_source(
+            app=app,
+            deployment_id_str=deployment_id_str,
+            env_slug=env_slug,
+            aws_account_name=aws_account_name,
+        )
+        if source is None:
             return
 
-        if deployment.status in [
-            models.Deployment.Status.BUILDING,
-            models.Deployment.Status.PUSHING,
-            models.Deployment.Status.DEPLOYING,
-            models.Deployment.Status.STARTING,
-        ]:
-            self.stderr.write(self.style.ERROR(f"Deployment is in progress ({deployment.status}) - cannot retry"))
+        allowed_source_statuses = (
+            models.Deployment.Status.SUCCEEDED,
+            models.Deployment.Status.FAILED,
+            models.Deployment.Status.TORN_DOWN,
+        )
+        if source.status not in allowed_source_statuses:
+            self.stderr.write(self.style.ERROR(
+                f"Source deployment status '{source.status}' is not redeployable. "
+                f"Expected one of: {', '.join(allowed_source_statuses)}"
+            ))
             return
 
-        # Reset to pending
-        old_status = deployment.status
-        deployment.status = models.Deployment.Status.PENDING
-        deployment.status_message = f"Retry triggered (was: {old_status})"
-        deployment.save(update_fields=["status", "status_message", "updated_at"])
+        created_by = self._resolve_created_by(org=app.organization, username=created_by_username)
+        if created_by is None:
+            return
 
-        self.stdout.write(self.style.SUCCESS(f"\nDeployment for '{app_slug}' queued for retry"))
-        self.stdout.write(f"  Previous status: {old_status}")
-        self.stdout.write(self.style.WARNING("Deployment will restart automatically"))
+        git_ref = source.git_ref or app.branch
+        timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
+        short_ref = git_ref[:8] if len(git_ref) > 8 else git_ref
+        image_tag = f"{app.slug}-{short_ref}-{timestamp}"
+
+        new_deployment = models.Deployment.objects.create(
+            blueprint=source.blueprint,
+            app=app,
+            environment=source.environment,
+            subdomain=source.subdomain,
+            git_ref=git_ref,
+            image_tag=image_tag,
+            status=models.Deployment.Status.PENDING,
+            status_message="Redeploy triggered via doh_control",
+            created_by=created_by,
+        )
+
+        self.stdout.write(self.style.SUCCESS(f"\nRedeploy queued for app '{app.slug}'"))
+        self.stdout.write(f"  App: {app.name}")
+        self.stdout.write(f"  Environment: {source.environment.name} ({source.environment.aws_account.name})")
+        self.stdout.write(f"  Source deployment: {source.id} (status: {source.status})")
+        self.stdout.write(f"  New deployment: {new_deployment.id}")
+        self.stdout.write(f"  git_ref: {git_ref}")
+        self.stdout.write(f"  image_tag: {image_tag}")
+        self.stdout.write(f"  Created by: {created_by.username}")
+        self.stdout.write(self.style.WARNING("Build/push/deploy will start automatically (job worker picks up pending deployments)"))
         self.stdout.write("")
+
+    def _resolve_redeploy_source(self, app, deployment_id_str, env_slug, aws_account_name):
+        """Pick the source Deployment to clone for a redeploy.
+
+        Resolution order:
+        1. --deployment <uuid> wins; must belong to `app`.
+        2. Else filter by --env (and optional --aws-account) and pick the latest concluded deployment.
+        3. Else if the app has been deployed to exactly one environment, use that one.
+        4. Else error: ambiguous.
+
+        Returns the Deployment, or None and writes an error to stderr.
+        """
+        if deployment_id_str:
+            try:
+                deployment_id = UUID(deployment_id_str)
+            except ValueError:
+                self.stderr.write(self.style.ERROR(f"--deployment '{deployment_id_str}' is not a valid UUID"))
+                return None
+            try:
+                return models.Deployment.objects.select_related(
+                    "blueprint", "environment", "environment__aws_account",
+                ).get(id=deployment_id, app=app)
+            except models.Deployment.DoesNotExist:
+                self.stderr.write(self.style.ERROR(
+                    f"Deployment '{deployment_id_str}' not found for app '{app.slug}'"
+                ))
+                return None
+
+        candidates = models.Deployment.objects.select_related(
+            "blueprint", "environment", "environment__aws_account",
+        ).filter(app=app)
+
+        if env_slug:
+            candidates = candidates.filter(environment__slug=env_slug)
+            if aws_account_name:
+                candidates = candidates.filter(environment__aws_account__name=aws_account_name)
+
+        distinct_env_ids = set(candidates.values_list("environment_id", flat=True).distinct())
+        if not distinct_env_ids:
+            scope = ""
+            if env_slug:
+                scope = f" in env '{env_slug}'"
+                if aws_account_name:
+                    scope += f" / account '{aws_account_name}'"
+            self.stderr.write(self.style.ERROR(f"No deployments found for app '{app.slug}'{scope}"))
+            return None
+
+        if len(distinct_env_ids) > 1:
+            envs = list(models.Environment.objects.filter(id__in=distinct_env_ids).select_related("aws_account"))
+            if env_slug:
+                account_names = sorted({e.aws_account.name for e in envs})
+                self.stderr.write(self.style.ERROR(
+                    f"Environment slug '{env_slug}' is ambiguous across accounts ({', '.join(account_names)}); "
+                    f"pass --aws-account to disambiguate"
+                ))
+            else:
+                env_slugs = sorted({e.slug for e in envs})
+                self.stderr.write(self.style.ERROR(
+                    f"App '{app.slug}' has been deployed to multiple environments ({', '.join(env_slugs)}); "
+                    f"pass --env to pick one"
+                ))
+            return None
+
+        source = (
+            candidates.filter(status__in=models.Deployment.CONCLUDED_STATUSES)
+            .order_by("-created_at")
+            .first()
+        )
+        if source is None:
+            scope = f" in env '{env_slug}'" if env_slug else ""
+            self.stderr.write(self.style.ERROR(
+                f"No concluded deployments found for app '{app.slug}'{scope} - nothing to redeploy from"
+            ))
+            return None
+        return source
 
     def _handle_deploy_app_template(self, options):
         """Deploy a new app from an AppTemplate.

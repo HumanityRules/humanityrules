@@ -1,5 +1,55 @@
 # DevOpsHero Development Journal
 
+## 2026-04-27 19:57 - [DevEx] Rename `retry-app-deployment` → `redeploy-app`, with semantics matching the UI's Redeploy button
+
+**Conversation:** [2026-04-27-1957-2bdda279.md](conversations/2026-04-27-1957-2bdda279.md)
+
+The "rename deferred" follow-up flagged in this morning's [DinD orphan-reap fix entry](#2026-04-27-1631---deployment-persist-hermes-tool-container-state-across-task-restarts-via-dind-side-efs-snapshots): `doh_control retry-app-deployment` had a misleading name *and* mismatched semantics. Renamed to `redeploy-app` and rebuilt the implementation so it matches `app_deployment_redeploy` in `devopshero_app/views/apps.py` exactly. No backward-compat alias.
+
+**Why the old command was wrong (not just badly named):**
+
+The UI's "Redeploy" button creates a new `Deployment` row cloned from a source deployment. The CLI did the opposite — *mutated the existing row's status back to PENDING in place*. Three bad consequences fell out of that single decision:
+
+- **History was destroyed.** The failed/succeeded source row was overwritten, so the deployment list lost a record of what actually happened.
+- **`image_tag` was reused.** A fresh `image_tag = f"{slug}-{shortref}-{timestamp}"` is what forces ECR to push a new layer and ECS to roll the service. Mutating in place kept the old tag, which meant ECR cache hits and (depending on `imagePullPolicy` and SHA collisions) sometimes no actual rollover.
+- **`SUCCEEDED` was rejected as a redeploy source.** Made sense if you read the name as "retry a *failure*", but in practice the most common reason to redeploy is "the code changed, push it again" — exactly the SUCCEEDED → SUCCEEDED case. This morning's session burned cycles flipping the deployment status to PENDING by hand specifically to bypass this guard.
+
+**Behavior change checklist (CLI ↔ UI parity):**
+
+- Source statuses now allowed: `SUCCEEDED`, `FAILED`, `TORN_DOWN`. Same set as the view.
+- Refuses if any deployment for the app is in `IN_PROGRESS_STATUSES` (not just the latest). Mirrors the view's `Deployment.objects.filter(app=app, status__in=IN_PROGRESS_STATUSES).exists()` guard.
+- Refuses if `app.status == PENDING_REMOVAL`.
+- Creates a new `Deployment` row cloning `blueprint`, `environment`, `subdomain`, `git_ref` (with `app.branch` fallback) — fresh `image_tag` with a current timestamp.
+- `--created-by` for audit attribution, reusing the existing `_resolve_created_by` helper from `deploy-app-template` (first admin in the org → any superuser → explicit override). Same convention as the sibling command, since management commands have no `request.user`.
+
+**Source-deployment resolution (the new ergonomics question):**
+
+The UI takes a `deployment_id` from a button click — unambiguous by construction. The CLI doesn't have that luxury. New `_resolve_redeploy_source` helper resolves in this order:
+
+1. `--deployment <uuid>` wins, and is verified to belong to `app`.
+2. Else filter by `--env [+ --aws-account]` and pick the latest concluded deployment in that env.
+3. Else if the app has been deployed to exactly one environment, use that one.
+4. Else error: "App has been deployed to multiple environments (foo, bar); pass --env to pick one".
+
+The single-env fall-through means the most common case (`redeploy-app --app simple-dashboard`) just works without an extra flag, while ambiguous cases fail loudly instead of silently picking. Mirrors the `--aws-account` disambiguation pattern already used by `deploy-app-template`.
+
+**What was *not* changed (deliberate):**
+
+- **`retry-env-provisioning`** has the same naming-vs-behavior friction (refuses to re-run a successful provisioning) but envs and apps are different lifecycle shapes — env provisioning is a CloudFormation stack update and idempotent in CFN, so the "retry" framing is actually defensible. Left alone for now.
+- **No backward-compat alias for `retry-app-deployment`.** A hidden alias would invite the agent to keep using the old name and re-learn the wrong mental model. Clean break is cheaper than a graceful deprecation here — only invocations are in agent skill docs (already updated) and journal/conversation logs (historical, fine to leave).
+- **No `--git-ref` or `--branch` override.** UI doesn't have one; not a real gap. If we ever want "redeploy at a different ref", that's `deploy-app-template` territory — the UI conflates this with the "Deploy from template" flow rather than the Redeploy button, and we should mirror that.
+
+**Skill-doc state:** the `manage-commands` SKILL files (`.claude/`, `.agents/`, `.codex/`) already described `doh_control` as supporting "redeploy". They were ahead of the code — written aspirationally during a prior session and never reconciled. The `prod-manage` SKILL was the one that needed touching; updated its example block to show `redeploy-app` with three common shapes (default / `--env` / `--deployment`).
+
+**Verification:** `uv run manage.py doh_control redeploy-app --help` parses cleanly. Parent `doh_control --help` no longer lists `retry-app-deployment`; `redeploy-app` shows with the new help text. Lints clean. End-to-end against a live deployment not run — same code paths as `deploy-app-template` once the row is created (which is exercised every UI deploy), so the risk is in argparse + selection logic, both of which are exercised by the parser smoke check.
+
+**Key points:**
+
+- The naming friction was a leading indicator, not the bug. The actual defect was that the CLI's mental model (`retry = mutate to pending`) and the platform's mental model (`redeploy = new row with fresh image_tag`) had drifted. Once the names are aligned, the behavior naturally has to follow — or the next agent reads `redeploy-app` and assumes UI semantics, gets surprised, and we're back to writing one-off snippets.
+- "CLI parity with UI X" is becoming a small but recurring pattern (`deploy-app-template` mirrors "Deploy from template", `redeploy-app` mirrors "Redeploy", `teardown-app --remove-app` mirrors "Remove App"). When we keep the helper functions composable (`_resolve_created_by`, `_resolve_environment`, soon `_resolve_redeploy_source`), each new mirrored command costs ~80 lines instead of 200.
+- Resolution-priority chains (`--deployment` > `--env` > "single-env fall-through" > "ambiguous error") read as a natural escalation from "I know exactly which one" to "infer it" to "fail loudly". Keeping this pattern consistent across commands means the agent can guess the right invocation without re-reading the docstring every time.
+- Journal note for whenever `retry-env-provisioning` gets revisited: the same shape applies — there's almost certainly a `redeploy-env` semantic hiding behind it, and the right rename will become obvious once a session needs it. Not before.
+
 ## 2026-04-27 18:51 - [DevEx] Install bash + coreutils on the doh-dind image so doh_app_shell / doh_app_exec work against the DinD sidecar
 
 **Conversation:** [2026-04-27-1851-ce940fcc.md](conversations/2026-04-27-1851-ce940fcc.md)
