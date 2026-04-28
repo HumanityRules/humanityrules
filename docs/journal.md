@@ -1,5 +1,83 @@
 # DevOpsHero Development Journal
 
+## 2026-04-27 16:31 - [Deployment] Persist Hermes tool-container state across task restarts via DinD-side EFS snapshots
+
+**Conversation:** [2026-04-27-1632-a1dd698f.md](conversations/2026-04-27-1632-a1dd698f.md)
+
+Hermes's agent flagged that pip/apt/npm installs it runs inside the tool container don't persist between tool invocations. Root cause: `container_persistent: false` in `config.yaml.template` plus upstream's per-turn cleanup (`run_agent.py:_cleanup_task_resources`) and 300-second idle reaper (`terminal_tool.py` `TERMINAL_LIFETIME_SECONDS`) tear the tool container down almost immediately. Only `/workspace` survived because it was an EFS bind mount — everything in the container's writable layer was ephemeral by design.
+
+The session walked through several architectures before landing on the chosen one, and the reasoning behind *rejecting* the alternatives is worth capturing because the "obvious" paths have real failure modes that bite after you commit to them.
+
+**Rejected approaches and why:**
+
+- **Just flip `container_persistent: true` + bump `TERMINAL_LIFETIME_SECONDS`.** Only persists across the lifetime of a single Hermes process. ECS task restart (deploy, scale-in, instance drain) wipes DinD's per-task ephemeral storage and everything in it. Fine for turn-to-turn, not for real durability.
+- **ECS-managed per-task EBS.** Killed after fetching the AWS docs directly (the [ECS EBS volumes page](https://docs.aws.amazon.com/AmazonECS/latest/developerguide/ebs-volumes.html)): "You can attach at most one Amazon EBS volume to each Amazon ECS task, and it must be a **new volume**. You can't attach an existing Amazon EBS volume to a task." Every task replacement gets a fresh blank volume. Useless for cross-restart state.
+- **Host-EBS on the ECS-on-EC2 ASG** (which we already run for Hermes, because DinD needs `privileged: true` which Fargate doesn't allow — `deploy_app.py:679-680`). Would give truly continuous state for the lifetime of the EC2 instance, but instance replacement still wipes it. Recovery would require snapshot-on-terminate lifecycle hooks + restore-on-launch userdata — real engineering. Single-AZ, and loses EFS's multi-AZ durability story.
+- **Putting `/var/lib/docker` directly on EFS.** Doesn't work at all. Overlay2 (Docker's default storage driver) requires xattrs and overlayfs semantics NFS doesn't provide — you get `EINVAL` at mount time. The daemon's BoltDB metadata stores (`buildkit/`, `containerd/`, `network/files/local-kv.db`) explicitly warn against NFS backing. The `vfs` driver sidesteps overlayfs but still has the BoltDB problem, plus it breaks CoW (a 1 GB image becomes 5 GB if it has 5 layers).
+- **Teaching Hermes to "adopt" an existing container on startup.** Would be the ideal for Hermes-only restart, but requires a patch to upstream's `_DockerEnvironment` in `tools/environments/docker.py`. User was (rightly) wary of forking container lifecycle logic.
+
+**Chosen architecture: snapshot-as-image on EFS.**
+
+A new `template_repos/doh_dind/` image layered on `docker:26.1.0-dind` runs a Python snapshotter alongside dockerd:
+
+- **Snapshot format**: `docker export <id> | zstd`. Flat single-layer tarball — no image metadata, no overlay layer count concerns. The restore side re-applies load-bearing ENVs (`PATH`, `LANG`, `POETRY_HOME`) via `docker import --change` because `docker export` drops image config. I verified against `nikolaik/python-nodejs:python3.11-nodejs20` that nothing else in `.Config.Env` is dynamically load-bearing (`GPG_KEY`/`PYTHON_VERSION`/`PYTHON_SHA256` are build-time only).
+- **Three concurrent triggers, one `do_snapshot()`**:
+  1. `docker events --filter event=die` — container stopping.
+  2. `docker events --filter event=start` — orphan reap (snapshot + `docker rm -f` older `hermes-*` siblings of the newly started container).
+  3. 15-minute periodic timer, guarded by `docker diff` fingerprint so idle containers are effectively free.
+  4. SIGTERM handler that force-snapshots all live tool containers before stopping dockerd.
+- **EFS layout** (new third access point under `_HERMES_EFS_CONFIG`):
+  ```
+  efs/deployments/<app>/docker-persistence/
+    latest.tar.zst        # most recent good snapshot
+    latest.meta.json      # base_image_ref, fingerprint, ts, container_id
+    snapshots/<ts>.tar.zst  # rotated prior snapshots (retention=3)
+    incoming.tar.zst      # in-flight write, atomic-renamed to latest
+  ```
+- **Restore on DinD boot**: if `latest.tar.zst` exists → `zstd -d | docker import - doh-toolbox:latest`. Otherwise pull `$TOOL_IMAGE_BASE` and tag it. Either way, `doh-toolbox:latest` exists locally before the healthcheck marker (`/var/run/doh-restore-ready`) is touched — so Hermes's `depends_on: {docker-dind, HEALTHY}` gate blocks it from doing `docker run` until the image is ready.
+- **`DOH_SNAPSHOT_RESTORE=auto|skip|force_rebuild` env** on DinD — the operator escape hatch. `force_rebuild` also deletes `latest.tar.zst`. We picked this because we're deliberately deferring the "base-image rebase workflow" (what happens when `TOOL_IMAGE_BASE` gets bumped, security patches, etc.) until it becomes a real problem; this knob at least lets ops nuke a user's state without hand-editing EFS.
+
+**Why snapshot-as-image (not adopt-existing-container):** Hermes keeps doing `docker run doh-toolbox:latest` with no knowledge that anything changed. Every upstream bump stays a trivial version bump. The cost: Hermes-only restart loses up to 15 min of rootfs churn (the new Hermes creates a fresh container from the last snapshot). Assumed rare enough to accept — if data contradicts that, we add adoption later.
+
+**Why all logic in DinD (no Hermes-side trap):** DinD owns the lifecycle of the tool container — it sees every `start` and `die` regardless of which sibling caused it. Putting the snapshotter trap in Hermes was explored (and accepted after a user push) but rejected once we realized it needed a DinD-side boot-reconciliation backstop anyway for SIGKILL-class failures — at which point owning it twice is worse than once. `essential: true` on the Hermes container means task-level SIGTERM reaches DinD in parallel anyway.
+
+**Secondary plumbing changes:**
+
+- **New `stop_timeout: int | None` on `ContainerConfig`** (`appconfig.py`), threaded through `app_config_builder.py` and into `ecs.ContainerDefinition`'s `stop_timeout` in `deploy_app.py`. Both `hermes` and `docker-dind` set it to 120 so the snapshotter has time to flush a multi-GB `docker export` to EFS before ECS SIGKILLs. ECS defaults to 30s, which isn't enough.
+- **`TERMINAL_LIFETIME_SECONDS=86400`** on the Hermes container env. Upstream's idle reaper would otherwise recycle the tool container after 5 min of silence, forcing a fresh `docker run` (and fresh writable layer) on the next call. With 24h, one Hermes process reuses one container all day, letting the snapshotter capture a real evolving writable layer.
+- **`TOOL_IMAGE` changed from the dockerhub ref to `doh-toolbox:latest`**. The ghcr/dockerhub base ref moved to `TOOL_IMAGE_BASE` on the DinD container, only consulted as a fallback when no snapshot exists. This separation is small but important — the base ref and the "what Hermes runs" ref are genuinely different concepts now.
+- **Prewarm block deleted from `hermes_agent/entrypoint.sh`.** DinD's healthcheck-gated restore makes the Hermes-side `docker pull` redundant.
+- **`container_persistent: true` in `config.yaml.template`.** Not strictly required for snapshot-as-image, but it means upstream's per-turn `cleanup_vm()` is skipped, so the container lives longer within a Hermes lifetime → snapshots capture more realistic state.
+
+**Scope parked (deliberately):**
+
+- **Multi-user Slack bots with `group_sessions_per_user: true`** (upstream default, kept). Each user gets their own `task_id` → their own `hermes-*` container → potentially N containers. Three shapes exist (shared snapshot, per-user snapshot via Hermes patch, shared-on-disk via SOUL.md nudges). User wanted to *observe first* before choosing. Design was kept single-container; the "which containers to snapshot" selector is isolated as a 5-line function so we can change it without touching `do_snapshot()` itself.
+- **Base-image rebase workflow.** Deferred. `base_image_ref` is stamped into `latest.meta.json` so when the day comes, we can tell which users are on which base and plan migration waves without reverse-engineering tarballs.
+- **Bypassing DinD entirely** (host-docker.sock mount). Raised by user, parked for later.
+- **Cross-region snapshot replication.** EFS's default multi-AZ durability is accepted.
+
+**Bug caught in dev rollout:** On first deploy, the agent's second `echo` call returned `No such container: <full-id>`. Root cause was a short-id vs full-id mismatch:
+
+- `docker events` emits full 64-char container ids.
+- `docker ps --format {{.ID}}` truncates to 12 chars by default.
+- `_reap_older_siblings` compared event-id (full) to ps-id (short) with `!=`, which was always true.
+- Net: every just-started tool container was immediately snapshotted-and-reaped as its own orphan, and Hermes's next `docker exec` against the full id failed.
+
+Fix: `docker ps --no-trunc` so both sides use full ids. Bumped `DOH_DIND_IMAGE_VERSION` to `0.1.1`, rebuilt and pushed via `doh_build_prebuilt_image`, flipped the Deployment status to PENDING manually (since `doh_control retry-app-deployment` refuses when the deployment is `SUCCEEDED`), redeployed, verified fix live. User noted the command naming is confusing ("retry" implies failure recovery, but the code path is a plain redeploy) — renaming deferred to a follow-up session.
+
+**Remaining known issues (not yet fixed):**
+
+- **13-byte tarball after orphan reap.** `docker rm -f` of a reaped container fires a `die` event → snapshotter tries to `docker export` the already-gone container → the shell pipeline swallows the export failure (zstd exits 0 on empty stream) → 13-byte "snapshot" rotates the real one into `snapshots/` and promotes garbage to `latest.tar.zst`. Two independent mistakes: (a) `shell=True` without `pipefail`, (b) no "recently reaped" set to suppress the redundant die-event snapshot. Both fixes are small. Parked for the next session.
+- **Upstream's `--storage-opt is supported only for overlay over xfs with 'pquota'` error** surfaces in logs from Hermes's container-create call. Pre-existing (not introduced by our changes); worth separate investigation if disk limits matter.
+
+**Key points:**
+
+- Snapshot on EFS is the right durability tier for reconstructible state (packages); `/workspace` and `/home/hermeswebui/.hermes` stay continuous-on-EFS because they hold irreplaceable state (user code, agent memory).
+- Docker `export`/`import` captures the container's *entire filesystem view* (base image bytes included), not just the writable-layer diff — so snapshot size has a floor ~= base image size regardless of agent activity. The `docker diff` fingerprint guard only skips *identical* repeated snapshots; it doesn't reduce per-snapshot size.
+- The `--no-trunc` bug is the kind of thing that's obvious once seen, and near-invisible in code review because the `!=` looks plausible both ways. Prefer structured equality helpers over raw id-string comparison in future.
+- `snapshots/` retention exists as crash protection for the write itself (torn tarball during step 1 of `export | zstd | rename`), not as a user-facing time-travel feature. Three copies is enough belt-and-suspenders; restore path doesn't automatically fall back to them (would be a 5-line addition).
+- Management command naming surfaced as a real friction point: `retry-app-deployment` / `retry-env-provisioning` both refuse to re-run against successful/ready targets. The commands' actual job is "reset status to pending so the worker picks it up" — they're redeploy commands with a guard in the wrong place. Rename deferred but noted.
+
 ## 2026-04-27 11:37 - [DevEx] `doh_app_exec`: non-interactive probe-in-container companion to `doh_app_shell`
 
 **Conversation:** [2026-04-27-1145-9ee7793c.md](conversations/2026-04-27-1145-9ee7793c.md)
