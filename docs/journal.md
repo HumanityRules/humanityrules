@@ -1,5 +1,48 @@
 # DevOpsHero Development Journal
 
+## 2026-04-28 12:44 - [Deployment] Drop `~/.hermes/.env` regeneration from `hermes_agent/entrypoint.sh`
+
+**Conversation:** [2026-04-28-1244-0961baa1.md](conversations/2026-04-28-1244-0961baa1.md)
+
+The Hermes container's `entrypoint.sh` had a 19-line block that, on every boot, materialised `~/.hermes/.env` from a hand-curated allowlist of process env vars: `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `OPENROUTER_API_KEY`, `TAVILY_API_KEY`, `OPENAI_BASE_URL` (derived from `DOH_LLM_BASE_URL` for non-Bedrock), and the `SLACK_*` family. The header comment claimed it existed "so the WebUI detects provider credentials." That claim turned out to be inaccurate. Removed the block entirely; it was redundant with the ECS task-definition env vars that already populate `os.environ`. Net deletion: 19 source lines from `entrypoint.sh`, two stale `~/.hermes/.env` references from the README, and the slightly off claim about `OPENAI_BASE_URL` being a needed bridge.
+
+**Why the `.env` was never load-bearing.** Walked the actual code paths in upstream `hermes-agent v2026.4.16` and `hermes-webui v0.50.126` end to end:
+
+- `run_agent.py` (the agent subprocess the WebUI spawns) does call `load_hermes_dotenv(hermes_home=…, project_env=…)` at module import. But it has an explicit "no .env file found, using system environment variables" log branch — i.e. the missing-file case is a designed-in fall-through, not an error path.
+- `hermes_cli/auth.py:_resolve_api_key_provider_secret` — the function the WebUI's provider-detection eventually calls — resolves API keys via plain `os.getenv(env_var, "").strip()`. No `.env` lookup at all. The few helpers that *do* read the file (e.g. `get_anthropic_key`) use the OR pattern `get_env_value(var) or os.getenv(var, "")`, so process env is the second-chance source if the file is absent.
+- `hermes-webui v0.50.126`'s `api/config.py:get_available_models` has two paths: a primary path that delegates to `hermes_cli.models.list_available_providers()` (→ `auth.py` → `os.getenv` only, file irrelevant) and a fallback path used only when `hermes_cli` import fails. Even the fallback OR-merges `~/.hermes/.env` with `os.getenv` — process env alone is enough for provider detection.
+- `python-dotenv` defaults to `override=False`, so a `.env` file *cannot* win over a value already in `os.environ`. Everything we'd write to the file is, by construction, already in process env (that's how it ended up readable from bash to write to the file in the first place). The file was strictly subordinate.
+
+So the runtime question — "is the `.env` needed?" — has a clean answer: no. The original block was DOH defensiveness from before the upstream code paths were understood; the "WebUI detects credentials" framing was the kind of plausible-sounding-but-wrong rationalisation that survives unexamined for a long time precisely because removing it would feel risky.
+
+**The `OPENAI_BASE_URL` discovery (and the README correction it forced).** Before deleting, had to verify nothing depended on the `DOH_LLM_BASE_URL → OPENAI_BASE_URL` env-var bridge that the block was performing for non-Bedrock providers. Two findings, both pointing the same way:
+
+- Upstream `PROVIDER_REGISTRY` in `hermes_cli/auth.py` has no `"openai"` entry — only `"openai-codex"` (OAuth-only). Direct OpenAI use is a *config-driven* setup with `provider: custom` + `model.base_url: …` in `config.yaml`. There's no env-var-driven OpenAI provider for the registry to consult.
+- `config.yaml.template` already substitutes `model.base_url: __BASE_URL__` from `DOH_LLM_BASE_URL` on every entrypoint render. `run_agent.py` reads that and passes it explicitly to the OpenAI SDK constructor as `base_url=self.base_url` (line 6036 in v2026.4.16). The OpenAI Python SDK's auto-fallback to `OPENAI_BASE_URL` env var only fires when no `base_url=` kwarg is supplied — and in our path one always is.
+
+So the `DOH_LLM_BASE_URL → OPENAI_BASE_URL` bridge in the deleted block was a no-op the whole time: `config.yaml` was carrying the same value through a different (and authoritative) channel. The README had two now-stale references to this bridge ("the entrypoint maps that into `config.yaml` and, when not on Bedrock, into `OPENAI_BASE_URL` in `~/.hermes/.env`") which both got rewritten to reflect the actual single channel.
+
+**Reasons one could keep it that we deliberately didn't.**
+
+- *User-visible debugging.* Someone shelling into the Hermes container will look at `~/.hermes/.env` first because every Hermes doc tells them to. An empty `~/.hermes/.env` is more confusing than a populated one. Decided this is not worth 19 lines of shell — operators debugging Hermes inside DOH already have the ECS task definition env vars one click away in the AWS console, and `env | grep _API_KEY` inside the container surfaces the same info.
+- *Forward-compat hedge.* If a future Hermes patch adds a code path that reads `.env` *without* an `os.environ` fallback, the regeneration would silently keep us covered. Decided this is speculative defence against an upstream regression that would itself be a bug worth filing — and `entrypoint.sh` is regenerated on every container build, so reintroducing the block if such a regression ever lands is a 5-minute change.
+- *Tools that source `.env` from a shell.* A few Hermes tools shell out (`bash -lc …`); some shell init scripts source `.env`. Currently no in-tree tool does this in the v2026.4.16 + WebUI 0.50.126 pin. Same forward-compat argument as above.
+
+**Comment style choice.** First draft of the replacement comment said "see entrypoint analysis in journal for details." Removed the journal pointer per the project rule that the journal is not a load-bearing reference for code comments — the comment should stand on its own. Final version explains the reasoning inline (process env via task def, `os.getenv` resolution, `override=False` default, `model.base_url` for the `custom` provider's base URL) so a reader six months from now doesn't need to chase a journal entry.
+
+**What deliberately stayed.**
+
+- `config.yaml` regeneration on every boot is unchanged. That file *is* load-bearing for the `terminal.backend`, `docker_volumes`, and `model.base_url` plumbing; the entrypoint's templating logic over `config.yaml.template` was not touched.
+- The `DOH_LLM_*` namespacing comment at the top of `entrypoint.sh` ("…consumed only by this entrypoint to generate config.yaml and .env; never exported to child processes") was *not* updated to drop the `.env` mention. Left as a follow-up for the next pass on this file — touching it now would balloon the diff scope and the misnomer is harmless: those vars are still entrypoint-scoped, just used to render only `config.yaml` now instead of two files.
+- `.env` and `.env.backup` artefacts in the repo's `template_repos/hermes_agent/` directory are leftover dev files (gitignored, last touched April 17/19). Flagged for the user to delete locally; not removed in this commit because they were never tracked.
+
+**Key points:**
+
+- The "is X needed?" investigation pattern: when a block of boot-time plumbing has a header comment claiming a runtime effect, *trace the actual consumers in upstream code* before trusting the comment. Upstream Python projects often have layered fallback (`get_env_value(var) or os.getenv(var, "")`), and a single grep for the variable name in the upstream tree usually settles it. In this case the comment was wrong about the WebUI's provider-detection path, and the wrongness was load-bearing for whether to keep the block.
+- `python-dotenv`'s `override=False` default is the critical mechanical fact that makes this kind of `.env` regeneration always-redundant when the same vars are also injected into the process env. If the file *can't* beat the process env, and the process env is the canonical source by Docker/ECS plumbing, the file's role collapses to "developer-visible echo" — a UX feature, not a runtime requirement.
+- Hermes's `custom` provider routes `base_url` exclusively through `config.yaml`'s `model.base_url`, never through `OPENAI_BASE_URL`. The OpenAI SDK's env-var fallback only fires when the SDK is invoked without an explicit `base_url=` kwarg, and `run_agent.py` always passes one. Anyone debugging an OpenAI-compatible setup in Hermes should check `~/.hermes/config.yaml`, not the process env.
+- README and code comment hygiene: documentation about file-based plumbing rots silently when the plumbing changes. Both stale `~/.hermes/.env` references in `template_repos/hermes_agent/README.md` were exactly this shape — accurate at write-time, never updated when the runtime semantics shifted (likely never *had* the semantics they described, given the upstream code). Worth treating "what does the README claim and is it still true?" as a co-equal step alongside "what does the code do?" during cleanup.
+
 ## 2026-04-28 12:40 - [Deployment] Drop `DOH_SNAPSHOT_RESTORE` knob and tidy `doh_dind/entrypoint.sh`
 
 **Conversation:** [2026-04-28-1240-3e321bf8.md](conversations/2026-04-28-1240-3e321bf8.md)
