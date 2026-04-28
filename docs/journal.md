@@ -1,5 +1,46 @@
 # DevOpsHero Development Journal
 
+## 2026-04-28 12:40 - [Deployment] Drop `DOH_SNAPSHOT_RESTORE` knob and tidy `doh_dind/entrypoint.sh`
+
+**Conversation:** [2026-04-28-1240-3e321bf8.md](conversations/2026-04-28-1240-3e321bf8.md)
+
+The `doh_dind` sidecar (the DinD daemon that runs Hermes's tool containers in customer ECS tasks) shipped with a three-mode operator switch — `DOH_SNAPSHOT_RESTORE=auto|skip|force_rebuild` — controlling how its `entrypoint.sh` decides between restoring `latest.tar.zst` from EFS vs. pulling `$TOOL_IMAGE_BASE` clean. The mechanism was added in the original snapshot rollout (entry `2026-04-27 16:31 - [Deployment] Persist Hermes tool-container state across task restarts via DinD-side EFS snapshots`) as a "deliberate escape hatch." Removed it entirely; the boot now does exactly what `auto` used to do — if the snapshot exists and is non-empty, `docker load` it; otherwise pull the base. Net 19 source lines deleted across `entrypoint.sh` + `seed_app_templates.py`, plus another ~6 lines from various unrelated micro-simplifications in the same script.
+
+**Why the switch was overkill.** Walking through the actual semantics of each mode in the conversation surfaced how marginal the differential utility was:
+
+- `skip` — boot without restoring, useful for "isolate a debugging session from accumulated state." But `skip` is a one-shot env-var override; the operator could equivalently set the env var on the next task-def revision, redeploy, then unset it — or just *not* set it and inspect whatever booted normally. There's no scenario where "boot without restoring just this once" is meaningfully better than "delete the snapshot file and let it auto-fall through to pull."
+- `force_rebuild` — same as `skip` *plus* delete `latest.tar.zst` so the next boot also can't restore. But operators can already achieve the same outcome by deleting `latest.tar.zst` directly on EFS (we have a side-channel for that — production EFS is mountable from a privileged location). And the `snapshots/<ts>.tar.zst` retention archive — which `force_rebuild` carefully *preserved* "for manual recovery" — is the same archive an operator would consult either way. So `force_rebuild` was the env-var-vs-`rm` version of the same operation, with the cost of three branches in shell code and an awkward "what's the difference between skip and force_rebuild?" footgun for anyone reading the script.
+
+The keep-it-simple test the conversation arrived at: *what failure mode would I hit on a customer task today that would push me to set `DOH_SNAPSHOT_RESTORE=skip` instead of just deleting the EFS snapshot?* No answer surfaced. Removed.
+
+**The cascade simplifications that followed.** With the case-statement and `force_rebuild` clean-up branch gone, the restore-or-pull logic collapsed from a `restored_from_snapshot=0; if [ -s ]; then ... if zstd | docker load; then flag=1; fi; fi; if [ "$flag" -eq 0 ]; then docker pull; fi` two-stage pattern (with a flag bridging the two ifs) into a single `if [ -s X ] && zstd | docker load; then ... else ... fi`. The else branch keeps a guarded `[ -s X ] && echo ERROR` so a corrupted-snapshot fall-through still logs, but a fresh-boot fall-through (no snapshot at all) is silent — the ERROR doesn't fire when `[ -s X ]` is false on the inner test. Three more nano-simplifications in the same pass:
+
+- The dockerd-wait loop had a `for i in $(seq 1 60); do ... break; done` followed by a redundant post-loop `if ! docker info` running the *same* command again to detect "loop completed without break." Flipped to an `until docker info; do ... done` with the counter as the timeout, eliminating the duplicate `docker info` call and giving exactly one place that prints "dockerd is up."
+- `mkdir -p "$PERSISTENCE_DIR" "$PERSISTENCE_DIR/snapshots"` → `mkdir -p "$PERSISTENCE_DIR/snapshots"`. `mkdir -p` creates parents anyway.
+- Three sequential `export DOCKERD_PID; export TOOLBOX_TAG; export PERSISTENCE_DIR` collapsed into one `export DOCKERD_PID TOOLBOX_TAG PERSISTENCE_DIR`.
+
+**Style decision: `${VAR:?msg}` rejected.** Tried replacing the four-line `if [ -z "${TOOL_IMAGE_BASE:-}" ]; then echo FATAL; exit 1; fi` guard with the POSIX one-liner `: "${TOOL_IMAGE_BASE:?[doh-dind] FATAL: TOOL_IMAGE_BASE not set}"`. User reverted — the parameter-substitution form is too cryptic for a script any operator might have to read in incident-response, and the shell-injected error format (`entrypoint.sh: TOOL_IMAGE_BASE: [doh-dind] FATAL: ...`) breaks the consistent `[doh-dind] FATAL:` log prefix that every other error in the file uses. Kept the explicit `if`.
+
+**POSIX `set -e` corners that were validated mid-session.** Worth recording because we'll lean on these patterns again:
+
+- Inside an `if` test, a `&&`-chain like `if [ -s X ] && cmd_a | cmd_b; then` is fully suppressed from `set -e` — none of the constituent commands can short-circuit the script even when any of them fails. The whole `&&`-list returns a single status to the `if`, which is the exit status of the last command actually executed.
+- Outside an `if`, the standalone `[ -s X ] && echo Y` idiom is also `set -e`-safe: POSIX explicitly says `set -e` is ignored for any command of an AND-OR list other than the last, so a failed `[ -s X ]` short-circuits the chain to non-zero status, but that status doesn't trigger `set -e` at the top level either (because the failed test is "not the final command" of the AND-OR list). This is the standard "do-this-if" form and the simplification chain depends on it.
+
+**What deliberately stayed.**
+
+- `snapshotter.py` was untouched. It never read `DOH_SNAPSHOT_RESTORE` — the env var was only consumed by `entrypoint.sh` — so there was nothing to remove on the Python side.
+- The `DOCKERD_DEBUG=1` block (~10 lines + a chunky comment) is still in. It's a *temporary* diagnostic for the open mid-session-container-recycling bug (see `hermes_agent/patches/04-...`). When that bug closes the whole block + the env var in `seed_app_templates.py` should be ripped out, but that's a separate cleanup.
+- Historical journal/conversation entries in `docs/journal.md` and `docs/conversations/` that mention `DOH_SNAPSHOT_RESTORE` are left alone. Per the project rule those are immutable session records — treated like git history.
+- No rollout drama: existing running ECS tasks have `DOH_SNAPSHOT_RESTORE=auto` baked into their task-def revision; the new entrypoint just ignores the env var, no compatibility shim needed. The next `seed_app_templates` re-seed will drop the variable cleanly from new task-def revisions.
+
+**Key points:**
+
+- Operator escape hatches with shell-level switches age badly when the EFS file they manipulate is already directly accessible to the operator. The right test for whether such a switch earns its complexity is *"what real failure mode would push me to use it instead of just `rm`-ing the file?"* — if no answer surfaces, delete the switch. The original "we picked this because we're deliberately deferring the base-image rebase workflow" framing in the rollout entry was correct at the time but never had to actually pay off; the deferred workflow is still deferred, and the placeholder-for-it became dead weight.
+- The `skip` vs `force_rebuild` ambiguity (what's actually different?) was a maintenance smell: any time *I* couldn't keep the difference straight while explaining the script, ops on call wouldn't either. The script-level distinction was buying us the appearance of operator control while imposing real cognitive cost on whoever next reads it. POSIX shell has no syntactic affordance for "and please remember which mode is which" — that cost is paid every time.
+- POSIX `set -e` interaction with `&&`-lists has a subtle but well-defined rule: failures of non-last commands in an AND-OR chain don't trigger `set -e`. This is what makes both `if [ X ] && cmd_a | cmd_b; then` and the bare `[ X ] && echo Y` line safe under strict-mode shell. The simplification chain in this session leaned on it twice and would have been impossible without it.
+- `docker load` preserves the tag baked into the tarball, eliminating the need for a re-tag step on the restore path. `docker import` (the older approach the original entrypoint used) does not, which is why the now-replaced version had a `--change` block. The single comment in the simplified script captures this trade-off without re-explaining the prior approach.
+- Style: when a one-liner POSIX idiom (`${VAR:?msg}`, brace-expansion, etc.) replaces a 3-4 line block, weigh log/error format consistency before adopting. A consistent operator-facing log prefix across every error in a 100-line script is worth four lines of boilerplate. Idiom golf shouldn't beat operator readability.
+
 ## 2026-04-27 22:29 - [DevEx] Move `policy_proxy/` into `template_repos/`
 
 **Conversation:** [2026-04-27-2229-8207d57a.md](conversations/2026-04-27-2229-8207d57a.md)
