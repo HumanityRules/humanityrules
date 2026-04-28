@@ -114,24 +114,4 @@ fi
 # become a soft landing. See patches/ for per-patch rationale.
 python3 /opt/hermes-defaults/patches/apply.py "$HERMES_DIR/hermes-agent"
 
-# Write .env from Docker env vars so the WebUI detects provider credentials.
-# Regenerated on every boot to pick up DOH config changes.
-ENV_FILE="$HERMES_DIR/.env"
-: > "$ENV_FILE"
-chmod 600 "$ENV_FILE"
-[ -n "$OPENAI_API_KEY" ] && echo "OPENAI_API_KEY=$OPENAI_API_KEY" >> "$ENV_FILE"
-# OPENAI_BASE_URL is only meaningful for OpenAI-compatible endpoints, not for
-# Bedrock (where DOH_LLM_BASE_URL is the bedrock-runtime URL used by boto3).
-if [ "$DOH_LLM_PROVIDER" != "bedrock" ] && [ -n "$DOH_LLM_BASE_URL" ]; then
-    echo "OPENAI_BASE_URL=$DOH_LLM_BASE_URL" >> "$ENV_FILE"
-fi
-[ -n "$ANTHROPIC_API_KEY" ] && echo "ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY" >> "$ENV_FILE"
-[ -n "$OPENROUTER_API_KEY" ] && echo "OPENROUTER_API_KEY=$OPENROUTER_API_KEY" >> "$ENV_FILE"
-[ -n "$TAVILY_API_KEY" ] && echo "TAVILY_API_KEY=$TAVILY_API_KEY" >> "$ENV_FILE"
-[ -n "$SLACK_APP_TOKEN" ] && echo "SLACK_APP_TOKEN=$SLACK_APP_TOKEN" >> "$ENV_FILE"
-[ -n "$SLACK_BOT_TOKEN" ] && echo "SLACK_BOT_TOKEN=$SLACK_BOT_TOKEN" >> "$ENV_FILE"
-[ -n "$SLACK_ALLOW_ALL_USERS" ] && echo "SLACK_ALLOW_ALL_USERS=$SLACK_ALLOW_ALL_USERS" >> "$ENV_FILE"
-[ -n "$SLACK_ALLOWED_USERS" ] && echo "SLACK_ALLOWED_USERS=$SLACK_ALLOWED_USERS" >> "$ENV_FILE"
-[ -n "$SLACK_HOME_CHANNEL" ] && echo "SLACK_HOME_CHANNEL=$SLACK_HOME_CHANNEL" >> "$ENV_FILE"
-
 exec "$@"

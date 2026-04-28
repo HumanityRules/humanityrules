@@ -18,10 +18,9 @@ WebUI at `http://localhost:8787`.
 
 Defined in `seed_app_templates.py` under `runtime_variables`. `category: "config"` vars land as plain ECS env vars; `category: "secret"` vars go through Secrets Manager and are wired into the task definition as `ecs.Secret` refs. See `template_deploy_service` and `secrets_utils` for the full flow.
 
-Inside the container, `entrypoint.sh` bridges ECS env vars into the two places Hermes actually reads from:
+Inside the container, `entrypoint.sh` renders **`~/.hermes/config.yaml`** from `config.yaml.template` on every boot. DOH owns this file; `terminal.backend` and the docker volumes are load-bearing for the sandbox, so user edits are not preserved.
 
-- **`~/.hermes/config.yaml`** — rendered from `config.yaml.template` on every boot. DOH owns this file; `terminal.backend` and the docker volumes are load-bearing for the sandbox, so user edits are not preserved.
-- **`~/.hermes/.env`** — rewritten every boot from the current env, so DOH config changes propagate.
+API keys (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `OPENROUTER_API_KEY`, `TAVILY_API_KEY`, `SLACK_*`, etc.) reach Hermes as plain ECS env vars and are consumed directly from the process environment — `run_agent.py` and the WebUI both resolve them via `os.getenv`. There is no `~/.hermes/.env` file; writing one would be redundant (python-dotenv defaults to `override=False`, so the file could never win over the process env anyway). The OpenAI-compatible base URL for `custom` providers is plumbed through `config.yaml`'s `model.base_url` (rendered from `DOH_LLM_BASE_URL`), not via `OPENAI_BASE_URL`.
 
 
 ## Provider config
@@ -40,7 +39,7 @@ For Claude on Bedrock, Hermes uses the `AnthropicBedrock` SDK (prompt caching, t
 
 ### OpenAI and OpenAI-compatible APIs (`custom`)
 
-Hermes does not treat `openai` as a runtime provider name for direct API access. Use **`custom`** with **`DOH_LLM_BASE_URL`** pointing at an OpenAI-compatible endpoint (the entrypoint maps that into `config.yaml` and, when not on Bedrock, into `OPENAI_BASE_URL` in `~/.hermes/.env`).
+Hermes does not treat `openai` as a runtime provider name for direct API access (it's not in `PROVIDER_REGISTRY`). Use **`custom`** with **`DOH_LLM_BASE_URL`** pointing at an OpenAI-compatible endpoint; the entrypoint writes that to `config.yaml`'s `model.base_url`, and `run_agent.py` passes it explicitly to the OpenAI SDK constructor — no env-var bridge needed.
 
 **Example — GPT 5.4 Mini on the official OpenAI API** (e.g. from-template overrides):
 
