@@ -7,7 +7,7 @@ Usage:
     uv run manage.py doh_control teardown-app --app ai-detector-and-humanizer
     uv run manage.py doh_control teardown-app --app foo --remove-app --delete-secrets --delete-efs-data --delete-policies
     uv run manage.py doh_control deploy-app-template --template hermes-agent --org acme-corp --workspace default --env default --app-name hermes-vmendi
-    uv run manage.py doh_control retry-env-provisioning --slug default --aws-account "Name"
+    uv run manage.py doh_control redeploy-env --slug default --aws-account "Name"
     uv run manage.py doh_control redeploy-app --app simple-dashboard
     uv run manage.py doh_control redeploy-app --app simple-dashboard --env default
     uv run manage.py doh_control redeploy-app --app simple-dashboard --deployment <uuid>
@@ -68,10 +68,13 @@ class Command(BaseCommand):
             help="With --remove-app: also delete policies targeting app-name={app}.",
         )
 
-        # retry-env-provisioning
-        retry_env = subparsers.add_parser("retry-env-provisioning", help="Retry provisioning for a failed environment")
-        retry_env.add_argument("--slug", required=True, help="Environment slug")
-        retry_env.add_argument("--aws-account", required=True, help="AWS account name")
+        # redeploy-env
+        redeploy_env = subparsers.add_parser(
+            "redeploy-env",
+            help="Re-run CloudFormation provisioning for an environment (DRAFT, ERROR, or READY sources)",
+        )
+        redeploy_env.add_argument("--slug", required=True, help="Environment slug")
+        redeploy_env.add_argument("--aws-account", required=True, help="AWS account name")
 
         # redeploy-app
         redeploy_app = subparsers.add_parser(
@@ -143,8 +146,8 @@ class Command(BaseCommand):
             self._handle_teardown_env(options)
         elif operation == "teardown-app":
             self._handle_teardown_app(options)
-        elif operation == "retry-env-provisioning":
-            self._handle_retry_env_provisioning(options)
+        elif operation == "redeploy-env":
+            self._handle_redeploy_env(options)
         elif operation == "redeploy-app":
             self._handle_redeploy_app(options)
         elif operation == "deploy-app-template":
@@ -191,19 +194,24 @@ class Command(BaseCommand):
         self.stdout.write(self.style.WARNING("\nProvisioning will start automatically (job worker picks up pending environments)"))
         self.stdout.write("")
 
-    def _handle_retry_env_provisioning(self, options):
-        """Retry environment provisioning by setting status to pending."""
+    def _handle_redeploy_env(self, options):
+        """Re-queue an environment for CloudFormation provisioning by flipping status to PENDING.
+
+        Allowed source statuses: DRAFT, ERROR, READY (re-converge a working env).
+        Soft no-op: PENDING (already queued).
+        Hard-blocked: PROVISIONING (in flight), TEARDOWN_PENDING / TEARING_DOWN
+        (lifecycle conflict — would race the teardown executor on the same CFN stack),
+        DISCARDED (abandoned setup draft, nothing to provision).
+        """
         slug = options["slug"]
         account_name = options["aws_account"]
 
-        # Find AWS account
         try:
             aws_account = models.AWSAccount.objects.get(name=account_name)
         except models.AWSAccount.DoesNotExist:
             self.stderr.write(self.style.ERROR(f"AWS account '{account_name}' not found"))
             return
 
-        # Find environment
         try:
             env = models.Environment.objects.get(aws_account=aws_account, slug=slug)
         except models.Environment.DoesNotExist:
@@ -211,22 +219,43 @@ class Command(BaseCommand):
             return
 
         if env.status == models.Environment.Status.PENDING:
-            self.stdout.write(self.style.WARNING(f"Environment '{slug}' is already pending"))
+            self.stdout.write(self.style.WARNING(f"Environment '{slug}' is already queued for provisioning"))
             return
 
-        if env.status == models.Environment.Status.PROVISIONING:
-            self.stderr.write(self.style.ERROR(f"Environment '{slug}' is already being provisioned"))
+        blocked_statuses = (
+            models.Environment.Status.PROVISIONING,
+            models.Environment.Status.TEARDOWN_PENDING,
+            models.Environment.Status.TEARING_DOWN,
+            models.Environment.Status.DISCARDED,
+        )
+        if env.status in blocked_statuses:
+            self.stderr.write(self.style.ERROR(
+                f"Environment '{slug}' is in '{env.status}' state - cannot redeploy. "
+                f"Wait for the current operation to complete, or recreate the environment if it was discarded."
+            ))
             return
 
-        # Set to pending
+        allowed_statuses = (
+            models.Environment.Status.DRAFT,
+            models.Environment.Status.ERROR,
+            models.Environment.Status.READY,
+        )
+        if env.status not in allowed_statuses:
+            self.stderr.write(self.style.ERROR(
+                f"Environment '{slug}' has unexpected status '{env.status}'. "
+                f"Allowed source statuses: {', '.join(allowed_statuses)}"
+            ))
+            return
+
         old_status = env.status
         env.status = models.Environment.Status.PENDING
-        env.status_message = f"Retry triggered (was: {old_status})"
+        env.status_message = f"Redeploy triggered via doh_control (was: {old_status})"
         env.save(update_fields=["status", "status_message", "updated_at"])
 
-        self.stdout.write(self.style.SUCCESS(f"\nEnvironment '{slug}' queued for retry"))
+        self.stdout.write(self.style.SUCCESS(f"\nEnvironment '{slug}' queued for redeploy"))
+        self.stdout.write(f"  AWS Account: {aws_account.name}")
         self.stdout.write(f"  Previous status: {old_status}")
-        self.stdout.write(self.style.WARNING("Provisioning will restart automatically"))
+        self.stdout.write(self.style.WARNING("Provisioning will restart automatically (job worker picks up pending environments)"))
         self.stdout.write("")
 
     def _handle_teardown_env(self, options):

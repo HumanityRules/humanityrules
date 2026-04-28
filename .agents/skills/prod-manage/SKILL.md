@@ -33,8 +33,8 @@ Operations that modify state for environments and deployments.
     --slug default \
     --aws-account "DevOps Hero AWS Account"
 
-# Retry failed environment provisioning
-./prod_manage.sh doh_control retry-env-provisioning \
+# Re-queue an environment for provisioning
+./prod_manage.sh doh_control redeploy-env \
     --slug default \
     --aws-account "DevOps Hero AWS Account"
 

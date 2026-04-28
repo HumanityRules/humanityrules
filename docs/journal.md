@@ -1,8 +1,64 @@
 # DevOpsHero Development Journal
 
+## 2026-04-27 20:17 - [DevEx] Rename `retry-env-provisioning` → `redeploy-env` and tighten its guard set
+
+**Conversation:** [2026-04-27-2017-2bdda279.md](conversations/2026-04-27-2017-2bdda279.md)
+
+Companion to the `redeploy-app` rename earlier in this session. The naming friction was the same — operators read "retry" and assume failure-recovery, and the journal had already flagged this — but the *behavior* fix is what makes this entry worth writing on its own. The pre-rename `retry-env-provisioning` had a silent footgun the rename forced into the open.
+
+**The latent bug:**
+
+The pre-rename handler only blocked `PENDING` and `PROVISIONING`, then flipped *everything else* to `PENDING`. That includes `TEARDOWN_PENDING`, `TEARING_DOWN`, and `DISCARDED`. Two of those are dangerous, one is meaningless:
+
+- `TEARING_DOWN → PENDING` would put the environment teardown executor and the provisioning executor on the same CFN stack at the same time. Race condition with destructive blast radius.
+- `TEARDOWN_PENDING → PENDING` is "user clicked teardown, then ran the CLI" — racing the worker pickup, but in a way that depends on which executor reads the row first. Indeterminate.
+- `DISCARDED → PENDING` is asking the worker to provision an env that was deliberately abandoned. No active harm, but not a real operation.
+
+None of these had been reported as an incident, but they were one careless operator-typo away. Worth fixing under cover of the rename instead of in a separate "bug fix" PR that nobody would think to write.
+
+**The new guard set:**
+
+Switched from a deny-list (block PENDING + PROVISIONING) to an explicit allow-list:
+
+- **Allow:** `DRAFT`, `ERROR`, `READY`. The third is the operator's actual common-case need ("re-converge a working env after a CDK template change") and is what the pre-rename command de-facto already supported.
+- **Soft no-op:** `PENDING` (already queued — warn and exit 0).
+- **Hard-block:** `PROVISIONING`, `TEARDOWN_PENDING`, `TEARING_DOWN`, `DISCARDED`.
+
+Allow-list semantics also mean any future addition to `Environment.Status` lands on a "unexpected status" error rather than silently flipping to PENDING. Defensive against the next status-enum addition.
+
+**Why this is *not* a clean parallel to `redeploy-app`:**
+
+The redeploy-app rename was an architectural change — the CLI was mutating an existing Deployment row in place when it should have been cloning to a new row, and the new code mirrors `app_deployment_redeploy` in `views/apps.py`. There's no analogous "Redeploy" button or view for environments — the agent's `provision_environment` tool is the closest equivalent, and it's *more* restrictive than even the new CLI (it refuses `READY` outright). So `redeploy-env` is intentionally not a strict mirror of any UI flow; it's the SRE escape hatch designed to be looser than chat-driven re-provisioning.
+
+**Open question parked:** the agent tool's refusal of `READY` is now in observable disagreement with the CLI. Two reasonable resolutions:
+
+1. Tighten the CLI to match the agent (drop `READY`). Means losing the most common operator capability — re-converging a working env from the command line — and nobody asked for that. Probably wrong.
+2. Loosen the agent to accept `READY` with a confirmation step. Means the chat product needs a "are you sure you want to re-converge a healthy env?" pattern, which it doesn't currently have. Bigger change, separate session.
+
+Left both as-is for now. The CLI is the right venue for "I know what I'm doing, re-run CFN" and the agent is the right venue for guided setup; the divergence reflects that.
+
+**What was *not* changed:**
+
+- **No `--force` flag for the hard-blocks.** If the env is `TEARING_DOWN`, the operator wait-or-fix-the-teardown is correct; offering an override invites people to use it.
+- **No status_message audit trail expansion.** Kept the existing `f"Redeploy triggered via doh_control (was: {old_status})"` shape, mirroring how the rest of `doh_control` writes to status_message.
+- **No new args.** Old `--slug` + `--aws-account` are still the right primary keys for an environment in the CLI; nothing in the rename touched lookup ergonomics.
+
+**Skill-doc state:**
+
+`prod-manage` SKILL example was the only doc that needed updating (the `manage-commands` SKILL files have been describing this command as "redeploy" for months — they were ahead of the code, same as for `redeploy-app`). First draft included the allowed/blocked status set as an inline shell comment; trimmed back to a one-liner since the comment was redundant with `--help` output and would drift if guards change.
+
+**Verification:** `uv run manage.py doh_control redeploy-env --help` parses cleanly. Parent `doh_control --help` lists `redeploy-env` and `redeploy-app` adjacent, with the old `retry-env-provisioning` name removed entirely. Lints clean. Guard logic is straightforward enough that no integration test was added — the surface is "string compare statuses, save the row", and the existing `_handle_create_env`/`_handle_teardown_env` already exercise the row write.
+
+**Key points:**
+
+- A rename was the cheapest way to ship a behavior fix that was technically pre-existing. The original silent-flip-to-pending of `TEARING_DOWN` was the kind of bug nobody writes a separate ticket for, but it would have eventually caught someone. Combining the rename with the tightening means the "you're using a different command now" prompt naturally surfaces the new guard behavior in operator memory.
+- Allow-list + explicit "unexpected status" branch is the right shape for any code that flips lifecycle states. The pre-rename code had deny-list semantics, which fail-open as the status enum grows. We now have *two* commands (`redeploy-env`, `redeploy-app`) using allow-list shape; if a third appears we should make it a helper.
+- The CLI vs agent divergence on `READY` is a feature, not a bug — but it's the kind of feature that needs explicit documentation. If we don't write down "the CLI is the SRE escape hatch and is intentionally looser than the agent tool", the next person to look at it will assume it's an oversight and try to "fix" it. Note added to the entry; consider adding it to a future ops doc when one materializes.
+- Pattern emerging across the last two sessions: `doh_control` subcommands are settling into a `<verb>-<noun>` shape (`redeploy-app`, `redeploy-env`, `teardown-app`, `teardown-env`, `deploy-app-template`, `create-env`). Worth keeping that consistent — when we add the next subcommand, default to that shape unless there's a reason not to.
+
 ## 2026-04-27 19:57 - [DevEx] Rename `retry-app-deployment` → `redeploy-app`, with semantics matching the UI's Redeploy button
 
-**Conversation:** [2026-04-27-1957-2bdda279.md](conversations/2026-04-27-1957-2bdda279.md)
+**Conversation:** [2026-04-27-2017-2bdda279.md](conversations/2026-04-27-2017-2bdda279.md)
 
 The "rename deferred" follow-up flagged in this morning's [DinD orphan-reap fix entry](#2026-04-27-1631---deployment-persist-hermes-tool-container-state-across-task-restarts-via-dind-side-efs-snapshots): `doh_control retry-app-deployment` had a misleading name *and* mismatched semantics. Renamed to `redeploy-app` and rebuilt the implementation so it matches `app_deployment_redeploy` in `devopshero_app/views/apps.py` exactly. No backward-compat alias.
 
