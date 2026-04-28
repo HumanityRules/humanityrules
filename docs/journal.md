@@ -1,5 +1,47 @@
 # DevOpsHero Development Journal
 
+## 2026-04-27 18:51 - [DevEx] Install bash + coreutils on the doh-dind image so doh_app_shell / doh_app_exec work against the DinD sidecar
+
+**Conversation:** [2026-04-27-1851-ce940fcc.md](conversations/2026-04-27-1851-ce940fcc.md)
+
+`doh_app_shell` and `doh_app_exec` couldn't target the `docker-dind` container because the image is Alpine-based (`docker:26.1.0-dind`) and we'd only `apk add`'d `python3 py3-psutil zstd` — there was no `/bin/bash` and no GNU `timeout`. Adding `bash coreutils` to the apk install line fixes both commands; bumped `DOH_DIND_IMAGE_VERSION` 0.2.0 → 0.2.1 and re-pushed.
+
+**Why both commands actually need bash:**
+
+- `doh_app_shell` defaults to `--command /bin/bash` — soft requirement, the user could pass `--command /bin/sh` as a workaround.
+- `doh_app_exec` is a hard bash dependency. Its SSM `--command` is `bash -c {wrapper}`, and the wrapper itself does `bash /tmp/doh_exec_script.sh`. Neither layer respects an override flag, so without `/bin/bash` the call dies with `bash: not found` before any user logic runs. There's no escape hatch.
+
+**Why coreutils too:**
+
+The wrapper builds `timeout --preserve-status {N}s {inner}` when `--timeout` is set. `--preserve-status` is GNU-only — busybox's `timeout` doesn't accept it. Without coreutils, any `--timeout N` invocation would fail at the flag-parse stage. Verified live: with coreutils installed, `doh_app_exec --timeout 3` against a 30-second `sleep` returned `exit_code: 143` (SIGTERM) with the post-sleep echo correctly absent. That's `timeout --preserve-status` propagating the killed-process exit code rather than the default 124 — exactly what the wrapper assumes.
+
+**What we deliberately didn't add:**
+
+- **`sudo`.** The wrapper wraps with `sudo -EH -u USER bash -c ...` when `--as USER` is set or the task definition's `user:` field is non-root. Our `_DOCKER_DIND_CONTAINER` in `seed_app_templates.py` doesn't set a `user:`, so it runs as root, `_task_container_user` returns `None`, `run_as` becomes `None`, and the sudo branch is never taken. Operator could only hit it by explicitly passing `--as someuser`, which makes no sense for the DinD sidecar. Skipped to keep the layer small.
+
+**Side effects on existing runtime:** none.
+
+- `apk add bash` doesn't change `/bin/sh` — that stays a busybox symlink to `ash`. Our `entrypoint.sh` (`#!/bin/sh`) and `dockerd-entrypoint.sh` keep running under busybox ash exactly as before.
+- `snapshotter.py` is Python; doesn't care.
+- Image size delta: bash ~5 MB extracted, coreutils ~5 MB. Noise against the ~470 MB `docker:dind` base.
+- Snapshot impact: zero. The snapshotter only `docker export`s `hermes-*` tool containers; the DinD image's own layers are never snapshotted.
+
+**Verification (full E2E):**
+
+Built and pushed `0.2.1` to CH Sandbox / default env ECR via `doh_build_prebuilt_image`, re-seeded templates, deployed a fresh `hermes-vmendi01` from `hermes-personal` into Course Hero / default. Then against the live `docker-dind` container:
+
+- `bash --version` → `GNU bash, version 5.2.21(1)-release (aarch64-alpine-linux-musl)` at `/bin/bash`.
+- `which timeout` → `/usr/bin/timeout` (the GNU one from coreutils, not busybox's).
+- `doh_app_exec` returned `exit_code: 0` end-to-end — meaning the SSM-side `bash -c {wrapper}` and the inner `bash /tmp/doh_exec_script.sh` both resolved.
+- `doh_app_exec --timeout 3` against a 30-second sleep returned `exit_code: 143` after ~3 s.
+
+**Key points:**
+
+- `doh_app_exec`'s wrapper is bash-only at two nested layers (the SSM `--command` and the inner script invocation), neither overridable by flags. Any container we want to script against must have `/bin/bash`. Worth keeping in mind for any future Alpine-derived images we add to a task.
+- `--preserve-status` is the load-bearing GNU-ism in the wrapper. Busybox `timeout` would silently accept `-s SIG -k KILLDELAY DURATION CMD` but reject `--preserve-status` outright. If we ever want this command to work on a busybox-only image (security-minimal containers, distroless, etc.), the cleaner fix is to portable-ize the wrapper rather than ship coreutils everywhere — note this for whenever it becomes relevant.
+- The DinD container is a slightly weird target for `doh_app_exec` philosophically (its job is dockerd + snapshotter PID 1, not arbitrary script hosting), but in practice this is exactly the access we want when triaging snapshot/restore issues — `docker images`, `ls /var/lib/doh-dind/persistence`, etc. Worth the 10 MB.
+- Version bump conflict noted: I'd planned 0.1.1 → 0.1.2, but a parallel commit (`b7a6a6d`, "Persist tool-container state via docker commit; snapshot only periodically") had landed 0.2.0 in the meantime. Bumped to 0.2.1 to keep history monotonic. Standard hazard when image versions live in source-controlled constants and multiple branches ship image-touching changes.
+
 ## 2026-04-27 16:31 - [Deployment] Persist Hermes tool-container state across task restarts via DinD-side EFS snapshots
 
 **Conversation:** [2026-04-27-1632-a1dd698f.md](conversations/2026-04-27-1632-a1dd698f.md)
