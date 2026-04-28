@@ -1,4 +1,4 @@
-FROM ghcr.io/nesquena/hermes-webui:0.50.126
+FROM ghcr.io/nesquena/hermes-webui:0.50.236
 
 USER root
 
@@ -6,7 +6,7 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends docker-cli git patch \
     && rm -rf /var/lib/apt/lists/*
 
-RUN git clone --depth 1 --branch v2026.4.16 https://github.com/NousResearch/hermes-agent.git \
+RUN git clone --depth 1 --branch v2026.4.23 https://github.com/NousResearch/hermes-agent.git \
         /opt/hermes-defaults/hermes-agent \
     && rm -rf /opt/hermes-defaults/hermes-agent/.git
 
