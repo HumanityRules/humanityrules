@@ -14,7 +14,7 @@ PERSISTENCE_DIR="/var/lib/doh-dind/persistence"
 LATEST_SNAPSHOT="$PERSISTENCE_DIR/latest.tar.zst"
 READY_MARKER="/var/run/doh-restore-ready"
 
-# Tag Hermes always launches. The restore step guarantees an image with this
+# The tag Hermes always launches. The restore step guarantees an image with this
 # tag exists on the daemon before marking ready, so Hermes's first `docker run`
 # never hits a pull.
 TOOLBOX_TAG="doh-toolbox:latest"
@@ -72,23 +72,16 @@ if [ "$RESTORE_MODE" = "force_rebuild" ] && [ -f "$LATEST_SNAPSHOT" ]; then
     rm -f "$LATEST_SNAPSHOT" "$PERSISTENCE_DIR/latest.meta.json"
 fi
 
-# ENV vars the base image (nikolaik/python-nodejs) sets at build time. `docker
-# export` drops the image config, so we re-apply the load-bearing ones via
-# `docker import --change` to keep the restored image behaviourally close to
-# a freshly-pulled base:
-#   PATH        — harmless if redundant with /etc/profile, load-bearing if
-#                 anything sets up an override (poetry, conda)
-#   LANG        — Python stdout encoding and locale
-#   POETRY_HOME — poetry is pre-installed in the base; without this it falls
-#                 back to its own default and state splits
-# GPG_KEY / PYTHON_VERSION / PYTHON_SHA256 are build-time only, skipped.
-IMPORT_CHANGES="--change=ENV PATH=/usr/local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin --change=ENV LANG=C.UTF-8 --change=ENV POETRY_HOME=/usr/local"
-
+# Snapshots are produced by `docker save`, which preserves image metadata
+# (ENV, CMD, WORKDIR, etc.) — no --change flags needed on restore. The
+# snapshotter flattens the image to a single layer before saving, so load
+# here only materializes one layer.
 restored_from_snapshot=0
 if [ "$RESTORE_MODE" != "skip" ] && [ -s "$LATEST_SNAPSHOT" ]; then
     echo "[doh-dind] Restoring tool image from $LATEST_SNAPSHOT"
-    # shellcheck disable=SC2086 # IMPORTANT: deliberate word-splitting for --change flags
-    if zstd -dc "$LATEST_SNAPSHOT" | docker import $IMPORT_CHANGES - "$TOOLBOX_TAG"; then
+    if zstd -dc "$LATEST_SNAPSHOT" | docker load; then
+        # `docker load` preserves the tag baked into the tarball, which is
+        # TOOLBOX_TAG — no extra re-tag step needed.
         echo "[doh-dind] Restored $TOOLBOX_TAG from snapshot"
         restored_from_snapshot=1
     else
