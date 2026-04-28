@@ -1,0 +1,15 @@
+--- a/tools/environments/docker.py
++++ b/tools/environments/docker.py
+@@ -551,6 +551,12 @@ class DockerEnvironment(BaseEnvironment):
+     def cleanup(self):
+         """Stop and remove the container. Bind-mount dirs persist if persistent=True."""
+         if self._container_id:
++            # DOH diagnostic: cleanup() issues `docker stop` regardless of the
++            # _persistent flag (only the post-stop removal is gated), so any
++            # caller here tears down the tool container and breaks state
++            # continuity. Log the traceback so we can tell which path fired.
++            import traceback
++            logger.error("DOH-CLEANUP-TRACE container=%s persistent=%s\n%s", self._container_id[:12], self._persistent, "".join(traceback.format_stack()))
+             try:
+                 # Stop in background so cleanup doesn't block
+                 stop_cmd = (
