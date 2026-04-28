@@ -1,5 +1,46 @@
 # DevOpsHero Development Journal
 
+## 2026-04-27 22:29 - [DevEx] Move `policy_proxy/` into `template_repos/`
+
+**Conversation:** [2026-04-27-2229-8207d57a.md](conversations/2026-04-27-2229-8207d57a.md)
+
+Repo housekeeping: `policy_proxy/` was a top-level directory at repo root, peer to `devopshero_app/`, `infra_devopshero/`, `lambdas/`. It is now `template_repos/policy_proxy/`, peer to `template_repos/doh_dind/`, `template_repos/hermes_agent/`, `template_repos/openclaw_agent/`. Pure relocation — no behavioral change in build, deploy, or runtime.
+
+**The framing question.** "Should `policy_proxy/` live under `template_repos/`?" turns on what `template_repos/` actually means today. The original intent (per migration `0033_add_app_template.py` and `settings.TEMPLATE_REPOS_DIR`) was "AppTemplate-backed source repos that DOH clones via `file://` at customer-app deploy time and pushes to per-app ECR." `hermes_agent/` and `openclaw_agent/` fit that exactly. But `doh_dind/` already broke the strict reading: it's a DOH-owned utility image, *not* AppTemplate-driven, built out-of-band via `manage.py doh_build_prebuilt_image --source-dir template_repos/doh_dind …` and referenced by tag from a sidecar entry on AppTemplates. Once `doh_dind/` is in `template_repos/`, the directory's *de facto* meaning is "DOH-owned container source trees that ship into customer accounts." `policy_proxy/` is exactly that shape — built per-env, pushed to `doh/{env_slug}/policy-proxy:{POLICY_PROXY_IMAGE_VERSION}`, lives outside the AppTemplate clone path entirely (its presence is signaled by `image_source="policy_proxy"` on a container entry, which `appconfig.py` and `deploy_app.py` resolve directly). So categorically: same bucket as `doh_dind/`, belongs in the same directory.
+
+**Why having it at repo root was actively misleading.** Repo-root peers like `devopshero_app/`, `infra_devopshero/`, `lambdas/` are top-level platform components — the Django app, the control-plane CDK, the Lambda functions. Putting `policy_proxy/` next to those overstates what it is: it's a small FastAPI proxy that ships *into* customer ECS tasks alongside other co-deployed images. Putting it next to `doh_dind/` accurately reflects that role.
+
+**Mechanical changes (small surface area).**
+
+- `git mv policy_proxy template_repos/policy_proxy` — 19 file renames, history preserved. `git mv` also dragged the untracked `.venv/`, `.pytest_cache/`, `.DS_Store` along physically; those got deleted in a follow-up since they're gitignored anyway and reproducible from `uv.lock`.
+- `devopshero_app/services/infra_customer/deploy_app.py:38`: `POLICY_PROXY_SOURCE_DIR = Path(__file__).resolve().parents[3] / "policy_proxy"` → `… / "template_repos" / "policy_proxy"`. Stuck with the `parents[3]`-relative pattern instead of swapping in `settings.TEMPLATE_REPOS_DIR / "policy_proxy"` — the existing constants in this file don't import Django settings at module load, and consistency beat symmetry. (Also: `settings.TEMPLATE_REPOS_DIR` is semantically the AppTemplate clone root; `policy_proxy` is not cloned through that path, so the symmetry would be misleading anyway.)
+- `template_repos/policy_proxy/README.md`: two `cd policy_proxy` snippets in the local-dev section retargeted to `cd template_repos/policy_proxy`.
+
+**What deliberately stayed unchanged.**
+
+- `Dockerfile` — `COPY policy_proxy ./policy_proxy` is build-context-relative, works at any host path.
+- `docs/policy_proxy_design.md` — only path-shaped reference is the runtime URL `/__policy_proxy/healthz`, not a directory; the AppTemplate field name `policy_proxy: true` isn't a path either.
+- `lambdas/policy_proxy_auth/README.md` — references its own dir (`cd lambdas/policy_proxy_auth`); the auth Lambda did not move.
+- The `pyproject.toml` / `uv.lock` / standalone uv-project shape of `policy_proxy/` — kept self-contained (own FastAPI/uvicorn/httpx deps, separate from the Django root project) because it ships as its own Docker image with hash-pinned `requirements.txt`. Not a candidate for absorption into the root pyproject; that would pollute the control-plane image with FastAPI's transitive surface for no reason.
+- Anything in `docs/conversations/*.md` referencing `policy_proxy/` paths — those are immutable session transcripts; treated like git history.
+
+**Verification:**
+
+- 27/27 policy_proxy unit tests pass at the new path (after `rm -rf .venv && uv sync` to refresh the venv — the carried-over venv had stale absolute paths in its activation scripts, which is expected uv behavior on directory rename).
+- `POLICY_PROXY_SOURCE_DIR` resolves to a real directory and contains both `Dockerfile` and `policy_proxy/app.py`; verified by importing `deploy_app` under `DJANGO_SETTINGS_MODULE` and printing the constant.
+- `git status` shows clean renames + the one path-constant edit; no orphan files.
+- Linter clean.
+
+**Naming caveat parked for later.** `template_repos/` is now genuinely a misnomer — the directory holds two non-template entries (`doh_dind/`, `policy_proxy/`) and two AppTemplate-backed ones (`hermes_agent/`, `openclaw_agent/`). A more accurate name would be `bundled_images/` or `vendored_images/` or `shipped_images/`. Not renamed in this session because (a) it's a much bigger surface — `settings.TEMPLATE_REPOS_DIR`, the `source_repo_path` migration help-text, every conversation/journal reference, the deploy-form template — and (b) the misnomer is mostly cosmetic now that the actual semantics ("DOH-owned image source trees") are the same for everything in there. Worth doing in a dedicated session if/when there's appetite.
+
+**Key points:**
+
+- The "template_repos" directory has been quietly broadening its meaning since `doh_dind/` landed; this move makes that drift explicit. Decisions about what belongs there should now use the rule "is this a DOH-owned container source tree that ships into a customer account?", not the original "is this a clone-time AppTemplate repo?". The AppTemplate clone path (`settings.TEMPLATE_REPOS_DIR / source_repo_path`) is one *consumer* of this directory, not its *purpose*.
+- Path constants for repo-relative resolution: `Path(__file__).resolve().parents[N]` is the prevailing pattern in `infra_customer/`, even though `settings.TEMPLATE_REPOS_DIR` exists. Don't mix the two in one file just for symmetry — pick whichever is already there. (If we ever add a new infra-side constant pointing into `template_repos/`, that's the moment to consider whether to import settings; for a one-line tail-edit it isn't.)
+- `git mv` carries untracked siblings of the moved tracked files along physically (the `.venv` ride-along surprised me; expected `git mv` to touch only tracked entries). Useful in this case because the dev artifacts came too, but the mental model is "git mv is a `mv` plus index update", not "index update only."
+- When moving a self-contained uv project, the venv has hardcoded absolute paths in its activation scripts and Python shebangs. `uv sync` after the move is mandatory if you want to run anything in it. Tests confirm in ~2-3 s.
+- The naming-debt tradeoff (`template_repos/` is now misnamed but renaming is invasive) is a recurring shape: directory names ossify because their referents move into the test/migration/doc surface area. Worth flagging but not always worth fixing on the same patch.
+
 ## 2026-04-27 20:17 - [DevEx] Rename `retry-env-provisioning` → `redeploy-env` and tighten its guard set
 
 **Conversation:** [2026-04-27-2017-2bdda279.md](conversations/2026-04-27-2017-2bdda279.md)

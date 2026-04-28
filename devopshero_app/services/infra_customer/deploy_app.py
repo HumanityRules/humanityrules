@@ -35,7 +35,7 @@ from . import secrets_utils
 # Pinned here rather than on AppConfig: the policy proxy is DOH-owned, not
 # AppTemplate-driven, and a version bump is a platform operation.
 POLICY_PROXY_IMAGE_VERSION = "0.1.1"
-POLICY_PROXY_SOURCE_DIR = Path(__file__).resolve().parents[3] / "policy_proxy"
+POLICY_PROXY_SOURCE_DIR = Path(__file__).resolve().parents[3] / "template_repos" / "policy_proxy"
 
 # A single flag signals deployment-time capabilities that we need to grant to, at least, the ECS task. 
 # Check the journal "Hermes Bedrock access moved from static keys to ECS task role" for more details.
