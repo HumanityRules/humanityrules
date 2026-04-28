@@ -436,12 +436,10 @@ _DOCKER_DIND_CONTAINER = {
     # Empty DOCKER_TLS_CERTDIR disables TLS on the dockerd listener, which is
     # required because we bind on tcp://127.0.0.1:2375 for in-task loopback.
     # TOOL_IMAGE_BASE is the fallback base image /entrypoint.sh pulls on
-    # fresh boot (when no snapshot exists on EFS yet); DOH_SNAPSHOT_RESTORE
-    # controls restore behavior (auto|skip|force_rebuild) for operator recovery.
+    # fresh boot (when no snapshot exists on EFS yet).
     "environment": {
         "DOCKER_TLS_CERTDIR": "",
         "TOOL_IMAGE_BASE": "nikolaik/python-nodejs:python3.11-nodejs20",
-        "DOH_SNAPSHOT_RESTORE": "auto",
         # TEMPORARY: makes dockerd log every API call so we can see which
         # client sends stop/kill to the tool containers. Remove once the
         # cause of mid-session container recycling is identified.
