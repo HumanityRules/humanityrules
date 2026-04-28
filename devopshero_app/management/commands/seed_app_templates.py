@@ -484,6 +484,20 @@ _HERMES_CONTAINER_BASE = {
         # reusing the same running container across the day, letting the
         # snapshotter capture a realistic evolving writable layer.
         "TERMINAL_LIFETIME_SECONDS": "86400",
+        # TL;DR: turns off per-container disk size limits inside DinD
+        # because our filesystem can't enforce them, and trying causes
+        # tool containers to fail to start. Task-level limits still apply.
+        #
+        # Detail: per-container disk quotas need overlay2-on-XFS with
+        # pquota, which DinD's overlay2-on-ext4 doesn't provide. Upstream's
+        # probe in _DockerEnvironment._storage_opt_supported flakes on our
+        # setup — it occasionally caches True from a hello-world probe that
+        # a 5 GB real container create then rejects (see dockerd error
+        # "--storage-opt is supported only for overlay over xfs with
+        # 'pquota' mount option"). Setting disk=0 skips the flag entirely;
+        # blast-radius is already bounded by the ECS task-level resource
+        # limits, and rootfs bloat is capped by the snapshot/flatten cadence.
+        "TERMINAL_CONTAINER_DISK": "0",
     },
     # Mirror doh-dind's stop_timeout so Hermes's own atexit/SIGTERM handling
     # has headroom. Hermes doesn't snapshot itself, but it does try to
