@@ -87,7 +87,16 @@ _last_saved_fingerprint: str = ""
 
 
 def _run(cmd: list[str]) -> subprocess.CompletedProcess:
+    # Pre-call log so we can reconcile our subprocess activity against
+    # dockerd's debug log when diagnosing mystery stop/kill calls.
+    LOG.info("subprocess: %s", " ".join(cmd))
     return subprocess.run(cmd, check=True, capture_output=True, text=True)
+
+
+def _run_shell(cmd: str) -> subprocess.CompletedProcess:
+    """Same as _run but for a shell pipeline (docker export | zstd | ...)."""
+    LOG.info("subprocess (shell): %s", cmd)
+    return subprocess.run(cmd, shell=True, check=True)
 
 
 def _list_tool_containers(running_only: bool) -> list[dict]:
@@ -122,15 +131,6 @@ def _diff_fingerprint(container_id: str) -> str:
         # Container gone between listing and diff — caller handles.
         return ""
     return hashlib.sha256(out.encode()).hexdigest()
-
-
-def _load_latest_meta() -> dict:
-    if not LATEST_META.exists():
-        return {}
-    try:
-        return json.loads(LATEST_META.read_text())
-    except (json.JSONDecodeError, OSError):
-        return {}
 
 
 def _prune_snapshots() -> None:
@@ -196,13 +196,14 @@ def _flatten_toolbox_tag() -> bool:
     )
     ok = True
     try:
-        subprocess.run(cmd, shell=True, check=True, capture_output=True, text=True)
+        _run_shell(cmd)
     except subprocess.CalledProcessError as e:
         LOG.error("flatten: export|import failed err=%s", e.stderr.strip() if e.stderr else e)
         ok = False
 
     # Always clean up the scratch container by its known id, even if the
     # export|import failed — otherwise it accumulates across failed saves.
+    LOG.info("subprocess: docker rm -f %s (flatten scratch)", scratch_cid[:12])
     subprocess.run(["docker", "rm", "-f", scratch_cid], capture_output=True, text=True)
     return ok
 
@@ -227,7 +228,7 @@ def do_save(trigger: str) -> bool:
     # stream on stdout; zstd compresses into place on EFS.
     cmd = f"docker save {TOOLBOX_TAG} | zstd -T0 -q -o {INCOMING}"
     try:
-        subprocess.run(cmd, shell=True, check=True)
+        _run_shell(cmd)
     except subprocess.CalledProcessError as e:
         LOG.error("save failed trigger=%s err=%s", trigger, e)
         if INCOMING.exists():
