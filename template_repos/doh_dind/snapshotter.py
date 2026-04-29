@@ -408,7 +408,7 @@ def _handle_termination_signal(signum: int, _frame: object) -> None:
 def main() -> None:
     logging.basicConfig(
         level=logging.INFO,
-        format="%(asctime)s %(levelname)s %(name)s %(message)s",
+        format="%(asctime)s %(levelname)s Snapshotter: %(message)s",
     )
     PERSISTENCE_DIR.mkdir(parents=True, exist_ok=True)
     SNAPSHOTS_DIR.mkdir(parents=True, exist_ok=True)
