@@ -1,4 +1,4 @@
-FROM ghcr.io/nesquena/hermes-webui:0.50.236
+FROM ghcr.io/nesquena/hermes-webui:0.50.239
 
 USER root
 
@@ -9,6 +9,18 @@ RUN apt-get update \
 RUN git clone --depth 1 --branch v2026.4.23 https://github.com/NousResearch/hermes-agent.git \
         /opt/hermes-defaults/hermes-agent \
     && rm -rf /opt/hermes-defaults/hermes-agent/.git
+
+# Curate the bundled skill set with an allowlist: only skills listed in
+# skills-allowlist.txt ship in the image. Anything else (new upstream skills,
+# macOS-only skills, competitor coding agents, consumer/novelty skills,
+# policy-risky content) is pruned. This means a Hermes version bump can't
+# silently add new skills to Enterprise deployments — additions require an
+# allowlist edit. Done before SOUL.md etc. are copied so the pruned files
+# never land in an intermediate layer.
+COPY skills-allowlist.txt /tmp/skills-allowlist.txt
+COPY --chmod=755 prune-skills.sh /tmp/prune-skills.sh
+RUN /tmp/prune-skills.sh /opt/hermes-defaults/hermes-agent/skills /tmp/skills-allowlist.txt \
+    && rm -f /tmp/prune-skills.sh /tmp/skills-allowlist.txt
 
 COPY SOUL.md /opt/hermes-defaults/SOUL.md
 COPY config.yaml.template /opt/hermes-defaults/config.yaml.template
