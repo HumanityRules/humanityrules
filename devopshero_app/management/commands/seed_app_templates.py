@@ -17,7 +17,7 @@ LEARNEO_MCP_IMAGE_VERSION = "0.1.0"
 # Image tag DOH expects in doh/{env_slug}/doh-dind. Bump when we ship a new
 # snapshotter or entrypoint in template_repos/doh_dind/ and push via
 # `doh_build_prebuilt_image --source-dir template_repos/doh_dind --ecr-repo doh-dind --tag X.Y.Z`.
-DOH_DIND_IMAGE_VERSION = "0.2.3"
+DOH_DIND_IMAGE_VERSION = "0.2.4"
 
 
 OPENCLAW_TEMPLATE = {
