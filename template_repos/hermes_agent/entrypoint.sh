@@ -45,9 +45,7 @@ mkdir -p "$HERMES_DIR"
 
 # DOCKER_HOST points at the in-task DinD sidecar. The hermes container's
 # depends_on: {docker-dind, HEALTHY} already guarantees DinD is up before we
-# boot, and ECS launches us with DOCKER_HOST set from the template. Fail
-# hard on any of these invariants — backend=docker is the only supported
-# mode, so there is no fallback path.
+# boot, and ECS launches us with DOCKER_HOST set from the template.
 if [ -z "${DOCKER_HOST}" ]; then
     echo "FATAL: DOCKER_HOST is not set; cannot reach the DinD sidecar" >&2
     exit 1
@@ -69,13 +67,26 @@ TERMINAL_CWD="/workspace"
 DOCKER_VOLUMES='["/workspace:/workspace"]'
 echo "[entrypoint] Docker-backed Hermes tools enabled (DinD via DOCKER_HOST)."
 
-# Image availability is owned by the doh-dind sidecar: its entrypoint either
-# restores doh-toolbox:latest from an EFS snapshot or pulls TOOL_IMAGE_BASE
-# as a fallback, and only marks itself HEALTHY after the tag exists. Our
-# depends_on: {docker-dind, HEALTHY} blocks Hermes boot until then, so the
-# first `docker run doh-toolbox:latest` is guaranteed to hit a local tag.
+# Build the providers block. For Bedrock we ship a curated dict of
+# inference-profile IDs → human-readable labels; the WebUI's group builder
+# (api/config.py:get_available_models) reads providers.<pid>.models.
+PROVIDERS_BLOCK_FILE=$(mktemp)
+if [ "$DOH_LLM_PROVIDER" = "bedrock" ]; then
+    cat > "$PROVIDERS_BLOCK_FILE" <<'EOF'
+providers:
+  bedrock:
+    models:
+      'us.anthropic.claude-opus-4-7': "Opus 4.7"
+      'us.anthropic.claude-sonnet-4-6': "Sonnet 4.6"
+      'us.anthropic.claude-haiku-4-5-20251001-v1:0': "Haiku 4.5"
+EOF
+else
+    echo "providers: {}" > "$PROVIDERS_BLOCK_FILE"
+fi
 
 # Regenerate config.yaml from template on every boot. DOH owns this file.
+# sed's `r file` + `d` replaces the single-line __PROVIDERS_BLOCK__ marker
+# with the multi-line block from above.
 sed \
     -e "s|__CONFIG_PROVIDER__|${DOH_LLM_PROVIDER}|g" \
     -e "s|__MODEL__|${DOH_LLM_MODEL}|g" \
@@ -87,7 +98,10 @@ sed \
     -e "s|__TERMINAL_CWD__|${TERMINAL_CWD}|g" \
     -e "s|__TOOL_IMAGE__|${TOOL_IMAGE}|g" \
     -e "s|__DOCKER_VOLUMES__|${DOCKER_VOLUMES}|g" \
+    -e "/__PROVIDERS_BLOCK__/r ${PROVIDERS_BLOCK_FILE}" \
+    -e "/__PROVIDERS_BLOCK__/d" \
     /opt/hermes-defaults/config.yaml.template > "$HERMES_DIR/config.yaml"
+rm -f "$PROVIDERS_BLOCK_FILE"
 
 # Hermes reads bedrock.region from config.yaml (runtime_provider.py:895).
 if [ "$DOH_LLM_PROVIDER" = "bedrock" ]; then

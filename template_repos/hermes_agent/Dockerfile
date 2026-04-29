@@ -16,6 +16,20 @@ COPY patches /opt/hermes-defaults/patches
 COPY --chmod=755 entrypoint.sh /entrypoint.sh
 COPY --chmod=755 start.sh /start.sh
 
+# WebUI lives in ephemeral image layers at /apptoo/, so DOH's WebUI patches
+# are applied at build time (not boot, unlike the agent patches on EFS).
+# See patches-webui/README.md for per-patch rationale. __pycache__/ eviction
+# is load-bearing: Python serves stale .pyc otherwise.
+COPY patches-webui /tmp/patches-webui
+RUN set -eu; \
+    for p in /tmp/patches-webui/*.patch; do \
+        [ -f "$p" ] || continue; \
+        echo "[patches-webui] applying $(basename "$p")"; \
+        patch -p1 -d /apptoo -i "$p"; \
+    done; \
+    find /apptoo -name __pycache__ -type d -exec rm -rf {} +; \
+    rm -rf /tmp/patches-webui
+
 # Append platform dependencies to the webui's requirements.txt so they're
 # installed by `hermeswebui_init.bash` before `python server.py` runs — this
 # avoids a race where tools.mcp_tool imports `mcp` at module-load time and
