@@ -360,41 +360,51 @@ def timer_loop() -> None:
 
 
 def _sigterm_snapshot_all() -> None:
-    """Commit + save every live tool container. Called from the SIGTERM
-    handler only, so unconditional (no docker-diff guard) — this is the
-    last chance to persist before ECS kills us."""
+    """Commit + save every live tool container. If none are live, still flush
+    TOOLBOX_TAG to EFS so die-event commits that landed since the last
+    periodic save aren't lost. Called from the SIGTERM handler only — this is
+    the last chance to persist before ECS kills us."""
     global _last_saved_fingerprint
     try:
         containers = _list_tool_containers(running_only=True)
     except subprocess.CalledProcessError as e:
         LOG.error("could not list tool containers during sigterm: %s", e)
-        return
+        containers = []
     for c in containers:
         with _snapshot_lock:
             if not do_commit(container_id=c["id"], trigger="sigterm"):
                 continue
             if do_save(trigger="sigterm"):
                 _last_saved_fingerprint = _diff_fingerprint(c["id"])
+    if not containers:
+        with _snapshot_lock:
+            if do_save(trigger="sigterm-no-live"):
+                _last_saved_fingerprint = ""
 
 
 def _stop_dockerd() -> None:
     """Best-effort graceful dockerd shutdown after SIGTERM snapshotting.
-    Waits up to 30s for dockerd to exit. ECS will SIGKILL us after
-    stopTimeout (120s) regardless."""
+    Waits up to 15s for dockerd to exit, then SIGKILLs — moby v26 frequently
+    finishes its shutdown work (logs "Daemon shutdown complete") but the
+    process itself lingers waiting on goroutines that never return."""
     if DOCKERD_PID <= 0:
         return
     try:
         os.kill(DOCKERD_PID, signal.SIGTERM)
     except ProcessLookupError:
         return
-    deadline = time.monotonic() + 30
+    deadline = time.monotonic() + 15
     while time.monotonic() < deadline:
         try:
             os.kill(DOCKERD_PID, 0)
         except ProcessLookupError:
             return
         time.sleep(0.5)
-    LOG.error("dockerd (pid=%d) did not exit within 30s after SIGTERM", DOCKERD_PID)
+    LOG.info("dockerd (pid=%d) did not exit within 15s after SIGTERM; sending SIGKILL", DOCKERD_PID)
+    try:
+        os.kill(DOCKERD_PID, signal.SIGKILL)
+    except ProcessLookupError:
+        pass
 
 
 def _handle_termination_signal(signum: int, _frame: object) -> None:
