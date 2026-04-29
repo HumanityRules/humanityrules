@@ -26,14 +26,7 @@ fi
 # Start the WebUI init script in the background. It creates /app/venv, installs
 # hermes-webui + hermes-agent deps, then runs `python server.py` which blocks
 # forever.
-#
-# We route its stdout+stderr through a `grep -v` process substitution that
-# drops successful /health access-log lines (a ~2/sec firehose between the
-# Docker HEALTHCHECK and the ALB target-group probe). Non-200 /health lines
-# still pass through, so real health failures remain visible. Process
-# substitution (not a pipe) is used so `$!` stays the init script's PID —
-# with a pipe, `$!` would become grep's PID and we'd lose exit-code tracking.
-/hermeswebui_init.bash > >(grep --line-buffered -v '"path": "/health", "status": 200') 2>&1 &
+/hermeswebui_init.bash 2>&1 &
 WEBUI_PID=$!
 
 if [ "$SLACK_ENABLED" -eq 0 ]; then

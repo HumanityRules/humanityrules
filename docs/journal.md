@@ -1,5 +1,47 @@
 # DevOpsHero Development Journal
 
+## 2026-04-28 23:31 - [Deployment] Quiet 200 access logs via WebUI patch
+
+**Conversation:** [2026-04-28-2331-38a4a76d.md](conversations/2026-04-28-2331-38a4a76d.md)
+
+Replaced the `grep -v` shell workaround in `start.sh` with a two-line source patch against `server.py` that filters noisy access logs at the emission point. The `/health` probe firehose (Docker HEALTHCHECK + ALB target-group, ~2/sec combined) was flooding CloudWatch with JSON access-log lines; the previous mitigation was a process-substitution `grep -v '"path": "/health", "status": 200'` wrapping the init script. That worked but was fragile to any change in log format, lived in shell-land where the WebUI's structured logs actually have types, and required the `>(…)` + `$!` dance to keep exit-code tracking intact. Now that we have `patches-webui/` wired into the Dockerfile, filtering at the source is both simpler and more principled.
+
+**Confirmed no upstream knob exists first.** Searched `v0.50.236` end to end before writing a patch: the full `HERMES_WEBUI_*` env var surface (`_AGENT_DIR`, `_PYTHON`, `_HOST`, `_PORT`, `_STATE_DIR`, `_DEFAULT_WORKSPACE`, `_DEFAULT_MODEL`, `_PASSWORD`, `_AUTO_INSTALL`, plus `HERMES_HOME`) none of which touch logging; CHANGELOG scan for `log/verbose/quiet/access/health` returned plenty of application-logging work but zero entries about an access-log toggle; GitHub code search for `log_request` across `nesquena/hermes-webui` turned up only the three existing matches in `server.py` and an `ARCHITECTURE.md` note marking this implementation as "FIXED Sprint 1" — so upstream considers this done. `QuietHTTPServer` (server.py:25) is deceptively named but only suppresses Python-level connection-error tracebacks (`ConnectionResetError` etc.), not access logs. `Handler.log_message` is already overridden to `pass`, but `log_request` is a separate sibling hook the stdlib calls for every completed request. `Handler.log_request` at `server.py:53-64` is the **sole** emitter, and crucially it's a direct `print(f'[webui] {record}', flush=True)` — not a logger call — so even a `logging.config` override at deploy time wouldn't catch it. The override-the-method patch is the only join point.
+
+**Broadened the filter from `/health 200s` to all 200s.** First draft was a two-condition guard that matched the old grep exactly (`path == '/health' and code == '200'`). User pushed to broaden to "suppress all access logs with 200 status" — and on reflection that's the cleaner semantics:
+
+- **One guard, one line, covers the whole class of successful-traffic noise** — `/health`, `/api/session`, static assets, streaming polls, everything that's working. All of these are boring noise in a log file.
+- **Keeps everything interesting.** 3xx (auth redirects), 4xx (bad requests, missing resources, auth failures), 5xx (real server errors), and the non-numeric `code='-'` fallback the stdlib uses when status is unknown — all still emit. A 500 on `/health` is still visible; a failing `/api/session` is still visible.
+- **Request-rate observability goes away.** This is the one real tradeoff. If someone needs "is the WebUI getting traffic," they can't eyeball logs anymore. But that's a metrics job (ALB target-group request counts live on the ALB, not in logs), and app logs carrying request-volume signal is a smell anyway. If we ever realize we *did* want per-endpoint 200 visibility, the guard is trivial to tighten back: `if str(code) == '200' and (self.path or '').startswith('/health'): return`. Starting broader and tightening later is the right order — we know what we don't want (successful access logs), we don't yet know what we might want.
+
+The alternate "filter just `/health`" framing was the conservative option; we went broader because the reasoning for keeping `/api/*` 200s in logs was weak ("maybe someone will want to eyeball traffic rate"), and the operational mitigation (look at ALB metrics) is better than log-grep anyway.
+
+**Exception logs unaffected.** The `[webui] ERROR ...` line at `server.py:79` comes from `do_GET`/`do_POST`'s explicit `except Exception` handlers, not from `log_request`. Tracebacks still print on 500s, and the 500 access-log line prints too (not gated by the new guard), so operators see both the "request failed with 500" summary and the full traceback.
+
+**Shell-side cleanup folded in.** `start.sh`'s WebUI-launch block dropped from the process-substitution mess:
+
+```bash
+/hermeswebui_init.bash > >(grep --line-buffered -v '"path": "/health", "status": 200') 2>&1 &
+```
+
+…to just:
+
+```bash
+/hermeswebui_init.bash 2>&1 &
+```
+
+…plus the 9-line comment block explaining *why* the process substitution was used (`$!` stays the init script's PID, not grep's; line buffering for flush behavior under a non-TTY stdout; etc.) — all of that is obsolete now and was deleted. The new comment just points at the patch by filename so a reader knows where the filtering actually happens: `see patches-webui/02-quiet-200-access-logs.patch`.
+
+**README cleanup from an earlier oversight.** While updating `patches-webui/README.md` I noticed the top-level description still said "evicts `__pycache__/` so stale bytecode doesn't shadow the patched sources" — a leftover from the first cut of the WebUI-patches system before we switched to `compileall`. Updated to match the current Dockerfile reality ("runs `python3 -m compileall` over `/apptoo` so fresh `.pyc` stamps with the patched source's `(mtime, size)`"). Also dropped the two `Upstream status:` trailing blocks per user request — they were speculative ("not filed yet. Worth a PR to drop this patch.") and clutter. If we ever actually file upstream PRs we can put the links back as `Upstream:` one-liners.
+
+**Key points:**
+
+- Verified end-to-end there's no upstream WebUI knob for access-log filtering before reaching for a patch. `log_request` is a direct `print(...)` — not even a `logging.Logger` call — so patching the method is the only join point.
+- Patch guard is `if str(code) == '200': return`. Broad semantics: drops every successful access log, not just `/health`'s. Keeps 3xx/4xx/5xx and non-numeric codes visible. Starting broader than the old grep-based filter was deliberate — if we realize we want per-path granularity later, the guard is trivial to tighten.
+- Tradeoff accepted: request-rate observability moves from logs to ALB target-group metrics where it belongs anyway. Exception logs are via a separate code path and unaffected.
+- `start.sh` dropped the process-substitution workaround + its 9-line rationale comment. The replacement comment points at the patch by filename so a reader finds the filter instantly.
+- Fixed a stale description at the top of `patches-webui/README.md` (still referenced `__pycache__` eviction instead of `compileall` from the earlier switchover). Removed speculative `Upstream status:` trailers per user instruction; they weren't paying for themselves.
+
 ## 2026-04-28 23:21 - [Deployment] Swap WebUI-patch `__pycache__` eviction for `compileall`
 
 **Conversation:** [2026-04-28-2321-38a4a76d.md](conversations/2026-04-28-2321-38a4a76d.md)
