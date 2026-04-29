@@ -440,10 +440,6 @@ _DOCKER_DIND_CONTAINER = {
     "environment": {
         "DOCKER_TLS_CERTDIR": "",
         "TOOL_IMAGE_BASE": "nikolaik/python-nodejs:python3.11-nodejs20",
-        # TEMPORARY: makes dockerd log every API call so we can see which
-        # client sends stop/kill to the tool containers. Remove once the
-        # cause of mid-session container recycling is identified.
-        "DOCKERD_DEBUG": "1",
     },
 }
 
@@ -465,11 +461,6 @@ _HERMES_CONTAINER_BASE = {
     ],
     # Platform-constant env vars the operator never touches. Kept out of
     # configurable_variables so the deploy form doesn't treat them as knobs.
-    # HERMES_WEBUI_HOST is NOT set here: it's a per-template decision.
-    # Policy-proxy-gated templates pin it to 127.0.0.1 so only the proxy
-    # (sharing the task network namespace) can reach the WebUI. Templates
-    # where the ALB targets the hermes container directly leave it at the
-    # upstream image default (0.0.0.0) so ALB health checks succeed.
     "environment": {
         # DOCKER_HOST targets the in-task DinD container over loopback.
         "DOCKER_HOST": "tcp://127.0.0.1:2375",
@@ -477,33 +468,19 @@ _HERMES_CONTAINER_BASE = {
         # is ALWAYS a local tag — the doh-dind sidecar restores it from
         # snapshot (or pulls TOOL_IMAGE_BASE as a fallback) before its
         # healthcheck goes green, so Hermes never pulls from a registry.
-        # Baked into config.yaml via __TOOL_IMAGE__ in the entrypoint.
         "TOOL_IMAGE": "doh-toolbox:latest",
-        # Upstream's idle reaper in terminal_tool.py kills cached tool
-        # environments after 5 min of inactivity, which would force a fresh
-        # `docker run` (and a fresh container with fresh writable layer) on
-        # the next tool call. Bump to 24h so a single Hermes process keeps
-        # reusing the same running container across the day, letting the
-        # snapshotter capture a realistic evolving writable layer.
+        # Upstream's terminal idle reaper checks this value before calling
+        # cleanup. Keep it high so idle recycling is not the normal path; other
+        # lifecycle cleanup can still stop persistent containers.
         "TERMINAL_LIFETIME_SECONDS": "86400",
         # TL;DR: turns off per-container disk size limits inside DinD
         # because our filesystem can't enforce them, and trying causes
         # tool containers to fail to start. Task-level limits still apply.
-        #
-        # Detail: per-container disk quotas need overlay2-on-XFS with
-        # pquota, which DinD's overlay2-on-ext4 doesn't provide. Upstream's
-        # probe in _DockerEnvironment._storage_opt_supported flakes on our
-        # setup — it occasionally caches True from a hello-world probe that
-        # a 5 GB real container create then rejects (see dockerd error
-        # "--storage-opt is supported only for overlay over xfs with
-        # 'pquota' mount option"). Setting disk=0 skips the flag entirely;
-        # blast-radius is already bounded by the ECS task-level resource
-        # limits, and rootfs bloat is capped by the snapshot/flatten cadence.
         "TERMINAL_CONTAINER_DISK": "0",
     },
     # Mirror doh-dind's stop_timeout so Hermes's own atexit/SIGTERM handling
     # has headroom. Hermes doesn't snapshot itself, but it does try to
-    # docker-stop its tool container on shutdown, which hits DinD and back.
+    # docker-stop its tool container on shutdown, which hits DinD.
     "stop_timeout": 120,
 }
 

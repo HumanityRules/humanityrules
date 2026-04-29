@@ -109,17 +109,12 @@ class BedrockPlatformCapabilityTests(SimpleTestCase):
         ]:
             dind = next(c for c in template["containers"] if c["name"] == "docker-dind")
             hermes_container = next(c for c in template["containers"] if c["name"] == "hermes")
-            self.assertEqual(dind["image_source"], "registry")
+            self.assertEqual(dind["image_source"], "prebuilt")
+            self.assertEqual(dind["ecr_repo"], "doh-dind")
+            self.assertEqual(dind["version"], seed_app_templates.DOH_DIND_IMAGE_VERSION)
             self.assertTrue(dind.get("privileged"))
-            self.assertEqual(dind.get("efs_mounts"), ["workspace"])
-            self.assertEqual(dind.get("registry_image"), "docker:26.1.0-dind")
-            self.assertEqual(
-                dind.get("command"),
-                [
-                    "dockerd",
-                    "--host=tcp://127.0.0.1:2375",
-                ],
-            )
+            self.assertEqual(dind.get("efs_mounts"), ["workspace", "docker-persistence"])
+            self.assertNotIn("command", dind)
             self.assertEqual(dind.get("environment", {}).get("DOCKER_TLS_CERTDIR"), "")
             self.assertEqual(
                 {dep["name"]: dep["condition"] for dep in (hermes_container.get("depends_on") or [])},
@@ -134,6 +129,7 @@ class BedrockPlatformCapabilityTests(SimpleTestCase):
             self.assertNotIn("user", hermes_container)
             # DOCKER_HOST is a platform constant in environment, not a knob.
             self.assertEqual(hermes_container["environment"]["DOCKER_HOST"], "tcp://127.0.0.1:2375")
+            self.assertEqual(hermes_container["environment"]["TERMINAL_LIFETIME_SECONDS"], "86400")
             # HERMES_WEBUI_HOST is per-template: pinned to loopback only when a
             # policy proxy fronts the task. When the ALB targets hermes directly
             # (e.g. hermes-slack), the WebUI must bind to all interfaces so the

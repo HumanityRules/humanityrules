@@ -42,11 +42,10 @@ terminal:
   docker_image: "__TOOL_IMAGE__"
   docker_mount_cwd_to_workspace: false
   docker_volumes: __DOCKER_VOLUMES__
-  # container_persistent=true skips upstream's per-turn teardown in
-  # run_agent.py:_cleanup_task_resources, so a single tool container lives
-  # for as long as Hermes's idle reaper allows (TERMINAL_LIFETIME_SECONDS,
-  # set to 86400 via env). The evolving writable layer is what the doh-dind
-  # snapshotter captures to EFS.
+  # container_persistent=true skips upstream's per-turn cleanup and makes
+  # Docker cleanup stop-but-not-remove the container. DinD's snapshotter
+  # commits the stopped container on the die event, so the next docker run
+  # starts from the latest doh-toolbox:latest image.
   container_persistent: true
 
 browser:

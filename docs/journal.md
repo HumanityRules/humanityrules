@@ -1,5 +1,27 @@
 # DevOpsHero Development Journal
 
+## 2026-04-28 22:41 - [Deployment] Align Hermes container cleanup with DinD snapshot persistence
+
+**Conversation:** [2026-04-28-2242-5cb55dff.md](conversations/2026-04-28-2242-5cb55dff.md)
+
+Clarified the mid-session Hermes tool-container recycling behavior and adjusted the DOH template around the actual upstream semantics. The important correction is that `terminal.container_persistent: true` in Hermes does not mean "never stop this container." It means Hermes skips the per-turn cleanup path and, when Docker cleanup does run, it stops the container but does not remove it. A stopped container still has its writable layer, and DOH's DinD snapshotter can commit that layer into the local `doh-toolbox:latest` image. The next Hermes tool container is still a fresh `docker run`, not a `docker start` of the old container, but it starts from the updated local image.
+
+Removed the DOH patch that had disconnected persistent containers from upstream `docker stop` cleanup paths. After walking through the failure modes, stopping the container on WebUI/session lifecycle cleanup is acceptable because tool filesystem state survives through the snapshotter path: `die` event commits update `doh-toolbox:latest` inside the current DinD task, and periodic/SIGTERM saves archive the image to the `docker-persistence` EFS access point for task replacement. `persistent_shell: true` remains useful only while the same tool container is alive; it does not make an exited shell process survive `docker stop`.
+
+Also removed the temporary dockerd API-call diagnostic from the seeded DinD environment and changed the DinD entrypoint comment back to an opt-in `DOCKERD_EXTRA_ARGS="--debug"` hint. The debug logging had done its job: dockerd showed `POST /containers/<id>/stop` followed by SIGTERM, and the snapshotter logs ruled out `doh-dind-snapshotter.py` as the caller. Keeping dockerd debug enabled by default would create noise without changing behavior.
+
+The Hermes config and README now describe the stop-but-not-remove model directly. The platform template still injects `TERMINAL_LIFETIME_SECONDS=86400` because upstream's default is short and the WebUI path does not bridge `terminal.lifetime_seconds` from `config.yaml`; this env var is the actual guard against normal idle reaping. We deliberately did not add `TERMINAL_CONTAINER_PERSISTENT=true` to the task env because upstream already defaults that setting to true and adding it would imply a WebUI propagation requirement that has not been proven load-bearing.
+
+**Key points:**
+
+- `container_persistent: true` is a cleanup/removal policy, not a guarantee that the process keeps running forever.
+- `docker stop` leaves the stopped container and writable layer behind; `docker start` would rerun the same container's entrypoint, but Hermes does not use that path for the next tool call.
+- DOH's continuity mechanism is `docker commit` for the next local run plus `docker save` to EFS for DinD task replacement.
+- The stopped-container lifecycle is acceptable as long as the snapshotter commits on `die` and periodically saves the local image archive.
+- Kept `TERMINAL_LIFETIME_SECONDS=86400` explicit and added a test assertion because that env var prevents the ordinary idle reaper from being the normal recycle path.
+- Updated the Bedrock platform capability test to match the current prebuilt DinD template: `doh-dind` image source, `docker-persistence` EFS mount, no inline dockerd command, and the Hermes terminal lifetime env.
+- Verified with `uv run manage.py test devopshero_app.tests.test_bedrock_platform_capabilities`, `uv run python template_repos/hermes_agent/patches/apply.py /tmp/hermes-agent-apply-test`, and `git diff --check`.
+
 ## 2026-04-28 16:12 - [Deployment] Bump Hermes WebUI to 0.50.236 and Hermes Agent to v2026.4.23
 
 **Conversation:** [2026-04-28-1612-38a4a76d.md](conversations/2026-04-28-1612-38a4a76d.md)

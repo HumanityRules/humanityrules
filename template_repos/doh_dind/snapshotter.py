@@ -255,6 +255,7 @@ def do_save(trigger: str) -> bool:
         "size_bytes": size_bytes,
         "trigger": trigger,
     }, indent=2))
+
     _prune_snapshots()
 
     duration_ms = int((time.monotonic() - started) * 1000)
@@ -267,6 +268,7 @@ def commit_and_maybe_save(container_id: str, trigger: str, save: bool) -> None:
     so concurrent triggers don't race on TOOLBOX_TAG or latest.tar.zst."""
     global _last_saved_fingerprint
     with _snapshot_lock:
+        # Commit is fast and updates the local image tag for the next docker run.
         if not do_commit(container_id=container_id, trigger=trigger):
             return
         if not save:
@@ -276,11 +278,10 @@ def commit_and_maybe_save(container_id: str, trigger: str, save: bool) -> None:
         # last save, skip the I/O. The commit itself already ran (cheap).
         fingerprint = _diff_fingerprint(container_id)
         if fingerprint and fingerprint == _last_saved_fingerprint:
-            LOG.info(
-                "save skipped (unchanged) container=%s trigger=%s",
-                container_id[:12], trigger,
-            )
+            LOG.info("save skipped (unchanged) container=%s trigger=%s", container_id[:12], trigger)
             return
+
+        # Save is slower and persists the image archive to EFS.
         if do_save(trigger=trigger):
             _last_saved_fingerprint = fingerprint
 
@@ -330,12 +331,12 @@ def events_stream() -> None:
                     continue
                 status = evt.get("status")
                 cid = evt.get("id", "")
+
                 if status == "start":
                     _reap_older_siblings({"id": cid, "name": name})
                 elif status == "die":
-                    commit_and_maybe_save(
-                        container_id=cid, trigger="die-event", save=False,
-                    )
+                    commit_and_maybe_save(container_id=cid, trigger="die-event", save=False)
+
             except Exception as e:
                 # Per-event guard: a single malformed event or failed commit
                 # must not kill the stream. The timer loop is a fallback for
@@ -353,9 +354,7 @@ def timer_loop() -> None:
     while not _shutdown.wait(SNAPSHOT_INTERVAL_SECONDS):
         try:
             for c in _list_tool_containers(running_only=True):
-                commit_and_maybe_save(
-                    container_id=c["id"], trigger="periodic", save=True,
-                )
+                commit_and_maybe_save(container_id=c["id"], trigger="periodic", save=True)
         except Exception as e:
             LOG.exception("timer_loop iteration failed: %s", e)
 
@@ -398,7 +397,7 @@ def _stop_dockerd() -> None:
     LOG.error("dockerd (pid=%d) did not exit within 30s after SIGTERM", DOCKERD_PID)
 
 
-def _handle_sigterm(signum: int, _frame: object) -> None:
+def _handle_termination_signal(signum: int, _frame: object) -> None:
     LOG.info("received signal %d; starting shutdown sequence", signum)
     _shutdown.set()
     _sigterm_snapshot_all()
@@ -414,8 +413,8 @@ def main() -> None:
     PERSISTENCE_DIR.mkdir(parents=True, exist_ok=True)
     SNAPSHOTS_DIR.mkdir(parents=True, exist_ok=True)
 
-    signal.signal(signal.SIGTERM, _handle_sigterm)
-    signal.signal(signal.SIGINT, _handle_sigterm)
+    signal.signal(signal.SIGTERM, _handle_termination_signal)
+    signal.signal(signal.SIGINT, _handle_termination_signal)
 
     threading.Thread(target=events_stream, name="events", daemon=True).start()
     threading.Thread(target=timer_loop, name="timer", daemon=True).start()

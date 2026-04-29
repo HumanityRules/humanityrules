@@ -82,7 +82,9 @@ Upstream credentials (`SIDECAR_MCP_GITLAB_TOKEN`, `SIDECAR_MCP_ATLASSIAN_*`, `SI
 
 All Hermes state (`config.yaml`, `SOUL.md`, `hermes-agent/`, `skills/`, `memories/`, `sessions/`, `workspace/`, WebUI state) lives on an EFS access point mounted at `~/.hermes`, scoped per app with the template's UID/GID (1024 today). The Dockerfile symlinks `/workspace` into this path so terminal tools persist their output.
 
-Everything else (image layers, `/opt/hermes-defaults/` seeds, the WebUI binary) is ephemeral and replaced on each task. First boot seeds EFS from `/opt/hermes-defaults/`; subsequent boots refresh `.env` and `config.yaml` and re-run patches. User edits to `SOUL.md` are preserved; `config.yaml` is DOH-owned and regenerated on every boot. Details in `entrypoint.sh`.
+Docker-backed terminal tools run in the sibling `docker-dind` container from the local `doh-toolbox:latest` tag. Hermes's persistent Docker cleanup stops but does not remove `hermes-*` containers; the DinD snapshotter commits stopped containers back into `doh-toolbox:latest` on the Docker `die` event and periodically saves that image to the `docker-persistence` EFS access point.
+
+Everything else (image layers, `/opt/hermes-defaults/` seeds, the WebUI binary) is ephemeral and replaced on each task. First boot seeds EFS from `/opt/hermes-defaults/`; subsequent boots refresh `config.yaml` and re-run patches. User edits to `SOUL.md` are preserved; `config.yaml` is DOH-owned and regenerated on every boot. Details in `entrypoint.sh`.
 
 
 ## ECS compute

@@ -24,27 +24,22 @@ if [ -z "${TOOL_IMAGE_BASE:-}" ]; then
     exit 1
 fi
 
+#
 # Start dockerd in the background via the upstream dind entrypoint. Passing
 # `dockerd` as the first arg suppresses dockerd-entrypoint.sh's default
 # --host=tcp://0.0.0.0:2375 (it only injects when the first arg starts with
 # '-'), so our loopback bind wins and no external port is exposed.
 #
-# DOCKERD_DEBUG=1 (default 0) adds --debug which logs every API call.
-# Temporarily enabled to diagnose what's sending SIGTERM to tool containers
-# without going through upstream's _DockerEnvironment.cleanup() — the
-# diagnostic traceback patch in hermes_agent/patches/04-... proved the
-# cleanup path never fires, so whoever is sending stop/kill is outside
-# the Python side.
 DOCKERD_EXTRA_ARGS=""
-if [ "${DOCKERD_DEBUG:-0}" = "1" ]; then
-    echo "[doh-dind] DOCKERD_DEBUG=1 — enabling --debug on dockerd"
-    DOCKERD_EXTRA_ARGS="--debug"
-fi
+# DOCKERD_EXTRA_ARGS="--debug"
+
 echo "[doh-dind] Starting dockerd on $DIND_HOST $DOCKERD_EXTRA_ARGS"
-# shellcheck disable=SC2086 # deliberate word-splitting for --debug flag
+
+# shellcheck disable=SC2086 # deliberate word-splitting for $DOCKERD_EXTRA_ARGS
 /usr/local/bin/dockerd-entrypoint.sh dockerd --host="$DIND_HOST" $DOCKERD_EXTRA_ARGS &
 DOCKERD_PID=$!
 
+#
 # Wait for dockerd to accept connections. The upstream image's own smoke test
 # is `docker info`; we do the same with a timeout so a broken daemon fails
 # loudly instead of hanging the task.
