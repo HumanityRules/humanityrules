@@ -1,5 +1,41 @@
 # DevOpsHero Development Journal
 
+## 2026-04-29 13:15 - [Deployment] Curate Hermes bundled skills via an allowlist
+
+**Conversation:** [2026-04-29-1316-8635c0d6.md](conversations/2026-04-29-1316-8635c0d6.md)
+
+Our Hermes image seeds `~/.hermes/skills/` from the upstream bundled skills tree (72 skills at v2026.4.23). Most of them aren't appropriate for a DOH-hosted Enterprise backend — macOS-host skills (`apple/*`) can't work without a Mac, the `autonomous-ai-agents/claude-code|codex|opencode` skills delegate to competitor coding agents, `red-teaming/godmode` is an LLM jailbreak kit we don't want to ship in an enterprise product, and a pile of consumer/novelty skills (gaming, smart-home, music generation, find-nearby) don't match the product.
+
+First pass did explicit *exclusion* via `rm -rf` of the unwanted paths in the Dockerfile. That worked but the user correctly flagged it as the wrong polarity: a version bump could silently add new skills to the image with no review. Flipped to an *allowlist* model.
+
+The allowlist lives in `template_repos/hermes_agent/skills-allowlist.txt` — one skill path per line, blank lines and `#` comments allowed, grouped by category. The pruning logic is a standalone `prune-skills.sh` (also checked in alongside the Dockerfile). The Dockerfile `COPY`s both files into `/tmp`, runs the pruner, then deletes them. Same layer as the `git clone` so the removed skills never land in an intermediate image layer.
+
+The pruner has a validation pass up front: for every line in the allowlist, it checks that `<bundled>/<rel>/SKILL.md` exists. If any path is missing, the build fails loudly with the exact skill name. This is the whole point of the allowlist model — on a hermes-agent version bump where upstream renamed or removed a skill, we want the build to fail, not silently drop a skill from production.
+
+That validation immediately paid off. My first allowlist listed skills I'd seen in my local `~/.hermes/hermes-agent/` checkout, which turned out to be a *different* snapshot than the pinned `v2026.4.23` tag. The build failed with `FATAL: allowlisted skill 'mcp/mcporter' not found in bundled repo`. Cloning the actual tag showed:
+
+- `mcp/mcporter` doesn't exist in v2026.4.23 — only `mcp/native-mcp`
+- `mlops/cloud/modal`, `mlops/inference/gguf`, `mlops/inference/guidance`, `mlops/models/clip`, `mlops/models/stable-diffusion`, `mlops/models/whisper`, `mlops/training/grpo-rl-training`, `mlops/training/peft`, `mlops/training/pytorch-fsdp` — all removed upstream between my local snapshot and the pinned tag
+- `social-media/xitter` → renamed to `social-media/xurl` (same thing — official X API CLI, now using a different open-source client)
+- New skills appeared: `creative/baoyu-comic`, `creative/baoyu-infographic`, `creative/pixel-art`, `productivity/maps`
+
+Rebuilt the allowlist from the actual pinned tag's inventory. 58 skills ship in the image now; 14 are explicitly excluded.
+
+The prune algorithm is touch-sentinel-then-delete: walk the allowlist, `touch .doh-keep` inside each allowlisted skill directory, then `find` every `SKILL.md` and `rm -rf` the parent unless it contains the sentinel. Finally sweep the sentinels and any now-empty category directories. `DESCRIPTION.md`-only category dirs (where all skills were pruned) also get removed so the WebUI doesn't render empty category panels. `index-cache/` (JSON blobs for remote skill discovery, no `SKILL.md`) is preserved because the tree walk only touches `SKILL.md`-containing directories.
+
+Not touched this session: existing EFS volumes on already-deployed customer environments still have the previously-seeded copies of the removed skills in `~/.hermes/skills/`. `tools/skills_sync.py` only cleans the manifest when a skill disappears from the bundled tree — it deliberately does not delete user-visible copies (documented behavior, in case the user customized them). The image change only stops new seeding; scrubbing existing volumes would need a one-shot cleanup in `entrypoint.sh` guarded by a marker file, or an upstream-friendly patch to `skills_sync.py`. Flagged but deferred.
+
+**Key points:**
+
+- Allowlist > exclusion list for platform curation. On a version bump, the allowlist makes "what ships" an explicit decision; an exclusion list makes it an accident of upstream's release notes.
+- The allowlist's fail-fast validation turned a silent prod regression into a build error. A local dev checkout is not the same as the pinned tag — when in doubt, clone the tag.
+- 14 skills excluded by policy: `apple/*` (platform-impossible on Linux Fargate), `autonomous-ai-agents/{claude-code,codex,opencode}` (competitors), `gaming/*`, `smart-home/openhue`, `leisure/find-nearby` (consumer/personal), `media/heartmula`, `media/songsee`, `creative/songwriting-and-ai-music` (music-gen toys), `red-teaming/godmode` (enterprise policy risk), `inference-sh` (duplicates Bedrock).
+- 58 skills kept — devops, mlops, research, productivity, github, software-development dev-loop skills, plus creative tools (architecture-diagram, excalidraw, ascii-art, manim, p5js, pixel-art, baoyu-*) and a few explicit user-requested keeps (`note-taking/obsidian`, `email/himalaya`, `social-media/xurl`, `research/polymarket`, `media/gif-search`).
+- Pruning runs in the same Docker layer as the `git clone`, so removed skills never land in an intermediate layer. `prune-skills.sh` is a standalone file (not inlined into `RUN`) because multi-line bash with inline `#` comments inside a single-command `RUN` would silently terminate the shell line early.
+- Existing EFS volumes retain previously-seeded copies of the now-removed skills. Not addressed this session; would need a one-shot `entrypoint.sh` cleanup or a `skills_sync.py` patch. Flagged as a follow-up.
+
+---
+
 ## 2026-04-29 11:42 - [Deployment] Promote image_source to a StrEnum with centralized docs
 
 **Conversation:** [2026-04-29-1144-823eae1c.md](conversations/2026-04-29-1144-823eae1c.md)
