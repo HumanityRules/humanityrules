@@ -111,7 +111,7 @@ class BedrockPlatformCapabilityTests(SimpleTestCase):
             hermes_container = next(c for c in template["containers"] if c["name"] == "hermes")
             self.assertEqual(dind["image_source"], "prebuilt")
             self.assertEqual(dind["ecr_repo"], "doh-dind")
-            self.assertEqual(dind["version"], seed_app_templates.DOH_DIND_IMAGE_VERSION)
+            self.assertTrue(dind.get("version"))
             self.assertTrue(dind.get("privileged"))
             self.assertEqual(dind.get("efs_mounts"), ["workspace", "docker-persistence"])
             self.assertNotIn("command", dind)

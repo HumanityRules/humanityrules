@@ -189,8 +189,10 @@ def _flatten_toolbox_tag() -> bool:
 
     # Always clean up the scratch container by its known id, even if the
     # export|import failed; otherwise it accumulates across failed saves.
-    LOG.info("subprocess: docker rm -f %s (flatten scratch)", scratch_cid[:12])
-    subprocess.run(["docker", "rm", "-f", scratch_cid], capture_output=True, text=True)
+    try:
+        _run(["docker", "rm", "-f", scratch_cid])
+    except subprocess.CalledProcessError as e:
+        LOG.error("flatten: scratch cleanup failed id=%s err=%s", scratch_cid[:12], e.stderr.strip() if e.stderr else e)
     return ok
 
 
@@ -366,8 +368,8 @@ def main() -> None:
         "doh-dind snapshotter started (persistence=%s, dockerd_pid=%d)",
         PERSISTENCE_DIR, DOCKERD_PID,
     )
-    while not _shutdown.is_set():
-        _shutdown.wait(60)
+    # Signal handlers exit(0) the process directly; this wait is only unblocked by that path
+    _shutdown.wait()
 
 
 if __name__ == "__main__":
