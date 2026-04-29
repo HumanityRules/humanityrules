@@ -1,5 +1,29 @@
 # DevOpsHero Development Journal
 
+## 2026-04-29 11:42 - [Deployment] Promote image_source to a StrEnum with centralized docs
+
+**Conversation:** [2026-04-29-1144-823eae1c.md](conversations/2026-04-29-1144-823eae1c.md)
+
+The per-container `image_source` discriminator lived as `Literal["dockerfile", "prebuilt", "registry", "policy_proxy"]` on `appconfig.py`, but the meaning of each value was scattered across five places: a multi-line block comment in `ContainerConfig.image_source`, a bullet-list docstring in `_container_image_uri`, a per-field comment column on `ContainerConfig` for each optional value, an ASCII-art block comment on `AppTemplate.containers` in `models.py`, and one-off `ValueError` messages in `app_config_builder`. Adding a value meant editing all of those in lockstep, and the documentation drifted in small ways (the `Literal` listed all four, the `ContainerConfig` comment only described the first two, etc.).
+
+Promoted `ImageSource` to a `StrEnum` so the enum itself is the single source of truth. Each member carries the docstring-equivalent paragraph describing what that value means, which fields on `ContainerConfig` it consumes, and any platform side-effects (e.g. `POLICY_PROXY` triggering env-level provisioning and forcing itself to be the ALB target). The duplicated comment blocks in `ContainerConfig`, `_container_image_uri`, and `deploy_app.py`'s `EcrStack` docstring all collapsed to short pointers at the enum. Consumers that hold a typed `ContainerConfig` now dispatch on enum members (`appconfig.ImageSource.DOCKERFILE`, etc.) instead of bare strings. The boundary at `app_config_builder._build_container_config` converts the JSON string into the enum with `ImageSource(template_container["image_source"])`.
+
+`StrEnum` was chosen specifically so raw JSON reads elsewhere in the codebase — `abac.py`, `doh_control.py`, `views/template_deploy.py`, `policy_proxy_e2e_test.py`, `app_deployment_teardown_executor.py`, tests that build template JSON with `"image_source": "dockerfile"` — keep working with no changes: `"dockerfile" == ImageSource.DOCKERFILE` is true, hashes match, and those callsites read plain dicts where typing with the enum would buy nothing. This kept the refactor contained to the typed path (AppConfig/ContainerConfig) without ripple-changing dict consumers.
+
+The `AppTemplate.containers` comment in `models.py` went through two revisions. First attempt replaced the ASCII-art block with a short prose summary plus a pointer to the enum. The user pushed back: the explicit-fields layout is more visual, and with three or four per-source optional fields it scans much faster than prose. Restored the original structure and extended it to cover all four `image_source` values (including `registry` and `policy_proxy`, which were missing before). Then the user asked to drop the enum-pointer sentence on top — unnecessary, since the member names already appear inline in the union type on the `"image_source"` line.
+
+Full test suite passes (314 tests). No behavior changes; this is purely a documentation and typing refactor.
+
+**Key points:**
+
+- `ImageSource` is now a `StrEnum` in `services/infra_customer/appconfig.py`. Each member's comment documents its semantics and the `ContainerConfig` fields it consumes — no more hunting across five files.
+- Typed callers (`deploy_app.py`, `app_config_builder.py`) dispatch on enum members. Raw JSON callers keep using string literals; `StrEnum` equality bridges them with no changes needed.
+- The JSON → typed boundary is `ImageSource(template_container["image_source"])` in `app_config_builder._build_container_config`. That's the only place that needs to tolerate an unknown value, and it still raises a clear `ValueError`.
+- `AppTemplate.containers` comment in `models.py` keeps the explicit-fields visual layout the user prefers, now extended to cover all four `image_source` values.
+- Lesson on documentation style: dense prose pointing at a type definition reads well in isolation but scans poorly at the call site. When the reader is already in the model and is trying to decide "what goes in this JSON field," the explicit per-value layout wins even if it duplicates information.
+
+---
+
 ## 2026-04-29 11:17 - [Bugfix] Fix Hermes reauth after policy-proxy session expiry
 
 **Conversation:**

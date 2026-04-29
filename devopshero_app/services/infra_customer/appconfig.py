@@ -3,13 +3,46 @@ Application configuration dataclass for ECS deployments.
 """
 
 from dataclasses import dataclass, field
+from enum import StrEnum
 from pathlib import Path
 from typing import Literal
 
 
 ComputeMode = Literal["fargate", "ec2"]
 ContainerDependencyCondition = Literal["START", "HEALTHY", "COMPLETE", "SUCCESS"]
-ImageSource = Literal["dockerfile", "prebuilt", "registry", "policy_proxy"]
+
+
+class ImageSource(StrEnum):
+    """How a container's image is sourced at deploy time.
+
+    This is the single source of truth for what each value means; the rest of
+    the codebase dispatches on these members.
+    """
+
+    # DOH builds the image from source during the deploy. The source tree lives
+    # under template_repos/ (or the customer's cloned repo) and is pushed to
+    # the per-app ECR repo `{c.ecr_repo_name}:{image_tag}`. Fields consumed:
+    # source_repo_path, dockerfile_path, ecr_repo_name.
+    DOCKERFILE = "dockerfile"
+
+    # Image already exists in the per-env ECR namespace (doh/{env_slug}/{repo})
+    # and was pushed out-of-band by `doh_build_prebuilt_image`. The deploy does
+    # not build — a missing image is a hard-fail. Fields consumed:
+    # prebuilt_ecr_repo, prebuilt_version.
+    PREBUILT = "prebuilt"
+
+    # Public registry reference resolved by ECS at pull time (e.g.
+    # "docker:26.1.0-dind", "docker.io/..."). Fields consumed: registry_image.
+    REGISTRY = "registry"
+
+    # Platform-owned SSO + ABAC proxy. Image resolves from the per-env
+    # doh/{env_slug}/policy-proxy repo (pushed by deploy_app at
+    # POLICY_PROXY_IMAGE_VERSION). Presence of any policy_proxy container in a
+    # task triggers env-level provisioning (ECR stack, auth Lambda, per-env
+    # auth config secret) and forces the proxy to be the ALB target. Fields
+    # consumed: upstream_container (name of the sibling the proxy fronts;
+    # resolved into DOH_UPSTREAM_HOST=127.0.0.1 + DOH_UPSTREAM_PORT env vars).
+    POLICY_PROXY = "policy_proxy"
 
 
 @dataclass
@@ -113,32 +146,20 @@ class ContainerConfig:
 
     name: str  # Stable identifier, used for logs / alb target lookup
 
-    # "dockerfile": DOH builds from app_source_path into ecr_repo_name:image_tag.
-    # "prebuilt": image already pushed by an out-of-band step at prebuilt_ecr_repo:prebuilt_version.
-    # "registry": public image reference (e.g. docker:26.1.0-dind) resolved by ECS at pull time.
-    # "policy_proxy": platform-owned SSO+ABAC proxy; image resolves from the
-    #     per-env doh/{env_slug}/policy-proxy repo at deploy time. Presence of
-    #     any "policy_proxy" container in a task triggers env-level provisioning
-    #     (ECR stack, auth Lambda, per-env auth config secret).
+    # See the ImageSource enum for what each member means and which fields it
+    # consumes on this dataclass.
     image_source: ImageSource
 
-    # Populated when image_source == "dockerfile":
-    source_repo_path: str | None = None  # Repo-relative path under template_repos/
-    dockerfile_path: str | None = None
-    ecr_repo_name: str | None = None  # Per-app + per-container ECR repo for the built image
+    source_repo_path: str | None = None  # DOCKERFILE: repo-relative path under template_repos/
+    dockerfile_path: str | None = None   # DOCKERFILE
+    ecr_repo_name: str | None = None     # DOCKERFILE: per-app + per-container ECR repo
 
-    # Populated when image_source == "prebuilt":
-    prebuilt_ecr_repo: str | None = None  # Within doh/{env_slug}/ namespace
-    prebuilt_version: str | None = None
+    prebuilt_ecr_repo: str | None = None  # PREBUILT: within doh/{env_slug}/ namespace
+    prebuilt_version: str | None = None   # PREBUILT
 
-    # Populated when image_source == "registry" (e.g. docker:26.1.0-dind, docker.io/...):
-    registry_image: str | None = None
+    registry_image: str | None = None  # REGISTRY
 
-    # Populated when image_source == "policy_proxy": name of the sibling
-    # container this proxy fronts. Resolved at deploy time into the
-    # DOH_UPSTREAM_HOST (always 127.0.0.1) + DOH_UPSTREAM_PORT env vars on the
-    # proxy. The upstream container's container_port is the target.
-    upstream_container: str | None = None
+    upstream_container: str | None = None  # POLICY_PROXY: sibling container this proxy fronts
 
     # Network / health
     container_port: int = 0
@@ -247,7 +268,7 @@ class AppConfig:
 
     def policy_proxy_container(self) -> ContainerConfig | None:
         """Return the policy-proxy ContainerConfig if the task includes one, else None."""
-        matches = [c for c in self.containers if c.image_source == "policy_proxy"]
+        matches = [c for c in self.containers if c.image_source == ImageSource.POLICY_PROXY]
         if not matches:
             return None
         if len(matches) > 1:
