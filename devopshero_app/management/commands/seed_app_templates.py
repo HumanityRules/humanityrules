@@ -10,16 +10,6 @@ from django.core.management.base import BaseCommand
 from devopshero_app.models import AppTemplate
 
 
-# Image tag DOH expects in doh/{env_slug}/sidecar-mcp. Bump in lock-step with
-# whatever the operator has built and pushed into the customer's ECR.
-SIDECAR_MCP_IMAGE_VERSION = "0.1.0"
-
-# Image tag DOH expects in doh/{env_slug}/doh-dind. Bump when we ship a new
-# snapshotter or entrypoint in template_repos/doh_dind/ and push via
-# `doh_build_prebuilt_image --source-dir template_repos/doh_dind --ecr-repo doh-dind --tag X.Y.Z`.
-DOH_DIND_IMAGE_VERSION = "0.2.4"
-
-
 OPENCLAW_TEMPLATE = {
     "name": "AI Assistant (OpenClaw)",
     "slug": "ai-assistant-openclaw",
@@ -408,7 +398,10 @@ _DOCKER_DIND_CONTAINER = {
     "name": "docker-dind",
     "image_source": "prebuilt",
     "ecr_repo": "doh-dind",
-    "version": DOH_DIND_IMAGE_VERSION,
+    # Image tag DOH expects in doh/{env_slug}/doh-dind. Bump when we ship a new
+    # snapshotter or entrypoint in template_repos/doh_dind/ and push via
+    # `doh_build_prebuilt_image --source-dir template_repos/doh_dind --ecr-repo doh-dind --tag X.Y.Z`.
+    "version": "0.2.5",
     # No "command" override: the doh_dind entrypoint starts dockerd itself
     # with the right loopback bind and then exec's into snapshotter.py.
     "container_port": 0,
@@ -549,7 +542,9 @@ _SIDECAR_MCP_CONTAINER = {
     "name": "sidecar-mcp",
     "image_source": "prebuilt",
     "ecr_repo": "sidecar-mcp",
-    "version": SIDECAR_MCP_IMAGE_VERSION,
+    # Image tag DOH expects in doh/{env_slug}/sidecar-mcp. Bump in lock-step
+    # with whatever the operator has built and pushed into the customer's ECR.
+    "version": "0.1.0",
     # Override the image default (stdio mode, which exits immediately on EOF
     # under ECS awsvpc). --host 127.0.0.1 keeps the endpoint loopback-only.
     "command": ["--http", "--port", "7777", "--host", "127.0.0.1"],

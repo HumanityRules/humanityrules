@@ -67,7 +67,7 @@ The `hermes-slack` AppTemplate ships with a second container â€” `sidecar-mcp` â
 The MCP image is referenced as a **prebuilt** container:
 
 - **Repo:** `doh/{env_slug}/sidecar-mcp` (per-env ECR).
-- **Tag:** `SIDECAR_MCP_IMAGE_VERSION` in `seed_app_templates.py`.
+- **Tag:** `version` field on the `_SIDECAR_MCP_CONTAINER` dict in `seed_app_templates.py`.
 - **How it's built:** operator-driven from a local checkout of the `sidecar-mcp` source, pushed with `manage.py doh_build_prebuilt_image --account <acct> [--env <env>] --source-dir <path-to-sidecar-mcp> --ecr-repo sidecar-mcp --tag <version>`.
 
 Upstream credentials (`SIDECAR_MCP_GITLAB_TOKEN`, `SIDECAR_MCP_ATLASSIAN_*`, `SIDECAR_MCP_DATADOG_*`, etc.) are declared on the Slack template as empty-value secrets. Ops populates them once in `devopshero/{env_slug}/shared-secrets` and every Hermes in the env inherits them via the fall-through mechanism in `secrets_utils._resolve_secret_value`.
