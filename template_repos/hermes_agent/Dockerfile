@@ -18,8 +18,9 @@ COPY --chmod=755 start.sh /start.sh
 
 # WebUI lives in ephemeral image layers at /apptoo/, so DOH's WebUI patches
 # are applied at build time (not boot, unlike the agent patches on EFS).
-# See patches-webui/README.md for per-patch rationale. __pycache__/ eviction
-# is load-bearing: Python serves stale .pyc otherwise.
+# See patches-webui/README.md for per-patch rationale. compileall after the
+# patch run overwrites any .pyc the base image shipped so stale bytecode
+# can't shadow the patched sources at runtime.
 COPY patches-webui /tmp/patches-webui
 RUN set -eu; \
     for p in /tmp/patches-webui/*.patch; do \
@@ -27,7 +28,7 @@ RUN set -eu; \
         echo "[patches-webui] applying $(basename "$p")"; \
         patch -p1 -d /apptoo -i "$p"; \
     done; \
-    find /apptoo -name __pycache__ -type d -exec rm -rf {} +; \
+    python3 -m compileall -q /apptoo || true; \
     rm -rf /tmp/patches-webui
 
 # Append platform dependencies to the webui's requirements.txt so they're
