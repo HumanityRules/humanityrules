@@ -1,5 +1,38 @@
 # DevOpsHero Development Journal
 
+## 2026-04-28 23:21 - [Deployment] Swap WebUI-patch `__pycache__` eviction for `compileall`
+
+**Conversation:** [2026-04-28-2321-38a4a76d.md](conversations/2026-04-28-2321-38a4a76d.md)
+
+The first cut of the `patches-webui/` build step (committed earlier this session) followed every `patch -p1` run with a blanket `find /apptoo -name __pycache__ -type d -exec rm -rf {} +`. The intent was to guarantee that Python wouldn't load stale bytecode compiled against the pre-patch source. Replaced that eviction with `python3 -m compileall -q /apptoo || true` — same correctness guarantee, no first-import penalty, and clearer intent.
+
+**Why eviction was overly defensive on Python 3.11.** PEP 552 (3.7+) extended the `.pyc` header to store both `source_mtime` and `source_size`, not just mtime. The default "timestamp-based" invalidation now treats a cached `.pyc` as stale if *either* field differs from the current source. Our `01-provider-model-labels.patch` adds several lines to `api/config.py` — that's an unambiguous size delta, so any pre-existing `.pyc` is invalidated by Python's own check regardless of what we do. The only scenarios where eviction would actually save us are contrived: a size-preserving rename patch (e.g. `foo` → `bar` of equal length) combined with an mtime collision. For practical patches, the size-check alone is sufficient on our Python floor.
+
+**Why I didn't just drop the eviction outright.** User's concern was performance: blanket eviction forces every module to parse + compile on first import, which for a WebUI with 100+ Python files is a measurable boot-path cost — once per container start, not once per image build. Evicting made first-request latency worse on every deploy, which is exactly when users are paying attention to responsiveness.
+
+"Just don't evict" would have been the naive win — it's zero-cost and correct on 3.11 for any patch that changes file size. But it leaves a small future-proofing gap: a future patch we can't predict *might* be size-preserving, and that patch would silently fail to take effect at runtime. The failure mode ("I edited the source but the WebUI still shows old behavior") is exactly the kind of thing that costs an afternoon to debug because it looks impossible.
+
+**Why `compileall` is the right middle ground.**
+
+- **Correctness.** After applying patches, `compileall` walks `/apptoo` and writes fresh `.pyc` files stamped with the current `(mtime, size)`. Any pre-existing `.pyc` from the base image gets clobbered by the new write. Staleness is impossible at runtime — the `.pyc` the image ships is the authoritative compiled form of the patched source.
+- **Runtime cost.** Zero. Python's import machinery finds an up-to-date `.pyc` and skips parsing entirely, identical to the fast path on the unpatched base image. No first-import penalty.
+- **Build cost.** A few seconds per image build, one-time. And `pip` already runs `compileall` at install time for every installed package — we're just re-running the same operation after our patches edit the WebUI source. No new dependency, no exotic tool.
+- **Intent.** The Dockerfile comment now reads "compileall after the patch run overwrites any .pyc the base image shipped" — a reviewer immediately understands why the line is there without having to reason about Python's invalidation rules.
+
+**The `|| true`.** `compileall -q` exits non-zero if *any* file in the walked tree has a syntax error. WebUI vendor trees occasionally ship Python-2-era test fixtures or intentionally-broken example code that won't parse on 3.11. Failing the Docker build over `some_vendor/tests/broken_example.py` would be strictly worse than the eviction behavior we had before — the actual patched files would still be fine at runtime (their `.py` is parseable; their `.pyc` just wouldn't have been pre-written by compileall, so they'd parse on first import). Tolerating the non-zero exit preserves correctness for the files that matter and degrades gracefully for the ones that don't.
+
+**Why the agent patches don't get the same treatment.** `patches/apply.py` edits `$HERMES_DIR/hermes-agent/**/*.py` at *container boot*, not at image build. On first boot the agent tree is freshly `cp -r`'d from `/opt/hermes-defaults/hermes-agent/` (zero existing `.pyc`). On subsequent boots, the patches are typically no-ops ("already applied" path through `patch -N --dry-run`), so no new `.pyc` staleness window opens. Even if we eventually add a patch that *does* apply on a subsequent boot against an existing EFS copy, Python's size-check covers the same cases it covers here. If we ever want belt-and-braces for the agent too, the fix would be a `python3 -m compileall -q "$HERMES_DIR/hermes-agent" || true` line in `apply.py` after the patch loop — noted as a future improvement, not done now because there's no active bug.
+
+**Unrelated entrypoint.sh tidy-up folded in.** The user made three small edits to `entrypoint.sh` in the same commit window: (1) trimmed two redundant comment lines about `DOH_LLM_*` namespacing, (2) added `DOCKER_HOST=$DOCKER_HOST` to the `[entrypoint] Docker-backed Hermes tools enabled` log line so the in-task DinD sidecar URL shows in the container logs, and (3) moved the `HERMES_DIR` export + `mkdir -p` to just before the `sed` that renders `config.yaml`, with a visual "we have everything we need to generate config.yaml!" comment block separating the env-prep phase from the render phase. All cosmetic / light-readability wins; folded into this commit because they touch the same file and would otherwise fragment the history.
+
+**Key points:**
+
+- Replaced `find /apptoo -name __pycache__ -type d -exec rm -rf {} +` with `python3 -m compileall -q /apptoo || true` in the Dockerfile WebUI-patch step. Same correctness guarantee on Python 3.11+, zero first-import penalty, clearer intent.
+- Didn't drop pycache handling entirely because a future size-preserving patch would silently fail at runtime, and that failure mode is expensive to debug.
+- `compileall` is what `pip` already runs at install time — no new dependency, no exotic tool, a few seconds of build cost, zero runtime cost.
+- `|| true` tolerates stray unparseable files in vendor trees; the patched files we actually care about are unaffected, they'd just parse on first import instead of being pre-compiled.
+- Agent-side `patches/apply.py` doesn't need the same treatment today (fresh `cp -r` on first boot, idempotent `-N` no-ops on subsequent boots). Future-proofing belongs there as a followup if needed.
+
 ## 2026-04-28 23:06 - [Deployment] WebUI patches system + Bedrock model dropdown fix
 
 **Conversation:** [2026-04-28-2307-38a4a76d.md](conversations/2026-04-28-2307-38a4a76d.md)

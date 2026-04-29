@@ -1,12 +1,8 @@
 #!/bin/bash
 set -e
 
-HERMES_DIR="/home/hermeswebui/.hermes"
-
 # DOH_LLM_* vars are DOH's own config, deliberately namespaced to avoid
-# colliding with Hermes's HERMES_* env vars. They are consumed only by this
-# entrypoint to generate config.yaml and .env; never exported to child processes.
-# Values are Hermes-native (e.g. "custom" not "openai").
+# colliding with Hermes's HERMES_* env vars.
 if [ -z "$DOH_LLM_PROVIDER" ] || [ -z "$DOH_LLM_MODEL" ]; then
     echo "FATAL: DOH_LLM_PROVIDER and DOH_LLM_MODEL must be set" >&2
     exit 1
@@ -41,8 +37,6 @@ if [ "$DOH_AUX_PROVIDER" = "bedrock" ]; then
     DOH_AUX_BASE_URL="https://bedrock-runtime.${AWS_BEDROCK_REGION}.amazonaws.com"
 fi
 
-mkdir -p "$HERMES_DIR"
-
 # DOCKER_HOST points at the in-task DinD sidecar. The hermes container's
 # depends_on: {docker-dind, HEALTHY} already guarantees DinD is up before we
 # boot, and ECS launches us with DOCKER_HOST set from the template.
@@ -65,7 +59,7 @@ fi
 TERMINAL_BACKEND="docker"
 TERMINAL_CWD="/workspace"
 DOCKER_VOLUMES='["/workspace:/workspace"]'
-echo "[entrypoint] Docker-backed Hermes tools enabled (DinD via DOCKER_HOST)."
+echo "[entrypoint] Docker-backed Hermes tools enabled (DinD via DOCKER_HOST=$DOCKER_HOST)."
 
 # Build the providers block. For Bedrock we ship a curated dict of
 # inference-profile IDs → human-readable labels; the WebUI's group builder
@@ -83,6 +77,12 @@ EOF
 else
     echo "providers: {}" > "$PROVIDERS_BLOCK_FILE"
 fi
+
+#
+# We have everything we need to generate config.yaml!
+#
+HERMES_DIR="/home/hermeswebui/.hermes"
+mkdir -p "$HERMES_DIR"
 
 # Regenerate config.yaml from template on every boot. DOH owns this file.
 # sed's `r file` + `d` replaces the single-line __PROVIDERS_BLOCK__ marker
