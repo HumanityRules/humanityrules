@@ -1,5 +1,30 @@
 # DevOpsHero Development Journal
 
+## 2026-04-29 14:04 - [Bugfix] Fix two doh-dind snapshotter issues: noisy 30s watchdog and lost SIGTERM saves
+
+**Conversation:** [2026-04-29-1405-7f138120.md](conversations/2026-04-29-1405-7f138120.md)
+
+Investigating the `ERROR Snapshotter: dockerd (pid=7) did not exit within 30s after SIGTERM` line on a stopped `hermes-vmendi10` task in CH Sandbox surfaced two separate defects in `template_repos/doh_dind/snapshotter.py`. Both were benign-looking but one had real data-loss consequences.
+
+**Issue 1 — the watchdog error is misleading.** On SIGTERM, `_stop_dockerd` sends SIGTERM to dockerd (pid 7) and polls `os.kill(pid, 0)` for 30s. Dockerd on moby v26 consistently logs `"Daemon shutdown complete"` within ~70ms and then continues emitting cleanup lines (HTTP shutdown with `context canceled`, healthcheck stop, event stream stop) over the next ~5s — after which it goes silent but the process stays alive. It's a known Go-runtime-style wedge on goroutines that never return. When snapshotter's `sys.exit(0)` runs, PID 1 exiting tears down the PID namespace and the kernel SIGKILLs dockerd as a side effect. Task exits cleanly (exit 0), but the log looks broken.
+
+Fix: shorten the wait to 15s (covers the real shutdown work we observed) and send SIGKILL explicitly if dockerd is still alive at the deadline. Logs at INFO, not ERROR, because it's the expected steady-state path given moby's behavior.
+
+**Issue 2 — SIGTERM save silently skipped when no tool container is live, losing die-event commits.** The snapshotter has three save paths: `die-event` (commit only, no EFS write), `periodic` (commit + save every 15 min, fingerprint-guarded), and `sigterm` (commit + save per live container). On the failing task, the tool container died at 19:08:12 — the die-event commit landed on `doh-toolbox:latest` in the daemon but wasn't flushed to EFS. SIGTERM arrived at 19:24:14; `_sigterm_snapshot_all` listed live containers (empty), iterated over zero containers, and returned. The accumulated state since the last periodic save at 19:03:41 was lost when the task exited.
+
+Fix: after the per-container loop, if no containers were live, do one unconditional `do_save(trigger="sigterm-no-live")` to flush the in-daemon tag to EFS. If any container was live, the loop already saved, so the extra flush is redundant and skipped.
+
+**Unrelated rolling-deploy gap noted but not fixed.** During a rolling ECS deploy, the new task loads `latest.tar.zst` at startup, before the old task's SIGTERM fires. Any state the old task saves in its SIGTERM handler is visible only to the *next* task after the new one — the new task never re-reads EFS. Fixing this requires a handoff protocol (e.g., new task waits on a version marker the old task's SIGTERM writes) that we haven't designed yet. Worst-case window is the 15-min periodic interval. Left as an open design question; user opted not to tackle it in this session.
+
+**Key points:**
+
+- Watchdog wait dropped 30s → 15s with an explicit SIGKILL follow-up. The ERROR→INFO demotion reflects that moby v26 reaching this path is normal, not pathological.
+- `_sigterm_snapshot_all` now flushes the toolbox tag unconditionally when no tool container is live — that's the case where die-event commits have accumulated and have nowhere else to land.
+- Noted but didn't fix the rolling-deploy read-before-write race; the new task snapshots from EFS before the old task's SIGTERM writes it. Needs a handoff protocol.
+- Verified behavior against the actual failing task's log (CH Sandbox, task `f25f034a…`): die-event at 19:08:12, periodic save at 19:03:41, SIGTERM at 19:24:14 with no live container. Matches the gap.
+
+---
+
 ## 2026-04-29 13:48 - [Deployment] Drop `dogfood` and all `mlops/*` from the Hermes skills allowlist
 
 **Conversation:** [2026-04-29-1349-8635c0d6.md](conversations/2026-04-29-1349-8635c0d6.md)
