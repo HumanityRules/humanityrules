@@ -65,11 +65,13 @@ mkdir -p "$PERSISTENCE_DIR/snapshots"
 
 # Snapshots are produced by `docker save`, which preserves image metadata
 # (ENV, CMD, WORKDIR, etc.) — no --change flags needed on restore. The
-# snapshotter flattens the image to a single layer before saving, so load
-# here materializes only one layer. `docker load` also preserves the tag
-# baked into the tarball (TOOLBOX_TAG), so the restore path skips re-tagging.
+# `docker load` preserves the tag baked into the tarball (TOOLBOX_TAG), so the
+# restore path skips re-tagging. The snapshotter compacts the image before the
+# layer chain gets deep.
+RESTORE_STARTED_AT=$(date +%s)
 if [ -s "$LATEST_SNAPSHOT" ] && zstd -dc "$LATEST_SNAPSHOT" | docker load; then
-    echo "[doh-dind] Restored $TOOLBOX_TAG from $LATEST_SNAPSHOT"
+    RESTORE_DURATION=$(( $(date +%s) - RESTORE_STARTED_AT ))
+    echo "[doh-dind] Restored $TOOLBOX_TAG from $LATEST_SNAPSHOT in ${RESTORE_DURATION}s"
 else
     [ -s "$LATEST_SNAPSHOT" ] && echo "[doh-dind] ERROR: snapshot restore failed; falling back to base image pull" >&2
     echo "[doh-dind] Pulling base image $TOOL_IMAGE_BASE"
@@ -78,7 +80,8 @@ else
         exit 1
     fi
     docker tag "$TOOL_IMAGE_BASE" "$TOOLBOX_TAG"
-    echo "[doh-dind] Tagged $TOOL_IMAGE_BASE as $TOOLBOX_TAG"
+    RESTORE_DURATION=$(( $(date +%s) - RESTORE_STARTED_AT ))
+    echo "[doh-dind] Tagged $TOOL_IMAGE_BASE as $TOOLBOX_TAG in ${RESTORE_DURATION}s"
 fi
 
 # Healthcheck in seed_app_templates.py greps for this file so Hermes (which

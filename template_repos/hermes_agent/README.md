@@ -109,7 +109,7 @@ Hermes uses two sibling EFS access points, scoped per app with the template's UI
 - `~/.hermes/` — all Hermes state: `config.yaml`, `SOUL.md`, `hermes-agent/`, `skills/`, `memories/`, `sessions/` (hermes-agent's own session store), `webui-mvp/` (WebUI state, via `HERMES_WEBUI_STATE_DIR`).
 - `/workspace/` — a top-level mount for terminal-tool output. `HERMES_WEBUI_DEFAULT_WORKSPACE=/workspace` wires it as the default workspace. The same access point is mounted into the `docker-dind` sidecar so the Hermes parent and every tool container see one consistent filesystem.
 
-Docker-backed terminal tools run in the sibling `docker-dind` container from the local `doh-toolbox:latest` tag. Hermes's persistent Docker cleanup stops but does not remove `hermes-*` containers; the DinD snapshotter commits stopped containers back into `doh-toolbox:latest` on the Docker `die` event and periodically saves that image to the `docker-persistence` EFS access point.
+Docker-backed terminal tools run in the sibling `docker-dind` container from the local `doh-toolbox:latest` tag. Hermes's persistent Docker cleanup stops but does not remove `hermes-*` containers; the DinD snapshotter commits stopped containers back into `doh-toolbox:latest` on the Docker `die` event and saves that image to the `docker-persistence` EFS access point.
 
 Everything else (image layers, `/opt/hermes-defaults/` seeds, the WebUI binary) is ephemeral and replaced on each task. First boot seeds EFS from `/opt/hermes-defaults/`; subsequent boots refresh `config.yaml` and re-run patches. User edits to `SOUL.md` are preserved; `config.yaml` is DOH-owned and regenerated on every boot. Details in `entrypoint.sh`.
 
