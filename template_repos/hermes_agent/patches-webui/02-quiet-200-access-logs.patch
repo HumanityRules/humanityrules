@@ -1,8 +1,7 @@
 --- a/server.py
 +++ b/server.py
-@@ -51,6 +51,8 @@
-     def log_message(self, fmt, *args): pass  # suppress default Apache-style log
-
+@@ -52,6 +52,8 @@
+ 
      def log_request(self, code: str='-', size: str='-') -> None:
          """Structured JSON logs for each request."""
 +        if str(code) == '200':

@@ -128,4 +128,18 @@ fi
 # become a soft landing. See patches/ for per-patch rationale.
 python3 /opt/hermes-defaults/patches/apply.py "$HERMES_DIR/hermes-agent"
 
+# --- Seed bundled skills into ~/.hermes/skills/ ---
+# Idempotent: sync_skills() tracks which skills have been offered via a
+# manifest and skips user-modified copies. Upstream wires this into
+# `hermes update` and `hermes profile create`, neither of which our ECS
+# deploy flow goes through — so without this call the WebUI skills panel
+# stays empty despite hermes-agent shipping 70+ bundled skills.
+HERMES_HOME="$HERMES_DIR" python3 -c "
+import sys
+sys.path.insert(0, '$HERMES_DIR/hermes-agent')
+from tools.skills_sync import sync_skills
+r = sync_skills(quiet=True)
+print(f'[entrypoint:skills] copied={len(r[\"copied\"])} updated={len(r[\"updated\"])} skipped={r[\"skipped\"]} user_modified={len(r[\"user_modified\"])} total_bundled={r[\"total_bundled\"]}')
+" || echo "[entrypoint:skills] sync failed (non-fatal)"
+
 exec "$@"

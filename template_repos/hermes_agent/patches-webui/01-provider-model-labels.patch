@@ -1,7 +1,6 @@
 --- a/api/config.py
 +++ b/api/config.py
-@@ -1688,7 +1688,13 @@
-                     provider_cfg = cfg.get("providers", {}).get(pid, {})
+@@ -1689,7 +1689,13 @@
                      if isinstance(provider_cfg, dict) and "models" in provider_cfg:
                          cfg_models = provider_cfg["models"]
                          if isinstance(cfg_models, dict):
@@ -15,3 +14,4 @@
 +                            ]
                          elif isinstance(cfg_models, list):
                              raw_models = [{"id": k, "label": k} for k in cfg_models]
+                     models = _apply_provider_prefix(raw_models, pid, active_provider)
