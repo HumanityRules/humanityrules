@@ -78,6 +78,25 @@ Upstream credentials (`LEARNEO_MCP_GITLAB_TOKEN`, `LEARNEO_MCP_ATLASSIAN_*`, `LE
 `patches/` carries DOH-owned fixes against the pinned `hermes-agent` tree: numbered `*.patch` files applied idempotently (`patch -N --forward`) and an `overlay/` tree for whole files DOH owns. `apply.py` runs on every boot against the **EFS-backed** copy, so a new image's patches reach already-deployed volumes. Already-applied patches become no-ops, so upstream fixes soft-land on the next rebuild.
 
 
+## Bundled skills
+
+Upstream ships 70+ skills under `hermes-agent/skills/` (GitHub CLI wrappers, creative generators, mlops toolkits, macOS-host skills, competitor coding agents, red-team kits, etc.). `entrypoint.sh` calls `sync_skills()` on every boot, which copies that tree into `~/.hermes/skills/` on EFS so the WebUI skills panel can pick them up.
+
+DOH curates which skills ship via an **allowlist** at `skills-allowlist.txt` — one path per line, relative to `hermes-agent/skills/`. At image build time, `prune-skills.sh` runs inside the `git clone` layer and deletes every skill directory not listed. Allowlist, not exclusion list, on purpose: a version bump can't silently add new skills to Enterprise deployments — additions require a conscious edit.
+
+The pruner fails the build if any allowlisted path no longer exists upstream (rename or removal). That's the point: on a version bump, an upstream rename should block the build so we can re-anchor the allowlist, not silently drop a skill.
+
+**Adding or removing a skill:**
+
+1. Edit `skills-allowlist.txt`. Keep it grouped by category; blank lines and `#` comments are fine.
+2. Rebuild the image. Look for `[skills-allowlist] kept N skills` in the build log.
+3. Redeploy. New apps get the new set on first boot.
+
+**What stays behind on existing deployments:** `sync_skills()` in upstream only cleans its manifest when a bundled skill disappears — it **does not** delete the copy in `~/.hermes/skills/`, on the assumption the user may have customized it. So skills removed from the allowlist will stop being re-seeded on new apps but will persist in existing EFS volumes until manually scrubbed. The WebUI picks them up from `~/.hermes/skills/`, so they'll still appear for those tenants until a cleanup pass.
+
+**On a version bump:** after bumping the `git clone --branch` pin, expect the build to fail with `FATAL: allowlisted skill 'foo/bar' not found in bundled repo` for any renamed or removed upstream skill. Clone the new tag locally, diff its `skills/` tree against the previous one, reconcile the allowlist, then rebuild.
+
+
 ## Storage: ephemeral vs EFS
 
 All Hermes state (`config.yaml`, `SOUL.md`, `hermes-agent/`, `skills/`, `memories/`, `sessions/`, `workspace/`, WebUI state) lives on an EFS access point mounted at `~/.hermes`, scoped per app with the template's UID/GID (1024 today). The Dockerfile symlinks `/workspace` into this path so terminal tools persist their output.
