@@ -33,7 +33,7 @@ Bedrock has a few quirks handled by the entrypoint:
 
 - Credentials come from the ECS task role via the standard boto3 credential chain; only `AWS_BEDROCK_REGION` needs to be set.
 - `DOH_LLM_BASE_URL` is derived from the region.
-- `boto3` is installed into the shared venv on first boot by `start.sh` (sentinel-guarded), so switching to Bedrock later doesn't require a rebuild.
+- `boto3` (plus `mcp` and `slack-{bolt,sdk}`) is baked into the image by appending to `/apptoo/requirements.txt` at build time, so it's present in the shared venv from first boot.
 
 For Claude on Bedrock, Hermes uses the `AnthropicBedrock` SDK (prompt caching, thinking budgets). Other models go through the Converse API.
 
@@ -75,7 +75,12 @@ Upstream credentials (`SIDECAR_MCP_GITLAB_TOKEN`, `SIDECAR_MCP_ATLASSIAN_*`, `SI
 
 ## Patches
 
-`patches/` carries DOH-owned fixes against the pinned `hermes-agent` tree: numbered `*.patch` files applied idempotently (`patch -N --forward`) and an `overlay/` tree for whole files DOH owns. `apply.py` runs on every boot against the **EFS-backed** copy, so a new image's patches reach already-deployed volumes. Already-applied patches become no-ops, so upstream fixes soft-land on the next rebuild.
+DOH carries two separate patch trees because the two upstreams land in different places in the running container:
+
+- **`patches/`** — fixes against the pinned `hermes-agent` source. `apply.py` runs on every boot against the **EFS-backed** copy at `~/.hermes/hermes-agent/`, so a new image's patches reach already-deployed volumes. Numbered `*.patch` files plus an `overlay/` tree for whole files DOH owns. Applied idempotently (`patch -N --forward`); already-applied patches are no-ops, so upstream fixes soft-land on the next rebuild.
+- **`patches-webui/`** — fixes against the Hermes WebUI, which lives in ephemeral image layers at `/apptoo/`. Applied at **image build time** with `patch -F 0` (zero fuzz) so any context drift fails the build loudly instead of silently misaligning. `compileall` runs right after to overwrite any `.pyc` files the base image shipped. Existing deployments pick these up on next image rebuild + redeploy — there's no EFS copy.
+
+See `patches-webui/README.md` for per-patch rationale.
 
 
 ## Bundled skills
@@ -99,7 +104,10 @@ The pruner fails the build if any allowlisted path no longer exists upstream (re
 
 ## Storage: ephemeral vs EFS
 
-All Hermes state (`config.yaml`, `SOUL.md`, `hermes-agent/`, `skills/`, `memories/`, `sessions/`, `workspace/`, WebUI state) lives on an EFS access point mounted at `~/.hermes`, scoped per app with the template's UID/GID (1024 today). The Dockerfile symlinks `/workspace` into this path so terminal tools persist their output.
+Hermes uses two sibling EFS access points, scoped per app with the template's UID/GID (1024 today):
+
+- `~/.hermes/` — all Hermes state: `config.yaml`, `SOUL.md`, `hermes-agent/`, `skills/`, `memories/`, `sessions/` (hermes-agent's own session store), `webui-mvp/` (WebUI state, via `HERMES_WEBUI_STATE_DIR`).
+- `/workspace/` — a top-level mount for terminal-tool output. `HERMES_WEBUI_DEFAULT_WORKSPACE=/workspace` wires it as the default workspace. The same access point is mounted into the `docker-dind` sidecar so the Hermes parent and every tool container see one consistent filesystem.
 
 Docker-backed terminal tools run in the sibling `docker-dind` container from the local `doh-toolbox:latest` tag. Hermes's persistent Docker cleanup stops but does not remove `hermes-*` containers; the DinD snapshotter commits stopped containers back into `doh-toolbox:latest` on the Docker `die` event and periodically saves that image to the `docker-persistence` EFS access point.
 
@@ -123,4 +131,10 @@ Both upstreams are pinned in the Dockerfile and bumped manually:
 - **WebUI**: `FROM ghcr.io/nesquena/hermes-webui:X.Y.Z`. Container tag drops the leading `v` of the release tag.
 - **Agent framework**: `git clone --branch vYYYY.M.D`. Uses CalVer git tags; ignore the parallel semver in release names.
 
-On existing deployments, only the WebUI updates on redeploy — `hermes-agent/` is frozen on EFS at the version seeded on first boot. Updating it requires user-run `hermes update` or an EFS wipe. When bumping either pin, re-run `patches/apply.py` against a fresh checkout to confirm anchors still match.
+On existing deployments, a redeploy updates:
+
+- The WebUI binary (ephemeral, ships with the image).
+- `patches/*.patch` applied to `~/.hermes/hermes-agent/` via `apply.py` on every boot (idempotent).
+- The bundled-skills seeding flow: `sync_skills()` runs on every boot, so allowlist changes reach `~/.hermes/skills/` for new entries. Skills already on EFS from a prior seeding survive — see the "Bundled skills" section for cleanup notes.
+
+What a redeploy does **not** update is the pinned `hermes-agent/` source tree itself. It stays at the version first seeded to EFS; bumping `git clone --branch` in the Dockerfile only affects *new* apps. Upgrading existing apps requires a user-run `hermes update` inside the agent or an EFS wipe. When bumping either pin, re-run `patches/apply.py` against a fresh checkout to confirm anchors still match.
