@@ -1,5 +1,28 @@
 # DevOpsHero Development Journal
 
+## 2026-04-29 13:48 - [Deployment] Drop `dogfood` and all `mlops/*` from the Hermes skills allowlist
+
+**Conversation:** [2026-04-29-1349-8635c0d6.md](conversations/2026-04-29-1349-8635c0d6.md)
+
+Follow-up to the allowlist curation earlier today. Two category-level removals and one real pruner bug surfaced by the second one.
+
+**Dropped `dogfood`.** The skill's own SKILL.md lists `browser_navigate`, `browser_snapshot`, `browser_click`, `browser_type`, `browser_vision`, `browser_console`, `browser_scroll`, `browser_back`, `browser_press` as prerequisites. Those tools aren't in our tool container image. Keeping the skill in the allowlist would advertise a capability Hermes can't deliver; the model would pick it up, try to invoke `browser_*`, and fail at tool-call time.
+
+**Dropped all of `mlops/*`.** Thirteen skills — training frameworks (axolotl, trl-fine-tuning, unsloth), inference engines (vllm, llama-cpp, outlines, obliteratus), evaluation harnesses (lm-evaluation-harness, weights-and-biases), model-specific tools (audiocraft, segment-anything), research tooling (dspy), and the HuggingFace Hub CLI. These are all oriented at ML researchers training and evaluating models, not at a DevOps platform helping customers deploy apps.
+
+**Pruner bug: two-level category stubs weren't collapsing.** After removing all mlops skills, `mlops/` stayed behind in the image: `mlops/inference/`, `mlops/models/`, `mlops/training/`, `mlops/evaluation/`, `mlops/research/`, `mlops/vector-databases/` all had their child skills deleted but each still contained a `DESCRIPTION.md`, so `find -empty` didn't match any of them. My original cleanup had two steps: (a) `find -mindepth 1 -maxdepth 2 -type d -empty -delete` and (b) a loop over `*/DESCRIPTION.md` that removed any top-level category with zero surviving skill subdirs. Neither step handled a `<category>/<subcategory>/DESCRIPTION.md` layout — (a) didn't see the subcategories as empty because of the DESCRIPTION.md, and (b) only iterated one level deep.
+
+Rewrote the cleanup as an iterate-until-stable loop: in each pass, sweep every `DESCRIPTION.md` and delete its parent if the parent has zero surviving subdirs, then sweep truly-empty directories, and repeat until the directory count stops dropping. This collapses `mlops/inference/` → `mlops/` → gone in two passes and will keep working for any future category nesting depth.
+
+**Key points:**
+
+- Never include a skill whose prerequisites aren't installed in the tool container. `dogfood` needs the browser toolset; we don't have it; removed.
+- `mlops/*` is out of scope for a DevOps deployment platform. All 13 skills under that category dropped.
+- Pruner now iterates `DESCRIPTION.md`-only cleanup + empty-dir sweep until stable. The original one-shot `-maxdepth 2 -empty` approach silently leaves category stubs behind when a category has internal subcategories (mlops is the only current case, but no reason to have the pruner's correctness depend on the tree shape).
+- 44 skills ship in the image now (was 58 after the initial allowlist landed, 57 after `dogfood`, 44 after `mlops/*`).
+
+---
+
 ## 2026-04-29 13:33 - [Bugfix] Stop Hermes final answers from masquerading as thinking
 
 **Conversation:** [2026-04-29-1334-019dda94.md](conversations/2026-04-29-1334-019dda94.md)

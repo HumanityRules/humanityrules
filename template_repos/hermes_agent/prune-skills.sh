@@ -44,14 +44,19 @@ find "$BUNDLED" -name SKILL.md -not -path "*/.git/*" -print0 \
 
 find "$BUNDLED" -name .doh-keep -delete
 
-# Drop now-empty category dirs, and any category dir whose only remaining
-# content is a DESCRIPTION.md (would render an empty panel in the WebUI).
-find "$BUNDLED" -mindepth 1 -maxdepth 2 -type d -empty -delete
-for desc in "$BUNDLED"/*/DESCRIPTION.md; do
-    [ -f "$desc" ] || continue
-    cat_dir=$(dirname "$desc")
-    siblings=$(find "$cat_dir" -mindepth 1 -maxdepth 1 -type d | wc -l)
-    [ "$siblings" -eq 0 ] && rm -rf "$cat_dir"
+# Drop dirs left with only a DESCRIPTION.md (would render an empty panel in
+# the WebUI) and any now-empty dirs. Loop until stable — nested categories
+# like mlops/inference/ → mlops/ collapse one level per pass.
+while :; do
+    before=$(find "$BUNDLED" -type d | wc -l)
+    while IFS= read -r -d '' desc; do
+        cat_dir=$(dirname "$desc")
+        siblings=$(find "$cat_dir" -mindepth 1 -maxdepth 1 -type d | wc -l)
+        [ "$siblings" -eq 0 ] && rm -rf "$cat_dir"
+    done < <(find "$BUNDLED" -name DESCRIPTION.md -print0)
+    find "$BUNDLED" -mindepth 1 -type d -empty -delete
+    after=$(find "$BUNDLED" -type d | wc -l)
+    [ "$before" -eq "$after" ] && break
 done
 
 echo "[skills-allowlist] kept $(find "$BUNDLED" -name SKILL.md | wc -l) skills"
