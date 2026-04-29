@@ -588,13 +588,17 @@ class AppTemplate(models.Model):
     # Ordered, non-empty list of container dicts. Each entry:
     #   {
     #     "name": "<stable identifier>",
-    #     "image_source": "dockerfile" | "prebuilt",
+    #     "image_source": "dockerfile" | "prebuilt" | "registry" | "policy_proxy",
     #     # image_source == "dockerfile":
     #     "source_repo_path": "hermes_agent",
     #     "dockerfile_path": "Dockerfile",
     #     # image_source == "prebuilt":
     #     "ecr_repo": "learneo-mcp",    # within doh/{env_slug}/ namespace
     #     "version": "0.1.0",
+    #     # image_source == "registry":
+    #     "registry_image": "docker:26.1.0-dind",
+    #     # image_source == "policy_proxy":
+    #     "upstream_container": "<sibling container name>",
     #     # common:
     #     "container_port": 8787,
     #     "health_check_path": "/health",

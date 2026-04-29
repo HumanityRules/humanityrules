@@ -159,12 +159,12 @@ def _container_dependency_condition(cond: str) -> ecs.ContainerDependencyConditi
 
 def dockerfile_containers(app_config: appconfig.AppConfig) -> list[appconfig.ContainerConfig]:
     """Return the subset of containers that DOH builds from source at deploy time."""
-    return [c for c in app_config.containers if c.image_source == "dockerfile"]
+    return [c for c in app_config.containers if c.image_source == appconfig.ImageSource.DOCKERFILE]
 
 
 def prebuilt_containers(app_config: appconfig.AppConfig) -> list[appconfig.ContainerConfig]:
     """Return the subset of containers that reference a pre-pushed ECR image."""
-    return [c for c in app_config.containers if c.image_source == "prebuilt"]
+    return [c for c in app_config.containers if c.image_source == appconfig.ImageSource.PREBUILT]
 
 
 def _uses_bedrock_runtime(app_config: appconfig.AppConfig) -> bool:
@@ -229,26 +229,20 @@ def _container_image_uri(
     env_slug: str,
     app_image_tag: str,
 ) -> str:
-    """Resolve the ECR image URI for a container.
-
-    - `dockerfile`:   {account}.dkr.ecr.{region}.amazonaws.com/{c.ecr_repo_name}:{app_image_tag}
-    - `prebuilt`:     {account}.dkr.ecr.{region}.amazonaws.com/doh/{env_slug}/{c.prebuilt_ecr_repo}:{c.prebuilt_version}
-    - `registry`:     c.registry_image (unmodified)
-    - `policy_proxy`: {account}.dkr.ecr.{region}.amazonaws.com/doh/{env_slug}/policy-proxy:POLICY_PROXY_IMAGE_VERSION
-    """
+    """Resolve the ECR image URI for a container, dispatching on ImageSource."""
     registry = f"{account}.dkr.ecr.{region}.amazonaws.com"
-    if container.image_source == "dockerfile":
+    if container.image_source == appconfig.ImageSource.DOCKERFILE:
         assert container.ecr_repo_name, "dockerfile container must have ecr_repo_name"
         return f"{registry}/{container.ecr_repo_name}:{app_image_tag}"
-    if container.image_source == "prebuilt":
+    if container.image_source == appconfig.ImageSource.PREBUILT:
         assert container.prebuilt_ecr_repo and container.prebuilt_version, (
             "prebuilt container must have prebuilt_ecr_repo + prebuilt_version"
         )
         return f"{registry}/doh/{env_slug}/{container.prebuilt_ecr_repo}:{container.prebuilt_version}"
-    if container.image_source == "registry":
+    if container.image_source == appconfig.ImageSource.REGISTRY:
         assert container.registry_image, "registry container must have registry_image"
         return container.registry_image
-    if container.image_source == "policy_proxy":
+    if container.image_source == appconfig.ImageSource.POLICY_PROXY:
         return f"{registry}/{policy_proxy_ecr_repo_name(env_slug)}:{POLICY_PROXY_IMAGE_VERSION}"
     raise ValueError(f"Unknown image_source='{container.image_source}' on container '{container.name}'")
 
@@ -257,9 +251,8 @@ class EcrStack(Stack):
     """
     DevOpsHero ECR Stack — one ECR repo per dockerfile-built container in the app.
 
-    Containers with image_source="prebuilt" are expected to already exist in a
-    separate per-env ECR repo (doh/{env_slug}/<repo>:<version>) and are not
-    created here.
+    Containers with other ImageSource values (prebuilt, registry, policy_proxy)
+    are not created here; see the ImageSource enum for where each is sourced.
     """
 
     def __init__(
@@ -549,7 +542,7 @@ class AppStack(Stack):
             )
 
         # Policy proxy (SSO + ABAC) is opt-in: a template declares a container
-        # with image_source="policy_proxy" and points alb_target_container at
+        # with image_source=POLICY_PROXY and points alb_target_container at
         # it. No separate flag — presence of the container drives everything.
         policy_proxy = app_config.policy_proxy_container()
         if policy_proxy is not None:
@@ -759,7 +752,7 @@ class AppStack(Stack):
             # Environment: per-container list of {name, value}, plus the
             # platform overlay when this is the policy-proxy container.
             environment = {e["name"]: e["value"] for e in c.environment_variables}
-            if c.image_source == "policy_proxy":
+            if c.image_source == appconfig.ImageSource.POLICY_PROXY:
                 environment.update(policy_proxy_environment_overlay)
 
             # Secrets: the container's declared fields from the shared app_secrets bag,
@@ -771,7 +764,7 @@ class AppStack(Stack):
                     secrets[field_name] = ecs.Secret.from_secrets_manager(app_secret_resource, field=field_name)
             if c.name == alb_target.name:
                 secrets.update(alb_target_database_secrets)
-            if c.image_source == "policy_proxy":
+            if c.image_source == appconfig.ImageSource.POLICY_PROXY:
                 secrets.update(policy_proxy_secret_overlay)
 
             health_check = None

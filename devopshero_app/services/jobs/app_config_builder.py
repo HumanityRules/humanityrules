@@ -14,6 +14,7 @@ from devopshero_app.services.infra_customer.appconfig import (
     AppConfig,
     ContainerConfig,
     ContainerDependencyConfig,
+    ImageSource,
 )
 
 
@@ -122,7 +123,7 @@ def _build_container_config(
 ) -> ContainerConfig:
     """Project a (template, blueprint) container pair into a ContainerConfig."""
     name = template_container["name"]
-    image_source = template_container["image_source"]
+    image_source = ImageSource(template_container["image_source"])
 
     command = template_container.get("command")
     common = dict(
@@ -151,20 +152,20 @@ def _build_container_config(
         stop_timeout=template_container.get("stop_timeout") or None,
     )
 
-    if image_source == "dockerfile":
+    if image_source == ImageSource.DOCKERFILE:
         return ContainerConfig(
             **common,
             source_repo_path=template_container["source_repo_path"],
             dockerfile_path=template_container.get("dockerfile_path") or None,
             ecr_repo_name=f"doh/{env_slug}/{app_name}-{name}",
         )
-    if image_source == "prebuilt":
+    if image_source == ImageSource.PREBUILT:
         return ContainerConfig(
             **common,
             prebuilt_ecr_repo=template_container["ecr_repo"],
             prebuilt_version=template_container["version"],
         )
-    if image_source == "registry":
+    if image_source == ImageSource.REGISTRY:
         if not template_container.get("registry_image"):
             msg = f"Container '{name}' is image_source=registry but has no registry_image"
             raise ValueError(msg)
@@ -172,7 +173,7 @@ def _build_container_config(
             **common,
             registry_image=template_container["registry_image"],
         )
-    if image_source == "policy_proxy":
+    if image_source == ImageSource.POLICY_PROXY:
         upstream = template_container.get("upstream_container")
         if not upstream:
             msg = f"Container '{name}' is image_source=policy_proxy but has no upstream_container"
