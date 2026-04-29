@@ -1,5 +1,28 @@
 # DevOpsHero Development Journal
 
+## 2026-04-29 13:33 - [Bugfix] Stop Hermes final answers from masquerading as thinking
+
+**Conversation:** [2026-04-29-1334-019dda94.md](conversations/2026-04-29-1334-019dda94.md)
+
+The Hermes WebUI thinking bubble was rendering the final assistant response as "thinking" text, so the same content appeared once inside the thinking bubble and again as the actual response. Initial suspects were DOH's policy proxy and the Bedrock integration. The policy proxy was ruled out because it streams upstream bytes raw via `StreamingResponse(... aiter_raw() ...)` and does not parse or rewrite SSE events. Bedrock was also not dismissed as incapable: AWS Bedrock does expose reasoning/thinking deltas for supported models, so the right question was whether Hermes was preserving those deltas or accidentally fabricating a reasoning event from final content.
+
+The concrete bug was in Hermes agent's post-response progress callback path. After `assistant_message.content` is available, Hermes stripped any XML-style reasoning tags from that content and, for top-level agents, emitted `tool_progress_callback("reasoning.available", "_thinking", _think_text[:500], None)`. In normal replies, `assistant_message.content` is the final answer. The WebUI receives `reasoning.available` as a reasoning SSE event and appends it to the thinking bubble, so final answer content was mislabeled as hidden reasoning. Added `04-stop-answer-as-reasoning.patch` to remove only that top-level fallback while preserving delegated subagent `_thinking` progress.
+
+Testing then surfaced a separate startup error: `api.config._set_thread_env() got multiple values for keyword argument 'TERMINAL_CWD'`. First pass was to patch WebUI `streaming.py` to merge `_profile_runtime_env` before calling `_set_thread_env`, but the better DOH-side fix is to avoid putting `terminal.cwd` in generated `config.yaml` at all. WebUI already sets `TERMINAL_CWD` per session from the selected workspace before running the agent; our static `terminal.cwd: /workspace` was redundant and caused `get_profile_runtime_env()` to inject `TERMINAL_CWD` once before streaming passed it again. Removed `cwd: __TERMINAL_CWD__` from the template and removed the unused `TERMINAL_CWD` substitution from `entrypoint.sh`.
+
+The user also pushed back on leaving explanatory comments in `config.yaml.template`. That was the right correction: the absence of `cwd` is the desired steady state, and historical rationale belongs in this journal/commit context rather than in a generated customer-facing config.
+
+**Key points:**
+
+- The thinking bubble was not duplicated as a component; its text was duplicated because final answer content was being emitted as `reasoning.available`.
+- `04-stop-answer-as-reasoning.patch` is intentionally narrow: real structured reasoning deltas still flow through the provider-specific callbacks, while the fake post-hoc final-answer fallback is gone.
+- GPT 5.5 on the laptop can still show correct thinking because that path can emit real structured reasoning; the bogus fallback only becomes visible when it is the only `reasoning.available` event or when it races/masks provider reasoning.
+- Bedrock can emit thinking tokens for supported models. If thinking bubbles now disappear rather than showing real Bedrock thinking, the next bug is in Hermes's Bedrock request/stream preservation path, not in the UI duplication symptom.
+- The `TERMINAL_CWD` crash was caused by DOH's generated config including `terminal.cwd`; WebUI already owns per-session workspace cwd. Removing the config-level cwd is cleaner than patching WebUI for a value we do not need to set.
+- Historical comments in config templates create residue. The clean fix is the smallest generated config that represents the steady state.
+
+---
+
 ## 2026-04-29 13:15 - [Deployment] Curate Hermes bundled skills via an allowlist
 
 **Conversation:** [2026-04-29-1316-8635c0d6.md](conversations/2026-04-29-1316-8635c0d6.md)

@@ -32,7 +32,6 @@ agent:
 terminal:
   backend: __TERMINAL_BACKEND__
   modal_mode: auto
-  cwd: __TERMINAL_CWD__
   timeout: 180
   env_passthrough: []
   persistent_shell: true
