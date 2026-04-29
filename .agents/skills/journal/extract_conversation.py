@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Extract conversations from Cursor or Claude CLI to markdown files.
+"""Extract conversations from Cursor, Claude CLI, or Codex to markdown files.
 
 Usage:
     # Extract most recent conversation (by message count)
@@ -20,7 +20,7 @@ Usage:
     # Extract to specific output file
     python extract_conversation.py --output /path/to/file.md
 
-    # Force a specific source (cursor or claude-cli)
+    # Force a specific source (cursor, claude-cli, or codex)
     python extract_conversation.py --source claude-cli
 
 Note: The current in-progress conversation may not appear until it's saved.
@@ -33,10 +33,13 @@ import sqlite3
 import sys
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 
 
 CURSOR_STATE_DB = Path.home() / "Library/Application Support/Cursor/User/globalStorage/state.vscdb"
 CLAUDE_CLI_PROJECTS_DIR = Path.home() / ".claude/projects"
+CODEX_SESSIONS_DIR = Path.home() / ".codex/sessions"
+CODEX_SESSION_INDEX = Path.home() / ".codex/session_index.jsonl"
 DEFAULT_OUTPUT_DIR = Path(__file__).parent.parent.parent.parent / "docs/conversations"
 
 
@@ -351,50 +354,296 @@ def claude_cli_to_markdown(uuid, data):
 
 
 # =============================================================================
+# Codex (JSONL session files)
+# =============================================================================
+
+def codex_iter_session_files() -> list[Path]:
+    """List Codex session JSONL files newest first."""
+    if not CODEX_SESSIONS_DIR.exists():
+        return []
+
+    return sorted(CODEX_SESSIONS_DIR.glob("**/*.jsonl"), key=lambda f: f.stat().st_mtime, reverse=True)
+
+
+def codex_load_thread_names() -> dict[str, str]:
+    """Load Codex thread names from the session index."""
+    if not CODEX_SESSION_INDEX.exists():
+        return {}
+
+    thread_names: dict[str, str] = {}
+    with open(CODEX_SESSION_INDEX, mode="r", encoding="utf-8") as f:
+        for line in f:
+            try:
+                entry = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+
+            if not isinstance(entry, dict):
+                continue
+
+            session_id = entry.get("id")
+            thread_name = entry.get("thread_name")
+            if isinstance(session_id, str) and isinstance(thread_name, str):
+                thread_names[session_id] = thread_name
+
+    return thread_names
+
+
+def codex_text_from_content(content: Any) -> str:
+    """Extract readable text from Codex message content."""
+    if isinstance(content, str):
+        return content
+
+    if isinstance(content, dict):
+        text = content.get("text")
+        if isinstance(text, str):
+            return text
+        return ""
+
+    if not isinstance(content, list):
+        return ""
+
+    text_parts: list[str] = []
+    for part in content:
+        if isinstance(part, str):
+            text_parts.append(part)
+            continue
+
+        if not isinstance(part, dict):
+            continue
+
+        if part.get("type") not in ("input_text", "output_text", "text"):
+            continue
+
+        text = part.get("text")
+        if isinstance(text, str):
+            text_parts.append(text)
+
+    return "\n".join(text_parts)
+
+
+def codex_should_skip_message(role: str, text: str) -> bool:
+    """Filter Codex messages that are metadata rather than conversation."""
+    if not text.strip():
+        return True
+
+    return role == "user" and text.startswith("# AGENTS.md instructions for ")
+
+
+def codex_matches_current_cwd(cwd: str | None) -> bool:
+    """Check whether a Codex session belongs to the current project."""
+    if not cwd:
+        return True
+
+    try:
+        return Path(cwd).resolve() == Path(os.getcwd()).resolve()
+    except OSError:
+        return cwd == os.getcwd()
+
+
+def codex_read_conversation_file(jsonl_file: Path, thread_names: dict[str, str]) -> dict[str, Any] | None:
+    """Read one Codex JSONL file into a normalized conversation."""
+    session_id: str | None = None
+    cwd: str | None = None
+    messages: list[dict[str, Any]] = []
+
+    with open(jsonl_file, mode="r", encoding="utf-8") as f:
+        for line in f:
+            try:
+                entry = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+
+            if not isinstance(entry, dict):
+                continue
+
+            payload = entry.get("payload", {})
+            if not isinstance(payload, dict):
+                continue
+
+            if entry.get("type") == "session_meta" and not session_id:
+                meta_session_id = payload.get("id")
+                if isinstance(meta_session_id, str):
+                    session_id = meta_session_id
+
+                meta_cwd = payload.get("cwd")
+                if isinstance(meta_cwd, str):
+                    cwd = meta_cwd
+                continue
+
+            if entry.get("type") != "response_item":
+                continue
+
+            if payload.get("type") != "message":
+                continue
+
+            role = payload.get("role")
+            if not isinstance(role, str) or role not in ("user", "assistant"):
+                continue
+
+            text = codex_text_from_content(content=payload.get("content", "")).strip()
+            if codex_should_skip_message(role=role, text=text):
+                continue
+
+            messages.append({
+                "role": role,
+                "text": text,
+                "timestamp": entry.get("timestamp"),
+                "phase": payload.get("phase"),
+            })
+
+    if not session_id:
+        return None
+
+    if not codex_matches_current_cwd(cwd=cwd):
+        return None
+
+    return {
+        "sessionId": session_id,
+        "threadName": thread_names.get(session_id),
+        "cwd": cwd,
+        "messages": messages,
+        "path": str(jsonl_file),
+    }
+
+
+def codex_list_conversations(limit: int, search_text: str | None, full_text_search: bool) -> list[tuple[str, str, int, str]]:
+    """List recent Codex conversations for the current project."""
+    conversations: list[tuple[str, str, int, str]] = []
+    thread_names = codex_load_thread_names()
+
+    for jsonl_file in codex_iter_session_files():
+        data = codex_read_conversation_file(jsonl_file=jsonl_file, thread_names=thread_names)
+        if not data:
+            continue
+
+        messages = data.get("messages", [])
+        preview = ""
+        all_text = ""
+        for msg in messages:
+            msg_text = msg.get("text", "")
+            all_text += " " + msg_text
+            if not preview and msg.get("role") == "user":
+                preview = msg_text[:100].replace("\n", " ")
+
+        if search_text:
+            search_target = all_text.lower() if full_text_search else preview.lower()
+            if search_text.lower() not in search_target:
+                continue
+
+        if messages:
+            conversations.append(("codex", data["sessionId"], len(messages), preview))
+            if len(conversations) >= limit:
+                break
+
+    return conversations
+
+
+def codex_get_conversation(uuid: str) -> dict[str, Any] | None:
+    """Get a specific Codex conversation by session UUID."""
+    thread_names = codex_load_thread_names()
+
+    for jsonl_file in codex_iter_session_files():
+        data = codex_read_conversation_file(jsonl_file=jsonl_file, thread_names=thread_names)
+        if data and data.get("sessionId") == uuid:
+            return data
+
+    return None
+
+
+def codex_to_markdown(uuid: str, data: dict[str, Any]) -> str:
+    """Convert Codex conversation to markdown."""
+    lines = [
+        f"# Codex Conversation",
+        f"",
+        f"**Session ID:** `{uuid}`",
+        f"**Extracted:** {datetime.now().strftime('%Y-%m-%d %H:%M')}",
+    ]
+
+    thread_name = data.get("threadName")
+    if thread_name:
+        lines.append(f"**Thread:** {thread_name}")
+
+    lines.extend([
+        f"",
+        f"---",
+        f"",
+    ])
+
+    for msg in data.get("messages", []):
+        role = msg.get("role", "unknown")
+        text = msg.get("text", "").strip()
+
+        if not text:
+            continue
+
+        if role == "user":
+            lines.append(f"## User\n\n{text}\n")
+        elif role == "assistant":
+            lines.append(f"## Assistant\n\n{text}\n")
+        else:
+            lines.append(f"## {role}\n\n{text}\n")
+
+        lines.append("---\n")
+
+    return "\n".join(lines)
+
+
+# =============================================================================
 # Main
 # =============================================================================
 
-def list_conversations(limit, search_text, full_text_search, source):
+def list_conversations(limit: int, search_text: str | None, full_text_search: bool, source: str | None) -> list[tuple[str, str, int, str]]:
     """List conversations from all sources (or a specific source)."""
     conversations = []
 
     if source in (None, "cursor"):
-        conversations.extend(cursor_list_conversations(limit, search_text, full_text_search))
+        conversations.extend(cursor_list_conversations(limit=limit, search_text=search_text, full_text_search=full_text_search))
 
     if source in (None, "claude-cli"):
-        conversations.extend(claude_cli_list_conversations(limit, search_text, full_text_search))
+        conversations.extend(claude_cli_list_conversations(limit=limit, search_text=search_text, full_text_search=full_text_search))
+
+    if source in (None, "codex"):
+        conversations.extend(codex_list_conversations(limit=limit, search_text=search_text, full_text_search=full_text_search))
 
     # Sort by message count descending
     conversations.sort(key=lambda x: x[2], reverse=True)
     return conversations[:limit]
 
 
-def get_conversation(uuid, source):
+def get_conversation(uuid: str, source: str | None) -> tuple[str | None, Any | None]:
     """Get a conversation by UUID, trying all sources if source not specified."""
+    if source in (None, "codex"):
+        data = codex_get_conversation(uuid=uuid)
+        if data:
+            return "codex", data
+
     if source in (None, "claude-cli"):
-        data = claude_cli_get_conversation(uuid)
+        data = claude_cli_get_conversation(uuid=uuid)
         if data:
             return "claude-cli", data
 
     if source in (None, "cursor"):
-        data = cursor_get_conversation(uuid)
+        data = cursor_get_conversation(uuid=uuid)
         if data:
             return "cursor", data
 
     return None, None
 
 
-def to_markdown(source, uuid, data):
+def to_markdown(source: str, uuid: str, data: Any) -> str:
     """Convert conversation to markdown based on source."""
     if source == "cursor":
-        return cursor_to_markdown(uuid, data)
+        return cursor_to_markdown(uuid=uuid, data=data)
     elif source == "claude-cli":
-        return claude_cli_to_markdown(uuid, data)
+        return claude_cli_to_markdown(uuid=uuid, data=data)
+    elif source == "codex":
+        return codex_to_markdown(uuid=uuid, data=data)
     else:
         raise ValueError(f"Unknown source: {source}")
 
 
-def main():
+def main() -> None:
     parser = argparse.ArgumentParser(description="Extract conversations to markdown")
     parser.add_argument("--uuid", help="Specific conversation UUID to extract")
     parser.add_argument("--list", action="store_true", help="List recent conversations")
@@ -402,11 +651,16 @@ def main():
     parser.add_argument("--full", "-f", action="store_true", help="Full-text search (all messages)")
     parser.add_argument("--limit", type=int, default=10, help="Number of conversations to list")
     parser.add_argument("--output", "-o", help="Output file path")
-    parser.add_argument("--source", choices=["cursor", "claude-cli"], help="Source to use (default: both)")
+    parser.add_argument("--source", choices=["cursor", "claude-cli", "codex"], help="Source to use (default: all)")
     args = parser.parse_args()
 
     if args.list:
-        conversations = list_conversations(args.limit, args.search, args.full, args.source)
+        conversations = list_conversations(
+            limit=args.limit,
+            search_text=args.search,
+            full_text_search=args.full,
+            source=args.source,
+        )
         print(f"Recent conversations ({len(conversations)}):\n")
         for source, uuid, count, preview in conversations:
             print(f"  [{source}] {uuid}")
@@ -418,23 +672,23 @@ def main():
 
     # Get the conversation
     if args.uuid:
-        source, data = get_conversation(args.uuid, args.source)
+        source, data = get_conversation(uuid=args.uuid, source=args.source)
         if not data:
             print(f"Error: Conversation {args.uuid} not found", file=sys.stderr)
             sys.exit(1)
         uuid = args.uuid
     else:
         # Get most recent by listing and picking first
-        conversations = list_conversations(1, None, False, args.source)
+        conversations = list_conversations(limit=1, search_text=None, full_text_search=False, source=args.source)
         if not conversations:
             print("Error: No conversations found", file=sys.stderr)
             sys.exit(1)
         source, uuid, _, _ = conversations[0]
-        _, data = get_conversation(uuid, source)
+        _, data = get_conversation(uuid=uuid, source=source)
         print(f"Using most recent conversation: [{source}] {uuid}")
 
     # Convert to markdown
-    markdown = to_markdown(source, uuid, data)
+    markdown = to_markdown(source=source, uuid=uuid, data=data)
 
     # Determine output path
     if args.output:
