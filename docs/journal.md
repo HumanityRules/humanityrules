@@ -1,5 +1,86 @@
 # DevOpsHero Development Journal
 
+## 2026-04-28 23:06 - [Deployment] WebUI patches system + Bedrock model dropdown fix
+
+**Conversation:** [2026-04-28-2307-38a4a76d.md](conversations/2026-04-28-2307-38a4a76d.md)
+
+After bumping Hermes WebUI to 0.50.236 earlier in the same session, a user-visible regression surfaced on `hermes-vmendi00`: the WebUI's model dropdown showed GPT-5.4 instead of the configured Bedrock Opus 4.7, and Bedrock wasn't present as a provider at all. The agent was running correctly — `config.yaml` still had `provider: bedrock`, IMDS credentials resolved fine, and the live session self-identified as "Opus 4.7 via Bedrock". The bug was entirely on the WebUI side. Root-caused and fixed in this change; the fix required both a WebUI source patch and a config render change. Also introduced the general infrastructure — a `patches-webui/` sibling to `patches/` — to carry future DOH-owned WebUI fixes, since this is almost certainly not the last one.
+
+**Root cause of the missing dropdown.** Traced through `api/config.py:get_available_models` in WebUI 0.50.236. The dropdown builder at line 1685 pulls per-provider models from one of two sources: a hardcoded `_PROVIDER_MODELS` catalog (`api/config.py:612-758`, contains anthropic/openai/google/deepseek/nous/zai/kimi/minimax/copilot/opencode-zen/opencode-go/gemini/mistralai/qwen/x-ai) or `config.yaml`'s `providers.<pid>.models` section. Bedrock is in *neither*:
+
+- `_PROVIDER_MODELS` has no `bedrock` entry. The WebUI project simply hasn't curated one yet.
+- Our `config.yaml.template` shipped `providers: {}` (line 13, pre-fix).
+
+`list_available_providers()` *does* report bedrock as authenticated (it calls `get_auth_status("bedrock")` which delegates to `has_aws_credentials()` in `agent/bedrock_adapter.py:152` — that walks boto3's default chain, resolves the ECS task role via IMDS, returns True), so `bedrock` is in the `detected_providers` set. But when the group builder gets to it, `pid in _PROVIDER_MODELS` is False, `pid in cfg.get("providers", {})` is False, so execution falls to the `else` branch (line 1703) which only appends a group if `auto_detected_models` is non-empty. `auto_detected_models` comes from hitting `<base_url>/v1/models`, and `bedrock-runtime.<region>.amazonaws.com/v1/models` doesn't exist (400s or 404s). Net: no Bedrock group is ever added to the dropdown. Whichever other provider happens to have credentials (OpenAI env var, in this case) wins the default selection. The `bedrock` alias table at `api/config.py:578-581` was a red herring — that handles *input* alias resolution, not dropdown population.
+
+The agent path is unaffected because it reads `model.provider` straight from `config.yaml` — the dropdown is purely a WebUI UX layer that never influenced routing. That's why "agent works, WebUI says GPT-5.4" was the symptom.
+
+**Second bug discovered along the way.** When I first tried to fix this purely via `config.yaml` (populate `providers.bedrock.models: {id: label}`), I hit a second WebUI bug: the group builder at line 1689-1694 reads the dict form but hardcodes the label:
+
+```python
+if isinstance(cfg_models, dict):
+    raw_models = [{"id": k, "label": k} for k in cfg_models.keys()]
+```
+
+It discards dict values. So `us.anthropic.claude-opus-4-7: "Claude Opus 4.7"` in config.yaml gets parsed correctly but the pretty label is thrown away — the dropdown would show the raw inference-profile ID. The dict form is effectively equivalent to the list form today; there's no config-only path to pretty labels. This is a genuine bug in the WebUI (dict values have no semantic purpose if they're always dropped); filing it upstream is the right long-term fix. Short-term, DOH needs to patch the WebUI.
+
+**New infrastructure: `patches-webui/` with build-time application.** Added a sibling directory to `patches/` for WebUI-specific patches. Crucially, the application model is *different* from the agent patches:
+
+- **Agent patches** (`patches/apply.py`) run at **every container boot** against the EFS-backed `~/.hermes/hermes-agent/` tree. They have to, because the agent source is only seeded on first deploy and stays on EFS thereafter — a rebuilt image never touches already-deployed volumes. Idempotency is load-bearing.
+- **WebUI patches** (`patches-webui/*.patch`) run at **image build time** against `/apptoo/` inside the Dockerfile. The WebUI lives in ephemeral image layers, so every ECS task pull picks up the patched source. Runtime re-application buys nothing and adds boot latency and failure modes.
+
+The Dockerfile step is tight — a `for` loop over `*.patch` with `patch -p1 -d /apptoo -i "$p"`, followed by a `find /apptoo -name __pycache__ -type d -exec rm -rf {} +`. The pycache eviction is load-bearing: Python has almost certainly compiled bytecode alongside the `.py` files during the WebUI image build (imports at install/server-start time, pip's compile-on-install flag, etc.), and stale `.pyc` would shadow the patched sources. A patched `.py` plus a stale `.pyc` yields the "my patch isn't working" debugging session that every codebase with image-time source edits has learned the hard way.
+
+**Patch: `01-provider-model-labels.patch`.** Three-line delta to `api/config.py:1689-1694`. Replaces the hardcoded `"label": k` with `"label": v if isinstance(v, str) and v.strip() else k` when `cfg_models` is a dict, preserving the fallback-to-key behavior when the value is empty or non-string. Verified by cloning the WebUI source tree (`gh api contents/api/config.py?ref=v0.50.236`), applying the patch with `patch -p1 --dry-run` (clean) and the real apply (clean, no fuzz). First attempt had a malformed hunk header — I'd counted 12 post-context lines when the actual count was 13 because the new dict comprehension is 7 lines, not 6. Fixed by bumping `@@ -1688,7 +1688,12 @@` to `@@ -1688,7 +1688,13 @@`.
+
+**Config-template change: `__PROVIDERS_BLOCK__` placeholder.** Replaced the hardcoded `providers: {}` in `config.yaml.template` with a `__PROVIDERS_BLOCK__` token, then substituted it at boot with either the Bedrock providers block or a plain `providers: {}` (non-Bedrock). sed's `/pattern/r file` + `/pattern/d` combo is the idiomatic way to expand a one-line marker into a multi-line block — tested both paths through `yaml.safe_load` and got clean dicts with the expected shape. First attempt hit an unexpected behavior: sed matched `__PROVIDERS_BLOCK__` in the *comment header's* "Variables:" list (line 5, pre-fix) as well as the real placeholder, producing a duplicated providers block near the top of the rendered config. Fixed by cleaning up the header comment to not enumerate the variable names — the list had already drifted from the actual substitution set, and the per-variable self-documentation doesn't add enough value to justify the footgun.
+
+**Curated model list: three Claude inference profiles.** The Bedrock providers block ships:
+
+```yaml
+providers:
+  bedrock:
+    models:
+      'us.anthropic.claude-opus-4-7': "Opus 4.7"
+      'us.anthropic.claude-sonnet-4-6': "Sonnet 4.6"
+      'us.anthropic.claude-haiku-4-5-20251001-v1:0': "Haiku 4.5"
+```
+
+Single-quoting the keys is load-bearing: Haiku's inference-profile ID ends in `:0`, which YAML would otherwise parse as a mapping value (the key would become `us.anthropic.claude-haiku-4-5-20251001-v1` with value `0`, which is not what we want and definitely not a valid Bedrock identifier). Verified via `yaml.safe_load` that the keys round-trip exactly.
+
+Model IDs were cross-checked against `devopshero_app/services/agent/llm_client.py:18-24` — the canonical registry used by the control plane's own agent. Confirmed:
+
+- **Opus 4.7** → `us.anthropic.claude-opus-4-7` (short form)
+- **Sonnet 4.6** → `us.anthropic.claude-sonnet-4-6` (short form, no `v1:0` suffix)
+- **Haiku 4.5** → `us.anthropic.claude-haiku-4-5-20251001-v1:0` (old dated form with `v1:0`)
+
+The inconsistency — Opus and Sonnet use the short form while Haiku still uses the long dated one — is real on AWS's side. It's not a mistake on our end; AWS has not (yet?) published a shortened `us.anthropic.claude-haiku-4-5` inference profile, and the dated form is what's actually available. When a short form ships, we can update both here and in `llm_client.py`.
+
+**Label style.** First draft used verbose labels ("Claude Opus 4.7"). User trimmed to just "Opus 4.7" / "Sonnet 4.6" / "Haiku 4.5" — the dropdown already has a "Bedrock" provider group heading, so prefixing every model with "Claude" is redundant. Kept user's version.
+
+**Option B2 (patch at entrypoint time) vs. B1 (patch at build time) — decision rationale.** Considered a runtime-apply approach that would mirror the agent's `apply.py` and run against `/apptoo/` on container start. Rejected because:
+
+- The WebUI source is replaced wholesale on every image pull anyway. There's no EFS-persistence problem to solve.
+- Boot latency matters: `patch` across a Python source tree plus `__pycache__` eviction adds measurable time to container startup.
+- Build-time failure is *better* than runtime failure. If a WebUI version bump breaks a patch anchor, we want the Docker build to fail so we notice and fix it, not for the container to boot with a subtly-broken WebUI.
+- There's no obvious case where we'd want the patches to vary per-deployment.
+
+**What I deliberately didn't do.**
+
+- Didn't file the WebUI label bug upstream yet. Worth doing; it's a three-line fix and the dict form is semantically meaningless without it. Tracked in `patches-webui/README.md` under the patch's "Upstream status" line so future-me is reminded.
+- Didn't expose a `DOH_BEDROCK_MODELS` env var to let deployments override the curated list. Every app we've shipped wants the same three Claude models; parameterizing now is premature. If a customer asks for Nova/Llama, we'll add a branch to `entrypoint.sh` then.
+- Didn't populate `providers.<pid>.models` for non-Bedrock providers (e.g. OpenAI/Anthropic via `custom`). The existing code paths work fine for those — `_PROVIDER_MODELS` catalogs them, and the `custom` provider's models come from a live `/v1/models` discovery if the endpoint supports it. Bedrock is the odd one out because AWS doesn't expose an OpenAI-shaped model discovery endpoint.
+
+**Key points:**
+
+- Root cause of the missing Bedrock dropdown: WebUI's group builder has no `_PROVIDER_MODELS["bedrock"]` entry and our template shipped empty `providers: {}`, so Bedrock fell to the `else` branch that gates on `auto_detected_models` (empty, since bedrock-runtime has no `/v1/models`). The agent path was unaffected — this was WebUI-only.
+- Fix requires both sides: populate `providers.bedrock.models` in `config.yaml`, AND patch the WebUI to actually use the dict values as labels instead of dropping them.
+- Introduced `patches-webui/` as a sibling to `patches/` for WebUI-specific patches. Applied at **image build time** (not boot) because the WebUI lives in ephemeral image layers, unlike the agent which lives on EFS. `__pycache__` eviction after patching is load-bearing.
+- First patch `01-provider-model-labels.patch` — three-line delta that makes the config-driven `providers.<pid>.models` dict form carry labels through to the dropdown. Belongs upstream eventually; filed as a known-to-drop patch in the README.
+- Model IDs cross-referenced against `devopshero_app/services/agent/llm_client.py` (the control-plane's own Bedrock client registry). Opus 4.7 + Sonnet 4.6 use the new short form; Haiku 4.5 still uses the dated `-20251001-v1:0` form because AWS hasn't shipped a short version. Quoting keys in YAML is mandatory because of the `:0` suffix.
+- Template substitution trap: sed's `/__PROVIDERS_BLOCK__/` pattern also matched the comment-header listing of variable names. Removed the listing to avoid the footgun; the comment didn't pay for itself.
+- Deliberately did not implement runtime patch application, per-deployment model list overrides, or the same infrastructure for non-Bedrock providers. All are speculative wins against current needs.
+
 ## 2026-04-28 22:41 - [Deployment] Align Hermes container cleanup with DinD snapshot persistence
 
 **Conversation:** [2026-04-28-2242-5cb55dff.md](conversations/2026-04-28-2242-5cb55dff.md)

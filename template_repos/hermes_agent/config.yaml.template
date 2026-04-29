@@ -1,8 +1,5 @@
 # Hermes Agent — DOH Enterprise Configuration
-# Variables: __CONFIG_PROVIDER__, __MODEL__, __BASE_URL__,
-#            __AUX_PROVIDER__, __AUX_MODEL__, __AUX_BASE_URL__,
-#            __TERMINAL_BACKEND__, __TERMINAL_CWD__, __DOCKER_VOLUMES__,
-#            __TOOL_IMAGE__
+# entrypoint.sh substitutes every __XXX__ placeholder below at boot.
 # Seeded to ~/.hermes/config.yaml on first boot; never overwritten after that.
 # API keys live in .env, not here.
 
@@ -10,7 +7,7 @@ model:
   default: __MODEL__
   provider: __CONFIG_PROVIDER__
   base_url: __BASE_URL__
-providers: {}
+__PROVIDERS_BLOCK__
 fallback_providers: []
 credential_pool_strategies: {}
 
