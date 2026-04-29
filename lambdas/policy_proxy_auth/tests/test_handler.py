@@ -139,8 +139,36 @@ def test_callback_happy_path(mock_http) -> None:
     assert claims["sub"] == "okta|vmendi"
     assert claims["username"] == "vmendi@example.com"
     assert claims["email"] == "vmendi@example.com"
-    # exp - iat should equal SESSION_TTL_SECONDS
-    assert claims["exp"] - claims["iat"] == handler.SESSION_TTL_SECONDS
+    assert claims["exp"] - claims["iat"] == handler.DEFAULT_SESSION_TTL_SECONDS
+    assert f"Max-Age={handler.DEFAULT_SESSION_TTL_SECONDS}" in set_cookie
+
+
+def test_callback_respects_configured_session_ttl(mock_http, monkeypatch) -> None:
+    rd = f"https://vmendi-hermes.{TEST_ENV_DOMAIN}/chat"
+    state = _mint_valid_state(rd)
+    monkeypatch.setenv(handler.SESSION_TTL_SECONDS_ENV, "7200")
+
+    token_resp = type("R", (), {"status": 200, "data": json.dumps({"access_token": "at-1"}).encode()})()
+    userinfo_resp = type("R", (), {
+        "status": 200,
+        "data": json.dumps({"sub": "okta|vmendi", "email": "vmendi@example.com"}).encode(),
+    })()
+    mock_http.request.side_effect = [token_resp, userinfo_resp]
+
+    response = handler.handler(
+        make_alb_event(path="/callback", query={"code": "code-xyz", "state": state}),
+        None,
+    )
+    set_cookie = response["headers"]["set-cookie"]
+    cookie_value = set_cookie.split("=", 1)[1].split(";", 1)[0]
+    claims = jwt.decode(
+        cookie_value,
+        key=handler._cached_config.jwt_key.public_pem,
+        algorithms=["RS256"],
+    )
+
+    assert claims["exp"] - claims["iat"] == 7200
+    assert "Max-Age=7200" in set_cookie
 
 
 def test_callback_token_exchange_failure_returns_502(mock_http) -> None:
@@ -195,7 +223,10 @@ def test_jwks_policy_proxy_verifies_session_jwt_using_jwks_public_key() -> None:
     public_key = RSAPublicNumbers(e, n).public_key(default_backend())
 
     session_jwt = handler._mint_session_jwt(
-        oidc_sub="okta|x", username="x@example.com", email="x@example.com",
+        oidc_sub="okta|x",
+        username="x@example.com",
+        email="x@example.com",
+        ttl_seconds=handler.DEFAULT_SESSION_TTL_SECONDS,
     )
     claims = jwt.decode(session_jwt, key=public_key, algorithms=["RS256"])
     assert claims["sub"] == "okta|x"

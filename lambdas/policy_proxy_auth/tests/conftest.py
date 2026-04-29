@@ -2,6 +2,7 @@
 
 import json
 import os
+from collections.abc import Generator
 from pathlib import Path
 from unittest.mock import MagicMock
 
@@ -37,13 +38,14 @@ def rsa_keypair() -> tuple[bytes, bytes]:
 
 
 @pytest.fixture(autouse=True)
-def fake_env(monkeypatch, rsa_keypair):
+def fake_env(monkeypatch: pytest.MonkeyPatch, rsa_keypair: tuple[bytes, bytes]) -> Generator[None, None, None]:
     """Set env vars + seed module caches so tests don't touch Secrets Manager."""
     private_pem, public_pem = rsa_keypair
 
     monkeypatch.setenv("DOH_ENV_DOMAIN", TEST_ENV_DOMAIN)
     monkeypatch.setenv("DOH_AUTH_BASE_URL", f"https://auth.{TEST_ENV_DOMAIN}")
     monkeypatch.setenv("DOH_POLICY_PROXY_AUTH_CONFIG_SECRET_ARN", "arn:aws:secretsmanager:us-east-1:0:secret:policy-proxy-auth-config")
+    monkeypatch.delenv(handler.SESSION_TTL_SECONDS_ENV, raising=False)
 
     # Reset cache and inject directly.
     handler._cached_config = handler.PolicyProxyAuthConfig(
