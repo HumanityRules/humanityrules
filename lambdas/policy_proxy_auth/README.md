@@ -17,6 +17,9 @@ Triggered by ALB (not API Gateway). The Lambda is configured with a single Secre
 
 The secret is provisioned at env setup time (see workstream (g)).
 
+`doh_session` defaults to a 30-day TTL. Set `DOH_SESSION_TTL_SECONDS` to
+override the JWT `exp` and cookie `Max-Age` together.
+
 ## Dependencies
 
 `authlib` (for the OAuth dance), `pyjwt[crypto]`, `cryptography`. Packaged as a CDK `lambda.Code.from_asset` with dependencies bundled. See the companion CDK construct.
@@ -27,5 +30,5 @@ Unit tests invoke `handler(event, context)` directly with synthesized ALB events
 
 ```bash
 cd lambdas/policy_proxy_auth
-uv run pytest
+uv run --group dev python -m pytest
 ```

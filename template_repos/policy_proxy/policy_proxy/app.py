@@ -2,7 +2,7 @@
 
 import logging
 from contextlib import asynccontextmanager
-from urllib.parse import quote
+from urllib.parse import quote, urlparse
 
 import httpx
 import jwt
@@ -19,6 +19,7 @@ logger = logging.getLogger(__name__)
 
 JWKS_CACHE_TTL_SECONDS = 15 * 60
 INTERNAL_PATH_PREFIX = "/__policy_proxy"
+AUTH_URL_HEADER = "X-DOH-Auth-URL"
 
 
 def _extract_original_url(request: Request, cfg: config_mod.PolicyProxyConfig) -> str:
@@ -32,9 +33,53 @@ def _extract_original_url(request: Request, cfg: config_mod.PolicyProxyConfig) -
     return full
 
 
-def _redirect_to_auth(request: Request, cfg: config_mod.PolicyProxyConfig) -> Response:
-    original = _extract_original_url(request=request, cfg=cfg)
-    target = f"{cfg.auth_base_url}/start?rd={quote(original, safe='')}"
+def _is_valid_return_url(url: str, cfg: config_mod.PolicyProxyConfig) -> bool:
+    """Return whether a post-auth redirect stays inside the environment domain."""
+    parsed = urlparse(url)
+    if parsed.scheme != "https":
+        return False
+    host = (parsed.hostname or "").lower()
+    parent = cfg.env_domain.lower()
+    return host == parent or host.endswith("." + parent)
+
+
+def _extract_reauth_return_url(request: Request, cfg: config_mod.PolicyProxyConfig) -> str:
+    """Use the browser page as the post-login return URL when an API call expires."""
+    referer = request.headers.get("referer", "")
+    if referer and _is_valid_return_url(url=referer, cfg=cfg):
+        return referer
+    return _extract_original_url(request=request, cfg=cfg)
+
+
+def _auth_start_url(return_url: str, cfg: config_mod.PolicyProxyConfig) -> str:
+    """Build the auth Lambda /start URL for the target return URL."""
+    return f"{cfg.auth_base_url}/start?rd={quote(return_url, safe='')}"
+
+
+def _is_fetch_request(request: Request) -> bool:
+    """Return true for requests that should receive 401 instead of a 302."""
+    sec_fetch_mode = request.headers.get("sec-fetch-mode", "").lower()
+    if sec_fetch_mode:
+        return sec_fetch_mode != "navigate"
+    if request.headers.get("x-requested-with", "").lower() == "xmlhttprequest":
+        return True
+    accept = request.headers.get("accept", "").lower()
+    return "application/json" in accept or "text/event-stream" in accept
+
+
+def _auth_required_response(request: Request, cfg: config_mod.PolicyProxyConfig) -> Response:
+    """Redirect navigations, but make API/fetch callers handle reauth explicitly."""
+    return_url = _extract_reauth_return_url(request=request, cfg=cfg)
+    target = _auth_start_url(return_url=return_url, cfg=cfg)
+    if _is_fetch_request(request=request):
+        return PlainTextResponse(
+            content="authentication required",
+            status_code=401,
+            headers={
+                AUTH_URL_HEADER: target,
+                "cache-control": "no-store",
+            },
+        )
     return RedirectResponse(url=target, status_code=302)
 
 
@@ -76,13 +121,13 @@ def create_app(cfg: config_mod.PolicyProxyConfig) -> FastAPI:
 
         cookie_value = request.cookies.get(jwt_verify.SESSION_COOKIE_NAME)
         if not cookie_value:
-            return _redirect_to_auth(request=request, cfg=state.config)
+            return _auth_required_response(request=request, cfg=state.config)
 
         identity = jwt_verify.verify_session_cookie(
             jwt_value=cookie_value, jwks_client=state.jwks_client,
         )
         if identity is None:
-            return _redirect_to_auth(request=request, cfg=state.config)
+            return _auth_required_response(request=request, cfg=state.config)
 
         decision = state.pdp_cache.get(identity.oidc_sub)
         if decision is None:

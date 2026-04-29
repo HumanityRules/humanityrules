@@ -1,5 +1,33 @@
 # DevOpsHero Development Journal
 
+## 2026-04-29 11:17 - [Bugfix] Fix Hermes reauth after policy-proxy session expiry
+
+**Conversation:**
+
+`hermes-vmendi10` looked alive in ECS but the Hermes WebUI became unusable after sitting overnight. Browser DevTools showed many requests as `(blocked:csp)` and the UI surfaced generic "Failed to load session" and "Failed to fetch" errors. The deployed app was healthy; the failure was the interaction between an expired DOH app session cookie, policy-proxy redirects, and the WebUI's CSP.
+
+The root cause was not that Hermes stopped serving its APIs. The auth Lambda was minting `doh_session` with a one-hour lifetime. When that cookie expired, policy-proxy returned `302 Location: https://auth.chsandbox.com/start?...` even for `fetch('/api/...')` calls. A fetch redirect is followed inside the fetch operation; it does not navigate the visible browser tab. Chrome then tried to follow the fetch to `auth.chsandbox.com`, but the Hermes page CSP has `connect-src 'self'`, so the browser blocked the redirected fetch before it reached auth. That is why DevTools showed `(blocked:csp)` and the UI saw network-style failures.
+
+The fix separates browser navigations from API/fetch calls. Page navigations still receive a normal 302 to the auth Lambda, because that is exactly what a user-visible navigation should do. API/fetch-style requests now receive a same-origin `401` with `X-DOH-Auth-URL`. The Hermes WebUI patch teaches the generic `api()` helper to honor that header and set `window.location.href`, turning the reauth into a top-level navigation that is not subject to `connect-src` in the same way as an XHR redirect.
+
+The first implementation used `path.startswith("/api/")` as one signal for "this is fetch-like." That was too brittle. The final version uses browser request intent instead: `Sec-Fetch-Mode: navigate` means redirect, any other `Sec-Fetch-Mode` value means return 401, and only when Fetch Metadata is absent do we fall back to legacy signals (`X-Requested-With: XMLHttpRequest`, `Accept: application/json`, or `Accept: text/event-stream`). Tests explicitly cover that `/api/sessions` is not special by path: with `Sec-Fetch-Mode: navigate` it redirects, and with `Sec-Fetch-Mode: cors` it gets the 401 auth URL response.
+
+The return URL for an expired API request is also intentional. For a fetch to `/api/session`, the post-login destination should be the WebUI page the user was on, not the JSON endpoint. Policy-proxy therefore prefers a same-domain `Referer` when building the auth URL for 401 responses, with the original request URL as a fallback.
+
+We also changed the DOH app session lifetime from one hour to a 30-day default. The Okta access token is still only used inside the auth Lambda callback: Okta returns an authorization code, the Lambda exchanges it for an access token, uses that access token to call `/userinfo`, and then discards it. Hermes and policy-proxy do not use Okta's token directly. The durable session is the DOH-signed `doh_session`, so its TTL is now `DEFAULT_SESSION_TTL_SECONDS = 30 * 24 * 60 * 60`, with `DOH_SESSION_TTL_SECONDS` available as an override. The JWT `exp` and cookie `Max-Age` are derived from the same value.
+
+The policy-proxy image tag was bumped to `0.1.2`. On a `hermes-vmendi10` redeploy through this local control plane, the deployment path should build and push the new DOH-owned policy-proxy image and rebuild the Hermes app image with the new WebUI patch. A redeploy from an older production control plane would not pick up these local code changes.
+
+**Key points:**
+
+- Expired `doh_session` caused policy-proxy to send cross-origin auth redirects for fetch calls. The browser followed the redirect inside fetch, then CSP blocked it because `auth.chsandbox.com` is outside `connect-src 'self'`.
+- Fetch redirects are not page navigations. Even without CSP, a fetch that follows an OAuth redirect chain would leave the visible Hermes tab stale and might return HTML to JavaScript that expected JSON.
+- Policy-proxy now returns `401` plus `X-DOH-Auth-URL` for non-navigation requests, while preserving `302` for real browser navigations.
+- Request classification now uses `Sec-Fetch-Mode` as the primary signal instead of hard-coded paths. `navigate` redirects; other Fetch Metadata modes get 401. Legacy clients fall back to `X-Requested-With` and `Accept` headers.
+- Hermes WebUI patch `04-policy-proxy-reauth-url.patch` updates the upstream `api()` helper to perform a top-level navigation to `X-DOH-Auth-URL` on 401, with the upstream `/login?next=...` behavior preserved as a fallback for non-DOH deployments.
+- `doh_session` now defaults to 30 days and is configurable through `DOH_SESSION_TTL_SECONDS`. The Okta access token lifetime is not used for app sessions because the Okta token is exchanged and discarded during callback.
+- Focused verification passed: policy-proxy tests (`31 passed`), auth Lambda tests (`14 passed`), `py_compile`, `git diff --check`, and a zero-fuzz dry run of the new WebUI patch.
+
 ## 2026-04-29 00:42 - [Deployment] Seed bundled skills, trim Bedrock dropdown, harden patch pipeline
 
 **Conversation:** [2026-04-29-0042-38a4a76d.md](conversations/2026-04-29-0042-38a4a76d.md)

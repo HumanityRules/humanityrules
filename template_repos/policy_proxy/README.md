@@ -11,6 +11,10 @@ A tiny reverse proxy that sits in front of apps deployed by DevOps Hero and enfo
 5. On `allow`, proxies to the app container on localhost, injecting trusted identity headers.
 6. On `deny`, returns a 403 with a short message.
 
+For API/fetch-style requests with missing or invalid auth, step 2 returns a
+same-origin `401` with `X-DOH-Auth-URL` instead of a `302`. Browser navigation
+requests still receive the `302` directly.
+
 ## Config (all env vars; no defaults)
 
 | Var | Example | Purpose |

@@ -30,7 +30,8 @@ logger.setLevel(logging.INFO)
 # Signing config: we use RS256 to keep JWKS trivially interoperable. EdDSA
 # works too but requires a newer pyjwt that may not be present in the runtime.
 JWT_ALGORITHM = "RS256"
-SESSION_TTL_SECONDS = 60 * 60  # 1 hour — design doc value
+DEFAULT_SESSION_TTL_SECONDS = 30 * 24 * 60 * 60
+SESSION_TTL_SECONDS_ENV = "DOH_SESSION_TTL_SECONDS"
 STATE_TTL_SECONDS = 10 * 60    # OAuth state param must be consumed within 10 minutes
 
 # Module-scoped HTTP pool + boto client: reused across warm invocations.
@@ -259,7 +260,23 @@ def _exchange_code_for_userinfo(code: str, redirect_uri: str) -> dict:
 # -----------------------------------------------------------------------------
 
 
-def _mint_session_jwt(oidc_sub: str, username: str, email: str) -> str:
+def _session_ttl_seconds() -> int:
+    """Return the configured app-session TTL, defaulting to 30 days."""
+    raw = os.environ.get(SESSION_TTL_SECONDS_ENV)
+    if raw is None or raw.strip() == "":
+        return DEFAULT_SESSION_TTL_SECONDS
+    try:
+        ttl_seconds = int(raw)
+    except ValueError:
+        logger.error("invalid %s=%r; using default", SESSION_TTL_SECONDS_ENV, raw)
+        return DEFAULT_SESSION_TTL_SECONDS
+    if ttl_seconds <= 0:
+        logger.error("invalid %s=%r; using default", SESSION_TTL_SECONDS_ENV, raw)
+        return DEFAULT_SESSION_TTL_SECONDS
+    return ttl_seconds
+
+
+def _mint_session_jwt(oidc_sub: str, username: str, email: str, ttl_seconds: int) -> str:
     now = int(time.time())
     key = load_policy_proxy_auth_config().jwt_key
     return jwt.encode(
@@ -268,7 +285,7 @@ def _mint_session_jwt(oidc_sub: str, username: str, email: str) -> str:
             "username": username,
             "email": email,
             "iat": now,
-            "exp": now + SESSION_TTL_SECONDS,
+            "exp": now + ttl_seconds,
         },
         key=key.private_pem,
         algorithm=JWT_ALGORITHM,
@@ -276,10 +293,10 @@ def _mint_session_jwt(oidc_sub: str, username: str, email: str) -> str:
     )
 
 
-def _session_cookie(jwt_value: str) -> str:
+def _session_cookie(jwt_value: str, ttl_seconds: int) -> str:
     return (
         f"doh_session={jwt_value}; Domain=.{env_domain()}; Path=/; "
-        f"Max-Age={SESSION_TTL_SECONDS}; Secure; HttpOnly; SameSite=Lax"
+        f"Max-Age={ttl_seconds}; Secure; HttpOnly; SameSite=Lax"
     )
 
 
@@ -371,10 +388,12 @@ def _handle_callback(event: dict) -> dict:
             status_code=502, body="oidc exchange failed",
         )
 
+    session_ttl_seconds = _session_ttl_seconds()
     session_jwt = _mint_session_jwt(
         oidc_sub=userinfo["sub"],
         username=userinfo.get("email", ""),  # design ties username to Okta email
         email=userinfo.get("email", ""),
+        ttl_seconds=session_ttl_seconds,
     )
     logger.info(
         "auth callback ok env=%s sub=%s email=%s -> %s",
@@ -385,7 +404,7 @@ def _handle_callback(event: dict) -> dict:
         body="",
         headers={
             "location": rd,
-            "set-cookie": _session_cookie(session_jwt),
+            "set-cookie": _session_cookie(jwt_value=session_jwt, ttl_seconds=session_ttl_seconds),
         },
     )
 

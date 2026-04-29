@@ -71,3 +71,16 @@ curated entries via `providers.bedrock.models`, and the frontend
 merge becomes a no-op. Other providers (OpenRouter, Anthropic,
 Copilot, etc.) keep their live discovery — DOH deployments on those
 providers genuinely want to see account-available models.
+
+### `04-policy-proxy-reauth-url.patch`
+
+**Target:** `static/workspace.js` (`api` helper).
+
+**Problem:** When DOH's `doh_session` cookie expires while the WebUI is
+open, API requests receive an auth challenge from the policy proxy. The
+old generic WebUI behavior redirected 401s to `/login`, which does not
+exist in DOH's policy-proxy flow and strands the user after reauth.
+
+**Fix:** Honor the policy proxy's `X-DOH-Auth-URL` response header on
+401. The frontend performs a top-level navigation to that URL, avoiding
+cross-origin fetch redirects that the WebUI CSP blocks.
