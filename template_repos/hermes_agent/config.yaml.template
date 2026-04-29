@@ -40,8 +40,8 @@ terminal:
   docker_volumes: __DOCKER_VOLUMES__
   # container_persistent=true skips upstream's per-turn cleanup and makes
   # Docker cleanup stop-but-not-remove the container. DinD's snapshotter
-  # commits the stopped container on the die event, so the next docker run
-  # starts from the latest doh-toolbox:latest image.
+  # commits and saves the stopped container on the die event, so the next
+  # docker run starts from the latest doh-toolbox:latest image.
   container_persistent: true
 
 browser:

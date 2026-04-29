@@ -1,54 +1,39 @@
 #!/usr/bin/env python3
 """
-doh-dind snapshotter: keeps doh-toolbox:latest carrying the accumulated
-state of Hermes tool containers across container deaths, Hermes restarts,
-and ECS task replacements.
+doh-dind snapshotter: persists Hermes tool-container filesystem state across
+container exits and ECS task replacements.
 
-Runs as PID 1 inside the doh-dind container after /entrypoint.sh staged
-doh-toolbox:latest and started dockerd. Two operations feed three triggers:
+Runs as PID 1 inside the doh-dind container after /entrypoint.sh has staged
+doh-toolbox:latest and started dockerd.
 
-  do_commit(container_id)       — in-daemon `docker commit` onto
-                                  doh-toolbox:latest. Fast (metadata only),
-                                  no I/O. Every new container Hermes spawns
-                                  from doh-toolbox:latest immediately sees
-                                  the prior container's packages.
+Operations:
 
-  do_save()                     — flatten doh-toolbox:latest to one layer
-                                  via `docker export | docker import` so
-                                  the commit-layer chain can't exceed
-                                  overlay2's 127-layer cap, then stream
-                                  `docker save | zstd` to EFS for cross-
-                                  ECS-task-restart durability. Slow (I/O).
+  do_commit(container_id) - commit the container filesystem onto
+                            doh-toolbox:latest so the next Hermes tool
+                            container starts from the latest state.
+
+  do_save()               - compact doh-toolbox:latest when its layer count
+                            reaches the threshold, then stream
+                            `docker save | zstd` to EFS.
 
 Triggers:
 
-  1. `docker events die`        — commit only. Fast path for Hermes-only
-                                  restarts and per-conversation container
-                                  recycling.
-  2. `docker events start`      — orphan reap. Commit the *older* siblings
-                                  then remove them; leave the newly-started
-                                  container alone (it's Hermes's live one).
-  3. 15-min timer               — commit + save. Bounds cross-task-restart
-                                  data loss to at most 15 min. Guarded by
-                                  `docker diff` fingerprint so idle
-                                  containers skip both ops.
-  4. SIGTERM                    — commit + save for every live tool
-                                  container, then stop dockerd. Graceful
-                                  ECS task shutdown.
+  1. `docker events die`  - commit + save the stopped tool container.
+  2. SIGTERM              - commit + save live tool containers before
+                            stopping dockerd.
 
 EFS layout (under $PERSISTENCE_DIR):
 
-    latest.tar.zst        # `docker save` of flattened doh-toolbox:latest
-    latest.meta.json      # base_image_ref, ts, container_id, trigger
-    incoming.tar.zst      # in-flight write; atomic-renamed to latest
+    latest.tar.zst          # `docker save` of doh-toolbox:latest
+    latest.meta.json        # base_image_ref, ts, size_bytes, trigger
+    incoming.tar.zst        # in-flight write; atomic-renamed to latest
     snapshots/<ts>.tar.zst  # rotated prior saves (retention=3)
 
-Concurrency: one lock serializes commit+save so the atomic rename on
-latest.tar.zst is uncontested and `docker commit`s don't race.
+Concurrency: one process-local lock serializes commit+save so the atomic
+rename on latest.tar.zst is uncontested inside this snapshotter.
 """
 
 import datetime
-import hashlib
 import json
 import logging
 import os
@@ -68,8 +53,8 @@ LATEST_META = PERSISTENCE_DIR / "latest.meta.json"
 INCOMING = PERSISTENCE_DIR / "incoming.tar.zst"
 
 TOOL_CONTAINER_NAME_PREFIX = "hermes-"  # upstream: tools/environments/docker.py
-SNAPSHOT_INTERVAL_SECONDS = 15 * 60
 RETENTION = 3
+FLATTEN_LAYER_THRESHOLD = 32
 
 # Passed through from /entrypoint.sh via env so we only configure the daemon
 # lifecycle in one place (the shell wrapper that started it).
@@ -80,11 +65,6 @@ TOOL_IMAGE_BASE = os.environ.get("TOOL_IMAGE_BASE", "")
 _snapshot_lock = threading.Lock()
 _shutdown = threading.Event()
 
-# Tracks the last fingerprint we saved to EFS. Only save() consults this —
-# commit() is cheap enough to run every time without a guard. Resets to ""
-# after a successful save so the next diff can be compared against it.
-_last_saved_fingerprint: str = ""
-
 
 def _run(cmd: list[str]) -> subprocess.CompletedProcess:
     # Pre-call log so we can reconcile our subprocess activity against
@@ -94,9 +74,9 @@ def _run(cmd: list[str]) -> subprocess.CompletedProcess:
 
 
 def _run_shell(cmd: str) -> subprocess.CompletedProcess:
-    """Same as _run but for a shell pipeline (docker export | zstd | ...)."""
+    """Run a shell pipeline and fail if any pipeline segment fails."""
     LOG.info("subprocess (shell): %s", cmd)
-    return subprocess.run(cmd, shell=True, check=True)
+    return subprocess.run(args=["bash", "-o", "pipefail", "-c", cmd], check=True)
 
 
 def _list_tool_containers(running_only: bool) -> list[dict]:
@@ -106,10 +86,8 @@ def _list_tool_containers(running_only: bool) -> list[dict]:
     we can't filter by ancestor because after the first commit every container
     is an ancestor of doh-toolbox:latest (which we want).
 
-    --no-trunc returns the full 64-char container id — required because
-    `docker events` also emits full ids, and _reap_older_siblings compares
-    them for equality. A short id match would reap the very container that
-    just started.
+    --no-trunc returns the full 64-char container id so ids from `docker ps`
+    and `docker events` use the same shape in logs and trigger handlers.
     """
     flags = ["--no-trunc", "--format", "{{.ID}}\t{{.Names}}\t{{.CreatedAt}}"]
     if not running_only:
@@ -123,16 +101,6 @@ def _list_tool_containers(running_only: bool) -> list[dict]:
     return containers
 
 
-def _diff_fingerprint(container_id: str) -> str:
-    """Hash of `docker diff` output. Changes when the writable layer changes."""
-    try:
-        out = _run(["docker", "diff", container_id]).stdout
-    except subprocess.CalledProcessError:
-        # Container gone between listing and diff — caller handles.
-        return ""
-    return hashlib.sha256(out.encode()).hexdigest()
-
-
 def _prune_snapshots() -> None:
     snaps = sorted(SNAPSHOTS_DIR.glob("*.tar.zst"))
     for old in snaps[:-RETENTION]:
@@ -142,15 +110,35 @@ def _prune_snapshots() -> None:
             LOG.error("prune: failed to remove %s: %s", old, e)
 
 
+def _toolbox_layer_count() -> int | None:
+    """Return the current Docker image layer count for TOOLBOX_TAG."""
+    try:
+        out = _run(cmd=[
+            "docker",
+            "image",
+            "inspect",
+            "--format",
+            "{{len .RootFS.Layers}}",
+            TOOLBOX_TAG,
+        ]).stdout.strip()
+    except subprocess.CalledProcessError as e:
+        LOG.error("layer inspect failed tag=%s err=%s", TOOLBOX_TAG, e.stderr.strip() if e.stderr else e)
+        return None
+    try:
+        return int(out)
+    except ValueError:
+        LOG.error("layer inspect returned non-integer tag=%s out=%r", TOOLBOX_TAG, out)
+        return None
+
+
 def do_commit(container_id: str, trigger: str) -> bool:
     """Commit the container's writable layer onto TOOLBOX_TAG.
 
     Fast: no I/O, no compression. Adds one overlay2 layer on top of the
-    existing chain; do_save flattens the chain back to one layer so the
-    overlay2 127-layer cap is not a concern.
+    existing chain; do_save compacts the tag before the chain gets deep.
 
-    Called on every die/orphan-reap/periodic/sigterm trigger — the tag is
-    always fresh for the next `docker run` Hermes issues.
+    Called before every save so the tag is fresh for the next `docker run`
+    Hermes issues.
     """
     try:
         _run(["docker", "commit", container_id, TOOLBOX_TAG])
@@ -167,11 +155,9 @@ def do_commit(container_id: str, trigger: str) -> bool:
 def _flatten_toolbox_tag() -> bool:
     """Export TOOLBOX_TAG and re-import to collapse to a single overlay2 layer.
 
-    Runs inside do_save so each EFS snapshot also bounds the in-daemon
-    layer count (commit chains would otherwise approach overlay2's 127
-    limit on a chatty bot). `docker export` drops image metadata; we
-    re-apply the load-bearing ENV vars via `docker import --change` to
-    match what was in the original base image.
+    `docker export` drops image metadata; we re-apply the load-bearing ENV
+    vars via `docker import --change` to match what was in the original base
+    image.
 
     Sequence: create a throwaway container from the current tag, pipe its
     export straight into a new import that overwrites the tag, then rm
@@ -202,14 +188,14 @@ def _flatten_toolbox_tag() -> bool:
         ok = False
 
     # Always clean up the scratch container by its known id, even if the
-    # export|import failed — otherwise it accumulates across failed saves.
+    # export|import failed; otherwise it accumulates across failed saves.
     LOG.info("subprocess: docker rm -f %s (flatten scratch)", scratch_cid[:12])
     subprocess.run(["docker", "rm", "-f", scratch_cid], capture_output=True, text=True)
     return ok
 
 
 def do_save(trigger: str) -> bool:
-    """Flatten TOOLBOX_TAG, save it to EFS as latest.tar.zst, rotate history.
+    """Save TOOLBOX_TAG to EFS as latest.tar.zst and rotate history.
 
     Must be preceded by do_commit so TOOLBOX_TAG reflects the live
     container's writable layer. Atomic-rename through incoming.tar.zst so
@@ -217,8 +203,15 @@ def do_save(trigger: str) -> bool:
     """
     started = time.monotonic()
 
-    if not _flatten_toolbox_tag():
-        return False
+    layer_count = _toolbox_layer_count()
+    should_flatten = layer_count is None or layer_count >= FLATTEN_LAYER_THRESHOLD
+    if should_flatten:
+        LOG.info("flattening toolbox tag layer_count=%s threshold=%d", layer_count, FLATTEN_LAYER_THRESHOLD)
+        if not _flatten_toolbox_tag():
+            return False
+        layer_count = _toolbox_layer_count()
+    else:
+        LOG.info("flatten skipped layer_count=%d threshold=%d", layer_count, FLATTEN_LAYER_THRESHOLD)
 
     SNAPSHOTS_DIR.mkdir(parents=True, exist_ok=True)
     if INCOMING.exists():
@@ -252,6 +245,8 @@ def do_save(trigger: str) -> bool:
     LATEST_META.write_text(json.dumps({
         "base_image_ref": TOOL_IMAGE_BASE,
         "created_utc": ts,
+        "flattened": should_flatten,
+        "layer_count": layer_count,
         "size_bytes": size_bytes,
         "trigger": trigger,
     }, indent=2))
@@ -259,61 +254,28 @@ def do_save(trigger: str) -> bool:
     _prune_snapshots()
 
     duration_ms = int((time.monotonic() - started) * 1000)
-    LOG.info("save ok trigger=%s size=%d ms=%d", trigger, size_bytes, duration_ms)
+    LOG.info(
+        "save ok trigger=%s size=%d ms=%d flattened=%s layer_count=%s",
+        trigger, size_bytes, duration_ms, should_flatten, layer_count,
+    )
     return True
 
 
-def commit_and_maybe_save(container_id: str, trigger: str, save: bool) -> None:
-    """One-call wrapper used by every trigger path. Holds the snapshot lock
-    so concurrent triggers don't race on TOOLBOX_TAG or latest.tar.zst."""
-    global _last_saved_fingerprint
+def commit_and_save(container_id: str, trigger: str) -> None:
+    """Commit a tool container and persist the resulting toolbox image."""
     with _snapshot_lock:
-        # Commit is fast and updates the local image tag for the next docker run.
         if not do_commit(container_id=container_id, trigger=trigger):
             return
-        if not save:
-            return
-
-        # Guard EFS save by fingerprint: if nothing has changed since the
-        # last save, skip the I/O. The commit itself already ran (cheap).
-        fingerprint = _diff_fingerprint(container_id)
-        if fingerprint and fingerprint == _last_saved_fingerprint:
-            LOG.info("save skipped (unchanged) container=%s trigger=%s", container_id[:12], trigger)
-            return
-
-        # Save is slower and persists the image archive to EFS.
-        if do_save(trigger=trigger):
-            _last_saved_fingerprint = fingerprint
-
-
-def _reap_older_siblings(newest: dict) -> None:
-    """Commit + remove every running hermes-* container older than `newest`.
-
-    Triggered on `docker events start` for a new tool container. Hermes
-    restarted (same DinD) and spawned a fresh container; we capture the
-    previous one's state onto TOOLBOX_TAG before removing it, and leave
-    the newly-started container alone.
-    """
-    siblings = [c for c in _list_tool_containers(running_only=True) if c["id"] != newest["id"]]
-    for c in siblings:
-        LOG.info("reaping orphan tool container %s (%s)", c["id"][:12], c["name"])
-        commit_and_maybe_save(container_id=c["id"], trigger="orphan-reap", save=False)
-        try:
-            _run(["docker", "rm", "-f", c["id"]])
-        except subprocess.CalledProcessError as e:
-            LOG.error("rm -f failed for orphan %s: %s", c["id"][:12], e)
+        do_save(trigger=trigger)
 
 
 def events_stream() -> None:
-    """Long-poll `docker events` and dispatch start/die to reap/commit."""
-    # event=create isn't enough — we need the container to be findable in
-    # `docker ps`, which happens on start. die fires before rm, so we can
-    # still docker-commit the stopped-but-present filesystem.
+    """Long-poll `docker events` and persist stopped tool containers."""
+    # die fires before rm, so the stopped container can still be committed.
     proc = subprocess.Popen(
         [
             "docker", "events", "--format", "{{json .}}",
             "--filter", "type=container",
-            "--filter", "event=start",
             "--filter", "event=die",
         ],
         stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
@@ -332,59 +294,31 @@ def events_stream() -> None:
                 status = evt.get("status")
                 cid = evt.get("id", "")
 
-                if status == "start":
-                    _reap_older_siblings({"id": cid, "name": name})
-                elif status == "die":
-                    commit_and_maybe_save(container_id=cid, trigger="die-event", save=False)
+                if status == "die":
+                    commit_and_save(container_id=cid, trigger="die-event")
 
             except Exception as e:
-                # Per-event guard: a single malformed event or failed commit
-                # must not kill the stream. The timer loop is a fallback for
-                # anything we miss here, but losing the stream entirely would
-                # hide orphan accumulation.
+                # A single malformed event or failed commit must not kill the
+                # stream, because this is the primary persistence trigger.
                 LOG.exception("event handling failed: %s", e)
     finally:
         proc.terminate()
 
 
-def timer_loop() -> None:
-    """Periodic commit + save for long-running containers. Commits are
-    cheap so we do them every tick; the save path fingerprint-guards EFS
-    I/O when the container is idle."""
-    while not _shutdown.wait(SNAPSHOT_INTERVAL_SECONDS):
-        try:
-            for c in _list_tool_containers(running_only=True):
-                commit_and_maybe_save(container_id=c["id"], trigger="periodic", save=True)
-        except Exception as e:
-            LOG.exception("timer_loop iteration failed: %s", e)
-
-
 def _sigterm_snapshot_all() -> None:
-    """Commit + save every live tool container. If none are live, still flush
-    TOOLBOX_TAG to EFS so die-event commits that landed since the last
-    periodic save aren't lost. Called from the SIGTERM handler only — this is
-    the last chance to persist before ECS kills us."""
-    global _last_saved_fingerprint
+    """Persist every live tool container before dockerd is stopped."""
     try:
         containers = _list_tool_containers(running_only=True)
     except subprocess.CalledProcessError as e:
         LOG.error("could not list tool containers during sigterm: %s", e)
-        containers = []
+        return
     for c in containers:
-        with _snapshot_lock:
-            if not do_commit(container_id=c["id"], trigger="sigterm"):
-                continue
-            if do_save(trigger="sigterm"):
-                _last_saved_fingerprint = _diff_fingerprint(c["id"])
-    if not containers:
-        with _snapshot_lock:
-            if do_save(trigger="sigterm-no-live"):
-                _last_saved_fingerprint = ""
+        commit_and_save(container_id=c["id"], trigger="sigterm")
 
 
 def _stop_dockerd() -> None:
     """Best-effort graceful dockerd shutdown after SIGTERM snapshotting.
-    Waits up to 15s for dockerd to exit, then SIGKILLs — moby v26 frequently
+    Waits up to 15s for dockerd to exit, then SIGKILLs. moby v26 frequently
     finishes its shutdown work (logs "Daemon shutdown complete") but the
     process itself lingers waiting on goroutines that never return."""
     if DOCKERD_PID <= 0:
@@ -427,11 +361,10 @@ def main() -> None:
     signal.signal(signal.SIGINT, _handle_termination_signal)
 
     threading.Thread(target=events_stream, name="events", daemon=True).start()
-    threading.Thread(target=timer_loop, name="timer", daemon=True).start()
 
     LOG.info(
-        "doh-dind snapshotter started (persistence=%s, interval=%ds, dockerd_pid=%d)",
-        PERSISTENCE_DIR, SNAPSHOT_INTERVAL_SECONDS, DOCKERD_PID,
+        "doh-dind snapshotter started (persistence=%s, dockerd_pid=%d)",
+        PERSISTENCE_DIR, DOCKERD_PID,
     )
     while not _shutdown.is_set():
         _shutdown.wait(60)

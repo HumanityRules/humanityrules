@@ -1,5 +1,28 @@
 # DevOpsHero Development Journal
 
+## 2026-04-29 15:07 - [Deployment] Simplify doh-dind snapshot persistence
+
+**Conversation:** [2026-04-29-1507-019ddb0e.md](conversations/2026-04-29-1507-019ddb0e.md)
+
+Reviewed the `doh-dind` snapshotter from a simplicity and stability point of view, then simplified the design around the ECS deployment model. The old design had four persistence triggers: die-event commits, start-event orphan reaping, periodic commit/save with `docker diff` fingerprinting, and SIGTERM live-container saves. That gave us several edge cases: pipeline failures could promote bad snapshots, `docker diff` was not a reliable "changed since last save" signal, idle die-event commits depended on a later periodic or SIGTERM save, and orphan reaping assumed a Hermes-only restart mode that does not normally exist for our ECS task because Hermes and DinD are replaced together.
+
+The new model is event-driven: persist on Docker `die` for stopped Hermes tool containers and persist live tool containers on DinD SIGTERM. There is no periodic timer, no diff/fingerprint state, no start-event orphan reap, and no `sigterm-no-live` flush. If no tool container is live at SIGTERM, there should be nothing extra to flush because die events now commit and save immediately.
+
+We also measured the existing save cost in Humanity Rules Sandbox before changing the design. For `hermes-vmendi10`, two completed saves of a 462 MiB snapshot took 28.398s and 41.751s. Splitting by log timestamps showed `_flatten_toolbox_tag()` was a large part of the total: about 9.9s of the 28.4s save and 27.3s of the 41.8s save. Flattening still matters because repeated `docker commit` grows the image layer chain, but doing it on every save is expensive. The current compromise asks Docker for `{{len .RootFS.Layers}}` and only flattens when `doh-toolbox:latest` reaches 32 layers, otherwise it saves the current tag directly.
+
+The shell pipeline wrapper now runs through `bash -o pipefail -c` so a failed `docker export` or `docker save` cannot look successful just because the last command in the pipeline exited 0. The DinD entrypoint now logs how many seconds restore took for both snapshot restore and fallback base-image pull/tag paths. Comments were updated to describe current invariants only, not the older design.
+
+**Key points:**
+
+- Persistence is now event-driven: Docker `die` -> commit + save; SIGTERM -> commit + save live tool containers before stopping dockerd.
+- Removed periodic saves, `docker diff` fingerprints, orphan reap, and no-live SIGTERM flush to reduce state and make failure modes easier to reason about.
+- `do_save()` still writes through `incoming.tar.zst` and atomic rename, but only compacts the image when Docker reports at least 32 layers.
+- `latest.meta.json` records whether a save was flattened and what layer count was observed, which should make CloudWatch/EFS inspection easier later.
+- Restore timing is now visible in entrypoint logs, so startup cost can be compared against save cost.
+- Historical rationale stays in the journal; code comments now describe the steady-state mechanism.
+
+---
+
 ## 2026-04-29 14:04 - [Bugfix] Fix two doh-dind snapshotter issues: noisy 30s watchdog and lost SIGTERM saves
 
 **Conversation:** [2026-04-29-1405-7f138120.md](conversations/2026-04-29-1405-7f138120.md)
