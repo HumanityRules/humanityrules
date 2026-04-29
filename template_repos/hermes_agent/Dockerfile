@@ -26,7 +26,7 @@ RUN set -eu; \
     for p in /tmp/patches-webui/*.patch; do \
         [ -f "$p" ] || continue; \
         echo "[patches-webui] applying $(basename "$p")"; \
-        patch -p1 -d /apptoo -i "$p"; \
+        patch -p1 -F 0 -d /apptoo -i "$p"; \
     done; \
     python3 -m compileall -q /apptoo || true; \
     rm -rf /tmp/patches-webui

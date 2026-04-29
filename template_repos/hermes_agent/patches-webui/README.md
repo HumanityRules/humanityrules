@@ -52,3 +52,22 @@ Drops every successful access log (health probes, normal session
 traffic, static assets, streaming polls); keeps 3xx/4xx/5xx and the
 non-numeric `'-'` fallback visible. Exception logs from `do_GET` /
 `do_POST` are emitted via a different code path and are unaffected.
+
+### `03-bedrock-skip-live-discovery.patch`
+
+**Target:** `api/routes.py` (`_handle_live_models`).
+
+**Problem:** The WebUI merges live-fetched models into the dropdown
+via `GET /api/models/live`. For Bedrock, that live fetch calls AWS's
+`ListFoundationModels` / `ListInferenceProfiles` and returns every
+model available to the ECS task role — including Nova, Llama, old
+Claude variants, DeepSeek, etc. The frontend then merges those with
+our curated `providers.bedrock.models` list from `config.yaml`, so
+the dropdown ends up showing ~10 entries instead of the 3 we want.
+
+**Fix:** Return an empty list from `_handle_live_models` when
+`provider == "bedrock"`. The static endpoint still serves our three
+curated entries via `providers.bedrock.models`, and the frontend
+merge becomes a no-op. Other providers (OpenRouter, Anthropic,
+Copilot, etc.) keep their live discovery — DOH deployments on those
+providers genuinely want to see account-available models.
