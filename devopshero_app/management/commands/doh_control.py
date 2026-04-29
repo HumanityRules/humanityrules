@@ -11,6 +11,8 @@ Usage:
     uv run manage.py doh_control redeploy-app --app simple-dashboard
     uv run manage.py doh_control redeploy-app --app simple-dashboard --env default
     uv run manage.py doh_control redeploy-app --app simple-dashboard --deployment <uuid>
+    uv run manage.py doh_control restart-task --app hermes-vmendi01
+    uv run manage.py doh_control restart-task --app hermes-vmendi01 --env default
 
 For production, use ./prod_manage.sh doh_control <operation> instead.
 
@@ -21,12 +23,15 @@ from datetime import datetime
 from uuid import UUID
 
 from asgiref.sync import async_to_sync
+from botocore.exceptions import ClientError
+from django.conf import settings
 from django.core.management.base import BaseCommand
 from django.db import transaction
 from django.utils.text import slugify
 
 from devopshero_app import models
 from devopshero_app.services.app_templates import template_deploy_service
+from devopshero_app.services.infra_customer import iam_utils
 
 
 class Command(BaseCommand):
@@ -99,6 +104,24 @@ class Command(BaseCommand):
             help="Username to attribute the redeploy to (audit trail). Defaults to the first admin in the app's org, then any superuser.",
         )
 
+        # restart-task
+        restart_task = subparsers.add_parser(
+            "restart-task",
+            help=(
+                "Stop the running ECS task for an app so the service respawns it. "
+                "Cycles all containers in the task (ECS has no per-container restart primitive)."
+            ),
+        )
+        restart_task.add_argument("--app", required=True, help="App slug")
+        restart_task.add_argument(
+            "--env",
+            help="Environment slug. Required if the app is deployed to more than one environment.",
+        )
+        restart_task.add_argument(
+            "--aws-account",
+            help="AWS account name (only required to disambiguate when --env exists across multiple accounts)",
+        )
+
         # deploy-app-template
         deploy_tpl = subparsers.add_parser(
             "deploy-app-template",
@@ -150,6 +173,8 @@ class Command(BaseCommand):
             self._handle_redeploy_env(options)
         elif operation == "redeploy-app":
             self._handle_redeploy_app(options)
+        elif operation == "restart-task":
+            self._handle_restart_task(options)
         elif operation == "deploy-app-template":
             self._handle_deploy_app_template(options)
         else:
@@ -555,6 +580,133 @@ class Command(BaseCommand):
             ))
             return None
         return source
+
+    def _handle_restart_task(self, options: dict) -> None:
+        """Stop the running ECS task for an app so the service scheduler respawns it.
+
+        ECS has no per-container restart primitive: exiting a non-essential container leaves
+        it dead, and exiting an essential one tears down the whole task. The supported way
+        to "restart" is to stop the task and let the service relaunch it — which is what
+        this does. Cycles all containers in the task.
+        """
+        app_slug = options["app"]
+        env_slug = options.get("env")
+        aws_account_name = options.get("aws_account")
+
+        try:
+            app = models.App.objects.select_related("organization").get(slug=app_slug)
+        except models.App.DoesNotExist:
+            self.stderr.write(self.style.ERROR(f"App '{app_slug}' not found"))
+            return
+
+        environment = self._resolve_restart_environment(
+            app=app,
+            env_slug=env_slug,
+            aws_account_name=aws_account_name,
+        )
+        if environment is None:
+            return
+
+        aws_account = environment.aws_account
+        cluster_name = f"devopshero-{environment.slug}-cluster"
+        service_name = f"doh-{environment.slug}-{app.slug}"
+
+        session = iam_utils.get_assumed_role_session(
+            access_key=settings.DOH_AWS_ACCESS_KEY,
+            secret_key=settings.DOH_AWS_SECRET_KEY,
+            account_id=aws_account.aws_account_id,
+            external_id=str(aws_account.external_id),
+            region=environment.aws_region,
+        )
+        ecs_client = session.client("ecs")
+
+        try:
+            list_resp = ecs_client.list_tasks(cluster=cluster_name, serviceName=service_name, desiredStatus="RUNNING")
+        except ClientError as e:
+            self.stderr.write(self.style.ERROR(f"Failed to list tasks for service '{service_name}': {e}"))
+            return
+
+        task_arns = list_resp.get("taskArns") or []
+        if not task_arns:
+            self.stderr.write(self.style.ERROR(
+                f"No RUNNING tasks for service '{service_name}' in cluster '{cluster_name}'. "
+                f"The service may already be cycling or have desiredCount=0."
+            ))
+            return
+
+        self.stdout.write(self.style.SUCCESS(f"\nRestarting ECS task(s) for app '{app.slug}'"))
+        self.stdout.write(f"  Environment: {environment.name} ({environment.slug}) / {aws_account.name}")
+        self.stdout.write(f"  Cluster:     {cluster_name}")
+        self.stdout.write(f"  Service:     {service_name}")
+        self.stdout.write(f"  Tasks:       {len(task_arns)}")
+
+        for task_arn in task_arns:
+            task_id = task_arn.split("/")[-1]
+            try:
+                ecs_client.stop_task(
+                    cluster=cluster_name,
+                    task=task_arn,
+                    reason="Restart requested via doh_control restart-task",
+                )
+                self.stdout.write(f"    Stopped: {task_id}")
+            except ClientError as e:
+                self.stderr.write(self.style.ERROR(f"    Failed to stop {task_id}: {e}"))
+
+        self.stdout.write(self.style.WARNING(
+            "ECS service scheduler will launch a replacement task automatically."
+        ))
+        self.stdout.write("")
+
+    def _resolve_restart_environment(
+        self,
+        app: models.App,
+        env_slug: str | None,
+        aws_account_name: str | None,
+    ) -> models.Environment | None:
+        """Pick the Environment whose running task should be restarted.
+
+        Resolves from the app's concluded deployments (SUCCEEDED / FAILED). Filters by --env
+        and optional --aws-account when provided; otherwise uses the sole target environment.
+        Writes an error and returns None if the selection is ambiguous or empty.
+        """
+        deployments = models.Deployment.objects.select_related(
+            "environment", "environment__aws_account",
+        ).filter(app=app, status__in=models.Deployment.CONCLUDED_STATUSES)
+
+        if env_slug:
+            deployments = deployments.filter(environment__slug=env_slug)
+            if aws_account_name:
+                deployments = deployments.filter(environment__aws_account__name=aws_account_name)
+
+        env_ids = set(deployments.values_list("environment_id", flat=True).distinct())
+        if not env_ids:
+            scope = ""
+            if env_slug:
+                scope = f" in env '{env_slug}'"
+                if aws_account_name:
+                    scope += f" / account '{aws_account_name}'"
+            self.stderr.write(self.style.ERROR(
+                f"No concluded deployments found for app '{app.slug}'{scope} - nothing to restart"
+            ))
+            return None
+
+        if len(env_ids) > 1:
+            envs = list(models.Environment.objects.filter(id__in=env_ids).select_related("aws_account"))
+            if env_slug:
+                account_names = sorted({e.aws_account.name for e in envs})
+                self.stderr.write(self.style.ERROR(
+                    f"Environment slug '{env_slug}' is ambiguous across accounts ({', '.join(account_names)}); "
+                    f"pass --aws-account to disambiguate"
+                ))
+            else:
+                env_slugs = sorted({e.slug for e in envs})
+                self.stderr.write(self.style.ERROR(
+                    f"App '{app.slug}' has been deployed to multiple environments ({', '.join(env_slugs)}); "
+                    f"pass --env to pick one"
+                ))
+            return None
+
+        return models.Environment.objects.select_related("aws_account").get(id=env_ids.pop())
 
     def _handle_deploy_app_template(self, options):
         """Deploy a new app from an AppTemplate.
