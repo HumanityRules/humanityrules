@@ -57,7 +57,6 @@ if [ -z "$TOOL_IMAGE" ]; then
     exit 1
 fi
 TERMINAL_BACKEND="docker"
-TERMINAL_CWD="/workspace"
 DOCKER_VOLUMES='["/workspace:/workspace"]'
 echo "[entrypoint] Docker-backed Hermes tools enabled (DinD via DOCKER_HOST=$DOCKER_HOST)."
 
@@ -95,7 +94,6 @@ sed \
     -e "s|__AUX_MODEL__|${DOH_AUX_MODEL}|g" \
     -e "s|__AUX_BASE_URL__|${DOH_AUX_BASE_URL}|g" \
     -e "s|__TERMINAL_BACKEND__|${TERMINAL_BACKEND}|g" \
-    -e "s|__TERMINAL_CWD__|${TERMINAL_CWD}|g" \
     -e "s|__TOOL_IMAGE__|${TOOL_IMAGE}|g" \
     -e "s|__DOCKER_VOLUMES__|${DOCKER_VOLUMES}|g" \
     -e "/__PROVIDERS_BLOCK__/r ${PROVIDERS_BLOCK_FILE}" \
