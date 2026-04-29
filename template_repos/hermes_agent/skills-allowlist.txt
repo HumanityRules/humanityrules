@@ -26,8 +26,6 @@ data-science/jupyter-live-kernel
 
 devops/webhook-subscriptions
 
-dogfood
-
 email/himalaya
 
 github/codebase-inspection
@@ -41,20 +39,6 @@ mcp/native-mcp
 
 media/gif-search
 media/youtube-content
-
-mlops/evaluation/lm-evaluation-harness
-mlops/evaluation/weights-and-biases
-mlops/huggingface-hub
-mlops/inference/llama-cpp
-mlops/inference/obliteratus
-mlops/inference/outlines
-mlops/inference/vllm
-mlops/models/audiocraft
-mlops/models/segment-anything
-mlops/research/dspy
-mlops/training/axolotl
-mlops/training/trl-fine-tuning
-mlops/training/unsloth
 
 note-taking/obsidian
 
