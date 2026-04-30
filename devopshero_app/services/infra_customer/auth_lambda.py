@@ -29,10 +29,47 @@ from constructs import Construct
 AUTH_LISTENER_RULE_PRIORITY = 10
 
 
-# Path to lambdas/policy_proxy_auth/ relative to this file, used by both the
-# Stack and the `ensure_auth_lambda_bundle_exists` helper that preps the deploy zip.
+# Path to lambdas/policy_proxy_auth/ relative to this file. The Lambda code is
+# either bundled on the fly via Docker (local dev) or materialized into
+# AUTH_LAMBDA_PREBUILT_DIR at image build time and used as-is (production —
+# ECS Fargate has no Docker daemon, so CDK's Docker-based asset bundling can't
+# run). See infra_devopshero/Dockerfile for the prebuild step and
+# `_resolve_auth_lambda_code` below for the runtime selection.
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 AUTH_LAMBDA_SOURCE_DIR = _REPO_ROOT / "lambdas" / "policy_proxy_auth"
+AUTH_LAMBDA_PREBUILT_DIR = AUTH_LAMBDA_SOURCE_DIR / "build"
+
+
+def _resolve_auth_lambda_code() -> "lambda_.Code":
+    """Return Lambda Code: prebuilt asset dir if present, else Docker bundling.
+
+    Production: the prod control-plane container is a Fargate task with no Docker
+    daemon, so CDK's docker-based bundling errors out with `spawnSync docker
+    ENOENT`. We materialize the asset at image build time (see
+    infra_devopshero/Dockerfile) and ship the prebuilt dir inside the image,
+    so this branch is taken in prod.
+
+    Local dev: the prebuilt dir is gitignored and not normally present, so the
+    fallback uses the SAM ARM64 Python 3.12 image to bundle on demand — which
+    works on a developer laptop because Docker Desktop is running.
+    """
+    if (AUTH_LAMBDA_PREBUILT_DIR / "handler.py").exists():
+        return lambda_.Code.from_asset(str(AUTH_LAMBDA_PREBUILT_DIR))
+    return lambda_.Code.from_asset(
+        str(AUTH_LAMBDA_SOURCE_DIR),
+        bundling={
+            "image": DockerImage.from_registry(
+                "public.ecr.aws/sam/build-python3.12:latest-arm64",
+            ),
+            "command": [
+                "bash", "-c",
+                (
+                    "pip install --no-cache-dir -r requirements.txt -t /asset-output && "
+                    "cp handler.py /asset-output/"
+                ),
+            ],
+        },
+    )
 
 
 @dataclass
@@ -88,24 +125,11 @@ class AuthLambdaStack(Stack):
         # Lambda function must both be ARM64 so cryptography's native wheels
         # (_rust.abi3.so) get pip-resolved for the right arch; running the
         # bundler on an x86 image and the function on ARM (or vice-versa)
-        # yields a cold-start ImportModuleError.
-        # Use the SAM ARM64 build image explicitly so pip resolves ARM64
-        # wheels — matches the Architecture.ARM_64 set on the function below.
-        code = lambda_.Code.from_asset(
-            str(AUTH_LAMBDA_SOURCE_DIR),
-            bundling={
-                "image": DockerImage.from_registry(
-                    "public.ecr.aws/sam/build-python3.12:latest-arm64",
-                ),
-                "command": [
-                    "bash", "-c",
-                    (
-                        "pip install --no-cache-dir -r requirements.txt -t /asset-output && "
-                        "cp handler.py /asset-output/"
-                    ),
-                ],
-            },
-        )
+        # yields a cold-start ImportModuleError. The control-plane Docker
+        # image (python:3.14-slim, ARM64) prebuilds the asset at image build
+        # time; in local dev, `_resolve_auth_lambda_code` falls back to the
+        # SAM ARM64 Python 3.12 bundling image.
+        code = _resolve_auth_lambda_code()
 
         self.function = lambda_.Function(
             self, "AuthLambda",
