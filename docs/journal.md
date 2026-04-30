@@ -1,5 +1,21 @@
 # DevOpsHero Development Journal
 
+## 2026-04-30 14:09 - [Deployment] Retire policy-proxy test management commands and the pdp_mock Lambda
+
+**Conversation:** [2026-04-30-1409-aa63d826.md](conversations/2026-04-30-1409-aa63d826.md)
+
+The codebase had accrued operator-only Django commands whose sole purpose was exercising the policy proxy path against AWS without depending on DOH control-plane PDP availability from inside a customer VPC: `policy_proxy_e2e_test` (multi-phase orchestrator that also inlined CDK for a mock PDP Lambda + ALB), `policy_proxy_mint_cookie` (mint `doh_session` from Secrets Manager keys for manual flows), and `policy_proxy_simulate` (local PDP round-trip debugging). Separately, `lambdas/pdp_mock` implemented a trivial stdlib Lambda behind `POST /evaluate` keyed off `ALLOWED_USERNAMES` — a stand-in for the real PDP HTTP contract during that e2e flow.
+
+Decision: delete all of it. Pre-beta prioritization favors a thinner surface area over keeping a seldom-run hermetic harness in-tree; the mock PDP duplicated contract shape already enforced by typing and upstream policy_proxy tests plus the production PDP endpoint, while the orchestrator commanded real CloudFormation churn and duplicated CDK concepts (auth stack, hosted zone semantics) operators were unlikely to rerun without upkeep. Tear-down semantics stay correct: env teardown still discovers stacks by `devopshero-{slug}-*` prefix, so any legacy `devopshero-{slug}-pdp-mock` stack in an old sandbox would still disappear on teardown even though nothing creates it anymore — the teardown docstring was trimmed to drop `pdp-mock` as an illustrative named example since it is no longer a first-class addition. Updated `docs/personal_assistant_deployment_state.md` so operator tooling bullets do not cite removed commands; journal and transcripts remain the historical archive for how the harness worked.
+
+**Key points:**
+
+- **Still in-tree:** production policy-proxy deploy (`deploy_app`), template repo `template_repos/policy_proxy/`, and DOH PDP/ABAC in the Django app unchanged.
+- **`lambdas/` at repo root** became empty once `pdp_mock` was deleted; removing the directory avoids implying a sibling platform component beside `infra_devopshero/` when none remain.
+- **Verification:** `uv run manage.py check` passes after deleting the commands; Django does not statically import deleted command modules elsewhere.
+
+---
+
 ## 2026-04-30 14:01 - [Deployment] Migrate policy-proxy auth Lambda to an ECS Fargate service
 
 **Conversation:**

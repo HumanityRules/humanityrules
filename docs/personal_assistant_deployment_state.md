@@ -16,7 +16,7 @@ DOH deploys **Hermes Agent** — a governed AI personal assistant — into a cus
 - **ABAC owner primitive** — `$resource.owner` / `$identity.<key>` condition form lets a single global policy express "owner can use their own PA" across N apps, instead of one policy per user. `username` is locked post-creation because it's the ABAC anchor.
 - **OIDC / Okta login** — orgs can be flipped to OIDC; WorkOS and OIDC can coexist on the same user.
 - **Per-env trust anchors** — three per-env Secrets Manager entries back the whole system: shared API keys + policy proxy bearer token, JWT signing keypair, Okta OIDC config. Keeps per-app secret sprawl down and scopes the trust boundary to the env's VPC.
-- **Hermes-specific operator tooling** — `policy_proxy_mint_cookie` (bypass Okta for manual UI debugging), `policy_proxy_simulate` (local PDP round-trip), `policy_proxy_e2e_test` (hermetic real-AWS orchestrator against a mock PDP), `setup_oidc_org`.
+- **Hermes-specific operator tooling** — `setup_oidc_org`.
 
 ## Known constraints / open surface
 
