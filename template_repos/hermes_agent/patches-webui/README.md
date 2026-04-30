@@ -84,3 +84,29 @@ exist in DOH's policy-proxy flow and strands the user after reauth.
 **Fix:** Honor the policy proxy's `X-DOH-Auth-URL` response header on
 401. The frontend performs a top-level navigation to that URL, avoiding
 cross-origin fetch redirects that the WebUI CSP blocks.
+
+### `05-webui-reasoning-effort-cfg.patch`
+
+**Target:** `api/streaming.py` (per-turn `AIAgent` kwargs assembly).
+
+**Problem:** The block at line ~1712 reads `agent.reasoning_effort`
+from the active profile's config and forwards it to the agent as
+`reasoning_config`. The upstream code writes
+`_cfg.cfg.get('agent', {}) if isinstance(_cfg.cfg, dict) else {}`, but
+`_cfg = get_config()` returns a bare dict — `_cfg.cfg` raises
+`AttributeError`. The whole block sits inside `try: … except
+Exception: _reasoning_config = None`, so the exception is swallowed and
+`reasoning_config` silently becomes `None` on every turn. For Claude on
+Bedrock via `AnthropicBedrock`, that means `thinking` and
+`output_config` are never set on the request, so no `thinking_delta`
+events come back in the stream, `_fire_reasoning_delta` never fires,
+the WebUI never receives a `reasoning` SSE event, and **the thinking
+bubble never appears**. Other reasoning-capable paths (OpenAI o-series,
+OpenRouter reasoning models) fail the same way.
+
+**Fix:** Drop the `.cfg` attribute access — `_cfg` is already a dict.
+Use `_cfg.get('agent', {}) if isinstance(_cfg, dict) else {}`, matching
+how `_cfg.get('fallback_model')` and `_cfg.get('agent', {})` are used
+elsewhere in the same function (lines 1687 and 1851 in the pinned
+WebUI). This is a fixed upstream bug in disguise; revisit on version
+bump.
