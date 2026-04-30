@@ -132,7 +132,7 @@ class Command(BaseCommand):
     help = "Fetch CloudWatch logs for a customer app (works for running and crashed tasks)"
 
     def add_arguments(self, parser):
-        add_aws_target_args(parser)
+        add_aws_target_args(parser=parser, env_default="default")
         parser.add_argument("--app", required=True, help="App slug")
         parser.add_argument(
             "--container",
@@ -152,12 +152,12 @@ class Command(BaseCommand):
     def handle(self, *args, **options):
         app_slug = options["app"]
 
-        target = resolve_aws_target(
-            account=options["account"], org=options.get("org"), env=options["env"],
-        )
+        target = resolve_aws_target(options=options)
+        if target.aws_account is None:
+            raise CommandError("doh_app_logs requires DB mode (--account/--env); raw mode is not supported.")
         aws_account = target.aws_account
         session = target.session
-        env_slug = target.environment.slug
+        env_slug = target.env_slug
 
         try:
             app = App.objects.select_related("source_template").get(

@@ -1,27 +1,55 @@
 #!/bin/bash
 #
-# Run Django management commands on the production ECS container.
+# Run Django management commands against production.
+#
+# Most commands ECS-exec into the prod app container (DB ops, control plane).
+# A few "local-exec" commands (Docker builds, etc.) need the operator's machine
+# but want prod's DB as the source of truth — those are dispatched to
+# prod_dispatch_local.py, which fetches target metadata from prod and runs the
+# command locally. From the operator's perspective the entry point is the same.
 #
 # Usage:
 #   ./prod_manage.sh <command> [args...]
 #
-# Examples:
+# Examples (ECS-exec into prod):
 #   ./prod_manage.sh doh_query Environment
 #   ./prod_manage.sh doh_control create-env --aws-account "DevOps Hero AWS Account" --name default --region us-east-1 --hosted-zone devopshero.co --provision
 #   ./prod_manage.sh shell
 #   ./prod_manage.sh dbshell
 #
+# Examples (local-exec, target resolved from prod):
+#   ./prod_manage.sh doh_build_prebuilt_image --account "Humanity Rules Sandbox" --env production --source-dir template_repos/doh_dind --ecr-repo doh-dind --tag 0.2.5
+#
 set -e
 
-# Check for at least one argument
+# Commands that must run on the operator's local machine but need target
+# metadata (account_id, external_id, region, env_slug) sourced from prod's DB.
+# Add more as their use cases arise.
+LOCAL_EXEC_COMMANDS=("doh_build_prebuilt_image")
+
+is_local_exec() {
+    local cmd="$1"
+    for c in "${LOCAL_EXEC_COMMANDS[@]}"; do
+        [ "$c" = "$cmd" ] && return 0
+    done
+    return 1
+}
+
 if [ $# -eq 0 ]; then
     echo "Usage: ./prod_manage.sh <command> [args...]"
     echo ""
-    echo "Examples:"
+    echo "Examples (ECS-exec):"
     echo "  ./prod_manage.sh doh_query Environment"
     echo "  ./prod_manage.sh doh_control create-env --aws-account \"Name\" --name default --region us-east-1"
     echo "  ./prod_manage.sh shell"
+    echo ""
+    echo "Examples (local-exec, target resolved from prod):"
+    echo "  ./prod_manage.sh doh_build_prebuilt_image --account \"Humanity Rules Sandbox\" --env production --source-dir template_repos/doh_dind --ecr-repo doh-dind --tag 0.2.5"
     exit 1
+fi
+
+if is_local_exec "$1"; then
+    exec python3 "$(dirname "$0")/prod_dispatch_local.py" "$@"
 fi
 
 # Load AWS credentials from .env

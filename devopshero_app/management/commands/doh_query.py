@@ -2,7 +2,7 @@
 Management command for ad-hoc model queries. Works against the local database, but can also be used on production via ./prod_manage.sh doh_query <args>.
 
 Usage:
-    uv run manage.py doh_query <Model> [field1 field2 ...] [--filter key=value] [--limit N]
+    uv run manage.py doh_query <Model> [field1 field2 ...] [--filter key=value] [--limit N] [--format pipe|json]
 
 For production, use ./prod_manage.sh doh_query <args> instead.
 
@@ -25,7 +25,12 @@ Common queries:
 
   Utilities:
     doh_query <Model> --describe   # Show available fields for any model
+
+  Machine-readable output (used by tooling like prod_manage.sh dispatcher):
+    doh_query AWSAccount aws_account_id external_id --filter name="Humanity Rules Sandbox" --format json
 """
+
+import json
 
 from django.apps import apps
 from django.core.management.base import BaseCommand, CommandError
@@ -42,6 +47,13 @@ class Command(BaseCommand):
         parser.add_argument("--order", "-o", help="Field to order by")
         parser.add_argument("--desc", action="store_true", help="Order descending (use with --order)")
         parser.add_argument("--describe", action="store_true", help="Show available fields and exit")
+        parser.add_argument(
+            "--format",
+            choices=["pipe", "json"],
+            default="pipe",
+            dest="output_format",
+            help="Output format: 'pipe' (default, human-readable) or 'json' (list of dicts, for tooling)",
+        )
 
     def handle(self, *args, **options):
         model_name = options["model"]
@@ -114,18 +126,33 @@ class Command(BaseCommand):
             if field not in valid_fields:
                 raise CommandError(f"Field '{field}' not found on {model_name}. Available: {', '.join(sorted(valid_fields))}")
 
-        # Output results
+        output_format = options["output_format"]
+
+        if output_format == "json":
+            rows: list[dict] = []
+            for obj in queryset:
+                row: dict = {}
+                for field in fields:
+                    val = getattr(obj, field, None)
+                    if val is None:
+                        row[field] = None
+                    elif hasattr(val, "pk"):
+                        row[field] = str(val)
+                    else:
+                        row[field] = str(val)
+                rows.append(row)
+            self.stdout.write(json.dumps(rows))
+            return
+
         count = 0
         for obj in queryset:
             values = []
             for field in fields:
                 val = getattr(obj, field, None)
-                # Handle foreign keys - show the string representation
                 if hasattr(val, "pk"):
                     val = str(val)
                 values.append(str(val) if val is not None else "None")
             self.stdout.write(" | ".join(values))
             count += 1
 
-        # Summary
         self.stdout.write(self.style.SUCCESS(f"\n({count} rows)"))
