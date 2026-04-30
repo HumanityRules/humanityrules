@@ -149,12 +149,26 @@ aws logs get-log-events \
 **Tail logs in real-time:**
 
 ```bash
-# App logs
-aws logs tail /devopshero/prod/ecs --follow --filter-pattern devopshero
+# Everything (app + migration + any sidecar)
+aws logs tail /devopshero/prod/ecs --follow
 
-# Migration logs
-aws logs tail /devopshero/prod/ecs --follow --filter-pattern migrate
+# App container only (stream prefix scoping)
+aws logs tail /devopshero/prod/ecs --follow --log-stream-name-prefix devopshero
+
+# Migration container only
+aws logs tail /devopshero/prod/ecs --follow --log-stream-name-prefix migrate
+
+# Filter on message content (NOT stream name)
+aws logs tail /devopshero/prod/ecs --follow --filter-pattern '?ERROR ?Exception ?Traceback'
 ```
+
+`--filter-pattern` matches log message body, not stream names. To scope by
+container, use `--log-stream-name-prefix`. The streams are
+`devopshero/devopshero/<task>` and `migrate/migrate/<task>`.
+
+There's also a wrapper that handles credential loading and defaults to
+`--follow`: `./tail_prod.sh [aws-logs-tail-flags...]` (pass `--no-follow` for a
+one-shot dump).
 
 ### ECS Exec (SSH Alternative)
 
