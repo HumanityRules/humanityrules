@@ -182,7 +182,7 @@ class Command(BaseCommand):
     help = "Open an interactive shell in a customer app container (ECS Exec / SSM)"
 
     def add_arguments(self, parser):
-        add_aws_target_args(parser)
+        add_aws_target_args(parser=parser, env_default="default")
         parser.add_argument("--app", required=True, help="App slug (same as ECS container name)")
         parser.add_argument(
             "--container",
@@ -202,12 +202,12 @@ class Command(BaseCommand):
         requested_container = options.get("container")
         shell_command = options["command"]
 
-        target = resolve_aws_target(
-            account=options["account"], org=options.get("org"), env=options["env"],
-        )
+        target = resolve_aws_target(options=options)
+        if target.aws_account is None:
+            raise CommandError("doh_app_shell requires DB mode (--account/--env); raw mode is not supported.")
         aws_account = target.aws_account
         session = target.session
-        env_slug = target.environment.slug
+        env_slug = target.env_slug
 
         try:
             app = App.objects.select_related("source_template").get(

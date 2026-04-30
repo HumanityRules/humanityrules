@@ -226,12 +226,12 @@ class Command(BaseCommand):
     def handle(self, *args, **options) -> None:
         script_text = self._read_script(script_file=options.get("script_file"))
 
-        target = _aws_account_resolver.resolve_aws_target(
-            account=options["account"], org=options.get("org"), env=options["env"],
-        )
+        target = _aws_account_resolver.resolve_aws_target(options=options)
+        if target.aws_account is None:
+            raise CommandError("doh_app_exec requires DB mode (--account/--env); raw mode is not supported.")
         aws_account = target.aws_account
         session = target.session
-        env_slug = target.environment.slug
+        env_slug = target.env_slug
 
         try:
             app = App.objects.select_related("source_template").get(

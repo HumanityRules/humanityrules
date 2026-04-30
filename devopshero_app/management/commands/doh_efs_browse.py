@@ -41,16 +41,16 @@ class Command(BaseCommand):
     help = "Browse EFS filesystem via ECS Exec (interactive shell)"
 
     def add_arguments(self, parser):
-        add_aws_target_args(parser)
+        add_aws_target_args(parser=parser, env_default="default")
 
     def handle(self, *args, **options):
-        target = resolve_aws_target(
-            account=options["account"], org=options.get("org"), env=options["env"],
-        )
+        target = resolve_aws_target(options=options)
+        if target.aws_account is None:
+            raise CommandError("doh_efs_browse requires DB mode (--account/--env); raw mode is not supported.")
         aws_account = target.aws_account
         session = target.session
-        env_slug = target.environment.slug
-        region = target.environment.aws_region
+        env_slug = target.env_slug
+        region = target.aws_region
 
         cf_client = session.client("cloudformation")
         ecs_client = session.client("ecs")

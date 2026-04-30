@@ -1,5 +1,52 @@
 # DevOpsHero Development Journal
 
+## 2026-04-29 23:33 - [DevEx] `prod_manage.sh` local-exec dispatcher and raw-mode AWS target resolver
+
+**Conversation:** [2026-04-29-2334-9830e7d1.md](conversations/2026-04-29-2334-9830e7d1.md)
+
+The operator workflow for "build a DOH-owned image for a prod-managed env from my laptop" was acutely broken the first time we hit it. Pushing `doh-dind:0.2.5` into Course Hero / production required running `doh_build_prebuilt_image` against an Environment row that doesn't exist in the operator's local Django DB (the env lives in *prod's* DB), and the only way the existing resolver knew how to find a target was via a local DB lookup. The temporary unblock was creating a fake Environment row locally with the right slug — clearly a smell that would compound over time as more DOH-owned images (`policy-proxy`, `learneo-mcp`, future ones) need the same workflow.
+
+Designed the second-attempt UX around a single principle: from the operator's perspective, `prod_manage.sh <cmd>` is the universal entry point for any operator action against prod. The script knows whether the command wants prod-side compute (DB ops, control plane) or operator-side compute (Docker builds, interactive shells), and routes accordingly. No "which script do I use?" question, no copy-paste of UUIDs, no temp DB rows.
+
+**The runtime constraint that shaped the design.** `prod_manage.sh` runs commands inside the prod app container via `aws ecs execute-command`. That container is the Django app — it has no Docker daemon, isn't privileged, can't `docker build`. So `./prod_manage.sh doh_build_prebuilt_image` literally cannot do the build there even if we wired it. This forces a real cleavage: some operator actions are "prod-DB on prod compute," others are "prod-DB on laptop compute." Pretending otherwise would either fail at runtime or require building a parallel privileged builder task definition next to the production app — out of scope for this session and probably forever.
+
+**Three pieces of plumbing.**
+
+1. **`doh_query --format json`.** Switched the model query from pipe-separated rendering to one JSON line when `--format json` is passed. Default output (`pipe`) preserves the existing human-readable rendering. The dispatcher needs robust machine parsing — pipe output has ANSI colors, "(N rows)" footer, and ECS-exec wrapper noise around it; values like account names contain spaces; FK string-reps could land anywhere. JSON sidesteps all of that.
+
+2. **Raw-mode resolver.** `_aws_account_resolver.py` now exposes two mutually-exclusive arg groups via `add_aws_target_args`:
+    - DB mode: `--account [--org] --env` (looks up rows in the local Django DB, existing behavior).
+    - Raw mode: `--aws-account-id --aws-external-id --aws-region --env-slug` (skips DB entirely, builds the assumed-role session directly from the four primitive values).
+
+    `ResolvedAwsTarget` was restructured to expose those four primitive fields plus the `session`. The `aws_account` and `environment` model rows are now `Optional` — populated only in DB mode. Commands that need `aws_account.organization` for an `App` lookup (the entire `doh_app_*` family, plus `doh_efs_browse`) explicitly reject raw mode with a clear `CommandError` early in `handle()`. Only `doh_build_prebuilt_image` is a real raw-mode consumer today; others stay DB-only.
+
+    Why both `--aws-account-id` and `--aws-external-id`? They encode independent things: account-id is *where* to assume into (goes in the role ARN's account section), external-id is *who* — it's used both as the AssumeRole `ExternalId` parameter and as the suffix in the role name itself (`devopshero-<external_id>`, set at customer onboarding by the CloudFormation install template). Two different DOH instances onboarding the same physical AWS account would generate two different external-ids and therefore two different role names; you can't derive one from the other.
+
+3. **`prod_manage.sh` dispatcher + `prod_dispatch_local.py`.** Added `LOCAL_EXEC_COMMANDS=("doh_build_prebuilt_image")` at the top of `prod_manage.sh`. When the first arg matches, the script `exec`s `python3 prod_dispatch_local.py "$@"` instead of going through ECS-exec. The Python helper:
+    1. Parses `--account`, `--env` (and optional `--org`) from the rest of `$@` with `argparse.parse_known_args` so all other flags pass through untouched.
+    2. Calls back into `./prod_manage.sh doh_query AWSAccount … --format json` and `… Environment … --format json` (which goes the ECS-exec path because `doh_query` is *not* in `LOCAL_EXEC_COMMANDS`) and parses out the four AWS values.
+    3. `os.execvp`s `uv run manage.py <cmd>` from the repo root, with the original `--account/--org/--env` stripped and `--aws-account-id/--aws-external-id/--aws-region/--env-slug` injected.
+
+**Two-step rollout to avoid chicken-and-egg with prod.** The dispatcher's `--format json` call requires the new `doh_query` to be running on prod, but `doh_query` lives in the deployed Django image. Two-step rollout: (a) push `doh-dind:0.2.5` immediately via raw mode locally, with the four values fetched once via the existing pipe-format `doh_query` — operator unblocked, no waiting for a deploy; (b) `./deploy_app.sh` to ship the new control-plane code to prod (~5 min); (c) smoke-test the dispatcher end-to-end with an `--overwrite` re-push of the same tag. The dispatcher run produced the same digest (`sha256:78961d3ea4192…0c021`) and went through the layer-cache fast path. This rollout shape is the pattern to use for any future bootstrap-the-tooling-using-the-tooling change to control-plane management commands.
+
+**Side findings worth preserving.**
+
+- The same physical AWS account (`266117665083`) is onboarded twice in prod — once as "Prod" (org Prod) and once as "Course Hero Sandbox" (org Course Hero), each with its own external-id and therefore a different cross-account role name. The dispatcher must disambiguate by `--account NAME` or `--org`; passing `--account 266117665083` correctly errors with "multiple accounts; use --org to disambiguate" and lists the candidates.
+- The CH Sandbox role we want is `devopshero-6484b2c0-c50e-4f3e-ba0f-5252f129ef8d` (Course Hero org's onboarding), not `devopshero-3f1b4a82-…` (Prod org's onboarding into the same physical account). Verified by inspecting the `🔑 Assuming role:` line printed by `iam_utils.get_assumed_role_session`.
+- `prod_dispatch_local.py` parses the embedded JSON line out of `prod_manage.sh` output by scanning each line for one that starts with `[` and ends with `]`. ECS-exec session preamble/postamble lines do not start with `[`, so this is robust enough until we decide to feed dispatcher output through a less chatty channel.
+- The Course Hero / production environment was torn down successfully at the start of the session (the second teardown attempt; the first hung on `Waiter StackDeleteComplete` exceeding max attempts on `devopshero-production-cluster`, but stacks deleted enough state that round 2 finished in ~90s). When teardown succeeds, the `Environment` row is hard-deleted by `environment_teardown_executor.py` after deployments and blueprints are cleaned up — `0 rows` from `doh_query Environment` is the success signal, not an error.
+
+**Key points:**
+
+- `prod_manage.sh` is now the single operator entry point. The script picks ECS-exec vs local-exec based on `LOCAL_EXEC_COMMANDS`. Same `--account NAME --env SLUG` UX for both modes; the dispatcher converts to raw-mode flags transparently.
+- Adding a new local-exec command is a one-line change to `LOCAL_EXEC_COMMANDS`. The command itself just needs to use `add_aws_target_args` (already true for everything that targets a customer account) and accept raw-mode flags (which it does for free via the shared resolver).
+- Don't try to put Docker builds inside the prod app container. The container is the Django app, not a builder. The honest split is "prod-DB on prod compute" vs "prod-DB on laptop compute," and `prod_dispatch_local.py` is the bridge.
+- `--format json` on `doh_query` was the smallest piece of plumbing that made the rest reliable. Worth doing first whenever a new tool needs to consume `doh_query` output.
+- Raw mode required restructuring `ResolvedAwsTarget` so primitive fields are first-class and model rows are optional. Existing `doh_app_*` consumers needed an explicit `target.aws_account is None → CommandError` check; quietly leaving `aws_account = None` would have surfaced as a confusing `AttributeError` deep inside the handler when it tried `aws_account.organization`.
+- The original temp-row hack (creating a local Environment row with `slug=production` for CH Sandbox so the DB-mode resolver would produce the right ECR path) worked once and was deleted at the end of the session. If you find yourself adding a row to your local DB to make a CLI tool resolve a target that lives elsewhere, you're doing the wrong shape — use raw mode (or `prod_manage.sh` if the dispatcher already covers the command).
+
+---
+
 ## 2026-04-29 21:59 - [Bugfix] Hermes thinking bubbles: upstream `_cfg.cfg` typo silently disabled reasoning
 
 **Conversation:** [2026-04-29-2200-4ecae61a.md](conversations/2026-04-29-2200-4ecae61a.md)

@@ -31,7 +31,7 @@ class Command(BaseCommand):
     help = "Build and push a pre-built image into the customer's per-env ECR"
 
     def add_arguments(self, parser):
-        add_aws_target_args(parser)
+        add_aws_target_args(parser=parser, env_default=None)
         parser.add_argument(
             "--source-dir",
             required=True,
@@ -63,15 +63,11 @@ class Command(BaseCommand):
         ecr_repo_short = options["ecr_repo"]
         version = options["tag"]
 
-        target = resolve_aws_target(
-            account=options["account"],
-            org=options.get("org"),
-            env=options["env"],
-        )
+        target = resolve_aws_target(options=options)
         session = target.session
-        env_slug = target.environment.slug
-        account_id = target.aws_account.aws_account_id
-        region = target.environment.aws_region
+        env_slug = target.env_slug
+        account_id = target.aws_account_id
+        region = target.aws_region
 
         repository_name = f"doh/{env_slug}/{ecr_repo_short}"
         ecr_client = session.client("ecr")
