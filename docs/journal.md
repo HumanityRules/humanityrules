@@ -1,6 +1,32 @@
 # DevOpsHero Development Journal
 
-## 2026-04-29 23:33 - [DevEx] `prod_manage.sh` local-exec dispatcher and raw-mode AWS target resolver
+## 2026-04-30 14:01 - [Deployment] Migrate policy-proxy auth Lambda to an ECS Fargate service
+
+**Conversation:**
+
+The policy-proxy auth endpoint was originally an AWS Lambda fronted by an ALB listener rule on `auth.<env-domain>`. Deploying the first Hermes PA in Humanity Rules Sandbox surfaced the true cost of that choice: the Lambda path forced packaging gymnastics the rest of the platform doesn't need. CDK's `Code.from_asset(..., bundling=...)` shells out to `docker` to bundle Python deps, but the prod control plane is a Fargate task with no Docker daemon — `spawnSync docker ENOENT`. The workaround was a prebuild step inside `infra_devopshero/Dockerfile` that materialized the Lambda asset at image-build time, plus a `_resolve_auth_lambda_code` dispatcher in `auth_lambda.py` that picked the prebuilt dir in prod and re-bundled via a SAM ARM64 image in local dev. On top of that, `cryptography`'s native wheels had to match between bundler and runtime (forced `Architecture.ARM_64`), the ALB→Lambda target flavor forced a manual percent-decode of `queryStringParameters`, and the Lambda carried its own parallel dependency manifest (`lambdas/policy_proxy_auth/requirements.txt`) with its own test scaffold.
+
+Decision: move the auth endpoint onto an ECS Fargate service. The policy-proxy sidecar already runs as an ECS container in every env that opts into the policy proxy, so the platform's hot path for "ship a small Python service with the same deps" is well-trodden. The question was whether to build a second image (`template_repos/policy_proxy_auth/`) or fold the auth role into the existing `policy_proxy` image as a second runtime mode. Chose the single-image approach: the proxy and the auth role share `pyjwt[crypto]`, `cryptography`, and (after this change) the same per-env JWT keypair secret; a second image would add a second ECR repo, a second build/push per env, and a second version to track for ~300 lines of handler code. The tradeoff is coupling — a bug in the proxy path could in theory take down auth — but the two already deploy in lockstep today (auth is provisioned on first policy-proxy deploy), so the isolation was mostly theoretical.
+
+The per-env auth-config secret (`devopshero/{env-slug}/policy-proxy-auth-config`) keeps its exact shape (`{oidc_config, jwt_key}`) because rotating it would invalidate every existing `doh_session` cookie in the env and require a coordinated redeploy of all policy proxies. IAM stays split along the same line as before: the auth-service task role reads the full auth-config secret; the sidecar task role does not — sidecars continue fetching only the public JWKS over HTTP. Handing every app's task role read access to OIDC credentials would widen the blast radius for no gain.
+
+Sizing and cost: 1 task, 0.25 vCPU / 0.5 GB, ARM64, private subnet with NAT egress to Okta. About $7/mo per env steady-state. User accepted that Fargate's non-zero idle cost beats the Lambda packaging debt at pre-beta scale; chose not to go Fargate Spot because interruptions mid-callback would drop in-flight OAuth exchanges for ~$5/mo in savings. Rolling deploys at `minHealthyPercent=100` / `maxHealthyPercent=200` — briefly run 2 tasks during a deploy for zero-downtime swap; steady state still 1 task.
+
+Orchestration order change in `deploy_app.py`: the auth-service stack now depends on the policy-proxy image existing in ECR (its Fargate task pulls it). Phase 1a split into three steps — deploy the policy-proxy ECR repo stack, build+push the image, then deploy the auth-service stack. The image URI is deterministic (`{account}.dkr.ecr.{region}.amazonaws.com/doh/{env}/policy-proxy:{version}`) so it can be computed at synth time even though the push happens later.
+
+Tests ported from `lambdas/policy_proxy_auth/tests/test_handler.py` to `template_repos/policy_proxy/tests/test_auth.py` using `fastapi.testclient.TestClient` + `httpx.MockTransport` for Okta stubbing and a `MagicMock` for the Secrets Manager client. All the semantically interesting cases carry over — `/start` rd validation, `/callback` happy path + state expiry + off-domain rd + token-exchange 502, JWKS round-trip, `/healthz` — now exercised against the real FastAPI app instead of synthesized ALB→Lambda events. Full policy_proxy suite: 44/44; Django suite: 314/314.
+
+**Key points:**
+
+- **Single-image dual role.** `DOH_ROLE=proxy` (default) mounts the sidecar routes; `DOH_ROLE=auth` mounts only `/start`, `/callback`, `/.well-known/jwks.json`. Shared `/__policy_proxy/healthz` endpoint used by the ALB target group health check in both shapes. The auth module is lazily imported only when needed — keeps the sidecar process surface small.
+- **`POLICY_PROXY_IMAGE_VERSION` bumped from `0.1.2` to `0.2.0`.** First deploy of a policy-proxy'd app after this change in any env will push the new image. Expected behavior of the pinned-version pattern; no action required.
+- **Why not ALB target type was Lambda-specific.** The Lambda ALB target type has different semantics (1 MB cap, percent-encoded query params, no WebSocket). Swapping to IP target type on the same shared ALB + listener rule priority 10 preserves the auth host contract without any DNS or Okta reconfig.
+- **Route53 alias and listener rule identifiers are stable across the cutover.** The auth-service stack reuses `priority=10` for the listener rule and creates the same `auth.<env-domain>` A-alias record the Lambda stack used to create. The stack name changes (`devopshero-{env}-auth-lambda` → `devopshero-{env}-auth-service`), so cutover is "delete old stack, redeploy policy-proxy'd app to trigger creation of the new one."
+- **Lambda packaging debt deleted.** `lambdas/policy_proxy_auth/` removed entirely. `infra_devopshero/Dockerfile:35-46` (the ARM64 wheel prebuild) removed. `auth_lambda._resolve_auth_lambda_code` and the SAM bundling image fallback are gone.
+- **Cutover is ch-sandbox-only and not yet executed.** Only one env has the Lambda deployed today, and the session ended before running the prod action. Steps recorded in the summary: delete old CF stack → redeploy any policy-proxy'd app in ch-sandbox → verify `/__policy_proxy/healthz`.
+- **Secret shape preserved deliberately.** Could have denormalized `oidc_config` fields into ECS secret-injection env vars for the auth task, but that would fan the OIDC client secret out across more IAM attachments. Keeping the single secret + boto3-at-startup pattern (what the Lambda did) concentrates access to one IAM statement.
+
+
 
 **Conversation:** [2026-04-29-2334-9830e7d1.md](conversations/2026-04-29-2334-9830e7d1.md)
 

@@ -32,19 +32,6 @@ COPY . .
 # Collect static files
 RUN uv run python manage.py collectstatic --noinput
 
-# Prebuild the policy-proxy auth Lambda asset. CDK's `Code.from_asset(...,
-# bundling=...)` shells out to `docker` to bundle Python deps, but the prod
-# control plane runs in Fargate with no Docker daemon — `spawnSync docker
-# ENOENT`. We materialize the asset here (this base image is ARM64 manylinux
-# Python 3.14) and `auth_lambda._resolve_auth_lambda_code` picks it up at
-# deploy time. cryptography ships cp37-abi3 wheels that load cleanly under
-# the Lambda's ARM64 Python 3.12 runtime; pyjwt and urllib3 are pure Python.
-RUN mkdir -p /app/lambdas/policy_proxy_auth/build && \
-    cp /app/lambdas/policy_proxy_auth/handler.py /app/lambdas/policy_proxy_auth/build/ && \
-    pip install --no-cache-dir \
-        -r /app/lambdas/policy_proxy_auth/requirements.txt \
-        -t /app/lambdas/policy_proxy_auth/build/
-
 # Create non-root user with explicit UID/GID 1000 (must match EFS Access Point configuration)
 # Required for Claude SDK's bypassPermissions mode, and because it's a good practice
 RUN groupadd --gid 1000 appuser && \

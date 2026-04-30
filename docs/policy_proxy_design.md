@@ -23,7 +23,7 @@ Out of scope for v1:
 
 Three pieces, all living inside the customer's AWS account except the PDP:
 
-- **Auth Lambda** — one per environment. Handles OAuth with the customer's Okta tenant, mints session JWTs. Fronted by the env ALB via a host-based listener rule (`auth.<env-domain>`).
+- **Auth Service** — one per environment. Singleton ECS Fargate service running the policy-proxy image in `DOH_ROLE=auth` mode. Handles OAuth with the customer's Okta tenant, mints session JWTs. Fronted by the env ALB via a host-based listener rule (`auth.<env-domain>`).
 - **Policy Proxy container** — one per protected app instance, in the same ECS task as the app container. Verifies JWTs locally, calls the DOH PDP per request (with caching), proxies or rejects.
 - **DOH PDP endpoint** — on the DOH control plane. Evaluates ABAC policies. Called by policy proxies over HTTPS.
 
@@ -32,13 +32,13 @@ Three pieces, all living inside the customer's AWS account except the PDP:
 
 Two secrets are provisioned when an environment is created:
 
-- **Policy-proxy JWT keypair** — RSA or EdDSA. Private half kept by the auth Lambda. Public half served at `https://auth.<env-domain>/.well-known/jwks.json`. Stored in Secrets Manager at `devopshero/{env-slug}/policy-proxy-auth-config` under the `jwt_key` key (alongside `oidc_config`, which carries the Okta app credentials for the same Lambda).
+- **Policy-proxy JWT keypair** — RSA or EdDSA. Private half kept by the auth service. Public half served at `https://auth.<env-domain>/.well-known/jwks.json`. Stored in Secrets Manager at `devopshero/{env-slug}/policy-proxy-auth-config` under the `jwt_key` key (alongside `oidc_config`, which carries the Okta app credentials for the same service).
 - **DOH policy-proxy token** — random 64-char bearer token. Stored in the shared-per-env secret `devopshero/{env-slug}/shared-secrets` under key `DOH_POLICY_PROXY_TOKEN`. All policy proxies in the env read it and send it on every PDP call. Rotated by redeploying the env's policy proxies.
 
 Both are auto-generated at env bootstrap. No manual provisioning.
 
 
-## Auth Lambda
+## Auth Service
 
 Responsibilities:
 
@@ -48,8 +48,9 @@ Responsibilities:
 
 Runtime shape:
 
-- **Deployment:** Lambda function, registered as an ALB target group, reached via a host-based listener rule on the env's existing ALB (`host-header = auth.<env-domain>` → forward → auth-lambda target group). Verified against AWS docs: ALB → Lambda targets are supported with a 1 MB payload cap (ample for OAuth) and host-based listener rules are supported. WebSockets are not supported on ALB → Lambda — irrelevant for auth.
+- **Deployment:** Fargate service (1 task, 0.25 vCPU / 0.5 GB RAM, ARM64), running the same `doh/{env-slug}/policy-proxy` image as the sidecars but with `DOH_ROLE=auth`. Fronted by the env's shared ALB via a host-based listener rule (`host-header = auth.<env-domain>` → forward → IP target group → container port 8443). ALB health check hits `/__policy_proxy/healthz`, which is served without auth.
 - **Provisioning trigger:** lazy. Deployed on first policy-proxy-enabled app deploy in the env. Subsequent policy-proxy'd apps reuse it.
+- **Rolling deploys:** zero-downtime via `minHealthyPercent=100`, `maxHealthyPercent=200` — ECS brings up a new task and drains the old one before replacing it. Brief extra cost during deploys only.
 - **Okta configuration:** the Okta app for this env has exactly one registered redirect URI: `https://auth.<env-domain>/callback`. Per-user destination URLs are carried in `state`, not in the redirect URI — no per-user whitelist.
 
 JWT shape (session cookie):
@@ -205,10 +206,10 @@ The policy proxy does not assume a specific app; it reads its `app_id` and `list
 ## Failure Modes Summary
 
 - **Okta down:** new logins fail. Existing JWTs keep working until `exp`.
-- **Auth Lambda down:** new logins fail. Existing JWTs keep working.
+- **Auth Service down:** new logins fail. Existing JWTs keep working.
 - **DOH PDP down:** existing sessions with warm cache entries keep working for 60 s. Cache expiry → fail closed (503).
 - **Policy Proxy crash:** ECS restarts the task. Cold start re-fetches JWKS; decision cache is empty until populated.
-- **JWT signing key compromise:** rotate by generating a new keypair in Secrets Manager, the auth Lambda cold-starts onto the new key, policy proxies pick up the new public key via JWKS refresh. All existing sessions invalidated.
+- **JWT signing key compromise:** rotate by generating a new keypair in Secrets Manager, force a new auth-service deployment so it picks up the new key, policy proxies pick up the new public key via JWKS refresh. All existing sessions invalidated.
 
 
 ## Open Items

@@ -274,7 +274,7 @@ def _generate_rsa_keypair_pem() -> tuple[bytes, bytes]:
 
 
 def ensure_env_policy_proxy_auth_config_exists(session: boto3.Session, env) -> str:
-    """Ensure the env's auth-Lambda config secret exists and return its ARN.
+    """Ensure the env's auth-service config secret exists and return its ARN.
 
     Payload shape (JSON):
         {
@@ -283,16 +283,16 @@ def ensure_env_policy_proxy_auth_config_exists(session: boto3.Session, env) -> s
         }
 
     On re-run the oidc_config block is refreshed from the Organization (so a
-    rotated client_secret propagates on the next Lambda cold-start) but the
-    jwt_key block is carried forward unchanged — rotating it would require a
-    coordinated redeploy of the auth Lambda + all policy proxies in the env
+    rotated client_secret propagates on the next auth-service task restart) but
+    the jwt_key block is carried forward unchanged — rotating it would require
+    a coordinated redeploy of the auth service + all policy proxies in the env
     (see docs/policy_proxy_design.md).
     """
     organization = env.aws_account.organization
     if not (organization.oidc_issuer_url and organization.oidc_client_id and organization.oidc_client_secret):
         raise RuntimeError(
             f"Organization '{organization.slug}' has no OIDC config; cannot provision "
-            f"auth Lambda for env '{env.slug}'. Run setup_oidc_org first.",
+            f"auth service for env '{env.slug}'. Run setup_oidc_org first.",
         )
 
     secret_name = f"devopshero/{env.slug}/policy-proxy-auth-config"
@@ -336,7 +336,7 @@ def ensure_env_policy_proxy_secrets_exist(session: boto3.Session, env) -> dict[s
     """Top-level helper: provision per-env policy-proxy secrets and return their ARNs.
 
     Returns a dict with keys: 'shared_secrets_arn', 'policy_proxy_auth_config_arn'.
-    Called from the deploy pipeline before the AuthLambdaStack runs.
+    Called from the deploy pipeline before the AuthServiceStack runs.
     """
     return {
         "shared_secrets_arn": ensure_env_policy_proxy_token_exists(session=session, env=env),

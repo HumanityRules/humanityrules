@@ -1,7 +1,20 @@
-"""FastAPI application for the policy proxy."""
+"""FastAPI application for the policy proxy.
+
+Two roles share this binary:
+
+- proxy (default): the per-app sidecar. `create_app(cfg)` builds the sidecar
+  FastAPI app with the PDP + upstream proxy catch-all.
+- auth: the singleton auth service. `create_auth_app(cfg, secrets_client)`
+  builds a FastAPI app with only the OAuth/JWKS routes.
+
+`main.py` dispatches on DOH_ROLE at startup. Keeping the two factories in one
+module lets both roles share the `/__policy_proxy/healthz` endpoint and the
+common FastAPI scaffolding without pulling the auth code into sidecar images.
+"""
 
 import logging
 from contextlib import asynccontextmanager
+from typing import Any
 from urllib.parse import quote, urlparse
 
 import httpx
@@ -9,6 +22,7 @@ import jwt
 from fastapi import FastAPI, Request
 from fastapi.responses import PlainTextResponse, RedirectResponse, Response
 
+from . import auth as auth_mod
 from . import config as config_mod
 from . import jwt_verify
 from . import pdp as pdp_mod
@@ -162,4 +176,23 @@ def create_app(cfg: config_mod.PolicyProxyConfig) -> FastAPI:
             http_client=state.http_client,
         )
 
+    return app
+
+
+def create_auth_app(cfg: config_mod.AuthServiceConfig, secrets_client: Any) -> FastAPI:
+    """Build the FastAPI app for the auth-service role (no proxy/PDP paths)."""
+
+    @asynccontextmanager
+    async def lifespan(app: FastAPI):
+        yield
+        await app.state.http_client.aclose()
+
+    app = FastAPI(lifespan=lifespan)
+    app.state.config = cfg
+
+    @app.get(f"{INTERNAL_PATH_PREFIX}/healthz")
+    async def healthz() -> Response:
+        return PlainTextResponse(content="ok")
+
+    auth_mod.install_auth_routes(app=app, cfg=cfg, secrets_client=secrets_client)
     return app
