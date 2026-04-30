@@ -734,7 +734,7 @@ def teardown(session: boto3.Session, env_slug: str) -> bool:
     Delete every CloudFormation stack owned by the given environment.
 
     Stacks are discovered dynamically by name prefix (``devopshero-{env_slug}-``)
-    rather than from a hardcoded list, so any stack added later (auth-lambda,
+    rather than from a hardcoded list, so any stack added later (auth-service,
     policy-proxy-ecr, pdp-mock, ...) is torn down as long as it follows the naming
     convention. Deletion runs in rounds because CloudFormation blocks deletion
     of a stack whose exports are still imported: each round deletes whatever
