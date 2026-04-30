@@ -1,5 +1,44 @@
 # DevOpsHero Development Journal
 
+## 2026-04-29 21:59 - [Bugfix] Hermes thinking bubbles: upstream `_cfg.cfg` typo silently disabled reasoning
+
+**Conversation:** [2026-04-29-2200-4ecae61a.md](conversations/2026-04-29-2200-4ecae61a.md)
+
+The thinking bubble had stopped appearing in the Hermes WebUI on `hermes-vmendi11` after the 3c72b41 fix (which removed a post-response fallback that was dumping final-answer text into the bubble). The obvious regression story — "you broke it by deleting the fallback" — turned out to be the less interesting half of the picture. The fallback deletion was correct; it just unmasked a pre-existing upstream WebUI bug that had never been noticed because the buggy fallback had been writing *something* into the bubble, so the bubble appeared to work.
+
+**Verification mechanism.** Skipped the browser entirely and drove the full stack from curl. The shipped image was booted locally with Bedrock creds, `DOCKER_HOST=tcp://fake:2375` + a `sed` stub on the entrypoint's docker-info check to sidestep the DinD requirement, and EFS-equivalent volumes under `/tmp/hermes-test-efs/`. From there, `POST /api/session/new` → `POST /api/chat/start` → SSE-consume `/api/chat/stream` and count `event: reasoning` vs `event: token` lines. Zero reasoning events on a reasoning-heavy prompt meant no bubble could ever render, regardless of frontend behavior. This is the mechanism to lean on for any future Hermes reasoning/thinking regressions — no browser needed, no UI rendering to second-guess, just event counts at the wire.
+
+**How the bug was found.** A first-layer probe against the direct Anthropic SDK showed Bedrock Opus 4.7 with `thinking.display: "summarized"` correctly emits 80+ `thinking_delta` events — so the protocol was fine. A second probe against `AIAgent` directly with the WebUI's exact kwargs produced 338 `reasoning_delta` callback invocations — so Hermes's streaming path was fine. But the live container produced zero. The gap had to be between the WebUI-layer kwargs assembly and the AIAgent constructor. Injecting `logging.warning` traces into `run_agent.py` at `_call` revealed the smoking gun: `api_mode='anthropic_messages'` (correct), `reasoning_config=None` (wrong — `config.yaml` clearly sets `agent.reasoning_effort: medium`). With no `reasoning_config`, the anthropic adapter never sets `thinking` on the request, Bedrock returns no thinking blocks, no deltas come back, no bubble.
+
+**The upstream bug.** `api/streaming.py:1712-1718` in WebUI 0.50.239:
+
+```python
+try:
+    from api.config import parse_reasoning_effort as _parse_reff
+    _effort_cfg = _cfg.cfg.get('agent', {}) if isinstance(_cfg.cfg, dict) else {}
+    _effort_raw = _effort_cfg.get('reasoning_effort') if isinstance(_effort_cfg, dict) else None
+    _reasoning_config = _parse_reff(_effort_raw)
+except Exception:
+    _reasoning_config = None
+```
+
+`_cfg = get_config()` returns a bare dict. `_cfg.cfg` raises `AttributeError` on attribute access *before* the `isinstance` check runs. The guard doesn't help because attribute access happens first. The `except Exception` swallows it and sets `_reasoning_config = None`. Elsewhere in the same function the author correctly uses `_cfg.get('fallback_model')` (line 1687) and `_cfg.get('agent', {})` (line 1851) — so this is a localized typo on a single line, not a deeper API mismatch.
+
+**The fix.** New `patches-webui/05-webui-reasoning-effort-cfg.patch`: replace the one bad line with `_cfg.get('agent', {}) if isinstance(_cfg, dict) else {}`, matching the pattern used elsewhere in the same function. Applied at image build with `patch -F 0` so any upstream drift is a hard build failure rather than a silent misapply. The `04-stop-answer-as-reasoning.patch` (agent-side) stays — removing the `elif _think_text` fallback was the right call. With both patches in place, the streaming reasoning path carries the bubble correctly and the post-response fallback no longer duplicates the final answer into it.
+
+**Verification after deploy.** Pulled the redeployed image `hermes-vmendi11-main-20260430011437`: line 1714 of `/apptoo/api/streaming.py` shows the fixed form; zero `_cfg.cfg.get` occurrences remain. Boot + curl probe on a 10x10 grid reasoning problem with Bedrock Opus 4.7 produced 288 `reasoning` SSE events delivered before the 288 `token` events — exactly the ordering needed for the bubble to render live and collapse when the answer starts.
+
+**Key points:**
+
+- Upstream WebUI 0.50.239 has a silent-failure bug in `api/streaming.py:1714`: `_cfg.cfg.get(...)` raises AttributeError, gets swallowed by the surrounding `except Exception`, and leaves `reasoning_config=None` on every turn. No diagnostic log reaches user eyes. Any deployment that relies on `agent.reasoning_effort` in `config.yaml` silently ships with thinking disabled.
+- 3c72b41 didn't cause the user-visible regression; it *exposed* it. Before 3c72b41 the buggy `elif _think_text` fallback was feeding the final answer into the bubble, which looked (incorrectly) like the bubble was working. After 3c72b41 the bubble had no upstream source because the streaming reasoning path was already broken by the typo bug.
+- Verification mechanism for reasoning/thinking regressions: boot the image locally with Bedrock creds, bypass DinD with a sed stub on the `docker info` check, drive through HTTP + SSE via curl, count `event: reasoning` vs `event: token`. Catches provider-layer protocol issues, Hermes-layer callback plumbing, and WebUI-layer kwargs assembly in one pass.
+- Patches are layered on a fragile substrate. The agent-side patch (`04-stop-answer-as-reasoning.patch`) lives on EFS, patched at boot by `apply.py` against the EFS copy — but the WebUI's `uv pip install` also copies `run_agent.py` into `/app/venv/lib/python3.12/site-packages/` as a hardlink to the uv cache. Python imports the site-packages copy, not the EFS copy. This worked out OK because `uv pip install` runs *after* `apply.py`, so the site-packages hardlink picks up the patched file. It's a load-bearing ordering; worth remembering if boot ever gets reorganized.
+- The original `04-stop-answer-as-reasoning.patch` was written as a zero-context unified diff (no `-C3` context lines). That makes the anchors fragile across upstream version bumps — nothing to anchor against, just line numbers. Future DOH patches should be generated with at least 3 lines of context, matching the `03-auxiliary_client-wire-bedrock.patch` style.
+- `-F 0` (zero fuzz) on WebUI patches stays right. We want build failures on upstream drift, not silent misapply. That contract is especially important for fixes like this one where the "correct" vs "broken" form differs by five characters.
+
+---
+
 ## 2026-04-29 15:07 - [Deployment] Simplify doh-dind snapshot persistence
 
 **Conversation:** [2026-04-29-1507-019ddb0e.md](conversations/2026-04-29-1507-019ddb0e.md)
