@@ -1,5 +1,28 @@
 # DevOpsHero Development Journal
 
+## 2026-04-30 21:27 - [Onboarding] Back-fill oidc_sub on /oidc/login when a WorkOS-onboarded user links their Okta identity
+
+**Conversation:** [2026-04-30-2128-262f35ea.md](conversations/2026-04-30-2128-262f35ea.md)
+
+Symptom: logging into `hermes-vmendi01.dohsandbox.com` through the per-env Okta auth service and getting "you do not have access to this application" even though the ResourceTags (`owner=vmendi@gmail.com`, `app-type=personal-assistant`, `app-name=hermes-vmendi01`) and the seed `Org admins: app usage` policy (wildcard resource, `app:use`) are all in place. The hermes deployment itself was clean — the access failure lived one layer down.
+
+Traced the request path: the per-env policy-proxy auth service mints a session JWT carrying `{sub, email}` from Okta, the sidecar sends `{oidc_sub, username}` to DOH's PDP at `/api/pdp/evaluate`, and the PDP does a hard lookup `User.objects.filter(oidc_sub=oidc_sub).first()` (`devopshero_app/views/pdp.py:97`). That lookup was missing — my user row had `workos_user_id` populated (original WorkOS onboarding path) but `oidc_sub=NULL`, so the PDP returned `deny reason=user-not-found` and the proxy renders the generic access-denied page. The rule matching was never reached. Patched my row in prod by back-filling `oidc_sub` with the Okta sub pulled from `/devopshero/production/ecs` log stream `devopshero-production-auth` (`auth callback ok env=… sub=00u1238lznaj1cjpm698 email=vmendi@gmail.com`).
+
+Root cause was a structural gap, not an operator mistake. `oidc_sub` is written in exactly one place: the `User.DoesNotExist` branch of `oidc_callback` at `devopshero_app/views/auth.py:201`, which only fires when a brand-new user first logs into DOH via `/oidc/login/?org=<slug>`. There is no code path that populates `oidc_sub` for a pre-existing WorkOS-onboarded user who later adds Okta — even if that user had dutifully logged out of WorkOS and gone through `/oidc/login/`, the `get(oidc_sub=…)` would have missed and the `DoesNotExist` branch would have tried to `create_user(username=email, …)`, colliding with the existing WorkOS row on the unique `username`. The operator-facing advice of "re-login via `/oidc/login/`" wasn't actually self-healing.
+
+Fix scope deliberately narrow. Added a second lookup branch to `oidc_callback` only — not the PDP. Rationale: the PDP fix only matters when there are DOH users whose sole touchpoint is a proxied app (i.e. real personal-assistant end-users who never log into the DOH control plane), and pre-beta that doesn't exist. For every current use case — me, F&F dogfooding — the operator hits `/oidc/login/` once per new Okta-migrated org, which is enough to cover the back-fill. Business decision deferred on the PDP side until a real customer rollout forces it.
+
+**Key points:**
+
+- **Lookup order is sub-first, then (org, email) fallback.** OIDC `sub` is the stable key across email changes, so it must remain canonical. Email is the identity-linking signal for the legacy case only — it's the exception path, not the steady state, so it lives in `except DoesNotExist`. Back-fill writes `oidc_sub` once so every subsequent login takes the fast path.
+- **Email fallback is scoped to the org, never email-only.** `_find_user_by_org_email(org, email)` accepts two trust signals: the candidate user already has an `OrganizationMembership` in the org, or they match the org's `bootstrap_admin_email`. Email alone would let a rogue IdP hijack any pre-existing account by asserting its email; "the IdP asserted an email for a user we already expect in this org" is the standard SSO linking pattern.
+- **Sub mismatch fails loudly, not silently.** If the matched row already has `oidc_sub` set to a *different* value than the IdP is now asserting, the callback returns `HttpResponseBadRequest("OIDC sub mismatch for existing user")` and emits a `logger.error`. That's a legitimate upstream-identity-changed event and should be investigated, not auto-repointed. Writes only happen when `oidc_sub` is NULL or already matches.
+- **Bootstrap path also fires from the back-fill branch.** If the identity-linked user is the pending `bootstrap_admin_email` and has no membership in the org yet, the callback now creates the admin membership, runs `abac.bootstrap_organization(...)`, and clears `bootstrap_admin_email` — same semantics as the create-user branch. Without this, migrating an org where the bootstrap admin already has a WorkOS account would silently skip ABAC seeding.
+- **`docs/okta_oidc_setup.md` step 5 now documents the operator's one-time linking step.** Added a paragraph calling out that an operator with a pre-existing WorkOS account must visit `/oidc/login/?org=<slug>` once after `setup_oidc_org` to trigger the back-fill; without it, app-level Okta logins through the per-env policy proxy will surface as "you do not have access to this application" because the PDP can't resolve the user by sub.
+- **What was intentionally not changed.** The PDP (`views/pdp.py`) keeps its hard `User.objects.filter(oidc_sub=…)` lookup; the policy proxy's user-facing deny page stays generic; `bootstrap_organization` still runs once per org, so the "Personal Assistant: owner access" seed policy remains absent in Course Hero and any other org bootstrapped before that seed was added (independent of this fix, non-blocking while admins have wildcard resource policies, to revisit before first non-admin PA owner).
+
+---
+
 ## 2026-04-30 14:09 - [Deployment] Retire policy-proxy test management commands and the pdp_mock Lambda
 
 **Conversation:** [2026-04-30-1409-aa63d826.md](conversations/2026-04-30-1409-aa63d826.md)

@@ -93,6 +93,8 @@ https://devopshero.ai/oidc/login/?org=acme
 
 This is the only URL they need. The bootstrap admin's first login will fully initialize the org (seed ABAC policies + admin role). Subsequent users are auto-created with the default role (viewer).
 
+**If you (the operator) already have a DOH account via WorkOS** and want that same account to be the bootstrap admin, you must visit `/oidc/login/?org=<slug>` once after running `setup_oidc_org`. That first visit identity-links your existing row into the new org: it matches by `(org, email)`, back-fills `oidc_sub` on your user, runs the org bootstrap, and clears `bootstrap_admin_email`. If you skip this step, the Okta `sub` never gets written to your user, and any app-level Okta login (e.g. through a personal-assistant policy proxy) will fail with "you do not have access to this application" because the PDP can't find your user by sub.
+
 ## Troubleshooting
 
 | Error | Cause | Fix |

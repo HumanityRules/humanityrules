@@ -155,6 +155,23 @@ def auth_callback(request):
         return HttpResponseBadRequest(f"Authentication failed: {str(e)}")
 
 
+def _find_user_by_org_email(org: Organization, email: str) -> User | None:
+    """Identity-link a WorkOS-onboarded user into OIDC by (org, email).
+
+    Accepts two trust signals: the user already has an OrganizationMembership
+    in the org, or they are the pending bootstrap admin. Email alone is never
+    sufficient — org scoping is required to prevent an IdP asserting an
+    arbitrary email from hijacking an unrelated account.
+    """
+    qs = User.objects.filter(email__iexact=email)
+    member = qs.filter(organization_memberships__organization=org).first()
+    if member is not None:
+        return member
+    if org.bootstrap_admin_email and email.lower() == org.bootstrap_admin_email.lower():
+        return qs.first()
+    return None
+
+
 def oidc_callback(request):
     """Handles the OAuth callback from OIDC provider (Okta)."""
     code = request.GET.get("code")
@@ -183,7 +200,7 @@ def oidc_callback(request):
     request.session.pop("oidc_state", None)
     request.session.pop("oidc_org_slug", None)
 
-    # Find or create user
+    # Canonical path: existing OIDC user, matched by stable sub.
     try:
         user = User.objects.get(oidc_sub=userinfo["sub"])
         user.email = userinfo["email"]
@@ -193,32 +210,76 @@ def oidc_callback(request):
         login(request, user)
         return redirect("/dashboard/")
     except User.DoesNotExist:
-        user = User.objects.create_user(
-            username=userinfo["email"],
-            email=userinfo["email"],
-            first_name=userinfo["first_name"],
-            last_name=userinfo["last_name"],
-            oidc_sub=userinfo["sub"],
-            current_organization=org,
+        pass
+
+    # Identity-linking path: an existing DOH user (typically WorkOS-onboarded)
+    # hitting /oidc/login/ for the first time. Match on (org, email) and
+    # back-fill oidc_sub so future logins take the canonical path.
+    existing = _find_user_by_org_email(org=org, email=userinfo["email"])
+    if existing is not None:
+        if existing.oidc_sub and existing.oidc_sub != userinfo["sub"]:
+            # Same email, different sub — upstream identity changed. Fail
+            # loudly rather than silently re-point the row.
+            logger.error(
+                "oidc sub mismatch org=%s email=%s stored_sub=%s asserted_sub=%s",
+                org.slug, userinfo["email"], existing.oidc_sub, userinfo["sub"],
+            )
+            return HttpResponseBadRequest("OIDC sub mismatch for existing user")
+        existing.oidc_sub = userinfo["sub"]
+        existing.email = userinfo["email"]
+        existing.first_name = userinfo["first_name"]
+        existing.last_name = userinfo["last_name"]
+        existing.save()
+        logger.info(
+            "oidc backfilled sub org=%s email=%s sub=%s",
+            org.slug, userinfo["email"], userinfo["sub"],
         )
-        if org.bootstrap_admin_email and userinfo["email"].lower() == org.bootstrap_admin_email.lower():
+        # If the matched row is the pending bootstrap admin (no membership in
+        # this org yet), run the bootstrap path now.
+        if (
+            org.bootstrap_admin_email
+            and userinfo["email"].lower() == org.bootstrap_admin_email.lower()
+            and not OrganizationMembership.objects.filter(user=existing, organization=org).exists()
+        ):
             OrganizationMembership.objects.create(
-                user=user,
+                user=existing,
                 organization=org,
                 role=OrganizationMembership.Role.ADMIN,
             )
-            abac.bootstrap_organization(organization=org, admin_user=user)
+            abac.bootstrap_organization(organization=org, admin_user=existing)
             org.bootstrap_admin_email = ""
             org.save(update_fields=["bootstrap_admin_email"])
-        else:
-            OrganizationMembership.objects.create(
-                user=user,
-                organization=org,
-                role=org.default_org_role,
-            )
-            abac.assign_default_org_role(organization=org, user=user)
-        login(request, user)
+        login(request, existing)
         return redirect("/dashboard/")
+
+    # Brand-new user: create the row and either bootstrap the org (first admin)
+    # or assign the default role.
+    user = User.objects.create_user(
+        username=userinfo["email"],
+        email=userinfo["email"],
+        first_name=userinfo["first_name"],
+        last_name=userinfo["last_name"],
+        oidc_sub=userinfo["sub"],
+        current_organization=org,
+    )
+    if org.bootstrap_admin_email and userinfo["email"].lower() == org.bootstrap_admin_email.lower():
+        OrganizationMembership.objects.create(
+            user=user,
+            organization=org,
+            role=OrganizationMembership.Role.ADMIN,
+        )
+        abac.bootstrap_organization(organization=org, admin_user=user)
+        org.bootstrap_admin_email = ""
+        org.save(update_fields=["bootstrap_admin_email"])
+    else:
+        OrganizationMembership.objects.create(
+            user=user,
+            organization=org,
+            role=org.default_org_role,
+        )
+        abac.assign_default_org_role(organization=org, user=user)
+    login(request, user)
+    return redirect("/dashboard/")
 
 
 def auth_logout(request):
