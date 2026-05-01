@@ -1,6 +1,6 @@
 --- a/api/routes.py
 +++ b/api/routes.py
-@@ -2499,6 +2499,12 @@
+@@ -3521,6 +3521,12 @@
          # works even when hermes_cli is not on sys.path.
          from api.config import _resolve_provider_alias
          provider = _resolve_provider_alias(provider)
@@ -10,6 +10,6 @@
 +        # foundation model in the account showing up in the dropdown.
 +        if provider == "bedrock":
 +            return j(handler, {"provider": provider, "models": [], "count": 0})
- 
-         # Delegate to the agent's live-fetch + fallback resolver.
-         # provider_model_ids() tries live endpoints first and falls back to
+
+         cache_key = _live_models_cache_key(provider)
+         cached = _get_cached_live_models(cache_key)

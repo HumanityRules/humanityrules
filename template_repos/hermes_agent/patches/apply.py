@@ -8,7 +8,9 @@ updated patches that apply to already-deployed EFS volumes.
 Steps, in order:
 
   1. Copy everything under ``overlay/`` into the target tree (DOH-owned files
-     that don't exist upstream, e.g. agent/bedrock_aux_client.py).
+     that don't exist upstream). No overlay files are shipped today; the
+     mechanism stays in place so future DOH-owned additions can drop in
+     without restructuring the pipeline.
 
   2. Apply each ``NN-*.patch`` in numeric order with ``patch -p1 -N --forward``
      relative to the target tree. ``-N`` (forward) means already-applied
