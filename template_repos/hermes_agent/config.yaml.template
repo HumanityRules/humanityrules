@@ -247,10 +247,10 @@ code_execution:
 web:
   backend: tavily
 
-mcp_servers:
-  sidecar:
-    url: "http://127.0.0.1:7777/mcp"
-    enabled: true
-    timeout: 120
+# mcp_servers:
+#  sidecar:
+#    url: "http://127.0.0.1:7777/mcp"
+#    enabled: true
+#    timeout: 120
 
 _config_version: 11

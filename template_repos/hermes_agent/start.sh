@@ -9,7 +9,8 @@
 #
 # If any launched process exits, the whole container exits so ECS can restart it.
 
-HERMES_AGENT_DIR="/home/hermeswebui/.hermes/hermes-agent"
+HERMES_HOME="/home/hermeswebui/.hermes"
+HERMES_AGENT_DIR="$HERMES_HOME/hermes-agent"
 VENV_DIR="/app/venv"
 
 SLACK_ENABLED=0
@@ -29,24 +30,40 @@ fi
 /hermeswebui_init.bash 2>&1 &
 WEBUI_PID=$!
 
-if [ "$SLACK_ENABLED" -eq 0 ]; then
-    echo "[start] Waiting on WebUI (PID=$WEBUI_PID)."
-    wait $WEBUI_PID
-    exit $?
-fi
-
-# Wait for the WebUI to bind its port before we start the gateway — the
-# gateway imports server modules that rely on WebUI state being initialized.
+# Wait for WebUI to bind its port. Healthy implies hermeswebui_init.bash has
+# finished installing into $VENV_DIR, so we can safely `source` it below.
 echo "[start] Waiting for WebUI to start..."
 for i in $(seq 1 60); do
     if curl -sf http://localhost:8787/health >/dev/null 2>&1; then
         echo "[start] WebUI is healthy."
         break
     fi
+    if ! kill -0 "$WEBUI_PID" 2>/dev/null; then
+        echo "[start] FATAL: WebUI exited before becoming healthy." >&2
+        wait $WEBUI_PID
+        exit $?
+    fi
     sleep 2
 done
 
 source "$VENV_DIR/bin/activate"
+
+# Seed bundled skills into ~/.hermes/skills/. Upstream wires sync_skills into
+# `hermes update` and `hermes profile create`, neither of which our deploy
+# flow goes through. Without this call the WebUI skills panel stays empty.
+HERMES_HOME="$HERMES_HOME" python3 -c "
+import sys
+sys.path.insert(0, '$HERMES_AGENT_DIR')
+from tools.skills_sync import sync_skills
+r = sync_skills(quiet=True)
+print(f'[start:skills] copied={len(r[\"copied\"])} updated={len(r[\"updated\"])} skipped={r[\"skipped\"]} user_modified={len(r[\"user_modified\"])} total_bundled={r[\"total_bundled\"]}')
+" || echo "[start:skills] sync failed (non-fatal)"
+
+if [ "$SLACK_ENABLED" -eq 0 ]; then
+    echo "[start] Waiting on WebUI (PID=$WEBUI_PID)."
+    wait $WEBUI_PID
+    exit $?
+fi
 
 echo "[start] Starting Hermes gateway..."
 cd "$HERMES_AGENT_DIR"
