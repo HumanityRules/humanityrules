@@ -433,6 +433,11 @@ _DOCKER_DIND_CONTAINER = {
     "environment": {
         "DOCKER_TLS_CERTDIR": "",
         "TOOL_IMAGE_BASE": "nikolaik/python-nodejs:python3.11-nodejs20",
+        # Our entrypoint.sh is PID 1, not tini — so tini's default zombie
+        # reaping (which only activates when it's PID 1) is off. Setting
+        # TINI_SUBREAPER=1 makes tini call PR_SET_CHILD_SUBREAPER on itself
+        # so dockerd's short-lived children get reaped instead of lingering.
+        "TINI_SUBREAPER": "1",
     },
 }
 
