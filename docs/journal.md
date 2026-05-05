@@ -1,5 +1,37 @@
 # DevOpsHero Development Journal
 
+## 2026-05-04 22:47 - [Deployment] DinD snapshotter: decouple docker save from die events
+
+**Conversation:** [2026-05-04-2247-9d0f49eb.md](conversations/2026-05-04-2247-9d0f49eb.md)
+
+`doh-dind/snapshotter.py` was doing a full `docker commit` + `docker save | zstd` to EFS on every tool-container `die` event. Logs showed 30–60s per die, which is the cost of streaming the entire `doh-toolbox:latest` tarball (base image + accumulated commit layers) through zstd into EFS. The commit itself is ~100ms; the save is where all the time goes.
+
+User explicitly set performance as #1 priority and accepted a larger data-loss window in corner cases (unclean task death without SIGTERM).
+
+**Shipped approach: commit on die, save on a fixed 10-min timer, with a dirty flag.**
+
+- `die` event → `do_commit` only. Fast path, ~100ms. Sets `_dirty`.
+- New `_periodic_save_loop` thread → every `SAVE_INTERVAL_SECONDS` (600s), calls `do_save("periodic")` if `_dirty` is set, else logs a skip. Idle sandboxes pay zero EFS I/O.
+- SIGTERM → commit each live tool container, then a single save if `_dirty`. Previously it did commit+save *per container*, so this is also a shutdown speedup when multiple containers exist.
+- `do_save` clears `_dirty` only on success. Failed save leaves it set so the next tick retries.
+- `do_commit` and `do_save` each take `_snapshot_lock` themselves. First pass had explicit `commit_locked` / `save_locked` wrappers, but with no callers needing the unlocked versions they were dead weight — folded the lock into the `do_` functions directly.
+
+**Alternatives considered and rejected:**
+
+1. *Debounce saves after commits (reset timer on each commit)* — tighter loss-window than fixed timer, but more state to track. User explicitly preferred the simpler fixed-timer approach; the loss-window difference only matters in the narrow case of "commit happened just before unclean death."
+2. *Push to ECR instead of `docker save` to EFS* — layer-incremental, scales better as toolbox grows. Deferred as the longer-term direction if the timer approach isn't enough.
+3. *`docker export` the dying container (just the writable layer, MBs not GBs)* — drops image metadata and changes the restore model to delta-stacking. Rejected as too invasive vs. the other options.
+
+**Worst-case loss window:** up to `SAVE_INTERVAL_SECONDS` (600s) of committed-but-unsaved state if the task dies without SIGTERM (OOM kill, spot reclaim, host death). SIGTERM path already handles graceful stop (ECS task replacement, `docker compose down`).
+
+**Key points:**
+
+- Die-event latency goes from 30–60s to ~100ms; that was the whole point.
+- The `_dirty` flag is critical: without it, an idle sandbox would rewrite a bit-identical ~GB tarball to EFS every 10 min.
+- Don't keep `commit_locked` / `save_locked` wrappers when nothing calls the unlocked versions — `do_commit` / `do_save` can just take the lock themselves. YAGNI.
+- `_snapshot_lock` still serializes commit-vs-save so a die event arriving mid-save blocks until the save finishes. That's fine because saves only fire every 10 min.
+- Updated module docstring to reflect the new trigger model (three triggers: die=commit, timer=maybe-save, SIGTERM=commit+save).
+
 ## 2026-05-04 19:14 - [Deployment] Hermes TTFT investigation: patches 05/06, SSD-primary layout with EFS mirror
 
 **Conversation:** [2026-05-04-1914-b584f827.md](conversations/2026-05-04-1914-b584f827.md)
