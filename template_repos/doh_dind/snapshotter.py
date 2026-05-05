@@ -18,9 +18,13 @@ Operations:
 
 Triggers:
 
-  1. `docker events die`  - commit + save the stopped tool container.
-  2. SIGTERM              - commit + save live tool containers before
-                            stopping dockerd.
+  1. `docker events die`  - commit the stopped tool container (fast path,
+                            ~100ms). Marks state dirty; EFS save deferred.
+  2. Periodic timer       - every SAVE_INTERVAL_SECONDS, save to EFS if
+                            dirty. No-op when nothing committed since the
+                            last successful save.
+  3. SIGTERM              - commit live tool containers, then save once
+                            before stopping dockerd.
 
 EFS layout (under $PERSISTENCE_DIR):
 
@@ -29,8 +33,11 @@ EFS layout (under $PERSISTENCE_DIR):
     incoming.tar.zst        # in-flight write; atomic-renamed to latest
     snapshots/<ts>.tar.zst  # rotated prior saves (retention=3)
 
-Concurrency: one process-local lock serializes commit+save so the atomic
-rename on latest.tar.zst is uncontested inside this snapshotter.
+Concurrency: one process-local lock serializes commits against saves so
+the atomic rename on latest.tar.zst is uncontested inside this
+snapshotter. A die event arriving during an in-flight save blocks on the
+lock until the save finishes — acceptable because saves only run every
+SAVE_INTERVAL_SECONDS.
 """
 
 import datetime
@@ -55,6 +62,7 @@ INCOMING = PERSISTENCE_DIR / "incoming.tar.zst"
 TOOL_CONTAINER_NAME_PREFIX = "hermes-"  # upstream: tools/environments/docker.py
 RETENTION = 3
 FLATTEN_LAYER_THRESHOLD = 32
+SAVE_INTERVAL_SECONDS = 600
 
 # Passed through from /entrypoint.sh via env so we only configure the daemon
 # lifecycle in one place (the shell wrapper that started it).
@@ -64,6 +72,10 @@ TOOL_IMAGE_BASE = os.environ.get("TOOL_IMAGE_BASE", "")
 
 _snapshot_lock = threading.Lock()
 _shutdown = threading.Event()
+# Set by do_commit, cleared by a successful do_save. The periodic save worker
+# skips its tick when this is false so an idle sandbox doesn't rewrite an
+# identical ~GB tarball to EFS every SAVE_INTERVAL_SECONDS.
+_dirty = threading.Event()
 
 
 def _run(cmd: list[str]) -> subprocess.CompletedProcess:
@@ -137,19 +149,20 @@ def do_commit(container_id: str, trigger: str) -> bool:
     Fast: no I/O, no compression. Adds one overlay2 layer on top of the
     existing chain; do_save compacts the tag before the chain gets deep.
 
-    Called before every save so the tag is fresh for the next `docker run`
-    Hermes issues.
+    Takes the snapshot lock so a concurrent save can't race the tag update.
     """
-    try:
-        _run(["docker", "commit", container_id, TOOLBOX_TAG])
-    except subprocess.CalledProcessError as e:
-        LOG.error(
-            "commit failed container=%s trigger=%s err=%s",
-            container_id[:12], trigger, e.stderr.strip() if e.stderr else e,
-        )
-        return False
-    LOG.info("commit ok container=%s trigger=%s tag=%s", container_id[:12], trigger, TOOLBOX_TAG)
-    return True
+    with _snapshot_lock:
+        try:
+            _run(["docker", "commit", container_id, TOOLBOX_TAG])
+        except subprocess.CalledProcessError as e:
+            LOG.error(
+                "commit failed container=%s trigger=%s err=%s",
+                container_id[:12], trigger, e.stderr.strip() if e.stderr else e,
+            )
+            return False
+        _dirty.set()
+        LOG.info("commit ok container=%s trigger=%s tag=%s", container_id[:12], trigger, TOOLBOX_TAG)
+        return True
 
 
 def _flatten_toolbox_tag() -> bool:
@@ -202,76 +215,72 @@ def do_save(trigger: str) -> bool:
     Must be preceded by do_commit so TOOLBOX_TAG reflects the live
     container's writable layer. Atomic-rename through incoming.tar.zst so
     a mid-write crash leaves latest.tar.zst intact.
+
+    Takes the snapshot lock so commits queue behind it.
     """
-    started = time.monotonic()
+    with _snapshot_lock:
+        started = time.monotonic()
 
-    layer_count = _toolbox_layer_count()
-    should_flatten = layer_count is None or layer_count >= FLATTEN_LAYER_THRESHOLD
-    if should_flatten:
-        LOG.info("flattening toolbox tag layer_count=%s threshold=%d", layer_count, FLATTEN_LAYER_THRESHOLD)
-        if not _flatten_toolbox_tag():
-            return False
         layer_count = _toolbox_layer_count()
-    else:
-        LOG.info("flatten skipped layer_count=%d threshold=%d", layer_count, FLATTEN_LAYER_THRESHOLD)
+        should_flatten = layer_count is None or layer_count >= FLATTEN_LAYER_THRESHOLD
+        if should_flatten:
+            LOG.info("flattening toolbox tag layer_count=%s threshold=%d", layer_count, FLATTEN_LAYER_THRESHOLD)
+            if not _flatten_toolbox_tag():
+                return False
+            layer_count = _toolbox_layer_count()
+        else:
+            LOG.info("flatten skipped layer_count=%d threshold=%d", layer_count, FLATTEN_LAYER_THRESHOLD)
 
-    SNAPSHOTS_DIR.mkdir(parents=True, exist_ok=True)
-    if INCOMING.exists():
-        INCOMING.unlink()
-
-    # `docker save` writes the full image (metadata + layers) as a tar
-    # stream on stdout; zstd compresses into place on EFS.
-    cmd = f"docker save {TOOLBOX_TAG} | zstd -T0 -q -o {INCOMING}"
-    try:
-        _run_shell(cmd)
-    except subprocess.CalledProcessError as e:
-        LOG.error("save failed trigger=%s err=%s", trigger, e)
+        SNAPSHOTS_DIR.mkdir(parents=True, exist_ok=True)
         if INCOMING.exists():
             INCOMING.unlink()
-        return False
 
-    size_bytes = INCOMING.stat().st_size
-
-    # Rotate current latest into snapshots/ BEFORE renaming incoming into
-    # latest, so readers that hit a torn state still see a prior good copy.
-    ts = datetime.datetime.now(datetime.UTC).strftime("%Y%m%dT%H%M%SZ")
-    if LATEST.exists():
-        rotated = SNAPSHOTS_DIR / f"{ts}.tar.zst"
+        # `docker save` writes the full image (metadata + layers) as a tar
+        # stream on stdout; zstd compresses into place on EFS.
+        cmd = f"docker save {TOOLBOX_TAG} | zstd -T0 -q -o {INCOMING}"
         try:
-            os.replace(LATEST, rotated)
-        except OSError as e:
-            LOG.error("rotate: failed to move latest to %s: %s", rotated, e)
+            _run_shell(cmd)
+        except subprocess.CalledProcessError as e:
+            LOG.error("save failed trigger=%s err=%s", trigger, e)
+            if INCOMING.exists():
+                INCOMING.unlink()
+            return False
 
-    os.replace(INCOMING, LATEST)
+        size_bytes = INCOMING.stat().st_size
 
-    LATEST_META.write_text(json.dumps({
-        "base_image_ref": TOOL_IMAGE_BASE,
-        "created_utc": ts,
-        "flattened": should_flatten,
-        "layer_count": layer_count,
-        "size_bytes": size_bytes,
-        "trigger": trigger,
-    }, indent=2))
+        # Rotate current latest into snapshots/ BEFORE renaming incoming into
+        # latest, so readers that hit a torn state still see a prior good copy.
+        ts = datetime.datetime.now(datetime.UTC).strftime("%Y%m%dT%H%M%SZ")
+        if LATEST.exists():
+            rotated = SNAPSHOTS_DIR / f"{ts}.tar.zst"
+            try:
+                os.replace(LATEST, rotated)
+            except OSError as e:
+                LOG.error("rotate: failed to move latest to %s: %s", rotated, e)
 
-    _prune_snapshots()
+        os.replace(INCOMING, LATEST)
 
-    duration_ms = int((time.monotonic() - started) * 1000)
-    LOG.info(
-        "save ok trigger=%s size=%d ms=%d flattened=%s layer_count=%s",
-        trigger, size_bytes, duration_ms, should_flatten, layer_count,
-    )
-    return True
+        LATEST_META.write_text(json.dumps({
+            "base_image_ref": TOOL_IMAGE_BASE,
+            "created_utc": ts,
+            "flattened": should_flatten,
+            "layer_count": layer_count,
+            "size_bytes": size_bytes,
+            "trigger": trigger,
+        }, indent=2))
+
+        _prune_snapshots()
+        _dirty.clear()
+
+        duration_ms = int((time.monotonic() - started) * 1000)
+        LOG.info(
+            "save ok trigger=%s size=%d ms=%d flattened=%s layer_count=%s",
+            trigger, size_bytes, duration_ms, should_flatten, layer_count,
+        )
+        return True
 
 
-def commit_and_save(container_id: str, trigger: str) -> None:
-    """Commit a tool container and persist the resulting toolbox image."""
-    with _snapshot_lock:
-        if not do_commit(container_id=container_id, trigger=trigger):
-            return
-        do_save(trigger=trigger)
-
-
-def events_stream() -> None:
+def _events_stream() -> None:
     """Long-poll `docker events` and persist stopped tool containers."""
     # die fires before rm, so the stopped container can still be committed.
     proc = subprocess.Popen(
@@ -297,7 +306,7 @@ def events_stream() -> None:
                 cid = evt.get("id", "")
 
                 if status == "die":
-                    commit_and_save(container_id=cid, trigger="die-event")
+                    do_commit(container_id=cid, trigger="die-event")
 
             except Exception as e:
                 # A single malformed event or failed commit must not kill the
@@ -307,15 +316,33 @@ def events_stream() -> None:
         proc.terminate()
 
 
+def _periodic_save_loop() -> None:
+    """Save to EFS every SAVE_INTERVAL_SECONDS when state is dirty.
+
+    Commits land on every die event (fast, local-only). This loop is what
+    actually pushes the accumulated state to EFS. Idle sandboxes leave
+    _dirty clear and this is a no-op."""
+    while not _shutdown.wait(SAVE_INTERVAL_SECONDS):
+        if not _dirty.is_set():
+            LOG.info("periodic save: skipped (not dirty)")
+            continue
+        do_save(trigger="periodic")
+
+
 def _sigterm_snapshot_all() -> None:
-    """Persist every live tool container before dockerd is stopped."""
+    """Persist every live tool container before dockerd is stopped.
+    Commit each running tool container, then do a single save to flush
+    both those commits and any die-event commits that haven't been saved
+    yet."""
     try:
         containers = _list_tool_containers(running_only=True)
     except subprocess.CalledProcessError as e:
         LOG.error("could not list tool containers during sigterm: %s", e)
-        return
+        containers = []
     for c in containers:
-        commit_and_save(container_id=c["id"], trigger="sigterm")
+        do_commit(container_id=c["id"], trigger="sigterm")
+    if _dirty.is_set():
+        do_save(trigger="sigterm")
 
 
 def _stop_dockerd() -> None:
@@ -362,11 +389,12 @@ def main() -> None:
     signal.signal(signal.SIGTERM, _handle_termination_signal)
     signal.signal(signal.SIGINT, _handle_termination_signal)
 
-    threading.Thread(target=events_stream, name="events", daemon=True).start()
+    threading.Thread(target=_events_stream, name="events", daemon=True).start()
+    threading.Thread(target=_periodic_save_loop, name="periodic-save", daemon=True).start()
 
     LOG.info(
-        "doh-dind snapshotter started (persistence=%s, dockerd_pid=%d)",
-        PERSISTENCE_DIR, DOCKERD_PID,
+        "doh-dind snapshotter started (persistence=%s, dockerd_pid=%d, save_interval_s=%d)",
+        PERSISTENCE_DIR, DOCKERD_PID, SAVE_INTERVAL_SECONDS,
     )
     # Signal handlers exit(0) the process directly; this wait is only unblocked by that path
     _shutdown.wait()
