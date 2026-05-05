@@ -438,7 +438,8 @@ _DOCKER_DIND_CONTAINER = {
     # fresh boot (when no snapshot exists on EFS yet).
     "environment": {
         "DOCKER_TLS_CERTDIR": "",
-        "TOOL_IMAGE_BASE": "nikolaik/python-nodejs:python3.11-nodejs20",
+        # "TOOL_IMAGE_BASE": "nikolaik/python-nodejs:python3.11-nodejs20",
+        "TOOL_IMAGE_BASE": "python:3.12-slim-bookworm",
         # Our entrypoint.sh is PID 1, not tini — so tini's default zombie
         # reaping (which only activates when it's PID 1) is off. Setting
         # TINI_SUBREAPER=1 makes tini call PR_SET_CHILD_SUBREAPER on itself
