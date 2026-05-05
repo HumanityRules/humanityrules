@@ -161,11 +161,11 @@ _HERMES_LLM_VARS = [
         "name": "DOH_LLM_MODEL",
         "group": "Main LLM",
         "category": "config",
-        "description": "LLM model identifier (e.g. us.anthropic.claude-opus-4-7, us.anthropic.claude-opus-4-6-v1, gpt-5.4-mini)",
+        "description": "LLM model identifier (e.g. us.anthropic.claude-opus-4-7, us.anthropic.claude-sonnet-4-6, gpt-5.4-mini)",
         "required": True,
         "auto_generate": False,
-        "default_value": "us.anthropic.claude-opus-4-7",
-        "value": "us.anthropic.claude-opus-4-7",
+        "default_value": "us.anthropic.claude-sonnet-4-6",
+        "value": "us.anthropic.claude-sonnet-4-6",
         "user_editable": True,
     },
     {
@@ -351,16 +351,22 @@ _HERMES_SLACK_VARS = [
     },
 ]
 
-# Three sibling access points on EFS per Hermes app: "home" holds agent state
-# (config, memory, skills, venv) and is mounted at ~/.hermes in the hermes
-# container; "workspace" holds user/agent work output and is mounted at
-# /workspace in both the hermes container and the docker-dind container — same
-# data visible on both sides, so files the agent creates through tool runs
-# appear under ~/.workspace and vice versa; "docker-persistence" holds the
-# zstd-compressed tool-container snapshots the doh-dind snapshotter writes,
-# which restore into doh-toolbox:latest on every DinD boot so pip/apt/npm
-# state survives ECS task restarts. Flat sibling layout (not nested inside
-# home) keeps each tier's data independent on disk.
+# Three sibling access points on EFS per Hermes app: "home" holds durable
+# Hermes state (sessions, memories, webui-mvp, SOUL.md, state.db) and is
+# mounted at /mnt/hermes-persistent — *not* at ~/.hermes — because ~/.hermes
+# lives on the ECS task's local SSD for low-latency per-turn I/O. A 10s
+# background rsync in start.sh mirrors ~/.hermes → /mnt/hermes-persistent,
+# and entrypoint.sh restores from it on boot so chat history survives task
+# replacement (the hermes container is "essential" → any crash replaces the
+# task). Durability window is ~10s plus one final sync on SIGTERM.
+# "workspace" holds user/agent work output and is mounted at /workspace in
+# both the hermes container and the docker-dind container — same data visible
+# on both sides, so files the agent creates through tool runs appear under
+# ~/.workspace and vice versa; "docker-persistence" holds the zstd-compressed
+# tool-container snapshots the doh-dind snapshotter writes, which restore
+# into doh-toolbox:latest on every DinD boot so pip/apt/npm state survives
+# ECS task restarts. Flat sibling layout (not nested inside home) keeps each
+# tier's data independent on disk.
 #
 # docker-persistence uses uid/gid 0 because docker-dind runs dockerd as root
 # and the snapshotter inherits that uid — the other two mounts stay on 1024
@@ -370,7 +376,7 @@ _HERMES_EFS_CONFIG = {
         {
             "name": "home",
             "subpath": "hermes",
-            "container_path": "/home/hermeswebui/.hermes",
+            "container_path": "/mnt/hermes-persistent",
             "posix_uid": 1024,
             "posix_gid": 1024,
         },
