@@ -1,5 +1,36 @@
 # DevOpsHero Development Journal
 
+## 2026-05-05 00:43 - [Deployment] DinD snapshotter simplifications + swap tool base image to python:3.12-slim-bookworm
+
+**Conversation:** [2026-05-05-0043-9d0f49eb.md](conversations/2026-05-05-0043-9d0f49eb.md)
+
+Follow-up to the previous entry. Two refinements to the snapshotter and one change to the tool base image.
+
+**Snapshotter: periodic commits, then drop `_dirty` entirely.** The previous iteration had periodic-tick → `do_save if _dirty`. User pointed out the hole: `_dirty` is only set on die events, so long-running tool containers (with `TERMINAL_LIFETIME_SECONDS=86400`, i.e. 24h) would accumulate writes indefinitely and never get saved while they're still running. Fixed by having the periodic loop commit every live `hermes-*` container first, then save. At that point `_dirty` is effectively always set (any commit sets it), so the flag was doing no work and added noise. Dropped it.
+
+Idle-save behavior: if a tool container is running but the user is idle, we still re-save a bit-identical image to EFS every 10 min. Explored `docker diff <container>` as a gate — it lists filesystem changes in the writable layer, but the baseline is *container creation time*, not *last save*, so it always reports non-empty after the first write. Would need cross-tick hash comparison to be useful; too elaborate for the savings. User agreed to accept the idle-save cost.
+
+Also collapsed `commit_locked` / `save_locked` wrappers into the `do_commit` / `do_save` functions themselves. There were no callers of the unlocked versions, so the wrappers were dead weight.
+
+**Rejected: write to SSD then rsync to EFS.** User asked if this would optimize saves. Analyzed and said no: the current `docker save | zstd -o /efs/file` pipeline already overlaps compression and EFS write; splitting into "zstd → SSD" then "SSD → EFS" *serializes* those stages. DinD's SSD is ephemeral too, so it doesn't shrink the loss window. Rsync specifically doesn't help because zstd tarballs don't delta well. Only scenario where SSD-primary wins is if you want non-blocking saves on the main loop (commit fast, mirror async) — that's the hermes sidecar pattern, but it has a continuous reconciliation loop to justify it. Deferred unless measurements say otherwise.
+
+**Tool base image: `nikolaik/python-nodejs:python3.11-nodejs20` → `python:3.12-slim-bookworm`.** The nikolaik image was Hermes's upstream default (`tools/terminal_tool.py:601`), not a deliberate DOH choice. It's ~1.5 GB compressed / ~4.5 GB uncompressed. Since the snapshot save streams all image layers through zstd on every periodic tick, the base image size is a direct multiplier on the EFS write every 10 min. `python:3.12-slim-bookworm` is ~45 MB compressed — ~30× smaller tarballs.
+
+Tradeoff: slim strips the Debian toolchain (no `gcc`, no `Python.h`, no node). Hermes agents can `apt install` on demand (the writable layer captures it in the next commit), but the first turn that hits a C-extension Python package or a node-using workflow pays a one-time install cost. Most modern PyPI packages ship manylinux wheels so `pip install` usually works on slim without compiling. Accepted the tradeoff.
+
+**Migration:** existing deployed sessions keep their current snapshot and base (the restore path loads whatever is in EFS regardless of `TOOL_IMAGE_BASE`). Only fresh deploys or sessions with no EFS snapshot pick up the new base. `TOOL_IMAGE_BASE` is only consulted by `doh_dind/entrypoint.sh` as the fallback when no snapshot exists.
+
+Changed in two places: `template_repos/hermes_agent/docker-compose.yaml` (local dev) and `devopshero_app/management/commands/seed_app_templates.py` (prod task template). Old value commented out in both, not deleted, to document the origin.
+
+**Key points:**
+
+- `_dirty` was redundant once the periodic path committed running containers — always-set flags are noise.
+- `docker commit` on a running container does not reset the writable layer; the container keeps accumulating. That's why `docker diff`'s baseline is creation-time, not last-commit-time, and why it can't gate saves without extra state.
+- Base image size matters more than expected because `docker save` is full-image every time; it's the bottleneck on periodic saves, not just first-boot pull time.
+- Hermes tool containers don't require any preinstalled runtime — they need `bash`, `--init`, and the ability to install packages. Any slim Debian/Ubuntu base works; node is rarely used in DOH workflows so paying to preinstall it is wasteful.
+- "build-essential ergonomics" was my clumsy phrasing for "this image can compile stuff without apt-installing gcc first." Non-slim `python:3.12-bookworm` (~380 MB) would sit between slim and nikolaik if slim ends up biting too often; kept in reserve.
+- The snapshot format is tied to whatever base was present when the snapshot was taken (baked into the layers). Base swaps are a clean-break event for new sessions and a no-op for existing ones — no migration code needed.
+
 ## 2026-05-04 22:47 - [Deployment] DinD snapshotter: decouple docker save from die events
 
 **Conversation:** [2026-05-04-2247-9d0f49eb.md](conversations/2026-05-04-2247-9d0f49eb.md)

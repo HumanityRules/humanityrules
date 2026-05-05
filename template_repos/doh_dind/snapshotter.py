@@ -19,11 +19,13 @@ Operations:
 Triggers:
 
   1. `docker events die`  - commit the stopped tool container (fast path,
-                            ~100ms). Marks state dirty; EFS save deferred.
-  2. Periodic timer       - every SAVE_INTERVAL_SECONDS, save to EFS if
-                            dirty. No-op when nothing committed since the
-                            last successful save.
-  3. SIGTERM              - commit live tool containers, then save once
+                            ~100ms). EFS save deferred to the periodic
+                            tick.
+  2. Periodic timer       - every SAVE_INTERVAL_SECONDS, commit every
+                            live tool container and save to EFS.
+                            Catches long-running containers that never
+                            exit between saves.
+  3. SIGTERM              - same as periodic, on the shutdown path,
                             before stopping dockerd.
 
 EFS layout (under $PERSISTENCE_DIR):
@@ -72,10 +74,6 @@ TOOL_IMAGE_BASE = os.environ.get("TOOL_IMAGE_BASE", "")
 
 _snapshot_lock = threading.Lock()
 _shutdown = threading.Event()
-# Set by do_commit, cleared by a successful do_save. The periodic save worker
-# skips its tick when this is false so an idle sandbox doesn't rewrite an
-# identical ~GB tarball to EFS every SAVE_INTERVAL_SECONDS.
-_dirty = threading.Event()
 
 
 def _run(cmd: list[str]) -> subprocess.CompletedProcess:
@@ -160,7 +158,6 @@ def do_commit(container_id: str, trigger: str) -> bool:
                 container_id[:12], trigger, e.stderr.strip() if e.stderr else e,
             )
             return False
-        _dirty.set()
         LOG.info("commit ok container=%s trigger=%s tag=%s", container_id[:12], trigger, TOOLBOX_TAG)
         return True
 
@@ -270,7 +267,6 @@ def do_save(trigger: str) -> bool:
         }, indent=2))
 
         _prune_snapshots()
-        _dirty.clear()
 
         duration_ms = int((time.monotonic() - started) * 1000)
         LOG.info(
@@ -316,33 +312,36 @@ def _events_stream() -> None:
         proc.terminate()
 
 
-def _periodic_save_loop() -> None:
-    """Save to EFS every SAVE_INTERVAL_SECONDS when state is dirty.
+def _commit_running_and_save(trigger: str) -> None:
+    """Commit every live tool container, then save to EFS.
 
-    Commits land on every die event (fast, local-only). This loop is what
-    actually pushes the accumulated state to EFS. Idle sandboxes leave
-    _dirty clear and this is a no-op."""
-    while not _shutdown.wait(SAVE_INTERVAL_SECONDS):
-        if not _dirty.is_set():
-            LOG.info("periodic save: skipped (not dirty)")
-            continue
-        do_save(trigger="periodic")
-
-
-def _sigterm_snapshot_all() -> None:
-    """Persist every live tool container before dockerd is stopped.
-    Commit each running tool container, then do a single save to flush
-    both those commits and any die-event commits that haven't been saved
-    yet."""
+    Die events commit stopped containers; this handles the other case —
+    long-running tool containers (TERMINAL_LIFETIME_SECONDS=86400) that
+    accumulate writes without ever exiting. Without this, a multi-hour
+    session would leak all its filesystem changes between restarts."""
     try:
         containers = _list_tool_containers(running_only=True)
     except subprocess.CalledProcessError as e:
-        LOG.error("could not list tool containers during sigterm: %s", e)
+        LOG.error("could not list tool containers (trigger=%s): %s", trigger, e)
         containers = []
     for c in containers:
-        do_commit(container_id=c["id"], trigger="sigterm")
-    if _dirty.is_set():
-        do_save(trigger="sigterm")
+        do_commit(container_id=c["id"], trigger=trigger)
+    do_save(trigger=trigger)
+
+
+def _periodic_save_loop() -> None:
+    """Every SAVE_INTERVAL_SECONDS: commit live containers, then save.
+
+    We commit running containers here (not just rely on die-event
+    commits) so long-running tool containers still get their state
+    captured."""
+    while not _shutdown.wait(SAVE_INTERVAL_SECONDS):
+        _commit_running_and_save(trigger="periodic")
+
+
+def _sigterm_snapshot_all() -> None:
+    """Persist every live tool container before dockerd is stopped."""
+    _commit_running_and_save(trigger="sigterm")
 
 
 def _stop_dockerd() -> None:
