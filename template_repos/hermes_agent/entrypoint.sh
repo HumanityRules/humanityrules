@@ -88,7 +88,7 @@ HERMES_EFS_PERSIST=/mnt/hermes-persistent
 if [ -d "$HERMES_EFS_PERSIST" ] && [ -n "$(ls -A "$HERMES_EFS_PERSIST" 2>/dev/null)" ]; then
     echo "[entrypoint] Restoring ~/.hermes from $HERMES_EFS_PERSIST..."
     _t0=$(date +%s%3N)
-    rsync -a --exclude='hermes-agent/' "$HERMES_EFS_PERSIST/" "$HERMES_DIR/"
+    rsync -aq --exclude='hermes-agent/' "$HERMES_EFS_PERSIST/" "$HERMES_DIR/"
     _size_mb=$(du -sm "$HERMES_DIR" 2>/dev/null | cut -f1)
     echo "[entrypoint] Restore done in $(($(date +%s%3N) - _t0))ms (~${_size_mb}MB on SSD)."
 fi
