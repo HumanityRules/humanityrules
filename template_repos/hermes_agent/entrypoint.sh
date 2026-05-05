@@ -22,20 +22,14 @@ if [ "$DOH_LLM_PROVIDER" = "bedrock" ]; then
     DOH_LLM_BASE_URL="https://bedrock-runtime.${AWS_BEDROCK_REGION}.amazonaws.com"
 fi
 
-# Auxiliary LLM (vision, compression, session_search, skills_hub, approval, mcp,
-# flush_memories, web_extract). One shared config, fanned out into all 8 slots.
-# Defaults to the main provider when unset so Bedrock users get a Bedrock aux.
-# Reuses the main provider's API key (no separate aux key var).
+# Auxiliary LLM (vision, compression, session_search, skills_hub, approval,
+# mcp, flush_memories, web_extract, title_generation). One shared config,
+# fanned out into all 9 slots. Defaults to the main provider when unset so
+# Bedrock users get a Bedrock aux. Reuses the main provider's API key (no
+# separate aux key var).
 : "${DOH_AUX_PROVIDER:=$DOH_LLM_PROVIDER}"
 : "${DOH_AUX_MODEL:=$DOH_LLM_MODEL}"
 : "${DOH_AUX_BASE_URL:=}"
-if [ "$DOH_AUX_PROVIDER" = "bedrock" ]; then
-    if [ -z "$AWS_BEDROCK_REGION" ]; then
-        echo "FATAL: DOH_AUX_PROVIDER=bedrock requires AWS_BEDROCK_REGION" >&2
-        exit 1
-    fi
-    DOH_AUX_BASE_URL="https://bedrock-runtime.${AWS_BEDROCK_REGION}.amazonaws.com"
-fi
 
 # DOCKER_HOST points at the in-task DinD sidecar. The hermes container's
 # depends_on: {docker-dind, HEALTHY} already guarantees DinD is up before we
@@ -83,6 +77,22 @@ fi
 HERMES_DIR="/home/hermeswebui/.hermes"
 mkdir -p "$HERMES_DIR"
 
+# ~/.hermes lives on the ECS task's local SSD for low-latency per-turn I/O.
+# Durable state (sessions, memories, webui-mvp, SOUL.md, state.db, etc.) is
+# mirrored to EFS at /mnt/hermes-persistent by a 10s background rsync loop in
+# start.sh. On boot, restore state from EFS so chat history, memories, and
+# settings survive task replacement. hermes-agent/ is excluded: it's
+# regenerated from the image every boot, and re-running the patches via
+# apply.py below keeps it fresh.
+HERMES_EFS_PERSIST=/mnt/hermes-persistent
+if [ -d "$HERMES_EFS_PERSIST" ] && [ -n "$(ls -A "$HERMES_EFS_PERSIST" 2>/dev/null)" ]; then
+    echo "[entrypoint] Restoring ~/.hermes from $HERMES_EFS_PERSIST..."
+    _t0=$(date +%s%3N)
+    rsync -a --exclude='hermes-agent/' "$HERMES_EFS_PERSIST/" "$HERMES_DIR/"
+    _size_mb=$(du -sm "$HERMES_DIR" 2>/dev/null | cut -f1)
+    echo "[entrypoint] Restore done in $(($(date +%s%3N) - _t0))ms (~${_size_mb}MB on SSD)."
+fi
+
 # Regenerate config.yaml from template on every boot. DOH owns this file.
 # sed's `r file` + `d` replaces the single-line __PROVIDERS_BLOCK__ marker
 # with the multi-line block from above.
@@ -110,10 +120,14 @@ bedrock:
 EOF
 fi
 
-if [ ! -d "$HERMES_DIR/hermes-agent" ]; then
-    cp -r /opt/hermes-defaults/hermes-agent "$HERMES_DIR/hermes-agent"
-fi
+# hermes-agent is rsync-excluded from the EFS persist set (see start.sh), so
+# ~/.hermes is fresh SSD on every boot and we seed unconditionally from the
+# image. apply.py then re-applies DOH patches against the freshly-seeded tree.
+cp -r /opt/hermes-defaults/hermes-agent "$HERMES_DIR/hermes-agent"
 
+# SOUL.md is user-editable, so it *is* in the EFS persist set and was already
+# restored above (if EFS had a copy). If restore left no SOUL.md -> brand-new
+# deploy with empty EFS -> seed the image default so Hermes has a persona.
 if [ ! -f "$HERMES_DIR/SOUL.md" ]; then
     cp /opt/hermes-defaults/SOUL.md "$HERMES_DIR/SOUL.md"
 fi

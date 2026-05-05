@@ -72,50 +72,56 @@ auxiliary:
   vision:
     provider: __AUX_PROVIDER__
     model: __AUX_MODEL__
-    base_url: __AUX_BASE_URL__
+    base_url: '__AUX_BASE_URL__'
     api_key: ''
     timeout: 30
     download_timeout: 30
   web_extract:
     provider: __AUX_PROVIDER__
     model: __AUX_MODEL__
-    base_url: __AUX_BASE_URL__
+    base_url: '__AUX_BASE_URL__'
     api_key: ''
     timeout: 30
   compression:
     provider: __AUX_PROVIDER__
     model: __AUX_MODEL__
-    base_url: __AUX_BASE_URL__
+    base_url: '__AUX_BASE_URL__'
     api_key: ''
     timeout: 120
   session_search:
     provider: __AUX_PROVIDER__
     model: __AUX_MODEL__
-    base_url: __AUX_BASE_URL__
+    base_url: '__AUX_BASE_URL__'
     api_key: ''
     timeout: 30
   skills_hub:
     provider: __AUX_PROVIDER__
     model: __AUX_MODEL__
-    base_url: __AUX_BASE_URL__
+    base_url: '__AUX_BASE_URL__'
     api_key: ''
     timeout: 30
   approval:
     provider: __AUX_PROVIDER__
     model: __AUX_MODEL__
-    base_url: __AUX_BASE_URL__
+    base_url: '__AUX_BASE_URL__'
     api_key: ''
     timeout: 30
   mcp:
     provider: __AUX_PROVIDER__
     model: __AUX_MODEL__
-    base_url: __AUX_BASE_URL__
+    base_url: '__AUX_BASE_URL__'
     api_key: ''
     timeout: 30
   flush_memories:
     provider: __AUX_PROVIDER__
     model: __AUX_MODEL__
-    base_url: __AUX_BASE_URL__
+    base_url: '__AUX_BASE_URL__'
+    api_key: ''
+    timeout: 30
+  title_generation:
+    provider: __AUX_PROVIDER__
+    model: __AUX_MODEL__
+    base_url: '__AUX_BASE_URL__'
     api_key: ''
     timeout: 30
 

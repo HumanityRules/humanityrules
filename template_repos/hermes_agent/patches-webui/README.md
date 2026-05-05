@@ -110,3 +110,28 @@ how `_cfg.get('fallback_model')` and `_cfg.get('agent', {})` are used
 elsewhere in the same function (lines 1687 and 1851 in the pinned
 WebUI). This is a fixed upstream bug in disguise; revisit on version
 bump.
+
+### `06-bedrock-ttft-perf.patch`
+
+**Target:** `api/routes.py` (`_handle_chat_start`), `api/streaming.py`
+(`_run_agent_streaming` on_token path), `static/messages.js` (`send()` +
+`attachLiveStream()`).
+
+**Problem:** No way to tell whether Bedrock chat sluggishness is the
+model's TTFT or our own pre-Bedrock work. Upstream metering only reports
+TPS/HIGH/LOW once tokens are already flowing.
+
+**Fix:** Record monotonic timestamps at POST arrival, just before
+`converse_stream()`, and on first Bedrock delta (the agent-side stamps
+come from `patches/05-bedrock-ttft-perf.patch`). On the first streamed
+token, emit a one-shot `perf` SSE event carrying `our_stack_ms`,
+`bedrock_ttft_ms`, and `callback_to_sse_ms`. The browser stamps Enter and
+POST-return with `performance.now()` and prints both halves as
+`[doh-perf bedrock]` / `[doh-perf bedrock backend]` to the JS console.
+Gated on `provider == 'bedrock'`; other providers stay silent. Agent
+attributes are cleared after emission so cached agents (the session-reuse
+path in `SESSION_AGENT_CACHE`) can't replay stale numbers on a later turn
+that didn't actually hit Bedrock (tool-only loops).
+
+**Pair:** Requires `patches/05-bedrock-ttft-perf.patch` applied to the
+agent tree for the backend timestamps to exist.

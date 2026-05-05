@@ -12,6 +12,7 @@
 HERMES_HOME="/home/hermeswebui/.hermes"
 HERMES_AGENT_DIR="$HERMES_HOME/hermes-agent"
 VENV_DIR="/app/venv"
+HERMES_EFS_PERSIST=/mnt/hermes-persistent
 
 SLACK_ENABLED=0
 if [ -n "$SLACK_BOT_TOKEN" ] || [ -n "$SLACK_APP_TOKEN" ]; then
@@ -45,6 +46,34 @@ for i in $(seq 1 60); do
     fi
     sleep 2
 done
+
+# Background sync: mirror ~/.hermes to EFS every 10s so chat history, memories,
+# and settings survive task replacement. Durability window is ~10s (plus one
+# final sync on SIGTERM). hermes-agent/ is excluded — regenerated from image
+# each boot, would waste ~700MB of NFS traffic. See entrypoint.sh for the
+# matching restore-on-boot logic.
+(
+    while true; do
+        _t0=$(date +%s%3N)
+        rsync -a --delete --exclude='hermes-agent/' \
+            "$HERMES_HOME/" "$HERMES_EFS_PERSIST/" 2>/dev/null
+        echo "[start:sync] mirror pass $(($(date +%s%3N) - _t0))ms"
+        sleep 10
+    done
+) &
+SYNC_PID=$!
+echo "[start] EFS mirror loop started (PID=$SYNC_PID, interval=10s)."
+
+# SIGTERM from ECS → final sync before exit, shrinking the durability window
+# to zero on graceful stops. Unconditional kill of the sync loop so it can't
+# race with the final rsync.
+trap '
+    kill $SYNC_PID 2>/dev/null
+    echo "[start] Final EFS sync on shutdown..."
+    _t0=$(date +%s%3N)
+    rsync -a --delete --exclude="hermes-agent/" "$HERMES_HOME/" "$HERMES_EFS_PERSIST/" 2>/dev/null
+    echo "[start] Final sync done in $(($(date +%s%3N) - _t0))ms."
+' EXIT
 
 source "$VENV_DIR/bin/activate"
 
