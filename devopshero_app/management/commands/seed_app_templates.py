@@ -649,7 +649,53 @@ HERMES_SLACK_TEMPLATE = {
 }
 
 
-TEMPLATES = [OPENCLAW_TEMPLATE, HERMES_PERSONAL_TEMPLATE, HERMES_SLACK_TEMPLATE]
+# -- Hermes nono Personal (prototype, web only) -----------------------------
+
+HERMES_NONO_PERSONAL_TEMPLATE = {
+    "name": "AI Assistant — Hermes nono (Personal)",
+    "slug": "hermes-nono-personal",
+    "description": (
+        "Personal AI assistant powered by Hermes Agent, packaged as the minimal "
+        "prototype for the nono sandbox path. Web UI only, with no Slack, no "
+        "sidecars, and no persistent EFS state."
+    ),
+    "icon": "⚡",
+    "category": "ai-assistant",
+    "cpu": 2048,
+    "memory": 4096,
+    "default_compute_mode": "ec2",
+    "datastore_config": None,
+    "efs_config": None,
+    "platform_capabilities": ["bedrock-runtime"],
+    "alb_target_container": "hermes",
+    "containers": [
+        {
+            "name": "hermes",
+            "image_source": "dockerfile",
+            "source_repo_path": "hermes_nono_agent",
+            "dockerfile_path": "Dockerfile",
+            "container_port": 8787,
+            "health_check_path": "/health",
+            "health_check_command": "",
+            "health_check_grace_period": 60,
+            "efs_mounts": [],
+            "configurable_variables": (
+                _HERMES_LLM_VARS + _HERMES_WEBUI_PASSWORD_VAR + _HERMES_BEDROCK_VARS
+            ),
+        },
+    ],
+    "default_tags": [{"key": "app-type", "value": "personal-assistant"}],
+    "prefill_name": "hermes-nono-{username}{index}",
+    "is_active": True,
+}
+
+
+TEMPLATES = [
+    OPENCLAW_TEMPLATE,
+    HERMES_PERSONAL_TEMPLATE,
+    HERMES_SLACK_TEMPLATE,
+    HERMES_NONO_PERSONAL_TEMPLATE,
+]
 
 
 class Command(BaseCommand):
