@@ -89,6 +89,7 @@ class BedrockPlatformCapabilityTests(SimpleTestCase):
         for template in [
             seed_app_templates.HERMES_PERSONAL_TEMPLATE,
             seed_app_templates.HERMES_SLACK_TEMPLATE,
+            seed_app_templates.HERMES_NONO_PERSONAL_TEMPLATE,
         ]:
             secret_names = {
                 var["name"]
@@ -123,7 +124,7 @@ class BedrockPlatformCapabilityTests(SimpleTestCase):
             mount_names = {m["name"]: m for m in template["efs_config"]["mounts"]}
             self.assertIn("home", mount_names)
             self.assertIn("workspace", mount_names)
-            self.assertEqual(mount_names["home"]["container_path"], "/home/hermeswebui/.hermes")
+            self.assertEqual(mount_names["home"]["container_path"], "/mnt/hermes-persistent")
             self.assertEqual(mount_names["workspace"]["container_path"], "/workspace")
             self.assertEqual(hermes_container["efs_mounts"], ["home", "workspace"])
             self.assertNotIn("user", hermes_container)
@@ -138,3 +139,26 @@ class BedrockPlatformCapabilityTests(SimpleTestCase):
                 self.assertEqual(hermes_container["environment"]["HERMES_WEBUI_HOST"], "127.0.0.1")
             else:
                 self.assertNotIn("HERMES_WEBUI_HOST", hermes_container["environment"])
+
+    def test_hermes_nono_template_starts_as_single_container_without_efs(self) -> None:
+        template = seed_app_templates.HERMES_NONO_PERSONAL_TEMPLATE
+
+        self.assertEqual(template["slug"], "hermes-nono-personal")
+        self.assertEqual(template["default_compute_mode"], "ec2")
+        self.assertEqual(template["platform_capabilities"], ["bedrock-runtime"])
+        self.assertIsNone(template["efs_config"])
+        self.assertEqual(template["alb_target_container"], "hermes")
+        self.assertEqual(len(template["containers"]), 1)
+
+        hermes = template["containers"][0]
+        self.assertEqual(hermes["name"], "hermes")
+        self.assertEqual(hermes["image_source"], "dockerfile")
+        self.assertEqual(hermes["source_repo_path"], "hermes_nono_agent")
+        self.assertEqual(hermes["dockerfile_path"], "Dockerfile")
+        self.assertEqual(hermes["efs_mounts"], [])
+        self.assertNotIn("depends_on", hermes)
+        self.assertNotIn("environment", hermes)
+
+        variable_names = {var["name"] for var in hermes["configurable_variables"]}
+        self.assertIn("HERMES_WEBUI_PASSWORD", variable_names)
+        self.assertIn("AWS_BEDROCK_REGION", variable_names)
