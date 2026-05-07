@@ -197,6 +197,9 @@ group_sessions_per_user: true
 streaming:
   enabled: false
 
+web:
+  backend: tavily
+
 platform_toolsets:
   cli:
   - browser
