@@ -7,8 +7,7 @@ AWS_STS_PORT=9901
 AWS_BEDROCK_PORT=9902
 AWS_BEDROCK_RUNTIME_PORT=9903
 AWS_HAPROXY_CONFIG=/tmp/hermes-nono-aws-haproxy.cfg
-AWS_SIGNER_HOME=/tmp/hermes-nono-sigv4-home
-AWS_CHILD_CONFIG_DIR="${HOME}/.aws"
+CHILD_AWS_CONFIG_DIR="${HOME}/.aws/hermes-nono"
 HERMES_DIR="/home/hermeswebui/.hermes"
 NONO_PROFILE=/etc/nono/profiles/hermes-nono.json
 SIGV4_PID=""
@@ -67,17 +66,7 @@ wait_for_port() {
 }
 
 start_sigv4_proxy() {
-    mkdir -p "$AWS_SIGNER_HOME"
-    touch "$AWS_SIGNER_HOME/config" "$AWS_SIGNER_HOME/credentials"
-
-    env \
-        -u AWS_ACCESS_KEY_ID \
-        -u AWS_SECRET_ACCESS_KEY \
-        -u AWS_SESSION_TOKEN \
-        HOME="$AWS_SIGNER_HOME" \
-        AWS_CONFIG_FILE="$AWS_SIGNER_HOME/config" \
-        AWS_SHARED_CREDENTIALS_FILE="$AWS_SIGNER_HOME/credentials" \
-        /usr/local/bin/aws-sigv4-proxy --port "127.0.0.1:${AWS_SIGV4_PROXY_PORT}" &
+    /usr/local/bin/aws-sigv4-proxy --port "127.0.0.1:${AWS_SIGV4_PROXY_PORT}" &
     SIGV4_PID=$!
     wait_for_port "$AWS_SIGV4_PROXY_PORT" "$SIGV4_PID" "aws-sigv4-proxy"
 }
@@ -98,8 +87,8 @@ start_aws_broker() {
 }
 
 write_child_aws_config() {
-    mkdir -p "$AWS_CHILD_CONFIG_DIR"
-    cat > "${AWS_CHILD_CONFIG_DIR}/config" <<EOF
+    mkdir -p "$CHILD_AWS_CONFIG_DIR"
+    cat > "${CHILD_AWS_CONFIG_DIR}/config" <<EOF
 [default]
 region = ${AWS_BROKER_REGION}
 services = hermes-nono-endpoints
@@ -115,7 +104,7 @@ bedrock_runtime =
   endpoint_url = http://127.0.0.1:${AWS_BEDROCK_RUNTIME_PORT}
 EOF
 
-    cat > "${AWS_CHILD_CONFIG_DIR}/credentials" <<'EOF'
+    cat > "${CHILD_AWS_CONFIG_DIR}/credentials" <<'EOF'
 [default]
 aws_access_key_id = dummy
 aws_secret_access_key = dummy
@@ -187,8 +176,6 @@ seed_hermes_files() {
 
 run_in_nono() {
     nono run --profile "$NONO_PROFILE" -- env \
-        -u AWS_CONFIG_FILE \
-        -u AWS_SHARED_CREDENTIALS_FILE \
         -u AWS_PROFILE \
         -u AWS_ACCESS_KEY_ID \
         -u AWS_SECRET_ACCESS_KEY \
@@ -197,6 +184,8 @@ run_in_nono() {
         -u AWS_CONTAINER_CREDENTIALS_RELATIVE_URI \
         -u AWS_CONTAINER_AUTHORIZATION_TOKEN \
         -u AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE \
+        AWS_CONFIG_FILE="${CHILD_AWS_CONFIG_DIR}/config" \
+        AWS_SHARED_CREDENTIALS_FILE="${CHILD_AWS_CONFIG_DIR}/credentials" \
         ANTHROPIC_BEDROCK_BASE_URL="http://127.0.0.1:${AWS_BEDROCK_RUNTIME_PORT}" \
         AWS_EC2_METADATA_DISABLED=true \
         NO_PROXY=127.0.0.1,localhost \

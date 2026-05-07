@@ -11,7 +11,8 @@
     "allow": [
       "$HOME/.aws",
       "$HOME/.hermes",
-      "/workspace"
+      "/workspace",
+      "/tmp"
     ],
     "read": [
       "/app",
