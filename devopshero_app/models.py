@@ -1660,6 +1660,27 @@ class PolicyProxyToken(models.Model):
         return f"PolicyProxyToken({self.environment.slug})"
 
 
+class IntegrationConfig(models.Model):
+    """DOH-global config for a third-party integration provider.
+
+    One row per provider. `config` holds the provider-specific payload as-is —
+    e.g. for Google, the contents of the `web` object from the OAuth client
+    JSON downloaded from Google Cloud Console.
+    """
+
+    class Provider(models.TextChoices):
+        GOOGLE = "google", "Google"
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid7, editable=False)
+    provider = models.CharField(max_length=50, choices=Provider.choices, unique=True)
+    config = models.JSONField()
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self) -> str:
+        return f"IntegrationConfig({self.provider})"
+
+
 # =============================================================================
 # Signals
 # =============================================================================

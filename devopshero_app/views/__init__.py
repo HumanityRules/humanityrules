@@ -33,6 +33,7 @@ from .integrations import (
     integrations_aws_accounts_add,
     integrations_git_integrations,
 )
+from .integrations_google import integrations_google_start
 from .partials import random_quote, switch_organization
 from .auth import auth_login, auth_callback, auth_logout, oidc_login, oidc_callback, dev_login
 from .onboarding import onboarding
@@ -139,6 +140,7 @@ __all__ = [
     "integrations_aws_accounts",
     "integrations_aws_accounts_add",
     "integrations_git_integrations",
+    "integrations_google_start",
     "random_quote",
     "switch_organization",
     "auth_login",
