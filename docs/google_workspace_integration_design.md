@@ -61,7 +61,7 @@ How a Hermes Personal Assistant user connects their Google account (Gmail, Calen
 
 - Looks up the stashed payload by `state` (recovers `env_slug`, `username`, `rd`).
 - Exchanges the code with Google server-to-server (DOH's client secret).
-- Assumes the customer's provisioning role and writes tokens into customer Secrets Manager at `devopshero/{env-slug}/integrations/google/{username}`. Same cross-account path already used for `devopshero/{env-slug}/policy-proxy-auth-config` and `shared-secrets`.
+- Assumes the customer's provisioning role and writes tokens into customer Secrets Manager at `devopshero/{env-slug}/users/{username}` — one secret per user, JSON body is `{provider: tokens, ...}`. Writing Google replaces only the `google` key; other providers already in the secret are preserved. Same cross-account path style as `devopshero/{env-slug}/policy-proxy-auth-config` and `shared-secrets`.
 - 302s back to `rd`. Hermes Connections page shows Connected.
 - Tokens transit DOH process memory for the ~100ms of token exchange. Not logged, not persisted on DOH. Documented in the audit story.
 
