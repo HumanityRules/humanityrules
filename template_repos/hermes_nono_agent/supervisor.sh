@@ -7,9 +7,8 @@ AWS_STS_PORT=9901
 AWS_BEDROCK_PORT=9902
 AWS_BEDROCK_RUNTIME_PORT=9903
 AWS_HAPROXY_CONFIG=/tmp/hermes-nono-aws-haproxy.cfg
-CHILD_AWS_CONFIG_DIR="${HOME}/.aws/hermes-nono"
-HERMES_DIR="/home/hermeswebui/.hermes"
-NONO_PROFILE=/etc/nono/profiles/hermes-nono.json
+CHILD_HOME=/workspace
+NONO_PROFILE=/etc/nono/profiles/hermes-nono-profile.json
 SIGV4_PID=""
 HAPROXY_PID=""
 
@@ -73,7 +72,7 @@ start_sigv4_proxy() {
 
 start_haproxy() {
     sed "s|__AWS_BROKER_REGION__|${AWS_BROKER_REGION}|g" \
-        /etc/haproxy/aws-endpoints.cfg.template > "$AWS_HAPROXY_CONFIG"
+        /etc/haproxy/haproxy.cfg.template > "$AWS_HAPROXY_CONFIG"
     /usr/sbin/haproxy -f "$AWS_HAPROXY_CONFIG" -db &
     HAPROXY_PID=$!
     wait_for_port "$AWS_STS_PORT" "$HAPROXY_PID" "haproxy"
@@ -87,8 +86,8 @@ start_aws_broker() {
 }
 
 write_child_aws_config() {
-    mkdir -p "$CHILD_AWS_CONFIG_DIR"
-    cat > "${CHILD_AWS_CONFIG_DIR}/config" <<EOF
+    mkdir -p "${CHILD_HOME}/.aws"
+    cat > "${CHILD_HOME}/.aws/config" <<EOF
 [default]
 region = ${AWS_BROKER_REGION}
 services = hermes-nono-endpoints
@@ -104,7 +103,7 @@ bedrock_runtime =
   endpoint_url = http://127.0.0.1:${AWS_BEDROCK_RUNTIME_PORT}
 EOF
 
-    cat > "${CHILD_AWS_CONFIG_DIR}/credentials" <<'EOF'
+    cat > "${CHILD_HOME}/.aws/credentials" <<'EOF'
 [default]
 aws_access_key_id = dummy
 aws_secret_access_key = dummy
@@ -143,7 +142,6 @@ render_hermes_config() {
     providers_block_file=$(mktemp)
     write_providers_block "$providers_block_file"
 
-    mkdir -p "$HERMES_DIR" /workspace
     sed \
         -e "s|__CONFIG_PROVIDER__|${DOH_LLM_PROVIDER}|g" \
         -e "s|__MODEL__|${DOH_LLM_MODEL}|g" \
@@ -153,24 +151,15 @@ render_hermes_config() {
         -e "s|__AUX_BASE_URL__|${doh_aux_base_url}|g" \
         -e "/__PROVIDERS_BLOCK__/r ${providers_block_file}" \
         -e "/__PROVIDERS_BLOCK__/d" \
-        /opt/hermes-defaults/config.yaml.template > "$HERMES_DIR/config.yaml"
+        /opt/hermes-defaults/config.yaml.template > "$HERMES_HOME/config.yaml"
     rm -f "$providers_block_file"
 
     if [ "$DOH_LLM_PROVIDER" = "bedrock" ]; then
-        cat >> "$HERMES_DIR/config.yaml" <<EOF
+        cat >> "$HERMES_HOME/config.yaml" <<EOF
 
 bedrock:
   region: ${AWS_BROKER_REGION}
 EOF
-    fi
-}
-
-seed_hermes_files() {
-    rm -rf "$HERMES_DIR/hermes-agent"
-    cp -r /opt/hermes-defaults/hermes-agent "$HERMES_DIR/hermes-agent"
-
-    if [ ! -f "$HERMES_DIR/SOUL.md" ]; then
-        cp /opt/hermes-defaults/SOUL.md "$HERMES_DIR/SOUL.md"
     fi
 }
 
@@ -184,10 +173,10 @@ run_in_nono() {
         -u AWS_CONTAINER_CREDENTIALS_RELATIVE_URI \
         -u AWS_CONTAINER_AUTHORIZATION_TOKEN \
         -u AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE \
-        AWS_CONFIG_FILE="${CHILD_AWS_CONFIG_DIR}/config" \
-        AWS_SHARED_CREDENTIALS_FILE="${CHILD_AWS_CONFIG_DIR}/credentials" \
+        -u PYTHONDONTWRITEBYTECODE \
         ANTHROPIC_BEDROCK_BASE_URL="http://127.0.0.1:${AWS_BEDROCK_RUNTIME_PORT}" \
         AWS_EC2_METADATA_DISABLED=true \
+        HOME="$CHILD_HOME" \
         NO_PROXY=127.0.0.1,localhost \
         "$@"
 }
@@ -196,7 +185,6 @@ main() {
     require_llm_config
     configure_aws_region
     render_hermes_config
-    seed_hermes_files
     start_aws_broker
     write_child_aws_config
 

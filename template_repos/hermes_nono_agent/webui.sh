@@ -1,16 +1,17 @@
 #!/bin/bash
 set -euo pipefail
 
-HERMES_HOME="/home/hermeswebui/.hermes"
-HERMES_AGENT_DIR="$HERMES_HOME/hermes-agent"
 VENV_DIR="/app/venv"
 WEBUI_PORT=8787
 WEBUI_PID=""
 
+: "$HERMES_HOME"
+: "$HERMES_WEBUI_AGENT_DIR"
+
 sync_skills() {
-    HERMES_HOME="$HERMES_HOME" python3 -c "
+    python3 -c "
 import sys
-sys.path.insert(0, '$HERMES_AGENT_DIR')
+sys.path.insert(0, '$HERMES_WEBUI_AGENT_DIR')
 from tools.skills_sync import sync_skills
 r = sync_skills(quiet=True)
 print(f'[webui:skills] copied={len(r[\"copied\"])} updated={len(r[\"updated\"])} skipped={r[\"skipped\"]} user_modified={len(r[\"user_modified\"])} total_bundled={r[\"total_bundled\"]}')
