@@ -27,7 +27,7 @@ agent:
     technical: You are a technical expert. Provide detailed, accurate technical information.
 
 terminal:
-  backend: __TERMINAL_BACKEND__
+  backend: local
   modal_mode: auto
   timeout: 180
   env_passthrough: []
