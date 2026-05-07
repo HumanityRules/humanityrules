@@ -11,12 +11,12 @@ frontend aws_sts
 
 frontend aws_bedrock
   bind 127.0.0.1:9902
-  http-request set-header Host bedrock.__AWS_REGION__.amazonaws.com
+  http-request set-header Host bedrock.__AWS_BROKER_REGION__.amazonaws.com
   default_backend aws_sigv4_proxy
 
 frontend aws_bedrock_runtime
   bind 127.0.0.1:9903
-  http-request set-header Host bedrock-runtime.__AWS_REGION__.amazonaws.com
+  http-request set-header Host bedrock-runtime.__AWS_BROKER_REGION__.amazonaws.com
   default_backend aws_sigv4_proxy
 
 backend aws_sigv4_proxy

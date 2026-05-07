@@ -293,6 +293,20 @@ _HERMES_BEDROCK_VARS = [
     },
 ]
 
+_HERMES_AWS_DEFAULT_REGION_VAR = [
+    {
+        "name": "AWS_DEFAULT_REGION",
+        "group": "AWS",
+        "category": "config",
+        "description": "AWS region used by AWS SDKs and CLI (e.g. us-east-1)",
+        "required": False,
+        "auto_generate": False,
+        "default_value": "us-east-1",
+        "value": "us-east-1",
+        "user_editable": False,
+    },
+]
+
 _HERMES_SLACK_VARS = [
     {
         "name": "SLACK_APP_TOKEN",
@@ -680,7 +694,7 @@ HERMES_NONO_PERSONAL_TEMPLATE = {
             "health_check_grace_period": 60,
             "efs_mounts": [],
             "configurable_variables": (
-                _HERMES_LLM_VARS + _HERMES_WEBUI_PASSWORD_VAR + _HERMES_BEDROCK_VARS
+                _HERMES_LLM_VARS + _HERMES_WEBUI_PASSWORD_VAR + _HERMES_AWS_DEFAULT_REGION_VAR
             ),
         },
     ],

@@ -1,7 +1,7 @@
 #!/bin/bash
 set -euo pipefail
 
-AWS_BROKER_REGION="${AWS_BEDROCK_REGION:-${AWS_DEFAULT_REGION:-us-east-1}}"
+AWS_BROKER_REGION=""
 AWS_SIGV4_PROXY_PORT=9911
 AWS_STS_PORT=9901
 AWS_BEDROCK_PORT=9902
@@ -9,8 +9,6 @@ AWS_BEDROCK_RUNTIME_PORT=9903
 AWS_HAPROXY_CONFIG=/tmp/hermes-nono-aws-haproxy.cfg
 AWS_SIGNER_HOME=/tmp/hermes-nono-sigv4-home
 AWS_CHILD_CONFIG_DIR="${HOME}/.aws"
-AWS_CHILD_CONFIG_FILE="${AWS_CHILD_CONFIG_DIR}/config"
-AWS_CHILD_CREDENTIALS_FILE="${AWS_CHILD_CONFIG_DIR}/credentials"
 HERMES_DIR="/home/hermeswebui/.hermes"
 NONO_PROFILE=/etc/nono/profiles/hermes-nono.json
 SIGV4_PID=""
@@ -39,27 +37,12 @@ require_llm_config() {
     fi
 }
 
-configure_bedrock() {
-    if [ "$DOH_LLM_PROVIDER" != "bedrock" ]; then
-        return
+configure_aws_region() {
+    if [ -z "${AWS_DEFAULT_REGION:-}" ]; then
+        die "AWS_DEFAULT_REGION must be set"
     fi
 
-    if [ -z "${AWS_BEDROCK_REGION:-}" ]; then
-        die "DOH_LLM_PROVIDER=bedrock requires AWS_BEDROCK_REGION"
-    fi
-
-    AWS_BROKER_REGION="$AWS_BEDROCK_REGION"
-    export AWS_REGION="$AWS_BROKER_REGION"
-    export AWS_DEFAULT_REGION="$AWS_BROKER_REGION"
-    DOH_LLM_BASE_URL="https://bedrock-runtime.${AWS_BROKER_REGION}.amazonaws.com"
-}
-
-apply_defaults() {
-    : "${DOH_LLM_BASE_URL:=}"
-    : "${DOH_AUX_PROVIDER:=$DOH_LLM_PROVIDER}"
-    : "${DOH_AUX_MODEL:=$DOH_LLM_MODEL}"
-    : "${DOH_AUX_BASE_URL:=}"
-    : "${TERMINAL_BACKEND:=local}"
+    AWS_BROKER_REGION="$AWS_DEFAULT_REGION"
 }
 
 wait_for_port() {
@@ -100,7 +83,7 @@ start_sigv4_proxy() {
 }
 
 start_haproxy() {
-    sed "s|__AWS_REGION__|${AWS_BROKER_REGION}|g" \
+    sed "s|__AWS_BROKER_REGION__|${AWS_BROKER_REGION}|g" \
         /etc/haproxy/aws-endpoints.cfg.template > "$AWS_HAPROXY_CONFIG"
     /usr/sbin/haproxy -f "$AWS_HAPROXY_CONFIG" -db &
     HAPROXY_PID=$!
@@ -116,7 +99,7 @@ start_aws_broker() {
 
 write_child_aws_config() {
     mkdir -p "$AWS_CHILD_CONFIG_DIR"
-    cat > "$AWS_CHILD_CONFIG_FILE" <<EOF
+    cat > "${AWS_CHILD_CONFIG_DIR}/config" <<EOF
 [default]
 region = ${AWS_BROKER_REGION}
 services = hermes-nono-endpoints
@@ -132,7 +115,7 @@ bedrock_runtime =
   endpoint_url = http://127.0.0.1:${AWS_BEDROCK_RUNTIME_PORT}
 EOF
 
-    cat > "$AWS_CHILD_CREDENTIALS_FILE" <<'EOF'
+    cat > "${AWS_CHILD_CONFIG_DIR}/credentials" <<'EOF'
 [default]
 aws_access_key_id = dummy
 aws_secret_access_key = dummy
@@ -158,7 +141,16 @@ EOF
 }
 
 render_hermes_config() {
+    local doh_llm_base_url="${DOH_LLM_BASE_URL:-}"
+    local doh_aux_provider="${DOH_AUX_PROVIDER:-$DOH_LLM_PROVIDER}"
+    local doh_aux_model="${DOH_AUX_MODEL:-$DOH_LLM_MODEL}"
+    local doh_aux_base_url="${DOH_AUX_BASE_URL:-}"
     local providers_block_file
+
+    if [ "$DOH_LLM_PROVIDER" = "bedrock" ]; then
+        doh_llm_base_url="https://bedrock-runtime.${AWS_BROKER_REGION}.amazonaws.com"
+    fi
+
     providers_block_file=$(mktemp)
     write_providers_block "$providers_block_file"
 
@@ -166,11 +158,10 @@ render_hermes_config() {
     sed \
         -e "s|__CONFIG_PROVIDER__|${DOH_LLM_PROVIDER}|g" \
         -e "s|__MODEL__|${DOH_LLM_MODEL}|g" \
-        -e "s|__BASE_URL__|${DOH_LLM_BASE_URL}|g" \
-        -e "s|__AUX_PROVIDER__|${DOH_AUX_PROVIDER}|g" \
-        -e "s|__AUX_MODEL__|${DOH_AUX_MODEL}|g" \
-        -e "s|__AUX_BASE_URL__|${DOH_AUX_BASE_URL}|g" \
-        -e "s|__TERMINAL_BACKEND__|${TERMINAL_BACKEND}|g" \
+        -e "s|__BASE_URL__|${doh_llm_base_url}|g" \
+        -e "s|__AUX_PROVIDER__|${doh_aux_provider}|g" \
+        -e "s|__AUX_MODEL__|${doh_aux_model}|g" \
+        -e "s|__AUX_BASE_URL__|${doh_aux_base_url}|g" \
         -e "/__PROVIDERS_BLOCK__/r ${providers_block_file}" \
         -e "/__PROVIDERS_BLOCK__/d" \
         /opt/hermes-defaults/config.yaml.template > "$HERMES_DIR/config.yaml"
@@ -199,27 +190,22 @@ run_in_nono() {
         -u AWS_CONFIG_FILE \
         -u AWS_SHARED_CREDENTIALS_FILE \
         -u AWS_PROFILE \
+        -u AWS_ACCESS_KEY_ID \
+        -u AWS_SECRET_ACCESS_KEY \
         -u AWS_SESSION_TOKEN \
         -u AWS_CONTAINER_CREDENTIALS_FULL_URI \
         -u AWS_CONTAINER_CREDENTIALS_RELATIVE_URI \
         -u AWS_CONTAINER_AUTHORIZATION_TOKEN \
         -u AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE \
-        AWS_ACCESS_KEY_ID=dummy \
-        AWS_SECRET_ACCESS_KEY=dummy \
-        AWS_DEFAULT_REGION="$AWS_BROKER_REGION" \
-        AWS_REGION="$AWS_BROKER_REGION" \
-        AWS_BEDROCK_REGION="$AWS_BROKER_REGION" \
         ANTHROPIC_BEDROCK_BASE_URL="http://127.0.0.1:${AWS_BEDROCK_RUNTIME_PORT}" \
         AWS_EC2_METADATA_DISABLED=true \
         NO_PROXY=127.0.0.1,localhost \
-        no_proxy=127.0.0.1,localhost \
         "$@"
 }
 
 main() {
     require_llm_config
-    configure_bedrock
-    apply_defaults
+    configure_aws_region
     render_hermes_config
     seed_hermes_files
     start_aws_broker

@@ -161,4 +161,6 @@ class BedrockPlatformCapabilityTests(SimpleTestCase):
 
         variable_names = {var["name"] for var in hermes["configurable_variables"]}
         self.assertIn("HERMES_WEBUI_PASSWORD", variable_names)
-        self.assertIn("AWS_BEDROCK_REGION", variable_names)
+        self.assertIn("AWS_DEFAULT_REGION", variable_names)
+        self.assertNotIn("AWS_REGION", variable_names)
+        self.assertNotIn("AWS_BEDROCK_REGION", variable_names)
