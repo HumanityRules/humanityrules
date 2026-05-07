@@ -44,6 +44,9 @@
   },
   "network": {
     "network_profile": "developer",
+    "allow_domain": [
+      "api.tavily.com"
+    ],
     "listen_port": [
       8787
     ],

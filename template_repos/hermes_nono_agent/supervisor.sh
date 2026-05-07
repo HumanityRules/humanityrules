@@ -164,7 +164,17 @@ EOF
 }
 
 run_in_nono() {
-    nono run --profile "$NONO_PROFILE" -- /usr/bin/env \
+    local nono_args=(run --profile "$NONO_PROFILE")
+
+    if [ -n "${TAVILY_API_KEY:-}" ]; then
+        # Tavily uses JSON payload, which nono doesn't support in its credential injection mechanism. 
+        # It is acceptable to pass it to Hermes because Hermes strips this particular env var in all 
+        # its tool calls (except web_search). We use "--env-credential-map" instead of allow_vars 
+        # in the nono profile because this makes explicit that this is a credential.
+        nono_args+=(--env-credential-map env://TAVILY_API_KEY TAVILY_API_KEY)
+    fi
+
+    nono "${nono_args[@]}" -- /usr/bin/env \
         ANTHROPIC_BEDROCK_BASE_URL="http://127.0.0.1:${AWS_BEDROCK_RUNTIME_PORT}" \
         AWS_DEFAULT_REGION="$AWS_BROKER_REGION" \
         AWS_EC2_METADATA_DISABLED=true \

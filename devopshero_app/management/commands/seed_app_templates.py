@@ -232,6 +232,20 @@ _HERMES_WEBUI_PASSWORD_VAR = [
     },
 ]
 
+_HERMES_TAVILY_VAR = [
+    {
+        "name": "TAVILY_API_KEY",
+        "group": "API Keys",
+        "category": "secret",
+        "description": "Tavily API key for web search capability",
+        "required": False,
+        "auto_generate": False,
+        "default_value": None,
+        "value": "",
+        "user_editable": False,
+    },
+]
+
 _HERMES_CREDENTIAL_VARS = [
     {
         "name": "ANTHROPIC_API_KEY",
@@ -266,17 +280,7 @@ _HERMES_CREDENTIAL_VARS = [
         "value": "",
         "user_editable": False,
     },
-    {
-        "name": "TAVILY_API_KEY",
-        "group": "API Keys",
-        "category": "secret",
-        "description": "Tavily API key for web search capability",
-        "required": False,
-        "auto_generate": False,
-        "default_value": None,
-        "value": "",
-        "user_editable": False,
-    },
+    *_HERMES_TAVILY_VAR,
 ]
 
 _HERMES_BEDROCK_VARS = [
@@ -663,15 +667,14 @@ HERMES_SLACK_TEMPLATE = {
 }
 
 
-# -- Hermes nono Personal (prototype, web only) -----------------------------
+# -- Hermes nono Personal (web only) ----------------------------------------
 
 HERMES_NONO_PERSONAL_TEMPLATE = {
     "name": "AI Assistant — Hermes nono (Personal)",
     "slug": "hermes-nono-personal",
     "description": (
-        "Personal AI assistant powered by Hermes Agent, packaged as the minimal "
-        "prototype for the nono sandbox path. Web UI only, with no Slack, no "
-        "sidecars, and no persistent EFS state."
+        "Personal AI assistant powered by Hermes Agent, packaged for the nono "
+        "sandbox path. Fronted by the policy proxy for SSO + ABAC."
     ),
     "icon": "⚡",
     "category": "ai-assistant",
@@ -681,7 +684,9 @@ HERMES_NONO_PERSONAL_TEMPLATE = {
     "datastore_config": None,
     "efs_config": None,
     "platform_capabilities": ["bedrock-runtime"],
-    "alb_target_container": "hermes",
+    # ALB targets the policy proxy; the proxy forwards to the hermes container
+    # over loopback after SSO + ABAC gates pass.
+    "alb_target_container": "policy-proxy",
     "containers": [
         {
             "name": "hermes",
@@ -693,10 +698,16 @@ HERMES_NONO_PERSONAL_TEMPLATE = {
             "health_check_command": "",
             "health_check_grace_period": 60,
             "efs_mounts": [],
+            # Policy proxy fronts the task; pin the WebUI to loopback so only
+            # the proxy (sharing the task network namespace) can reach it.
+            "environment": {
+                "HERMES_WEBUI_HOST": "127.0.0.1",
+            },
             "configurable_variables": (
-                _HERMES_LLM_VARS + _HERMES_WEBUI_PASSWORD_VAR + _HERMES_AWS_DEFAULT_REGION_VAR
+                _HERMES_LLM_VARS + _HERMES_AWS_DEFAULT_REGION_VAR + _HERMES_TAVILY_VAR
             ),
         },
+        {**_HERMES_POLICY_PROXY_CONTAINER},
     ],
     "default_tags": [{"key": "app-type", "value": "personal-assistant"}],
     "prefill_name": "hermes-nono-{username}{index}",

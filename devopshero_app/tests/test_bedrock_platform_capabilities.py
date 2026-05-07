@@ -140,27 +140,31 @@ class BedrockPlatformCapabilityTests(SimpleTestCase):
             else:
                 self.assertNotIn("HERMES_WEBUI_HOST", hermes_container["environment"])
 
-    def test_hermes_nono_template_starts_as_single_container_without_efs(self) -> None:
+    def test_hermes_nono_template_is_policy_proxy_fronted_without_efs(self) -> None:
         template = seed_app_templates.HERMES_NONO_PERSONAL_TEMPLATE
 
         self.assertEqual(template["slug"], "hermes-nono-personal")
         self.assertEqual(template["default_compute_mode"], "ec2")
         self.assertEqual(template["platform_capabilities"], ["bedrock-runtime"])
         self.assertIsNone(template["efs_config"])
-        self.assertEqual(template["alb_target_container"], "hermes")
-        self.assertEqual(len(template["containers"]), 1)
+        self.assertEqual(template["alb_target_container"], "policy-proxy")
+        self.assertEqual(len(template["containers"]), 2)
 
-        hermes = template["containers"][0]
-        self.assertEqual(hermes["name"], "hermes")
+        hermes = next(c for c in template["containers"] if c["name"] == "hermes")
         self.assertEqual(hermes["image_source"], "dockerfile")
         self.assertEqual(hermes["source_repo_path"], "hermes_nono_agent")
         self.assertEqual(hermes["dockerfile_path"], "Dockerfile")
         self.assertEqual(hermes["efs_mounts"], [])
         self.assertNotIn("depends_on", hermes)
-        self.assertNotIn("environment", hermes)
+        self.assertEqual(hermes["environment"]["HERMES_WEBUI_HOST"], "127.0.0.1")
 
         variable_names = {var["name"] for var in hermes["configurable_variables"]}
-        self.assertIn("HERMES_WEBUI_PASSWORD", variable_names)
+        self.assertNotIn("HERMES_WEBUI_PASSWORD", variable_names)
         self.assertIn("AWS_DEFAULT_REGION", variable_names)
+        self.assertIn("TAVILY_API_KEY", variable_names)
         self.assertNotIn("AWS_REGION", variable_names)
         self.assertNotIn("AWS_BEDROCK_REGION", variable_names)
+
+        proxy = next(c for c in template["containers"] if c["name"] == "policy-proxy")
+        self.assertEqual(proxy["image_source"], "policy_proxy")
+        self.assertEqual(proxy["upstream_container"], "hermes")
