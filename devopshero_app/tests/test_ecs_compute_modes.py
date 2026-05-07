@@ -361,3 +361,16 @@ class EcsComputeModeTests(SimpleTestCase):
         })
         template.resource_count_is("AWS::AutoScaling::LaunchConfiguration", 0)
         template.resource_count_is("AWS::EC2::LaunchTemplate", 1)
+
+        launch_templates = template.find_resources("AWS::EC2::LaunchTemplate")
+        launch_template = next(iter(launch_templates.values()))
+        user_data_parts = launch_template["Properties"]["LaunchTemplateData"]["UserData"]["Fn::Base64"]["Fn::Join"][1]
+        user_data = "".join(part if isinstance(part, str) else "<token>" for part in user_data_parts)
+        self.assertIn("dnf install -y kernel6.18", user_data)
+        self.assertIn("ECS_CLUSTER=devopshero-staging-cluster", user_data)
+        self.assertIn("touch \"$KERNEL_MARKER\"\n  reboot", user_data)
+        self.assertNotIn("systemctl stop ecs", user_data)
+        self.assertNotIn("systemctl disable ecs", user_data)
+        self.assertNotIn("devopshero-start-ecs-after-kernel.service", user_data)
+        self.assertLess(user_data.index("ECS_CLUSTER=devopshero-staging-cluster"), user_data.index("dnf install -y kernel6.18"))
+        self.assertLess(user_data.index("dnf install -y kernel6.18"), user_data.index("reboot"))

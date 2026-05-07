@@ -240,10 +240,12 @@ class EcsClusterStack(Stack):
 
         prefix = f"devopshero-{env_slug}"
 
+        ecs_cluster_name = f"{prefix}-cluster"
+
         # ECS Cluster
         self.cluster = ecs.Cluster(
             self, "EcsCluster",
-            cluster_name=f"{prefix}-cluster",
+            cluster_name=ecs_cluster_name,
             vpc=vpc,
             container_insights_v2=ecs.ContainerInsights.ENHANCED,
         )
@@ -265,6 +267,23 @@ class EcsClusterStack(Stack):
             allow_all_outbound=True,
         )
         container_instance_user_data = ec2.UserData.for_linux()
+        container_instance_user_data.add_commands(
+            "set -euxo pipefail",
+            "KERNEL_MARKER=/var/lib/devopshero/kernel6.18-installed",
+            "mkdir -p /etc/ecs \"$(dirname \"$KERNEL_MARKER\")\"",
+            f"grep -qxF 'ECS_CLUSTER={ecs_cluster_name}' /etc/ecs/ecs.config 2>/dev/null || "
+            f"echo 'ECS_CLUSTER={ecs_cluster_name}' >> /etc/ecs/ecs.config",
+            "if ! uname -r | grep -q '^6\\.18'; then",
+            "  dnf install -y kernel6.18",
+            "  kernel_path=$(find /boot -maxdepth 1 -name 'vmlinuz-6.18*' -print | sort -V | tail -n1)",
+            "  test -n \"$kernel_path\"",
+            "  grubby --set-default \"$kernel_path\"",
+            "  touch \"$KERNEL_MARKER\"",
+            "  reboot",
+            "  exit 0",
+            "fi",
+            "touch \"$KERNEL_MARKER\"",
+        )
         self.container_instance_launch_template = ec2.LaunchTemplate(
             self, "ContainerInstanceLaunchTemplate",
             launch_template_name=f"{prefix}-ecs-container-instances",

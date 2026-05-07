@@ -1,0 +1,44 @@
+{
+  "extends": "default",
+  "meta": {
+    "name": "hermes-nono",
+    "description": "Hermes WebUI with local AWS broker access"
+  },
+  "workdir": {
+    "access": "readwrite"
+  },
+  "filesystem": {
+    "allow": [
+      "$HOME/.aws",
+      "$HOME/.hermes",
+      "/workspace"
+    ],
+    "read": [
+      "/app",
+      "/usr/local/aws-cli"
+    ],
+    "read_file": [
+      "/start.sh",
+      "/usr/local/bin/aws",
+      "/.within_container",
+      "/etc/passwd",
+      "/etc/group",
+      "/etc/nsswitch.conf"
+    ],
+    "bypass_protection": [
+      "$HOME/.aws"
+    ]
+  },
+  "network": {
+    "network_profile": "developer",
+    "listen_port": [
+      8787
+    ],
+    "open_port": [
+      8787,
+      9901,
+      9902,
+      9903
+    ]
+  }
+}
