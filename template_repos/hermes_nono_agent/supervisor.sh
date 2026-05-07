@@ -164,19 +164,12 @@ EOF
 }
 
 run_in_nono() {
-    nono run --profile "$NONO_PROFILE" -- env \
-        -u AWS_PROFILE \
-        -u AWS_ACCESS_KEY_ID \
-        -u AWS_SECRET_ACCESS_KEY \
-        -u AWS_SESSION_TOKEN \
-        -u AWS_CONTAINER_CREDENTIALS_FULL_URI \
-        -u AWS_CONTAINER_CREDENTIALS_RELATIVE_URI \
-        -u AWS_CONTAINER_AUTHORIZATION_TOKEN \
-        -u AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE \
-        -u PYTHONDONTWRITEBYTECODE \
+    nono run --profile "$NONO_PROFILE" -- /usr/bin/env \
         ANTHROPIC_BEDROCK_BASE_URL="http://127.0.0.1:${AWS_BEDROCK_RUNTIME_PORT}" \
+        AWS_DEFAULT_REGION="$AWS_BROKER_REGION" \
         AWS_EC2_METADATA_DISABLED=true \
         HOME="$CHILD_HOME" \
+        PATH=/usr/local/bin:/usr/local/sbin:/usr/bin:/usr/sbin:/bin:/sbin \
         NO_PROXY=127.0.0.1,localhost \
         "$@"
 }

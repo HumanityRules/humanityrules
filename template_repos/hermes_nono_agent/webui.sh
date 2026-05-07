@@ -1,7 +1,6 @@
 #!/bin/bash
 set -euo pipefail
 
-VENV_DIR="/app/venv"
 WEBUI_PORT=8787
 WEBUI_PID=""
 
@@ -9,7 +8,7 @@ WEBUI_PID=""
 : "$HERMES_WEBUI_AGENT_DIR"
 
 sync_skills() {
-    python3 -c "
+    /app/venv/bin/python -c "
 import sys
 sys.path.insert(0, '$HERMES_WEBUI_AGENT_DIR')
 from tools.skills_sync import sync_skills
@@ -20,7 +19,7 @@ print(f'[webui:skills] copied={len(r[\"copied\"])} updated={len(r[\"updated\"])}
 
 start_webui() {
     cd /app
-    python server.py 2>&1 &
+    /app/venv/bin/python server.py 2>&1 &
     WEBUI_PID=$!
 }
 
@@ -41,7 +40,6 @@ wait_for_webui() {
 }
 
 main() {
-    source "$VENV_DIR/bin/activate"
     sync_skills
     start_webui
     wait_for_webui
