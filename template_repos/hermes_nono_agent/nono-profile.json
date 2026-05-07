@@ -18,7 +18,7 @@
       "/usr/local/aws-cli"
     ],
     "read_file": [
-      "/start.sh",
+      "/webui.sh",
       "/usr/local/bin/aws",
       "/.within_container",
       "/etc/passwd",

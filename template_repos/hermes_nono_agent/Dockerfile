@@ -29,8 +29,8 @@ COPY SOUL.md /opt/hermes-defaults/SOUL.md
 COPY config.yaml.template /opt/hermes-defaults/config.yaml.template
 COPY haproxy-aws.cfg.template /etc/haproxy/aws-endpoints.cfg.template
 COPY nono-profile.json /etc/nono/profiles/hermes-nono.json
-COPY --chmod=755 entrypoint.sh /entrypoint.sh
-COPY --chmod=755 start.sh /start.sh
+COPY --chmod=755 supervisor.sh /supervisor.sh
+COPY --chmod=755 webui.sh /webui.sh
 
 RUN test -f /apptoo/requirements.txt \
     && cat >> /apptoo/requirements.txt <<'EOF'
@@ -71,5 +71,5 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
 
 USER hermeswebui
 
-ENTRYPOINT ["/entrypoint.sh"]
-CMD ["/start.sh"]
+ENTRYPOINT ["/supervisor.sh"]
+CMD ["/webui.sh"]
