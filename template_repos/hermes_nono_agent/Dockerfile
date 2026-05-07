@@ -27,8 +27,8 @@ RUN git clone --depth 1 --branch v2026.4.30 https://github.com/NousResearch/herm
 COPY --from=sigv4proxy /aws-sigv4-proxy /usr/local/bin/aws-sigv4-proxy
 COPY SOUL.md /opt/hermes-defaults/SOUL.md
 COPY config.yaml.template /opt/hermes-defaults/config.yaml.template
-COPY haproxy-aws.cfg.template /etc/haproxy/aws-endpoints.cfg.template
-COPY nono-profile.json /etc/nono/profiles/hermes-nono.json
+COPY haproxy.cfg.template /etc/haproxy/haproxy.cfg.template
+COPY hermes-nono-profile.json /etc/nono/profiles/hermes-nono-profile.json
 COPY --chmod=755 supervisor.sh /supervisor.sh
 COPY --chmod=755 webui.sh /webui.sh
 
@@ -38,38 +38,35 @@ mcp>=1.2.0,<2
 boto3>=1.35.0,<2
 EOF
 
-RUN mkdir -p /app /uv_cache /home/hermeswebui/.hermes \
-    && rsync -a --chown=hermeswebui:hermeswebui /apptoo/ /app/ \
-    && cp -r /opt/hermes-defaults/hermes-agent /home/hermeswebui/.hermes/hermes-agent \
-    && chown -R hermeswebui:hermeswebui /app /uv_cache /home/hermeswebui/.hermes
+ENV HERMES_HOME=/home/hermeswebui/.hermes
+ENV HERMES_WEBUI_AGENT_DIR=${HERMES_HOME}/hermes-agent
+ENV HERMES_WEBUI_STATE_DIR=${HERMES_HOME}/webui-mvp
+ENV HERMES_WEBUI_DEFAULT_WORKSPACE=/workspace
+ENV HERMES_WEBUI_SKIP_ONBOARDING=1
+
+RUN mkdir -p /app /uv_cache "$HERMES_HOME" /workspace \
+    && rsync -a /apptoo/ /app/ \
+    && cp -r /opt/hermes-defaults/hermes-agent "$HERMES_WEBUI_AGENT_DIR" \
+    && cp /opt/hermes-defaults/SOUL.md "$HERMES_HOME/SOUL.md" \
+    && chown -R hermeswebui:hermeswebui /app /uv_cache "$HERMES_HOME" /workspace
 
 USER hermeswebui
 
 RUN cd /app \
-    && UV_PROJECT_ENVIRONMENT=venv UV_CACHE_DIR=/uv_cache uv venv venv \
+    && export UV_CACHE_DIR=/uv_cache \
+    && uv venv /app/venv \
     && . /app/venv/bin/activate \
-    && UV_CACHE_DIR=/uv_cache uv pip install -r requirements.txt --trusted-host pypi.org --trusted-host files.pythonhosted.org \
-    && UV_CACHE_DIR=/uv_cache uv pip install -U pip setuptools --trusted-host pypi.org --trusted-host files.pythonhosted.org \
-    && UV_CACHE_DIR=/uv_cache uv pip install "/home/hermeswebui/.hermes/hermes-agent[all]" --trusted-host pypi.org --trusted-host files.pythonhosted.org \
-    && UV_CACHE_DIR=/uv_cache uv pip install "hindsight-client>=0.4.22" --trusted-host pypi.org --trusted-host files.pythonhosted.org \
+    && uv pip install -r requirements.txt \
+    && uv pip install -U pip setuptools \
+    && uv pip install "${HERMES_WEBUI_AGENT_DIR}[all]" \
+    && uv pip install "hindsight-client>=0.4.22" \
+    && python -m compileall -q -j 0 /app "$HERMES_WEBUI_AGENT_DIR" \
     && touch /app/venv/.deps_installed
-
-USER root
-
-ENV HERMES_WEBUI_STATE_DIR=/home/hermeswebui/.hermes/webui-mvp
-ENV HERMES_WEBUI_DEFAULT_WORKSPACE=/workspace
-ENV HERMES_WEBUI_SKIP_ONBOARDING=1
-ENV PYTHONDONTWRITEBYTECODE=1
-
-RUN mkdir -p /home/hermeswebui/.aws /home/hermeswebui/.hermes /workspace \
-    && chown -R hermeswebui:hermeswebui /home/hermeswebui/.aws /home/hermeswebui/.hermes /workspace /opt/hermes-defaults /app /uv_cache
 
 EXPOSE 8787
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
     CMD curl -f http://localhost:8787/health || exit 1
-
-USER hermeswebui
 
 ENTRYPOINT ["/supervisor.sh"]
 CMD ["/webui.sh"]

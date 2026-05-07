@@ -9,7 +9,6 @@
   },
   "filesystem": {
     "allow": [
-      "$HOME/.aws",
       "$HOME/.hermes",
       "/workspace",
       "/tmp"
@@ -25,9 +24,6 @@
       "/etc/passwd",
       "/etc/group",
       "/etc/nsswitch.conf"
-    ],
-    "bypass_protection": [
-      "$HOME/.aws"
     ]
   },
   "network": {
