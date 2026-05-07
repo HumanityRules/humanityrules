@@ -7,8 +7,9 @@ from urllib.parse import urlencode
 import httpx
 from django.conf import settings
 from django.contrib.auth import login, logout
+from django.http import HttpRequest, HttpResponseBadRequest
 from django.shortcuts import redirect
-from django.http import HttpResponseBadRequest
+from django.utils.http import url_has_allowed_host_and_scheme
 from workos import WorkOSClient
 
 from ..models import Organization, OrganizationMembership, User
@@ -29,6 +30,19 @@ def _get_workos_client():
 def _build_base_uri(request):
     scheme = "https" if request.is_secure() else "http"
     return f"{scheme}://{request.get_host()}"
+
+
+def _safe_next(request: HttpRequest, next_url: str) -> str | None:
+    """Return *next_url* if it is a safe same-host redirect target, else None."""
+    if not next_url:
+        return None
+    if url_has_allowed_host_and_scheme(
+        url=next_url,
+        allowed_hosts={request.get_host()},
+        require_https=request.is_secure(),
+    ):
+        return next_url
+    return None
 
 
 def _start_oidc_login(request, org):
@@ -78,14 +92,21 @@ def _exchange_oidc_code(org, code, redirect_uri):
 
 def oidc_login(request):
     """Start OIDC login for the given organization."""
+    next_url = _safe_next(request=request, next_url=request.GET.get("next", ""))
+
     if request.user.is_authenticated:
-        return redirect("/dashboard/")
+        return redirect(next_url or "/dashboard/")
 
     org_slug = request.GET.get("org", "")
     try:
         org = Organization.objects.get(slug=org_slug, auth_provider=Organization.AuthProvider.OIDC)
     except Organization.DoesNotExist:
         return HttpResponseBadRequest("Organization not found")
+
+    if next_url:
+        request.session["oidc_next"] = next_url
+    else:
+        request.session.pop("oidc_next", None)
 
     return _start_oidc_login(request, org)
 
@@ -196,9 +217,12 @@ def oidc_callback(request):
 
     logger.info("oidc login org=%s sub=%s email=%s", org.slug, userinfo["sub"], userinfo["email"])
 
-    # Clean up session state
+    # Clean up session state (but preserve oidc_next until after login() is called,
+    # since login() cycles the session).
     request.session.pop("oidc_state", None)
     request.session.pop("oidc_org_slug", None)
+    next_url = _safe_next(request=request, next_url=request.session.pop("oidc_next", ""))
+    post_login_redirect = next_url or "/dashboard/"
 
     # Canonical path: existing OIDC user, matched by stable sub.
     try:
@@ -208,7 +232,7 @@ def oidc_callback(request):
         user.last_name = userinfo["last_name"]
         user.save()
         login(request, user)
-        return redirect("/dashboard/")
+        return redirect(post_login_redirect)
     except User.DoesNotExist:
         pass
 
@@ -250,7 +274,7 @@ def oidc_callback(request):
             org.bootstrap_admin_email = ""
             org.save(update_fields=["bootstrap_admin_email"])
         login(request, existing)
-        return redirect("/dashboard/")
+        return redirect(post_login_redirect)
 
     # Brand-new user: create the row and either bootstrap the org (first admin)
     # or assign the default role.
@@ -279,7 +303,7 @@ def oidc_callback(request):
         )
         abac.assign_default_org_role(organization=org, user=user)
     login(request, user)
-    return redirect("/dashboard/")
+    return redirect(post_login_redirect)
 
 
 def auth_logout(request):

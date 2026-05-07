@@ -92,6 +92,7 @@ urlpatterns = [
     path("integrations/aws-accounts/", views.integrations_aws_accounts, name="integrations_aws_accounts"),
     path("integrations/aws-accounts/add/", views.integrations_aws_accounts_add, name="integrations_aws_accounts_add"),
     path("integrations/git-integrations/", views.integrations_git_integrations, name="integrations_git_integrations"),
+    path("integrations/google/start/", views.integrations_google_start, name="integrations_google_start"),
     path("random-quote/", views.random_quote, name="random_quote"),
     path("switch-organization/", views.switch_organization, name="switch_organization"),
 
