@@ -6,6 +6,7 @@ from devopshero_app.models import (
     AWSAccount,
     App,
     AppPermissions,
+    AppRemovalJob,
     AppTemplate,
     Conversation,
     Datastore,
@@ -19,6 +20,7 @@ from devopshero_app.models import (
     GroupAttribute,
     GroupMembership,
     IdentityAttribute,
+    IntegrationConfig,
     LLMUsageLog,
     Message,
     Organization,
@@ -26,6 +28,7 @@ from devopshero_app.models import (
     AwsResourceCache,
     AppPermissionRequest,
     Policy,
+    PolicyProxyToken,
     Repository,
     ResourceTag,
     User,
@@ -36,27 +39,44 @@ from devopshero_app.models import (
 
 @admin.register(User)
 class UserAdmin(BaseUserAdmin):
-    list_display = ["email", "username", "workos_user_id", "oidc_sub", "is_staff", "is_active"]
-    list_filter = ["is_staff", "is_active"]
+    list_display = ["email", "username", "workos_user_id", "oidc_sub", "current_organization", "is_staff", "is_active"]
+    list_filter = ["is_staff", "is_active", "current_organization"]
     search_fields = ["email", "username", "workos_user_id", "oidc_sub"]
     ordering = ["email"]
+    autocomplete_fields = ["current_organization"]
 
     fieldsets = BaseUserAdmin.fieldsets + (
         ("WorkOS", {"fields": ("workos_user_id",)}),
         ("OIDC", {"fields": ("oidc_sub",)}),
+        ("Current Organization", {"fields": ("current_organization",)}),
     )
     add_fieldsets = BaseUserAdmin.add_fieldsets + (
         ("WorkOS", {"fields": ("workos_user_id",)}),
         ("OIDC", {"fields": ("oidc_sub",)}),
+        ("Current Organization", {"fields": ("current_organization",)}),
     )
 
 
 @admin.register(Organization)
 class OrganizationAdmin(admin.ModelAdmin):
-    list_display = ["name", "slug", "created_at", "updated_at"]
-    search_fields = ["name", "slug"]
+    list_display = ["name", "slug", "auth_provider", "default_org_role", "bootstrap_admin_email", "created_at", "updated_at"]
+    list_filter = ["auth_provider"]
+    search_fields = ["name", "slug", "bootstrap_admin_email", "oidc_issuer_url", "oidc_client_id"]
     prepopulated_fields = {"slug": ("name",)}
     readonly_fields = ["id", "created_at", "updated_at"]
+
+    fieldsets = (
+        (None, {
+            "fields": ("name", "slug", "default_org_role", "bootstrap_admin_email"),
+        }),
+        ("Authentication", {
+            "fields": ("auth_provider", "oidc_issuer_url", "oidc_client_id", "oidc_client_secret"),
+        }),
+        ("Metadata", {
+            "fields": ("id", "created_at", "updated_at"),
+            "classes": ("collapse",),
+        }),
+    )
 
 
 @admin.register(OrganizationMembership)
@@ -111,6 +131,9 @@ class EnvironmentAdmin(admin.ModelAdmin):
             "fields": ("vpc_id", "cluster_arn"),
             "classes": ("collapse",)
         }),
+        ("Shared ALB", {
+            "fields": ("shared_alb_hosted_zone",),
+        }),
         ("Metadata", {
             "fields": ("created_at", "updated_at", "id"),
             "classes": ("collapse",)
@@ -129,9 +152,9 @@ class GitProviderIntegrationAdmin(admin.ModelAdmin):
 
 @admin.register(Repository)
 class RepositoryAdmin(admin.ModelAdmin):
-    list_display = ["full_name", "organization", "provider", "default_branch", "created_at"]
+    list_display = ["full_name", "organization", "provider", "external_id", "default_branch", "created_at"]
     list_filter = ["provider", "organization"]
-    search_fields = ["name", "full_name", "organization__name", "clone_url"]
+    search_fields = ["name", "full_name", "organization__name", "clone_url", "external_id"]
     readonly_fields = ["id", "created_at", "updated_at"]
     autocomplete_fields = ["organization", "integration"]
 
@@ -148,28 +171,28 @@ class WorkspaceAdmin(admin.ModelAdmin):
 
 @admin.register(AppTemplate)
 class AppTemplateAdmin(admin.ModelAdmin):
-    list_display = ["name", "slug", "category", "alb_target_container", "efs_config", "is_active", "updated_at"]
-    list_filter = ["is_active", "category"]
-    search_fields = ["name", "slug", "description"]
+    list_display = ["name", "slug", "category", "default_compute_mode", "alb_target_container", "efs_config", "prefill_name", "is_active", "updated_at"]
+    list_filter = ["is_active", "category", "default_compute_mode"]
+    search_fields = ["name", "slug", "description", "prefill_name"]
     prepopulated_fields = {"slug": ("name",)}
     readonly_fields = ["id", "created_at", "updated_at"]
 
 
 @admin.register(App)
 class AppAdmin(admin.ModelAdmin):
-    list_display = ["name", "slug", "organization", "workspace", "repository", "app_type", "build_strategy", "branch", "container_port", "updated_at"]
-    list_filter = ["app_type", "build_strategy", "organization"]
+    list_display = ["name", "slug", "organization", "workspace", "repository", "source_template", "app_type", "build_strategy", "branch", "container_port", "status", "updated_at"]
+    list_filter = ["status", "app_type", "build_strategy", "organization", "source_template"]
     search_fields = ["name", "slug", "workspace__name", "organization__name", "repository__full_name", "branch"]
     prepopulated_fields = {"slug": ("name",)}
     readonly_fields = ["id", "created_at", "updated_at"]
-    autocomplete_fields = ["organization", "workspace", "repository", "created_by"]
+    autocomplete_fields = ["organization", "workspace", "repository", "source_template", "created_by"]
 
 
 @admin.register(DeploymentBlueprint)
 class DeploymentBlueprintAdmin(admin.ModelAdmin):
-    list_display = ["app", "environment", "status", "cpu", "memory", "subdomain", "updated_at"]
-    list_filter = ["status"]
-    search_fields = ["app__name", "app__slug", "environment__name"]
+    list_display = ["app", "environment", "status", "branch", "cpu", "memory", "compute_mode", "subdomain", "updated_at"]
+    list_filter = ["status", "compute_mode"]
+    search_fields = ["app__name", "app__slug", "environment__name", "branch"]
     readonly_fields = ["id", "created_at", "updated_at"]
     autocomplete_fields = ["app", "environment", "datastore", "created_by"]
 
@@ -188,17 +211,20 @@ class DatastoreAdmin(admin.ModelAdmin):
 class ConversationAdmin(admin.ModelAdmin):
     list_display = [
         "title", "mode", "status", "user", "organization", "context_workspace",
-        "context_repository", "context_aws_account", "context_environment", "updated_at",
+        "context_repository", "context_aws_account", "context_environment",
+        "context_app", "context_deployment_blueprint", "updated_at",
     ]
     list_filter = ["mode", "status", "organization", "context_workspace"]
     search_fields = [
         "title", "user__email", "user__username", "organization__name", "context_workspace__name",
-        "context_repository__full_name", "context_aws_account__name", "context_environment__name", "session_id",
+        "context_repository__full_name", "context_aws_account__name", "context_environment__name",
+        "context_app__name", "session_id",
     ]
     readonly_fields = ["id", "created_at", "updated_at"]
     autocomplete_fields = [
         "user", "organization", "context_workspace", "context_repository", "context_aws_account",
-        "context_environment", "context_app_permission_request",
+        "context_environment", "context_app", "context_deployment_blueprint",
+        "context_app_permission_request",
     ]
     filter_horizontal = ["deployments"]
 
@@ -220,7 +246,7 @@ class MessageAdmin(admin.ModelAdmin):
 
 @admin.register(Deployment)
 class DeploymentAdmin(admin.ModelAdmin):
-    list_display = ["app", "environment", "git_ref", "status", "created_at", "completed_at", "service_url"]
+    list_display = ["app", "environment", "blueprint", "git_ref", "status", "created_at", "completed_at", "service_url"]
     list_filter = ["status", "environment", "app__workspace__organization"]
     search_fields = [
         "app__name",
@@ -232,7 +258,7 @@ class DeploymentAdmin(admin.ModelAdmin):
         "image_uri",
     ]
     readonly_fields = ["id", "created_at", "updated_at"]
-    autocomplete_fields = ["app", "environment", "created_by"]
+    autocomplete_fields = ["app", "environment", "blueprint", "created_by"]
 
 
 @admin.register(DeploymentLog)
@@ -300,9 +326,22 @@ class AppPermissionsAdmin(admin.ModelAdmin):
 class AppPermissionRequestAdmin(admin.ModelAdmin):
     list_display = ["id", "app", "environment", "status", "created_by", "created_at", "updated_at"]
     list_filter = ["status", "app__organization"]
-    search_fields = ["app__name", "environment__name", "created_by__email", "status_message"]
+    search_fields = ["app__name", "environment__name", "created_by__email", "description", "status_message"]
     readonly_fields = ["id", "statements", "created_at", "updated_at"]
     autocomplete_fields = ["app", "environment", "created_by"]
+
+    fieldsets = (
+        (None, {
+            "fields": ("app", "environment", "status", "status_message"),
+        }),
+        ("Request", {
+            "fields": ("description", "statements", "created_by"),
+        }),
+        ("Metadata", {
+            "fields": ("id", "created_at", "updated_at"),
+            "classes": ("collapse",),
+        }),
+    )
 
 
 @admin.register(AwsResourceCache)
@@ -378,3 +417,46 @@ class PolicyAdmin(admin.ModelAdmin):
     search_fields = ["name", "organization__name"]
     readonly_fields = ["id", "created_at", "updated_at"]
     autocomplete_fields = ["organization"]
+
+
+# =============================================================================
+# Async Jobs
+# =============================================================================
+
+
+@admin.register(AppRemovalJob)
+class AppRemovalJobAdmin(admin.ModelAdmin):
+    list_display = [
+        "app_slug_snapshot", "app_name_snapshot", "workspace_slug_snapshot",
+        "organization", "status", "teardown_first", "delete_secrets",
+        "delete_efs_data", "delete_policies", "created_at", "updated_at",
+    ]
+    list_filter = ["status", "teardown_first", "delete_secrets", "delete_efs_data", "delete_policies", "organization"]
+    search_fields = ["app_slug_snapshot", "app_name_snapshot", "workspace_slug_snapshot", "organization__name", "status_message"]
+    readonly_fields = [
+        "id", "organization", "app_id_snapshot", "app_slug_snapshot",
+        "app_name_snapshot", "workspace_slug_snapshot", "created_by",
+        "created_at", "updated_at",
+    ]
+    autocomplete_fields = []
+
+
+# =============================================================================
+# Infrastructure / Integrations
+# =============================================================================
+
+
+@admin.register(PolicyProxyToken)
+class PolicyProxyTokenAdmin(admin.ModelAdmin):
+    list_display = ["environment", "token_hash", "created_at"]
+    search_fields = ["environment__name", "environment__slug", "token_hash"]
+    readonly_fields = ["id", "token_hash", "created_at"]
+    autocomplete_fields = ["environment"]
+
+
+@admin.register(IntegrationConfig)
+class IntegrationConfigAdmin(admin.ModelAdmin):
+    list_display = ["provider", "created_at", "updated_at"]
+    list_filter = ["provider"]
+    search_fields = ["provider"]
+    readonly_fields = ["id", "created_at", "updated_at"]
