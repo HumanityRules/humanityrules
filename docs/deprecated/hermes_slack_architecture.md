@@ -2,12 +2,12 @@
 
 ## Current State (2026-04-15)
 
-We have two AppTemplate rows for Hermes, both built from the same Docker image (`template_repos/hermes_agent/`):
+We have two AppTemplate rows for Hermes, both built from the same Docker image (`template_repos/hermes_docker_agent/`):
 
 | Template | Slug | Purpose |
 |---|---|---|
-| Hermes (Personal) | `hermes-personal` | One per user. Web UI only. No Slack tokens. |
-| Hermes (Slack) | `hermes-slack` | One per org. Slack + web UI. Shared by all workspace users. |
+| Hermes Docker (Personal) | `hermes-docker-personal` | One per user. Web UI only. No Slack tokens. |
+| Hermes Docker (Slack) | `hermes-docker-slack` | One per org. Slack + web UI. Shared by all workspace users. |
 
 ### How the Slack gateway works
 
@@ -45,7 +45,7 @@ The builtin memory provider has no concept of user_id. The `user_id` threading t
 
 The shared Slack instance gives every user the same model, the same API keys, the same agent personality, and the same memory. That's fine for an org-wide bot, but doesn't match the "personal assistant" model where each user has their own Hermes with their own configuration and accumulated knowledge.
 
-Meanwhile, the per-user web deployments (`hermes-personal`) give exactly that — each user has their own URL, own EFS volume, own memory, own config. But they can't do Slack because of how Slack distributes events.
+Meanwhile, the per-user web deployments (`hermes-docker-personal`) give exactly that — each user has their own URL, own EFS volume, own memory, own config. But they can't do Slack because of how Slack distributes events.
 
 
 ## The Slack routing problem
@@ -111,7 +111,7 @@ DOH Slack Proxy (one per org)
 ### User-to-instance mapping
 
 The mapping could be:
-- **From DOH's database**: query which `hermes-personal` app belongs to which user. Requires a mechanism to associate a Slack user ID with a DOH user/app.
+- **From DOH's database**: query which `hermes-docker-personal` app belongs to which user. Requires a mechanism to associate a Slack user ID with a DOH user/app.
 - **From a config file or environment variable**: simple `{slack_user_id: hermes_url}` mapping, managed manually or by a DOH management command.
 - **From ECS service discovery**: if personal instances register in Cloud Map, the proxy could look them up by app name.
 

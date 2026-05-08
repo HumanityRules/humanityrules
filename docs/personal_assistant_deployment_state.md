@@ -6,7 +6,7 @@ DOH deploys **Hermes Agent** — a governed AI personal assistant — into a cus
 
 ## Core pieces in place
 
-- **Hermes Agent AppTemplate** — full template repo under `template_repos/hermes_agent/`.
+- **Hermes Agent AppTemplate** — full template repos under `template_repos/hermes_agent/` (policy-proxy-fronted WebUI, the current main template) and `template_repos/hermes_docker_agent/` (alternative Docker-in-Docker-backed variant for terminal tool execution).
 - **Deploy flow** — template picker → deploy form with grouped, user-editable runtime variables (Main LLM, Auxiliary LLM, Slack). Template authors decide what's operator-tunable per deploy vs hidden.
 - **Multi-channel** — WebUI + Slack gateway run side-by-side when Slack tokens are present; WebUI-only otherwise. Proactive messages land in a configurable Slack home channel.
 - **Persistent state on EFS** — per-app access point gives chroot-like path + UID isolation so agents can't see each other's files. Agent memory, skills, and workspace output survive task restarts.

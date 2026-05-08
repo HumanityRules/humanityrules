@@ -19,8 +19,8 @@ from devopshero_app.services.jobs import app_config_builder
 
 def _hermes_slack_template() -> AppTemplate:
     return AppTemplate.objects.create(
-        name="Hermes Slack",
-        slug="hermes-slack",
+        name="Hermes Docker Slack",
+        slug="hermes-docker-slack",
         description="Two-container Hermes + learneo-mcp.",
         icon="💬",
         category="ai-assistant",
@@ -32,7 +32,7 @@ def _hermes_slack_template() -> AppTemplate:
             {
                 "name": "hermes",
                 "image_source": "dockerfile",
-                "source_repo_path": "hermes_agent",
+                "source_repo_path": "hermes_docker_agent",
                 "dockerfile_path": "Dockerfile",
                 "container_port": 8787,
                 "health_check_path": "/health",
@@ -77,7 +77,7 @@ def _scaffold_blueprint(template: AppTemplate, blueprint_containers: list) -> De
     )
     workspace = Workspace.objects.get(organization=org, slug="default")
     repo = Repository.objects.create(
-        organization=org, full_name="template/hermes-slack", name="hermes-slack",
+        organization=org, full_name="template/hermes-docker-slack", name="hermes-docker-slack",
         clone_url="file:///tmp/x", default_branch="main",
     )
     app = App.objects.create(

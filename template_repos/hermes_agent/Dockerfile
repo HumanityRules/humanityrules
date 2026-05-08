@@ -1,77 +1,72 @@
+FROM public.ecr.aws/aws-observability/aws-sigv4-proxy:1.11.1 AS sigv4proxy
+
 FROM ghcr.io/nesquena/hermes-webui:0.50.259
 
 USER root
 
+ARG NONO_VERSION=0.47.1
+
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends docker-cli git patch \
+    && apt-get install -y --no-install-recommends ca-certificates curl git haproxy libdbus-1-3 unzip \
+    && arch="$(dpkg --print-architecture)" \
+    && curl -fsSL -o /tmp/nono.deb \
+        "https://github.com/always-further/nono/releases/download/v${NONO_VERSION}/nono-cli_${NONO_VERSION}_${arch}.deb" \
+    && apt-get install -y --no-install-recommends /tmp/nono.deb \
+    && aws_arch="$(uname -m)" \
+    && curl -fsSL -o /tmp/awscliv2.zip "https://awscli.amazonaws.com/awscli-exe-linux-${aws_arch}.zip" \
+    && unzip -q /tmp/awscliv2.zip -d /tmp \
+    && /tmp/aws/install --bin-dir /usr/local/bin --install-dir /usr/local/aws-cli \
+    && rm -f /tmp/nono.deb \
+    && rm -rf /tmp/aws /tmp/awscliv2.zip \
     && rm -rf /var/lib/apt/lists/*
 
 RUN git clone --depth 1 --branch v2026.4.30 https://github.com/NousResearch/hermes-agent.git \
         /opt/hermes-defaults/hermes-agent \
     && rm -rf /opt/hermes-defaults/hermes-agent/.git
 
-# Curate the bundled skill set with an allowlist: only skills listed in
-# skills-allowlist.txt ship in the image. Anything else (new upstream skills,
-# macOS-only skills, competitor coding agents, consumer/novelty skills,
-# policy-risky content) is pruned. This means a Hermes version bump can't
-# silently add new skills to Enterprise deployments — additions require an
-# allowlist edit. Done before SOUL.md etc. are copied so the pruned files
-# never land in an intermediate layer.
-COPY skills-allowlist.txt /tmp/skills-allowlist.txt
-COPY --chmod=755 prune-skills.sh /tmp/prune-skills.sh
-RUN /tmp/prune-skills.sh /opt/hermes-defaults/hermes-agent/skills /tmp/skills-allowlist.txt \
-    && rm -f /tmp/prune-skills.sh /tmp/skills-allowlist.txt
-
+COPY --from=sigv4proxy /aws-sigv4-proxy /usr/local/bin/aws-sigv4-proxy
 COPY SOUL.md /opt/hermes-defaults/SOUL.md
 COPY config.yaml.template /opt/hermes-defaults/config.yaml.template
-COPY patches /opt/hermes-defaults/patches
-COPY --chmod=755 entrypoint.sh /entrypoint.sh
-COPY --chmod=755 start.sh /start.sh
+COPY haproxy.cfg.template /etc/haproxy/haproxy.cfg.template
+COPY hermes-nono-profile.json /etc/nono/profiles/hermes-nono-profile.json
+COPY --chmod=755 supervisor.sh /supervisor.sh
+COPY --chmod=755 webui.sh /webui.sh
 
-# WebUI lives in ephemeral image layers at /apptoo/, so DOH's WebUI patches
-# are applied at build time (not boot, unlike the agent patches on EFS).
-# See patches-webui/README.md for per-patch rationale. compileall after the
-# patch run overwrites any .pyc the base image shipped so stale bytecode
-# can't shadow the patched sources at runtime.
-COPY patches-webui /tmp/patches-webui
-RUN set -eu; \
-    for p in /tmp/patches-webui/*.patch; do \
-        [ -f "$p" ] || continue; \
-        echo "[patches-webui] applying $(basename "$p")"; \
-        patch -p1 -F 0 -d /apptoo -i "$p"; \
-    done; \
-    python3 -m compileall -q /apptoo || true; \
-    rm -rf /tmp/patches-webui
-
-# Append platform dependencies to the webui's requirements.txt so they're
-# installed by `hermeswebui_init.bash` before `python server.py` runs — this
-# avoids a race where tools.mcp_tool imports `mcp` at module-load time and
-# caches _MCP_AVAILABLE=False if the package isn't there yet, and where
-# gateway.run imports slack-bolt at startup.
-#   mcp          → enables MCP server auto-discovery (hermes-agent[mcp])
-#   boto3        → enables the Bedrock LLM provider (hermes-agent[bedrock])
-#   slack-{bolt,sdk} → gateway Slack adapter (hermes-agent[slack])
 RUN test -f /apptoo/requirements.txt \
     && cat >> /apptoo/requirements.txt <<'EOF'
 mcp>=1.2.0,<2
 boto3>=1.35.0,<2
-slack-bolt>=1.18.0,<2
-slack-sdk>=3.27.0,<4
 EOF
 
-# /workspace is a real top-level EFS mount, sibling to the agent home —
-# same data is mounted into the docker-dind sidecar so tool runs and the
-# hermes parent see one consistent filesystem.
-ENV HERMES_WEBUI_STATE_DIR=/home/hermeswebui/.hermes/webui-mvp
+ENV HERMES_HOME=/home/hermeswebui/.hermes
+ENV HERMES_WEBUI_AGENT_DIR=${HERMES_HOME}/hermes-agent
+ENV HERMES_WEBUI_STATE_DIR=${HERMES_HOME}/webui-mvp
 ENV HERMES_WEBUI_DEFAULT_WORKSPACE=/workspace
 ENV HERMES_WEBUI_SKIP_ONBOARDING=1
+
+RUN mkdir -p /app /uv_cache "$HERMES_HOME" /workspace \
+    && rsync -a /apptoo/ /app/ \
+    && cp -r /opt/hermes-defaults/hermes-agent "$HERMES_WEBUI_AGENT_DIR" \
+    && cp /opt/hermes-defaults/SOUL.md "$HERMES_HOME/SOUL.md" \
+    && chown -R hermeswebui:hermeswebui /app /uv_cache "$HERMES_HOME" /workspace
+
+USER hermeswebui
+
+RUN cd /app \
+    && export UV_CACHE_DIR=/uv_cache \
+    && uv venv /app/venv \
+    && . /app/venv/bin/activate \
+    && uv pip install -r requirements.txt \
+    && uv pip install -U pip setuptools \
+    && uv pip install "${HERMES_WEBUI_AGENT_DIR}[all]" \
+    && uv pip install "hindsight-client>=0.4.22" \
+    && python -m compileall -q -j 0 /app "$HERMES_WEBUI_AGENT_DIR" \
+    && touch /app/venv/.deps_installed
 
 EXPOSE 8787
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
     CMD curl -f http://localhost:8787/health || exit 1
 
-USER hermeswebui
-
-ENTRYPOINT ["/entrypoint.sh"]
-CMD ["/start.sh"]
+ENTRYPOINT ["/supervisor.sh"]
+CMD ["/webui.sh"]

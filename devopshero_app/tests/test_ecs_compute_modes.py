@@ -92,7 +92,7 @@ def _dind_hermes_stack_template() -> Template:
                 ContainerConfig(
                     name="hermes",
                     image_source="dockerfile",
-                    source_repo_path="hermes_agent",
+                    source_repo_path="hermes_docker_agent",
                     ecr_repo_name="doh/staging/my-app-hermes",
                     container_port=8787,
                     efs_mounts=["home", "workspace"],

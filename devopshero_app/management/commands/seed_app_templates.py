@@ -469,7 +469,7 @@ _DOCKER_DIND_CONTAINER = {
 _HERMES_CONTAINER_BASE = {
     "name": "hermes",
     "image_source": "dockerfile",
-    "source_repo_path": "hermes_agent",
+    "source_repo_path": "hermes_docker_agent",
     "dockerfile_path": "Dockerfile",
     "container_port": 8787,
     "health_check_path": "/health",
@@ -587,15 +587,16 @@ _LEARNEO_MCP_CONTAINER = {
 }
 
 
-# -- Hermes Personal (web only, one per user) -------------------------------
+# -- Hermes Docker Personal (web only, one per user) ------------------------
 
-HERMES_PERSONAL_TEMPLATE = {
-    "name": "AI Assistant — Hermes (Personal)",
-    "slug": "hermes-personal",
+HERMES_DOCKER_PERSONAL_TEMPLATE = {
+    "name": "AI Assistant — Hermes Docker (Personal)",
+    "slug": "hermes-docker-personal",
     "description": (
-        "Personal AI assistant powered by Hermes Agent. Web UI with tool "
-        "execution, persistent memory, and self-improving skills. Deploy one "
-        "per user for isolated conversations and settings."
+        "Personal AI assistant powered by Hermes Agent with a Docker-in-Docker "
+        "sidecar for terminal tool execution. Web UI with persistent memory "
+        "and self-improving skills. Deploy one per user for isolated "
+        "conversations and settings."
     ),
     "icon": "⚡",
     "category": "ai-assistant",
@@ -627,19 +628,20 @@ HERMES_PERSONAL_TEMPLATE = {
     # The "app-type" tag is what the global PA ABAC policy matches on.
     # The "owner" tag is stamped per-deployment from the deploy form.
     "default_tags": [{"key": "app-type", "value": "personal-assistant"}],
-    "prefill_name": "hermes-{username}{index}",
+    "prefill_name": "hermes-docker-{username}{index}",
     "is_active": True,
 }
 
-# -- Hermes Slack (shared, one per org) -------------------------------------
+# -- Hermes Docker Slack (shared, one per org) ------------------------------
 
-HERMES_SLACK_TEMPLATE = {
-    "name": "AI Assistant — Hermes (Slack)",
-    "slug": "hermes-slack",
+HERMES_DOCKER_SLACK_TEMPLATE = {
+    "name": "AI Assistant — Hermes Docker (Slack)",
+    "slug": "hermes-docker-slack",
     "description": (
-        "Shared AI assistant powered by Hermes Agent with Slack integration. "
-        "Deploy one per organization — all workspace users can DM the bot "
-        "with isolated conversations. Also includes the web UI."
+        "Shared AI assistant powered by Hermes Agent with Slack integration "
+        "and a Docker-in-Docker sidecar for terminal tool execution. Deploy "
+        "one per organization — all workspace users can DM the bot with "
+        "isolated conversations. Also includes the web UI."
     ),
     "icon": "💬",
     "category": "ai-assistant",
@@ -667,14 +669,14 @@ HERMES_SLACK_TEMPLATE = {
 }
 
 
-# -- Hermes nono Personal (web only) ----------------------------------------
+# -- Hermes Personal (web only) ---------------------------------------------
 
-HERMES_NONO_PERSONAL_TEMPLATE = {
-    "name": "AI Assistant — Hermes nono (Personal)",
-    "slug": "hermes-nono-personal",
+HERMES_PERSONAL_TEMPLATE = {
+    "name": "AI Assistant — Hermes (Personal)",
+    "slug": "hermes-personal",
     "description": (
-        "Personal AI assistant powered by Hermes Agent, packaged for the nono "
-        "sandbox path. Fronted by the policy proxy for SSO + ABAC."
+        "Personal AI assistant powered by Hermes Agent. Fronted by the policy "
+        "proxy for SSO + ABAC."
     ),
     "icon": "⚡",
     "category": "ai-assistant",
@@ -691,7 +693,7 @@ HERMES_NONO_PERSONAL_TEMPLATE = {
         {
             "name": "hermes",
             "image_source": "dockerfile",
-            "source_repo_path": "hermes_nono_agent",
+            "source_repo_path": "hermes_agent",
             "dockerfile_path": "Dockerfile",
             "container_port": 8787,
             "health_check_path": "/health",
@@ -710,16 +712,16 @@ HERMES_NONO_PERSONAL_TEMPLATE = {
         {**_HERMES_POLICY_PROXY_CONTAINER},
     ],
     "default_tags": [{"key": "app-type", "value": "personal-assistant"}],
-    "prefill_name": "hermes-nono-{username}{index}",
+    "prefill_name": "hermes-{username}{index}",
     "is_active": True,
 }
 
 
 TEMPLATES = [
     OPENCLAW_TEMPLATE,
+    HERMES_DOCKER_PERSONAL_TEMPLATE,
+    HERMES_DOCKER_SLACK_TEMPLATE,
     HERMES_PERSONAL_TEMPLATE,
-    HERMES_SLACK_TEMPLATE,
-    HERMES_NONO_PERSONAL_TEMPLATE,
 ]
 
 

@@ -1,7 +1,4 @@
-# Hermes Agent — DOH Enterprise Configuration
-# entrypoint.sh substitutes every __XXX__ placeholder below at boot.
-# Seeded to ~/.hermes/config.yaml on first boot; never overwritten after that.
-# API keys live in .env, not here.
+# Hermes Agent — DOH nono prototype configuration
 
 model:
   default: __MODEL__
@@ -30,19 +27,15 @@ agent:
     technical: You are a technical expert. Provide detailed, accurate technical information.
 
 terminal:
-  backend: __TERMINAL_BACKEND__
+  backend: local
   modal_mode: auto
   timeout: 180
   env_passthrough: []
   persistent_shell: true
-  docker_image: "__TOOL_IMAGE__"
+  docker_image: ''
   docker_mount_cwd_to_workspace: false
-  docker_volumes: __DOCKER_VOLUMES__
-  # container_persistent=true skips upstream's per-turn cleanup and makes
-  # Docker cleanup stop-but-not-remove the container. DinD's snapshotter
-  # commits and saves the stopped container on the die event, so the next
-  # docker run starts from the latest doh-toolbox:latest image.
-  container_persistent: true
+  docker_volumes: []
+  container_persistent: false
 
 browser:
   inactivity_timeout: 120
@@ -204,6 +197,9 @@ group_sessions_per_user: true
 streaming:
   enabled: false
 
+web:
+  backend: tavily
+
 platform_toolsets:
   cli:
   - browser
@@ -219,44 +215,3 @@ platform_toolsets:
   - todo
   - vision
   - web
-  telegram:
-  - hermes-telegram
-  discord:
-  - hermes-discord
-  whatsapp:
-  - browser
-  - clarify
-  - code_execution
-  - cronjob
-  - delegation
-  - file
-  - image_gen
-  - memory
-  - session_search
-  - skills
-  - terminal
-  - todo
-  - tts
-  - vision
-  - web
-  slack:
-  - hermes-slack
-  signal:
-  - hermes-signal
-  homeassistant:
-  - hermes-homeassistant
-
-code_execution:
-  timeout: 300
-  max_tool_calls: 50
-
-web:
-  backend: tavily
-
-# mcp_servers:
-#  learneo:
-#    url: "http://127.0.0.1:7777/mcp"
-#    enabled: true
-#    timeout: 120
-
-_config_version: 11
