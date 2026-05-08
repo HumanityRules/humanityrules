@@ -62,7 +62,7 @@ Hermes does not treat `openai` as a runtime provider name for direct API access 
 
 ## MCP aggregator sidecar (Slack template only)
 
-The `hermes-slack` AppTemplate ships with a second container — `sidecar-mcp` — in the same ECS task. Hermes reaches it over loopback at `http://127.0.0.1:7777/mcp` via the static `mcp_servers.sidecar` entry in `config.yaml.template`. No auth header is needed: loopback binding is the security boundary (no port mapping, so nothing outside the task can reach the MCP).
+The `hermes-docker-slack` AppTemplate ships with a second container — `sidecar-mcp` — in the same ECS task. Hermes reaches it over loopback at `http://127.0.0.1:7777/mcp` via the static `mcp_servers.sidecar` entry in `config.yaml.template`. No auth header is needed: loopback binding is the security boundary (no port mapping, so nothing outside the task can reach the MCP).
 
 The MCP image is referenced as a **prebuilt** container:
 

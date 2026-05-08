@@ -19,8 +19,8 @@ from devopshero_app.services import abac
 
 def _make_pa_template() -> AppTemplate:
     return AppTemplate.objects.create(
-        name="AI Assistant — Hermes (Personal)",
-        slug="hermes-personal",
+        name="AI Assistant — Hermes Docker (Personal)",
+        slug="hermes-docker-personal",
         description="Personal AI assistant.",
         icon="⚡",
         category="ai-assistant",
@@ -43,7 +43,7 @@ def _make_pa_template() -> AppTemplate:
             {
                 "name": "hermes",
                 "image_source": "dockerfile",
-                "source_repo_path": "hermes_agent",
+                "source_repo_path": "hermes_docker_agent",
                 "dockerfile_path": "Dockerfile",
                 "container_port": 8787,
                 "health_check_path": "/health",

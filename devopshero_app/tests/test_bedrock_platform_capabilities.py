@@ -87,9 +87,9 @@ class BedrockPlatformCapabilityTests(SimpleTestCase):
 
     def test_hermes_templates_do_not_declare_bedrock_access_key_secrets(self) -> None:
         for template in [
+            seed_app_templates.HERMES_DOCKER_PERSONAL_TEMPLATE,
+            seed_app_templates.HERMES_DOCKER_SLACK_TEMPLATE,
             seed_app_templates.HERMES_PERSONAL_TEMPLATE,
-            seed_app_templates.HERMES_SLACK_TEMPLATE,
-            seed_app_templates.HERMES_NONO_PERSONAL_TEMPLATE,
         ]:
             secret_names = {
                 var["name"]
@@ -105,8 +105,8 @@ class BedrockPlatformCapabilityTests(SimpleTestCase):
 
     def test_hermes_templates_enable_docker_backed_tools(self) -> None:
         for template in [
-            seed_app_templates.HERMES_PERSONAL_TEMPLATE,
-            seed_app_templates.HERMES_SLACK_TEMPLATE,
+            seed_app_templates.HERMES_DOCKER_PERSONAL_TEMPLATE,
+            seed_app_templates.HERMES_DOCKER_SLACK_TEMPLATE,
         ]:
             dind = next(c for c in template["containers"] if c["name"] == "docker-dind")
             hermes_container = next(c for c in template["containers"] if c["name"] == "hermes")
@@ -133,17 +133,17 @@ class BedrockPlatformCapabilityTests(SimpleTestCase):
             self.assertEqual(hermes_container["environment"]["TERMINAL_LIFETIME_SECONDS"], "86400")
             # HERMES_WEBUI_HOST is per-template: pinned to loopback only when a
             # policy proxy fronts the task. When the ALB targets hermes directly
-            # (e.g. hermes-slack), the WebUI must bind to all interfaces so the
-            # ALB health check on the task ENI succeeds.
+            # (e.g. hermes-docker-slack), the WebUI must bind to all interfaces
+            # so the ALB health check on the task ENI succeeds.
             if template["alb_target_container"] == "policy-proxy":
                 self.assertEqual(hermes_container["environment"]["HERMES_WEBUI_HOST"], "127.0.0.1")
             else:
                 self.assertNotIn("HERMES_WEBUI_HOST", hermes_container["environment"])
 
-    def test_hermes_nono_template_is_policy_proxy_fronted_without_efs(self) -> None:
-        template = seed_app_templates.HERMES_NONO_PERSONAL_TEMPLATE
+    def test_hermes_template_is_policy_proxy_fronted_without_efs(self) -> None:
+        template = seed_app_templates.HERMES_PERSONAL_TEMPLATE
 
-        self.assertEqual(template["slug"], "hermes-nono-personal")
+        self.assertEqual(template["slug"], "hermes-personal")
         self.assertEqual(template["default_compute_mode"], "ec2")
         self.assertEqual(template["platform_capabilities"], ["bedrock-runtime"])
         self.assertIsNone(template["efs_config"])
@@ -152,7 +152,7 @@ class BedrockPlatformCapabilityTests(SimpleTestCase):
 
         hermes = next(c for c in template["containers"] if c["name"] == "hermes")
         self.assertEqual(hermes["image_source"], "dockerfile")
-        self.assertEqual(hermes["source_repo_path"], "hermes_nono_agent")
+        self.assertEqual(hermes["source_repo_path"], "hermes_agent")
         self.assertEqual(hermes["dockerfile_path"], "Dockerfile")
         self.assertEqual(hermes["efs_mounts"], [])
         self.assertNotIn("depends_on", hermes)

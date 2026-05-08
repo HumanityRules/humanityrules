@@ -3,6 +3,7 @@
 __pycache__/
 .playwright-mcp/
 .env
+.env.backup*
 **/cdk.out/
 **/cdk.context.json
 db.sqlite3

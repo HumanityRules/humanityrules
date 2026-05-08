@@ -1,6 +1,6 @@
 ---
 name: hermes-update-check
-description: Evaluate whether we can update the pinned Hermes Agent version, drop any of the DOH-owned patches under template_repos/hermes_agent/patches/, and what upstream changes have landed since our pin. Use when the user asks about the Hermes update status, whether patches are still needed, or what has improved upstream.
+description: Evaluate whether we can update the pinned Hermes Agent version, drop any of the DOH-owned patches under template_repos/hermes_docker_agent/patches/, and what upstream changes have landed since our pin. Use when the user asks about the Hermes update status, whether patches are still needed, or what has improved upstream.
 ---
 
 # Hermes Update Check
@@ -8,17 +8,17 @@ description: Evaluate whether we can update the pinned Hermes Agent version, dro
 Decide three things and report them back:
 
 1. **Should we bump the pin?** — is there a newer tag, how far is `main` ahead?
-2. **Which patches can we drop?** — for each patch under `template_repos/hermes_agent/patches/`, has the fix landed upstream?
+2. **Which patches can we drop?** — for each patch under `template_repos/hermes_docker_agent/patches/`, has the fix landed upstream?
 3. **What else changed upstream that matters to us?** — Bedrock path, auxiliary clients, prompt caching, config/model handling.
 
-The upstream repo is **`NousResearch/hermes-agent`**. The pinned version lives in `template_repos/hermes_agent/Dockerfile` (the `--branch` arg of `git clone`).
+The upstream repo is **`NousResearch/hermes-agent`**. The pinned version lives in `template_repos/hermes_docker_agent/Dockerfile` (the `--branch` arg of `git clone`).
 
 ## Workflow
 
 ### 1. Read the pin
 
 ```bash
-grep -E "branch v[0-9]" /Users/vmendi/websites/devopshero/template_repos/hermes_agent/Dockerfile
+grep -E "branch v[0-9]" /Users/vmendi/websites/devopshero/template_repos/hermes_docker_agent/Dockerfile
 ```
 
 Record the tag (e.g. `v2026.4.16`).
@@ -53,7 +53,7 @@ Fetch any other file a patch targets (check `--- a/<path>` header in each `.patc
 
 For each `NN-*.patch` in numeric order:
 
-- Read the patch (`Read template_repos/hermes_agent/patches/NN-...patch`) and extract:
+- Read the patch (`Read template_repos/hermes_docker_agent/patches/NN-...patch`) and extract:
   - the target file (from `--- a/<path>`)
   - the key identifiers being changed (e.g. `_anthropic_preserve_dots`, `is_native_anthropic`, `auth_type == "aws_sdk"`)
 - `grep` those identifiers in the upstream file.
