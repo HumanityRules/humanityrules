@@ -7,7 +7,7 @@ USER root
 ARG NONO_VERSION=0.47.1
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends ca-certificates curl git haproxy libdbus-1-3 unzip \
+    && apt-get install -y --no-install-recommends ca-certificates curl git haproxy libdbus-1-3 patch unzip \
     && arch="$(dpkg --print-architecture)" \
     && curl -fsSL -o /tmp/nono.deb \
         "https://github.com/always-further/nono/releases/download/v${NONO_VERSION}/nono-cli_${NONO_VERSION}_${arch}.deb" \
@@ -27,10 +27,21 @@ RUN git clone --depth 1 --branch v2026.4.30 https://github.com/NousResearch/herm
 COPY --from=sigv4proxy /aws-sigv4-proxy /usr/local/bin/aws-sigv4-proxy
 COPY SOUL.md /opt/hermes-defaults/SOUL.md
 COPY config.yaml.template /opt/hermes-defaults/config.yaml.template
+COPY --chmod=755 apply-patches.py /opt/hermes-defaults/apply-patches.py
 COPY haproxy.cfg.template /etc/haproxy/haproxy.cfg.template
 COPY hermes-nono-profile.json /etc/nono/profiles/hermes-nono-profile.json
 COPY --chmod=755 supervisor.sh /supervisor.sh
 COPY --chmod=755 webui.sh /webui.sh
+
+# WebUI lives in the base image at /apptoo/. Patch it before copying it into
+# /app so the installed venv and precompiled bytecode use patched source.
+COPY patches-webui /tmp/patches-webui
+RUN set -eu; \
+    python3 /opt/hermes-defaults/apply-patches.py /tmp/patches-webui /apptoo; \
+    python3 -m compileall -q /apptoo || true; \
+    rm -rf /tmp/patches-webui
+
+COPY patches /tmp/patches-agent
 
 RUN test -f /apptoo/requirements.txt \
     && cat >> /apptoo/requirements.txt <<'EOF'
@@ -47,6 +58,8 @@ ENV HERMES_WEBUI_SKIP_ONBOARDING=1
 RUN mkdir -p /app /uv_cache "$HERMES_HOME" /workspace \
     && rsync -a /apptoo/ /app/ \
     && cp -r /opt/hermes-defaults/hermes-agent "$HERMES_WEBUI_AGENT_DIR" \
+    && python3 /opt/hermes-defaults/apply-patches.py /tmp/patches-agent "$HERMES_WEBUI_AGENT_DIR" \
+    && rm -rf /tmp/patches-agent \
     && cp /opt/hermes-defaults/SOUL.md "$HERMES_HOME/SOUL.md" \
     && chown -R hermeswebui:hermeswebui /app /uv_cache "$HERMES_HOME" /workspace
 
