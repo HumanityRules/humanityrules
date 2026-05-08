@@ -1,4 +1,4 @@
-"""Tests for the per-env policy-proxy secrets helpers in infra_customer.secrets_utils."""
+"""Tests for the per-env bearer-token and auth-config secrets helpers in infra_customer.secrets_utils."""
 
 import hashlib
 import json
@@ -7,7 +7,7 @@ from unittest.mock import MagicMock
 from botocore.exceptions import ClientError
 from django.test import TestCase
 
-from devopshero_app.models import AWSAccount, Environment, Organization, PolicyProxyToken
+from devopshero_app.models import AWSAccount, Environment, EnvironmentBearerToken, Organization
 from devopshero_app.services.infra_customer import secrets_utils
 from devopshero_app.services.infra_customer.appconfig import AppConfig
 
@@ -53,7 +53,7 @@ def _session_with(fake: FakeSecretsManager) -> MagicMock:
     return session
 
 
-class PolicyProxySecretsTestBase(TestCase):
+class EnvBearerTestBase(TestCase):
 
     def setUp(self) -> None:
         self.org = Organization.objects.create(
@@ -73,26 +73,26 @@ class PolicyProxySecretsTestBase(TestCase):
 
 
 # -----------------------------------------------------------------------------
-# ensure_env_policy_proxy_token_exists
+# ensure_env_bearer_token_exists
 # -----------------------------------------------------------------------------
 
 
-class TestEnsureEnvPolicyProxyToken(PolicyProxySecretsTestBase):
+class TestEnsureEnvBearerToken(EnvBearerTestBase):
 
     def test_creates_token_and_row_when_neither_exists(self) -> None:
         fake = FakeSecretsManager()
         session = _session_with(fake)
 
-        arn = secrets_utils.ensure_env_policy_proxy_token_exists(session=session, env=self.env)
+        arn = secrets_utils.ensure_env_bearer_token_exists(session=session, env=self.env)
         self.assertTrue(arn.endswith("shared-secrets-AAAA"))
 
         # Secrets Manager side.
         secret = json.loads(fake.store["devopshero/staging/shared-secrets"]["SecretString"])
-        raw_token = secret["DOH_POLICY_PROXY_TOKEN"]
+        raw_token = secret["DOH_ENV_BEARER"]
         self.assertEqual(len(raw_token), 64)
 
         # DB side.
-        row = PolicyProxyToken.objects.get(environment=self.env)
+        row = EnvironmentBearerToken.objects.get(environment=self.env)
         self.assertEqual(row.token_hash, hashlib.sha256(raw_token.encode()).hexdigest())
 
     def test_noop_when_both_sides_present(self) -> None:
@@ -103,32 +103,32 @@ class TestEnsureEnvPolicyProxyToken(PolicyProxySecretsTestBase):
             Name="devopshero/staging/shared-secrets",
             Description="seed",
             SecretString=json.dumps({
-                "DOH_POLICY_PROXY_TOKEN": "pre-existing-raw-token-of-reasonable-length-0123456789012345",
+                "DOH_ENV_BEARER": "pre-existing-raw-token-of-reasonable-length-0123456789012345",
                 "OTHER_KEY": "keep-me",
             }),
         )
-        PolicyProxyToken.objects.create(environment=self.env, token_hash="does-not-match-but-we-dont-check-here")
+        EnvironmentBearerToken.objects.create(environment=self.env, token_hash="does-not-match-but-we-dont-check-here")
 
         original_secret = fake.store["devopshero/staging/shared-secrets"]["SecretString"]
-        original_hash = PolicyProxyToken.objects.get(environment=self.env).token_hash
+        original_hash = EnvironmentBearerToken.objects.get(environment=self.env).token_hash
 
-        arn = secrets_utils.ensure_env_policy_proxy_token_exists(session=session, env=self.env)
+        arn = secrets_utils.ensure_env_bearer_token_exists(session=session, env=self.env)
         self.assertIn("shared-secrets", arn)
         self.assertEqual(fake.store["devopshero/staging/shared-secrets"]["SecretString"], original_secret)
-        self.assertEqual(PolicyProxyToken.objects.get(environment=self.env).token_hash, original_hash)
+        self.assertEqual(EnvironmentBearerToken.objects.get(environment=self.env).token_hash, original_hash)
 
     def test_regenerates_when_row_exists_but_secret_missing(self) -> None:
         # Simulates a corrupted state where the DB row was created but the
         # AWS secret doesn't exist. We regenerate both in lockstep.
         fake = FakeSecretsManager()
         session = _session_with(fake)
-        PolicyProxyToken.objects.create(environment=self.env, token_hash="stale-hash")
+        EnvironmentBearerToken.objects.create(environment=self.env, token_hash="stale-hash")
 
-        secrets_utils.ensure_env_policy_proxy_token_exists(session=session, env=self.env)
+        secrets_utils.ensure_env_bearer_token_exists(session=session, env=self.env)
 
         secret = json.loads(fake.store["devopshero/staging/shared-secrets"]["SecretString"])
-        raw = secret["DOH_POLICY_PROXY_TOKEN"]
-        new_hash = PolicyProxyToken.objects.get(environment=self.env).token_hash
+        raw = secret["DOH_ENV_BEARER"]
+        new_hash = EnvironmentBearerToken.objects.get(environment=self.env).token_hash
         self.assertEqual(new_hash, hashlib.sha256(raw.encode()).hexdigest())
         self.assertNotEqual(new_hash, "stale-hash")
 
@@ -141,11 +141,11 @@ class TestEnsureEnvPolicyProxyToken(PolicyProxySecretsTestBase):
             SecretString=json.dumps({"SOMETHING_ELSE": "keep-me"}),
         )
 
-        secrets_utils.ensure_env_policy_proxy_token_exists(session=session, env=self.env)
+        secrets_utils.ensure_env_bearer_token_exists(session=session, env=self.env)
 
         secret = json.loads(fake.store["devopshero/staging/shared-secrets"]["SecretString"])
         self.assertEqual(secret["SOMETHING_ELSE"], "keep-me")
-        self.assertIn("DOH_POLICY_PROXY_TOKEN", secret)
+        self.assertIn("DOH_ENV_BEARER", secret)
 
 
 # -----------------------------------------------------------------------------
@@ -153,7 +153,7 @@ class TestEnsureEnvPolicyProxyToken(PolicyProxySecretsTestBase):
 # -----------------------------------------------------------------------------
 
 
-class TestEnsureEnvPolicyProxyAuthConfig(PolicyProxySecretsTestBase):
+class TestEnsureEnvPolicyProxyAuthConfig(EnvBearerTestBase):
 
     def test_creates_combined_secret_when_missing(self) -> None:
         fake = FakeSecretsManager()
@@ -224,7 +224,7 @@ class TestEnsureEnvPolicyProxyAuthConfig(PolicyProxySecretsTestBase):
 # -----------------------------------------------------------------------------
 
 
-class TestEnsureEnvPolicyProxySecrets(PolicyProxySecretsTestBase):
+class TestEnsureEnvPolicyProxySecrets(EnvBearerTestBase):
 
     def test_returns_arns_on_fresh_env(self) -> None:
         fake = FakeSecretsManager()
@@ -236,8 +236,8 @@ class TestEnsureEnvPolicyProxySecrets(PolicyProxySecretsTestBase):
         self.assertIn("devopshero/staging/shared-secrets", fake.store)
         self.assertIn("devopshero/staging/policy-proxy-auth-config", fake.store)
 
-        # Side effect: the PolicyProxyToken row exists too.
-        self.assertTrue(PolicyProxyToken.objects.filter(environment=self.env).exists())
+        # Side effect: the EnvironmentBearerToken row exists too.
+        self.assertTrue(EnvironmentBearerToken.objects.filter(environment=self.env).exists())
 
 
 # -----------------------------------------------------------------------------

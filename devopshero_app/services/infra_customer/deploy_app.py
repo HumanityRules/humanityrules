@@ -599,7 +599,7 @@ class AppStack(Stack):
                 resources=[database_connection_secret.secret_arn],
             ))
         if policy_proxy is not None:
-            # The policy-proxy container reads DOH_POLICY_PROXY_TOKEN from the
+            # The policy-proxy container reads DOH_ENV_BEARER from the
             # env's shared-secrets entry via ECS secret injection.
             task_role.add_to_policy(iam.PolicyStatement(
                 actions=["secretsmanager:GetSecretValue"],
@@ -733,8 +733,8 @@ class AppStack(Stack):
                 "DOH_LISTEN_PORT": str(policy_proxy.container_port),
             }
             policy_proxy_secret_overlay = {
-                "DOH_POLICY_PROXY_TOKEN": ecs.Secret.from_secrets_manager(
-                    policy_proxy_shared_secret, field="DOH_POLICY_PROXY_TOKEN",
+                "DOH_ENV_BEARER": ecs.Secret.from_secrets_manager(
+                    policy_proxy_shared_secret, field="DOH_ENV_BEARER",
                 ),
             }
 

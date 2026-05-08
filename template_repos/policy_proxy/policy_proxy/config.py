@@ -4,7 +4,7 @@ The same binary runs in two roles. Selected by `DOH_ROLE`:
 
 - `proxy`: the per-app sidecar that verifies JWTs, calls the PDP, and proxies
   to a local upstream. Required env: DOH_APP_ID, DOH_JWKS_URL, DOH_PDP_URL,
-  DOH_POLICY_PROXY_TOKEN, DOH_UPSTREAM_HOST, DOH_UPSTREAM_PORT.
+  DOH_ENV_BEARER, DOH_UPSTREAM_HOST, DOH_UPSTREAM_PORT.
 - `auth`: the singleton per-env service that runs the Okta OAuth dance and
   mints session JWTs. Required env: DOH_POLICY_PROXY_AUTH_CONFIG_SECRET_ARN.
   Optional: DOH_SESSION_TTL_SECONDS.
@@ -29,7 +29,7 @@ class PolicyProxyConfig:
     auth_base_url: str
     jwks_url: str
     pdp_url: str
-    policy_proxy_token: str
+    env_bearer_token: str
     upstream_host: str
     upstream_port: int
     listen_port: int
@@ -79,7 +79,7 @@ def load_proxy_config_from_env() -> PolicyProxyConfig:
         auth_base_url=_required("DOH_AUTH_BASE_URL").rstrip("/"),
         jwks_url=_required("DOH_JWKS_URL"),
         pdp_url=_required("DOH_PDP_URL"),
-        policy_proxy_token=_required("DOH_POLICY_PROXY_TOKEN"),
+        env_bearer_token=_required("DOH_ENV_BEARER"),
         upstream_host=_required("DOH_UPSTREAM_HOST"),
         upstream_port=int(_required("DOH_UPSTREAM_PORT")),
         listen_port=int(_required("DOH_LISTEN_PORT")),

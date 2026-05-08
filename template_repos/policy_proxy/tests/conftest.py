@@ -56,7 +56,7 @@ def policy_proxy_config() -> config_mod.PolicyProxyConfig:
         auth_base_url="https://auth.ch-sandbox.chsandbox.com",
         jwks_url="https://auth.ch-sandbox.chsandbox.com/.well-known/jwks.json",
         pdp_url="https://devopshero.ai/api/pdp/evaluate",
-        policy_proxy_token="t" * 64,
+        env_bearer_token="t" * 64,
         upstream_host="127.0.0.1",
         upstream_port=8787,
         listen_port=8443,

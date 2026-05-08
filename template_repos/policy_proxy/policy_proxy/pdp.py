@@ -20,7 +20,7 @@ class PdpDecision:
 async def evaluate(
     http_client: httpx.AsyncClient,
     pdp_url: str,
-    policy_proxy_token: str,
+    env_bearer_token: str,
     app_id: str,
     oidc_sub: str,
     username: str,
@@ -30,7 +30,7 @@ async def evaluate(
     try:
         response = await http_client.post(
             pdp_url,
-            headers={"Authorization": f"Bearer {policy_proxy_token}"},
+            headers={"Authorization": f"Bearer {env_bearer_token}"},
             json={
                 "app_id": app_id,
                 "oidc_sub": oidc_sub,

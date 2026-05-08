@@ -1634,20 +1634,21 @@ class Policy(models.Model):
         return self.name
 
 
-class PolicyProxyToken(models.Model):
+class EnvironmentBearerToken(models.Model):
     """
-    Per-environment bearer token used by policy proxies to authenticate calls to
-    the DOH PDP endpoint. One active token per environment; the token itself lives
-    in the customer's AWS Secrets Manager (devopshero/{env-slug}/shared-secrets,
-    key DOH_POLICY_PROXY_TOKEN). Only the hash is stored here so DOH can
-    authenticate incoming PDP requests without ever seeing the raw value after
-    issue.
+    Per-environment bearer token used by components running inside a customer
+    env (policy proxies, Hermes, future env-resident services) to authenticate
+    calls to DOH's control plane. One active token per environment; the raw
+    token lives in the customer's AWS Secrets Manager
+    (devopshero/{env-slug}/shared-secrets, key DOH_ENV_BEARER). Only the hash
+    is stored here so DOH can authenticate incoming control-plane calls
+    without ever seeing the raw value after issue.
     """
     id = models.UUIDField(primary_key=True, default=uuid.uuid7, editable=False)
     environment = models.OneToOneField(
         Environment,
         on_delete=models.CASCADE,
-        related_name="policy_proxy_token",
+        related_name="env_bearer_token",
     )
     token_hash = models.CharField(
         max_length=128,
@@ -1657,7 +1658,7 @@ class PolicyProxyToken(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self) -> str:
-        return f"PolicyProxyToken({self.environment.slug})"
+        return f"EnvironmentBearerToken({self.environment.slug})"
 
 
 class IntegrationConfig(models.Model):
