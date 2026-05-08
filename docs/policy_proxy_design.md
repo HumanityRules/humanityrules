@@ -33,7 +33,7 @@ Three pieces, all living inside the customer's AWS account except the PDP:
 Two secrets are provisioned when an environment is created:
 
 - **Policy-proxy JWT keypair** — RSA or EdDSA. Private half kept by the auth service. Public half served at `https://auth.<env-domain>/.well-known/jwks.json`. Stored in Secrets Manager at `devopshero/{env-slug}/policy-proxy-auth-config` under the `jwt_key` key (alongside `oidc_config`, which carries the Okta app credentials for the same service).
-- **DOH policy-proxy token** — random 64-char bearer token. Stored in the shared-per-env secret `devopshero/{env-slug}/shared-secrets` under key `DOH_POLICY_PROXY_TOKEN`. All policy proxies in the env read it and send it on every PDP call. Rotated by redeploying the env's policy proxies.
+- **Environment bearer token** — random 64-char bearer token. Stored in the shared-per-env secret `devopshero/{env-slug}/shared-secrets` under key `DOH_ENV_BEARER`. Any env-resident component that calls DOH's control plane (policy proxies today; Hermes and other future services) reads it and sends it on every call. Rotated by redeploying the env's policy proxies.
 
 Both are auto-generated at env bootstrap. No manual provisioning.
 
@@ -120,9 +120,9 @@ Request:
 }
 ```
 
-Headers: `Authorization: Bearer <DOH_POLICY_PROXY_TOKEN>`.
+Headers: `Authorization: Bearer <DOH_ENV_BEARER>`.
 
-- The token authenticates the caller as a legitimate policy proxy inside a customer env. Shared per env, since all policy proxies in an env sit inside the same trust boundary.
+- The token authenticates the caller as a legitimate component inside a customer env. Shared per env, since all env-resident components sit inside the same trust boundary.
 - The `app_id` is self-reported by the policy proxy. Inside a trusted env, this is acceptable.
 
 Response:

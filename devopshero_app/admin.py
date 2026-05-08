@@ -28,7 +28,7 @@ from devopshero_app.models import (
     AwsResourceCache,
     AppPermissionRequest,
     Policy,
-    PolicyProxyToken,
+    EnvironmentBearerToken,
     Repository,
     ResourceTag,
     User,
@@ -446,8 +446,8 @@ class AppRemovalJobAdmin(admin.ModelAdmin):
 # =============================================================================
 
 
-@admin.register(PolicyProxyToken)
-class PolicyProxyTokenAdmin(admin.ModelAdmin):
+@admin.register(EnvironmentBearerToken)
+class EnvironmentBearerTokenAdmin(admin.ModelAdmin):
     list_display = ["environment", "token_hash", "created_at"]
     search_fields = ["environment__name", "environment__slug", "token_hash"]
     readonly_fields = ["id", "token_hash", "created_at"]

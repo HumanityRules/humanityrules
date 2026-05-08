@@ -148,7 +148,7 @@ def create_app(cfg: config_mod.PolicyProxyConfig) -> FastAPI:
             decision = await pdp_mod.evaluate(
                 http_client=state.http_client,
                 pdp_url=state.config.pdp_url,
-                policy_proxy_token=state.config.policy_proxy_token,
+                env_bearer_token=state.config.env_bearer_token,
                 app_id=state.config.app_id,
                 oidc_sub=identity.oidc_sub,
                 username=identity.username,

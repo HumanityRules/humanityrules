@@ -21,7 +21,7 @@ async def test_allow_response_parsed() -> None:
         decision = await pdp_mod.evaluate(
             http_client=client,
             pdp_url="https://devopshero.ai/api/pdp/evaluate",
-            policy_proxy_token="token-abc",
+            env_bearer_token="token-abc",
             app_id="vmendi-hermes",
             oidc_sub="okta|v",
             username="vmendi",
@@ -47,7 +47,7 @@ async def test_deny_response_parsed() -> None:
         decision = await pdp_mod.evaluate(
             http_client=client,
             pdp_url="https://devopshero.ai/api/pdp/evaluate",
-            policy_proxy_token="t",
+            env_bearer_token="t",
             app_id="x", oidc_sub="y", username="z", path="/",
         )
     assert decision is not None
@@ -64,7 +64,7 @@ async def test_non_200_returns_none() -> None:
         decision = await pdp_mod.evaluate(
             http_client=client,
             pdp_url="https://devopshero.ai/api/pdp/evaluate",
-            policy_proxy_token="t",
+            env_bearer_token="t",
             app_id="x", oidc_sub="y", username="z", path="/",
         )
     assert decision is None
@@ -80,7 +80,7 @@ async def test_connection_error_returns_none() -> None:
         decision = await pdp_mod.evaluate(
             http_client=client,
             pdp_url="https://devopshero.ai/api/pdp/evaluate",
-            policy_proxy_token="t",
+            env_bearer_token="t",
             app_id="x", oidc_sub="y", username="z", path="/",
         )
     assert decision is None

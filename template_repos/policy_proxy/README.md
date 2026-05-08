@@ -7,7 +7,7 @@ A tiny reverse proxy that sits in front of apps deployed by DevOps Hero and enfo
 1. Reads the `doh_session` cookie.
 2. If missing or invalid, 302s to `https://auth.<env-domain>/start?rd=<current-url>` for the OAuth dance.
 3. Verifies the JWT against the env's public key (fetched from `/.well-known/jwks.json` at startup).
-4. POSTs to DOH's PDP endpoint with `{app_id, oidc_sub, username, path}` and `Authorization: Bearer <DOH_POLICY_PROXY_TOKEN>`.
+4. POSTs to DOH's PDP endpoint with `{app_id, oidc_sub, username, path}` and `Authorization: Bearer <DOH_ENV_BEARER>`.
 5. On `allow`, proxies to the app container on localhost, injecting trusted identity headers.
 6. On `deny`, returns a 403 with a short message.
 
@@ -25,7 +25,7 @@ requests still receive the `302` directly.
 | `DOH_AUTH_BASE_URL` | `https://auth.ch-sandbox.chsandbox.com` | Where to redirect for login. |
 | `DOH_JWKS_URL` | `https://auth.ch-sandbox.chsandbox.com/.well-known/jwks.json` | JWT verification keys. |
 | `DOH_PDP_URL` | `https://devopshero.ai/api/pdp/evaluate` | Central authorization endpoint. |
-| `DOH_POLICY_PROXY_TOKEN` | 64 random chars | Bearer token for the PDP call. From Secrets Manager. |
+| `DOH_ENV_BEARER` | 64 random chars | Environment bearer token. From Secrets Manager. Used by any env component calling the DOH control plane. |
 | `DOH_UPSTREAM_HOST` | `127.0.0.1` | The app container. |
 | `DOH_UPSTREAM_PORT` | `8787` | The app container's port. |
 | `DOH_LISTEN_PORT` | `8443` | Port the policy proxy listens on. ALB routes here. |
