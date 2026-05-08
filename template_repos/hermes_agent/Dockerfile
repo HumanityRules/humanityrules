@@ -20,8 +20,11 @@ RUN apt-get update \
     && rm -rf /tmp/aws /tmp/awscliv2.zip \
     && rm -rf /var/lib/apt/lists/*
 
+COPY --chmod=755 prune-skills.sh /tmp/prune-skills.sh
 RUN git clone --depth 1 --branch v2026.4.30 https://github.com/NousResearch/hermes-agent.git \
         /opt/hermes-defaults/hermes-agent \
+    && /tmp/prune-skills.sh /opt/hermes-defaults/hermes-agent/skills \
+    && rm -f /tmp/prune-skills.sh \
     && rm -rf /opt/hermes-defaults/hermes-agent/.git
 
 COPY --from=sigv4proxy /aws-sigv4-proxy /usr/local/bin/aws-sigv4-proxy
