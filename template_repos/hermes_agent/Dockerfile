@@ -71,13 +71,13 @@ ENV HERMES_WEBUI_STATE_DIR=${HERMES_HOME}/webui-mvp
 ENV HERMES_WEBUI_DEFAULT_WORKSPACE=/workspace
 ENV HERMES_WEBUI_SKIP_ONBOARDING=1
 
-RUN mkdir -p /app /uv_cache "$HERMES_HOME" /workspace \
+RUN mkdir -p /app /uv_cache "$HERMES_HOME" /workspace /home/hermeswebui/.doh/credentials \
     && rsync -a /apptoo/ /app/ \
     && cp -r /opt/hermes-defaults/hermes-agent "$HERMES_WEBUI_AGENT_DIR" \
     && python3 /opt/hermes-defaults/apply-patches.py /tmp/patches-agent "$HERMES_WEBUI_AGENT_DIR" \
     && rm -rf /tmp/patches-agent \
     && cp /opt/hermes-defaults/SOUL.md "$HERMES_HOME/SOUL.md" \
-    && chown -R hermeswebui:hermeswebui /app /uv_cache "$HERMES_HOME" /workspace
+    && chown -R hermeswebui:hermeswebui /app /uv_cache "$HERMES_HOME" /workspace /home/hermeswebui/.doh
 
 USER hermeswebui
 
