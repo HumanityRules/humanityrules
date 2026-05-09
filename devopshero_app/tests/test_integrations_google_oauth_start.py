@@ -19,7 +19,10 @@ VALID_WEB_CONFIG = {
     "client_secret": "csecret",
     "auth_uri": "https://accounts.google.com/o/oauth2/auth",
     "token_uri": "https://oauth2.googleapis.com/token",
-    "redirect_uris": ["https://devopshero.ai/integrations/google/callback"],
+    "redirect_uris": [
+        "http://testserver/integrations/google/callback",
+        "https://devopshero.ai/integrations/google/callback",
+    ],
 }
 
 
@@ -85,7 +88,7 @@ class TestIntegrationsGoogleStart(TestCase):
         params = parse_qs(parsed.query)
         self.assertEqual(params["client_id"], ["cid-123.apps.googleusercontent.com"])
         self.assertEqual(params["response_type"], ["code"])
-        self.assertEqual(params["redirect_uri"], ["https://devopshero.ai/integrations/google/callback"])
+        self.assertEqual(params["redirect_uri"], ["http://testserver/integrations/google/callback"])
         self.assertEqual(params["access_type"], ["offline"])
         self.assertEqual(params["prompt"], ["consent"])
         self.assertIn("https://www.googleapis.com/auth/gmail.readonly", params["scope"][0])
@@ -151,6 +154,42 @@ class TestIntegrationsGoogleStart(TestCase):
         )
         self.assertEqual(response.status_code, 400)
         self.assertIn("setup_google_oauth_client", response.content.decode())
+
+    def test_fails_when_no_redirect_uri_matches_request_host(self) -> None:
+        # OAuth client has registered URIs, but none match this request's host.
+        self.google_config.config = {
+            **self.google_config.config,
+            "redirect_uris": ["https://some-other-host.example.com/integrations/google/callback"],
+        }
+        self.google_config.save()
+
+        response = self.client.get(
+            reverse("integrations_google_oauth_start"),
+            {"rd": "https://hermes.dev.example.com/x"},
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("redirect_uri", response.content.decode())
+
+    def test_picks_matching_redirect_uri_by_request_host(self) -> None:
+        # Multiple URIs registered; picks the one matching the request host.
+        self.google_config.config = {
+            **self.google_config.config,
+            "redirect_uris": [
+                "https://devopshero.ai/integrations/google/callback",
+                "http://testserver/integrations/google/callback",
+                "https://devopshero.ngrok.io/integrations/google/callback",
+            ],
+        }
+        self.google_config.save()
+
+        response = self.client.get(
+            reverse("integrations_google_oauth_start"),
+            {"rd": "https://hermes.dev.example.com/x"},
+        )
+        self.assertEqual(response.status_code, 302)
+        parsed = urlparse(response["Location"])
+        params = parse_qs(parsed.query)
+        self.assertEqual(params["redirect_uri"], ["http://testserver/integrations/google/callback"])
 
     def test_ignores_envs_with_blank_hosted_zone(self) -> None:
         # A second env exists but has no hosted zone — it must not match any rd.

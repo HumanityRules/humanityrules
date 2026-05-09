@@ -709,6 +709,9 @@ HERMES_PERSONAL_TEMPLATE = {
             "configurable_variables": (
                 _HERMES_LLM_VARS + _HERMES_AWS_DEFAULT_REGION_VAR + _HERMES_TAVILY_VAR
             ),
+            # Supervisor process (outside the nono sandbox) refreshes Google
+            # access tokens by POSTing to DOH /api/integrations/google/token.
+            "requires_env_bearer": True,
         },
         {**_HERMES_POLICY_PROXY_CONTAINER},
     ],

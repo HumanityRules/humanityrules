@@ -39,7 +39,8 @@
       "/.within_container",
       "/etc/passwd",
       "/etc/group",
-      "/etc/nsswitch.conf"
+      "/etc/nsswitch.conf",
+      "/home/hermeswebui/.doh/credentials/google_access_token"
     ]
   },
   "network": {

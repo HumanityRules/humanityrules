@@ -1,7 +1,8 @@
 """Tests for the env-bearer overlay in deploy_app.AppStack.
 
 Verifies that containers with `requires_env_bearer=True` receive the
-DOH_ENV_BEARER secret and the DOH_ENV_SLUG / DOH_OWNER_USERNAME plain vars, and
+DOH_ENV_BEARER secret and the DOH_ENV_SLUG / DOH_CONTROL_PLANE_URL /
+DOH_OWNER_USERNAME plain vars, and
 that other containers in the same task do not.
 """
 
@@ -92,6 +93,7 @@ class TestEnvBearerOverlay(SimpleTestCase):
         env = {e["Name"]: e["Value"] for e in hermes.get("Environment", [])}
         self.assertEqual(env.get("DOH_ENV_SLUG"), "staging")
         self.assertEqual(env.get("DOH_OWNER_USERNAME"), "vmendi")
+        self.assertTrue(env.get("DOH_CONTROL_PLANE_URL", "").startswith("https://"))
         secret_names = {s["Name"] for s in hermes.get("Secrets", [])}
         self.assertIn("DOH_ENV_BEARER", secret_names)
 
@@ -143,5 +145,6 @@ class TestEnvBearerOverlay(SimpleTestCase):
         env = {e["Name"]: e["Value"] for e in dind.get("Environment", [])}
         self.assertNotIn("DOH_ENV_SLUG", env)
         self.assertNotIn("DOH_OWNER_USERNAME", env)
+        self.assertNotIn("DOH_CONTROL_PLANE_URL", env)
         secret_names = {s["Name"] for s in dind.get("Secrets", [])}
         self.assertNotIn("DOH_ENV_BEARER", secret_names)
