@@ -5,6 +5,7 @@ FROM ghcr.io/nesquena/hermes-webui:0.50.259
 USER root
 
 ARG NONO_VERSION=0.47.1
+ARG GWS_VERSION=0.22.5
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates curl git haproxy libdbus-1-3 patch unzip \
@@ -16,7 +17,12 @@ RUN apt-get update \
     && curl -fsSL -o /tmp/awscliv2.zip "https://awscli.amazonaws.com/awscli-exe-linux-${aws_arch}.zip" \
     && unzip -q /tmp/awscliv2.zip -d /tmp \
     && /tmp/aws/install --bin-dir /usr/local/bin --install-dir /usr/local/aws-cli \
-    && rm -f /tmp/nono.deb \
+    && gws_tar="google-workspace-cli-${aws_arch}-unknown-linux-gnu.tar.gz" \
+    && curl -fsSL -o /tmp/gws.tar.gz \
+        "https://github.com/googleworkspace/cli/releases/download/v${GWS_VERSION}/${gws_tar}" \
+    && tar -xzf /tmp/gws.tar.gz -C /usr/local/bin \
+    && chmod +x /usr/local/bin/gws \
+    && rm -f /tmp/nono.deb /tmp/gws.tar.gz \
     && rm -rf /tmp/aws /tmp/awscliv2.zip \
     && rm -rf /var/lib/apt/lists/*
 
@@ -26,6 +32,12 @@ RUN git clone --depth 1 --branch v2026.4.30 https://github.com/NousResearch/herm
     && /tmp/prune-skills.sh /opt/hermes-defaults/hermes-agent/skills \
     && rm -f /tmp/prune-skills.sh \
     && rm -rf /opt/hermes-defaults/hermes-agent/.git
+
+# DOH-owned skills. Dropped into the bundled dir so the upstream skill-sync
+# treats them as first-class bundled skills and copies them to $HERMES_HOME.
+# Our `google-workspace` replaces the pruned upstream one and uses
+# platform-managed auth (see template_repos/hermes_agent/skills/google-workspace/).
+COPY skills/google-workspace /opt/hermes-defaults/hermes-agent/skills/productivity/google-workspace
 
 COPY --from=sigv4proxy /aws-sigv4-proxy /usr/local/bin/aws-sigv4-proxy
 COPY SOUL.md /opt/hermes-defaults/SOUL.md

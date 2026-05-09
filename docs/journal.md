@@ -1,5 +1,59 @@
 # DevOpsHero Development Journal
 
+## 2026-05-09 12:36 - [Integrations] Google Workspace skill (fork from upstream) + gws install + naming cleanup
+
+**Conversation:** [2026-05-09-1236-feefa2cf.md](conversations/2026-05-09-1236-feefa2cf.md)
+
+Shipped the sandbox-side consumer of the access-token file: a forked `google-workspace` skill that uses the platform-managed access token via the `gws` CLI. Replaces the upstream Nous skill of the same name. Deploy verified the image builds and runs, but a runtime `PermissionError` surfaced when the agent tried to read the token file — caught at the end of the session, fix is the next thing to do.
+
+**Design call on "is this a new skill or a fork of upstream."** Long back-and-forth on naming: `doh-google`, `google-apps`, `google-suite`, `google-workspace`, `gws`. Landed on **`google-workspace`** — literally the same name as the upstream skill, which means the upstream version gets pruned at image build and ours takes its place invisibly. Reasoning: it's what Google calls the category, it's what agents and users expect to see, and "it hides the platform difference from the LLM" is a doc problem not a name problem. The SKILL.md's opening paragraph makes the platform-managed shape explicit.
+
+**Content scrubbed of comparative language.** User caught that several phrasings implied a prior version the reader may never have seen — "The agent does not run any setup," "There is no `--check`/`--auth-url`/..." and "Do not try to fix the connection from inside the sandbox." Rewrote to describe the skill as native to its own world, not as a delta against upstream. Key principle to remember for forked-docs work: **don't describe the fork in terms of what upstream does differently; describe the current behavior as if it's the only shape that ever existed.** Forks that read as "look what we removed" age into confusion fast.
+
+**Skill location and sync mechanism.** The upstream Hermes WebUI has a `sync_skills` function (`tools/skills_sync.py:176`) that discovers bundled skills in `$HERMES_WEBUI_AGENT_DIR/skills/` and copies them to `$HERMES_HOME/skills/` at runtime. Dropping our fork into the bundled dir at image build time means skill-sync treats it as first-class. Upstream's `google-workspace` is pruned by `prune-skills.sh` (its allowlist entry was removed) before our fork is COPYed in, so there's no collision. A one-line COPY in the Dockerfile is all that's needed; no custom sync logic.
+
+**Fork strategy: full fork, not monkey-patch.** Looked at a minimal-diff shim (import upstream, override `_ensure_authenticated` / `_gws_env`) but it requires keeping upstream scripts on disk alongside ours, which defeats the "clean replacement" goal. User picked full fork. Dropped ~325 lines from the 855-line upstream: the entire Python-google-client fallback path (every `else:` branch after `if _gws_binary():`), `_stored_token_scopes`, `_normalize_authorized_user_payload`, `get_credentials`, `build_service`, all setup.py references. Final forked `google_api.py` is ~530 lines, mostly argument plumbing.
+
+**`gws` install in the Dockerfile.** The official CLI at `googleworkspace/cli`, pinned to `v0.22.5`. Tarball name for Linux: `google-workspace-cli-{x86_64|aarch64}-unknown-linux-gnu.tar.gz`. Verified the tarball layout is flat (`./gws` + LICENSE + CHANGELOG at top level), so `tar -xzf ... -C /usr/local/bin` deposits the binary directly at `/usr/local/bin/gws`. Added to the same RUN block that installs nono + awscli to keep image layers consolidated.
+
+**Nono profile: per-file `read_file` grants.** Two grants added:
+- `/usr/local/bin/gws` — so the sandbox can exec the CLI.
+- `/home/hermeswebui/.doh/credentials/google_access_token` — the only file DOH writes into that directory that the sandbox needs to see.
+
+Chose per-file `read_file` over a folder-level `read` on `/home/hermeswebui/.doh/credentials/`. The posture discussed earlier: "new credential files appearing should be an explicit profile edit, not something the sandbox silently gets." One-line cost per provider.
+
+**Allow-listed Google API domains.** The default nono network profile blocks unknown hosts. `gws` talks to a handful of Google API subdomains; enumerated them explicitly (`*.googleapis.com` wildcards don't appear to be supported by nono's `allow_domain`, only by `upstream_bypass`): `www`, `gmail`, `calendar-json`, `drive`, `docs`, `sheets`, `people`. Conservative enumeration; we can widen later if `gws` hits a new host we didn't anticipate.
+
+**First deploy failed twice.** First failure was the existing latent bug: `env_obj` was defined only inside the `if env_bearer_needed:` branch in `deploy_app.py`, and the (stale) seeded template had `requires_env_bearer=None` on its containers so the branch didn't run, and the policy-proxy branch below hit a NameError. Fixed by hoisting `env_obj` out of the conditional (it's cheap, always needed for any policy-proxy deploy). Second issue was the seeded template itself being stale — `seed_app_templates` is idempotent but had to be re-run for the new `requires_env_bearer: True` to propagate. Good reminder: **every deploy-path code change that touches the `*_CONTAINER` dicts in seed_app_templates.py needs a re-seed** to land in the DB.
+
+**Second deploy succeeded. Third attempt (the first with the skill) failed with "No space left on device" during `uv pip install`.** Docker Desktop's VM was full — `docker buildx prune -f` + `docker system prune -f --volumes` reclaimed 23.5GB and the next build went through.
+
+**Runtime verification via `doh_app_exec`:** the token file exists in the deployed container at `/home/hermeswebui/.doh/credentials/google_access_token`, 253 bytes, content starts with `ya29.a0AQvPyIN...`, owned by `hermeswebui:hermeswebui` with permissions `-rw-r--r--`. The refresher wrote it fresh at task startup. Proof that the whole pipeline (env-bearer overlay → supervisor launch → refresher → DOH POST via ngrok → file write) works end-to-end.
+
+**Layer-2 bootstrapping for local testing.** Created `doh_seed_env_bearer` management command that mints an `EnvironmentBearerToken` row with a *chosen* raw value (inverse of the prod path which generates randomly). User manually copied that chosen token into `devopshero/default/shared-secrets` in Humanity Rules Sandbox's Secrets Manager to keep local DB hash and customer SM value in sync. After a real deploy, `ensure_env_bearer_token_exists` rotates the value again — the seed command stays useful for future Layer-2 smoke runs.
+
+**Redirect-URI selection: host-aware now.** Was hardcoding `web["redirect_uris"][0]`, which meant whichever URI landed at index 0 in the stored JSON was sent to Google. User flagged this: what if both `devopshero.ngrok.io` and `devopshero.ai` are registered? Added `_pick_redirect_uri(request, configured)` that matches by `request.get_host()` exactly, fails closed if nothing matches. Both the start view and the token-exchange step in the callback use it; correctness requirement: token exchange has to send the byte-identical URI that authorize sent (Google rejects mismatches with `invalid_grant`). Since the callback host == start host (Google redirects to whatever `redirect_uri` we sent), recomputing from `request.get_host()` works on both sides. Two new tests added: mismatch → 400, multi-URI list → picks by host. Also exposed a real gap in how we stored `redirect_uris`: Google only lets you download the client JSON at creation time — later edits to the registered URIs in Google Cloud Console don't update the file. Fixed by editing the stored `IntegrationConfig.config["redirect_uris"]` directly in the local DB via a shell snippet.
+
+**gws env-var contract, re-confirmed.** `GOOGLE_WORKSPACE_CLI_TOKEN` takes a bare access-token string (priority 1 in gws's auth table). `GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE` expects the full OAuth payload (priority 2). We use the former deliberately: passing our file to `CREDENTIALS_FILE` would fail because our file is bare-token-only — and if gws *did* accept a bare-token file, we'd still reject the approach because it reintroduces the failure mode of "sandbox has credentials that can refresh themselves." The skill's `google_api.py` reads the token file in-Python, sets the env var on the `gws` subprocess, and execs.
+
+**Runtime `PermissionError` at the end.** Agent inside the sandbox ran `ls /home/hermeswebui/.doh/credentials/` and got `Permission denied`, even though the token file itself has 644 permissions. The `read_file` grant makes the file readable, but the *parent directory* (`.doh/credentials/`) isn't traversable by the sandboxed process, so Python can't even `open()` the file. Fix is one or both of:
+- Add a `filesystem.read` grant for the parent dir (directory-level, traversable).
+- Add a `read_file` entry for each step along the path (`/home/hermeswebui/.doh`, `/home/hermeswebui/.doh/credentials`) — except nono's `read_file` is for *files*, not directories.
+
+Nono docs need a second look to confirm which grant type actually allows directory traversal without listing contents. This is the first thing to do in the next session — a one-line profile fix and a redeploy should resolve it.
+
+**Key points:**
+
+- **Skill fork named identically to upstream, pruned at build time.** No agent-side disambiguation; the skill the agent sees is just `google-workspace`. The fork nature is an engineering detail behind the curtain.
+- **Don't describe a fork in terms of what it removed.** Every mention of upstream behavior in SKILL.md ages into confusion when readers haven't seen upstream. Describe the current shape as self-contained.
+- **Skill-sync sees bundled skills at image build time.** Drop our fork into `$HERMES_WEBUI_AGENT_DIR/skills/` and upstream's sync picks it up at runtime. No custom code path.
+- **`filesystem.read_file` grants files but not directory traversal.** The `.doh/credentials/` parent needs its own grant. Worth documenting in the nono profile style guide.
+- **Seed templates on DB-carrying config changes.** `seed_app_templates.py` is idempotent but not automatic — any change to a `*_CONTAINER` dict that's supposed to affect new deploys needs a re-seed before the change propagates.
+- **Host-aware redirect_uri selection is mandatory once there's more than one URI registered.** Blind `redirect_uris[0]` was fine when there was only prod; it becomes a footgun the moment you add ngrok.
+- **gws tarball layout matters.** Cleanly flat (`./gws` at top), so `tar -xzf -C /usr/local/bin` just works. If it had been in a subdirectory we'd have needed `--strip-components`.
+- **ngrok is load-bearing for localhost-control-plane deploys.** `DEBUG=True` makes `_resolve_control_plane_url()` return `https://devopshero.ngrok.io`; the deployed container's refresher calls that URL, which forwards to the laptop's Django at `:8000`. Without this, real deploy + local control plane isn't reachable.
+- **Docker Desktop's VM disk fills up silently.** `buildx prune -f` + `system prune -f --volumes` is a good habit to establish for anyone doing heavy local builds of this image. Reclaimed 23.5GB.
+
 ## 2026-05-09 11:09 - [Integrations] Google Workspace step 2 — outside-sandbox refresher, end-to-end
 
 **Conversation:** [2026-05-09-1109-feefa2cf.md](conversations/2026-05-09-1109-feefa2cf.md)

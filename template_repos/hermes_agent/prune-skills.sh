@@ -36,7 +36,6 @@ mcp/native-mcp
 media/gif-search
 media/youtube-content
 note-taking/obsidian
-productivity/google-workspace
 productivity/linear
 productivity/maps
 productivity/nano-pdf
