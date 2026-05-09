@@ -31,7 +31,8 @@
     ],
     "read": [
       "/app",
-      "/usr/local/aws-cli"
+      "/usr/local/aws-cli",
+      "/home/hermeswebui/.doh/credentials"
     ],
     "read_file": [
       "/webui.sh",
@@ -40,8 +41,7 @@
       "/.within_container",
       "/etc/passwd",
       "/etc/group",
-      "/etc/nsswitch.conf",
-      "/home/hermeswebui/.doh/credentials/google_access_token"
+      "/etc/nsswitch.conf"
     ]
   },
   "network": {
