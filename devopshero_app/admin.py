@@ -32,6 +32,7 @@ from devopshero_app.models import (
     Repository,
     ResourceTag,
     User,
+    UserThirdPartyIntegration,
     WaitlistSignup,
     Workspace,
 )
@@ -460,3 +461,12 @@ class IntegrationConfigAdmin(admin.ModelAdmin):
     list_filter = ["provider"]
     search_fields = ["provider"]
     readonly_fields = ["id", "created_at", "updated_at"]
+
+
+@admin.register(UserThirdPartyIntegration)
+class UserThirdPartyIntegrationAdmin(admin.ModelAdmin):
+    list_display = ["user", "environment", "provider", "granted_at", "last_refreshed_at"]
+    list_filter = ["provider", "environment"]
+    search_fields = ["user__email", "user__username", "environment__name", "environment__slug", "scope"]
+    readonly_fields = ["id", "refresh_token", "granted_at", "last_refreshed_at"]
+    autocomplete_fields = ["user", "environment"]
