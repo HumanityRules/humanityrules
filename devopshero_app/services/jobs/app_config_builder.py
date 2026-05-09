@@ -7,7 +7,7 @@ into an appconfig.AppConfig suitable for CDK deployment.
 
 from pathlib import Path
 
-from devopshero_app.models import AppTemplate, Datastore, DeploymentBlueprint
+from devopshero_app.models import App, AppTemplate, Datastore, DeploymentBlueprint, ResourceTag
 from devopshero_app.services import infra_customer
 from devopshero_app.services.app_templates import template_deploy_service
 from devopshero_app.services.infra_customer.appconfig import (
@@ -150,6 +150,7 @@ def _build_container_config(
         command=list(command) if command else None,
         essential=bool(template_container.get("essential", True)),
         stop_timeout=template_container.get("stop_timeout") or None,
+        requires_env_bearer=bool(template_container.get("requires_env_bearer", False)),
     )
 
     if image_source == ImageSource.DOCKERFILE:
@@ -247,6 +248,8 @@ def build_app_config_from_blueprint(blueprint: DeploymentBlueprint, repo_path: P
 
     app_secrets_union = _union_app_secrets(containers)
 
+    owner_username = _owner_username_for_app(app=app)
+
     return AppConfig(
         app_name=app.slug,
         cpu=blueprint.cpu,
@@ -259,4 +262,19 @@ def build_app_config_from_blueprint(blueprint: DeploymentBlueprint, repo_path: P
         app_secrets=app_secrets_union or None,
         efs_config=efs_config,
         platform_capabilities=list(template.platform_capabilities or []),
+        owner_username=owner_username,
     )
+
+
+def _owner_username_for_app(app: App) -> str | None:
+    """Return the `owner` ResourceTag value for *app*, or None if the app has no owner tag.
+
+    The owner tag is set by the Personal Assistant deploy flow (see
+    docs/policy_proxy_design.md). It's the identity DOH injects into env-bearer
+    containers as DOH_OWNER_USERNAME so they can speak to the DOH control plane on
+    behalf of this user.
+    """
+    row = ResourceTag.objects.filter(
+        resource_type="app", app=app, key="owner",
+    ).first()
+    return row.value if row is not None else None

@@ -59,11 +59,11 @@ How a Hermes Personal Assistant user connects their Google account (Gmail, Calen
 
 ### The `/integrations/google/callback` view (DOH side)
 
-- Looks up the stashed payload by `state` (recovers `env_slug`, `username`, `rd`).
+- Looks up the stashed payload by `state` (recovers `env_slug`, `owner_username`, `rd`).
 - Exchanges the code with Google server-to-server (DOH's client secret).
-- Assumes the customer's provisioning role and writes tokens into customer Secrets Manager at `devopshero/{env-slug}/users/{username}` — one secret per user, JSON body is `{provider: tokens, ...}`. Writing Google replaces only the `google` key; other providers already in the secret are preserved. Same cross-account path style as `devopshero/{env-slug}/policy-proxy-auth-config` and `shared-secrets`.
+- Upserts a `UserThirdPartyIntegration` row in DOH's DB keyed by `(user, environment, provider="google")` with `refresh_token`, `scope`, and `granted_at`. **No credentials cross into the customer env** — refresh happens later via a DOH endpoint (`POST /api/integrations/google/token`) that env-resident callers hit with the env bearer. This is the option-3 posture: DOH is the sole custodian of refresh tokens, the blast radius for a compromised customer env is zero Google access.
 - 302s back to `rd`. Hermes Connections page shows Connected.
-- Tokens transit DOH process memory for the ~100ms of token exchange. Not logged, not persisted on DOH. Documented in the audit story.
+- Plaintext at rest (matches existing posture for `Organization.oidc_client_secret` and `IntegrationConfig.config`). Encryption-at-rest is a cross-cutting concern, not a per-column decision.
 
 ### Required patches to existing DOH code
 

@@ -27,13 +27,17 @@ from .settings import (
     settings_organization,
     settings_billing,
 )
-from .integrations import (
+from .integrations.integrations_page import (
     integrations_root,
     integrations_aws_accounts,
     integrations_aws_accounts_add,
     integrations_git_integrations,
 )
-from .integrations_google import integrations_google_start, integrations_google_callback
+from .integrations.google_oauth import (
+    integrations_google_oauth_start,
+    integrations_google_oauth_callback,
+)
+from .integrations.google_token_refresh import integrations_google_token_refresh
 from .partials import random_quote, switch_organization
 from .auth import auth_login, auth_callback, auth_logout, oidc_login, oidc_callback, dev_login
 from .onboarding import onboarding
@@ -140,8 +144,9 @@ __all__ = [
     "integrations_aws_accounts",
     "integrations_aws_accounts_add",
     "integrations_git_integrations",
-    "integrations_google_start",
-    "integrations_google_callback",
+    "integrations_google_oauth_start",
+    "integrations_google_oauth_callback",
+    "integrations_google_token_refresh",
     "random_quote",
     "switch_organization",
     "auth_login",

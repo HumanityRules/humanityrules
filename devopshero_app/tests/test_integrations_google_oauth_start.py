@@ -62,7 +62,7 @@ class TestIntegrationsGoogleStart(TestCase):
     def test_login_required_when_unauthenticated(self) -> None:
         self.client.logout()
         response = self.client.get(
-            reverse("integrations_google_start"),
+            reverse("integrations_google_oauth_start"),
             {"rd": "https://hermes.dev.example.com/x"},
         )
         self.assertEqual(response.status_code, 302)
@@ -72,7 +72,7 @@ class TestIntegrationsGoogleStart(TestCase):
 
     def test_redirects_to_google_with_expected_params(self) -> None:
         response = self.client.get(
-            reverse("integrations_google_start"),
+            reverse("integrations_google_oauth_start"),
             {"rd": "https://hermes.dev.example.com/settings/connections"},
         )
         self.assertEqual(response.status_code, 302)
@@ -93,7 +93,7 @@ class TestIntegrationsGoogleStart(TestCase):
 
     def test_stashes_state_and_payload_in_session(self) -> None:
         response = self.client.get(
-            reverse("integrations_google_start"),
+            reverse("integrations_google_oauth_start"),
             {"rd": "https://hermes.dev.example.com/x"},
         )
         parsed = urlparse(response["Location"])
@@ -104,12 +104,12 @@ class TestIntegrationsGoogleStart(TestCase):
         payload = session["google_oauth_payload"]
         self.assertEqual(payload["rd"], "https://hermes.dev.example.com/x")
         self.assertEqual(payload["env_slug"], "staging")
-        self.assertEqual(payload["username"], "vmendi")
+        self.assertEqual(payload["owner_username"], "vmendi")
 
     def test_exact_zone_host_matches(self) -> None:
         # rd host == env zone (no subdomain) should still match.
         response = self.client.get(
-            reverse("integrations_google_start"),
+            reverse("integrations_google_oauth_start"),
             {"rd": "https://dev.example.com/x"},
         )
         self.assertEqual(response.status_code, 302)
@@ -117,7 +117,7 @@ class TestIntegrationsGoogleStart(TestCase):
 
     def test_rejects_rd_with_unknown_host(self) -> None:
         response = self.client.get(
-            reverse("integrations_google_start"),
+            reverse("integrations_google_oauth_start"),
             {"rd": "https://hermes.other-domain.com/x"},
         )
         self.assertEqual(response.status_code, 400)
@@ -127,26 +127,26 @@ class TestIntegrationsGoogleStart(TestCase):
         # "evil-dev.example.com" ends with the zone string "dev.example.com"
         # but is not a subdomain — must be rejected.
         response = self.client.get(
-            reverse("integrations_google_start"),
+            reverse("integrations_google_oauth_start"),
             {"rd": "https://evil-dev.example.com/x"},
         )
         self.assertEqual(response.status_code, 400)
 
     def test_rejects_non_http_scheme(self) -> None:
         response = self.client.get(
-            reverse("integrations_google_start"),
+            reverse("integrations_google_oauth_start"),
             {"rd": "javascript:alert(1)"},
         )
         self.assertEqual(response.status_code, 400)
 
     def test_rejects_missing_rd(self) -> None:
-        response = self.client.get(reverse("integrations_google_start"))
+        response = self.client.get(reverse("integrations_google_oauth_start"))
         self.assertEqual(response.status_code, 400)
 
     def test_errors_when_google_integration_not_configured(self) -> None:
         self.google_config.delete()
         response = self.client.get(
-            reverse("integrations_google_start"),
+            reverse("integrations_google_oauth_start"),
             {"rd": "https://hermes.dev.example.com/x"},
         )
         self.assertEqual(response.status_code, 400)
@@ -162,7 +162,7 @@ class TestIntegrationsGoogleStart(TestCase):
             shared_alb_hosted_zone="",
         )
         response = self.client.get(
-            reverse("integrations_google_start"),
+            reverse("integrations_google_oauth_start"),
             {"rd": "https://anything.com/x"},
         )
         self.assertEqual(response.status_code, 400)

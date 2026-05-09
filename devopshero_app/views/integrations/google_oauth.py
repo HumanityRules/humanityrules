@@ -1,25 +1,24 @@
-"""Google Workspace OAuth start view.
+"""Google Workspace OAuth start + callback views.
 
-Step 1c of the Google Workspace integration (see
-`docs/google_workspace_integration_design.md`). The authenticated DOH user lands
-here carrying `?rd=<URL>` pointing at the Hermes WebUI in a customer env. We
-validate `rd` against known env domains, stash state, and kick the browser off
-to Google's consent screen.
+See `docs/google_workspace_integration_design.md`. The authenticated DOH user
+starts at `/integrations/google/start?rd=<URL>` (where `rd` points at the
+Hermes WebUI in a customer env), consents at Google, and lands back at
+`/integrations/google/callback`. The callback persists the refresh_token in
+DOH's DB as a UserThirdPartyIntegration row; no long-lived Google credentials
+cross into the customer env.
 """
 
-import json
 import logging
 import secrets
-import time
 from urllib.parse import urlencode, urlparse
 
 import httpx
 from django.contrib.auth.decorators import login_required
 from django.http import HttpRequest, HttpResponse, HttpResponseBadRequest
 from django.shortcuts import redirect
+from django.utils import timezone
 
-from devopshero_app.models import Environment, IntegrationConfig
-from devopshero_app.services.infra_customer import iam_utils, secrets_utils
+from devopshero_app.models import Environment, IntegrationConfig, UserThirdPartyIntegration
 
 logger = logging.getLogger(__name__)
 
@@ -52,7 +51,7 @@ def _resolve_env_by_rd(rd: str) -> Environment | None:
 
 
 @login_required
-def integrations_google_start(request: HttpRequest) -> HttpResponse:
+def integrations_google_oauth_start(request: HttpRequest) -> HttpResponse:
     """Validate `rd`, stash state, redirect to Google's OAuth consent screen."""
     rd = request.GET.get("rd", "")
     env = _resolve_env_by_rd(rd=rd)
@@ -72,7 +71,7 @@ def integrations_google_start(request: HttpRequest) -> HttpResponse:
     request.session["google_oauth_payload"] = {
         "rd": rd,
         "env_slug": env.slug,
-        "username": request.user.username,
+        "owner_username": request.user.username,
     }
 
     web = google_cfg.config
@@ -115,8 +114,8 @@ def _append_query(url: str, extra: dict[str, str]) -> str:
 
 
 @login_required
-def integrations_google_callback(request: HttpRequest) -> HttpResponse:
-    """Exchange Google's auth code, write tokens to customer Secrets Manager, 302 back to `rd`."""
+def integrations_google_oauth_callback(request: HttpRequest) -> HttpResponse:
+    """Exchange Google's auth code, persist refresh_token on DOH, 302 back to `rd`."""
     if request.GET.get("error"):
         logger.error("google oauth callback error=%s", request.GET.get("error"))
         return HttpResponseBadRequest(f"Google OAuth error: {request.GET['error']}")
@@ -133,16 +132,16 @@ def integrations_google_callback(request: HttpRequest) -> HttpResponse:
 
     rd = payload.get("rd", "")
     env_slug = payload.get("env_slug", "")
-    username = payload.get("username", "")
-    if not rd or not env_slug or not username:
+    owner_username = payload.get("owner_username", "")
+    if not rd or not env_slug or not owner_username:
         return HttpResponseBadRequest("Corrupt session payload")
 
     # Defense in depth: the authenticated user must own the session payload.
-    # Prevents a cross-user race from writing tokens under the wrong key.
-    if username != request.user.username:
+    # Prevents a cross-user race from writing the row under the wrong owner.
+    if owner_username != request.user.username:
         logger.error(
             "google callback user mismatch session_user=%s request_user=%s",
-            username, request.user.username,
+            owner_username, request.user.username,
         )
         return HttpResponseBadRequest("User mismatch")
 
@@ -153,7 +152,7 @@ def integrations_google_callback(request: HttpRequest) -> HttpResponse:
         return HttpResponseBadRequest("Google integration not configured")
 
     try:
-        env = Environment.objects.select_related("aws_account").get(slug=env_slug)
+        env = Environment.objects.get(slug=env_slug)
     except Environment.DoesNotExist:
         logger.error("google callback failed: env_slug=%s not found", env_slug)
         return HttpResponseBadRequest("Environment not found")
@@ -164,29 +163,35 @@ def integrations_google_callback(request: HttpRequest) -> HttpResponse:
         logger.error("google token exchange failed: %s", exc)
         return HttpResponseBadRequest("Google token exchange failed")
 
-    token_record = {
-        "access_token": token_response["access_token"],
-        "refresh_token": token_response.get("refresh_token", ""),
-        "scope": token_response.get("scope", ""),
-        "token_type": token_response.get("token_type", "Bearer"),
-        "expires_at": int(time.time()) + int(token_response.get("expires_in", 0)),
-        "granted_at": int(time.time()),
-    }
+    # Google issues a new refresh_token only on the first consent with
+    # `prompt=consent` (or when previously revoked); subsequent grants may
+    # omit it. Reject when absent — without a refresh_token we can't serve
+    # access tokens to env-resident callers.
+    refresh_token = token_response.get("refresh_token", "")
+    if not refresh_token:
+        logger.error(
+            "google token exchange returned no refresh_token env=%s user=%s",
+            env_slug, owner_username,
+        )
+        return HttpResponseBadRequest(
+            "Google did not return a refresh_token. Revoke the app at "
+            "myaccount.google.com and reconnect."
+        )
 
-    aws_session = iam_utils.get_assumed_role_session(
-        access_key=None,
-        secret_key=None,
-        account_id=env.aws_account.aws_account_id,
-        external_id=str(env.aws_account.external_id),
-        region=env.aws_region,
+    UserThirdPartyIntegration.objects.update_or_create(
+        user=request.user,
+        environment=env,
+        provider=UserThirdPartyIntegration.Provider.GOOGLE,
+        defaults={
+            "refresh_token": refresh_token,
+            "scope": token_response.get("scope", ""),
+            "granted_at": timezone.now(),
+            "last_refreshed_at": None,
+        },
     )
-    secrets_utils.write_integration_tokens(
-        session=aws_session,
-        env_slug=env_slug,
-        provider="google",
-        username=username,
-        tokens=token_record,
+    logger.info(
+        "google integration stored env=%s owner=%s",
+        env_slug, owner_username,
     )
-    logger.info("google tokens stored env=%s user=%s", env_slug, username)
 
     return redirect(_append_query(rd, {"connected": "google"}))

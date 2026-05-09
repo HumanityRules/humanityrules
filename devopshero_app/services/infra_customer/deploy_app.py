@@ -528,7 +528,7 @@ class AppStack(Stack):
         database_connection_secret: secretsmanager.ISecret | None,
         shared_alb_hosted_zone: str | None,
         shared_hosted_zone_id: str | None,
-        policy_proxy_shared_secrets_arn: str | None,
+        env_bearer_shared_secrets_arn: str | None,
         auth_base_url: str | None,
         **kwargs,
     ) -> None:
@@ -541,16 +541,25 @@ class AppStack(Stack):
                 f"ALB attachment requires one container in the list to be marked as the target."
             )
 
+        # Every container with requires_env_bearer needs the env's shared-secrets
+        # ARN (to mount DOH_ENV_BEARER via ECS secret injection). The policy
+        # proxy needs it too, and additionally requires auth_base_url + upstream
+        # wiring. Validate both preconditions before building resources.
+        if app_config.needs_env_bearer() and not env_bearer_shared_secrets_arn:
+            raise RuntimeError(
+                "App declares requires_env_bearer but env_bearer_shared_secrets_arn "
+                "is missing — did the orchestration skip ensure_env_bearer_token_exists?",
+            )
+
         # Policy proxy (SSO + ABAC) is opt-in: a template declares a container
         # with image_source=POLICY_PROXY and points alb_target_container at
         # it. No separate flag — presence of the container drives everything.
         policy_proxy = app_config.policy_proxy_container()
         if policy_proxy is not None:
-            if not (policy_proxy_shared_secrets_arn and auth_base_url):
+            if not auth_base_url:
                 raise RuntimeError(
-                    "Policy-proxy deploy requires policy_proxy_shared_secrets_arn and "
-                    "auth_base_url. One or more were missing — did the orchestration "
-                    "skip ensure_env_policy_proxy_secrets_exist?",
+                    "Policy-proxy deploy requires auth_base_url. Missing — did the "
+                    "orchestration skip ensure_env_policy_proxy_secrets_exist?",
                 )
             if not policy_proxy.upstream_container:
                 raise RuntimeError(
@@ -598,12 +607,12 @@ class AppStack(Stack):
                 actions=["secretsmanager:GetSecretValue"],
                 resources=[database_connection_secret.secret_arn],
             ))
-        if policy_proxy is not None:
-            # The policy-proxy container reads DOH_ENV_BEARER from the
-            # env's shared-secrets entry via ECS secret injection.
+        if app_config.needs_env_bearer():
+            # Any container with requires_env_bearer reads DOH_ENV_BEARER
+            # from the env's shared-secrets entry via ECS secret injection.
             task_role.add_to_policy(iam.PolicyStatement(
                 actions=["secretsmanager:GetSecretValue"],
-                resources=[policy_proxy_shared_secrets_arn],
+                resources=[env_bearer_shared_secrets_arn],
             ))
         if _uses_bedrock_runtime(app_config):
             task_role.add_to_policy(iam.PolicyStatement(
@@ -712,18 +721,36 @@ class AppStack(Stack):
                 ),
             )
 
-        # Platform-injected env + secrets for the policy-proxy container, if any.
-        # Computed once here so the main container loop stays uniform.
+        # Two platform overlays, computed once so the main container loop stays uniform:
+        #
+        # 1. Env-bearer overlay — applied to every container with c.requires_env_bearer=True.
+        #    Provides DOH_ENV_BEARER (from shared-secrets), DOH_ENV_SLUG, and
+        #    DOH_OWNER_USERNAME when the app has an owner tag. Any env-resident
+        #    component that calls DOH's control plane gets this.
+        # 2. Policy-proxy-specific overlay — applied only to the policy-proxy
+        #    container. Carries JWT verification URL, upstream wiring, etc.
+        env_bearer_environment_overlay: dict[str, str] = {}
+        env_bearer_secret_overlay: dict[str, ecs.Secret] = {}
+        if app_config.needs_env_bearer():
+            env_bearer_shared_secret = secretsmanager.Secret.from_secret_complete_arn(
+                self, "EnvBearerSharedSecret", env_bearer_shared_secrets_arn,
+            )
+            env_bearer_environment_overlay = {
+                "DOH_ENV_SLUG": env_slug,
+            }
+            if app_config.owner_username:
+                env_bearer_environment_overlay["DOH_OWNER_USERNAME"] = app_config.owner_username
+            env_bearer_secret_overlay = {
+                "DOH_ENV_BEARER": ecs.Secret.from_secrets_manager(
+                    env_bearer_shared_secret, field="DOH_ENV_BEARER",
+                ),
+            }
+
         policy_proxy_environment_overlay: dict[str, str] = {}
-        policy_proxy_secret_overlay: dict[str, ecs.Secret] = {}
         if policy_proxy is not None:
             assert upstream is not None  # enforced above
-            policy_proxy_shared_secret = secretsmanager.Secret.from_secret_complete_arn(
-                self, "PolicyProxySharedSecret", policy_proxy_shared_secrets_arn,
-            )
             policy_proxy_environment_overlay = {
                 "DOH_APP_ID": app_config.app_name,
-                "DOH_ENV_SLUG": env_slug,
                 "DOH_ENV_DOMAIN": shared_alb_hosted_zone or "",
                 "DOH_AUTH_BASE_URL": auth_base_url,
                 "DOH_JWKS_URL": f"{auth_base_url.rstrip('/')}/.well-known/jwks.json",
@@ -731,11 +758,6 @@ class AppStack(Stack):
                 "DOH_UPSTREAM_HOST": "127.0.0.1",
                 "DOH_UPSTREAM_PORT": str(upstream.container_port),
                 "DOH_LISTEN_PORT": str(policy_proxy.container_port),
-            }
-            policy_proxy_secret_overlay = {
-                "DOH_ENV_BEARER": ecs.Secret.from_secrets_manager(
-                    policy_proxy_shared_secret, field="DOH_ENV_BEARER",
-                ),
             }
 
         # Add each configured container to the task definition.
@@ -750,22 +772,25 @@ class AppStack(Stack):
             )
 
             # Environment: per-container list of {name, value}, plus the
-            # platform overlay when this is the policy-proxy container.
+            # env-bearer overlay for every container that opts in, plus the
+            # policy-proxy-specific overlay on the policy-proxy container.
             environment = {e["name"]: e["value"] for e in c.environment_variables}
+            if c.requires_env_bearer:
+                environment.update(env_bearer_environment_overlay)
             if c.image_source == appconfig.ImageSource.POLICY_PROXY:
                 environment.update(policy_proxy_environment_overlay)
 
             # Secrets: the container's declared fields from the shared app_secrets bag,
             # plus database_connection_secret pieces on the ALB-target container only,
-            # plus the policy-proxy token overlay when this is the policy-proxy container.
+            # plus DOH_ENV_BEARER on any container that opts in.
             secrets: dict[str, ecs.Secret] = {}
             if app_secret_resource is not None and c.app_secrets:
                 for field_name in c.app_secrets:
                     secrets[field_name] = ecs.Secret.from_secrets_manager(app_secret_resource, field=field_name)
             if c.name == alb_target.name:
                 secrets.update(alb_target_database_secrets)
-            if c.image_source == appconfig.ImageSource.POLICY_PROXY:
-                secrets.update(policy_proxy_secret_overlay)
+            if c.requires_env_bearer:
+                secrets.update(env_bearer_secret_overlay)
 
             health_check = None
             if c.health_check_command:
@@ -1118,11 +1143,25 @@ def deploy(
         else:
             logger.error("Could not find hosted zone ID for '%(hosted_zone)s', DNS record will not be created", {"hosted_zone": shared_alb_hosted_zone})
 
-    # Policy-proxy prerequisites: per-env secrets + ECR repo + image push + auth
-    # Lambda. All idempotent, safe to run on every policy-proxy deploy. The
-    # first policy-proxy deploy in an env does the heavy lift; subsequent
-    # deploys are fast because the secrets, stacks, and image already exist.
+    # Env-bearer prerequisite: shared-secrets entry + EnvironmentBearerToken row.
+    # Any container in the app that opts into the DOH control-plane bearer
+    # needs this. Idempotent; reused across apps sharing the env.
     policy_proxy_needed = app_config.policy_proxy_container() is not None
+    env_bearer_needed = app_config.needs_env_bearer()
+    env_bearer_shared_secrets_arn: str | None = None
+    if env_bearer_needed:
+        from devopshero_app.models import Environment
+        env_obj = Environment.objects.get(slug=env_slug)
+        logger.info("Ensuring per-env bearer token exists")
+        env_bearer_shared_secrets_arn = secrets_utils.ensure_env_bearer_token_exists(
+            session=session, env=env_obj,
+        )
+
+    # Policy-proxy prerequisites: additionally, the per-env auth-config secret +
+    # ECR repo + image push + auth Lambda. All idempotent, safe to run on every
+    # policy-proxy deploy. The first policy-proxy deploy in an env does the
+    # heavy lift; subsequent deploys are fast because the secrets, stacks, and
+    # image already exist.
     policy_proxy_secret_arns: dict[str, str] = {}
     policy_proxy_auth_base_url: str | None = None
     if policy_proxy_needed:
@@ -1132,8 +1171,6 @@ def deploy(
             return DeployResult(success=False, error=msg, service_url="", alb_dns="")
 
         logger.info("Ensuring per-env policy-proxy infrastructure exists")
-        from devopshero_app.models import Environment
-        env_obj = Environment.objects.get(slug=env_slug)
         policy_proxy_secret_arns = secrets_utils.ensure_env_policy_proxy_secrets_exist(
             session=session, env=env_obj,
         )
@@ -1205,7 +1242,7 @@ def deploy(
         database_connection_secret=aurora_connection_secret,
         shared_alb_hosted_zone=shared_alb_hosted_zone,
         shared_hosted_zone_id=shared_hosted_zone_id,
-        policy_proxy_shared_secrets_arn=policy_proxy_secret_arns.get("shared_secrets_arn") if policy_proxy_needed else None,
+        env_bearer_shared_secrets_arn=env_bearer_shared_secrets_arn,
         auth_base_url=policy_proxy_auth_base_url,
     )
     app_stack.add_dependency(ecr_stack)

@@ -7,8 +7,6 @@ token identifies the Environment; the environment's organization then scopes
 the ABAC lookup.
 """
 
-import hashlib
-import hmac
 import json
 import logging
 
@@ -16,48 +14,22 @@ from django.http import HttpRequest, JsonResponse
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_POST
 
-from ..models import App, DeploymentBlueprint, EnvironmentBearerToken, User
+from ..models import App, DeploymentBlueprint, User
 from ..services import abac
+from . import env_bearer_auth
 
 logger = logging.getLogger(__name__)
-
-
-def _hash_token(raw: str) -> str:
-    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
-
-
-def _extract_bearer_token(request: HttpRequest) -> str | None:
-    header = request.headers.get("Authorization", "")
-    if not header.startswith("Bearer "):
-        return None
-    return header[len("Bearer "):].strip() or None
-
-
-def _resolve_env_from_token(raw_token: str):
-    """Return the Environment matching *raw_token*, or None."""
-    token_hash = _hash_token(raw_token)
-    # Constant-time comparison across all rows: fetch hash-matching row by index,
-    # then compare digests with hmac.compare_digest to guard against any timing
-    # signal in the equality test.
-    row = EnvironmentBearerToken.objects.select_related(
-        "environment", "environment__aws_account__organization",
-    ).filter(token_hash=token_hash).first()
-    if row is None:
-        return None
-    if not hmac.compare_digest(row.token_hash, token_hash):
-        return None
-    return row.environment
 
 
 @csrf_exempt
 @require_POST
 def pdp_evaluate(request: HttpRequest) -> JsonResponse:
     """Evaluate a single (identity, app, path) decision. Returns {decision, reason}."""
-    raw_token = _extract_bearer_token(request)
+    raw_token = env_bearer_auth.extract_bearer_token(request=request)
     if raw_token is None:
         return JsonResponse({"error": "missing bearer token"}, status=401)
 
-    environment = _resolve_env_from_token(raw_token)
+    environment = env_bearer_auth.resolve_env_from_token(raw_token=raw_token)
     if environment is None:
         return JsonResponse({"error": "invalid bearer token"}, status=401)
 

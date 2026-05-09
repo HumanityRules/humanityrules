@@ -110,7 +110,7 @@ def _dind_hermes_stack_template() -> Template:
         database_connection_secret=None,
         shared_alb_hosted_zone=None,
         shared_hosted_zone_id=None,
-        policy_proxy_shared_secrets_arn=None,
+        env_bearer_shared_secrets_arn=None,
         auth_base_url=None,
     )
     return Template.from_stack(stack)
@@ -129,7 +129,7 @@ def _app_stack_template(compute_mode: str, include_workspace_efs: bool) -> Templ
         database_connection_secret=None,
         shared_alb_hosted_zone=None,
         shared_hosted_zone_id=None,
-        policy_proxy_shared_secrets_arn=None,
+        env_bearer_shared_secrets_arn=None,
         auth_base_url=None,
     )
     return Template.from_stack(stack)
@@ -205,7 +205,7 @@ class EcsComputeModeTests(SimpleTestCase):
                 database_connection_secret=None,
                 shared_alb_hosted_zone=None,
                 shared_hosted_zone_id=None,
-                policy_proxy_shared_secrets_arn=None,
+                env_bearer_shared_secrets_arn=None,
                 auth_base_url=None,
             )
 
@@ -291,7 +291,7 @@ class EcsComputeModeTests(SimpleTestCase):
                 database_connection_secret=None,
                 shared_alb_hosted_zone=None,
                 shared_hosted_zone_id=None,
-                policy_proxy_shared_secrets_arn=None,
+                env_bearer_shared_secrets_arn=None,
                 auth_base_url=None,
             )
 
