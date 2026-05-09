@@ -69,20 +69,26 @@ def policy_proxy_ecr_repo_name(env_slug: str) -> str:
     return f"doh/{env_slug}/policy-proxy"
 
 
+def _resolve_control_plane_url() -> str:
+    """Resolve DOH's control-plane base URL (prod or dev ngrok tunnel).
+
+    In prod env-resident components call devopshero.ai directly. In local dev
+    they live in a customer VPC and can't reach the laptop, so we point them
+    at a reserved ngrok tunnel that forwards to localhost:8000. If someone
+    else ever needs to deploy from their laptop, switch to a per-developer
+    setting.
+    """
+    from django.conf import settings
+    return "https://devopshero.ai" if not settings.DEBUG else "https://devopshero.ngrok.io"
+
+
 def _resolve_pdp_url() -> str:
     """Resolve the PDP URL the policy proxy should call. DOH_PDP_URL wins if set."""
     import os
-    from django.conf import settings
     explicit = os.environ.get("DOH_PDP_URL")
     if explicit:
         return explicit
-    # In prod the policy proxy calls devopshero.ai directly. In local dev the
-    # proxy lives in a customer VPC and can't reach the laptop, so we point it
-    # at a reserved ngrok tunnel that forwards to localhost:8000. If someone
-    # else ever needs to deploy a policy-proxy'd app from their laptop, switch
-    # to a per-developer DOH_PDP_PUBLIC_URL setting.
-    base = "https://devopshero.ai" if not settings.DEBUG else "https://devopshero.ngrok.io"
-    return f"{base}/api/pdp/evaluate"
+    return f"{_resolve_control_plane_url()}/api/pdp/evaluate"
 
 logger = logging.getLogger(__name__)
 
@@ -724,9 +730,10 @@ class AppStack(Stack):
         # Two platform overlays, computed once so the main container loop stays uniform:
         #
         # 1. Env-bearer overlay — applied to every container with c.requires_env_bearer=True.
-        #    Provides DOH_ENV_BEARER (from shared-secrets), DOH_ENV_SLUG, and
-        #    DOH_OWNER_USERNAME when the app has an owner tag. Any env-resident
-        #    component that calls DOH's control plane gets this.
+        #    Provides DOH_ENV_BEARER (from shared-secrets), DOH_ENV_SLUG,
+        #    DOH_CONTROL_PLANE_URL, and DOH_OWNER_USERNAME when the app has
+        #    an owner tag. Any env-resident component that calls DOH's
+        #    control plane gets this.
         # 2. Policy-proxy-specific overlay — applied only to the policy-proxy
         #    container. Carries JWT verification URL, upstream wiring, etc.
         env_bearer_environment_overlay: dict[str, str] = {}
@@ -737,6 +744,7 @@ class AppStack(Stack):
             )
             env_bearer_environment_overlay = {
                 "DOH_ENV_SLUG": env_slug,
+                "DOH_CONTROL_PLANE_URL": _resolve_control_plane_url(),
             }
             if app_config.owner_username:
                 env_bearer_environment_overlay["DOH_OWNER_USERNAME"] = app_config.owner_username
@@ -1149,9 +1157,11 @@ def deploy(
     policy_proxy_needed = app_config.policy_proxy_container() is not None
     env_bearer_needed = app_config.needs_env_bearer()
     env_bearer_shared_secrets_arn: str | None = None
+
+    from devopshero_app.models import Environment
+    env_obj = Environment.objects.get(slug=env_slug)
+
     if env_bearer_needed:
-        from devopshero_app.models import Environment
-        env_obj = Environment.objects.get(slug=env_slug)
         logger.info("Ensuring per-env bearer token exists")
         env_bearer_shared_secrets_arn = secrets_utils.ensure_env_bearer_token_exists(
             session=session, env=env_obj,

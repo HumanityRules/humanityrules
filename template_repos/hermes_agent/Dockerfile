@@ -35,6 +35,7 @@ COPY haproxy.cfg.template /etc/haproxy/haproxy.cfg.template
 COPY hermes-nono-profile.json /etc/nono/profiles/hermes-nono-profile.json
 COPY --chmod=755 supervisor.sh /supervisor.sh
 COPY --chmod=755 webui.sh /webui.sh
+COPY --chmod=755 google_token_refresher.py /google_token_refresher.py
 
 # WebUI lives in the base image at /apptoo/. Patch it before copying it into
 # /app so the installed venv and precompiled bytecode use patched source.

@@ -30,6 +30,24 @@ GOOGLE_SCOPES = [
 ]
 
 
+def _pick_redirect_uri(request: HttpRequest, configured: list[str]) -> str:
+    """Return the registered redirect URI whose host matches *request*'s host.
+
+    Google validates the `redirect_uri` parameter exactly — it must be byte-identical
+    to one of the OAuth client's registered URIs, AND it must be byte-identical at
+    token-exchange time to what we sent on /authorize. Both the start view (browser)
+    and the callback view (browser round-trip from Google) hit the same host, so
+    we can recompute the choice on each step by looking at request.get_host().
+    """
+    request_host = request.get_host().lower()
+    for uri in configured:
+        if urlparse(uri).netloc.lower() == request_host:
+            return uri
+    raise ValueError(
+        f"No redirect_uri configured for host {request_host!r}. Available: {configured!r}"
+    )
+
+
 def _resolve_env_by_rd(rd: str) -> Environment | None:
     """Return the Environment whose shared_alb_hosted_zone suffixes *rd*'s host, or None.
 
@@ -75,11 +93,19 @@ def integrations_google_oauth_start(request: HttpRequest) -> HttpResponse:
     }
 
     web = google_cfg.config
+    try:
+        redirect_uri = _pick_redirect_uri(request=request, configured=web["redirect_uris"])
+    except ValueError as exc:
+        logger.error("google oauth start failed: %s", exc)
+        return HttpResponseBadRequest(
+            "Google OAuth client has no redirect_uri registered for this host."
+        )
+
     params = urlencode({
         "client_id": web["client_id"],
         "response_type": "code",
         "scope": " ".join(GOOGLE_SCOPES),
-        "redirect_uri": web["redirect_uris"][0],
+        "redirect_uri": redirect_uri,
         "state": state,
         "access_type": "offline",
         "prompt": "consent",
@@ -88,8 +114,12 @@ def integrations_google_oauth_start(request: HttpRequest) -> HttpResponse:
     return redirect(f"{web['auth_uri']}?{params}")
 
 
-def _exchange_google_code(web: dict, code: str) -> dict:
-    """POST to Google's token endpoint and return the JSON body."""
+def _exchange_google_code(web: dict, code: str, redirect_uri: str) -> dict:
+    """POST to Google's token endpoint and return the JSON body.
+
+    *redirect_uri* must be byte-identical to what was sent on the /authorize step;
+    Google rejects mismatches with invalid_grant.
+    """
     response = httpx.post(
         web["token_uri"],
         data={
@@ -97,7 +127,7 @@ def _exchange_google_code(web: dict, code: str) -> dict:
             "client_secret": web["client_secret"],
             "code": code,
             "grant_type": "authorization_code",
-            "redirect_uri": web["redirect_uris"][0],
+            "redirect_uri": redirect_uri,
         },
         timeout=30,
     )
@@ -158,7 +188,19 @@ def integrations_google_oauth_callback(request: HttpRequest) -> HttpResponse:
         return HttpResponseBadRequest("Environment not found")
 
     try:
-        token_response = _exchange_google_code(web=google_cfg.config, code=code)
+        redirect_uri = _pick_redirect_uri(
+            request=request, configured=google_cfg.config["redirect_uris"],
+        )
+    except ValueError as exc:
+        logger.error("google callback failed: %s", exc)
+        return HttpResponseBadRequest(
+            "Google OAuth client has no redirect_uri registered for this host."
+        )
+
+    try:
+        token_response = _exchange_google_code(
+            web=google_cfg.config, code=code, redirect_uri=redirect_uri,
+        )
     except Exception as exc:
         logger.error("google token exchange failed: %s", exc)
         return HttpResponseBadRequest("Google token exchange failed")

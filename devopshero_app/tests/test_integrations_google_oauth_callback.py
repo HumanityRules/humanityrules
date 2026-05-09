@@ -20,7 +20,10 @@ VALID_WEB_CONFIG = {
     "client_secret": "csecret",
     "auth_uri": "https://accounts.google.com/o/oauth2/auth",
     "token_uri": "https://oauth2.googleapis.com/token",
-    "redirect_uris": ["https://devopshero.ai/integrations/google/callback"],
+    "redirect_uris": [
+        "http://testserver/integrations/google/callback",
+        "https://devopshero.ai/integrations/google/callback",
+    ],
 }
 
 GOOGLE_TOKEN_RESPONSE = {
@@ -113,7 +116,7 @@ class TestIntegrationsGoogleCallbackHappyPath(_CallbackTestBase):
         self.assertEqual(kwargs["data"]["grant_type"], "authorization_code")
         self.assertEqual(
             kwargs["data"]["redirect_uri"],
-            "https://devopshero.ai/integrations/google/callback",
+            "http://testserver/integrations/google/callback",
         )
 
         # One UserThirdPartyIntegration row, keyed by (user, env, provider).
