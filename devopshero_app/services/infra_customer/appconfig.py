@@ -208,6 +208,15 @@ class ContainerConfig:
     # to EFS, which can run 30-60s for a multi-GB rootfs).
     stop_timeout: int | None = None
 
+    # Opt this container in to the DOH control-plane bearer overlay:
+    # DOH_ENV_BEARER (from shared-secrets), DOH_ENV_SLUG, and DOH_OWNER_USERNAME (if
+    # the owning App has an owner tag). Any env-resident component that calls
+    # the DOH control plane sets this — policy proxies (PDP calls) and Hermes
+    # (token refresh) today; future env-resident services later. The IAM grant
+    # to read shared-secrets is added to the task role iff any container in
+    # the task declares this.
+    requires_env_bearer: bool = False
+
 
 @dataclass
 class AppConfig:
@@ -253,6 +262,16 @@ class AppConfig:
     # Platform-owned capabilities requested by the source template. CDK maps
     # these to infrastructure grants on the ECS task role.
     platform_capabilities: list[str] = field(default_factory=list)
+
+    # Owner's username (from the App's `owner` ResourceTag) when the app has
+    # one, else None. Injected into env-bearer containers as DOH_OWNER_USERNAME so
+    # they can identify themselves to DOH's control plane on behalf of this
+    # user. None for apps without an owner tag (typical multi-user apps).
+    owner_username: str | None = None
+
+    def needs_env_bearer(self) -> bool:
+        """True if any container in the task opts into the DOH control-plane bearer overlay."""
+        return any(c.requires_env_bearer for c in self.containers)
 
     def alb_target(self) -> ContainerConfig | None:
         """Return the ALB-target ContainerConfig, or None if no ALB exposure."""

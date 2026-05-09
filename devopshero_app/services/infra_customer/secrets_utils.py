@@ -211,42 +211,6 @@ def _create_or_merge_secret(
     return response["ARN"]
 
 
-def write_integration_tokens(
-    session: boto3.Session,
-    env_slug: str,
-    provider: str,
-    username: str,
-    tokens: dict,
-) -> str:
-    """Write third-party integration tokens into the user's per-user secret.
-
-    The secret lives at ``devopshero/{env_slug}/users/{username}`` — a bag of
-    everything-for-this-user — and its JSON body is a top-level map
-    ``{provider: tokens}``. Writing provider X replaces only X's entry; any
-    other providers already in the secret are preserved. Returns the ARN.
-    """
-    sm_client = session.client("secretsmanager")
-    secret_name = f"devopshero/{env_slug}/users/{username}"
-    try:
-        response = sm_client.get_secret_value(SecretId=secret_name)
-        existing = json.loads(response["SecretString"])
-        existing[provider] = tokens
-        sm_client.put_secret_value(SecretId=secret_name, SecretString=json.dumps(existing))
-        logger.info("secret '%s' provider=%s updated", secret_name, provider)
-        return response["ARN"]
-    except ClientError as e:
-        if e.response["Error"]["Code"] != "ResourceNotFoundException":
-            raise
-
-    response = sm_client.create_secret(
-        Name=secret_name,
-        Description=f"Per-user secrets for {username} in env '{env_slug}'",
-        SecretString=json.dumps({provider: tokens}),
-    )
-    logger.info("secret '%s' created with provider=%s", secret_name, provider)
-    return response["ARN"]
-
-
 def ensure_env_bearer_token_exists(session: boto3.Session, env) -> str:
     """Ensure DOH_ENV_BEARER exists both in shared-secrets and as an EnvironmentBearerToken row.
 

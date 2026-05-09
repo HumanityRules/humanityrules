@@ -92,8 +92,8 @@ urlpatterns = [
     path("integrations/aws-accounts/", views.integrations_aws_accounts, name="integrations_aws_accounts"),
     path("integrations/aws-accounts/add/", views.integrations_aws_accounts_add, name="integrations_aws_accounts_add"),
     path("integrations/git-integrations/", views.integrations_git_integrations, name="integrations_git_integrations"),
-    path("integrations/google/start/", views.integrations_google_start, name="integrations_google_start"),
-    path("integrations/google/callback/", views.integrations_google_callback, name="integrations_google_callback"),
+    path("integrations/google/start/", views.integrations_google_oauth_start, name="integrations_google_oauth_start"),
+    path("integrations/google/callback/", views.integrations_google_oauth_callback, name="integrations_google_oauth_callback"),
     path("random-quote/", views.random_quote, name="random_quote"),
     path("switch-organization/", views.switch_organization, name="switch_organization"),
 
@@ -121,6 +121,8 @@ urlpatterns = [
     path("api/github/webhook", views.github_webhook, name="github_webhook"),
     #  - pdp_evaluate: called by policy proxies to authorize each request against ABAC
     path("api/pdp/evaluate", views.pdp_evaluate, name="pdp_evaluate"),
+    #  - integrations_google_token_refresh: called by env-resident components (Hermes refresher) to get a fresh Google access token
+    path("api/integrations/google/token", views.integrations_google_token_refresh, name="integrations_google_token_refresh"),
 
     # Chat / Agent
     path("chat/app_deploy/<slug:workspace_slug>/<str:repo_owner>/<str:repo_name>/", views.chat_app_deploy, name="chat_app_deploy_with_owner"),

@@ -4,8 +4,8 @@ from django.contrib.auth.decorators import login_required
 from django.http import HttpRequest, HttpResponse, HttpResponseRedirect
 from django.shortcuts import render
 
-from ..models import AWSAccount, GitProviderIntegration, Repository
-from . import base
+from ...models import AWSAccount, GitProviderIntegration, Repository
+from .. import base
 
 logger = logging.getLogger(__name__)
 

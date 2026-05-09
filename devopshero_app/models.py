@@ -1682,6 +1682,54 @@ class IntegrationConfig(models.Model):
         return f"IntegrationConfig({self.provider})"
 
 
+class UserThirdPartyIntegration(models.Model):
+    """A user's OAuth grant to a third-party provider, scoped to one environment.
+
+    Persists the long-lived refresh_token plus metadata (scopes, timestamps)
+    on DOH's side. Env-resident components (Hermes, etc.) never see the
+    refresh_token or the provider's client_secret — they call DOH's refresh
+    endpoint with the env bearer + owner_username and receive a short-lived
+    access_token. Plaintext at rest (matches existing posture for
+    Organization.oidc_client_secret / IntegrationConfig.config).
+    """
+
+    class Provider(models.TextChoices):
+        GOOGLE = "google", "Google"
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid7, editable=False)
+    user = models.ForeignKey(
+        "User",
+        on_delete=models.CASCADE,
+        related_name="third_party_integrations",
+    )
+    environment = models.ForeignKey(
+        Environment,
+        on_delete=models.CASCADE,
+        related_name="third_party_integrations",
+    )
+    provider = models.CharField(max_length=50, choices=Provider.choices)
+    refresh_token = models.TextField()
+    scope = models.TextField(
+        blank=True,
+        help_text="Space-separated scopes granted at auth time (as returned by the provider).",
+    )
+    granted_at = models.DateTimeField(auto_now_add=True)
+    last_refreshed_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        verbose_name = "User Third-Party Integration"
+        verbose_name_plural = "User Third-Party Integrations"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["user", "environment", "provider"],
+                name="unique_user_env_provider",
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return f"UserThirdPartyIntegration({self.user.username}@{self.environment.slug}:{self.provider})"
+
+
 # =============================================================================
 # Signals
 # =============================================================================
