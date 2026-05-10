@@ -37,8 +37,8 @@ def kill_process_on_port(port):
 
 kill_process_on_port(8000)
 
-# Get absolute path to sandbox directory for exclusion
-TMP_DIR = str(Path("sandbox").resolve())
+# Get absolute path to local dev data directory (sandbox, db, test_db) for exclusion
+TMP_DIR = str(Path("local").resolve())
 
 # Build uvicorn command matching Procfile.tailwind
 cmd = [

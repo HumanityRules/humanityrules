@@ -25,8 +25,8 @@ Usage:
 
 Database snapshotting:
   - The harness copies a base SQLite DB to a per-run DB file.
-  - Use --db-base to point at the base DB (default: ./db.sqlite3).
-  - Use --db-run to choose the run DB path (default: timestamped copy in test_db/).
+  - Use --db-base to point at the base DB (default: ./local/db.sqlite3).
+  - Use --db-run to choose the run DB path (default: timestamped copy in local/test_db/).
   - Use --no-copy to skip the copy and use --db-run (or --db-base) directly.
 """
 
@@ -53,7 +53,7 @@ def _build_run_db_path(base_path: Path, run_path_arg: str | None) -> Path:
         return Path(run_path_arg)
     timestamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
     suffix = base_path.suffix or ".sqlite3"
-    return Path("test_db") / f"{base_path.stem}.harness-{timestamp}{suffix}"
+    return Path("local/test_db") / f"{base_path.stem}.harness-{timestamp}{suffix}"
 
 
 def _copy_sqlite_db(base_path: Path, run_path: Path) -> None:
@@ -123,13 +123,13 @@ def _parse_args(project_root: Path) -> argparse.Namespace:
     parser.add_argument(
         "--db-base",
         type=str,
-        default=str(project_root / "db.sqlite3"),
+        default=str(project_root / "local" / "db.sqlite3"),
         help="Base SQLite DB path to copy from.",
     )
     parser.add_argument(
         "--db-run",
         type=str,
-        help="Run DB path to use (defaults to timestamped copy in test_db/).",
+        help="Run DB path to use (defaults to timestamped copy in local/test_db/).",
     )
     parser.add_argument(
         "--no-copy",

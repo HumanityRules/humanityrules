@@ -6,11 +6,8 @@ __pycache__/
 .env.backup*
 **/cdk.out/
 **/cdk.context.json
-db.sqlite3
-test_db/**
-!test_db/.gitkeep
+local/*
+!local/.gitkeep
 tmp/
-sandbox/**
-!sandbox/.gitkeep
 /template_repos/hermes_agent/.env.backup
 /lambdas/policy_proxy_auth/build/
