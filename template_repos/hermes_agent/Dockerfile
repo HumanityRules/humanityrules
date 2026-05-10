@@ -47,7 +47,14 @@ COPY haproxy.cfg.template /etc/haproxy/haproxy.cfg.template
 COPY hermes-nono-profile.json /etc/nono/profiles/hermes-nono-profile.json
 COPY --chmod=755 supervisor.sh /supervisor.sh
 COPY --chmod=755 webui.sh /webui.sh
-COPY --chmod=755 google_token_refresher.py /google_token_refresher.py
+COPY --chmod=755 integrations_refresher.py /integrations_refresher.py
+
+# DOH-owned WebUI extension bundle. Loaded by Hermes WebUI per docs/EXTENSIONS.md
+# when the three HERMES_WEBUI_EXTENSION_* env vars are set (see supervisor.sh).
+# The refresher writes integrations_status.json into this same directory, so it
+# must be writable by hermeswebui (chowned below) and readable by the sandbox
+# (read grant in hermes-nono-profile.json).
+COPY webui-extension /opt/doh/webui-extension
 
 # WebUI lives in the base image at /apptoo/. Patch it before copying it into
 # /app so the installed venv and precompiled bytecode use patched source.
@@ -77,7 +84,7 @@ RUN mkdir -p /app /uv_cache "$HERMES_HOME" /workspace /home/hermeswebui/.doh/cre
     && python3 /opt/hermes-defaults/apply-patches.py /tmp/patches-agent "$HERMES_WEBUI_AGENT_DIR" \
     && rm -rf /tmp/patches-agent \
     && cp /opt/hermes-defaults/SOUL.md "$HERMES_HOME/SOUL.md" \
-    && chown -R hermeswebui:hermeswebui /app /uv_cache "$HERMES_HOME" /workspace /home/hermeswebui/.doh
+    && chown -R hermeswebui:hermeswebui /app /uv_cache "$HERMES_HOME" /workspace /home/hermeswebui/.doh /opt/doh/webui-extension
 
 USER hermeswebui
 

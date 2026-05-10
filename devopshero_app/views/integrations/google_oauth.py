@@ -237,3 +237,56 @@ def integrations_google_oauth_callback(request: HttpRequest) -> HttpResponse:
     )
 
     return redirect(_append_query(rd, {"connected": "google"}))
+
+
+def _revoke_google_refresh_token(refresh_token: str) -> None:
+    """Best-effort revoke at Google's oauth2 endpoint.
+
+    Failure doesn't block the local deletion — the row removal is the
+    load-bearing step. Revoke just accelerates Google-side cleanup so a
+    subsequent refresh would 410 instead of silently succeeding in an edge
+    case where we somehow missed the local delete.
+    """
+    try:
+        httpx.post(
+            "https://oauth2.googleapis.com/revoke",
+            data={"token": refresh_token},
+            timeout=10,
+        )
+    except Exception as exc:
+        logger.error("google revoke best-effort failed: %s", exc)
+
+
+@login_required
+def integrations_google_oauth_disconnect(request: HttpRequest) -> HttpResponse:
+    """Disconnect the authenticated user's Google grant for the env resolved from `rd`.
+
+    Idempotent: returns 302 to `rd?disconnected=google` whether a row existed
+    or not. The refresher's next tick (≤60s) will flip the WebUI status to
+    `not_connected` via the shared integrations_status.json file.
+    """
+    rd = request.GET.get("rd", "")
+    env = _resolve_env_by_rd(rd=rd)
+    if env is None:
+        return HttpResponseBadRequest("Invalid or unknown rd")
+
+    integration = UserThirdPartyIntegration.objects.filter(
+        user=request.user,
+        environment=env,
+        provider=UserThirdPartyIntegration.Provider.GOOGLE,
+    ).first()
+    if integration is not None:
+        refresh_token = integration.refresh_token
+        integration.delete()
+        _revoke_google_refresh_token(refresh_token=refresh_token)
+        logger.info(
+            "google integration disconnected env=%s owner=%s",
+            env.slug, request.user.username,
+        )
+    else:
+        logger.info(
+            "google disconnect no-op (no grant) env=%s owner=%s",
+            env.slug, request.user.username,
+        )
+
+    return redirect(_append_query(rd, {"disconnected": "google"}))

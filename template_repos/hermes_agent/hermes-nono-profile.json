@@ -17,6 +17,9 @@
       "HERMES_WEBUI_HOST",
       "HERMES_WEBUI_PORT",
       "HERMES_WEBUI_PASSWORD",
+      "HERMES_WEBUI_EXTENSION_DIR",
+      "HERMES_WEBUI_EXTENSION_SCRIPT_URLS",
+      "HERMES_WEBUI_EXTENSION_STYLESHEET_URLS",
       "LANG",
       "LC_*",
       "TERM",
@@ -32,7 +35,8 @@
     "read": [
       "/app",
       "/usr/local/aws-cli",
-      "/home/hermeswebui/.doh/credentials"
+      "/home/hermeswebui/.doh/credentials",
+      "/opt/doh/webui-extension"
     ],
     "read_file": [
       "/webui.sh",

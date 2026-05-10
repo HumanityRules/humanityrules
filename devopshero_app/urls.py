@@ -94,6 +94,7 @@ urlpatterns = [
     path("integrations/git-integrations/", views.integrations_git_integrations, name="integrations_git_integrations"),
     path("integrations/google/start/", views.integrations_google_oauth_start, name="integrations_google_oauth_start"),
     path("integrations/google/callback/", views.integrations_google_oauth_callback, name="integrations_google_oauth_callback"),
+    path("integrations/google/disconnect/", views.integrations_google_oauth_disconnect, name="integrations_google_oauth_disconnect"),
     path("random-quote/", views.random_quote, name="random_quote"),
     path("switch-organization/", views.switch_organization, name="switch_organization"),
 

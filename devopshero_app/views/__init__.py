@@ -36,6 +36,7 @@ from .integrations.integrations_page import (
 from .integrations.google_oauth import (
     integrations_google_oauth_start,
     integrations_google_oauth_callback,
+    integrations_google_oauth_disconnect,
 )
 from .integrations.google_token_refresh import integrations_google_token_refresh
 from .partials import random_quote, switch_organization
@@ -146,6 +147,7 @@ __all__ = [
     "integrations_git_integrations",
     "integrations_google_oauth_start",
     "integrations_google_oauth_callback",
+    "integrations_google_oauth_disconnect",
     "integrations_google_token_refresh",
     "random_quote",
     "switch_organization",
