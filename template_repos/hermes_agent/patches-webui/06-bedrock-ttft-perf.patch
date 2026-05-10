@@ -1,7 +1,7 @@
 From: DevOps Hero <doh@devopshero.ai>
 Subject: [PATCH] Bedrock TTFT perf telemetry over SSE `perf` event
 
-Pinned upstream: hermes-webui 0.50.259.
+Pinned upstream: hermes-webui 0.51.34.
 
 Purpose: surface end-to-end and per-segment latency for Bedrock chat turns
 to the browser console so we can see whether sluggishness is Bedrock TTFT
@@ -29,32 +29,32 @@ didn't actually hit Bedrock (e.g. tool-only loops).
 Upstream status: DOH-specific; no plan to upstream. Revisit if upstream
 adds a first-class TTFT metric in api/metering.py.
 
---- a/api/routes.py	2026-05-03 21:00:36
-+++ b/api/routes.py	2026-05-03 21:00:58
-@@ -4966,6 +4966,10 @@
-         s.active_stream_id = stream_id
-         s.pending_user_message = msg
-         s.pending_attachments = attachments
-+        # DOH TTFT telemetry: monotonic stamp of when this POST was parsed.
-+        # Streaming thread reads it off the session to compute our_stack_ms.
-+        # Wall-clock `pending_started_at` is kept for existing callers.
-+        s.pending_started_at_mono = time.monotonic()
-         s.pending_started_at = time.time()
-         s.save()
-     set_last_workspace(workspace)
---- a/api/streaming.py	2026-05-03 21:00:36
-+++ b/api/streaming.py	2026-05-03 21:01:25
-@@ -1632,7 +1632,41 @@
-                 stats = meter().get_stats()
-                 stats['session_id'] = stream_id
+--- a/api/routes.py
++++ b/api/routes.py
+@@ -6480,6 +6480,10 @@
+     s.workspace = workspace
+     s.model = model
+     s.model_provider = model_provider
++    # DOH TTFT telemetry: monotonic stamp of when this POST was parsed.
++    # Streaming thread reads it off the session to compute our_stack_ms.
++    # Wall-clock `pending_started_at` is kept for existing callers.
++    s.pending_started_at_mono = time.monotonic()
+     s.active_stream_id = stream_id
+     s.pending_user_message = msg
+     s.pending_attachments = attachments
+--- a/api/streaming.py
++++ b/api/streaming.py
+@@ -2169,6 +2169,40 @@
+                 stats.setdefault('tps_available', False)
+                 stats.setdefault('estimated', False)
                  put('metering', stats)
 +
 +            # DOH TTFT telemetry (bedrock only). Emitted once per turn on the
 +            # first on_token. `agent` and `s` are bound in the enclosing scope
-+            # by the time tokens arrive (agent is built ~line 1930, tokens only
-+            # flow once agent.run_conversation() is called below).
++            # by the time tokens arrive (agent is built later in the function;
++            # tokens only flow once agent.run_conversation() is called below).
 +            _perf_emitted = [False]
-
++
 +            def _maybe_emit_bedrock_perf():
 +                if _perf_emitted[0]:
 +                    return
@@ -82,35 +82,34 @@ adds a first-class TTFT metric in api/metering.py.
 +                            delattr(agent, _attr)
 +                        except Exception:
 +                            pass
-+
+
              def on_token(text):
                  nonlocal _token_sent
-                 if text is None:
-@@ -1642,6 +1676,7 @@
+@@ -2179,6 +2213,7 @@
                  if stream_id in STREAM_PARTIAL_TEXT:
                      STREAM_PARTIAL_TEXT[stream_id] += str(text)
                  put('token', {'text': text})
 +                _maybe_emit_bedrock_perf()
-                 # Update global throughput meter
-                 meter().record_token(stream_id, len(STREAM_PARTIAL_TEXT[stream_id]))
-                 _emit_metering()
---- a/static/messages.js	2026-05-03 21:00:36
-+++ b/static/messages.js	2026-05-03 22:14:13
-@@ -173,6 +173,12 @@
-
+                 # Update live throughput from stream delta callbacks, not from
+                 # byte/character length. If a backend cannot provide live deltas,
+                 # the frontend hides TPS rather than showing an estimate.
+--- a/static/messages.js
++++ b/static/messages.js
+@@ -191,6 +191,12 @@
    $('msg').value='';autoResize();
-   const displayText=text||(uploaded.length?`Uploaded: ${uploadedNames.join(', ')}`:'(file upload)');
+   // Clear persisted composer draft since message was sent.
+   if (activeSid && typeof _clearComposerDraft === 'function') _clearComposerDraft(activeSid);
 +  // DOH TTFT telemetry: stamp Enter so we can compute browser_ttft_ms and
 +  // post_rtt_ms. performance.now() is monotonic, unaffected by clock skew.
 +  // _dohPerfPostRttMs is hoisted (let, not const) because it's assigned
 +  // inside the try{} around /api/chat/start but read after the try/catch.
 +  const _dohPerfEnterTs=(typeof performance!=='undefined'&&performance.now)?performance.now():Date.now();
 +  let _dohPerfPostRttMs=0;
+   const displayText=text||(uploaded.length?`Uploaded: ${uploadedNames.join(', ')}`:'(file upload)');
    const userMsg={role:'user',content:displayText,attachments:uploaded.length?uploadedNames:undefined,_ts:Date.now()/1000};
    S.toolCalls=[];  // clear tool calls from previous turn
-   clearLiveToolCards();  // clear any leftover live cards from last turn
-@@ -211,6 +217,8 @@
-       model_provider:S.session.model_provider||null,
+@@ -243,6 +249,8 @@
+       profile:S.activeProfile||S.session.profile||'default',
        attachments:uploaded.length?uploaded:undefined
      })});
 +    const _dohPerfPostTs=(typeof performance!=='undefined'&&performance.now)?performance.now():Date.now();
@@ -118,7 +117,7 @@ adds a first-class TTFT metric in api/metering.py.
      if(startData.effective_model && S.session){
        S.session.model=startData.effective_model;
        S.session.model_provider=startData.effective_model_provider||S.session.model_provider||null;
-@@ -271,8 +279,9 @@
+@@ -314,8 +322,9 @@
      return;
    }
 
@@ -130,7 +129,7 @@ adds a first-class TTFT metric in api/metering.py.
 
  }
 
-@@ -650,10 +659,32 @@
+@@ -739,10 +748,32 @@
      // the fixes below (_streamFinalized guard + cancelAnimationFrame in the
      // terminal handlers) address it without needing a reset here.
 
@@ -163,7 +162,7 @@ adds a first-class TTFT metric in api/metering.py.
        syncInflightAssistantMessage();
        if(!S.session||S.session.session_id!==activeSid) return;
        const parsed=_parseStreamState();
-@@ -955,6 +986,14 @@
+@@ -1153,6 +1184,14 @@
        if(typeof _setCompressionSessionLock==='function') _setCompressionSessionLock(null);
        if(!S.busy&&typeof renderMessages==='function') renderMessages();
        showToast(message||'Context compressed');
