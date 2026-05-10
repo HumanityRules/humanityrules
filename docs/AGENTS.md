@@ -14,10 +14,6 @@ The main developer documentation lives in the docs/ subdirectory. **When creatin
 
 - **`docs/okta_oidc_setup.md`** — Step-by-step guide for onboarding customers who use Okta for SSO (OIDC login instead of WorkOS). Open when setting up a new Okta/OIDC customer org or debugging OIDC login/redirect/issuer issues.
 
-- **`docs/personal_assistant_deployment_state.md`** — Current-state report for the Personal Assistant Deployment feature (Hermes Agent template, multi-channel gateway, EFS persistence, Bedrock governance path, operator tooling). Open for context on that feature's scope and open surface.
-
-- **`docs/policy_enforcement_analysis.md`** — Analysis of Pulumi CrossGuard vs CDK/AWS options for deployment-time policy enforcement. Describes what DOH would need: policy packs (cost guardrails, internal-only, auto-cleanup, security basics), policy groups, and pipeline integration. Open when implementing or designing pre-deploy policy checks or environment-level guardrails.
-
 - **`docs/policy_proxy_design.md`** — Runtime design for the policy proxy that enforces SSO + ABAC in front of deployed apps. Covers the per-env auth Lambda (Okta OAuth, JWT minting, JWKS), the policy-proxy container (JWT verification, per-request PDP calls with caching), the DOH PDP endpoint contract, and the Personal Assistant specifics (owner tag, global self-referential policy). Open when working on the policy proxy, the auth Lambda, or the PDP endpoint.
 
 - **`docs/ui_live_update_contract.md`** — The current live-update contract for HTMX polling, chat-scoped SSE invalidation, and widget fragment refresh patterns. Open when adding or changing live-refresh behavior.
