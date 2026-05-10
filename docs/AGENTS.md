@@ -8,7 +8,7 @@ The main developer documentation lives in the docs/ subdirectory. **When creatin
 
 - **`docs/authorization_design_abac.md`** — Authorization system design (ABAC). Defines identity attributes, resource tags, policies, groups as attribute containers, and bootstrapping. Open when implementing or changing ABAC policies, attributes, tags, or org bootstrap.
 
-- **`docs/google_workspace_integration_design.md`** — Architecture for third-party OAuth integrations in Hermes, using Google Workspace as the concrete case. Answers where the refresh token lives (DOH control plane, not the customer env), what credentials cross the DOH/customer boundary (only a short-lived access token), and how the three actors (browser, control plane, env supervisor) authenticate to each other. Open when reasoning about the trust boundary for any third-party integration.
+- **`docs/integrations_broker_design.md`** — Architecture for third-party OAuth integrations in Hermes (Google Workspace today; Slack/Notion/Linear next). Answers where the refresh token lives (DOH control plane), what crosses the DOH/customer boundary (nothing — access tokens stay in the broker's memory, the sandbox sees only a placeholder), and how the in-container HTTPS forward proxy terminates TLS with an on-demand DOH-signed leaf and swaps the Authorization header. Open when reasoning about the trust boundary, adding a new provider, or debugging the integrations broker.
 
 - **`docs/domain_model.md`** — Core domain concepts and entity relationships. Defines Workspace, App, Environment, Datastore, Deployment, etc entities with their attributes and how they relate. Read this when implementing features that touch the domain model or when clarifying entity boundaries.
 
