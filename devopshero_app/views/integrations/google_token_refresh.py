@@ -3,10 +3,9 @@
 See `docs/integrations_broker_design.md`. Env-resident callers
 (Hermes refresher, etc.) hit this endpoint with `Authorization: Bearer
 <DOH_ENV_BEARER>` and `{"owner_username": "..."}` in the body. DOH resolves
-the environment from the bearer, looks up the user's
-UserThirdPartyIntegration row for that env, exchanges the stored refresh
-token with Google using DOH's OAuth client_secret, and returns a short-lived
-access token.
+the environment from the bearer, looks up the user's IntegrationUserGrant
+row for that env, exchanges the stored refresh token with Google using DOH's
+OAuth client_secret, and returns a short-lived access token.
 
 The refresh_token and DOH's OAuth client_secret never cross the customer/DOH
 boundary. If Google has revoked the refresh_token, the row is deleted and
@@ -21,7 +20,7 @@ from django.http import HttpRequest, JsonResponse
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_POST
 
-from devopshero_app.models import IntegrationConfig, User, UserThirdPartyIntegration
+from devopshero_app.models import IntegrationConfig, IntegrationUserGrant, User
 from devopshero_app.views import env_bearer_auth
 
 logger = logging.getLogger(__name__)
@@ -67,10 +66,10 @@ def integrations_google_token_refresh(request: HttpRequest) -> JsonResponse:
         )
         return JsonResponse({"error": "not connected"}, status=404)
 
-    integration = UserThirdPartyIntegration.objects.filter(
+    integration = IntegrationUserGrant.objects.filter(
         user=user,
         environment=environment,
-        provider=UserThirdPartyIntegration.Provider.GOOGLE,
+        provider=IntegrationUserGrant.Provider.GOOGLE,
     ).first()
     if integration is None:
         logger.info(

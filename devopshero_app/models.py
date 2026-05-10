@@ -212,7 +212,7 @@ class AWSAccount(models.Model):
         return f"{base_url}?region=us-east-1#/stacks/quickcreate?{urllib.parse.urlencode(params)}"
 
 
-class GitProviderIntegration(models.Model):
+class IntegrationGitProvider(models.Model):
     """
     Organization-level connection to a Git provider (GitHub, GitLab).
     Stores authentication credentials for accessing repositories.
@@ -259,8 +259,8 @@ class GitProviderIntegration(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
-        verbose_name = "Git Provider Integration"
-        verbose_name_plural = "Git Provider Integrations"
+        verbose_name = "Integration Git Provider"
+        verbose_name_plural = "Integration Git Providers"
         ordering = ["-created_at"]
 
     def __str__(self) -> str:
@@ -289,7 +289,7 @@ class Repository(models.Model):
         related_name="repositories",
     )
     integration = models.ForeignKey(
-        GitProviderIntegration,
+        IntegrationGitProvider,
         on_delete=models.SET_NULL,
         null=True,
         blank=True,
@@ -1678,11 +1678,15 @@ class IntegrationConfig(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
+    class Meta:
+        verbose_name = "Integration Config"
+        verbose_name_plural = "Integration Configs"
+
     def __str__(self) -> str:
         return f"IntegrationConfig({self.provider})"
 
 
-class UserThirdPartyIntegration(models.Model):
+class IntegrationUserGrant(models.Model):
     """A user's OAuth grant to a third-party provider, scoped to one environment.
 
     Persists the long-lived refresh_token plus metadata (scopes, timestamps)
@@ -1700,12 +1704,12 @@ class UserThirdPartyIntegration(models.Model):
     user = models.ForeignKey(
         "User",
         on_delete=models.CASCADE,
-        related_name="third_party_integrations",
+        related_name="integration_grants",
     )
     environment = models.ForeignKey(
         Environment,
         on_delete=models.CASCADE,
-        related_name="third_party_integrations",
+        related_name="integration_grants",
     )
     provider = models.CharField(max_length=50, choices=Provider.choices)
     refresh_token = models.TextField()
@@ -1717,8 +1721,8 @@ class UserThirdPartyIntegration(models.Model):
     last_refreshed_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
-        verbose_name = "User Third-Party Integration"
-        verbose_name_plural = "User Third-Party Integrations"
+        verbose_name = "Integration User Grant"
+        verbose_name_plural = "Integration User Grants"
         constraints = [
             models.UniqueConstraint(
                 fields=["user", "environment", "provider"],
@@ -1727,7 +1731,7 @@ class UserThirdPartyIntegration(models.Model):
         ]
 
     def __str__(self) -> str:
-        return f"UserThirdPartyIntegration({self.user.username}@{self.environment.slug}:{self.provider})"
+        return f"IntegrationUserGrant({self.user.username}@{self.environment.slug}:{self.provider})"
 
 
 # =============================================================================

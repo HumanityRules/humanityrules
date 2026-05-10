@@ -7,9 +7,9 @@ from django.test import TestCase
 from devopshero_app.models import (
     AWSAccount,
     Environment,
+    IntegrationUserGrant,
     Organization,
     User,
-    UserThirdPartyIntegration,
 )
 
 
@@ -41,10 +41,10 @@ class _DisconnectTestBase(TestCase):
             current_organization=self.org,
         )
         self.client.force_login(self.user)
-        self.integration = UserThirdPartyIntegration.objects.create(
+        self.integration = IntegrationUserGrant.objects.create(
             user=self.user,
             environment=self.env,
-            provider=UserThirdPartyIntegration.Provider.GOOGLE,
+            provider=IntegrationUserGrant.Provider.GOOGLE,
             refresh_token="stored-refresh-token",
             scope="openid email",
         )
@@ -63,7 +63,7 @@ class TestDisconnectHappyPath(_DisconnectTestBase):
         self.assertIn("disconnected=google", response["Location"])
         self.assertIn("hermes.dev.example.com", response["Location"])
         self.assertFalse(
-            UserThirdPartyIntegration.objects.filter(id=self.integration.id).exists()
+            IntegrationUserGrant.objects.filter(id=self.integration.id).exists()
         )
         # Best-effort revoke invoked with the stored token.
         revoke_mock.assert_called_once()
@@ -97,14 +97,14 @@ class TestDisconnectRdValidation(_DisconnectTestBase):
         self.assertEqual(response.status_code, 400)
         # Row preserved — we refused the request before touching state.
         self.assertTrue(
-            UserThirdPartyIntegration.objects.filter(id=self.integration.id).exists()
+            IntegrationUserGrant.objects.filter(id=self.integration.id).exists()
         )
 
     def test_missing_rd_returns_400(self) -> None:
         response = self.client.get("/integrations/google/disconnect/")
         self.assertEqual(response.status_code, 400)
         self.assertTrue(
-            UserThirdPartyIntegration.objects.filter(id=self.integration.id).exists()
+            IntegrationUserGrant.objects.filter(id=self.integration.id).exists()
         )
 
 
@@ -122,7 +122,7 @@ class TestDisconnectRevokeFailureNonFatal(_DisconnectTestBase):
         self.assertIn("disconnected=google", response["Location"])
         # Row still gone — the row deletion is load-bearing, the revoke is best-effort.
         self.assertFalse(
-            UserThirdPartyIntegration.objects.filter(id=self.integration.id).exists()
+            IntegrationUserGrant.objects.filter(id=self.integration.id).exists()
         )
 
 
@@ -136,5 +136,5 @@ class TestDisconnectAuth(_DisconnectTestBase):
         self.assertEqual(response.status_code, 302)
         # login_required redirects to settings.LOGIN_URL. The row must survive.
         self.assertTrue(
-            UserThirdPartyIntegration.objects.filter(id=self.integration.id).exists()
+            IntegrationUserGrant.objects.filter(id=self.integration.id).exists()
         )

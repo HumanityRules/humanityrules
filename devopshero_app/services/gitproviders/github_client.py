@@ -14,7 +14,7 @@ import httpx
 import jwt
 from django.conf import settings
 
-from devopshero_app.models import GitProviderIntegration, Organization, Repository
+from devopshero_app.models import IntegrationGitProvider, Organization, Repository
 
 logger = logging.getLogger(__name__)
 
@@ -140,7 +140,7 @@ def list_installation_repos(installation_id: str) -> list[GitHubRepo]:
     return repos
 
 
-def sync_repositories(organization: Organization, integration: GitProviderIntegration) -> SyncResult:
+def sync_repositories(organization: Organization, integration: IntegrationGitProvider) -> SyncResult:
     """Sync repositories from GitHub to the database."""
     github_repos = list_installation_repos(installation_id=integration.installation_id)
 
