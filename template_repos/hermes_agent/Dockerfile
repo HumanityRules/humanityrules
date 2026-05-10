@@ -47,7 +47,7 @@ COPY haproxy.cfg.template /etc/haproxy/haproxy.cfg.template
 COPY hermes-nono-profile.json /etc/nono/profiles/hermes-nono-profile.json
 COPY --chmod=755 supervisor.sh /supervisor.sh
 COPY --chmod=755 webui.sh /webui.sh
-COPY --chmod=755 integrations_refresher.py /integrations_refresher.py
+COPY --chmod=755 integrations_broker.py /integrations_broker.py
 
 # DOH-owned WebUI extension bundle. Loaded by Hermes WebUI per docs/EXTENSIONS.md
 # when the three HERMES_WEBUI_EXTENSION_* env vars are set (see supervisor.sh).
@@ -70,6 +70,7 @@ RUN test -f /apptoo/requirements.txt \
     && cat >> /apptoo/requirements.txt <<'EOF'
 mcp>=1.2.0,<2
 boto3>=1.35.0,<2
+cryptography>=42
 EOF
 
 ENV HERMES_HOME=/home/hermeswebui/.hermes
@@ -78,13 +79,13 @@ ENV HERMES_WEBUI_STATE_DIR=${HERMES_HOME}/webui-mvp
 ENV HERMES_WEBUI_DEFAULT_WORKSPACE=/workspace
 ENV HERMES_WEBUI_SKIP_ONBOARDING=1
 
-RUN mkdir -p /app /uv_cache "$HERMES_HOME" /workspace /home/hermeswebui/.doh/credentials \
+RUN mkdir -p /app /uv_cache "$HERMES_HOME" /workspace /opt/doh/ca \
     && rsync -a /apptoo/ /app/ \
     && cp -r /opt/hermes-defaults/hermes-agent "$HERMES_WEBUI_AGENT_DIR" \
     && python3 /opt/hermes-defaults/apply-patches.py /tmp/patches-agent "$HERMES_WEBUI_AGENT_DIR" \
     && rm -rf /tmp/patches-agent \
     && cp /opt/hermes-defaults/SOUL.md "$HERMES_HOME/SOUL.md" \
-    && chown -R hermeswebui:hermeswebui /app /uv_cache "$HERMES_HOME" /workspace /home/hermeswebui/.doh /opt/doh/webui-extension
+    && chown -R hermeswebui:hermeswebui /app /uv_cache "$HERMES_HOME" /workspace /opt/doh/ca /opt/doh/webui-extension
 
 USER hermeswebui
 
