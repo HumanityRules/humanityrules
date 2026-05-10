@@ -4,7 +4,7 @@ See `docs/integrations_broker_design.md`. The authenticated DOH user
 starts at `/integrations/google/start?rd=<URL>` (where `rd` points at the
 Hermes WebUI in a customer env), consents at Google, and lands back at
 `/integrations/google/callback`. The callback persists the refresh_token in
-DOH's DB as a UserThirdPartyIntegration row; no long-lived Google credentials
+DOH's DB as an IntegrationUserGrant row; no long-lived Google credentials
 cross into the customer env.
 """
 
@@ -18,7 +18,7 @@ from django.http import HttpRequest, HttpResponse, HttpResponseBadRequest
 from django.shortcuts import redirect
 from django.utils import timezone
 
-from devopshero_app.models import Environment, IntegrationConfig, UserThirdPartyIntegration
+from devopshero_app.models import Environment, IntegrationConfig, IntegrationUserGrant
 
 logger = logging.getLogger(__name__)
 
@@ -220,10 +220,10 @@ def integrations_google_oauth_callback(request: HttpRequest) -> HttpResponse:
             "myaccount.google.com and reconnect."
         )
 
-    UserThirdPartyIntegration.objects.update_or_create(
+    IntegrationUserGrant.objects.update_or_create(
         user=request.user,
         environment=env,
-        provider=UserThirdPartyIntegration.Provider.GOOGLE,
+        provider=IntegrationUserGrant.Provider.GOOGLE,
         defaults={
             "refresh_token": refresh_token,
             "scope": token_response.get("scope", ""),
@@ -270,10 +270,10 @@ def integrations_google_oauth_disconnect(request: HttpRequest) -> HttpResponse:
     if env is None:
         return HttpResponseBadRequest("Invalid or unknown rd")
 
-    integration = UserThirdPartyIntegration.objects.filter(
+    integration = IntegrationUserGrant.objects.filter(
         user=request.user,
         environment=env,
-        provider=UserThirdPartyIntegration.Provider.GOOGLE,
+        provider=IntegrationUserGrant.Provider.GOOGLE,
     ).first()
     if integration is not None:
         refresh_token = integration.refresh_token

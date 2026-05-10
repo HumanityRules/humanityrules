@@ -9,9 +9,9 @@ from devopshero_app.models import (
     AWSAccount,
     Environment,
     IntegrationConfig,
+    IntegrationUserGrant,
     Organization,
     User,
-    UserThirdPartyIntegration,
 )
 
 
@@ -119,11 +119,11 @@ class TestIntegrationsGoogleCallbackHappyPath(_CallbackTestBase):
             "http://testserver/integrations/google/callback",
         )
 
-        # One UserThirdPartyIntegration row, keyed by (user, env, provider).
-        row = UserThirdPartyIntegration.objects.get(
+        # One IntegrationUserGrant row, keyed by (user, env, provider).
+        row = IntegrationUserGrant.objects.get(
             user=self.user,
             environment=self.env,
-            provider=UserThirdPartyIntegration.Provider.GOOGLE,
+            provider=IntegrationUserGrant.Provider.GOOGLE,
         )
         self.assertEqual(row.refresh_token, "1//refresh")
         self.assertIn("gmail.readonly", row.scope)
@@ -138,10 +138,10 @@ class TestIntegrationsGoogleCallbackHappyPath(_CallbackTestBase):
 
     def test_reconnect_updates_row_in_place(self) -> None:
         """Running through consent again should update the existing row, not duplicate."""
-        UserThirdPartyIntegration.objects.create(
+        IntegrationUserGrant.objects.create(
             user=self.user,
             environment=self.env,
-            provider=UserThirdPartyIntegration.Provider.GOOGLE,
+            provider=IntegrationUserGrant.Provider.GOOGLE,
             refresh_token="old-refresh",
             scope="stale-scope",
         )
@@ -158,9 +158,9 @@ class TestIntegrationsGoogleCallbackHappyPath(_CallbackTestBase):
                 {"code": "c", "state": "stst"},
             )
 
-        rows = UserThirdPartyIntegration.objects.filter(
+        rows = IntegrationUserGrant.objects.filter(
             user=self.user, environment=self.env,
-            provider=UserThirdPartyIntegration.Provider.GOOGLE,
+            provider=IntegrationUserGrant.Provider.GOOGLE,
         )
         self.assertEqual(rows.count(), 1)
         self.assertEqual(rows.first().refresh_token, "1//refresh")
@@ -179,7 +179,7 @@ class TestIntegrationsGoogleCallbackRejections(_CallbackTestBase):
         )
         self.assertEqual(response.status_code, 400)
         self.assertNotIn("google_oauth_state", self.client.session)
-        self.assertFalse(UserThirdPartyIntegration.objects.exists())
+        self.assertFalse(IntegrationUserGrant.objects.exists())
 
     def test_rejects_missing_state_in_session(self) -> None:
         response = self.client.get(
@@ -212,7 +212,7 @@ class TestIntegrationsGoogleCallbackRejections(_CallbackTestBase):
             {"code": "c", "state": "stst"},
         )
         self.assertEqual(response.status_code, 400)
-        self.assertFalse(UserThirdPartyIntegration.objects.exists())
+        self.assertFalse(IntegrationUserGrant.objects.exists())
 
     def test_rejects_when_env_missing(self) -> None:
         self._seed_session(state="stst", rd="https://hermes.dev.example.com/x",
@@ -237,7 +237,7 @@ class TestIntegrationsGoogleCallbackRejections(_CallbackTestBase):
                 {"code": "c", "state": "stst"},
             )
         self.assertEqual(response.status_code, 400)
-        self.assertFalse(UserThirdPartyIntegration.objects.exists())
+        self.assertFalse(IntegrationUserGrant.objects.exists())
 
     def test_rejects_when_google_returns_no_refresh_token(self) -> None:
         """Without a refresh_token in the response, DOH can't serve access tokens later."""
@@ -256,7 +256,7 @@ class TestIntegrationsGoogleCallbackRejections(_CallbackTestBase):
                 {"code": "c", "state": "stst"},
             )
         self.assertEqual(response.status_code, 400)
-        self.assertFalse(UserThirdPartyIntegration.objects.exists())
+        self.assertFalse(IntegrationUserGrant.objects.exists())
 
 
 class TestIntegrationsGoogleCallbackRdAppend(_CallbackTestBase):

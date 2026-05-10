@@ -4,7 +4,7 @@ from django.contrib.auth.decorators import login_required
 from django.http import HttpRequest, HttpResponse, HttpResponseRedirect
 from django.shortcuts import render
 
-from ...models import AWSAccount, GitProviderIntegration, Repository
+from ...models import AWSAccount, IntegrationGitProvider, Repository
 from .. import base
 
 logger = logging.getLogger(__name__)
@@ -97,25 +97,25 @@ def integrations_git_integrations(request: HttpRequest) -> HttpResponse:
     org = request.user.current_organization
 
     if request.method == "POST":
-        integration = GitProviderIntegration.objects.filter(
+        integration = IntegrationGitProvider.objects.filter(
             organization=org,
-            provider=GitProviderIntegration.Provider.GITHUB,
+            provider=IntegrationGitProvider.Provider.GITHUB,
         ).first()
 
         if integration and integration.installation_id:
             try:
                 github_client.sync_repositories(organization=org, integration=integration)
-                if integration.status != GitProviderIntegration.Status.CONNECTED:
-                    integration.status = GitProviderIntegration.Status.CONNECTED
+                if integration.status != IntegrationGitProvider.Status.CONNECTED:
+                    integration.status = IntegrationGitProvider.Status.CONNECTED
                     integration.save(update_fields=["status", "updated_at"])
             except Exception as e:
                 logger.error("GitHub re-sync failed: %s", str(e))
-                integration.status = GitProviderIntegration.Status.ERROR
+                integration.status = IntegrationGitProvider.Status.ERROR
                 integration.save(update_fields=["status", "updated_at"])
 
-    github_integration = GitProviderIntegration.objects.filter(
+    github_integration = IntegrationGitProvider.objects.filter(
         organization=org,
-        provider=GitProviderIntegration.Provider.GITHUB,
+        provider=IntegrationGitProvider.Provider.GITHUB,
     ).first()
 
     context = base.get_app_shell_context(request=request, current_page="integrations")

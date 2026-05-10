@@ -15,12 +15,13 @@ from devopshero_app.models import (
     DeploymentLog,
     Environment,
     EnvironmentLog,
-    GitProviderIntegration,
     Group,
     GroupAttribute,
     GroupMembership,
     IdentityAttribute,
     IntegrationConfig,
+    IntegrationGitProvider,
+    IntegrationUserGrant,
     LLMUsageLog,
     Message,
     Organization,
@@ -32,7 +33,6 @@ from devopshero_app.models import (
     Repository,
     ResourceTag,
     User,
-    UserThirdPartyIntegration,
     WaitlistSignup,
     Workspace,
 )
@@ -142,8 +142,8 @@ class EnvironmentAdmin(admin.ModelAdmin):
     )
 
 
-@admin.register(GitProviderIntegration)
-class GitProviderIntegrationAdmin(admin.ModelAdmin):
+@admin.register(IntegrationGitProvider)
+class IntegrationGitProviderAdmin(admin.ModelAdmin):
     list_display = ["organization", "provider", "status", "installation_id", "created_at"]
     list_filter = ["provider", "status", "organization"]
     search_fields = ["organization__name", "installation_id"]
@@ -463,8 +463,8 @@ class IntegrationConfigAdmin(admin.ModelAdmin):
     readonly_fields = ["id", "created_at", "updated_at"]
 
 
-@admin.register(UserThirdPartyIntegration)
-class UserThirdPartyIntegrationAdmin(admin.ModelAdmin):
+@admin.register(IntegrationUserGrant)
+class IntegrationUserGrantAdmin(admin.ModelAdmin):
     list_display = ["user", "environment", "provider", "granted_at", "last_refreshed_at"]
     list_filter = ["provider", "environment"]
     search_fields = ["user__email", "user__username", "environment__name", "environment__slug", "scope"]

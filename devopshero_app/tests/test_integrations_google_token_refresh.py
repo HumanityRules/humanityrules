@@ -11,9 +11,9 @@ from devopshero_app.models import (
     Environment,
     EnvironmentBearerToken,
     IntegrationConfig,
+    IntegrationUserGrant,
     Organization,
     User,
-    UserThirdPartyIntegration,
 )
 
 
@@ -50,9 +50,9 @@ class _TokenEndpointTestBase(TestCase):
             provider=IntegrationConfig.Provider.GOOGLE,
             config=VALID_WEB_CONFIG,
         )
-        self.integration = UserThirdPartyIntegration.objects.create(
+        self.integration = IntegrationUserGrant.objects.create(
             user=self.user, environment=self.env,
-            provider=UserThirdPartyIntegration.Provider.GOOGLE,
+            provider=IntegrationUserGrant.Provider.GOOGLE,
             refresh_token="existing-refresh", scope="gmail.readonly openid email",
         )
         self.client = Client()
@@ -180,7 +180,7 @@ class TestRevocation(_TokenEndpointTestBase):
             )
         self.assertEqual(status, 410)
         self.assertFalse(
-            UserThirdPartyIntegration.objects.filter(id=self.integration.id).exists()
+            IntegrationUserGrant.objects.filter(id=self.integration.id).exists()
         )
 
 
@@ -197,7 +197,7 @@ class TestTransientFailures(_TokenEndpointTestBase):
         self.assertEqual(status, 502)
         # Row preserved — user hasn't revoked, DOH is just asking again later.
         self.assertTrue(
-            UserThirdPartyIntegration.objects.filter(id=self.integration.id).exists()
+            IntegrationUserGrant.objects.filter(id=self.integration.id).exists()
         )
 
     def test_integration_config_missing_returns_500(self) -> None:

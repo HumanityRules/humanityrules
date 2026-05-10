@@ -91,7 +91,7 @@ Customer-owned AWS account connected via cross-account IAM role.
 - **status** — pending / connected / error
 - Unique constraint: (organization, name)
 
-### GitProviderIntegration
+### IntegrationGitProvider
 Organization-level connection to a Git provider.
 - **organization** — FK to Organization
 - **provider** — github / gitlab
@@ -100,7 +100,7 @@ Organization-level connection to a Git provider.
 
 ### Repository
 - **organization** — FK to Organization
-- **integration** — FK to GitProviderIntegration (null for local repos)
+- **integration** — FK to IntegrationGitProvider (null for local repos)
 - **provider** — github / gitlab / local
 - **name** — Repository name (e.g., "flask-api")
 - **full_name** — Full name (e.g., "acme/flask-api")

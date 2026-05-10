@@ -23,7 +23,7 @@ from django.http import HttpResponse, HttpResponseBadRequest, HttpResponseForbid
 from django.shortcuts import redirect, render
 from django.views.decorators.http import require_POST
 
-from devopshero_app.models import GitProviderIntegration, Organization
+from devopshero_app.models import IntegrationGitProvider, Organization
 from devopshero_app.services import abac
 from devopshero_app.services.gitproviders import github_client
 
@@ -161,17 +161,17 @@ def _handle_setup(request, org: Organization) -> HttpResponse:
 
 
 def _connect_installation(org: Organization, installation_id: str) -> HttpResponse:
-    """Create/update GitProviderIntegration and sync repositories."""
+    """Create/update IntegrationGitProvider and sync repositories."""
     try:
         installation_details = github_client.get_installation_details(installation_id=installation_id)
         account_name = installation_details.get("account", {}).get("login", "Unknown")
 
-        integration, created = GitProviderIntegration.objects.update_or_create(
+        integration, created = IntegrationGitProvider.objects.update_or_create(
             organization=org,
-            provider=GitProviderIntegration.Provider.GITHUB,
+            provider=IntegrationGitProvider.Provider.GITHUB,
             defaults={
                 "installation_id": installation_id,
-                "status": GitProviderIntegration.Status.CONNECTED,
+                "status": IntegrationGitProvider.Status.CONNECTED,
             },
         )
 
@@ -191,12 +191,12 @@ def _connect_installation(org: Organization, installation_id: str) -> HttpRespon
 
     except Exception as e:
         logger.error("GitHub connection failed: %s", str(e))
-        GitProviderIntegration.objects.update_or_create(
+        IntegrationGitProvider.objects.update_or_create(
             organization=org,
-            provider=GitProviderIntegration.Provider.GITHUB,
+            provider=IntegrationGitProvider.Provider.GITHUB,
             defaults={
                 "installation_id": installation_id,
-                "status": GitProviderIntegration.Status.ERROR,
+                "status": IntegrationGitProvider.Status.ERROR,
             },
         )
         return redirect("/integrations/git-integrations/?error=connection_failed")
@@ -282,9 +282,9 @@ def _handle_installation_event(payload: dict):
     logger.info("Installation event: action=%s, installation_id=%s", action, installation_id)
 
     if action == "deleted":
-        GitProviderIntegration.objects.filter(
+        IntegrationGitProvider.objects.filter(
             installation_id=str(installation_id),
-        ).update(status=GitProviderIntegration.Status.ERROR)
+        ).update(status=IntegrationGitProvider.Status.ERROR)
 
 
 def _handle_installation_repositories_event(payload: dict):
@@ -295,7 +295,7 @@ def _handle_installation_repositories_event(payload: dict):
     logger.info("Installation repositories event: action=%s, installation_id=%s", action, installation_id)
 
     try:
-        integration = GitProviderIntegration.objects.get(installation_id=str(installation_id))
+        integration = IntegrationGitProvider.objects.get(installation_id=str(installation_id))
         github_client.sync_repositories(organization=integration.organization, integration=integration)
-    except GitProviderIntegration.DoesNotExist:
+    except IntegrationGitProvider.DoesNotExist:
         logger.error("No integration found for installation_id=%s", installation_id)
