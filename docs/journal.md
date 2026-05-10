@@ -1,5 +1,25 @@
 # DevOpsHero Development Journal
 
+## 2026-05-09 18:57 - [Integrations] Hermes Agent + WebUI pin bump (v2026.4.30 → v2026.5.7 / 0.50.259 → 0.51.34)
+
+**Conversation:** [2026-05-09-1857-bb294714.md](conversations/2026-05-09-1857-bb294714.md)
+
+Ran the `hermes-update-check` skill, triaged 881/748 upstream commits, and bumped both pins. Patches apply cleanly against the new trees with zero fuzz (`patch -F 0`). Not runtime-tested yet — image build, `/health` log silence, Bedrock dropdown curation, 401 → `X-DOH-Auth-URL` navigation, and the `[doh-perf bedrock]` console logs still need a live container pass.
+
+**One patch retired.** `patches-webui/05-webui-reasoning-effort-cfg.patch` is **landed upstream**. Upstream now has `_cfg.get('agent', {}) if isinstance(_cfg, dict) else {}` at `api/streaming.py:2466` — the exact fix our patch made. Deleted the patch file and its section in `patches-webui/README.md`. This was a "fixed upstream bug in disguise" patch and the note in its README flagged to revisit on bump, which paid off.
+
+**Re-anchoring was the bulk of the work.** Line numbers drift a lot over ~750 upstream commits; the patch header line numbers had to be updated on three of the remaining five WebUI patches. The agent patches (04-stop-answer-as-reasoning, 05-bedrock-ttft-perf) happened to still apply with `-F 0` because upstream hadn't touched their immediate context — pure luck, not stability.
+
+- **01-provider-model-labels** — moved from line 1689 → 3372 in `api/config.py`. Logic identical; just refreshed the hunk header.
+- **04-policy-proxy-reauth-url** — upstream also changed `/login` → `login` (relative) for subpath mounts like `/hermes/`. Re-rolled the patch to preserve that fallback when `X-DOH-Auth-URL` is absent, since DOH deployments may eventually run under a subpath too.
+- **06-bedrock-ttft-perf** — biggest re-anchor. Routes.py had a new helper `_prepare_chat_start_session_for_stream` wrapping what used to be inline; moved the `pending_started_at_mono` write into that helper. Streaming.py on_token moved from line ~1676 → 2213. Messages.js drifted ~150 lines. Also **initially got the hunk header off-by-one** (`@@ -739,9 +748,31 @@` should have been `-739,10 +748,32`) — `patch` refuses with "File to patch:" prompt when trailing context count is short. Lesson: **count trailing context lines carefully when writing hunk headers by hand, and always dry-run with `-F 0` to catch this** — normal `patch` runs will prompt interactively, which `apply-patches.py` silently treats as a skipped file (not a hard error).
+
+**Verification harness used.** Downloaded the three upstream trees (pinned WebUI, new WebUI, new Agent) to `/tmp/hermes-upgrade/` and ran `apply-patches.py` sequentially on each. Treating the final state as the "patched container tree" and grepping for the DOH-specific markers (`X-DOH-Auth-URL`, `_perf_bedrock_send_at`, `pending_started_at_mono`, `_dohPerfEnterTs`, `DOH: skip live discovery`) confirmed every patch landed where intended. This kind of offline dry-run catches drift without waiting for a Docker build.
+
+**Noteworthy upstream change we'll inherit.** `fix(bedrock): preserve reasoningContent across converse normalization` in the agent v2026.5.7 release — directly touches our Bedrock + reasoning path. Streaming fixes in WebUI (`keep assistant-only stream deltas on current turn`, `preserve sidebar scrolling while streaming`, `keep streaming chat pinned after final render`) are pure wins. No Bedrock live-discovery changes and no access-log throttle knobs added upstream, so patches 02 and 03 remain necessary.
+
+**Process note on the skill.** The `hermes-update-check` skill's "report in under 50 lines" format worked well — kept the first response tight and scannable. The verdict-per-patch bullet with a file:line anchor gave the user everything needed to green-light the bump. The skill doesn't cover doing the bump itself; that's correct separation since verdict → bump is a judgment call.
+
 ## 2026-05-09 12:36 - [Integrations] Google Workspace skill (fork from upstream) + gws install + naming cleanup
 
 **Conversation:** [2026-05-09-1236-feefa2cf.md](conversations/2026-05-09-1236-feefa2cf.md)

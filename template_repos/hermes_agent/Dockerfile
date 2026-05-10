@@ -1,6 +1,6 @@
 FROM public.ecr.aws/aws-observability/aws-sigv4-proxy:1.11.1 AS sigv4proxy
 
-FROM ghcr.io/nesquena/hermes-webui:0.50.259
+FROM ghcr.io/nesquena/hermes-webui:0.51.34
 
 USER root
 
@@ -27,7 +27,7 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --chmod=755 prune-skills.sh /tmp/prune-skills.sh
-RUN git clone --depth 1 --branch v2026.4.30 https://github.com/NousResearch/hermes-agent.git \
+RUN git clone --depth 1 --branch v2026.5.7 https://github.com/NousResearch/hermes-agent.git \
         /opt/hermes-defaults/hermes-agent \
     && /tmp/prune-skills.sh /opt/hermes-defaults/hermes-agent/skills \
     && rm -f /tmp/prune-skills.sh \
