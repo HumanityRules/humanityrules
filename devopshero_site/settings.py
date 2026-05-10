@@ -138,7 +138,7 @@ else:
     DATABASES = {
         "default": {
             "ENGINE": "django.db.backends.sqlite3",
-            "NAME": DB_PATH if DB_PATH else BASE_DIR / "db.sqlite3",
+            "NAME": DB_PATH if DB_PATH else BASE_DIR / "local" / "db.sqlite3",
         }
     }
 
@@ -224,7 +224,7 @@ CLAUDE_MODEL_ENVIRONMENT = os.environ.get("CLAUDE_MODEL_ENVIRONMENT", "sonnet-4.
 CLAUDE_MODEL_APP_DEPLOYMENT = os.environ.get("CLAUDE_MODEL_APP_DEPLOYMENT", "sonnet-4.6")
 
 # Claude Agent Sandbox: Base directory for agent sandbox (cloned repos, temp files, etc.)
-CLAUDE_SANDBOX_DIR = BASE_DIR / "sandbox"
+CLAUDE_SANDBOX_DIR = BASE_DIR / "local" / "sandbox"
 
 # App Templates: bundled template repositories
 TEMPLATE_REPOS_DIR = BASE_DIR / "template_repos"

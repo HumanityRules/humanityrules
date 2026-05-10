@@ -36,7 +36,7 @@
             "type": "debugpy",
             "request": "launch",
             "module": "devopshero_app.services.agent.test_main_agent",
-            "args": ["--repl", "--conversation-id", "019bc7e3-f78f-74bc-9490-003bd8264dab", "--db-run", "test_db/my_test.sqlite3", "--no-copy"],
+            "args": ["--repl", "--conversation-id", "019bc7e3-f78f-74bc-9490-003bd8264dab", "--db-run", "local/test_db/my_test.sqlite3", "--no-copy"],
             "env": {
                 "DJANGO_SETTINGS_MODULE": "devopshero_site.settings"
             },

@@ -1,3 +1,9 @@
+# Per-Dockerfile ignore for `infra_devopshero/Dockerfile`, picked up by BuildKit
+# because of the `Dockerfile.dockerignore` filename (must sit next to the Dockerfile
+# and use this exact `<dockerfile-name>.dockerignore` form). Patterns are evaluated
+# relative to the build context, which is the project root (see deploy_app.sh:
+# `docker build -f infra_devopshero/Dockerfile -t devopshero:latest .`).
+
 # Git
 .git
 .gitignore
@@ -34,7 +40,7 @@ node_modules/
 .env.*
 !.env.example
 *.sqlite3
-db.sqlite3
+local/
 
 # Documentation and specs
 docs/
