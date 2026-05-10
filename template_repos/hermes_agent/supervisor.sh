@@ -9,10 +9,11 @@ AWS_BEDROCK_RUNTIME_PORT=9903
 AWS_HAPROXY_CONFIG=/tmp/hermes-nono-aws-haproxy.cfg
 CHILD_HOME=/workspace
 NONO_PROFILE=/etc/nono/profiles/hermes-nono-profile.json
-GOOGLE_TOKEN_REFRESHER=/google_token_refresher.py
+INTEGRATIONS_REFRESHER=/integrations_refresher.py
+WEBUI_EXTENSION_DIR=/opt/doh/webui-extension
 SIGV4_PID=""
 HAPROXY_PID=""
-GOOGLE_REFRESHER_PID=""
+INTEGRATIONS_REFRESHER_PID=""
 
 die() {
     echo "FATAL: $*" >&2
@@ -21,8 +22,8 @@ die() {
 
 cleanup() {
     set +e
-    if [ -n "$GOOGLE_REFRESHER_PID" ] && kill -0 "$GOOGLE_REFRESHER_PID" 2>/dev/null; then
-        kill "$GOOGLE_REFRESHER_PID"
+    if [ -n "$INTEGRATIONS_REFRESHER_PID" ] && kill -0 "$INTEGRATIONS_REFRESHER_PID" 2>/dev/null; then
+        kill "$INTEGRATIONS_REFRESHER_PID"
     fi
     if [ -n "$HAPROXY_PID" ] && kill -0 "$HAPROXY_PID" 2>/dev/null; then
         kill "$HAPROXY_PID"
@@ -90,16 +91,25 @@ start_aws_broker() {
     start_haproxy
 }
 
-start_google_token_refresher() {
+start_integrations_refresher() {
     # Only when deploy_app.py's env-bearer overlay supplied the identity
     # triple. Missing any of them = not a personal-assistant deploy (e.g.
     # local dev), so skip silently.
     if [ -z "${DOH_ENV_BEARER:-}" ] || [ -z "${DOH_OWNER_USERNAME:-}" ] || [ -z "${DOH_CONTROL_PLANE_URL:-}" ]; then
-        echo "[supervisor] DOH_ENV_BEARER / DOH_OWNER_USERNAME / DOH_CONTROL_PLANE_URL not set; skipping google token refresher"
+        echo "[supervisor] DOH_ENV_BEARER / DOH_OWNER_USERNAME / DOH_CONTROL_PLANE_URL not set; skipping integrations refresher"
         return
     fi
-    /app/venv/bin/python "$GOOGLE_TOKEN_REFRESHER" &
-    GOOGLE_REFRESHER_PID=$!
+    /app/venv/bin/python "$INTEGRATIONS_REFRESHER" &
+    INTEGRATIONS_REFRESHER_PID=$!
+}
+
+export_webui_extension_env() {
+    # Point the WebUI at our extension bundle. EXTENSIONS.md-compliant same-origin
+    # URLs — the upstream static handler serves $HERMES_WEBUI_EXTENSION_DIR under
+    # /extensions/. These three vars are in the nono profile's allow_vars.
+    export HERMES_WEBUI_EXTENSION_DIR="$WEBUI_EXTENSION_DIR"
+    export HERMES_WEBUI_EXTENSION_SCRIPT_URLS="/extensions/doh.js"
+    export HERMES_WEBUI_EXTENSION_STYLESHEET_URLS="/extensions/doh.css"
 }
 
 write_child_aws_config() {
@@ -207,7 +217,8 @@ main() {
     render_hermes_config
     start_aws_broker
     write_child_aws_config
-    start_google_token_refresher
+    start_integrations_refresher
+    export_webui_extension_env
 
     run_in_nono "$@" &
     NONO_PID=$!
