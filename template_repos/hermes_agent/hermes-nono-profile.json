@@ -20,6 +20,8 @@
       "HERMES_WEBUI_EXTENSION_DIR",
       "HERMES_WEBUI_EXTENSION_SCRIPT_URLS",
       "HERMES_WEBUI_EXTENSION_STYLESHEET_URLS",
+      "HTTPS_PROXY",
+      "SSL_CERT_FILE",
       "LANG",
       "LC_*",
       "TERM",
@@ -35,7 +37,7 @@
     "read": [
       "/app",
       "/usr/local/aws-cli",
-      "/home/hermeswebui/.doh/credentials",
+      "/opt/doh/ca",
       "/opt/doh/webui-extension"
     ],
     "read_file": [
@@ -51,14 +53,7 @@
   "network": {
     "network_profile": "developer",
     "allow_domain": [
-      "api.tavily.com",
-      "www.googleapis.com",
-      "gmail.googleapis.com",
-      "calendar-json.googleapis.com",
-      "drive.googleapis.com",
-      "docs.googleapis.com",
-      "sheets.googleapis.com",
-      "people.googleapis.com"
+      "api.tavily.com"
     ],
     "listen_port": [
       8787
@@ -67,7 +62,9 @@
       8787,
       9901,
       9902,
-      9903
+      9903,
+      9950,
+      9951
     ]
   }
 }

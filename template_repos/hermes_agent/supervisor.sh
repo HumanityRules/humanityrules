@@ -9,11 +9,14 @@ AWS_BEDROCK_RUNTIME_PORT=9903
 AWS_HAPROXY_CONFIG=/tmp/hermes-nono-aws-haproxy.cfg
 CHILD_HOME=/workspace
 NONO_PROFILE=/etc/nono/profiles/hermes-nono-profile.json
-INTEGRATIONS_REFRESHER=/integrations_refresher.py
+INTEGRATIONS_BROKER=/integrations_broker.py
+INTEGRATIONS_BROKER_CA_DIR=/opt/doh/ca
+INTEGRATIONS_BROKER_PROXY_PORT=9950
+INTEGRATIONS_BROKER_CONTROL_PORT=9951
 WEBUI_EXTENSION_DIR=/opt/doh/webui-extension
 SIGV4_PID=""
 HAPROXY_PID=""
-INTEGRATIONS_REFRESHER_PID=""
+INTEGRATIONS_BROKER_PID=""
 
 die() {
     echo "FATAL: $*" >&2
@@ -22,8 +25,8 @@ die() {
 
 cleanup() {
     set +e
-    if [ -n "$INTEGRATIONS_REFRESHER_PID" ] && kill -0 "$INTEGRATIONS_REFRESHER_PID" 2>/dev/null; then
-        kill "$INTEGRATIONS_REFRESHER_PID"
+    if [ -n "$INTEGRATIONS_BROKER_PID" ] && kill -0 "$INTEGRATIONS_BROKER_PID" 2>/dev/null; then
+        kill "$INTEGRATIONS_BROKER_PID"
     fi
     if [ -n "$HAPROXY_PID" ] && kill -0 "$HAPROXY_PID" 2>/dev/null; then
         kill "$HAPROXY_PID"
@@ -91,16 +94,24 @@ start_aws_broker() {
     start_haproxy
 }
 
-start_integrations_refresher() {
+start_integrations_broker() {
     # Only when deploy_app.py's env-bearer overlay supplied the identity
     # triple. Missing any of them = not a personal-assistant deploy (e.g.
-    # local dev), so skip silently.
+    # local dev), so skip silently — but nono-managed clients will then
+    # call Google without HTTPS_PROXY set and get ENOTCONN, which is the
+    # expected local-dev behavior.
     if [ -z "${DOH_ENV_BEARER:-}" ] || [ -z "${DOH_OWNER_USERNAME:-}" ] || [ -z "${DOH_CONTROL_PLANE_URL:-}" ]; then
-        echo "[supervisor] DOH_ENV_BEARER / DOH_OWNER_USERNAME / DOH_CONTROL_PLANE_URL not set; skipping integrations refresher"
+        echo "[supervisor] DOH_ENV_BEARER / DOH_OWNER_USERNAME / DOH_CONTROL_PLANE_URL not set; skipping integrations broker"
         return
     fi
-    /app/venv/bin/python "$INTEGRATIONS_REFRESHER" &
-    INTEGRATIONS_REFRESHER_PID=$!
+    mkdir -p "$INTEGRATIONS_BROKER_CA_DIR"
+    /app/venv/bin/python "$INTEGRATIONS_BROKER" \
+        --proxy-port "$INTEGRATIONS_BROKER_PROXY_PORT" \
+        --control-port "$INTEGRATIONS_BROKER_CONTROL_PORT" \
+        --ca-dir "$INTEGRATIONS_BROKER_CA_DIR" &
+    INTEGRATIONS_BROKER_PID=$!
+    wait_for_port "$INTEGRATIONS_BROKER_PROXY_PORT" "$INTEGRATIONS_BROKER_PID" "integrations-broker-proxy"
+    wait_for_port "$INTEGRATIONS_BROKER_CONTROL_PORT" "$INTEGRATIONS_BROKER_PID" "integrations-broker-control"
 }
 
 export_webui_extension_env() {
@@ -201,6 +212,19 @@ run_in_nono() {
         nono_args+=(--env-credential-map env://TAVILY_API_KEY TAVILY_API_KEY)
     fi
 
+    # HTTPS_PROXY + SSL_CERT_FILE route in-sandbox clients (gws, curl, etc.)
+    # through the integrations broker, which injects per-user access tokens
+    # and forwards to real upstreams. NO_PROXY keeps loopback direct so the
+    # sandbox can still reach the AWS haproxy on 9901-9903 and the broker
+    # itself on 9950/9951 without a proxy round-trip.
+    local broker_env=()
+    if [ -n "${INTEGRATIONS_BROKER_PID:-}" ]; then
+        broker_env+=(
+            "HTTPS_PROXY=http://127.0.0.1:${INTEGRATIONS_BROKER_PROXY_PORT}"
+            "SSL_CERT_FILE=${INTEGRATIONS_BROKER_CA_DIR}/bundle.pem"
+        )
+    fi
+
     nono "${nono_args[@]}" -- /usr/bin/env \
         ANTHROPIC_BEDROCK_BASE_URL="http://127.0.0.1:${AWS_BEDROCK_RUNTIME_PORT}" \
         AWS_DEFAULT_REGION="$AWS_BROKER_REGION" \
@@ -208,6 +232,7 @@ run_in_nono() {
         HOME="$CHILD_HOME" \
         PATH=/usr/local/bin:/usr/local/sbin:/usr/bin:/usr/sbin:/bin:/sbin \
         NO_PROXY=127.0.0.1,localhost \
+        "${broker_env[@]}" \
         "$@"
 }
 
@@ -217,7 +242,7 @@ main() {
     render_hermes_config
     start_aws_broker
     write_child_aws_config
-    start_integrations_refresher
+    start_integrations_broker
     export_webui_extension_env
 
     run_in_nono "$@" &

@@ -1,0 +1,74 @@
+--- a/api/routes.py
++++ b/api/routes.py
+@@ -2754,6 +2754,11 @@
+ 
+ def handle_get(handler, parsed) -> bool:
+     """Handle all GET routes. Returns True if handled, False for 404."""
++
++    # DOH: same-origin reverse proxy for the integrations broker's control
++    # API. See template_repos/hermes_agent/integrations_broker.py.
++    if parsed.path.startswith("/__doh_broker/"):
++        return _doh_broker_proxy(handler, parsed, method="GET", body=b"")
+ 
+     if parsed.path.startswith("/session/static/"):
+         # Strip the leading "/session" so _serve_static() sees a path that
+@@ -3710,6 +3715,20 @@
+ def handle_post(handler, parsed) -> bool:
+     """Handle all POST routes. Returns True if handled, False for 404."""
+     diag = RequestDiagnostics.maybe_start("POST", parsed.path, logger=logger)
++
++    # DOH: same-origin reverse proxy for the integrations broker's control
++    # API. Deliberately runs BEFORE the upstream CSRF gate — the broker is
++    # loopback-only and the endpoints are stateless (trigger a refresh / read
++    # cached state), which is fine to expose to any in-tab script. The CSRF
++    # check below rejects fetches with `credentials: 'include'` from unknown
++    # origins, which would otherwise break the WebUI extension's /kick POST.
++    if parsed.path.startswith("/__doh_broker/"):
++        try:
++            body = handler.rfile.read(int(handler.headers.get("Content-Length") or 0))
++        except Exception:
++            body = b""
++        return _doh_broker_proxy(handler, parsed, method="POST", body=body)
++
+     # CSRF: reject cross-origin browser requests
+     if diag:
+         diag.stage("csrf")
+@@ -4994,6 +5013,38 @@
+         return True
+     return False
+ 
++
++# DOH: /__doh_broker/* → 127.0.0.1:9951 (the integrations broker's control API).
++# Keeps the extension's fetch same-origin (no CORS). Forwarded verbatim minus
++# the /__doh_broker prefix. The broker is a sibling sidecar process on the
++# same host, so no auth — loopback scope + nono profile already bound it.
++def _doh_broker_proxy(handler, parsed, method: str, body: bytes) -> bool:
++    import http.client as _httpclient
++
++    upstream_path = parsed.path[len("/__doh_broker"):] or "/"
++    if parsed.query:
++        upstream_path += "?" + parsed.query
++    try:
++        conn = _httpclient.HTTPConnection("127.0.0.1", 9951, timeout=10)
++        conn.request(method, upstream_path, body=body, headers={"Content-Type": "application/json"})
++        resp = conn.getresponse()
++        payload = resp.read()
++        status = resp.status
++        ctype = resp.getheader("Content-Type") or "application/json"
++        conn.close()
++    except Exception as exc:
++        payload = json.dumps({"error": f"broker unreachable: {exc}"}).encode()
++        status = 502
++        ctype = "application/json"
++    handler.send_response(status)
++    handler.send_header("Content-Type", ctype)
++    handler.send_header("Content-Length", str(len(payload)))
++    handler.send_header("Cache-Control", "no-store")
++    handler.end_headers()
++    handler.wfile.write(payload)
++    return True
++
++
+ # ── GET route helpers ─────────────────────────────────────────────────────────
+ 
+ # MIME types for static file serving. Hoisted to module scope to avoid

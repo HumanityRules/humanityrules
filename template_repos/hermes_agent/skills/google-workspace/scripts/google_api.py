@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 """Google Workspace API CLI for Hermes agents with platform-managed auth.
 
-Auth is handled outside the sandbox: a short-lived access token is written
-to a fixed path on the host and refreshed automatically before it expires.
-Refresh tokens and OAuth client secrets never enter the sandbox.
+Auth is injected outside the sandbox: an integrations broker sits between
+this script and Google, terminating TLS with a DOH-signed leaf cert and
+swapping the Authorization header for the current short-lived access token.
+Refresh tokens, OAuth client secrets, and even the access token never enter
+the sandbox — we send a sentinel Bearer value that the broker replaces.
 
 Hard-requires the `gws` CLI. There is no interactive setup inside the
 sandbox — if the user needs to connect Google, they do that through the
@@ -33,24 +35,12 @@ import subprocess
 import sys
 from datetime import datetime, timedelta, timezone
 from email.mime.text import MIMEText
-from pathlib import Path
 
 
-# Hardcoded path where the platform writes the current access token.
-# A host-side refresher keeps this file fresh; the nono profile's
-# `read_file` grant makes exactly this path visible to the sandbox.
-ACCESS_TOKEN_FILE = Path("/home/hermeswebui/.doh/credentials/google_access_token")
-
-
-def _ensure_connected() -> None:
-    """Exit 1 with a clear message if the access-token file is missing."""
-    if not ACCESS_TOKEN_FILE.exists():
-        print(
-            "Google not connected for this agent. Ask the user to connect Google "
-            "before running Google Workspace commands.",
-            file=sys.stderr,
-        )
-        sys.exit(1)
+# Sentinel token sent to the broker. The broker swaps the Authorization
+# header before forwarding to Google. If the user hasn't connected Google,
+# the broker returns 503 with a clear message that gws surfaces verbatim.
+_BROKER_PLACEHOLDER_TOKEN = "doh-broker-placeholder"
 
 
 def _gws_binary() -> str:
@@ -66,16 +56,14 @@ def _gws_binary() -> str:
 
 
 def _gws_env() -> dict[str, str]:
-    """Environment for a gws subprocess: current env + GOOGLE_WORKSPACE_CLI_TOKEN."""
+    """Environment for a gws subprocess: current env + placeholder token for broker injection."""
     env = os.environ.copy()
-    env["GOOGLE_WORKSPACE_CLI_TOKEN"] = ACCESS_TOKEN_FILE.read_text().strip()
+    env["GOOGLE_WORKSPACE_CLI_TOKEN"] = _BROKER_PLACEHOLDER_TOKEN
     return env
 
 
 def _run_gws(parts: list[str], *, params: dict | None = None, body: dict | None = None) -> dict:
     """Invoke gws with JSON output, returning the parsed response. Exits on non-zero exit codes."""
-    _ensure_connected()
-
     cmd = [_gws_binary(), *parts]
     if params is not None:
         cmd.extend(["--params", json.dumps(params)])

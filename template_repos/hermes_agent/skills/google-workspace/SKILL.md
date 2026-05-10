@@ -14,25 +14,18 @@ Gmail, Calendar, Drive, Contacts, Sheets, and Docs — through the `gws` CLI, us
 
 ## How auth works
 
-A short-lived Google access token is maintained at
-`/home/hermeswebui/.doh/credentials/google_access_token` and refreshed
-automatically before it expires.
+Auth is injected by the platform's integrations broker — you don't handle
+tokens. Every Google API call goes through an HTTPS proxy that swaps in
+the current short-lived access token before forwarding to Google. You
+pass a placeholder; the broker replaces it.
 
-If that file doesn't exist, Google isn't connected for this agent. Tell the
-user: "Google isn't connected for this agent — it needs to be connected
-before I can use Gmail/Calendar/Drive."
+If Google isn't connected, the broker returns a 503 with a clear message:
+"google integration not connected in DOH — connect it from the Integrations
+pane." Surface that to the user verbatim.
 
 ## References
 
 - `references/gmail-search-syntax.md` — Gmail search operators.
-
-## First-use check
-
-```bash
-test -f /home/hermeswebui/.doh/credentials/google_access_token
-```
-
-If this returns non-zero, Google isn't connected. Ask the user to connect it.
 
 ## Usage
 
@@ -117,16 +110,13 @@ All commands return JSON. Parse with `jq` or read directly. Key fields:
 ## Rules
 
 1. **Confirm before sending email or creating/deleting events.** Show the draft content and ask for approval.
-2. **Check the token file before the first Google call** in a conversation. If missing, surface the "not connected" message and stop.
-3. **Use the Gmail search syntax reference** for complex queries — load it with `skill_view("google-workspace", file_path="references/gmail-search-syntax.md")`.
-4. **Calendar times must include timezone** — use ISO 8601 with offset (e.g., `2026-03-01T10:00:00-06:00`) or UTC (`Z`).
-5. **Respect rate limits** — batch reads when possible; avoid rapid-fire sequential API calls.
+2. **Use the Gmail search syntax reference** for complex queries — load it with `skill_view("google-workspace", file_path="references/gmail-search-syntax.md")`.
+3. **Calendar times must include timezone** — use ISO 8601 with offset (e.g., `2026-03-01T10:00:00-06:00`) or UTC (`Z`).
+4. **Respect rate limits** — batch reads when possible; avoid rapid-fire sequential API calls.
 
 ## Troubleshooting
 
-| Problem | Meaning | What to do |
-|---------|---------|------------|
-| `Google not connected` | Token file is missing | Tell the user Google needs to be connected for this agent. |
-| `HttpError 403: Insufficient Permission` | Missing API scope | User needs to reconnect with the needed scopes. |
-| `HttpError 403: Access Not Configured` | Google API not enabled | Surface to the user; they need to get it enabled. |
-| `invalid_grant` during a refresh | Refresh token revoked | The connection was removed; user needs to reconnect. |
+- **503 "google integration not connected in DOH"** — the user hasn't connected Google yet (or disconnected it). Ask them to connect from the Integrations pane.
+- **`HttpError 403: Insufficient Permission`** — missing API scope. User needs to reconnect with the needed scopes.
+- **`HttpError 403: Access Not Configured`** — Google API not enabled. Surface to the user; they need to get it enabled.
+- **`invalid_grant`** — refresh token revoked at Google's end. The broker will report `revoked` status; user needs to reconnect.

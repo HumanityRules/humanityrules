@@ -1,0 +1,158 @@
+"""Tests for integrations_broker.py.
+
+The broker runs inside the customer-env Hermes container (not Django), but
+its correctness is load-bearing for the WebUI extension's Integrations pane
+and for all Google Workspace tool calls. We unit-test the load-bearing
+primitives (host→provider routing, header rewrite, CA/leaf generation, and
+refresh-loop outcome classification) directly without standing up the
+asyncio servers.
+"""
+
+import importlib.util
+import pathlib
+import ssl
+import sys
+import tempfile
+import unittest
+from unittest.mock import patch
+
+
+def _load_broker_module():
+    """Load template_repos/hermes_agent/integrations_broker.py as a module."""
+    repo_root = pathlib.Path(__file__).resolve().parents[2]
+    script_path = repo_root / "template_repos" / "hermes_agent" / "integrations_broker.py"
+    spec = importlib.util.spec_from_file_location(
+        name="integrations_broker_under_test",
+        location=str(script_path),
+    )
+    module = importlib.util.module_from_spec(spec)
+    sys.modules["integrations_broker_under_test"] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+broker = _load_broker_module()
+
+
+class TestHostToProviderRouting(unittest.TestCase):
+
+    def test_all_google_hosts_route_to_google(self) -> None:
+        for host in broker.PROVIDERS["google"]["hosts"]:
+            self.assertEqual(broker._host_to_provider_slug(host=host), "google")
+
+    def test_unknown_host_returns_none(self) -> None:
+        self.assertIsNone(broker._host_to_provider_slug(host="api.tavily.com"))
+        self.assertIsNone(broker._host_to_provider_slug(host="example.com"))
+
+
+class TestRewriteAuthorization(unittest.TestCase):
+
+    def test_existing_authorization_is_replaced(self) -> None:
+        hdrs = [(b"authorization", b"Bearer SANDBOX-DUMMY"), (b"content-type", b"application/json")]
+        out = broker._rewrite_authorization(headers=hdrs, token="REAL-TOKEN", upstream_host="gmail.googleapis.com")
+        auth = dict([(n.lower(), v) for n, v in out])[b"authorization"]
+        self.assertEqual(auth, b"Bearer REAL-TOKEN")
+
+    def test_missing_authorization_gets_injected(self) -> None:
+        hdrs = [(b"content-type", b"application/json")]
+        out = broker._rewrite_authorization(headers=hdrs, token="T", upstream_host="gmail.googleapis.com")
+        auth = dict([(n.lower(), v) for n, v in out])[b"authorization"]
+        self.assertEqual(auth, b"Bearer T")
+
+    def test_host_is_set_to_upstream(self) -> None:
+        hdrs = [(b"host", b"whatever"), (b"authorization", b"Bearer x")]
+        out = broker._rewrite_authorization(headers=hdrs, token="T", upstream_host="gmail.googleapis.com")
+        host = dict([(n.lower(), v) for n, v in out])[b"host"]
+        self.assertEqual(host, b"gmail.googleapis.com")
+
+    def test_hop_by_hop_proxy_headers_are_stripped(self) -> None:
+        hdrs = [
+            (b"authorization", b"Bearer x"),
+            (b"proxy-connection", b"keep-alive"),
+            (b"proxy-authorization", b"Basic xxx"),
+        ]
+        out = broker._rewrite_authorization(headers=hdrs, token="T", upstream_host="gmail.googleapis.com")
+        names = [n.lower() for n, _ in out]
+        self.assertNotIn(b"proxy-connection", names)
+        self.assertNotIn(b"proxy-authorization", names)
+
+
+class TestCertMinter(unittest.TestCase):
+
+    def test_bootstrap_writes_bundle_and_leaf_mint_returns_ssl_context(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            minter = broker._CertMinter(ca_dir=pathlib.Path(tmp))
+            minter.bootstrap()
+            bundle = pathlib.Path(tmp) / "bundle.pem"
+            self.assertTrue(bundle.exists())
+            self.assertGreater(bundle.stat().st_size, 100)
+            ctx = minter.context_for(hostname="gmail.googleapis.com")
+            self.assertIsInstance(ctx, ssl.SSLContext)
+            # Second call is cached — same object.
+            ctx2 = minter.context_for(hostname="gmail.googleapis.com")
+            self.assertIs(ctx, ctx2)
+            # Different host mints a different context.
+            ctx3 = minter.context_for(hostname="drive.googleapis.com")
+            self.assertIsNot(ctx, ctx3)
+
+
+class TestFetchProviderTokenClassification(unittest.TestCase):
+    """Drive _fetch_provider_token through each outcome by faking urlopen."""
+
+    def _run(self, status: int, payload: dict | None) -> dict:
+        class _FakeResp:
+            def __init__(self, status: int, body: bytes) -> None:
+                self.status = status
+                self._body = body
+            def read(self) -> bytes:
+                return self._body
+            def __enter__(self):
+                return self
+            def __exit__(self, *a):
+                return False
+
+        import json as _json
+        import urllib.error
+
+        body = _json.dumps(payload or {}).encode()
+        if 200 <= status < 300:
+            opener = _FakeResp(status=status, body=body)
+            with patch.object(broker.urllib.request, "urlopen", return_value=opener):
+                return broker._fetch_provider_token(
+                    control_plane_url="https://example.invalid",
+                    bearer="b",
+                    owner_username="u",
+                    refresh_path="/api/x",
+                )
+        raise_with = urllib.error.HTTPError(
+            url="https://example.invalid", code=status, msg="x", hdrs={}, fp=None,
+        )
+        raise_with.read = lambda: body  # type: ignore[assignment]
+        with patch.object(broker.urllib.request, "urlopen", side_effect=raise_with):
+            return broker._fetch_provider_token(
+                control_plane_url="https://example.invalid",
+                bearer="b",
+                owner_username="u",
+                refresh_path="/api/x",
+            )
+
+    def test_200_is_ok(self) -> None:
+        out = self._run(status=200, payload={"access_token": "abc", "expires_in": 3600})
+        self.assertEqual(out["kind"], "ok")
+        self.assertEqual(out["access_token"], "abc")
+        self.assertEqual(out["expires_in"], 3600)
+
+    def test_404_is_not_connected(self) -> None:
+        self.assertEqual(self._run(status=404, payload={})["kind"], "not_connected")
+
+    def test_410_is_revoked(self) -> None:
+        self.assertEqual(self._run(status=410, payload={})["kind"], "revoked")
+
+    def test_401_is_fatal(self) -> None:
+        self.assertEqual(self._run(status=401, payload={"error": "bad bearer"})["kind"], "fatal")
+
+    def test_500_is_fatal(self) -> None:
+        self.assertEqual(self._run(status=500, payload={"error": "bad config"})["kind"], "fatal")
+
+    def test_503_is_transient(self) -> None:
+        self.assertEqual(self._run(status=503, payload={"error": "try later"})["kind"], "transient")

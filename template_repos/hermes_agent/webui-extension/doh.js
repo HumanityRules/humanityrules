@@ -2,21 +2,18 @@
 // HERMES_WEBUI_EXTENSION_* env vars exported in supervisor.sh.
 //
 // Adds an "Integrations" section to the WebUI's Settings panel, rendering
-// per-provider cards from /extensions/integrations_status.json (published by
-// the supervisor-side integrations_refresher.py). Connect / Disconnect are
-// top-level navigations to DOH's control plane; we never call DOH cross-origin.
+// per-provider cards from the integrations broker's control API. The
+// broker is reached same-origin via the WebUI reverse-proxy patch
+// (patches-webui/07-doh-broker-proxy.patch). Connect / Disconnect are
+// top-level navigations to DOH's control plane; we never call DOH
+// cross-origin.
 (() => {
   'use strict';
 
-  const STATUS_URL = '/extensions/integrations_status.json';
-  // How long to poll for a status flip after Connect/Disconnect round-trips
-  // back to us. The refresher tick is 60s; 90s covers one full cycle.
-  const POST_FLOW_POLL_MS = 5000;
-  const POST_FLOW_POLL_DEADLINE_MS = 90000;
+  const STATUS_URL = '/__doh_broker/status';
+  const KICK_URL = '/__doh_broker/kick';
 
   let _currentStatus = null;
-  let _postFlowTimer = null;
-  let _postFlowStartedAt = 0;
 
   function elem(tag, props, children) {
     const el = document.createElement(tag);
@@ -44,13 +41,18 @@
 
   async function fetchStatus() {
     try {
-      // Cache-bust; the refresher rewrites this file atomically every tick.
-      const response = await fetch(STATUS_URL + '?t=' + Date.now(), { cache: 'no-store' });
+      const response = await fetch(STATUS_URL, { cache: 'no-store' });
       if (!response.ok) return null;
       return await response.json();
     } catch (_) {
       return null;
     }
+  }
+
+  async function kickBroker() {
+    try {
+      await fetch(KICK_URL, { method: 'POST', cache: 'no-store' });
+    } catch (_) { /* best-effort; the broker is loopback */ }
   }
 
   function buildConnectUrl(status, returnTo) {
@@ -152,17 +154,13 @@
     renderPane(_currentStatus);
   }
 
-  function startPostFlowPoll() {
-    if (_postFlowTimer) return;
-    _postFlowStartedAt = Date.now();
-    _postFlowTimer = setInterval(async () => {
-      if (Date.now() - _postFlowStartedAt > POST_FLOW_POLL_DEADLINE_MS) {
-        clearInterval(_postFlowTimer);
-        _postFlowTimer = null;
-        return;
-      }
-      await refreshAndRender();
-    }, POST_FLOW_POLL_MS);
+  // After the Connect/Disconnect round-trip returns us here, nudge the broker
+  // to refresh immediately, then re-render once. No background polling —
+  // /kick triggers a synchronous refresh against DOH, so one fetchStatus()
+  // after it returns is all we need.
+  async function refreshAfterFlow() {
+    await kickBroker();
+    await refreshAndRender();
   }
 
   // Drop any ?connected=/?disconnected= sentinel once we've acted on it,
@@ -250,11 +248,10 @@
     const sentinel = consumeReturnSentinel();
     if (sentinel) {
       // User just came back from DOH's start/disconnect. Route them straight
-      // to the Integrations pane, and poll until the refresher's status file
-      // reflects the new state.
+      // to the Integrations pane and nudge the broker to refresh now.
       if (typeof window.switchPanel === 'function') window.switchPanel('settings');
       showIntegrationsSection();
-      startPostFlowPoll();
+      refreshAfterFlow();
     }
   }
 
