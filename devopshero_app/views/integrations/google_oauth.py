@@ -1,6 +1,6 @@
 """Google Workspace OAuth start + callback views.
 
-See `docs/google_workspace_integration_design.md`. The authenticated DOH user
+See `docs/integrations_broker_design.md`. The authenticated DOH user
 starts at `/integrations/google/start?rd=<URL>` (where `rd` points at the
 Hermes WebUI in a customer env), consents at Google, and lands back at
 `/integrations/google/callback`. The callback persists the refresh_token in
