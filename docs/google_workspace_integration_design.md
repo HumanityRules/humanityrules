@@ -1,95 +1,69 @@
 # Google Workspace Integration Design
 
-How a Hermes Personal Assistant user connects their Google account (Gmail, Calendar, Drive) so the agent can act on their behalf.
+How a Hermes Personal Assistant user connects their Google account so the agent can act on their behalf, without any long-lived Google credential ever entering a customer environment.
 
-## Scope of v1
+## The core constraint
 
-- **Personal Hermes WebUI only.** Slack gateway is out of scope for this flow.
-- **Per-user OAuth.** Domain-wide delegation deferred.
-- **Google-first.** Shape should generalize to other third-party integrations later.
+A Hermes agent runs inside a customer's AWS account, inside a nono sandbox, on behalf of one specific user. It needs to call Gmail/Calendar/Drive/etc. on that user's behalf. This requires an OAuth refresh token somewhere, long-lived enough to mint short-lived access tokens for the lifetime of the connection.
 
-## Decisions
+**The architectural question is where that refresh token lives.** Three plausible homes:
 
-### Integration surface
+1. **Customer env Secrets Manager.** The sandbox-adjacent supervisor refreshes it. Rejected: puts DOH's OAuth client secret into every customer env too, and a compromised env yields long-term Gmail access.
+2. **DOH control plane.** Env-resident components call DOH to get a fresh access token. Chosen.
+3. **Inside the sandbox (with Google's SDK doing its own refresh).** Rejected for the same reasons as (1), amplified — the sandbox itself becomes the credential custodian.
 
-- **Direct Google SDKs, not an MCP server** (tentative — not finalized). Reason: MCP server tool surfaces bloat the agent context. Revisit if governance story later needs a uniform "approved MCP servers" framing.
+Choice (2) is the design. It costs a runtime dependency on DOH's control plane — if DOH is unreachable for ~an hour, Gmail-dependent tools stop working. That's an acceptable tradeoff for custody.
 
-### Connection UX
+## The trust boundary
 
-- **Settings-first (not just-in-time).** A "Connections" page in the Hermes WebUI with a card per Google app (Gmail / Calendar / Drive). Chosen for mental-model simplicity and consistency with every other SaaS integration users have seen.
-- **Chat behavior when a required app is not connected:** agent replies "I can't read your calendar yet — connect Google Calendar in Settings → Connections." No inline auth card, no auto-retry.
-- **Scope bundling:** one card per app, all needed scopes bundled. Splitting within an app (e.g. separate "read Gmail" vs "send mail" toggles) is governance complexity to add later if customers ask.
+Only one secret crosses from DOH into a customer env: a **short-lived Google access token** (minutes of validity). Nothing else Google-related is stored in the env, not even transiently.
 
-### OAuth client ownership
+The refresh token, DOH's OAuth client secret, and every other long-lived Google credential live only in DOH's database.
 
-- **DOH-owned Google Cloud project, one OAuth client.**
-- **Single registered redirect URI:** `https://devopshero.ai/integrations/google/callback`. Google requires exact-match redirects and does not accept wildcards, so per-employee subdomains cannot be registered. The control plane is the fixed landing point; per-env/per-user destinations are carried in `state`.
-- **Verification:** Gmail/Drive scopes are "restricted" and require CASA assessment before going to production. Testing mode is sufficient for dev — test users allowlisted explicitly. Verification work starts in parallel, blocks public launch only.
-- **Customer-owned client** (enterprise option) is deferred; add if a customer demands it.
+The sandbox sees only the access token, via a file the platform maintains. It cannot refresh on its own — that would require credentials it doesn't have.
 
-### Auth / identity flow on the DOH side
+## Three actors, three roles
 
-- **Hermes users already have `User` rows in DOH** (created on first Okta login, keyed by `oidc_sub`; required by the PDP at `devopshero_app/views/pdp.py:97`). No separate identity mechanism needed.
-- **Control-plane flow, not an auth-service ticket JWT.** Earlier in the design we considered having the env auth-service container mint a signed ticket so DOH could identify the Hermes user without a DOH login. Rejected: Hermes users are already DOH users, so reusing `/oidc/login/` is simpler and avoids a new JWT trust mechanism.
-- **Hermes implies the org is OIDC.** The env auth-service (policy-proxy in auth-service role) only speaks Okta — any env hosting Hermes is by construction OIDC. So `/integrations/google/start` can assume OIDC without branching on `Organization.auth_provider`.
+**The browser (user on their laptop).** Drives the initial OAuth consent. Traverses DOH's control plane to authenticate the user, then Google's consent screen, then DOH's callback. Lands back on the Hermes WebUI with the connection recorded.
 
-### Org migration
+**DOH's control plane.** Owns the Google OAuth client, stores refresh tokens per (user, env, provider), and exposes an authenticated endpoint that mints access tokens. Also the identity authority — a DOH user is the unit Google grants are attached to, and Hermes users are by construction DOH users.
 
-- **`setup_oidc_org` already flips `auth_provider` to OIDC** via `update_or_create` (`devopshero_app/management/commands/setup_oidc_org.py:42`). Running it against an existing WorkOS org migrates it. No new command or option needed for v1.
-- **Global `LOGIN_URL` (`/auth/login/` → WorkOS) stays as-is.** The integration flow does not rely on `@login_required`'s global redirect; it carries the org slug explicitly.
+**The customer environment.** Has a supervisor process (outside the sandbox) that periodically asks DOH for a fresh access token and writes it to a known path. The sandbox reads that path read-only via nono's filesystem grant; everything else is invisible to it.
 
-### The Connect link
+## Authentication between the three
 
-- **Hermes-side link:** `https://devopshero.ai/oidc/login/?org=<slug>&next=<URL-encoded /integrations/google/start?rd=<URL-encoded rd>>`
-- The org slug is known to Hermes at render time, so no pre-auth lookup on DOH.
-- **No env/rd check pre-auth.** Validating `rd` against the `Environment` table before authentication would leak which hostnames are known envs and let anonymous callers probe DOH's tenancy. The `rd` is validated post-auth inside `/integrations/google/start`.
+- **Browser → DOH control plane:** standard OIDC/Okta login. The connect link carries a validated `next` parameter that lands the user on `/integrations/google/start` post-auth.
+- **DOH control plane → Google:** DOH's OAuth client, registered with Google, with redirect URIs covering every host DOH can be reached at (prod, ngrok for dev). The right URI is chosen per request based on the browser's current host.
+- **Customer env supervisor → DOH control plane:** the per-environment bearer token that already authenticates the policy-proxy's PDP calls. Env-scoped, not user-scoped; the user identity is passed in the request body and validated server-side against the env's org. The supervisor has the bearer; the sandboxed agent does not.
+- **Sandbox → supervisor:** no direct channel. The sandbox reads a file; that file is the whole API.
 
-### The `/integrations/google/start` view (DOH side)
+## Why `rd` validation sits where it does
 
-- `@login_required`. By the time we're here, the user is authenticated via OIDC.
-- Validates `rd`: must be a URL whose host ends in a known env-domain suffix. Rejects otherwise.
-- Stashes `rd` plus the authenticated `username` / `oidc_sub` server-side keyed by a fresh random `state`.
-- Redirects to Google's `/authorize` with:
-  - `client_id` = DOH's one web client
-  - `redirect_uri` = `https://devopshero.ai/integrations/google/callback`
-  - `scope` = app-bundle scopes for this integration
-  - `state` = opaque id
-  - `access_type=offline`, `prompt=consent` (first time) to get a refresh token
-- **Deferred hardening:** `rd` validation should later check that the authenticated user actually has access to the target env/app, not just "any env exists." Non-issue while one user maps to one org; tighten before that changes.
+The connect flow accepts a `?rd=<url>` pointing at the Hermes WebUI, which the user lands on after the dance completes. Validating `rd` pre-auth would leak which hostnames correspond to real environments — an anonymous caller could probe DOH's tenancy. So `rd` is validated inside the authenticated start view, against the list of known env domains.
 
-### The `/integrations/google/callback` view (DOH side)
+## Failure modes and their shape
 
-- Looks up the stashed payload by `state` (recovers `env_slug`, `owner_username`, `rd`).
-- Exchanges the code with Google server-to-server (DOH's client secret).
-- Upserts a `UserThirdPartyIntegration` row in DOH's DB keyed by `(user, environment, provider="google")` with `refresh_token`, `scope`, and `granted_at`. **No credentials cross into the customer env** — refresh happens later via a DOH endpoint (`POST /api/integrations/google/token`) that env-resident callers hit with the env bearer. This is the option-3 posture: DOH is the sole custodian of refresh tokens, the blast radius for a compromised customer env is zero Google access.
-- 302s back to `rd`. Hermes Connections page shows Connected.
-- Plaintext at rest (matches existing posture for `Organization.oidc_client_secret` and `IntegrationConfig.config`). Encryption-at-rest is a cross-cutting concern, not a per-column decision.
+- **User hasn't connected Google yet.** Refresh endpoint returns 404. Supervisor removes the token file; sandbox sees no file and surfaces a "not connected" message to the user.
+- **Refresh token revoked at Google** (either by the user or by Google's security systems). Refresh endpoint returns 410 and deletes the stored grant; user must reconnect. This is the standard revocation path.
+- **Transient Google failure.** Supervisor keeps the last valid access token until it expires, retries with backoff. Tool calls fail only once the cached token actually expires.
+- **DOH control plane unreachable.** Same as transient failure at first; if DOH stays down past the current access token's expiry, Google tool calls start failing. This is the cost of option (2).
+- **Customer env compromised.** The attacker gets the bearer, which can mint access tokens for users already connected in that env — bounded to env users, bounded in token lifetime. They cannot extract refresh tokens (they're not in the env) and cannot mint for other envs (the bearer is env-scoped).
 
-### Required patches to existing DOH code
+## What lives where
 
-- **`/oidc/login/`** (`devopshero_app/views/auth.py:82`): currently hard-redirects to `/dashboard/` when the user is already authenticated. Must honor `?next=<url>` instead.
-- **`/oidc/callback/`** (`devopshero_app/views/auth.py:194`): currently always redirects to `/dashboard/`. Must read `next` from session (set during `/oidc/login/`) and redirect there when present.
-- **Safe-URL validation for `next`:** use `django.utils.http.url_has_allowed_host_and_scheme`. Without this the `next` param is an open redirector.
+- **OAuth client ID + secret** — DOH database. One per DOH deployment. Never crosses the boundary.
+- **Refresh tokens** — DOH database, keyed by (user, env, provider). Custody stays on DOH. Scoped to env so revocation can be env-surgical.
+- **Env bearer token** — customer env secrets manager, with only the hash stored on DOH. Pre-existing pattern, reused.
+- **Access token** — customer env, single file written by the supervisor. The only Google-side credential the env ever holds. Short-lived.
 
-### UX wart (accepted for v1)
+## Shape that generalizes to other providers
 
-On cold entry the browser traverses:
-
-```
-<app>.<env-domain>
-  → devopshero.ai/oidc/login/       (silent if DOH session warm)
-  → Okta                             (silent if Okta session warm)
-  → devopshero.ai/oidc/callback/
-  → devopshero.ai/integrations/google/start
-  → accounts.google.com              (first time: consent; later: auto)
-  → devopshero.ai/integrations/google/callback
-  → <app>.<env-domain>/settings/connections?connected=google
-```
-
-If the user's Okta session has expired in the tiny window between the last Hermes interaction and the click, they'll re-enter Okta creds before reaching Google's consent screen. Rare enough to accept.
+Everything above is Google-specific only in naming. The same architecture — provider config on DOH, per-user grants on DOH, refresh endpoint keyed on env bearer + user claim, supervisor-side refresher, sandbox reads a file — works for Slack, Notion, or anything else with an OAuth refresh-token flow. Schema (`UserThirdPartyIntegration`) and endpoint shape are already provider-generic.
 
 ## Open questions
 
-- **Governance layering.** Where does "admin hasn't enabled Gmail for this workspace" get enforced? Most likely a new model on the DOH control plane, checked before starting the Google dance.
-- **Revocation visibility.** If the user revokes on `myaccount.google.com`, the next tool call fails. Settings page should show "Last verified" so the black-box state is legible.
-- **MCP vs SDK** is tentative — still worth revisiting when governance surface crystallizes.
+- **Governance.** How does "admin hasn't enabled Gmail for this workspace" get expressed? Probably a workspace-level allowlist checked before `/integrations/google/start` proceeds. Not built.
+- **Revocation surfacing.** When DOH detects revocation via 410 during a refresh, the connection silently disappears from the UI. The Connections page should distinguish "never connected" from "was connected, now revoked" so the user knows why.
+- **Scope granularity.** Currently all-or-nothing per app family. If customers ask for read/write splits ("the agent can read mail but not send"), we'd add per-scope toggles on the Connections page and track granted scopes more narrowly in the grant row.
+- **Multi-account.** A user might want to connect two Google accounts (personal + work). The schema allows it in principle (drop the `(user, env, provider)` uniqueness); the UX and routing logic — "which account does this tool call use?" — are not designed.
+- **Encryption at rest.** Refresh tokens are plaintext in Postgres, matching existing posture. A cross-cutting initiative would cover them uniformly; not a per-column decision.
