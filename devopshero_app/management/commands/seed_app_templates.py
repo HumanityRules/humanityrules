@@ -705,7 +705,6 @@ HERMES_PERSONAL_TEMPLATE = {
             # the proxy (sharing the task network namespace) can reach it.
             "environment": {
                 "HERMES_WEBUI_HOST": "127.0.0.1",
-                "HERMES_PERSISTENT_ROOT": "/hermes-persistent-root",
             },
             "host_mounts": [
                 {
