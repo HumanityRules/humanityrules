@@ -1,5 +1,28 @@
 # DevOpsHero Development Journal
 
+## 2026-05-11 11:50 - [Deployment] Added Hermes EFS checkpoint restore for node movement
+
+**Conversation:** [2026-05-11-1150-019e0fac.md](conversations/2026-05-11-1150-019e0fac.md)
+
+Extended the Hermes ECS-on-EC2 persistence design from V1 same-node local root persistence toward the V2 durability model. The core decision stayed the same: the hot runtime filesystem remains the EC2 node's local EBS-backed root under `/hermes-persistent-root`, not EFS. V2 adds EFS only as a durability checkpoint layer, mounted into the Hermes task as `/hermes-checkpoint`, so a Hermes deployment can restore onto a different node when its local root is empty.
+
+The first deployment attempt under the V1 paradigm failed because the newly created environment had a fresh ECS node, but the local AppTemplate row had not been reseeded. The built image contained the persistent-root runner, while the task definition generated from the stale template did not include the host mount or `SYS_ADMIN`. ECS launched the runner without the capability needed to mount `/proc` inside the chroot and the Hermes container exited with `mount: /hermes-persistent-root/proc: permission denied` followed by `persistent-root runner needs CAP_SYS_ADMIN`. The fix was not a code change: reseed templates before redeploying so the DB row includes the current container contract.
+
+For V2, Hermes Personal now declares a dedicated EFS mount named `checkpoint` with subpath `checkpoint` and container path `/hermes-checkpoint`. The runner checks startup state in this order: if the local root is empty and `/hermes-checkpoint/rootfs.tar` exists, restore that archive into the local root; if no checkpoint exists, initialize the local root from the image; if the local root is already populated, reuse it. This keeps local storage as the fast path while allowing a later node to recover from the durable EFS archive.
+
+The shutdown path now treats the runner as PID 1 rather than `exec`ing directly into the chrooted runtime. It starts the runtime in a new session, traps `SIGTERM`/`SIGINT`, forwards termination to the runtime process group, waits for it to exit, and then writes a checkpoint archive to EFS. The archive is written to a temporary path and atomically moved into place as `/hermes-checkpoint/rootfs.tar`, avoiding readers seeing a partially written checkpoint. The template gives Hermes a 120 second ECS `stop_timeout` so checkpointing has headroom before ECS sends SIGKILL.
+
+Timing instrumentation was added around all persistence modes: initial image-root initialization, reuse preparation, checkpoint restore, and checkpoint write. The Docker smoke test showed the path working end to end with two separate local Docker volumes standing in for two EC2 nodes: create workspace and SQLite WAL-backed state in local root A, stop the container to checkpoint to the shared checkpoint volume, start with empty local root B, restore from the checkpoint archive, and verify both workspace artifact and SQLite state.
+
+**Key points:**
+- V2 is local EBS hot root plus EFS checkpoint archive, not running Hermes directly from EFS.
+- Hermes Personal now has `efs_config` for one access point named `checkpoint`, mounted only into the Hermes container at `/hermes-checkpoint`.
+- The runner restores from `/hermes-checkpoint/rootfs.tar` only when `/hermes-persistent-root` is empty, preserving the V1 same-node reuse path.
+- The runner checkpoints on graceful termination by tar-archiving the local root to a temp file, then moving it into place as the latest completed checkpoint.
+- Runtime pseudo-filesystems (`/dev`, `/proc`, `/run`, `/sys`, `/tmp`) are excluded from checkpoints, while numeric ownership, xattrs, and ACLs are preserved.
+- Deployment hygiene learning: after changing template definitions, reseed AppTemplates before deploying, or the built image and DB-backed task definition can drift.
+- Verification covered shell syntax, Python compile checks, focused Django tests, `git diff --check`, a full Hermes Docker build, and a Docker restore smoke across two local roots.
+
 ## 2026-05-10 19:54 - [Deployment] Designed Hermes EC2 persistent roots for V1
 
 **Conversation:** [2026-05-10-1956-019e0fac.md](conversations/2026-05-10-1956-019e0fac.md)

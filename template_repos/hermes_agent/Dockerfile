@@ -79,8 +79,9 @@ ENV HERMES_WEBUI_STATE_DIR=${HERMES_HOME}/webui-mvp
 ENV HERMES_WEBUI_DEFAULT_WORKSPACE=/workspace
 ENV HERMES_WEBUI_SKIP_ONBOARDING=1
 ENV HERMES_PERSISTENT_ROOT=/hermes-persistent-root
+ENV HERMES_CHECKPOINT_ROOT=/hermes-checkpoint
 
-RUN mkdir -p /app /uv_cache "$HERMES_HOME" /workspace "$HERMES_PERSISTENT_ROOT" /opt/doh/ca /opt/doh/broker-private \
+RUN mkdir -p /app /uv_cache "$HERMES_HOME" /workspace "$HERMES_PERSISTENT_ROOT" "$HERMES_CHECKPOINT_ROOT" /opt/doh/ca /opt/doh/broker-private \
     && rsync -a /apptoo/ /app/ \
     && cp -r /opt/hermes-defaults/hermes-agent "$HERMES_WEBUI_AGENT_DIR" \
     && python3 /opt/hermes-defaults/apply-patches.py /tmp/patches-agent "$HERMES_WEBUI_AGENT_DIR" \

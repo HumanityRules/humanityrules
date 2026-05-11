@@ -415,6 +415,18 @@ _HERMES_EFS_CONFIG = {
     ],
 }
 
+_HERMES_CHECKPOINT_EFS_CONFIG = {
+    "mounts": [
+        {
+            "name": "checkpoint",
+            "subpath": "checkpoint",
+            "container_path": "/hermes-checkpoint",
+            "posix_uid": 0,
+            "posix_gid": 0,
+        },
+    ],
+}
+
 # Privileged; mounts workspace (shared with hermes) and docker-persistence
 # (snapshotter-owned). DOH-owned image layered on docker:26.1.0-dind — see
 # template_repos/doh_dind/ for the Dockerfile, entrypoint, and snapshotter.
@@ -685,7 +697,7 @@ HERMES_PERSONAL_TEMPLATE = {
     "memory": 4096,
     "default_compute_mode": "ec2",
     "datastore_config": None,
-    "efs_config": None,
+    "efs_config": _HERMES_CHECKPOINT_EFS_CONFIG,
     "platform_capabilities": ["bedrock-runtime"],
     # ALB targets the policy proxy; the proxy forwards to the hermes container
     # over loopback after SSO + ABAC gates pass.
@@ -700,7 +712,7 @@ HERMES_PERSONAL_TEMPLATE = {
             "health_check_path": "/health",
             "health_check_command": "",
             "health_check_grace_period": 60,
-            "efs_mounts": [],
+            "efs_mounts": ["checkpoint"],
             # Policy proxy fronts the task; pin the WebUI to loopback so only
             # the proxy (sharing the task network namespace) can reach it.
             "environment": {
@@ -713,6 +725,7 @@ HERMES_PERSONAL_TEMPLATE = {
                 },
             ],
             "linux_capabilities": ["SYS_ADMIN"],
+            "stop_timeout": 120,
             "configurable_variables": (
                 _HERMES_LLM_VARS + _HERMES_AWS_DEFAULT_REGION_VAR + _HERMES_TAVILY_VAR
             ),
