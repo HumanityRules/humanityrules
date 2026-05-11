@@ -1,5 +1,31 @@
 # DevOpsHero Development Journal
 
+## 2026-05-11 16:36 - [Bugfix] Replaced aws-sigv4-proxy with streaming Python signer
+
+**Conversation:** [2026-05-11-1638-b5ad038c.md](conversations/2026-05-11-1638-b5ad038c.md)
+
+Hermes Agent streaming had been broken — responses arrived all at once instead of token-by-token. Ruled out suspects in order: policy_proxy (reproduced the burst behavior on `127.0.0.1:8787` inside the hermes container, bypassing the policy-proxy sidecar entirely); the Hermes `streaming` config (`display.streaming: true` is what actually controls the agent-side SSE emission; the top-level `streaming.enabled: false` is a different subsystem and was correct); our DOH patches; upstream regressions in the recent Hermes/WebUI bumps. Each got ruled out live on the running `hermes-vmendi00` container using `doh_app_exec --container hermes`.
+
+Root cause: **`aws-sigv4-proxy` buffers the entire response body before flushing to the client.** Direct inspection of the upstream Go code (`handler/handler.go`) confirmed this — `io.Copy(&buf, resp.Body)` into a `bytes.Buffer`, then one `w.Write(buf.Bytes())`. Upstream issue [awslabs/aws-sigv4-proxy#250](https://github.com/awslabs/aws-sigv4-proxy/issues/250) documents the exact bug, open since Oct 2025 with no workaround flag. Evidence collected on the running container: going through `haproxy → sigv4-proxy → Bedrock`, 45KB arrived in one burst 9.1s after sending. Direct boto3 to Bedrock, same host: tokens spread over 8 seconds. sigv4-proxy on port 9911 alone (no haproxy): same full-buffering behavior.
+
+Streaming broke on 2026-05-06 in commit `8e2b6b7 Nono` — when the nono sandbox, aws-sigv4-proxy, and haproxy sidecars were introduced. Before that, Hermes talked directly to Bedrock with the ECS task role via boto3 and streaming worked fine.
+
+The sidecar exists for a real reason: the nono profile blocks sandboxed network access and whitelists only the proxy ports. AWS credentials must never enter the Hermes process environment, so signing has to happen outside the sandbox. That constrained the fix — we can't just drop the sidecar and give Hermes direct AWS access.
+
+Replaced aws-sigv4-proxy + haproxy with one ~130-line Python process (`template_repos/hermes_agent/aws_signer.py`) that binds 9901/9902/9903 directly, signs with botocore's `SigV4Auth`, and streams via urllib3's `preload_content=False` + `pool.urlopen(...).stream(4096, decode_content=False)`. Each upstream has a dedicated `HTTPSConnectionPool(maxsize=16)` so Hermes's bursty Bedrock traffic reuses TLS connections instead of paying a handshake per call. `retries=False, redirect=False` matches sigv4-proxy's `http.ErrUseLastResponse` semantics — let boto3 handle retries from its side instead of replaying signed requests.
+
+One subtle bug caught during the live test: initial config had `service="bedrock-runtime"` for the 9903 port, which produced `InvalidSignatureException: Credential should be scoped to correct service: 'bedrock'`. Both Bedrock endpoints share the `bedrock` SigV4 signing_name even though one resolves `bedrock.*` and the other resolves `bedrock-runtime.*`. Verified via `client.meta.service_model.signing_name`.
+
+**Key points:**
+- Localized the bug end-to-end inside the running container using `doh_app_exec --container hermes` — three progressively narrower tests (Hermes→haproxy, direct boto3, signer-only on 9911) pinpointed sigv4-proxy as the sole culprit before touching any code.
+- The nono sandbox constrains the fix shape: credential isolation must be preserved, so the replacement runs outside nono on the parent filesystem and the sandboxed process still sees only whitelisted loopback ports.
+- SigV4 signing_name ≠ endpoint hostname: `bedrock.us-east-1.amazonaws.com` and `bedrock-runtime.us-east-1.amazonaws.com` both sign under `bedrock`. Missing this produces a confusing "Credential should be scoped to correct service" error.
+- Read the upstream source before considering edge cases worth porting. Audited aws-sigv4-proxy's Go code: S3 URI escaping, presign for S3, hardcoded execute-api/lambda-url/es/aps endpoints, `--strip`/`--duplicate-headers`/`--custom-headers` flags, and `--unsigned-payload` all exist but don't apply to our Bedrock+STS-only scope. Only connection pooling was worth porting.
+- `shutil.copytree` in `repo_service.clone_repo` follows the working tree, so testing the fix didn't require a pre-commit — deploying `hermes-vmendi02` picked up uncommitted changes directly.
+- The `persistent-root` layer checkpoints the runtime filesystem, so a redeploy of an existing app reuses the old supervisor.sh and won't pick up Dockerfile changes. Fresh apps initialize from the new image; existing apps need the EFS checkpoint + host mount cleared.
+- End-to-end verification on fresh `hermes-vmendi02`: first token at 1.5s, 192 tokens streamed continuously over ~10s. Broken baseline was 15.5s silence followed by all-at-once delivery.
+- Worth remembering: aws-sigv4-proxy is in wide use and this bug affects every streaming AWS API (Bedrock event-stream, Lambda response streaming, anything SSE-based) for anyone routing through it.
+
 ## 2026-05-11 11:50 - [Deployment] Added Hermes EFS checkpoint restore for node movement
 
 **Conversation:** [2026-05-11-1150-019e0fac.md](conversations/2026-05-11-1150-019e0fac.md)
