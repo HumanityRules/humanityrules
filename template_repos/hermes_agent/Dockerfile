@@ -1,5 +1,3 @@
-FROM public.ecr.aws/aws-observability/aws-sigv4-proxy:1.11.1 AS sigv4proxy
-
 FROM ghcr.io/nesquena/hermes-webui:0.51.34
 
 USER root
@@ -8,7 +6,7 @@ ARG NONO_VERSION=0.47.1
 ARG GWS_VERSION=0.22.5
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends ca-certificates curl git haproxy libdbus-1-3 patch rsync sudo unzip \
+    && apt-get install -y --no-install-recommends ca-certificates curl git libdbus-1-3 patch rsync sudo unzip \
     && arch="$(dpkg --print-architecture)" \
     && curl -fsSL -o /tmp/nono.deb \
         "https://github.com/always-further/nono/releases/download/v${NONO_VERSION}/nono-cli_${NONO_VERSION}_${arch}.deb" \
@@ -40,15 +38,14 @@ RUN git clone --depth 1 --branch v2026.5.7 https://github.com/NousResearch/herme
 # platform-managed auth (see template_repos/hermes_agent/skills/google-workspace/).
 COPY skills/google-workspace /opt/hermes-defaults/hermes-agent/skills/productivity/google-workspace
 
-COPY --from=sigv4proxy /aws-sigv4-proxy /usr/local/bin/aws-sigv4-proxy
 COPY SOUL.md /opt/hermes-defaults/SOUL.md
 COPY config.yaml.template /opt/hermes-defaults/config.yaml.template
 COPY --chmod=755 apply-patches.py /opt/hermes-defaults/apply-patches.py
-COPY haproxy.cfg.template /etc/haproxy/haproxy.cfg.template
 COPY hermes-nono-profile.json /etc/nono/profiles/hermes-nono-profile.json
 COPY --chmod=755 persistent-root-runner.sh /persistent-root-runner.sh
 COPY --chmod=755 supervisor.sh /supervisor.sh
 COPY --chmod=755 webui.sh /webui.sh
+COPY aws_signer.py /aws_signer.py
 COPY --chmod=755 integrations_broker.py /integrations_broker.py
 
 # DOH-owned WebUI extension bundle. Loaded by Hermes WebUI per docs/EXTENSIONS.md

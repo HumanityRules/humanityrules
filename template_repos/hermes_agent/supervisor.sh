@@ -2,11 +2,10 @@
 set -euo pipefail
 
 AWS_BROKER_REGION=""
-AWS_SIGV4_PROXY_PORT=9911
 AWS_STS_PORT=9901
 AWS_BEDROCK_PORT=9902
 AWS_BEDROCK_RUNTIME_PORT=9903
-AWS_HAPROXY_CONFIG=/tmp/hermes-nono-aws-haproxy.cfg
+AWS_SIGNER=/aws_signer.py
 CHILD_HOME=/workspace
 NONO_PROFILE=/etc/nono/profiles/hermes-nono-profile.json
 INTEGRATIONS_BROKER=/integrations_broker.py
@@ -15,8 +14,7 @@ INTEGRATIONS_BROKER_PRIVATE_DIR=/opt/doh/broker-private
 INTEGRATIONS_BROKER_PROXY_PORT=9950
 INTEGRATIONS_BROKER_CONTROL_PORT=9951
 WEBUI_EXTENSION_DIR=/opt/doh/webui-extension
-SIGV4_PID=""
-HAPROXY_PID=""
+AWS_SIGNER_PID=""
 INTEGRATIONS_BROKER_PID=""
 
 die() {
@@ -29,11 +27,8 @@ cleanup() {
     if [ -n "$INTEGRATIONS_BROKER_PID" ] && kill -0 "$INTEGRATIONS_BROKER_PID" 2>/dev/null; then
         kill "$INTEGRATIONS_BROKER_PID"
     fi
-    if [ -n "$HAPROXY_PID" ] && kill -0 "$HAPROXY_PID" 2>/dev/null; then
-        kill "$HAPROXY_PID"
-    fi
-    if [ -n "$SIGV4_PID" ] && kill -0 "$SIGV4_PID" 2>/dev/null; then
-        kill "$SIGV4_PID"
+    if [ -n "$AWS_SIGNER_PID" ] && kill -0 "$AWS_SIGNER_PID" 2>/dev/null; then
+        kill "$AWS_SIGNER_PID"
     fi
 }
 
@@ -74,25 +69,16 @@ wait_for_port() {
     return 1
 }
 
-start_sigv4_proxy() {
-    /usr/local/bin/aws-sigv4-proxy --port "127.0.0.1:${AWS_SIGV4_PROXY_PORT}" &
-    SIGV4_PID=$!
-    wait_for_port "$AWS_SIGV4_PROXY_PORT" "$SIGV4_PID" "aws-sigv4-proxy"
-}
-
-start_haproxy() {
-    sed "s|__AWS_BROKER_REGION__|${AWS_BROKER_REGION}|g" \
-        /etc/haproxy/haproxy.cfg.template > "$AWS_HAPROXY_CONFIG"
-    /usr/sbin/haproxy -f "$AWS_HAPROXY_CONFIG" -db &
-    HAPROXY_PID=$!
-    wait_for_port "$AWS_STS_PORT" "$HAPROXY_PID" "haproxy"
-    wait_for_port "$AWS_BEDROCK_PORT" "$HAPROXY_PID" "haproxy"
-    wait_for_port "$AWS_BEDROCK_RUNTIME_PORT" "$HAPROXY_PID" "haproxy"
-}
-
-start_aws_broker() {
-    start_sigv4_proxy
-    start_haproxy
+start_aws_signer() {
+    # DOH-owned streaming SigV4 proxy. Replaces aws-sigv4-proxy + haproxy —
+    # those buffer the full response body before flushing, which breaks
+    # Bedrock event-stream (see awslabs/aws-sigv4-proxy#250). Runs outside
+    # nono so credentials stay out of the sandboxed Hermes process.
+    /app/venv/bin/python3 "$AWS_SIGNER" --region "$AWS_BROKER_REGION" &
+    AWS_SIGNER_PID=$!
+    wait_for_port "$AWS_STS_PORT"             "$AWS_SIGNER_PID" "aws-signer"
+    wait_for_port "$AWS_BEDROCK_PORT"         "$AWS_SIGNER_PID" "aws-signer"
+    wait_for_port "$AWS_BEDROCK_RUNTIME_PORT" "$AWS_SIGNER_PID" "aws-signer"
 }
 
 start_integrations_broker() {
@@ -242,7 +228,7 @@ main() {
     require_llm_config
     configure_aws_region
     render_hermes_config
-    start_aws_broker
+    start_aws_signer
     write_child_aws_config
     start_integrations_broker
     export_webui_extension_env
