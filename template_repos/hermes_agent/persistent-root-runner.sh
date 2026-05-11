@@ -2,6 +2,10 @@
 set -euo pipefail
 
 HERMES_PERSISTENT_ROOT="${HERMES_PERSISTENT_ROOT:-/hermes-persistent-root}"
+HERMES_CHECKPOINT_ROOT="${HERMES_CHECKPOINT_ROOT:-/hermes-checkpoint}"
+CHECKPOINT_ARCHIVE_NAME="rootfs.tar"
+RUNTIME_PID=""
+TERMINATION_REQUESTED=0
 
 die() {
     echo "FATAL: $*" >&2
@@ -20,6 +24,14 @@ format_duration_ms() {
 
 is_empty_dir() {
     [ -z "$(find "$HERMES_PERSISTENT_ROOT" -mindepth 1 -maxdepth 1 -print -quit)" ]
+}
+
+checkpoint_archive_path() {
+    printf "%s/%s" "$HERMES_CHECKPOINT_ROOT" "$CHECKPOINT_ARCHIVE_NAME"
+}
+
+checkpoint_root_mounted() {
+    [ -d "$HERMES_CHECKPOINT_ROOT" ] && mountpoint -q "$HERMES_CHECKPOINT_ROOT"
 }
 
 copy_runtime_file() {
@@ -73,6 +85,7 @@ EOF
 
 initialize_persistent_root() {
     local root_exclude="${HERMES_PERSISTENT_ROOT%/}"
+    local checkpoint_exclude="${HERMES_CHECKPOINT_ROOT%/}"
     local start_ms
     local end_ms
     local duration_ms
@@ -82,6 +95,7 @@ initialize_persistent_root() {
     echo "[persistent-root] Initializing ${HERMES_PERSISTENT_ROOT} from image root..."
     rsync -aH --numeric-ids --one-file-system \
         --exclude="${root_exclude}/***" \
+        --exclude="${checkpoint_exclude}/***" \
         --exclude="/dev/***" \
         --exclude="/proc/***" \
         --exclude="/run/***" \
@@ -95,6 +109,43 @@ initialize_persistent_root() {
     end_ms="$(now_ms)"
     duration_ms="$((end_ms - start_ms))"
     echo "[persistent-root] Initialization complete in $(format_duration_ms "$duration_ms") (${duration_ms} ms)."
+}
+
+restore_persistent_root_from_checkpoint() {
+    local archive
+    local start_ms
+    local end_ms
+    local duration_ms
+
+    if ! checkpoint_root_mounted; then
+        echo "[persistent-root] Checkpoint root ${HERMES_CHECKPOINT_ROOT} is not mounted; no restore source."
+        return 1
+    fi
+
+    archive="$(checkpoint_archive_path)"
+    if [ ! -s "$archive" ]; then
+        echo "[persistent-root] No checkpoint archive found at ${archive}."
+        return 1
+    fi
+
+    start_ms="$(now_ms)"
+    echo "[persistent-root] Restoring ${HERMES_PERSISTENT_ROOT} from ${archive}..."
+    tar --extract \
+        --file "$archive" \
+        --directory "$HERMES_PERSISTENT_ROOT" \
+        --numeric-owner \
+        --same-owner \
+        --xattrs \
+        --acls \
+        || die "failed to restore persistent root from ${archive}"
+    prepare_runtime_filesystem
+    install_passwordless_sudo
+    touch "${HERMES_PERSISTENT_ROOT}/.doh-hermes-persistent-root"
+
+    end_ms="$(now_ms)"
+    duration_ms="$((end_ms - start_ms))"
+    echo "[persistent-root] Restore complete in $(format_duration_ms "$duration_ms") (${duration_ms} ms)."
+    return 0
 }
 
 reuse_persistent_root() {
@@ -113,7 +164,65 @@ reuse_persistent_root() {
     echo "[persistent-root] Reuse preparation complete in $(format_duration_ms "$duration_ms") (${duration_ms} ms)."
 }
 
+checkpoint_persistent_root() {
+    local archive
+    local tmp_archive
+    local start_ms
+    local end_ms
+    local duration_ms
+
+    if ! checkpoint_root_mounted; then
+        echo "[persistent-root] Checkpoint root ${HERMES_CHECKPOINT_ROOT} is not mounted; skipping checkpoint."
+        return
+    fi
+
+    archive="$(checkpoint_archive_path)"
+    tmp_archive="${archive}.tmp.$$"
+    rm -f "$tmp_archive"
+
+    start_ms="$(now_ms)"
+    echo "[persistent-root] Writing checkpoint to ${archive}..."
+    sync
+    tar --create \
+        --file "$tmp_archive" \
+        --directory "$HERMES_PERSISTENT_ROOT" \
+        --one-file-system \
+        --numeric-owner \
+        --xattrs \
+        --acls \
+        --exclude="./dev" \
+        --exclude="./proc" \
+        --exclude="./run" \
+        --exclude="./sys" \
+        --exclude="./tmp" \
+        . \
+        || die "failed to write checkpoint archive ${tmp_archive}"
+    sync
+    mv -f "$tmp_archive" "$archive"
+    sync
+
+    end_ms="$(now_ms)"
+    duration_ms="$((end_ms - start_ms))"
+    echo "[persistent-root] Checkpoint complete in $(format_duration_ms "$duration_ms") (${duration_ms} ms)."
+}
+
+request_termination() {
+    if [ "$TERMINATION_REQUESTED" -eq 1 ]; then
+        return
+    fi
+
+    TERMINATION_REQUESTED=1
+    echo "[persistent-root] Termination requested; forwarding SIGTERM to runtime."
+    if [ -n "$RUNTIME_PID" ] && kill -0 "$RUNTIME_PID" 2>/dev/null; then
+        kill -TERM "-$RUNTIME_PID" 2>/dev/null \
+            || kill -TERM "$RUNTIME_PID" 2>/dev/null \
+            || true
+    fi
+}
+
 main() {
+    local exit_code
+
     if [ "$#" -eq 0 ]; then
         die "no command supplied"
     fi
@@ -123,17 +232,41 @@ main() {
     if [ "$HERMES_PERSISTENT_ROOT" = "/" ]; then
         die "HERMES_PERSISTENT_ROOT must not be /"
     fi
+    if [[ "$HERMES_CHECKPOINT_ROOT" != /* ]]; then
+        die "HERMES_CHECKPOINT_ROOT must be an absolute path"
+    fi
+    if [ "$HERMES_CHECKPOINT_ROOT" = "/" ]; then
+        die "HERMES_CHECKPOINT_ROOT must not be /"
+    fi
 
     mkdir -p "$HERMES_PERSISTENT_ROOT"
     if is_empty_dir; then
-        initialize_persistent_root
+        restore_persistent_root_from_checkpoint || initialize_persistent_root
     else
         reuse_persistent_root
     fi
 
-    exec chroot "$HERMES_PERSISTENT_ROOT" \
+    trap request_termination TERM INT
+    chroot "$HERMES_PERSISTENT_ROOT" \
+        /usr/bin/setsid \
         /usr/bin/setpriv --bounding-set=-sys_admin --inh-caps=-all --ambient-caps=-all \
-        /usr/bin/env HOME=/root USER=root LOGNAME=root "$@"
+        /usr/bin/env HOME=/root USER=root LOGNAME=root "$@" &
+    RUNTIME_PID=$!
+
+    set +e
+    wait "$RUNTIME_PID"
+    exit_code=$?
+    if [ "$TERMINATION_REQUESTED" -eq 1 ] && kill -0 "$RUNTIME_PID" 2>/dev/null; then
+        wait "$RUNTIME_PID"
+        exit_code=$?
+    fi
+    set -e
+
+    if [ "$TERMINATION_REQUESTED" -eq 1 ]; then
+        checkpoint_persistent_root
+    fi
+
+    exit "$exit_code"
 }
 
 main "$@"

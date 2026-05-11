@@ -140,13 +140,23 @@ class BedrockPlatformCapabilityTests(SimpleTestCase):
             else:
                 self.assertNotIn("HERMES_WEBUI_HOST", hermes_container["environment"])
 
-    def test_hermes_template_is_policy_proxy_fronted_without_efs(self) -> None:
+    def test_hermes_template_is_policy_proxy_fronted_with_checkpoint_efs(self) -> None:
         template = seed_app_templates.HERMES_PERSONAL_TEMPLATE
 
         self.assertEqual(template["slug"], "hermes-personal")
         self.assertEqual(template["default_compute_mode"], "ec2")
         self.assertEqual(template["platform_capabilities"], ["bedrock-runtime"])
-        self.assertIsNone(template["efs_config"])
+        self.assertEqual(template["efs_config"], {
+            "mounts": [
+                {
+                    "name": "checkpoint",
+                    "subpath": "checkpoint",
+                    "container_path": "/hermes-checkpoint",
+                    "posix_uid": 0,
+                    "posix_gid": 0,
+                },
+            ],
+        })
         self.assertEqual(template["alb_target_container"], "policy-proxy")
         self.assertEqual(len(template["containers"]), 2)
 
@@ -154,8 +164,9 @@ class BedrockPlatformCapabilityTests(SimpleTestCase):
         self.assertEqual(hermes["image_source"], "dockerfile")
         self.assertEqual(hermes["source_repo_path"], "hermes_agent")
         self.assertEqual(hermes["dockerfile_path"], "Dockerfile")
-        self.assertEqual(hermes["efs_mounts"], [])
+        self.assertEqual(hermes["efs_mounts"], ["checkpoint"])
         self.assertNotIn("depends_on", hermes)
+        self.assertEqual(hermes["stop_timeout"], 120)
         self.assertEqual(hermes["environment"]["HERMES_WEBUI_HOST"], "127.0.0.1")
 
         variable_names = {var["name"] for var in hermes["configurable_variables"]}
