@@ -1,5 +1,28 @@
 # DevOpsHero Development Journal
 
+## 2026-05-10 19:54 - [Deployment] Designed Hermes EC2 persistent roots for V1
+
+**Conversation:** [2026-05-10-1956-019e0fac.md](conversations/2026-05-10-1956-019e0fac.md)
+
+Designed and implemented the first-pass ECS-on-EC2 persistence model for Hermes Agent. The V1 shape is deliberately simple: Hermes runs on the EC2 node's primary EBS-backed root volume, with one per-deployment host directory under `/var/lib/devopshero/hermes-roots/{app_slug}` bind-mounted into the task at `/hermes-persistent-root`. The Hermes image now acts as a runner: it initializes that mounted directory as a persistent root filesystem if empty, then chroots into it and starts the existing supervisor/webui command from there. Package installs, Hermes runtime state, SQLite WAL files, workspace files, and user artifacts all live in that persistent root. V1 explicitly survives task/container replacement on the same node, but not node loss.
+
+The design discussion intentionally narrowed scope before implementation. We chose the primary/root EBS volume instead of a secondary host-attached volume to avoid host bootstrap and mount ordering work in V1. The ECS EC2 launch template now makes the root block device explicit as 200 GiB gp3 on `/dev/xvda`; existing EC2 nodes that predate this will not change in place, so a real proof should use a new or replaced node. We also settled on `/hermes-persistent-root` as the container mount because it matches `HERMES_PERSISTENT_ROOT` and makes the runtime contract obvious.
+
+The runner needs `SYS_ADMIN` only for the pre-chroot mount setup: mounting `/proc`, bind-mounting `/dev` and `/sys`, and mounting tmpfs on `/run` inside the persistent root. ECS handles the host bind mount itself; `SYS_ADMIN` is not for that part. After preparing the root filesystem, the runner drops `SYS_ADMIN` before launching Hermes/nono. Hermes runs as root inside the chroot because nono's `no_new_privs` setting blocks setuid sudo for a non-root child, and the requirement is that tools can run commands like `sudo apt-get install`. The effective boundary remains container/chroot/nono, not Unix user separation inside the chroot.
+
+The nono profile was cleaned up for the new runtime. The old `developer` network profile injected proxy environment and GitHub/GitLab credential proxy behavior, but it also broke apt package installation because Debian repo traffic was routed through the proxy path. The profile now uses direct network mode with `block: true`, `connect_port: [443]`, `listen_port: [8787]`, and the required broker `open_port` values. That keeps HTTPS package installs working while blocking sandbox HTTP access, including EC2 instance metadata on `169.254.169.254:80`. We also removed inherited `HTTPS_PROXY` and `SSL_CERT_FILE` from the profile allow-list to avoid leaking parent proxy/cert configuration into the sandbox; explicit broker env set by our supervisor still applies. Localhost bypass via `NO_PROXY=127.0.0.1,localhost` remains necessary for broker ports.
+
+One important tradeoff is credential injection. Removing `network_profile: developer` also removes nono's implicit GitHub/GitLab credential proxy conveniences (`GITHUB_BASE_URL`, `GITLAB_BASE_URL`, proxy token wiring, and env-backed GitHub/GitLab tokens). DOH-owned AWS broker, Google integrations broker, and Tavily env credential mapping remain intact because they are explicit in our runtime. Future GitHub/GitLab support should be designed explicitly instead of depending on hidden developer-profile behavior.
+
+**Key points:**
+- Added template-level support for EC2-only `host_mounts` and Linux capabilities, with Fargate rejection checks so host mounts cannot silently synthesize into a Fargate task.
+- Hermes Personal now declares `HERMES_PERSISTENT_ROOT=/hermes-persistent-root`, a host mount from `/var/lib/devopshero/hermes-roots/{app_slug}`, and `linux_capabilities=["SYS_ADMIN"]`.
+- Added a persistent-root runner that initializes the mounted root with `rsync`, prepares `/proc`, `/dev`, `/sys`, `/run`, copies basic host resolution files, installs passwordless sudoers for `hermeswebui`, then chroots into the root.
+- Changed the Hermes nono profile from the `developer` proxy profile to direct HTTPS-only outbound access from inside the sandbox, while blocking HTTP/IMDS.
+- Switched Debian apt sources to HTTPS so future `sudo apt-get` installs inside the persistent root can work with the HTTPS-only sandbox policy.
+- Verified with shell syntax checks, Python compile checks, JSON validation, a full Hermes Docker build, packaged nono profile validation, HTTPS/HTTP/IMDS network probes, apt install smoke tests, SQLite WAL persistence, workspace artifact persistence, and focused Django tests.
+- Investigated the real `default` customer environment: it is usable but not ideal as-is for the V1 proof because its EC2 node predates the 200 GiB root volume and the running Hermes task definition has no persistent mount or `SYS_ADMIN`; cleanest proof path is a fresh or replaced node followed by task replacement and persistence checks.
+
 ## 2026-05-10 18:09 - [Integrations] Hardened the integrations broker follow-up fixes
 
 **Conversation:** [2026-05-10-1809-019e1462.md](conversations/2026-05-10-1809-019e1462.md)

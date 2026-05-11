@@ -138,7 +138,15 @@ def _build_container_config(
         ),
         app_secrets=dict(blueprint_container.get("app_secrets") or {}),
         efs_mounts=list(template_container.get("efs_mounts") or []),
+        host_mounts=[
+            infra_customer.appconfig.HostMount(
+                source_path=str(m["source_path"]).format(app_slug=app_name, env_slug=env_slug),
+                container_path=str(m["container_path"]),
+            )
+            for m in template_container.get("host_mounts", [])
+        ],
         privileged=bool(template_container.get("privileged", False)),
+        linux_capabilities=list(template_container.get("linux_capabilities") or []),
         depends_on=[
             ContainerDependencyConfig(
                 name=dep["name"],

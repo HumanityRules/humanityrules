@@ -292,6 +292,16 @@ class EcsClusterStack(Stack):
             role=self.container_instance_role,
             security_group=self.container_instance_security_group,
             user_data=container_instance_user_data,
+            block_devices=[
+                ec2.BlockDevice(
+                    device_name="/dev/xvda",
+                    volume=ec2.BlockDeviceVolume.ebs(
+                        volume_size=200,
+                        volume_type=ec2.EbsDeviceVolumeType.GP3,
+                        delete_on_termination=True,
+                    ),
+                ),
+            ],
         )
         self.container_instance_asg = autoscaling.AutoScalingGroup(
             self, "ContainerInstanceAsg",

@@ -12,6 +12,7 @@ from devopshero_app.services.infra_customer.appconfig import (
     ContainerDependencyConfig,
     EfsConfig,
     EfsMount,
+    HostMount,
 )
 
 
@@ -209,6 +210,115 @@ class EcsComputeModeTests(SimpleTestCase):
                 auth_base_url=None,
             )
 
+    def test_fargate_mode_rejects_host_mounts(self) -> None:
+        cdk_app = App()
+        with self.assertRaisesMessage(
+            ValueError, "Host bind mounts are only supported for EC2-backed ECS tasks",
+        ):
+            deploy_app.AppStack(
+                scope=cdk_app,
+                construct_id="TestAppStack",
+                app_config=AppConfig(
+                    app_name="p",
+                    cpu=1024,
+                    memory=2048,
+                    compute_mode="fargate",
+                    alb_target_container="x",
+                    containers=[
+                        ContainerConfig(
+                            name="x",
+                            image_source="dockerfile",
+                            ecr_repo_name="doh/s/x",
+                            source_repo_path="a",
+                            container_port=80,
+                            host_mounts=[
+                                HostMount(
+                                    source_path="/var/lib/devopshero/hermes-roots/p",
+                                    container_path="/hermes-persistent-root",
+                                ),
+                            ],
+                        ),
+                    ],
+                ),
+                image_tag="t",
+                env_slug="staging",
+                resource_prefix="doh-s-p",
+                subdomain="p",
+                database_connection_secret=None,
+                shared_alb_hosted_zone=None,
+                shared_hosted_zone_id=None,
+                env_bearer_shared_secrets_arn=None,
+                auth_base_url=None,
+            )
+
+    def test_ec2_host_mount_drives_volume_and_mount_point(self) -> None:
+        cdk_app = App()
+        stack = deploy_app.AppStack(
+            scope=cdk_app,
+            construct_id="TestAppStack",
+            app_config=AppConfig(
+                app_name="my-app",
+                cpu=1024,
+                memory=2048,
+                compute_mode="ec2",
+                alb_target_container="hermes",
+                containers=[
+                    ContainerConfig(
+                        name="hermes",
+                        image_source="dockerfile",
+                        ecr_repo_name="doh/staging/my-app-hermes",
+                        source_repo_path="hermes_agent",
+                        container_port=8787,
+                        linux_capabilities=["SYS_ADMIN"],
+                        host_mounts=[
+                            HostMount(
+                                source_path="/var/lib/devopshero/hermes-roots/my-app",
+                                container_path="/hermes-persistent-root",
+                            ),
+                        ],
+                    ),
+                ],
+            ),
+            image_tag="test",
+            env_slug="staging",
+            resource_prefix="doh-staging-my-app",
+            subdomain="my-app",
+            database_connection_secret=None,
+            shared_alb_hosted_zone=None,
+            shared_hosted_zone_id=None,
+            env_bearer_shared_secrets_arn=None,
+            auth_base_url=None,
+        )
+        template = Template.from_stack(stack)
+
+        template.has_resource_properties("AWS::ECS::TaskDefinition", {
+            "Volumes": Match.array_with([
+                {
+                    "Name": "app-host-hermes-0",
+                    "Host": {
+                        "SourcePath": "/var/lib/devopshero/hermes-roots/my-app",
+                    },
+                },
+            ]),
+            "ContainerDefinitions": Match.array_with([
+                Match.object_like({
+                    "Name": "my-app-hermes",
+                    "LinuxParameters": {
+                        "Capabilities": {
+                            "Add": ["SYS_ADMIN"],
+                        },
+                    },
+                    "MountPoints": Match.array_with([
+                        {
+                            "ContainerPath": "/hermes-persistent-root",
+                            "SourceVolume": "app-host-hermes-0",
+                            "ReadOnly": False,
+                        },
+                    ]),
+                }),
+            ]),
+        })
+
     def test_ec2_mode_dind_privileged_and_workspace_only_efs(self) -> None:
         template = _dind_hermes_stack_template()
         template.has_resource_properties("AWS::ECS::TaskDefinition", {
@@ -361,6 +471,20 @@ class EcsComputeModeTests(SimpleTestCase):
         })
         template.resource_count_is("AWS::AutoScaling::LaunchConfiguration", 0)
         template.resource_count_is("AWS::EC2::LaunchTemplate", 1)
+        template.has_resource_properties("AWS::EC2::LaunchTemplate", {
+            "LaunchTemplateData": {
+                "BlockDeviceMappings": Match.array_with([
+                    {
+                        "DeviceName": "/dev/xvda",
+                        "Ebs": Match.object_like({
+                            "DeleteOnTermination": True,
+                            "VolumeSize": 200,
+                            "VolumeType": "gp3",
+                        }),
+                    },
+                ]),
+            },
+        })
 
         launch_templates = template.find_resources("AWS::EC2::LaunchTemplate")
         launch_template = next(iter(launch_templates.values()))

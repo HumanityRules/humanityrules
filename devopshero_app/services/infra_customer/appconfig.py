@@ -130,6 +130,13 @@ class EfsConfig:
 
 
 @dataclass
+class HostMount:
+    """One EC2 host-path bind mount for an EC2-backed ECS container."""
+    source_path: str
+    container_path: str
+
+
+@dataclass
 class DatabaseConfig:
     """Configuration for an Aurora database."""
     name: str  # Database name, e.g., "myapp_prod"
@@ -182,8 +189,18 @@ class ContainerConfig:
     # never see agent home/config.
     efs_mounts: list[str] = field(default_factory=list)
 
+    # EC2 host-path bind mounts for this container. These are intentionally
+    # separate from EFS mounts: the source path lives on the ECS container
+    # instance, not in an AWS-managed network filesystem.
+    host_mounts: list[HostMount] = field(default_factory=list)
+
     # When True, CDK sets privileged on the container (EC2-only; not supported on Fargate).
     privileged: bool = False
+
+    # Linux capabilities added to the container. Keep this narrow; Hermes uses
+    # SYS_ADMIN only to mount proc/dev/sys into its persistent chroot before
+    # entering the sandboxed runtime.
+    linux_capabilities: list[str] = field(default_factory=list)
 
     # Sibling start ordering within the same task.
     depends_on: list[ContainerDependencyConfig] = field(default_factory=list)
