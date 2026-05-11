@@ -8,6 +8,16 @@ die() {
     exit 1
 }
 
+now_ms() {
+    date +%s%3N
+}
+
+format_duration_ms() {
+    local duration_ms="$1"
+
+    printf "%d.%03ds" "$((duration_ms / 1000))" "$((duration_ms % 1000))"
+}
+
 is_empty_dir() {
     [ -z "$(find "$HERMES_PERSISTENT_ROOT" -mindepth 1 -maxdepth 1 -print -quit)" ]
 }
@@ -63,6 +73,11 @@ EOF
 
 initialize_persistent_root() {
     local root_exclude="${HERMES_PERSISTENT_ROOT%/}"
+    local start_ms
+    local end_ms
+    local duration_ms
+
+    start_ms="$(now_ms)"
 
     echo "[persistent-root] Initializing ${HERMES_PERSISTENT_ROOT} from image root..."
     rsync -aH --numeric-ids --one-file-system \
@@ -76,7 +91,26 @@ initialize_persistent_root() {
     prepare_runtime_filesystem
     install_passwordless_sudo
     touch "${HERMES_PERSISTENT_ROOT}/.doh-hermes-persistent-root"
-    echo "[persistent-root] Initialization complete."
+
+    end_ms="$(now_ms)"
+    duration_ms="$((end_ms - start_ms))"
+    echo "[persistent-root] Initialization complete in $(format_duration_ms "$duration_ms") (${duration_ms} ms)."
+}
+
+reuse_persistent_root() {
+    local start_ms
+    local end_ms
+    local duration_ms
+
+    start_ms="$(now_ms)"
+
+    echo "[persistent-root] Reusing existing ${HERMES_PERSISTENT_ROOT}."
+    prepare_runtime_filesystem
+    install_passwordless_sudo
+
+    end_ms="$(now_ms)"
+    duration_ms="$((end_ms - start_ms))"
+    echo "[persistent-root] Reuse preparation complete in $(format_duration_ms "$duration_ms") (${duration_ms} ms)."
 }
 
 main() {
@@ -94,9 +128,7 @@ main() {
     if is_empty_dir; then
         initialize_persistent_root
     else
-        echo "[persistent-root] Reusing existing ${HERMES_PERSISTENT_ROOT}."
-        prepare_runtime_filesystem
-        install_passwordless_sudo
+        reuse_persistent_root
     fi
 
     exec chroot "$HERMES_PERSISTENT_ROOT" \
