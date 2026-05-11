@@ -705,7 +705,15 @@ HERMES_PERSONAL_TEMPLATE = {
             # the proxy (sharing the task network namespace) can reach it.
             "environment": {
                 "HERMES_WEBUI_HOST": "127.0.0.1",
+                "HERMES_PERSISTENT_ROOT": "/hermes-persistent-root",
             },
+            "host_mounts": [
+                {
+                    "source_path": "/var/lib/devopshero/hermes-roots/{app_slug}",
+                    "container_path": "/hermes-persistent-root",
+                },
+            ],
+            "linux_capabilities": ["SYS_ADMIN"],
             "configurable_variables": (
                 _HERMES_LLM_VARS + _HERMES_AWS_DEFAULT_REGION_VAR + _HERMES_TAVILY_VAR
             ),

@@ -22,6 +22,7 @@ RUN apt-get update \
         "https://github.com/googleworkspace/cli/releases/download/v${GWS_VERSION}/${gws_tar}" \
     && tar -xzf /tmp/gws.tar.gz -C /usr/local/bin \
     && chmod +x /usr/local/bin/gws \
+    && sed -i 's|http://deb.debian.org|https://deb.debian.org|g' /etc/apt/sources.list.d/debian.sources \
     && rm -f /tmp/nono.deb /tmp/gws.tar.gz \
     && rm -rf /tmp/aws /tmp/awscliv2.zip \
     && rm -rf /var/lib/apt/lists/*

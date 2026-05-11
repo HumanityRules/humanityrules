@@ -686,6 +686,10 @@ class AppStack(Stack):
 
         if app_config.compute_mode == "fargate" and any(c.privileged for c in app_config.containers):
             raise ValueError("Privileged containers are only supported for EC2-backed ECS tasks")
+        if app_config.compute_mode == "fargate" and any(c.host_mounts for c in app_config.containers):
+            raise ValueError("Host bind mounts are only supported for EC2-backed ECS tasks")
+        if app_config.compute_mode == "fargate" and any(c.linux_capabilities for c in app_config.containers):
+            raise ValueError("Linux capabilities are only supported for EC2-backed ECS tasks")
 
         if app_config.compute_mode == "ec2":
             task_definition = ecs.TaskDefinition(
@@ -726,6 +730,32 @@ class AppStack(Stack):
                     ),
                 ),
             )
+
+        host_mount_resources: dict[tuple[str, int], str] = {}
+        for c in app_config.containers:
+            for mount_idx, mount in enumerate(c.host_mounts):
+                if not Path(mount.source_path).is_absolute():
+                    raise ValueError(
+                        f"Container '{c.name}' host mount source_path must be absolute: {mount.source_path!r}"
+                    )
+                if ".." in Path(mount.source_path).parts:
+                    raise ValueError(
+                        f"Container '{c.name}' host mount source_path must not contain '..': {mount.source_path!r}"
+                    )
+                if not Path(mount.container_path).is_absolute():
+                    raise ValueError(
+                        f"Container '{c.name}' host mount container_path must be absolute: {mount.container_path!r}"
+                    )
+                if ".." in Path(mount.container_path).parts:
+                    raise ValueError(
+                        f"Container '{c.name}' host mount container_path must not contain '..': {mount.container_path!r}"
+                    )
+                volume_name = f"app-host-{c.name}-{mount_idx}"
+                task_definition.add_volume(
+                    name=volume_name,
+                    host=ecs.Host(source_path=mount.source_path),
+                )
+                host_mount_resources[(c.name, mount_idx)] = volume_name
 
         # Two platform overlays, computed once so the main container loop stays uniform:
         #
@@ -810,6 +840,18 @@ class AppStack(Stack):
                     start_period=Duration.seconds(c.health_check_grace_period or 60),
                 )
 
+            linux_parameters = None
+            if c.linux_capabilities:
+                linux_parameters = ecs.LinuxParameters(self, f"LinuxParameters{idx}")
+                for capability_name in c.linux_capabilities:
+                    try:
+                        capability = ecs.Capability[capability_name]
+                    except KeyError as exc:
+                        raise ValueError(
+                            f"Container '{c.name}' requests unsupported Linux capability '{capability_name}'"
+                        ) from exc
+                    linux_parameters.add_capabilities(capability)
+
             container = task_definition.add_container(
                 f"Container{idx}",
                 container_name=f"{app_config.app_name}-{c.name}",
@@ -823,6 +865,7 @@ class AppStack(Stack):
                 environment=environment or None,
                 secrets=secrets if secrets else None,
                 health_check=health_check,
+                linux_parameters=linux_parameters,
                 user=c.user,
                 privileged=c.privileged or None,
                 stop_timeout=Duration.seconds(c.stop_timeout) if c.stop_timeout else None,
@@ -847,6 +890,15 @@ class AppStack(Stack):
                     ecs.MountPoint(
                         container_path=mount_spec.container_path,
                         source_volume=volume_name,
+                        read_only=False,
+                    ),
+                )
+
+            for mount_idx, mount in enumerate(c.host_mounts):
+                container.add_mount_points(
+                    ecs.MountPoint(
+                        container_path=mount.container_path,
+                        source_volume=host_mount_resources[(c.name, mount_idx)],
                         read_only=False,
                     ),
                 )

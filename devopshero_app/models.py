@@ -605,6 +605,8 @@ class AppTemplate(models.Model):
     #     "health_check_command": "",
     #     "health_check_grace_period": 0,
     #     "efs_mounts": ["home", "workspace"],  # names from efs_config.mounts
+    #     "host_mounts": [{"source_path": "/var/lib/...", "container_path": "/mnt"}],
+    #     "linux_capabilities": ["SYS_ADMIN"],
     #     "environment": {NAME: value, ...},     # DOH-managed platform constants
     #     "configurable_variables": [ ... {name, category, value, user_editable, ...} ... ],
     #   }
