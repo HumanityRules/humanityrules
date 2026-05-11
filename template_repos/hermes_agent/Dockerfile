@@ -8,7 +8,7 @@ ARG NONO_VERSION=0.47.1
 ARG GWS_VERSION=0.22.5
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends ca-certificates curl git haproxy libdbus-1-3 patch unzip \
+    && apt-get install -y --no-install-recommends ca-certificates curl git haproxy libdbus-1-3 patch rsync sudo unzip \
     && arch="$(dpkg --print-architecture)" \
     && curl -fsSL -o /tmp/nono.deb \
         "https://github.com/always-further/nono/releases/download/v${NONO_VERSION}/nono-cli_${NONO_VERSION}_${arch}.deb" \
@@ -45,15 +45,14 @@ COPY config.yaml.template /opt/hermes-defaults/config.yaml.template
 COPY --chmod=755 apply-patches.py /opt/hermes-defaults/apply-patches.py
 COPY haproxy.cfg.template /etc/haproxy/haproxy.cfg.template
 COPY hermes-nono-profile.json /etc/nono/profiles/hermes-nono-profile.json
+COPY --chmod=755 persistent-root-runner.sh /persistent-root-runner.sh
 COPY --chmod=755 supervisor.sh /supervisor.sh
 COPY --chmod=755 webui.sh /webui.sh
 COPY --chmod=755 integrations_broker.py /integrations_broker.py
 
 # DOH-owned WebUI extension bundle. Loaded by Hermes WebUI per docs/EXTENSIONS.md
 # when the three HERMES_WEBUI_EXTENSION_* env vars are set (see supervisor.sh).
-# The refresher writes integrations_status.json into this same directory, so it
-# must be writable by hermeswebui (chowned below) and readable by the sandbox
-# (read grant in hermes-nono-profile.json).
+# The sandbox reads this directory so the WebUI can serve the extension bundle.
 COPY webui-extension /opt/doh/webui-extension
 
 # WebUI lives in the base image at /apptoo/. Patch it before copying it into
@@ -78,14 +77,16 @@ ENV HERMES_WEBUI_AGENT_DIR=${HERMES_HOME}/hermes-agent
 ENV HERMES_WEBUI_STATE_DIR=${HERMES_HOME}/webui-mvp
 ENV HERMES_WEBUI_DEFAULT_WORKSPACE=/workspace
 ENV HERMES_WEBUI_SKIP_ONBOARDING=1
+ENV HERMES_PERSISTENT_ROOT=/hermes-persistent-root
 
-RUN mkdir -p /app /uv_cache "$HERMES_HOME" /workspace /opt/doh/ca \
+RUN mkdir -p /app /uv_cache "$HERMES_HOME" /workspace "$HERMES_PERSISTENT_ROOT" /opt/doh/ca /opt/doh/broker-private \
     && rsync -a /apptoo/ /app/ \
     && cp -r /opt/hermes-defaults/hermes-agent "$HERMES_WEBUI_AGENT_DIR" \
     && python3 /opt/hermes-defaults/apply-patches.py /tmp/patches-agent "$HERMES_WEBUI_AGENT_DIR" \
     && rm -rf /tmp/patches-agent \
     && cp /opt/hermes-defaults/SOUL.md "$HERMES_HOME/SOUL.md" \
-    && chown -R hermeswebui:hermeswebui /app /uv_cache "$HERMES_HOME" /workspace /opt/doh/ca /opt/doh/webui-extension
+    && chown -R hermeswebui:hermeswebui /app /uv_cache "$HERMES_HOME" /workspace /opt/doh/ca /opt/doh/broker-private /opt/doh/webui-extension \
+    && chmod 700 /opt/doh/broker-private
 
 USER hermeswebui
 
@@ -100,10 +101,12 @@ RUN cd /app \
     && python -m compileall -q -j 0 /app "$HERMES_WEBUI_AGENT_DIR" \
     && touch /app/venv/.deps_installed
 
+USER root
+
 EXPOSE 8787
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
     CMD curl -f http://localhost:8787/health || exit 1
 
-ENTRYPOINT ["/supervisor.sh"]
-CMD ["/webui.sh"]
+ENTRYPOINT ["/persistent-root-runner.sh"]
+CMD ["/supervisor.sh", "/webui.sh"]

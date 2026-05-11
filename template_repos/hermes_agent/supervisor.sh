@@ -11,6 +11,7 @@ CHILD_HOME=/workspace
 NONO_PROFILE=/etc/nono/profiles/hermes-nono-profile.json
 INTEGRATIONS_BROKER=/integrations_broker.py
 INTEGRATIONS_BROKER_CA_DIR=/opt/doh/ca
+INTEGRATIONS_BROKER_PRIVATE_DIR=/opt/doh/broker-private
 INTEGRATIONS_BROKER_PROXY_PORT=9950
 INTEGRATIONS_BROKER_CONTROL_PORT=9951
 WEBUI_EXTENSION_DIR=/opt/doh/webui-extension
@@ -108,7 +109,8 @@ start_integrations_broker() {
     /app/venv/bin/python "$INTEGRATIONS_BROKER" \
         --proxy-port "$INTEGRATIONS_BROKER_PROXY_PORT" \
         --control-port "$INTEGRATIONS_BROKER_CONTROL_PORT" \
-        --ca-dir "$INTEGRATIONS_BROKER_CA_DIR" &
+        --ca-dir "$INTEGRATIONS_BROKER_CA_DIR" \
+        --private-dir "$INTEGRATIONS_BROKER_PRIVATE_DIR" &
     INTEGRATIONS_BROKER_PID=$!
     wait_for_port "$INTEGRATIONS_BROKER_PROXY_PORT" "$INTEGRATIONS_BROKER_PID" "integrations-broker-proxy"
     wait_for_port "$INTEGRATIONS_BROKER_CONTROL_PORT" "$INTEGRATIONS_BROKER_PID" "integrations-broker-control"

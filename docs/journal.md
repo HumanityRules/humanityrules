@@ -1,5 +1,24 @@
 # DevOpsHero Development Journal
 
+## 2026-05-10 18:09 - [Integrations] Hardened the integrations broker follow-up fixes
+
+**Conversation:** [2026-05-10-1809-019e1462.md](conversations/2026-05-10-1809-019e1462.md)
+
+Reviewed the implementation behind the "Integrations broker: HTTPS MITM on localhost; token never enters the sandbox" entry, then made a narrow hardening pass on the broker rather than broadening the feature surface. The most important fix was around certificate material: the broker previously wrote per-leaf cert/key PEMs under `/opt/doh/ca`, which the sandbox can read because `SSL_CERT_FILE` points there. The broker now has a separate `/opt/doh/broker-private` directory with `0700` permissions; leaf cert/key PEMs are written there only long enough for `ssl.SSLContext.load_cert_chain()`, then immediately unlinked. The sandbox still gets the public CA bundle but no longer has filesystem access to leaf private keys.
+
+`POST /__doh_broker/kick` was also changed from "set an event and return" to a genuinely synchronous refresh path. The control handler now runs the same provider refresh primitive used by the background loop, under a per-provider async lock, then returns the same status envelope as `/status`. This matches what the WebUI extension already assumed after connect/disconnect redirects: one `/kick` response is enough to render fresh state, with no stale-status race hidden behind a follow-up fetch.
+
+The stale comments from the refresher/status-file era were cleaned up at the same time. Dockerfile and view comments no longer mention `integrations_status.json` or the deleted refresher, and the broker design doc now describes the private temp directory and synchronous `/kick` behavior. An attempted cleanup that aligned the Google Workspace skill to read-only was deliberately backed out after review; this change does not alter the Google OAuth scope set or remove the existing `google_api.py` write-capable commands.
+
+**Key points:**
+- The sandbox-readable CA directory now contains only the public trust bundle; transient leaf cert/key files live under `/opt/doh/broker-private`, are mode-restricted, and are deleted after loading into OpenSSL.
+- `/kick` is now synchronous by construction: it performs the refresh before responding and returns the updated provider status payload.
+- A per-provider refresh lock prevents timer refreshes and manual `/kick` refreshes from racing each other.
+- The WebUI extension consumes `/kick`'s returned status directly, falling back to `/status` only if the kick request fails.
+- The stale "refresher writes status file" comments were removed; documentation now describes the current broker API and cert lifecycle.
+- The Google Workspace skill/CLI surface and OAuth scopes were left as they were after the user asked to restore the read-only alignment change.
+- Focused verification passed: Python compile checks, `bash -n` for `supervisor.sh`, `node --check` for `doh.js`, Google integration tests, and broker tests.
+
 ## 2026-05-10 17:59 - [Integrations] Broadened Google Workspace OAuth scopes to Tier 1 read-only
 
 **Conversation:** [2026-05-10-1800-8c06cced.md](conversations/2026-05-10-1800-8c06cced.md)

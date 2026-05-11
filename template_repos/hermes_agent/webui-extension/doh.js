@@ -51,8 +51,11 @@
 
   async function kickBroker() {
     try {
-      await fetch(KICK_URL, { method: 'POST', cache: 'no-store' });
+      const response = await fetch(KICK_URL, { method: 'POST', cache: 'no-store' });
+      if (!response.ok) return null;
+      return await response.json();
     } catch (_) { /* best-effort; the broker is loopback */ }
+    return null;
   }
 
   function buildConnectUrl(status, returnTo) {
@@ -131,7 +134,7 @@
 
     if (!status) {
       pane.appendChild(elem('div', { class: 'doh-integration-empty' }, [
-        'No integration status file found yet. If this persists, the platform refresher may not be running.',
+        'Integration status is unavailable. If this persists, the platform broker may not be running.',
       ]));
       return;
     }
@@ -154,17 +157,20 @@
     renderPane(_currentStatus);
   }
 
-  // After the Connect/Disconnect round-trip returns us here, nudge the broker
-  // to refresh immediately, then re-render once. No background polling —
-  // /kick triggers a synchronous refresh against DOH, so one fetchStatus()
-  // after it returns is all we need.
+  // After the Connect/Disconnect round-trip returns us here, ask the broker to
+  // refresh now and render the status returned by /kick.
   async function refreshAfterFlow() {
-    await kickBroker();
+    const status = await kickBroker();
+    if (status) {
+      _currentStatus = status;
+      renderPane(_currentStatus);
+      return;
+    }
     await refreshAndRender();
   }
 
   // Drop any ?connected=/?disconnected= sentinel once we've acted on it,
-  // so a reload doesn't replay the poll.
+  // so a reload doesn't replay the refresh.
   function consumeReturnSentinel() {
     const params = new URLSearchParams(window.location.search);
     const connected = params.get('connected');

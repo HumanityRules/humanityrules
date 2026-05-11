@@ -61,7 +61,7 @@ Sandbox TLS clients verify the leaf cert against the CA bundle (because the CA's
 Plain HTTP, three endpoints:
 
 - **`GET /status`** — current provider state, serialized from in-memory at request time. Shape: `{doh_control_plane_url, env_slug, owner_username, providers: {<slug>: {label, status, last_refreshed_at}}}`. No on-disk status file.
-- **`POST /kick`** — wakes every refresh loop's `asyncio.Event`. Used by the WebUI extension after the OAuth connect/disconnect round-trip returns the user to Hermes, so state flips are sub-second instead of waiting for the next polling tick.
+- **`POST /kick`** — refreshes every provider synchronously and returns the same status envelope as `/status`. Used by the WebUI extension after the OAuth connect/disconnect round-trip returns the user to Hermes, so state flips are reflected in the response instead of waiting for the next polling tick.
 - **`GET /healthz`** — liveness.
 
 Reached from the browser same-origin via a WebUI reverse-proxy patch (`patches-webui/07-doh-broker-proxy.patch`) that forwards `/__doh_broker/*` to `127.0.0.1:9951`. Deliberately bypasses the WebUI's CSRF gate — the broker is loopback-only and the endpoints are stateless.
@@ -70,7 +70,7 @@ Reached from the browser same-origin via a WebUI reverse-proxy patch (`patches-w
 
 One coroutine per provider, driven by a single `PROVIDERS` dict at the top of the broker. Each entry: `{label, refresh_path, hosts[]}`. Adding Slack/Notion/Linear is a new dict entry, not new functions.
 
-Each loop POSTs `{owner_username}` with the env bearer to DOH's `refresh_path`, classifies the response by status code (200 ok / 404 not_connected / 410 revoked / 401+500 fatal / else transient), updates an in-memory `{host: token}` map for its hosts, updates `{slug: state}` for the control API, then sleeps until `expires_in - 5min` or an `asyncio.Event.wait()` from `/kick` fires.
+Each loop POSTs `{owner_username}` with the env bearer to DOH's `refresh_path`, classifies the response by status code (200 ok / 404 not_connected / 410 revoked / 401+500 fatal / else transient), updates an in-memory `{host: token}` map for its hosts, updates `{slug: state}` for the control API, then sleeps until `expires_in - 5min`. `/kick` uses the same refresh primitive directly and returns after the state update has completed.
 
 Refresh cadence is ~55 minutes when connected. `/kick` replaces the short polling interval the old design used to mask the lack of a synchronous signal.
 
@@ -137,7 +137,7 @@ That dict alone drives: which hostnames get MITM'd vs tunneled; which DOH endpoi
 
 - **CA generation**: at broker startup, an RSA-4096 CA key is generated in memory. The CA cert is valid for 5 years, with `BasicConstraints(ca=True, path_length=0)` and `KeyUsage(cert_sign, crl_sign)`. Subject Key Identifier is attached.
 - **Bundle write**: CA cert is concatenated with the system root bundle (from `/etc/ssl/certs/ca-certificates.crt`) and written to `/opt/doh/ca/bundle.pem`. Supervisor exports this as `SSL_CERT_FILE` inside the nono env. Sandbox TLS clients use this bundle for verification, which is why they trust both our MITM'd hosts and direct-tunneled real hosts (Tavily etc.).
-- **Leaf minting**: first `CONNECT` for a known hostname mints an RSA-2048 leaf, 2-year validity, with `SubjectAlternativeName=[DNS:<host>]`, `BasicConstraints(ca=False, critical)`, `KeyUsage(digital_signature, key_encipherment, critical)`, `ExtendedKeyUsage=[SERVER_AUTH]`, `SubjectKeyIdentifier`, and `AuthorityKeyIdentifier.from_issuer_public_key(CA)`. Cached in-memory by hostname. Never written to disk except transient per-leaf tmp PEMs consumed by `ssl.SSLContext.load_cert_chain`.
+- **Leaf minting**: first `CONNECT` for a known hostname mints an RSA-2048 leaf, 2-year validity, with `SubjectAlternativeName=[DNS:<host>]`, `BasicConstraints(ca=False, critical)`, `KeyUsage(digital_signature, key_encipherment, critical)`, `ExtendedKeyUsage=[SERVER_AUTH]`, `SubjectKeyIdentifier`, and `AuthorityKeyIdentifier.from_issuer_public_key(CA)`. Cached in-memory by hostname. Leaf cert/key PEMs are written only as transient files under `/opt/doh/broker-private`, loaded into `ssl.SSLContext`, and immediately unlinked; that directory is not granted to the sandbox.
 - **Rotation**: a new container boot regenerates the CA and all leaves. The sandbox reboots with the container, so there's no "CA rotated under a live agent" corner.
 
 Python's cert validation (OpenSSL) rejects chains missing `SubjectKeyIdentifier` or `AuthorityKeyIdentifier`. Both must be attached — learned the hard way.

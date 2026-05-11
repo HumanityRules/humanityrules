@@ -8,7 +8,9 @@ refresh-loop outcome classification) directly without standing up the
 asyncio servers.
 """
 
+import asyncio
 import importlib.util
+import json
 import pathlib
 import ssl
 import sys
@@ -81,9 +83,11 @@ class TestCertMinter(unittest.TestCase):
 
     def test_bootstrap_writes_bundle_and_leaf_mint_returns_ssl_context(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
-            minter = broker._CertMinter(ca_dir=pathlib.Path(tmp))
+            ca_dir = pathlib.Path(tmp) / "ca"
+            private_dir = pathlib.Path(tmp) / "private"
+            minter = broker._CertMinter(ca_dir=ca_dir, private_dir=private_dir)
             minter.bootstrap()
-            bundle = pathlib.Path(tmp) / "bundle.pem"
+            bundle = ca_dir / "bundle.pem"
             self.assertTrue(bundle.exists())
             self.assertGreater(bundle.stat().st_size, 100)
             ctx = minter.context_for(hostname="gmail.googleapis.com")
@@ -94,6 +98,64 @@ class TestCertMinter(unittest.TestCase):
             # Different host mints a different context.
             ctx3 = minter.context_for(hostname="drive.googleapis.com")
             self.assertIsNot(ctx, ctx3)
+            self.assertEqual(list(ca_dir.glob(".leaf-*.pem")), [])
+            self.assertEqual(list(private_dir.glob(".leaf-*.pem")), [])
+
+    def test_private_dir_is_owner_only(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            private_dir = pathlib.Path(tmp) / "private"
+            minter = broker._CertMinter(ca_dir=pathlib.Path(tmp) / "ca", private_dir=private_dir)
+            minter.bootstrap()
+            self.assertEqual(private_dir.stat().st_mode & 0o777, 0o700)
+
+
+class TestControlKick(unittest.IsolatedAsyncioTestCase):
+
+    def setUp(self) -> None:
+        broker._provider_state.clear()
+        broker._host_token.clear()
+        broker._provider_refresh_locks.clear()
+
+    async def test_kick_refreshes_before_returning_status(self) -> None:
+        for slug in broker.PROVIDERS:
+            broker._provider_refresh_locks[slug] = asyncio.Lock()
+
+        async def _handle(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+            await broker._handle_control_conn(
+                reader=reader,
+                writer=writer,
+                control_plane_url="https://doh.example",
+                bearer="env-bearer",
+                owner_username="vmendi",
+                env_slug="default",
+            )
+
+        with patch.object(
+            broker,
+            "_fetch_provider_token",
+            return_value={"kind": "ok", "access_token": "fresh-token", "expires_in": 3600},
+        ) as fetch_mock:
+            server = await asyncio.start_server(_handle, host="127.0.0.1", port=0)
+            try:
+                port = server.sockets[0].getsockname()[1]
+                reader, writer = await asyncio.open_connection(host="127.0.0.1", port=port)
+                writer.write(b"POST /kick HTTP/1.1\r\nHost: broker\r\nContent-Length: 0\r\n\r\n")
+                await writer.drain()
+                response = await reader.read()
+                writer.close()
+                await writer.wait_closed()
+            finally:
+                server.close()
+                await server.wait_closed()
+
+        body = response.split(b"\r\n\r\n", 1)[1]
+        payload = json.loads(body.decode())
+        self.assertEqual(payload["providers"]["google"]["status"], "connected")
+        self.assertEqual(
+            await broker._current_token_for_host(host="gmail.googleapis.com"),
+            "fresh-token",
+        )
+        fetch_mock.assert_called_once()
 
 
 class TestFetchProviderTokenClassification(unittest.TestCase):

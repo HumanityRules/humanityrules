@@ -1,7 +1,7 @@
 """Env-resident-component → DOH refresh endpoint for Google access tokens.
 
 See `docs/integrations_broker_design.md`. Env-resident callers
-(Hermes refresher, etc.) hit this endpoint with `Authorization: Bearer
+(Hermes integrations broker, etc.) hit this endpoint with `Authorization: Bearer
 <DOH_ENV_BEARER>` and `{"owner_username": "..."}` in the body. DOH resolves
 the environment from the bearer, looks up the user's IntegrationUserGrant
 row for that env, exchanges the stored refresh token with Google using DOH's
