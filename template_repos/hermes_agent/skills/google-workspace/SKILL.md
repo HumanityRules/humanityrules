@@ -1,6 +1,7 @@
 ---
 name: google-workspace
-description: Gmail, Calendar, Drive, Contacts, Sheets, and Docs. Google auth is platform-managed — a short-lived access token is refreshed for you automatically.
+description: Email (via Gmail) and the rest of Google Workspace — Calendar, Drive, Contacts, Sheets, and Docs.
+
 version: 1.0.0
 license: MIT
 metadata:

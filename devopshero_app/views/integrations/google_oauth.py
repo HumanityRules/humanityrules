@@ -25,6 +25,8 @@ logger = logging.getLogger(__name__)
 
 GOOGLE_SCOPES = [
     "https://www.googleapis.com/auth/gmail.readonly",
+    "https://www.googleapis.com/auth/calendar.readonly",
+    "https://www.googleapis.com/auth/drive.readonly",
     "openid",
     "email",
 ]

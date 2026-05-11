@@ -25,7 +25,6 @@ creative/pixel-art
 creative/popular-web-designs
 data-science/jupyter-live-kernel
 devops/webhook-subscriptions
-email/himalaya
 github/codebase-inspection
 github/github-auth
 github/github-code-review
