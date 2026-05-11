@@ -16,7 +16,7 @@ helpers). Two responsibilities:
 2. **Control API on 127.0.0.1:9951** (reached same-origin by the WebUI
    extension via the /__doh_broker/* reverse-proxy patch):
    - GET  /status   — in-memory provider state (no file on disk)
-   - POST /kick     — wake every refresh loop immediately
+   - POST /kick     — refresh providers now and return the updated status
    - GET  /healthz  — liveness
 
 Refresh tokens, DOH's OAuth client secrets, and the env bearer NEVER enter
@@ -33,6 +33,8 @@ Environment contract (set by deploy_app.py's env-bearer overlay):
 Required file system:
 - BROKER_CA_DIR (default /opt/doh/ca) must be writable by the broker user.
   The CA bundle is written here on startup for SSL_CERT_FILE to pick up.
+- BROKER_PRIVATE_DIR (default /opt/doh/broker-private) must be writable by the
+  broker user and unreadable by the sandbox.
 """
 
 import argparse
@@ -61,6 +63,7 @@ from cryptography.hazmat.primitives.asymmetric import rsa
 DEFAULT_PROXY_PORT = 9950
 DEFAULT_CONTROL_PORT = 9951
 DEFAULT_CA_DIR = Path("/opt/doh/ca")
+DEFAULT_PRIVATE_DIR = Path("/opt/doh/broker-private")
 
 # Refresh ~5 minutes before the typical 3600s expiry. Backoff for transient
 # errors. MIN_SLEEP guards against a tight loop if DOH's expires_in is tiny.
@@ -70,11 +73,11 @@ NOT_CONNECTED_POLL_SECONDS = 60
 BACKOFF_INITIAL_SECONDS = 5
 BACKOFF_MAX_SECONDS = 300
 
-# /kick uses this to wake every provider loop synchronously.
-_kick_events: dict[str, asyncio.Event] = {}
+# Serializes refreshes per provider so a timer refresh and a synchronous /kick
+# cannot race each other.
+_provider_refresh_locks: dict[str, asyncio.Lock] = {}
 
-# In-memory state keyed by provider slug. Shape matches the old status file's
-# `providers.<slug>` entries so the extension's render code is unchanged.
+# In-memory state keyed by provider slug. Exposed through /status and /kick.
 _provider_state: dict[str, dict] = {}
 _provider_state_lock = asyncio.Lock()
 
@@ -131,12 +134,13 @@ class _CertMinter:
 
     CA private key is in-memory only — never written to disk. The public CA
     cert is written to `ca_dir/bundle.pem` so SSL_CERT_FILE can point at it.
-    Leaf certs are cached indefinitely (broker process lifetime == container
-    lifetime, and leaves expire long after).
+    Leaf certs are loaded through broker-private temp files and cached
+    indefinitely (broker process lifetime == container lifetime).
     """
 
-    def __init__(self, ca_dir: Path) -> None:
+    def __init__(self, ca_dir: Path, private_dir: Path) -> None:
         self._ca_dir = ca_dir
+        self._private_dir = private_dir
         self._ca_key: rsa.RSAPrivateKey | None = None
         self._ca_cert: x509.Certificate | None = None
         self._leaf_cache: dict[str, ssl.SSLContext] = {}
@@ -175,6 +179,8 @@ class _CertMinter:
     def _write_bundle(self) -> None:
         """Write the CA cert + system roots into bundle.pem for SSL_CERT_FILE."""
         self._ca_dir.mkdir(parents=True, exist_ok=True)
+        self._private_dir.mkdir(parents=True, exist_ok=True)
+        os.chmod(self._private_dir, 0o700)
         our_pem = self._ca_cert.public_bytes(serialization.Encoding.PEM)
         system_roots = b""
         for candidate in (Path("/etc/ssl/certs/ca-certificates.crt"), Path("/etc/pki/tls/certs/ca-bundle.crt")):
@@ -227,22 +233,28 @@ class _CertMinter:
             .sign(private_key=self._ca_key, algorithm=hashes.SHA256())
         )
         ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
-        ctx.load_cert_chain(
-            certfile=self._pem_bytes_to_tmp(leaf_cert.public_bytes(serialization.Encoding.PEM)),
-            keyfile=self._pem_bytes_to_tmp(leaf_key.private_bytes(
+        cert_path = self._pem_bytes_to_private_tmp(leaf_cert.public_bytes(serialization.Encoding.PEM))
+        key_path = self._pem_bytes_to_private_tmp(
+            leaf_key.private_bytes(
                 encoding=serialization.Encoding.PEM,
                 format=serialization.PrivateFormat.TraditionalOpenSSL,
                 encryption_algorithm=serialization.NoEncryption(),
-            )),
+            )
         )
+        try:
+            ctx.load_cert_chain(certfile=cert_path, keyfile=key_path)
+        finally:
+            for path in (cert_path, key_path):
+                with contextlib.suppress(FileNotFoundError):
+                    Path(path).unlink()
         ctx.set_alpn_protocols(["http/1.1"])
         self._leaf_cache[hostname] = ctx
         logger.info("minted leaf cert for %s", hostname)
         return ctx
 
-    def _pem_bytes_to_tmp(self, pem: bytes) -> str:
-        """Write PEM to a tmpfile under the CA dir and return its path."""
-        target = self._ca_dir / f".leaf-{random.randbytes(8).hex()}.pem"
+    def _pem_bytes_to_private_tmp(self, pem: bytes) -> str:
+        """Write PEM to a broker-private tmpfile and return its path."""
+        target = self._private_dir / f".leaf-{random.randbytes(8).hex()}.pem"
         target.write_bytes(pem)
         os.chmod(target, 0o600)
         return str(target)
@@ -614,66 +626,113 @@ def _fetch_provider_token(control_plane_url: str, bearer: str, owner_username: s
     return {"kind": "transient", "detail": f"http {status}: {payload.get('error', 'unknown')}"}
 
 
-async def _refresh_loop(slug: str, cfg: dict, control_plane_url: str, bearer: str, owner_username: str, kick: asyncio.Event) -> None:
-    """One coroutine per provider. Refreshes on a timer; /kick wakes it immediately."""
+async def _refresh_provider_once(
+    slug: str,
+    cfg: dict,
+    control_plane_url: str,
+    bearer: str,
+    owner_username: str,
+    backoff: float,
+) -> tuple[float, float]:
+    """Refresh one provider and return the next sleep and backoff values."""
     label = cfg["label"]
     refresh_path = cfg["refresh_path"]
     hosts = cfg["hosts"]
-    backoff = BACKOFF_INITIAL_SECONDS
 
-    while True:
-        kick.clear()
-        outcome = await asyncio.to_thread(
-            _fetch_provider_token,
+    outcome = await asyncio.to_thread(
+        _fetch_provider_token,
+        control_plane_url=control_plane_url,
+        bearer=bearer,
+        owner_username=owner_username,
+        refresh_path=refresh_path,
+    )
+    kind = outcome["kind"]
+    now_iso = dt.datetime.now(dt.timezone.utc).isoformat()
+
+    if kind == "ok":
+        async with _host_token_lock:
+            for host in hosts:
+                _host_token[host] = outcome["access_token"]
+        async with _provider_state_lock:
+            _provider_state[slug] = {"label": label, "status": "connected", "last_refreshed_at": now_iso}
+        sleep_for = max(MIN_SLEEP_SECONDS, outcome["expires_in"] - REFRESH_LEAD_SECONDS)
+        logger.info("refreshed %s token, next refresh in %ds", slug, sleep_for)
+        return sleep_for, BACKOFF_INITIAL_SECONDS
+    if kind == "not_connected":
+        async with _host_token_lock:
+            for host in hosts:
+                _host_token.pop(host, None)
+        async with _provider_state_lock:
+            _provider_state[slug] = {"label": label, "status": "not_connected", "last_refreshed_at": None}
+        logger.info("%s not connected for user=%s, polling in %ds", slug, owner_username, NOT_CONNECTED_POLL_SECONDS)
+        return NOT_CONNECTED_POLL_SECONDS, BACKOFF_INITIAL_SECONDS
+    if kind == "revoked":
+        async with _host_token_lock:
+            for host in hosts:
+                _host_token.pop(host, None)
+        async with _provider_state_lock:
+            _provider_state[slug] = {"label": label, "status": "revoked", "last_refreshed_at": None}
+        logger.error("%s refresh token revoked for user=%s, polling in %ds", slug, owner_username, NOT_CONNECTED_POLL_SECONDS)
+        return NOT_CONNECTED_POLL_SECONDS, BACKOFF_INITIAL_SECONDS
+    if kind == "fatal":
+        async with _provider_state_lock:
+            _provider_state[slug] = {"label": label, "status": "fatal_error", "last_refreshed_at": None}
+        raise RuntimeError(f"{slug} refresh returned {outcome['detail']}")
+
+    async with _provider_state_lock:
+        _provider_state[slug] = {"label": label, "status": "transient_error", "last_refreshed_at": None}
+    sleep_for = backoff + random.uniform(0, backoff / 2)
+    logger.error("%s transient refresh failure (%s), retrying in %.1fs", slug, outcome["detail"], sleep_for)
+    return sleep_for, min(backoff * 2, BACKOFF_MAX_SECONDS)
+
+
+async def _refresh_provider_locked(
+    slug: str,
+    cfg: dict,
+    control_plane_url: str,
+    bearer: str,
+    owner_username: str,
+    backoff: float,
+) -> tuple[float, float]:
+    """Run a provider refresh with its per-provider lock held."""
+    async with _provider_refresh_locks[slug]:
+        return await _refresh_provider_once(
+            slug=slug,
+            cfg=cfg,
             control_plane_url=control_plane_url,
             bearer=bearer,
             owner_username=owner_username,
-            refresh_path=refresh_path,
+            backoff=backoff,
         )
-        kind = outcome["kind"]
-        now_iso = dt.datetime.now(dt.timezone.utc).isoformat()
 
-        if kind == "ok":
-            async with _host_token_lock:
-                for host in hosts:
-                    _host_token[host] = outcome["access_token"]
-            async with _provider_state_lock:
-                _provider_state[slug] = {"label": label, "status": "connected", "last_refreshed_at": now_iso}
-            sleep_for = max(MIN_SLEEP_SECONDS, outcome["expires_in"] - REFRESH_LEAD_SECONDS)
-            logger.info("refreshed %s token, next refresh in %ds", slug, sleep_for)
-            backoff = BACKOFF_INITIAL_SECONDS
-        elif kind == "not_connected":
-            async with _host_token_lock:
-                for host in hosts:
-                    _host_token.pop(host, None)
-            async with _provider_state_lock:
-                _provider_state[slug] = {"label": label, "status": "not_connected", "last_refreshed_at": None}
-            sleep_for = NOT_CONNECTED_POLL_SECONDS
-            logger.info("%s not connected for user=%s, polling in %ds", slug, owner_username, sleep_for)
-            backoff = BACKOFF_INITIAL_SECONDS
-        elif kind == "revoked":
-            async with _host_token_lock:
-                for host in hosts:
-                    _host_token.pop(host, None)
-            async with _provider_state_lock:
-                _provider_state[slug] = {"label": label, "status": "revoked", "last_refreshed_at": None}
-            sleep_for = NOT_CONNECTED_POLL_SECONDS
-            logger.error("%s refresh token revoked for user=%s, polling in %ds", slug, owner_username, sleep_for)
-            backoff = BACKOFF_INITIAL_SECONDS
-        elif kind == "fatal":
-            logger.error("FATAL: %s refresh returned %s", slug, outcome["detail"])
-            sys.exit(1)
-        else:
-            async with _provider_state_lock:
-                _provider_state[slug] = {"label": label, "status": "transient_error", "last_refreshed_at": None}
-            sleep_for = backoff + random.uniform(0, backoff / 2)
-            logger.error("%s transient refresh failure (%s), retrying in %.1fs", slug, outcome["detail"], sleep_for)
-            backoff = min(backoff * 2, BACKOFF_MAX_SECONDS)
 
-        try:
-            await asyncio.wait_for(kick.wait(), timeout=sleep_for)
-        except asyncio.TimeoutError:
-            pass
+async def _refresh_all_providers_once(control_plane_url: str, bearer: str, owner_username: str) -> None:
+    """Synchronously refresh every provider before returning."""
+    for slug, cfg in PROVIDERS.items():
+        await _refresh_provider_locked(
+            slug=slug,
+            cfg=cfg,
+            control_plane_url=control_plane_url,
+            bearer=bearer,
+            owner_username=owner_username,
+            backoff=BACKOFF_INITIAL_SECONDS,
+        )
+
+
+async def _refresh_loop(slug: str, cfg: dict, control_plane_url: str, bearer: str, owner_username: str) -> None:
+    """Refresh one provider on a background timer."""
+    backoff = BACKOFF_INITIAL_SECONDS
+
+    while True:
+        sleep_for, backoff = await _refresh_provider_locked(
+            slug=slug,
+            cfg=cfg,
+            control_plane_url=control_plane_url,
+            bearer=bearer,
+            owner_username=owner_username,
+            backoff=backoff,
+        )
+        await asyncio.sleep(delay=sleep_for)
 
 
 async def _current_token_for_host(host: str) -> str | None:
@@ -683,7 +742,26 @@ async def _current_token_for_host(host: str) -> str | None:
 
 # ── Control API ───────────────────────────────────────────────────────
 
-async def _handle_control_conn(reader: asyncio.StreamReader, writer: asyncio.StreamWriter, control_plane_url: str, owner_username: str, env_slug: str) -> None:
+async def _status_payload(control_plane_url: str, owner_username: str, env_slug: str) -> dict:
+    """Return the current control API status payload."""
+    async with _provider_state_lock:
+        snapshot = {slug: dict(state) for slug, state in _provider_state.items()}
+    return {
+        "doh_control_plane_url": control_plane_url,
+        "env_slug": env_slug,
+        "owner_username": owner_username,
+        "providers": snapshot,
+    }
+
+
+async def _handle_control_conn(
+    reader: asyncio.StreamReader,
+    writer: asyncio.StreamWriter,
+    control_plane_url: str,
+    bearer: str,
+    owner_username: str,
+    env_slug: str,
+) -> None:
     try:
         request_line = await reader.readline()
         if not request_line:
@@ -701,19 +779,36 @@ async def _handle_control_conn(reader: asyncio.StreamReader, writer: asyncio.Str
             await _send_json(writer=writer, status=200, payload={"ok": True})
             return
         if method == "GET" and path == "/status":
-            async with _provider_state_lock:
-                snapshot = dict(_provider_state)
-            await _send_json(writer=writer, status=200, payload={
-                "doh_control_plane_url": control_plane_url,
-                "env_slug": env_slug,
-                "owner_username": owner_username,
-                "providers": snapshot,
-            })
+            payload = await _status_payload(
+                control_plane_url=control_plane_url,
+                owner_username=owner_username,
+                env_slug=env_slug,
+            )
+            await _send_json(writer=writer, status=200, payload=payload)
             return
         if method == "POST" and path == "/kick":
-            for event in _kick_events.values():
-                event.set()
-            await _send_json(writer=writer, status=200, payload={"kicked": list(_kick_events.keys())})
+            try:
+                await _refresh_all_providers_once(
+                    control_plane_url=control_plane_url,
+                    bearer=bearer,
+                    owner_username=owner_username,
+                )
+            except RuntimeError as exc:
+                logger.error("synchronous refresh failed: %s", exc)
+                payload = await _status_payload(
+                    control_plane_url=control_plane_url,
+                    owner_username=owner_username,
+                    env_slug=env_slug,
+                )
+                payload["error"] = str(exc)
+                await _send_json(writer=writer, status=500, payload=payload)
+                return
+            payload = await _status_payload(
+                control_plane_url=control_plane_url,
+                owner_username=owner_username,
+                env_slug=env_slug,
+            )
+            await _send_json(writer=writer, status=200, payload=payload)
             return
         await _send_json(writer=writer, status=404, payload={"error": "not found"})
     except (ConnectionResetError, BrokenPipeError):
@@ -748,7 +843,7 @@ def _require_env(name: str) -> str:
     return value
 
 
-async def _run(proxy_port: int, control_port: int, ca_dir: Path) -> None:
+async def _run(proxy_port: int, control_port: int, ca_dir: Path, private_dir: Path) -> None:
     control_plane_url = _require_env(name="DOH_CONTROL_PLANE_URL")
     bearer = _require_env(name="DOH_ENV_BEARER")
     owner_username = _require_env(name="DOH_OWNER_USERNAME")
@@ -757,11 +852,11 @@ async def _run(proxy_port: int, control_port: int, ca_dir: Path) -> None:
         "starting integrations_broker for owner=%s env=%s against %s (proxy=%d, control=%d)",
         owner_username, env_slug, control_plane_url, proxy_port, control_port,
     )
-    minter = _CertMinter(ca_dir=ca_dir)
+    minter = _CertMinter(ca_dir=ca_dir, private_dir=private_dir)
     minter.bootstrap()
 
     for slug in PROVIDERS:
-        _kick_events[slug] = asyncio.Event()
+        _provider_refresh_locks[slug] = asyncio.Lock()
 
     loop = asyncio.get_running_loop()
     stop = loop.create_future()
@@ -773,7 +868,14 @@ async def _run(proxy_port: int, control_port: int, ca_dir: Path) -> None:
         await _handle_proxy_conn(reader=r, writer=w, minter=minter)
 
     async def _control_cb(r: asyncio.StreamReader, w: asyncio.StreamWriter) -> None:
-        await _handle_control_conn(reader=r, writer=w, control_plane_url=control_plane_url, owner_username=owner_username, env_slug=env_slug)
+        await _handle_control_conn(
+            reader=r,
+            writer=w,
+            control_plane_url=control_plane_url,
+            bearer=bearer,
+            owner_username=owner_username,
+            env_slug=env_slug,
+        )
 
     proxy_server = await asyncio.start_server(client_connected_cb=_proxy_cb, host="127.0.0.1", port=proxy_port)
     control_server = await asyncio.start_server(client_connected_cb=_control_cb, host="127.0.0.1", port=control_port)
@@ -786,7 +888,6 @@ async def _run(proxy_port: int, control_port: int, ca_dir: Path) -> None:
             control_plane_url=control_plane_url,
             bearer=bearer,
             owner_username=owner_username,
-            kick=_kick_events[slug],
         ))
         for slug, cfg in PROVIDERS.items()
     ]
@@ -806,6 +907,7 @@ async def _run(proxy_port: int, control_port: int, ca_dir: Path) -> None:
             exc = task.exception() if task.done() and not task.cancelled() else None
             if exc:
                 logger.error("task exited: %r", exc)
+                raise exc
 
 
 def main() -> None:
@@ -814,9 +916,17 @@ def main() -> None:
     parser.add_argument("--proxy-port", type=int, default=DEFAULT_PROXY_PORT)
     parser.add_argument("--control-port", type=int, default=DEFAULT_CONTROL_PORT)
     parser.add_argument("--ca-dir", type=Path, default=DEFAULT_CA_DIR)
+    parser.add_argument("--private-dir", type=Path, default=DEFAULT_PRIVATE_DIR)
     args = parser.parse_args()
     try:
-        asyncio.run(_run(proxy_port=args.proxy_port, control_port=args.control_port, ca_dir=args.ca_dir))
+        asyncio.run(
+            _run(
+                proxy_port=args.proxy_port,
+                control_port=args.control_port,
+                ca_dir=args.ca_dir,
+                private_dir=args.private_dir,
+            )
+        )
     except KeyboardInterrupt:
         pass
 
