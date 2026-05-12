@@ -225,6 +225,20 @@ class ContainerConfig:
     # to EFS, which can run 30-60s for a multi-GB rootfs).
     stop_timeout: int | None = None
 
+    # Container-level hard memory ceiling in MiB. Over = OOM-kill. None = no
+    # per-container hard cap (container can use all task-level memory). On
+    # EC2, either this or the task-level memory must be set somewhere in the
+    # task; on Fargate the task-level memory is always the ceiling.
+    memory_limit_mib: int | None = None
+
+    # Container-level soft memory reservation in MiB. ECS uses this for
+    # placement reservation on EC2 tasks when a container has no hard cap
+    # (memory_limit_mib=None); when both are set, memory_limit_mib is the
+    # hard cap and memory_reservation_mib is a cgroup soft limit Docker
+    # squeezes toward under memory pressure. Lets two tasks share a node with
+    # bursty-but-usually-idle containers (e.g. two hermes tasks on one m8g).
+    memory_reservation_mib: int | None = None
+
     # Opt this container in to the DOH control-plane bearer overlay:
     # DOH_ENV_BEARER (from shared-secrets), DOH_ENV_SLUG, and DOH_OWNER_USERNAME (if
     # the owning App has an owner tag). Any env-resident component that calls
@@ -244,7 +258,13 @@ class AppConfig:
 
     # Task-level resources (shared across containers)
     cpu: int  # ECS task CPU units (256, 512, 1024, etc.)
-    memory: int  # ECS task memory in MiB
+    # Task-level memory in MiB. Always applied on Fargate (where it's the
+    # task size). On EC2 it's also applied as the task-level ceiling unless
+    # every container sets its own memory_limit_mib, in which case the
+    # task-level cap is omitted and placement reserves the sum of container
+    # reservations — this is how we get two 2-GiB-reserved hermes tasks on
+    # one 8-GiB node.
+    memory: int
 
     # Ordered, non-empty list of containers.
     containers: list[ContainerConfig]

@@ -728,6 +728,12 @@ HERMES_PERSONAL_TEMPLATE = {
             ],
             "linux_capabilities": ["SYS_ADMIN"],
             "stop_timeout": 120,
+            # Placement reservation: 2 GiB so two hermes tasks fit on one
+            # m8g.large (~7747 MiB usable). Hard cap: 4 GiB for burst under
+            # light load. If the second task arrives, Docker squeezes both
+            # back toward 2 GiB under memory pressure.
+            "memory_reservation_mib": 2048,
+            "memory_limit_mib": 4096,
             "configurable_variables": (
                 _HERMES_LLM_VARS + _HERMES_AWS_DEFAULT_REGION_VAR + _HERMES_TAVILY_VAR
             ),
@@ -735,7 +741,10 @@ HERMES_PERSONAL_TEMPLATE = {
             # access tokens by POSTing to DOH /api/integrations/google/token.
             "requires_env_bearer": True,
         },
-        {**_HERMES_POLICY_PROXY_CONTAINER},
+        # Policy proxy is tiny (httpx + starlette); 256 MiB is plenty. Must
+        # be set so the task has no container without a memory cap (ECS
+        # requires task-level OR per-container memory on EC2).
+        {**_HERMES_POLICY_PROXY_CONTAINER, "memory_limit_mib": 256},
     ],
     "default_tags": [{"key": "app-type", "value": "personal-assistant"}],
     "prefill_name": "hermes-{username}{index}",

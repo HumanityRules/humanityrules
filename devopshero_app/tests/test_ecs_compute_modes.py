@@ -227,6 +227,75 @@ class EcsComputeModeTests(SimpleTestCase):
             "AvailabilityZoneRebalancing": "DISABLED",
         })
 
+    def test_ec2_task_omits_task_level_memory_when_all_containers_cap(self) -> None:
+        """Container-level memory_limit on every container frees ECS to
+        reserve the sum of container reservations for placement instead of
+        the larger task-level memory."""
+        cdk_app = App()
+        stack = deploy_app.AppStack(
+            scope=cdk_app,
+            construct_id="TestAppStack",
+            app_config=AppConfig(
+                app_name="my-app", cpu=1024, memory=4096, compute_mode="ec2",
+                alb_target_container="app",
+                containers=[
+                    ContainerConfig(
+                        name="app", image_source="dockerfile",
+                        ecr_repo_name="doh/staging/my-app-app", source_repo_path="app",
+                        container_port=8080,
+                        memory_limit_mib=4096, memory_reservation_mib=2048,
+                    ),
+                ],
+            ),
+            image_tag="test", env_slug="staging", resource_prefix="doh-staging-my-app",
+            subdomain="my-app", database_connection_secret=None,
+            shared_alb_hosted_zone=None, shared_hosted_zone_id=None,
+            env_bearer_shared_secrets_arn=None, auth_base_url=None,
+        )
+        template = Template.from_stack(stack)
+
+        template.has_resource_properties("AWS::ECS::TaskDefinition", {
+            "RequiresCompatibilities": ["EC2"],
+            "Memory": Match.absent(),
+            "ContainerDefinitions": Match.array_with([
+                Match.object_like({
+                    "Memory": 4096,
+                    "MemoryReservation": 2048,
+                }),
+            ]),
+        })
+
+    def test_ec2_task_keeps_task_level_memory_when_any_container_uncapped(self) -> None:
+        """A container without its own memory cap forces ECS to use the
+        task-level memory for placement; omitting task-level would be an
+        invalid task def."""
+        cdk_app = App()
+        stack = deploy_app.AppStack(
+            scope=cdk_app,
+            construct_id="TestAppStack",
+            app_config=AppConfig(
+                app_name="my-app", cpu=1024, memory=4096, compute_mode="ec2",
+                alb_target_container="app",
+                containers=[
+                    ContainerConfig(
+                        name="app", image_source="dockerfile",
+                        ecr_repo_name="doh/staging/my-app-app", source_repo_path="app",
+                        container_port=8080,
+                    ),
+                ],
+            ),
+            image_tag="test", env_slug="staging", resource_prefix="doh-staging-my-app",
+            subdomain="my-app", database_connection_secret=None,
+            shared_alb_hosted_zone=None, shared_hosted_zone_id=None,
+            env_bearer_shared_secrets_arn=None, auth_base_url=None,
+        )
+        template = Template.from_stack(stack)
+
+        template.has_resource_properties("AWS::ECS::TaskDefinition", {
+            "RequiresCompatibilities": ["EC2"],
+            "Memory": "4096",
+        })
+
     def test_fargate_mode_rejects_privileged(self) -> None:
         cdk_app = App()
         with self.assertRaisesMessage(
