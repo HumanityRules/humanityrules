@@ -1,9 +1,10 @@
 """
 App removal executor.
 
-Runs an AppRemovalJob: optionally cleans EFS app data and Secrets Manager secrets
-in every environment the app has a blueprint in, then deletes the App row (FK
-cascades handle blueprints, deployments, logs, permissions, tags).
+Runs an AppRemovalJob: optionally cleans persistent data (EFS app data + EC2 host
+bind-mount data) and Secrets Manager secrets in every environment the app has a
+blueprint in, then deletes the App row (FK cascades handle blueprints, deployments,
+logs, permissions, tags).
 """
 
 import json
@@ -130,15 +131,31 @@ def run_removal(job_id: str) -> bool:
     )
 
     try:
-        if job.delete_efs_data:
-            if not app.source_template or not app.source_template.efs_config:
-                logger.info("Skipping EFS cleanup: app has no EFS config")
+        if job.delete_persistent_data:
+            template = app.source_template
+            has_efs = bool(template and template.efs_config)
+            host_path_templates = _template_host_path_templates(template) if template else []
+            if not has_efs and not host_path_templates:
+                logger.info("Skipping persistent-data cleanup: template has no EFS or host_mounts")
             else:
                 for env in environments:
-                    ok, message = _run_efs_cleanup_task(env=env, app_slug=app.slug)
-                    if not ok:
-                        _fail(job, app, f"EFS cleanup failed in '{env.slug}': {message}")
-                        return False
+                    if has_efs:
+                        ok, message = _run_efs_cleanup_task(env=env, app_slug=app.slug)
+                        if not ok:
+                            _fail(job, app, f"EFS cleanup failed in '{env.slug}': {message}")
+                            return False
+                    if host_path_templates:
+                        host_paths = _resolve_host_paths(
+                            path_templates=host_path_templates,
+                            app_slug=app.slug,
+                            env_slug=env.slug,
+                        )
+                        ok, message = _run_host_path_cleanup_ssm(
+                            env=env, app_slug=app.slug, host_paths=host_paths,
+                        )
+                        if not ok:
+                            _fail(job, app, f"Host-path cleanup failed in '{env.slug}': {message}")
+                            return False
 
         if job.delete_secrets:
             for env in environments:
@@ -430,3 +447,122 @@ def _wait_for_stopped(ecs_client, cluster: str, task_arn: str) -> tuple[bool, st
             return False, task.get("stoppedReason") or f"exit={exit_code}"
         time.sleep(CLEANUP_POLL_INTERVAL_SECONDS)
     return False, "timed out waiting for task to stop"
+
+
+# ---------------------------------------------------------------------------
+# EC2 host bind-mount cleanup via SSM Run Command
+# ---------------------------------------------------------------------------
+#
+# When a template declares per-container host_mounts (e.g., hermes_agent at
+# /var/lib/devopshero/hermes-roots/{app_slug}), the underlying directory survives
+# task teardown — it lives on the EC2 container instance's EBS volume, not in any
+# AWS-managed filesystem. ECS may have scheduled the task across several instances
+# over its lifetime, so we broadcast a `rm -rf` to every instance in the env's ECS
+# container ASG via SSM Run Command. Instances that never ran the task harmlessly
+# find no directory and exit 0 — idempotent.
+#
+# Permissions: the container instance role already attaches AmazonSSMManagedInstanceCore
+# (see deploy_base.py EcsClusterStack), so the agent is present. DOH's assumed role
+# in the customer account needs ssm:SendCommand + ssm:GetCommandInvocation, which
+# the customer-side DevOpsHero admin role already provides.
+
+# Only allow rm -rf under this top-level prefix. Belt-and-suspenders guard against
+# a future template typo emitting a host path outside the DOH-owned area.
+SSM_HOST_PATH_ALLOWED_PREFIX = "/var/lib/devopshero/"
+SSM_COMMAND_TIMEOUT_SECONDS = 300
+SSM_POLL_INTERVAL_SECONDS = 5
+SSM_MAX_WAIT_ITERATIONS = 60  # 60 * 5s = 5 min
+
+
+def _template_host_path_templates(template: "models.AppTemplate") -> list[str]:
+    """Return distinct {app_slug}/{env_slug}-style host_mount source paths across all containers."""
+    seen: list[str] = []
+    for container in (template.containers or []):
+        for mount in (container.get("host_mounts") or []):
+            source_path = mount.get("source_path")
+            if source_path and source_path not in seen:
+                seen.append(source_path)
+    return seen
+
+
+def _resolve_host_paths(path_templates: list[str], app_slug: str, env_slug: str) -> list[str]:
+    """Substitute {app_slug}/{env_slug} placeholders and validate the result is under the allowed prefix."""
+    resolved: list[str] = []
+    for template_path in path_templates:
+        path = template_path.format(app_slug=app_slug, env_slug=env_slug)
+        if not path.startswith(SSM_HOST_PATH_ALLOWED_PREFIX):
+            raise ValueError(
+                f"Refusing to clean host path outside {SSM_HOST_PATH_ALLOWED_PREFIX!r}: {path!r}"
+            )
+        if app_slug not in path:
+            raise ValueError(
+                f"Refusing to clean host path that does not include the app slug {app_slug!r}: {path!r}"
+            )
+        resolved.append(path)
+    return resolved
+
+
+def _run_host_path_cleanup_ssm(
+    env: models.Environment, app_slug: str, host_paths: list[str],
+) -> tuple[bool, str]:
+    """SSM-broadcast `rm -rf` for each host_path on every container instance in the env's ECS ASG."""
+    if not host_paths:
+        return True, "no host paths to clean"
+
+    session = _get_env_session(env)
+    ssm_client = session.client("ssm")
+
+    asg_name = f"devopshero-{env.slug}-ecs-container-instances"
+    quoted_paths = " ".join(f"'{p}'" for p in host_paths)
+    command_script = (
+        "set -e; "
+        f"for p in {quoted_paths}; do "
+        "  if [ -d \"$p\" ]; then rm -rf \"$p\" && echo \"removed $p\"; "
+        "  else echo \"absent $p\"; fi; "
+        "done"
+    )
+
+    try:
+        resp = ssm_client.send_command(
+            DocumentName="AWS-RunShellScript",
+            Targets=[{"Key": "tag:aws:autoscaling:groupName", "Values": [asg_name]}],
+            Parameters={"commands": [command_script]},
+            TimeoutSeconds=SSM_COMMAND_TIMEOUT_SECONDS,
+            Comment=f"devopshero host-path cleanup for app {app_slug}",
+        )
+    except ClientError as e:
+        logger.exception("SSM SendCommand failed")
+        return False, f"SendCommand failed: {e}"
+
+    command_id = resp["Command"]["CommandId"]
+    logger.info("SSM host-path cleanup command started: %s (asg=%s)", command_id, asg_name)
+    return _wait_for_ssm_command(ssm_client=ssm_client, command_id=command_id)
+
+
+def _wait_for_ssm_command(ssm_client, command_id: str) -> tuple[bool, str]:
+    """Poll list_command_invocations until every invocation is in a terminal state."""
+    terminal_success = {"Success"}
+    terminal_failure = {"Cancelled", "Failed", "TimedOut", "Cancelling"}
+
+    for _ in range(SSM_MAX_WAIT_ITERATIONS):
+        try:
+            resp = ssm_client.list_command_invocations(CommandId=command_id, Details=False)
+        except ClientError as e:
+            return False, f"list_command_invocations failed: {e}"
+
+        invocations = resp.get("CommandInvocations", [])
+        if not invocations:
+            # ASG may have zero instances right now (min_capacity=0 + scaled to 0). Nothing to do.
+            logger.info("SSM command %s has no targets — treating as success (ASG empty?)", command_id)
+            return True, "no instances targeted"
+
+        statuses = [inv.get("Status", "") for inv in invocations]
+        if all(s in terminal_success or s in terminal_failure for s in statuses):
+            failures = [(inv.get("InstanceId", "?"), inv.get("Status", "?")) for inv in invocations if inv.get("Status") in terminal_failure]
+            if failures:
+                detail = ", ".join(f"{i}={s}" for i, s in failures)
+                return False, f"SSM cleanup failed on instances: {detail}"
+            return True, "ok"
+        time.sleep(SSM_POLL_INTERVAL_SECONDS)
+
+    return False, "timed out waiting for SSM command to finish"

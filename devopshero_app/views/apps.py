@@ -40,8 +40,17 @@ def app_is_live(app: App) -> bool:
     return any(status != Deployment.Status.TORN_DOWN for status, _ in latest_by_env.values())
 
 
-def _app_has_efs(app: App) -> bool:
-    return bool(app.source_template and app.source_template.efs_config)
+def _app_has_persistent_data(app: App) -> bool:
+    """True if the template declares persistent storage (EFS or per-container host bind mounts)."""
+    template = app.source_template
+    if not template:
+        return False
+    if template.efs_config:
+        return True
+    for container in (template.containers or []):
+        if container.get("host_mounts"):
+            return True
+    return False
 
 
 @dataclass
@@ -215,7 +224,6 @@ def build_app_detail_context(request: HttpRequest, app: App) -> dict[str, Any]:
     context["can_admin"] = can_admin
     context["is_pending_removal"] = is_pending_removal
     context["can_remove"] = can_edit and not is_pending_removal and not app_is_live(app)
-    context["has_efs"] = _app_has_efs(app)
     context["url_base"] = f"/apps/{app.slug}/tags/"
     context["suggested_keys"], context["suggested_values"] = abac.get_resource_tag_suggestions(org, "app")
 
@@ -536,7 +544,7 @@ def app_remove_confirm(request: HttpRequest, app_slug: str) -> HttpResponse:
     context = {
         "app": app,
         "post_url": reverse("app_remove", kwargs={"app_slug": app.slug}),
-        "has_efs": _app_has_efs(app),
+        "has_persistent_data": _app_has_persistent_data(app),
     }
     return render(request, "devopshero_app/apps/_app_remove_confirm_modal.html", context=context)
 
@@ -556,7 +564,7 @@ def app_remove(request: HttpRequest, app_slug: str) -> HttpResponse:
     if app_is_live(app):
         return HttpResponse(status=422)
 
-    has_efs = _app_has_efs(app)
+    has_persistent_data = _app_has_persistent_data(app)
     with transaction.atomic():
         AppRemovalJob.objects.create(
             organization=request.user.current_organization,
@@ -565,7 +573,7 @@ def app_remove(request: HttpRequest, app_slug: str) -> HttpResponse:
             app_name_snapshot=app.name,
             workspace_slug_snapshot=app.workspace.slug,
             delete_secrets=request.POST.get("delete_secrets") == "on",
-            delete_efs_data=has_efs and request.POST.get("delete_efs_data") == "on",
+            delete_persistent_data=has_persistent_data and request.POST.get("delete_persistent_data") == "on",
             delete_policies=request.POST.get("delete_policies") == "on",
             created_by=request.user,
         )

@@ -5,7 +5,7 @@ Usage:
     uv run manage.py doh_control create-env --aws-account "Name" --name default --region us-east-1 --hosted-zone example.com
     uv run manage.py doh_control teardown-env --slug default --aws-account "Name"
     uv run manage.py doh_control teardown-app --app ai-detector-and-humanizer
-    uv run manage.py doh_control teardown-app --app foo --remove-app --delete-secrets --delete-efs-data --delete-policies
+    uv run manage.py doh_control teardown-app --app foo --remove-app --delete-secrets --delete-persistent-data --delete-policies
     uv run manage.py doh_control deploy-app-template --template hermes-agent --org acme-corp --workspace default --env default --app-name hermes-vmendi
     uv run manage.py doh_control redeploy-env --slug default --aws-account "Name"
     uv run manage.py doh_control redeploy-app --app simple-dashboard
@@ -65,8 +65,8 @@ class Command(BaseCommand):
             help="With --remove-app: also delete devopshero/{env}/{app}/* AWS Secrets Manager secrets in every env.",
         )
         teardown_app.add_argument(
-            "--delete-efs-data", action="store_true",
-            help="With --remove-app: also delete /deployments/{app} EFS data in every env (no-op if the app has no EFS config).",
+            "--delete-persistent-data", action="store_true",
+            help="With --remove-app: also delete the app's persistent data (EFS subtree /deployments/{app} and EC2 host bind-mount directories) in every env. No-op if the template declares neither.",
         )
         teardown_app.add_argument(
             "--delete-policies", action="store_true",
@@ -327,12 +327,12 @@ class Command(BaseCommand):
         app_slug = options["app"]
         remove_app = options.get("remove_app", False)
         delete_secrets = options.get("delete_secrets", False)
-        delete_efs_data = options.get("delete_efs_data", False)
+        delete_persistent_data = options.get("delete_persistent_data", False)
         delete_policies = options.get("delete_policies", False)
 
-        if not remove_app and (delete_secrets or delete_efs_data or delete_policies):
+        if not remove_app and (delete_secrets or delete_persistent_data or delete_policies):
             self.stderr.write(self.style.ERROR(
-                "--delete-secrets, --delete-efs-data, --delete-policies require --remove-app"
+                "--delete-secrets, --delete-persistent-data, --delete-policies require --remove-app"
             ))
             return
 
@@ -346,7 +346,7 @@ class Command(BaseCommand):
             self._queue_app_removal(
                 app=app,
                 delete_secrets=delete_secrets,
-                delete_efs_data=delete_efs_data,
+                delete_persistent_data=delete_persistent_data,
                 delete_policies=delete_policies,
             )
             return
@@ -387,7 +387,7 @@ class Command(BaseCommand):
         self.stdout.write(self.style.WARNING("Teardown will start automatically (job worker picks up pending teardowns)"))
         self.stdout.write("")
 
-    def _queue_app_removal(self, app: models.App, delete_secrets: bool, delete_efs_data: bool, delete_policies: bool) -> None:
+    def _queue_app_removal(self, app: models.App, delete_secrets: bool, delete_persistent_data: bool, delete_policies: bool) -> None:
         """Queue an AppRemovalJob with teardown_first=True; the worker tears down live deployments inline, then removes the app."""
         if app.status == models.App.Status.PENDING_REMOVAL:
             self.stdout.write(self.style.WARNING(f"App '{app.slug}' is already pending removal"))
@@ -401,7 +401,7 @@ class Command(BaseCommand):
                 app_name_snapshot=app.name,
                 workspace_slug_snapshot=app.workspace.slug,
                 delete_secrets=delete_secrets,
-                delete_efs_data=delete_efs_data,
+                delete_persistent_data=delete_persistent_data,
                 delete_policies=delete_policies,
                 teardown_first=True,
                 created_by=None,
@@ -416,7 +416,7 @@ class Command(BaseCommand):
         self.stdout.write(f"  Removal job: {job.id}")
         self.stdout.write(f"  teardown_first: True")
         self.stdout.write(f"  delete_secrets: {delete_secrets}")
-        self.stdout.write(f"  delete_efs_data: {delete_efs_data}")
+        self.stdout.write(f"  delete_persistent_data: {delete_persistent_data}")
         self.stdout.write(f"  delete_policies: {delete_policies}")
         self.stdout.write(self.style.WARNING(
             "Worker will tear down all live deployments inline, then perform cleanup + cascade delete"

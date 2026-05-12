@@ -1417,7 +1417,14 @@ class AppPermissionRequest(models.Model):
 
 
 class AppRemovalJob(models.Model):
-    """Async job to remove an App: optional EFS/secrets cleanup, then DB cascade delete."""
+    """Async job to remove an App: optional persistent-data/secrets/policy cleanup, then DB cascade delete.
+
+    `delete_persistent_data` covers both EFS app data (`/deployments/{app_slug}` on the
+    env's shared EFS, when the template declares `efs_config`) and EC2 host bind-mount
+    data (paths from `template.containers[*].host_mounts[*].source_path`, when any
+    container declares `host_mounts`). The executor skips each branch when the template
+    has nothing of that kind to clean.
+    """
 
     class Status(models.TextChoices):
         PENDING = "pending", "Pending"
@@ -1435,7 +1442,7 @@ class AppRemovalJob(models.Model):
     app_name_snapshot = models.CharField(max_length=255)
     workspace_slug_snapshot = models.SlugField(max_length=255)
     delete_secrets = models.BooleanField(default=False)
-    delete_efs_data = models.BooleanField(default=False)
+    delete_persistent_data = models.BooleanField(default=False)
     delete_policies = models.BooleanField(default=False)
     # If True, the executor first tears down every live deployment of this app
     # (calling app_deployment_teardown_executor.run_teardown inline) before

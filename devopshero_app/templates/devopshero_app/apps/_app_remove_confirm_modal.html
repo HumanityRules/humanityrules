@@ -58,13 +58,14 @@
                             in every environment this app is deployed in.
                         </span>
                     </label>
-                    {% if has_efs %}
+                    {% if has_persistent_data %}
                     <label class="flex items-start gap-2 text-sm">
-                        <input type="checkbox" name="delete_efs_data"
+                        <input type="checkbox" name="delete_persistent_data"
                                class="mt-0.5 h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500">
                         <span class="text-gray-700 dark:text-gray-300">
-                            Also delete EFS app data under
+                            Also delete persistent data (EFS app data under
                             <code class="text-xs">/deployments/{{ app.slug }}</code>
+                            and any EC2 host bind-mount directories for this app)
                             in every environment this app is deployed in.
                         </span>
                     </label>
