@@ -95,44 +95,25 @@ adds a first-class TTFT metric in api/metering.py.
                  # the frontend hides TPS rather than showing an estimate.
 --- a/static/messages.js
 +++ b/static/messages.js
-@@ -191,6 +191,12 @@
-   $('msg').value='';autoResize();
-   // Clear persisted composer draft since message was sent.
-   if (activeSid && typeof _clearComposerDraft === 'function') _clearComposerDraft(activeSid);
+@@ -208,0 +209,6 @@
 +  // DOH TTFT telemetry: stamp Enter so we can compute browser_ttft_ms and
 +  // post_rtt_ms. performance.now() is monotonic, unaffected by clock skew.
 +  // _dohPerfPostRttMs is hoisted (let, not const) because it's assigned
 +  // inside the try{} around /api/chat/start but read after the try/catch.
 +  const _dohPerfEnterTs=(typeof performance!=='undefined'&&performance.now)?performance.now():Date.now();
 +  let _dohPerfPostRttMs=0;
-   const displayText=text||(uploaded.length?`Uploaded: ${uploadedNames.join(', ')}`:'(file upload)');
-   const userMsg={role:'user',content:displayText,attachments:uploaded.length?uploadedNames:undefined,_ts:Date.now()/1000};
-   S.toolCalls=[];  // clear tool calls from previous turn
-@@ -243,6 +249,8 @@
-       profile:S.activeProfile||S.session.profile||'default',
-       attachments:uploaded.length?uploaded:undefined
-     })});
+@@ -262,0 +269,3 @@
 +    const _dohPerfPostTs=(typeof performance!=='undefined'&&performance.now)?performance.now():Date.now();
 +    _dohPerfPostRttMs=_dohPerfPostTs-_dohPerfEnterTs;
-     if(startData.effective_model && S.session){
-       S.session.model=startData.effective_model;
-       S.session.model_provider=startData.effective_model_provider||S.session.model_provider||null;
-@@ -314,8 +322,9 @@
-     return;
-   }
-
++
+@@ -337,2 +346,3 @@
 -  // Open SSE stream and render tokens live
 -  attachLiveStream(activeSid, streamId, uploadedNames);
 +  // Open SSE stream and render tokens live. Pass TTFT anchors so the
 +  // first-token handler can compute browser_ttft_ms.
 +  attachLiveStream(activeSid, streamId, uploadedNames, {_dohPerfEnterTs, _dohPerfPostRttMs});
-
- }
-
-@@ -739,10 +748,32 @@
-     // the fixes below (_streamFinalized guard + cancelAnimationFrame in the
-     // terminal handlers) address it without needing a reset here.
-
+@@ -760,0 +771,11 @@
++
 +    // DOH TTFT telemetry: remember Enter + post-RTT stamps passed by send().
 +    // First `token` event prints once, then silences. The `perf` SSE event
 +    // (bedrock only) delivers the backend's three monotonic measurements;
@@ -143,11 +124,7 @@ adds a first-class TTFT metric in api/metering.py.
 +    const _dohPerfPostRttMs=options&&options._dohPerfPostRttMs;
 +    let _dohPerfTokenLogged=false;
 +    let _dohPerfBackend=null;
-+
-     source.addEventListener('token',e=>{
-       if(!S.session||S.session.session_id!==activeSid) return;
-       const d=JSON.parse(e.data);
-       assistantText+=d.text;
+@@ -765,0 +787,11 @@
 +      if(!_dohPerfTokenLogged&&typeof _dohPerfEnterTs==='number'){
 +        _dohPerfTokenLogged=true;
 +        const _now=(typeof performance!=='undefined'&&performance.now)?performance.now():Date.now();
@@ -159,13 +136,7 @@ adds a first-class TTFT metric in api/metering.py.
 +          stream_id: streamId,
 +        });
 +      }
-       syncInflightAssistantMessage();
-       if(!S.session||S.session.session_id!==activeSid) return;
-       const parsed=_parseStreamState();
-@@ -1153,6 +1184,14 @@
-       if(typeof _setCompressionSessionLock==='function') _setCompressionSessionLock(null);
-       if(!S.busy&&typeof renderMessages==='function') renderMessages();
-       showToast(message||'Context compressed');
+@@ -1190,0 +1223,8 @@
 +    });
 +
 +    source.addEventListener('perf',e=>{
@@ -174,6 +145,3 @@ adds a first-class TTFT metric in api/metering.py.
 +        _dohPerfBackend=JSON.parse(e.data||'{}');
 +        console.log('[doh-perf bedrock backend]',_dohPerfBackend);
 +      }catch(_){}
-     });
-
-     source.addEventListener('metering',e=>{
