@@ -1,5 +1,41 @@
 # DevOpsHero Development Journal
 
+## 2026-05-11 20:05 - [Deployment] Broadened `delete_efs_data` to `delete_persistent_data` (covers EC2 host bind mounts too)
+
+**Conversation:** [2026-05-11-2006-7aadedd8.md](conversations/2026-05-11-2006-7aadedd8.md)
+
+The "delete EFS app data" checkbox on the Remove App modal (and its CLI sibling `--delete-efs-data`) had become a half-truth for the new `hermes_agent` template. That template (`hermes-personal` slug) is the one running the nono-sandbox persistent-root model: EFS holds only a single `rootfs.tar` checkpoint at `/deployments/<app>/checkpoint/`, while the *live* working filesystem lives on the EC2 container instance's EBS volume at `/var/lib/devopshero/hermes-roots/<app_slug>/`, bind-mounted into the container at `/hermes-persistent-root`. Ticking the "delete EFS data" box wiped the checkpoint but left the bulk of the persistent state — package installs, Hermes runtime state, SQLite WAL files, workspace files, user artifacts — sitting on the EC2 host until the instance got replaced. From the user's mental model, the box was lying.
+
+Renamed the flag to `delete_persistent_data` and broadened the executor to clean both surfaces:
+
+- **Model + migration:** `AppRemovalJob.delete_efs_data` → `delete_persistent_data` via `RenameField` in `0054_rename_delete_efs_data_to_delete_persistent_data.py`. Column data preserved (2 historical job rows still queryable post-migrate).
+- **Gate function:** `_app_has_efs(app)` → `_app_has_persistent_data(app)` in `views/apps.py`. Returns True when the template has *either* `efs_config` OR any container with `host_mounts`. The modal checkbox is hidden if neither.
+- **CLI:** `--delete-efs-data` → `--delete-persistent-data` with help text spelling out both surfaces and "no-op if the template declares neither."
+- **Executor (`app_remove_executor.run_removal`):** when `delete_persistent_data=True`, for each environment, run the existing Fargate-based `rm -rf /deployments/<app>` EFS cleanup *only if* the template has `efs_config`, AND the new SSM-based host-path cleanup *only if* any container has `host_mounts`. Each branch is independent — a template with only host mounts skips the EFS branch entirely, and vice versa.
+- **Dropped dead `context["has_efs"]` in `build_app_detail_context`** — set but never consumed by any template.
+
+The EBS-cleanup half required a design choice with one real branch point. Two complications constrained the answer: by the time the cleanup runs the task is already torn down (so the bind mount is gone and we can't reach the host through ECS Exec), and ECS may have scheduled the task across multiple instances over its lifetime (so the path can exist on more than one node). Considered three approaches:
+
+1. **One-shot ECS task with `/var` bind-mounted on the host** — only lands on one instance, doesn't cover migration.
+2. **Track which instances the task ran on** — bookkeeping burden, fragile against instance replacement.
+3. **SSM Run Command broadcast to the env's container ASG** — idempotent, hits every instance, instances that never ran the task harmlessly return "absent".
+
+Picked (3). The `EcsClusterStack` already attaches `AmazonSSMManagedInstanceCore` to the container instance role (`deploy_base.py:259`), so the agent is present on every node. Target via `tag:aws:autoscaling:groupName=devopshero-<env_slug>-ecs-container-instances` (the ASG name CDK already emits), poll `list_command_invocations` until all instances reach a terminal state, surface failures into `AppRemovalJob.status_message`.
+
+Path resolution doesn't hardcode the hermes path — it reads `template.containers[*].host_mounts[*].source_path` and runs the same `.format(app_slug=..., env_slug=...)` substitution that `app_config_builder.py` uses at deploy time. Two safety guards refuse to clean a resolved path that (a) doesn't start with `/var/lib/devopshero/` or (b) doesn't contain the app slug — defense in depth against a future template typo emitting a host path outside the DOH-owned area.
+
+The empty-ASG case (`min_capacity=0`, scaled to 0) is handled in `_wait_for_ssm_command`: if the first `list_command_invocations` returns no invocations, treat as success ("no instances targeted") rather than spinning forever.
+
+Validated end-to-end with a read-only probe against the real `CH Sandbox` env / `hermes-vmendi00` deployment before merging. The probe (`uv run manage.py shell` calling `_template_host_path_templates` + `_resolve_host_paths` + a one-off `ls -la` via the same `SendCommand` shape) confirmed: path resolution produces `['/var/lib/devopshero/hermes-roots/hermes-vmendi00']`, DOH's assumed role can call SSM in the customer account, the ASG tag-target hits 3 instances in well under 60s with all returning `Status: Success / ExitCode: 0`, and exactly one of the three (the instance currently hosting the task) has the fully-populated rootfs while the other two harmlessly report `No such file or directory`. That last data point is the validation of the broadcast model itself — exactly the idempotent absent-case we wanted from "broadcast and don't worry about which node it was on."
+
+**Key points:**
+- The flag rename is the visible part; the real change is that "persistent data" now means both filesystems Hermes uses, not just the EFS half. The DOH-owned area on the EC2 instance is no longer orphaned forever.
+- Reading `host_mounts` off the live template (not the blueprint snapshot) matches how the existing EFS cleanup already works — it reads `template.efs_config` live. Consistent shape, and a deployment retried after a template edit picks up the corrected cleanup paths.
+- SSM was the right reach because the container instance role *already* has `AmazonSSMManagedInstanceCore`; no IAM change to the customer environment was needed. The customer-side DevOpsHero admin role already grants `ssm:SendCommand` and `ssm:ListCommandInvocations`. If that role were ever scoped tighter, the failure would surface cleanly through `_fail(job, ...)` as the job's status_message rather than blow up mid-flight.
+- Two independent template-driven gates inside one outer flag means each cleanup branch runs only when there's something for it to do. A template that grows EFS but not host mounts (or vice versa) does the right thing without code changes. A template with neither logs "Skipping persistent-data cleanup: template has no EFS or host_mounts" and falls through to the secrets/policies branches.
+- Read-only probes against real infrastructure before destructive end-to-end are cheap insurance. The `ls -la` broadcast told us everything the destructive `rm -rf` would have, without committing to nuking a working hermes — the only thing we don't get for free is "does the actual delete work", which at this point is a mechanical substitution given that SSM, targeting, permissions, and path resolution all returned exit-0 from every instance in the ASG.
+- Worth remembering for future host-mount cleanup work: the DOH-owned prefix `/var/lib/devopshero/` plus an "app slug must appear in the path" guard is sufficient defense for the rm-rf case. The bigger structural protection is that the path comes from the template (which is DOH-authored), not from user input.
+
 ## 2026-05-11 16:36 - [Bugfix] Replaced aws-sigv4-proxy with streaming Python signer
 
 **Conversation:** [2026-05-11-1638-b5ad038c.md](conversations/2026-05-11-1638-b5ad038c.md)

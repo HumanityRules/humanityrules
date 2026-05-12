@@ -430,9 +430,9 @@ class AppRemovalJobAdmin(admin.ModelAdmin):
     list_display = [
         "app_slug_snapshot", "app_name_snapshot", "workspace_slug_snapshot",
         "organization", "status", "teardown_first", "delete_secrets",
-        "delete_efs_data", "delete_policies", "created_at", "updated_at",
+        "delete_persistent_data", "delete_policies", "created_at", "updated_at",
     ]
-    list_filter = ["status", "teardown_first", "delete_secrets", "delete_efs_data", "delete_policies", "organization"]
+    list_filter = ["status", "teardown_first", "delete_secrets", "delete_persistent_data", "delete_policies", "organization"]
     search_fields = ["app_slug_snapshot", "app_name_snapshot", "workspace_slug_snapshot", "organization__name", "status_message"]
     readonly_fields = [
         "id", "organization", "app_id_snapshot", "app_slug_snapshot",
