@@ -174,6 +174,59 @@ class EcsComputeModeTests(SimpleTestCase):
             ],
         })
 
+    def test_default_service_allows_200_percent_task_overlap(self) -> None:
+        template = _app_stack_template(compute_mode="fargate", include_workspace_efs=False)
+
+        template.has_resource_properties("AWS::ECS::Service", {
+            "DeploymentConfiguration": Match.object_like({
+                "MaximumPercent": 200,
+                "MinimumHealthyPercent": 0,
+            }),
+            "AvailabilityZoneRebalancing": "ENABLED",
+        })
+
+    def test_serialize_task_replacement_caps_max_at_100_percent(self) -> None:
+        cdk_app = App()
+        stack = deploy_app.AppStack(
+            scope=cdk_app,
+            construct_id="TestAppStack",
+            app_config=AppConfig(
+                app_name="my-app",
+                cpu=1024,
+                memory=2048,
+                compute_mode="fargate",
+                alb_target_container="app",
+                containers=[
+                    ContainerConfig(
+                        name="app",
+                        image_source="dockerfile",
+                        ecr_repo_name="doh/staging/my-app-app",
+                        source_repo_path="app",
+                        container_port=8080,
+                    ),
+                ],
+                serialize_task_replacement=True,
+            ),
+            image_tag="test",
+            env_slug="staging",
+            resource_prefix="doh-staging-my-app",
+            subdomain="my-app",
+            database_connection_secret=None,
+            shared_alb_hosted_zone=None,
+            shared_hosted_zone_id=None,
+            env_bearer_shared_secrets_arn=None,
+            auth_base_url=None,
+        )
+        template = Template.from_stack(stack)
+
+        template.has_resource_properties("AWS::ECS::Service", {
+            "DeploymentConfiguration": Match.object_like({
+                "MaximumPercent": 100,
+                "MinimumHealthyPercent": 0,
+            }),
+            "AvailabilityZoneRebalancing": "DISABLED",
+        })
+
     def test_fargate_mode_rejects_privileged(self) -> None:
         cdk_app = App()
         with self.assertRaisesMessage(

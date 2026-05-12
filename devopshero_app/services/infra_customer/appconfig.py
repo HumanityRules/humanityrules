@@ -280,6 +280,13 @@ class AppConfig:
     # these to infrastructure grants on the ECS task role.
     platform_capabilities: list[str] = field(default_factory=list)
 
+    # When True, the ECS service is configured with max_healthy_percent=100 so
+    # the old task stops completely before the replacement starts. Required for
+    # checkpoint-based persistence (Hermes tars /hermes-persistent-root into
+    # EFS on SIGTERM; the replacement task must wait for that write to land or
+    # it boots from the image and drops conversation state).
+    serialize_task_replacement: bool = False
+
     # Owner's username (from the App's `owner` ResourceTag) when the app has
     # one, else None. Injected into env-bearer containers as DOH_OWNER_USERNAME so
     # they can identify themselves to DOH's control plane on behalf of this

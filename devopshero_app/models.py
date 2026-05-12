@@ -637,6 +637,13 @@ class AppTemplate(models.Model):
     # wiring; they are not user-managed app permissions.
     platform_capabilities = models.JSONField(default=list, blank=True)
 
+    # When True, the ECS service runs at max_healthy_percent=100, which forces
+    # ECS to fully stop the old task before starting the replacement. Set for
+    # templates whose stop handler writes durable state that the replacement
+    # task must restore from (e.g., Hermes's EFS checkpoint tar). Default False:
+    # stop and start can overlap, trading a checkpoint race for zero-downtime.
+    serialize_task_replacement = models.BooleanField(default=False)
+
     # Template for the default App Name shown on the deploy form. Tokens:
     #   {username} - owner's username; email local-part with non-alnum stripped
     #   {index}    - zero-padded (2-digit) counter that picks the lowest free slug in the org

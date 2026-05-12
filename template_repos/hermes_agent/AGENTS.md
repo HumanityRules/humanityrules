@@ -7,7 +7,7 @@ Sometimes the developer will want you doing it himself, other times he will pref
 ## How we verify
 
 **Management commands:** are the primary mechanism for end-to-end verification. They drive the same code paths the UI does (deploy, redeploy, update live app, run jobs, etc.) without needing browser interaction. See the `manage-commands` skill.
-**Job worker:** `run_job_worker` is often running in the background. Deployments, redeploys, and most async work go through it, so **if your change touches code the worker imports you must stop and restart it** — otherwise the worker keeps executing the old code and your verification is meaningless.
+**Job worker:** `run_job_worker` is often running in the background. Deployments, redeploys, and most async work go through it, so **if your change touches code the worker imports you must stop and restart it** — otherwise the worker keeps executing the old code and your verification is meaningless. If an existing `run_job_worker` is already running (e.g. from the main tree or another worktree), stop it without asking and start a fresh one from your worktree for the deploy; the user will restart their preferred one afterwards.
 **AppTemplate reseeding:**If you update the AppTemplate, don't forget to call seed_app_templates so that they are updated in the database.
 
 ## Test environment

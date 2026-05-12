@@ -1,5 +1,25 @@
 # DevOpsHero Development Journal
 
+## 2026-05-12 14:36 - [Deployment] Fix checkpoint race on Hermes node movement
+
+**Conversation:** [2026-05-12-1438-c93256bd.md](conversations/2026-05-12-1438-c93256bd.md)
+
+The user reported losing a Hermes conversation after an ASG scale-in migrated the task to a new node. The trigger line in the logs was `[integrations_broker] signal 15; shutting down` — which is a clean SIGTERM from supervisor.sh, not an OOM or crash. Before the fix, the service ran with `maximumPercent=200, minimumHealthyPercent=0`, so ECS started the replacement task 0.64s after stopping the old one. The old task's persistent-root runner writes an EFS checkpoint tar (~1.3 GB) during SIGTERM, which takes ~30-60s. The replacement boots immediately on the target node, calls `restore_persistent_root_from_checkpoint`, finds no archive on EFS yet, and falls back to `initialize_persistent_root` from the image — wiping `/workspace/.hermes/webui-mvp/sessions/` and the SQLite databases. The user's 404 on `POST /api/session/draft` was this fallback, not a bug in Hermes itself.
+
+The fix is deliberately simple: a new `AppTemplate.serialize_task_replacement` boolean that forces the ECS service to run with `max_healthy_percent=100`. With max=100 and desiredCount=1, ECS has to stop the old task fully before starting the replacement, which gives the checkpoint writer its full stop_timeout window (currently 120s). The flag is plumbed through `AppConfig` and set to True only on the Hermes Personal template — other services keep the 200% overlap for zero-downtime rolling deploys. The tradeoff is 2-3 minutes of 502s per node move for hermes-personal apps, which is acceptable for single-replica personal assistants whose durability story is checkpoint-based.
+
+ECS rejects `maximumPercent<=100` when AZ Rebalancing is enabled; the first redeploy attempt failed with `Availability Zone Rebalancing does not support maximumPercent <= 100 %`. The fix disables AZ rebalancing in the same branch — it's a no-op for single-task services anyway since "rebalanced across AZs" isn't a concept when you have one task.
+
+Verification used an explicit node-move: drop a marker file into `/hermes-persistent-root/workspace/.hermes/doh-test-mark.txt`, redeploy from the worktree so the service picks up the new config, scale the ASG to 2 to get a spare node, then `update_container_instances_state(status=DRAINING)` on the busy node. Before the fix: service events showed stop and start overlapping by 640ms. After the fix: 9-second gap **after** the old task fully stopped (stop at 20:35:48, start at 20:35:57). The hermes container's boot log on the new node logged `Restoring /hermes-persistent-root from /hermes-checkpoint/rootfs.tar...Restore complete in 8.078s` instead of `No checkpoint archive found`. Marker file, state.db (602 KB), kanban.db, and the full webui-mvp/sessions/ directory all landed on the new node. Scale-in back to desired=1 cleanly terminated the now-empty old instance without touching the running task.
+
+**Key points:**
+- Root cause was the overlap between ECS starting the replacement and the old task's SIGTERM handler writing its checkpoint — a race that V2's checkpoint model silently depends on not losing, but the service's deployment config was not set up to guarantee.
+- The service deployment percents are defaults in `deploy_app.py` (`min_healthy_percent=0, max_healthy_percent=200`); the fix adds a template-level opt-in rather than changing the default, because most apps genuinely want the 200% overlap for rolling deploys.
+- `AvailabilityZoneRebalancing=DISABLED` had to be bundled with `MaximumPercent<=100` because of an ECS API validation rule; the CDK L2 enables rebalancing by default so a plain `max_healthy_percent=100` change is not enough.
+- Verification strategy: manual `DRAINING` state update on the container instance beats waiting for an ASG alarm to scale in, because it's deterministic and fast. Dropping a marker file pre-fix gives a single file to grep for after the move that proves the full persistent root survived, without depending on real conversation state.
+- The `[persistent-root] Restoring … from …/rootfs.tar` log line is the definitive signal of the restore code path in `persistent-root-runner.sh`. When it shows instead of `No checkpoint archive found`, the new task has the old task's state.
+- Worktree note: creating a worktree in `.claude/worktrees/` and editing via absolute paths into `/Users/vmendi/websites/devopshero/...` silently lands changes in the main tree instead of the worktree. Had to `git stash -u` and pop in the worktree to relocate them. Worth being explicit about which directory Writes target when working in a worktree session.
+
 ## 2026-05-12 09:48 - [Deployment] Make template-backed clones resolve on the worker, not the creator
 
 **Conversation:** [2026-05-12-0951-33cb557f.md](conversations/2026-05-12-0951-33cb557f.md)

@@ -158,6 +158,7 @@ class BedrockPlatformCapabilityTests(SimpleTestCase):
             ],
         })
         self.assertEqual(template["alb_target_container"], "policy-proxy")
+        self.assertEqual(template["serialize_task_replacement"], True)
         self.assertEqual(len(template["containers"]), 2)
 
         hermes = next(c for c in template["containers"] if c["name"] == "hermes")
