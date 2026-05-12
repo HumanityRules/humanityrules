@@ -1,5 +1,28 @@
 # DevOpsHero Development Journal
 
+## 2026-05-12 15:53 - [Deployment] Per-container memory caps so two Hermes tasks fit one m8g.large
+
+**Conversation:** [2026-05-12-1553-c93256bd.md](conversations/2026-05-12-1553-c93256bd.md)
+
+Follow-up to the checkpoint race fix earlier in the day. The question that opened this was whether we should bump the ECS container instance size from `m8g.large` (2 vCPU, 8 GiB) to `m8g.xlarge` (4 vCPU, 16 GiB) to avoid the two-Hermes-tasks-don't-fit-on-one-node problem. The answer: no, stay on large, but drop the task-level memory advertisement so the scheduler reserves less per task.
+
+The task definition synthesized by CDK today sets exactly one memory value: `"Memory": "4096"` at the task level. No container-level `Memory` or `MemoryReservation`. On EC2, when task-level memory is present, ECS uses that number for placement reservation — so even though hermes's real RSS sits well below 4 GiB in practice, the scheduler sees `4096 + 4096 = 8192 > 7747 MiB available` and won't co-locate two tasks. That's what forced the 2-instance window during every deploy.
+
+The fix splits memory into two container-level knobs: `memory_limit_mib` (hard cap, → OOM kill) and `memory_reservation_mib` (soft reservation → `memory.low` cgroup v2 floor, used for ECS placement when set). `deploy_app.py` now omits the task-level `memory_mib` entirely on EC2 tasks when every container declares its own hard cap — ECS then computes placement reservation as the sum of container reservations (falling back to limits for containers that only have a hard cap). Fargate is unchanged because Fargate strictly requires task-level memory as the billing unit.
+
+Hermes Personal sets `hermes: memory_reservation_mib=2048, memory_limit_mib=4096` and `policy-proxy: memory_limit_mib=256`. Total task reservation = 2304 MiB (was 4096). Two tasks fit on one m8g.large with headroom. Verified on the live `hermes-vmendi00` task after redeploy: task def shows `memory: None` at task level, containers carry the expected caps, and ECS reports the instance now has `remaining MEMORY = 5443 MiB` (= 7747 - 2304). Inside the container, `/sys/fs/cgroup/memory.max` = 4 GiB and `memory.low` = 2 GiB, matching the intent.
+
+An earlier draft of the comment in seed_app_templates.py said Docker "squeezes both back toward 2 GiB under memory pressure." That's wrong and worth flagging for anyone reading the source later. `memory.low` is a protection floor, not a throttle: under host pressure the kernel reclaims *reclaimable* pages (page cache first, then swappable anonymous pages if swap is configured) from containers above their floor, before touching containers below theirs. Usage does not snap back to 2 GiB. A container with 3.5 GiB of hot, unreclaimable RSS will stay at 3.5 GiB until something OOM-kills it; the contract is only "your neighbor can't evict you below 2 GiB." Comment was corrected in a follow-up commit.
+
+Worktree hygiene learning: when you create a git worktree under `.claude/worktrees/<name>/` and start editing files via absolute paths that begin with the main tree's path (`/Users/vmendi/websites/devopshero/...`), your edits silently land in the main tree, not the worktree. Had to `git stash push -u`, `git stash pop` inside the worktree to relocate. Then `.claude/worktrees/` showed up as `??` in main's `git status` forever — added to `.gitignore` at the end. Worktrees are tracked via `.git/worktrees/<name>/` (a HEAD pointer + administrative files), NOT via files in the parent tree, so ignoring the container directory is correct and doesn't affect git's ability to track the worktree.
+
+**Key points:**
+- EC2 ECS task placement uses task-level `memory` when set, ignoring container-level values. Omitting task-level unlocks per-container reservations as the placement reservation — the only way to fit 2×4 GiB-capable Hermes tasks on an 8 GiB node.
+- Fargate always needs task-level memory; the new conditional in `deploy_app.py` only skips it on EC2 and only when every container has its own hard cap, so we can't accidentally create an invalid task def.
+- `memoryReservation` translates to cgroup v2 `memory.low` in Docker's ecs-agent integration — a reclaim-priority floor, not a soft clamp. The right mental model is "your floor is protected by reclaiming from containers above their floor first," not "Docker rebalances to stay under the reservation."
+- Cost decision: staying on m8g.large saves ~$65/mo per always-on instance vs. m8g.xlarge, and eliminates the unnecessary 2-node window during deploys (the serialized-replacement fix earlier in the day meant we never really needed a second node during a deploy on the same template).
+- Worktree gotcha: prefer worktree-relative paths when editing, or double-check `git status` in the main tree before assuming changes landed where intended. `.gitignore` entry `.claude/worktrees/` is the right steady state.
+
 ## 2026-05-12 14:36 - [Deployment] Fix checkpoint race on Hermes node movement
 
 **Conversation:** [2026-05-12-1438-c93256bd.md](conversations/2026-05-12-1438-c93256bd.md)
