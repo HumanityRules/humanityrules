@@ -729,9 +729,15 @@ HERMES_PERSONAL_TEMPLATE = {
             "linux_capabilities": ["SYS_ADMIN"],
             "stop_timeout": 120,
             # Placement reservation: 2 GiB so two hermes tasks fit on one
-            # m8g.large (~7747 MiB usable). Hard cap: 4 GiB for burst under
-            # light load. If the second task arrives, Docker squeezes both
-            # back toward 2 GiB under memory pressure.
+            # m8g.large (~7747 MiB usable). Hard cap: 4 GiB — the container
+            # can burst there when alone on the node. Under host memory
+            # pressure the kernel reclaims *reclaimable pages* (page cache,
+            # swappable anonymous pages) from whichever container is above
+            # its 2-GiB memory.low floor first. Usage doesn't snap back to
+            # 2 GiB; each task is just guaranteed not to be evicted below
+            # 2 GiB by its neighbor. If both tasks' live RSS is unreclaimable
+            # and exceeds the host, one will be OOM-killed before the kernel
+            # violates memory.low.
             "memory_reservation_mib": 2048,
             "memory_limit_mib": 4096,
             "configurable_variables": (
