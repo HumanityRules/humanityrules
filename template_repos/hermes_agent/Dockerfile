@@ -1,8 +1,8 @@
-FROM ghcr.io/nesquena/hermes-webui:0.51.34
+FROM ghcr.io/nesquena/hermes-webui:0.51.48
 
 USER root
 
-ARG NONO_VERSION=0.47.1
+ARG NONO_VERSION=0.53.0
 ARG GWS_VERSION=0.22.5
 ARG HERMES_AGENT_EXTRAS=modal,daytona,vercel,messaging,matrix,cron,cli,dev,tts-premium,slack,pty,honcho,mcp,homeassistant,sms,acp,voice,dingtalk,feishu,google,bedrock,web
 
