@@ -985,6 +985,21 @@ class AppStack(Stack):
         # failed task starts (~3-6 min) instead of CFN's 3h stabilization wait.
         # rollback=True auto-reverts to the prior COMPLETED deployment on trip;
         # on first deploy there is none, so the stack simply rolls back via CFN.
+        #
+        # max_healthy_percent=100 when the template asks for it: ECS will not
+        # start the replacement task until the old one is fully stopped. This
+        # trades deploy/node-move downtime for correctness on checkpoint-based
+        # apps (Hermes writes its EFS checkpoint during SIGTERM; overlapping
+        # starts race the write and the new task boots from image, dropping
+        # conversation state). ECS rejects max<=100 with AZ Rebalancing on, so
+        # we disable it in the same branch — acceptable for single-task
+        # services, where "rebalanced across AZs" doesn't apply.
+        if app_config.serialize_task_replacement:
+            max_healthy = 100
+            az_rebalancing = ecs.AvailabilityZoneRebalancing.DISABLED
+        else:
+            max_healthy = 200
+            az_rebalancing = ecs.AvailabilityZoneRebalancing.ENABLED
         service_props = {
             "service_name": resource_prefix[:255],
             "cluster": self.environment_infra.cluster,
@@ -995,7 +1010,8 @@ class AppStack(Stack):
             "security_groups": [self.environment_infra.default_security_group],
             "enable_execute_command": True,
             "min_healthy_percent": min_healthy,
-            "max_healthy_percent": 200,
+            "max_healthy_percent": max_healthy,
+            "availability_zone_rebalancing": az_rebalancing,
             "health_check_grace_period": Duration.seconds(health_check_grace),
             "circuit_breaker": ecs.DeploymentCircuitBreaker(enable=True, rollback=True),
         }

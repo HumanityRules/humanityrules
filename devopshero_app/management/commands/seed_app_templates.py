@@ -699,6 +699,8 @@ HERMES_PERSONAL_TEMPLATE = {
     "datastore_config": None,
     "efs_config": _HERMES_CHECKPOINT_EFS_CONFIG,
     "platform_capabilities": ["bedrock-runtime"],
+    # Force ECS to fully stop the old task before starting its replacement
+    "serialize_task_replacement": True,
     # ALB targets the policy proxy; the proxy forwards to the hermes container
     # over loopback after SSO + ABAC gates pass.
     "alb_target_container": "policy-proxy",
