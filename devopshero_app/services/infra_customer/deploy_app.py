@@ -692,13 +692,21 @@ class AppStack(Stack):
             raise ValueError("Linux capabilities are only supported for EC2-backed ECS tasks")
 
         if app_config.compute_mode == "ec2":
+            # Omit the task-level memory cap when every container carries its
+            # own hard limit: ECS then reserves the sum of container-level
+            # memory_reservation_mib (falling back to memory_limit_mib) for
+            # placement instead of task-level memory. That's what makes two
+            # hermes tasks share one node — container-level reservation < the
+            # 4-GiB task-level value we'd otherwise advertise.
+            all_have_hard_cap = all(c.memory_limit_mib is not None for c in app_config.containers)
+            task_memory_mib = None if all_have_hard_cap else str(app_config.memory)
             task_definition = ecs.TaskDefinition(
                 self, "TaskDefinition",
                 compatibility=ecs.Compatibility.EC2,
                 network_mode=ecs.NetworkMode.AWS_VPC,
                 family=resource_prefix[:255],
                 cpu=str(app_config.cpu),
-                memory_mib=str(app_config.memory),
+                memory_mib=task_memory_mib,
                 execution_role=self.environment_infra.task_execution_role,
                 task_role=task_role,
             )
@@ -869,6 +877,8 @@ class AppStack(Stack):
                 user=c.user,
                 privileged=c.privileged or None,
                 stop_timeout=Duration.seconds(c.stop_timeout) if c.stop_timeout else None,
+                memory_limit_mib=c.memory_limit_mib,
+                memory_reservation_mib=c.memory_reservation_mib,
             )
             # Only the ALB-target container needs a port mapping visible to ECS
             # task-networking — sibling containers communicate over the task's

@@ -169,6 +169,8 @@ class BedrockPlatformCapabilityTests(SimpleTestCase):
         self.assertNotIn("depends_on", hermes)
         self.assertEqual(hermes["stop_timeout"], 120)
         self.assertEqual(hermes["environment"]["HERMES_WEBUI_HOST"], "127.0.0.1")
+        self.assertEqual(hermes["memory_reservation_mib"], 2048)
+        self.assertEqual(hermes["memory_limit_mib"], 4096)
 
         variable_names = {var["name"] for var in hermes["configurable_variables"]}
         self.assertNotIn("HERMES_WEBUI_PASSWORD", variable_names)
@@ -180,3 +182,4 @@ class BedrockPlatformCapabilityTests(SimpleTestCase):
         proxy = next(c for c in template["containers"] if c["name"] == "policy-proxy")
         self.assertEqual(proxy["image_source"], "policy_proxy")
         self.assertEqual(proxy["upstream_container"], "hermes")
+        self.assertEqual(proxy["memory_limit_mib"], 256)

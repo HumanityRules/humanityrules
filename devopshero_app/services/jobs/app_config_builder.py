@@ -158,6 +158,8 @@ def _build_container_config(
         command=list(command) if command else None,
         essential=bool(template_container.get("essential", True)),
         stop_timeout=template_container.get("stop_timeout") or None,
+        memory_limit_mib=template_container.get("memory_limit_mib") or None,
+        memory_reservation_mib=template_container.get("memory_reservation_mib") or None,
         requires_env_bearer=bool(template_container.get("requires_env_bearer", False)),
     )
 
