@@ -1,0 +1,91 @@
+--- a/api/routes.py
++++ b/api/routes.py
+@@ -260,12 +260,20 @@
+
+
+ def _find_skill_in_dir(name: str, skills_dir: Path) -> tuple[Path | None, Path | None]:
+-    """Resolve a WebUI skill name inside an explicit skills directory."""
++    """Resolve a WebUI skill name across the active profile's skill search dirs.
++
++    The view/content endpoints used to scan only the primary skills_dir, which
++    silently missed skills shipped in `skills.external_dirs` (DOH bundles all
++    upstream skills at /opt/hermes/agent/skills). The listing endpoint already
++    iterates _active_skill_search_dirs, so the WebUI showed entries that then
++    yielded "Skill not found" on click. Scan the same dir set here so view,
++    content, and linked-file reads resolve anywhere the list does.
++    """
+     from agent.skill_utils import iter_skill_index_files
+     from tools.skills_tool import _EXCLUDED_SKILL_DIRS, _parse_frontmatter
+
+     raw_name = str(name or "").strip().strip("/")
+-    if not raw_name or not skills_dir.exists():
++    if not raw_name:
+         return None, None
+
+     candidate_names = [raw_name]
+@@ -274,34 +282,39 @@
+         if namespace and bare:
+             candidate_names.append(f"{namespace}/{bare}")
+
+-    for candidate_name in candidate_names:
+-        direct_path = skills_dir / candidate_name
+-        if not _skill_path_within(skills_dir, direct_path):
+-            continue
+-        if direct_path.is_dir() and (direct_path / "SKILL.md").exists():
+-            return direct_path, direct_path / "SKILL.md"
+-        legacy_md = direct_path.with_suffix(".md")
+-        if legacy_md.exists() and _skill_path_within(skills_dir, legacy_md):
+-            return legacy_md.parent, legacy_md
++    search_dirs = _active_skill_search_dirs(skills_dir)
+
+-    for skill_md in iter_skill_index_files(skills_dir, "SKILL.md"):
+-        if any(part in _EXCLUDED_SKILL_DIRS for part in skill_md.parts):
+-            continue
+-        skill_dir = skill_md.parent
+-        if skill_dir.name == raw_name:
+-            return skill_dir, skill_md
+-        try:
+-            frontmatter, _ = _parse_frontmatter(skill_md.read_text(encoding="utf-8")[:4000])
+-            if frontmatter.get("name") == raw_name:
+-                return skill_dir, skill_md
+-        except Exception:
+-            continue
++    for scan_dir in search_dirs:
++        for candidate_name in candidate_names:
++            direct_path = scan_dir / candidate_name
++            if not _skill_path_within(scan_dir, direct_path):
++                continue
++            if direct_path.is_dir() and (direct_path / "SKILL.md").exists():
++                return direct_path, direct_path / "SKILL.md"
++            legacy_md = direct_path.with_suffix(".md")
++            if legacy_md.exists() and _skill_path_within(scan_dir, legacy_md):
++                return legacy_md.parent, legacy_md
+
+-    for legacy_md in skills_dir.rglob("*.md"):
+-        if legacy_md.name == "SKILL.md":
+-            continue
+-        if legacy_md.stem == raw_name and _skill_path_within(skills_dir, legacy_md):
+-            return legacy_md.parent, legacy_md
++    for scan_dir in search_dirs:
++        for skill_md in iter_skill_index_files(scan_dir, "SKILL.md"):
++            if any(part in _EXCLUDED_SKILL_DIRS for part in skill_md.parts):
++                continue
++            skill_dir = skill_md.parent
++            if skill_dir.name == raw_name:
++                return skill_dir, skill_md
++            try:
++                frontmatter, _ = _parse_frontmatter(skill_md.read_text(encoding="utf-8")[:4000])
++                if frontmatter.get("name") == raw_name:
++                    return skill_dir, skill_md
++            except Exception:
++                continue
++
++    for scan_dir in search_dirs:
++        for legacy_md in scan_dir.rglob("*.md"):
++            if legacy_md.name == "SKILL.md":
++                continue
++            if legacy_md.stem == raw_name and _skill_path_within(scan_dir, legacy_md):
++                return legacy_md.parent, legacy_md
+     return None, None
+
+

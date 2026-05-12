@@ -114,3 +114,29 @@ that didn't actually hit Bedrock (tool-only loops).
 
 **Pair:** Requires `patches/05-bedrock-ttft-perf.patch` applied to the
 agent tree for the backend timestamps to exist.
+
+### `08-skills-content-external-dirs.patch`
+
+**Target:** `api/routes.py` (`_find_skill_in_dir`).
+
+**Problem:** The WebUI's skill listing (`/api/skills`) scans
+`_active_skill_search_dirs()` — the active profile's `~/.hermes/skills/`
+plus every path in `skills.external_dirs`. But the view/content helpers
+(`_skill_view_from_active_dir` and the `/api/skills/content?file=`
+linked-file branch) call `_find_skill_in_dir(name, skills_dir)` with
+only the primary skills dir. DOH's persistent-root layout bundles every
+upstream skill at `/opt/hermes/agent/skills` and exposes it via
+`skills.external_dirs` (see `config.yaml.template`). Result: the WebUI
+sidebar shows the full skill list, but clicking any bundled skill returns
+"Skill not found" because the content path never looks at the external
+dir.
+
+**Fix:** Rewrite `_find_skill_in_dir` to iterate every entry in
+`_active_skill_search_dirs(skills_dir)` — the same function the list
+endpoint already uses — preserving the existing search order (direct
+path → SKILL.md dir walk → legacy flat `.md`). Drops the
+early-return-on-missing-primary-dir so a profile with only external
+skills still resolves. Upstream has no notion of a WebUI viewing
+external skills (skills.external_dirs is an agent-runtime concept in
+their setup), so no fix is pending; this patch stays until upstream
+grows the same multi-dir awareness in the WebUI view path.
