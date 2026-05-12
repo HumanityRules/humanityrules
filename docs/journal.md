@@ -1,5 +1,37 @@
 # DevOpsHero Development Journal
 
+## 2026-05-11 21:56 - [Deployment] Split Hermes persistent root into platform-owned and user-owned paths
+
+**Conversation:** [2026-05-11-2156-019e0fac.md](conversations/2026-05-11-2156-019e0fac.md)
+
+Hermes persistence started as "make the whole container filesystem durable" so package installs, SQLite state, and workspace artifacts could survive ECS task replacement on the same EC2 node. That worked, but it created a deployment-update problem: if the entire initialized root filesystem is treated as user-owned, then a redeploy with a new Docker image does not naturally refresh DOH-owned scripts, Hermes WebUI, Hermes Agent, bundled skills, or platform CLIs. The fix was to make ownership boundaries explicit inside the persistent root.
+
+The runtime layout is now:
+
+- `/opt/doh` is DOH-owned platform content: runtime scripts, integrations broker, AWS signer, WebUI extension, nono profile, and packaged CLIs such as `aws`, `nono`, and `gws`.
+- `/opt/hermes` is Hermes-owned application content: patched WebUI, patched Hermes Agent checkout, config template, SOUL, and bundled DOH/Hermes skills.
+- `/workspace` is user-owned durable state: workspace files, user artifacts, Hermes state, SQLite `state.db` and WAL files, and user-created skills under `/workspace/.hermes/skills`.
+- `/run/doh` is ephemeral task runtime state: generated broker CA bundle/private files and other per-process material.
+
+The persistent-root runner now keeps `/opt/doh` and `/opt/hermes` image-owned. On every init, reuse, and restore it `rsync --delete`s those directories from the current image into the mounted persistent root. That gives image redeploys a clear update path for DOH/Hermes code while deliberately not touching OS package-manager paths or `/workspace`. If a user installs Node, apt packages, npm globals, or other system-level tools, those mutations remain part of the persistent root. If DOH updates `supervisor.sh`, `webui.sh`, broker code, the WebUI, bundled skills, or packaged CLIs, those refresh from the new image.
+
+The config contract was tightened to make the Dockerfile the source of truth for runtime paths. `supervisor.sh` and `webui.sh` no longer repeat fallback path defaults like `/opt/doh` or `/opt/hermes`; instead they require the image-provided env vars and fail loudly if the contract is missing. The most relevant path envs are documented directly above the Dockerfile env block so future readers can see the ownership model before following individual variables. The Hermes config template also no longer hardcodes `/opt/hermes/agent/skills`; it renders `skills.external_dirs` from `HERMES_WEBUI_AGENT_DIR`, keeping bundled skills tied to the same path contract.
+
+Skills were another important boundary. Hermes can read multiple skill directories, so bundled/curated skills stay in `/opt/hermes/agent/skills` as an external skill directory, while user-created skills remain in `/workspace/.hermes/skills`. This avoids the previous copy/sync model that mixed platform-owned skills into user-owned Hermes home. Local user skills still take precedence in Hermes's normal resolution order, which is acceptable for now; a reserved/non-shadowable platform skill namespace can be added later if policy requires it.
+
+The checkpoint design was adjusted to match the new ownership split. V2 EFS checkpoints still capture durable user and OS/package-manager mutations, but now exclude `/opt/doh` and `/opt/hermes`. Restores onto an empty local root pull user/OS state from the checkpoint, then repopulate DOH/Hermes code from the image. That preserves the intended V2 shape: local EBS remains the hot runtime filesystem, EFS is only the durability/restore layer, and image-owned software is not fossilized inside old checkpoints.
+
+One build-time learning: upstream PyPI currently reports `mistralai` as quarantined and serves no simple-index files for that project. The previous `hermes-agent[all]` install therefore no longer builds from a clean image because the `mistral` extra depends on `mistralai>=2.3.0,<3`. Rather than hardcoding a files.pythonhosted.org wheel URL and bypassing the quarantine, the image now installs an explicit set of Hermes extras that includes the surfaces DOH uses (`bedrock`, `google`, WebUI, MCP, etc.) and excludes `mistral`.
+
+**Key points:**
+- Persistence is now an ownership contract, not just a mount: image-owned `/opt/doh` and `/opt/hermes` refresh on every start, while user-owned `/workspace` and OS-level package mutations persist.
+- The update policy is intentionally simple: DOH updates DOH/Hermes files from the image; DOH does not rebase the OS or touch user files. Full rootfs rebasing remains a later problem.
+- The runner logs timing for init, reuse, restore, checkpoint, and image-owned sync. Docker smoke runs showed init around 6-8s, reuse prep around 20ms, image-owned sync around 0.6-1.0s, restore around 1.5s, and checkpoint around 2s in the local test environment.
+- Validation covered the actual behavior we care about: corrupting `/opt/doh/runtime/webui.sh` inside the persistent root was repaired on reuse, while `/workspace` artifacts and WAL-mode SQLite state survived.
+- Checkpoint/restore validation used separate Docker volumes as two local EC2-node stand-ins. The checkpoint archive excluded `/opt/doh` and `/opt/hermes`; an empty restored root still got fresh image-owned files and preserved workspace plus SQLite state.
+- WebUI was smoke-tested under nono from `/opt/hermes/webui`, with state under `/workspace/.hermes`, using inherited Dockerfile env rather than duplicated script defaults.
+- Full supervisor startup still requires ECS task-role credentials because the AWS signer intentionally refuses to run without them. Local smoke tests bypassed only that signer step; the signer failure itself is expected and preserves the credential-isolation model.
+
 ## 2026-05-11 20:05 - [Deployment] Broadened `delete_efs_data` to `delete_persistent_data` (covers EC2 host bind mounts too)
 
 **Conversation:** [2026-05-11-2006-7aadedd8.md](conversations/2026-05-11-2006-7aadedd8.md)

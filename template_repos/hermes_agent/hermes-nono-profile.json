@@ -9,8 +9,14 @@
   },
   "environment": {
     "allow_vars": [
+      "DOH_BIN_DIR",
+      "DOH_ROOT",
+      "DOH_RUN_DIR",
+      "DOH_RUNTIME_DIR",
       "HERMES_HOME",
       "HERMES_WEBUI_AGENT_DIR",
+      "HERMES_WEBUI_DIR",
+      "HERMES_WEBUI_PYTHON",
       "HERMES_WEBUI_STATE_DIR",
       "HERMES_WEBUI_DEFAULT_WORKSPACE",
       "HERMES_WEBUI_SKIP_ONBOARDING",
@@ -28,10 +34,7 @@
   },
   "filesystem": {
     "allow": [
-      "/app",
       "/etc",
-      "/home/hermeswebui/.hermes",
-      "/opt",
       "/run",
       "/tmp",
       "/usr",
@@ -39,15 +42,14 @@
       "/workspace"
     ],
     "read": [
-      "/app",
-      "/usr/local/aws-cli",
-      "/opt/doh/ca",
-      "/opt/doh/webui-extension"
+      "/opt/doh",
+      "/opt/hermes",
+      "/run/doh/integrations-broker/ca"
     ],
     "read_file": [
-      "/webui.sh",
-      "/usr/local/bin/aws",
-      "/usr/local/bin/gws",
+      "/opt/doh/runtime/webui.sh",
+      "/opt/doh/bin/aws",
+      "/opt/doh/bin/gws",
       "/.within_container",
       "/etc/passwd",
       "/etc/group",
