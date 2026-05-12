@@ -108,7 +108,11 @@ def run_removal(job_id: str) -> bool:
         .first()
     )
     if app is None:
-        _mark(job, models.AppRemovalJob.Status.SUCCEEDED, "App row already gone; nothing to do.")
+        _mark(
+            job,
+            models.AppRemovalJob.Status.SUCCEEDED,
+            f"App row already gone for '{job.app_name_snapshot}' ({job.app_slug_snapshot}); nothing to do.",
+        )
         return True
 
     live = _find_live_deployments(app)
@@ -180,7 +184,7 @@ def run_removal(job_id: str) -> bool:
         # are handled above when delete_policies is set.
         app.delete()
 
-    _mark(job, models.AppRemovalJob.Status.SUCCEEDED, "App removed.")
+    _mark(job, models.AppRemovalJob.Status.SUCCEEDED, f"App removed: '{job.app_name_snapshot}' ({job.app_slug_snapshot}).")
     return True
 
 
