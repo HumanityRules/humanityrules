@@ -2,9 +2,9 @@
 
 DOH-owned fixes against the `ghcr.io/nesquena/hermes-webui` image tree
 (`/apptoo/` inside the container). Applied at **image build time** by the
-`Dockerfile`, not at container start, before `/apptoo` is copied into `/app`.
-That keeps the WebUI source, dependency install, and compiled bytecode in sync
-with the patched tree.
+`Dockerfile`, not at container start, before `/apptoo` is copied into
+`$HERMES_WEBUI_DIR`. That keeps the WebUI source, dependency install, and
+compiled bytecode in sync with the patched tree.
 
 The Dockerfile uses one generic applier for both patch sets:
 `apply-patches.py <patch-dir> <target-dir>`. It calls that script once for

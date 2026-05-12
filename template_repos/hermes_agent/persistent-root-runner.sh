@@ -6,6 +6,10 @@ HERMES_CHECKPOINT_ROOT="${HERMES_CHECKPOINT_ROOT:-/hermes-checkpoint}"
 CHECKPOINT_ARCHIVE_NAME="rootfs.tar"
 RUNTIME_PID=""
 TERMINATION_REQUESTED=0
+IMAGE_OWNED_DIRS=(
+    /opt/doh
+    /opt/hermes
+)
 
 die() {
     echo "FATAL: $*" >&2
@@ -83,6 +87,28 @@ EOF
     chmod 0440 "${HERMES_PERSISTENT_ROOT}/etc/sudoers.d/hermeswebui"
 }
 
+sync_image_owned_dirs() {
+    local start_ms
+    local end_ms
+    local duration_ms
+    local path
+
+    start_ms="$(now_ms)"
+
+    for path in "${IMAGE_OWNED_DIRS[@]}"; do
+        if [ ! -d "$path" ]; then
+            continue
+        fi
+        mkdir -p "${HERMES_PERSISTENT_ROOT}${path}"
+        rsync -aH --delete --numeric-ids --one-file-system \
+            "${path}/" "${HERMES_PERSISTENT_ROOT}${path}/"
+    done
+
+    end_ms="$(now_ms)"
+    duration_ms="$((end_ms - start_ms))"
+    echo "[persistent-root] Image-owned sync complete in $(format_duration_ms "$duration_ms") (${duration_ms} ms)."
+}
+
 initialize_persistent_root() {
     local root_exclude="${HERMES_PERSISTENT_ROOT%/}"
     local checkpoint_exclude="${HERMES_CHECKPOINT_ROOT%/}"
@@ -97,6 +123,8 @@ initialize_persistent_root() {
         --exclude="${root_exclude}/***" \
         --exclude="${checkpoint_exclude}/***" \
         --exclude="/dev/***" \
+        --exclude="/opt/doh/***" \
+        --exclude="/opt/hermes/***" \
         --exclude="/proc/***" \
         --exclude="/run/***" \
         --exclude="/sys/***" \
@@ -195,6 +223,8 @@ checkpoint_persistent_root() {
         --exclude="./run" \
         --exclude="./sys" \
         --exclude="./tmp" \
+        --exclude="./opt/doh" \
+        --exclude="./opt/hermes" \
         . \
         || die "failed to write checkpoint archive ${tmp_archive}"
     sync
@@ -245,6 +275,8 @@ main() {
     else
         reuse_persistent_root
     fi
+
+    sync_image_owned_dirs
 
     trap request_termination TERM INT
     chroot "$HERMES_PERSISTENT_ROOT" \

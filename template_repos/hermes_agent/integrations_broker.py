@@ -31,9 +31,9 @@ Environment contract (set by deploy_app.py's env-bearer overlay):
 - DOH_ENV_SLUG         — env slug, for logging only.
 
 Required file system:
-- BROKER_CA_DIR (default /opt/doh/ca) must be writable by the broker user.
+- BROKER_CA_DIR (default /run/doh/integrations-broker/ca) must be writable by the broker user.
   The CA bundle is written here on startup for SSL_CERT_FILE to pick up.
-- BROKER_PRIVATE_DIR (default /opt/doh/broker-private) must be writable by the
+- BROKER_PRIVATE_DIR (default /run/doh/integrations-broker/private) must be writable by the
   broker user and unreadable by the sandbox.
 """
 
@@ -62,8 +62,8 @@ from cryptography.hazmat.primitives.asymmetric import rsa
 
 DEFAULT_PROXY_PORT = 9950
 DEFAULT_CONTROL_PORT = 9951
-DEFAULT_CA_DIR = Path("/opt/doh/ca")
-DEFAULT_PRIVATE_DIR = Path("/opt/doh/broker-private")
+DEFAULT_CA_DIR = Path("/run/doh/integrations-broker/ca")
+DEFAULT_PRIVATE_DIR = Path("/run/doh/integrations-broker/private")
 
 # Refresh ~5 minutes before the typical 3600s expiry. Backoff for transient
 # errors. MIN_SLEEP guards against a tight loop if DOH's expires_in is tiny.

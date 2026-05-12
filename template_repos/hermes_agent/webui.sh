@@ -4,22 +4,13 @@ set -euo pipefail
 WEBUI_PORT=8787
 WEBUI_PID=""
 
-: "$HERMES_HOME"
-: "$HERMES_WEBUI_AGENT_DIR"
-
-sync_skills() {
-    /app/venv/bin/python -c "
-import sys
-sys.path.insert(0, '$HERMES_WEBUI_AGENT_DIR')
-from tools.skills_sync import sync_skills
-r = sync_skills(quiet=True)
-print(f'[webui:skills] copied={len(r[\"copied\"])} updated={len(r[\"updated\"])} skipped={r[\"skipped\"]} user_modified={len(r[\"user_modified\"])} total_bundled={r[\"total_bundled\"]}')
-" || echo "[webui:skills] sync failed (non-fatal)"
-}
+: "${HERMES_HOME:?HERMES_HOME must be set}"
+: "${HERMES_WEBUI_DIR:?HERMES_WEBUI_DIR must be set}"
+: "${HERMES_WEBUI_PYTHON:?HERMES_WEBUI_PYTHON must be set}"
 
 start_webui() {
-    cd /app
-    /app/venv/bin/python server.py 2>&1 &
+    cd "$HERMES_WEBUI_DIR"
+    "$HERMES_WEBUI_PYTHON" server.py 2>&1 &
     WEBUI_PID=$!
 }
 
@@ -40,7 +31,6 @@ wait_for_webui() {
 }
 
 main() {
-    sync_skills
     start_webui
     wait_for_webui
 
