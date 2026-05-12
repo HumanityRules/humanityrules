@@ -1,5 +1,27 @@
 # DevOpsHero Development Journal
 
+## 2026-05-12 09:48 - [Deployment] Make template-backed clones resolve on the worker, not the creator
+
+**Conversation:** [2026-05-12-0951-33cb557f.md](conversations/2026-05-12-0951-33cb557f.md)
+
+Template-backed apps (the Hermes Personal Assistant and siblings) used to store their `Repository.clone_url` as `file://{settings.TEMPLATE_REPOS_DIR / source_repo_path}` — an absolute path baked in at app-creation time, computed on whichever checkout happened to be running the control plane. At deploy time, `repo_service.clone_repository()` just `shutil.copytree`'d that absolute path into the worker sandbox. That works fine when the control plane and the worker run from the same checkout, but it breaks git worktrees: the worker in a worktree has no `template_repos/` directory (those files live on the main branch / main checkout), so the copy fails even though the worker has a perfectly valid `template_repos/hermes_agent/` one directory over in its own tree. The symptom was that any worker launched from a worktree always pulled template source from the main checkout — so template changes on a feature branch never reached the deploy.
+
+The fix introduces a new URL scheme, `doh-template://<source_repo_path>`, stored on the Repository row instead of an absolute `file://` URL. `repo_service.clone_repository()` gets a new branch at the top that resolves the scheme against the *worker's own* `settings.TEMPLATE_REPOS_DIR`. The existing `file://` branch is left intact for `seed_local_repos` and any pre-existing template Repository rows — we deliberately chose not to migrate old rows, since the behavior they encode (always pull from the main checkout) is still valid for production, where only one checkout exists anyway.
+
+We considered two alternatives and rejected both:
+
+- **Resolve at deploy time from `AppTemplate`**: skip the `Repository` row's clone_url entirely for template apps and have the executor compute `TEMPLATE_REPOS_DIR / primary_container["source_repo_path"]` itself. Arguably cleaner — the `Repository` row for a template app is a bit of a fiction — but it forces the executor and `AppConfigBuilder` to learn a "is this a template?" branch, spreading template awareness across the deploy pipeline.
+- **Token-in-URL (`file://$WORKTREE/...`)**: avoids the new provider concept but silently overloads what `file://` means. URL parsers, logs, and the admin UI would all have to know about the `$WORKTREE` token, and it breaks the `file://` = absolute-local-path contract.
+
+Option 2 (the new scheme) keeps `clone_repository()` as the single place that knows how to resolve sources and leaves the deploy pipeline untouched.
+
+**Key points:**
+- The bug only manifests in dev (git worktrees); production runs one checkout and is unaffected, which is why existing rows are intentionally not migrated.
+- The new scheme is resolved on the *worker*, so each worker's `TEMPLATE_REPOS_DIR` — including a worktree's own `template_repos/` — is what actually gets cloned. This is the whole point.
+- `Repository.clone_url` is a `URLField`, but Django's `URLValidator` only runs in forms / `full_clean()`. `aget_or_create` bypasses validation, so storing `doh-template://` works the same way `file://` already did today.
+- The relative path on the URL (e.g., `hermes_agent`) is the same `source_repo_path` value that already lives on `AppTemplate.containers[*]`, so there is no new source of truth — the URL is just a projection of a template field.
+- Dropped the now-unused `django.conf.settings` import from `template_deploy_service.py` since the URL no longer needs `TEMPLATE_REPOS_DIR` at app-creation time.
+
 ## 2026-05-11 21:56 - [Deployment] Split Hermes persistent root into platform-owned and user-owned paths
 
 **Conversation:** [2026-05-11-2156-019e0fac.md](conversations/2026-05-11-2156-019e0fac.md)
