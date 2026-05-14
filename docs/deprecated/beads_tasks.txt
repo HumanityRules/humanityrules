@@ -1,0 +1,1122 @@
+Beads Issue Export
+================================================================================
+Exported: 2026-05-14
+Source: .beads/issues.jsonl (58 active records, tombstones excluded)
+Beads (bd) was removed from the project; this is a frozen snapshot.
+================================================================================
+
+
+## OPEN  (14 issues)
+--------------------------------------------------------------------------------
+
+[devopshero-k4r] P1 task      created 2026-01-13
+  AgentChat: Create proposal for interactive choice system
+    Create an OpenSpec proposal for the interactive choice/question system in the deployment agent. This enables the agent to present options to users and receive structured responses. Deferred from add-deployment-agent spec (task 4.3).
+
+[devopshero-bzm] P1 task      created 2026-01-13
+  Onboarding: Form validation and session expiration handling
+    High priority onboarding improvements:
+    1. Display validation errors on the onboarding page (empty org name, slug conflicts, etc.)
+    2. Handle session expiration - if user closes browser mid-onboarding and returns later, show friendly message instead of silent redirect to login
+
+[devopshero-4mr] P1 task      created 2026-01-13
+  Onboarding: UX improvements (loading states, slug preview, different account)
+    Medium priority UX improvements for onboarding:
+    1. Loading state on form submission - disable submit button and show spinner while creating user/org
+    2. Add organization slug preview - show what the org URL slug will be as user types the name
+    3. Add 'Sign in with a different account' link on onboarding page to let users go back to sign in with different WorkOS account
+
+[devopshero-3hx] P1 task      created 2026-01-13
+  Onboarding: Invitation and WorkOS sync flows
+    Medium priority onboarding flows:
+    1. Support invitation flow - allow new users to join existing organization via invite link instead of always creating a new one
+    2. Sync WorkOS organization data - if WorkOS returns organization info from SSO/directory sync, use that instead of asking user to create one
+
+[devopshero-1q8] P1 task      created 2026-01-13
+  Onboarding: Technical debt (slug race condition, tests)
+    Technical debt for onboarding flow:
+    1. Slug uniqueness race condition - the current slug generation has a TOCTOU race. Consider using unique constraint with retry logic or DB-generated slugs
+    2. Add tests for onboarding flow - unit tests for auth_callback branching, onboarding view, and transaction atomicity
+
+[devopshero-ava] P1 task      created 2026-01-13
+  Onboarding: Growth features (analytics, welcome email, tour)
+    Low priority growth features:
+    1. Analytics/tracking - track onboarding completion rate, drop-off points
+    2. Welcome email - send a welcome email after successful onboarding
+    3. Onboarding tour - after first login, show a guided tour of the dashboard
+
+[devopshero-twi] P1 task      created 2026-01-13
+  Integrations: Core features (verify job, email, create/delete flows)
+    Core AWS account management features:
+    1. Background job to verify AssumeRole works - periodic verification that our assumed role access is still valid
+    2. 'Send instructions' email flow - email CloudFormation setup instructions to team members
+    3. Create new AWS Account flow - UI flow for adding new AWS accounts
+    4. Delete/disconnect flow with CloudFormation stack cleanup guidance
+
+[devopshero-7wa] P1 task      created 2026-01-13
+  Deployment: Least privilege role and resource tagging
+    Security and compliance improvements for customer installations:
+    1. Least privilege of the role we create in the customer's account - audit and minimize IAM permissions
+    2. All our resources must be tagged with standard DOH tags: doh:awsAccountId, doh:createdBy, doh:environmentId, doh:id, doh:organizationId, doh:projectId, doh:purpose
+
+[devopshero-6za] P1 task      created 2026-01-19
+  Deployment: Review error handling UX in deploy_app tool
+    Review error handling in deploy_app.py tool for better UX.
+    
+    **Current behavior:**
+    - Line 105-112: Raises ValueError if environment not found
+    - Line 122-131: Raises ValueError if app already has active deployment
+    
+    **Questions to answer:**
+    1. How can users trigger these errors? (via agent chat? direct API?)
+    2. Are the error messages surfaced properly to users or do they see generic failures?
+    3. Should we prevent users from triggering these (e.g., UI disables deploy button during active deployment)?
+    4. Should errors return structured responses instead of exceptions for better agent/UI handling?
+    
+    **Options to consider:**
+    - Return user-friendly error dict instead of raising exceptions
+    - Add UI affordances to prevent invalid states (disable buttons, show status)
+    - Improve error message clarity with actionable guidance
+    - Validate earlier in the flow (before reaching this code)
+
+[devopshero-prq] P1 task      created 2026-01-19
+  Deployment: Agent recovery tools for failed deployments/environments
+    **Note: This analysis was generated by Claude. More thought and discussion required before implementation.**
+    
+    ## Analysis: Recovery Tools for the Deployment Agent
+    
+    Based on the current architecture, here's what can fail and what tools would help:
+    
+    ### Current State
+    
+    **What exists:**
+    - `deploy_app` — Creates PENDING deployment, worker executes it
+    - `get_deployment_status` — Shows status + logs for a single deployment
+    
+    **What can fail:**
+    1. **Deployment failures** — Docker build, ECR push, CDK deploy, health checks
+    2. **Environment provisioning failures** — VPC/cluster creation (environment stuck in ERROR)
+    3. **AWS account issues** — IAM role problems, permissions, credential expiry
+    
+    ### Recovery Tools Needed
+    
+    #### Tier 1: Essential Recovery
+    
+    **`retry_deployment`** (optional convenience)
+    - `deploy_app` already works for failed apps (FAILED isn't an "active" status that blocks new deployments)
+    - But a dedicated retry tool could be cleaner: takes `deployment_id`, resets to PENDING
+    - Preserves deployment lineage vs creating new records
+    
+    **`get_environment_status`**
+    - Check environment state (PENDING/PROVISIONING/READY/ERROR) and `status_message`
+    - Currently no way for agent to see why environment provisioning failed
+    - Would return: `{status, status_message, vpc_id, cluster_arn, vpc_stack_name, cluster_stack_name}`
+    
+    **`retry_environment`**
+    - Reset an ERROR environment back to PENDING
+    - Next deployment will trigger re-provisioning
+    - Critical for recovering from base infra failures
+    
+    **`list_deployments`**
+    - Get deployment history for an app (recent N, filtered by status)
+    - Agent needs this to say "Your last 3 deployments failed, here's the pattern..."
+    - Currently can only check one deployment by ID if you already know it
+    
+    **`cancel_deployment`**
+    - Mark an in-progress deployment as CANCELLED
+    - Sets a flag that worker checks and aborts gracefully
+    - Needed for stuck deployments or user abort requests
+    
+    #### Tier 2: Deeper Debugging
+    
+    **`get_stack_events`**
+    - Fetch CloudFormation events for a deployment's stacks
+    - When CDK deploy fails, the real error is in CFN events
+    - Would need stack names (already tracked on Environment/Deployment)
+    
+    **`verify_aws_account`**
+    - Test AssumeRole and basic permissions (sts:GetCallerIdentity, etc.)
+    - Returns pass/fail with specific permission errors
+    - Helps diagnose "AWS connection stopped working"
+    
+    **`teardown_app`**
+    - Delete CDK stacks for an app (ECR, ECS service, ALB target group)
+    - Cleanup after repeated failures before retrying fresh
+    - Dangerous — needs confirmation
+    
+    #### Tier 3: Runtime Operations
+    
+    **`get_ecs_logs`**
+    - Fetch CloudWatch logs from ECS tasks
+    - For debugging "app deployed but crashes at runtime"
+    
+    **`restart_service`**
+    - Force ECS service restart without full redeploy
+    - For "try turning it off and on again" fixes
+    
+    **`list_environments`**
+    - Show all environments in an AWS account
+    - For multi-environment support later
+    
+    ### Suggested Implementation Order
+    
+    1. **`list_deployments`** — Low effort, high value. Agent can't help with history otherwise.
+    2. **`get_environment_status`** — Essential for diagnosing provisioning failures.
+    3. **`retry_environment`** — Unblocks stuck environments.
+    4. **`cancel_deployment`** — User escape hatch for stuck deployments.
+    5. **`get_stack_events`** — Makes CDK failures actually debuggable.
+    
+    The first three tools close the most critical gap: **the agent can't see or recover from environment-level failures** today. A failed environment blocks all future deployments to that account until someone manually fixes the database.
+    
+    ### Implementation Notes
+    
+    For `cancel_deployment`, the worker needs a check in the loop to abort if status changes to CANCELLED.
+    
+    For `retry_environment`, reset status to PENDING and clear status_message. Next `deploy_app` will see PENDING and trigger `_provision_environment()`.
+
+[devopshero-929] P1 task      created 2026-01-19
+  AgentChat: Add AWS live monitoring tools for deployments
+    **Status: Preliminary analysis — requires more thinking before implementation.**
+    
+    ## Problem
+    
+    The agent's `get_deployment_status` tool reads from the Django DB, which shows "last written" state from the deployment worker. The agent cannot see live AWS state, making it difficult to:
+    - Understand what's happening during long-running CDK deploys
+    - Debug failed deployments (no access to CF stack events)
+    - Diagnose container crashes (no access to ECS stopped task reasons)
+    - See actual application logs
+    
+    ## Preliminary Analysis
+    
+    ### Potential New Tools
+    
+    1. **`get_stack_events(deployment_id)`** — CloudFormation events for the app stack. Essential for debugging deploy failures.
+    
+    2. **`get_ecs_service_health(deployment_id)`** — ECS service state: task counts, service events, stopped task reasons.
+    
+    3. **`get_container_logs(deployment_id, tail_lines)`** — CloudWatch Logs for the container (if configured).
+    
+    ### Existing Code to Reuse
+    
+    - `infra_customer/cloudformation_utils.py`: `stack_exists()`, `describe_stacks()`, `_print_stack_failure_events()`
+    - `infra_customer/ecs_utils.py`: `check_stopped_tasks()`, `describe_services()` patterns
+    - `infra_customer/iam_utils.py`: `get_assumed_role_session()` for cross-account access
+    
+    ### Implementation Considerations
+    
+    - **AWS session:** Need to get credentials via `Deployment.environment.aws_account` chain
+    - **Async:** boto3 is sync — need `sync_to_async` wrappers or thread pool
+    - **Stack names:** Need to derive CF stack names from deployment/environment (pattern: `devopshero-{env_slug}-*`)
+    
+    ### Design Questions (TBD)
+    
+    - One combined tool vs separate granular tools?
+    - Should `get_deployment_status` gain an `include_aws_status` flag?
+    - How to handle rate limiting / cost of AWS API calls?
+    - Should these be "advanced" tools only available after deployment starts?
+
+[devopshero-bxr] P2 task      created 2026-01-21
+  Deployment: Configurable secrets path for deployed apps
+    ## Problem
+    
+    When DOH deploys an app, it creates secrets in AWS Secrets Manager using a path derived from the app slug:
+    
+    ```python
+    # secrets_utils.py:37
+    secret_name = f"devopshero/{app_config.app_name}/secrets"
+    ```
+    
+    Where `app_config.app_name` comes from `app.slug` (set in `app_config_builder.py:105`).
+    
+    However, many apps have hardcoded expectations about their secret path. For example, db_portal:
+    
+    ```elixir
+    # secrets_manager_config_provider.ex:15
+    @default_secret_name "devopshero/db-portal/secrets"
+    ```
+    
+    **The mismatch:** If someone deploys db_portal with slug "my-db-portal", DOH creates `devopshero/my-db-portal/secrets`, but the app looks for `devopshero/db-portal/secrets`. The app fails to start because it can't find its secrets.
+    
+    ### How This Was Discovered
+    
+    The Main Agent created the same app (db-portal) twice in a conversation. The `create_app` tool uses `slugify()` with uniqueness checks, so the second creation got slug "db-portal-1" instead of "db-portal". When deployed, DOH created secrets at `devopshero/db-portal-1/secrets`, but the app was still looking for `devopshero/db-portal/secrets`. The app failed to start.
+    
+    This revealed the tight coupling between app slug and secrets path — a coupling that breaks whenever the slug doesn't match what the app expects.
+    
+    ## Alternatives Considered
+    
+    ### Option 1: Make apps accept configurable secret path (CHOSEN)
+    
+    The app reads its secret path from an environment variable (e.g., `DOH_SECRET_NAME`) with a fallback to a default for local dev.
+    
+    **Pros:**
+    - Apps become truly portable — deploy the same app multiple times with different configs
+    - DOH keeps a simple, predictable naming convention
+    - Single source of truth — DOH tells the app where its secrets are
+    - Apps don't need to have "devopshero" in their codebase
+    
+    **Cons:**
+    - Requires establishing a convention for all deployable apps
+    - App developers need to understand the convention
+    
+    ### Option 2: Make secret path configurable in DOH
+    
+    Add a `secrets_path` field to the App model. If set, use that path; otherwise generate from app_name. Agent would analyze app code to find hardcoded paths.
+    
+    **Pros:**
+    - Apps don't need modification
+    - Works with existing/legacy apps
+    
+    **Cons:**
+    - Agent must analyze app source to find hardcoded paths (fragile)
+    - Grepping for "devopshero/" won't work — apps shouldn't need to know about DOH
+    - Config drift risk: app code changes but DOH config doesn't update
+    - More complexity in DOH configuration layer
+    
+    ## Decision
+    
+    **Go with Option 1.** Since we haven't released anything yet, there's no backward compatibility concern. This is the cleaner architecture:
+    
+    1. Apps receive their secret path via environment variable
+    2. DOH injects the env var during deployment
+    3. Apps can use any secret path they want for local dev (e.g., "data-eng/db-portal/secrets")
+    
+    ## Implementation Plan
+    
+    1. **Modify db_portal** to read secret path from `DOH_SECRET_NAME` env var with fallback to default
+    2. **Update DOH** to inject `DOH_SECRET_NAME` env var during deployment
+    3. **Test** by deploying db_portal with secret path "data-eng/db-portal/secrets" (proves apps don't need "devopshero" in their config)
+    4. **Document** the convention for future deployable apps
+    
+    ## Files Involved
+    
+    - `deployable_repos/db_portal/lib/db_portal/secrets_manager_config_provider.ex` — add env var support
+    - `devopshero_app/services/infra_customer/secrets_utils.py` — may need to accept custom path
+    - `devopshero_app/services/deployment/app_config_builder.py` — wire through the secret path
+    - `devopshero_app/services/infra_customer/appconfig.py` — add secrets_path field to AppConfig
+    - `devopshero_app/models.py` — possibly add secrets_path to App model
+
+[devopshero-9c7] P2 task      created 2026-01-27
+  Bugfix: Claude Agent sandbox inherits Bedrock AWS credentials - boto3 in sandbox uses account 315915642113 instead of having no AWS access. Caused by get_claude_env() mapping AWS_BEDROCK_* to AWS_* which propagates to all subprocesses. MCP tools work correctly (use AssumeRole), but arbitrary code execution leaks Bedrock creds.
+    ## Problem
+    
+    When Claude Agent SDK executes code in its sandbox (python, bash), boto3 picks up AWS credentials from the Bedrock API account (315915642113) instead of having no AWS access.
+    
+    ## Root Cause
+    
+    In `agent_service.py`, credentials are passed to `ClaudeAgentOptions`:
+    
+    ```python
+    env = {
+        **get_claude_env(),  # Maps AWS_BEDROCK_* → AWS_*
+        "TMPDIR": str(settings.CLAUDE_SANDBOX_DIR),
+    }
+    ```
+    
+    `get_claude_env()` maps:
+    - AWS_BEDROCK_REGION → AWS_REGION
+    - AWS_BEDROCK_ACCESS_KEY_ID → AWS_ACCESS_KEY_ID  
+    - AWS_BEDROCK_SECRET_ACCESS_KEY → AWS_SECRET_ACCESS_KEY
+    
+    These are needed for Claude Code to call the Bedrock API, but they propagate to all subprocess execution (sandbox).
+    
+    ## Why Two AWS Accounts
+    
+    - **555553041615** — DevOps Hero control plane (ECS, customer deployments)
+    - **315915642113** — Bedrock API access (cross-account IAM user)
+    
+    Bedrock access uses explicit credentials from account 315915642113, not the ECS task role.
+    
+    ## Impact
+    
+    - MCP tools work correctly (use `iam_utils.get_assumed_role_session()` with AssumeRole)
+    - Sandbox code (arbitrary python/bash) gets Bedrock account credentials
+    - Security: sandbox can access Bedrock account resources
+    
+    ## Potential Fixes
+    
+    1. **Clear credentials in sandbox env** — Explicitly set AWS_*="" in env dict (if SDK supports separation)
+    2. **SDK feature request** — Ask for sandbox env isolation from runtime env
+    3. **System prompt guidance** — Tell agent not to use boto3 directly, use MCP tools instead
+
+[devopshero-3yg] P3 task      created 2026-01-19
+  Deployment: Reuse existing wildcard ACM certificates
+    ## Context
+    
+    When deploying apps with custom domains, DOH currently creates a new ACM certificate for each app. This requires DNS validation which:
+    - Takes time (minutes)
+    - Doesn't work with private hosted zones
+    
+    ## Proposed Solution
+    
+    Discover and reuse existing wildcard certificates in ACM.
+    
+    ### Implementation
+    
+    1. **New agent tool: `list_certificates`**
+       - Query ACM for certificates in the AWS account
+       - Return domain name, ARN, status, type (wildcard vs exact)
+    
+    2. **Certificate matching logic in deploy_app.py**
+       - Before creating a certificate, check for:
+         - Exact match: `myapp.example.com`
+         - Wildcard match: `*.example.com` for `myapp.example.com`
+       - If found and status is ISSUED, use `Certificate.from_certificate_arn()`
+       - If not found, create new (current behavior)
+    
+    3. **Agent guidance**
+       - When wildcard cert exists, skip asking about domain validation
+       - Inform user the existing cert will be used
+    
+    ### Benefits
+    
+    - **Faster deployments** — No certificate validation wait
+    - **Private zone support** — If user has pre-validated wildcard for private zone, it just works
+    - **Cost** — Fewer certificates (ACM is free, but cleaner)
+    
+    ### Files to modify
+    
+    - `infra_customer/acm_utils.py` (new) — Certificate discovery
+    - `infra_customer/deploy_app.py` — Certificate matching before creation
+    - `devopshero_app/services/agent/tools/list_certificates.py` (new) — Agent tool
+    - `devopshero_app/services/agent/mcp_tools.py` — Register tool
+    - `devopshero_app/services/agent/system_prompt.md` — Agent guidance
+
+## CLOSED  (44 issues)
+--------------------------------------------------------------------------------
+
+[devopshero-mlb] P1 task      created 2026-01-13  closed 2026-01-20
+  AgentChat: Fix markdown underscore rendering
+    ## Problem
+    Underscores in the middle of words (e.g., `this_is_a_test`) are incorrectly rendered as italic text. The streaming-markdown library treats intraword underscores as emphasis markers, violating CommonMark/GFM spec.
+    
+    ## Proposed Solution
+    Hybrid approach:
+    1. Keep streaming-markdown for live streaming (it's designed for that)
+    2. On stream completion, re-render with marked.js in GFM mode
+    3. For static messages (page load), use marked.js directly
+    
+    marked.js is GFM-compliant and handles intraword underscores correctly.
+
+[devopshero-f10] P1 task      created 2026-01-13  closed 2026-03-03
+  Integrations: AWS Organizations support
+    Support for AWS Organizations - allow managing multiple accounts under one root organization. This enables enterprise customers with many AWS accounts to manage them all from DevOps Hero.
+
+[devopshero-1pg] P1 task      created 2026-01-15  closed 2026-03-03
+  DomainModel: Multi-repo support design
+    ## Context
+    
+    Currently: one workspace = one repo. Apps inherit repo from `workspace.primary_repo_url`.
+    This was a deliberate v1 simplification (see journal 2026-01-15 "Workspace Pinning").
+    
+    ## Use Cases to Support
+    
+    1. **Microservices in separate repos** — Frontend in one repo, backend in another, both deployed together
+    2. **Shared infrastructure** — Multiple unrelated apps sharing the same VPC/datastores
+    3. **Team ownership** — One team manages multiple apps across repos, wants single dashboard
+    
+    ## Design Options Discussed
+    
+    ### Option A: Add `repo_url` back to App (nullable, fallback to workspace)
+    
+    ```python
+    class App:
+        repo_url = models.URLField(blank=True, null=True)  # If null, use workspace.primary_repo_url
+    ```
+    
+    **Pros:** Simple migration, backward compatible, each app can optionally override
+    **Cons:** Two sources of truth, agent needs to handle both cases, ambiguous "where does this app come from?"
+    
+    ### Option B: Separate Repository model, M2M with Workspace
+    
+    ```python
+    class Repository(models.Model):
+        url = models.URLField()
+        name = models.CharField()
+        organization = models.ForeignKey(Organization)
+    
+    class Workspace(models.Model):
+        repositories = models.ManyToManyField(Repository)
+        # Remove primary_repo_url
+    
+    class App(models.Model):
+        repository = models.ForeignKey(Repository)  # Required
+    ```
+    
+    **Pros:** Clean normalization, repos are first-class (credentials, webhooks), clear app-to-repo mapping
+    **Cons:** More complex model, harder migration, workspace becomes more abstract
+    
+    ### Option C: Keep workspace = one repo, create multiple workspaces
+    
+    No model changes. Two repos = two workspaces. They can share AWS account/region.
+    
+    **Pros:** No changes needed, clear mental model, workspace isolation
+    **Cons:** Can't see "all my apps" in one place, datastores not easily shared
+    
+    ## Open Questions (to resolve when implementing)
+    
+    1. **Primary use case?** Microservices across repos, or more general multi-repo?
+    2. **Should repos be first-class entities?** Matters for git provider integration (credentials, webhooks per repo)
+    3. **Datastore sharing importance?** If two apps from different repos need same Aurora cluster, that drives putting them in one workspace
+    4. **Agent flow implications:** Should pinning a workspace still make sense? Or pin a repo within workspace?
+    
+    ## Current Model Reference
+    
+    - `Workspace.primary_repo_url` — required, single repo for workspace
+    - `App.branch` — branch to deploy from
+    - `App.dockerfile_path` — path within repo to Dockerfile (supports monorepos)
+    - App has no `repo_url` field (removed in workspace pinning work)
+    
+    ## Recommendation
+    
+    Option B (Repository as first-class entity) is likely the right long-term choice because:
+    - Git provider integration will need per-repo credentials/webhooks anyway
+    - Clean data model beats convenience hacks
+    - Supports all use cases cleanly
+    
+    But Option A could be a quick interim solution if needed before full git integration.
+
+[devopshero-l4d] P1 task      created 2026-01-19  closed 2026-01-20
+  Integrations: Domain name discovery and workspace defaults from Route53
+    When connecting an AWS Account, discover Route53 hosted zones and let the user choose a default domain for workspaces.
+    
+    **Note:** This is just an idea. At implementation time, more options will need to be discussed.
+    
+    **Current problem:** app.domain_name comes empty (see app_config_builder.py:98)
+    
+    **Proposed solution:**
+    1. During AWS account connection, query Route53 for available hosted zones
+    2. Present the list of domains to the user
+    3. Let user select a default domain for the account
+    4. New workspaces inherit the account's default domain
+    5. Each workspace can override with its own domain zone if needed
+    
+    **Model changes needed:**
+    - AwsAccount: add default_domain and default_hosted_zone_id fields
+    - Workspace: add optional domain and hosted_zone_id fields (override)
+    
+    **Implementation steps:**
+    1. Add Route53 discovery to AWS account connection flow
+    2. UI to display and select from available hosted zones
+    3. Store default on AwsAccount model
+    4. Workspace creation picks up default
+    5. Workspace settings allow domain override
+    6. App deployment uses workspace domain (or account default)
+
+[devopshero-q1y] P2 task      created 2026-01-09  closed 2026-01-09
+  Add Django models: Workspace, App, Datastore, Deployment, DeploymentLog
+
+[devopshero-cvj] P2 task      created 2026-01-09  closed 2026-01-09
+  Add Django models: Conversation, Message
+
+[devopshero-jo3] P2 task      created 2026-01-09  closed 2026-01-09
+  Create database migrations for all new models
+  depends-on: devopshero-q1y (blocks)
+  depends-on: devopshero-cvj (blocks)
+
+[devopshero-mgy] P2 task      created 2026-01-09  closed 2026-01-09
+  Create basic chat view with HTMX message sending
+  depends-on: devopshero-jo3 (blocks)
+
+[devopshero-a71] P2 task      created 2026-01-09  closed 2026-01-09
+  Implement SSE endpoint for message streaming
+  depends-on: devopshero-jo3 (blocks)
+
+[devopshero-c46] P2 task      created 2026-01-09  closed 2026-01-09
+  Create message partials for all content types
+  depends-on: devopshero-jo3 (blocks)
+
+[devopshero-xus] P2 task      created 2026-01-10  closed 2026-01-10
+  2.1 Integrate Claude Agents SDK
+    Integrate Claude Agents SDK (claude-agent-sdk) properly. Current implementation uses raw anthropic package with manual tool loop. Need to: 1) Add claude-agent-sdk dependency, 2) Convert tools to @tool decorator format, 3) Create MCP server with custom tools, 4) Replace manual agentic loop with ClaudeSDKClient, 5) Use contextvars for Django context in tools.
+
+[devopshero-yj4] P2 task      created 2026-01-10  closed 2026-01-10
+  2.2 Agent service with context management and system prompt
+  depends-on: devopshero-xus (blocks)
+
+[devopshero-5vz] P2 task      created 2026-01-10  closed 2026-01-10
+  2.3 inspect_repository tool (file:// only)
+  depends-on: devopshero-yj4 (blocks)
+
+[devopshero-dsq] P2 task      created 2026-01-10  closed 2026-01-10
+  2.4 list_aws_accounts tool
+  depends-on: devopshero-yj4 (blocks)
+
+[devopshero-5iu] P2 task      created 2026-01-10  closed 2026-01-10
+  2.5 ask_user tool with human-in-the-loop flow
+  depends-on: devopshero-yj4 (blocks)
+
+[devopshero-0c2] P2 task      created 2026-01-10  closed 2026-01-10
+  2.6 Connect agent to chat view
+  depends-on: devopshero-yj4 (blocks)
+
+[devopshero-1i9] P2 task      created 2026-01-10  closed 2026-01-10
+  2.7 Streaming responses from agent
+  depends-on: devopshero-0c2 (blocks)
+
+[devopshero-fej] P2 feature   created 2026-01-11  closed 2026-01-11
+  Phase 3: Deployment Flow Tools
+  depends-on: devopshero-i2h (blocks)
+  depends-on: devopshero-3hy (blocks)
+  depends-on: devopshero-698 (blocks)
+
+[devopshero-i2h] P2 task      created 2026-01-11  closed 2026-01-11
+  Implement create_workspace agent tool
+
+[devopshero-3hy] P2 task      created 2026-01-11  closed 2026-01-11
+  Implement create_app agent tool
+
+[devopshero-698] P2 task      created 2026-01-11  closed 2026-01-11
+  Implement create_datastore agent tool
+
+[devopshero-3ex] P2 task      created 2026-01-11  closed 2026-01-11
+  Implement deploy_app agent tool (stubbed)
+  depends-on: devopshero-3hy (blocks)
+
+[devopshero-xm6] P2 task      created 2026-01-11  closed 2026-01-11
+  Implement get_deployment_status agent tool
+  depends-on: devopshero-3ex (blocks)
+
+[devopshero-a54] P2 task      created 2026-01-11  closed 2026-01-11
+  Enhance progress indicator with phase tracking
+  depends-on: devopshero-3ex (blocks)
+
+[devopshero-7yj] P2 bug       created 2026-01-11  closed 2026-01-11
+  Fix ask_user tool: handle choices as JSON string
+    ## Bug
+    
+    The `mcp__devopshero__ask_user` MCP tool fails with `'str' object has no attribute 'get'` error.
+    
+    ## Root Cause
+    
+    In `devopshero_app/services/agent/tools/ask_user.py` (lines 63-69), the code assumes `choices` is `list[dict]` but the model passes:
+    1. A JSON string that needs parsing (e.g., `"[\"option1\", \"option2\"]"`)
+    2. Simple strings instead of dicts (e.g., `["option1", "option2"]` instead of `[{"id": "...", "label": "option1"}]`)
+    
+    The failing code:
+    ```python
+    for i, choice in enumerate(choices):
+        processed_choice = {
+            "id": choice.get("id", str(uuid.uuid4())),  # Fails: string has no .get()
+            "label": choice["label"],                   # Fails: string subscript fails
+            ...
+        }
+    ```
+    
+    ## Fix
+    
+    Add input normalization at the start of `ask_user()`:
+    1. Parse `choices` if it's a JSON string
+    2. Convert simple string choices to dict format (use string as label, generate UUID for id)
+    
+    ## Files
+    - `devopshero_app/services/agent/tools/ask_user.py` - Add input normalization before processing loop
+    
+    ## Verification
+    - Test with JSON string choices
+    - Test with simple string list
+    - Test with proper dict list
+    - Verify CHOICE message renders interactive buttons in UI
+
+[devopshero-dos] P2 task      created 2026-01-19  closed 2026-01-30
+  Deployment: Show clickable app URL after successful deployment
+    After a successful deployment, the user currently sees a message saying the URL is available in the AWS console. Instead, we should retrieve and display the actual ALB DNS name so the user can click it directly.
+    
+    Implementation notes:
+    - The ALB DNS name is available from the CDK stack outputs or can be queried from AWS
+    - Need to store/return the URL from the deployment executor
+    - Display as a clickable link in the success message
+
+[devopshero-byx] P2 task      created 2026-01-27  closed 2026-03-03
+  AgentChat: Split system prompt into deploy vs global modes
+    ## Problem
+    
+    The deployment agent's system prompt currently handles both deployment (repository selected) and global/management (no repository) modes in a single file with conditional logic. This causes the agent to:
+    
+    1. **Surface internal workflow steps as user options** — The prompt says "Check existing apps" as step 2 of the deployment flow, but the agent presents this as a menu option in its greeting instead of doing it automatically.
+    
+    2. **Muddle personality and focus** — A "deploy this repo" conversation should be action-oriented; a "manage my workspace" conversation is more exploratory. One prompt tries to be both.
+    
+    3. **Mention irrelevant capabilities** — The agent sees all instructions and may reference tools/flows that don't apply to the current context.
+    
+    ## Evidence
+    
+    Screenshot shows agent greeting with repository selected offering:
+    - Deploy fastapi_app
+    - **Check existing apps** ← this should not be a user-facing option
+    - Something else
+    
+    The system prompt (line 108) says: "2. **Check existing apps** - Use list_apps to see if an app for this repository already exists" — this is meant to be an internal step, not a menu item.
+    
+    ## Proposed Solution
+    
+    Split `system_prompt.md` into two focused prompts:
+    
+    - **`system_prompt_deploy.md`** — Used when `context_repository_id` is set. Laser-focused on: analyze repo, check for existing app (automatically, not as option), create app, deploy.
+    
+    - **`system_prompt_global.md`** — Used when no repository selected. Focuses on: listing apps, checking deployment status, troubleshooting, re-deploying existing apps, connecting AWS accounts.
+    
+    ### Implementation
+    
+    1. Create `system_prompt_deploy.md` with deployment-focused instructions
+    2. Create `system_prompt_global.md` with management/exploration instructions  
+    3. Update `_load_system_prompt()` in `agent_service.py` to accept `has_repository: bool` and select the appropriate file
+    4. Update `_build_system_prompt()` to pass `conversation.context_repository_id is not None`
+    5. Delete the old combined `system_prompt.md`
+    
+    ### Key changes in deploy prompt
+    
+    The deployment flow should explicitly say:
+    
+        Perform steps 1-2 automatically when the user's first message arrives — don't offer 
+        "check existing apps" as a menu option. Either tell them you found an existing app, 
+        or proceed to analyze the repository.
+    
+    This makes it clear the agent should act, not ask.
+
+[devopshero-3hn] P2 task      created 2026-01-28  closed 2026-01-30
+  UI: Investigate QUIC protocol errors on SSE stream
+    SSE connections to /chat/.../stream/ are failing with ERR_QUIC_PROTOCOL_ERROR, causing frequent reconnections.
+    
+    **Symptoms:**
+    - Console shows repeated 'Failed to load resource: net::ERR_QUIC_PROTOCOL_ERROR' on the stream URL
+    - EventSource fires error events and auto-reconnects
+    - This exacerbates the duplicate tool output issue (now fixed with idempotent handleToolStart)
+    
+    **Thesis:**
+    HTTP/3 (QUIC) doesn't handle long-lived SSE connections well. QUIC has aggressive timeout/flow-control that can interrupt streaming connections. This is a known compatibility issue.
+    
+    **Potential fixes:**
+    1. Disable HTTP/3 for the SSE endpoint path in CloudFront (force HTTP/2)
+    2. Add response headers to prevent QUIC upgrade for streaming paths
+    3. Adjust CloudFront origin timeout settings for long-lived connections
+    4. Consider if ALB idle timeout needs adjustment for SSE
+    
+    **Evidence:**
+    - Browser DevTools shows ERR_QUIC_PROTOCOL_ERROR on GET requests to stream endpoint
+    - Error events on EventSource with readyState transitions
+    - Multiple reconnection attempts visible in console
+
+[devopshero-isa] P2 task      created 2026-01-31  closed 2026-03-03
+  DomainModel: Add SUPERSEDED status for replaced deployments
+    When redeploying an app to the same environment, the old deployment stays as RUNNING even though it's been replaced. This causes:
+    
+    1. **Data model incorrectness** — Multiple deployments show as RUNNING for the same app+environment
+    2. **Slow queries** — The list_apps query filters by ACTIVE_DEPLOYMENT_STATUSES which includes RUNNING. Without marking old deployments as superseded, this query scans more rows than necessary and relies on Python-level deduplication
+    
+    **Implementation:**
+    1. Add SUPERSEDED status to Deployment.Status choices
+    2. In deployment_executor.py, after a successful deploy, mark previous RUNNING deployments for the same (app_id, environment_id) as SUPERSEDED
+    3. Create migration for the new status
+    
+    **Query affected (list_apps.py:78-81):**
+    
+    Deployment.objects.filter(
+        app=app,
+        status__in=ACTIVE_DEPLOYMENT_STATUSES,
+    ).select_related('environment').order_by('-created_at')
+    
+    This query would benefit from fewer rows to scan once old deployments are properly marked as SUPERSEDED.
+
+[devopshero-o0v] P3 task      created 2026-01-11  closed 2026-01-11
+  Investigate AskUserQuestion tool display in conversation UI
+    ## Issue
+    
+    In the conversation UI, Claude Code's built-in `AskUserQuestion` tool appears as a tool call card showing just "Answer questions?" as the result, instead of rendering proper interactive UI.
+    
+    ## Root Cause
+    
+    Claude Agent SDK runs Claude Code internally. When Claude uses the built-in `AskUserQuestion` tool:
+    1. It gets captured as a `ToolUseBlock` in agent_service.py
+    2. The tool executes and returns a `ToolResultBlock`
+    3. The generic handling creates a `TOOL_CALL` type message
+    4. The tool call card renders opaque JSON instead of interactive buttons
+    
+    ## Solution
+    
+    Detect `AskUserQuestion` tool calls and convert them to `CHOICE` messages instead.
+    
+    ### Implementation
+    
+    1. **Add converter function** in agent_service.py:
+       - `_convert_ask_user_question_to_choice(tool_input: dict) -> tuple[str, dict]`
+       - Maps AskUserQuestion format to CHOICE format
+       - Handle: header, question, options (with descriptions), multiSelect
+    
+    2. **Modify ToolResultBlock handling** (lines ~140-157):
+       - Check if `tool_name == "AskUserQuestion"`
+       - Call converter and create CHOICE message
+       - Otherwise use existing TOOL_CALL logic
+    
+    ### Edge Cases
+    - Multiple questions: Handle only first question (v1)
+    - multiSelect: Preserve in metadata, render as single-select
+    - No options: allow_text=True with no buttons
+    - Empty questions: Fallback to generic prompt
+    
+    ## Files
+    - `devopshero_app/services/agent/agent_service.py` - Add converter + modify handling
+    
+    ## Verification
+    - Trigger conversation where Claude uses AskUserQuestion
+    - Verify CHOICE message appears with interactive buttons
+    - Verify button click sends response correctly
+
+[devopshero-p5v] P3 task      created 2026-01-14  closed 2026-01-14
+  ReferenceApps: Django with PostgreSQL - primary test case
+    Create a Django application with PostgreSQL database integration.
+    
+    **Purpose:** This is the primary test case for the deployment agent. Django + PostgreSQL is the most common pattern for target users (Full Stack Engineers, Data Scientists). Tests Aurora PostgreSQL integration, database migrations, and web app deployment.
+    
+    **Features (minimal, deployment-focused):**
+    - Basic user authentication (Django's built-in auth)
+    - Simple CRUD model (e.g., a "Note" or "Task" entity)
+    - Database migrations
+    - Django admin interface enabled
+    - Health check endpoint at /health
+    
+    **Infrastructure exercised:** Aurora PostgreSQL, ALB, ECS Fargate
+    
+    **Standards:**
+    - README.md with local setup instructions
+    - .env.example documenting DATABASE_URL and other env vars
+    - Document the port (likely 8000)
+    - NO Dockerfile (agent generates this)
+    
+    **Location:** deployable_repos/django_postgres_app/
+
+[devopshero-dzx] P3 task      created 2026-01-14  closed 2026-01-14
+  ReferenceApps: FastAPI stateless - no database
+    Create a FastAPI application with no database dependency.
+    
+    **Purpose:** Tests stateless deployment patterns where no database is required. Simpler infrastructure needs - validates that the agent can deploy apps without provisioning Aurora.
+    
+    **Features (minimal, deployment-focused):**
+    - A few REST API endpoints (e.g., /items, /echo)
+    - OpenAPI/Swagger documentation (FastAPI built-in)
+    - Health check endpoint at /health
+    - One endpoint that returns environment info (to verify env vars work)
+    
+    **Infrastructure exercised:** ALB, ECS Fargate (no database)
+    
+    **Standards:**
+    - README.md with local setup instructions
+    - .env.example (even if minimal)
+    - Document the port (likely 8000)
+    - NO Dockerfile (agent generates this)
+    
+    **Location:** deployable_repos/fastapi_app/
+
+[devopshero-jbe] P3 task      created 2026-01-14  closed 2026-01-14
+  ReferenceApps: Next.js - Node ecosystem
+    Create a Next.js application to test Node.js/JavaScript detection and deployment.
+    
+    **Purpose:** Tests that the deployment agent correctly detects JavaScript/Node.js applications and generates appropriate Dockerfiles. Validates Node ecosystem deployment on ECS Fargate.
+    
+    **Features (minimal, deployment-focused):**
+    - Server-side rendered page (to test SSR works in container)
+    - One API route (e.g., /api/hello)
+    - Static page generation example
+    - Health check at /api/health
+    
+    **Infrastructure exercised:** ALB, ECS Fargate
+    
+    **Standards:**
+    - README.md with local setup instructions
+    - .env.example documenting any env vars
+    - Document the port (likely 3000)
+    - NO Dockerfile (agent generates this)
+    
+    **Location:** deployable_repos/nextjs_app/
+
+[devopshero-ooy] P3 task      created 2026-01-14  closed 2026-01-14
+  ReferenceApps: Slack bot worker - SQS integration
+    Create a Slack bot application that runs as a worker process.
+    
+    **Purpose:** Tests worker workload type - applications that don't serve HTTP traffic and don't need an ALB. Workers are common for bots, queue processors, and background services. Also tests SQS integration.
+    
+    **Features (minimal, deployment-focused):**
+    - Slack event listener (using slack-sdk or similar)
+    - Basic message processing (echo or simple response)
+    - SQS integration for receiving events
+    - Graceful shutdown handling
+    - NO HTTP server - this is a worker pattern
+    
+    **Infrastructure exercised:** ECS Fargate (no ALB), SQS
+    
+    **Standards:**
+    - README.md explaining this is a worker (no web UI)
+    - .env.example documenting SLACK_BOT_TOKEN, SQS_QUEUE_URL, etc.
+    - NO Dockerfile (agent generates this)
+    
+    **Location:** deployable_repos/slack_bot/
+
+[devopshero-ii1] P3 task      created 2026-01-14  closed 2026-01-14
+  ReferenceApps: Phoenix/Elixir - cleaner alternative
+    Create a simple Elixir/Phoenix application with PostgreSQL.
+    
+    **Purpose:** Provides a cleaner Elixir test case than db_portal (which is messy, taken from a friend's repo). Tests Elixir/Phoenix detection and deployment with Aurora PostgreSQL.
+    
+    **Features (minimal, deployment-focused):**
+    - Simple CRUD interface (e.g., a "Post" or "Item" resource)
+    - Database-backed with Ecto migrations
+    - Optional: LiveView for a real-time element
+    - Health check endpoint at /health
+    
+    **Infrastructure exercised:** Aurora PostgreSQL, ALB, ECS Fargate
+    
+    **Standards:**
+    - README.md with local setup instructions (mix deps.get, etc.)
+    - .env.example documenting DATABASE_URL
+    - Document the port (likely 4000)
+    - NO Dockerfile (agent generates this)
+    
+    **Location:** deployable_repos/phoenix_app/
+
+[devopshero-5d3] P3 task      created 2026-01-14  closed 2026-01-14
+  ReferenceApps: ML model serving API - S3 integration
+    Create an ML model serving API using FastAPI or Flask.
+    
+    **Purpose:** Tests a common enterprise pattern for data science teams - serving ML models via API. Also tests S3 integration for model storage and larger memory requirements.
+    
+    **Features (minimal, deployment-focused):**
+    - Model inference endpoint (e.g., /predict)
+    - Use a simple pre-trained model (scikit-learn classifier or similar - nothing heavy)
+    - Load model from S3 on startup
+    - Health check endpoint at /health
+    - Endpoint to check model version/info
+    
+    **Infrastructure exercised:** ALB, ECS Fargate (may need larger memory), S3
+    
+    **Standards:**
+    - README.md explaining how to train/upload a simple model
+    - .env.example documenting S3_BUCKET, MODEL_KEY, etc.
+    - Document the port
+    - NO Dockerfile (agent generates this)
+    
+    **Location:** deployable_repos/ml_model_api/
+
+[devopshero-ndk] P3 task      created 2026-01-14  closed 2026-01-14
+  ReferenceApps: Background job processor - SQS consumer
+    Create a background job processor that consumes messages from SQS.
+    
+    **Purpose:** Tests worker pattern with queue processing - a common enterprise pattern for async workloads. No HTTP server needed, just queue consumption.
+    
+    **Features (minimal, deployment-focused):**
+    - SQS message consumption (long polling)
+    - Simple job processing (e.g., log the message, transform data, or resize an image)
+    - S3 integration for reading/writing job artifacts
+    - Graceful shutdown handling
+    - NO HTTP server - pure worker
+    
+    **Infrastructure exercised:** ECS Fargate (no ALB), SQS, S3
+    
+    **Standards:**
+    - README.md explaining this is a worker
+    - .env.example documenting SQS_QUEUE_URL, S3_BUCKET, etc.
+    - NO Dockerfile (agent generates this)
+    
+    **Location:** deployable_repos/job_processor/
+
+[devopshero-fca] P3 task      created 2026-01-14  closed 2026-01-14
+  ReferenceApps: GraphQL API - modern API pattern
+    Create a GraphQL API using Apollo Server (Node.js) or Strawberry (Python).
+    
+    **Purpose:** Tests modern API patterns and GraphQL detection. Many enterprises are adopting GraphQL - validates that the agent can deploy this pattern.
+    
+    **Features (minimal, deployment-focused):**
+    - GraphQL schema with a simple type (e.g., Book, User)
+    - Basic query resolvers
+    - Basic mutation resolvers
+    - Optional: PostgreSQL database backend
+    - Health check endpoint at /health
+    
+    **Infrastructure exercised:** ALB, ECS Fargate, optionally Aurora
+    
+    **Standards:**
+    - README.md with local setup instructions
+    - .env.example documenting DATABASE_URL if using database
+    - Document the port
+    - NO Dockerfile (agent generates this)
+    
+    **Location:** deployable_repos/graphql_api/
+
+[devopshero-2vt] P3 task      created 2026-01-14  closed 2026-01-14
+  ReferenceApps: Internal admin dashboard - common internal tool
+    Create an internal admin dashboard using Django Admin or a React dashboard.
+    
+    **Purpose:** Tests a very common internal tool pattern - admin dashboards for managing data. This is exactly the kind of tool DevOps Hero targets.
+    
+    **Features (minimal, deployment-focused):**
+    - Admin interface for a simple model
+    - Basic user management (list users, view details)
+    - Simple reporting/analytics view (can be static/mock data)
+    - Health check endpoint at /health
+    
+    **Infrastructure exercised:** Aurora PostgreSQL, ALB, ECS Fargate
+    
+    **Standards:**
+    - README.md with local setup instructions
+    - .env.example documenting DATABASE_URL, SECRET_KEY, etc.
+    - Document the port
+    - NO Dockerfile (agent generates this)
+    
+    **Location:** deployable_repos/admin_dashboard/
+
+[devopshero-5w4] P3 task      created 2026-01-14  closed 2026-01-14
+  ReferenceApps: Scheduled task runner - EventBridge integration
+    Create a scheduled task runner that integrates with EventBridge.
+    
+    **Purpose:** Tests cron-like scheduled jobs pattern. Many enterprise apps need periodic tasks (data sync, report generation, cleanup). Tests EventBridge integration for scheduling.
+    
+    **Features (minimal, deployment-focused):**
+    - Task that runs on schedule (e.g., log a message, write to S3)
+    - Accept trigger from EventBridge scheduled rule
+    - Graceful completion signaling
+    - NO persistent HTTP server - runs, completes, exits
+    
+    **Infrastructure exercised:** ECS Fargate (no ALB), EventBridge for scheduling
+    
+    **Standards:**
+    - README.md explaining this is a scheduled task (not a web server)
+    - .env.example documenting any env vars
+    - NO Dockerfile (agent generates this)
+    
+    **Location:** deployable_repos/scheduled_tasks/
+
+[devopshero-i5g] P3 task      created 2026-01-14  closed 2026-01-14
+  ReferenceApps: WebSocket real-time app - DynamoDB integration
+    Create a WebSocket/real-time application with DynamoDB for state.
+    
+    **Purpose:** Tests real-time communication patterns (WebSockets) and DynamoDB integration. Real-time features are common in enterprise dashboards, notifications, and collaboration tools.
+    
+    **Features (minimal, deployment-focused):**
+    - WebSocket endpoint for real-time connections
+    - Simple chat or live notification feature
+    - Store connection state in DynamoDB
+    - Store message history in DynamoDB
+    - Health check endpoint at /health (for ALB)
+    
+    **Infrastructure exercised:** ALB (with WebSocket support), ECS Fargate, DynamoDB
+    
+    **Standards:**
+    - README.md with local setup instructions
+    - .env.example documenting DYNAMODB_TABLE, etc.
+    - Document the port
+    - NO Dockerfile (agent generates this)
+    
+    **Location:** deployable_repos/realtime_app/
+
+[devopshero-7v4] P3 task      created 2026-01-14  closed 2026-01-14
+  ReferenceApps: File processing service - S3 event triggers
+    Create a file processing service that integrates with S3.
+    
+    **Purpose:** Tests S3 integration and event-driven patterns. File processing is common in enterprise (document conversion, image resizing, data import).
+    
+    **Features (minimal, deployment-focused):**
+    - Endpoint to upload files to S3
+    - Endpoint to download/retrieve processed files
+    - Simple file transformation (e.g., image resize, text conversion)
+    - Handle S3 event notifications (file uploaded triggers processing)
+    - Health check endpoint at /health
+    
+    **Infrastructure exercised:** ALB, ECS Fargate, S3, S3 event notifications
+    
+    **Standards:**
+    - README.md with local setup instructions
+    - .env.example documenting S3_BUCKET, etc.
+    - Document the port
+    - NO Dockerfile (agent generates this)
+    
+    **Location:** deployable_repos/file_processor/
+
+[devopshero-3n1] P3 task      created 2026-01-21  closed 2026-01-30
+  AgentChat: Investigate sync_to_async error in select_workspace when workspace deleted
+    ## Problem
+    
+    The Main Agent was calling `select_workspace` multiple times, failing each time with a `SynchronousOnlyOperation` error:
+    ```
+    You cannot call this from an async context - use a thread or sync_to_async.
+    ```
+    
+    ## Context
+    
+    - A workspace was manually deleted from the database
+    - The conversation still had `workspace_id` pointing to the deleted workspace's UUID
+    - Even after changing `conversation.workspace` to `conversation.workspace_id` (which should be a raw column access with no DB query), the error persisted
+    
+    ## Files involved
+    
+    - `devopshero_app/services/agent/tools/select_workspace.py` (line 50)
+    - `devopshero_app/services/deployment/deployment_logging.py` (the log handler with sync_to_async handling)
+    
+    ## Ugly workaround in deployment_logging.py
+    
+    The `DeploymentLogHandler.emit()` method has this sync/async detection logic that feels wrong:
+    
+    ```python
+    if loop is not None:
+        # Async context: offload sync DB call to thread pool
+        coro = sync_to_async(self._create_log, thread_sensitive=False)(...)
+        asyncio.ensure_future(coro)
+    else:
+        # Sync context: call directly
+        self._create_log(...)
+    ```
+    
+    This complexity shouldn't be necessary. There should be a simpler, universal approach.
+    
+    ## Investigation needed
+    
+    1. Confirm whether `workspace_id` access truly avoids DB queries in all cases
+    2. Check if the error is actually coming from a different location (need full traceback)
+    3. The `DeploymentLogHandler` was also updated with sync_to_async handling - verify it's not the source
+    4. Consider whether orphaned FK references (pointing to deleted objects) cause special Django behavior
+    5. Find a cleaner pattern for the logging handler that doesn't require manual sync/async detection
+
+[devopshero-3ur] P3 task      created 2026-01-23  closed 2026-03-03
+  AgentChat: Implement repo clone cleanup on conversation close
+    ## Context
+    
+    When a conversation has a repository context (`conversation.context_repository_id`), the agent service clones that repo at the start of each message in `stream_response()`. The clone persists for the conversation lifetime at `tmp/conv-{conversation_id}`.
+    
+    **Current behavior:**
+    - Clones are created in `agent_service.py:stream_response()` (line ~227)
+    - Cleanup comment at line ~286 says to implement cleanup via `chat_close` or periodic job
+    - `chat_close` view exists in `chat.py` but is never called from UI (dead code)
+    
+    ## Problem
+    
+    Cloned repos accumulate in `tmp/` directory forever:
+    - Each conversation creates `tmp/conv-{uuid}/`
+    - Never cleaned up because `chat_close` is not exposed in UI
+    - Over time this will fill disk space
+    
+    ## Implementation Options
+    
+    ### Option A: Wire up chat_close in UI
+    - Add close button or implicit close when navigating away
+    - Call `chat_close` view which can cleanup the clone
+    - Needs frontend work
+    
+    ### Option B: Periodic cleanup job
+    - Background task that removes old `conv-*` directories
+    - Delete if conversation is closed OR if not accessed in X hours
+    - More robust (handles abandoned conversations)
+    
+    ### Option C: Both
+    - chat_close for explicit cleanup
+    - Periodic job as fallback
+    
+    ## Files Involved
+    
+    - `devopshero_app/views/chat.py` - `chat_close` view (exists, not exposed)
+    - `devopshero_app/services/agent/agent_service.py` - comment at line ~286
+    - `devopshero_app/services/github/repo_service.py` - `cleanup_repository()` function exists
+    - `devopshero_site/settings.py` - `CLAUDE_SANDBOX_DIR` is `tmp/`
+    
+    ## Reference
+    
+    Clone path pattern: `settings.CLAUDE_SANDBOX_DIR / f"conv-{conversation.id}"`
+    
+    Cleanup function exists: `repo_service.cleanup_repository(repo_path)` uses `shutil.rmtree()`
