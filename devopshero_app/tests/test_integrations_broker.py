@@ -20,9 +20,9 @@ from unittest.mock import patch
 
 
 def _load_broker_module():
-    """Load template_repos/hermes_agent/integrations_broker.py as a module."""
+    """Load template_repos/hermes_agent/doh_runtime/integrations_broker.py as a module."""
     repo_root = pathlib.Path(__file__).resolve().parents[2]
-    script_path = repo_root / "template_repos" / "hermes_agent" / "integrations_broker.py"
+    script_path = repo_root / "template_repos" / "hermes_agent" / "doh_runtime" / "integrations_broker.py"
     spec = importlib.util.spec_from_file_location(
         name="integrations_broker_under_test",
         location=str(script_path),

@@ -49,7 +49,7 @@ RUN mkdir -p "$DOH_BIN_DIR" \
     && rm -rf /tmp/aws /tmp/awscliv2.zip \
     && rm -rf /var/lib/apt/lists/*
 
-COPY --chmod=755 prune-skills.sh /tmp/prune-skills.sh
+COPY --chmod=755 build/prune-skills.sh /tmp/prune-skills.sh
 RUN git clone --depth 1 --branch v2026.5.7 https://github.com/NousResearch/hermes-agent.git \
         "$HERMES_WEBUI_AGENT_DIR" \
     && /tmp/prune-skills.sh "$HERMES_WEBUI_AGENT_DIR/skills" \
@@ -64,14 +64,8 @@ COPY skills/google-workspace /opt/hermes/agent/skills/productivity/google-worksp
 
 COPY SOUL.md /opt/hermes/SOUL.md
 COPY config.yaml.template /opt/hermes/config.yaml.template
-COPY --chmod=755 apply-patches.py /tmp/apply-patches.py
-COPY hermes-nono-profile.json /opt/doh/nono/hermes-nono-profile.json
-COPY --chmod=755 persistent-root-runner.sh /opt/doh/runtime/persistent-root-runner.sh
-COPY --chmod=755 supervisor.sh /opt/doh/runtime/supervisor.sh
-COPY --chmod=755 webui.sh /opt/doh/runtime/webui.sh
-COPY aws_signer.py /opt/doh/runtime/aws_signer.py
-COPY --chmod=755 integrations_broker.py /opt/doh/runtime/integrations_broker.py
-COPY mcp_aggregator.py /opt/doh/runtime/mcp_aggregator.py
+COPY --chmod=755 build/apply-patches.py /tmp/apply-patches.py
+COPY doh_runtime /opt/doh/runtime
 
 # DOH-owned WebUI extension bundle. Loaded by Hermes WebUI per docs/EXTENSIONS.md
 # when the three HERMES_WEBUI_EXTENSION_* env vars are set (see supervisor.sh).
@@ -80,13 +74,13 @@ COPY webui-extension /opt/doh/webui-extension
 
 # WebUI lives in the base image at /apptoo/. Patch it before copying it into
 # $HERMES_WEBUI_DIR so the installed venv and precompiled bytecode use patched source.
-COPY patches-webui /tmp/patches-webui
+COPY build/patches-webui /tmp/patches-webui
 RUN set -eu; \
     python3 /tmp/apply-patches.py /tmp/patches-webui /apptoo; \
     python3 -m compileall -q /apptoo || true; \
     rm -rf /tmp/patches-webui
 
-COPY patches /tmp/patches-agent
+COPY build/patches-agent /tmp/patches-agent
 
 RUN test -f /apptoo/requirements.txt \
     && cat >> /apptoo/requirements.txt <<'EOF'

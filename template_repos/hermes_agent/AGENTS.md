@@ -2,7 +2,7 @@
 
 Changes to the Hermes agent often require running the full deploy → container-boot → agent-runtime loop to verify. Unit tests alone don't live deployment problems with, for example, the Dockerfile, entrypoint, supervisor, skill-pruning, patch-application, or integration-broker regressions.
 
-If you are making a change that requires verification, **ask** the developer if he wants you to run end-to-end verification. Sometimes the developer will want you doing it himself, other times he will prefer that you do it. 
+If you are making a change that requires verification, **ask** the developer if he wants you to run end-to-end verification.
 
 When you need an instance of a Hermes agent to run your verification, deploy it anew from AppTemplate by using the management command "doh_control dpeloy-app-template"
 
