@@ -1,4 +1,4 @@
-FROM ghcr.io/nesquena/hermes-webui:0.51.48
+FROM ghcr.io/nesquena/hermes-webui:0.51.63
 
 USER root
 
