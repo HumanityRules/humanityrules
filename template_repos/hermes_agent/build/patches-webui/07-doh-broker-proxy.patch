@@ -1,6 +1,6 @@
 --- a/api/routes.py
 +++ b/api/routes.py
-@@ -2840,6 +2840,17 @@
+@@ -3098,6 +3098,17 @@
  def handle_get(handler, parsed) -> bool:
      """Handle all GET routes. Returns True if handled, False for 404."""
  
@@ -18,7 +18,7 @@
      if parsed.path.startswith("/session/static/"):
          # Strip the leading "/session" so _serve_static() sees a path that
          # starts with "/static/" (its required prefix). _serve_static enforces
-@@ -3836,6 +3847,27 @@
+@@ -4139,6 +4150,27 @@
  def handle_post(handler, parsed) -> bool:
      """Handle all POST routes. Returns True if handled, False for 404."""
      diag = RequestDiagnostics.maybe_start("POST", parsed.path, logger=logger)
@@ -43,10 +43,10 @@
 +            body = b""
 +        return _doh_broker_proxy(handler, parsed, method="POST", body=body)
 +
-     # CSRF: reject cross-origin browser requests
-     if diag:
-         diag.stage("csrf")
-@@ -5162,7 +5194,68 @@
+     if parsed.path == "/api/csp-report":
+         if diag:
+             diag.stage("csp_report")
+@@ -5606,7 +5638,68 @@
              return _kanban_unknown_endpoint(handler, parsed, "DELETE")
          return True
      return False
