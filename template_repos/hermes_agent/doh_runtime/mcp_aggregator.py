@@ -109,6 +109,11 @@ class _OAuthState:
         if self._token_file.exists():
             self._token_file.unlink()
 
+    def clear_client(self) -> None:
+        self._client = None
+        if self._client_file.exists():
+            self._client_file.unlink()
+
 
 class MCPAggregator:
     """One per Hermes container. Hosts a FastMCP server with per-provider proxies."""
@@ -157,7 +162,7 @@ class MCPAggregator:
             token = await self._current_access_token(slug=slug)
             if token is None:
                 raise RuntimeError(f"{slug} has no valid token")
-            return Client(url, headers={"Authorization": f"Bearer {token}"})
+            return Client(url, auth=token)
 
         provider = ProxyProvider(client_factory=factory)
         self._mcp.add_provider(provider=provider)
@@ -201,6 +206,7 @@ class MCPAggregator:
             return JSONResponse(content={"error": "unknown provider"}, status_code=404)
         self._detach_provider(slug=provider)
         self._oauth_states[provider].clear_token()
+        self._oauth_states[provider].clear_client()
         return JSONResponse(content={"ok": True})
 
     async def _handle_oauth_start(self, request: Request) -> Response:

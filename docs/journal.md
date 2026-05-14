@@ -1,5 +1,42 @@
 # DevOpsHero Development Journal
 
+## 2026-05-14 15:22 - [Bugfix] Notion MCP aggregator returned empty tool list — wrong fastmcp Client kwarg
+
+**Conversation:** [2026-05-14-1523-82843057.md](conversations/2026-05-14-1523-82843057.md)
+
+The Notion MCP integration deployed in the previous session looked connected end-to-end — OAuth/DCR completed, token persisted, the aggregator's `/status` endpoint reported `connected`, the Hermes agent claimed to "see" Notion MCP — but the agent only listed four generic tools (`mcp_notion_list_prompts`, `mcp_notion_get_prompt`, `mcp_notion_list_resources`, `mcp_notion_read_resource`) and no real Notion tools. Searching, fetching, page creation — none of it worked.
+
+**The bug.** One line in `mcp_aggregator.py` built the upstream client wrong:
+
+```python
+return Client(url, headers={"Authorization": f"Bearer {token}"})
+```
+
+`fastmcp.Client.__init__` (3.2.4, the version installed in the WebUI venv that runs the aggregator) doesn't accept `headers=`. Its signature is `Client(transport, *, name, ..., auth: httpx.Auth | Literal['oauth'] | str | None, verify, ...)`. Passing `headers` raises `TypeError`. `ProxyProvider._list_tools` catches this — incorrectly classified somewhere as "no tools available" — and silently returns `tools=[]`. Same for resources and prompts.
+
+The fix: `return Client(url, auth=token)`. fastmcp treats a bare string as a bearer token and applies it as `Authorization: Bearer <token>` to every upstream request.
+
+**Why the agent reported the four wrapper tools.** Initially I called this a hallucination. It wasn't. With our aggregator advertising `prompts`/`resources` capabilities in `initialize` but returning empty `tools/list`, the Hermes agent's MCP client stack synthesized read/list wrappers around prompts/resources and presented them as the "tools available." That's the documented fallback behavior of MCP clients when servers expose prompts/resources but no tools — not LLM confabulation. Useful correction: don't reach for "the LLM made it up" when the protocol explains it.
+
+**Diagnostic path that nailed it.** Hit the running container's MCP loopback endpoint directly via `doh_app_exec --container hermes`, comparing what the upstream Notion server returned for our token vs. what our aggregator was forwarding:
+
+- Upstream `tools/list` (with browser User-Agent — Cloudflare blocks `python-urllib`): 16 real tools (`notion-search`, `notion-fetch`, `notion-create-pages`, ...).
+- Aggregator `tools/list` over `127.0.0.1:9952/mcp`: `tools=[]`.
+
+That isolated the failure cleanly between aggregator and upstream. Then re-running the same probe with `ProxyProvider(client_factory=...)._list_tools()` directly using the saved token reproduced the empty list — and the `TypeError` traceback when `headers=` was used confirmed the kwarg mismatch. The whole sequence ran from `doh_app_exec` against the live container; no rebuild or redeploy was needed to find the bug.
+
+**Disconnect cleanup secondary fix.** Earlier in the session, also added a `_OAuthState.clear_client()` method and called it from `_handle_disconnect` so disconnect now removes both `token.json` and `client.json`. Reason: leaving the DCR client registration in place caused Notion to skip the consent screen on reconnect (because the same `client_id` was reused and the workspace had previously approved it). Cost: each disconnect/reconnect cycle creates a new orphaned DCR client at Notion. Worth it for predictable consent re-prompts during dev.
+
+**Notion MCP doesn't use OAuth scopes or page pickers.** Side learning while debugging: the `.well-known/oauth-authorization-server` doc has no `scopes_supported`, and adding `scope=` to `/authorize` is ignored. Notion's hosted MCP grants workspace-wide access scoped to whatever the authorizing user can see — no per-page selection at consent time. Page-level limits, if needed, are managed by which pages the authorizing user has access to, not by the OAuth flow.
+
+**Key points:**
+- Don't rely on a library accepting an obvious-looking kwarg. `fastmcp.Client(headers=...)` would seem natural for any HTTP client, but the lib chose `auth=` to keep its surface smaller. The kwarg-mismatch failed silently because `ProxyProvider` swallows factory exceptions as "no tools" — a usability gap in fastmcp 3.2.4 worth knowing about.
+- Probe the running container, not assumptions. `doh_app_exec --container hermes` running short Python snippets against the live aggregator and the live token was the fastest path to ground truth — much faster than redeploying with a debug endpoint, and the data is unimpeachable.
+- The Hermes app template runs two containers (`hermeswebui` + `hermes`); aggregator state lives on the `hermes` container's persistent EBS mount. Specify `--container hermes` for `doh_app_exec`, otherwise you land on the WebUI container which can't see the persistent dir.
+- An empty `tools/list` is *not* a no-op for MCP clients — they will synthesize prompts/resources wrappers and present those as "the tools." Future debugging: if the agent reports an unexpectedly small or generic-looking tool catalog, check whether `tools/list` is returning empty before assuming the LLM is confused.
+- Mistake to remember: I called the four tool names a hallucination without evidence, then had to walk it back when the user pushed. The honest framing is "I don't know yet" — debugging produces evidence; prejudgement burns trust.
+
+
 ## 2026-05-14 10:41 - [DevEx] Reorganize template_repos/hermes_agent into source-dir = image-dir layout
 
 **Conversation:** [2026-05-14-1042-c9591fd0.md](conversations/2026-05-14-1042-c9591fd0.md)
