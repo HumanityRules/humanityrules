@@ -208,7 +208,7 @@ ensure_user_runtime_dirs() {
 }
 
 run_in_nono() {
-    local nono_args=(run --profile "${DOH_ROOT}/nono/hermes-nono-profile.json")
+    local nono_args=(run --profile "${DOH_RUNTIME_DIR}/hermes-nono-profile.json")
 
     if [ -n "${TAVILY_API_KEY:-}" ]; then
         # Tavily uses JSON payload, which nono doesn't support in its credential injection mechanism. 

@@ -1,6 +1,33 @@
 # DevOpsHero Development Journal
 
-## 2026-05-14 07:55 - [Integrations] MCP aggregator: third-party MCP servers without sandbox-resident credentials
+## 2026-05-14 10:41 - [DevEx] Reorganize template_repos/hermes_agent into source-dir = image-dir layout
+
+**Conversation:** [2026-05-14-1042-c9591fd0.md](conversations/2026-05-14-1042-c9591fd0.md)
+
+Pure cleanup pass. The `template_repos/hermes_agent/` directory had grown organically — 13 files at the root, 6 individual `COPY` lines in the Dockerfile for the runtime scripts alone, and the relationship between source paths and their destinations in the image was implicit. Reorganized so each top-level directory in the source maps cleanly to one destination in the built image, which collapses Dockerfile noise and makes the layout self-documenting.
+
+**The mapping invariant.** After the reorg, every source dir under `hermes_agent/` answers the question "where does this end up in the image?" without reading the Dockerfile:
+- `build/` — consumed only by Dockerfile RUN steps; never lands in the runtime image. Holds `apply-patches.py`, `prune-skills.sh`, `patches-agent/`, `patches-webui/`.
+- `doh_runtime/` → `/opt/doh/runtime/`. Holds the supervisor, persistent-root entrypoint, webui starter, the three Python services (aws_signer, integrations_broker, mcp_aggregator), and the nono profile JSON.
+- `skills/` → `/opt/hermes/agent/skills/.../`
+- `webui-extension/` → `/opt/doh/webui-extension/`
+- Top-level files are intentional outliers: `Dockerfile`, `AGENTS.md`, `CLAUDE.md`, `SOUL.md`, `config.yaml.template`. The first three are repo-level. `SOUL.md` and `config.yaml.template` go to `/opt/hermes/` (not under any of the above subtrees) and are persona/config — keeping them at root is honest about that.
+
+**Six COPY lines collapsed into one.** The old Dockerfile copied `persistent-root-runner.sh`, `supervisor.sh`, `webui.sh`, `aws_signer.py`, `integrations_broker.py`, `mcp_aggregator.py` individually — three with `--chmod=755`, three without. Replaced with `COPY doh_runtime /opt/doh/runtime`. Set the executable bit on the three `.sh` files in git's index (`100755`) so the COPY preserves perms naturally; the `.py` files stay 644 because they're imported by the venv's Python interpreter, never invoked directly. Image is one layer instead of six.
+
+**`patches/` → `build/patches-agent/`.** The Dockerfile already did `COPY patches /tmp/patches-agent` — the rename was a smell that suggested the source name was wrong. Renaming the source dir and dropping the rename in the COPY restores symmetry with `build/patches-webui/`.
+
+**Nono profile flattened into `doh_runtime/`.** Before: `hermes-nono-profile.json` at root, copied to `/opt/doh/nono/hermes-nono-profile.json`, referenced from `supervisor.sh:211` as `${DOH_ROOT}/nono/hermes-nono-profile.json`. The dedicated `/opt/doh/nono/` subdir held exactly one file. Flattened to `/opt/doh/runtime/hermes-nono-profile.json` (peer of supervisor.sh), referenced via `${DOH_RUNTIME_DIR}/hermes-nono-profile.json`. Removes one COPY line and one image directory. Mild cost: `doh_runtime/` is now a slight grab-bag of file types (shell, python, json) rather than purely "scripts the supervisor invokes." Acceptable — the dir's identity is "files that live at /opt/doh/runtime", not "files of a particular type."
+
+**Tests caught the only live cross-reference.** `devopshero_app/tests/test_integrations_broker.py` loads `integrations_broker.py` by absolute file path via `importlib.util.spec_from_file_location`, so the test had to be updated when the file moved. No other live code in the repo referenced the old paths — only `docs/` mentions, which are historical. The relative `import mcp_aggregator` inside `integrations_broker.py` keeps working because it does `sys.path.insert(0, str(Path(__file__).resolve().parent))` before the import.
+
+**Key points:**
+- The "source dir = image destination" invariant is the right organizing principle for image-content repos. It means the directory tree is the manifest — Dockerfile becomes a transport mechanism rather than the source of truth for "what goes where." Adding a new runtime script is now `git add doh_runtime/foo.sh` with no Dockerfile churn.
+- `--chmod=755` on COPY is fine for individual files but becomes lossy when bulk-copying directories (you'd over-permission the `.py` files). Setting `100755` in the git index instead is the cleaner mechanism — git tracks executability, COPY preserves it, no Dockerfile annotation needed.
+- Resisted moving `SOUL.md` and `config.yaml.template` into a `hermes_config/` subdir even though it's tempting for tidiness. They're two top-level config files, like `Dockerfile` or `pyproject.toml` in any normal repo — that's a normal shape, not a smell. Adding a directory for two files would break the "source dir = single image destination" invariant the rest of the layout follows.
+- The `prune-skills.sh` script lives in `build/` because it's only run during `docker build` against the cloned upstream Hermes agent — its output is the curated `skills/` tree inside the image, but the script itself never ships. This is the cleanest example of the build-vs-runtime split the new layout makes visible.
+
+
 
 **Conversation:** [2026-05-14-1007-aff26acf.md](conversations/2026-05-14-1007-aff26acf.md)
 
