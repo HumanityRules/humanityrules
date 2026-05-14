@@ -71,6 +71,7 @@ COPY --chmod=755 supervisor.sh /opt/doh/runtime/supervisor.sh
 COPY --chmod=755 webui.sh /opt/doh/runtime/webui.sh
 COPY aws_signer.py /opt/doh/runtime/aws_signer.py
 COPY --chmod=755 integrations_broker.py /opt/doh/runtime/integrations_broker.py
+COPY mcp_aggregator.py /opt/doh/runtime/mcp_aggregator.py
 
 # DOH-owned WebUI extension bundle. Loaded by Hermes WebUI per docs/EXTENSIONS.md
 # when the three HERMES_WEBUI_EXTENSION_* env vars are set (see supervisor.sh).
@@ -92,6 +93,9 @@ RUN test -f /apptoo/requirements.txt \
 mcp>=1.2.0,<2
 boto3>=1.35.0,<2
 cryptography>=42
+httpx>=0.27,<1
+fastmcp>=3.0,<4
+uvicorn>=0.30,<1
 EOF
 
 WORKDIR /

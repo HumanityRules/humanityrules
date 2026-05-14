@@ -201,6 +201,11 @@ streaming:
 web:
   backend: tavily
 
+mcp_servers:
+  notion:
+    url: http://127.0.0.1:9952/mcp
+    timeout: 120
+
 platform_toolsets:
   cli:
   - browser
@@ -209,6 +214,7 @@ platform_toolsets:
   - cronjob
   - delegation
   - file
+  - mcp
   - memory
   - session_search
   - skills
