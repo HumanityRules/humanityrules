@@ -12,8 +12,11 @@
 
   const STATUS_URL = '/__doh_broker/status';
   const KICK_URL = '/__doh_broker/kick';
+  const MCP_STATUS_URL = '/__mcp_aggregator/status';
+  const MCP_DISCONNECT_URL = '/__mcp_aggregator/disconnect/';
 
   let _currentStatus = null;
+  let _mcpStatus = null;
 
   function elem(tag, props, children) {
     const el = document.createElement(tag);
@@ -58,6 +61,16 @@
     return null;
   }
 
+  async function fetchMcpStatus() {
+    try {
+      const response = await fetch(MCP_STATUS_URL, { cache: 'no-store' });
+      if (!response.ok) return null;
+      return await response.json();
+    } catch (_) {
+      return null;
+    }
+  }
+
   function buildConnectUrl(status, returnTo) {
     const rd = encodeURIComponent(returnTo);
     return status.doh_control_plane_url.replace(/\/$/, '') + '/integrations/google/start?rd=' + rd;
@@ -66,6 +79,49 @@
   function buildDisconnectUrl(status, returnTo) {
     const rd = encodeURIComponent(returnTo);
     return status.doh_control_plane_url.replace(/\/$/, '') + '/integrations/google/disconnect?rd=' + rd;
+  }
+
+  function buildMcpConnectUrl(provider) {
+    const returnTo = encodeURIComponent(window.location.origin + window.location.pathname);
+    const origin = encodeURIComponent(window.location.origin);
+    return '/__mcp_aggregator/oauth/' + provider + '/start?return_to=' + returnTo + '&origin=' + origin;
+  }
+
+  function renderMcpProviderCard(providerKey, providerState) {
+    const label = providerState.label || providerKey;
+    const card = elem('div', { class: 'doh-integration-card', dataset: { provider: providerKey } });
+    const header = elem('div', { class: 'doh-integration-card-head' }, [
+      elem('div', { class: 'doh-integration-card-title' }, [label]),
+      elem('div', { class: 'doh-integration-card-status', dataset: { status: providerState.status } }, [
+        providerState.status === 'connected' ? 'Connected' :
+        providerState.status === 'not_connected' ? 'Not connected' :
+        providerState.status === 'token_expired' ? 'Token expired' : '—',
+      ]),
+    ]);
+    card.appendChild(header);
+
+    const body = elem('div', { class: 'doh-integration-card-body' });
+    if (providerState.status === 'connected') {
+      if (providerState.tools_count != null) {
+        body.appendChild(elem('div', { class: 'doh-integration-meta' }, [
+          providerState.tools_count + ' tools available',
+        ]));
+      }
+      body.appendChild(elem('button', {
+        class: 'doh-integration-btn doh-integration-btn-secondary',
+        onclick: async () => {
+          await fetch(MCP_DISCONNECT_URL + providerKey, { method: 'POST' });
+          await refreshAndRender();
+        },
+      }, ['Disconnect']));
+    } else {
+      body.appendChild(elem('button', {
+        class: 'doh-integration-btn doh-integration-btn-primary',
+        onclick: () => { window.location.href = buildMcpConnectUrl(providerKey); },
+      }, ['Connect ' + label]));
+    }
+    card.appendChild(body);
+    return card;
   }
 
   function renderProviderCard(providerKey, providerState, status) {
@@ -142,31 +198,34 @@
     const list = elem('div', { class: 'doh-integration-list' });
     const providers = status.providers || {};
     const keys = Object.keys(providers);
-    if (keys.length === 0) {
+    if (keys.length === 0 && !_mcpStatus) {
       list.appendChild(elem('div', { class: 'doh-integration-empty' }, ['No integrations configured.']));
     } else {
       for (const key of keys) {
         list.appendChild(renderProviderCard(key, providers[key], status));
+      }
+      if (_mcpStatus && _mcpStatus.providers) {
+        for (const key of Object.keys(_mcpStatus.providers)) {
+          list.appendChild(renderMcpProviderCard(key, _mcpStatus.providers[key]));
+        }
       }
     }
     pane.appendChild(list);
   }
 
   async function refreshAndRender() {
-    _currentStatus = await fetchStatus();
+    [_currentStatus, _mcpStatus] = await Promise.all([fetchStatus(), fetchMcpStatus()]);
     renderPane(_currentStatus);
   }
 
   // After the Connect/Disconnect round-trip returns us here, ask the broker to
   // refresh now and render the status returned by /kick.
   async function refreshAfterFlow() {
-    const status = await kickBroker();
-    if (status) {
-      _currentStatus = status;
-      renderPane(_currentStatus);
-      return;
-    }
-    await refreshAndRender();
+    const [kickResult, mcpResult] = await Promise.all([kickBroker(), fetchMcpStatus()]);
+    if (kickResult) _currentStatus = kickResult;
+    else _currentStatus = await fetchStatus();
+    _mcpStatus = mcpResult;
+    renderPane(_currentStatus);
   }
 
   // Drop any ?connected=/?disconnected= sentinel once we've acted on it,

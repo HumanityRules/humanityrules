@@ -16,4 +16,6 @@ The main developer documentation lives in the docs/ subdirectory. **When creatin
 
 - **`docs/policy_proxy_design.md`** — Runtime design for the policy proxy that enforces SSO + ABAC in front of deployed apps. Covers the per-env auth Lambda (Okta OAuth, JWT minting, JWKS), the policy-proxy container (JWT verification, per-request PDP calls with caching), the DOH PDP endpoint contract, and the Personal Assistant specifics (owner tag, global self-referential policy). Open when working on the policy proxy, the auth Lambda, or the PDP endpoint.
 
+- **`docs/mcp_aggregator_design.md`** — Architecture for MCP server integration in Hermes (Notion today; others tomorrow). Covers the MCP aggregator process (folded into integrations_broker.py), OAuth 2.1 with DCR+PKCE, token custody outside the sandbox, tool discovery via `notifications/tools/list_changed`, and the WebUI OAuth callback flow. Open when adding MCP providers, working on the aggregator, or reasoning about the sandbox ↔ MCP trust boundary.
+
 - **`docs/ui_live_update_contract.md`** — The current live-update contract for HTMX polling, chat-scoped SSE invalidation, and widget fragment refresh patterns. Open when adding or changing live-refresh behavior.

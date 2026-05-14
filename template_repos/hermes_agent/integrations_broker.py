@@ -62,8 +62,10 @@ from cryptography.hazmat.primitives.asymmetric import rsa
 
 DEFAULT_PROXY_PORT = 9950
 DEFAULT_CONTROL_PORT = 9951
+DEFAULT_MCP_PORT = 9952
 DEFAULT_CA_DIR = Path("/run/doh/integrations-broker/ca")
 DEFAULT_PRIVATE_DIR = Path("/run/doh/integrations-broker/private")
+DEFAULT_MCP_PERSISTENT_DIR = Path("/hermes-persistent-root/mcp-aggregator")
 
 # Refresh ~5 minutes before the typical 3600s expiry. Backoff for transient
 # errors. MIN_SLEEP guards against a tight loop if DOH's expires_in is tiny.
@@ -843,14 +845,14 @@ def _require_env(name: str) -> str:
     return value
 
 
-async def _run(proxy_port: int, control_port: int, ca_dir: Path, private_dir: Path) -> None:
+async def _run(proxy_port: int, control_port: int, mcp_port: int, ca_dir: Path, private_dir: Path, mcp_persistent_dir: Path) -> None:
     control_plane_url = _require_env(name="DOH_CONTROL_PLANE_URL")
     bearer = _require_env(name="DOH_ENV_BEARER")
     owner_username = _require_env(name="DOH_OWNER_USERNAME")
     env_slug = os.environ.get("DOH_ENV_SLUG", "")
     logger.info(
-        "starting integrations_broker for owner=%s env=%s against %s (proxy=%d, control=%d)",
-        owner_username, env_slug, control_plane_url, proxy_port, control_port,
+        "starting integrations_broker for owner=%s env=%s against %s (proxy=%d, control=%d, mcp=%d)",
+        owner_username, env_slug, control_plane_url, proxy_port, control_port, mcp_port,
     )
     minter = _CertMinter(ca_dir=ca_dir, private_dir=private_dir)
     minter.bootstrap()
@@ -881,6 +883,14 @@ async def _run(proxy_port: int, control_port: int, ca_dir: Path, private_dir: Pa
     control_server = await asyncio.start_server(client_connected_cb=_control_cb, host="127.0.0.1", port=control_port)
     logger.info("proxy listening on 127.0.0.1:%d; control on 127.0.0.1:%d", proxy_port, control_port)
 
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    import mcp_aggregator
+    public_base_url = os.environ.get("DOH_APP_PUBLIC_URL")
+    mcp_persistent_dir.mkdir(parents=True, exist_ok=True)
+    aggregator = mcp_aggregator.MCPAggregator(
+        port=mcp_port, persistent_dir=mcp_persistent_dir, public_base_url=public_base_url,
+    )
+
     refreshers = [
         asyncio.create_task(_refresh_loop(
             slug=slug,
@@ -895,8 +905,9 @@ async def _run(proxy_port: int, control_port: int, ca_dir: Path, private_dir: Pa
     async with proxy_server, control_server:
         proxy_task = asyncio.create_task(proxy_server.serve_forever())
         control_task = asyncio.create_task(control_server.serve_forever())
+        mcp_task = asyncio.create_task(aggregator.serve())
         done, pending = await asyncio.wait(
-            {stop, proxy_task, control_task, *refreshers},
+            {stop, proxy_task, control_task, mcp_task, *refreshers},
             return_when=asyncio.FIRST_COMPLETED,
         )
         for task in pending:
@@ -915,16 +926,20 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--proxy-port", type=int, default=DEFAULT_PROXY_PORT)
     parser.add_argument("--control-port", type=int, default=DEFAULT_CONTROL_PORT)
+    parser.add_argument("--mcp-port", type=int, default=DEFAULT_MCP_PORT)
     parser.add_argument("--ca-dir", type=Path, default=DEFAULT_CA_DIR)
     parser.add_argument("--private-dir", type=Path, default=DEFAULT_PRIVATE_DIR)
+    parser.add_argument("--mcp-persistent-dir", type=Path, default=DEFAULT_MCP_PERSISTENT_DIR)
     args = parser.parse_args()
     try:
         asyncio.run(
             _run(
                 proxy_port=args.proxy_port,
                 control_port=args.control_port,
+                mcp_port=args.mcp_port,
                 ca_dir=args.ca_dir,
                 private_dir=args.private_dir,
+                mcp_persistent_dir=args.mcp_persistent_dir,
             )
         )
     except KeyboardInterrupt:

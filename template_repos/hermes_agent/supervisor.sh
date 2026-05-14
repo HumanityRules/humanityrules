@@ -23,6 +23,7 @@ INTEGRATIONS_BROKER_CA_DIR="${DOH_RUN_DIR}/integrations-broker/ca"
 INTEGRATIONS_BROKER_PRIVATE_DIR="${DOH_RUN_DIR}/integrations-broker/private"
 INTEGRATIONS_BROKER_PROXY_PORT=9950
 INTEGRATIONS_BROKER_CONTROL_PORT=9951
+MCP_AGGREGATOR_PORT=9952
 AWS_SIGNER_PID=""
 INTEGRATIONS_BROKER_PID=""
 
@@ -103,11 +104,13 @@ start_integrations_broker() {
     "$HERMES_WEBUI_PYTHON" "${DOH_RUNTIME_DIR}/integrations_broker.py" \
         --proxy-port "$INTEGRATIONS_BROKER_PROXY_PORT" \
         --control-port "$INTEGRATIONS_BROKER_CONTROL_PORT" \
+        --mcp-port "$MCP_AGGREGATOR_PORT" \
         --ca-dir "$INTEGRATIONS_BROKER_CA_DIR" \
         --private-dir "$INTEGRATIONS_BROKER_PRIVATE_DIR" &
     INTEGRATIONS_BROKER_PID=$!
     wait_for_port "$INTEGRATIONS_BROKER_PROXY_PORT" "$INTEGRATIONS_BROKER_PID" "integrations-broker-proxy"
     wait_for_port "$INTEGRATIONS_BROKER_CONTROL_PORT" "$INTEGRATIONS_BROKER_PID" "integrations-broker-control"
+    wait_for_port "$MCP_AGGREGATOR_PORT" "$INTEGRATIONS_BROKER_PID" "mcp-aggregator"
 }
 
 export_webui_extension_env() {
