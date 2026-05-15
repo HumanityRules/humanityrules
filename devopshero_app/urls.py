@@ -124,6 +124,13 @@ urlpatterns = [
     path("api/pdp/evaluate", views.pdp_evaluate, name="pdp_evaluate"),
     #  - integrations_google_token_refresh: called by env-resident components (Hermes refresher) to get a fresh Google access token
     path("api/integrations/google/token", views.integrations_google_token_refresh, name="integrations_google_token_refresh"),
+    #  - Merge.dev Agent Handler: env-resident components (Hermes broker / MCP aggregator) reach Merge through these. Tenant-wide Merge API key lives only on DOH.
+    path("api/integrations/merge/ensure-registered-user", views.integrations_merge_ensure_registered_user, name="integrations_merge_ensure_registered_user"),
+    path("api/integrations/merge/link-token", views.integrations_merge_link_token, name="integrations_merge_link_token"),
+    path("api/integrations/merge/connectors", views.integrations_merge_connectors, name="integrations_merge_connectors"),
+    path("api/integrations/merge/connector-status", views.integrations_merge_connector_status, name="integrations_merge_connector_status"),
+    path("api/integrations/merge/disconnect", views.integrations_merge_disconnect, name="integrations_merge_disconnect"),
+    path("api/integrations/merge/mcp", views.integrations_merge_mcp, name="integrations_merge_mcp"),
 
     # Chat / Agent
     path("chat/app_deploy/<slug:workspace_slug>/<str:repo_owner>/<str:repo_name>/", views.chat_app_deploy, name="chat_app_deploy_with_owner"),

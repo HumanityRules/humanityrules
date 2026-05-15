@@ -783,6 +783,7 @@ class AppStack(Stack):
             env_bearer_environment_overlay = {
                 "DOH_ENV_SLUG": env_slug,
                 "DOH_CONTROL_PLANE_URL": _resolve_control_plane_url(),
+                "DOH_APP_SLUG": app_config.app_name,
             }
             if app_config.owner_username:
                 env_bearer_environment_overlay["DOH_OWNER_USERNAME"] = app_config.owner_username

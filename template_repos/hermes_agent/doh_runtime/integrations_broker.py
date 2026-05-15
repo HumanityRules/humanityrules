@@ -794,6 +794,19 @@ async def _handle_unified_status(
             "label": state.get("label", slug),
             "status": state.get("status", "unknown"),
         })
+    merge_response = await aggregator.handle_merge_connectors(request=request)
+    if merge_response.status_code == 200:
+        merge_payload = json.loads(merge_response.body.decode())
+        for connector in merge_payload.get("connectors", []):
+            items.append({
+                "kind": "merge_connector",
+                "slug": connector.get("slug"),
+                "label": connector.get("name"),
+                "logo_url": connector.get("logo_url"),
+                "status": connector.get("status", "unknown"),
+            })
+    else:
+        logger.error("merge connectors fan-out failed: status=%d", merge_response.status_code)
     return JSONResponse(content={
         "doh_control_plane_url": control_plane_url,
         "env_slug": env_slug,
@@ -892,6 +905,7 @@ async def _run(proxy_port: int, control_port: int, mcp_port: int, ca_dir: Path, 
     control_plane_url = _require_env(name="DOH_CONTROL_PLANE_URL")
     bearer = _require_env(name="DOH_ENV_BEARER")
     owner_username = _require_env(name="DOH_OWNER_USERNAME")
+    app_slug = _require_env(name="DOH_APP_SLUG")
     env_slug = os.environ.get("DOH_ENV_SLUG", "")
     logger.info(
         "starting integrations_broker for owner=%s env=%s against %s (proxy=%d, control=%d, mcp=%d)",
@@ -920,7 +934,13 @@ async def _run(proxy_port: int, control_port: int, mcp_port: int, ca_dir: Path, 
     public_base_url = os.environ.get("DOH_APP_PUBLIC_URL")
     mcp_persistent_dir.mkdir(parents=True, exist_ok=True)
     aggregator = mcp_aggregator.MCPAggregator(
-        port=mcp_port, persistent_dir=mcp_persistent_dir, public_base_url=public_base_url,
+        port=mcp_port,
+        persistent_dir=mcp_persistent_dir,
+        public_base_url=public_base_url,
+        doh_control_plane_url=control_plane_url,
+        doh_env_bearer=bearer,
+        doh_app_slug=app_slug,
+        doh_owner_username=owner_username,
     )
 
     control_app = _build_control_app(

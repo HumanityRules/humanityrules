@@ -96,3 +96,58 @@
 .doh-integration-btn-primary:hover {
   filter: brightness(1.1);
 }
+
+.doh-integration-card-title-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.doh-integration-logo {
+  width: 24px;
+  height: 24px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.08);
+  object-fit: contain;
+  flex-shrink: 0;
+}
+
+.doh-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 9999;
+}
+
+.doh-modal {
+  background: var(--bg, #1a1a1a);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 22px 24px;
+  max-width: 460px;
+  width: calc(100% - 48px);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.45);
+}
+
+.doh-modal-title {
+  font-size: 15px;
+  font-weight: 600;
+  margin-bottom: 10px;
+}
+
+.doh-modal-body {
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--muted);
+  margin-bottom: 18px;
+}
+
+.doh-modal-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}

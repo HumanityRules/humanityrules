@@ -86,6 +86,147 @@
     }
   }
 
+  // ── Merge connector flow ──────────────────────────────────────────
+
+  function showMergeExplainerModal(item, onContinue) {
+    const backdrop = elem('div', { class: 'doh-modal-backdrop' });
+    const close = () => backdrop.remove();
+    const modal = elem('div', { class: 'doh-modal' }, [
+      elem('div', { class: 'doh-modal-title' }, ['Connect ' + item.label]),
+      elem('div', { class: 'doh-modal-body' }, [
+        'You’ll authenticate in a new tab via Merge.dev, our integration broker. ' +
+        item.label + ' never sees your password — OAuth happens directly with the provider. ' +
+        'Close the tab when Merge says you’re done; this list will refresh automatically.',
+      ]),
+      elem('div', { class: 'doh-modal-actions' }, [
+        elem('button', {
+          class: 'doh-integration-btn',
+          onclick: close,
+        }, ['Cancel']),
+        elem('button', {
+          class: 'doh-integration-btn doh-integration-btn-primary',
+          onclick: () => { close(); onContinue(); },
+        }, ['Continue']),
+      ]),
+    ]);
+    backdrop.appendChild(modal);
+    backdrop.addEventListener('click', (e) => { if (e.target === backdrop) close(); });
+    document.body.appendChild(backdrop);
+  }
+
+  function showMergeWaitingModal(item, onCancel) {
+    const backdrop = elem('div', { class: 'doh-modal-backdrop' });
+    const modal = elem('div', { class: 'doh-modal' }, [
+      elem('div', { class: 'doh-modal-title' }, ['Waiting for ' + item.label + '…']),
+      elem('div', { class: 'doh-modal-body' }, [
+        'Complete authentication in the tab that just opened. When Merge confirms, ' +
+        'this dialog closes automatically.',
+      ]),
+      elem('div', { class: 'doh-modal-actions' }, [
+        elem('button', {
+          class: 'doh-integration-btn',
+          onclick: () => { backdrop.remove(); onCancel(); },
+        }, ['Cancel']),
+      ]),
+    ]);
+    backdrop.appendChild(modal);
+    document.body.appendChild(backdrop);
+    return backdrop;
+  }
+
+  async function startMergeConnect(item) {
+    showMergeExplainerModal(item, async () => {
+      let resp;
+      try {
+        resp = await fetch('/__doh_broker/integrations/merge/link-token', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ connector_slug: item.slug }),
+        });
+      } catch (_) {
+        alert('Could not reach the integrations broker. Try again.');
+        return;
+      }
+      if (!resp.ok) {
+        alert('Merge link-token request failed.');
+        return;
+      }
+      const data = await resp.json();
+      if (!data.magic_link_url) {
+        alert('Merge did not return a magic link.');
+        return;
+      }
+      window.open(data.magic_link_url, '_blank');
+
+      let stopped = false;
+      const waiting = showMergeWaitingModal(item, () => { stopped = true; });
+      const start = Date.now();
+      const intervalMs = 3000;
+      const timeoutMs = 5 * 60 * 1000;
+      const tick = async () => {
+        if (stopped) return;
+        if (Date.now() - start > timeoutMs) {
+          stopped = true;
+          waiting.remove();
+          return;
+        }
+        try {
+          const r = await fetch(
+            '/__doh_broker/integrations/merge/connector-status?connector_slug=' + encodeURIComponent(item.slug),
+            { cache: 'no-store' },
+          );
+          if (r.ok) {
+            const s = await r.json();
+            if (s.status === 'connected') {
+              stopped = true;
+              waiting.remove();
+              await refreshAndRender();
+              return;
+            }
+          }
+        } catch (_) { /* keep polling */ }
+        setTimeout(tick, intervalMs);
+      };
+      setTimeout(tick, intervalMs);
+    });
+  }
+
+  function renderMergeConnectorCard(item) {
+    const card = elem('div', { class: 'doh-integration-card', dataset: { provider: 'merge:' + item.slug } });
+    const titleRow = elem('div', { class: 'doh-integration-card-title-row' });
+    if (item.logo_url) {
+      titleRow.appendChild(elem('img', { class: 'doh-integration-logo', src: item.logo_url, alt: '' }));
+    }
+    titleRow.appendChild(elem('div', { class: 'doh-integration-card-title' }, [item.label || item.slug]));
+    const header = elem('div', { class: 'doh-integration-card-head' }, [
+      titleRow,
+      elem('div', { class: 'doh-integration-card-status', dataset: { status: item.status } }, [statusLabelFor(item.status)]),
+    ]);
+    card.appendChild(header);
+
+    const body = elem('div', { class: 'doh-integration-card-body' });
+    if (item.status === 'connected') {
+      body.appendChild(elem('button', {
+        class: 'doh-integration-btn doh-integration-btn-secondary',
+        onclick: async () => {
+          await fetch('/__doh_broker/integrations/merge/disconnect', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ connector_slug: item.slug }),
+          });
+          await refreshAndRender();
+        },
+      }, ['Disconnect']));
+    } else {
+      body.appendChild(elem('button', {
+        class: 'doh-integration-btn doh-integration-btn-primary',
+        onclick: () => startMergeConnect(item),
+      }, ['Connect ' + (item.label || item.slug)]));
+    }
+    card.appendChild(body);
+    return card;
+  }
+
   function renderTlsInterceptCard(item, payload) {
     const returnTo = window.location.origin + window.location.pathname;
     const card = elem('div', { class: 'doh-integration-card', dataset: { provider: item.slug } });
@@ -185,6 +326,8 @@
           list.appendChild(renderTlsInterceptCard(item, payload));
         } else if (item.kind === 'mcp_aggregator') {
           list.appendChild(renderMcpAggregatorCard(item));
+        } else if (item.kind === 'merge_connector') {
+          list.appendChild(renderMergeConnectorCard(item));
         }
       }
     }
