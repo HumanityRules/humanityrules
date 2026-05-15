@@ -192,22 +192,17 @@
   }
 
   function renderMergeConnectorCard(item) {
-    const card = elem('div', { class: 'doh-integration-card', dataset: { provider: 'merge:' + item.slug } });
+    const card = elem('div', { class: 'doh-integration-card doh-integration-card-row', dataset: { provider: 'merge:' + item.slug } });
     const titleRow = elem('div', { class: 'doh-integration-card-title-row' });
     if (item.logo_url) {
       titleRow.appendChild(elem('img', { class: 'doh-integration-logo', src: item.logo_url, alt: '' }));
     }
     titleRow.appendChild(elem('div', { class: 'doh-integration-card-title' }, [item.label || item.slug]));
-    const header = elem('div', { class: 'doh-integration-card-head' }, [
-      titleRow,
-      elem('div', { class: 'doh-integration-card-status', dataset: { status: item.status } }, [statusLabelFor(item.status)]),
-    ]);
-    card.appendChild(header);
 
-    const body = elem('div', { class: 'doh-integration-card-body' });
+    let actionBtn;
     if (item.status === 'connected') {
-      body.appendChild(elem('button', {
-        class: 'doh-integration-btn doh-integration-btn-secondary',
+      actionBtn = elem('button', {
+        class: 'doh-integration-btn',
         onclick: async () => {
           await fetch('/__doh_broker/integrations/merge/disconnect', {
             method: 'POST',
@@ -216,14 +211,19 @@
           });
           await refreshAndRender();
         },
-      }, ['Disconnect']));
+      }, ['Disconnect']);
     } else {
-      body.appendChild(elem('button', {
-        class: 'doh-integration-btn doh-integration-btn-primary',
+      actionBtn = elem('button', {
+        class: 'doh-integration-btn',
         onclick: () => startMergeConnect(item),
-      }, ['Connect ' + (item.label || item.slug)]));
+      }, ['Connect']);
     }
-    card.appendChild(body);
+
+    const trailing = elem('div', { class: 'doh-integration-card-trailing' }, [
+      actionBtn,
+      elem('div', { class: 'doh-integration-card-status', dataset: { status: item.status } }, [statusLabelFor(item.status)]),
+    ]);
+    card.appendChild(elem('div', { class: 'doh-integration-card-head' }, [titleRow, trailing]));
     return card;
   }
 
