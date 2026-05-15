@@ -225,9 +225,15 @@ class MCPAggregator:
         elif kind == "doh_relay":
             url = self._doh_control_plane_url + cfg["doh_relay_path"]
             bearer = self._doh_env_bearer
+            app_slug = self._doh_app_slug
+            owner_username = self._doh_owner_username
 
             async def factory() -> Client:
-                return Client(url, headers={"Authorization": f"Bearer {bearer}"})
+                return Client(url, headers={
+                    "Authorization": f"Bearer {bearer}",
+                    "X-Doh-App-Slug": app_slug,
+                    "X-Doh-Owner-Username": owner_username,
+                })
         else:
             raise RuntimeError(f"unknown auth_kind for {slug}: {kind!r}")
 
