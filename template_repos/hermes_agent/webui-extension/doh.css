@@ -1,17 +1,38 @@
-/* DOH WebUI extension — Integrations pane.
+/* DOH WebUI extension — Integrations panel.
    Scoped to our own class names so upstream CSS can't accidentally target us. */
+
+.doh-integration-panel-head {
+  padding: 10px 12px 6px;
+  flex-shrink: 0;
+}
+
+.doh-integration-panel-title {
+  font-size: 11px;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.doh-integration-panel-meta {
+  font-size: 11px;
+  color: var(--muted);
+  margin-top: 4px;
+  line-height: 1.5;
+}
 
 .doh-integration-list {
   display: flex;
   flex-direction: column;
-  gap: 12px;
-  margin-top: 8px;
+  gap: 10px;
+  padding: 4px 12px 12px;
+  overflow-y: auto;
+  flex: 1;
 }
 
 .doh-integration-empty {
   color: var(--muted);
-  font-size: 13px;
-  padding: 16px 0;
+  font-size: 12px;
+  padding: 12px 0;
 }
 
 .doh-integration-card {

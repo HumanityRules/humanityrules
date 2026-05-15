@@ -1,7 +1,7 @@
 // DOH WebUI extension. Loaded per Hermes' docs/EXTENSIONS.md via the
 // HERMES_WEBUI_EXTENSION_* env vars exported in supervisor.sh.
 //
-// Adds an "Integrations" section to the WebUI's Settings panel, rendering
+// Adds an "Integrations" tab to the WebUI's main left sidebar nav, rendering
 // per-provider cards from the integrations broker's unified control API. The
 // broker is reached same-origin via the WebUI reverse-proxy patch
 // (patches-webui/07-doh-broker-proxy.patch). Connect / Disconnect for TLS-
@@ -295,43 +295,31 @@
   }
 
   function renderPane(payload) {
-    const pane = document.getElementById('settingsPaneIntegrations');
-    if (!pane) return;
-    pane.innerHTML = '';
-
-    const head = elem('div', { class: 'settings-section-head' }, [
-      elem('div', null, [
-        elem('div', { class: 'settings-section-title' }, ['Integrations']),
-        elem('div', { class: 'settings-section-meta' }, [
-          'Third-party accounts the agent can act on. Managed by the platform.',
-        ]),
-      ]),
-    ]);
-    pane.appendChild(head);
+    const list = document.getElementById('dohIntegrationList');
+    if (!list) return;
+    list.innerHTML = '';
 
     if (!payload) {
-      pane.appendChild(elem('div', { class: 'doh-integration-empty' }, [
+      list.appendChild(elem('div', { class: 'doh-integration-empty' }, [
         'Integration status is unavailable. If this persists, the platform broker may not be running.',
       ]));
       return;
     }
 
-    const list = elem('div', { class: 'doh-integration-list' });
     const items = payload.items || [];
     if (items.length === 0) {
       list.appendChild(elem('div', { class: 'doh-integration-empty' }, ['No integrations configured.']));
-    } else {
-      for (const item of items) {
-        if (item.kind === 'tls_intercept') {
-          list.appendChild(renderTlsInterceptCard(item, payload));
-        } else if (item.kind === 'mcp_aggregator') {
-          list.appendChild(renderMcpAggregatorCard(item));
-        } else if (item.kind === 'merge_connector') {
-          list.appendChild(renderMergeConnectorCard(item));
-        }
+      return;
+    }
+    for (const item of items) {
+      if (item.kind === 'tls_intercept') {
+        list.appendChild(renderTlsInterceptCard(item, payload));
+      } else if (item.kind === 'mcp_aggregator') {
+        list.appendChild(renderMcpAggregatorCard(item));
+      } else if (item.kind === 'merge_connector') {
+        list.appendChild(renderMergeConnectorCard(item));
       }
     }
-    pane.appendChild(list);
   }
 
   async function refreshAndRender() {
@@ -366,79 +354,70 @@
     return connected ? 'connected' : 'disconnected';
   }
 
-  function ensureMenuItemAndPane() {
-    const menu = document.getElementById('settingsMenu');
-    const main = document.querySelector('#mainSettings .settings-main');
-    if (!menu || !main) return false;
-    if (document.getElementById('dohIntegrationsMenuItem')) return true;
+  function ensureSidebarTabAndPane() {
+    const sidebar = document.querySelector('.sidebar');
+    const nav = sidebar && sidebar.querySelector('.sidebar-nav');
+    if (!sidebar || !nav) return false;
+    if (document.getElementById('dohIntegrationsTab')) return true;
 
-    // Menu item, after the last existing one.
     const btn = elem('button', {
       type: 'button',
-      class: 'side-menu-item',
-      id: 'dohIntegrationsMenuItem',
-      dataset: { settingsSection: 'integrations' },
-      onclick: () => showIntegrationsSection(),
-    }, []);
-    // Plug icon.
-    btn.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 2v6M15 2v6M6 8h12v4a6 6 0 0 1-12 0zM12 18v4"/></svg><span>Integrations</span>';
-    menu.appendChild(btn);
+      class: 'nav-tab',
+      id: 'dohIntegrationsTab',
+      title: 'Integrations',
+      dataset: { panel: 'integrations', label: 'Integrations' },
+      onclick: () => { if (typeof window.switchPanel === 'function') window.switchPanel('integrations'); },
+    });
+    // Plug icon, sized to match the other nav-tab SVGs.
+    btn.innerHTML = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 2v6M15 2v6M6 8h12v4a6 6 0 0 1-12 0zM12 18v4"/></svg>';
+    nav.appendChild(btn);
 
-    // Pane under .settings-main. Same shape as upstream panes.
-    const pane = elem('div', { class: 'settings-pane', id: 'settingsPaneIntegrations' });
-    main.appendChild(pane);
+    // Build the panel-view body. Upstream's switchPanel toggles `.active` on
+    // any element with id `panel<Name>` and class `panel-view`, so we follow
+    // the same shape — no additional wiring needed for activation.
+    const pane = elem('div', { class: 'panel-view', id: 'panelIntegrations' }, [
+      elem('div', { class: 'doh-integration-panel-head' }, [
+        elem('div', { class: 'doh-integration-panel-title' }, ['Integrations']),
+        elem('div', { class: 'doh-integration-panel-meta' }, [
+          'Third-party accounts the agent can act on.',
+        ]),
+      ]),
+      elem('div', { class: 'doh-integration-list', id: 'dohIntegrationList' }),
+    ]);
+    const bottom = sidebar.querySelector('.sidebar-bottom');
+    if (bottom) sidebar.insertBefore(pane, bottom);
+    else sidebar.appendChild(pane);
     return true;
   }
 
-  function showIntegrationsSection() {
-    // Deactivate upstream menu items + panes, activate ours. We bypass
-    // upstream's switchSettingsSection because its allow-list doesn't include
-    // our name.
-    document.querySelectorAll('#settingsMenu .side-menu-item').forEach((it) => {
-      it.classList.toggle('active', it.id === 'dohIntegrationsMenuItem');
-    });
-    document.querySelectorAll('#mainSettings .settings-pane').forEach((p) => {
-      p.classList.toggle('active', p.id === 'settingsPaneIntegrations');
-    });
-    // Mobile dropdown (if present) won't have our value; clear selection.
-    const dd = document.getElementById('settingsSectionDropdown');
-    if (dd) dd.value = '';
-    refreshAndRender();
-  }
-
-  // Wrap upstream switchSettingsSection so clicks on the other menu items
-  // correctly deactivate our pane. Upstream's function only toggles its own
-  // known panes, leaving ours stuck ".active" from the previous visit.
-  function wrapSwitchSettingsSection() {
-    if (typeof window.switchSettingsSection !== 'function') return;
-    if (window.__dohSettingsWrapped) return;
-    window.__dohSettingsWrapped = true;
-    const orig = window.switchSettingsSection;
-    window.switchSettingsSection = function (name) {
-      const ours = document.getElementById('settingsPaneIntegrations');
-      if (ours) ours.classList.remove('active');
-      const ourBtn = document.getElementById('dohIntegrationsMenuItem');
-      if (ourBtn) ourBtn.classList.remove('active');
-      return orig.apply(this, arguments);
+  // Wrap upstream switchPanel so opening our tab refreshes the broker view.
+  function wrapSwitchPanel() {
+    if (typeof window.switchPanel !== 'function') return;
+    if (window.__dohPanelWrapped) return;
+    window.__dohPanelWrapped = true;
+    const orig = window.switchPanel;
+    window.switchPanel = async function (name) {
+      const result = await orig.apply(this, arguments);
+      if (name === 'integrations') await refreshAndRender();
+      return result;
     };
   }
 
   function init() {
-    if (!ensureMenuItemAndPane()) {
-      // Settings DOM not ready yet; retry on the next animation frame.
+    if (!ensureSidebarTabAndPane()) {
+      // Sidebar DOM not ready yet; retry on the next animation frame.
       // Happens on fresh page loads where the extension script runs before
-      // panels render.
+      // the sidebar renders.
       requestAnimationFrame(init);
       return;
     }
-    wrapSwitchSettingsSection();
+    wrapSwitchPanel();
 
     const sentinel = consumeReturnSentinel();
     if (sentinel) {
       // User just came back from DOH's start/disconnect. Route them straight
-      // to the Integrations pane and nudge the broker to refresh now.
-      if (typeof window.switchPanel === 'function') window.switchPanel('settings');
-      showIntegrationsSection();
+      // to the Integrations panel and nudge the broker to refresh now.
+      if (typeof window.switchPanel === 'function') window.switchPanel('integrations');
       refreshAfterFlow();
     }
   }
