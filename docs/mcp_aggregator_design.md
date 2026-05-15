@@ -113,12 +113,17 @@ A standard MCP server (Streamable HTTP on `127.0.0.1:9952/mcp`) that:
 
 ## What the aggregator exposes for the WebUI
 
-Control/OAuth endpoints on the same port (`127.0.0.1:9952`), proxied by the WebUI at `/__mcp_aggregator/*`:
+The aggregator owns the OAuth handlers (DCR, callback, status, disconnect) but they're mounted by the integrations_broker's unified Starlette router on `127.0.0.1:9951` under `/__doh_broker/integrations/`, alongside Google's TLS-intercept controls and Merge's DOH-relay passthroughs. Port 9952 is sandbox-only MCP transport; the browser never reaches it.
 
-- `GET /oauth/<provider>/start?return_to=...` — initiate DCR + authorize.
-- `GET /oauth/callback?code=...&state=...` — exchange code, store tokens.
-- `GET /status` — per-provider connection state.
-- `POST /disconnect/<provider>` — drop tokens, revoke, notify Hermes.
+`MCPAggregator.routes(prefix=...)` returns the Starlette routes the broker splats into its router:
+
+- `GET /__doh_broker/integrations/<provider>/oauth/start?return_to=...` — initiate DCR + authorize.
+- `GET /__doh_broker/integrations/<provider>/oauth/callback?code=...&state=...` — exchange code, store tokens.
+- `POST /__doh_broker/integrations/<provider>/disconnect` — drop tokens, revoke, notify Hermes.
+
+`GET /__doh_broker/integrations` returns a unified flat list of all integrations (TLS-intercept providers like Google + MCP-aggregator providers like Notion + Merge per-connector cards), each tagged with a `kind` discriminator the WebUI uses to dispatch the right click handlers.
+
+The aggregator also exposes a second kind of upstream — `auth_kind="doh_relay"` — used for Merge.dev: instead of holding OAuth tokens directly, the ProxyProvider's `client_factory` builds a `StreamableHttpTransport` pointed at a DOH relay endpoint with `DOH_ENV_BEARER` + identity headers attached. See `merge_integration_design.md`.
 
 ## Nono profile changes
 
