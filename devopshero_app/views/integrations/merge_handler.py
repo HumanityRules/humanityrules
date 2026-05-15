@@ -14,6 +14,7 @@ taking over the slug starts fresh.
 
 import json
 import logging
+import re
 
 import httpx
 from django.conf import settings
@@ -34,6 +35,15 @@ MERGE_REQUEST_TIMEOUT_SECONDS = 30
 MERGE_MCP_CONNECT_TIMEOUT_SECONDS = 10
 MERGE_MCP_READ_TIMEOUT_SECONDS = 600
 
+# Merge POST /registered-users is NOT idempotent; on duplicate it returns 400
+# with `{"non_field_errors": ["User of origin_id: ... already exists. ... PATCH
+# /registered-users/<UUID> endpoint."]}`. We parse the UUID out of that string
+# rather than maintaining a DB cache — the operation is rare and bounded.
+_DUPLICATE_USER_UUID_RE = re.compile(
+    r"already exists.*registered-users/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})",
+    re.IGNORECASE,
+)
+
 
 def _origin_user_id(*, user: User, app_slug: str) -> str:
     return f"doh_{user.pk}_{app_slug}"
@@ -42,9 +52,9 @@ def _origin_user_id(*, user: User, app_slug: str) -> str:
 def _resolve_caller(request: HttpRequest) -> tuple[App, User] | JsonResponse:
     """Validate the bearer and resolve the (App, User) pair the call is for.
 
-    Body must be JSON with `app_slug`. The env's owner_username is read from
-    the bearer-resolved Environment's tagging (passed by the broker in
-    `owner_username`). Returns a JsonResponse on any auth failure.
+    Identity is read first from `X-Doh-App-Slug` / `X-Doh-Owner-Username`
+    headers (used by the MCP relay, where the body is the JSON-RPC payload),
+    and falls back to query string / JSON body for the other endpoints.
     """
     raw_token = env_bearer_auth.extract_bearer_token(request=request)
     if raw_token is None:
@@ -53,16 +63,19 @@ def _resolve_caller(request: HttpRequest) -> tuple[App, User] | JsonResponse:
     if environment is None:
         return JsonResponse({"error": "invalid bearer token"}, status=401)
 
-    if request.method == "GET":
-        app_slug = request.GET.get("app_slug", "")
-        owner_username = request.GET.get("owner_username", "")
-    else:
-        try:
-            payload = json.loads(request.body)
-        except json.JSONDecodeError:
-            return JsonResponse({"error": "invalid JSON body"}, status=400)
-        app_slug = payload.get("app_slug", "")
-        owner_username = payload.get("owner_username", "")
+    app_slug = request.headers.get("X-Doh-App-Slug", "")
+    owner_username = request.headers.get("X-Doh-Owner-Username", "")
+    if not app_slug or not owner_username:
+        if request.method == "GET":
+            app_slug = app_slug or request.GET.get("app_slug", "")
+            owner_username = owner_username or request.GET.get("owner_username", "")
+        else:
+            try:
+                payload = json.loads(request.body) if request.body else {}
+            except json.JSONDecodeError:
+                payload = {}
+            app_slug = app_slug or payload.get("app_slug", "")
+            owner_username = owner_username or payload.get("owner_username", "")
 
     if not isinstance(app_slug, str) or not app_slug:
         return JsonResponse({"error": "app_slug is required"}, status=400)
@@ -98,33 +111,66 @@ def _tool_pack_or_500() -> str | JsonResponse:
 
 
 def _ensure_registered_user_remote(*, user: User, app_slug: str, api_key: str) -> tuple[str | None, str | None]:
-    """POST /api/v1/registered-users on Merge (idempotent on origin_user_id).
+    """POST /api/v1/registered-users on Merge.
+
+    Merge does NOT make this endpoint idempotent — duplicate POSTs return 400
+    with the existing UUID embedded in `non_field_errors`. We parse it out.
 
     Returns `(registered_user_id, error_message)` — exactly one is None.
     """
     body = {
         "origin_user_id": _origin_user_id(user=user, app_slug=app_slug),
         "origin_user_name": app_slug,
-        "origin_user_email": user.email or "",
     }
     try:
         response = httpx.post(
-            f"{MERGE_API_BASE}/api/v1/registered-users",
+            f"{MERGE_API_BASE}/api/v1/registered-users/",
             headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
             json=body,
             timeout=MERGE_REQUEST_TIMEOUT_SECONDS,
         )
     except httpx.HTTPError as exc:
         return None, f"network: {exc}"
-    if response.status_code not in (200, 201):
+
+    if response.status_code in (200, 201):
+        try:
+            rid = response.json().get("id")
+        except ValueError:
+            return None, "non-json response on create"
+        if not isinstance(rid, str) or not rid:
+            return None, "missing id in create response"
+        return rid, None
+
+    # Duplicate path — extract the existing UUID from the error message.
+    if response.status_code == 400:
+        try:
+            errs = response.json().get("non_field_errors") or []
+        except ValueError:
+            errs = []
+        for msg in errs:
+            match = _DUPLICATE_USER_UUID_RE.search(msg)
+            if match:
+                return match.group(1), None
+
+    return None, f"http {response.status_code}: {response.text[:300]}"
+
+
+def _fetch_registered_user(*, registered_user_id: str, api_key: str) -> tuple[dict | None, str | None]:
+    """GET /api/v1/registered-users/{id}/ — returns the full record including authenticated_connectors."""
+    try:
+        response = httpx.get(
+            f"{MERGE_API_BASE}/api/v1/registered-users/{registered_user_id}/",
+            headers={"Authorization": f"Bearer {api_key}"},
+            timeout=MERGE_REQUEST_TIMEOUT_SECONDS,
+        )
+    except httpx.HTTPError as exc:
+        return None, f"network: {exc}"
+    if response.status_code != 200:
         return None, f"http {response.status_code}: {response.text[:300]}"
     try:
-        rid = response.json().get("registered_user_id")
+        return response.json(), None
     except ValueError:
         return None, "non-json response"
-    if not isinstance(rid, str) or not rid:
-        return None, "missing registered_user_id in response"
-    return rid, None
 
 
 @csrf_exempt
@@ -173,12 +219,12 @@ def integrations_merge_link_token(request: HttpRequest) -> JsonResponse:
         logger.error("merge link-token: ensure failed: %s", error)
         return JsonResponse({"error": "merge ensure failed"}, status=502)
 
-    body: dict = {}
-    if connector_slug:
-        body["connector_slug"] = connector_slug
+    if not connector_slug:
+        return JsonResponse({"error": "connector_slug is required"}, status=400)
+    body = {"connector": connector_slug}
     try:
         response = httpx.post(
-            f"{MERGE_API_BASE}/api/registered-users/{rid}/link-token",
+            f"{MERGE_API_BASE}/api/v1/registered-users/{rid}/link-token/",
             headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
             json=body,
             timeout=MERGE_REQUEST_TIMEOUT_SECONDS,
@@ -186,7 +232,7 @@ def integrations_merge_link_token(request: HttpRequest) -> JsonResponse:
     except httpx.HTTPError as exc:
         logger.error("merge link-token network failure: %s", exc)
         return JsonResponse({"error": "merge upstream error"}, status=502)
-    if response.status_code != 200:
+    if response.status_code not in (200, 201):
         logger.error("merge link-token http %d: %s", response.status_code, response.text[:300])
         return JsonResponse({"error": "merge link-token failed"}, status=502)
     try:
@@ -220,29 +266,13 @@ def _fetch_tool_pack_connectors(*, api_key: str, tool_pack_id: str) -> tuple[lis
     return None, "unexpected catalog shape"
 
 
-def _fetch_user_connections(*, api_key: str, registered_user_id: str) -> tuple[set[str] | None, str | None]:
-    """Return the set of connector slugs the registered user has authenticated."""
-    try:
-        response = httpx.get(
-            f"{MERGE_API_BASE}/api/v1/registered-users/{registered_user_id}/connections/",
-            headers={"Authorization": f"Bearer {api_key}"},
-            timeout=MERGE_REQUEST_TIMEOUT_SECONDS,
-        )
-    except httpx.HTTPError as exc:
-        return None, f"network: {exc}"
-    if response.status_code != 200:
-        return None, f"http {response.status_code}: {response.text[:300]}"
-    try:
-        data = response.json()
-    except ValueError:
-        return None, "non-json response"
-    connected: set[str] = set()
-    rows = data if isinstance(data, list) else data.get("results", [])
-    for row in rows:
-        slug = row.get("connector_slug") or row.get("slug")
-        if isinstance(slug, str) and slug:
-            connected.add(slug)
-    return connected, None
+def _authenticated_connectors(*, api_key: str, registered_user_id: str) -> tuple[set[str] | None, str | None]:
+    """Pull the `authenticated_connectors` array off the Registered User record."""
+    record, error = _fetch_registered_user(registered_user_id=registered_user_id, api_key=api_key)
+    if error is not None:
+        return None, error
+    raw = record.get("authenticated_connectors") or []
+    return {slug for slug in raw if isinstance(slug, str)}, None
 
 
 @csrf_exempt
@@ -270,7 +300,7 @@ def integrations_merge_connectors(request: HttpRequest) -> JsonResponse:
     if cat_error is not None:
         logger.error("merge tool-pack catalog failed: %s", cat_error)
         return JsonResponse({"error": "merge catalog failed"}, status=502)
-    connected, conn_error = _fetch_user_connections(api_key=api_key, registered_user_id=rid)
+    connected, conn_error = _authenticated_connectors(api_key=api_key, registered_user_id=rid)
     if conn_error is not None:
         logger.error("merge user connections failed: %s", conn_error)
         return JsonResponse({"error": "merge connections failed"}, status=502)
@@ -311,7 +341,7 @@ def integrations_merge_connector_status(request: HttpRequest) -> JsonResponse:
         logger.error("merge connector-status: ensure failed: %s", error)
         return JsonResponse({"error": "merge ensure failed"}, status=502)
 
-    connected, conn_error = _fetch_user_connections(api_key=api_key, registered_user_id=rid)
+    connected, conn_error = _authenticated_connectors(api_key=api_key, registered_user_id=rid)
     if conn_error is not None:
         logger.error("merge connector-status connections failed: %s", conn_error)
         return JsonResponse({"error": "merge connections failed"}, status=502)
@@ -349,7 +379,7 @@ def integrations_merge_disconnect(request: HttpRequest) -> JsonResponse:
 
     try:
         response = httpx.delete(
-            f"{MERGE_API_BASE}/api/v1/registered-users/{rid}/connections/{connector_slug}",
+            f"{MERGE_API_BASE}/api/v1/credentials/registered-users/{rid}/connectors/{connector_slug}/",
             headers={"Authorization": f"Bearer {api_key}"},
             timeout=MERGE_REQUEST_TIMEOUT_SECONDS,
         )
@@ -390,7 +420,7 @@ def integrations_merge_mcp(request: HttpRequest) -> StreamingHttpResponse | Json
         logger.error("merge mcp: ensure failed: %s", error)
         return JsonResponse({"error": "merge ensure failed"}, status=502)
 
-    upstream_url = f"{MERGE_API_BASE}/api/v1/tool-packs/{pack_id}/registered-users/{rid}/mcp"
+    upstream_url = f"{MERGE_API_BASE}/api/v1/tool-packs/{pack_id}/registered-users/{rid}/mcp/"
     upstream_headers = {
         "Authorization": f"Bearer {api_key}",
         "Content-Type": request.headers.get("Content-Type", "application/json"),

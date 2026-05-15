@@ -116,41 +116,45 @@ class TestControlKick(unittest.IsolatedAsyncioTestCase):
         broker._host_token.clear()
         broker._provider_refresh_locks.clear()
 
-    async def test_kick_refreshes_before_returning_status(self) -> None:
+    async def test_kick_refreshes_before_returning_unified_status(self) -> None:
+        """POST /integrations/google/kick should refresh, then return the unified items list."""
+        from starlette.testclient import TestClient
+
         for slug in broker.PROVIDERS:
             broker._provider_refresh_locks[slug] = asyncio.Lock()
 
-        async def _handle(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
-            await broker._handle_control_conn(
-                reader=reader,
-                writer=writer,
-                control_plane_url="https://doh.example",
-                bearer="env-bearer",
-                owner_username="vmendi",
-                env_slug="default",
-            )
+        # Stub MCPAggregator with the minimal surface our unified status + control app need.
+        class _StubAggregator:
+            async def handle_status(self, request):
+                from starlette.responses import JSONResponse
+                return JSONResponse(content={"providers": {}})
+            async def handle_merge_connectors(self, request):
+                from starlette.responses import JSONResponse
+                return JSONResponse(content={"connectors": []}, status_code=502)
+            def routes(self, prefix):
+                return []
+
+        app = broker._build_control_app(
+            aggregator=_StubAggregator(),
+            control_plane_url="https://doh.example",
+            bearer="env-bearer",
+            owner_username="vmendi",
+            env_slug="default",
+        )
 
         with patch.object(
             broker,
             "_fetch_provider_token",
             return_value={"kind": "ok", "access_token": "fresh-token", "expires_in": 3600},
         ) as fetch_mock:
-            server = await asyncio.start_server(_handle, host="127.0.0.1", port=0)
-            try:
-                port = server.sockets[0].getsockname()[1]
-                reader, writer = await asyncio.open_connection(host="127.0.0.1", port=port)
-                writer.write(b"POST /kick HTTP/1.1\r\nHost: broker\r\nContent-Length: 0\r\n\r\n")
-                await writer.drain()
-                response = await reader.read()
-                writer.close()
-                await writer.wait_closed()
-            finally:
-                server.close()
-                await server.wait_closed()
+            with TestClient(app) as client:
+                resp = client.post("/integrations/google/kick")
+                self.assertEqual(resp.status_code, 200)
+                payload = resp.json()
 
-        body = response.split(b"\r\n\r\n", 1)[1]
-        payload = json.loads(body.decode())
-        self.assertEqual(payload["providers"]["google"]["status"], "connected")
+        items_by_slug = {item["slug"]: item for item in payload["items"]}
+        self.assertEqual(items_by_slug["google"]["kind"], "tls_intercept")
+        self.assertEqual(items_by_slug["google"]["status"], "connected")
         self.assertEqual(
             await broker._current_token_for_host(host="gmail.googleapis.com"),
             "fresh-token",
