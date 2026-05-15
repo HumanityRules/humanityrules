@@ -2,21 +2,18 @@
 // HERMES_WEBUI_EXTENSION_* env vars exported in supervisor.sh.
 //
 // Adds an "Integrations" section to the WebUI's Settings panel, rendering
-// per-provider cards from the integrations broker's control API. The
+// per-provider cards from the integrations broker's unified control API. The
 // broker is reached same-origin via the WebUI reverse-proxy patch
-// (patches-webui/07-doh-broker-proxy.patch). Connect / Disconnect are
-// top-level navigations to DOH's control plane; we never call DOH
-// cross-origin.
+// (patches-webui/07-doh-broker-proxy.patch). Connect / Disconnect for TLS-
+// intercept providers (Google) are top-level navigations to DOH's control
+// plane; MCP-aggregator providers (Notion) flow entirely through the broker.
 (() => {
   'use strict';
 
-  const STATUS_URL = '/__doh_broker/status';
-  const KICK_URL = '/__doh_broker/kick';
-  const MCP_STATUS_URL = '/__mcp_aggregator/status';
-  const MCP_DISCONNECT_URL = '/__mcp_aggregator/disconnect/';
+  const INTEGRATIONS_URL = '/__doh_broker/integrations';
+  const KICK_URL = '/__doh_broker/integrations/google/kick';
 
-  let _currentStatus = null;
-  let _mcpStatus = null;
+  let _current = null;
 
   function elem(tag, props, children) {
     const el = document.createElement(tag);
@@ -42,9 +39,9 @@
     try { return new Date(iso).toLocaleString(); } catch (_) { return iso; }
   }
 
-  async function fetchStatus() {
+  async function fetchIntegrations() {
     try {
-      const response = await fetch(STATUS_URL, { cache: 'no-store' });
+      const response = await fetch(INTEGRATIONS_URL, { cache: 'no-store' });
       if (!response.ok) return null;
       return await response.json();
     } catch (_) {
@@ -52,7 +49,7 @@
     }
   }
 
-  async function kickBroker() {
+  async function kickGoogle() {
     try {
       const response = await fetch(KICK_URL, { method: 'POST', cache: 'no-store' });
       if (!response.ok) return null;
@@ -61,119 +58,102 @@
     return null;
   }
 
-  async function fetchMcpStatus() {
-    try {
-      const response = await fetch(MCP_STATUS_URL, { cache: 'no-store' });
-      if (!response.ok) return null;
-      return await response.json();
-    } catch (_) {
-      return null;
+  function buildGoogleConnectUrl(payload, returnTo) {
+    const rd = encodeURIComponent(returnTo);
+    return payload.doh_control_plane_url.replace(/\/$/, '') + '/integrations/google/start?rd=' + rd;
+  }
+
+  function buildGoogleDisconnectUrl(payload, returnTo) {
+    const rd = encodeURIComponent(returnTo);
+    return payload.doh_control_plane_url.replace(/\/$/, '') + '/integrations/google/disconnect?rd=' + rd;
+  }
+
+  function buildMcpConnectUrl(slug) {
+    const returnTo = encodeURIComponent(window.location.origin + window.location.pathname);
+    const origin = encodeURIComponent(window.location.origin);
+    return '/__doh_broker/integrations/' + slug + '/oauth/start?return_to=' + returnTo + '&origin=' + origin;
+  }
+
+  function statusLabelFor(status) {
+    switch (status) {
+      case 'connected': return 'Connected';
+      case 'not_connected': return 'Not connected';
+      case 'token_expired': return 'Token expired';
+      case 'revoked': return 'Revoked';
+      case 'transient_error': return 'Checking…';
+      case 'starting': return 'Starting…';
+      default: return '—';
     }
   }
 
-  function buildConnectUrl(status, returnTo) {
-    const rd = encodeURIComponent(returnTo);
-    return status.doh_control_plane_url.replace(/\/$/, '') + '/integrations/google/start?rd=' + rd;
-  }
-
-  function buildDisconnectUrl(status, returnTo) {
-    const rd = encodeURIComponent(returnTo);
-    return status.doh_control_plane_url.replace(/\/$/, '') + '/integrations/google/disconnect?rd=' + rd;
-  }
-
-  function buildMcpConnectUrl(provider) {
-    const returnTo = encodeURIComponent(window.location.origin + window.location.pathname);
-    const origin = encodeURIComponent(window.location.origin);
-    return '/__mcp_aggregator/oauth/' + provider + '/start?return_to=' + returnTo + '&origin=' + origin;
-  }
-
-  function renderMcpProviderCard(providerKey, providerState) {
-    const label = providerState.label || providerKey;
-    const card = elem('div', { class: 'doh-integration-card', dataset: { provider: providerKey } });
+  function renderTlsInterceptCard(item, payload) {
+    const returnTo = window.location.origin + window.location.pathname;
+    const card = elem('div', { class: 'doh-integration-card', dataset: { provider: item.slug } });
     const header = elem('div', { class: 'doh-integration-card-head' }, [
-      elem('div', { class: 'doh-integration-card-title' }, [label]),
-      elem('div', { class: 'doh-integration-card-status', dataset: { status: providerState.status } }, [
-        providerState.status === 'connected' ? 'Connected' :
-        providerState.status === 'not_connected' ? 'Not connected' :
-        providerState.status === 'token_expired' ? 'Token expired' : '—',
-      ]),
+      elem('div', { class: 'doh-integration-card-title' }, [item.label]),
+      elem('div', { class: 'doh-integration-card-status', dataset: { status: item.status } }, [statusLabelFor(item.status)]),
     ]);
     card.appendChild(header);
 
     const body = elem('div', { class: 'doh-integration-card-body' });
-    if (providerState.status === 'connected') {
-      if (providerState.tools_count != null) {
+    if (item.status === 'connected') {
+      if (item.last_refreshed_at) {
         body.appendChild(elem('div', { class: 'doh-integration-meta' }, [
-          providerState.tools_count + ' tools available',
+          'Last refreshed: ' + formatDate(item.last_refreshed_at),
         ]));
       }
       body.appendChild(elem('button', {
         class: 'doh-integration-btn doh-integration-btn-secondary',
+        onclick: () => { window.location.href = buildGoogleDisconnectUrl(payload, returnTo); },
+      }, ['Disconnect']));
+    } else if (item.status === 'revoked') {
+      body.appendChild(elem('div', { class: 'doh-integration-meta' }, [
+        'The connection was removed at ' + item.label + '. Reconnect to restore access.',
+      ]));
+      body.appendChild(elem('button', {
+        class: 'doh-integration-btn doh-integration-btn-primary',
+        onclick: () => { window.location.href = buildGoogleConnectUrl(payload, returnTo); },
+      }, ['Reconnect']));
+    } else if (item.status === 'transient_error' || item.status === 'starting') {
+      body.appendChild(elem('div', { class: 'doh-integration-meta' }, ['Checking connection…']));
+    } else {
+      body.appendChild(elem('button', {
+        class: 'doh-integration-btn doh-integration-btn-primary',
+        onclick: () => { window.location.href = buildGoogleConnectUrl(payload, returnTo); },
+      }, ['Connect ' + item.label]));
+    }
+    card.appendChild(body);
+    return card;
+  }
+
+  function renderMcpAggregatorCard(item) {
+    const card = elem('div', { class: 'doh-integration-card', dataset: { provider: item.slug } });
+    const header = elem('div', { class: 'doh-integration-card-head' }, [
+      elem('div', { class: 'doh-integration-card-title' }, [item.label]),
+      elem('div', { class: 'doh-integration-card-status', dataset: { status: item.status } }, [statusLabelFor(item.status)]),
+    ]);
+    card.appendChild(header);
+
+    const body = elem('div', { class: 'doh-integration-card-body' });
+    if (item.status === 'connected') {
+      body.appendChild(elem('button', {
+        class: 'doh-integration-btn doh-integration-btn-secondary',
         onclick: async () => {
-          await fetch(MCP_DISCONNECT_URL + providerKey, { method: 'POST' });
+          await fetch('/__doh_broker/integrations/' + item.slug + '/disconnect', { method: 'POST' });
           await refreshAndRender();
         },
       }, ['Disconnect']));
     } else {
       body.appendChild(elem('button', {
         class: 'doh-integration-btn doh-integration-btn-primary',
-        onclick: () => { window.location.href = buildMcpConnectUrl(providerKey); },
-      }, ['Connect ' + label]));
+        onclick: () => { window.location.href = buildMcpConnectUrl(item.slug); },
+      }, ['Connect ' + item.label]));
     }
     card.appendChild(body);
     return card;
   }
 
-  function renderProviderCard(providerKey, providerState, status) {
-    const label = providerState.label || providerKey;
-    const returnTo = window.location.origin + window.location.pathname;
-
-    const card = elem('div', { class: 'doh-integration-card', dataset: { provider: providerKey } });
-    const header = elem('div', { class: 'doh-integration-card-head' }, [
-      elem('div', { class: 'doh-integration-card-title' }, [label]),
-      elem('div', { class: 'doh-integration-card-status', dataset: { status: providerState.status } }, [
-        providerState.status === 'connected' ? 'Connected' :
-        providerState.status === 'not_connected' ? 'Not connected' :
-        providerState.status === 'revoked' ? 'Revoked' :
-        providerState.status === 'transient_error' ? 'Checking…' : '—',
-      ]),
-    ]);
-    card.appendChild(header);
-
-    const body = elem('div', { class: 'doh-integration-card-body' });
-    if (providerState.status === 'connected') {
-      if (providerState.last_refreshed_at) {
-        body.appendChild(elem('div', { class: 'doh-integration-meta' }, [
-          'Last refreshed: ' + formatDate(providerState.last_refreshed_at),
-        ]));
-      }
-      body.appendChild(elem('button', {
-        class: 'doh-integration-btn doh-integration-btn-secondary',
-        onclick: () => { window.location.href = buildDisconnectUrl(status, returnTo); },
-      }, ['Disconnect']));
-    } else if (providerState.status === 'revoked') {
-      body.appendChild(elem('div', { class: 'doh-integration-meta' }, [
-        'The connection was removed at Google. Reconnect to restore access.',
-      ]));
-      body.appendChild(elem('button', {
-        class: 'doh-integration-btn doh-integration-btn-primary',
-        onclick: () => { window.location.href = buildConnectUrl(status, returnTo); },
-      }, ['Reconnect']));
-    } else if (providerState.status === 'transient_error') {
-      body.appendChild(elem('div', { class: 'doh-integration-meta' }, [
-        'Checking connection…',
-      ]));
-    } else {
-      body.appendChild(elem('button', {
-        class: 'doh-integration-btn doh-integration-btn-primary',
-        onclick: () => { window.location.href = buildConnectUrl(status, returnTo); },
-      }, ['Connect ' + label]));
-    }
-    card.appendChild(body);
-    return card;
-  }
-
-  function renderPane(status) {
+  function renderPane(payload) {
     const pane = document.getElementById('settingsPaneIntegrations');
     if (!pane) return;
     pane.innerHTML = '';
@@ -188,7 +168,7 @@
     ]);
     pane.appendChild(head);
 
-    if (!status) {
+    if (!payload) {
       pane.appendChild(elem('div', { class: 'doh-integration-empty' }, [
         'Integration status is unavailable. If this persists, the platform broker may not be running.',
       ]));
@@ -196,17 +176,15 @@
     }
 
     const list = elem('div', { class: 'doh-integration-list' });
-    const providers = status.providers || {};
-    const keys = Object.keys(providers);
-    if (keys.length === 0 && !_mcpStatus) {
+    const items = payload.items || [];
+    if (items.length === 0) {
       list.appendChild(elem('div', { class: 'doh-integration-empty' }, ['No integrations configured.']));
     } else {
-      for (const key of keys) {
-        list.appendChild(renderProviderCard(key, providers[key], status));
-      }
-      if (_mcpStatus && _mcpStatus.providers) {
-        for (const key of Object.keys(_mcpStatus.providers)) {
-          list.appendChild(renderMcpProviderCard(key, _mcpStatus.providers[key]));
+      for (const item of items) {
+        if (item.kind === 'tls_intercept') {
+          list.appendChild(renderTlsInterceptCard(item, payload));
+        } else if (item.kind === 'mcp_aggregator') {
+          list.appendChild(renderMcpAggregatorCard(item));
         }
       }
     }
@@ -214,18 +192,20 @@
   }
 
   async function refreshAndRender() {
-    [_currentStatus, _mcpStatus] = await Promise.all([fetchStatus(), fetchMcpStatus()]);
-    renderPane(_currentStatus);
+    _current = await fetchIntegrations();
+    renderPane(_current);
   }
 
   // After the Connect/Disconnect round-trip returns us here, ask the broker to
   // refresh now and render the status returned by /kick.
   async function refreshAfterFlow() {
-    const [kickResult, mcpResult] = await Promise.all([kickBroker(), fetchMcpStatus()]);
-    if (kickResult) _currentStatus = kickResult;
-    else _currentStatus = await fetchStatus();
-    _mcpStatus = mcpResult;
-    renderPane(_currentStatus);
+    const kickResult = await kickGoogle();
+    if (kickResult) {
+      _current = kickResult;
+      renderPane(_current);
+      return;
+    }
+    await refreshAndRender();
   }
 
   // Drop any ?connected=/?disconnected= sentinel once we've acted on it,
