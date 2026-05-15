@@ -97,10 +97,28 @@
   filter: brightness(1.1);
 }
 
+/* Single-row Merge connector cards: title on the left, button + status on the right. */
+.doh-integration-card-row {
+  padding: 10px 14px;
+}
+.doh-integration-card-row .doh-integration-card-head {
+  margin-bottom: 0;
+}
+.doh-integration-card-trailing {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-shrink: 0;
+}
+.doh-integration-card-trailing .doh-integration-btn {
+  align-self: center;
+}
+
 .doh-integration-card-title-row {
   display: flex;
   align-items: center;
   gap: 10px;
+  min-width: 0;
 }
 
 .doh-integration-logo {
