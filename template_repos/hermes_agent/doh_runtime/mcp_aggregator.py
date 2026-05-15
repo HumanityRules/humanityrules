@@ -28,6 +28,7 @@ from pathlib import Path
 import httpx
 import uvicorn
 from fastmcp import Client, FastMCP
+from fastmcp.client.transports import StreamableHttpTransport
 from fastmcp.server.providers.proxy import ProxyProvider
 from starlette.requests import Request
 from starlette.responses import JSONResponse, RedirectResponse, Response
@@ -229,11 +230,14 @@ class MCPAggregator:
             owner_username = self._doh_owner_username
 
             async def factory() -> Client:
-                return Client(url, headers={
+                # FastMCP's Client(...) doesn't accept headers=; construct the transport
+                # explicitly to attach the env bearer plus identity headers.
+                transport = StreamableHttpTransport(url=url, headers={
                     "Authorization": f"Bearer {bearer}",
                     "X-Doh-App-Slug": app_slug,
                     "X-Doh-Owner-Username": owner_username,
                 })
+                return Client(transport)
         else:
             raise RuntimeError(f"unknown auth_kind for {slug}: {kind!r}")
 
