@@ -1,13 +1,16 @@
 """MCP Aggregator — proxies upstream MCP servers with DOH-managed OAuth.
 
-Architecture: a single FastMCP server exposes /mcp to the sandbox. Per-provider
-ProxyProviders are added/removed as OAuth completes/disconnects; each holds a
-client_factory that builds a Client with the current access token, so token
-refresh is automatic. Starlette serves the OAuth/control endpoints alongside.
+Architecture: a single FastMCP server exposes /mcp to the sandbox on
+127.0.0.1:9952. Per-provider ProxyProviders are added/removed as OAuth
+completes/disconnects; each holds a client_factory that builds a Client with
+the current access token, so token refresh is automatic.
 
-The sandbox talks to /mcp over plain HTTP on loopback (no TLS, no creds). The
-browser reaches /oauth/* and /status via the WebUI reverse proxy that forwards
-/__mcp_aggregator/* to this process.
+The sandbox is the only thing talking to /mcp — it does so over plain HTTP on
+loopback. Browser-facing integration management (OAuth start/callback, status,
+disconnect) is implemented here too, on the same MCPAggregator class that owns
+the per-provider state. The integrations_broker exposes those handlers under
+its unified /__doh_broker/* router by calling MCPAggregator.routes(prefix=...);
+the aggregator owns its own URL surface, the broker owns the mount point.
 
 Custom code is limited to OAuth/DCR/PKCE and token storage — the MCP protocol
 on both sides is FastMCP's job.
@@ -26,10 +29,9 @@ import httpx
 import uvicorn
 from fastmcp import Client, FastMCP
 from fastmcp.server.providers.proxy import ProxyProvider
-from starlette.applications import Starlette
 from starlette.requests import Request
 from starlette.responses import JSONResponse, RedirectResponse, Response
-from starlette.routing import Mount, Route
+from starlette.routing import Route
 
 
 logger = logging.getLogger("mcp_aggregator")
@@ -135,19 +137,20 @@ class MCPAggregator:
                 self._attach_provider(slug=slug)
 
         mcp_app = self._mcp.http_app(path="/mcp", transport="streamable-http")
-        oauth_routes = [
-            Route(path="/oauth/{provider}/start", endpoint=self._handle_oauth_start, methods=["GET"]),
-            Route(path="/oauth/callback", endpoint=self._handle_oauth_callback, methods=["GET"]),
-            Route(path="/status", endpoint=self._handle_status, methods=["GET"]),
-            Route(path="/disconnect/{provider}", endpoint=self._handle_disconnect, methods=["POST"]),
-        ]
-        app = Starlette(routes=[*oauth_routes, Mount(path="/", app=mcp_app)], lifespan=mcp_app.lifespan)
-        config = uvicorn.Config(app=app, host="127.0.0.1", port=self._port, log_level="warning", access_log=False)
+        config = uvicorn.Config(app=mcp_app, host="127.0.0.1", port=self._port, log_level="warning", access_log=False)
         server = uvicorn.Server(config=config)
         # The broker process owns signal handling; uvicorn must not install its own.
         server.install_signal_handlers = lambda: None
         logger.info("MCP aggregator listening on 127.0.0.1:%d", self._port)
         await server.serve()
+
+    def routes(self, prefix: str) -> list[Route]:
+        """Routes for the integrations_broker to mount under its unified /__doh_broker/* router."""
+        return [
+            Route(path=f"{prefix}/{{provider}}/oauth/start", endpoint=self.handle_oauth_start, methods=["GET"]),
+            Route(path=f"{prefix}/{{provider}}/oauth/callback", endpoint=self.handle_oauth_callback, methods=["GET"]),
+            Route(path=f"{prefix}/{{provider}}/disconnect", endpoint=self.handle_disconnect, methods=["POST"]),
+        ]
 
     # ── Provider attach / detach ─────────────────────────────────────
 
@@ -186,9 +189,10 @@ class MCPAggregator:
             return token
         return await self._refresh_access_token(slug=slug)
 
-    # ── Starlette endpoints ──────────────────────────────────────────
+    # ── Starlette endpoints (mounted by integrations_broker on port 9951) ─
 
-    async def _handle_status(self, request: Request) -> Response:
+    async def handle_status(self, request: Request) -> Response:
+        """Return per-MCP-provider connection state for the integrations pane."""
         providers: dict[str, dict] = {}
         for slug, cfg in MCP_PROVIDERS.items():
             oauth = self._oauth_states[slug]
@@ -200,7 +204,7 @@ class MCPAggregator:
                 providers[slug] = {"label": cfg["label"], "status": "not_connected"}
         return JSONResponse(content={"providers": providers})
 
-    async def _handle_disconnect(self, request: Request) -> Response:
+    async def handle_disconnect(self, request: Request) -> Response:
         provider = request.path_params.get("provider", "")
         if provider not in MCP_PROVIDERS:
             return JSONResponse(content={"error": "unknown provider"}, status_code=404)
@@ -209,7 +213,7 @@ class MCPAggregator:
         self._oauth_states[provider].clear_client()
         return JSONResponse(content={"ok": True})
 
-    async def _handle_oauth_start(self, request: Request) -> Response:
+    async def handle_oauth_start(self, request: Request) -> Response:
         provider = request.path_params.get("provider", "")
         if provider not in MCP_PROVIDERS:
             return Response(content="unknown provider", status_code=404)
@@ -220,7 +224,7 @@ class MCPAggregator:
             return Response(content="origin query param required on first connect", status_code=400)
         if not self._public_base_url:
             self._public_base_url = origin
-        redirect_uri = origin + "/__mcp_aggregator/oauth/callback"
+        redirect_uri = origin + f"/__doh_broker/integrations/{provider}/oauth/callback"
 
         cfg = MCP_PROVIDERS[provider]
         oauth = self._oauth_states[provider]
@@ -257,7 +261,11 @@ class MCPAggregator:
         })
         return RedirectResponse(url=f"{metadata['authorization_endpoint']}?{params}", status_code=302)
 
-    async def _handle_oauth_callback(self, request: Request) -> Response:
+    async def handle_oauth_callback(self, request: Request) -> Response:
+        provider = request.path_params.get("provider", "")
+        if provider not in MCP_PROVIDERS:
+            return Response(content="unknown provider", status_code=404)
+
         code = request.query_params.get("code", "")
         state = request.query_params.get("state", "")
         error = request.query_params.get("error", "")
@@ -269,7 +277,8 @@ class MCPAggregator:
             return Response(content="invalid or expired state parameter", status_code=400)
 
         pending = self._pending_oauth.pop(state)
-        provider = pending["provider"]
+        if pending["provider"] != provider:
+            return Response(content="state/provider mismatch", status_code=400)
         code_verifier = pending["code_verifier"]
         return_to = pending["return_to"]
 

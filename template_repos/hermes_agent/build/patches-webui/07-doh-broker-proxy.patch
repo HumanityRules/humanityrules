@@ -1,37 +1,22 @@
 --- a/api/routes.py
 +++ b/api/routes.py
-@@ -3098,6 +3098,17 @@
+@@ -3098,6 +3098,12 @@
  def handle_get(handler, parsed) -> bool:
      """Handle all GET routes. Returns True if handled, False for 404."""
- 
-+    # DOH: same-origin reverse proxy for the MCP aggregator's OAuth and
-+    # control endpoints. See template_repos/hermes_agent/mcp_aggregator.py.
-+    if parsed.path.startswith("/__mcp_aggregator/"):
-+        return _doh_mcp_aggregator_proxy(handler, parsed, method="GET", body=b"")
-+
+
 +    # DOH: same-origin reverse proxy for the integrations broker's control
-+    # API. See template_repos/hermes_agent/integrations_broker.py.
++    # API. Covers all integration management surfaces (status, OAuth start /
++    # callback, disconnect, kick). See template_repos/hermes_agent/integrations_broker.py.
 +    if parsed.path.startswith("/__doh_broker/"):
 +        return _doh_broker_proxy(handler, parsed, method="GET", body=b"")
-+
 +
      if parsed.path.startswith("/session/static/"):
          # Strip the leading "/session" so _serve_static() sees a path that
          # starts with "/static/" (its required prefix). _serve_static enforces
-@@ -4139,6 +4150,27 @@
+@@ -4139,6 +4145,17 @@
  def handle_post(handler, parsed) -> bool:
      """Handle all POST routes. Returns True if handled, False for 404."""
      diag = RequestDiagnostics.maybe_start("POST", parsed.path, logger=logger)
-+
-+    # DOH: same-origin reverse proxy for the MCP aggregator. Runs BEFORE the
-+    # upstream CSRF gate — the aggregator is loopback-only and the endpoints
-+    # are stateless (OAuth callbacks, status reads, disconnect).
-+    if parsed.path.startswith("/__mcp_aggregator/"):
-+        try:
-+            body = handler.rfile.read(int(handler.headers.get("Content-Length") or 0))
-+        except Exception:
-+            body = b""
-+        return _doh_mcp_aggregator_proxy(handler, parsed, method="POST", body=body)
 +
 +    # DOH: same-origin reverse proxy for the integrations broker's control
 +    # API. Deliberately runs BEFORE the upstream CSRF gate — the broker is
@@ -46,51 +31,26 @@
      if parsed.path == "/api/csp-report":
          if diag:
              diag.stage("csp_report")
-@@ -5606,7 +5638,68 @@
+@@ -5606,6 +5624,42 @@
              return _kanban_unknown_endpoint(handler, parsed, "DELETE")
          return True
      return False
 +
 +
-+
-+# DOH: /__doh_broker/* → 127.0.0.1:9951 (the integrations broker's control API).
++# DOH: /__doh_broker/* → 127.0.0.1:9951 (the integrations broker's unified
++# control API: TLS-intercept providers like Google plus MCP-aggregator
++# providers like Notion). The aggregator's port 9952 is sandbox-only MCP
++# transport and is never reached by the browser.
 +def _doh_broker_proxy(handler, parsed, method: str, body: bytes) -> bool:
 +    import http.client as _httpclient
- 
++
 +    upstream_path = parsed.path[len("/__doh_broker"):] or "/"
 +    if parsed.query:
 +        upstream_path += "?" + parsed.query
 +    try:
-+        conn = _httpclient.HTTPConnection("127.0.0.1", 9951, timeout=10)
-+        conn.request(method, upstream_path, body=body, headers={"Content-Type": "application/json"})
-+        resp = conn.getresponse()
-+        payload = resp.read()
-+        status = resp.status
-+        ctype = resp.getheader("Content-Type") or "application/json"
-+        conn.close()
-+    except Exception as exc:
-+        payload = json.dumps({"error": f"broker unreachable: {exc}"}).encode()
-+        status = 502
-+        ctype = "application/json"
-+    handler.send_response(status)
-+    handler.send_header("Content-Type", ctype)
-+    handler.send_header("Content-Length", str(len(payload)))
-+    handler.send_header("Cache-Control", "no-store")
-+    handler.end_headers()
-+    handler.wfile.write(payload)
-+    return True
-+
-+
-+# DOH: /__mcp_aggregator/* → 127.0.0.1:9952 (MCP aggregator OAuth + control).
-+def _doh_mcp_aggregator_proxy(handler, parsed, method: str, body: bytes) -> bool:
-+    import http.client as _httpclient
-+
-+    upstream_path = parsed.path[len("/__mcp_aggregator"):] or "/"
-+    if parsed.query:
-+        upstream_path += "?" + parsed.query
-+    try:
-+        conn = _httpclient.HTTPConnection("127.0.0.1", 9952, timeout=30)
-+        conn.request(method, upstream_path, body=body, headers={"Content-Type": handler.headers.get("Content-Type", "application/json")})
++        conn = _httpclient.HTTPConnection("127.0.0.1", 9951, timeout=30)
++        upstream_headers = {"Content-Type": handler.headers.get("Content-Type", "application/json")}
++        conn.request(method, upstream_path, body=body, headers=upstream_headers)
 +        resp = conn.getresponse()
 +        payload = resp.read()
 +        status = resp.status
@@ -98,7 +58,7 @@
 +        location = resp.getheader("Location")
 +        conn.close()
 +    except Exception as exc:
-+        payload = json.dumps({"error": f"mcp aggregator unreachable: {exc}"}).encode()
++        payload = json.dumps({"error": f"broker unreachable: {exc}"}).encode()
 +        status = 502
 +        ctype = "application/json"
 +        location = None
@@ -111,7 +71,6 @@
 +    handler.end_headers()
 +    handler.wfile.write(payload)
 +    return True
-+
+
  # ── GET route helpers ─────────────────────────────────────────────────────────
- 
- # MIME types for static file serving. Hoisted to module scope to avoid
+

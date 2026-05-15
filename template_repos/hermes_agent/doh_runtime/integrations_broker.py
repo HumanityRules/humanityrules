@@ -13,11 +13,18 @@ helpers). Two responsibilities:
    we opaque-tunnel — the sandbox sees normal end-to-end TLS and we inject
    nothing.
 
-2. **Control API on 127.0.0.1:9951** (reached same-origin by the WebUI
-   extension via the /__doh_broker/* reverse-proxy patch):
-   - GET  /status   — in-memory provider state (no file on disk)
-   - POST /kick     — refresh providers now and return the updated status
-   - GET  /healthz  — liveness
+2. **Integrations control API on 127.0.0.1:9951** (Starlette/uvicorn, reached
+   same-origin by the WebUI extension via the /__doh_broker/* reverse-proxy
+   patch). One unified URL space for all browser-facing integration
+   management:
+   - GET  /healthz                  — liveness
+   - GET  /integrations             — flat unified status (Google + aggregator)
+   - POST /integrations/google/kick — synchronous Google refresh
+   - …plus whatever routes mcp_aggregator.MCPAggregator.routes() returns,
+     mounted under /integrations. The aggregator owns those handlers and
+     declares its own URL surface; the broker just provides the mount point
+     and the unified status endpoint that fans out to it.
+   The aggregator's port 9952 is sandbox-only MCP traffic.
 
 Refresh tokens, DOH's OAuth client secrets, and the env bearer NEVER enter
 the sandbox. Only swapped-in short-lived access tokens reach Google — and
@@ -55,9 +62,14 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
+import uvicorn
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
+from starlette.applications import Starlette
+from starlette.requests import Request
+from starlette.responses import JSONResponse, Response
+from starlette.routing import Route
 
 
 DEFAULT_PROXY_PORT = 9950
@@ -742,97 +754,128 @@ async def _current_token_for_host(host: str) -> str | None:
         return _host_token.get(host)
 
 
-# ── Control API ───────────────────────────────────────────────────────
+# ── Integrations control API (Starlette on 127.0.0.1:9951) ───────────
+#
+# The unified /integrations endpoint returns a flat list of cards: TLS-intercept
+# providers (Google) and MCP-aggregator providers (Notion) coexist. The WebUI
+# renders one card per entry, branching click handlers on `kind`.
+#
+# MCP-aggregator routes (oauth start/callback, disconnect) are mounted here so
+# that browser traffic for both kinds of integrations shares one URL space and
+# the aggregator's port 9952 is sandbox-only MCP transport.
 
-async def _status_payload(control_plane_url: str, owner_username: str, env_slug: str) -> dict:
-    """Return the current control API status payload."""
+
+async def _handle_unified_status(
+    request: Request,
+    aggregator: "mcp_aggregator.MCPAggregator",
+    control_plane_url: str,
+    owner_username: str,
+    env_slug: str,
+) -> Response:
+    """Flat list combining TLS-intercept providers (Google) and MCP-aggregator providers."""
+    items: list[dict] = []
     async with _provider_state_lock:
-        snapshot = {slug: dict(state) for slug, state in _provider_state.items()}
-    return {
+        google_snapshot = {slug: dict(state) for slug, state in _provider_state.items()}
+    for slug, cfg in PROVIDERS.items():
+        state = google_snapshot.get(slug, {})
+        items.append({
+            "kind": "tls_intercept",
+            "slug": slug,
+            "label": state.get("label", cfg["label"]),
+            "status": state.get("status", "starting"),
+            "last_refreshed_at": state.get("last_refreshed_at"),
+        })
+    mcp_status = await aggregator.handle_status(request=request)
+    mcp_payload = json.loads(mcp_status.body.decode())
+    for slug, state in mcp_payload.get("providers", {}).items():
+        items.append({
+            "kind": "mcp_aggregator",
+            "slug": slug,
+            "label": state.get("label", slug),
+            "status": state.get("status", "unknown"),
+        })
+    return JSONResponse(content={
         "doh_control_plane_url": control_plane_url,
         "env_slug": env_slug,
         "owner_username": owner_username,
-        "providers": snapshot,
-    }
+        "items": items,
+    })
 
 
-async def _handle_control_conn(
-    reader: asyncio.StreamReader,
-    writer: asyncio.StreamWriter,
+async def _handle_healthz(request: Request) -> Response:
+    return JSONResponse(content={"ok": True})
+
+
+async def _handle_google_kick(
+    request: Request,
     control_plane_url: str,
     bearer: str,
     owner_username: str,
     env_slug: str,
-) -> None:
+    aggregator: "mcp_aggregator.MCPAggregator",
+) -> Response:
+    """Force-refresh every TLS-intercept provider, then return the unified status."""
     try:
-        request_line = await reader.readline()
-        if not request_line:
-            return
-        parts = request_line.decode("iso-8859-1").strip().split(" ", 2)
-        if len(parts) < 2:
-            await _send_raw(writer=writer, status=400, body=b"bad request")
-            return
-        method, path = parts[0].upper(), parts[1]
-        while True:
-            hdr = await reader.readline()
-            if hdr in (b"\r\n", b"\n", b""):
-                break
-        if method == "GET" and path == "/healthz":
-            await _send_json(writer=writer, status=200, payload={"ok": True})
-            return
-        if method == "GET" and path == "/status":
-            payload = await _status_payload(
-                control_plane_url=control_plane_url,
-                owner_username=owner_username,
-                env_slug=env_slug,
-            )
-            await _send_json(writer=writer, status=200, payload=payload)
-            return
-        if method == "POST" and path == "/kick":
-            try:
-                await _refresh_all_providers_once(
-                    control_plane_url=control_plane_url,
-                    bearer=bearer,
-                    owner_username=owner_username,
-                )
-            except RuntimeError as exc:
-                logger.error("synchronous refresh failed: %s", exc)
-                payload = await _status_payload(
-                    control_plane_url=control_plane_url,
-                    owner_username=owner_username,
-                    env_slug=env_slug,
-                )
-                payload["error"] = str(exc)
-                await _send_json(writer=writer, status=500, payload=payload)
-                return
-            payload = await _status_payload(
-                control_plane_url=control_plane_url,
-                owner_username=owner_username,
-                env_slug=env_slug,
-            )
-            await _send_json(writer=writer, status=200, payload=payload)
-            return
-        await _send_json(writer=writer, status=404, payload={"error": "not found"})
-    except (ConnectionResetError, BrokenPipeError):
-        return
-    except Exception:
-        logger.exception("control API connection failed")
-    finally:
-        with contextlib.suppress(Exception):
-            writer.close()
-            await writer.wait_closed()
-
-
-async def _send_json(writer: asyncio.StreamWriter, status: int, payload: dict) -> None:
-    body = json.dumps(payload).encode()
-    writer.write(
-        b"HTTP/1.1 " + str(status).encode() + b" " + _http_reason(status=status).encode() + b"\r\n"
-        b"Content-Type: application/json\r\n"
-        b"Content-Length: " + str(len(body)).encode() + b"\r\n"
-        b"Connection: close\r\n\r\n" + body
+        await _refresh_all_providers_once(
+            control_plane_url=control_plane_url,
+            bearer=bearer,
+            owner_username=owner_username,
+        )
+    except RuntimeError as exc:
+        logger.error("synchronous refresh failed: %s", exc)
+        response = await _handle_unified_status(
+            request=request,
+            aggregator=aggregator,
+            control_plane_url=control_plane_url,
+            owner_username=owner_username,
+            env_slug=env_slug,
+        )
+        payload = json.loads(response.body.decode())
+        payload["error"] = str(exc)
+        return JSONResponse(content=payload, status_code=500)
+    return await _handle_unified_status(
+        request=request,
+        aggregator=aggregator,
+        control_plane_url=control_plane_url,
+        owner_username=owner_username,
+        env_slug=env_slug,
     )
-    with contextlib.suppress(Exception):
-        await writer.drain()
+
+
+def _build_control_app(
+    aggregator: "mcp_aggregator.MCPAggregator",
+    control_plane_url: str,
+    bearer: str,
+    owner_username: str,
+    env_slug: str,
+) -> Starlette:
+    """Wire the unified /__doh_broker/* router for browser-facing integration management."""
+    async def status_route(request: Request) -> Response:
+        return await _handle_unified_status(
+            request=request,
+            aggregator=aggregator,
+            control_plane_url=control_plane_url,
+            owner_username=owner_username,
+            env_slug=env_slug,
+        )
+
+    async def kick_route(request: Request) -> Response:
+        return await _handle_google_kick(
+            request=request,
+            control_plane_url=control_plane_url,
+            bearer=bearer,
+            owner_username=owner_username,
+            env_slug=env_slug,
+            aggregator=aggregator,
+        )
+
+    routes = [
+        Route(path="/healthz", endpoint=_handle_healthz, methods=["GET"]),
+        Route(path="/integrations", endpoint=status_route, methods=["GET"]),
+        Route(path="/integrations/google/kick", endpoint=kick_route, methods=["POST"]),
+        *aggregator.routes(prefix="/integrations"),
+    ]
+    return Starlette(routes=routes)
 
 
 # ── Wiring ────────────────────────────────────────────────────────────
@@ -869,19 +912,8 @@ async def _run(proxy_port: int, control_port: int, mcp_port: int, ca_dir: Path, 
     async def _proxy_cb(r: asyncio.StreamReader, w: asyncio.StreamWriter) -> None:
         await _handle_proxy_conn(reader=r, writer=w, minter=minter)
 
-    async def _control_cb(r: asyncio.StreamReader, w: asyncio.StreamWriter) -> None:
-        await _handle_control_conn(
-            reader=r,
-            writer=w,
-            control_plane_url=control_plane_url,
-            bearer=bearer,
-            owner_username=owner_username,
-            env_slug=env_slug,
-        )
-
     proxy_server = await asyncio.start_server(client_connected_cb=_proxy_cb, host="127.0.0.1", port=proxy_port)
-    control_server = await asyncio.start_server(client_connected_cb=_control_cb, host="127.0.0.1", port=control_port)
-    logger.info("proxy listening on 127.0.0.1:%d; control on 127.0.0.1:%d", proxy_port, control_port)
+    logger.info("proxy listening on 127.0.0.1:%d", proxy_port)
 
     sys.path.insert(0, str(Path(__file__).resolve().parent))
     import mcp_aggregator
@@ -890,6 +922,21 @@ async def _run(proxy_port: int, control_port: int, mcp_port: int, ca_dir: Path, 
     aggregator = mcp_aggregator.MCPAggregator(
         port=mcp_port, persistent_dir=mcp_persistent_dir, public_base_url=public_base_url,
     )
+
+    control_app = _build_control_app(
+        aggregator=aggregator,
+        control_plane_url=control_plane_url,
+        bearer=bearer,
+        owner_username=owner_username,
+        env_slug=env_slug,
+    )
+    control_uvicorn_config = uvicorn.Config(
+        app=control_app, host="127.0.0.1", port=control_port, log_level="warning", access_log=False,
+    )
+    control_server = uvicorn.Server(config=control_uvicorn_config)
+    # The broker process owns signal handling; uvicorn must not install its own.
+    control_server.install_signal_handlers = lambda: None
+    logger.info("control API listening on 127.0.0.1:%d", control_port)
 
     refreshers = [
         asyncio.create_task(_refresh_loop(
@@ -902,9 +949,9 @@ async def _run(proxy_port: int, control_port: int, mcp_port: int, ca_dir: Path, 
         for slug, cfg in PROVIDERS.items()
     ]
 
-    async with proxy_server, control_server:
+    async with proxy_server:
         proxy_task = asyncio.create_task(proxy_server.serve_forever())
-        control_task = asyncio.create_task(control_server.serve_forever())
+        control_task = asyncio.create_task(control_server.serve())
         mcp_task = asyncio.create_task(aggregator.serve())
         done, pending = await asyncio.wait(
             {stop, proxy_task, control_task, mcp_task, *refreshers},
