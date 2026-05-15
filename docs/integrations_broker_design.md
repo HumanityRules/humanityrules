@@ -56,15 +56,19 @@ Sandbox TLS clients verify the leaf cert against the CA bundle (because the CA's
 
 **Why not `HTTPS_PROXY`-without-MITM?** When `HTTPS_PROXY` is set, TLS clients send `CONNECT` and then do TLS end-to-end with the real origin. The proxy sees opaque bytes and cannot touch the Authorization header. To swap it, we have to *be* the TLS peer from the sandbox's perspective. Hence the CA + on-demand leaves.
 
-### 2. Control API (127.0.0.1:9951)
+### 2. Integrations control API (127.0.0.1:9951)
 
-Plain HTTP, three endpoints:
+Starlette/uvicorn server. One unified URL space for **all** browser-facing integration management — Google's TLS-intercept world, Notion's MCP OAuth, and Merge's DOH-relay passthroughs:
 
-- **`GET /status`** — current provider state, serialized from in-memory at request time. Shape: `{doh_control_plane_url, env_slug, owner_username, providers: {<slug>: {label, status, last_refreshed_at}}}`. No on-disk status file.
-- **`POST /kick`** — refreshes every provider synchronously and returns the same status envelope as `/status`. Used by the WebUI extension after the OAuth connect/disconnect round-trip returns the user to Hermes, so state flips are reflected in the response instead of waiting for the next polling tick.
 - **`GET /healthz`** — liveness.
+- **`GET /integrations`** — flat unified status, one entry per card: `[{kind, slug, label, status, …}, …]`. `kind` is `tls_intercept` (Google), `mcp_aggregator` (Notion), or `merge_connector` (per-Merge-connector entries with `logo_url`).
+- **`POST /integrations/google/kick`** — synchronously refresh every TLS-intercept provider and return the unified status envelope.
+- **`GET /integrations/<provider>/oauth/start`**, **`GET /integrations/<provider>/oauth/callback`**, **`POST /integrations/<provider>/disconnect`** — MCP-aggregator OAuth flow (Notion). The aggregator owns the handlers; the broker mounts them via `MCPAggregator.routes(prefix="/integrations")`.
+- **`GET /integrations/merge/connectors`**, **`GET /integrations/merge/connector-status`**, **`POST /integrations/merge/link-token`**, **`POST /integrations/merge/disconnect`** — Merge passthroughs that forward to DOH with the env bearer attached. See `merge_integration_design.md`.
 
 Reached from the browser same-origin via a WebUI reverse-proxy patch (`patches-webui/07-doh-broker-proxy.patch`) that forwards `/__doh_broker/*` to `127.0.0.1:9951`. Deliberately bypasses the WebUI's CSRF gate — the broker is loopback-only and the endpoints are stateless.
+
+The `/__mcp_aggregator/*` URL space that earlier holds Notion's OAuth was retired during the unification — port 9952 is now sandbox-only MCP transport.
 
 ### 3. Refresh loops
 
