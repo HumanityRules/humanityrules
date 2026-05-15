@@ -200,6 +200,11 @@ GITHUB_WEBHOOK_SECRET = os.environ.get("GITHUB_WEBHOOK_SECRET")
 # DevOpsHero API Configuration
 DOH_API_SECRET_KEY = os.environ.get("DOH_API_SECRET_KEY")
 
+# Merge.dev Agent Handler — single tenant-wide API key + Tool Pack.
+# Stored only on DOH; never injected into customer-deployed Hermes containers.
+MERGE_AGENT_HANDLER_API_KEY = os.environ.get("MERGE_AGENT_HANDLER_API_KEY")
+MERGE_TOOL_PACK_ID = os.environ.get("MERGE_TOOL_PACK_ID")
+
 # DevOpsHero AWS Control Plane Credentials (for assuming roles in customer accounts)
 DOH_AWS_ACCESS_KEY = os.environ.get("DOH_AWS_ACCESS_KEY")
 DOH_AWS_SECRET_KEY = os.environ.get("DOH_AWS_SECRET_KEY")

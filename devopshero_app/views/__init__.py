@@ -39,6 +39,14 @@ from .integrations.google_oauth import (
     integrations_google_oauth_disconnect,
 )
 from .integrations.google_token_refresh import integrations_google_token_refresh
+from .integrations.merge_handler import (
+    integrations_merge_ensure_registered_user,
+    integrations_merge_link_token,
+    integrations_merge_connectors,
+    integrations_merge_connector_status,
+    integrations_merge_disconnect,
+    integrations_merge_mcp,
+)
 from .partials import random_quote, switch_organization
 from .auth import auth_login, auth_callback, auth_logout, oidc_login, oidc_callback, dev_login
 from .onboarding import onboarding
@@ -149,6 +157,12 @@ __all__ = [
     "integrations_google_oauth_callback",
     "integrations_google_oauth_disconnect",
     "integrations_google_token_refresh",
+    "integrations_merge_ensure_registered_user",
+    "integrations_merge_link_token",
+    "integrations_merge_connectors",
+    "integrations_merge_connector_status",
+    "integrations_merge_disconnect",
+    "integrations_merge_mcp",
     "random_quote",
     "switch_organization",
     "auth_login",

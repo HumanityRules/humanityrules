@@ -41,8 +41,15 @@ DEFAULT_MCP_PORT = 9952
 MCP_PROVIDERS: dict[str, dict] = {
     "notion": {
         "label": "Notion",
+        "auth_kind": "oauth_dcr_pkce",
         "upstream_url": "https://mcp.notion.com/mcp",
         "oauth_metadata_url": "https://mcp.notion.com/.well-known/oauth-authorization-server",
+    },
+    "merge": {
+        "label": "Merge",
+        "auth_kind": "doh_relay",
+        # The relay URL is constructed against DOH_CONTROL_PLANE_URL at attach time.
+        "doh_relay_path": "/api/integrations/merge/mcp",
     },
 }
 
@@ -120,21 +127,43 @@ class _OAuthState:
 class MCPAggregator:
     """One per Hermes container. Hosts a FastMCP server with per-provider proxies."""
 
-    def __init__(self, port: int, persistent_dir: Path, public_base_url: str | None) -> None:
+    def __init__(
+        self,
+        port: int,
+        persistent_dir: Path,
+        public_base_url: str | None,
+        doh_control_plane_url: str,
+        doh_env_bearer: str,
+        doh_app_slug: str,
+        doh_owner_username: str,
+    ) -> None:
         self._port = port
         self._persistent_dir = persistent_dir
         self._public_base_url = public_base_url.rstrip("/") if public_base_url else None
+        self._doh_control_plane_url = doh_control_plane_url.rstrip("/")
+        self._doh_env_bearer = doh_env_bearer
+        self._doh_app_slug = doh_app_slug
+        self._doh_owner_username = doh_owner_username
         self._mcp = FastMCP(name="doh-mcp-aggregator")
         self._oauth_states: dict[str, _OAuthState] = {}
         self._provider_attached: dict[str, ProxyProvider] = {}
         self._pending_oauth: dict[str, dict] = {}
-        for slug in MCP_PROVIDERS:
-            self._oauth_states[slug] = _OAuthState(provider_dir=persistent_dir / slug)
+        for slug, cfg in MCP_PROVIDERS.items():
+            if cfg.get("auth_kind") == "oauth_dcr_pkce":
+                self._oauth_states[slug] = _OAuthState(provider_dir=persistent_dir / slug)
 
     async def serve(self) -> None:
-        for slug in MCP_PROVIDERS:
-            if self._oauth_states[slug].has_token:
+        for slug, cfg in MCP_PROVIDERS.items():
+            kind = cfg.get("auth_kind")
+            if kind == "oauth_dcr_pkce" and self._oauth_states[slug].has_token:
                 self._attach_provider(slug=slug)
+            elif kind == "doh_relay":
+                # Always attach the DOH relay; per-call failures surface naturally.
+                self._attach_provider(slug=slug)
+
+        # Best-effort registration with Merge at boot. Failure is non-fatal —
+        # individual MCP/connector calls will surface errors if DOH is unreachable.
+        await self._ensure_merge_registered_user()
 
         mcp_app = self._mcp.http_app(path="/mcp", transport="streamable-http")
         config = uvicorn.Config(app=mcp_app, host="127.0.0.1", port=self._port, log_level="warning", access_log=False)
@@ -150,7 +179,31 @@ class MCPAggregator:
             Route(path=f"{prefix}/{{provider}}/oauth/start", endpoint=self.handle_oauth_start, methods=["GET"]),
             Route(path=f"{prefix}/{{provider}}/oauth/callback", endpoint=self.handle_oauth_callback, methods=["GET"]),
             Route(path=f"{prefix}/{{provider}}/disconnect", endpoint=self.handle_disconnect, methods=["POST"]),
+            # Merge — DOH-relayed; the WebUI talks to DOH through these passthroughs.
+            Route(path=f"{prefix}/merge/connectors", endpoint=self.handle_merge_connectors, methods=["GET"]),
+            Route(path=f"{prefix}/merge/connector-status", endpoint=self.handle_merge_connector_status, methods=["GET"]),
+            Route(path=f"{prefix}/merge/link-token", endpoint=self.handle_merge_link_token, methods=["POST"]),
+            Route(path=f"{prefix}/merge/disconnect", endpoint=self.handle_merge_disconnect, methods=["POST"]),
         ]
+
+    async def _ensure_merge_registered_user(self) -> None:
+        """Idempotent boot-time registration with Merge via DOH passthrough."""
+        try:
+            async with httpx.AsyncClient(timeout=30) as client:
+                resp = await client.post(
+                    url=f"{self._doh_control_plane_url}/api/integrations/merge/ensure-registered-user",
+                    headers={
+                        "Authorization": f"Bearer {self._doh_env_bearer}",
+                        "Content-Type": "application/json",
+                    },
+                    json={"app_slug": self._doh_app_slug, "owner_username": self._doh_owner_username},
+                )
+            if resp.status_code != 200:
+                logger.error("merge ensure-registered-user at boot returned %d: %s", resp.status_code, resp.text[:300])
+                return
+            logger.info("merge ensure-registered-user OK at boot")
+        except Exception:
+            logger.exception("merge ensure-registered-user at boot failed (continuing)")
 
     # ── Provider attach / detach ─────────────────────────────────────
 
@@ -159,18 +212,29 @@ class MCPAggregator:
         cfg = MCP_PROVIDERS[slug]
         if slug in self._provider_attached:
             self._detach_provider(slug=slug)
-        url = cfg["upstream_url"]
+        kind = cfg.get("auth_kind")
 
-        async def factory() -> Client:
-            token = await self._current_access_token(slug=slug)
-            if token is None:
-                raise RuntimeError(f"{slug} has no valid token")
-            return Client(url, auth=token)
+        if kind == "oauth_dcr_pkce":
+            url = cfg["upstream_url"]
+
+            async def factory() -> Client:
+                token = await self._current_access_token(slug=slug)
+                if token is None:
+                    raise RuntimeError(f"{slug} has no valid token")
+                return Client(url, auth=token)
+        elif kind == "doh_relay":
+            url = self._doh_control_plane_url + cfg["doh_relay_path"]
+            bearer = self._doh_env_bearer
+
+            async def factory() -> Client:
+                return Client(url, headers={"Authorization": f"Bearer {bearer}"})
+        else:
+            raise RuntimeError(f"unknown auth_kind for {slug}: {kind!r}")
 
         provider = ProxyProvider(client_factory=factory)
         self._mcp.add_provider(provider=provider)
         self._provider_attached[slug] = provider
-        logger.info("attached provider %s -> %s", slug, url)
+        logger.info("attached provider %s (kind=%s) -> %s", slug, kind, url)
 
     def _detach_provider(self, slug: str) -> None:
         provider = self._provider_attached.pop(slug, None)
@@ -192,9 +256,16 @@ class MCPAggregator:
     # ── Starlette endpoints (mounted by integrations_broker on port 9951) ─
 
     async def handle_status(self, request: Request) -> Response:
-        """Return per-MCP-provider connection state for the integrations pane."""
+        """Return per-OAuth-provider connection state for the integrations pane.
+
+        Excludes DOH-relay providers (Merge) — those are surfaced as per-connector
+        cards via the broker's unified /integrations endpoint, which calls
+        handle_merge_connectors directly.
+        """
         providers: dict[str, dict] = {}
         for slug, cfg in MCP_PROVIDERS.items():
+            if cfg.get("auth_kind") != "oauth_dcr_pkce":
+                continue
             oauth = self._oauth_states[slug]
             if slug in self._provider_attached:
                 providers[slug] = {"label": cfg["label"], "status": "connected"}
@@ -206,8 +277,14 @@ class MCPAggregator:
 
     async def handle_disconnect(self, request: Request) -> Response:
         provider = request.path_params.get("provider", "")
-        if provider not in MCP_PROVIDERS:
+        cfg = MCP_PROVIDERS.get(provider)
+        if cfg is None:
             return JSONResponse(content={"error": "unknown provider"}, status_code=404)
+        if cfg.get("auth_kind") != "oauth_dcr_pkce":
+            return JSONResponse(
+                content={"error": f"{provider} disconnect must use the connector-specific endpoint"},
+                status_code=400,
+            )
         self._detach_provider(slug=provider)
         self._oauth_states[provider].clear_token()
         self._oauth_states[provider].clear_client()
@@ -215,8 +292,9 @@ class MCPAggregator:
 
     async def handle_oauth_start(self, request: Request) -> Response:
         provider = request.path_params.get("provider", "")
-        if provider not in MCP_PROVIDERS:
-            return Response(content="unknown provider", status_code=404)
+        cfg = MCP_PROVIDERS.get(provider)
+        if cfg is None or cfg.get("auth_kind") != "oauth_dcr_pkce":
+            return Response(content="unknown OAuth provider", status_code=404)
 
         return_to = request.query_params.get("return_to", "/")
         origin = request.query_params.get("origin", "") or self._public_base_url or ""
@@ -225,8 +303,6 @@ class MCPAggregator:
         if not self._public_base_url:
             self._public_base_url = origin
         redirect_uri = origin + f"/__doh_broker/integrations/{provider}/oauth/callback"
-
-        cfg = MCP_PROVIDERS[provider]
         oauth = self._oauth_states[provider]
 
         metadata = await self._fetch_oauth_metadata(url=cfg["oauth_metadata_url"])
@@ -263,8 +339,9 @@ class MCPAggregator:
 
     async def handle_oauth_callback(self, request: Request) -> Response:
         provider = request.path_params.get("provider", "")
-        if provider not in MCP_PROVIDERS:
-            return Response(content="unknown provider", status_code=404)
+        cfg = MCP_PROVIDERS.get(provider)
+        if cfg is None or cfg.get("auth_kind") != "oauth_dcr_pkce":
+            return Response(content="unknown OAuth provider", status_code=404)
 
         code = request.query_params.get("code", "")
         state = request.query_params.get("state", "")
@@ -282,7 +359,6 @@ class MCPAggregator:
         code_verifier = pending["code_verifier"]
         return_to = pending["return_to"]
 
-        cfg = MCP_PROVIDERS[provider]
         oauth = self._oauth_states[provider]
 
         metadata = await self._fetch_oauth_metadata(url=cfg["oauth_metadata_url"])
@@ -304,6 +380,80 @@ class MCPAggregator:
 
         separator = "&" if "?" in return_to else "?"
         return RedirectResponse(url=f"{return_to}{separator}connected={provider}", status_code=302)
+
+    # ── Merge.dev passthroughs (DOH owns the API key; we just forward) ─
+
+    async def handle_merge_connectors(self, request: Request) -> Response:
+        return await self._merge_passthrough(method="GET", path="/api/integrations/merge/connectors")
+
+    async def handle_merge_connector_status(self, request: Request) -> Response:
+        connector_slug = request.query_params.get("connector_slug", "")
+        if not connector_slug:
+            return JSONResponse(content={"error": "connector_slug is required"}, status_code=400)
+        return await self._merge_passthrough(
+            method="GET",
+            path="/api/integrations/merge/connector-status",
+            extra_query={"connector_slug": connector_slug},
+        )
+
+    async def handle_merge_link_token(self, request: Request) -> Response:
+        try:
+            payload = json.loads((await request.body()).decode() or "{}")
+        except json.JSONDecodeError:
+            return JSONResponse(content={"error": "invalid JSON body"}, status_code=400)
+        body: dict = {}
+        if "connector_slug" in payload:
+            body["connector_slug"] = payload["connector_slug"]
+        return await self._merge_passthrough(
+            method="POST", path="/api/integrations/merge/link-token", json_body=body,
+        )
+
+    async def handle_merge_disconnect(self, request: Request) -> Response:
+        try:
+            payload = json.loads((await request.body()).decode() or "{}")
+        except json.JSONDecodeError:
+            return JSONResponse(content={"error": "invalid JSON body"}, status_code=400)
+        connector_slug = payload.get("connector_slug", "")
+        if not isinstance(connector_slug, str) or not connector_slug:
+            return JSONResponse(content={"error": "connector_slug is required"}, status_code=400)
+        return await self._merge_passthrough(
+            method="POST",
+            path="/api/integrations/merge/disconnect",
+            json_body={"connector_slug": connector_slug},
+        )
+
+    async def _merge_passthrough(
+        self,
+        method: str,
+        path: str,
+        json_body: dict | None = None,
+        extra_query: dict | None = None,
+    ) -> Response:
+        """Forward to DOH with the env bearer attached. DOH does the real work.
+
+        app_slug and owner_username are auto-injected — into the query string
+        for GET, into the JSON body for POST. Callers provide only the
+        operation-specific fields.
+        """
+        url = f"{self._doh_control_plane_url}{path}"
+        headers = {"Authorization": f"Bearer {self._doh_env_bearer}"}
+        identity = {"app_slug": self._doh_app_slug, "owner_username": self._doh_owner_username}
+        try:
+            async with httpx.AsyncClient(timeout=30) as client:
+                if method == "GET":
+                    params = {**identity, **(extra_query or {})}
+                    resp = await client.get(url=url, headers=headers, params=params)
+                else:
+                    body = {**identity, **(json_body or {})}
+                    resp = await client.request(method=method, url=url, headers=headers, json=body)
+        except Exception as exc:
+            logger.exception("merge passthrough %s %s failed", method, path)
+            return JSONResponse(content={"error": f"doh unreachable: {exc}"}, status_code=502)
+        return Response(
+            content=resp.content,
+            status_code=resp.status_code,
+            media_type=resp.headers.get("Content-Type", "application/json"),
+        )
 
     # ── OAuth helpers ───────────────────────────────────────────────
 
