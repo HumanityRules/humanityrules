@@ -17,13 +17,19 @@ Runs as a supervisor-managed sidecar process. Two responsibilities:
    patch). One unified URL space for all browser-facing integration
    management:
    - GET  /healthz                  — liveness
-   - GET  /integrations             — flat unified status (Google + aggregator)
-   - POST /integrations/google/kick — synchronous Google refresh
+   - GET  /integrations             — flat unified status (Google + aggregator);
+                                      force-refreshes every TLS-intercept
+                                      provider before responding.
    - …plus whatever routes mcp_aggregator.MCPAggregator.routes() returns,
      mounted under /integrations. The aggregator owns those handlers and
      declares its own URL surface; the broker just provides the mount point
      and the unified status endpoint that fans out to it.
    The aggregator's port 9952 is sandbox-only MCP traffic.
+
+Token refresh for TLS-intercept providers is lazy: tokens are fetched on
+the first request that needs them and re-fetched only when the cached
+token is within REFRESH_LEAD_SECONDS of expiry. /integrations forces a
+refresh so the UI always shows current state.
 
 Refresh tokens, DOH's OAuth client secrets, and the env bearer NEVER enter
 the sandbox. Only swapped-in short-lived access tokens reach Google — and
@@ -55,6 +61,7 @@ import random
 import signal
 import ssl
 import sys
+import time
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -78,26 +85,31 @@ DEFAULT_CA_DIR = Path("/run/doh/integrations-broker/ca")
 DEFAULT_PRIVATE_DIR = Path("/run/doh/integrations-broker/private")
 DEFAULT_MCP_PERSISTENT_DIR = Path("/hermes-persistent-root/mcp-aggregator")
 
-# Refresh ~5 minutes before the typical 3600s expiry. Backoff for transient
-# errors. MIN_SLEEP guards against a tight loop if DOH's expires_in is tiny.
+# Refresh when the cached token is within this window of expiry. Wider than
+# any reasonable refresh round-trip so the request waiting on us never sees a
+# token that expires mid-flight upstream.
 REFRESH_LEAD_SECONDS = 300
-MIN_SLEEP_SECONDS = 30
-NOT_CONNECTED_POLL_SECONDS = 60
-BACKOFF_INITIAL_SECONDS = 5
-BACKOFF_MAX_SECONDS = 300
 
-# Serializes refreshes per provider so a timer refresh and a synchronous /kick
-# cannot race each other.
+# Per-provider lock: many concurrent agent requests will race on the same
+# host's first call after expiry; only one of them should hit DOH.
 _provider_refresh_locks: dict[str, asyncio.Lock] = {}
 
-# In-memory state keyed by provider slug. Exposed through /status and /kick.
-_provider_state: dict[str, dict] = {}
-_provider_state_lock = asyncio.Lock()
+# Cache of the last refresh outcome per provider. Read by the proxy hot path
+# (to get a token) and by /integrations (to render status).
+#
+# Shape: {
+#   "status": "connected" | "not_connected" | "revoked" | "transient_error",
+#   "access_token": str | None,
+#   "expires_at": float | None,            # monotonic seconds
+#   "last_refreshed_at": str | None,       # ISO 8601, only set on "connected"
+# }
+_provider_cache: dict[str, dict] = {}
+_provider_cache_lock = asyncio.Lock()
 
-# host → bearer token, populated by provider refresh loops. Read on every
-# intercepted request. String (not bytes) for debuggability.
-_host_token: dict[str, str] = {}
-_host_token_lock = asyncio.Lock()
+# Credentials for calling DOH's per-provider refresh endpoint. Set once in
+# _run() from env vars; read by _refresh_provider so callers don't have to
+# thread these three args through every helper.
+_doh_refresh_config: dict[str, str] = {}
 
 
 logger = logging.getLogger("integrations_broker")
@@ -592,17 +604,30 @@ async def _send_raw(writer: asyncio.StreamWriter, status: int, body: bytes) -> N
         await writer.drain()
 
 
-# ── Provider refresh loops ────────────────────────────────────────────
+# ── Provider refresh ──────────────────────────────────────────────────
+#
+# Refresh is lazy: we fetch a token only when one is needed and the cache is
+# missing or about to expire. Per-provider lock guarantees single-flight, so
+# concurrent first-callers all wait on the same in-flight refresh and then
+# read the fresh cache entry.
+
+# Refresh outcomes from DOH's per-provider endpoint. The proxy treats anything
+# other than "connected" the same way (no token → 503), so the value matters
+# only for /integrations rendering and logging.
+_OUTCOMES = {
+    200: "connected",          # token in payload
+    404: "not_connected",      # user hasn't connected this provider
+    410: "revoked",            # refresh token gone
+    401: "transient_error",    # bad env bearer; treat as transient so we keep trying
+    500: "transient_error",    # DOH misconfig
+}
+
 
 def _fetch_provider_token(control_plane_url: str, bearer: str, owner_username: str, refresh_path: str) -> dict:
-    """Call DOH's per-provider refresh endpoint. Returns a classified outcome dict.
+    """Call DOH's per-provider refresh endpoint. Returns a status dict.
 
-    Kinds:
-      {"kind": "ok", "access_token": str, "expires_in": int}
-      {"kind": "not_connected"}                           — DOH 404
-      {"kind": "revoked"}                                 — DOH 410
-      {"kind": "transient", "detail": str}                — retryable (network, 5xx)
-      {"kind": "fatal", "detail": str}                    — unrecoverable (401 bad bearer, 500 misconfig)
+    Shape: {"status": <see _OUTCOMES>, "access_token": str|None, "expires_in": int|None}
+    Network errors and unexpected statuses come back as transient_error.
     """
     url = f"{control_plane_url.rstrip('/')}{refresh_path}"
     body = json.dumps({"owner_username": owner_username}).encode("utf-8")
@@ -622,134 +647,76 @@ def _fetch_provider_token(control_plane_url: str, bearer: str, owner_username: s
             payload = json.loads(exc.read().decode("utf-8"))
         except Exception:
             payload = {}
-    except urllib.error.URLError as exc:
-        return {"kind": "transient", "detail": f"network: {exc.reason}"}
     except Exception as exc:
-        return {"kind": "transient", "detail": f"unexpected: {exc}"}
+        logger.error("refresh network error for %s: %s", refresh_path, exc)
+        return {"status": "transient_error", "access_token": None, "expires_in": None}
 
     if status == 200:
-        return {"kind": "ok", "access_token": payload["access_token"], "expires_in": int(payload.get("expires_in", 0))}
-    if status == 404:
-        return {"kind": "not_connected"}
-    if status == 410:
-        return {"kind": "revoked"}
-    if status in (401, 500):
-        return {"kind": "fatal", "detail": f"http {status}: {payload.get('error', 'unknown')}"}
-    return {"kind": "transient", "detail": f"http {status}: {payload.get('error', 'unknown')}"}
+        return {
+            "status": "connected",
+            "access_token": payload["access_token"],
+            "expires_in": int(payload.get("expires_in", 0)),
+        }
+    outcome = _OUTCOMES.get(status, "transient_error")
+    if outcome == "transient_error":
+        logger.error("refresh got http %d for %s: %s", status, refresh_path, payload.get("error", ""))
+    return {"status": outcome, "access_token": None, "expires_in": None}
 
 
-async def _refresh_provider_once(
-    slug: str,
-    cfg: dict,
-    control_plane_url: str,
-    bearer: str,
-    owner_username: str,
-    backoff: float,
-) -> tuple[float, float]:
-    """Refresh one provider and return the next sleep and backoff values."""
-    label = cfg["label"]
-    refresh_path = cfg["refresh_path"]
-    hosts = cfg["hosts"]
-
+async def _refresh_provider(slug: str) -> dict:
+    """Force a refresh for one provider and update the cache. Returns the new entry."""
+    cfg = PROVIDERS[slug]
     outcome = await asyncio.to_thread(
         _fetch_provider_token,
-        control_plane_url=control_plane_url,
-        bearer=bearer,
-        owner_username=owner_username,
-        refresh_path=refresh_path,
+        control_plane_url=_doh_refresh_config["control_plane_url"],
+        bearer=_doh_refresh_config["bearer"],
+        owner_username=_doh_refresh_config["owner_username"],
+        refresh_path=cfg["refresh_path"],
     )
-    kind = outcome["kind"]
-    now_iso = dt.datetime.now(dt.timezone.utc).isoformat()
-
-    if kind == "ok":
-        async with _host_token_lock:
-            for host in hosts:
-                _host_token[host] = outcome["access_token"]
-        async with _provider_state_lock:
-            _provider_state[slug] = {"label": label, "status": "connected", "last_refreshed_at": now_iso}
-        sleep_for = max(MIN_SLEEP_SECONDS, outcome["expires_in"] - REFRESH_LEAD_SECONDS)
-        logger.info("refreshed %s token, next refresh in %ds", slug, sleep_for)
-        return sleep_for, BACKOFF_INITIAL_SECONDS
-    if kind == "not_connected":
-        async with _host_token_lock:
-            for host in hosts:
-                _host_token.pop(host, None)
-        async with _provider_state_lock:
-            _provider_state[slug] = {"label": label, "status": "not_connected", "last_refreshed_at": None}
-        logger.info("%s not connected for user=%s, polling in %ds", slug, owner_username, NOT_CONNECTED_POLL_SECONDS)
-        return NOT_CONNECTED_POLL_SECONDS, BACKOFF_INITIAL_SECONDS
-    if kind == "revoked":
-        async with _host_token_lock:
-            for host in hosts:
-                _host_token.pop(host, None)
-        async with _provider_state_lock:
-            _provider_state[slug] = {"label": label, "status": "revoked", "last_refreshed_at": None}
-        logger.error("%s refresh token revoked for user=%s, polling in %ds", slug, owner_username, NOT_CONNECTED_POLL_SECONDS)
-        return NOT_CONNECTED_POLL_SECONDS, BACKOFF_INITIAL_SECONDS
-    if kind == "fatal":
-        async with _provider_state_lock:
-            _provider_state[slug] = {"label": label, "status": "fatal_error", "last_refreshed_at": None}
-        raise RuntimeError(f"{slug} refresh returned {outcome['detail']}")
-
-    async with _provider_state_lock:
-        _provider_state[slug] = {"label": label, "status": "transient_error", "last_refreshed_at": None}
-    sleep_for = backoff + random.uniform(0, backoff / 2)
-    logger.error("%s transient refresh failure (%s), retrying in %.1fs", slug, outcome["detail"], sleep_for)
-    return sleep_for, min(backoff * 2, BACKOFF_MAX_SECONDS)
+    entry = {
+        "status": outcome["status"],
+        "access_token": outcome["access_token"],
+        "expires_at": (
+            time.monotonic() + outcome["expires_in"] if outcome["status"] == "connected" else None
+        ),
+        "last_refreshed_at": (
+            dt.datetime.now(dt.timezone.utc).isoformat() if outcome["status"] == "connected" else None
+        ),
+    }
+    async with _provider_cache_lock:
+        _provider_cache[slug] = entry
+    logger.info("refreshed %s: %s", slug, entry["status"])
+    return entry
 
 
-async def _refresh_provider_locked(
-    slug: str,
-    cfg: dict,
-    control_plane_url: str,
-    bearer: str,
-    owner_username: str,
-    backoff: float,
-) -> tuple[float, float]:
-    """Run a provider refresh with its per-provider lock held."""
+async def _ensure_fresh(slug: str) -> dict:
+    """Return a cache entry that's either non-connected or has a token >LEAD seconds from expiry.
+
+    Single-flights via the per-provider lock: concurrent callers see the same
+    refreshed entry without firing duplicate requests at DOH.
+    """
     async with _provider_refresh_locks[slug]:
-        return await _refresh_provider_once(
-            slug=slug,
-            cfg=cfg,
-            control_plane_url=control_plane_url,
-            bearer=bearer,
-            owner_username=owner_username,
-            backoff=backoff,
-        )
+        async with _provider_cache_lock:
+            entry = _provider_cache.get(slug)
+        if entry and entry["status"] == "connected" and entry["expires_at"] - time.monotonic() > REFRESH_LEAD_SECONDS:
+            return entry
+        return await _refresh_provider(slug=slug)
 
 
-async def _refresh_all_providers_once(control_plane_url: str, bearer: str, owner_username: str) -> None:
-    """Synchronously refresh every provider before returning."""
-    for slug, cfg in PROVIDERS.items():
-        await _refresh_provider_locked(
-            slug=slug,
-            cfg=cfg,
-            control_plane_url=control_plane_url,
-            bearer=bearer,
-            owner_username=owner_username,
-            backoff=BACKOFF_INITIAL_SECONDS,
-        )
-
-
-async def _refresh_loop(slug: str, cfg: dict, control_plane_url: str, bearer: str, owner_username: str) -> None:
-    """Refresh one provider on a background timer."""
-    backoff = BACKOFF_INITIAL_SECONDS
-
-    while True:
-        sleep_for, backoff = await _refresh_provider_locked(
-            slug=slug,
-            cfg=cfg,
-            control_plane_url=control_plane_url,
-            bearer=bearer,
-            owner_username=owner_username,
-            backoff=backoff,
-        )
-        await asyncio.sleep(delay=sleep_for)
+async def _refresh_all_providers() -> None:
+    """Force-refresh every provider. Used by /integrations so the UI sees current state."""
+    for slug in PROVIDERS:
+        async with _provider_refresh_locks[slug]:
+            await _refresh_provider(slug=slug)
 
 
 async def _current_token_for_host(host: str) -> str | None:
-    async with _host_token_lock:
-        return _host_token.get(host)
+    """Token for an upstream host, refreshing lazily. None if the user isn't connected."""
+    slug = _host_to_provider_slug(host=host)
+    if slug is None:
+        return None
+    entry = await _ensure_fresh(slug=slug)
+    return entry["access_token"]
 
 
 # ── Integrations control API (Starlette on 127.0.0.1:9951) ───────────
@@ -770,18 +737,23 @@ async def _handle_unified_status(
     owner_username: str,
     env_slug: str,
 ) -> Response:
-    """Flat list combining TLS-intercept providers (Google) and MCP-aggregator items."""
+    """Flat list combining TLS-intercept providers (Google) and MCP-aggregator items.
+
+    Force-refreshes every TLS-intercept provider so the rendered status reflects
+    DOH's current view of the user's grants, not whatever the proxy last saw.
+    """
+    await _refresh_all_providers()
     items: list[dict] = []
-    async with _provider_state_lock:
-        google_snapshot = {slug: dict(state) for slug, state in _provider_state.items()}
+    async with _provider_cache_lock:
+        snapshot = {slug: dict(entry) for slug, entry in _provider_cache.items()}
     for slug, cfg in PROVIDERS.items():
-        state = google_snapshot.get(slug, {})
+        entry = snapshot.get(slug, {})
         items.append({
             "kind": "tls_intercept",
             "slug": slug,
-            "label": state.get("label", cfg["label"]),
-            "status": state.get("status", "starting"),
-            "last_refreshed_at": state.get("last_refreshed_at"),
+            "label": cfg["label"],
+            "status": entry.get("status", "transient_error"),
+            "last_refreshed_at": entry.get("last_refreshed_at"),
         })
     items.extend(await aggregator.status_items(request=request))
     return JSONResponse(content={
@@ -796,46 +768,9 @@ async def _handle_healthz(request: Request) -> Response:
     return JSONResponse(content={"ok": True})
 
 
-async def _handle_google_kick(
-    request: Request,
-    control_plane_url: str,
-    bearer: str,
-    owner_username: str,
-    env_slug: str,
-    aggregator: mcp_aggregator.MCPAggregator,
-) -> Response:
-    """Force-refresh every TLS-intercept provider, then return the unified status."""
-    try:
-        await _refresh_all_providers_once(
-            control_plane_url=control_plane_url,
-            bearer=bearer,
-            owner_username=owner_username,
-        )
-    except RuntimeError as exc:
-        logger.error("synchronous refresh failed: %s", exc)
-        response = await _handle_unified_status(
-            request=request,
-            aggregator=aggregator,
-            control_plane_url=control_plane_url,
-            owner_username=owner_username,
-            env_slug=env_slug,
-        )
-        payload = json.loads(response.body.decode())
-        payload["error"] = str(exc)
-        return JSONResponse(content=payload, status_code=500)
-    return await _handle_unified_status(
-        request=request,
-        aggregator=aggregator,
-        control_plane_url=control_plane_url,
-        owner_username=owner_username,
-        env_slug=env_slug,
-    )
-
-
 def _build_control_app(
     aggregator: mcp_aggregator.MCPAggregator,
     control_plane_url: str,
-    bearer: str,
     owner_username: str,
     env_slug: str,
 ) -> Starlette:
@@ -849,16 +784,6 @@ def _build_control_app(
             env_slug=env_slug,
         )
 
-    async def kick_route(request: Request) -> Response:
-        return await _handle_google_kick(
-            request=request,
-            control_plane_url=control_plane_url,
-            bearer=bearer,
-            owner_username=owner_username,
-            env_slug=env_slug,
-            aggregator=aggregator,
-        )
-
     async def refresh_catalog_route(request: Request) -> Response:
         ok, payload = await aggregator.refresh_catalog()
         return JSONResponse(content=payload, status_code=200 if ok else 429)
@@ -866,7 +791,6 @@ def _build_control_app(
     routes = [
         Route(path="/healthz", endpoint=_handle_healthz, methods=["GET"]),
         Route(path="/integrations", endpoint=status_route, methods=["GET"]),
-        Route(path="/integrations/google/kick", endpoint=kick_route, methods=["POST"]),
         Route(path="/integrations/refresh_catalog", endpoint=refresh_catalog_route, methods=["POST"]),
         *aggregator.routes(prefix="/integrations"),
     ]
@@ -896,6 +820,9 @@ async def _run(proxy_port: int, control_port: int, mcp_port: int, ca_dir: Path, 
     minter = _CertMinter(ca_dir=ca_dir, private_dir=private_dir)
     minter.bootstrap()
 
+    _doh_refresh_config["control_plane_url"] = control_plane_url
+    _doh_refresh_config["bearer"] = bearer
+    _doh_refresh_config["owner_username"] = owner_username
     for slug in PROVIDERS:
         _provider_refresh_locks[slug] = asyncio.Lock()
 
@@ -926,7 +853,6 @@ async def _run(proxy_port: int, control_port: int, mcp_port: int, ca_dir: Path, 
     control_app = _build_control_app(
         aggregator=aggregator,
         control_plane_url=control_plane_url,
-        bearer=bearer,
         owner_username=owner_username,
         env_slug=env_slug,
     )
@@ -938,23 +864,12 @@ async def _run(proxy_port: int, control_port: int, mcp_port: int, ca_dir: Path, 
     control_server.install_signal_handlers = lambda: None
     logger.info("control API listening on 127.0.0.1:%d", control_port)
 
-    refreshers = [
-        asyncio.create_task(_refresh_loop(
-            slug=slug,
-            cfg=cfg,
-            control_plane_url=control_plane_url,
-            bearer=bearer,
-            owner_username=owner_username,
-        ))
-        for slug, cfg in PROVIDERS.items()
-    ]
-
     async with proxy_server:
         proxy_task = asyncio.create_task(proxy_server.serve_forever())
         control_task = asyncio.create_task(control_server.serve())
         mcp_task = asyncio.create_task(aggregator.serve())
         done, pending = await asyncio.wait(
-            {stop, proxy_task, control_task, mcp_task, *refreshers},
+            {stop, proxy_task, control_task, mcp_task},
             return_when=asyncio.FIRST_COMPLETED,
         )
         for task in pending:

@@ -6,7 +6,7 @@
 
 +    # DOH: same-origin reverse proxy for the integrations broker's control
 +    # API. Covers all integration management surfaces (status, OAuth start /
-+    # callback, disconnect, kick). See template_repos/hermes_agent/integrations_broker.py.
++    # callback, disconnect). See template_repos/hermes_agent/integrations_broker.py.
 +    if parsed.path.startswith("/__doh_broker/"):
 +        return _doh_broker_proxy(handler, parsed, method="GET", body=b"")
 +
