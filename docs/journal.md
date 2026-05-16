@@ -1,5 +1,54 @@
 # DevOpsHero Development Journal
 
+## 2026-05-15 21:11 - [Bugfix] Fix 314k-token context blowout from Merge ProxyProvider, redesign aggregator around progressive disclosure
+
+**Conversation:** [2026-05-15-2111-2447523d.md](conversations/2026-05-15-2111-2447523d.md)
+
+Hermes WebUI was showing **157% context used / 314.4k tokens** on the user's first message after redeploy — over the 200k Claude window before they typed a character. Root cause: `template_repos/hermes_agent/doh_runtime/mcp_aggregator.py:161-163` unconditionally attached a Merge `ProxyProvider` at boot, transparently re-exporting the entire 151-connector Tool Pack (~1500 tool defs averaging ~200 tokens of schema each) into Hermes's `tools/list`. The fix replaces the transparent passthrough with a progressive-disclosure surface — four always-on tools the LLM uses to discover, inspect, and invoke arbitrary integration tools.
+
+**Diagnosis path.** Confirmed it was *us* (not upstream) by reading the deployed image's `tools/list` flow against the 314k figure. The number had to be **tool definitions**, not chat history (first message), and Hermes vanilla doesn't ship anywhere near that. Found the unconditional `_attach_provider(slug="merge")` line and traced it to `MergeBackend.list_tools` → ~1500 namespaced tools.
+
+**Design grilled in `grill-me`.** Long, useful interview that nailed seven decisions before any code:
+1. **Aggregator stays in-container, alpha-style** (engine, not shim). Notion's `_OAuthState` and per-user state already live there; splitting state across DOH/container would be worse. Per-(app, user) is *practically* per-app since each Hermes app has one owner.
+2. **DOH stays stateless on catalog**. No DOH-side cache; aggregator pulls fresh from `/api/integrations/merge/mcp` through the existing relay on boot, and via a user-facing **Refresh button** in the Integrations panel header (rate-limited 30s) when needed.
+3. **Catalog in-memory only.** Persistence buys ~1-3s of boot savings vs a real engineering tax (atomic writes, schema migration, "is this stale because…"). Container restarts are infrequent enough that the cost is tiny. Restart = re-fetch.
+4. **BM25 search, not embeddings.** Pure-Python `rank_bm25` (~50 LOC, zero deps). LLM is already great at query rewriting; semantic embeddings are a v2 problem. Indexed text per entry: `tool_id + connector + description`.
+5. **Mutation classification: verb-prefix heuristic + static `*_MUTATION_OVERRIDES` dict per backend, default-to-mutates on ambiguity.** Asymmetric cost — over-prompting for approvals is worse than silent mutations. Different verb tables for Merge's `connector__verb_object` and Notion's `verb-object-thing`.
+6. **Tool ids = native upstream names verbatim.** Considered DOH-namespacing (`connector.action`) and aggressively bounced it during grilling — overdesign. Native names mean no normalization layer, no mapping table, no rename-handling complexity. Backends stamp `connector` and `mutates` as metadata fields on `CatalogEntry`. If two backends ever advertise the same name, log loud, last-write-wins.
+7. **The 4 primitives**: `integrations_search_tools(query, limit, status_filter)`, `integrations_describe_tool(tool_id)`, `integrations_call_tool(tool_id, args)`, `integrations_list_connectors(status_filter)`. Naming went through `merge.search` → `search_tools` → namespaced `integrations_search_tools` (because Hermes already exposes terminal/file/web/etc. and bare names collide). Settled on uniform `integrations_*_*` shape so the four read as a coherent set in tool listings.
+
+**Pre-flight verification of fastmcp's API.** Instead of dropping to JSON-RPC for `tools/list`/`tools/call`, confirmed `fastmcp.Client.list_tools()` and `Client.call_tool()` exist at `~/.cache/uv/.../fastmcp/client/mixins/tools.py:62, 191`. Saved a chunk of code.
+
+**The `Backend` Protocol.** Each backend implements `list_catalog`, `list_known_connectors`, `call`, `connector_status`, `invalidate_caches`. **MergeBackend** uses the existing DOH-side relay (`/api/integrations/merge/mcp` for tools, `/api/integrations/merge/connectors` for the connector roster, `/api/integrations/merge/connector-status` for per-connector state). **NotionBackend** uses the existing `_OAuthState` + Notion's hosted MCP (`https://mcp.notion.com/mcp`) directly. Both reuse the WebUI-facing OAuth + Merge passthrough Starlette routes — those weren't deleted, just freed from being on the LLM-facing path.
+
+**Three rounds of in-container verification on `hermes-vmendi01`** revealed three real issues, each fixed:
+
+1. **Initial deploy: bloat fixed but 7 connectors only.** `tools/list` returned exactly 4 tools to Hermes (definitive: 314k → ~few k tokens), search/describe/call worked. But `integrations_list_connectors` showed only 7 connectors instead of the expected 151. Diagnosed: my `MergeBackend.list_catalog` derived `connector` from `name.split("__", 1)[0]`, which left `authenticate_<slug>` placeholders Merge ships for unconnected connectors falling into a `connector="unknown"` bucket. They also had inflated BM25 scores because their description packs every downstream tool's docs (a Merge quirk). **Fix: skip `authenticate_*` entirely; they're meta tools the LLM has no reason to call (connection happens via Magic Link UI, not a tool call) and they pollute search.**
+
+2. **Second deploy: 7 connectors still, but reason is structural.** Merge only exposes *action* tools after the user OAuth-authenticates. Unconnected connectors literally don't appear in `tools/list` (just the auth-tool placeholder we now skip). So `list_connectors` derived from the catalog can never surface unconnected ones. **Fix: split the catalog into two indexes — `entries: dict[tool_id, CatalogEntry]` for callable tools, and `connectors: dict[(backend, slug), _ConnectorIndex]` populated from a new `Backend.list_known_connectors()` method.** MergeBackend's implementation hits the existing `/api/integrations/merge/connectors` endpoint (which returns all 151 from the Tool Pack with their `status`). Search now returns mixed results: `kind=tool` for callable tools, `kind=connector` for known-but-unconnected connectors with a hint to open the Integrations panel.
+
+3. **Third deploy: 152 connectors, but `list_connectors` showed asymmetry between OAuth and public-API connectors.** When the user asked the LLM "what mcp tools do you see," it correctly listed Jira (43 tools, connected) but bucketed Weather/Wikipedia/etc. (which are public-API, no auth required) as "not connected with tools available when connected" — confusing because their tools are *immediately* callable. Root cause: Merge marks a connector as `authenticated` only after an OAuth grant; for no-auth public APIs, status is permanently `not_connected` even though the tools work. **Fix: in `CatalogStore._reload_locked`, after folding tool counts into the connector index, promote `status` to `connected` when `tool_count > 0`** — `connected` now means "callable right now," consistently across OAuth and public-API connectors. Also added a `_connector_status_for_entry()` helper so per-tool calls/searches consult the catalog index (which factors in tool_count) rather than calling `backend.connector_status` directly, avoiding the same OAuth-only signal mismatch in `integrations_call_tool`.
+
+**Final shape on `hermes-vmendi01`** after all three deploys:
+- `tools/list` returns exactly **4 tools** to Hermes.
+- Catalog: **97 callable tool entries, 152 connectors** from 2 backends, 0 collisions.
+- `connected` = "callable now" (Jira via OAuth + 6 public-API connectors with no auth).
+- `not_connected` = ~145 OAuth-gated connectors awaiting Magic Link.
+- Search returns `kind=connector` shells for queries like "slack" / "send email", correctly pointing the LLM at the Integrations panel.
+
+**SOUL.md additions** — three workflow rules so the LLM uses these primitives correctly without per-call reminders: "search before invoking" / "on `not_connected` tell user to open Integrations panel" / "if `mutates: true` confirm before calling."
+
+**Refresh button.** New `POST /__doh_broker/integrations/refresh_catalog` endpoint on the broker's Starlette app, plus a button in the Integrations page header. Drops both catalog and per-backend connection-status caches, rebuilds the BM25 index. Rate-limited (30s server-side, JS inflight flag client-side).
+
+**Async catalog load with `asyncio.Event` gate.** `serve()` kicks `asyncio.create_task(catalog_store.load_in_background(...))` and starts FastMCP immediately — sandbox `/mcp` comes up unblocked. Each of the 4 tools `await store.ensure_loaded(timeout=30)` first thing; first call waits for catalog if not yet loaded, subsequent calls are no-ops. Lenient partial backend failure: per-backend `gather(..., return_exceptions=True)` style, a failed backend contributes zero entries, others keep working.
+
+**Lessons:**
+- **The tool-pack relay was a footgun.** Transparent passthrough seemed clean but mixed two responsibilities: "let DOH manage the API key" (the actual goal) and "expose every Tool Pack tool to the LLM" (an unintended side effect). Splitting these via a stateful aggregator with explicit primitives is better. The DOH-side relay still exists and still owns the API key boundary; just the *aggregator's* role changed.
+- **Merge's catalog API has no `read_only`/`mutates` flag.** Tried to find one in their docs — public docs are thin (mostly 404s on the API reference URLs). The naming convention (`connector__verb_object`) is the only signal. Heuristic + per-tool overrides is the right shape until we discover a flag.
+- **`connected` should mean "callable," not "credentialed."** The Merge API conflates the two; we need the looser, callability-based definition for the LLM to give coherent answers.
+- **Don't await catalog load in `serve()`.** Tested briefly: a slow Merge response stalls container startup, and ECS health checks start failing. Async kick + per-call gate is strictly better.
+- **The grill-me skill produced ~30% better design than my first instinct.** Several of my early proposals (DOH-namespaced tool IDs, search-engine in DOH, embeddings-first search, 4 primitives + connect URL surfacing) got bounced as overdesign during grilling. Worth using on any non-trivial system change.
+
 ## 2026-05-15 19:37 - [UI] Promote Integrations to a top-level page in the Hermes WebUI
 
 **Conversation:** [2026-05-15-1937-89d09b66.md](conversations/2026-05-15-1937-89d09b66.md)
