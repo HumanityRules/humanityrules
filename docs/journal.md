@@ -1,5 +1,27 @@
 # DevOpsHero Development Journal
 
+## 2026-05-15 23:39 - [DevEx] Per-worker label scoping for parallel-worktree verification
+
+**Conversation:** [2026-05-15-2340-74f0749e.md](conversations/2026-05-15-2340-74f0749e.md)
+
+The Hermes verification flow in `template_repos/hermes_agent/AGENTS.md` told Claude to *stop* any running `run_job_worker` and start a fresh one in its worktree before deploying. That works for one Claude at a time but breaks the moment two Claudes work in parallel — they keep killing each other's workers, and a stale main-tree worker can still race ahead and claim a job created from a worktree (the worker imports its code at process-start, so it executes whichever code its own worktree was on when started). Replaced "kill the others" with "scope your own work so others can't see it."
+
+**Why a label, not a per-app `--app` filter.** First idea was `run_job_worker --app foo`. Two problems: (1) other unscoped workers (the host main-tree worker) still grab `foo`'s rows because `skip_locked=True` is per-row, not per-app — so we'd be back to telling Claudes to stop the main worker; (2) it doesn't generalize cleanly to environment-level jobs or multi-app verification flows. A free-form `App.label` field — defaulting to `""` for everything UI-created — lets the unscoped main worker only see `label=""` rows, and a labelled worker only see its own. They literally cannot collide.
+
+**Why `App.label` and not `Deployment.label` or `Blueprint.label`.** A verification session orbits one App: deploy → maybe redeploy → maybe permission-apply → teardown → remove. Stamping on the App means every downstream row (Deployment, AppPermissionRequest, AppRemovalJob) inherits the scope transitively through the FK. We only need to plumb a `--label` flag through *one* command — `doh_control deploy-app-template`, which is the only thing creating new Apps from the CLI — and every other operation reads it for free. That's the difference between "two new flags and one model field" and "label parameter on every job-creating service in the codebase."
+
+**The AppRemovalJob subtlety I got wrong twice.** First claimed the App row could be gone by the time the removal job is claimed (so we'd need a `label_snapshot` field). User pushed back, and re-reading `app_remove_executor.run_removal` made it obvious: `app.delete()` runs at the very *end* of the executor, long after the worker has claimed the job. The App is always present at claim time. The removal job's existing `app_id_snapshot` field (a UUID, not a FK — it has to survive the eventual `app.delete()` for audit) is fine for the claim filter: `.filter(app_id_snapshot__in=App.objects.filter(label=label).values("id"))`. No extra schema change.
+
+**Env-level jobs (provisioning/teardown) stay unscoped.** They have no FK to App, and a verification session usually reuses an existing env. Adding `Environment.label` would force a label decision into env-creation flows that are otherwise invariant across worktrees. Decided: env-level claims are gated by `if not label:` in the worker loop, so a labelled worker simply skips them. The unscoped main worker handles all env work for everyone. If env-creation collisions become a real problem someday, we can revisit; today they aren't.
+
+**Magic-via-env-var idea was rejected for being too magical.** Considered using `os.environ["DOH_WORKER_LABEL"]` plus a `pre_save` signal so callers wouldn't need to plumb the parameter at all — both the worker and `deploy-app-template` would inherit it from the shell. Zero callsite changes, but the coupling is invisible: a future reader sees a `label` column and has to grep the codebase to discover the env-var hook. Explicit beats magic here, especially since the only places that actually need to set it are `deploy_from_template` (CLI passes label, UI passes `""`) and `start_worker` (management command passes label, AppConfig.ready passes `""`).
+
+**Key points:**
+- The right unit of scoping is the *resource that's being verified*, not the worker process or the job row. Workers and jobs are ephemeral; the App outlives them and naturally carries verification identity through to every dependent row via FK.
+- Unscoped (`label=""`) is a real production state, not a placeholder. The web-server-embedded worker (`apps.py`) and the host main-tree CLI worker both run unscoped and serve real users; the labelled mode is purely a developer-affordance overlay. This is why the field is `default=""` and not nullable — `""` is the meaningful "main worker territory" value, distinct from "we forgot to think about this."
+- Resisted plumbing `--label` into `redeploy-app`, `teardown-app`, etc. The label is a property of the App, not of each invocation. Once stamped at app creation, it's the worker's job (literally) to filter by it — callers shouldn't have to think about it again.
+- The fix is mostly subtractive: instead of orchestrating "everyone stop their workers before I run mine," we let workers stay running indefinitely and use the schema to make their visibility cones non-overlapping.
+
 ## 2026-05-15 21:11 - [Bugfix] Fix 314k-token context blowout from Merge ProxyProvider, redesign aggregator around progressive disclosure
 
 **Conversation:** [2026-05-15-2111-2447523d.md](conversations/2026-05-15-2111-2447523d.md)

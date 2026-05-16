@@ -746,6 +746,13 @@ class App(models.Model):
         default=Status.ACTIVE,
     )
 
+    # Free-form tag used to scope async work to a specific job worker. The unscoped
+    # main worker (no --label) only claims rows where label="" — the default for
+    # every App created via the UI. A worktree-local worker started with
+    # `run_job_worker --label foo` only claims rows whose App has label="foo",
+    # which avoids cross-worktree collisions during end-to-end verification.
+    label = models.CharField(max_length=64, blank=True, default="")
+
     created_by = models.ForeignKey(
         User,
         on_delete=models.SET_NULL,
