@@ -384,15 +384,25 @@ class Command(BaseCommand):
             return
 
         old_status = deployment.status
-        deployment.status = models.Deployment.Status.TEARDOWN_PENDING
-        deployment.status_message = "Teardown triggered via doh_control"
-        deployment.save(update_fields=["status", "status_message", "updated_at"])
+        old_label = app.label
+        with transaction.atomic():
+            deployment.status = models.Deployment.Status.TEARDOWN_PENDING
+            deployment.status_message = "Teardown triggered via doh_control"
+            deployment.save(update_fields=["status", "status_message", "updated_at"])
+            # Clear App.label so the unscoped main worker picks up the teardown.
+            # The label scopes verification-time work to a specific run_job_worker;
+            # by teardown time that worker is typically gone, leaving the row stranded.
+            if app.label:
+                app.label = ""
+                app.save(update_fields=["label", "updated_at"])
 
         self.stdout.write(self.style.SUCCESS(f"\nDeployment for '{app_slug}' set to TEARDOWN_PENDING"))
         self.stdout.write(f"  App: {app.name}")
         self.stdout.write(f"  Environment: {deployment.environment.name}")
         self.stdout.write(f"  Deployment: {deployment.id}")
         self.stdout.write(f"  Previous status: {old_status}")
+        if old_label:
+            self.stdout.write(f"  Cleared App.label: {old_label!r} → '' (unscoped main worker will claim)")
         self.stdout.write(self.style.WARNING("Teardown will start automatically (job worker picks up pending teardowns)"))
         self.stdout.write("")
 
@@ -402,6 +412,7 @@ class Command(BaseCommand):
             self.stdout.write(self.style.WARNING(f"App '{app.slug}' is already pending removal"))
             return
 
+        old_label = app.label
         with transaction.atomic():
             job = models.AppRemovalJob.objects.create(
                 organization=app.organization,
@@ -417,7 +428,14 @@ class Command(BaseCommand):
                 status_message="Queued via doh_control teardown-app --remove-app",
             )
             app.status = models.App.Status.PENDING_REMOVAL
-            app.save(update_fields=["status", "updated_at"])
+            # Clear App.label so the unscoped main worker picks up the removal.
+            # The label scopes verification-time work to a specific run_job_worker;
+            # by removal time that worker is typically gone, leaving the row stranded.
+            update_fields = ["status", "updated_at"]
+            if app.label:
+                app.label = ""
+                update_fields.append("label")
+            app.save(update_fields=update_fields)
 
         self.stdout.write(self.style.SUCCESS(f"\nApp '{app.slug}' set to PENDING_REMOVAL"))
         self.stdout.write(f"  App: {app.name}")
@@ -427,6 +445,8 @@ class Command(BaseCommand):
         self.stdout.write(f"  delete_secrets: {delete_secrets}")
         self.stdout.write(f"  delete_persistent_data: {delete_persistent_data}")
         self.stdout.write(f"  delete_policies: {delete_policies}")
+        if old_label:
+            self.stdout.write(f"  Cleared App.label: {old_label!r} → '' (unscoped main worker will claim)")
         self.stdout.write(self.style.WARNING(
             "Worker will tear down all live deployments inline, then perform cleanup + cascade delete"
         ))
