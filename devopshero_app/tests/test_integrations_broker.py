@@ -119,35 +119,36 @@ class TestCertMinter(unittest.TestCase):
             self.assertEqual(private_dir.stat().st_mode & 0o777, 0o700)
 
 
-class TestControlKick(unittest.IsolatedAsyncioTestCase):
+class _StubAggregator:
+    """Minimal MCPAggregator surface for the unified-status + control-app tests."""
+
+    async def status_items(self, request):
+        return []
+
+    def routes(self, prefix):
+        return []
+
+
+class TestControlIntegrations(unittest.IsolatedAsyncioTestCase):
+    """The /integrations endpoint refreshes every TLS-intercept provider before rendering."""
 
     def setUp(self) -> None:
-        broker._provider_state.clear()
-        broker._host_token.clear()
+        broker._provider_cache.clear()
         broker._provider_refresh_locks.clear()
-
-    async def test_kick_refreshes_before_returning_unified_status(self) -> None:
-        """POST /integrations/google/kick should refresh, then return the unified items list."""
-        from starlette.testclient import TestClient
-
         for slug in broker.PROVIDERS:
             broker._provider_refresh_locks[slug] = asyncio.Lock()
+        broker._doh_refresh_config.update({
+            "control_plane_url": "https://doh.example",
+            "bearer": "env-bearer",
+            "owner_username": "vmendi",
+        })
 
-        # Stub MCPAggregator with the minimal surface our unified status + control app need.
-        class _StubAggregator:
-            async def handle_status(self, request):
-                from starlette.responses import JSONResponse
-                return JSONResponse(content={"providers": {}})
-            async def handle_merge_connectors(self, request):
-                from starlette.responses import JSONResponse
-                return JSONResponse(content={"connectors": []}, status_code=502)
-            def routes(self, prefix):
-                return []
+    async def test_get_integrations_refreshes_then_returns_unified_status(self) -> None:
+        from starlette.testclient import TestClient
 
         app = broker._build_control_app(
             aggregator=_StubAggregator(),
             control_plane_url="https://doh.example",
-            bearer="env-bearer",
             owner_username="vmendi",
             env_slug="default",
         )
@@ -155,10 +156,10 @@ class TestControlKick(unittest.IsolatedAsyncioTestCase):
         with patch.object(
             broker,
             "_fetch_provider_token",
-            return_value={"kind": "ok", "access_token": "fresh-token", "expires_in": 3600},
+            return_value={"status": "connected", "access_token": "fresh-token", "expires_in": 3600},
         ) as fetch_mock:
             with TestClient(app) as client:
-                resp = client.post("/integrations/google/kick")
+                resp = client.get("/integrations")
                 self.assertEqual(resp.status_code, 200)
                 payload = resp.json()
 
@@ -170,6 +171,58 @@ class TestControlKick(unittest.IsolatedAsyncioTestCase):
             "fresh-token",
         )
         fetch_mock.assert_called_once()
+
+
+class TestLazyTokenForHost(unittest.IsolatedAsyncioTestCase):
+    """_current_token_for_host fetches lazily and reuses the cache until near-expiry."""
+
+    def setUp(self) -> None:
+        broker._provider_cache.clear()
+        broker._provider_refresh_locks.clear()
+        for slug in broker.PROVIDERS:
+            broker._provider_refresh_locks[slug] = asyncio.Lock()
+        broker._doh_refresh_config.update({
+            "control_plane_url": "https://doh.example",
+            "bearer": "env-bearer",
+            "owner_username": "vmendi",
+        })
+
+    async def test_first_call_fetches_subsequent_calls_use_cache(self) -> None:
+        with patch.object(
+            broker,
+            "_fetch_provider_token",
+            return_value={"status": "connected", "access_token": "T1", "expires_in": 3600},
+        ) as fetch_mock:
+            self.assertEqual(await broker._current_token_for_host(host="gmail.googleapis.com"), "T1")
+            self.assertEqual(await broker._current_token_for_host(host="drive.googleapis.com"), "T1")
+            fetch_mock.assert_called_once()
+
+    async def test_refresh_when_within_lead_window(self) -> None:
+        responses = [
+            {"status": "connected", "access_token": "T1", "expires_in": 3600},
+            {"status": "connected", "access_token": "T2", "expires_in": 3600},
+        ]
+        with patch.object(broker, "_fetch_provider_token", side_effect=responses):
+            self.assertEqual(await broker._current_token_for_host(host="gmail.googleapis.com"), "T1")
+            # Backdate the cached entry past the lead window to force a refresh.
+            broker._provider_cache["google"]["expires_at"] = (
+                broker._provider_cache["google"]["expires_at"] - 3600
+            )
+            self.assertEqual(await broker._current_token_for_host(host="gmail.googleapis.com"), "T2")
+
+    async def test_unknown_host_returns_none_without_fetching(self) -> None:
+        with patch.object(broker, "_fetch_provider_token") as fetch_mock:
+            self.assertIsNone(await broker._current_token_for_host(host="api.tavily.com"))
+            fetch_mock.assert_not_called()
+
+    async def test_not_connected_caches_no_token(self) -> None:
+        with patch.object(
+            broker,
+            "_fetch_provider_token",
+            return_value={"status": "not_connected", "access_token": None, "expires_in": None},
+        ):
+            self.assertIsNone(await broker._current_token_for_host(host="gmail.googleapis.com"))
+        self.assertEqual(broker._provider_cache["google"]["status"], "not_connected")
 
 
 class TestFetchProviderTokenClassification(unittest.TestCase):
@@ -212,23 +265,23 @@ class TestFetchProviderTokenClassification(unittest.TestCase):
                 refresh_path="/api/x",
             )
 
-    def test_200_is_ok(self) -> None:
+    def test_200_is_connected(self) -> None:
         out = self._run(status=200, payload={"access_token": "abc", "expires_in": 3600})
-        self.assertEqual(out["kind"], "ok")
+        self.assertEqual(out["status"], "connected")
         self.assertEqual(out["access_token"], "abc")
         self.assertEqual(out["expires_in"], 3600)
 
     def test_404_is_not_connected(self) -> None:
-        self.assertEqual(self._run(status=404, payload={})["kind"], "not_connected")
+        self.assertEqual(self._run(status=404, payload={})["status"], "not_connected")
 
     def test_410_is_revoked(self) -> None:
-        self.assertEqual(self._run(status=410, payload={})["kind"], "revoked")
+        self.assertEqual(self._run(status=410, payload={})["status"], "revoked")
 
-    def test_401_is_fatal(self) -> None:
-        self.assertEqual(self._run(status=401, payload={"error": "bad bearer"})["kind"], "fatal")
+    def test_401_is_transient(self) -> None:
+        self.assertEqual(self._run(status=401, payload={"error": "bad bearer"})["status"], "transient_error")
 
-    def test_500_is_fatal(self) -> None:
-        self.assertEqual(self._run(status=500, payload={"error": "bad config"})["kind"], "fatal")
+    def test_500_is_transient(self) -> None:
+        self.assertEqual(self._run(status=500, payload={"error": "bad config"})["status"], "transient_error")
 
     def test_503_is_transient(self) -> None:
-        self.assertEqual(self._run(status=503, payload={"error": "try later"})["kind"], "transient")
+        self.assertEqual(self._run(status=503, payload={"error": "try later"})["status"], "transient_error")
