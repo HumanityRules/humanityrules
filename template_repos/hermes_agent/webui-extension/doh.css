@@ -1,38 +1,89 @@
-/* DOH WebUI extension — Integrations panel.
+/* DOH WebUI extension — Integrations page.
    Scoped to our own class names so upstream CSS can't accidentally target us. */
 
-.doh-integration-panel-head {
-  padding: 10px 12px 6px;
-  flex-shrink: 0;
-}
+/* Plug into upstream's main-view switching contract:
+   - hide #mainIntegrations by default
+   - reveal it when <main> has `showing-integrations`
+   - force-hide #mainChat in the same state (upstream's default-show rule
+     reveals chat for any state not in its hard-coded :not() list, so we need
+     !important to override it without patching upstream CSS) */
+main.main > #mainIntegrations { display: none; }
+main.main.showing-integrations > #mainIntegrations { display: flex; }
+main.main.showing-integrations > #mainChat { display: none !important; }
 
-.doh-integration-panel-title {
-  font-size: 11px;
+.doh-integration-summary {
+  padding: 12px 14px;
+  font-size: 12px;
   color: var(--muted);
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
+  line-height: 1.5;
 }
 
-.doh-integration-panel-meta {
-  font-size: 11px;
+.doh-integration-page {
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  flex-direction: column;
+  background: var(--bg);
+  overflow-y: auto;
+}
+
+.doh-integration-page-inner {
+  width: min(900px, 100%);
+  margin: 0 auto;
+  padding: 28px 32px 48px;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.doh-integration-page-head {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--border);
+}
+
+.doh-integration-page-head-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.doh-integration-page-title {
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--text);
+  letter-spacing: -0.01em;
+}
+
+.doh-integration-page-meta {
+  font-size: 12px;
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+.doh-integration-page-refresh-btn {
+  align-self: center;
+}
+
+.doh-integration-page-refresh-note {
+  font-size: 12px;
   color: var(--muted);
   margin-top: 4px;
-  line-height: 1.5;
 }
 
 .doh-integration-list {
   display: flex;
   flex-direction: column;
   gap: 10px;
-  padding: 4px 12px 12px;
-  overflow-y: auto;
-  flex: 1;
 }
 
 .doh-integration-empty {
   color: var(--muted);
-  font-size: 12px;
-  padding: 12px 0;
+  font-size: 13px;
+  padding: 16px 0;
 }
 
 .doh-integration-card {
@@ -143,10 +194,16 @@
 }
 
 .doh-integration-logo {
-  width: 24px;
-  height: 24px;
-  border-radius: 4px;
-  background: rgba(255, 255, 255, 0.08);
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  /* Pure white tile so dark-on-light logos (Basecamp, Box, bioRxiv, etc.)
+     stay readable against our dark theme. Tried softer/translucent variants
+     — none worked across the full set of Merge logo styles, so we accept
+     the contrast as the cost of universal legibility. */
+  background: #fff;
+  padding: 3px;
+  box-sizing: border-box;
   object-fit: contain;
   flex-shrink: 0;
 }
