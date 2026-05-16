@@ -30,6 +30,7 @@ import argparse
 import json
 import os
 import sqlite3
+import subprocess
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -40,7 +41,73 @@ CURSOR_STATE_DB = Path.home() / "Library/Application Support/Cursor/User/globalS
 CLAUDE_CLI_PROJECTS_DIR = Path.home() / ".claude/projects"
 CODEX_SESSIONS_DIR = Path.home() / ".codex/sessions"
 CODEX_SESSION_INDEX = Path.home() / ".codex/session_index.jsonl"
-DEFAULT_OUTPUT_DIR = Path(__file__).parent.parent.parent.parent / "docs/conversations"
+
+
+# =============================================================================
+# Project-root resolution (worktree-aware)
+# =============================================================================
+#
+# Claude Code, Codex, and Cursor all key their session storage off the working
+# directory at session start. When a session begins in the main checkout and
+# later switches into a git worktree (via EnterWorktree), the session log stays
+# under the original mangled-cwd directory while os.getcwd() returns the
+# worktree path. Lookups by current cwd alone miss the session.
+#
+# Resolve to BOTH the current worktree root and the main checkout root so each
+# source's lookup logic can search both. Cursor stores everything in a single
+# global SQLite DB with no cwd filtering, so it doesn't need this.
+
+def project_roots() -> list[Path]:
+    """Return git roots to search: current worktree first, then main checkout.
+
+    Falls back to [cwd] when not in a git repo. Each path is resolved and the
+    list is deduped while preserving order.
+    """
+    roots: list[Path] = []
+
+    def _add(path: Path) -> None:
+        try:
+            resolved = path.resolve()
+        except OSError:
+            return
+        if resolved not in roots:
+            roots.append(resolved)
+
+    try:
+        toplevel = subprocess.run(
+            ["git", "rev-parse", "--show-toplevel"],
+            capture_output=True, text=True, check=True,
+        ).stdout.strip()
+        if toplevel:
+            _add(Path(toplevel))
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        pass
+
+    # `--git-common-dir` returns the shared .git for both worktrees and the main
+    # checkout; its parent is the main checkout root. For the main checkout this
+    # collapses to the same path as --show-toplevel and gets deduped.
+    try:
+        common = subprocess.run(
+            ["git", "rev-parse", "--git-common-dir"],
+            capture_output=True, text=True, check=True,
+        ).stdout.strip()
+        if common:
+            common_path = Path(common)
+            if not common_path.is_absolute():
+                common_path = Path.cwd() / common_path
+            _add(common_path.parent)
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        pass
+
+    if not roots:
+        _add(Path.cwd())
+
+    return roots
+
+
+def default_output_dir() -> Path:
+    """`docs/conversations` under the current worktree (or cwd if not a repo)."""
+    return project_roots()[0] / "docs/conversations"
 
 
 # =============================================================================
@@ -207,28 +274,35 @@ def cursor_to_markdown(uuid, data):
 # Claude CLI (JSONL files)
 # =============================================================================
 
-def claude_cli_get_project_dir():
-    """Get the Claude CLI project directory for the current working directory."""
-    cwd = os.getcwd()
-    # Claude CLI uses a mangled path format: /Users/foo/bar -> -Users-foo-bar
-    mangled = cwd.replace("/", "-")
-    if mangled.startswith("-"):
-        mangled = mangled  # Keep the leading dash
-    project_dir = CLAUDE_CLI_PROJECTS_DIR / mangled
-    if project_dir.exists():
-        return project_dir
-    return None
+def claude_cli_project_dirs() -> list[Path]:
+    """Get Claude CLI project directories for the current worktree AND main checkout.
+
+    Claude Code mangles cwd as `/Users/foo/bar` -> `-Users-foo-bar` to derive
+    the per-project log dir. When a session was started from the main checkout
+    and EnterWorktree later switched cwd, the log stays under the original
+    mangling. Search both so lookups find it regardless.
+    """
+    dirs: list[Path] = []
+    for root in project_roots():
+        mangled = str(root).replace("/", "-")
+        candidate = CLAUDE_CLI_PROJECTS_DIR / mangled
+        if candidate.exists() and candidate not in dirs:
+            dirs.append(candidate)
+    return dirs
 
 
 def claude_cli_list_conversations(limit, search_text, full_text_search):
     """List recent Claude CLI conversations."""
-    project_dir = claude_cli_get_project_dir()
-    if not project_dir:
+    project_dirs = claude_cli_project_dirs()
+    if not project_dirs:
         return []
 
-    conversations = []
-    jsonl_files = sorted(project_dir.glob("*.jsonl"), key=lambda f: f.stat().st_mtime, reverse=True)
+    jsonl_files: list[Path] = []
+    for project_dir in project_dirs:
+        jsonl_files.extend(project_dir.glob("*.jsonl"))
+    jsonl_files.sort(key=lambda f: f.stat().st_mtime, reverse=True)
 
+    conversations = []
     for jsonl_file in jsonl_files[:limit * 2]:  # Check more files than limit in case some are filtered
         uuid = jsonl_file.stem
         try:
@@ -278,12 +352,13 @@ def claude_cli_list_conversations(limit, search_text, full_text_search):
 
 def claude_cli_get_conversation(uuid):
     """Get a specific Claude CLI conversation by UUID."""
-    project_dir = claude_cli_get_project_dir()
-    if not project_dir:
-        return None
-
-    jsonl_file = project_dir / f"{uuid}.jsonl"
-    if not jsonl_file.exists():
+    jsonl_file: Path | None = None
+    for project_dir in claude_cli_project_dirs():
+        candidate = project_dir / f"{uuid}.jsonl"
+        if candidate.exists():
+            jsonl_file = candidate
+            break
+    if jsonl_file is None:
         return None
 
     messages = []
@@ -431,14 +506,20 @@ def codex_should_skip_message(role: str, text: str) -> bool:
 
 
 def codex_matches_current_cwd(cwd: str | None) -> bool:
-    """Check whether a Codex session belongs to the current project."""
+    """Check whether a Codex session belongs to the current project.
+
+    Matches any of the project roots (current worktree + main checkout) so a
+    Codex session started in one and continued in the other still resolves.
+    """
     if not cwd:
         return True
 
     try:
-        return Path(cwd).resolve() == Path(os.getcwd()).resolve()
+        session_path = Path(cwd).resolve()
     except OSError:
-        return cwd == os.getcwd()
+        return cwd in {str(r) for r in project_roots()} or cwd == os.getcwd()
+
+    return session_path in project_roots()
 
 
 def codex_read_conversation_file(jsonl_file: Path, thread_names: dict[str, str]) -> dict[str, Any] | None:
@@ -694,9 +775,10 @@ def main() -> None:
     if args.output:
         output_path = Path(args.output)
     else:
-        DEFAULT_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+        output_dir = default_output_dir()
+        output_dir.mkdir(parents=True, exist_ok=True)
         timestamp = datetime.now().strftime("%Y-%m-%d-%H%M")
-        output_path = DEFAULT_OUTPUT_DIR / f"{timestamp}-{uuid[:8]}.md"
+        output_path = output_dir / f"{timestamp}-{uuid[:8]}.md"
 
     # Write output
     output_path.write_text(markdown)
