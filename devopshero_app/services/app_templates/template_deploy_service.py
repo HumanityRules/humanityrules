@@ -160,6 +160,7 @@ async def deploy_from_template(
     runtime_variable_overrides: dict[str, str] | None,
     owner_username: str | None,
     compute_mode: str,
+    label: str,
 ) -> models.Deployment:
     """Create Repository + App + Blueprint + Deployment from a template and queue for deployment."""
     # The App row still carries identity/build fields for a single canonical
@@ -203,6 +204,7 @@ async def deploy_from_template(
         health_check_grace_period=primary.get("health_check_grace_period", 0),
         branch="",
         created_by=created_by,
+        label=label,
     )
 
     await _stamp_template_tags(

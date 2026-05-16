@@ -159,6 +159,15 @@ class Command(BaseCommand):
             "--created-by",
             help="Username to attribute the deploy to (audit trail). Defaults to the first admin in the resolved org, then any superuser.",
         )
+        deploy_tpl.add_argument(
+            "--label",
+            default="",
+            help=(
+                "Stamp App.label so a labelled run_job_worker (--label same value) is the only "
+                "worker that picks up this app's deployment, redeploys, permission applies, and "
+                "removal. Use in worktrees to avoid colliding with the unscoped main worker."
+            ),
+        )
 
     def handle(self, *args, **options):
         operation = options.get("operation")
@@ -824,6 +833,8 @@ class Command(BaseCommand):
         if created_by is None:
             return
 
+        label = options.get("label") or ""
+
         deployment = async_to_sync(template_deploy_service.deploy_from_template)(
             template=template,
             organization=org,
@@ -835,6 +846,7 @@ class Command(BaseCommand):
             runtime_variable_overrides=overrides,
             owner_username=owner_username,
             compute_mode=compute_mode,
+            label=label,
         )
 
         self.stdout.write(self.style.SUCCESS(f"\nDeployment queued from template '{template.slug}'"))
@@ -846,6 +858,7 @@ class Command(BaseCommand):
         self.stdout.write(f"  Created by: {created_by.username}")
         self.stdout.write(f"  Deployment id: {deployment.id}")
         self.stdout.write(f"  Variable overrides: {len(overrides)}")
+        self.stdout.write(f"  Label: {label or '(none — picked up by unscoped main worker)'}")
         self.stdout.write(self.style.WARNING("Build/push/deploy will start automatically (job worker picks up pending deployments)"))
         self.stdout.write("")
 

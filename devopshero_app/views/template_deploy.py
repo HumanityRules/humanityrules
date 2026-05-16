@@ -354,6 +354,7 @@ def _handle_deploy(request: HttpRequest, template: models.AppTemplate, org: mode
         runtime_variable_overrides=variable_overrides,
         owner_username=owner_username,
         compute_mode=compute_mode,
+        label="",
     )
 
     return redirect("app_detail", app_slug=deployment.app.slug)

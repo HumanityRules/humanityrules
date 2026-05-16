@@ -75,4 +75,5 @@ class DevopsheroAppConfig(AppConfig):
 
         # Import here because job_worker imports models, which aren't ready at module load time
         from .services.jobs import job_worker
-        job_worker.start_worker()
+        # Web-server-embedded worker is always unscoped — it serves real UI traffic.
+        job_worker.start_worker(label="")
