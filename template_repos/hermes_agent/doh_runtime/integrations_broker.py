@@ -1,7 +1,6 @@
 """Outside-the-sandbox HTTPS broker for per-user third-party integration tokens.
 
-Runs as a supervisor-managed sidecar (same trust level as the sigv4 / haproxy
-helpers). Two responsibilities:
+Runs as a supervisor-managed sidecar process. Two responsibilities:
 
 1. **HTTPS forward proxy on 127.0.0.1:9950.** The nono sandbox gets
    HTTPS_PROXY=http://127.0.0.1:9950 and SSL_CERT_FILE pointed at our
@@ -882,10 +881,15 @@ def _build_control_app(
             aggregator=aggregator,
         )
 
+    async def refresh_catalog_route(request: Request) -> Response:
+        ok, payload = await aggregator.refresh_catalog()
+        return JSONResponse(content=payload, status_code=200 if ok else 429)
+
     routes = [
         Route(path="/healthz", endpoint=_handle_healthz, methods=["GET"]),
         Route(path="/integrations", endpoint=status_route, methods=["GET"]),
         Route(path="/integrations/google/kick", endpoint=kick_route, methods=["POST"]),
+        Route(path="/integrations/refresh_catalog", endpoint=refresh_catalog_route, methods=["POST"]),
         *aggregator.routes(prefix="/integrations"),
     ]
     return Starlette(routes=routes)
