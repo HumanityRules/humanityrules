@@ -53,10 +53,8 @@ import logging
 import os
 import random
 import signal
-import socket
 import ssl
 import sys
-import time
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -69,6 +67,8 @@ from starlette.applications import Starlette
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 from starlette.routing import Route
+
+import mcp_aggregator
 
 
 DEFAULT_PROXY_PORT = 9950
@@ -561,7 +561,6 @@ async def _read_response_body(reader: asyncio.StreamReader, headers: list[tuple[
 def _render_response(status: int, headers: list[tuple[bytes, bytes]], body: bytes) -> bytes:
     reason = _http_reason(status=status)
     lines = [b"HTTP/1.1 " + str(status).encode() + b" " + reason.encode() + b"\r\n"]
-    has_cl = False
     skip = {b"transfer-encoding", b"connection", b"content-length"}
     for name, value in headers:
         if name.lower() in skip:
@@ -766,12 +765,12 @@ async def _current_token_for_host(host: str) -> str | None:
 
 async def _handle_unified_status(
     request: Request,
-    aggregator: "mcp_aggregator.MCPAggregator",
+    aggregator: mcp_aggregator.MCPAggregator,
     control_plane_url: str,
     owner_username: str,
     env_slug: str,
 ) -> Response:
-    """Flat list combining TLS-intercept providers (Google) and MCP-aggregator providers."""
+    """Flat list combining TLS-intercept providers (Google) and MCP-aggregator items."""
     items: list[dict] = []
     async with _provider_state_lock:
         google_snapshot = {slug: dict(state) for slug, state in _provider_state.items()}
@@ -784,28 +783,7 @@ async def _handle_unified_status(
             "status": state.get("status", "starting"),
             "last_refreshed_at": state.get("last_refreshed_at"),
         })
-    mcp_status = await aggregator.handle_status(request=request)
-    mcp_payload = json.loads(mcp_status.body.decode())
-    for slug, state in mcp_payload.get("providers", {}).items():
-        items.append({
-            "kind": "mcp_aggregator",
-            "slug": slug,
-            "label": state.get("label", slug),
-            "status": state.get("status", "unknown"),
-        })
-    merge_response = await aggregator.handle_merge_connectors(request=request)
-    if merge_response.status_code == 200:
-        merge_payload = json.loads(merge_response.body.decode())
-        for connector in merge_payload.get("connectors", []):
-            items.append({
-                "kind": "merge_connector",
-                "slug": connector.get("slug"),
-                "label": connector.get("name"),
-                "logo_url": connector.get("logo_url"),
-                "status": connector.get("status", "unknown"),
-            })
-    else:
-        logger.error("merge connectors fan-out failed: status=%d", merge_response.status_code)
+    items.extend(await aggregator.status_items(request=request))
     return JSONResponse(content={
         "doh_control_plane_url": control_plane_url,
         "env_slug": env_slug,
@@ -824,7 +802,7 @@ async def _handle_google_kick(
     bearer: str,
     owner_username: str,
     env_slug: str,
-    aggregator: "mcp_aggregator.MCPAggregator",
+    aggregator: mcp_aggregator.MCPAggregator,
 ) -> Response:
     """Force-refresh every TLS-intercept provider, then return the unified status."""
     try:
@@ -855,7 +833,7 @@ async def _handle_google_kick(
 
 
 def _build_control_app(
-    aggregator: "mcp_aggregator.MCPAggregator",
+    aggregator: mcp_aggregator.MCPAggregator,
     control_plane_url: str,
     bearer: str,
     owner_username: str,
@@ -933,8 +911,6 @@ async def _run(proxy_port: int, control_port: int, mcp_port: int, ca_dir: Path, 
     proxy_server = await asyncio.start_server(client_connected_cb=_proxy_cb, host="127.0.0.1", port=proxy_port)
     logger.info("proxy listening on 127.0.0.1:%d", proxy_port)
 
-    sys.path.insert(0, str(Path(__file__).resolve().parent))
-    import mcp_aggregator
     public_base_url = os.environ.get("DOH_APP_PUBLIC_URL")
     mcp_persistent_dir.mkdir(parents=True, exist_ok=True)
     aggregator = mcp_aggregator.MCPAggregator(

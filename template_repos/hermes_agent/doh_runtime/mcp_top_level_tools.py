@@ -248,7 +248,7 @@ class CatalogStore:
 def _connect_kind_for_backend(*, backend_name: str) -> str:
     if backend_name == "merge":
         return "magic_link"
-    if backend_name == "notion":
+    if backend_name in ("notion", "posthog"):
         return "oauth_dcr_pkce"
     return "unknown"
 

@@ -61,6 +61,7 @@ RUN git clone --depth 1 --branch v2026.5.7 https://github.com/NousResearch/herme
 # Our `google-workspace` replaces the pruned upstream one and uses
 # platform-managed auth (see template_repos/hermes_agent/skills/google-workspace/).
 COPY skills/google-workspace /opt/hermes/agent/skills/productivity/google-workspace
+COPY skills/posthog /opt/hermes/agent/skills/productivity/posthog
 
 COPY SOUL.md /opt/hermes/SOUL.md
 COPY config.yaml.template /opt/hermes/config.yaml.template
