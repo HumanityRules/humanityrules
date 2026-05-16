@@ -58,6 +58,48 @@
     return null;
   }
 
+  let _refreshInflight = false;
+
+  async function startRefreshCatalog() {
+    if (_refreshInflight) return;
+    const btn = document.getElementById('dohIntegrationRefreshBtn');
+    const note = document.getElementById('dohIntegrationRefreshNote');
+    if (note) { note.style.display = 'none'; note.textContent = ''; }
+    _refreshInflight = true;
+    if (btn) btn.disabled = true;
+    try {
+      const response = await fetch('/__doh_broker/integrations/refresh_catalog', {
+        method: 'POST',
+        cache: 'no-store',
+      });
+      if (response.status === 429) {
+        let retry = 30;
+        try { retry = (await response.json()).retry_after_seconds || 30; } catch (_) { /* ignore */ }
+        if (note) {
+          note.textContent = 'Refresh on cooldown. Try again in ' + retry + 's.';
+          note.style.display = '';
+        }
+        return;
+      }
+      if (!response.ok) {
+        if (note) {
+          note.textContent = 'Refresh failed. Please try again.';
+          note.style.display = '';
+        }
+        return;
+      }
+      await refreshAndRender();
+    } catch (_) {
+      if (note) {
+        note.textContent = 'Could not reach the integrations broker.';
+        note.style.display = '';
+      }
+    } finally {
+      _refreshInflight = false;
+      if (btn) btn.disabled = false;
+    }
+  }
+
   function buildGoogleConnectUrl(payload, returnTo) {
     const rd = encodeURIComponent(returnTo);
     return payload.doh_control_plane_url.replace(/\/$/, '') + '/integrations/google/start?rd=' + rd;
@@ -195,7 +237,13 @@
     const card = elem('div', { class: 'doh-integration-card doh-integration-card-row', dataset: { provider: 'merge:' + item.slug } });
     const titleRow = elem('div', { class: 'doh-integration-card-title-row' });
     if (item.logo_url) {
-      titleRow.appendChild(elem('img', { class: 'doh-integration-logo', src: item.logo_url, alt: '' }));
+      titleRow.appendChild(elem('img', {
+        class: 'doh-integration-logo',
+        src: item.logo_url,
+        alt: '',
+        loading: 'lazy',
+        decoding: 'async',
+      }));
     }
     titleRow.appendChild(elem('div', { class: 'doh-integration-card-title' }, [item.label || item.slug]));
 
@@ -294,7 +342,27 @@
     return card;
   }
 
+  function renderSummary(payload) {
+    const summary = document.getElementById('dohIntegrationSummary');
+    if (!summary) return;
+    summary.innerHTML = '';
+    if (!payload) {
+      summary.appendChild(document.createTextNode('Status unavailable.'));
+      return;
+    }
+    const items = payload.items || [];
+    const connected = items.filter((it) => it.status === 'connected').length;
+    const total = items.length;
+    summary.appendChild(document.createTextNode(
+      total === 0
+        ? 'No integrations configured.'
+        : connected + ' of ' + total + ' connected'
+    ));
+  }
+
   function renderPane(payload) {
+    renderSummary(payload);
+
     const list = document.getElementById('dohIntegrationList');
     if (!list) return;
     list.innerHTML = '';
@@ -356,41 +424,119 @@
 
   function ensureSidebarTabAndPane() {
     const sidebar = document.querySelector('.sidebar');
-    const nav = sidebar && sidebar.querySelector('.sidebar-nav');
-    if (!sidebar || !nav) return false;
-    if (document.getElementById('dohIntegrationsTab')) return true;
+    const sidebarNav = sidebar && sidebar.querySelector('.sidebar-nav');
+    const mainEl = document.querySelector('main.main');
+    // Hermes 0.51+ added a desktop primary `<nav class="rail">` alongside the
+    // legacy `.sidebar-nav`. CSS hides `.sidebar-nav` at ≥641px and shows
+    // `.rail` instead, so we have to register a button in BOTH so the entry
+    // is visible on every viewport. Older versions without `.rail` just have
+    // the sidebar-nav button — that's fine.
+    const rail = document.querySelector('nav.rail');
+    if (!sidebar || !sidebarNav || !mainEl) return false;
+    if (document.getElementById('mainIntegrations')) return true;
 
-    const btn = elem('button', {
+    const onActivate = () => {
+      // Pass `fromRailClick: true` so we get the same rail behaviour as
+      // other top-level entries — second click on the active rail icon
+      // collapses the sidebar, click while collapsed re-expands it.
+      if (typeof window.switchPanel === 'function') {
+        window.switchPanel('integrations', { fromRailClick: true });
+      }
+    };
+
+    // Plug icon — 20×20 in the rail (matches upstream rail icons),
+    // 18×18 in the sidebar-nav (matches upstream nav-tab icons).
+    const railIcon = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 2v6M15 2v6M6 8h12v4a6 6 0 0 1-12 0zM12 18v4"/></svg>';
+    const navIcon = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 2v6M15 2v6M6 8h12v4a6 6 0 0 1-12 0zM12 18v4"/></svg>';
+
+    if (rail && !document.getElementById('dohIntegrationsRailBtn')) {
+      const railBtn = elem('button', {
+        type: 'button',
+        class: 'rail-btn nav-tab has-tooltip',
+        id: 'dohIntegrationsRailBtn',
+        'aria-label': 'Integrations',
+        dataset: { panel: 'integrations', tooltip: 'Integrations' },
+        onclick: onActivate,
+      });
+      railBtn.innerHTML = railIcon;
+      // Insert before `.rail-spacer` so the button sits with primary panels,
+      // not below the spacer where Settings lives.
+      const spacer = rail.querySelector('.rail-spacer');
+      if (spacer) rail.insertBefore(railBtn, spacer);
+      else rail.appendChild(railBtn);
+    }
+
+    if (!document.getElementById('dohIntegrationsTab')) {
+      const navBtn = elem('button', {
+        type: 'button',
+        class: 'nav-tab has-tooltip has-tooltip--bottom',
+        id: 'dohIntegrationsTab',
+        dataset: { panel: 'integrations', label: 'Integrations', tooltip: 'Integrations' },
+        onclick: onActivate,
+      });
+      navBtn.innerHTML = navIcon;
+      sidebarNav.appendChild(navBtn);
+    }
+
+    // Integrations is a top-level destination, not a sidebar drawer. Mount
+    // it as a `#main<Name>.main-view` sibling inside <main>, matching the
+    // upstream view-switching contract (see hermes-webui static/style.css —
+    // "Generalized main-view switching"). The wrapper around switchPanel adds
+    // `showing-integrations` on <main>; our CSS reveals this view and hides
+    // `#mainChat` when the class is present.
+    const refreshButton = elem('button', {
+      class: 'doh-integration-btn doh-integration-page-refresh-btn',
+      id: 'dohIntegrationRefreshBtn',
       type: 'button',
-      class: 'nav-tab',
-      id: 'dohIntegrationsTab',
-      title: 'Integrations',
-      dataset: { panel: 'integrations', label: 'Integrations' },
-      onclick: () => { if (typeof window.switchPanel === 'function') window.switchPanel('integrations'); },
+      onclick: startRefreshCatalog,
+    }, ['Refresh']);
+    const refreshNote = elem('div', {
+      class: 'doh-integration-page-refresh-note',
+      id: 'dohIntegrationRefreshNote',
+      style: { display: 'none' },
     });
-    // Plug icon, sized to match the other nav-tab SVGs.
-    btn.innerHTML = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 2v6M15 2v6M6 8h12v4a6 6 0 0 1-12 0zM12 18v4"/></svg>';
-    nav.appendChild(btn);
-
-    // Build the panel-view body. Upstream's switchPanel toggles `.active` on
-    // any element with id `panel<Name>` and class `panel-view`, so we follow
-    // the same shape — no additional wiring needed for activation.
-    const pane = elem('div', { class: 'panel-view', id: 'panelIntegrations' }, [
-      elem('div', { class: 'doh-integration-panel-head' }, [
-        elem('div', { class: 'doh-integration-panel-title' }, ['Integrations']),
-        elem('div', { class: 'doh-integration-panel-meta' }, [
-          'Third-party accounts the agent can act on.',
+    const view = elem('section', { class: 'main-view doh-integration-page', id: 'mainIntegrations' }, [
+      elem('div', { class: 'doh-integration-page-inner' }, [
+        elem('div', { class: 'doh-integration-page-head' }, [
+          elem('div', { class: 'doh-integration-page-head-row' }, [
+            elem('div', { class: 'doh-integration-page-title' }, ['Integrations']),
+            refreshButton,
+          ]),
+          elem('div', { class: 'doh-integration-page-meta' }, [
+            'Third-party accounts the agent can act on.',
+          ]),
+          refreshNote,
         ]),
+        elem('div', { class: 'doh-integration-list', id: 'dohIntegrationList' }),
       ]),
-      elem('div', { class: 'doh-integration-list', id: 'dohIntegrationList' }),
     ]);
-    const bottom = sidebar.querySelector('.sidebar-bottom');
-    if (bottom) sidebar.insertBefore(pane, bottom);
-    else sidebar.appendChild(pane);
+    mainEl.appendChild(view);
+
+    // Sidebar panel-view: upstream's switchPanel activates `#panel<Name>`
+    // and deactivates the rest, so without our own panel the sidebar would
+    // appear empty when Integrations is active. We give it a title and a
+    // connected-count summary updated each time we refresh from the broker.
+    const sidebarPane = elem('div', { class: 'panel-view', id: 'panelIntegrations' }, [
+      elem('div', { class: 'panel-head' }, [
+        elem('span', null, ['Integrations']),
+      ]),
+      elem('div', { class: 'doh-integration-summary', id: 'dohIntegrationSummary' }, [
+        'Loading…',
+      ]),
+    ]);
+    const sidebarBottom = sidebar.querySelector('.sidebar-bottom');
+    if (sidebarBottom) sidebar.insertBefore(sidebarPane, sidebarBottom);
+    else sidebar.appendChild(sidebarPane);
     return true;
   }
 
-  // Wrap upstream switchPanel so opening our tab refreshes the broker view.
+  // Wrap upstream switchPanel so:
+  //   1. Opening our tab refreshes the broker view.
+  //   2. <main> gets `showing-integrations` while we're active and loses it
+  //      when leaving — upstream's loop only toggles classes for known panels,
+  //      so we apply ours after upstream has run. CSS gated on this class
+  //      hides the sidebar while Integrations owns the screen, so our page
+  //      isn't sitting next to an empty/confusing sidebar drawer.
   function wrapSwitchPanel() {
     if (typeof window.switchPanel !== 'function') return;
     if (window.__dohPanelWrapped) return;
@@ -398,6 +544,8 @@
     const orig = window.switchPanel;
     window.switchPanel = async function (name) {
       const result = await orig.apply(this, arguments);
+      const mainEl = document.querySelector('main.main');
+      if (mainEl) mainEl.classList.toggle('showing-integrations', name === 'integrations');
       if (name === 'integrations') await refreshAndRender();
       return result;
     };
@@ -419,6 +567,12 @@
       // to the Integrations panel and nudge the broker to refresh now.
       if (typeof window.switchPanel === 'function') window.switchPanel('integrations');
       refreshAfterFlow();
+    } else {
+      // Prefetch the broker payload in the background so when the user
+      // eventually opens the Integrations page the cards render instantly.
+      // Cheap, non-blocking; first paint of chat is unaffected. Also
+      // populates the sidebar's "X of Y connected" summary up front.
+      refreshAndRender();
     }
   }
 
