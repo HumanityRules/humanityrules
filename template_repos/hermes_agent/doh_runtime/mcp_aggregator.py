@@ -7,14 +7,20 @@ four LLM-facing tools (search/describe/call/list_connectors) backed by a flat
 in-memory catalog assembled at boot from N pluggable Backend implementations.
 See mcp_top_level_tools.py for the LLM-facing surface.
 
-Browser-facing integration management (OAuth start/callback, status,
-disconnect) is implemented here on the same MCPAggregator class that owns the
-per-provider state. The integrations_broker exposes those handlers under its
-unified /__doh_broker/* router by calling MCPAggregator.routes(prefix=...);
-the aggregator owns its own URL surface, the broker owns the mount point.
+This module owns only the generic OAuth DCR/PKCE spine and the aggregator
+class that composes everything. Per-service code lives elsewhere:
 
-Custom code is limited to OAuth/DCR/PKCE, token storage, and the two backend
-adapters (Merge, Notion) — the MCP protocol itself is fastmcp's job.
+  - DCR connectors (Notion, PostHog, ...): one self-contained module each in
+    `connectors/`. The aggregator iterates `connectors.DCR_CONNECTORS` at
+    startup to build the provider table and backend list.
+  - Merge.dev relay (Magic Link, not DCR): `mcp_merge_backend.py`. The aggregator
+    constructs one `MergeBackend`, calls `boot()` on startup, and includes
+    `MergeBackend.routes(...)` in its own `routes()` so the broker mounts
+    Merge passthroughs alongside the DCR OAuth ones.
+
+The integrations_broker mounts the aggregator's routes under its unified
+/__doh_broker/* router. The aggregator owns its URL surface, the broker owns
+the mount point.
 """
 
 import asyncio
@@ -25,17 +31,19 @@ import logging
 import secrets
 import time
 import urllib.parse
+from functools import partial
 from pathlib import Path
 
 import httpx
 import uvicorn
-from fastmcp import Client, FastMCP
-from fastmcp.client.transports import StreamableHttpTransport
+from fastmcp import FastMCP
 from starlette.requests import Request
 from starlette.responses import JSONResponse, RedirectResponse, Response
 from starlette.routing import Route
 
 import mcp_top_level_tools
+from connectors import DCR_CONNECTORS, DCRConnectorSpec
+from mcp_merge_backend import MergeBackend
 
 
 logger = logging.getLogger("mcp_aggregator")
@@ -43,25 +51,11 @@ logger = logging.getLogger("mcp_aggregator")
 DEFAULT_MCP_PORT = 9952
 
 REFRESH_COOLDOWN_SECONDS = 30
-CONNECTOR_STATUS_CACHE_TTL_SECONDS = 60
 
-# OAuth-DCR-PKCE providers managed inline. Merge is NOT in this dict — it's a
-# Backend adapter, see MergeBackend below.
-MCP_PROVIDERS: dict[str, dict] = {
-    "notion": {
-        "label": "Notion",
-        "upstream_url": "https://mcp.notion.com/mcp",
-        "oauth_metadata_url": "https://mcp.notion.com/.well-known/oauth-authorization-server",
-    },
-}
+# OAuth-DCR-PKCE providers, indexed by slug. The OAuth handlers and refresh
+# loop below resolve provider configuration off these specs.
+DCR_CONNECTORS_BY_SLUG: dict[str, DCRConnectorSpec] = {spec.slug: spec for spec in DCR_CONNECTORS}
 
-# Read/write verb tables for mutation classification of upstream tool names.
-READ_VERBS = frozenset({"list", "get", "search", "retrieve", "fetch", "read", "find", "describe", "show"})
-WRITE_VERBS = frozenset({"create", "update", "delete", "post", "send", "patch", "put", "remove", "merge", "close", "open", "archive"})
-
-# Tool names where the verb-prefix heuristic mis-classifies. Keep alphabetical.
-MERGE_MUTATION_OVERRIDES: dict[str, bool] = {}
-NOTION_MUTATION_OVERRIDES: dict[str, bool] = {}
 
 
 class _OAuthState:
@@ -134,218 +128,6 @@ class _OAuthState:
             self._client_file.unlink()
 
 
-def _mutates_from_double_underscore_name(*, name: str) -> bool:
-    """Heuristic for Merge-style `connector__verb_object` names. Default to mutates on ambiguity."""
-    try:
-        verb = name.split("__", 1)[1].split("_", 1)[0].lower()
-    except IndexError:
-        return True
-    if verb in READ_VERBS:
-        return False
-    if verb in WRITE_VERBS:
-        return True
-    return True
-
-
-def _mutates_from_dash_name(*, name: str) -> bool:
-    """Heuristic for Notion-style `notion-verb-object` names. Default to mutates on ambiguity."""
-    parts = name.lower().split("-")
-    for token in parts:
-        if token in READ_VERBS:
-            return False
-        if token in WRITE_VERBS:
-            return True
-    return True
-
-
-class MergeBackend:
-    """Backend adapter for Merge.dev Agent Handler, talking through the DOH-side relay."""
-
-    name = "merge"
-
-    def __init__(self, *, doh_control_plane_url: str, doh_env_bearer: str, doh_app_slug: str, doh_owner_username: str) -> None:
-        self._mcp_url = doh_control_plane_url + "/api/integrations/merge/mcp"
-        self._status_url = doh_control_plane_url + "/api/integrations/merge/connector-status"
-        self._connectors_url = doh_control_plane_url + "/api/integrations/merge/connectors"
-        self._headers = {
-            "Authorization": f"Bearer {doh_env_bearer}",
-            "X-Doh-App-Slug": doh_app_slug,
-            "X-Doh-Owner-Username": doh_owner_username,
-        }
-        self._status_cache: dict[str, tuple[str, float]] = {}
-        self._status_lock = asyncio.Lock()
-
-    def _client(self) -> Client:
-        transport = StreamableHttpTransport(url=self._mcp_url, headers=dict(self._headers))
-        return Client(transport)
-
-    async def list_catalog(self) -> list[mcp_top_level_tools.CatalogEntry]:
-        async with self._client() as c:
-            tools = await c.list_tools()
-        out: list[mcp_top_level_tools.CatalogEntry] = []
-        for tool in tools:
-            tool_id = tool.name
-            # Merge ships a per-connector `authenticate_<slug>` tool whose description packs
-            # every downstream tool's docs. They're meta — connection happens via Magic Link,
-            # not by calling them — and they wreck BM25 ranking. Skip them.
-            if tool_id.startswith("authenticate_"):
-                continue
-            if "__" not in tool_id:
-                logger.error("merge tool %r has no '__' connector prefix; skipping", tool_id)
-                continue
-            connector = tool_id.split("__", 1)[0]
-            mutates = MERGE_MUTATION_OVERRIDES.get(tool_id)
-            if mutates is None:
-                mutates = _mutates_from_double_underscore_name(name=tool_id)
-            out.append(mcp_top_level_tools.CatalogEntry(
-                tool_id=tool_id,
-                backend=self.name,
-                connector=connector,
-                description=tool.description or "",
-                input_schema=tool.inputSchema or {},
-                mutates=mutates,
-            ))
-        return out
-
-    async def list_known_connectors(self) -> list[mcp_top_level_tools.KnownConnector]:
-        try:
-            async with httpx.AsyncClient(timeout=30) as client:
-                resp = await client.get(url=self._connectors_url, headers=self._headers)
-        except Exception:
-            logger.exception("merge list_known_connectors failed")
-            return []
-        if resp.status_code != 200:
-            logger.error("merge list_known_connectors returned %d: %s", resp.status_code, resp.text[:300])
-            return []
-        try:
-            payload = resp.json()
-        except ValueError:
-            logger.error("merge list_known_connectors returned non-JSON: %s", resp.text[:300])
-            return []
-        out: list[mcp_top_level_tools.KnownConnector] = []
-        for connector in payload.get("connectors", []):
-            slug = connector.get("slug")
-            if not isinstance(slug, str) or not slug:
-                continue
-            out.append(mcp_top_level_tools.KnownConnector(
-                backend=self.name,
-                slug=slug,
-                name=connector.get("name", slug),
-                status=connector.get("status", "unknown"),
-            ))
-        return out
-
-    async def call(self, *, tool_id: str, args: dict) -> dict:
-        async with self._client() as c:
-            result = await c.call_tool(tool_id, args, raise_on_error=False)
-        # Pass through structured / text content as-is so the model sees what Merge said.
-        return {
-            "is_error": bool(getattr(result, "is_error", False)),
-            "structured_content": getattr(result, "structured_content", None),
-            "content": [
-                getattr(block, "model_dump", lambda: block)() for block in getattr(result, "content", []) or []
-            ],
-        }
-
-    async def connector_status(self, *, connector_slug: str) -> str:
-        now = time.time()
-        async with self._status_lock:
-            cached = self._status_cache.get(connector_slug)
-            if cached is not None and now - cached[1] < CONNECTOR_STATUS_CACHE_TTL_SECONDS:
-                return cached[0]
-        try:
-            async with httpx.AsyncClient(timeout=15) as client:
-                resp = await client.get(
-                    url=self._status_url,
-                    headers=self._headers,
-                    params={"connector_slug": connector_slug},
-                )
-            if resp.status_code == 200:
-                status = resp.json().get("status", "unknown")
-            else:
-                logger.error("merge connector_status %s returned %d", connector_slug, resp.status_code)
-                status = "transient_error"
-        except Exception:
-            logger.exception("merge connector_status %s failed", connector_slug)
-            status = "transient_error"
-        async with self._status_lock:
-            self._status_cache[connector_slug] = (status, time.time())
-        return status
-
-    async def invalidate_caches(self) -> None:
-        async with self._status_lock:
-            self._status_cache.clear()
-
-
-class NotionBackend:
-    """Backend adapter for Notion's hosted MCP server (OAuth DCR/PKCE)."""
-
-    name = "notion"
-
-    def __init__(self, *, oauth_state: "_OAuthState", refresh_fn, upstream_url: str) -> None:
-        self._oauth_state = oauth_state
-        self._refresh_fn = refresh_fn
-        self._upstream_url = upstream_url
-
-    async def _token(self) -> str | None:
-        token = self._oauth_state.access_token
-        if token is not None:
-            return token
-        return await self._refresh_fn()
-
-    async def list_catalog(self) -> list[mcp_top_level_tools.CatalogEntry]:
-        if not self._oauth_state.has_token:
-            return []
-        token = await self._token()
-        if token is None:
-            return []
-        async with Client(self._upstream_url, auth=token) as c:
-            tools = await c.list_tools()
-        out: list[mcp_top_level_tools.CatalogEntry] = []
-        for tool in tools:
-            tool_id = tool.name
-            mutates = NOTION_MUTATION_OVERRIDES.get(tool_id)
-            if mutates is None:
-                mutates = _mutates_from_dash_name(name=tool_id)
-            out.append(mcp_top_level_tools.CatalogEntry(
-                tool_id=tool_id,
-                backend=self.name,
-                connector="notion",
-                description=tool.description or "",
-                input_schema=tool.inputSchema or {},
-                mutates=mutates,
-            ))
-        return out
-
-    async def list_known_connectors(self) -> list[mcp_top_level_tools.KnownConnector]:
-        return [mcp_top_level_tools.KnownConnector(
-            backend=self.name,
-            slug="notion",
-            name="Notion",
-            status="connected" if self._oauth_state.has_token else "not_connected",
-        )]
-
-    async def call(self, *, tool_id: str, args: dict) -> dict:
-        token = await self._token()
-        if token is None:
-            return {"error": "not_connected", "connector": "notion", "connect_kind": "oauth_dcr_pkce"}
-        async with Client(self._upstream_url, auth=token) as c:
-            result = await c.call_tool(tool_id, args, raise_on_error=False)
-        return {
-            "is_error": bool(getattr(result, "is_error", False)),
-            "structured_content": getattr(result, "structured_content", None),
-            "content": [
-                getattr(block, "model_dump", lambda: block)() for block in getattr(result, "content", []) or []
-            ],
-        }
-
-    async def connector_status(self, *, connector_slug: str) -> str:
-        return "connected" if self._oauth_state.has_token else "not_connected"
-
-    async def invalidate_caches(self) -> None:
-        return None
-
-
 class MCPAggregator:
     """One per Hermes container. Hosts a FastMCP server exposing the 4 progressive-disclosure tools."""
 
@@ -369,28 +151,50 @@ class MCPAggregator:
         self._mcp = FastMCP(name="doh-mcp-aggregator")
         self._oauth_states: dict[str, _OAuthState] = {}
         self._pending_oauth: dict[str, dict] = {}
-        for slug in MCP_PROVIDERS:
-            self._oauth_states[slug] = _OAuthState(provider_dir=persistent_dir / slug)
+        for spec in DCR_CONNECTORS:
+            self._oauth_states[spec.slug] = _OAuthState(provider_dir=persistent_dir / spec.slug)
         self._catalog_store = mcp_top_level_tools.CatalogStore()
         self._refresh_lock = asyncio.Lock()
         self._last_refresh_ts: float = 0.0
-        self._backends: list[mcp_top_level_tools.Backend] = [
-            MergeBackend(
-                doh_control_plane_url=self._doh_control_plane_url,
-                doh_env_bearer=self._doh_env_bearer,
-                doh_app_slug=self._doh_app_slug,
-                doh_owner_username=self._doh_owner_username,
-            ),
-            NotionBackend(
-                oauth_state=self._oauth_states["notion"],
-                refresh_fn=lambda: self._refresh_access_token(slug="notion"),
-                upstream_url=MCP_PROVIDERS["notion"]["upstream_url"],
-            ),
-        ]
+
+        # Merge (relayed via DOH, not DCR) first, then one Backend per connector spec.
+        # Each spec.make_backend gets its own subdir under persistent_dir for any
+        # extra state the connector wants to keep (e.g. PostHog's session config).
+        self._merge_backend = MergeBackend(
+            doh_control_plane_url=self._doh_control_plane_url,
+            doh_env_bearer=self._doh_env_bearer,
+            doh_app_slug=self._doh_app_slug,
+            doh_owner_username=self._doh_owner_username,
+        )
+        self._backends: list[mcp_top_level_tools.Backend] = [self._merge_backend]
+        for spec in DCR_CONNECTORS:
+            backend = spec.make_backend(
+                oauth_state=self._oauth_states[spec.slug],
+                refresh_fn=partial(self._refresh_access_token, slug=spec.slug),
+                persistent_dir=persistent_dir / spec.slug,
+            )
+            # Connectors with mutable session state (e.g. PostHog's set-config tool)
+            # need a way to ask us to reload the catalog after a state change. Hook
+            # it up if the backend exposes the attribute; no-op otherwise.
+            if hasattr(backend, "_on_config_change"):
+                backend._on_config_change = self._reload_catalog
+            self._backends.append(backend)
+
+    async def _reload_catalog(self) -> None:
+        """Force a catalog reload; called by connectors after their state changes."""
+        async with self._refresh_lock:
+            self._last_refresh_ts = time.time()
+            for backend in self._backends:
+                await backend.invalidate_caches()
+            await self._catalog_store.reload(backends=self._backends)
 
     async def serve(self) -> None:
-        await self._ensure_merge_registered_user()
-        mcp_top_level_tools.register(mcp=self._mcp, store=self._catalog_store, backends=self._backends)
+        await self._merge_backend.boot()
+        mcp_top_level_tools.register(
+            mcp=self._mcp,
+            store=self._catalog_store,
+            backends=self._backends,
+        )
         asyncio.create_task(self._catalog_store.load_in_background(backends=self._backends))
 
         mcp_app = self._mcp.http_app(path="/mcp", transport="streamable-http")
@@ -416,36 +220,17 @@ class MCPAggregator:
         return True, {"ok": True, "tools": len(self._catalog_store.entries), "connectors": len(connectors)}
 
     def routes(self, prefix: str) -> list[Route]:
-        """Routes for the integrations_broker to mount under its unified /__doh_broker/* router."""
+        """Routes for the integrations_broker to mount under its unified /__doh_broker/* router.
+
+        Merge owns its own routes under merge_backend.routes(prefix=...); the aggregator
+        composes both URL surfaces into one list so the broker mounts them in one shot.
+        """
         return [
             Route(path=f"{prefix}/{{provider}}/oauth/start", endpoint=self.handle_oauth_start, methods=["GET"]),
             Route(path=f"{prefix}/{{provider}}/oauth/callback", endpoint=self.handle_oauth_callback, methods=["GET"]),
             Route(path=f"{prefix}/{{provider}}/disconnect", endpoint=self.handle_disconnect, methods=["POST"]),
-            # Merge — DOH-relayed; the WebUI talks to DOH through these passthroughs.
-            Route(path=f"{prefix}/merge/connectors", endpoint=self.handle_merge_connectors, methods=["GET"]),
-            Route(path=f"{prefix}/merge/connector-status", endpoint=self.handle_merge_connector_status, methods=["GET"]),
-            Route(path=f"{prefix}/merge/link-token", endpoint=self.handle_merge_link_token, methods=["POST"]),
-            Route(path=f"{prefix}/merge/disconnect", endpoint=self.handle_merge_disconnect, methods=["POST"]),
+            *self._merge_backend.routes(prefix=prefix),
         ]
-
-    async def _ensure_merge_registered_user(self) -> None:
-        """Idempotent boot-time registration with Merge via DOH passthrough."""
-        try:
-            async with httpx.AsyncClient(timeout=30) as client:
-                resp = await client.post(
-                    url=f"{self._doh_control_plane_url}/api/integrations/merge/ensure-registered-user",
-                    headers={
-                        "Authorization": f"Bearer {self._doh_env_bearer}",
-                        "Content-Type": "application/json",
-                    },
-                    json={"app_slug": self._doh_app_slug, "owner_username": self._doh_owner_username},
-                )
-            if resp.status_code != 200:
-                logger.error("merge ensure-registered-user at boot returned %d: %s", resp.status_code, resp.text[:300])
-                return
-            logger.info("merge ensure-registered-user OK at boot")
-        except Exception:
-            logger.exception("merge ensure-registered-user at boot failed (continuing)")
 
     async def _current_access_token(self, slug: str) -> str | None:
         oauth = self._oauth_states[slug]
@@ -456,21 +241,40 @@ class MCPAggregator:
 
     # ── Starlette endpoints (mounted by integrations_broker on port 9951) ─
 
-    async def handle_status(self, request: Request) -> Response:
-        """Return per-OAuth-provider connection state for the integrations pane.
+    async def status_items(self, request: Request) -> list[dict]:
+        """Return ready-to-render integration cards for the broker's unified status fan-out.
 
-        Merge connectors are surfaced as per-connector cards via the broker's unified
-        /integrations endpoint, which calls handle_merge_connectors directly.
+        One entry per DCR provider plus one per Merge-managed connector. The broker
+        prepends its own TLS-intercept entries (Google) and returns the combined list
+        to the WebUI, which renders cards by `kind`. Keeping the assembly here means
+        the broker never has to know Merge or PostHog or Notion exist.
         """
-        providers: dict[str, dict] = {}
-        for slug, cfg in MCP_PROVIDERS.items():
+        items: list[dict] = []
+        for slug, spec in DCR_CONNECTORS_BY_SLUG.items():
             oauth = self._oauth_states[slug]
-            providers[slug] = {"label": cfg["label"], "status": "connected" if oauth.has_token else "not_connected"}
-        return JSONResponse(content={"providers": providers})
+            items.append({
+                "kind": "mcp_aggregator",
+                "slug": slug,
+                "label": spec.label,
+                "status": "connected" if oauth.has_token else "not_connected",
+            })
+        merge_response = await self._merge_backend.handle_connectors(request=request)
+        if merge_response.status_code == 200:
+            for connector in json.loads(merge_response.body.decode()).get("connectors", []):
+                items.append({
+                    "kind": "merge_connector",
+                    "slug": connector.get("slug"),
+                    "label": connector.get("name"),
+                    "logo_url": connector.get("logo_url"),
+                    "status": connector.get("status", "unknown"),
+                })
+        else:
+            logger.error("merge connectors fan-out failed: status=%d", merge_response.status_code)
+        return items
 
     async def handle_disconnect(self, request: Request) -> Response:
         provider = request.path_params.get("provider", "")
-        if provider not in MCP_PROVIDERS:
+        if provider not in DCR_CONNECTORS_BY_SLUG:
             return JSONResponse(content={"error": "unknown provider"}, status_code=404)
         self._oauth_states[provider].clear_token()
         self._oauth_states[provider].clear_client()
@@ -479,8 +283,8 @@ class MCPAggregator:
 
     async def handle_oauth_start(self, request: Request) -> Response:
         provider = request.path_params.get("provider", "")
-        cfg = MCP_PROVIDERS.get(provider)
-        if cfg is None:
+        spec = DCR_CONNECTORS_BY_SLUG.get(provider)
+        if spec is None:
             return Response(content="unknown OAuth provider", status_code=404)
 
         return_to = request.query_params.get("return_to", "/")
@@ -492,9 +296,11 @@ class MCPAggregator:
         redirect_uri = origin + f"/__doh_broker/integrations/{provider}/oauth/callback"
         oauth = self._oauth_states[provider]
 
-        metadata = await self._fetch_oauth_metadata(url=cfg["oauth_metadata_url"])
+        metadata = await self._fetch_oauth_metadata(url=spec.oauth_metadata_url)
         if metadata is None:
             return Response(content="failed to fetch OAuth metadata", status_code=502)
+
+        scope = spec.default_scope
 
         if not oauth.has_client or oauth.registered_redirect_uri != redirect_uri:
             registration_endpoint = metadata.get("registration_endpoint")
@@ -503,7 +309,8 @@ class MCPAggregator:
             client_data = await self._register_client(
                 registration_endpoint=registration_endpoint,
                 redirect_uri=redirect_uri,
-                provider_label=cfg["label"],
+                provider_label=spec.label,
+                scope=scope,
             )
             if client_data is None:
                 return Response(content="DCR registration failed", status_code=502)
@@ -514,20 +321,23 @@ class MCPAggregator:
         state = secrets.token_urlsafe(32)
         self._pending_oauth[state] = {"provider": provider, "code_verifier": code_verifier, "return_to": return_to}
 
-        params = urllib.parse.urlencode({
+        authorize_params: dict[str, str] = {
             "client_id": oauth.client_id,
             "response_type": "code",
             "redirect_uri": redirect_uri,
             "code_challenge": code_challenge,
             "code_challenge_method": "S256",
             "state": state,
-        })
+        }
+        if scope:
+            authorize_params["scope"] = scope
+        params = urllib.parse.urlencode(authorize_params)
         return RedirectResponse(url=f"{metadata['authorization_endpoint']}?{params}", status_code=302)
 
     async def handle_oauth_callback(self, request: Request) -> Response:
         provider = request.path_params.get("provider", "")
-        cfg = MCP_PROVIDERS.get(provider)
-        if cfg is None:
+        spec = DCR_CONNECTORS_BY_SLUG.get(provider)
+        if spec is None:
             return Response(content="unknown OAuth provider", status_code=404)
 
         code = request.query_params.get("code", "")
@@ -548,7 +358,7 @@ class MCPAggregator:
 
         oauth = self._oauth_states[provider]
 
-        metadata = await self._fetch_oauth_metadata(url=cfg["oauth_metadata_url"])
+        metadata = await self._fetch_oauth_metadata(url=spec.oauth_metadata_url)
         if metadata is None:
             return Response(content="failed to fetch OAuth metadata", status_code=502)
 
@@ -568,85 +378,15 @@ class MCPAggregator:
         separator = "&" if "?" in return_to else "?"
         return RedirectResponse(url=f"{return_to}{separator}connected={provider}", status_code=302)
 
-    # ── Merge.dev passthroughs (DOH owns the API key; we just forward) ─
-
-    async def handle_merge_connectors(self, request: Request) -> Response:
-        return await self._merge_passthrough(method="GET", path="/api/integrations/merge/connectors")
-
-    async def handle_merge_connector_status(self, request: Request) -> Response:
-        connector_slug = request.query_params.get("connector_slug", "")
-        if not connector_slug:
-            return JSONResponse(content={"error": "connector_slug is required"}, status_code=400)
-        return await self._merge_passthrough(
-            method="GET",
-            path="/api/integrations/merge/connector-status",
-            extra_query={"connector_slug": connector_slug},
-        )
-
-    async def handle_merge_link_token(self, request: Request) -> Response:
-        try:
-            payload = json.loads((await request.body()).decode() or "{}")
-        except json.JSONDecodeError:
-            return JSONResponse(content={"error": "invalid JSON body"}, status_code=400)
-        body: dict = {}
-        if "connector_slug" in payload:
-            body["connector_slug"] = payload["connector_slug"]
-        return await self._merge_passthrough(
-            method="POST", path="/api/integrations/merge/link-token", json_body=body,
-        )
-
-    async def handle_merge_disconnect(self, request: Request) -> Response:
-        try:
-            payload = json.loads((await request.body()).decode() or "{}")
-        except json.JSONDecodeError:
-            return JSONResponse(content={"error": "invalid JSON body"}, status_code=400)
-        connector_slug = payload.get("connector_slug", "")
-        if not isinstance(connector_slug, str) or not connector_slug:
-            return JSONResponse(content={"error": "connector_slug is required"}, status_code=400)
-        return await self._merge_passthrough(
-            method="POST",
-            path="/api/integrations/merge/disconnect",
-            json_body={"connector_slug": connector_slug},
-        )
-
-    async def _merge_passthrough(
-        self,
-        method: str,
-        path: str,
-        json_body: dict | None = None,
-        extra_query: dict | None = None,
-    ) -> Response:
-        """Forward to DOH with the env bearer attached. DOH does the real work.
-
-        app_slug and owner_username are auto-injected — into the query string
-        for GET, into the JSON body for POST. Callers provide only the
-        operation-specific fields.
-        """
-        url = f"{self._doh_control_plane_url}{path}"
-        headers = {"Authorization": f"Bearer {self._doh_env_bearer}"}
-        identity = {"app_slug": self._doh_app_slug, "owner_username": self._doh_owner_username}
-        try:
-            async with httpx.AsyncClient(timeout=30) as client:
-                if method == "GET":
-                    params = {**identity, **(extra_query or {})}
-                    resp = await client.get(url=url, headers=headers, params=params)
-                else:
-                    body = {**identity, **(json_body or {})}
-                    resp = await client.request(method=method, url=url, headers=headers, json=body)
-        except Exception as exc:
-            logger.exception("merge passthrough %s %s failed", method, path)
-            return JSONResponse(content={"error": f"doh unreachable: {exc}"}, status_code=502)
-        return Response(
-            content=resp.content,
-            status_code=resp.status_code,
-            media_type=resp.headers.get("Content-Type", "application/json"),
-        )
-
     # ── OAuth helpers ───────────────────────────────────────────────
 
     async def _fetch_oauth_metadata(self, url: str) -> dict | None:
         try:
-            async with httpx.AsyncClient(timeout=30) as client:
+            # follow_redirects=True: PostHog's /.well-known/oauth-authorization-server
+            # at mcp.posthog.com 302s to oauth.posthog.com (different host) — RFC 8414
+            # discovery is supposed to live at the resource origin, but providers
+            # commonly redirect to the AS origin instead.
+            async with httpx.AsyncClient(timeout=30, follow_redirects=True) as client:
                 resp = await client.get(url=url)
             if resp.status_code == 200:
                 return resp.json()
@@ -655,14 +395,16 @@ class MCPAggregator:
             logger.exception("OAuth metadata fetch failed for %s", url)
         return None
 
-    async def _register_client(self, registration_endpoint: str, redirect_uri: str, provider_label: str) -> dict | None:
-        body = {
+    async def _register_client(self, registration_endpoint: str, redirect_uri: str, provider_label: str, scope: str | None = None) -> dict | None:
+        body: dict = {
             "client_name": f"DOH Hermes - {provider_label}",
             "redirect_uris": [redirect_uri],
             "grant_types": ["authorization_code", "refresh_token"],
             "response_types": ["code"],
             "token_endpoint_auth_method": "none",
         }
+        if scope:
+            body["scope"] = scope
         try:
             async with httpx.AsyncClient(timeout=30) as client:
                 resp = await client.post(url=registration_endpoint, json=body)
@@ -695,8 +437,8 @@ class MCPAggregator:
         oauth = self._oauth_states[slug]
         if not oauth.refresh_token or not oauth.client_id:
             return None
-        cfg = MCP_PROVIDERS[slug]
-        metadata = await self._fetch_oauth_metadata(url=cfg["oauth_metadata_url"])
+        spec = DCR_CONNECTORS_BY_SLUG[slug]
+        metadata = await self._fetch_oauth_metadata(url=spec.oauth_metadata_url)
         if metadata is None:
             return None
         data = {
