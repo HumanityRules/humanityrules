@@ -1,5 +1,23 @@
 # DevOpsHero Development Journal
 
+## 2026-05-16 20:04 - [Integrations] Use Merge metadata for native connector logos without exposing replaced Merge connectors
+
+**Conversation:** [2026-05-16-2004-019e3304.md](conversations/2026-05-16-2004-019e3304.md)
+
+Follow-up to the unified native/Merge integrations list. The first pass correctly rendered native MCP connectors in the same row style as Merge connectors and hid same-slug Merge equivalents, but it had two rough edges: native rows had no logos, and the shared row renderer accidentally changed Connect buttons to the yellow primary style. Fixed both while keeping the product rule simple: native connectors win, same-slug Merge connectors stay hidden, but Merge can still supply display metadata.
+
+The implementation now fetches Merge connector metadata once during the unified `/__doh_broker/integrations` status assembly. `MCPAggregator.status_items()` builds a temporary slug map from the raw Merge connector rows, uses it to copy `logo_url` onto native `mcp_aggregator` items, then appends only Merge connectors that survive the existing same-slug exclusion filter. The WebUI did not need a new rendering path because `renderConnectorCard()` already shows `item.logo_url` when present.
+
+Cleaned up the server-side boundary at the same time. Removed the unused browser-facing `GET /__doh_broker/integrations/merge/connectors` route; the WebUI renders from the unified `/integrations` endpoint, and Merge's remaining browser routes are only the ones the Magic Link flow still needs (`link-token`, `connector-status`, `disconnect`). `MergeBackend` now has one internal connector-metadata fetch path and one filter path. `list_known_connectors()` reuses those helpers instead of carrying a second HTTP/parsing/filtering implementation for the same Merge endpoint.
+
+**Key points:**
+
+- Native MCP connector rows now get Merge-provided `logo_url` metadata while same-slug Merge connectors remain hidden from the rendered list and Toolpack inventory.
+- The normal Integrations page still performs one Merge connectors fetch: raw metadata is reused for native logo enrichment and filtered Merge rows.
+- Removed `/merge/connectors` from the broker's browser-facing route surface because nothing in the WebUI needed a separate connector-list endpoint anymore.
+- Restored neutral row Connect buttons by using `doh-integration-btn` instead of `doh-integration-btn-primary`; TLS-intercept cards keep their existing primary-button treatment.
+- Verification used `uv run python -m py_compile` for the touched Hermes runtime Python files, `node --check` for the WebUI extension, and `git diff --check`.
+
 ## 2026-05-16 18:31 - [Bugfix] Restore /opt/doh/bin on PATH for Hermes' login-shell snapshot
 
 **Conversation:** [2026-05-16-1832-174027b0.md](conversations/2026-05-16-1832-174027b0.md)

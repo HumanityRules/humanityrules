@@ -264,7 +264,7 @@
       }, ['Disconnect']);
     } else {
       actionBtn = elem('button', {
-        class: 'doh-integration-btn doh-integration-btn-primary',
+        class: 'doh-integration-btn',
         onclick: () => {
           if (isMergeConnector) startMergeConnect(item);
           else window.location.href = buildMcpConnectUrl(item.slug);

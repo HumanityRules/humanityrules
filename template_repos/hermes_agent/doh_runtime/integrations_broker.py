@@ -66,7 +66,7 @@ async def _handle_unified_status(
 ) -> Response:
     """Flat list combining TLS-intercept providers and MCP-aggregator items."""
     items = await tls_runtime.status_items(force_refresh=True)
-    items.extend(await aggregator.status_items(request=request))
+    items.extend(await aggregator.status_items())
     return JSONResponse(content={
         "doh_control_plane_url": control_plane_url,
         "env_slug": env_slug,
