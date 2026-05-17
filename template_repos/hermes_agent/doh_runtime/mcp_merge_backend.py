@@ -68,11 +68,20 @@ class MergeBackend:
 
     name = "merge"
 
-    def __init__(self, *, doh_control_plane_url: str, doh_env_bearer: str, doh_app_slug: str, doh_owner_username: str) -> None:
+    def __init__(
+        self,
+        *,
+        doh_control_plane_url: str,
+        doh_env_bearer: str,
+        doh_app_slug: str,
+        doh_owner_username: str,
+        excluded_connector_slugs: frozenset[str],
+    ) -> None:
         self._doh_control_plane_url = doh_control_plane_url
         self._doh_env_bearer = doh_env_bearer
         self._doh_app_slug = doh_app_slug
         self._doh_owner_username = doh_owner_username
+        self._excluded_connector_slugs = excluded_connector_slugs
         self._mcp_url = doh_control_plane_url + "/api/integrations/merge/mcp"
         self._status_url = doh_control_plane_url + "/api/integrations/merge/connector-status"
         self._connectors_url = doh_control_plane_url + "/api/integrations/merge/connectors"
@@ -105,6 +114,8 @@ class MergeBackend:
                 logger.error("merge tool %r has no '__' connector prefix; skipping", tool_id)
                 continue
             connector = tool_id.split("__", 1)[0]
+            if connector in self._excluded_connector_slugs:
+                continue
             mutates = MUTATION_OVERRIDES.get(tool_id)
             if mutates is None:
                 mutates = _mutates_from_double_underscore_name(name=tool_id)
@@ -137,6 +148,8 @@ class MergeBackend:
         for connector in payload.get("connectors", []):
             slug = connector.get("slug")
             if not isinstance(slug, str) or not slug:
+                continue
+            if slug in self._excluded_connector_slugs:
                 continue
             out.append(mcp_top_level_tools.KnownConnector(
                 backend=self.name,
@@ -224,7 +237,20 @@ class MergeBackend:
         ]
 
     async def handle_connectors(self, request: Request) -> Response:
-        return await self._passthrough(method="GET", path="/api/integrations/merge/connectors")
+        response = await self._passthrough(method="GET", path="/api/integrations/merge/connectors")
+        if response.status_code != 200:
+            return response
+        try:
+            payload = json.loads(response.body.decode())
+        except (AttributeError, UnicodeDecodeError, json.JSONDecodeError):
+            logger.error("merge connectors passthrough returned non-JSON")
+            return response
+        payload["connectors"] = [
+            connector
+            for connector in payload.get("connectors", [])
+            if connector.get("slug") not in self._excluded_connector_slugs
+        ]
+        return JSONResponse(content=payload, status_code=response.status_code)
 
     async def handle_connector_status(self, request: Request) -> Response:
         connector_slug = request.query_params.get("connector_slug", "")

@@ -1,5 +1,23 @@
 # DevOpsHero Development Journal
 
+## 2026-05-16 18:20 - [Integrations] Native MCP connectors share the Merge integrations list and hide same-slug Merge equivalents
+
+**Conversation:** [2026-05-16-1820-019e3304.md](conversations/2026-05-16-1820-019e3304.md)
+
+After extracting the TLS-intercept subsystem, the next simplification was the MCP/Merge integration boundary. The user wanted our own connectors to appear in the same Integrations list, with the same visual treatment, as Merge's connectors. The related product decision was deliberately simple: when DOH has a native connector for the same service, remove the Merge equivalent from the Toolpack/catalog instead of trying to surface connected-but-not-allowed Merge connectors. If that leaves an old connection sitting inside Merge, accept it as a Merge-side zombie rather than adding code to keep it visible.
+
+The implementation keeps that rule close to the existing provider registry. `DCR_CONNECTORS` remains the source of truth for enabled native MCP connectors. At aggregator startup, those slugs are passed into `MergeBackend` as `excluded_connector_slugs`. Merge then filters same-slug connectors in all three places that matter to readers and users: the MCP tool catalog, the known-connectors list used by the top-level toolpack, and the browser-facing `/merge/connectors` passthrough used by the Integrations page. There is no second identity map, no canonical-provider table, and no compatibility layer for zombie connections.
+
+The WebUI got the matching simplification. The separate native `renderMcpAggregatorCard` was deleted and replaced with one row-style `renderConnectorCard` used by both `mcp_aggregator` and `merge_connector` items. The only remaining branch is the action transport: Merge uses Magic Link and Merge disconnect; native MCP connectors use broker OAuth and native disconnect. Finally, the Integrations list now renders connected items first while preserving the broker payload order within the same status group.
+
+**Key points:**
+
+- Native connector registration is the only knob for replacing a Merge connector. Adding a native connector to `DCR_CONNECTORS` automatically hides the same slug from Merge's catalog, Toolpack connector inventory, and Integrations page.
+- We intentionally do not show connected Merge connectors that are no longer in the allowed list. The connection can remain in Merge, but DOH no longer advertises it as usable once a native equivalent exists.
+- Native MCP connectors and Merge connectors now share the same row visual in the Integrations page. This removes a UI distinction that did not help the user choose or manage integrations.
+- TLS-intercept integrations remain visually separate for now because they are still a different mechanism: they redirect through DOH's TLS-intercept OAuth/disconnect flow rather than the MCP aggregator/Merge connector mechanisms.
+- Verification used `uv run python -m py_compile` for the touched Hermes runtime Python files, `node --check` for the WebUI extension, and `git diff --check`.
+
 ## 2026-05-16 17:53 - [Integrations] Datadog direct-MCP integration: blocked by undocumented redirect_uri allowlist; connector code stays in tree, unregistered
 
 **Conversation:** [2026-05-16-1753-ce1fe1f9.md](conversations/2026-05-16-1753-ce1fe1f9.md)

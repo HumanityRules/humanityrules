@@ -118,6 +118,12 @@
     }
   }
 
+  function connectedFirst(a, b) {
+    if (a.status === 'connected' && b.status !== 'connected') return -1;
+    if (a.status !== 'connected' && b.status === 'connected') return 1;
+    return 0;
+  }
+
   // ── Merge connector flow ──────────────────────────────────────────
 
   function showMergeExplainerModal(item, onContinue) {
@@ -223,8 +229,10 @@
     });
   }
 
-  function renderMergeConnectorCard(item) {
-    const card = elem('div', { class: 'doh-integration-card doh-integration-card-row', dataset: { provider: 'merge:' + item.slug } });
+  function renderConnectorCard(item) {
+    const isMergeConnector = item.kind === 'merge_connector';
+    const provider = (isMergeConnector ? 'merge:' : 'mcp:') + item.slug;
+    const card = elem('div', { class: 'doh-integration-card doh-integration-card-row', dataset: { provider } });
     const titleRow = elem('div', { class: 'doh-integration-card-title-row' });
     if (item.logo_url) {
       titleRow.appendChild(elem('img', {
@@ -240,20 +248,27 @@
     let actionBtn;
     if (item.status === 'connected') {
       actionBtn = elem('button', {
-        class: 'doh-integration-btn',
+        class: 'doh-integration-btn doh-integration-btn-secondary',
         onclick: async () => {
-          await fetch('/__doh_broker/integrations/merge/disconnect', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ connector_slug: item.slug }),
-          });
+          if (isMergeConnector) {
+            await fetch('/__doh_broker/integrations/merge/disconnect', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ connector_slug: item.slug }),
+            });
+          } else {
+            await fetch('/__doh_broker/integrations/' + item.slug + '/disconnect', { method: 'POST' });
+          }
           await refreshAndRender();
         },
       }, ['Disconnect']);
     } else {
       actionBtn = elem('button', {
-        class: 'doh-integration-btn',
-        onclick: () => startMergeConnect(item),
+        class: 'doh-integration-btn doh-integration-btn-primary',
+        onclick: () => {
+          if (isMergeConnector) startMergeConnect(item);
+          else window.location.href = buildMcpConnectUrl(item.slug);
+        },
       }, ['Connect']);
     }
 
@@ -305,33 +320,6 @@
     return card;
   }
 
-  function renderMcpAggregatorCard(item) {
-    const card = elem('div', { class: 'doh-integration-card', dataset: { provider: item.slug } });
-    const header = elem('div', { class: 'doh-integration-card-head' }, [
-      elem('div', { class: 'doh-integration-card-title' }, [item.label]),
-      elem('div', { class: 'doh-integration-card-status', dataset: { status: item.status } }, [statusLabelFor(item.status)]),
-    ]);
-    card.appendChild(header);
-
-    const body = elem('div', { class: 'doh-integration-card-body' });
-    if (item.status === 'connected') {
-      body.appendChild(elem('button', {
-        class: 'doh-integration-btn doh-integration-btn-secondary',
-        onclick: async () => {
-          await fetch('/__doh_broker/integrations/' + item.slug + '/disconnect', { method: 'POST' });
-          await refreshAndRender();
-        },
-      }, ['Disconnect']));
-    } else {
-      body.appendChild(elem('button', {
-        class: 'doh-integration-btn doh-integration-btn-primary',
-        onclick: () => { window.location.href = buildMcpConnectUrl(item.slug); },
-      }, ['Connect ' + item.label]));
-    }
-    card.appendChild(body);
-    return card;
-  }
-
   function renderSummary(payload) {
     const summary = document.getElementById('dohIntegrationSummary');
     if (!summary) return;
@@ -364,7 +352,7 @@
       return;
     }
 
-    const items = payload.items || [];
+    const items = (payload.items || []).slice().sort(connectedFirst);
     if (items.length === 0) {
       list.appendChild(elem('div', { class: 'doh-integration-empty' }, ['No integrations configured.']));
       return;
@@ -372,10 +360,8 @@
     for (const item of items) {
       if (item.kind === 'tls_intercept') {
         list.appendChild(renderTlsInterceptCard(item, payload));
-      } else if (item.kind === 'mcp_aggregator') {
-        list.appendChild(renderMcpAggregatorCard(item));
-      } else if (item.kind === 'merge_connector') {
-        list.appendChild(renderMergeConnectorCard(item));
+      } else if (item.kind === 'mcp_aggregator' || item.kind === 'merge_connector') {
+        list.appendChild(renderConnectorCard(item));
       }
     }
   }
