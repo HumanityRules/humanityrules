@@ -135,7 +135,7 @@ class PostHogBackend:
         refresh_fn: Callable[[], Awaitable[str | None]],
         upstream_url: str,
         config: PostHogConfig,
-        on_config_change: Callable[[], Awaitable[None]],
+        on_config_change: Callable[[str, str, mcp_top_level_tools.StateTransition], Awaitable[None]],
     ) -> None:
         self._oauth_state = oauth_state
         self._refresh_fn = refresh_fn
@@ -261,7 +261,7 @@ class PostHogBackend:
         if project_id is not None:
             self._config.project_id = project_id or None
         self._config.save()
-        await self.on_config_change()
+        await self.on_config_change(self.name, "posthog", "reconfigured")
         return {"is_error": False, "structured_content": {"ok": True, "config": self._config.as_dict()}, "content": []}
 
     # ── Backend protocol ──────────────────────────────────────────────
@@ -323,7 +323,7 @@ class PostHogBackend:
         return None
 
 
-def _make_backend(*, oauth_state, refresh_fn, persistent_dir: Path, on_config_change: Callable[[], Awaitable[None]]) -> PostHogBackend:
+def _make_backend(*, oauth_state, refresh_fn, persistent_dir: Path, on_config_change: Callable[[str, str, mcp_top_level_tools.StateTransition], Awaitable[None]]) -> PostHogBackend:
     config = PostHogConfig(persistent_dir=persistent_dir)
     return PostHogBackend(
         oauth_state=oauth_state,

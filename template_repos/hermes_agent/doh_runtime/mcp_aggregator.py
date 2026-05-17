@@ -167,7 +167,7 @@ class MCPAggregator:
             doh_app_slug=self._doh_app_slug,
             doh_owner_username=self._doh_owner_username,
             excluded_connector_slugs=frozenset(DCR_CONNECTORS_BY_SLUG.keys()),
-            on_config_change=self._reload_catalog,
+            on_config_change=self._on_state_change,
         )
         self._backends: list[mcp_top_level_tools.Backend] = [self._merge_backend]
         for spec in DCR_CONNECTORS:
@@ -175,17 +175,45 @@ class MCPAggregator:
                 oauth_state=self._oauth_states[spec.slug],
                 refresh_fn=partial(self._refresh_access_token, slug=spec.slug),
                 persistent_dir=persistent_dir / spec.slug,
-                on_config_change=self._reload_catalog,
+                on_config_change=self._on_state_change,
             )
             self._backends.append(backend)
 
     async def _reload_catalog(self) -> None:
-        """Force a catalog reload; called by connectors after their state changes."""
+        """Force a full catalog reload, awaiting completion. Used by the user-facing Refresh button."""
         async with self._refresh_lock:
             self._last_refresh_ts = time.time()
             for backend in self._backends:
                 await backend.invalidate_caches()
             await self._catalog_store.reload(backends=self._backends)
+
+    async def _on_state_change(self, backend_name: str, connector: str, transition: mcp_top_level_tools.StateTransition) -> None:
+        """Dispatcher every backend's on_config_change is wired to.
+
+        Per-transition policy:
+        - "disconnected": drop the connector's rows from the catalog and zero
+          its tool_count. No network — pure dict mutation. Block on it; by
+          the time the caller returns, the agent's view is already consistent.
+        - "connected" / "reconfigured": schedule a per-backend reload in the
+          background. Only the changed backend re-lists tools, so a slow Merge
+          response can't delay a Notion connect. The HTTP response doesn't
+          wait — the panel renders from oauth.has_token / Merge's live
+          authenticated_connectors and doesn't need the catalog.
+        """
+        if transition == "disconnected":
+            self._catalog_store.drop(backend_name=backend_name, connector=connector)
+            return
+        backend = self._backend_by_name(name=backend_name)
+        if backend is None:
+            logger.error("on_config_change for unknown backend %r; skipping reload", backend_name)
+            return
+        asyncio.create_task(self._catalog_store.reload_backend(backend=backend))
+
+    def _backend_by_name(self, *, name: str) -> mcp_top_level_tools.Backend | None:
+        for backend in self._backends:
+            if backend.name == name:
+                return backend
+        return None
 
     async def serve(self) -> None:
         await self._merge_backend.boot()
@@ -289,7 +317,7 @@ class MCPAggregator:
             return JSONResponse(content={"error": "unknown provider"}, status_code=404)
         self._oauth_states[provider].clear_token()
         self._oauth_states[provider].clear_client()
-        await self._catalog_store.reload(backends=self._backends)
+        await self._on_state_change(provider, provider, "disconnected")
         return JSONResponse(content={"ok": True})
 
     async def handle_oauth_start(self, request: Request) -> Response:
@@ -384,7 +412,7 @@ class MCPAggregator:
             return Response(content="token exchange failed", status_code=502)
 
         oauth.save_token(token_data=token_data)
-        await self._catalog_store.reload(backends=self._backends)
+        await self._on_state_change(provider, provider, "connected")
 
         separator = "&" if "?" in return_to else "?"
         return RedirectResponse(url=f"{return_to}{separator}connected={provider}", status_code=302)
