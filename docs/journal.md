@@ -1,5 +1,36 @@
 # DevOpsHero Development Journal
 
+## 2026-05-17 02:12 - [Integrations] Enumerate-by-connector mode for `integrations_search_tools`, mutates-heuristic fixes, name-sorted integrations list
+
+**Conversation:** [2026-05-17-0225-641f92c9.md](conversations/2026-05-17-0225-641f92c9.md)
+
+A polish pass on the integrations surface, motivated by three concrete bugs the user noticed while using a deployed Hermes:
+
+**1. Disconnected integrations weren't sorted by name.** The webui-extension's `connectedFirst` comparator (`webui-extension/doh.js:122`) only sorted by `status`, with no tiebreaker, so when *every* item was `not_connected` the list kept its assembly order — `tls_runtime` first (Google), then DCR connectors (Notion, PostHog, Datadog), then the ~150 Merge connectors as Merge returned them. We thought we'd already done the sort; turns out we'd only done the connected-first half. Added a `localeCompare` fallback on `(label || slug).toLowerCase()` so the comparator collapses to a pure name sort in the all-disconnected case and acts as a name tiebreaker within the connected and disconnected groups when mixed. Verified against the live broker on `hermes-search-cap.chsandbox.com`: payload arrives Google → Notion → PostHog → ActiveCampaign → Adobe… → Airtable… (the bug), and the frontend sort renders alphabetically.
+
+**2. `integrations_search_tools` silently truncated busy connectors.** The cap was `SEARCH_HARD_CAP=25`. When the LLM searched `query="datadog"` to enumerate Datadog's tool surface, it got 25 of ~50. The fix could have been "raise the cap," but that conflates two operations (ranked search vs. enumeration) and a vague query like `tool` would still flood the response. Took the cleaner option: added a `connector: str | None` parameter and a separate enumerate path. Three usage modes now:
+
+  - `query=...` — BM25 search across all connectors (default 25, max 100, both bumped from 10/25 by the user after the patch landed).
+  - `connector=..., query=""` — enumerate every tool of one connector, alphabetized by `tool_id`, capped at `ENUMERATE_HARD_CAP=500`. This is the new mode for "what can I do with Datadog".
+  - `query=..., connector=...` — search filtered to one connector.
+
+  When a known connector is enumerated but disconnected, it falls through to a single `kind="connector"` shell row with the existing "tell the user to open Integrations and click Connect" hint, so the LLM still has a useful answer instead of `[]`.
+
+  Made `limit: int | None`. The default differs by path: `SEARCH_DEFAULT_LIMIT` for search, `ENUMERATE_HARD_CAP` for enumerate. Earlier draft had `limit: int = SEARCH_DEFAULT_LIMIT` shared, which would have silently capped Datadog at 10 again — caught and fixed before deploy.
+
+  End-to-end verified by deploying a labelled `hermes-search-cap` app (`--label vmendi-search-cap`, dedicated job worker), running a 50/5/disconnected synthetic catalog through `register(..., store)` against the live `/opt/doh/runtime` code via `/opt/hermes/webui/venv/bin/python`. All 10 probe cases matched expectations including the headline `connector="datadog"` → 50 tools. Test app then torn down via `doh_control teardown-app --remove-app`.
+
+**3. `query_timeseries` and `validate_credential` were flagged `mutates=true`.** The user noticed an LLM aside about it. Root cause: `mutates_from_dash_name` in `connectors/_common.py` walks tokens and matches against `READ_VERBS` / `WRITE_VERBS`; on no-match it defaults to True (the comment makes the rationale explicit — confirmation prompt cheaper than silent mutation). `query` and `validate` weren't in either table, so they fell through. Added them to `READ_VERBS`. Then noticed `mcp_merge_backend.py` had its own private duplicate `_READ_VERBS`/`_WRITE_VERBS` set — same drift hazard. Deleted the copies and imported from `connectors._common`, so the two backends can't drift again. The 24-test `test_mcp_aggregator_state_change` suite still passes.
+
+**4. SOUL and tool-description rewrite.** The original `integrations_search_tools` description told the LLM "search by intent or name," which doesn't teach when to use the new enumerate mode. Rewrote it as a two-mode contract (SEARCH vs ENUMERATE) with default/cap numbers inlined from the constants, and a one-line clarification of `status_filter`. Mirrored the same shift into `SOUL.md:9` so the agent's behavioral layer also points at both modes.
+
+**Key points:**
+- `connectedFirst` now does a name tiebreaker. Pure status-sort with no tiebreaker is a code smell — when one branch dominates (all-disconnected), the other branch never runs and the comparator silently does nothing useful.
+- Two distinct operations (rank-by-relevance vs. enumerate-known-set) want two distinct shapes; raising a single cap papers over the design split. Better to add a parameter and let the path it triggers carry its own defaults and bounds.
+- Heuristic defaults that "fail safe" (mutates → True on ambiguity) only stay safe if the verb tables track real usage. `query` and `validate` are common API verbs we'd missed; periodic audit beats per-tool overrides.
+- Duplicate constants across sibling modules with the same intent are a drift hazard. Deleted the Merge backend's private copies of `READ_VERBS`/`WRITE_VERBS` and imported from the shared `connectors._common`.
+- End-to-end verification path is solid: `--label`-scoped worker + labelled deploy, then exercise the runtime via `doh_app_exec` with the actual on-container venv (`/opt/hermes/webui/venv/bin/python`) instead of the system Python. The runtime ships through Dockerfile COPY, so any source change requires an image rebuild — labelled deploys make that automatic.
+
 ## 2026-05-16 23:29 - [Integrations] Per-backend, per-transition catalog updates with `authenticated_only` and a `list_tool_catalog` rename
 
 **Conversation:** [2026-05-16-2330-9335825d.md](conversations/2026-05-16-2330-9335825d.md)

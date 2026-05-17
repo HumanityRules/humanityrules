@@ -13,6 +13,7 @@
   const INTEGRATIONS_URL = '/__doh_broker/integrations';
 
   let _current = null;
+  const _disconnecting = new Set();
 
   function elem(tag, props, children) {
     const el = document.createElement(tag);
@@ -121,7 +122,9 @@
   function connectedFirst(a, b) {
     if (a.status === 'connected' && b.status !== 'connected') return -1;
     if (a.status !== 'connected' && b.status === 'connected') return 1;
-    return 0;
+    const aLabel = (a.label || a.slug || '').toLowerCase();
+    const bLabel = (b.label || b.slug || '').toLowerCase();
+    return aLabel.localeCompare(bLabel);
   }
 
   // ── Merge connector flow ──────────────────────────────────────────
@@ -232,7 +235,9 @@
   function renderConnectorCard(item) {
     const isMergeConnector = item.kind === 'merge_connector';
     const provider = (isMergeConnector ? 'merge:' : 'mcp:') + item.slug;
-    const card = elem('div', { class: 'doh-integration-card doh-integration-card-row', dataset: { provider } });
+    const isConnected = item.status === 'connected';
+    const cardClass = isConnected ? 'doh-integration-card' : 'doh-integration-card doh-integration-card-row';
+    const card = elem('div', { class: cardClass, dataset: { provider } });
     const titleRow = elem('div', { class: 'doh-integration-card-title-row' });
     if (item.logo_url) {
       titleRow.appendChild(elem('img', {
@@ -244,38 +249,48 @@
       }));
     }
     titleRow.appendChild(elem('div', { class: 'doh-integration-card-title' }, [item.label || item.slug]));
+    const statusPill = elem('div', { class: 'doh-integration-card-status', dataset: { status: item.status } }, [statusLabelFor(item.status)]);
 
-    let actionBtn;
-    if (item.status === 'connected') {
-      actionBtn = elem('button', {
+    if (isConnected) {
+      const pending = _disconnecting.has(provider);
+      const btnProps = {
         class: 'doh-integration-btn doh-integration-btn-secondary',
         onclick: async () => {
-          if (isMergeConnector) {
-            await fetch('/__doh_broker/integrations/merge/disconnect', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ connector_slug: item.slug }),
-            });
-          } else {
-            await fetch('/__doh_broker/integrations/' + item.slug + '/disconnect', { method: 'POST' });
+          if (_disconnecting.has(provider)) return;
+          _disconnecting.add(provider);
+          renderPane(_current);
+          try {
+            if (isMergeConnector) {
+              await fetch('/__doh_broker/integrations/merge/disconnect', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ connector_slug: item.slug }),
+              });
+            } else {
+              await fetch('/__doh_broker/integrations/' + item.slug + '/disconnect', { method: 'POST' });
+            }
+            await refreshAndRender();
+          } finally {
+            _disconnecting.delete(provider);
+            renderPane(_current);
           }
-          await refreshAndRender();
         },
-      }, ['Disconnect']);
-    } else {
-      actionBtn = elem('button', {
-        class: 'doh-integration-btn',
-        onclick: () => {
-          if (isMergeConnector) startMergeConnect(item);
-          else window.location.href = buildMcpConnectUrl(item.slug);
-        },
-      }, ['Connect']);
+      };
+      if (pending) btnProps.disabled = '';
+      const disconnectBtn = elem('button', btnProps, [pending ? 'Disconnecting…' : 'Disconnect']);
+      card.appendChild(elem('div', { class: 'doh-integration-card-head' }, [titleRow, statusPill]));
+      card.appendChild(elem('div', { class: 'doh-integration-card-body' }, [disconnectBtn]));
+      return card;
     }
 
-    const trailing = elem('div', { class: 'doh-integration-card-trailing' }, [
-      actionBtn,
-      elem('div', { class: 'doh-integration-card-status', dataset: { status: item.status } }, [statusLabelFor(item.status)]),
-    ]);
+    const connectBtn = elem('button', {
+      class: 'doh-integration-btn',
+      onclick: () => {
+        if (isMergeConnector) startMergeConnect(item);
+        else window.location.href = buildMcpConnectUrl(item.slug);
+      },
+    }, ['Connect']);
+    const trailing = elem('div', { class: 'doh-integration-card-trailing' }, [connectBtn, statusPill]);
     card.appendChild(elem('div', { class: 'doh-integration-card-head' }, [titleRow, trailing]));
     return card;
   }

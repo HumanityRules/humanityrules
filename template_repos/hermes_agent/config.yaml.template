@@ -202,7 +202,7 @@ web:
   backend: tavily
 
 mcp_servers:
-  notion:
+  agg:
     url: http://127.0.0.1:9952/mcp
     timeout: 120
 

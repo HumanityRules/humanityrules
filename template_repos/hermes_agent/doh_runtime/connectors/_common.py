@@ -11,7 +11,7 @@ logger = logging.getLogger("connectors")
 # Read/write verb tables for mutation classification of upstream tool names.
 # Used by per-connector heuristics to default `mutates` correctly when the
 # upstream MCP doesn't tell us which tools mutate state.
-READ_VERBS = frozenset({"list", "get", "search", "retrieve", "fetch", "read", "find", "describe", "show"})
+READ_VERBS = frozenset({"list", "get", "search", "retrieve", "fetch", "read", "find", "describe", "show", "query", "validate"})
 WRITE_VERBS = frozenset({"create", "update", "delete", "post", "send", "patch", "put", "remove", "merge", "close", "open", "archive"})
 
 

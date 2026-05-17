@@ -34,6 +34,7 @@ from starlette.responses import JSONResponse, Response
 from starlette.routing import Route
 
 import mcp_top_level_tools
+from connectors._common import READ_VERBS, WRITE_VERBS
 
 
 logger = logging.getLogger("mcp_merge_backend")
@@ -44,12 +45,6 @@ CONNECTOR_STATUS_CACHE_TTL_SECONDS = 60
 # Tool names where the verb-prefix heuristic mis-classifies. Keep alphabetical.
 MUTATION_OVERRIDES: dict[str, bool] = {}
 
-# Read/write verb tables for mutation classification of upstream tool names.
-# Inlined here so this module is self-contained — Merge is the only backend that
-# uses double-underscore tool names; the DCR connectors use kebab-case.
-_READ_VERBS = frozenset({"list", "get", "search", "retrieve", "fetch", "read", "find", "describe", "show"})
-_WRITE_VERBS = frozenset({"create", "update", "delete", "post", "send", "patch", "put", "remove", "merge", "close", "open", "archive"})
-
 
 def _mutates_from_double_underscore_name(*, name: str) -> bool:
     """Heuristic for Merge-style `connector__verb_object` names. Default to mutates on ambiguity."""
@@ -57,9 +52,9 @@ def _mutates_from_double_underscore_name(*, name: str) -> bool:
         verb = name.split("__", 1)[1].split("_", 1)[0].lower()
     except IndexError:
         return True
-    if verb in _READ_VERBS:
+    if verb in READ_VERBS:
         return False
-    if verb in _WRITE_VERBS:
+    if verb in WRITE_VERBS:
         return True
     return True
 
