@@ -267,8 +267,9 @@ def integrations_google_oauth_disconnect(request: HttpRequest) -> HttpResponse:
     """Disconnect the authenticated user's Google grant for the env resolved from `rd`.
 
     Idempotent: returns 302 to `rd?disconnected=google` whether a row existed
-    or not. The WebUI extension calls the broker's synchronous /kick endpoint
-    after redirect so the Integrations pane reflects the disconnect immediately.
+    or not. The WebUI extension re-fetches /__doh_broker/integrations after
+    redirect; the broker force-refreshes on that GET so the Integrations pane
+    reflects the disconnect immediately.
     """
     rd = request.GET.get("rd", "")
     env = _resolve_env_by_rd(rd=rd)

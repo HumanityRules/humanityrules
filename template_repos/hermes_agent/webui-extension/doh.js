@@ -11,7 +11,6 @@
   'use strict';
 
   const INTEGRATIONS_URL = '/__doh_broker/integrations';
-  const KICK_URL = '/__doh_broker/integrations/google/kick';
 
   let _current = null;
 
@@ -47,15 +46,6 @@
     } catch (_) {
       return null;
     }
-  }
-
-  async function kickGoogle() {
-    try {
-      const response = await fetch(KICK_URL, { method: 'POST', cache: 'no-store' });
-      if (!response.ok) return null;
-      return await response.json();
-    } catch (_) { /* best-effort; the broker is loopback */ }
-    return null;
   }
 
   let _refreshInflight = false;
@@ -395,18 +385,6 @@
     renderPane(_current);
   }
 
-  // After the Connect/Disconnect round-trip returns us here, ask the broker to
-  // refresh now and render the status returned by /kick.
-  async function refreshAfterFlow() {
-    const kickResult = await kickGoogle();
-    if (kickResult) {
-      _current = kickResult;
-      renderPane(_current);
-      return;
-    }
-    await refreshAndRender();
-  }
-
   // Drop any ?connected=/?disconnected= sentinel once we've acted on it,
   // so a reload doesn't replay the refresh.
   function consumeReturnSentinel() {
@@ -562,18 +540,15 @@
     wrapSwitchPanel();
 
     const sentinel = consumeReturnSentinel();
-    if (sentinel) {
-      // User just came back from DOH's start/disconnect. Route them straight
-      // to the Integrations panel and nudge the broker to refresh now.
-      if (typeof window.switchPanel === 'function') window.switchPanel('integrations');
-      refreshAfterFlow();
-    } else {
-      // Prefetch the broker payload in the background so when the user
-      // eventually opens the Integrations page the cards render instantly.
-      // Cheap, non-blocking; first paint of chat is unaffected. Also
-      // populates the sidebar's "X of Y connected" summary up front.
-      refreshAndRender();
+    if (sentinel && typeof window.switchPanel === 'function') {
+      // User just came back from DOH's start/disconnect — route them straight
+      // to the Integrations panel.
+      window.switchPanel('integrations');
     }
+    // /integrations force-refreshes every TLS-intercept provider before
+    // responding, so the rendered status reflects DOH's current view whether
+    // we got here via a return-trip or a normal page load.
+    refreshAndRender();
   }
 
   if (document.readyState === 'loading') {

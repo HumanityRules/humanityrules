@@ -8,18 +8,37 @@ refresh-loop outcome classification) directly without standing up the
 asyncio servers.
 """
 
-import asyncio
 import importlib.util
-import json
 import pathlib
 import ssl
 import sys
 import tempfile
+import types
 import unittest
 from unittest.mock import patch
 
 
-def _load_broker_module():
+def _install_mcp_aggregator_stub_if_needed() -> None:
+    """Stub MCPAggregator only when the local test env lacks FastMCP."""
+    if "mcp_aggregator" in sys.modules:
+        return
+    try:
+        __import__("mcp_aggregator")
+        return
+    except ModuleNotFoundError as exc:
+        if exc.name != "fastmcp":
+            raise
+    sys.modules.pop("mcp_aggregator", None)
+    stub = types.ModuleType("mcp_aggregator")
+
+    class MCPAggregator:
+        pass
+
+    stub.MCPAggregator = MCPAggregator
+    sys.modules["mcp_aggregator"] = stub
+
+
+def _load_broker_module() -> types.ModuleType:
     """Load template_repos/hermes_agent/doh_runtime/integrations_broker.py as a module.
 
     The broker imports its sibling `mcp_aggregator` module by bare name. When
@@ -33,6 +52,7 @@ def _load_broker_module():
     script_path = runtime_dir / "integrations_broker.py"
     if str(runtime_dir) not in sys.path:
         sys.path.insert(0, str(runtime_dir))
+    _install_mcp_aggregator_stub_if_needed()
     spec = importlib.util.spec_from_file_location(
         name="integrations_broker_under_test",
         location=str(script_path),
@@ -46,34 +66,63 @@ def _load_broker_module():
 broker = _load_broker_module()
 
 
+def _make_token_store() -> broker.tls_intercept._TokenStore:
+    """Create a fresh TLS token store for isolated broker tests."""
+    return broker.tls_intercept._TokenStore(
+        providers=broker.tls_intercept.TLS_INTERCEPT_PROVIDERS,
+        refresh_config=broker.tls_intercept.DohRefreshConfig(
+            control_plane_url="https://doh.example",
+            bearer="env-bearer",
+            owner_username="vmendi",
+        ),
+        refresh_lead_seconds=broker.tls_intercept.REFRESH_LEAD_SECONDS,
+    )
+
+
+def _make_tls_runtime(ca_dir: pathlib.Path, private_dir: pathlib.Path) -> broker.tls_intercept.TlsInterceptRuntime:
+    """Create a fresh TLS-intercept runtime for control-app tests."""
+    return broker.tls_intercept.TlsInterceptRuntime(
+        providers=broker.tls_intercept.TLS_INTERCEPT_PROVIDERS,
+        refresh_config=broker.tls_intercept.DohRefreshConfig(
+            control_plane_url="https://doh.example",
+            bearer="env-bearer",
+            owner_username="vmendi",
+        ),
+        refresh_lead_seconds=broker.tls_intercept.REFRESH_LEAD_SECONDS,
+        ca_dir=ca_dir,
+        private_dir=private_dir,
+    )
+
+
 class TestHostToProviderRouting(unittest.TestCase):
 
     def test_all_google_hosts_route_to_google(self) -> None:
-        for host in broker.PROVIDERS["google"]["hosts"]:
-            self.assertEqual(broker._host_to_provider_slug(host=host), "google")
+        for host in broker.tls_intercept.TLS_INTERCEPT_PROVIDERS["google"].hosts:
+            self.assertEqual(broker.tls_intercept.HOST_TO_TLS_PROVIDER[host], "google")
 
     def test_unknown_host_returns_none(self) -> None:
-        self.assertIsNone(broker._host_to_provider_slug(host="api.tavily.com"))
-        self.assertIsNone(broker._host_to_provider_slug(host="example.com"))
+        store = _make_token_store()
+        self.assertIsNone(store.provider_for_host(host="api.tavily.com"))
+        self.assertIsNone(store.provider_for_host(host="example.com"))
 
 
 class TestRewriteAuthorization(unittest.TestCase):
 
     def test_existing_authorization_is_replaced(self) -> None:
         hdrs = [(b"authorization", b"Bearer SANDBOX-DUMMY"), (b"content-type", b"application/json")]
-        out = broker._rewrite_authorization(headers=hdrs, token="REAL-TOKEN", upstream_host="gmail.googleapis.com")
+        out = broker.tls_intercept._rewrite_authorization(headers=hdrs, token="REAL-TOKEN", upstream_host="gmail.googleapis.com")
         auth = dict([(n.lower(), v) for n, v in out])[b"authorization"]
         self.assertEqual(auth, b"Bearer REAL-TOKEN")
 
     def test_missing_authorization_gets_injected(self) -> None:
         hdrs = [(b"content-type", b"application/json")]
-        out = broker._rewrite_authorization(headers=hdrs, token="T", upstream_host="gmail.googleapis.com")
+        out = broker.tls_intercept._rewrite_authorization(headers=hdrs, token="T", upstream_host="gmail.googleapis.com")
         auth = dict([(n.lower(), v) for n, v in out])[b"authorization"]
         self.assertEqual(auth, b"Bearer T")
 
     def test_host_is_set_to_upstream(self) -> None:
         hdrs = [(b"host", b"whatever"), (b"authorization", b"Bearer x")]
-        out = broker._rewrite_authorization(headers=hdrs, token="T", upstream_host="gmail.googleapis.com")
+        out = broker.tls_intercept._rewrite_authorization(headers=hdrs, token="T", upstream_host="gmail.googleapis.com")
         host = dict([(n.lower(), v) for n, v in out])[b"host"]
         self.assertEqual(host, b"gmail.googleapis.com")
 
@@ -83,7 +132,7 @@ class TestRewriteAuthorization(unittest.TestCase):
             (b"proxy-connection", b"keep-alive"),
             (b"proxy-authorization", b"Basic xxx"),
         ]
-        out = broker._rewrite_authorization(headers=hdrs, token="T", upstream_host="gmail.googleapis.com")
+        out = broker.tls_intercept._rewrite_authorization(headers=hdrs, token="T", upstream_host="gmail.googleapis.com")
         names = [n.lower() for n, _ in out]
         self.assertNotIn(b"proxy-connection", names)
         self.assertNotIn(b"proxy-authorization", names)
@@ -95,7 +144,7 @@ class TestCertMinter(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             ca_dir = pathlib.Path(tmp) / "ca"
             private_dir = pathlib.Path(tmp) / "private"
-            minter = broker._CertMinter(ca_dir=ca_dir, private_dir=private_dir)
+            minter = broker.tls_intercept._CertMinter(ca_dir=ca_dir, private_dir=private_dir)
             minter.bootstrap()
             bundle = ca_dir / "bundle.pem"
             self.assertTrue(bundle.exists())
@@ -114,51 +163,52 @@ class TestCertMinter(unittest.TestCase):
     def test_private_dir_is_owner_only(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             private_dir = pathlib.Path(tmp) / "private"
-            minter = broker._CertMinter(ca_dir=pathlib.Path(tmp) / "ca", private_dir=private_dir)
+            minter = broker.tls_intercept._CertMinter(ca_dir=pathlib.Path(tmp) / "ca", private_dir=private_dir)
             minter.bootstrap()
             self.assertEqual(private_dir.stat().st_mode & 0o777, 0o700)
 
 
-class TestControlKick(unittest.IsolatedAsyncioTestCase):
+class _StubAggregator:
+    """Minimal MCPAggregator surface for the unified-status + control-app tests."""
+
+    async def status_items(self, request: object) -> list:
+        return []
+
+    def routes(self, prefix: str) -> list:
+        return []
+
+
+class TestControlIntegrations(unittest.IsolatedAsyncioTestCase):
+    """The /integrations endpoint refreshes every TLS-intercept provider before rendering."""
 
     def setUp(self) -> None:
-        broker._provider_state.clear()
-        broker._host_token.clear()
-        broker._provider_refresh_locks.clear()
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        root = pathlib.Path(self.tmp.name)
+        self.tls_runtime = _make_tls_runtime(ca_dir=root / "ca", private_dir=root / "private")
 
-    async def test_kick_refreshes_before_returning_unified_status(self) -> None:
-        """POST /integrations/google/kick should refresh, then return the unified items list."""
+    async def test_get_integrations_refreshes_then_returns_unified_status(self) -> None:
         from starlette.testclient import TestClient
-
-        for slug in broker.PROVIDERS:
-            broker._provider_refresh_locks[slug] = asyncio.Lock()
-
-        # Stub MCPAggregator with the minimal surface our unified status + control app need.
-        class _StubAggregator:
-            async def handle_status(self, request):
-                from starlette.responses import JSONResponse
-                return JSONResponse(content={"providers": {}})
-            async def handle_merge_connectors(self, request):
-                from starlette.responses import JSONResponse
-                return JSONResponse(content={"connectors": []}, status_code=502)
-            def routes(self, prefix):
-                return []
 
         app = broker._build_control_app(
             aggregator=_StubAggregator(),
+            tls_runtime=self.tls_runtime,
             control_plane_url="https://doh.example",
-            bearer="env-bearer",
             owner_username="vmendi",
             env_slug="default",
         )
 
         with patch.object(
-            broker,
-            "_fetch_provider_token",
-            return_value={"kind": "ok", "access_token": "fresh-token", "expires_in": 3600},
+            broker.tls_intercept,
+            "fetch_provider_token",
+            return_value=broker.tls_intercept.RefreshResult(
+                status=broker.tls_intercept.STATUS_CONNECTED,
+                access_token="fresh-token",
+                expires_in=3600,
+            ),
         ) as fetch_mock:
             with TestClient(app) as client:
-                resp = client.post("/integrations/google/kick")
+                resp = client.get("/integrations")
                 self.assertEqual(resp.status_code, 200)
                 payload = resp.json()
 
@@ -166,16 +216,74 @@ class TestControlKick(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(items_by_slug["google"]["kind"], "tls_intercept")
         self.assertEqual(items_by_slug["google"]["status"], "connected")
         self.assertEqual(
-            await broker._current_token_for_host(host="gmail.googleapis.com"),
+            await self.tls_runtime._token_store.token_for_host(host="gmail.googleapis.com"),
             "fresh-token",
         )
         fetch_mock.assert_called_once()
 
 
-class TestFetchProviderTokenClassification(unittest.TestCase):
-    """Drive _fetch_provider_token through each outcome by faking urlopen."""
+class TestLazyTokenForHost(unittest.IsolatedAsyncioTestCase):
+    """The TLS token store fetches lazily and reuses the cache until near-expiry."""
 
-    def _run(self, status: int, payload: dict | None) -> dict:
+    def setUp(self) -> None:
+        self.token_store = _make_token_store()
+
+    async def test_first_call_fetches_subsequent_calls_use_cache(self) -> None:
+        with patch.object(
+            broker.tls_intercept,
+            "fetch_provider_token",
+            return_value=broker.tls_intercept.RefreshResult(
+                status=broker.tls_intercept.STATUS_CONNECTED,
+                access_token="T1",
+                expires_in=3600,
+            ),
+        ) as fetch_mock:
+            self.assertEqual(await self.token_store.token_for_host(host="gmail.googleapis.com"), "T1")
+            self.assertEqual(await self.token_store.token_for_host(host="drive.googleapis.com"), "T1")
+            fetch_mock.assert_called_once()
+
+    async def test_refresh_when_within_lead_window(self) -> None:
+        responses = [
+            broker.tls_intercept.RefreshResult(
+                status=broker.tls_intercept.STATUS_CONNECTED,
+                access_token="T1",
+                expires_in=3600,
+            ),
+            broker.tls_intercept.RefreshResult(
+                status=broker.tls_intercept.STATUS_CONNECTED,
+                access_token="T2",
+                expires_in=3600,
+            ),
+        ]
+        with patch.object(broker.tls_intercept, "fetch_provider_token", side_effect=responses):
+            self.assertEqual(await self.token_store.token_for_host(host="gmail.googleapis.com"), "T1")
+            # Backdate the cached entry past the lead window to force a refresh.
+            self.token_store._cache["google"].expires_at = self.token_store._cache["google"].expires_at - 3600
+            self.assertEqual(await self.token_store.token_for_host(host="gmail.googleapis.com"), "T2")
+
+    async def test_unknown_host_returns_none_without_fetching(self) -> None:
+        with patch.object(broker.tls_intercept, "fetch_provider_token") as fetch_mock:
+            self.assertIsNone(await self.token_store.token_for_host(host="api.tavily.com"))
+            fetch_mock.assert_not_called()
+
+    async def test_not_connected_caches_no_token(self) -> None:
+        with patch.object(
+            broker.tls_intercept,
+            "fetch_provider_token",
+            return_value=broker.tls_intercept.RefreshResult(
+                status=broker.tls_intercept.STATUS_NOT_CONNECTED,
+                access_token=None,
+                expires_in=None,
+            ),
+        ):
+            self.assertIsNone(await self.token_store.token_for_host(host="gmail.googleapis.com"))
+        self.assertEqual(self.token_store._cache["google"].status, broker.tls_intercept.STATUS_NOT_CONNECTED)
+
+
+class TestFetchProviderTokenClassification(unittest.TestCase):
+    """Drive fetch_provider_token through each outcome by faking urlopen."""
+
+    def _run(self, status: int, payload: dict | None) -> broker.tls_intercept.RefreshResult:
         class _FakeResp:
             def __init__(self, status: int, body: bytes) -> None:
                 self.status = status
@@ -191,44 +299,54 @@ class TestFetchProviderTokenClassification(unittest.TestCase):
         import urllib.error
 
         body = _json.dumps(payload or {}).encode()
+        refresh_config = broker.tls_intercept.DohRefreshConfig(
+            control_plane_url="https://example.invalid",
+            bearer="b",
+            owner_username="u",
+        )
+        provider = broker.tls_intercept.TlsProviderSpec(
+            slug="test",
+            label="Test",
+            refresh_path="/api/x",
+            hosts=("example.invalid",),
+        )
         if 200 <= status < 300:
             opener = _FakeResp(status=status, body=body)
-            with patch.object(broker.urllib.request, "urlopen", return_value=opener):
-                return broker._fetch_provider_token(
-                    control_plane_url="https://example.invalid",
-                    bearer="b",
-                    owner_username="u",
-                    refresh_path="/api/x",
-                )
+            with patch.object(broker.tls_intercept.urllib.request, "urlopen", return_value=opener):
+                return broker.tls_intercept.fetch_provider_token(refresh_config=refresh_config, provider=provider)
         raise_with = urllib.error.HTTPError(
             url="https://example.invalid", code=status, msg="x", hdrs={}, fp=None,
         )
         raise_with.read = lambda: body  # type: ignore[assignment]
-        with patch.object(broker.urllib.request, "urlopen", side_effect=raise_with):
-            return broker._fetch_provider_token(
-                control_plane_url="https://example.invalid",
-                bearer="b",
-                owner_username="u",
-                refresh_path="/api/x",
-            )
+        with patch.object(broker.tls_intercept.urllib.request, "urlopen", side_effect=raise_with):
+            return broker.tls_intercept.fetch_provider_token(refresh_config=refresh_config, provider=provider)
 
-    def test_200_is_ok(self) -> None:
+    def test_200_is_connected(self) -> None:
         out = self._run(status=200, payload={"access_token": "abc", "expires_in": 3600})
-        self.assertEqual(out["kind"], "ok")
-        self.assertEqual(out["access_token"], "abc")
-        self.assertEqual(out["expires_in"], 3600)
+        self.assertEqual(out.status, broker.tls_intercept.STATUS_CONNECTED)
+        self.assertEqual(out.access_token, "abc")
+        self.assertEqual(out.expires_in, 3600)
 
     def test_404_is_not_connected(self) -> None:
-        self.assertEqual(self._run(status=404, payload={})["kind"], "not_connected")
+        self.assertEqual(self._run(status=404, payload={}).status, broker.tls_intercept.STATUS_NOT_CONNECTED)
 
     def test_410_is_revoked(self) -> None:
-        self.assertEqual(self._run(status=410, payload={})["kind"], "revoked")
+        self.assertEqual(self._run(status=410, payload={}).status, broker.tls_intercept.STATUS_REVOKED)
 
-    def test_401_is_fatal(self) -> None:
-        self.assertEqual(self._run(status=401, payload={"error": "bad bearer"})["kind"], "fatal")
+    def test_401_is_transient(self) -> None:
+        self.assertEqual(
+            self._run(status=401, payload={"error": "bad bearer"}).status,
+            broker.tls_intercept.STATUS_TRANSIENT_ERROR,
+        )
 
-    def test_500_is_fatal(self) -> None:
-        self.assertEqual(self._run(status=500, payload={"error": "bad config"})["kind"], "fatal")
+    def test_500_is_transient(self) -> None:
+        self.assertEqual(
+            self._run(status=500, payload={"error": "bad config"}).status,
+            broker.tls_intercept.STATUS_TRANSIENT_ERROR,
+        )
 
     def test_503_is_transient(self) -> None:
-        self.assertEqual(self._run(status=503, payload={"error": "try later"})["kind"], "transient")
+        self.assertEqual(
+            self._run(status=503, payload={"error": "try later"}).status,
+            broker.tls_intercept.STATUS_TRANSIENT_ERROR,
+        )
