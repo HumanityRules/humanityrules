@@ -57,7 +57,6 @@ REFRESH_COOLDOWN_SECONDS = 30
 DCR_CONNECTORS_BY_SLUG: dict[str, DCRConnectorSpec] = {spec.slug: spec for spec in DCR_CONNECTORS}
 
 
-
 class _OAuthState:
     """Per-provider DCR client + tokens, persisted on EBS-backed disk."""
 
@@ -160,11 +159,14 @@ class MCPAggregator:
         # Merge (relayed via DOH, not DCR) first, then one Backend per connector spec.
         # Each spec.make_backend gets its own subdir under persistent_dir for any
         # extra state the connector wants to keep (e.g. PostHog's session config).
+        # Native connectors win over same-slug Merge connectors in the catalog
+        # and browser integrations list.
         self._merge_backend = MergeBackend(
             doh_control_plane_url=self._doh_control_plane_url,
             doh_env_bearer=self._doh_env_bearer,
             doh_app_slug=self._doh_app_slug,
             doh_owner_username=self._doh_owner_username,
+            excluded_connector_slugs=frozenset(DCR_CONNECTORS_BY_SLUG.keys()),
         )
         self._backends: list[mcp_top_level_tools.Backend] = [self._merge_backend]
         for spec in DCR_CONNECTORS:
