@@ -245,16 +245,13 @@ class CatalogStore:
         return out
 
 
-def _connect_kind_for_backend(*, backend_name: str) -> str:
-    if backend_name == "merge":
-        return "magic_link"
-    if backend_name in ("notion", "posthog"):
-        return "oauth_dcr_pkce"
-    return "unknown"
+def register(*, mcp: FastMCP, store: CatalogStore, backends: list[Backend], connect_kinds: dict[str, str]) -> None:
+    """Register the four LLM-facing tools on the FastMCP server.
 
-
-def register(*, mcp: FastMCP, store: CatalogStore, backends: list[Backend]) -> None:
-    """Register the four LLM-facing tools on the FastMCP server."""
+    `connect_kinds` maps backend.name → the string returned in the `connect_kind`
+    field of a `not_connected` error. Built by the aggregator from the connector
+    spec registry plus a fixed entry for Merge.
+    """
 
     backends_by_name: dict[str, Backend] = {b.name: b for b in backends}
 
@@ -367,7 +364,7 @@ def register(*, mcp: FastMCP, store: CatalogStore, backends: list[Backend]) -> N
             return {
                 "error": "not_connected",
                 "connector": entry.connector,
-                "connect_kind": _connect_kind_for_backend(backend_name=entry.backend),
+                "connect_kind": connect_kinds.get(entry.backend, "unknown"),
             }
         try:
             return await backend.call(tool_id=tool_id, args=args)

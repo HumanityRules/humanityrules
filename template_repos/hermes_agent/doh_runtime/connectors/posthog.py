@@ -346,4 +346,5 @@ SPEC = DCRConnectorSpec(
     oauth_metadata_url="https://mcp.posthog.com/.well-known/oauth-authorization-server",
     default_scope=_DEFAULT_SCOPE,
     make_backend=_make_backend,
+    connect_kind="oauth_dcr_pkce",
 )

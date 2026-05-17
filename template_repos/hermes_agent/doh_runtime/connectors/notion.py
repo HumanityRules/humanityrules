@@ -104,4 +104,5 @@ SPEC = DCRConnectorSpec(
     oauth_metadata_url="https://mcp.notion.com/.well-known/oauth-authorization-server",
     default_scope=None,  # Notion's AS ignores scope.
     make_backend=_make_backend,
+    connect_kind="oauth_dcr_pkce",
 )
