@@ -1,5 +1,49 @@
 # DevOpsHero Development Journal
 
+## 2026-05-16 18:31 - [Bugfix] Restore /opt/doh/bin on PATH for Hermes' login-shell snapshot
+
+**Conversation:** [2026-05-16-1832-174027b0.md](conversations/2026-05-16-1832-174027b0.md)
+
+Started from a user-reported wrong answer in `hermes-datadog-test`: when asked to read emails, the agent replied with a polite "Gmail integration isn't connected — open the Integrations panel and click Connect." Two things smelled off: the Google integration was demonstrably connected (broker `/integrations` reported `status: connected`, refreshed minutes earlier), and the wording the agent used did not appear anywhere in the codebase. The skill (`skills/google-workspace/SKILL.md`) explicitly instructs the agent to surface the broker's verbatim 503 string ("`google integration not connected in DOH — connect it from the Integrations pane.`"), and the broker can only emit that exact phrase. The agent's "Hermes UI", "Integrations **panel**", numbered "click Connect / authorize read permissions" was paraphrase, not a real broker message.
+
+The user then revealed what the agent had actually run: `python /opt/hermes/agent/skills/.../google_api.py gmail search …` returned `FATAL: gws CLI not found in PATH`. So the FATAL was real (one bug), and the agent fabricated the "Gmail isn't connected" rewrite from a vaguely matching error string (a separate, more concerning bug — agent confabulation when stderr says X and the model says "Y is more likely").
+
+**Root cause of the FATAL.** `gws` is installed at `/opt/doh/bin/gws` by our Dockerfile, and `supervisor.sh` exports `PATH=/opt/doh/bin:/usr/local/bin:…` into the nono-sandboxed Hermes process. But Hermes' `LocalEnvironment` builds its terminal session-snapshot with `bash -l -c …` (login shell, see `tools/environments/local.py:389`). Login-shell startup sources Debian's `/etc/profile`, which contains:
+```sh
+if [ "$(id -u)" -eq 0 ]; then
+  PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+else
+  PATH="/usr/local/bin:/usr/bin:/bin:/usr/local/games:/usr/games"
+fi
+export PATH
+```
+For `hermeswebui` (uid 1024) this **overwrites** the inherited PATH from scratch. After the snapshot, `/opt/doh/bin` is gone — `shutil.which("gws")` returns `None` → FATAL. `python3` survives because it lives in `/usr/local/bin`. Reproduced directly: `bash -lc 'echo $PATH'` inside nono yields `/usr/local/bin:/usr/bin:/bin:/usr/local/games:/usr/games`.
+
+**Fix.** Drop one line into `/etc/profile.d/doh-bin.sh` from the Dockerfile, after the existing apt/nono/aws/gws install layer:
+```
+RUN echo 'export PATH="/opt/doh/bin:$PATH"' > /etc/profile.d/doh-bin.sh \
+    && chmod 644 /etc/profile.d/doh-bin.sh
+```
+`/etc/profile`'s `run-parts /etc/profile.d/*.sh` loop is Debian-base-files convention and rock-stable. The drop-in adds `/opt/doh/bin` to PATH for any login shell in the image — survives `bash -l`, doesn't touch any file upstream owns, and patches `gws`, `aws`, and any future `/opt/doh/bin/*` tool in one shot.
+
+**Why this respects our update design.** Our customizations of the upstream Hermes image fall into three buckets: (1) patches against upstream code in `build/patches-webui/` and `build/patches-agent/`, applied at image-build via `apply-patches.py`, where a fuzz/reject is a build failure and `hermes-update-check` decides when to retire; (2) DOH-owned files like `doh_runtime/`, `webui-extension/`, `skills/google-workspace/`, copied in via `COPY`; (3) image-layer additions on top of the base — `nono`, `aws`, `gws` installs in the big `RUN` block. `/etc/profile.d/doh-bin.sh` is bucket #3: lives in *our* Dockerfile, gets re-laid-down on every rebuild, no upstream-code drift to track. The underlying behavior (login-shell PATH reset) is Debian's design, not Hermes' bug — even if upstream Hermes changed its snapshot mechanism, this drop-in remains the right shape for ensuring `/opt/doh/bin` is on PATH for any login shell.
+
+**End-to-end verification.** Ran the full deploy → boot → agent-runtime loop per `template_repos/hermes_agent/AGENTS.md`: started a labelled worker (`vmendi-doh-bin`), `doh_control deploy-app-template` with the same label spun up `doh-bin-fix-test` in Humanity Rules Sandbox / default in ~8 min. Then verified inside the live container:
+1. `/etc/profile.d/doh-bin.sh` is present and readable.
+2. Inside nono as `hermeswebui`, `bash -lc 'echo $PATH; which gws; which aws'` now yields `PATH=/opt/doh/bin:/usr/local/bin:/usr/bin:/bin:/usr/local/games:/usr/games` with both binaries resolving — the `/opt/doh/bin` prefix is the addition.
+3. `python3 google_api.py gmail labels`, run inside the chroot + nono with the same env vars supervisor.sh injects (`HTTPS_PROXY=http://127.0.0.1:9950`, `SSL_CERT_FILE=/run/doh/integrations-broker/ca/bundle.pem`), returned the owner's actual Gmail labels — system labels (INBOX, SENT, DRAFT, …) and ~16 user-defined labels — through the broker's TLS-intercept token swap. Broker logs show `refreshed google: connected` + `minted leaf cert for www.googleapis.com` with no TLS errors on the success path.
+
+Tore down the test app (`teardown-app --remove-app --delete-persistent-data --delete-policies`) and stopped the labelled worker.
+
+**Key points:**
+
+- The agent confabulation deserves a separate filing. The skill's `SKILL.md:103` already says "surface the broker's 503 verbatim", but the agent rewrote a stderr that didn't even mention auth state into a "Gmail isn't connected" UI prompt. Worth tightening the skill instruction to "do not paraphrase tool stderr; do not infer auth state from anything other than an explicit broker 503."
+- `doh_app_exec` lands you in the ALB-target container's mount namespace, *outside* the chroot Hermes runs in (`persistent-root-runner.sh:282` `chroot /hermes-persistent-root …`). The CA bundle that supervisor.sh writes to `/run/doh/integrations-broker/ca/bundle.pem` lives inside the chroot — from `doh_app_exec`'s view it's at `/hermes-persistent-root/run/doh/integrations-broker/ca/bundle.pem`. Reproductions of the agent's exact path need to `chroot /hermes-persistent-root` first, then re-spawn nono. Worth knowing for future debugging.
+- Considered a defense-in-depth secondary fix: `HERMES_GWS_BIN=/opt/doh/bin/gws` in the Dockerfile + `allow_vars` in the nono profile (the skill's `google_api.py:46-55` checks this env var before `shutil.which`). Skipped — narrower than the PATH fix (only patches Gmail, not `aws` or any future tool), and only useful as a fallback if PATH gets undone again.
+- Considered telling Hermes not to use a login shell for the snapshot (set `terminal.shell_init_files: []`). Rejected — also disables the nvm/pyenv/asdf PATH discovery the login shell deliberately enables.
+- `/etc/profile.d/` ordering: if upstream ever ships its own `*.sh` that re-sets PATH, `run-parts` runs alphabetically — could rename ours to `99-doh-bin.sh` to win the ordering. Not needed today.
+- Drift-trail: nothing requires `hermes-update-check` to flag this. The fix is image-layer config, not a patch against upstream code.
+
 ## 2026-05-16 18:20 - [Integrations] Native MCP connectors share the Merge integrations list and hide same-slug Merge equivalents
 
 **Conversation:** [2026-05-16-1820-019e3304.md](conversations/2026-05-16-1820-019e3304.md)

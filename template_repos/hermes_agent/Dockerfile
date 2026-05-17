@@ -49,6 +49,13 @@ RUN mkdir -p "$DOH_BIN_DIR" \
     && rm -rf /tmp/aws /tmp/awscliv2.zip \
     && rm -rf /var/lib/apt/lists/*
 
+# Ensure /opt/doh/bin survives login-shell PATH resets. Debian's /etc/profile
+# rewrites PATH from scratch for non-root uids; Hermes' terminal session
+# snapshot uses `bash -l`, so without this drop-in, hermeswebui's snapshot
+# loses /opt/doh/bin and tools like gws/aws become invisible to the agent.
+RUN echo 'export PATH="/opt/doh/bin:$PATH"' > /etc/profile.d/doh-bin.sh \
+    && chmod 644 /etc/profile.d/doh-bin.sh
+
 COPY --chmod=755 build/prune-skills.sh /tmp/prune-skills.sh
 RUN git clone --depth 1 --branch v2026.5.7 https://github.com/NousResearch/hermes-agent.git \
         "$HERMES_WEBUI_AGENT_DIR" \
