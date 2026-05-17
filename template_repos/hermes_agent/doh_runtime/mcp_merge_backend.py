@@ -135,17 +135,12 @@ class MergeBackend:
 
     # ── Backend protocol ──────────────────────────────────────────────
 
-    async def list_catalog(self) -> list[mcp_top_level_tools.CatalogEntry]:
+    async def list_tool_catalog(self) -> list[mcp_top_level_tools.CatalogEntry]:
         async with self._client() as c:
             tools = await c.list_tools()
         out: list[mcp_top_level_tools.CatalogEntry] = []
         for tool in tools:
             tool_id = tool.name
-            # Merge ships a per-connector `authenticate_<slug>` tool whose description packs
-            # every downstream tool's docs. They're meta — connection happens via Magic Link,
-            # not by calling them — and they wreck BM25 ranking. Skip them.
-            if tool_id.startswith("authenticate_"):
-                continue
             if "__" not in tool_id:
                 logger.error("merge tool %r has no '__' connector prefix; skipping", tool_id)
                 continue

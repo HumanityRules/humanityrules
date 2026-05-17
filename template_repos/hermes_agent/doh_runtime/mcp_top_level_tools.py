@@ -67,7 +67,7 @@ class Backend(Protocol):
     # are free, in-memory) or background (connects re-list upstream tools).
     on_config_change: Callable[[str, str, StateTransition], Awaitable[None]]
 
-    async def list_catalog(self) -> list[CatalogEntry]: ...
+    async def list_tool_catalog(self) -> list[CatalogEntry]: ...
     async def list_known_connectors(self) -> list[KnownConnector]: ...
     async def call(self, *, tool_id: str, args: dict) -> dict: ...
     async def connector_status(self, *, connector_slug: str) -> str: ...
@@ -137,7 +137,7 @@ class CatalogStore:
         than reload(): a slow Merge `tools/list` won't delay a Notion connect.
         """
         async with self._lock:
-            entries = await self._safe_list_catalog(backend=backend)
+            entries = await self._safe_list_tool_catalog(backend=backend)
             known = await self._safe_list_connectors(backend=backend)
             self._replace_backend_slice(backend_name=backend.name, entries=entries, known=known)
             self._loaded.set()
@@ -216,7 +216,7 @@ class CatalogStore:
 
     async def _reload_locked(self, *, backends: list[Backend]) -> None:
         catalog_results = await asyncio.gather(
-            *[self._safe_list_catalog(backend=b) for b in backends],
+            *[self._safe_list_tool_catalog(backend=b) for b in backends],
             return_exceptions=False,
         )
         connector_results = await asyncio.gather(
@@ -274,11 +274,11 @@ class CatalogStore:
             len(new_entries), len(new_connectors), len(backends), collisions,
         )
 
-    async def _safe_list_catalog(self, *, backend: Backend) -> list[CatalogEntry]:
+    async def _safe_list_tool_catalog(self, *, backend: Backend) -> list[CatalogEntry]:
         try:
-            return await backend.list_catalog()
+            return await backend.list_tool_catalog()
         except Exception:
-            logger.exception("backend %r failed list_catalog; contributing 0 entries", backend.name)
+            logger.exception("backend %r failed list_tool_catalog; contributing 0 entries", backend.name)
             return []
 
     async def _safe_list_connectors(self, *, backend: Backend) -> list[KnownConnector]:

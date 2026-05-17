@@ -155,13 +155,13 @@ class _FakeBackend:
         self.name = name
         self.catalog = list(catalog)
         self.known = list(known)
-        self.list_catalog_calls = 0
+        self.list_tool_catalog_calls = 0
         self.list_known_calls = 0
         # The aggregator wires this; tests can override.
         self.on_config_change = None  # type: ignore[assignment]
 
-    async def list_catalog(self) -> list[CatalogEntry]:
-        self.list_catalog_calls += 1
+    async def list_tool_catalog(self) -> list[CatalogEntry]:
+        self.list_tool_catalog_calls += 1
         return list(self.catalog)
 
     async def list_known_connectors(self) -> list[KnownConnector]:
@@ -300,12 +300,12 @@ class TestCatalogStoreReloadBackend(unittest.IsolatedAsyncioTestCase):
     async def test_reload_backend_does_not_touch_other_backends(self) -> None:
         """Notion's slice must survive a Merge reload untouched."""
         # Mutate the *fake* notion backend after the initial reload — to prove
-        # reload_backend(merge) does NOT re-call notion.list_catalog().
+        # reload_backend(merge) does NOT re-call notion.list_tool_catalog().
         self.notion.catalog = [
             _make_entry(tool_id="notion-search", backend="notion", connector="notion"),
             _make_entry(tool_id="notion-create-page", backend="notion", connector="notion", mutates=True),
         ]
-        notion_calls_before = self.notion.list_catalog_calls
+        notion_calls_before = self.notion.list_tool_catalog_calls
 
         await self.store.reload_backend(backend=self.merge)
 
@@ -313,7 +313,7 @@ class TestCatalogStoreReloadBackend(unittest.IsolatedAsyncioTestCase):
         self.assertIn("notion-search", self.store.entries)
         # And the new Notion entry is NOT picked up — reload_backend(merge) skipped it.
         self.assertNotIn("notion-create-page", self.store.entries)
-        self.assertEqual(self.notion.list_catalog_calls, notion_calls_before)
+        self.assertEqual(self.notion.list_tool_catalog_calls, notion_calls_before)
 
     async def test_reload_backend_drops_disappeared_connector(self) -> None:
         """If Merge drops a connector from its tool pack, reload_backend should mirror that."""
@@ -405,10 +405,10 @@ class TestAggregatorDispatcher(unittest.IsolatedAsyncioTestCase):
             "not_connected",
         )
 
-    async def test_disconnect_does_not_call_list_catalog(self) -> None:
-        before = self.merge.list_catalog_calls
+    async def test_disconnect_does_not_call_list_tool_catalog(self) -> None:
+        before = self.merge.list_tool_catalog_calls
         await self.agg._on_state_change("merge", "datadog", "disconnected")
-        self.assertEqual(self.merge.list_catalog_calls, before)
+        self.assertEqual(self.merge.list_tool_catalog_calls, before)
 
     async def test_connected_schedules_per_backend_reload(self) -> None:
         """Connected fires a background task; the call returns before reload runs."""
@@ -426,8 +426,8 @@ class TestAggregatorDispatcher(unittest.IsolatedAsyncioTestCase):
         await asyncio.sleep(0)
 
         self.assertIn("github__list_issues", self.agg._catalog_store.entries)
-        # Notion's list_catalog was NOT called by this path.
-        self.assertEqual(self.notion.list_catalog_calls, 1)  # only the asyncSetUp reload
+        # Notion's list_tool_catalog was NOT called by this path.
+        self.assertEqual(self.notion.list_tool_catalog_calls, 1)  # only the asyncSetUp reload
 
     async def test_reconfigured_schedules_per_backend_reload(self) -> None:
         """Reconfigure (PostHog/Datadog set-config) fires the same per-backend reload."""

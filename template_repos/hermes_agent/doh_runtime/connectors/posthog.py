@@ -172,12 +172,12 @@ class PostHogBackend:
 
     # ── Synthetic meta-tools ──────────────────────────────────────────
     #
-    # Inlined into list_catalog/call so the LLM finds and invokes them via
+    # Inlined into list_tool_catalog/call so the LLM finds and invokes them via
     # integrations_search_tools / integrations_call_tool — same UX as any other
     # PostHog tool. No top-level FastMCP registration; nothing about these
     # leaks into mcp_top_level_tools.py.
 
-    def _meta_catalog_entries(self) -> list[mcp_top_level_tools.CatalogEntry]:
+    def _meta_tool_catalog_entries(self) -> list[mcp_top_level_tools.CatalogEntry]:
         """Synthetic catalog entries the LLM should always see when PostHog is connected."""
         return [
             mcp_top_level_tools.CatalogEntry(
@@ -266,7 +266,7 @@ class PostHogBackend:
 
     # ── Backend protocol ──────────────────────────────────────────────
 
-    async def list_catalog(self) -> list[mcp_top_level_tools.CatalogEntry]:
+    async def list_tool_catalog(self) -> list[mcp_top_level_tools.CatalogEntry]:
         if not self._oauth_state.has_token:
             return []
         token = await self._token()
@@ -274,7 +274,7 @@ class PostHogBackend:
             return []
         async with Client(self._scoped_url(), auth=token) as c:
             tools = await c.list_tools()
-        out: list[mcp_top_level_tools.CatalogEntry] = list(self._meta_catalog_entries())
+        out: list[mcp_top_level_tools.CatalogEntry] = list(self._meta_tool_catalog_entries())
         for tool in tools:
             tool_id = tool.name
             mutates = MUTATION_OVERRIDES.get(tool_id)
