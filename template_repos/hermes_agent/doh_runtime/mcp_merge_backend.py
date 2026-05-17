@@ -77,7 +77,7 @@ class MergeBackend:
         doh_app_slug: str,
         doh_owner_username: str,
         excluded_connector_slugs: frozenset[str],
-        on_config_change: Callable[[], Awaitable[None]],
+        on_config_change: Callable[[str, str, mcp_top_level_tools.StateTransition], Awaitable[None]],
     ) -> None:
         self._doh_control_plane_url = doh_control_plane_url
         self._doh_env_bearer = doh_env_bearer
@@ -266,11 +266,11 @@ class MergeBackend:
             extra_query={"connector_slug": connector_slug},
         )
         # JS polls this every 3s during the connect modal and stops on the
-        # first `connected`, so we fire the reload exactly once per successful
+        # first `connected`, so we fire the hook exactly once per successful
         # connect. Without this the aggregator's catalog still reflects the
         # boot snapshot — connector stays not_connected, tools stay missing.
         if response.status_code == 200 and self._status_says_connected(response=response):
-            await self.on_config_change()
+            await self.on_config_change(self.name, connector_slug, "connected")
         return response
 
     def _status_says_connected(self, *, response: Response) -> bool:
@@ -306,7 +306,7 @@ class MergeBackend:
             json_body={"connector_slug": connector_slug},
         )
         if response.status_code == 200:
-            await self.on_config_change()
+            await self.on_config_change(self.name, connector_slug, "disconnected")
         return response
 
     async def _passthrough(

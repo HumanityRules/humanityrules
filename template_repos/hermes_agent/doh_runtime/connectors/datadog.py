@@ -141,7 +141,7 @@ class DatadogBackend:
         refresh_fn: Callable[[], Awaitable[str | None]],
         upstream_url: str,
         config: DatadogConfig,
-        on_config_change: Callable[[], Awaitable[None]],
+        on_config_change: Callable[[str, str, mcp_top_level_tools.StateTransition], Awaitable[None]],
     ) -> None:
         self._oauth_state = oauth_state
         self._refresh_fn = refresh_fn
@@ -268,7 +268,7 @@ class DatadogBackend:
             }
         self._config.toolsets = list(toolsets)
         self._config.save()
-        await self.on_config_change()
+        await self.on_config_change(self.name, "datadog", "reconfigured")
         return {
             "is_error": False,
             "structured_content": {"ok": True, "config": self._config.as_dict()},
@@ -332,7 +332,7 @@ class DatadogBackend:
         return None
 
 
-def _make_backend(*, oauth_state, refresh_fn, persistent_dir: Path, on_config_change: Callable[[], Awaitable[None]]) -> DatadogBackend:
+def _make_backend(*, oauth_state, refresh_fn, persistent_dir: Path, on_config_change: Callable[[str, str, mcp_top_level_tools.StateTransition], Awaitable[None]]) -> DatadogBackend:
     config = DatadogConfig(persistent_dir=persistent_dir)
     return DatadogBackend(
         oauth_state=oauth_state,

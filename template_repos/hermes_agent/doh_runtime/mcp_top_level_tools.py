@@ -19,7 +19,7 @@ import asyncio
 import logging
 import re
 from dataclasses import dataclass
-from typing import Awaitable, Callable, Protocol
+from typing import Awaitable, Callable, Literal, Protocol
 
 from fastmcp import FastMCP
 from rank_bm25 import BM25Okapi
@@ -55,14 +55,17 @@ class KnownConnector:
     status: str
 
 
+StateTransition = Literal["connected", "disconnected", "reconfigured"]
+
+
 class Backend(Protocol):
     name: str
     # Fired by the backend after observing a state change (Merge connect/
     # disconnect, PostHog/Datadog meta-tool config change, etc.) so the
-    # aggregator can rebuild the catalog. Backends without mutable session
-    # state default this to a no-op; the aggregator reassigns it to its own
-    # _reload_catalog at construction time.
-    on_config_change: Callable[[], Awaitable[None]]
+    # aggregator can update the catalog. The aggregator wires this to a
+    # dispatcher that decides per-transition whether to block (disconnects
+    # are free, in-memory) or background (connects re-list upstream tools).
+    on_config_change: Callable[[str, str, StateTransition], Awaitable[None]]
 
     async def list_catalog(self) -> list[CatalogEntry]: ...
     async def list_known_connectors(self) -> list[KnownConnector]: ...
@@ -125,6 +128,91 @@ class CatalogStore:
         async with self._lock:
             await self._reload_locked(backends=backends)
             self._loaded.set()
+
+    async def reload_backend(self, *, backend: Backend) -> None:
+        """Refresh catalog rows for a single backend; leave others untouched.
+
+        Used for connect / reconfigure transitions where only the changing
+        backend has new tools to expose. Cheaper and more failure-isolated
+        than reload(): a slow Merge `tools/list` won't delay a Notion connect.
+        """
+        async with self._lock:
+            entries = await self._safe_list_catalog(backend=backend)
+            known = await self._safe_list_connectors(backend=backend)
+            self._replace_backend_slice(backend_name=backend.name, entries=entries, known=known)
+            self._loaded.set()
+
+    def drop(self, *, backend_name: str, connector: str) -> None:
+        """Remove every catalog row tied to (backend, connector). No network.
+
+        For disconnect transitions: the backend has cleared its credential, so
+        any cached tools are no longer callable. Pure in-memory mutation —
+        sub-millisecond, safe to block on.
+        """
+        self._entries = {
+            tool_id: entry
+            for tool_id, entry in self._entries.items()
+            if not (entry.backend == backend_name and entry.connector == connector)
+        }
+        idx = self._connectors.get((backend_name, connector))
+        if idx is not None:
+            idx.status = "not_connected"
+            idx.tool_count = 0
+        self._bm25 = None
+        self._bm25_keys = []
+
+    def _replace_backend_slice(
+        self,
+        *,
+        backend_name: str,
+        entries: list[CatalogEntry],
+        known: list[KnownConnector],
+    ) -> None:
+        """Swap one backend's catalog rows in place; reconcile tool counts and status."""
+        # Drop the old slice (entries + connector rows for this backend) before
+        # folding in the new view, so removed connectors actually disappear.
+        self._entries = {
+            tool_id: entry
+            for tool_id, entry in self._entries.items()
+            if entry.backend != backend_name
+        }
+        self._connectors = {
+            key: idx for key, idx in self._connectors.items() if idx.backend != backend_name
+        }
+
+        for entry in entries:
+            existing = self._entries.get(entry.tool_id)
+            if existing is not None:
+                logger.error(
+                    "catalog tool_id collision on %r: kept existing backend=%s, dropping new backend=%s",
+                    entry.tool_id, existing.backend, entry.backend,
+                )
+                continue
+            self._entries[entry.tool_id] = entry
+
+        for kc in known:
+            self._connectors[(kc.backend, kc.slug)] = _ConnectorIndex(
+                backend=kc.backend, slug=kc.slug, name=kc.name, status=kc.status, tool_count=0,
+            )
+        for entry in self._entries.values():
+            if entry.backend != backend_name:
+                continue
+            key = (entry.backend, entry.connector)
+            existing_idx = self._connectors.get(key)
+            if existing_idx is None:
+                self._connectors[key] = _ConnectorIndex(
+                    backend=entry.backend, slug=entry.connector, name=entry.connector,
+                    status="connected", tool_count=1,
+                )
+            else:
+                existing_idx.tool_count += 1
+        # Same status fixup as _reload_locked — callable tools imply connected.
+        for idx in self._connectors.values():
+            if idx.backend == backend_name and idx.tool_count > 0 and idx.status != "connected":
+                idx.status = "connected"
+
+        self._bm25 = None
+        self._bm25_keys = []
 
     async def _reload_locked(self, *, backends: list[Backend]) -> None:
         catalog_results = await asyncio.gather(
