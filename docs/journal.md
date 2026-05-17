@@ -1,5 +1,55 @@
 # DevOpsHero Development Journal
 
+## 2026-05-16 17:13 - [Integrations] Extracted TLS-intercept runtime from the Hermes integrations broker
+
+**Conversation:** [2026-05-16-1713-019e3304.md](conversations/2026-05-16-1713-019e3304.md)
+
+User asked for a read-only analysis of the `lazy-google-refresh` worktree with a specific goal: reduce cognitive load around the new provider mechanism without rejecting the accepted generalization that Google is only the first TLS-intercept provider. The initial review split the problem into three exploration routes (provider data shape, runtime wiring, and UI/API readability) and converged on three simplification directions: make TLS providers data-driven into the WebUI, type/scope the TLS-provider layer, and wrap the token lifecycle behind a clearer boundary.
+
+The implementation followed the second and third directions first. Created a new `tls_intercept.py` module because the term names the mechanism, not just the registry. Avoided `integrations_tls_intercept.py` as too forced: `integrations_broker.py` is the process that brokers all integration traffic/control surfaces; `tls_intercept.py` is the mechanism for the special TLS-intercept class. The first version moved the TLS provider spec, host map, refresh-result/cache records, and token-store behavior out of the broker. The user then correctly pointed out that if the file is called `tls_intercept.py`, the HTTPS proxy and CA minter belong there too; otherwise the file is really just `tls_intercept_token_store`.
+
+Final shape: `tls_intercept.py` owns the full TLS-intercept subsystem. Static provider specs live in `TlsProviderSpec` / `TLS_INTERCEPT_PROVIDERS`; host routing is precomputed and validated with `HOST_TO_TLS_PROVIDER`; refresh/cache state is private behind `_TokenStore`; the CA minter, CONNECT handling, header rewrite, upstream forwarding, and HTTP parsing helpers all live in the same module. The public broker-facing API is now `TlsInterceptRuntime`, which starts the TLS proxy and returns TLS integration status cards.
+
+`integrations_broker.py` is now much closer to orchestration only. It reads env, constructs `TlsInterceptRuntime`, starts `tls_runtime.start_proxy_server(...)`, mounts the unified Starlette control API, and fans out status by asking `tls_runtime.status_items(force_refresh=True)` plus `aggregator.status_items(...)`. It no longer knows about provider caches, refresh locks, host maps, cert minting, header rewriting, or proxy forwarding internals. A small naming cleanup at the end renamed the local `proxy_server` variable to `tls_proxy_server`, because this process also owns the control API server and MCP server.
+
+**Key points:**
+
+- **Accepted generalization, narrowed ownership.** The second TLS provider is expected soon, so the right simplification was not "make it Google-specific again." The simplification was to put all TLS-intercept concerns behind one named subsystem and keep the broker from learning that subsystem's internals.
+- **One mechanism module beats a premature package.** A package split would add navigation overhead before the second provider proves it needs provider-specific behavior beyond config. One cohesive `tls_intercept.py` is enough for now; `_TokenStore` and `_CertMinter` are private implementation details, while `TlsInterceptRuntime` is the public surface.
+- **The broker now has a better abstraction boundary.** Earlier, `integrations_broker.py` carried process orchestration, control routing, TLS proxying, cert minting, host routing, token cache, and status serialization. After the refactor, it only holds an opaque TLS runtime plus the MCP aggregator. That makes the process lifecycle easier to read.
+- **Tests moved with the behavior.** The existing broker test file still covers the load-bearing primitives, but now calls the primitives through `broker.tls_intercept`. The control-app test constructs `TlsInterceptRuntime`, and token-cache tests target the private store directly because those are unit tests for behavior inside the mechanism.
+- **Local test environment still lacks `fastmcp`.** The broker import path pulls in `mcp_aggregator`, which imports `fastmcp` in the Hermes runtime but not in the Django uv env. The test fixture now stubs only `mcp_aggregator.MCPAggregator` when `fastmcp` is missing, keeping these broker/TLS tests runnable locally without changing production code.
+- **Verification passed.** Ran `uv run python -m py_compile` across the touched Python files, `git diff --check`, and `uv run manage.py test devopshero_app.tests.test_integrations_broker` (19 tests).
+
+## 2026-05-16 16:08 - [Integrations] Replaced Hermes broker's timer-driven Google token refresh with lazy-on-demand
+
+**Conversation:** [2026-05-16-1609-9bc45a23.md](conversations/2026-05-16-1609-9bc45a23.md)
+
+User asked whether the broker's ~60-min Google refresh loop could be replaced with a "refresh on 401" approach. We talked through it and rejected 401-driven retry: the broker is a transparent TLS-intercept + header-swap proxy; making it reactive would require buffering request bodies, classifying upstream responses (real auth failures vs. expired-token), and replaying — much more code and many more failure modes than what the timer was buying. Settled on a different simplification: lazy refresh inside `_current_token_for_host`, gated by the existing per-provider lock, with a `REFRESH_LEAD_SECONDS` window so a request never gets a token that expires mid-flight upstream. User accepted that the first-caller-after-expiry blocks for a refresh round-trip (~few hundred ms); skipped the stale-while-revalidate variant because at that point you've reinvented the timer.
+
+**Architectural choices:**
+
+- **One cache, one helper.** Replaced two parallel module-level dicts (`_provider_state` for status rendering + `_host_token` for the proxy) and three coordinator functions (`_refresh_loop`, `_refresh_provider_locked`, `_refresh_all_providers_once`) with a single `_provider_cache` (status + token + monotonic `expires_at` + last-refreshed iso) and one `_ensure_fresh(slug)` helper. The proxy hot path's `_current_token_for_host` now does the host→slug lookup and triggers a refresh inline. Single-flight is preserved by reusing the existing `_provider_refresh_locks` per-provider lock — concurrent first-callers all wait on one in-flight refresh.
+
+- **Collapsed `/integrations/google/kick` into `GET /integrations`.** The kick POST existed solely to bypass the timer-driven cache for the post-OAuth-return case (user clicks Connect, redirects back, but the timer hasn't ticked yet — without kick, UI would show "Not connected" for up to ~60s after a successful connect). Once `_ensure_fresh` is the path, GET can refresh on every render with no staleness window. Deleted the kick endpoint, the WebUI's `kickGoogle()`, and `refreshAfterFlow()`. The post-OAuth return path now just calls `refreshAndRender()` like every other entry point. Tradeoff: every Integrations-tab open hits DOH once per provider; today that's 1 call. Linear scaling with provider count is fine until/unless it becomes a real cost.
+
+- **Folded 5-kind outcomes into a single status string.** Old: `{kind: ok|not_connected|revoked|transient|fatal}`. New: `{status: connected|not_connected|revoked|transient_error}` matching what the WebUI already renders. The proxy's branch on "is there a token" still works — anything not `connected` returns `None`, proxy returns 503. Notably, **401 from the env bearer is now `transient_error` instead of `fatal` (which used to `raise RuntimeError`).** That was safe to change because there's no longer a long-running timer task to crash; a 401 in lazy refresh just means the next request retries. Removes a whole error-propagation path.
+
+- **`_doh_refresh_config` module dict instead of threading args.** The refresh helpers need `(control_plane_url, bearer, owner_username)` from env; threading those three through `_ensure_fresh → _refresh_provider → _fetch_provider_token` from the proxy hot path was noisy. Set once in `_run()`, read inside `_refresh_provider`. Initial naming as `_runtime` was rejected by the user as too generic — renamed to spell out it's the credentials for DOH's per-provider refresh endpoint.
+
+**Verification:**
+
+- Pre-existing test file `devopshero_app/tests/test_integrations_broker.py` can't be loaded by Django's test runner because `mcp_aggregator` imports `fastmcp` which only ships in the Hermes container, not the Django venv. Same on `main`; not introduced here. Worked around with a `sys.modules['mcp_aggregator']` stub for a self-contained smoke test that exercised: lazy first fetch, cache hit across hosts in the same provider, refresh on near-expiry, unknown host short-circuits without a fetch, `not_connected` caches no token, and 20 concurrent first-callers single-flight to one fetch. All pass.
+- Updated test file to match new shape — replaced `TestControlKick` with `TestControlIntegrations` (asserts GET refreshes), added `TestLazyTokenForHost` for the lazy-cache scenarios, updated outcome-classification tests to the new `status` values.
+
+**Cleanup:**
+
+- Deleted dead constants: `MIN_SLEEP_SECONDS`, `NOT_CONNECTED_POLL_SECONDS`, `BACKOFF_INITIAL_SECONDS`, `BACKOFF_MAX_SECONDS`. Backoff jitter is gone — there's no loop to back off in.
+- Updated `google_oauth.py` disconnect docstring (referenced the dead `/kick` endpoint).
+- Updated `patches-webui/07-doh-broker-proxy.patch` comment that mentioned kick.
+
+**Net diff:** −56 lines in the broker, similar reductions in the WebUI extension. Total ~220 insertions / ~276 deletions across 5 files.
+
 ## 2026-05-16 13:10 - [Integrations] DCR candidate audit — per-vendor reports + summary for the next-wave direct integrations
 
 **Conversation:** [2026-05-16-1310-30f95663.md](conversations/2026-05-16-1310-30f95663.md)
