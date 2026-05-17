@@ -1,5 +1,26 @@
 # DevOpsHero Development Journal
 
+## 2026-05-16 17:13 - [Integrations] Extracted TLS-intercept runtime from the Hermes integrations broker
+
+**Conversation:** [2026-05-16-1713-019e3304.md](conversations/2026-05-16-1713-019e3304.md)
+
+User asked for a read-only analysis of the `lazy-google-refresh` worktree with a specific goal: reduce cognitive load around the new provider mechanism without rejecting the accepted generalization that Google is only the first TLS-intercept provider. The initial review split the problem into three exploration routes (provider data shape, runtime wiring, and UI/API readability) and converged on three simplification directions: make TLS providers data-driven into the WebUI, type/scope the TLS-provider layer, and wrap the token lifecycle behind a clearer boundary.
+
+The implementation followed the second and third directions first. Created a new `tls_intercept.py` module because the term names the mechanism, not just the registry. Avoided `integrations_tls_intercept.py` as too forced: `integrations_broker.py` is the process that brokers all integration traffic/control surfaces; `tls_intercept.py` is the mechanism for the special TLS-intercept class. The first version moved the TLS provider spec, host map, refresh-result/cache records, and token-store behavior out of the broker. The user then correctly pointed out that if the file is called `tls_intercept.py`, the HTTPS proxy and CA minter belong there too; otherwise the file is really just `tls_intercept_token_store`.
+
+Final shape: `tls_intercept.py` owns the full TLS-intercept subsystem. Static provider specs live in `TlsProviderSpec` / `TLS_INTERCEPT_PROVIDERS`; host routing is precomputed and validated with `HOST_TO_TLS_PROVIDER`; refresh/cache state is private behind `_TokenStore`; the CA minter, CONNECT handling, header rewrite, upstream forwarding, and HTTP parsing helpers all live in the same module. The public broker-facing API is now `TlsInterceptRuntime`, which starts the TLS proxy and returns TLS integration status cards.
+
+`integrations_broker.py` is now much closer to orchestration only. It reads env, constructs `TlsInterceptRuntime`, starts `tls_runtime.start_proxy_server(...)`, mounts the unified Starlette control API, and fans out status by asking `tls_runtime.status_items(force_refresh=True)` plus `aggregator.status_items(...)`. It no longer knows about provider caches, refresh locks, host maps, cert minting, header rewriting, or proxy forwarding internals. A small naming cleanup at the end renamed the local `proxy_server` variable to `tls_proxy_server`, because this process also owns the control API server and MCP server.
+
+**Key points:**
+
+- **Accepted generalization, narrowed ownership.** The second TLS provider is expected soon, so the right simplification was not "make it Google-specific again." The simplification was to put all TLS-intercept concerns behind one named subsystem and keep the broker from learning that subsystem's internals.
+- **One mechanism module beats a premature package.** A package split would add navigation overhead before the second provider proves it needs provider-specific behavior beyond config. One cohesive `tls_intercept.py` is enough for now; `_TokenStore` and `_CertMinter` are private implementation details, while `TlsInterceptRuntime` is the public surface.
+- **The broker now has a better abstraction boundary.** Earlier, `integrations_broker.py` carried process orchestration, control routing, TLS proxying, cert minting, host routing, token cache, and status serialization. After the refactor, it only holds an opaque TLS runtime plus the MCP aggregator. That makes the process lifecycle easier to read.
+- **Tests moved with the behavior.** The existing broker test file still covers the load-bearing primitives, but now calls the primitives through `broker.tls_intercept`. The control-app test constructs `TlsInterceptRuntime`, and token-cache tests target the private store directly because those are unit tests for behavior inside the mechanism.
+- **Local test environment still lacks `fastmcp`.** The broker import path pulls in `mcp_aggregator`, which imports `fastmcp` in the Hermes runtime but not in the Django uv env. The test fixture now stubs only `mcp_aggregator.MCPAggregator` when `fastmcp` is missing, keeping these broker/TLS tests runnable locally without changing production code.
+- **Verification passed.** Ran `uv run python -m py_compile` across the touched Python files, `git diff --check`, and `uv run manage.py test devopshero_app.tests.test_integrations_broker` (19 tests).
+
 ## 2026-05-16 16:08 - [Integrations] Replaced Hermes broker's timer-driven Google token refresh with lazy-on-demand
 
 **Conversation:** [2026-05-16-1609-9bc45a23.md](conversations/2026-05-16-1609-9bc45a23.md)
