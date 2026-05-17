@@ -149,7 +149,7 @@ class DatadogBackend:
         self._config = config
         # Called when datadog-set-toolsets mutates state — the aggregator hooks
         # this to reload the catalog so the new scoping takes effect immediately.
-        self._on_config_change = on_config_change
+        self.on_config_change = on_config_change
 
     @property
     def config(self) -> DatadogConfig:
@@ -268,7 +268,7 @@ class DatadogBackend:
             }
         self._config.toolsets = list(toolsets)
         self._config.save()
-        await self._on_config_change()
+        await self.on_config_change()
         return {
             "is_error": False,
             "structured_content": {"ok": True, "config": self._config.as_dict()},
@@ -332,19 +332,14 @@ class DatadogBackend:
         return None
 
 
-def _make_backend(*, oauth_state, refresh_fn, persistent_dir: Path) -> DatadogBackend:
+def _make_backend(*, oauth_state, refresh_fn, persistent_dir: Path, on_config_change: Callable[[], Awaitable[None]]) -> DatadogBackend:
     config = DatadogConfig(persistent_dir=persistent_dir)
-    # Catalog-reload hook is wired up by the aggregator after construction, via
-    # backend._on_config_change replacement. Default to a no-op so the backend
-    # works in isolation (e.g. unit tests).
-    async def _noop() -> None:
-        return None
     return DatadogBackend(
         oauth_state=oauth_state,
         refresh_fn=refresh_fn,
         upstream_url=SPEC.upstream_url,
         config=config,
-        on_config_change=_noop,
+        on_config_change=on_config_change,
     )
 
 

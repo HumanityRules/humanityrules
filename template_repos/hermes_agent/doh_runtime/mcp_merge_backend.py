@@ -24,6 +24,7 @@ import asyncio
 import json
 import logging
 import time
+from typing import Awaitable, Callable
 
 import httpx
 from fastmcp import Client
@@ -76,6 +77,7 @@ class MergeBackend:
         doh_app_slug: str,
         doh_owner_username: str,
         excluded_connector_slugs: frozenset[str],
+        on_config_change: Callable[[], Awaitable[None]],
     ) -> None:
         self._doh_control_plane_url = doh_control_plane_url
         self._doh_env_bearer = doh_env_bearer
@@ -91,6 +93,9 @@ class MergeBackend:
         }
         self._status_cache: dict[str, tuple[str, float]] = {}
         self._status_lock = asyncio.Lock()
+        # Fired after a connect/disconnect we observe so the aggregator can
+        # rebuild the Merge tool catalog.
+        self.on_config_change = on_config_change
 
     def _client(self) -> Client:
         transport = StreamableHttpTransport(url=self._mcp_url, headers=dict(self._headers))
@@ -255,11 +260,25 @@ class MergeBackend:
         connector_slug = request.query_params.get("connector_slug", "")
         if not connector_slug:
             return JSONResponse(content={"error": "connector_slug is required"}, status_code=400)
-        return await self._passthrough(
+        response = await self._passthrough(
             method="GET",
             path="/api/integrations/merge/connector-status",
             extra_query={"connector_slug": connector_slug},
         )
+        # JS polls this every 3s during the connect modal and stops on the
+        # first `connected`, so we fire the reload exactly once per successful
+        # connect. Without this the aggregator's catalog still reflects the
+        # boot snapshot — connector stays not_connected, tools stay missing.
+        if response.status_code == 200 and self._status_says_connected(response=response):
+            await self.on_config_change()
+        return response
+
+    def _status_says_connected(self, *, response: Response) -> bool:
+        try:
+            payload = json.loads(response.body.decode())
+        except (AttributeError, UnicodeDecodeError, json.JSONDecodeError):
+            return False
+        return isinstance(payload, dict) and payload.get("status") == "connected"
 
     async def handle_link_token(self, request: Request) -> Response:
         try:
@@ -281,11 +300,14 @@ class MergeBackend:
         connector_slug = payload.get("connector_slug", "")
         if not isinstance(connector_slug, str) or not connector_slug:
             return JSONResponse(content={"error": "connector_slug is required"}, status_code=400)
-        return await self._passthrough(
+        response = await self._passthrough(
             method="POST",
             path="/api/integrations/merge/disconnect",
             json_body={"connector_slug": connector_slug},
         )
+        if response.status_code == 200:
+            await self.on_config_change()
+        return response
 
     async def _passthrough(
         self,

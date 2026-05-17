@@ -19,7 +19,7 @@ import asyncio
 import logging
 import re
 from dataclasses import dataclass
-from typing import Protocol
+from typing import Awaitable, Callable, Protocol
 
 from fastmcp import FastMCP
 from rank_bm25 import BM25Okapi
@@ -57,6 +57,12 @@ class KnownConnector:
 
 class Backend(Protocol):
     name: str
+    # Fired by the backend after observing a state change (Merge connect/
+    # disconnect, PostHog/Datadog meta-tool config change, etc.) so the
+    # aggregator can rebuild the catalog. Backends without mutable session
+    # state default this to a no-op; the aggregator reassigns it to its own
+    # _reload_catalog at construction time.
+    on_config_change: Callable[[], Awaitable[None]]
 
     async def list_catalog(self) -> list[CatalogEntry]: ...
     async def list_known_connectors(self) -> list[KnownConnector]: ...

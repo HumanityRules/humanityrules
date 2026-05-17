@@ -23,10 +23,20 @@ class NotionBackend:
 
     name = "notion"
 
-    def __init__(self, *, oauth_state, refresh_fn: Callable[[], Awaitable[str | None]], upstream_url: str) -> None:
+    def __init__(
+        self,
+        *,
+        oauth_state,
+        refresh_fn: Callable[[], Awaitable[str | None]],
+        upstream_url: str,
+        on_config_change: Callable[[], Awaitable[None]],
+    ) -> None:
         self._oauth_state = oauth_state
         self._refresh_fn = refresh_fn
         self._upstream_url = upstream_url
+        # Notion has no mutable session state, so this hook never fires —
+        # carried only to satisfy the Backend protocol uniformly.
+        self.on_config_change = on_config_change
 
     async def _token(self) -> str | None:
         token = self._oauth_state.access_token
@@ -87,13 +97,14 @@ class NotionBackend:
         return None
 
 
-def _make_backend(*, oauth_state, refresh_fn, persistent_dir: Path) -> NotionBackend:
+def _make_backend(*, oauth_state, refresh_fn, persistent_dir: Path, on_config_change: Callable[[], Awaitable[None]]) -> NotionBackend:
     """Spec-side factory; persistent_dir unused for Notion (no per-session state)."""
     _ = persistent_dir
     return NotionBackend(
         oauth_state=oauth_state,
         refresh_fn=refresh_fn,
         upstream_url=SPEC.upstream_url,
+        on_config_change=on_config_change,
     )
 
 

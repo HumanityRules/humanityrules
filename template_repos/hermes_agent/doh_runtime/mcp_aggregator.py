@@ -167,6 +167,7 @@ class MCPAggregator:
             doh_app_slug=self._doh_app_slug,
             doh_owner_username=self._doh_owner_username,
             excluded_connector_slugs=frozenset(DCR_CONNECTORS_BY_SLUG.keys()),
+            on_config_change=self._reload_catalog,
         )
         self._backends: list[mcp_top_level_tools.Backend] = [self._merge_backend]
         for spec in DCR_CONNECTORS:
@@ -174,12 +175,8 @@ class MCPAggregator:
                 oauth_state=self._oauth_states[spec.slug],
                 refresh_fn=partial(self._refresh_access_token, slug=spec.slug),
                 persistent_dir=persistent_dir / spec.slug,
+                on_config_change=self._reload_catalog,
             )
-            # Connectors with mutable session state (e.g. PostHog's set-config tool)
-            # need a way to ask us to reload the catalog after a state change. Hook
-            # it up if the backend exposes the attribute; no-op otherwise.
-            if hasattr(backend, "_on_config_change"):
-                backend._on_config_change = self._reload_catalog
             self._backends.append(backend)
 
     async def _reload_catalog(self) -> None:

@@ -1,5 +1,28 @@
 # DevOpsHero Development Journal
 
+## 2026-05-16 20:27 - [Bugfix] Refresh aggregator catalog when a Merge connector is connected mid-session
+
+**Conversation:** [2026-05-16-2028-9335825d.md](conversations/2026-05-16-2028-9335825d.md)
+
+User connected Datadog via Merge.dev's Magic Link in the `hermes-vmendi00` integrations panel. The browser panel correctly showed Datadog as Connected, but the agent reported "Datadog shows `not_connected` with 0 tools available" and asked the user to disconnect/reconnect. Two different data sources, polled on different schedules — and the agent's source had no invalidation hook for the Merge flow.
+
+The browser UI hits `/__doh_broker/integrations` → `aggregator.status_items()`, which currently fetches Merge's connector list live on every panel open and reads `authenticated_connectors` directly off the Registered User record. The agent reads through `CatalogStore`, an in-process cache populated from `backend.list_catalog()` + `backend.list_known_connectors()` and refreshed only on these triggers: boot, the user-facing Refresh button (30s cooldown), DCR OAuth callback success, DCR disconnect, and per-connector `_on_config_change` hooks (PostHog/Datadog meta-tools). Nothing fired the cache invalidation when a Merge connect or disconnect succeeded — so the agent kept seeing the boot snapshot, where Merge's `tools/list` only returned `authenticate_<slug>` tools (filtered out at `mcp_merge_backend.py:142-143`) and `KnownConnector.status` was `not_connected`.
+
+The simplest correct fix reuses the existing `_on_config_change` plumbing the DCR connectors already have: in `MergeBackend`, fire the hook from `handle_connector_status` whenever upstream returns `status=connected` (the JS connect-modal polls every 3s and stops on the first `connected`, so the hook fires exactly once per successful connect) and from `handle_disconnect` on a 200. The aggregator wires the hook to its existing `_reload_catalog`. No JS change, no new endpoint, no cooldown bypass needed (the cooldown only guards the user-facing Refresh button).
+
+Then promoted the hook from a private convention to a first-class part of the `Backend` protocol. The original `MCPAggregator.__init__` had a `hasattr(backend, "_on_config_change")` rewire loop applied only to DCR connectors — Merge would have needed a separate explicit assignment, and Notion would have needed a synthetic no-op default to participate. Cleaner: declare `on_config_change: Callable[[], Awaitable[None]]` on the `Backend` Protocol, make every backend take it as a constructor kwarg (`MergeBackend.__init__`, `DCRConnectorSpec.make_backend(..., on_config_change)`), pass `self._reload_catalog` at construction time, and delete the rewire loop entirely. One pattern, no defaults, no post-hoc attribute mutation, and the hook is documented at the type level.
+
+Verification budget was static checks only (per user choice). Did not run end-to-end against a fresh Hermes container — `template_repos/hermes_agent/AGENTS.md` mandates a from-scratch deploy + browser-driven Magic Link to actually exercise the fix, since redeploying `hermes-vmendi00` boots with Datadog already connected and would not exercise the mid-session reload path. User opted to verify manually after this commit lands.
+
+**Key points:**
+
+- Root cause: `CatalogStore` had no invalidation hook for the Magic Link flow, so a successful Merge connect updated only the live UI path and left the agent's catalog frozen on the boot snapshot.
+- Fix exploits the existing JS poll: `MergeBackend.handle_connector_status` fires `on_config_change` on the first `status=connected` response, which is exactly once per successful connect because the modal stops polling at that point.
+- `handle_disconnect` mirrors the same hook on a 200 response, so disconnects also reach the catalog without a Refresh click.
+- Cleaned up the convention while we were there: `on_config_change` is now a public `Backend` Protocol attribute, every backend takes it as a constructor kwarg, the aggregator passes `self._reload_catalog` at construction, and the `hasattr` rewire loop plus the per-connector `_noop` defaults are gone.
+- Static verification: `py_compile` clean across the seven touched files, `git grep` confirmed no `_on_config_change` references survived the rename, no JS or DOH-side changes.
+- Did NOT verify end-to-end live; user is verifying manually with a fresh Magic Link connect against a redeployed app.
+
 ## 2026-05-16 20:04 - [Integrations] Use Merge metadata for native connector logos without exposing replaced Merge connectors
 
 **Conversation:** [2026-05-16-2004-019e3304.md](conversations/2026-05-16-2004-019e3304.md)
