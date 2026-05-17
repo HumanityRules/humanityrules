@@ -298,8 +298,19 @@
   function renderTlsInterceptCard(item, payload) {
     const returnTo = window.location.origin + window.location.pathname;
     const card = elem('div', { class: 'doh-integration-card', dataset: { provider: item.slug } });
+    const titleRow = elem('div', { class: 'doh-integration-card-title-row' });
+    if (item.logo_url) {
+      titleRow.appendChild(elem('img', {
+        class: 'doh-integration-logo',
+        src: item.logo_url,
+        alt: '',
+        loading: 'lazy',
+        decoding: 'async',
+      }));
+    }
+    titleRow.appendChild(elem('div', { class: 'doh-integration-card-title' }, [item.label]));
     const header = elem('div', { class: 'doh-integration-card-head' }, [
-      elem('div', { class: 'doh-integration-card-title' }, [item.label]),
+      titleRow,
       elem('div', { class: 'doh-integration-card-status', dataset: { status: item.status } }, [statusLabelFor(item.status)]),
     ]);
     card.appendChild(header);

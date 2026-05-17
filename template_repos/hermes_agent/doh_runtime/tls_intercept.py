@@ -47,6 +47,7 @@ class TlsProviderSpec:
     label: str
     refresh_path: str
     hosts: tuple[str, ...]
+    logo_url: str
 
 
 @dataclass(frozen=True)
@@ -100,6 +101,7 @@ TLS_INTERCEPT_PROVIDER_SPECS = (
             "www.googleapis.com",
             "oauth2.googleapis.com",
         ),
+        logo_url="/extensions/google-workspace.svg",
     ),
 )
 
@@ -185,6 +187,7 @@ def _status_item_for_provider(provider: TlsProviderSpec, entry: _TokenCacheEntry
         "kind": "tls_intercept",
         "slug": provider.slug,
         "label": provider.label,
+        "logo_url": provider.logo_url,
         "status": entry.status if entry is not None else STATUS_TRANSIENT_ERROR,
         "last_refreshed_at": entry.last_refreshed_at if entry is not None else None,
     }
