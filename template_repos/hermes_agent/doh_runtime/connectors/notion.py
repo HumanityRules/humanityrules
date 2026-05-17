@@ -44,7 +44,7 @@ class NotionBackend:
             return token
         return await self._refresh_fn()
 
-    async def list_catalog(self) -> list[mcp_top_level_tools.CatalogEntry]:
+    async def list_tool_catalog(self) -> list[mcp_top_level_tools.CatalogEntry]:
         if not self._oauth_state.has_token:
             return []
         token = await self._token()

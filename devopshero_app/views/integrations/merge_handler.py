@@ -420,7 +420,12 @@ def integrations_merge_mcp(request: HttpRequest) -> StreamingHttpResponse | Json
         logger.error("merge mcp: ensure failed: %s", error)
         return JsonResponse({"error": "merge ensure failed"}, status=502)
 
-    upstream_url = f"{MERGE_API_BASE}/api/v1/tool-packs/{pack_id}/registered-users/{rid}/mcp/"
+    # `authenticated_only=true` asks Merge to omit tools for connectors the
+    # user hasn't authenticated yet, plus the per-connector `authenticate_*`
+    # meta-tools. Combined with the broker's per-backend reload on connect,
+    # the agent's catalog mirrors what's actually callable. The full firehose
+    # ballooned the prompt past the context window with ~1500 tool defs.
+    upstream_url = f"{MERGE_API_BASE}/api/v1/tool-packs/{pack_id}/registered-users/{rid}/mcp/?authenticated_only=true"
     upstream_headers = {
         "Authorization": f"Bearer {api_key}",
         "Content-Type": request.headers.get("Content-Type", "application/json"),
