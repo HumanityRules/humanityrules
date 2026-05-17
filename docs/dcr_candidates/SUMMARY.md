@@ -57,7 +57,8 @@ Effort buckets:
 | monday        | marginal         | low              | UI widget tools, marketplace install required                  |
 | airtable      | marginal         | medium           | 7 scopes, post-hoc base allowlist, enterprise client_id        |
 |               |                  |                  | allowlist                                                      |
-| datadog       | yes              | high             | regions, `?toolsets=`                                          |
+| datadog       | n/a              | blocked          | host allowlist on /authorize; CIMD unsupported; regions,       |
+|               |                  | (allowlist)      | `?toolsets=` — connector code in tree but unregistered         |
 | miro          | marginal         | low-medium       | 2 scopes, team pinned at install                               |
 | clickup       | n/a              | blocked          | 2 scopes, plan-conditional rate limits                         |
 |               |                  | (redirect        |                                                                |
@@ -118,10 +119,12 @@ These need per-session config and meta-tools, the same shape we already
 built for PostHog. The work generalizes — once one of these is solid the
 others fall in line.
 
-12. **datadog** — 18 toolsets via `?toolsets=`, six regional hosts. The
-    most direct PostHog clone in mechanism. **Highest customer value of
-    the Tier 3 set** because Merge's 49 tools dramatically under-shoot
-    Datadog's 110+. (High.)
+12. ~~**datadog**~~ — **moved to "Blocked by vendor allowlists" below**
+    (2026-05-16). Datadog's `/authorize` rejects every redirect_uri host
+    outside `{localhost, 127.0.0.1, claude.ai, app.datadoghq.com}` even
+    when DCR registration succeeds with that URI. CIMD is not supported
+    either. Connector code (`connectors/datadog.py`) is in tree but
+    unregistered. See `datadog.md` for the full investigation.
 13. **klaviyo** — 2-3 boolean URL toggles + `?company=`. Smaller scope
     than PostHog/Datadog but exercises the same plumbing. (Medium-high.)
 14. **make** — Scenarios-as-tools means dynamic per-session tool
@@ -150,6 +153,11 @@ others fall in line.
   features.
 - **clickup** — submit redirect URI for review.
 - **ramp** — coordinate with Ramp support to register our redirect URI.
+- **datadog** — undocumented host allowlist on `/authorize`; DCR succeeds
+  but every host outside `{localhost, 127.0.0.1, claude.ai,
+  app.datadoghq.com}` returns `400 Invalid redirect_uri`. CIMD also
+  unsupported. Reach out to Datadog for an allowlist conversation; until
+  then, Merge's 49-tool API-key path is the only working option.
 
 ## Mechanisms inventory
 
@@ -189,8 +197,12 @@ PostHog implementations cover today.
   per-connection `mode` field. Recommend two connectors for clarity.
 - **Allowlist precondition signaling.** When DCR succeeds but the OAuth
   authorization rejects an unknown redirect URI (Square, ClickUp, Ramp,
-  Figma), surface a clear "this client must be allowlisted by <vendor>"
-  error in the integrations panel rather than a generic OAuth failure.
+  Figma, Datadog), surface a clear "this client must be allowlisted by
+  <vendor>" error in the integrations panel rather than a generic OAuth
+  failure. Datadog is the most caustic of the bunch: the registration
+  response echoes the redirect_uri back as if accepted, then `/authorize`
+  returns plain-text `400 Invalid redirect_uri` with no `error_description`
+  — no signal that an allowlist is involved at all.
 - **Cross-vendor consistency on tool annotations.** Some vendors mark
   write tools as destructive / requires-confirmation (Attio, ChatGPT
   preview tools). Aggregator should honor those annotations in its

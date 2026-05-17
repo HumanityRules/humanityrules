@@ -190,10 +190,14 @@ class MCPAggregator:
 
     async def serve(self) -> None:
         await self._merge_backend.boot()
+        connect_kinds: dict[str, str] = {"merge": "magic_link"}
+        for spec in DCR_CONNECTORS:
+            connect_kinds[spec.slug] = spec.connect_kind
         mcp_top_level_tools.register(
             mcp=self._mcp,
             store=self._catalog_store,
             backends=self._backends,
+            connect_kinds=connect_kinds,
         )
         asyncio.create_task(self._catalog_store.load_in_background(backends=self._backends))
 

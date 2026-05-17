@@ -39,6 +39,11 @@ class DCRConnectorSpec:
     `refresh_fn` are owned by the aggregator and passed through; `persistent_dir`
     is the connector's own subdir for any extra state (e.g. PostHog's per-session
     config).
+
+    `connect_kind` surfaces in the `not_connected` error returned by
+    integrations_call_tool so the LLM/UX dispatcher knows which connect flow to
+    point the user at. All current DCR connectors share `oauth_dcr_pkce`; Merge
+    is `magic_link` and lives outside this spec.
     """
     slug: str
     label: str
@@ -46,3 +51,4 @@ class DCRConnectorSpec:
     oauth_metadata_url: str
     default_scope: str | None  # None when the AS ignores scope (Notion).
     make_backend: Callable  # (oauth_state, refresh_fn, persistent_dir) -> Backend
+    connect_kind: str
