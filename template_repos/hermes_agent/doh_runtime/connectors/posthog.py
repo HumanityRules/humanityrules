@@ -143,7 +143,7 @@ class PostHogBackend:
         self._config = config
         # Called when posthog-set-config mutates state — the aggregator hooks this
         # to reload the catalog so the new scoping takes effect immediately.
-        self._on_config_change = on_config_change
+        self.on_config_change = on_config_change
 
     @property
     def config(self) -> PostHogConfig:
@@ -261,7 +261,7 @@ class PostHogBackend:
         if project_id is not None:
             self._config.project_id = project_id or None
         self._config.save()
-        await self._on_config_change()
+        await self.on_config_change()
         return {"is_error": False, "structured_content": {"ok": True, "config": self._config.as_dict()}, "content": []}
 
     # ── Backend protocol ──────────────────────────────────────────────
@@ -323,19 +323,14 @@ class PostHogBackend:
         return None
 
 
-def _make_backend(*, oauth_state, refresh_fn, persistent_dir: Path) -> PostHogBackend:
+def _make_backend(*, oauth_state, refresh_fn, persistent_dir: Path, on_config_change: Callable[[], Awaitable[None]]) -> PostHogBackend:
     config = PostHogConfig(persistent_dir=persistent_dir)
-    # Catalog-reload hook is wired up by the aggregator after construction, via
-    # backend._on_config_change replacement. We default to a no-op so the
-    # backend works in isolation (e.g. unit tests).
-    async def _noop() -> None:
-        return None
     return PostHogBackend(
         oauth_state=oauth_state,
         refresh_fn=refresh_fn,
         upstream_url=SPEC.upstream_url,
         config=config,
-        on_config_change=_noop,
+        on_config_change=on_config_change,
     )
 
 
