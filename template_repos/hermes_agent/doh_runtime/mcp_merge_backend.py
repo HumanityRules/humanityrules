@@ -84,7 +84,6 @@ class MergeBackend:
         self._excluded_connector_slugs = excluded_connector_slugs
         self._mcp_url = doh_control_plane_url + "/api/integrations/merge/mcp"
         self._status_url = doh_control_plane_url + "/api/integrations/merge/connector-status"
-        self._connectors_url = doh_control_plane_url + "/api/integrations/merge/connectors"
         self._headers = {
             "Authorization": f"Bearer {doh_env_bearer}",
             "X-Doh-App-Slug": doh_app_slug,
@@ -96,6 +95,38 @@ class MergeBackend:
     def _client(self) -> Client:
         transport = StreamableHttpTransport(url=self._mcp_url, headers=dict(self._headers))
         return Client(transport)
+
+    async def fetch_connectors(self) -> list[dict]:
+        """Return Merge connector rows before native same-slug exclusions."""
+        response = await self._passthrough(method="GET", path="/api/integrations/merge/connectors")
+        if response.status_code != 200:
+            logger.error("merge connectors list returned %d", response.status_code)
+            return []
+        payload = self._connectors_payload_from_response(response=response)
+        if payload is None:
+            return []
+        return self._connectors_from_payload(payload=payload)
+
+    def filter_visible_connectors(self, *, connectors: list[dict]) -> list[dict]:
+        """Remove Merge connectors replaced by native same-slug connectors."""
+        return [
+            connector
+            for connector in connectors
+            if connector.get("slug") not in self._excluded_connector_slugs
+        ]
+
+    def _connectors_payload_from_response(self, *, response: Response) -> dict | None:
+        try:
+            return json.loads(response.body.decode())
+        except (AttributeError, UnicodeDecodeError, json.JSONDecodeError):
+            logger.error("merge connectors passthrough returned non-JSON")
+            return None
+
+    def _connectors_from_payload(self, *, payload: dict) -> list[dict]:
+        connectors = payload.get("connectors", [])
+        if not isinstance(connectors, list):
+            return []
+        return [connector for connector in connectors if isinstance(connector, dict)]
 
     # ── Backend protocol ──────────────────────────────────────────────
 
@@ -130,26 +161,11 @@ class MergeBackend:
         return out
 
     async def list_known_connectors(self) -> list[mcp_top_level_tools.KnownConnector]:
-        try:
-            async with httpx.AsyncClient(timeout=30) as client:
-                resp = await client.get(url=self._connectors_url, headers=self._headers)
-        except Exception:
-            logger.exception("merge list_known_connectors failed")
-            return []
-        if resp.status_code != 200:
-            logger.error("merge list_known_connectors returned %d: %s", resp.status_code, resp.text[:300])
-            return []
-        try:
-            payload = resp.json()
-        except ValueError:
-            logger.error("merge list_known_connectors returned non-JSON: %s", resp.text[:300])
-            return []
         out: list[mcp_top_level_tools.KnownConnector] = []
-        for connector in payload.get("connectors", []):
+        connectors = self.filter_visible_connectors(connectors=await self.fetch_connectors())
+        for connector in connectors:
             slug = connector.get("slug")
             if not isinstance(slug, str) or not slug:
-                continue
-            if slug in self._excluded_connector_slugs:
                 continue
             out.append(mcp_top_level_tools.KnownConnector(
                 backend=self.name,
@@ -230,27 +246,10 @@ class MergeBackend:
         + identity injected and stream the response back to the WebUI.
         """
         return [
-            Route(path=f"{prefix}/merge/connectors", endpoint=self.handle_connectors, methods=["GET"]),
             Route(path=f"{prefix}/merge/connector-status", endpoint=self.handle_connector_status, methods=["GET"]),
             Route(path=f"{prefix}/merge/link-token", endpoint=self.handle_link_token, methods=["POST"]),
             Route(path=f"{prefix}/merge/disconnect", endpoint=self.handle_disconnect, methods=["POST"]),
         ]
-
-    async def handle_connectors(self, request: Request) -> Response:
-        response = await self._passthrough(method="GET", path="/api/integrations/merge/connectors")
-        if response.status_code != 200:
-            return response
-        try:
-            payload = json.loads(response.body.decode())
-        except (AttributeError, UnicodeDecodeError, json.JSONDecodeError):
-            logger.error("merge connectors passthrough returned non-JSON")
-            return response
-        payload["connectors"] = [
-            connector
-            for connector in payload.get("connectors", [])
-            if connector.get("slug") not in self._excluded_connector_slugs
-        ]
-        return JSONResponse(content=payload, status_code=response.status_code)
 
     async def handle_connector_status(self, request: Request) -> Response:
         connector_slug = request.query_params.get("connector_slug", "")

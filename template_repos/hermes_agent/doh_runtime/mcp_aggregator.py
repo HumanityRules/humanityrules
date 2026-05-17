@@ -247,7 +247,7 @@ class MCPAggregator:
 
     # ── Starlette endpoints (mounted by integrations_broker on port 9951) ─
 
-    async def status_items(self, request: Request) -> list[dict]:
+    async def status_items(self) -> list[dict]:
         """Return ready-to-render integration cards for the broker's unified status fan-out.
 
         One entry per DCR provider plus one per Merge-managed connector. The broker
@@ -256,26 +256,34 @@ class MCPAggregator:
         the broker never has to know Merge or PostHog or Notion exist.
         """
         items: list[dict] = []
+        merge_connectors = await self._merge_backend.fetch_connectors()
+        merge_connectors_by_slug: dict[str, dict] = {}
+        for connector in merge_connectors:
+            merge_slug = connector.get("slug")
+            if isinstance(merge_slug, str) and merge_slug:
+                merge_connectors_by_slug[merge_slug] = connector
+
         for slug, spec in DCR_CONNECTORS_BY_SLUG.items():
             oauth = self._oauth_states[slug]
-            items.append({
+            item = {
                 "kind": "mcp_aggregator",
                 "slug": slug,
                 "label": spec.label,
                 "status": "connected" if oauth.has_token else "not_connected",
+            }
+            merge_connector = merge_connectors_by_slug.get(slug)
+            if merge_connector is not None:
+                item["logo_url"] = merge_connector.get("logo_url")
+            items.append(item)
+
+        for connector in self._merge_backend.filter_visible_connectors(connectors=merge_connectors):
+            items.append({
+                "kind": "merge_connector",
+                "slug": connector.get("slug"),
+                "label": connector.get("name"),
+                "logo_url": connector.get("logo_url"),
+                "status": connector.get("status", "unknown"),
             })
-        merge_response = await self._merge_backend.handle_connectors(request=request)
-        if merge_response.status_code == 200:
-            for connector in json.loads(merge_response.body.decode()).get("connectors", []):
-                items.append({
-                    "kind": "merge_connector",
-                    "slug": connector.get("slug"),
-                    "label": connector.get("name"),
-                    "logo_url": connector.get("logo_url"),
-                    "status": connector.get("status", "unknown"),
-                })
-        else:
-            logger.error("merge connectors fan-out failed: status=%d", merge_response.status_code)
         return items
 
     async def handle_disconnect(self, request: Request) -> Response:
