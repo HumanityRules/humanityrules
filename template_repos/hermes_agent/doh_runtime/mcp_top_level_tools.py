@@ -28,8 +28,9 @@ from rank_bm25 import BM25Okapi
 logger = logging.getLogger("mcp_top_level_tools")
 
 
-SEARCH_DEFAULT_LIMIT = 10
-SEARCH_HARD_CAP = 25
+SEARCH_DEFAULT_LIMIT = 25
+SEARCH_HARD_CAP = 100
+ENUMERATE_HARD_CAP = 500
 ONE_LINE_MAX_CHARS = 120
 ENSURE_LOADED_TIMEOUT_SECONDS = 30
 _TOKEN_RE = re.compile(r"[a-z0-9]+")
@@ -368,24 +369,43 @@ def register(*, mcp: FastMCP, store: CatalogStore, backends: list[Backend], conn
     @mcp.tool(
         name="integrations_search_tools",
         description=(
-            "Search third-party integration tools (Slack, GitHub, Linear, Notion, etc.) by intent or name. "
-            "Returns ranked matches as either kind='tool' (a callable tool) or kind='connector' (a connector that exists "
-            "but isn't connected yet — its tools will appear after the user connects it). "
-            "Use this whenever the user requests an action against an external system — these tools are NOT in your prompt."
+            "Find third-party integration tools (Slack, GitHub, Linear, Notion, Datadog, etc.) — these are NOT in your prompt, "
+            "so call this whenever the user wants an action against an external system. Two modes:\n"
+            f"  • SEARCH by intent: pass `query` (e.g. 'create incident'). Ranked BM25 over tool name+description, "
+            f"default {SEARCH_DEFAULT_LIMIT}, max {SEARCH_HARD_CAP}.\n"
+            f"  • ENUMERATE one connector: pass `connector` (e.g. 'datadog') with no `query`. Returns every tool of that "
+            f"connector, alphabetized, up to {ENUMERATE_HARD_CAP}. Use this when the user asks 'what can I do with X' "
+            "or you need to scan the full surface of a known integration.\n"
+            "Combine both (`query` + `connector`) to search inside one connector. "
+            "Results have kind='tool' (callable now) or kind='connector' (exists but disconnected — tell the user to connect it). "
+            "`status_filter='connected'` drops disconnected-connector shells from the results."
         ),
     )
-    async def integrations_search_tools(query: str, limit: int = SEARCH_DEFAULT_LIMIT, status_filter: str = "available") -> dict:
+    async def integrations_search_tools(
+        query: str = "",
+        connector: str | None = None,
+        limit: int | None = None,
+        status_filter: str = "available",
+    ) -> dict:
         err = await _ensure_loaded_or_error()
         if err is not None:
             return err
-        bounded_limit = max(1, min(int(limit), SEARCH_HARD_CAP))
-        if not query or not query.strip():
+        query_str = (query or "").strip()
+        if connector and not query_str:
+            return _enumerate_connector_tools(
+                connector_slug=connector, limit=limit, status_filter=status_filter,
+            )
+        if not query_str:
             return {"results": []}
-        candidates = store.search(query=query, limit=bounded_limit * 4)
+        effective_limit = SEARCH_DEFAULT_LIMIT if limit is None else int(limit)
+        bounded_limit = max(1, min(effective_limit, SEARCH_HARD_CAP))
+        candidates = store.search(query=query_str, limit=bounded_limit * 4)
         results: list[dict] = []
         for kind, payload in candidates:
             if kind == "tool":
                 entry = payload  # type: ignore[assignment]
+                if connector and entry.connector != connector:
+                    continue
                 status = await _connector_status_for_entry(entry)
                 if status_filter == "connected" and status != "connected":
                     continue
@@ -399,6 +419,8 @@ def register(*, mcp: FastMCP, store: CatalogStore, backends: list[Backend], conn
                 })
             else:
                 idx = payload  # type: ignore[assignment]
+                if connector and idx.slug != connector:
+                    continue
                 if status_filter == "connected" and idx.status != "connected":
                     continue
                 results.append({
@@ -414,6 +436,56 @@ def register(*, mcp: FastMCP, store: CatalogStore, backends: list[Backend], conn
             if len(results) >= bounded_limit:
                 break
         return {"results": results}
+
+    def _enumerate_connector_tools(*, connector_slug: str, limit: int | None, status_filter: str) -> dict:
+        """Return every catalog entry for `connector_slug`, alphabetized by tool_id.
+
+        Triggered when the LLM passes `connector` without a `query`. Skips BM25
+        and uses ENUMERATE_HARD_CAP as the default so a busy connector (e.g.
+        Datadog with 50+ tools) returns its full set in one call.
+        """
+        effective_limit = ENUMERATE_HARD_CAP if limit is None else int(limit)
+        bounded_limit = max(1, min(effective_limit, ENUMERATE_HARD_CAP))
+        matching_entries = sorted(
+            (e for e in store.entries.values() if e.connector == connector_slug),
+            key=lambda e: e.tool_id,
+        )
+        results: list[dict] = []
+        for entry in matching_entries:
+            idx = store.connectors.get((entry.backend, entry.connector))
+            status = idx.status if idx is not None else "unknown"
+            if status_filter == "connected" and status != "connected":
+                continue
+            results.append({
+                "kind": "tool",
+                "tool_id": entry.tool_id,
+                "connector": entry.connector,
+                "connector_status": status,
+                "one_line": _truncate(entry.description, ONE_LINE_MAX_CHARS),
+                "mutates": entry.mutates,
+            })
+            if len(results) >= bounded_limit:
+                break
+        if results:
+            return {"results": results}
+        # No catalog rows. Either the connector exists but isn't connected (return
+        # the shell), or the slug is unknown.
+        for (_, slug), idx in store.connectors.items():
+            if slug != connector_slug:
+                continue
+            if status_filter == "connected" and idx.status != "connected":
+                return {"results": []}
+            return {"results": [{
+                "kind": "connector",
+                "connector": idx.slug,
+                "connector_name": idx.name,
+                "connector_status": idx.status,
+                "one_line": (
+                    f"{idx.name} is available but not yet connected. "
+                    "Tell the user to open the Integrations panel and click Connect to expose its tools."
+                ),
+            }]}
+        return {"results": []}
 
     @mcp.tool(
         name="integrations_describe_tool",
