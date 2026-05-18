@@ -79,14 +79,6 @@ prepare_runtime_filesystem() {
     copy_runtime_file /etc/hostname
 }
 
-install_passwordless_sudo() {
-    mkdir -p "${HERMES_PERSISTENT_ROOT}/etc/sudoers.d"
-    cat > "${HERMES_PERSISTENT_ROOT}/etc/sudoers.d/hermeswebui" <<'EOF'
-hermeswebui ALL=(root) NOPASSWD:ALL
-EOF
-    chmod 0440 "${HERMES_PERSISTENT_ROOT}/etc/sudoers.d/hermeswebui"
-}
-
 sync_image_owned_dirs() {
     local start_ms
     local end_ms
@@ -131,7 +123,6 @@ initialize_persistent_root() {
         --exclude="/tmp/***" \
         / "${HERMES_PERSISTENT_ROOT}/"
     prepare_runtime_filesystem
-    install_passwordless_sudo
     touch "${HERMES_PERSISTENT_ROOT}/.doh-hermes-persistent-root"
 
     end_ms="$(now_ms)"
@@ -167,7 +158,6 @@ restore_persistent_root_from_checkpoint() {
         --acls \
         || die "failed to restore persistent root from ${archive}"
     prepare_runtime_filesystem
-    install_passwordless_sudo
     touch "${HERMES_PERSISTENT_ROOT}/.doh-hermes-persistent-root"
 
     end_ms="$(now_ms)"
@@ -185,7 +175,6 @@ reuse_persistent_root() {
 
     echo "[persistent-root] Reusing existing ${HERMES_PERSISTENT_ROOT}."
     prepare_runtime_filesystem
-    install_passwordless_sudo
 
     end_ms="$(now_ms)"
     duration_ms="$((end_ms - start_ms))"

@@ -1,5 +1,28 @@
 # DevOpsHero Development Journal
 
+## 2026-05-18 15:56 - [Deployment] Remove dead passwordless-sudo plumbing from hermes_agent runtime
+
+**Conversation:** [2026-05-18-1557-998a6720.md](conversations/2026-05-18-1557-998a6720.md)
+
+Cleanup pass on the Hermes agent container's persistent-root setup. `persistent-root-runner.sh` had an `install_passwordless_sudo` function that, on every boot path (init / restore / reuse), wrote `/etc/sudoers.d/hermeswebui` granting `hermeswebui ALL=(root) NOPASSWD:ALL`. That entry is a remnant from when the nono sandbox ran as root inside its bounding set; once we switched the sandbox to launch via `runuser -u hermeswebui` (supervisor.sh:258, supported by `chown -R hermeswebui:hermeswebui` on `/uv_cache`, `$HERMES_ROOT`, `$HERMES_HOME`, `$HERMES_WEBUI_DEFAULT_WORKSPACE` in the Dockerfile), the sudoers grant becomes the worst kind of remnant: it actively undermines the new privilege boundary by giving the LLM-driven user a one-line escalation path to root inside the chroot.
+
+**What was removed.**
+- `install_passwordless_sudo()` and its three call sites in `persistent-root-runner.sh` (`initialize_persistent_root`, `restore_persistent_root_from_checkpoint`, `reuse_persistent_root`).
+- `sudo` from the Dockerfile's `apt-get install` list — that package was only there to back the now-gone sudoers file. With the sandbox running as `hermeswebui`, there is no in-sandbox caller of `sudo` we want to keep working.
+- A stale parenthetical in `supervisor.sh`'s `run_in_nono` comment that justified the privilege drop "even after `sudo`". Now that sudo isn't installed, the substantive guarantee is the bounding-set drop of `CAP_SYS_PTRACE` plus running as a non-root UID; the "even after sudo" hedge no longer applies.
+
+**Why this is safe for ECS exec / management commands inside the container.** Asked specifically whether sudo was still pulling weight outside the sandbox. It is not: the container's main process starts as root (final `USER root` at Dockerfile:147 just before `ENTRYPOINT`), `persistent-root-runner.sh` runs as root (it has to mount `/proc`, `/dev`, `/sys`, `/run` and `chroot`), and `supervisor.sh` runs as root inside the chroot — that's how it can `chown` paths, start `aws_signer` and `integrations_broker` as root-owned daemons, and forward signals during cleanup. The privilege drop happens *only* at `runuser -u hermeswebui -- nono …`. `aws ecs execute-command` honors the container's `USER` directive, so an operator lands as root with full `/`, `/opt/doh`, and credential-daemon `/proc/<pid>/environ` access without needing sudo. The only thing lost is the ability for *the agent inside nono* to escalate to root — which is exactly what the sandbox is there to prevent.
+
+**Edge case worth flagging.** If anyone ever `docker exec`s in and explicitly `runuser -u hermeswebui`s to reproduce a sandbox-side issue, they no longer have `sudo` to step back out. The fix is `exit` and re-enter as root — not a real loss, but worth knowing before debugging.
+
+**Verification.** No live deploy run; the change is mechanical (delete dead function + drop unused apt package + reword stale comment), and the cleanup makes the existing trust boundary in `run_in_nono` actually hold instead of being silently bypassed. Offered an end-to-end CH-Sandbox boot but it wasn't requested.
+
+**Key points:**
+- The `hermeswebui ALL=(root) NOPASSWD:ALL` sudoers line was load-bearing only when the sandbox itself ran as root; once nono launches via `runuser -u hermeswebui` it became a silent escalation path that contradicts the supervisor's privilege-drop comment block.
+- Sudo is irrelevant to operator workflows because every layer above the `runuser` boundary (entrypoint, persistent-root runner, supervisor) is already root, and ECS exec lands you as root by default.
+- `apt-get install … sudo` was the *only* consumer of the sudo package; removing the sudoers writer made it dead weight and a free attack-surface reduction.
+- `supervisor.sh:246`'s "even after `sudo`" wording was the last paper trail to the old escalation pattern — refreshed it so the comment block doesn't mislead a future reader into thinking sudo is part of the threat model.
+
 ## 2026-05-18 02:43 - [Deployment] Webapps mechanism for hermes_agent — Caddy + process-compose serving user apps at /webapps/&lt;slug&gt;/
 
 **Conversation:** [2026-05-18-0244-11a23a80.md](conversations/2026-05-18-0244-11a23a80.md)

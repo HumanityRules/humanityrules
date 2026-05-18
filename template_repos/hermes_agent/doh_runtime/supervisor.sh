@@ -243,8 +243,8 @@ run_in_nono() {
     # terminal, and execute_code all run as UID 1024. Combined with nono's
     # bounding set (CAP_SYS_PTRACE dropped), this makes /proc/<pid>/environ on
     # supervisor's root-owned children (aws_signer, integrations_broker)
-    # unreadable from inside the sandbox even after `sudo`. supervisor itself
-    # stays root so it can still signal those daemons during cleanup.
+    # unreadable from inside the sandbox. supervisor itself stays root so it
+    # can still signal those daemons during cleanup.
     #
     # VIRTUAL_ENV + venv on PATH wire the user venv (created in the Dockerfile)
     # into both tools: terminal resolves python/pip via PATH, execute_code's
