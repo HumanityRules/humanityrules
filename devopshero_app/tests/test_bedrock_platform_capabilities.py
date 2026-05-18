@@ -85,60 +85,19 @@ class BedrockPlatformCapabilityTests(SimpleTestCase):
 
         self.assertEqual(actions, [])
 
-    def test_hermes_templates_do_not_declare_bedrock_access_key_secrets(self) -> None:
-        for template in [
-            seed_app_templates.HERMES_DOCKER_PERSONAL_TEMPLATE,
-            seed_app_templates.HERMES_DOCKER_SLACK_TEMPLATE,
-            seed_app_templates.HERMES_PERSONAL_TEMPLATE,
-        ]:
-            secret_names = {
-                var["name"]
-                for container in template["containers"]
-                for var in container.get("configurable_variables", [])
-                if var["category"] == "secret"
-            }
+    def test_hermes_template_does_not_declare_bedrock_access_key_secrets(self) -> None:
+        template = seed_app_templates.HERMES_PERSONAL_TEMPLATE
+        secret_names = {
+            var["name"]
+            for container in template["containers"]
+            for var in container.get("configurable_variables", [])
+            if var["category"] == "secret"
+        }
 
-            self.assertEqual(template["platform_capabilities"], ["bedrock-runtime"])
-            self.assertEqual(template["default_compute_mode"], "ec2")
-            self.assertNotIn("AWS_BEDROCK_ACCESS_KEY_ID", secret_names)
-            self.assertNotIn("AWS_BEDROCK_SECRET_ACCESS_KEY", secret_names)
-
-    def test_hermes_templates_enable_docker_backed_tools(self) -> None:
-        for template in [
-            seed_app_templates.HERMES_DOCKER_PERSONAL_TEMPLATE,
-            seed_app_templates.HERMES_DOCKER_SLACK_TEMPLATE,
-        ]:
-            dind = next(c for c in template["containers"] if c["name"] == "docker-dind")
-            hermes_container = next(c for c in template["containers"] if c["name"] == "hermes")
-            self.assertEqual(dind["image_source"], "prebuilt")
-            self.assertEqual(dind["ecr_repo"], "doh-dind")
-            self.assertTrue(dind.get("version"))
-            self.assertTrue(dind.get("privileged"))
-            self.assertEqual(dind.get("efs_mounts"), ["workspace", "docker-persistence"])
-            self.assertNotIn("command", dind)
-            self.assertEqual(dind.get("environment", {}).get("DOCKER_TLS_CERTDIR"), "")
-            self.assertEqual(
-                {dep["name"]: dep["condition"] for dep in (hermes_container.get("depends_on") or [])},
-                {"docker-dind": "HEALTHY"},
-            )
-            mount_names = {m["name"]: m for m in template["efs_config"]["mounts"]}
-            self.assertIn("home", mount_names)
-            self.assertIn("workspace", mount_names)
-            self.assertEqual(mount_names["home"]["container_path"], "/mnt/hermes-persistent")
-            self.assertEqual(mount_names["workspace"]["container_path"], "/workspace")
-            self.assertEqual(hermes_container["efs_mounts"], ["home", "workspace"])
-            self.assertNotIn("user", hermes_container)
-            # DOCKER_HOST is a platform constant in environment, not a knob.
-            self.assertEqual(hermes_container["environment"]["DOCKER_HOST"], "tcp://127.0.0.1:2375")
-            self.assertEqual(hermes_container["environment"]["TERMINAL_LIFETIME_SECONDS"], "86400")
-            # HERMES_WEBUI_HOST is per-template: pinned to loopback only when a
-            # policy proxy fronts the task. When the ALB targets hermes directly
-            # (e.g. hermes-docker-slack), the WebUI must bind to all interfaces
-            # so the ALB health check on the task ENI succeeds.
-            if template["alb_target_container"] == "policy-proxy":
-                self.assertEqual(hermes_container["environment"]["HERMES_WEBUI_HOST"], "127.0.0.1")
-            else:
-                self.assertNotIn("HERMES_WEBUI_HOST", hermes_container["environment"])
+        self.assertEqual(template["platform_capabilities"], ["bedrock-runtime"])
+        self.assertEqual(template["default_compute_mode"], "ec2")
+        self.assertNotIn("AWS_BEDROCK_ACCESS_KEY_ID", secret_names)
+        self.assertNotIn("AWS_BEDROCK_SECRET_ACCESS_KEY", secret_names)
 
     def test_hermes_template_is_policy_proxy_fronted_with_checkpoint_efs(self) -> None:
         template = seed_app_templates.HERMES_PERSONAL_TEMPLATE

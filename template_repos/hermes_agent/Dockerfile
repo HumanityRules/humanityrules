@@ -25,7 +25,7 @@ ENV HERMES_WEBUI_SKIP_ONBOARDING=1
 ENV HERMES_WEBUI_EXTENSION_DIR=/opt/doh/webui-extension
 ENV HERMES_PERSISTENT_ROOT=/hermes-persistent-root
 ENV HERMES_CHECKPOINT_ROOT=/hermes-checkpoint
-ENV PATH=/opt/doh/bin:/usr/local/bin:/usr/local/sbin:/usr/bin:/usr/sbin:/bin:/sbin
+ENV PATH=${DOH_BIN_DIR}:${PATH}
 
 RUN mkdir -p "$DOH_BIN_DIR" \
     && apt-get update \
@@ -53,8 +53,7 @@ RUN mkdir -p "$DOH_BIN_DIR" \
 # rewrites PATH from scratch for non-root uids; Hermes' terminal session
 # snapshot uses `bash -l`, so without this drop-in, hermeswebui's snapshot
 # loses /opt/doh/bin and tools like gws/aws become invisible to the agent.
-RUN echo 'export PATH="/opt/doh/bin:$PATH"' > /etc/profile.d/doh-bin.sh \
-    && chmod 644 /etc/profile.d/doh-bin.sh
+RUN echo "export PATH=\"${DOH_BIN_DIR}:\$PATH\"" > /etc/profile.d/doh-bin.sh
 
 COPY --chmod=755 build/prune-skills.sh /tmp/prune-skills.sh
 RUN git clone --depth 1 --branch v2026.5.7 https://github.com/NousResearch/hermes-agent.git \
@@ -108,7 +107,7 @@ RUN mkdir -p "$HERMES_WEBUI_DIR" /uv_cache "$HERMES_HOME" /workspace "$HERMES_PE
     && python3 /tmp/apply-patches.py /tmp/patches-agent "$HERMES_WEBUI_AGENT_DIR" \
     && rm -rf /tmp/patches-agent \
     && rm -rf /app /apptoo \
-    && chown -R hermeswebui:hermeswebui "$HERMES_ROOT" /uv_cache "$HERMES_HOME" /workspace "$DOH_ROOT"
+    && chown -R hermeswebui:hermeswebui "$HERMES_ROOT" /uv_cache "$HERMES_HOME" /workspace
 
 USER hermeswebui
 
