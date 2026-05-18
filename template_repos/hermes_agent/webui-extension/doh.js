@@ -297,7 +297,9 @@
 
   function renderTlsInterceptCard(item, payload) {
     const returnTo = window.location.origin + window.location.pathname;
-    const card = elem('div', { class: 'doh-integration-card', dataset: { provider: item.slug } });
+    const isConnected = item.status === 'connected';
+    const cardClass = isConnected ? 'doh-integration-card' : 'doh-integration-card doh-integration-card-row';
+    const card = elem('div', { class: cardClass, dataset: { provider: item.slug } });
     const titleRow = elem('div', { class: 'doh-integration-card-title-row' });
     if (item.logo_url) {
       titleRow.appendChild(elem('img', {
@@ -309,14 +311,11 @@
       }));
     }
     titleRow.appendChild(elem('div', { class: 'doh-integration-card-title' }, [item.label]));
-    const header = elem('div', { class: 'doh-integration-card-head' }, [
-      titleRow,
-      elem('div', { class: 'doh-integration-card-status', dataset: { status: item.status } }, [statusLabelFor(item.status)]),
-    ]);
-    card.appendChild(header);
+    const statusPill = elem('div', { class: 'doh-integration-card-status', dataset: { status: item.status } }, [statusLabelFor(item.status)]);
 
-    const body = elem('div', { class: 'doh-integration-card-body' });
-    if (item.status === 'connected') {
+    if (isConnected) {
+      card.appendChild(elem('div', { class: 'doh-integration-card-head' }, [titleRow, statusPill]));
+      const body = elem('div', { class: 'doh-integration-card-body' });
       if (item.last_refreshed_at) {
         body.appendChild(elem('div', { class: 'doh-integration-meta' }, [
           'Last refreshed: ' + formatDate(item.last_refreshed_at),
@@ -326,23 +325,16 @@
         class: 'doh-integration-btn doh-integration-btn-secondary',
         onclick: () => { window.location.href = buildGoogleDisconnectUrl(payload, returnTo); },
       }, ['Disconnect']));
-    } else if (item.status === 'revoked') {
-      body.appendChild(elem('div', { class: 'doh-integration-meta' }, [
-        'The connection was removed at ' + item.label + '. Reconnect to restore access.',
-      ]));
-      body.appendChild(elem('button', {
-        class: 'doh-integration-btn doh-integration-btn-primary',
-        onclick: () => { window.location.href = buildGoogleConnectUrl(payload, returnTo); },
-      }, ['Reconnect']));
-    } else if (item.status === 'transient_error' || item.status === 'starting') {
-      body.appendChild(elem('div', { class: 'doh-integration-meta' }, ['Checking connection…']));
-    } else {
-      body.appendChild(elem('button', {
-        class: 'doh-integration-btn doh-integration-btn-primary',
-        onclick: () => { window.location.href = buildGoogleConnectUrl(payload, returnTo); },
-      }, ['Connect ' + item.label]));
+      card.appendChild(body);
+      return card;
     }
-    card.appendChild(body);
+
+    const connectBtn = elem('button', {
+      class: 'doh-integration-btn',
+      onclick: () => { window.location.href = buildGoogleConnectUrl(payload, returnTo); },
+    }, ['Connect']);
+    const trailing = elem('div', { class: 'doh-integration-card-trailing' }, [connectBtn, statusPill]);
+    card.appendChild(elem('div', { class: 'doh-integration-card-head' }, [titleRow, trailing]));
     return card;
   }
 
