@@ -70,7 +70,11 @@ webapps create hello \
     --cwd /workspace/webapps/projects/hello
 ```
 
-Output prints the URL. Tell the user to visit it.
+The CLI prints a final line like `webapps: 'hello' is live at https://<host>/webapps/hello/ (port 4000)`. **Always show that URL to the user as a clickable markdown link**, e.g.:
+
+> Your app is live at [https://hermes-foo.example.com/webapps/hello/](https://hermes-foo.example.com/webapps/hello/)
+
+Use the *exact host* from the CLI's output. Do not invent a hostname, do not write the literal string `<your-agent-hostname>`, and do not omit the trailing slash. If the CLI prints `<your-agent-hostname>` it means `DOH_PUBLIC_HOSTNAME` wasn't injected — read the URL from the user's browser address bar (it's the same hostname they used to reach you) instead of repeating the placeholder.
 
 ## Per-framework path-prefix configuration
 
@@ -119,6 +123,7 @@ If you scaffold a framework not listed, search its docs for "reverse proxy subpa
 - **Don't run `webapps delete <slug> --yes` without first telling the user what will be removed and getting explicit confirmation.** Delete is total: route, supervision, logs, AND `projects/<slug>/`.
 - **Don't bind the app to anything other than `127.0.0.1:$WEBAPP_PORT`.** Apps must listen on loopback only — Caddy is the only thing that should be reachable from outside the container. Many frameworks default to `0.0.0.0`; explicitly bind to `127.0.0.1` or `localhost`.
 - **Don't put your project source elsewhere.** Keep code under `/workspace/webapps/projects/<slug>/`. The CLI's `delete` cleans that path; if your code is somewhere else, deletion will leave orphans.
+- **Don't echo `<your-agent-hostname>` as if it were a URL.** It's a placeholder the CLI prints when `DOH_PUBLIC_HOSTNAME` isn't injected. If you see it, substitute the user-visible hostname yourself (look at the URL the user used to reach this WebUI). Then present the link as clickable markdown: `[https://.../webapps/<slug>/](https://.../webapps/<slug>/)`.
 
 ## Failure modes
 
