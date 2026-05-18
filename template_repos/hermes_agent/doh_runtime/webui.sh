@@ -54,6 +54,13 @@ version: "0.5"
 processes: {}
 EOF
     fi
+    # Always-present placeholder so Caddy's glob never hits "no files matching"
+    # (which spams a warning every second under --watch). Underscore prefix
+    # sorts the placeholder before user snippets but still matches *.caddy.
+    if [ ! -f "$WEBAPPS_CADDY_DIR/_placeholder.caddy" ]; then
+        printf '# placeholder so import glob always has at least one match\n' \
+            > "$WEBAPPS_CADDY_DIR/_placeholder.caddy"
+    fi
 }
 
 start_caddy() {

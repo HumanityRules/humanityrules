@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/opt/hermes/webui/venv/bin/python3
 """DOH webapps CLI: register, manage, and route user-built web apps.
 
 Source of truth: /workspace/webapps/process-compose.yaml + caddy/<slug>.caddy
