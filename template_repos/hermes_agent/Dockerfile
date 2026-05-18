@@ -31,7 +31,7 @@ ENV PATH=${DOH_BIN_DIR}:${PATH}
 
 RUN mkdir -p "$DOH_BIN_DIR" \
     && apt-get update \
-    && apt-get install -y --no-install-recommends ca-certificates curl git libdbus-1-3 patch rsync sudo unzip \
+    && apt-get install -y --no-install-recommends ca-certificates curl git libdbus-1-3 patch rsync unzip \
     && arch="$(dpkg --print-architecture)" \
     && curl -fsSL -o /tmp/nono.deb \
         "https://github.com/always-further/nono/releases/download/v${NONO_VERSION}/nono-cli_${NONO_VERSION}_${arch}.deb" \
