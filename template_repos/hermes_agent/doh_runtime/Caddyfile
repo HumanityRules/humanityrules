@@ -1,0 +1,17 @@
+# DOH webapps reverse proxy. See template_repos/hermes_agent/skills/webapps/.
+#
+# Caddy listens on the container-public port 8787 (the ALB target). It routes
+# /webapps/<slug>/* to per-app loopback ports declared by snippets the agent
+# writes via the `webapps` CLI; everything else falls through to Hermes WebUI
+# on 8788.
+
+{
+	admin off
+	auto_https off
+	# Caddy --watch picks up snippet add/remove/edit under /workspace/webapps/caddy/.
+}
+
+:8787 {
+	import /workspace/webapps/caddy/*.caddy
+	reverse_proxy 127.0.0.1:8788
+}
