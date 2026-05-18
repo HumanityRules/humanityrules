@@ -90,10 +90,11 @@ If you scaffold a framework not listed, search its docs for "reverse proxy subpa
 **User: "Make a Phoenix counter app at /webapps/counter."**
 1. Install Elixir/Erlang if missing: `sudo apt-get update && sudo apt-get install -y elixir erlang-dev`. (First-time install can take several minutes — set the user's expectation.)
 2. `cd /workspace/webapps/projects && mix phx.new counter --no-ecto`.
-3. Edit `config/dev.exs` so the endpoint has `url: [path: "/webapps/counter", host: "..."]`.
-4. `webapps create counter --command "mix phx.server" --cwd /workspace/webapps/projects/counter --timeout 180` (Phoenix's first compile is slow).
-5. Tail logs with `webapps logs counter -f` until you see `Running CounterWeb.Endpoint`.
-6. Tell the user the URL.
+3. Edit `config/dev.exs` so the endpoint has `url: [path: "/webapps/counter", host: "..."]` and `http: [ip: {127, 0, 0, 1}, port: System.get_env("WEBAPP_PORT", "4000") |> String.to_integer()]`.
+4. **Important:** `mix phx.server` (dev mode) needs `Mix.Sync.PubSub`, which binds a random ephemeral port — that port range is *not* allowed by the sandbox profile. To avoid this, build a release: `MIX_ENV=prod mix release` and run `_build/prod/rel/counter/bin/counter start` instead of `mix phx.server`. This skips Mix.Sync entirely and is closer to how you'd run Phoenix in production anyway.
+5. `webapps create counter --command "_build/prod/rel/counter/bin/counter start" --cwd /workspace/webapps/projects/counter --timeout 180`.
+6. Tail logs with `webapps logs counter -f` until you see `Running CounterWeb.Endpoint`.
+7. Tell the user the URL.
 
 **User: "The app crashed — fix and redeploy."**
 1. `webapps logs <slug>` to see the failure.
@@ -125,3 +126,4 @@ If you scaffold a framework not listed, search its docs for "reverse proxy subpa
 - **502 Bad Gateway in browser**: the app crashed after registering. `webapps list` will show non-`Ready`. Logs have the trace.
 - **404 Not Found in browser**: either the slug is wrong or the app is stopped. `webapps list` shows current routes.
 - **"no free ports"**: delete an app you don't need, or ask the platform team to widen the port range.
+- **`EACCES` / "permission denied" on bind**: the app is trying to bind to a port outside the allowed range (4000–4019). Check the framework — Mix dev tools, Node debuggers, and some auto-port-pickers grab random ephemeral ports. Configure the framework to bind only to `$WEBAPP_PORT`, or run a production build (e.g. `mix release` for Phoenix) that doesn't need Mix.Sync.
