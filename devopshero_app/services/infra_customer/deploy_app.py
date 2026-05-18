@@ -787,6 +787,8 @@ class AppStack(Stack):
             }
             if app_config.owner_username:
                 env_bearer_environment_overlay["DOH_OWNER_USERNAME"] = app_config.owner_username
+            if shared_alb_hosted_zone:
+                env_bearer_environment_overlay["DOH_PUBLIC_HOSTNAME"] = f"{subdomain}.{shared_alb_hosted_zone}"
             env_bearer_secret_overlay = {
                 "DOH_ENV_BEARER": ecs.Secret.from_secrets_manager(
                     env_bearer_shared_secret, field="DOH_ENV_BEARER",
