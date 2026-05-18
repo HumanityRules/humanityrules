@@ -207,6 +207,14 @@ ensure_user_runtime_dirs() {
     fi
 }
 
+chown_sandbox_paths() {
+    # The sandbox runs as hermeswebui (see run_in_nono). Everything we wrote
+    # above ran as root, so hand the paths the sandbox needs to read or write
+    # to hermeswebui. The integrations broker's CA bundle stays root-owned but
+    # is mode 0644 (see tls_intercept._write_bundle), so no chown needed there.
+    chown -R hermeswebui:hermeswebui "$HERMES_WEBUI_DEFAULT_WORKSPACE"
+}
+
 run_in_nono() {
     local nono_args=(run --profile "${DOH_RUNTIME_DIR}/hermes-nono-profile.json")
 
@@ -231,12 +239,24 @@ run_in_nono() {
         )
     fi
 
-    "$DOH_BIN_DIR/nono" "${nono_args[@]}" -- /usr/bin/env \
+    # Drop privileges to hermeswebui before launching the sandbox so the LLM,
+    # terminal, and execute_code all run as UID 1024. Combined with nono's
+    # bounding set (CAP_SYS_PTRACE dropped), this makes /proc/<pid>/environ on
+    # supervisor's root-owned children (aws_signer, integrations_broker)
+    # unreadable from inside the sandbox even after `sudo`. supervisor itself
+    # stays root so it can still signal those daemons during cleanup.
+    #
+    # VIRTUAL_ENV + venv on PATH wire the user venv (created in the Dockerfile)
+    # into both tools: terminal resolves python/pip via PATH, execute_code's
+    # project mode walks $VIRTUAL_ENV when picking the child interpreter
+    # (hermes-agent tools/code_execution_tool.py:_resolve_child_python).
+    runuser -u hermeswebui -- "$DOH_BIN_DIR/nono" "${nono_args[@]}" -- /usr/bin/env \
         ANTHROPIC_BEDROCK_BASE_URL="http://127.0.0.1:${AWS_BEDROCK_RUNTIME_PORT}" \
         AWS_DEFAULT_REGION="$AWS_DEFAULT_REGION" \
         AWS_EC2_METADATA_DISABLED=true \
         HOME="$HERMES_WEBUI_DEFAULT_WORKSPACE" \
-        PATH="${DOH_BIN_DIR}:/usr/local/bin:/usr/local/sbin:/usr/bin:/usr/sbin:/bin:/sbin" \
+        VIRTUAL_ENV="${HERMES_WEBUI_DEFAULT_WORKSPACE}/.venv" \
+        PATH="${HERMES_WEBUI_DEFAULT_WORKSPACE}/.venv/bin:${DOH_BIN_DIR}:/usr/local/bin:/usr/local/sbin:/usr/bin:/usr/sbin:/bin:/sbin" \
         NO_PROXY=127.0.0.1,localhost \
         "${broker_env[@]}" \
         "$@"
@@ -245,6 +265,11 @@ run_in_nono() {
 main() {
     require_llm_config
     require_aws_region
+
+    # === Stage 1: root setup. Render configs, start the credential-holding
+    # daemons (aws_signer, integrations_broker) — these stay root so the LLM
+    # can never read their /proc/<pid>/environ. Anything written here that the
+    # sandbox needs to read is chowned to hermeswebui in Stage 2 prep.
     ensure_user_runtime_dirs
     render_hermes_config
     start_aws_signer
@@ -252,6 +277,10 @@ main() {
     start_integrations_broker
     export_webui_extension_env
 
+    # === Stage 2: prep + launch the sandbox. supervisor stays root (it owns
+    # the daemons started above), but everything inside nono runs as
+    # hermeswebui — see run_in_nono.
+    chown_sandbox_paths
     run_in_nono "$@" &
     NONO_PID=$!
     wait "$NONO_PID"

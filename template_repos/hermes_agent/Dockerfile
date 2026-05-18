@@ -102,12 +102,12 @@ EOF
 
 WORKDIR /
 
-RUN mkdir -p "$HERMES_WEBUI_DIR" /uv_cache "$HERMES_HOME" /workspace "$HERMES_PERSISTENT_ROOT" "$HERMES_CHECKPOINT_ROOT" "$DOH_RUN_DIR" \
+RUN mkdir -p /uv_cache "$HERMES_WEBUI_DIR" "$HERMES_HOME" "$HERMES_WEBUI_DEFAULT_WORKSPACE" "$HERMES_PERSISTENT_ROOT" "$HERMES_CHECKPOINT_ROOT" "$DOH_RUN_DIR" \
     && rsync -a /apptoo/ "$HERMES_WEBUI_DIR/" \
     && python3 /tmp/apply-patches.py /tmp/patches-agent "$HERMES_WEBUI_AGENT_DIR" \
     && rm -rf /tmp/patches-agent \
     && rm -rf /app /apptoo \
-    && chown -R hermeswebui:hermeswebui "$HERMES_ROOT" /uv_cache "$HERMES_HOME" /workspace
+    && chown -R hermeswebui:hermeswebui /uv_cache "$HERMES_ROOT" "$HERMES_HOME" "$HERMES_WEBUI_DEFAULT_WORKSPACE"
 
 USER hermeswebui
 
@@ -122,9 +122,15 @@ RUN cd "$HERMES_WEBUI_DIR" \
     && python -m compileall -q -j 0 "$HERMES_WEBUI_DIR" "$HERMES_WEBUI_AGENT_DIR" \
     && touch "$HERMES_WEBUI_DIR/venv/.deps_installed"
 
+# Empty user venv shared by terminal and execute_code's project mode. Lives on
+# the persistent root: rsynced into /var/lib/devopshero/hermes-roots/{slug} on
+# first boot and preserved across redeploys, so the agent's installs (pip,
+# apt-get) survive container restarts.
+RUN uv venv --python /usr/local/bin/python3 "${HERMES_WEBUI_DEFAULT_WORKSPACE}/.venv"
+
 USER root
 
-WORKDIR /workspace
+WORKDIR ${HERMES_WEBUI_DEFAULT_WORKSPACE}
 
 EXPOSE 8787
 
