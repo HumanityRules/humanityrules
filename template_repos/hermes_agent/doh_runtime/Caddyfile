@@ -14,9 +14,12 @@
 :8787 {
 	import /workspace/webapps/caddy/*.caddy
 	reverse_proxy 127.0.0.1:8789 {
-		# Preserve the public Host so WebUI's same-origin CSRF gate accepts
-		# POSTs (e.g. /api/session/new). Without this, Caddy rewrites Host
-		# to 127.0.0.1:8789 and WebUI rejects requests as cross-origin.
-		header_up Host {host}
+		# Pass through the X-Forwarded-Host policy-proxy already set (the
+		# browser's original Host). Caddy's reverse_proxy default would
+		# otherwise *append* its own X-Forwarded-Host header (the immediate
+		# Host = 127.0.0.1:8787 from policy-proxy's perspective), and
+		# WebUI's CSRF gate would walk both, see the loopback first, and
+		# reject the POST as cross-origin.
+		header_up X-Forwarded-Host {header.X-Forwarded-Host}
 	}
 }

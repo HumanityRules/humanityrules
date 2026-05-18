@@ -136,14 +136,14 @@ def caddy_snippet_path(slug: str) -> Path:
 
 def write_caddy_snippet(slug: str, port: int) -> None:
     # handle_path strips the prefix; X-Forwarded-Prefix lets the framework
-    # generate correct absolute URLs back. header_up Host {host} preserves
-    # the client Host so frameworks that gate on origin see the public
-    # hostname, not 127.0.0.1. Caddy handles WebSocket upgrades automatically
-    # through reverse_proxy.
+    # generate correct absolute URLs back. X-Forwarded-Host pass-through keeps
+    # the original browser hostname (set by policy-proxy) so frameworks that
+    # gate on origin see the public host, not the loopback. Caddy handles
+    # WebSocket upgrades automatically through reverse_proxy.
     snippet = (
         f"handle_path /webapps/{slug}/* {{\n"
         f"\treverse_proxy 127.0.0.1:{port} {{\n"
-        f"\t\theader_up Host {{host}}\n"
+        f"\t\theader_up X-Forwarded-Host {{header.X-Forwarded-Host}}\n"
         f"\t\theader_up X-Forwarded-Prefix /webapps/{slug}\n"
         f"\t}}\n"
         f"}}\n"
