@@ -1,10 +1,8 @@
 #!/opt/hermes/webui/venv/bin/python3
 """DOH webapps CLI: register, manage, and route user-built web apps.
 
-Source of truth: /workspace/webapps/process-compose.yaml + caddy/<slug>.caddy
-snippets. Caddy --watch picks up snippet changes; process-compose reloads via
-`process-compose project update`. The agent talks to this CLI; everything
-under /workspace/webapps/ is an implementation detail.
+Source of truth: /workspace/webapps/process-compose.yaml. Caddy routes in
+routes.caddy are regenerated from that file on every change.
 
 See template_repos/hermes_agent/skills/webapps/SKILL.md for the agent contract.
 """
@@ -25,7 +23,7 @@ import yaml
 
 WEBAPPS_ROOT = Path("/workspace/webapps")
 PROCESS_COMPOSE_YAML = WEBAPPS_ROOT / "process-compose.yaml"
-CADDY_DIR = WEBAPPS_ROOT / "caddy"
+CADDY_ROUTES = WEBAPPS_ROOT / "routes.caddy"
 PROJECTS_DIR = WEBAPPS_ROOT / "projects"
 LOGS_DIR = WEBAPPS_ROOT / "logs"
 LOCK_FILE = WEBAPPS_ROOT / ".lock"
@@ -44,15 +42,15 @@ def die(msg: str, code: int = 1) -> None:
 
 
 def ensure_layout() -> None:
-    for p in (WEBAPPS_ROOT, CADDY_DIR, PROJECTS_DIR, LOGS_DIR):
+    for p in (WEBAPPS_ROOT, PROJECTS_DIR, LOGS_DIR):
         p.mkdir(parents=True, exist_ok=True)
     if not PROCESS_COMPOSE_YAML.exists():
         PROCESS_COMPOSE_YAML.write_text('version: "0.5"\nprocesses: {}\n')
+    if not CADDY_ROUTES.exists():
+        CADDY_ROUTES.write_text("# no routes\n")
 
 
 class Lock:
-    """flock around YAML mutations so two CLI invocations can't tear writes."""
-
     def __enter__(self):
         ensure_layout()
         self.fh = open(LOCK_FILE, "w")
@@ -78,19 +76,13 @@ def save_yaml(doc: dict) -> None:
 
 
 def pc(*args: str, check: bool = True, capture: bool = False) -> subprocess.CompletedProcess:
-    """Invoke process-compose against the running daemon."""
     cmd = [
         "process-compose",
         "--address", PROCESS_COMPOSE_ADDR,
         "--port", PROCESS_COMPOSE_PORT,
         *args,
     ]
-    return subprocess.run(
-        cmd,
-        check=check,
-        capture_output=capture,
-        text=True,
-    )
+    return subprocess.run(cmd, check=check, capture_output=capture, text=True)
 
 
 def project_update() -> None:
@@ -108,11 +100,18 @@ def state_for(slug: str) -> dict | None:
     return next((s for s in process_states() if s.get("name") == slug), None)
 
 
+def port_from_entry(entry: dict) -> int | None:
+    for item in entry.get("environment", []):
+        if item.startswith("WEBAPP_PORT="):
+            return int(item.split("=", 1)[1])
+    return None
+
+
 def used_ports(doc: dict) -> set[int]:
     ports: set[int] = set()
     for entry in doc.get("processes", {}).values():
-        port = (entry.get("vars") or {}).get("port")
-        if isinstance(port, int):
+        port = port_from_entry(entry)
+        if port is not None:
             ports.add(port)
     return ports
 
@@ -127,24 +126,14 @@ def next_free_port(doc: dict) -> int:
 
 def validate_slug(slug: str) -> None:
     if not SLUG_PATTERN.match(slug):
-        die(f"invalid slug {slug!r}: lowercase letters/digits/hyphens, 2-32 chars, must start with letter and end alphanumeric")
+        die(
+            f"invalid slug {slug!r}: lowercase letters/digits/hyphens, "
+            "2-32 chars, must start with letter and end alphanumeric"
+        )
 
 
-def caddy_snippet_path(slug: str) -> Path:
-    return CADDY_DIR / f"{slug}.caddy"
-
-
-def write_caddy_snippet(slug: str, port: int) -> None:
-    # handle_path strips the prefix; X-Forwarded-Prefix lets the framework
-    # generate correct absolute URLs back. X-Forwarded-Host pass-through keeps
-    # the original browser hostname (set by policy-proxy) so frameworks that
-    # gate on origin see the public host, not the loopback. Caddy handles
-    # WebSocket upgrades automatically through reverse_proxy.
-    #
-    # The bare-slug redir handles `/webapps/<slug>` (no trailing slash) — the
-    # `handle_path /webapps/<slug>/*` matcher requires at least one char after
-    # the slash, so without this it would fall through to WebUI and 404.
-    snippet = (
+def route_block(slug: str, port: int) -> str:
+    return (
         f"redir /webapps/{slug} /webapps/{slug}/ 308\n"
         f"handle_path /webapps/{slug}/* {{\n"
         f"\treverse_proxy 127.0.0.1:{port} {{\n"
@@ -153,31 +142,36 @@ def write_caddy_snippet(slug: str, port: int) -> None:
         f"\t}}\n"
         f"}}\n"
     )
-    caddy_snippet_path(slug).write_text(snippet)
 
 
-def remove_caddy_snippet(slug: str) -> None:
-    p = caddy_snippet_path(slug)
-    if p.exists():
-        p.unlink()
+def regenerate_routes(doc: dict) -> None:
+    """Rewrite routes.caddy from enabled processes in process-compose.yaml."""
+    blocks: list[str] = []
+    for slug, entry in sorted(doc.get("processes", {}).items()):
+        if entry.get("disabled"):
+            continue
+        port = port_from_entry(entry)
+        if port is not None:
+            blocks.append(route_block(slug=slug, port=port))
+    CADDY_ROUTES.write_text("".join(blocks) if blocks else "# no routes\n")
 
 
-def make_process_entry(slug: str, command: str, cwd: str, port: int, env: dict[str, str] | None = None) -> dict:
-    full_env = {"WEBAPP_PORT": str(port), **(env or {})}
+def is_routed(entry: dict) -> bool:
+    return not entry.get("disabled") and port_from_entry(entry) is not None
+
+
+def make_process_entry(slug: str, command: str, cwd: str, port: int) -> dict:
     return {
         "command": command,
         "working_dir": cwd,
         "log_location": str(LOGS_DIR / f"{slug}.log"),
-        "vars": {"port": port},
-        "environment": [f"{k}={v}" for k, v in full_env.items()],
+        "environment": [f"WEBAPP_PORT={port}"],
         "availability": {
             "restart": "on_failure",
             "backoff_seconds": 2,
             "max_restarts": 5,
         },
         "readiness_probe": {
-            # Bare bash test — "is anything listening on $port?". process-compose
-            # has no native tcp_socket probe (only exec/http_get).
             "exec": {
                 "command": f"bash -c 'echo > /dev/tcp/127.0.0.1/{port}'",
             },
@@ -210,9 +204,6 @@ def url_for(slug: str) -> str:
     return f"https://{host}/webapps/{slug}/"
 
 
-# --- subcommands ---------------------------------------------------------
-
-
 def cmd_create(args: argparse.Namespace) -> None:
     validate_slug(args.slug)
     cwd = Path(args.cwd).resolve()
@@ -240,10 +231,12 @@ def cmd_create(args: argparse.Namespace) -> None:
         die(
             f"{args.slug} did not become ready (status={state.get('status')}, "
             f"is_ready={state.get('is_ready')}, restarts={state.get('restarts')}). "
-            f"Check `webapps logs {args.slug}` and fix the app, then `webapps delete {args.slug} --yes` and retry."
+            f"Check `webapps logs {args.slug}` and fix the app, then "
+            f"`webapps delete {args.slug} --yes` and retry."
         )
 
-    write_caddy_snippet(args.slug, port)
+    with Lock():
+        regenerate_routes(load_yaml())
     print(f"webapps: {args.slug!r} is live at {url_for(args.slug)} (port {port})")
 
 
@@ -255,20 +248,18 @@ def cmd_list(_args: argparse.Namespace) -> None:
         print("")
         print("Try:")
         print("  webapps create my-app --command 'python -m http.server $WEBAPP_PORT' --cwd /workspace/webapps/projects/my-app")
-        print("")
-        print("See `webapps --help` or the `webapps` skill for more.")
         return
 
     states = {s["name"]: s for s in process_states()}
     print(f"{'SLUG':<20} {'PORT':<6} {'STATUS':<14} {'READY':<10} {'URL'}")
     for slug, entry in sorted(procs.items()):
-        port = (entry.get("vars") or {}).get("port", "-")
+        port = port_from_entry(entry)
         st = states.get(slug, {})
-        status = st.get("status", "Pending")
-        ready = st.get("is_ready", "Unknown")
-        snippet_present = caddy_snippet_path(slug).exists()
-        url = url_for(slug) if snippet_present else "(no route)"
-        print(f"{slug:<20} {port!s:<6} {status:<14} {ready:<10} {url}")
+        url = url_for(slug) if is_routed(entry) else "(stopped)"
+        print(
+            f"{slug:<20} {port or '-':<6} {st.get('status', 'Pending'):<14} "
+            f"{st.get('is_ready', 'Unknown'):<10} {url}"
+        )
 
 
 def cmd_logs(args: argparse.Namespace) -> None:
@@ -291,7 +282,6 @@ def cmd_start(args: argparse.Namespace) -> None:
         entry.pop("disabled", None)
         save_yaml(doc)
         project_update()
-        port = (entry.get("vars") or {}).get("port")
 
     print(f"webapps: starting {args.slug!r}; waiting up to {args.timeout}s for readiness...")
     state = wait_for_ready(args.slug, args.timeout)
@@ -300,8 +290,9 @@ def cmd_start(args: argparse.Namespace) -> None:
             f"{args.slug} did not become ready (status={state.get('status')}). "
             f"Check `webapps logs {args.slug}`."
         )
-    if isinstance(port, int):
-        write_caddy_snippet(args.slug, port)
+
+    with Lock():
+        regenerate_routes(load_yaml())
     print(f"webapps: {args.slug!r} is live at {url_for(args.slug)}")
 
 
@@ -311,12 +302,11 @@ def cmd_stop(args: argparse.Namespace) -> None:
         entry = doc["processes"].get(args.slug)
         if entry is None:
             die(f"unknown app {args.slug!r}")
-        # Remove the route first so users don't see a 502 while we tear down.
-        remove_caddy_snippet(args.slug)
         entry["disabled"] = True
         save_yaml(doc)
+        regenerate_routes(doc)
         project_update()
-    print(f"webapps: {args.slug!r} stopped; route removed (URL now 404s).")
+    print(f"webapps: {args.slug!r} stopped (URL now 404s).")
 
 
 def cmd_restart(args: argparse.Namespace) -> None:
@@ -331,8 +321,11 @@ def cmd_set_env(args: argparse.Namespace) -> None:
         if entry is None:
             die(f"unknown app {args.slug!r}")
 
-        env: list[str] = list(entry.get("environment", []))
-        env_map = {e.split("=", 1)[0]: e.split("=", 1)[1] for e in env if "=" in e}
+        env_map = {
+            e.split("=", 1)[0]: e.split("=", 1)[1]
+            for e in entry.get("environment", [])
+            if "=" in e
+        }
         for kv in args.kv:
             if "=" not in kv:
                 die(f"bad KEY=VALUE pair: {kv!r}")
@@ -341,7 +334,7 @@ def cmd_set_env(args: argparse.Namespace) -> None:
         entry["environment"] = [f"{k}={v}" for k, v in env_map.items()]
         save_yaml(doc)
         project_update()
-    print(f"webapps: env updated for {args.slug!r}; process-compose restarted it surgically.")
+    print(f"webapps: env updated for {args.slug!r}.")
 
 
 def cmd_delete(args: argparse.Namespace) -> None:
@@ -350,11 +343,10 @@ def cmd_delete(args: argparse.Namespace) -> None:
 
     with Lock():
         doc = load_yaml()
-        entry = doc["processes"].pop(args.slug, None)
-        if entry is None:
+        if doc["processes"].pop(args.slug, None) is None:
             die(f"unknown app {args.slug!r}")
         save_yaml(doc)
-        remove_caddy_snippet(args.slug)
+        regenerate_routes(doc)
         project_update()
 
         log_path = LOGS_DIR / f"{args.slug}.log"
@@ -364,28 +356,24 @@ def cmd_delete(args: argparse.Namespace) -> None:
         if proj_path.exists():
             shutil.rmtree(proj_path)
 
-    print(f"webapps: {args.slug!r} deleted (route, supervision, logs, projects/{args.slug}/).")
-
-
-def cmd_next_port(_args: argparse.Namespace) -> None:
-    with Lock():
-        doc = load_yaml()
-        print(next_free_port(doc))
+    print(f"webapps: {args.slug!r} deleted.")
 
 
 def main() -> None:
-    p = argparse.ArgumentParser(prog="webapps", description="Manage user-built web apps served at /webapps/<slug>/.")
+    p = argparse.ArgumentParser(
+        prog="webapps",
+        description="Manage user-built web apps served at /webapps/<slug>/.",
+    )
     sub = p.add_subparsers(dest="cmd", required=True)
 
     pc_create = sub.add_parser("create", help="Register and start a new web app.")
     pc_create.add_argument("slug")
-    pc_create.add_argument("--command", required=True, help="The command to run (e.g. 'python -m http.server $WEBAPP_PORT').")
-    pc_create.add_argument("--cwd", required=True, help="Working directory for the app.")
-    pc_create.add_argument("--timeout", type=int, default=DEFAULT_TIMEOUT_SECONDS, help="Seconds to wait for readiness.")
+    pc_create.add_argument("--command", required=True)
+    pc_create.add_argument("--cwd", required=True)
+    pc_create.add_argument("--timeout", type=int, default=DEFAULT_TIMEOUT_SECONDS)
     pc_create.set_defaults(func=cmd_create)
 
-    pc_list = sub.add_parser("list", help="List webapps and their state.")
-    pc_list.set_defaults(func=cmd_list)
+    sub.add_parser("list", help="List webapps.").set_defaults(func=cmd_list)
 
     pc_logs = sub.add_parser("logs", help="Tail a webapp's stdout/stderr.")
     pc_logs.add_argument("slug")
@@ -411,13 +399,10 @@ def main() -> None:
     pc_set_env.add_argument("kv", nargs="+", help="KEY=VALUE pairs.")
     pc_set_env.set_defaults(func=cmd_set_env)
 
-    pc_delete = sub.add_parser("delete", help="Delete a webapp completely (route, supervision, logs, project source).")
+    pc_delete = sub.add_parser("delete", help="Delete a webapp (route, process, logs, source).")
     pc_delete.add_argument("slug")
-    pc_delete.add_argument("--yes", action="store_true", help="Confirm — required.")
+    pc_delete.add_argument("--yes", action="store_true")
     pc_delete.set_defaults(func=cmd_delete)
-
-    pc_next = sub.add_parser("next-port", help="Print the next free port in the webapps range.")
-    pc_next.set_defaults(func=cmd_next_port)
 
     args = p.parse_args()
     args.func(args)
