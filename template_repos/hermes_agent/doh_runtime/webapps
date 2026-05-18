@@ -140,7 +140,12 @@ def write_caddy_snippet(slug: str, port: int) -> None:
     # the original browser hostname (set by policy-proxy) so frameworks that
     # gate on origin see the public host, not the loopback. Caddy handles
     # WebSocket upgrades automatically through reverse_proxy.
+    #
+    # The bare-slug redir handles `/webapps/<slug>` (no trailing slash) — the
+    # `handle_path /webapps/<slug>/*` matcher requires at least one char after
+    # the slash, so without this it would fall through to WebUI and 404.
     snippet = (
+        f"redir /webapps/{slug} /webapps/{slug}/ 308\n"
         f"handle_path /webapps/{slug}/* {{\n"
         f"\treverse_proxy 127.0.0.1:{port} {{\n"
         f"\t\theader_up X-Forwarded-Host {{header.X-Forwarded-Host}}\n"
