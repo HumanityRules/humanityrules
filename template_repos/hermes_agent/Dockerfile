@@ -4,6 +4,8 @@ USER root
 
 ARG NONO_VERSION=0.53.0
 ARG GWS_VERSION=0.22.5
+ARG CADDY_VERSION=2.11.3
+ARG PROCESS_COMPOSE_VERSION=1.110.0
 ARG HERMES_AGENT_EXTRAS=modal,daytona,vercel,messaging,matrix,cron,cli,dev,tts-premium,slack,pty,honcho,mcp,homeassistant,sms,acp,voice,dingtalk,feishu,google,bedrock,web
 
 # Runtime layout: /opt/doh and /opt/hermes are image-owned and refreshed into
@@ -44,8 +46,16 @@ RUN mkdir -p "$DOH_BIN_DIR" \
         "https://github.com/googleworkspace/cli/releases/download/v${GWS_VERSION}/${gws_tar}" \
     && tar -xzf /tmp/gws.tar.gz -C "$DOH_BIN_DIR" \
     && chmod +x "$DOH_BIN_DIR/gws" \
+    && curl -fsSL -o /tmp/caddy.tar.gz \
+        "https://github.com/caddyserver/caddy/releases/download/v${CADDY_VERSION}/caddy_${CADDY_VERSION}_linux_${arch}.tar.gz" \
+    && tar -xzf /tmp/caddy.tar.gz -C "$DOH_BIN_DIR" caddy \
+    && chmod +x "$DOH_BIN_DIR/caddy" \
+    && curl -fsSL -o /tmp/process-compose.tar.gz \
+        "https://github.com/F1bonacc1/process-compose/releases/download/v${PROCESS_COMPOSE_VERSION}/process-compose_linux_${arch}.tar.gz" \
+    && tar -xzf /tmp/process-compose.tar.gz -C "$DOH_BIN_DIR" process-compose \
+    && chmod +x "$DOH_BIN_DIR/process-compose" \
     && sed -i 's|http://deb.debian.org|https://deb.debian.org|g' /etc/apt/sources.list.d/debian.sources \
-    && rm -f /tmp/nono.deb /tmp/gws.tar.gz \
+    && rm -f /tmp/nono.deb /tmp/gws.tar.gz /tmp/caddy.tar.gz /tmp/process-compose.tar.gz \
     && rm -rf /tmp/aws /tmp/awscliv2.zip \
     && rm -rf /var/lib/apt/lists/*
 
@@ -68,11 +78,17 @@ RUN git clone --depth 1 --branch v2026.5.7 https://github.com/NousResearch/herme
 # platform-managed auth (see template_repos/hermes_agent/skills/google-workspace/).
 COPY skills/google-workspace /opt/hermes/agent/skills/productivity/google-workspace
 COPY skills/posthog /opt/hermes/agent/skills/productivity/posthog
+COPY skills/webapps /opt/hermes/agent/skills/development/webapps
 
 COPY SOUL.md /opt/hermes/SOUL.md
 COPY config.yaml.template /opt/hermes/config.yaml.template
 COPY --chmod=755 build/apply-patches.py /tmp/apply-patches.py
 COPY doh_runtime /opt/doh/runtime
+
+# Expose the webapps CLI on PATH. Source-of-truth lives in doh_runtime/ so the
+# whole runtime tree COPYs together; the symlink lets the agent type `webapps`.
+RUN chmod +x /opt/doh/runtime/webapps \
+    && ln -s /opt/doh/runtime/webapps /opt/doh/bin/webapps
 
 # DOH-owned WebUI extension bundle. Loaded by Hermes WebUI per docs/EXTENSIONS.md
 # when the three HERMES_WEBUI_EXTENSION_* env vars are set (see supervisor.sh).

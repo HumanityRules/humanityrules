@@ -250,11 +250,16 @@ run_in_nono() {
     # into both tools: terminal resolves python/pip via PATH, execute_code's
     # project mode walks $VIRTUAL_ENV when picking the child interpreter
     # (hermes-agent tools/code_execution_tool.py:_resolve_child_python).
+    # HERMES_WEBUI_PORT=8788 frees 8787 for Caddy to own as the public-facing
+    # reverse proxy. Caddy routes /webapps/<slug>/* to user apps and falls back
+    # to WebUI on 8788. Both Caddy and process-compose run inside this same
+    # nono sandbox alongside WebUI — see webui.sh.
     runuser -u hermeswebui -- "$DOH_BIN_DIR/nono" "${nono_args[@]}" -- /usr/bin/env \
         ANTHROPIC_BEDROCK_BASE_URL="http://127.0.0.1:${AWS_BEDROCK_RUNTIME_PORT}" \
         AWS_DEFAULT_REGION="$AWS_DEFAULT_REGION" \
         AWS_EC2_METADATA_DISABLED=true \
         HOME="$HERMES_WEBUI_DEFAULT_WORKSPACE" \
+        HERMES_WEBUI_PORT=8788 \
         VIRTUAL_ENV="${HERMES_WEBUI_DEFAULT_WORKSPACE}/.venv" \
         PATH="${HERMES_WEBUI_DEFAULT_WORKSPACE}/.venv/bin:${DOH_BIN_DIR}:/usr/local/bin:/usr/local/sbin:/usr/bin:/usr/sbin:/bin:/sbin" \
         NO_PROXY=127.0.0.1,localhost \
