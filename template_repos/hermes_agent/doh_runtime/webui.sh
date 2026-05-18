@@ -2,16 +2,18 @@
 set -euo pipefail
 
 # Inside nono. Three siblings run here as hermeswebui:
-#   1. Caddy on :8787 — public-facing reverse proxy. Routes /webapps/<slug>/*
-#      to user apps; falls back to WebUI on 127.0.0.1:8788.
+#   1. Caddy on :8787 — receives auth-validated traffic from policy-proxy
+#      (separate container in this task). Routes /webapps/<slug>/* to user
+#      apps; falls back to WebUI on 127.0.0.1:8789.
 #   2. process-compose on 127.0.0.1:9956 — supervises user app processes
 #      defined in /workspace/webapps/process-compose.yaml.
-#   3. Hermes WebUI on 127.0.0.1:8788.
+#   3. Hermes WebUI on 127.0.0.1:8789. (Not 8788 — that's policy-proxy's
+#      external port and the two containers share a network namespace.)
 #
 # If any child exits, we kill the others and exit. supervisor.sh's trap then
 # tears down the root-side daemons (aws_signer, integrations_broker).
 
-WEBUI_PORT="${HERMES_WEBUI_PORT:-8788}"
+WEBUI_PORT="${HERMES_WEBUI_PORT:-8789}"
 CADDY_PORT=8787
 PROCESS_COMPOSE_PORT=9956
 
