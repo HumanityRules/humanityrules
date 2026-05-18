@@ -60,18 +60,19 @@ Three things to notice:
 ```
 /workspace/webapps/
   process-compose.yaml        # the supervisor's source-of-truth
-  caddy/<slug>.caddy          # routing snippet per app (Caddy --watch picks them up)
-  caddy/_placeholder.caddy    # always-present so the import glob never goes empty
+  routes.caddy                # generated routes file (rewritten on every CLI mutation)
   projects/<slug>/            # user code lives here
   logs/<slug>.log             # captured stdout/stderr, written by process-compose
   .lock                       # flock target for YAML mutations
 ```
 
-`/workspace` is on the persistent root, so this whole layout survives container restarts. process-compose, on cold start, reads the existing YAML and restores supervision; Caddy `--watch` rescans the snippet directory and route table is back in seconds.
+`process-compose.yaml` is the **only** source of truth. `routes.caddy` is fully derived from it: every CLI mutation rebuilds the file from scratch by walking the YAML's enabled processes. The port lives in one place — the process's `environment: [WEBAPP_PORT=<port>]` — and the route generator reads it from there. No shadow copies, no synchronization concerns.
+
+`/workspace` is on the persistent root, so this whole layout survives container restarts. process-compose, on cold start, reads the existing YAML and restores supervision; Caddy boots with the existing `routes.caddy` (which the last CLI mutation left correct) and routes are back instantly.
 
 ## The agent's contract: the `webapps` CLI
 
-The agent never touches `process-compose.yaml` or `caddy/*.caddy` directly. It uses a single Python CLI on PATH:
+The agent never touches `process-compose.yaml` or `routes.caddy` directly. It uses a single Python CLI on PATH:
 
 ```
 webapps create <slug> --command "..." --cwd <path> [--timeout 90]
@@ -82,22 +83,21 @@ webapps stop <slug>
 webapps restart <slug>
 webapps set-env <slug> KEY=VALUE [KEY2=VALUE2 ...]
 webapps delete <slug> --yes
-webapps next-port
 ```
 
-`/opt/doh/runtime/webapps`, ~250 lines, shebang pinned to `/opt/hermes/webui/venv/bin/python3` (it imports pyyaml, which the system python doesn't have but the Hermes serving venv does). All YAML mutations are wrapped in `flock /workspace/webapps/.lock` so concurrent invocations don't tear writes.
+`/opt/doh/runtime/webapps`, ~310 lines, shebang pinned to `/opt/hermes/webui/venv/bin/python3` (it imports pyyaml, which the system python doesn't have but the Hermes serving venv does). All YAML mutations are wrapped in `flock /workspace/webapps/.lock` so concurrent invocations don't tear writes. The CLI's `regenerate_routes(doc)` is called inside the lock on every mutation; it rewrites `routes.caddy` end-to-end from the YAML.
 
 **Key contract decisions:**
 
 - **`create` errors on collision.** If the slug exists, the agent must `delete` first. No "create-or-update."
-- **Port allocation is automatic.** The CLI scans the YAML, picks the next free port in 4000–4019 (the range is allowlisted in the nono profile), and writes `WEBAPP_PORT` into the process's env. The agent's `--command` references `$WEBAPP_PORT`.
-- **Readiness gating.** After `process-compose project update`, the CLI polls until process-compose reports `is_ready == "Ready"` (or timeout). Caddy snippet is written **only after** readiness passes — this avoids the brief window where `/webapps/<slug>/` would 502 because the upstream isn't accepting connections yet.
+- **Port allocation is automatic.** The CLI scans the YAML, picks the next free port in 4000–4019 (the range is allowlisted in the nono profile), and writes `WEBAPP_PORT` into the process's env. The agent's `--command` references `$WEBAPP_PORT`. The route generator parses `WEBAPP_PORT` back out of the YAML — single encoding.
+- **Readiness gating.** After `process-compose project update`, the CLI polls until process-compose reports `is_ready == "Ready"` (or timeout). The Caddy route is added to `routes.caddy` **only after** readiness passes — this avoids the brief window where `/webapps/<slug>/` would 502 because the upstream isn't accepting connections yet.
 - **Readiness probe is a TCP-bind check.** process-compose has only `exec` and `http_get` probes (no native `tcp_socket`), so the CLI emits `bash -c 'echo > /dev/tcp/127.0.0.1/<port>'`. Tells you the app bound the port; doesn't tell you the app is *correct*. That's the bare minimum we want for `webapps create` to claim success.
-- **`stop` removes the Caddy snippet first** (clean 404), then disables the process. `start` reverses it.
-- **`delete` is total.** Removes route, supervision entry, log file, and `projects/<slug>/`. The skill tells the agent to confirm explicitly with the user before passing `--yes`.
+- **`stop` sets `disabled: true` and regenerates `routes.caddy`** (the disabled entry is skipped, so the route disappears). `start` reverses it.
+- **`delete` is total.** Removes the YAML entry, regenerates routes (so the route is gone), removes the log file, and `rm -rf projects/<slug>/`. The skill tells the agent to confirm explicitly with the user before passing `--yes`.
 - **`set-env` ships in v1.** Surgical: only the affected process restarts. Without this, every env change would be a delete (now total!) + recreate.
 
-## The Caddy snippet (per-app)
+## The Caddy route block (per-app, in `routes.caddy`)
 
 ```caddy
 redir /webapps/<slug> /webapps/<slug>/ 308
@@ -126,16 +126,16 @@ The same `header_up X-Forwarded-Host` lives in the top-level Caddyfile's WebUI f
 }
 
 :8787 {
-    import /workspace/webapps/caddy/*.caddy
+    import /workspace/webapps/routes.caddy
     reverse_proxy 127.0.0.1:8789 {
         header_up X-Forwarded-Host {header.X-Forwarded-Host}
     }
 }
 ```
 
-`admin off` because we never use the admin API; configuration is driven via filesystem (snippets) plus `--watch`. `auto_https off` because TLS terminates upstream at the ALB; everything inside the container is plaintext loopback.
+`admin off` because we never use the admin API; the CLI drives Caddy by rewriting `routes.caddy` and letting `--watch` (passed at startup) pick up the change. `auto_https off` because TLS terminates upstream at the ALB; everything inside the container is plaintext loopback.
 
-`_placeholder.caddy` is seeded into `/workspace/webapps/caddy/` on first boot so the import glob never matches zero files — without it, Caddy `--watch` logs "No files matching import glob pattern" once a second.
+`routes.caddy` is seeded with the placeholder content `# no routes` on first boot so it always exists — Caddy's `import` would fail loudly on a missing file.
 
 ## Network: nono profile additions
 
@@ -156,7 +156,7 @@ The agent prints the URL for the user to click. To do that, it needs to know the
 
 **Apps must bind to `127.0.0.1`, not `0.0.0.0`.** Caddy is the only thing that should be reachable from outside the container — apps go through Caddy's reverse_proxy, no shortcut. Many frameworks default to all-interfaces; they need explicit configuration. The skill calls this out in the Don'ts.
 
-**Phoenix dev mode (`mix phx.server`) doesn't work.** Mix's `Mix.Sync.PubSub` does `:gen_tcp.listen(0, ...)` — random ephemeral port — and there's no documented disable knob (the module is `@moduledoc false` internal). The nono profile's listen_port allowlist blocks the random port; Mix gets EACCES at startup. **Phoenix releases work fine** (no Mix.Sync). The skill documents the workaround: `MIX_ENV=prod mix release` then run the release binary from `webapps create --command`. WebSocket support itself is unaffected — Caddy's `reverse_proxy` upgrades transparently, verified end-to-end with a Python `websockets` echo server.
+**Phoenix needs explicit endpoint binding.** Phoenix's HTTP port is configurable; generated apps usually read `PORT`, so `PORT=$WEBAPP_PORT mix phx.server` is the right dev-server shape when the endpoint is configured to bind loopback. For durable apps, **Phoenix releases are the preferred shape**: `MIX_ENV=prod mix release`, then run the release binary from `webapps create --command` with the same `127.0.0.1:$WEBAPP_PORT` binding. WebSocket support itself is unaffected — Caddy's `reverse_proxy` upgrades transparently, verified end-to-end with a Python `websockets` echo server.
 
 ## Lifecycle: cold start
 
@@ -165,7 +165,7 @@ ECS replaces the task. persistent-root-runner restores `/workspace/` from the pe
 1. Seeds `/workspace/webapps/` if missing (idempotent, only first boot).
 2. Starts `process-compose up` against the existing YAML — apps marked enabled come back up automatically; ones marked `disabled: true` stay down (process-compose honors disabled on initial up).
 3. Waits for WebUI on 8789 to become healthy.
-4. Starts Caddy with `--watch`. Caddy reads the existing snippets and restores routes within ~1 second.
+4. Starts Caddy with `--watch`. Caddy reads the existing `routes.caddy` (left in correct state by the last CLI mutation before shutdown) and routes are live immediately.
 
 `webapps list` after cold start shows everything with the same state it had before, modulo a few seconds of "Pending → Running" while processes initialize.
 
@@ -173,7 +173,7 @@ End-to-end verified on `hermes-vmendi-webapps`: created `persist-test`, killed t
 
 ## Out of scope (v1)
 
-- **Non-HTTP background workers.** A Discord bot, a cron job, a queue consumer. Same supervisor would manage them but with no port + no Caddy snippet. `webapps create --no-port` was considered and rejected — the name `webapps` is a contract, and "background services" is a separate concept worth its own primitive in v2.
+- **Non-HTTP background workers.** A Discord bot, a cron job, a queue consumer. Same supervisor would manage them but with no port + no Caddy route. `webapps create --no-port` was considered and rejected — the name `webapps` is a contract, and "background services" is a separate concept worth its own primitive in v2.
 - **WebUI sidebar discoverability.** No "Web Apps" panel in the WebUI listing live apps. The agent telling the user the URL after `webapps create` is sufficient for v1; a UI integration is a `webui-extension/doh.js` change for later.
 - **Resource limits per app.** A user app eating 100% CPU starves Hermes. process-compose doesn't do cgroup limits; ECS task-level limits exist but per-app limits don't. Not fixed in v1.
 - **Trash-bin on delete.** `webapps delete --yes` is total: route, supervision, logs, AND `projects/<slug>/`. Considered moving to `.trash/` for recoverability but rejected — too much janitorial complexity for a low-frequency operation. The skill mandates explicit user confirmation before passing `--yes`.
