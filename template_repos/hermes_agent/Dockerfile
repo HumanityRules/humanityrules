@@ -62,9 +62,12 @@ RUN mkdir -p "$DOH_BIN_DIR" \
 # Ensure the sandbox's intended PATH survives login-shell resets. Debian's
 # /etc/profile rewrites PATH from scratch for non-root uids; Hermes' terminal
 # session snapshot uses `bash -l`, so this drop-in restores the supervisor's
-# DOH_LOGIN_PATH after /etc/profile runs.
+# DOH_LOGIN_PATH after /etc/profile runs. The fallback (used when a login
+# shell isn't descended from supervisor.sh — e.g. ECS Exec sessions debugging
+# the container) keeps brew, doh-bin, and system bins reachable so basic
+# tools still work.
 RUN { \
-      echo 'export PATH="$DOH_LOGIN_PATH"'; \
+      echo 'export PATH="${DOH_LOGIN_PATH:-/opt/doh/bin:/home/linuxbrew/.linuxbrew/bin:/home/linuxbrew/.linuxbrew/sbin:/usr/local/bin:/usr/local/sbin:/usr/bin:/usr/sbin:/bin:/sbin}"'; \
       echo "export HOMEBREW_PREFIX=/home/linuxbrew/.linuxbrew"; \
       echo "export HOMEBREW_NO_ANALYTICS=1"; \
       echo "export HOMEBREW_NO_AUTO_UPDATE=1"; \
