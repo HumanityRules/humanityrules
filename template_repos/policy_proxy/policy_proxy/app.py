@@ -14,12 +14,13 @@ common FastAPI scaffolding without pulling the auth code into sidecar images.
 
 import logging
 from contextlib import asynccontextmanager
+from dataclasses import dataclass
 from typing import Any
 from urllib.parse import quote, urlparse
 
 import httpx
 import jwt
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, WebSocket
 from fastapi.responses import PlainTextResponse, RedirectResponse, Response
 
 from . import auth as auth_mod
@@ -34,6 +35,71 @@ logger = logging.getLogger(__name__)
 JWKS_CACHE_TTL_SECONDS = 15 * 60
 INTERNAL_PATH_PREFIX = "/__policy_proxy"
 AUTH_URL_HEADER = "X-DOH-Auth-URL"
+
+# WebSocket close codes used when we reject an upgrade.
+WS_CLOSE_AUTH_REQUIRED = 4401
+WS_CLOSE_FORBIDDEN = 4403
+WS_CLOSE_SERVICE_UNAVAILABLE = 1011
+
+
+@dataclass(frozen=True)
+class _AuthDecision:
+    """Result of running cookie -> JWT -> PDP for one request.
+
+    Exactly one of `identity` or `reject` is set. `reject` is a string tag the
+    HTTP and WS paths translate into their own protocol-appropriate response
+    (302/401/403/503 vs ws close codes).
+    """
+    identity: jwt_verify.SessionIdentity | None
+    reject: str | None  # one of: "auth", "deny", "pdp-down"
+
+
+async def _authorize_session(
+    *,
+    cookie_value: str | None,
+    path: str,
+    state: Any,
+) -> _AuthDecision:
+    """Verify the session cookie and run PDP. Same logic for HTTP and WS paths."""
+    if not cookie_value:
+        return _AuthDecision(identity=None, reject="auth")
+
+    identity = jwt_verify.verify_session_cookie(
+        jwt_value=cookie_value, jwks_client=state.jwks_client,
+    )
+    if identity is None:
+        return _AuthDecision(identity=None, reject="auth")
+
+    decision = state.pdp_cache.get(identity.oidc_sub)
+    if decision is None:
+        decision = await pdp_mod.evaluate(
+            http_client=state.http_client,
+            pdp_url=state.config.pdp_url,
+            env_bearer_token=state.config.env_bearer_token,
+            app_id=state.config.app_id,
+            oidc_sub=identity.oidc_sub,
+            username=identity.username,
+            path=path,
+        )
+        if decision is None:
+            return _AuthDecision(identity=identity, reject="pdp-down")
+        state.pdp_cache.put(identity.oidc_sub, decision)
+
+    if decision.decision != "allow":
+        logger.info(
+            "policy-proxy deny reason=%s env=%s app=%s user=%s path=%s",
+            decision.reason, state.config.env_slug, state.config.app_id,
+            identity.username, path,
+        )
+        return _AuthDecision(identity=identity, reject="deny")
+
+    return _AuthDecision(identity=identity, reject=None)
+
+
+async def _close_ws_after_accept(websocket: WebSocket, code: int) -> None:
+    """Send a browser-visible close code for rejected WebSocket upgrades."""
+    await websocket.accept()
+    await websocket.close(code=code)
 
 
 def _extract_original_url(request: Request, cfg: config_mod.PolicyProxyConfig) -> str:
@@ -132,49 +198,67 @@ def create_app(cfg: config_mod.PolicyProxyConfig) -> FastAPI:
             return PlainTextResponse(content="not found", status_code=404)
 
         state = request.app.state
-
-        cookie_value = request.cookies.get(jwt_verify.SESSION_COOKIE_NAME)
-        if not cookie_value:
-            return _auth_required_response(request=request, cfg=state.config)
-
-        identity = jwt_verify.verify_session_cookie(
-            jwt_value=cookie_value, jwks_client=state.jwks_client,
+        result = await _authorize_session(
+            cookie_value=request.cookies.get(jwt_verify.SESSION_COOKIE_NAME),
+            path=request.url.path,
+            state=state,
         )
-        if identity is None:
-            return _auth_required_response(request=request, cfg=state.config)
 
-        decision = state.pdp_cache.get(identity.oidc_sub)
-        if decision is None:
-            decision = await pdp_mod.evaluate(
-                http_client=state.http_client,
-                pdp_url=state.config.pdp_url,
-                env_bearer_token=state.config.env_bearer_token,
-                app_id=state.config.app_id,
-                oidc_sub=identity.oidc_sub,
-                username=identity.username,
-                path=request.url.path,
+        if result.reject == "auth":
+            return _auth_required_response(request=request, cfg=state.config)
+        if result.reject == "pdp-down":
+            return PlainTextResponse(
+                content="authorization service unavailable", status_code=503,
             )
-            if decision is None:
-                return PlainTextResponse(
-                    content="authorization service unavailable", status_code=503,
-                )
-            state.pdp_cache.put(identity.oidc_sub, decision)
-        if decision.decision != "allow":
-            logger.info(
-                "policy-proxy deny reason=%s env=%s app=%s user=%s path=%s",
-                decision.reason, state.config.env_slug, state.config.app_id,
-                identity.username, request.url.path,
-            )
+        if result.reject == "deny":
             return PlainTextResponse(
                 content="you do not have access to this application", status_code=403,
             )
 
+        assert result.identity is not None
         return await proxy_mod.proxy_to_upstream(
             request=request,
-            identity=identity,
+            identity=result.identity,
             upstream_base=state.upstream_base,
             http_client=state.http_client,
         )
+
+    @app.websocket("/{path:path}")
+    async def catch_all_ws(websocket: WebSocket, path: str) -> None:
+        state = websocket.app.state
+
+        if websocket.url.path.startswith(INTERNAL_PATH_PREFIX):
+            await _close_ws_after_accept(websocket=websocket, code=WS_CLOSE_FORBIDDEN)
+            return
+
+        result = await _authorize_session(
+            cookie_value=websocket.cookies.get(jwt_verify.SESSION_COOKIE_NAME),
+            path=websocket.url.path,
+            state=state,
+        )
+
+        if result.reject == "auth":
+            await _close_ws_after_accept(websocket=websocket, code=WS_CLOSE_AUTH_REQUIRED)
+            return
+        if result.reject == "pdp-down":
+            await _close_ws_after_accept(websocket=websocket, code=WS_CLOSE_SERVICE_UNAVAILABLE)
+            return
+        if result.reject == "deny":
+            await _close_ws_after_accept(websocket=websocket, code=WS_CLOSE_FORBIDDEN)
+            return
+
+        assert result.identity is not None
+        try:
+            await proxy_mod.proxy_to_upstream_ws(
+                websocket=websocket,
+                identity=result.identity,
+                upstream_host=state.config.upstream_host,
+                upstream_port=state.config.upstream_port,
+            )
+        except proxy_mod.WebSocketUpstreamUnavailable:
+            await _close_ws_after_accept(
+                websocket=websocket, code=WS_CLOSE_SERVICE_UNAVAILABLE,
+            )
 
     return app
 

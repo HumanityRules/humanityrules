@@ -1,5 +1,60 @@
 # DevOpsHero Development Journal
 
+## 2026-05-19 14:04 - [Deployment] WebSocket support in policy-proxy sidecar
+
+**Conversation:** [2026-05-19-1407-b3a985ef.md](conversations/2026-05-19-1407-b3a985ef.md)
+
+User reported `WebSocket connection to 'wss://hermes-vmendi00.chsandbox.com/webapps/terminal/ws' failed; ttyd websocket connection closed with code: 1006` after creating a ttyd-backed `terminal` webapp inside Hermes. Diagnosed end-to-end (browser → Caddy:8787 → policy-proxy:8788 → upstream ttyd:4001) by probing each layer from inside the running container with `doh_app_exec --container hermes-vmendi00-hermes`. Caddy and ttyd both returned `101 Switching Protocols`; the policy-proxy returned `302 Found` to the auth Lambda — i.e. the proxy was treating the upgrade as a regular HTTP request and redirecting on missing cookie *before* the WS handshake could complete.
+
+Root cause: `policy_proxy/app.py` only had `@app.api_route("/{path:path}", methods=[...])`, which Starlette does not match for `websocket.connect` ASGI scopes. Forwarding was via `httpx`, which is HTTP-only and additionally strips `upgrade` as a hop-by-hop header. So WS upgrades fell through to a 302, which the browser surfaces as `code: 1006`.
+
+### Fix shape
+
+Two parallel pieces. (1) Factor the cookie → JWT → PDP logic into a shared `_authorize_session` helper returning a small `_AuthDecision` dataclass with either an identity or one of three reject tags (`"auth"`, `"deny"`, `"pdp-down"`); HTTP and WS paths each translate the tags into protocol-appropriate responses. (2) Add `@app.websocket("/{path:path}")` and a new `proxy_to_upstream_ws` in `proxy.py` using the `websockets` library to bridge browser ↔ upstream connections.
+
+Several non-obvious decisions baked into the WS path, all worth recording because they're easy to "simplify" away:
+
+- **Accept-then-close on rejection.** Closing while in `CONNECTING` state translates to an HTTP 403 at the ASGI layer, which strips the 4xxx code and leaves JS with `event.code === 1006`. Calling `accept()` first means the handshake completes (101) and the close frame carries the actual code, so devtools and `onclose` can distinguish reauth (4401) from deny (4403) from upstream-down (1011).
+- **Connect upstream first, then accept inbound.** A 502-equivalent surfaces as a failed handshake at the browser instead of a successful open followed by an immediate close — semantically much cleaner for clients to detect.
+- **Custom 4xxx close codes.** RFC 6455 §7.4.2 reserves 4000–4999 for application use; picking distinct codes (`WS_CLOSE_AUTH_REQUIRED=4401`, `WS_CLOSE_FORBIDDEN=4403`) makes the cause debuggable without server-side log access.
+- **`ping_interval=None` on the upstream client.** The browser drives pings; ttyd/Phoenix drive their own application-level heartbeats. Adding ours doubles traffic and risks killing idle-but-healthy streams (LLM completions can sit silent for >20s).
+- **`max_size=4 MiB`.** Default 1 MiB triggered max-size errors on bursty terminal output; 4 MiB clears the realistic ceiling without making the per-connection memory budget obnoxious.
+- **Strip the session cookie before forwarding.** The session JWT is for the policy proxy; apps must read identity from `X-Auth-{User,Sub,Email}` instead. Same model as the HTTP path.
+
+### Verification
+
+End-to-end on `hermes-vmendi00`, before/after the bump (probed via `doh_app_exec --container hermes-vmendi00-hermes`):
+
+- **ttyd:4001/ws** — 101 / 101 (unchanged; never the problem).
+- **Caddy:8787/webapps/terminal/ws** — 101 / 101 (unchanged).
+- **policy-proxy:8788/webapps/terminal/ws** — **302 → 101**. The fix.
+- **Regular HTTP via policy-proxy:8788** — 302 to auth / 302 to auth (no regression on the existing path).
+
+Bumped `POLICY_PROXY_IMAGE_VERSION` 0.2.0 → 0.3.0 in `deploy_app.py`. Per `template_repos/hermes_agent/AGENTS.md` ("throwaway test environment, destroy redeploy or mutate anything you need"), rolled out via `doh_control redeploy-app --app hermes-vmendi00 --env default`, accepting that the env's auth-service container picks up the same image.
+
+### Tests
+
+Added `tests/test_app_flow_ws.py` covering: missing cookie → 4401; tampered cookie → 4401; PDP deny → 4403; PDP unreachable → 1011; internal-path → 4403; happy path bidirectional with subprotocol negotiation + identity-header propagation; upstream unreachable → 1011.
+
+The happy path stands up a real `websockets.serve` server in a background thread on a private event loop. `TestClient`'s mock transport doesn't actually speak WS frames, so without a real upstream we wouldn't be exercising subprotocol negotiation, header propagation, or the bidirectional pumper at all.
+
+Two test-writing gotchas worth remembering:
+- `from websockets.asyncio.server import serve as ws_serve` — submodules under `websockets.asyncio` are NOT auto-imported via attribute access; calling `websockets.asyncio.server.serve(...)` raises `AttributeError` at runtime.
+- `subprocess.run(..., text=True)` blew up with `UnicodeDecodeError` because WS close-frame bytes aren't UTF-8. Verification probes used `curl -D - -o /dev/null` (headers to stdout, body to /dev/null) to sidestep.
+
+### Peer-review pass
+
+A peer pushed structural simplifications on top: a `_close_ws_after_accept` helper, a `WebSocketUpstreamUnavailable` exception so `proxy.py` owns transport and `app.py` owns close-code policy, and moving `accept()` inside the `try:` block in `proxy_to_upstream_ws` so `upstream.close()` runs in `finally` even on accept failure. Also rewrote the `upstream_unreachable` test to use a real uvicorn server + real `ws_connect` instead of `TestClient`. The peer's diff additionally caught a real bug: the original `proxy.py` did `await websocket.close(code=1011)` *before* accept on the InvalidStatus/OSError branches — which the accept-then-close comment in `app.py` warned against, but proxy.py never followed. `TestClient` masked it because it observes `websocket.close` ASGI events directly without the uvicorn HTTP-403 conversion.
+
+Accepted the structural changes. Pushed back on (and need to restore) several load-bearing comments the peer dropped during the simplification: the accept-then-close rationale, `ping_interval=None` LLM-stall reasoning, `max_size=4MB` knob hint, and the 4xxx range RFC reference. These all clear the "would removing this confuse a future reader?" bar — they encode incident knowledge, not decoration.
+
+**Key points:**
+- Starlette's `api_route` does not match WS upgrades; you need a separate `@app.websocket` decorator. Easy mistake because the path patterns look identical.
+- `TestClient.websocket_connect` does NOT round-trip through uvicorn, so close-before-accept bugs masquerade as passing tests. For close-code assertions on the upstream-failure path, drive a real uvicorn server with `ws_connect`.
+- httpx is HTTP-only — any WS upgrade through an httpx-based forwarder is structurally broken. The `websockets` library has parallel client/server APIs that pair cleanly.
+- The pump pattern: two `asyncio.create_task` pumps + `asyncio.wait(FIRST_COMPLETED)` + cancel pending. `WebSocketDisconnect` and `ConnectionClosed` are normal-termination signals from one side or the other, not errors — swallow them in the cleanup loop and only `logger.exception` the rest.
+- "Simplification" PRs touching protocol-level code can silently strip the *why*. The structural cleanup was correct, but the comments documented incident knowledge (1006 conversion at ASGI layer, LLM-silent-period heartbeat sensitivity, RFC 6455 close-code range). Restoring those is part of accepting the diff.
+
 ## 2026-05-19 12:17 - [Deployment] zstd-compress persistent-root checkpoints; fix login-shell PATH for non-supervisor shells; harden Phoenix LiveSocket guidance
 
 **Conversation:** [2026-05-19-1220-e07daac1.md](conversations/2026-05-19-1220-e07daac1.md)
