@@ -117,8 +117,8 @@ export_webui_extension_env() {
     # Point the WebUI at our extension bundle. EXTENSIONS.md-compliant same-origin
     # URLs — the upstream static handler serves $HERMES_WEBUI_EXTENSION_DIR under
     # /extensions/. These three vars are in the nono profile's allow_vars.
-    export HERMES_WEBUI_EXTENSION_SCRIPT_URLS="/extensions/doh.js"
-    export HERMES_WEBUI_EXTENSION_STYLESHEET_URLS="/extensions/doh.css"
+    export HERMES_WEBUI_EXTENSION_SCRIPT_URLS="/extensions/doh-integrations.js,/extensions/doh-webapps.js"
+    export HERMES_WEBUI_EXTENSION_STYLESHEET_URLS="/extensions/doh-integrations.css,/extensions/doh-webapps.css"
 }
 
 write_child_aws_config() {

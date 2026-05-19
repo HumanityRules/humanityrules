@@ -171,18 +171,45 @@ ECS replaces the task. persistent-root-runner restores `/workspace/` from the pe
 
 End-to-end verified on `hermes-vmendi-webapps`: created `persist-test`, killed the task with `restart-task`, replacement task came up, `webapps list` showed `persist-test` Running+Ready automatically, HTTP 200 served at the original URL.
 
+## Admin webapp & sidebar UI
+
+The WebUI's "Web Apps" panel is a thin reader on top of a **platform-owned webapp**, `__admin`. Rather than carve a one-off API path through Caddy → process-compose's admin port, we dogfood the same mechanism the agent uses: `__admin` is registered in `process-compose.yaml` like any other webapp, and the WebUI extension fetches `/webapps/__admin/api/webapps` same-origin. The path goes through policy-proxy → Caddy → loopback to the FastAPI admin process exactly like a user app would.
+
+This buys three things:
+
+- **Zero new surface.** No Caddy admin allow-list, no second sidecar, no per-endpoint auth bypass. If the webapps mechanism breaks, the panel breaks too — and that's actually what we want during a regression: one symptom, one diagnosis.
+- **Room to grow.** The slug is `__admin`, not `__webapps`. The same FastAPI process can host future runtime-admin endpoints (logs viewer, runtime ops) without ever putting "DOH" in a URL or carving a second admin path.
+- **Plain HTTP between browser and backend.** The WebUI extension is the only client; the API speaks ordinary JSON. No SSE, no WebSocket, no integrations broker.
+
+**Reserved-prefix convention.** The slug regex (`webapps_lib.SLUG_PATTERN`) accepts an optional `__` prefix. There is **no enforcement** in the CLI — a `__` slug is a Python-dunder-style hint that "this is platform internal," not a hard reservation. The bootstrap (`webapps create __admin --if-missing` in `webui.sh`) wins the cold-start race and registers the slug; subsequent agent attempts to create the same slug collide on the existing entry and error, which is the same behavior as any other slug collision. The skill's Don'ts tell the agent not to touch `__*` slugs.
+
+**Source layout.** `template_repos/hermes_agent/doh_runtime/admin/` (no "webapps" in the name — scope will grow). `__main__.py` reads `WEBAPP_PORT` from the env (set by the supervisor like for any webapp) and serves `server.py`'s FastAPI `app` on `127.0.0.1:$WEBAPP_PORT`. Boot order in `webui.sh`: start process-compose → wait for `/live` → `webapps create __admin --if-missing` → start WebUI → start Caddy. The `--if-missing` flag is idempotent; on a redeploy where `__admin` is already in the YAML, the bootstrap is a no-op.
+
+**v1 surface.** Read-only:
+
+- `GET /api/webapps` — list with slug/port/status/is_ready/restarts/routed/url/is_internal.
+- `GET /api/webapps/{slug}` — detail (adds command/working_dir/environment).
+- `GET /api/webapps/{slug}/logs?tail=N` — last N log lines (capped at 2000).
+
+No mutation endpoints: start/stop/restart/delete stay on the CLI. The panel polls every 3s while active and stops when the user navigates away.
+
+**WebUI extension.** Hermes' `HERMES_WEBUI_EXTENSION_SCRIPT_URLS` accepts a comma-separated list (validated by `apptoo/api/extensions.py:_read_url_list`), so DOH ships two parallel files: `doh-integrations.js` / `doh-integrations.css` and `doh-webapps.js` / `doh-webapps.css`. Both wrap the upstream `switchPanel` (chained, each with its own `__doh*Wrapped` flag) and contribute one rail icon + one sidebar pane + one main view. The webapps panel filters out `__*` slugs by default so the user sees only their own apps.
+
 ## Out of scope (v1)
 
 - **Non-HTTP background workers.** A Discord bot, a cron job, a queue consumer. Same supervisor would manage them but with no port + no Caddy route. `webapps create --no-port` was considered and rejected — the name `webapps` is a contract, and "background services" is a separate concept worth its own primitive in v2.
-- **WebUI sidebar discoverability.** No "Web Apps" panel in the WebUI listing live apps. The agent telling the user the URL after `webapps create` is sufficient for v1; a UI integration is a `webui-extension/doh.js` change for later.
+- **Mutations from the UI.** No start/stop/restart/delete buttons in the Web Apps panel. The CLI is the sole mutation surface in v1; the panel is a status reader.
 - **Resource limits per app.** A user app eating 100% CPU starves Hermes. process-compose doesn't do cgroup limits; ECS task-level limits exist but per-app limits don't. Not fixed in v1.
 - **Trash-bin on delete.** `webapps delete --yes` is total: route, supervision, logs, AND `projects/<slug>/`. Considered moving to `.trash/` for recoverability but rejected — too much janitorial complexity for a low-frequency operation. The skill mandates explicit user confirmation before passing `--yes`.
 
 ## Files of interest
 
 - **`template_repos/hermes_agent/doh_runtime/Caddyfile`** — the static config Caddy loads at boot.
-- **`template_repos/hermes_agent/doh_runtime/webapps`** — the CLI. Single Python file.
-- **`template_repos/hermes_agent/doh_runtime/webui.sh`** — launches Caddy + process-compose + WebUI inside nono and propagates failures.
+- **`template_repos/hermes_agent/doh_runtime/webapps`** — the CLI. Thin shim over `webapps_lib.py`.
+- **`template_repos/hermes_agent/doh_runtime/webapps_lib.py`** — shared helpers (slug pattern, YAML I/O, route generation, process-compose RPC). Imported by both the CLI and the admin webapp.
+- **`template_repos/hermes_agent/doh_runtime/admin/`** — the `__admin` FastAPI webapp (`server.py` + `__main__.py`).
+- **`template_repos/hermes_agent/webui-extension/doh-webapps.{js,css}`** — the Web Apps sidebar panel.
+- **`template_repos/hermes_agent/doh_runtime/webui.sh`** — launches Caddy + process-compose + WebUI inside nono, bootstraps `__admin`, propagates failures.
 - **`template_repos/hermes_agent/doh_runtime/supervisor.sh`** — exports `HERMES_WEBUI_PORT=8789` so WebUI clears port 8787 for Caddy.
 - **`template_repos/hermes_agent/doh_runtime/hermes-nono-profile.json`** — port allow-lists, binary read-allows, `DOH_PUBLIC_HOSTNAME` allow_vars entry.
 - **`template_repos/hermes_agent/Dockerfile`** — downloads Caddy + process-compose binaries; symlinks the CLI onto PATH.

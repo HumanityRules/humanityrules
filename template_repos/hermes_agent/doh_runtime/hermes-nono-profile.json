@@ -53,6 +53,9 @@
     "read_file": [
       "/opt/doh/runtime/webui.sh",
       "/opt/doh/runtime/webapps",
+      "/opt/doh/runtime/webapps_lib.py",
+      "/opt/doh/runtime/admin/__main__.py",
+      "/opt/doh/runtime/admin/server.py",
       "/opt/doh/runtime/Caddyfile",
       "/opt/doh/bin/aws",
       "/opt/doh/bin/gws",

@@ -122,6 +122,7 @@ cryptography>=42
 httpx>=0.27,<1
 fastmcp>=3.0,<4
 uvicorn>=0.30,<1
+fastapi>=0.110,<1
 rank_bm25>=0.2,<1
 EOF
 
