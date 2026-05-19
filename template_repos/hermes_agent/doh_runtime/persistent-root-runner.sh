@@ -3,7 +3,7 @@ set -euo pipefail
 
 : "${HERMES_PERSISTENT_ROOT:?HERMES_PERSISTENT_ROOT must be set}"
 : "${HERMES_CHECKPOINT_ROOT:?HERMES_CHECKPOINT_ROOT must be set}"
-CHECKPOINT_ARCHIVE_NAME="rootfs.tar"
+CHECKPOINT_ARCHIVE_NAME="rootfs.tar.zst"
 RUNTIME_PID=""
 TERMINATION_REQUESTED=0
 IMAGE_OWNED_DIRS=(
@@ -156,6 +156,7 @@ restore_persistent_root_from_checkpoint() {
     start_ms="$(now_ms)"
     echo "[persistent-root] Restoring ${HERMES_PERSISTENT_ROOT} from ${archive}..."
     tar --extract \
+        --zstd \
         --file "$archive" \
         --directory "$HERMES_PERSISTENT_ROOT" \
         --numeric-owner \
@@ -206,7 +207,13 @@ checkpoint_persistent_root() {
     start_ms="$(now_ms)"
     echo "[persistent-root] Writing checkpoint to ${archive}..."
     sync
+    # zstd: GNU tar shells out to the `zstd` binary on PATH (apt-installed).
+    # Default level 3, single-threaded — CPU is rarely the bottleneck here
+    # since EFS write throughput (~50 MB/s) caps the tar pipeline well below
+    # zstd's ~400 MB/s/core. If CPU ever becomes the limit, add `-T0` via
+    # ZSTD_NBTHREADS or pipe through `zstd -T0` explicitly.
     tar --create \
+        --zstd \
         --file "$tmp_archive" \
         --directory "$HERMES_PERSISTENT_ROOT" \
         --one-file-system \

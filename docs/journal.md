@@ -1,5 +1,58 @@
 # DevOpsHero Development Journal
 
+## 2026-05-19 12:17 - [Deployment] zstd-compress persistent-root checkpoints; fix login-shell PATH for non-supervisor shells; harden Phoenix LiveSocket guidance
+
+**Conversation:** [2026-05-19-1220-e07daac1.md](conversations/2026-05-19-1220-e07daac1.md)
+
+Three Hermes agent runtime improvements, all surfaced from a single bug report ("LiveView WebSocket fails on a Phoenix app deployed under the `webapps` skill"). The investigation cascaded outward: the immediate fix was a doc tweak, but the verification path exposed a latent PATH bug, and the verification *that* required pulling logs which exposed how slow checkpoint writes had become.
+
+### LiveSocket URL prefix — guidance was buried, agent skipped it
+
+Symptom in the browser: `WebSocket connection to wss://.../live/websocket failed` followed by `Uncaught Error: unhandled poll status undefined`. CSS/JS load fine because Phoenix's server-side `~p` sigils know about the `URL_PATH_PREFIX` from `runtime.exs`, but the JS-side `new LiveSocket("/live", Socket, ...)` is a string literal and bypasses Elixir entirely. The page renders, the agent reports success, the user opens devtools and finds it broken.
+
+The skill already documented the fix (a `<meta name="ws-path">` tag rendered through `Endpoint.path/1`, read in `app.js`), but it was a paragraph buried inside step #4 of `elixir.md`, after the runtime.exs change. Two consecutive agent runs ignored it. Fixed by promoting it to its own numbered step #5 with: a "most common LLM mistake" callout up front, the exact patch lines, and a `curl + grep ws-path` verification command the agent can run before reporting success.
+
+**Key points:**
+- Don't bury safety-critical guidance under "see also" prose. If the LLM doesn't try the verification command, it stops reading once the surface symptom (CSS/JS loading) goes away.
+- Verified end-to-end on a live `webmon` app: rendered HTML now contains `<meta name="ws-path" content="/webapps/webmon/live">` and the JS bundle hash changed after rebuild.
+
+### `/etc/profile.d/doh-bin.sh` clobbers PATH outside supervisor
+
+While trying to verify the LiveSocket fix, ECS-Exec'd into the container, ran `runuser -u hermeswebui -- bash -lc "mix ..."`, and got `mix: command not found`. PATH was empty. Traced to commit `d35b1b0` (Linuxbrew bake-in): the drop-in went from `export PATH="$DOH_BIN_DIR:$PATH"` (prepend) to `export PATH="$DOH_LOGIN_PATH"` (overwrite). `$DOH_LOGIN_PATH` is set only by `supervisor.sh`'s `run_in_nono` wrapper; any login shell *not* descended from supervisor — ECS Exec, ad-hoc `runuser`, future systemd-style scripts — sees it unset and gets `PATH=""`.
+
+Two-part fix:
+1. **Dockerfile**: change to `${DOH_LOGIN_PATH:-/opt/doh/bin:/home/linuxbrew/.linuxbrew/bin:...}`. Supervised path (where `$DOH_LOGIN_PATH` is set) is unchanged; debug shells get a working fallback that mirrors the supervisor's path minus the user venv (which only exists at runtime, so depending on it would re-introduce env coupling).
+2. **persistent-root-runner.sh**: add `copy_runtime_file /etc/profile.d/doh-bin.sh` to `prepare_runtime_filesystem`. Without this, the Dockerfile change would only land on freshly-initialized persistent roots — `/etc` is intentionally outside `IMAGE_OWNED_DIRS` (we don't want to clobber the rest of /etc on every redeploy), so existing roots froze the original buggy file forever. The same `copy_runtime_file` helper is already used for `/etc/{resolv.conf,hosts,hostname}`, so this fits the established pattern.
+
+**Key points:**
+- The persistent-root model has a class of bug shaped like "DOH-owned config in /etc never updates on redeploy." When you ship a new version of an `/etc/profile.d/...`, `/etc/sudoers.d/...`, or similar file, you have to plumb it through `copy_runtime_file` — `IMAGE_OWNED_DIRS` is path-scoped to `/opt/doh` and `/opt/hermes` only.
+- Verified by redeploying twice (first picks up the Dockerfile change; second picks up the runner change which then refreshes the profile.d file in the existing root) and confirming `runuser -u hermeswebui -- bash -lc "mix --version"` works.
+- Both fixes shipped in commit `d4bbf33`.
+
+### Checkpoint tar wasn't compressed — switched to zstd
+
+While pulling timing data to validate the path fix worked, found that `checkpoint_persistent_root` was writing a plain uncompressed tar to EFS, and recent checkpoints on `hermes-vmendi00` were taking **~95 s for ~5 GB**. The 5 GB came from a prior agent's `brew install elixir` pulling its full dep closure (llvm 2.7 GB, gcc 388 MB, binutils 431 MB, mesa 210 MB, etc. — elixir itself is only 11 MB).
+
+EFS write throughput on a small bursting filesystem is the bound (~14 MB/s effective in our measurements), so anything that shrinks the bytes-on-the-wire is approximately linear time savings. zstd at default level 3 is CPU-cheap (~400 MB/s/core) and easily exceeds EFS throughput, so compression is essentially free here.
+
+Three-line change:
+- Dockerfile: add `zstd` to the apt install list (GNU tar's `--zstd` flag shells out to the `zstd` binary on PATH; without it, the flag silently fails).
+- persistent-root-runner.sh: rename `CHECKPOINT_ARCHIVE_NAME` from `rootfs.tar` to `rootfs.tar.zst` (so a zstd-aware extract never accidentally tries to read a legacy uncompressed tar by the same name and vice versa), add `--zstd` to both `tar --create` and `tar --extract`.
+
+Verified end-to-end on a fresh test app `hermes-zstd-test` (deployed from the hermes-personal template with `--label vmendi-zstd` so it wouldn't collide with the unscoped main worker):
+- First boot: archive not found → init from image (12 s).
+- Triggered a redeploy → checkpoint wrote `/hermes-checkpoint/rootfs.tar.zst`. `file` reports "Zstandard compressed data (v0.8+)". `zstd -t` integrity check passed.
+- Compression ratio on the fresh-image content (no LLM-driven brew installs yet): **3.91×** (1.27 GB tar → 334 MB archive). Write took 24.4 s.
+- Manual `tar --extract --zstd` round-trip into `/tmp/test-restore` produced a valid 1.4 GB tree, confirming the restore path works (the actual restore branch in `restore_persistent_root_from_checkpoint` only fires when a task lands on a fresh EC2 host, which the rolling redeploy didn't exercise).
+
+Extrapolation to `hermes-vmendi00`'s 5 GB tree: ~95 s → ~25 s, **~70% saved per redeploy**.
+
+**Key points:**
+- Compression ratio depends heavily on what the agent installed. Fresh image (system files + Hermes venv) compresses 3.9×. Brew-heavy installs (already-stripped ELF binaries) compress less, probably 1.3–1.5×, so a 5 GB brew tree → ~3.5–3.8 GB archive — still a major win over uncompressed.
+- The brew tree itself is the bigger cost driver. `brew install elixir` on Linuxbrew pulls ~30 transitive packages totaling ~4.9 GB even though elixir is 11 MB. Most of that (llvm, gcc, binutils, mesa) is build-time only and could in principle be uninstalled after the install, but that'd cost reproducibility — leaving it alone for now.
+- The restore branch wasn't directly exercised in production because ECS rolling redeploys reuse the same EC2 host, so the host bind-mount `/var/lib/devopshero/hermes-roots/<slug>` is non-empty and `is_empty_dir` returns false → "Reusing" path. Restore only fires on host replacement / scale-out / cold task placement.
+- The zstd change is staged but not yet committed pending user review.
+
 ## 2026-05-18 23:05 - [Deployment] Bake Linuxbrew into hermes_agent image; document Mix 1.19 sandbox traps in webapps skill
 
 **Conversation:** [2026-05-18-2307-2a9e38cf.md](conversations/2026-05-18-2307-2a9e38cf.md)
