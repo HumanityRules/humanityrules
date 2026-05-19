@@ -239,6 +239,8 @@ run_in_nono() {
         )
     fi
 
+    local doh_login_path="${HERMES_WEBUI_DEFAULT_WORKSPACE}/.venv/bin:${DOH_BIN_DIR}:/home/linuxbrew/.linuxbrew/bin:/home/linuxbrew/.linuxbrew/sbin:/usr/local/bin:/usr/local/sbin:/usr/bin:/usr/sbin:/bin:/sbin"
+
     # Drop privileges to hermeswebui before launching the sandbox so the LLM,
     # terminal, and execute_code all run as UID 1024. Combined with nono's
     # bounding set (CAP_SYS_PTRACE dropped), this makes /proc/<pid>/environ on
@@ -261,8 +263,13 @@ run_in_nono() {
         AWS_EC2_METADATA_DISABLED=true \
         HOME="$HERMES_WEBUI_DEFAULT_WORKSPACE" \
         HERMES_WEBUI_PORT=8789 \
+        HOMEBREW_PREFIX=/home/linuxbrew/.linuxbrew \
+        HOMEBREW_NO_ANALYTICS=1 \
+        HOMEBREW_NO_AUTO_UPDATE=1 \
+        HOMEBREW_INSTALL_FROM_API=1 \
         VIRTUAL_ENV="${HERMES_WEBUI_DEFAULT_WORKSPACE}/.venv" \
-        PATH="${HERMES_WEBUI_DEFAULT_WORKSPACE}/.venv/bin:${DOH_BIN_DIR}:/usr/local/bin:/usr/local/sbin:/usr/bin:/usr/sbin:/bin:/sbin" \
+        DOH_LOGIN_PATH="$doh_login_path" \
+        PATH="$doh_login_path" \
         NO_PROXY=127.0.0.1,localhost \
         "${broker_env[@]}" \
         "$@"

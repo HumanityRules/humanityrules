@@ -88,7 +88,7 @@ The CLI maps to the shapes you'll need:
 
 ## Framework gotchas
 
-- **Phoenix:** Configure the endpoint to listen on `127.0.0.1:$WEBAPP_PORT` (generated apps usually honor `PORT`, so run with `PORT=$WEBAPP_PORT`). For anything beyond a quick dev server, build a release with `MIX_ENV=prod mix release` and run the release binary from `webapps create --command`.
+- **Phoenix / Elixir** — read [`elixir.md`](elixir.md) before scaffolding.
 
 ## Don'ts
 

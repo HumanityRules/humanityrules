@@ -1,5 +1,40 @@
 # DevOpsHero Development Journal
 
+## 2026-05-18 23:05 - [Deployment] Bake Linuxbrew into hermes_agent image; document Mix 1.19 sandbox traps in webapps skill
+
+**Conversation:** [2026-05-18-2307-2a9e38cf.md](conversations/2026-05-18-2307-2a9e38cf.md)
+
+Two related changes to the Hermes agent container, driven by the agent needing to install dev tools at runtime (concretely: it had to install Elixir to scaffold a Phoenix dashboard).
+
+### Linuxbrew, baked into the image at the canonical prefix
+
+The agent runs as `hermeswebui` (UID 1024) inside nono with Landlock enforcing the filesystem profile, so `apt-get install` is dead — it can't escalate. `pip` works for Python; for everything else (Elixir, jq, gh, kubectl, …) the natural fit is Homebrew. Linuxbrew has one strict constraint: bottle binaries are RPATH-locked to `/home/linuxbrew/.linuxbrew`, so any other prefix forces source builds (slow, needs gcc/make in the image). We started by exploring a `/workspace/.linuxbrew` install with a `/home/linuxbrew/.linuxbrew → /workspace/.linuxbrew` symlink — the user then pointed out the simpler answer: `/home` is *not* in `IMAGE_OWNED_DIRS` and is not excluded from `persistent-root-runner.sh`'s wholesale `/ → persistent root` rsync nor its checkpoint tar, so installs at the canonical prefix already persist for free. Reverted to a plain install at `/home/linuxbrew/.linuxbrew`, no symlink.
+
+**Key points:**
+- Bottle RPATH constraint is non-negotiable. Standard prefix or accept source builds — there's no third option that gives you bottles. Future-me trying to "redirect" Linuxbrew somewhere else: don't.
+- `/home` is already persistent. The persistent-root rsync exclusion list is `/dev`, `/opt/doh`, `/opt/hermes`, `/proc`, `/run`, `/sys`, `/tmp`. `/home` rides along with the rest of `/usr`, `/var`, `/etc`. So image-time installs survive first boot, and runtime `brew install`s survive redeploys via the checkpoint tar. Same persistence model as the user `.venv` — including the same downside: image rebuilds don't refresh existing persistent roots, agent has to `brew update` manually if we want a newer brew clone.
+- nono profile needed `/home/linuxbrew` added to `filesystem.allow` (sandbox writes there for `brew install`). Tried `read` first, then realized writes need `allow`.
+- Dockerfile changes: added `file` and `procps` to apt deps (brew bootstrap); added `HOMEBREW_PREFIX=/home/linuxbrew/.linuxbrew`, `HOMEBREW_NO_ANALYTICS=1`, `HOMEBREW_NO_AUTO_UPDATE=1`, `HOMEBREW_INSTALL_FROM_API=1` to `/etc/profile.d/doh-bin.sh` so the env survives `bash -l` resets in Hermes' terminal session snapshot. `HOMEBREW_INSTALL_FROM_API=1` skips cloning the multi-GB homebrew-core tap — brew fetches formula JSON on demand.
+- `supervisor.sh`'s `run_in_nono` got `/home/linuxbrew/.linuxbrew/{bin,sbin}` prepended to the sandbox PATH, plus the four `HOMEBREW_*` env vars passed through. (Subsequent linter/user pass switched the supervisor to use a `DOH_LOGIN_PATH` indirection — same idea, cleaner.)
+- SOUL.md got an "Installing packages" section telling the agent: use `brew install` (no sudo, persistent), `pip install` for Python in the activated venv, and bail out if no formula exists rather than try `sudo apt`.
+
+### Mix 1.19 + Erlang releases on nono — the four bind traps
+
+The agent succeeded at building a Phoenix LiveView dashboard, but only after working through four sandbox-bind failures. Documented these in a new `template_repos/hermes_agent/skills/webapps/elixir.md` so the next agent doesn't waste a full session re-learning them. SKILL.md's "Framework gotchas" section now points to that file.
+
+The root cause is that nono's network policy uses `Vec<u16>` for `listen_port`/`open_port` — no range syntax, no wildcards, and Landlock can't filter by destination IP, so loopback gets no special treatment. The 4000–4019 range allows webapps to listen on their assigned `$WEBAPP_PORT`, and that's it. Anything that tries to `bind(127.0.0.1, ephemeral)` outside that range hits `EACCES`. Investigated whether we could widen this at the nono layer — confirmed via subagent that there is no clean profile widening, so the fix lives entirely in per-language documentation.
+
+**The four traps and their fixes:**
+1. `Mix.Sync.Lock` (Mix 1.19+) — opens a transient loopback socket for the build-time concurrency lock. `MIX_OS_CONCURRENCY_LOCK=0` disables it.
+2. `Mix.PubSub` (Mix 1.19+) — same problem, no env-var off-switch. The agent worked around it by patching the compiled BEAM at `/home/linuxbrew/.linuxbrew/opt/elixir/lib/elixir/lib/mix/ebin/Elixir.Mix.PubSub.beam` with a no-op module of the same name (original copied to `.beam.orig`). Documented the recipe but flagged that it must be re-applied after every `brew upgrade elixir`.
+3. EPMD / Erlang distribution — releases start in distributed mode and EPMD wants an ephemeral port → `Protocol 'inet_tcp': register/listen error: eacces`. `RELEASE_DISTRIBUTION=none` + `ERL_EPMD_PORT=-1` in the release launcher fixes it.
+4. `URL_PATH_PREFIX` for LiveView, sockets, and assets — Phoenix's `X-Forwarded-Prefix` handling doesn't reach LiveView, the WebSocket endpoint, or static asset URLs. Wire the prefix through `config :endpoint, url: [path: prefix]` in `runtime.exs`. The runtime config covers server-rendered URLs but not the JS-side `new LiveSocket("/live", ...)` literal — that needs a meta-tag injection + JS read pattern, which the doc spells out.
+
+**Key points:**
+- The previous journal entry on this topic (`docs/journal.md` Phoenix LiveView paragraph from the webapps initial-design entry) claimed `mix release` doesn't trigger Mix.Sync. That's wrong on Mix 1.19 — both `Mix.Sync.Lock` and `Mix.PubSub` fire on every `mix` invocation, including releases. Future readers should trust `elixir.md`, not the older journal text.
+- Symptom worth memorizing: empty `routes.caddy` after first `webapps create` for an Elixir app means EPMD bind blocked readiness. Fix the env, then `webapps stop && webapps start` to regenerate the route block.
+- Redeploy sequence (in `elixir.md`): `MIX_ENV=prod mix assets.deploy && MIX_ENV=prod mix release --overwrite && webapps restart <slug>`. `--overwrite` is required on rebuilds. `ELIXIR_ERL_OPTIONS="+fnu"` if you hit filename-encoding warnings.
+
 ## 2026-05-18 15:56 - [Deployment] Remove dead passwordless-sudo plumbing from hermes_agent runtime
 
 **Conversation:** [2026-05-18-1557-998a6720.md](conversations/2026-05-18-1557-998a6720.md)

@@ -31,7 +31,7 @@ ENV PATH=${DOH_BIN_DIR}:${PATH}
 
 RUN mkdir -p "$DOH_BIN_DIR" \
     && apt-get update \
-    && apt-get install -y --no-install-recommends ca-certificates curl git libdbus-1-3 patch rsync unzip \
+    && apt-get install -y --no-install-recommends ca-certificates curl file git libdbus-1-3 patch procps rsync unzip \
     && arch="$(dpkg --print-architecture)" \
     && curl -fsSL -o /tmp/nono.deb \
         "https://github.com/always-further/nono/releases/download/v${NONO_VERSION}/nono-cli_${NONO_VERSION}_${arch}.deb" \
@@ -59,11 +59,17 @@ RUN mkdir -p "$DOH_BIN_DIR" \
     && rm -rf /tmp/aws /tmp/awscliv2.zip \
     && rm -rf /var/lib/apt/lists/*
 
-# Ensure /opt/doh/bin survives login-shell PATH resets. Debian's /etc/profile
-# rewrites PATH from scratch for non-root uids; Hermes' terminal session
-# snapshot uses `bash -l`, so without this drop-in, hermeswebui's snapshot
-# loses /opt/doh/bin and tools like gws/aws become invisible to the agent.
-RUN echo "export PATH=\"${DOH_BIN_DIR}:\$PATH\"" > /etc/profile.d/doh-bin.sh
+# Ensure the sandbox's intended PATH survives login-shell resets. Debian's
+# /etc/profile rewrites PATH from scratch for non-root uids; Hermes' terminal
+# session snapshot uses `bash -l`, so this drop-in restores the supervisor's
+# DOH_LOGIN_PATH after /etc/profile runs.
+RUN { \
+      echo 'export PATH="$DOH_LOGIN_PATH"'; \
+      echo "export HOMEBREW_PREFIX=/home/linuxbrew/.linuxbrew"; \
+      echo "export HOMEBREW_NO_ANALYTICS=1"; \
+      echo "export HOMEBREW_NO_AUTO_UPDATE=1"; \
+      echo "export HOMEBREW_INSTALL_FROM_API=1"; \
+    } > /etc/profile.d/doh-bin.sh
 
 COPY --chmod=755 build/prune-skills.sh /tmp/prune-skills.sh
 RUN git clone --depth 1 --branch v2026.5.7 https://github.com/NousResearch/hermes-agent.git \
@@ -125,6 +131,11 @@ RUN mkdir -p /uv_cache "$HERMES_WEBUI_DIR" "$HERMES_HOME" "$HERMES_WEBUI_DEFAULT
     && rm -rf /app /apptoo \
     && chown -R hermeswebui:hermeswebui /uv_cache "$HERMES_ROOT" "$HERMES_HOME" "$HERMES_WEBUI_DEFAULT_WORKSPACE"
 
+# /home is preserved by persistent-root-runner.sh's full-rootfs rsync and
+# tar checkpoint, so brew installs under /home/linuxbrew/.linuxbrew survive
+# redeploys without any extra plumbing.
+RUN mkdir -p /home/linuxbrew && chown hermeswebui:hermeswebui /home/linuxbrew
+
 USER hermeswebui
 
 RUN cd "$HERMES_WEBUI_DIR" \
@@ -143,6 +154,18 @@ RUN cd "$HERMES_WEBUI_DIR" \
 # first boot and preserved across redeploys, so the agent's installs (pip,
 # apt-get) survive container restarts.
 RUN uv venv --python /usr/local/bin/python3 "${HERMES_WEBUI_DEFAULT_WORKSPACE}/.venv"
+
+# Linuxbrew bootstrap. Bottles are RPATH-locked to /home/linuxbrew/.linuxbrew,
+# so we install at the canonical prefix and let the persistent-root rsync
+# preserve the tree across redeploys (including the agent's `brew install`s).
+# HOMEBREW_INSTALL_FROM_API skips cloning the multi-GB homebrew-core tap;
+# brew fetches formula JSON on demand.
+RUN mkdir -p /home/linuxbrew/.linuxbrew/bin \
+    && git clone --depth=1 https://github.com/Homebrew/brew \
+         /home/linuxbrew/.linuxbrew/Homebrew \
+    && ln -s ../Homebrew/bin/brew /home/linuxbrew/.linuxbrew/bin/brew \
+    && HOMEBREW_NO_AUTO_UPDATE=1 HOMEBREW_NO_ANALYTICS=1 HOMEBREW_INSTALL_FROM_API=1 \
+       /home/linuxbrew/.linuxbrew/bin/brew --version
 
 USER root
 
