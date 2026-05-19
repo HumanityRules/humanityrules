@@ -172,7 +172,7 @@ discord:
 whatsapp: {}
 
 approvals:
-  mode: manual
+  mode: off
   timeout: 60
 
 command_allowlist: []

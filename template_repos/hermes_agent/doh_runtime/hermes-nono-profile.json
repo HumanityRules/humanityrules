@@ -10,6 +10,7 @@
   "environment": {
     "allow_vars": [
       "DOH_BIN_DIR",
+      "DOH_LOGIN_PATH",
       "DOH_ROOT",
       "DOH_RUN_DIR",
       "DOH_RUNTIME_DIR",
@@ -37,6 +38,7 @@
   "filesystem": {
     "allow": [
       "/etc",
+      "/home/linuxbrew",
       "/run",
       "/tmp",
       "/usr",
