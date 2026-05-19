@@ -11,7 +11,7 @@ metadata:
 
 # Webapps
 
-Use this skill when the user asks you to build a web app, dashboard, microsite, or HTTP service. The user will be able to reach the app in a browser at the agent's own hostname.
+Use this skill when the user asks you to build a web app, dashboard, microsite, or HTTP service. The user will be able to reach the app in a browser at the agent's own hostname. 
 
 ## What this gives you
 
@@ -98,7 +98,9 @@ The CLI maps to the shapes you'll need:
 - **Don't run `webapps delete <slug> --yes` without first telling the user what will be removed and getting explicit confirmation.** Delete is total: route, supervision, logs, AND `projects/<slug>/`.
 - **Don't bind the app to anything other than `127.0.0.1:$WEBAPP_PORT`.** Apps must listen on loopback only. Many frameworks default to `0.0.0.0`; explicitly bind to `127.0.0.1`.
 - **Don't put your project source elsewhere.** Keep code under `/workspace/webapps/projects/<slug>/`. The CLI's `delete` cleans that path; if your code is somewhere else, deletion will leave orphans.
-
+- **Don't create or delete slugs starting with `__`.** They're reserved for platform internals (e.g. `__admin`). Pick a slug that begins with a letter.
+- **Don't plan nor offer to build an authentication feature to the user for the web app.** The app does not need any authentication mechanism because the platform provides for it through a policy proxy.
+- 
 ## Failure modes
 
 - **"did not become ready"** after `webapps create`: check `webapps logs <slug>`. The app probably crashed at startup, didn't bind the port, or bound the wrong port (must use `$WEBAPP_PORT`).

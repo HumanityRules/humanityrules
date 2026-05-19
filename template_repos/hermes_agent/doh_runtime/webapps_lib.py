@@ -1,0 +1,202 @@
+"""Shared helpers for the webapps mechanism.
+
+Imported by both the `webapps` CLI and the `__admin` webapp. Source of truth
+is /workspace/webapps/process-compose.yaml; routes.caddy is regenerated from
+it on every mutation. See docs/webapps_design.md.
+"""
+from __future__ import annotations
+
+import fcntl
+import json
+import os
+import re
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+import yaml
+
+WEBAPPS_ROOT = Path("/workspace/webapps")
+PROCESS_COMPOSE_YAML = WEBAPPS_ROOT / "process-compose.yaml"
+CADDY_ROUTES = WEBAPPS_ROOT / "routes.caddy"
+PROJECTS_DIR = WEBAPPS_ROOT / "projects"
+LOGS_DIR = WEBAPPS_ROOT / "logs"
+LOCK_FILE = WEBAPPS_ROOT / ".lock"
+
+PORT_MIN = 4000
+PORT_MAX = 4019
+PROCESS_COMPOSE_ADDR = "127.0.0.1"
+PROCESS_COMPOSE_PORT = "9956"
+DEFAULT_TIMEOUT_SECONDS = 90
+# Optional `__` prefix marks platform-internal slugs (e.g. __admin). No
+# enforcement: bootstrap wins the cold-start race; agent attempts collide.
+SLUG_PATTERN = re.compile(r"^(?:__)?[a-z][a-z0-9-]{0,30}[a-z0-9]$")
+
+
+def die(msg: str, code: int = 1) -> None:
+    print(f"webapps: {msg}", file=sys.stderr)
+    sys.exit(code)
+
+
+def ensure_layout() -> None:
+    for p in (WEBAPPS_ROOT, PROJECTS_DIR, LOGS_DIR):
+        p.mkdir(parents=True, exist_ok=True)
+    if not PROCESS_COMPOSE_YAML.exists():
+        PROCESS_COMPOSE_YAML.write_text('version: "0.5"\nprocesses: {}\n')
+    if not CADDY_ROUTES.exists():
+        CADDY_ROUTES.write_text("# no routes\n")
+
+
+class Lock:
+    def __enter__(self):
+        ensure_layout()
+        self.fh = open(LOCK_FILE, "w")
+        fcntl.flock(self.fh.fileno(), fcntl.LOCK_EX)
+        return self
+
+    def __exit__(self, *_exc):
+        fcntl.flock(self.fh.fileno(), fcntl.LOCK_UN)
+        self.fh.close()
+
+
+def load_yaml() -> dict:
+    raw = yaml.safe_load(PROCESS_COMPOSE_YAML.read_text()) or {}
+    raw.setdefault("version", "0.5")
+    raw.setdefault("processes", {})
+    return raw
+
+
+def save_yaml(doc: dict) -> None:
+    tmp = PROCESS_COMPOSE_YAML.with_suffix(".yaml.tmp")
+    tmp.write_text(yaml.safe_dump(doc, sort_keys=False))
+    tmp.replace(PROCESS_COMPOSE_YAML)
+
+
+def pc(*args: str, check: bool = True, capture: bool = False) -> subprocess.CompletedProcess:
+    cmd = [
+        "process-compose",
+        "--address", PROCESS_COMPOSE_ADDR,
+        "--port", PROCESS_COMPOSE_PORT,
+        *args,
+    ]
+    return subprocess.run(cmd, check=check, capture_output=capture, text=True)
+
+
+def project_update() -> None:
+    pc("project", "update", "--config", str(PROCESS_COMPOSE_YAML))
+
+
+def process_states() -> list[dict]:
+    res = pc("list", "-o", "json", check=False, capture=True)
+    if res.returncode != 0:
+        die(f"process-compose list failed: {res.stderr.strip()}")
+    return json.loads(res.stdout or "[]")
+
+
+def state_for(slug: str) -> dict | None:
+    return next((s for s in process_states() if s.get("name") == slug), None)
+
+
+def port_from_entry(entry: dict) -> int | None:
+    for item in entry.get("environment", []):
+        if item.startswith("WEBAPP_PORT="):
+            return int(item.split("=", 1)[1])
+    return None
+
+
+def used_ports(doc: dict) -> set[int]:
+    ports: set[int] = set()
+    for entry in doc.get("processes", {}).values():
+        port = port_from_entry(entry)
+        if port is not None:
+            ports.add(port)
+    return ports
+
+
+def next_free_port(doc: dict) -> int:
+    used = used_ports(doc)
+    for port in range(PORT_MIN, PORT_MAX + 1):
+        if port not in used:
+            return port
+    die(f"no free ports in {PORT_MIN}-{PORT_MAX}; delete an app first")
+
+
+def validate_slug(slug: str) -> None:
+    if not SLUG_PATTERN.match(slug):
+        die(
+            f"invalid slug {slug!r}: lowercase letters/digits/hyphens, "
+            "2-32 chars, must start with letter and end alphanumeric "
+            "(optional `__` prefix reserved for platform internals)"
+        )
+
+
+def route_block(slug: str, port: int) -> str:
+    return (
+        f"redir /webapps/{slug} /webapps/{slug}/ 308\n"
+        f"handle_path /webapps/{slug}/* {{\n"
+        f"\treverse_proxy 127.0.0.1:{port} {{\n"
+        f"\t\theader_up X-Forwarded-Host {{header.X-Forwarded-Host}}\n"
+        f"\t\theader_up X-Forwarded-Prefix /webapps/{slug}\n"
+        f"\t}}\n"
+        f"}}\n"
+    )
+
+
+def regenerate_routes(doc: dict) -> None:
+    blocks: list[str] = []
+    for slug, entry in sorted(doc.get("processes", {}).items()):
+        if entry.get("disabled"):
+            continue
+        port = port_from_entry(entry)
+        if port is not None:
+            blocks.append(route_block(slug=slug, port=port))
+    CADDY_ROUTES.write_text("".join(blocks) if blocks else "# no routes\n")
+
+
+def is_routed(entry: dict) -> bool:
+    return not entry.get("disabled") and port_from_entry(entry) is not None
+
+
+def make_process_entry(slug: str, command: str, cwd: str, port: int) -> dict:
+    return {
+        "command": command,
+        "working_dir": cwd,
+        "log_location": str(LOGS_DIR / f"{slug}.log"),
+        "environment": [f"WEBAPP_PORT={port}"],
+        "availability": {
+            "restart": "on_failure",
+            "backoff_seconds": 2,
+            "max_restarts": 5,
+        },
+        "readiness_probe": {
+            "exec": {
+                "command": f"bash -c 'echo > /dev/tcp/127.0.0.1/{port}'",
+            },
+            "initial_delay_seconds": 1,
+            "period_seconds": 2,
+            "timeout_seconds": 2,
+            "success_threshold": 1,
+            "failure_threshold": 1,
+        },
+    }
+
+
+def wait_for_ready(slug: str, timeout: int) -> dict:
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        state = state_for(slug)
+        if state is None:
+            time.sleep(0.5)
+            continue
+        if state.get("is_ready") == "Ready":
+            return state
+        if state.get("status") == "Error":
+            return state
+        time.sleep(0.5)
+    return state_for(slug) or {"name": slug, "status": "unknown", "is_ready": "Unknown"}
+
+
+def url_for(slug: str) -> str:
+    host = os.environ.get("DOH_PUBLIC_HOSTNAME") or "<your-agent-hostname>"
+    return f"https://{host}/webapps/{slug}/"
