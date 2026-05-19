@@ -6,6 +6,7 @@ ARG NONO_VERSION=0.53.0
 ARG GWS_VERSION=0.22.5
 ARG CADDY_VERSION=2.11.3
 ARG PROCESS_COMPOSE_VERSION=1.110.0
+ARG TTYD_VERSION=1.7.7
 ARG HERMES_AGENT_EXTRAS=modal,daytona,vercel,messaging,matrix,cron,cli,dev,tts-premium,slack,pty,honcho,mcp,homeassistant,sms,acp,voice,dingtalk,feishu,google,bedrock,web
 
 # Runtime layout: /opt/doh and /opt/hermes are image-owned and refreshed into
@@ -54,6 +55,9 @@ RUN mkdir -p "$DOH_BIN_DIR" \
         "https://github.com/F1bonacc1/process-compose/releases/download/v${PROCESS_COMPOSE_VERSION}/process-compose_linux_${arch}.tar.gz" \
     && tar -xzf /tmp/process-compose.tar.gz -C "$DOH_BIN_DIR" process-compose \
     && chmod +x "$DOH_BIN_DIR/process-compose" \
+    && curl -fsSL -o "$DOH_BIN_DIR/ttyd" \
+        "https://github.com/tsl0922/ttyd/releases/download/${TTYD_VERSION}/ttyd.${aws_arch}" \
+    && chmod +x "$DOH_BIN_DIR/ttyd" \
     && sed -i 's|http://deb.debian.org|https://deb.debian.org|g' /etc/apt/sources.list.d/debian.sources \
     && rm -f /tmp/nono.deb /tmp/gws.tar.gz /tmp/caddy.tar.gz /tmp/process-compose.tar.gz \
     && rm -rf /tmp/aws /tmp/awscliv2.zip \
