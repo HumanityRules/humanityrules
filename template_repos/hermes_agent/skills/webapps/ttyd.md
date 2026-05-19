@@ -2,6 +2,8 @@
 
 Read this *before* registering a `ttyd` web terminal under `webapps`. ttyd has two flag traps that trip every LLM scaffold.
 
+`ttyd` is preinstalled and on `PATH` — do not `brew install` it.
+
 ## Recommended command
 
 ```bash
