@@ -89,6 +89,10 @@ The CLI maps to the shapes you'll need:
 ## Framework gotchas
 
 - **Phoenix / Elixir** — read [`elixir.md`](elixir.md) before scaffolding.
+- **ttyd** — read [`ttyd.md`](ttyd.md) before registering a web terminal.
+- **Inbound base-path / mount-prefix flags** (router-mount options, `--base-path`, etc.): leave them at the default. The proxy already strips `/webapps/<slug>`, so the app must serve incoming requests at `/`.
+- **Outbound public URL settings** (`--root-url`, generated asset URLs, server-rendered WebSocket URLs): these may need the public prefix. Prefer reading `X-Forwarded-Prefix`; if the framework cannot, pass `/webapps/<slug>` as a public URL/path setting only — never as an inbound router mount.
+- **Client-side WebSocket URLs**: if the framework's JS opens a WebSocket using an *absolute* path (e.g. `new WebSocket("/ws")`, `new LiveSocket("/live", …)`, Socket.IO defaults, Vite HMR), the connection bypasses `/webapps/<slug>` and the proxy returns 404. Either configure the framework to emit a prefixed path, or inject the prefix into the page (meta tag, data attribute, …) and read it in JS. Frameworks that use *relative* paths (ttyd) need no change.
 
 ## Don'ts
 
@@ -100,10 +104,11 @@ The CLI maps to the shapes you'll need:
 - **Don't put your project source elsewhere.** Keep code under `/workspace/webapps/projects/<slug>/`. The CLI's `delete` cleans that path; if your code is somewhere else, deletion will leave orphans.
 - **Don't create or delete slugs starting with `__`.** They're reserved for platform internals (e.g. `__admin`). Pick a slug that begins with a letter.
 - **Don't plan nor offer to build an authentication feature to the user for the web app.** The app does not need any authentication mechanism because the platform provides for it through a policy proxy.
-- 
+  
 ## Failure modes
 
 - **"did not become ready"** after `webapps create`: check `webapps logs <slug>`. The app probably crashed at startup, didn't bind the port, or bound the wrong port (must use `$WEBAPP_PORT`).
 - **502 Bad Gateway in browser**: the app crashed after registering. `webapps list` will show non-`Ready`. Logs have the trace.
 - **404 Not Found in browser**: either the slug is wrong or the app is stopped. `webapps list` shows current routes.
 - **`EACCES` / "permission denied" on bind**: the app is trying to bind to a port outside the allowed range (4000–4019). Configure the app to bind only to `$WEBAPP_PORT`.
+- **404 in browser but `webapps list` shows `Ready`**: the app is probably expecting incoming requests under `/webapps/<slug>`. Remove the inbound base-path/mount setting; keep only outbound public URL prefix config if the framework needs it.
