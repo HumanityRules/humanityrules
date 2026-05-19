@@ -519,6 +519,12 @@
   //      so we apply ours after upstream has run. CSS gated on this class
   //      hides the sidebar while Integrations owns the screen, so our page
   //      isn't sitting next to an empty/confusing sidebar drawer.
+  //
+  // The refresh fetch is intentionally NOT awaited: a sibling wrapper (e.g.
+  // doh-webapps.js) is waiting for us to return before it toggles its own
+  // `showing-<panel>` class off, and a multi-second broker fetch in between
+  // would leave both panels' classes set simultaneously, so both views would
+  // render on top of each other until the fetch resolved.
   function wrapSwitchPanel() {
     if (typeof window.switchPanel !== 'function') return;
     if (window.__dohPanelWrapped) return;
@@ -528,7 +534,7 @@
       const result = await orig.apply(this, arguments);
       const mainEl = document.querySelector('main.main');
       if (mainEl) mainEl.classList.toggle('showing-integrations', name === 'integrations');
-      if (name === 'integrations') await refreshAndRender();
+      if (name === 'integrations') refreshAndRender();
       return result;
     };
   }

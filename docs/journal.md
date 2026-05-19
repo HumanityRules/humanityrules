@@ -1,5 +1,23 @@
 # DevOpsHero Development Journal
 
+## 2026-05-19 16:31 - [Bugfix] Two WebUI panels render simultaneously on tab switch
+
+**Conversation:** [2026-05-19-1635-508aebe6.md](conversations/2026-05-19-1635-508aebe6.md)
+
+User reported that switching from "Web Apps" to "Integrations" in the Hermes WebUI showed both panels stacked for several seconds before Integrations alone settled in. The Integrations page rendered at the top, the Web Apps page rendered halfway down, and only after the broker fetch resolved did Web Apps disappear.
+
+Root cause is in how the two DOH WebUI extensions (`doh-integrations.js`, `doh-webapps.js`) coexist. Each one wraps `window.switchPanel` to (a) toggle a `showing-<panel>` class on `<main>` and (b) trigger a refresh when their panel is opened. Because they both wrap the same global, the second-loaded wrapper sits *outside* the first — so switching to Integrations runs `webapps-wrapper → integrations-wrapper → orig`.
+
+The integrations wrapper was awaiting `refreshAndRender()` (a network call to `/__doh_broker/integrations` that takes a few seconds) **after** flipping `showing-integrations` ON, but **before** returning. The webapps wrapper, sitting outside, only flips `showing-webapps` OFF after that await resolves. Result: for the duration of the broker fetch, `<main>` carries both `showing-webapps` and `showing-integrations`, and the CSS reveals both views. CSS forces `#mainChat` hidden when either class is present (`display: none !important`), but it never hides `#mainWebapps` when `showing-integrations` is also set, so they overlap.
+
+Fix at `template_repos/hermes_agent/webui-extension/doh-integrations.js:531`: drop the `await` from the refresh call. The class toggles now run in one synchronous tick, so the views never overlap. The fetch still resolves and re-renders the pane in the background — UX is the same except for the absence of the visual overlap.
+
+**Key points:**
+- Wrapping a shared global like `switchPanel` with two independent extensions is a coordination hazard: any awaited work inside the inner wrapper stalls the outer wrapper's cleanup. Either wrappers must avoid awaiting non-trivial work between class toggles, or the extensions need a shared coordinator that batches the toggles atomically.
+- `showing-webapps` and `showing-integrations` are not mutually exclusive at the CSS level — neither rule hides the *other* panel's view. Adding `:not(.showing-X)` guards on the reveal rules would have been a defensive belt-and-suspenders, but the real bug was in the JS sequencing, so we left CSS alone.
+- The webapps wrapper kicks off `await refreshAndRender(); startPolling();` on activation; that's still awaited and could theoretically reproduce the symptom in the reverse direction (integrations → webapps). The webapps fetch hits a same-origin admin endpoint and is fast in practice, so we did not change it. If it ever causes the same overlap, mirror the fix.
+- Symptom diagnosis tip for future-me: when two views overlap during a transition, check what's between the class-toggle and the function return in any wrapper of the navigation primitive. An awaited fetch is the classic offender.
+
 ## 2026-05-19 14:04 - [Deployment] WebSocket support in policy-proxy sidecar
 
 **Conversation:** [2026-05-19-1407-b3a985ef.md](conversations/2026-05-19-1407-b3a985ef.md)
