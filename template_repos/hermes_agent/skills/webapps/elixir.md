@@ -1,12 +1,12 @@
 # Phoenix / Elixir on webapps
 
-Read this *before* scaffolding any Elixir or Phoenix app under `webapps`. The sandbox has four traps that fire on every Mix 1.19+ project and on every Erlang release; all four have fixes you must apply up front.
+Read this *before* scaffolding any Elixir or Phoenix app under `webapps`. The sandbox has five traps that fire on every Mix 1.19+ project and on every Erlang release; all five have fixes you must apply up front.
 
 ## Endpoint config
 
 Configure the endpoint to listen on `127.0.0.1:$WEBAPP_PORT` (generated apps usually honor `PORT`, so run with `PORT=$WEBAPP_PORT`). For anything beyond a quick dev server, build a release with `MIX_ENV=prod mix release` and run the release binary from `webapps create --command`.
 
-## Sandbox bind restrictions — the four fixes
+## Sandbox bind restrictions — the five fixes
 
 The sandbox blocks `bind(127.0.0.1, <ephemeral>)` outside the 4000–4019 webapps range. That breaks:
 
@@ -38,7 +38,7 @@ export RELEASE_DISTRIBUTION=none
 export ERL_EPMD_PORT=-1
 ```
 
-### 4. `URL_PATH_PREFIX` for LiveView, sockets, and assets
+### 4. `URL_PATH_PREFIX` for server-rendered URLs (runtime.exs)
 
 Phoenix's `X-Forwarded-Prefix` handling doesn't reach LiveView, the WebSocket endpoint, or static asset URLs. Wire the prefix through explicitly in `config/runtime.exs`:
 
@@ -51,24 +51,63 @@ config :my_app, MyAppWeb.Endpoint,
 
 Then `webapps set-env <slug> URL_PATH_PREFIX=/webapps/<slug>` after `webapps create`.
 
-The runtime.exs config above only fixes server-rendered URLs (sigil_p, static assets, redirects). It does **not** rewrite the LiveSocket URL constructed in JS — `assets/js/app.js` has a literal `new LiveSocket("/live", ...)`. That literal hits `/live/websocket` (no prefix), Caddy falls through to WebUI:8789, you get a 404 / "unhandled poll status undefined" in the browser console. Inject the prefix via a meta tag and read it in JS:
+This fixes server-rendered URLs only (sigil_p, static assets, redirects). It is *necessary but not sufficient* — fix #5 is mandatory for any LiveView app.
+
+### 5. LiveSocket URL prefix (mandatory for LiveView)
+
+Fix #4 cannot rewrite a string literal inside JS. Generated `assets/js/app.js` has:
+
+```js
+const liveSocket = new LiveSocket("/live", Socket, {...})
+```
+
+That literal opens `wss://<host>/live/websocket` — *without* the `/webapps/<slug>` prefix. Caddy falls through to the WebUI on 8789, which 404s, and the browser console shows:
+
+```
+WebSocket connection to 'wss://<host>/live/websocket?...' failed
+GET https://<host>/live/longpoll?... 404 (Not Found)
+Uncaught Error: unhandled poll status undefined
+```
+
+**Skipping this is the most common LLM mistake — the runtime.exs change in fix #4 makes static assets load (CSS/JS appear correctly), so the page looks healthy until you open devtools and see the WebSocket failing. Apply this fix every time, even if the app seems to work.**
+
+Two-line patch — meta tag in the layout, read it in JS:
 
 ```heex
-<%!-- lib/my_app_web/components/layouts/root.html.heex, in <head> --%>
+<%!-- lib/my_app_web/components/layouts/root.html.heex, inside <head> --%>
 <meta name="ws-path" content={MyAppWeb.Endpoint.path("/live")} />
 ```
 
 ```js
-// assets/js/app.js
+// assets/js/app.js — replace `"/live"` with the meta-tag value
 const wsPath = document.querySelector("meta[name='ws-path']")?.getAttribute("content") || "/live"
-const liveSocket = new LiveSocket(wsPath, Socket, { /* ... */ })
+const liveSocket = new LiveSocket(wsPath, Socket, { /* ... existing options ... */ })
 ```
 
-Rebuild assets (`mix assets.deploy`) and the release before restarting.
+`MyAppWeb.Endpoint.path/1` honors the `url: [path: prefix]` from fix #4 and prepends `/webapps/<slug>`, so the rendered tag is `<meta name="ws-path" content="/webapps/<slug>/live">`.
+
+After editing, **rebuild and verify before reporting success**:
+
+```bash
+cd /workspace/webapps/projects/<slug>
+MIX_ENV=prod MIX_OS_CONCURRENCY_LOCK=0 mix assets.deploy
+MIX_ENV=prod MIX_OS_CONCURRENCY_LOCK=0 mix release --overwrite
+webapps restart <slug>
+
+# Sanity check the prefix made it into the rendered HTML:
+curl -s http://127.0.0.1:$(webapps list | awk '$1=="<slug>"{print $2}')/ | grep ws-path
+# Expected: <meta name="ws-path" content="/webapps/<slug>/live">
+# If you see content="/live" instead, the meta tag wasn't rendered through Endpoint.path —
+# check that you used `{MyAppWeb.Endpoint.path("/live")}`, not a string literal.
+```
 
 ## Symptom: empty `routes.caddy` after first `webapps create`
 
 The first `webapps create` for an Elixir app will time out on readiness if you skip fix #3 above — `routes.caddy` will stay empty. After fixing the env, `webapps stop && webapps start` regenerates the route block.
+
+## Symptom: page loads but LiveView never connects
+
+CSS/JS load correctly, but devtools shows `WebSocket connection to .../live/websocket failed` and `Uncaught Error: unhandled poll status undefined`. You forgot fix #5 — the LiveSocket URL is hardcoded to `/live` in JS and bypasses the prefix.
 
 ## Redeploy after code changes
 

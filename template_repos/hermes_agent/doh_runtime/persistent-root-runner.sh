@@ -77,6 +77,12 @@ prepare_runtime_filesystem() {
     copy_runtime_file /etc/resolv.conf
     copy_runtime_file /etc/hosts
     copy_runtime_file /etc/hostname
+    # DOH-owned login-shell PATH drop-in. Without refreshing this on every
+    # boot, edits to /etc/profile.d/doh-bin.sh in the image (e.g. PATH
+    # additions) would never reach existing persistent roots — the file is
+    # outside IMAGE_OWNED_DIRS by design (we don't want to clobber the rest
+    # of /etc).
+    copy_runtime_file /etc/profile.d/doh-bin.sh
 }
 
 sync_image_owned_dirs() {
