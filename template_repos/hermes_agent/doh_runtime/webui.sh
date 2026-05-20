@@ -1,10 +1,11 @@
 #!/bin/bash
 set -euo pipefail
 
-# Inside nono. Three siblings run here as hermeswebui:
+# Inside nono. Four siblings run here as hermeswebui:
 #   1. Caddy on :8787 — policy-proxy forwards here; routes /webapps/* to user apps.
 #   2. process-compose on :9956 — supervises apps from process-compose.yaml.
 #   3. Hermes WebUI on :8789.
+#   4. Hermes gateway
 #
 # If any child exits, we kill the others and exit.
 
@@ -18,6 +19,7 @@ WEBAPPS_ROUTES="${WEBAPPS_ROOT}/routes.caddy"
 CADDY_PID=""
 PROCESS_COMPOSE_PID=""
 WEBUI_PID=""
+GATEWAY_PID=""
 
 : "${HERMES_HOME:?HERMES_HOME must be set}"
 : "${HERMES_WEBUI_DIR:?HERMES_WEBUI_DIR must be set}"
@@ -25,7 +27,7 @@ WEBUI_PID=""
 
 cleanup() {
     set +e
-    for pid in "$WEBUI_PID" "$PROCESS_COMPOSE_PID" "$CADDY_PID"; do
+    for pid in "$WEBUI_PID" "$GATEWAY_PID" "$PROCESS_COMPOSE_PID" "$CADDY_PID"; do
         if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
             kill -TERM "$pid" 2>/dev/null
         fi
@@ -64,6 +66,19 @@ start_webui() {
     cd "$HERMES_WEBUI_DIR"
     "$HERMES_WEBUI_PYTHON" server.py 2>&1 &
     WEBUI_PID=$!
+}
+
+start_gateway() {
+    # Headless gateway — drives the cron ticker. With no messaging platforms
+    # enabled (no TELEGRAM_BOT_TOKEN/etc. in env), `start_gateway()` logs
+    # "Gateway will continue running for cron job execution." and the
+    # ~60s cron tick thread spawns. --replace clears any stale gateway.pid
+    # left over from a previous container run that crashed before atexit
+    # could remove it.
+    echo "[webui] Starting Hermes gateway (cron ticker)..."
+    cd "$HERMES_WEBUI_AGENT_DIR"
+    "$HERMES_WEBUI_PYTHON" -m hermes_cli.main gateway run --replace -v 2>&1 &
+    GATEWAY_PID=$!
 }
 
 start_caddy() {
@@ -110,9 +125,10 @@ main() {
     start_webui
     wait_for_webui
     start_caddy
+    start_gateway
 
-    echo "[webui] All services up. caddy=${CADDY_PID} process-compose=${PROCESS_COMPOSE_PID} webui=${WEBUI_PID}."
-    wait -n "$CADDY_PID" "$PROCESS_COMPOSE_PID" "$WEBUI_PID"
+    echo "[webui] All services up. caddy=${CADDY_PID} process-compose=${PROCESS_COMPOSE_PID} webui=${WEBUI_PID} gateway=${GATEWAY_PID}."
+    wait -n "$CADDY_PID" "$PROCESS_COMPOSE_PID" "$WEBUI_PID" "$GATEWAY_PID"
     exit $?
 }
 
