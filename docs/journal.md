@@ -1,8 +1,66 @@
 # DevOpsHero Development Journal
 
+## 2026-05-20 02:47 - [Bugfix] CAS the GitHub refresh-token endpoint against concurrent rotations
+
+**Conversation:** [2026-05-20-0248-e46cb2d9.md](conversations/2026-05-20-0248-e46cb2d9.md)
+
+The DOH GitHub token-refresh endpoint had a read-then-network-then-decide gap. Pseudocode of the original:
+
+```
+integration = read_row()
+result = github.exchange(integration.refresh_token)
+if result.revoked:
+    integration.delete()
+elif result.success:
+    integration.refresh_token = result.new_refresh
+    integration.save()
+```
+
+GitHub rotates the refresh_token on every successful refresh and consumes the prior one. Two callers reading the same R1 race at GitHub's token endpoint: GitHub will reply success-with-R2 to one and `bad_refresh_token` to the other (because R1 was consumed). The naïve code corrupts the row in two distinct ways:
+
+- **Update path:** both callers get a successful rotation. Loser of the persist race overwrites winner's R2 with its own (now-orphan) R3. Next refresh fails — the row holds a value GitHub already invalidated.
+- **Delete path:** loser holding stale R1 hits `bad_refresh_token`, deletes the row. The row was perfectly valid (winner already wrote R2). Grant lost; user has to reconnect for no reason.
+
+Both paths violate the same invariant, so the fix is symmetric: **only mutate the row if its refresh_token still matches what we acted on.** Compare-and-swap, both paths.
+
+```
+old_refresh = integration.refresh_token
+result = github.exchange(old_refresh)
+
+if result.revoked:
+    deleted, _ = filter(id=..., refresh_token=old_refresh).delete()
+    if deleted:
+        return 410  # row really is gone
+    return 409 "stale, retry"  # someone else rotated under us
+
+filter(id=..., refresh_token=old_refresh).update(refresh_token=new, ...)
+# affected_rows == 0 means we lost; access_token is still good for 8h, return it
+```
+
+The loser of the success-path race still returns its access_token (it's good for 8h regardless of who's persisted what refresh_token; the user's call works). The loser of the revoke-path race returns 409, the broker retries on next call, `_ensure_fresh` reads the winner's R2.
+
+### Why I almost shipped a half-fix
+
+First pass only CAS'd the update path. Argued at the time that the delete-path race was rare (requires sub-millisecond interleaving at GitHub's endpoint) and the user-visible recovery was "click reconnect." Reviewer pushed back: silent grant loss is exactly the bug nobody notices for weeks until "I keep having to reconnect GitHub" trickles in as a complaint, and the asymmetric fix makes the code harder to reason about. Convinced — shipped the symmetric version. Lesson noted: when an invariant is "only mutate if we still hold the value we acted on," apply it to *every* mutation site, not just the one with a more-frequent failure mode.
+
+### Tests
+
+Two regression guards in `test_integrations_github_token_refresh.py`:
+
+- **`test_loser_does_not_overwrite_winner`** — winner-persisted-R2 mid-flight; loser's success path must NOT overwrite R2 with its own R3, but must return its access_token to the caller.
+- **`test_loser_with_bad_refresh_token_does_not_delete_winner_row`** — winner-persisted-R2 mid-flight; loser's revoke path must NOT delete the row, must return 409.
+
+Both tests use `httpx.post`'s `side_effect` to simulate the winner's persist landing during the loser's network call (the realistic race shape, vs. a pre-test setup that the view's read would clobber).
+
+The original `test_bad_refresh_token_deletes_row_and_returns_410` still passes — when nothing else races, the CAS-delete affects 1 row, returns 410 as before.
+
+### What I'm explicitly NOT fixing
+
+The same race exists in principle for the Google refresh endpoint, but Google's rotation semantics are different: refresh_tokens rotate sometimes, not always; old access_tokens stay valid even after a new one is issued; and `invalid_grant` only fires when the refresh_token is actually revoked, not "merely consumed by a peer." So the failure mode that motivated this fix (`bad_refresh_token` on a stale read of a winner-rotated row) doesn't apply to Google. Code stays asymmetric between providers, on purpose.
+
 ## 2026-05-20 02:30 - [Bugfix] Stop force-refreshing TLS-intercept tokens on every status read
 
-**Conversation:** [2026-05-20-0230-e46cb2d9.md](conversations/2026-05-20-0230-e46cb2d9.md)
+**Conversation:** [2026-05-20-0248-e46cb2d9.md](conversations/2026-05-20-0248-e46cb2d9.md)
 
 The integrations broker's `/__doh_broker/integrations` status handler was calling `tls_runtime.status_items(force_refresh=True)`, which under the hood ran `_TokenStore.refresh_all()` — unconditional `_refresh_provider` for every TLS-intercept provider, on every page open and every periodic poll from the WebUI extension.
 
@@ -42,7 +100,7 @@ The bring-up tested with a freshly-deployed Hermes that had no other in-flight g
 
 ## 2026-05-20 01:48 - [Integrations] Per-user GitHub OAuth for Hermes — git + gh inside the sandbox
 
-**Conversation:** [2026-05-20-0230-e46cb2d9.md](conversations/2026-05-20-0230-e46cb2d9.md)
+**Conversation:** [2026-05-20-0248-e46cb2d9.md](conversations/2026-05-20-0248-e46cb2d9.md)
 
 Built a per-user GitHub integration for the Hermes Personal Assistant, parallel to the existing Google Workspace one. End users connect *their own* GitHub account from the WebUI integrations pane; inside the sandbox `git clone/push`, `gh repo list`, `gh pr create`, etc. just work, attributed to the connected user, with **no real token ever entering the sandbox**.
 
