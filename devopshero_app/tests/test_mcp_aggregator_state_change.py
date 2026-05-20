@@ -105,13 +105,17 @@ def _load_runtime_module(name: str) -> types.ModuleType:
     Mirrors the load-by-bare-name behaviour of supervisor.sh / production. We
     add the runtime dir to sys.path so peer modules (`mcp_top_level_tools`,
     `connectors`, …) resolve.
+
+    A sibling test file (test_integrations_broker.py) installs a tiny stub
+    `mcp_aggregator` into sys.modules when fastmcp is absent; if it ran first
+    under Django's test runner, we'd otherwise hand back that stub here. Pop
+    any cached entry so we always exec the real runtime file.
     """
     repo_root = pathlib.Path(__file__).resolve().parents[2]
     runtime_dir = repo_root / "template_repos" / "hermes_agent" / "doh_runtime"
     if str(runtime_dir) not in sys.path:
         sys.path.insert(0, str(runtime_dir))
-    if name in sys.modules:
-        return sys.modules[name]
+    sys.modules.pop(name, None)
     script_path = runtime_dir / f"{name.split('.')[0]}.py"
     if name.startswith("connectors."):
         script_path = runtime_dir / "connectors" / f"{name.split('.')[1]}.py"
