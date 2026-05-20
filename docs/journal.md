@@ -1,5 +1,41 @@
 # DevOpsHero Development Journal
 
+## 2026-05-19 19:55 - [Deployment] Hermes cron scheduler: run the gateway as a 4th sibling
+
+Scheduled Hermes cron jobs (`cron.scheduler.tick()`) were never firing in DOH-shipped Hermes containers. The agent could *create* jobs (the `cronjob` toolset is registered in `config.yaml.template` and the `cron` extra is installed) but the JSON store at `~/.hermes/cron/jobs.json` just accumulated entries with their `next_run_at` slipping further into the past — nothing ever picked them up.
+
+Root cause: in upstream Hermes, the **gateway** (`hermes_cli.main gateway run`) is the long-running process that hosts both messaging-platform adapters AND the cron ticker thread (`gateway/run.py:_start_cron_ticker`, ticks every 60 s and calls `cron.scheduler.tick()`). The DOH `webui.sh` only supervised three siblings — Caddy, process-compose, WebUI — and never started the gateway. So `tick()` was simply never called.
+
+### Fix shape
+
+Run the gateway as a fourth supervised sibling alongside Caddy/process-compose/WebUI. `webui.sh` now has `start_gateway()` that runs `python -m hermes_cli.main gateway run --replace -v` from `$HERMES_WEBUI_AGENT_DIR` and tracks `GATEWAY_PID` for `cleanup` (sends SIGTERM on exit) and `wait -n` (any sibling exiting tears down the whole task, same contract as the other three).
+
+Several non-obvious decisions worth recording — they are easy to second-guess in a future read:
+
+- **Headless gateway, not "no gateway".** With zero messaging adapters configured (no `TELEGRAM_BOT_TOKEN` / `SLACK_*` / etc. in env), the gateway logs `No messaging platforms enabled. Gateway will continue running for cron job execution.` and stays up — the cron ticker thread spawns regardless. We don't need a sidecar ticker; the upstream entry point is already designed for this case.
+- **Gateway has NO HTTP listener.** It is purely a background process — the cron ticker is a `threading.Thread`, not an HTTP server. Don't conflate it with `127.0.0.1:9952` (the MCP aggregator / integrations broker, also a sibling but in `supervisor.sh` outside nono). Two unrelated services; only the MCP aggregator binds a port.
+- **Gateway runs *inside* nono with the agent.** The cron job execution path needs the same env the WebUI gets — `HERMES_HOME=/workspace/.hermes`, the agent venv, the AWS Bedrock signer envs, the broker `HTTPS_PROXY`/`SSL_CERT_FILE` for OAuth-backed integrations. Running it from `webui.sh` (already inside nono) inherits all of that for free; running it in `supervisor.sh` (outside nono) would have meant duplicating the env plumbing AND would have given cron jobs a different sandboxing posture than chat-driven runs.
+- **`--replace` is deliberate.** Stale `gateway.pid` files survive crashes (atexit doesn't always run). Without `--replace`, a hard task exit leaves the next boot's gateway refusing to start because "another gateway is already running". Cold-start idempotence beats safety here — only one task supervisor exists per container.
+- **No first-run provider check on `cmd_gateway`.** I confirmed that `_has_any_provider_configured` is gated only inside `cmd_chat`, not `cmd_gateway`, so the gateway can launch on cold containers before the user has set up a provider via the WebUI.
+- **Order matters: `start_gateway` after `start_caddy`.** Cron's first tick spawns ~60 s later, so the public surface (Caddy:8787 → WebUI) being healthy first is the priority. If we ever care about firing a job immediately at boot we'd reorder, but jobs are by definition future-dated.
+
+### Verification
+
+Created a real one-shot job via the supported API (`cron.jobs.create_job(name="vmendi-verify", schedule="1m", deliver="local", prompt="...echo CRON-VERIFY-OK > /workspace/cron-verify.txt...")`) on a deployed `hermes-vmendi00` task. After ~10 minutes:
+- `agent.log`: `cron.scheduler: Running job 'vmendi-verify-' (ID: )`
+- `gateway.log`: `Cron ticker started (interval=60s)` at boot
+- `/workspace/cron-verify.txt`: contains `CRON-VERIFY-OK`, owned by `hermeswebui`
+- `jobs.json`: empty (one-shot completed and was auto-pruned)
+
+End-to-end confirmation that boot → ticker → job fetch → agent execution → tool call → file write all work in the DOH runtime.
+
+**Key points:**
+- Cron ticker lives **in the gateway**, not the WebUI server. If the gateway isn't running, cron jobs accumulate but never fire — silent failure, no error surfaces in the WebUI.
+- Gateway is callable headlessly. With no platform tokens it just hosts the cron ticker. This is upstream-supported behavior, not a hack.
+- Don't conflate the gateway with port 9952 — that's the MCP aggregator. The gateway has no HTTP listener at all.
+- Job schema gotcha for direct file edits: kind is `"once"` (not `"oneshot"`) and the field is `run_at` (not `fire_at`). Always prefer `cron.jobs.create_job()` over hand-crafted JSON; the helper handles ID generation, schema versioning, and event hooks the scheduler relies on.
+- Initial-attempt mistake worth remembering: I tried to seed a job by editing `jobs.json` with a fabricated entry. The scheduler logs the entry as malformed and skips it. The proper path is the `create_job` Python API or the `cronjob` toolset from inside the agent.
+
 ## 2026-05-19 16:31 - [Bugfix] Two WebUI panels render simultaneously on tab switch
 
 **Conversation:** [2026-05-19-1635-508aebe6.md](conversations/2026-05-19-1635-508aebe6.md)
