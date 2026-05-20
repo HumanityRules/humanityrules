@@ -128,6 +128,89 @@ class TestHappyPath(_GithubTokenEndpointTestBase):
         self.assertEqual(self.integration.refresh_token, "ghr_rotated")
 
 
+class TestConcurrentRefreshRace(_GithubTokenEndpointTestBase):
+    """Two near-simultaneous refreshes for the same grant must not corrupt the row."""
+
+    def test_loser_with_bad_refresh_token_does_not_delete_winner_row(self) -> None:
+        # The dangerous variant: B holds stale R1. While B is mid-flight at
+        # GitHub, A finishes its refresh and persists R2. GitHub then tells
+        # B that R1 is bad_refresh_token (because A consumed it). Naïve
+        # code would delete the row — but that row now holds A's valid R2.
+        # CAS-on-delete: only delete if the row still holds R1.
+        from devopshero_app.models import IntegrationUserGrant
+        from unittest.mock import MagicMock, patch
+
+        def fake_exchange(*args, **kwargs):
+            # A's persist lands while B is still talking to GitHub.
+            IntegrationUserGrant.objects.filter(id=self.integration.id).update(
+                refresh_token="ghr_winner_R2",
+            )
+            response = MagicMock()
+            response.status_code = 200
+            response.json.return_value = {
+                "error": "bad_refresh_token",
+                "error_description": "The refresh token has been consumed.",
+            }
+            return response
+
+        with patch(
+            "devopshero_app.views.integrations.github_token_refresh.httpx.post",
+            side_effect=fake_exchange,
+        ):
+            status, body = self._post(
+                body={"owner_username": "vmendi"}, token=self.raw_token,
+            )
+
+        # B's call returns "stale, retry" 409, NOT 410 ("revoked").
+        self.assertEqual(status, 409)
+        # A's row survives intact. B's stale revoke didn't delete it.
+        self.assertTrue(
+            IntegrationUserGrant.objects.filter(id=self.integration.id).exists()
+        )
+        self.integration.refresh_from_db()
+        self.assertEqual(self.integration.refresh_token, "ghr_winner_R2")
+
+    def test_loser_does_not_overwrite_winner(self) -> None:
+        # Simulate the race: B reads R1 from the DB. While B's call to
+        # GitHub is in flight, A finishes its own refresh and persists R2.
+        # B's call returns R3, B then tries to persist R3 — but since the
+        # row no longer holds R1 (A wrote R2), B's CAS-on-WHERE update
+        # affects 0 rows, leaving R2 intact.
+        from devopshero_app.models import IntegrationUserGrant
+        from unittest.mock import MagicMock, patch
+
+        def fake_exchange(*args, **kwargs):
+            # Simulate "A persists R2 while B is mid-flight at GitHub".
+            IntegrationUserGrant.objects.filter(id=self.integration.id).update(
+                refresh_token="ghr_winner_R2",
+            )
+            response = MagicMock()
+            response.status_code = 200
+            response.json.return_value = {
+                "access_token": "ghu_loser_access",
+                "refresh_token": "ghr_loser_R3",
+                "expires_in": 28800,
+                "token_type": "bearer",
+            }
+            return response
+
+        with patch(
+            "devopshero_app.views.integrations.github_token_refresh.httpx.post",
+            side_effect=fake_exchange,
+        ):
+            status, body = self._post(
+                body={"owner_username": "vmendi"}, token=self.raw_token,
+            )
+
+        # B's call still returned its access_token (valid for 8h regardless
+        # of who's persisted what refresh_token).
+        self.assertEqual(status, 200)
+        self.assertEqual(body["access_token"], "ghu_loser_access")
+        # But B did NOT overwrite A's R2 with its own R3.
+        self.integration.refresh_from_db()
+        self.assertEqual(self.integration.refresh_token, "ghr_winner_R2")
+
+
 class TestNotConnected(_GithubTokenEndpointTestBase):
 
     def test_unknown_user_returns_404(self) -> None:

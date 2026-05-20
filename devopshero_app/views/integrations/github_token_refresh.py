@@ -90,14 +90,37 @@ def integrations_github_token_refresh(request: HttpRequest) -> JsonResponse:
         )
         return JsonResponse({"error": "not connected"}, status=404)
 
-    exchange_result = _exchange_refresh_token(refresh_token=integration.refresh_token)
+    old_refresh = integration.refresh_token
+    exchange_result = _exchange_refresh_token(refresh_token=old_refresh)
+
+    # Whatever happens next, we must only mutate the row if its
+    # refresh_token is still old_refresh. Two callers can read the same
+    # R1, race at GitHub's token endpoint, and disagree on what the row
+    # should look like — but only one of them was actually authoritative
+    # (the one whose R1 the row still holds at decision time).
+
     if exchange_result.revoked:
+        # Compare-and-swap delete: GitHub said R1 is dead, but if the row
+        # has since rotated to R2 (a concurrent winner), R1 being dead is
+        # expected — the row is fine. Don't delete a valid grant.
+        deleted, _ = IntegrationUserGrant.objects.filter(
+            id=integration.id, refresh_token=old_refresh,
+        ).delete()
+        if deleted:
+            logger.info(
+                "github token refresh: revoked by github, deleted row env=%s owner=%s",
+                environment.slug, owner_username,
+            )
+            return JsonResponse({"error": "revoked, please reconnect"}, status=410)
+        # Row already rotated by a concurrent refresh — treat as transient.
+        # Caller (broker) retries; _ensure_fresh on the next call reads the
+        # winner's R2, which is valid.
         logger.info(
-            "github token refresh: revoked by github, deleting row env=%s owner=%s",
+            "github token refresh: stale revoke (row rotated under us) env=%s owner=%s",
             environment.slug, owner_username,
         )
-        integration.delete()
-        return JsonResponse({"error": "revoked, please reconnect"}, status=410)
+        return JsonResponse({"error": "stale, retry"}, status=409)
+
     if exchange_result.error is not None:
         logger.error(
             "github token refresh failed env=%s owner=%s error=%s",
@@ -105,12 +128,15 @@ def integrations_github_token_refresh(request: HttpRequest) -> JsonResponse:
         )
         return JsonResponse({"error": "github token exchange failed"}, status=502)
 
-    # GitHub rotates the refresh_token on every successful refresh — always persist.
-    new_refresh = exchange_result.response.get("refresh_token", "")
-    if new_refresh:
-        integration.refresh_token = new_refresh
-    integration.last_refreshed_at = _now()
-    integration.save(update_fields=["refresh_token", "last_refreshed_at"])
+    # Compare-and-swap update: only rotate if the row still holds R1. A
+    # peer who also got back a successful rotation may have already
+    # written R2 — in that case our new_refresh would be a now-orphan
+    # value. Affected_rows == 0 just means we lost; our access_token
+    # is still valid for ~8h, so we return it without persisting.
+    new_refresh = exchange_result.response.get("refresh_token", "") or old_refresh
+    IntegrationUserGrant.objects.filter(
+        id=integration.id, refresh_token=old_refresh,
+    ).update(refresh_token=new_refresh, last_refreshed_at=_now())
 
     return JsonResponse({
         "access_token": exchange_result.response["access_token"],
