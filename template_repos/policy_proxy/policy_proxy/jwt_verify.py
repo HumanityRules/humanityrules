@@ -13,14 +13,20 @@ ACCEPTED_ALGORITHMS = ["RS256", "EdDSA"]
 # JWT clock skew tolerance, seconds. ECS task clocks are usually tight; this is
 # a small safety margin against normal NTP drift.
 LEEWAY_SECONDS = 30
+ACCEPTED_PROVIDERS = {"oidc", "workos"}
 
 
 @dataclass(frozen=True)
 class SessionIdentity:
-    """The verified claims we care about from a session JWT."""
-    oidc_sub: str
+    """The verified claims we care about from a session JWT.
+
+    ``sub`` is opaque from the proxy's point of view — its meaning depends on
+    ``provider``. The PDP uses both fields together to look up a User row.
+    """
+    sub: str
     username: str
     email: str
+    provider: str
 
 
 def verify_session_cookie(jwt_value: str, jwks_client: jwt.PyJWKClient) -> SessionIdentity | None:
@@ -46,8 +52,12 @@ def verify_session_cookie(jwt_value: str, jwks_client: jwt.PyJWKClient) -> Sessi
     sub = claims.get("sub")
     username = claims.get("username")
     email = claims.get("email", "")
-    if not (isinstance(sub, str) and isinstance(username, str)):
+    provider = claims.get("provider")
+    if not (isinstance(sub, str) and isinstance(username, str) and isinstance(provider, str)):
         logger.error("jwt reject reason=missing-claim")
         return None
+    if provider not in ACCEPTED_PROVIDERS:
+        logger.error("jwt reject reason=unknown-provider provider=%r", provider)
+        return None
 
-    return SessionIdentity(oidc_sub=sub, username=username, email=email)
+    return SessionIdentity(sub=sub, username=username, email=email, provider=provider)

@@ -131,6 +131,60 @@ class OrganizationMembership(models.Model):
         return f"{self.user} - {self.organization} ({self.role})"
 
 
+class OrganizationInvite(models.Model):
+    """
+    Email-based invitation to join an Organization on the DOH control plane.
+
+    Issued by an org admin, consumed by the invitee at /invite/<token>/. Once
+    accepted, the row is preserved (with `accepted_at` set) for audit. Email
+    match against `request.user.email` is the security check at consumption
+    time — the invite link itself is bearer-authoritative.
+    """
+    id = models.UUIDField(
+        primary_key=True,
+        default=uuid.uuid7,
+        editable=False,
+    )
+    organization = models.ForeignKey(
+        Organization,
+        on_delete=models.CASCADE,
+        related_name="invites",
+    )
+    email = models.EmailField(
+        help_text="Address the invitation was sent to; the invitee must sign in with this email.",
+    )
+    invited_by = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="invites_sent",
+    )
+    token = models.UUIDField(
+        default=uuid.uuid4,
+        unique=True,
+        editable=False,
+        help_text="Secret bearer token embedded in the invite URL.",
+    )
+    role = models.CharField(
+        max_length=20,
+        choices=OrganizationMembership.Role.choices,
+        default=OrganizationMembership.Role.MEMBER,
+    )
+    expires_at = models.DateTimeField()
+    accepted_at = models.DateTimeField(null=True, blank=True)
+    revoked_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = "Organization Invite"
+        verbose_name_plural = "Organization Invites"
+        ordering = ["-created_at"]
+
+    def __str__(self) -> str:
+        return f"{self.email} -> {self.organization} ({self.role})"
+
+
 class AWSAccount(models.Model):
     """
     Represents an AWS account connected to an organization.

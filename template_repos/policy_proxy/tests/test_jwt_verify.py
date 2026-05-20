@@ -13,9 +13,10 @@ def test_valid_cookie_returns_identity(fake_jwks_client, jwt_minter) -> None:
         jwt_value=token, jwks_client=fake_jwks_client,
     )
     assert identity is not None
-    assert identity.oidc_sub == "okta|vmendi"
+    assert identity.sub == "okta|vmendi"
     assert identity.username == "vmendi"
     assert identity.email == "vmendi@example.com"
+    assert identity.provider == "oidc"
 
 
 def test_expired_cookie_returns_none(fake_jwks_client, jwt_minter) -> None:
@@ -28,9 +29,13 @@ def test_expired_cookie_returns_none(fake_jwks_client, jwt_minter) -> None:
 
 
 def test_tampered_signature_returns_none(fake_jwks_client, jwt_minter) -> None:
+    # Flip a middle signature char rather than the final one: the trailing
+    # base64url char's low bits get truncated by an unpadded-length decode,
+    # so a final-char flip can decode to the same RSA signature bytes.
     token = jwt_minter()
     head, payload, sig = token.split(".")
-    flipped_sig = sig[:-1] + ("A" if sig[-1] != "A" else "B")
+    mid = len(sig) // 2
+    flipped_sig = sig[:mid] + ("A" if sig[mid] != "A" else "B") + sig[mid + 1:]
     bad_token = f"{head}.{payload}.{flipped_sig}"
     result = jwt_verify.verify_session_cookie(
         jwt_value=bad_token, jwks_client=fake_jwks_client,

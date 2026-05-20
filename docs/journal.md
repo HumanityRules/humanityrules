@@ -1,5 +1,72 @@
 # DevOpsHero Development Journal
 
+## 2026-05-20 15:05 - [Onboarding] WorkOS as a second policy-proxy provider, plus control-plane invites
+
+**Conversation:** [2026-05-20-1505-0278fc35.md](conversations/2026-05-20-1505-0278fc35.md)
+
+Two decoupled changes that together unlock "individual user signs up with their Gmail, gets a personal Org, deploys their own Hermes, invites a friend." Until now the policy-proxy auth-service authenticated exclusively against the Organization's Okta tenant, which is fine for enterprise customers but locks out individuals. And the control plane had no invitation flow at all — every new user got a fresh Organization on first WorkOS callback.
+
+### Part 1: Policy-proxy WorkOS provider
+
+The auth-service container now branches on a `provider` field in its per-env auth-config secret:
+
+- `provider == "oidc"` runs the standard OIDC code flow against the Organization's per-org issuer (Okta today, but no Okta-specific quirks — `/v1/authorize` + `/v1/token` + `/v1/userinfo`).
+- `provider == "workos"` runs the WorkOS social-login dance against the shared DOH WorkOS app, using `provider=GoogleOAuth` on `/user_management/authorize` and a single round-trip `/user_management/authenticate` for code exchange.
+
+The session JWT minted from either branch carries a `provider` claim alongside `sub/username/email`. The PDP uses it to pick the right column on the `User` row: `oidc_sub` for `oidc`, `workos_user_id` for `workos`. Both columns already existed on the model — no migration needed for the User row, just a new field on `Organization.AuthProvider`.
+
+The per-env JWT keypair (RS256, kid'd, exposed via `/.well-known/jwks.json`) is provider-agnostic and unchanged. So is the env's policy-proxy → PDP path; only the JSON body got a new required `provider` field.
+
+**Naming note that bit me:** my first pass used `"okta"` as the secret/JWT/PDP value to mean "OIDC code flow," then `Organization.AuthProvider.OIDC = "oidc"` on the control plane. Inconsistent vocabulary across two halves of the same call chain. Reviewer caught it; I almost shipped the suggestion to standardize on `"okta"` everywhere before realizing the OIDC code in the auth-service has *zero* Okta-specific quirks — it's bog-standard OIDC. Renamed everything to `"oidc"` (constant `PROVIDER_OIDC`, helper `_exchange_oidc_code`) so a future second-OIDC-vendor onboarding requires zero code changes.
+
+### Part 2: Control-plane OrganizationInvite
+
+New model + accept flow + admin-side UI. The invite link is `/invite/<uuid:token>/`. Three terminal states: revoked, expired, accepted. The state computation is centralized in `invites.py::invite_status(invite)` so the onboarding-side filter and the accept-side guard share one definition.
+
+The accept-flow has two entry shapes the user can follow:
+
+1. **Already-authenticated user clicks the invite link** → `accept_invite` validates email-match against the invite, calls `_accept_invite_for_user(invite, user)` which creates the `OrganizationMembership`, sets `invite.accepted_at`, and switches `current_organization`. Single transaction.
+
+2. **Anonymous user clicks the invite link** → invite landing page → WorkOS social login → `auth_callback` stashes `next=/invite/<token>/` in `post_login_redirect` → for new users, lands at `/onboarding/`. The onboarding view detects the pending invite via `_pending_invite_for_session` and routes into `_onboarding_via_invite` instead of the standard "name your org" form. **Originally this then redirected the just-created user to `/invite/<token>/` to repeat path 1**, but that left a half-state window where `current_organization` was set on the User row but no OrganizationMembership existed. Collapsed into one atomic step: `User.objects.create(...)` + `_accept_invite_for_user(...)` inside a single `transaction.atomic()`, then redirect straight to `/dashboard/`. No round-trip.
+
+### Single source of truth: `materialize_membership`
+
+The PA owner-only ABAC policy compares `$resource.owner` against the user's `username` IdentityAttribute. I learned mid-session that *no production code path was creating that IA* — my own `username` IA had been hand-seeded during dev, which is why my dev Hermes worked but a freshly-onboarded invitee would silently get denied. Three call sites needed to grow membership creation: `bootstrap_organization` (admin path), `_find_user_by_org_email` (OIDC backfill into bootstrap), and the new invite-accept path. Putting the IA writes inline in all three was the wrong shape.
+
+Extracted `abac.materialize_membership(organization, user, role)` as the **only** way to create an `OrganizationMembership`. It atomically creates:
+
+- `OrganizationMembership(role=role)` (or no-ops if it exists)
+- `IdentityAttribute(key="org-role", value=membership.role)` ← see below
+- `IdentityAttribute(key="username", value=user.username)`
+
+Three callers now use it: `bootstrap_organization`, the OIDC-callback default-role path, and `invites._accept_invite_for_user`. `seed_test_apps` no longer creates memberships inline. `assign_default_org_role` deleted.
+
+**Subtle bug in the helper, caught in review:** the first version sourced `org-role` from the *requested* `role` argument. But `IdentityAttribute.unique_together = (org, user, key, value)` — uniqueness is on the value too. If `materialize_membership(role="admin")` is called against a user whose existing membership has role="member", `get_or_create(key="org-role", value="admin")` would not find the existing `("org-role", "member")` row and would *insert a second IA alongside it*, silently adding admin permissions. Fix: `value=membership.role` (the row that actually stuck), making the helper truly idempotent. Doesn't fix role *changes* generally — that's a separate cleanup problem for whatever code mutates `membership.role` — but for this helper's join/materialize purpose it's correct.
+
+### What I'm explicitly NOT doing
+
+- **No backfill migration.** I'm the sole user; the existing rows are dev-seeded. A fresh deploy is the migration.
+- **No backwards-compat for older deployed proxies.** Same reason — rolling deploy across the (very small) population. So `provider` is required everywhere; no defaulting to `"oidc"` if absent.
+- **No `dohsandbox.com`-specific cookie domain check on the control plane.** Reviewer worried the policy-proxy session cookie could leak across `devopshero.ai`/`dohsandbox.com`. The actual security boundary is the per-env JWT keypair (each env signs with its own kid; control-plane sessions are vanilla Django and never carry that cookie). Cookie scoping is a defense-in-depth concern, not a correctness one.
+- **No cross-member app sharing.** The PA owner-only policy stays as-is. An invitee can deploy *their own* Hermes in the joined org; they can't see other members' deployed apps.
+
+### Invites are WorkOS-only
+
+Reviewer caught that `create_invite` and `accept_invite` had no `auth_provider` check, so an Okta-org admin could create an invite, the invitee would land in `/auth/login/` (WorkOS) and end up with a `workos_user_id` attached to an Okta org. The user could log into the control plane (the WorkOS sub matches), but the org's policy proxy is configured for Okta and would reject every JWT — half-broken account in an org whose admin presumably wanted SSO to be the gate.
+
+Considered "leave the gate off, build OIDC invites alongside" but that means shipping a known-broken path until OIDC invites land. OIDC invites are also a different flow shape: the landing page would route to `/oidc/login/?org=<slug>&next=/invite/<token>/`, the new-user path would go through `oidc_callback` (sets `oidc_sub`), and the bootstrap-admin-email logic would need to learn about invites. Not a one-line addition.
+
+Gated four spots:
+
+1. **`create_invite`** — errors out for non-WorkOS orgs.
+2. **Settings template** — invite section hidden behind `invites_enabled` (true only for WorkOS orgs); `pending_invites` not even queried for non-WorkOS orgs.
+3. **`accept_invite`** — rejects with 400 when the org's `auth_provider` isn't WORKOS. Defense in depth for stale invites if an org ever flips.
+4. **`_pending_invite_for_session`** — filters to WorkOS-org invites so the post-WorkOS-login routing in `onboarding()` falls through to the standard "name your org" form for any stale OIDC-org invite link, rather than attaching the new user to the OIDC org.
+
+### Tests
+
+24 invite-flow tests + provider-aware PDP tests + secret-payload tests + 57 policy-proxy tests, all green.
+
 ## 2026-05-20 02:47 - [Bugfix] CAS the GitHub refresh-token endpoint against concurrent rotations
 
 **Conversation:** [2026-05-20-0248-e46cb2d9.md](conversations/2026-05-20-0248-e46cb2d9.md)

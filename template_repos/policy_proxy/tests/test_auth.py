@@ -56,6 +56,7 @@ def fake_secrets_client(rsa_pems: tuple[bytes, bytes]) -> Any:
     """Secrets Manager client stub returning an auth-config secret."""
     private_pem, public_pem = rsa_pems
     payload = {
+        "provider": "oidc",
         "oidc_config": {
             "issuer_url": "https://okta.example.com/oauth2/default",
             "client_id": "client-id-xyz",
@@ -136,7 +137,7 @@ def _mint_state_directly(cfg: config_mod.AuthServiceConfig, secrets_client: Any,
     runtime = auth_mod.load_runtime_config(
         secret_arn=cfg.auth_config_secret_arn, secrets_client=secrets_client,
     )
-    return auth_mod._mint_state(rd_url=rd, key=runtime.jwt_key)
+    return auth_mod._mint_state(rd_url=rd, nonce=auth_mod._new_state_nonce(), key=runtime.jwt_key)
 
 
 def test_callback_missing_params_returns_400(auth_service_config, fake_secrets_client) -> None:
@@ -284,9 +285,10 @@ def test_jwks_round_trip_verifies_session_jwt(auth_service_config, fake_secrets_
         secret_arn=auth_service_config.auth_config_secret_arn, secrets_client=fake_secrets_client,
     )
     session_jwt = auth_mod._mint_session_jwt(
-        oidc_sub="okta|x",
+        sub="okta|x",
         username="x@example.com",
         email="x@example.com",
+        provider=auth_mod.PROVIDER_OIDC,
         ttl_seconds=config_mod.DEFAULT_SESSION_TTL_SECONDS,
         key=runtime.jwt_key,
     )
@@ -322,7 +324,7 @@ def test_expired_state_rejected(auth_service_config, fake_secrets_client, monkey
     )
     real_time = time.time
     monkeypatch.setattr(time, "time", lambda: real_time() - auth_mod.STATE_TTL_SECONDS - 60)
-    state = auth_mod._mint_state(rd_url=rd, key=runtime.jwt_key)
+    state = auth_mod._mint_state(rd_url=rd, nonce=auth_mod._new_state_nonce(), key=runtime.jwt_key)
     monkeypatch.setattr(time, "time", real_time)
 
     async def okta(request: httpx.Request) -> httpx.Response:

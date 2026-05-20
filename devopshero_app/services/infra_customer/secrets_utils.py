@@ -276,24 +276,34 @@ def _generate_rsa_keypair_pem() -> tuple[bytes, bytes]:
 def ensure_env_policy_proxy_auth_config_exists(session: boto3.Session, env) -> str:
     """Ensure the env's auth-service config secret exists and return its ARN.
 
-    Payload shape (JSON):
+    The payload shape depends on the Organization's auth_provider:
+
+    - ``oidc`` (enterprise org with its own OIDC issuer; Okta today)::
+
         {
+          "provider":    "oidc",
           "oidc_config": {"issuer_url": "...", "client_id": "...", "client_secret": "..."},
           "jwt_key":     {"private_pem": "...", "public_pem": "...", "kid": "..."}
         }
 
-    On re-run the oidc_config block is refreshed from the Organization (so a
-    rotated client_secret propagates on the next auth-service task restart) but
-    the jwt_key block is carried forward unchanged — rotating it would require
-    a coordinated redeploy of the auth service + all policy proxies in the env
+    - ``workos`` (personal/social-login org)::
+
+        {
+          "provider":      "workos",
+          "workos_config": {"client_id": "..."},
+          "jwt_key":       {"private_pem": "...", "public_pem": "...", "kid": "..."}
+        }
+
+    On re-run, the provider config is refreshed from settings/Organization but the
+    jwt_key block is carried forward unchanged — rotating it would require a
+    coordinated redeploy of the auth service + all policy proxies in the env
     (see docs/policy_proxy_design.md).
     """
+    from django.conf import settings as django_settings
+
+    from ...models import Organization
+
     organization = env.aws_account.organization
-    if not (organization.oidc_issuer_url and organization.oidc_client_id and organization.oidc_client_secret):
-        raise RuntimeError(
-            f"Organization '{organization.slug}' has no OIDC config; cannot provision "
-            f"auth service for env '{env.slug}'. Run setup_oidc_org first.",
-        )
 
     secret_name = f"devopshero/{env.slug}/policy-proxy-auth-config"
     sm_client = session.client("secretsmanager")
@@ -315,18 +325,47 @@ def ensure_env_policy_proxy_auth_config_exists(session: boto3.Session, env) -> s
             "kid": f"{env.slug}-{uuid.uuid4().hex[:8]}",
         }
 
-    payload = {
-        "oidc_config": {
-            "issuer_url": organization.oidc_issuer_url,
-            "client_id": organization.oidc_client_id,
-            "client_secret": organization.oidc_client_secret,
-        },
-        "jwt_key": jwt_key,
-    }
+    if organization.auth_provider == Organization.AuthProvider.WORKOS:
+        if not django_settings.WORKOS_CLIENT_ID:
+            raise RuntimeError(
+                f"WORKOS_CLIENT_ID is not configured; cannot provision "
+                f"WorkOS auth service for env '{env.slug}'.",
+            )
+        payload = {
+            "provider": "workos",
+            "workos_config": {
+                "client_id": django_settings.WORKOS_CLIENT_ID,
+            },
+            "jwt_key": jwt_key,
+        }
+        description = (
+            f"Policy-proxy auth-service config for env '{env.slug}' "
+            f"(WorkOS social login, shared DOH WorkOS app)"
+        )
+    else:
+        if not (organization.oidc_issuer_url and organization.oidc_client_id and organization.oidc_client_secret):
+            raise RuntimeError(
+                f"Organization '{organization.slug}' has no OIDC config; cannot provision "
+                f"auth service for env '{env.slug}'. Run setup_oidc_org first.",
+            )
+        payload = {
+            "provider": "oidc",
+            "oidc_config": {
+                "issuer_url": organization.oidc_issuer_url,
+                "client_id": organization.oidc_client_id,
+                "client_secret": organization.oidc_client_secret,
+            },
+            "jwt_key": jwt_key,
+        }
+        description = (
+            f"Policy-proxy auth-service config for env '{env.slug}' "
+            f"(OIDC sourced from Organization '{organization.slug}')"
+        )
+
     return _create_or_merge_secret(
         sm_client=sm_client,
         secret_name=secret_name,
-        description=f"Policy-proxy auth-Lambda config for env '{env.slug}' (OIDC sourced from Organization '{organization.slug}')",
+        description=description,
         values_to_write=payload,
         merge_mode=False,
     )

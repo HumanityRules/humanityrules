@@ -23,8 +23,9 @@ async def test_allow_response_parsed() -> None:
             pdp_url="https://devopshero.ai/api/pdp/evaluate",
             env_bearer_token="token-abc",
             app_id="vmendi-hermes",
-            oidc_sub="okta|v",
+            sub="okta|v",
             username="vmendi",
+            provider="oidc",
             path="/chat/new",
         )
     assert decision is not None
@@ -48,7 +49,7 @@ async def test_deny_response_parsed() -> None:
             http_client=client,
             pdp_url="https://devopshero.ai/api/pdp/evaluate",
             env_bearer_token="t",
-            app_id="x", oidc_sub="y", username="z", path="/",
+            app_id="x", sub="y", username="z", provider="oidc", path="/",
         )
     assert decision is not None
     assert decision.decision == "deny"
@@ -65,7 +66,7 @@ async def test_non_200_returns_none() -> None:
             http_client=client,
             pdp_url="https://devopshero.ai/api/pdp/evaluate",
             env_bearer_token="t",
-            app_id="x", oidc_sub="y", username="z", path="/",
+            app_id="x", sub="y", username="z", provider="oidc", path="/",
         )
     assert decision is None
 
@@ -81,6 +82,6 @@ async def test_connection_error_returns_none() -> None:
             http_client=client,
             pdp_url="https://devopshero.ai/api/pdp/evaluate",
             env_bearer_token="t",
-            app_id="x", oidc_sub="y", username="z", path="/",
+            app_id="x", sub="y", username="z", provider="oidc", path="/",
         )
     assert decision is None

@@ -121,6 +121,15 @@ def _start_workos_login(request):
     return redirect(authorization_url)
 
 
+def _stash_post_login_redirect(request: HttpRequest) -> None:
+    """Persist a validated `next` URL so auth_callback can pick it up after WorkOS."""
+    next_url = _safe_next(request=request, next_url=request.GET.get("next", ""))
+    if next_url:
+        request.session["post_login_redirect"] = next_url
+    else:
+        request.session.pop("post_login_redirect", None)
+
+
 def dev_login(request):
     """Auto-login as superuser for local development. Only available when DEBUG=True."""
     if not settings.DEBUG:
@@ -136,8 +145,15 @@ def dev_login(request):
 def auth_login(request):
     """Redirects to WorkOS AuthKit for authentication."""
     if request.user.is_authenticated:
-        return redirect("/dashboard/")
+        next_url = _safe_next(request=request, next_url=request.GET.get("next", ""))
+        return redirect(next_url or "/dashboard/")
+    _stash_post_login_redirect(request=request)
     return _start_workos_login(request)
+
+
+def _post_login_redirect_target(request: HttpRequest) -> str:
+    """Pop the stashed redirect target. Default to /dashboard/."""
+    return request.session.pop("post_login_redirect", "") or "/dashboard/"
 
 
 def auth_callback(request):
@@ -160,7 +176,7 @@ def auth_callback(request):
             user.last_name = workos_user.last_name or ""
             user.save()
             login(request, user)
-            return redirect("/dashboard/")
+            return redirect(_post_login_redirect_target(request=request))
 
         except User.DoesNotExist:
             # New user - store WorkOS info in session for onboarding
@@ -265,11 +281,6 @@ def oidc_callback(request):
             and userinfo["email"].lower() == org.bootstrap_admin_email.lower()
             and not OrganizationMembership.objects.filter(user=existing, organization=org).exists()
         ):
-            OrganizationMembership.objects.create(
-                user=existing,
-                organization=org,
-                role=OrganizationMembership.Role.ADMIN,
-            )
             abac.bootstrap_organization(organization=org, admin_user=existing)
             org.bootstrap_admin_email = ""
             org.save(update_fields=["bootstrap_admin_email"])
@@ -277,7 +288,7 @@ def oidc_callback(request):
         return redirect(post_login_redirect)
 
     # Brand-new user: create the row and either bootstrap the org (first admin)
-    # or assign the default role.
+    # or join as a default-role member.
     user = User.objects.create_user(
         username=userinfo["email"],
         email=userinfo["email"],
@@ -287,21 +298,13 @@ def oidc_callback(request):
         current_organization=org,
     )
     if org.bootstrap_admin_email and userinfo["email"].lower() == org.bootstrap_admin_email.lower():
-        OrganizationMembership.objects.create(
-            user=user,
-            organization=org,
-            role=OrganizationMembership.Role.ADMIN,
-        )
         abac.bootstrap_organization(organization=org, admin_user=user)
         org.bootstrap_admin_email = ""
         org.save(update_fields=["bootstrap_admin_email"])
     else:
-        OrganizationMembership.objects.create(
-            user=user,
-            organization=org,
-            role=org.default_org_role,
+        abac.materialize_membership(
+            organization=org, user=user, role=org.default_org_role,
         )
-        abac.assign_default_org_role(organization=org, user=user)
     login(request, user)
     return redirect(post_login_redirect)
 

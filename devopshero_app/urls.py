@@ -112,6 +112,11 @@ urlpatterns = [
     # Onboarding
     path("onboarding/", views.onboarding, name="onboarding"),
 
+    # Organization invites
+    path("invite/<uuid:token>/", views.accept_invite, name="invite_accept"),
+    path("settings/invites/create/", views.create_invite, name="invite_create"),
+    path("settings/invites/<uuid:invite_id>/revoke/", views.revoke_invite, name="invite_revoke"),
+
     # GitHub App integration
     path("github/connect", views.github_connect, name="github_connect"),
     path("github/callback", views.github_callback, name="github_callback"),

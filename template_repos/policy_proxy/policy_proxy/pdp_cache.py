@@ -1,6 +1,6 @@
 """Tiny in-memory PDP decision cache.
 
-Keyed on oidc_sub only. Each policy-proxy container serves exactly one app
+Keyed on sub only. Each policy-proxy container serves exactly one app
 (DOH_APP_ID is baked in at deploy time), and v1 has no route-level policy
 overrides, so expanding the key with app_id or request path would just waste
 memory. Add path-keying here when route overrides land; app_id will never be
@@ -20,7 +20,7 @@ class _Entry:
 
 
 class PdpDecisionCache:
-    """Fixed-TTL cache of PDP allow/deny decisions keyed on oidc_sub.
+    """Fixed-TTL cache of PDP allow/deny decisions keyed on sub.
 
     Not thread-safe in the sense that two concurrent requests for the same
     cold key will both hit the PDP. That's fine: both get the same answer
@@ -38,22 +38,22 @@ class PdpDecisionCache:
     def enabled(self) -> bool:
         return self._ttl > 0
 
-    def get(self, oidc_sub: str) -> pdp_mod.PdpDecision | None:
+    def get(self, sub: str) -> pdp_mod.PdpDecision | None:
         if not self.enabled:
             return None
-        entry = self._entries.get(oidc_sub)
+        entry = self._entries.get(sub)
         if entry is None:
             return None
         if entry.expires_at <= self._now():
             # Lazy eviction keeps the hot path lock-free.
-            self._entries.pop(oidc_sub, None)
+            self._entries.pop(sub, None)
             return None
         return entry.decision
 
-    def put(self, oidc_sub: str, decision: pdp_mod.PdpDecision) -> None:
+    def put(self, sub: str, decision: pdp_mod.PdpDecision) -> None:
         if not self.enabled:
             return
-        self._entries[oidc_sub] = _Entry(
+        self._entries[sub] = _Entry(
             decision=decision,
             expires_at=self._now() + self._ttl,
         )
