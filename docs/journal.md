@@ -1,5 +1,132 @@
 # DevOpsHero Development Journal
 
+## 2026-05-20 02:30 - [Bugfix] Stop force-refreshing TLS-intercept tokens on every status read
+
+**Conversation:** [2026-05-20-0230-e46cb2d9.md](conversations/2026-05-20-0230-e46cb2d9.md)
+
+The integrations broker's `/__doh_broker/integrations` status handler was calling `tls_runtime.status_items(force_refresh=True)`, which under the hood ran `_TokenStore.refresh_all()` — unconditional `_refresh_provider` for every TLS-intercept provider, on every page open and every periodic poll from the WebUI extension.
+
+For Google, harmless: Google's refresh-token rotation is sticky-but-rare, and old access tokens stay valid even after a new one is minted. For GitHub, this is **actively wrong**: GitHub's user-to-server refresh rotates *both* tokens on every call and revokes the previous access_token immediately. The race shape is concrete — agent runs `git push` (long-lived TLS connection through the broker), user opens the integrations pane mid-push, status read triggers a refresh, the access token currently in flight on the open connection gets invalidated by GitHub. Push fails 401 mid-stream. The 401-evict path catches it on the *next* request, but in-flight requests can't recover, and the agent sees a transient git failure that looks mysterious.
+
+### Fix
+
+Three layers, mirroring the read/refresh boundary that should have existed from the start:
+
+1. **`tls_intercept.py`** — `status_items` no longer takes `force_refresh`. It now uses `_ensure_fresh` per provider, which is the single-flight "refetch only if the cached entry is missing or near expiry" path the proxy hot path already uses. Added `invalidate_all()` for explicit cache eviction. The old `refresh_all()` method was deleted; nothing else used it.
+
+2. **`integrations_broker.py`** — `/__doh_broker/integrations` now renders straight from cache. Added `POST /__doh_broker/integrations/invalidate_tls_cache` so the WebUI can explicitly nudge the cache when it knows DOH's grant state just changed (post-disconnect or user-clicked-Refresh).
+
+3. **`doh-integrations.js`** — invalidate-then-refresh on the `?connected=`/`?disconnected=` return-trip and on the user-driven Refresh button. Normal page loads (just navigating to the integrations panel) render from cache; no rotation, no race.
+
+### Why this asymmetry is correct
+
+The WebUI's job is to display state, not to reconcile it. A "Connected" card with a token minted 200ms ago and a "Connected" card with a 7-hour-old cached token are functionally identical to the user — the only authoritative reconciliation moment is when an actual upstream call goes through the proxy, and that path already handles freshness (`_ensure_fresh` proactively, 401-evict reactively). Forcing a refresh on every status read traded perceived-freshness for actual-correctness, with a real failure mode for any provider that revokes-on-refresh.
+
+The two cases where invalidation *is* warranted:
+- User just disconnected on DOH. The grant is gone. Cache says "connected" until next expiry — wrong. Invalidate forces the next read to 404 against DOH and flip to `not_connected`.
+- User clicked the explicit "Refresh" button. They asked. Trade a token rotation for a fresh view.
+
+Both are signaled explicitly by the WebUI; the broker doesn't need to guess.
+
+### Tests
+
+Two regression guards added in `test_integrations_broker.py`:
+- Three back-to-back GETs of `/integrations` produce exactly one `fetch_provider_token` call per provider (vs. three before).
+- POSTing `/integrations/invalidate_tls_cache` between two GETs produces two calls per provider (cache evicted, refetched).
+
+Also fixed an existing arity bug in `_StubAggregator.status_items` (had a vestigial `request: object` argument from before the broker's signature simplification). Test count went from 19 → 22, and 5 previously-failing tests now pass.
+
+### Why this didn't bite during the GitHub bring-up
+
+The bring-up tested with a freshly-deployed Hermes that had no other in-flight git/gh activity competing with status reads. The reviewer flagged it as a P1 race condition before any user actually hit it. Fixed pre-emptively.
+
+## 2026-05-20 01:48 - [Integrations] Per-user GitHub OAuth for Hermes — git + gh inside the sandbox
+
+**Conversation:** [2026-05-20-0230-e46cb2d9.md](conversations/2026-05-20-0230-e46cb2d9.md)
+
+Built a per-user GitHub integration for the Hermes Personal Assistant, parallel to the existing Google Workspace one. End users connect *their own* GitHub account from the WebUI integrations pane; inside the sandbox `git clone/push`, `gh repo list`, `gh pr create`, etc. just work, attributed to the connected user, with **no real token ever entering the sandbox**.
+
+This is distinct from the org-scoped GitHub App install used by the DOH control plane (`devopshero_app/views/github.py`) for repo discovery and deploy-time `git_ops`. Same App registration on github.com, same `client_id`/`client_secret` — but a different OAuth path (user-to-server, with the App's "Expire user authorization tokens" feature ON, yielding 8h access tokens + 6mo rotating refresh tokens).
+
+### Architecture (what got added)
+
+Five layers, mirroring the Google design beat-for-beat:
+
+1. **DOH model + migration** — added `IntegrationUserGrant.Provider.GITHUB`. Migration 0058. The unique constraint stays `(user, environment, provider)` — same user connecting from two different envs gets two grants, deliberately (per-env Hermes deployments stay isolated).
+
+2. **DOH OAuth views** (`devopshero_app/views/integrations/github_oauth.py`) — start/callback/disconnect, mirror of `google_oauth.py`. The `_redirect_uri` is built from `request.build_absolute_uri()`, so the GitHub App's Callback URL list only needs DOH control-plane hosts (e.g. `devopshero.ai`, `devopshero.ngrok.io`), **not** per-customer hosts. The user-facing `rd` is the customer Hermes WebUI host; it's validated by hostname suffix against `Environment.shared_alb_hosted_zone`.
+
+3. **DOH token-refresh endpoint** (`devopshero_app/views/integrations/github_token_refresh.py`) — env-bearer-authed POST that exchanges the stored refresh_token for an 8h access token. Two GitHub-specific quirks the implementation guards against:
+    - GitHub returns **HTTP 200 with an error body** when the refresh_token is no longer valid (not a 4xx). Codes treated as revoked: `bad_refresh_token`, `bad_credentials`, `unauthorized_client`, `invalid_grant`.
+    - GitHub **always rotates the refresh_token on every refresh** (Google only sometimes does). Persisting the new value is load-bearing — without it the next refresh would fail.
+
+4. **Broker TLS-intercept** (`template_repos/hermes_agent/doh_runtime/tls_intercept.py`) — added `auth_format` field to `TlsProviderSpec` with two values: `bearer` (Google) and `basic_x_access_token` (GitHub git smart-HTTP). Registered `github` provider with hosts `github.com`, `api.github.com`, `codeload.github.com`. Added 401-evict-cache logic: any upstream 401 evicts the cached token so the next call refetches from DOH — catches user-revoked-on-github case without a separate revocation endpoint. **Same auth format works for both git and api.github.com**, so we didn't need per-host formatting (GitHub accepts Basic-with-x-access-token on both surfaces).
+
+5. **Sandbox plumbing** (`Dockerfile`, `supervisor.sh`, `config.yaml.template`):
+    - System-wide `/etc/gitconfig` credential helper for `https://github.com`: `username=x-access-token`, `password=DOH_PLACEHOLDER`. Git Basic-encodes the placeholder; the broker swaps it before forwarding.
+    - `gh` CLI 2.92.0 added to the image alongside `gws`/`caddy`/`process-compose`.
+    - `GITHUB_TOKEN=DOH_PLACEHOLDER` exported into the sandbox env from `supervisor.sh`'s `broker_env` block (gated on `INTEGRATIONS_BROKER_PID`, so local dev without a broker doesn't ship a fake token).
+    - `GIT_SSL_CAINFO` added — git on Debian doesn't honor `SSL_CERT_FILE` (curl-only), so without this git fails the broker's MITM leaf with "certificate signer not trusted" even on public repos.
+    - **`terminal.env_passthrough: [GITHUB_TOKEN]`** in `config.yaml.template` — see "the env-passthrough discovery" below.
+
+6. **Merge exclusion** — added `"github"` to `merge_excluded` in `mcp_aggregator.py` so Merge.dev's GitHub connector is filtered out of the Tool Pack catalog and `tools/list` exposed to the agent. Same mechanism that already filtered Notion/PostHog after we shipped DCR connectors for those.
+
+7. **Agent system prompt** (`SOUL.md`) — added a "GitHub (git and gh)" section telling the agent that auth is handled and **not** to run `gh auth login` / configure SSH / set `~/.netrc` / disable TLS verification. Without this guardrail, when the agent hit any auth-related glitch its instinct was to "fix" it by reaching for those mechanisms, polluting state and breaking the broker's swap.
+
+### Why the threat model required this exact shape
+
+The customer's Hermes container runs in the **customer's AWS account**. A customer admin with `ecs:ExecuteCommand` can read `/proc/<pid>/environ` of any process in the container. So:
+- DOH's `client_secret` cannot be in the container (would leak the OAuth app)
+- The user's refresh_token cannot be in the container (would let admin act as the user against any third party indefinitely)
+- Even the short-lived access_token is best kept off the container — not catastrophic if leaked, but no reason to risk it
+
+Solution: **secret on DOH, broker as in-container TLS-terminating relay**. The broker mints a per-boot CA (private key in `/run/doh/integrations-broker/private`, 0700, root-owned, regenerated each container start), terminates HTTPS to known hosts using leaf certs from that CA, calls DOH on the side to mint a fresh access token, swaps the Authorization header, and forwards. The sandbox process tree (UID 1024, nono-bound, `CAP_SYS_PTRACE` dropped) cannot read the broker's environ or filesystem state. The placeholder `DOH_PLACEHOLDER` is harmless on disclosure — it authenticates nothing.
+
+### The user-to-server token expiration toggle
+
+GitHub Apps have an opt-in feature called "Expire user authorization tokens" in the App's "Optional features" page. Without it: user-to-server tokens never expire, no refresh tokens are issued. With it: 8h access tokens + 6mo refresh tokens. We chose ON deliberately:
+- Refreshing every ~7.9h gets us automatic revocation detection within ~8h for free
+- Same code path we'd write anyway to handle 401s from a permanently-issued token
+- The refresh endpoint we needed to write either way; might as well actually use it
+- Sets a tighter blast radius if a token ever leaks
+
+### The env-passthrough discovery (the most surprising debug)
+
+After the redeploy, `gh repo list` from the agent printed: *"To get started with GitHub CLI, please run: gh auth login"*. We confirmed:
+- The placeholder `GITHUB_TOKEN=DOH_PLACEHOLDER` was on supervisor.sh's `env`-wrapper command line
+- It reached pid 197 (webui.sh, the parent of every sandbox process) — verified via `/proc/197/environ`
+- It also reached pid 201 (the WebUI server itself)
+- But the agent's terminal shell saw `GITHUB_TOKEN=UNSET`
+
+Hermes intentionally **scrubs anything matching `*TOKEN*` / `*KEY*` / `*SECRET*`** from sandboxed shells before spawning them, to prevent host secrets like `ANTHROPIC_API_KEY` leaking into agent contexts. The `*PROXY*` and `*CAINFO*` vars survive because they're on the safe-list. The fix is `terminal.env_passthrough: [GITHUB_TOKEN]` in `config.yaml`, which is the **intended public hook** — the same path `required_environment_variables` uses for skill declarations. There's a security history here: GHSA-rhgp-j443-p4rf documents a bypass where a malicious skill registered `ANTHROPIC_TOKEN` for passthrough. The blocklist explicitly stops that case while letting third-party tokens through.
+
+I considered (and rejected) putting `GITHUB_TOKEN` in `webui.sh` instead — it wouldn't help. The scrubbing happens when the WebUI spawns a child shell for the agent, *after* webui.sh already ran. The only mechanism that crosses that boundary is `env_passthrough`.
+
+### Mistakes, in chronological order, for posterity
+
+1. **Initially conflated the two GitHub integrations.** First sketched reusing the org-scoped install token (which would have attributed commits to `devops-hero[bot]` and required org-admin pre-blessing of every repo). Corrected when user clarified end users authorize their own accounts.
+
+2. **Floated putting tokens directly in the sandbox via a credential-helper-to-broker loopback HTTP call.** Tokens (briefly) on disk, in `/proc/<pid>/environ`, and reachable via the helper endpoint from any uid in the container. User caught it; corrected to the TLS-intercept design that keeps tokens entirely off the sandbox.
+
+3. **Rotated the env bearer for the `default` env mid-test.** Wanted to test the GitHub token-refresh endpoint; only had the hash, not a raw bearer; deleted+recreated the `EnvironmentBearerToken` row. This silently broke `hermes-vmendi00` (which still had the *old* raw bearer in its container env from Secrets Manager). All PDP calls 401'd → "authorization service unavailable". Recovery: read the still-correct raw value from `devopshero/default/shared-secrets`, hash it, write the matching row back. The bearer is intentionally split-store: hash on DOH, raw in customer Secrets Manager — rotating one without the other breaks every container in the env. Don't rotate for testing again.
+
+4. **Forgot `GIT_SSL_CAINFO` initially.** Git on Debian uses libcurl built against OpenSSL, but doesn't honor `SSL_CERT_FILE` — that's a curl-only knob. Git has its own: `GIT_SSL_CAINFO` or `http.sslCAInfo`. Without it, even public clones failed verification of the broker's MITM leaf cert. Caught after the first deploy.
+
+5. **Didn't anticipate Hermes' env scrubbing.** Believed `GITHUB_TOKEN` would inherit just like `HTTPS_PROXY`. The selective scrubbing is documented (`tools/env_passthrough.py`) and well-reasoned, but invisible until you debug a missing-var case. Now documented in this entry so the next provider with a per-call API token doesn't repeat it.
+
+### What didn't change
+
+- `repository_git_operations.py` — the existing MCP `git_ops` tool that runs git from DOH's *own* environment using GitHub App installation tokens. That's used during the deploy-design conversation, before any Hermes container exists. Untouched, still useful.
+- The org-scoped `views/github.py` install flow. Same App; the new per-user views just live alongside.
+- Merge.dev itself — still wired up; we just exclude the `github` connector from its Tool Pack on our side. No dashboard changes required.
+
+### Concrete behaviors that now work in the sandbox
+
+- `git clone https://github.com/<owner>/<repo>` (public or private, as the user)
+- `git push` to repos the user has access to
+- `gh repo list`, `gh pr create`, `gh issue list`, etc.
+- Commits attributed to the authorizing user, not to a bot
+
 ## 2026-05-20 01:16 - [Deployment] Hermes loopback API server for in-sandbox webapps
 
 **Conversation:** [2026-05-20-0116-5e765d0d.md](conversations/2026-05-20-0116-5e765d0d.md)

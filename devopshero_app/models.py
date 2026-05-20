@@ -1722,6 +1722,7 @@ class IntegrationUserGrant(models.Model):
 
     class Provider(models.TextChoices):
         GOOGLE = "google", "Google"
+        GITHUB = "github", "GitHub"
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid7, editable=False)
     user = models.ForeignKey(

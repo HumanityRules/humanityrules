@@ -79,6 +79,11 @@
         }
         return;
       }
+      // User asked for a fresh view — drop the broker's cached tokens too,
+      // not just the MCP catalog, so TLS-intercept providers re-resolve
+      // their grant state on next read. Trades a token rotation for an
+      // accurate "Connected" / "Not connected" indicator on demand.
+      await invalidateBrokerTlsCache();
       await refreshAndRender();
     } catch (_) {
       if (note) {
@@ -91,14 +96,18 @@
     }
   }
 
-  function buildGoogleConnectUrl(payload, returnTo) {
+  // TLS-intercept providers all expose the same control-plane URL shape:
+  // /integrations/<slug>/start and /integrations/<slug>/disconnect, with
+  // ?rd=<return_to>. Each provider's `start` view stashes the rd target,
+  // bounces to the upstream OAuth, and the callback redirects back.
+  function buildTlsConnectUrl(payload, slug, returnTo) {
     const rd = encodeURIComponent(returnTo);
-    return payload.doh_control_plane_url.replace(/\/$/, '') + '/integrations/google/start?rd=' + rd;
+    return payload.doh_control_plane_url.replace(/\/$/, '') + '/integrations/' + slug + '/start?rd=' + rd;
   }
 
-  function buildGoogleDisconnectUrl(payload, returnTo) {
+  function buildTlsDisconnectUrl(payload, slug, returnTo) {
     const rd = encodeURIComponent(returnTo);
-    return payload.doh_control_plane_url.replace(/\/$/, '') + '/integrations/google/disconnect?rd=' + rd;
+    return payload.doh_control_plane_url.replace(/\/$/, '') + '/integrations/' + slug + '/disconnect?rd=' + rd;
   }
 
   function buildMcpConnectUrl(slug) {
@@ -323,7 +332,7 @@
       }
       body.appendChild(elem('button', {
         class: 'doh-integration-btn doh-integration-btn-secondary',
-        onclick: () => { window.location.href = buildGoogleDisconnectUrl(payload, returnTo); },
+        onclick: () => { window.location.href = buildTlsDisconnectUrl(payload, item.slug, returnTo); },
       }, ['Disconnect']));
       card.appendChild(body);
       return card;
@@ -331,7 +340,7 @@
 
     const connectBtn = elem('button', {
       class: 'doh-integration-btn',
-      onclick: () => { window.location.href = buildGoogleConnectUrl(payload, returnTo); },
+      onclick: () => { window.location.href = buildTlsConnectUrl(payload, item.slug, returnTo); },
     }, ['Connect']);
     const trailing = elem('div', { class: 'doh-integration-card-trailing' }, [connectBtn, statusPill]);
     card.appendChild(elem('div', { class: 'doh-integration-card-head' }, [titleRow, trailing]));
@@ -387,6 +396,21 @@
   async function refreshAndRender() {
     _current = await fetchIntegrations();
     renderPane(_current);
+  }
+
+  // Tell the broker to drop its cached TLS-intercept tokens. The broker no
+  // longer force-refreshes on every status read (that was racing in-flight
+  // git/gh requests on GitHub, which rotates tokens), so when we know DOH's
+  // grant state just changed (a connect/disconnect just happened), we have
+  // to nudge the cache ourselves before reading. Best-effort.
+  async function invalidateBrokerTlsCache() {
+    try {
+      await fetch('/__doh_broker/integrations/invalidate_tls_cache', { method: 'POST' });
+    } catch (_) {
+      // Stale-cache survival isn't critical — next 8h's worth of status
+      // reads might lie about a disconnect, but the proxy's 401-evict path
+      // catches it on the first real call.
+    }
   }
 
   // Drop any ?connected=/?disconnected= sentinel once we've acted on it,
@@ -555,10 +579,15 @@
       // to the Integrations panel.
       window.switchPanel('integrations');
     }
-    // /integrations force-refreshes every TLS-intercept provider before
-    // responding, so the rendered status reflects DOH's current view whether
-    // we got here via a return-trip or a normal page load.
-    refreshAndRender();
+    // The broker reads from cache; nudge the cache only when we know DOH's
+    // grant state may have just changed (the user came back from a connect
+    // or disconnect round-trip). On normal page loads we render whatever is
+    // cached — fresh enough, and avoids the GitHub refresh-rotation race.
+    if (sentinel) {
+      invalidateBrokerTlsCache().then(refreshAndRender);
+    } else {
+      refreshAndRender();
+    }
   }
 
   if (document.readyState === 'loading') {

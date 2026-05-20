@@ -95,6 +95,9 @@ urlpatterns = [
     path("integrations/google/start/", views.integrations_google_oauth_start, name="integrations_google_oauth_start"),
     path("integrations/google/callback/", views.integrations_google_oauth_callback, name="integrations_google_oauth_callback"),
     path("integrations/google/disconnect/", views.integrations_google_oauth_disconnect, name="integrations_google_oauth_disconnect"),
+    path("integrations/github/start/", views.integrations_github_oauth_start, name="integrations_github_oauth_start"),
+    path("integrations/github/callback/", views.integrations_github_oauth_callback, name="integrations_github_oauth_callback"),
+    path("integrations/github/disconnect/", views.integrations_github_oauth_disconnect, name="integrations_github_oauth_disconnect"),
     path("random-quote/", views.random_quote, name="random_quote"),
     path("switch-organization/", views.switch_organization, name="switch_organization"),
 
@@ -124,6 +127,8 @@ urlpatterns = [
     path("api/pdp/evaluate", views.pdp_evaluate, name="pdp_evaluate"),
     #  - integrations_google_token_refresh: called by env-resident components (Hermes refresher) to get a fresh Google access token
     path("api/integrations/google/token", views.integrations_google_token_refresh, name="integrations_google_token_refresh"),
+    #  - integrations_github_token_refresh: called by env-resident components (Hermes refresher) to get a fresh GitHub user-to-server access token
+    path("api/integrations/github/token", views.integrations_github_token_refresh, name="integrations_github_token_refresh"),
     #  - Merge.dev Agent Handler: env-resident components (Hermes broker / MCP aggregator) reach Merge through these. Tenant-wide Merge API key lives only on DOH.
     path("api/integrations/merge/ensure-registered-user", views.integrations_merge_ensure_registered_user, name="integrations_merge_ensure_registered_user"),
     path("api/integrations/merge/link-token", views.integrations_merge_link_token, name="integrations_merge_link_token"),

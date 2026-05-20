@@ -1,6 +1,7 @@
 """TLS-intercept proxy runtime for platform-managed provider tokens."""
 
 import asyncio
+import base64
 import contextlib
 import datetime as dt
 import ipaddress
@@ -30,6 +31,10 @@ STATUS_NOT_CONNECTED = "not_connected"
 STATUS_REVOKED = "revoked"
 STATUS_TRANSIENT_ERROR = "transient_error"
 
+# How a provider expects the rewritten Authorization header to look.
+AUTH_FORMAT_BEARER = "bearer"
+AUTH_FORMAT_BASIC_X_ACCESS_TOKEN = "basic_x_access_token"
+
 _OUTCOMES = {
     200: STATUS_CONNECTED,
     404: STATUS_NOT_CONNECTED,
@@ -48,6 +53,10 @@ class TlsProviderSpec:
     refresh_path: str
     hosts: tuple[str, ...]
     logo_url: str
+    # How the rewritten Authorization header should be encoded. Google takes
+    # plain Bearer; GitHub git-smart-HTTP needs HTTP Basic with the token as
+    # the password under the `x-access-token` username.
+    auth_format: str
 
 
 @dataclass(frozen=True)
@@ -102,6 +111,23 @@ TLS_INTERCEPT_PROVIDER_SPECS = (
             "oauth2.googleapis.com",
         ),
         logo_url="/extensions/google-workspace.svg",
+        auth_format=AUTH_FORMAT_BEARER,
+    ),
+    TlsProviderSpec(
+        slug="github",
+        label="GitHub",
+        refresh_path="/api/integrations/github/token",
+        hosts=(
+            # github.com handles git smart-HTTP (clone/push) and OAuth
+            # endpoints; api.github.com handles REST (incl. `gh` CLI);
+            # codeload.github.com serves archive/tarball downloads after a
+            # github.com redirect.
+            "github.com",
+            "api.github.com",
+            "codeload.github.com",
+        ),
+        logo_url="/extensions/github.svg",
+        auth_format=AUTH_FORMAT_BASIC_X_ACCESS_TOKEN,
     ),
 )
 
@@ -220,16 +246,38 @@ class _TokenStore:
         entry = await self._ensure_fresh(provider=provider)
         return entry.access_token
 
-    async def refresh_all(self) -> None:
-        """Force-refresh every TLS-intercept provider."""
-        for provider in self._providers.values():
-            async with self._refresh_locks[provider.slug]:
-                await self._refresh_provider(provider=provider)
+    async def invalidate(self, slug: str) -> None:
+        """Drop the cached token for a provider (e.g. after upstream 401).
 
-    async def status_items(self, force_refresh: bool) -> list[dict]:
-        """Return TLS-intercept integration cards for the unified status payload."""
-        if force_refresh:
-            await self.refresh_all()
+        Forces the next `token_for_host` call to refetch from DOH. If DOH
+        has since deleted the grant (user revoked), the next refresh
+        returns 404 → status flips to not_connected → integrations pane
+        updates without ceremony.
+        """
+        async with self._cache_lock:
+            self._cache.pop(slug, None)
+
+    async def invalidate_all(self) -> None:
+        """Drop every cached entry. Used by explicit "I just disconnected" signals.
+
+        The next status read will lazily refetch. Without this, the cache
+        could keep reporting "connected" for up to one full token lifetime
+        after the user disconnects on DOH's side from the same session.
+        """
+        async with self._cache_lock:
+            self._cache.clear()
+
+    async def status_items(self) -> list[dict]:
+        """Return TLS-intercept integration cards for the unified status payload.
+
+        Uses `_ensure_fresh` per provider (single-flight, refetches only when
+        the cached entry is missing or near expiry). Avoids the previous
+        "force-refresh on every page open" pattern, which on GitHub would
+        rotate the refresh_token and invalidate the in-flight access token —
+        racing any concurrent git/gh request through the proxy.
+        """
+        for provider in self._providers.values():
+            await self._ensure_fresh(provider=provider)
         async with self._cache_lock:
             snapshot = dict(self._cache)
         return [
@@ -291,9 +339,13 @@ class TlsInterceptRuntime:
 
         return await asyncio.start_server(client_connected_cb=handle_conn, host=host, port=port)
 
-    async def status_items(self, force_refresh: bool) -> list[dict]:
+    async def status_items(self) -> list[dict]:
         """Return TLS-intercept integration cards."""
-        return await self._token_store.status_items(force_refresh=force_refresh)
+        return await self._token_store.status_items()
+
+    async def invalidate_all(self) -> None:
+        """Drop every cached token entry; next status read refetches lazily."""
+        await self._token_store.invalidate_all()
 
 
 class _CertMinter:
@@ -527,7 +579,9 @@ async def _intercept_and_forward(
             if token is None:
                 await _send_provider_not_connected(writer=tls_writer, provider=provider)
                 return
-            forward_headers = _rewrite_authorization(headers=headers, token=token, upstream_host=host)
+            forward_headers = _rewrite_authorization(
+                headers=headers, token=token, auth_format=provider.auth_format, upstream_host=host,
+            )
             try:
                 upstream_status, upstream_headers, upstream_body = await _forward_to_upstream(
                     host=host,
@@ -541,6 +595,14 @@ async def _intercept_and_forward(
                 logger.exception("forward to %s failed", host)
                 await _send_json_error(writer=tls_writer, status=502, message=f"broker upstream error: {exc}")
                 return
+            # Treat upstream 401 as "the cached token is no longer valid":
+            # evict it so the next request refetches from DOH. Covers both
+            # transient-after-rotation and user-revoked-on-provider-side.
+            # We don't retry within this connection — the user's next
+            # request through the proxy hits the refreshed token.
+            if upstream_status == 401:
+                await token_store.invalidate(slug=provider.slug)
+                logger.info("evicted %s token cache after upstream 401 from %s", provider.slug, host)
             tls_writer.write(_render_response(status=upstream_status, headers=upstream_headers, body=upstream_body))
             await tls_writer.drain()
             if _header_value(headers=upstream_headers, name=b"connection") == b"close":
@@ -639,14 +701,24 @@ async def _read_chunked(reader: asyncio.StreamReader) -> bytes:
         await reader.readline()
 
 
-def _rewrite_authorization(headers: list[tuple[bytes, bytes]], token: str, upstream_host: str) -> list[tuple[bytes, bytes]]:
-    bearer = b"Bearer " + token.encode()
+def _build_authorization_value(token: str, auth_format: str) -> bytes:
+    """Encode the upstream Authorization header for a given provider's auth format."""
+    if auth_format == AUTH_FORMAT_BEARER:
+        return b"Bearer " + token.encode()
+    if auth_format == AUTH_FORMAT_BASIC_X_ACCESS_TOKEN:
+        creds = b"x-access-token:" + token.encode()
+        return b"Basic " + base64.b64encode(creds)
+    raise ValueError(f"unknown auth_format: {auth_format!r}")
+
+
+def _rewrite_authorization(headers: list[tuple[bytes, bytes]], token: str, auth_format: str, upstream_host: str) -> list[tuple[bytes, bytes]]:
+    auth_value = _build_authorization_value(token=token, auth_format=auth_format)
     host_override = upstream_host.encode()
     rewritten: list[tuple[bytes, bytes]] = []
     seen_auth = False
     for name, value in headers:
         if name == b"authorization":
-            rewritten.append((b"Authorization", bearer))
+            rewritten.append((b"Authorization", auth_value))
             seen_auth = True
             continue
         if name == b"host":
@@ -656,7 +728,7 @@ def _rewrite_authorization(headers: list[tuple[bytes, bytes]], token: str, upstr
             continue
         rewritten.append((name, value))
     if not seen_auth:
-        rewritten.append((b"Authorization", bearer))
+        rewritten.append((b"Authorization", auth_value))
     return rewritten
 
 
