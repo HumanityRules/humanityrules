@@ -8,7 +8,7 @@ import re
 from typing import TypeVar
 
 from django.core.exceptions import ValidationError
-from django.db import models
+from django.db import models, transaction
 from django.db.models import QuerySet
 
 from devopshero_app.models import (
@@ -523,23 +523,59 @@ def filter_visible_app_permission_requests(
 # Bootstrapping
 # ---------------------------------------------------------------------------
 
+def materialize_membership(
+    organization: Organization,
+    user: User,
+    role: str,
+) -> OrganizationMembership:
+    """Create the OrganizationMembership and the identity attributes ABAC reads.
+
+    Single source of truth for "user joins org": Membership row, org-role IA
+    (drives role-based policies), username IA (drives self-referential
+    policies like the PA owner check, which compare $resource.owner to the
+    user's username). Idempotent — safe to call when any subset already
+    exists.
+    """
+    with transaction.atomic():
+        membership, _ = OrganizationMembership.objects.get_or_create(
+            user=user,
+            organization=organization,
+            defaults={"role": role},
+        )
+        # Source from membership.role, not the requested role: if a membership
+        # already exists with a different role, get_or_create on (key, value)
+        # would otherwise insert a *second* org-role IA alongside the existing
+        # one (IA uniqueness is on value too), silently adding permissions.
+        IdentityAttribute.objects.get_or_create(
+            organization=organization,
+            user=user,
+            key="org-role",
+            value=membership.role,
+        )
+        IdentityAttribute.objects.get_or_create(
+            organization=organization,
+            user=user,
+            key="username",
+            value=user.username,
+        )
+    return membership
+
+
 def bootstrap_organization(organization: Organization, admin_user: User) -> None:
     """
-    Create seed ABAC data for a new organization:
-    1. IdentityAttribute org-role=admin on admin_user
-    2. Wildcard-resource seed policies for admin/member/viewer org-roles
-    3. Personal-Assistant owner policy (self-referential, global per org)
+    Materialize the admin's membership and seed the org's ABAC policies.
+
+    Policies seeded:
+    - Wildcard-resource seed policies for admin/member/viewer org-roles
+    - Personal-Assistant owner policy (self-referential, global per org)
 
     The member and viewer roles intentionally do NOT get a wildcard "app:use"
     grant. Per-app access is governed by each app's own default policy (see
     create_default_app_policy), which is created when the App is saved and
     which the deploy flow may suppress for restricted apps like PAs.
     """
-    IdentityAttribute.objects.get_or_create(
-        organization=organization,
-        user=admin_user,
-        key="org-role",
-        value="admin",
+    materialize_membership(
+        organization=organization, user=admin_user, role="admin",
     )
 
     seed_policies = [
@@ -621,16 +657,6 @@ def bootstrap_organization(organization: Organization, admin_user: User) -> None
                 "is_system": True,
             },
         )
-
-
-def assign_default_org_role(organization: Organization, user: User) -> None:
-    """Assign the organization's default org-role as an IdentityAttribute on a new member."""
-    IdentityAttribute.objects.get_or_create(
-        organization=organization,
-        user=user,
-        key="org-role",
-        value=organization.default_org_role,
-    )
 
 
 def create_default_app_policy(app: App) -> None:

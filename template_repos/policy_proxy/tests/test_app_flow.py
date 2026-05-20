@@ -272,7 +272,7 @@ def test_cache_misses_across_different_users(policy_proxy_config, fake_jwks_clie
     async def pdp(request: httpx.Request) -> httpx.Response:
         import json
         body = json.loads(request.content)
-        pdp_calls.append(body["oidc_sub"])
+        pdp_calls.append(body["sub"])
         return httpx.Response(200, json={"decision": "allow", "reason": "ok"})
 
     async def upstream(request: httpx.Request) -> httpx.Response:

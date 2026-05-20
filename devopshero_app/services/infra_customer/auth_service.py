@@ -47,7 +47,7 @@ class AuthServiceInputs:
     env_slug: str
     env_domain: str                           # Parent domain, e.g. "ch-sandbox.chsandbox.com"
     policy_proxy_image_uri: str               # Full ECR image URI for the policy-proxy image (auth role)
-    policy_proxy_auth_config_secret_arn: str  # Secrets Manager ARN with {oidc_config, jwt_key}
+    policy_proxy_auth_config_secret_arn: str  # Secrets Manager ARN with {provider config, jwt_key}
     shared_alb_https_listener_arn: str
     shared_alb_security_group_id: str
     shared_hosted_zone_id: str
@@ -75,8 +75,8 @@ class AuthServiceStack(Stack):
             scope=self, env_slug=inputs.env_slug, shared_alb_hosted_zone=inputs.shared_hosted_zone_name,
         )
 
-        # Task role: read the per-env auth-config secret (OIDC creds + JWT key).
-        # No other AWS access needed — Okta calls are outbound HTTPS, no IAM.
+        # Task role: read the per-env auth-config secret.
+        # No other AWS access needed — provider calls are outbound HTTPS, no IAM.
         task_role = iam.Role(
             self, "AuthTaskRole",
             role_name=f"{prefix}-task-role"[:64],

@@ -19,7 +19,6 @@ from devopshero_app.models import (
     GroupAttribute,
     GroupMembership,
     Organization,
-    OrganizationMembership,
     Repository,
     User,
     Workspace,
@@ -325,9 +324,6 @@ class Command(BaseCommand):
             Workspace.objects.filter(organization=org, slug="default").delete()
         self.stdout.write(f"  Created org: {org.name}")
 
-        OrganizationMembership.objects.create(
-            user=user, organization=org, role=OrganizationMembership.Role.ADMIN,
-        )
         abac.bootstrap_organization(organization=org, admin_user=user)
         self.stdout.write(f"    Membership: {user.email} as admin (bootstrapped)")
 

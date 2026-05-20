@@ -28,6 +28,7 @@ def jwt_minter(rsa_keypair):
         sub: str = "okta|vmendi",
         username: str = "vmendi",
         email: str = "vmendi@example.com",
+        provider: str = "oidc",
         exp_offset: int = 3600,
         kid: str = TEST_KID,
     ) -> str:
@@ -36,6 +37,7 @@ def jwt_minter(rsa_keypair):
             "sub": sub,
             "username": username,
             "email": email,
+            "provider": provider,
             "iat": now,
             "exp": now + exp_offset,
         }

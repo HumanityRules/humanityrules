@@ -56,6 +56,7 @@ from .integrations.merge_handler import (
 from .partials import random_quote, switch_organization
 from .auth import auth_login, auth_callback, auth_logout, oidc_login, oidc_callback, dev_login
 from .onboarding import onboarding
+from .invites import accept_invite, create_invite, revoke_invite
 from .api import aws_install_account_callback, health_check
 from .pdp import pdp_evaluate
 from .github import github_connect, github_callback, github_setup, github_select_installation, github_webhook
@@ -181,6 +182,9 @@ __all__ = [
     "oidc_login",
     "oidc_callback",
     "onboarding",
+    "accept_invite",
+    "create_invite",
+    "revoke_invite",
     "aws_install_account_callback",
     "health_check",
     "pdp_evaluate",

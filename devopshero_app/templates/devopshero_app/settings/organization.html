@@ -18,5 +18,84 @@
         </dl>
     </section>
 
+    {% if messages %}
+    <section>
+        {% for message in messages %}
+        <div class="rounded-md p-3 text-sm
+                    {% if message.tags == 'error' %}
+                        bg-red-50 text-red-700 dark:bg-red-900/30 dark:text-red-200
+                    {% else %}
+                        bg-green-50 text-green-800 dark:bg-green-900/30 dark:text-green-200
+                    {% endif %}">
+            {{ message }}
+        </div>
+        {% endfor %}
+    </section>
+    {% endif %}
+
+    <section>
+        <h2 class="text-base font-semibold text-gray-900 dark:text-white mb-1">Members</h2>
+        <p class="text-sm text-gray-500 dark:text-gray-400 mb-4">People who have joined this organization.</p>
+        <ul class="divide-y divide-gray-100 dark:divide-white/10 rounded-lg border border-gray-200 dark:border-white/10">
+            {% for membership in members %}
+            <li class="px-4 py-3 flex items-center justify-between">
+                <div>
+                    <div class="text-sm text-gray-900 dark:text-white">{{ membership.user.email }}</div>
+                    <div class="text-xs text-gray-500 dark:text-gray-400">{{ membership.user.first_name }} {{ membership.user.last_name }}</div>
+                </div>
+                <span class="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">{{ membership.get_role_display }}</span>
+            </li>
+            {% endfor %}
+        </ul>
+    </section>
+
+    {% if invites_enabled %}
+    <section>
+        <h2 class="text-base font-semibold text-gray-900 dark:text-white mb-1">Invite people</h2>
+        <p class="text-sm text-gray-500 dark:text-gray-400 mb-4">Send someone a private link to join this organization as a member.</p>
+        <form method="POST" action="/settings/invites/create/" class="flex gap-2">
+            {% csrf_token %}
+            <input type="email"
+                   name="email"
+                   required
+                   placeholder="friend@example.com"
+                   class="block flex-1 rounded-md border-0 bg-white py-2 px-3 text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 placeholder:text-gray-400 focus:ring-2 focus:ring-inset focus:ring-indigo-500 text-sm dark:bg-white/5 dark:text-white dark:ring-white/10 dark:placeholder:text-gray-500">
+            <button type="submit"
+                    class="rounded-md bg-indigo-500 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-indigo-400">
+                Create invite
+            </button>
+        </form>
+
+        {% if pending_invites %}
+        <h3 class="mt-6 text-sm font-semibold text-gray-900 dark:text-white">Pending invites</h3>
+        <ul class="mt-2 divide-y divide-gray-100 dark:divide-white/10 rounded-lg border border-gray-200 dark:border-white/10">
+            {% for invite in pending_invites %}
+            <li class="px-4 py-3">
+                <div class="flex items-center justify-between">
+                    <div>
+                        <div class="text-sm text-gray-900 dark:text-white">{{ invite.email }}</div>
+                        <div class="text-xs text-gray-500 dark:text-gray-400">
+                            invited by {{ invite.invited_by.email|default:"—" }} · expires {{ invite.expires_at|date:"M j, Y" }}
+                        </div>
+                    </div>
+                    <form method="POST" action="/settings/invites/{{ invite.id }}/revoke/">
+                        {% csrf_token %}
+                        <button type="submit" class="text-xs text-red-600 hover:text-red-500 dark:text-red-400">Revoke</button>
+                    </form>
+                </div>
+                <div class="mt-2 flex items-center gap-2">
+                    <input type="text"
+                           readonly
+                           value="{{ invite_base_url }}{{ invite.token }}/"
+                           class="block flex-1 rounded-md border-0 bg-gray-50 py-1.5 px-2 text-xs text-gray-700 ring-1 ring-inset ring-gray-200 dark:bg-white/5 dark:text-gray-300 dark:ring-white/10"
+                           onclick="this.select()">
+                </div>
+            </li>
+            {% endfor %}
+        </ul>
+        {% endif %}
+    </section>
+    {% endif %}
+
 </div>
 {% endblock %}
