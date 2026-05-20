@@ -39,6 +39,12 @@ from .integrations.google_oauth import (
     integrations_google_oauth_disconnect,
 )
 from .integrations.google_token_refresh import integrations_google_token_refresh
+from .integrations.github_oauth import (
+    integrations_github_oauth_start,
+    integrations_github_oauth_callback,
+    integrations_github_oauth_disconnect,
+)
+from .integrations.github_token_refresh import integrations_github_token_refresh
 from .integrations.merge_handler import (
     integrations_merge_ensure_registered_user,
     integrations_merge_link_token,
@@ -157,6 +163,10 @@ __all__ = [
     "integrations_google_oauth_callback",
     "integrations_google_oauth_disconnect",
     "integrations_google_token_refresh",
+    "integrations_github_oauth_start",
+    "integrations_github_oauth_callback",
+    "integrations_github_oauth_disconnect",
+    "integrations_github_token_refresh",
     "integrations_merge_ensure_registered_user",
     "integrations_merge_link_token",
     "integrations_merge_connectors",

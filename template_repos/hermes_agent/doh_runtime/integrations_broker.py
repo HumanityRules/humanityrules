@@ -64,8 +64,18 @@ async def _handle_unified_status(
     owner_username: str,
     env_slug: str,
 ) -> Response:
-    """Flat list combining TLS-intercept providers and MCP-aggregator items."""
-    items = await tls_runtime.status_items(force_refresh=True)
+    """Flat list combining TLS-intercept providers and MCP-aggregator items.
+
+    Uses cached TLS-intercept entries (refreshed lazily by the proxy hot
+    path or near expiry). A previous version force-refreshed every TLS
+    provider on every status read, which on GitHub rotated the
+    refresh_token and invalidated any in-flight access_token — racing
+    concurrent git/gh requests through the proxy. If the caller knows the
+    cache is stale (e.g. the user just clicked Disconnect on DOH and
+    landed back here), they should POST /__doh_broker/integrations/invalidate
+    first.
+    """
+    items = await tls_runtime.status_items()
     items.extend(await aggregator.status_items())
     return JSONResponse(content={
         "doh_control_plane_url": control_plane_url,
@@ -101,10 +111,22 @@ def _build_control_app(
         ok, payload = await aggregator.refresh_catalog()
         return JSONResponse(content=payload, status_code=200 if ok else 429)
 
+    async def invalidate_tls_cache_route(request: Request) -> Response:
+        """Drop cached TLS-intercept tokens so the next status read refetches.
+
+        Posted by the WebUI extension after consuming a `?disconnected=...`
+        sentinel. Without this, a user who just disconnected on DOH would
+        keep seeing "Connected" in the integrations pane until their cached
+        token naturally expired (up to 8h for GitHub).
+        """
+        await tls_runtime.invalidate_all()
+        return JSONResponse(content={"ok": True})
+
     routes = [
         Route(path="/healthz", endpoint=_handle_healthz, methods=["GET"]),
         Route(path="/integrations", endpoint=status_route, methods=["GET"]),
         Route(path="/integrations/refresh_catalog", endpoint=refresh_catalog_route, methods=["POST"]),
+        Route(path="/integrations/invalidate_tls_cache", endpoint=invalidate_tls_cache_route, methods=["POST"]),
         *aggregator.routes(prefix="/integrations"),
     ]
     return Starlette(routes=routes)

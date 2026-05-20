@@ -59,6 +59,7 @@
       "/opt/doh/runtime/Caddyfile",
       "/opt/doh/bin/aws",
       "/opt/doh/bin/gws",
+      "/opt/doh/bin/gh",
       "/opt/doh/bin/caddy",
       "/opt/doh/bin/process-compose",
       "/opt/doh/bin/webapps",

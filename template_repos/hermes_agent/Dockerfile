@@ -7,6 +7,7 @@ ARG GWS_VERSION=0.22.5
 ARG CADDY_VERSION=2.11.3
 ARG PROCESS_COMPOSE_VERSION=1.110.0
 ARG TTYD_VERSION=1.7.7
+ARG GH_CLI_VERSION=2.92.0
 ARG HERMES_AGENT_EXTRAS=modal,daytona,vercel,messaging,matrix,cron,cli,dev,tts-premium,slack,pty,honcho,mcp,homeassistant,sms,acp,voice,dingtalk,feishu,google,bedrock,web
 
 # Runtime layout: /opt/doh and /opt/hermes are image-owned and refreshed into
@@ -58,6 +59,13 @@ RUN mkdir -p "$DOH_BIN_DIR" \
     && curl -fsSL -o "$DOH_BIN_DIR/ttyd" \
         "https://github.com/tsl0922/ttyd/releases/download/${TTYD_VERSION}/ttyd.${aws_arch}" \
     && chmod +x "$DOH_BIN_DIR/ttyd" \
+    && gh_arch="$([ "$arch" = "arm64" ] && echo "arm64" || echo "amd64")" \
+    && curl -fsSL -o /tmp/gh.tar.gz \
+        "https://github.com/cli/cli/releases/download/v${GH_CLI_VERSION}/gh_${GH_CLI_VERSION}_linux_${gh_arch}.tar.gz" \
+    && tar -xzf /tmp/gh.tar.gz -C /tmp \
+    && cp "/tmp/gh_${GH_CLI_VERSION}_linux_${gh_arch}/bin/gh" "$DOH_BIN_DIR/gh" \
+    && chmod +x "$DOH_BIN_DIR/gh" \
+    && rm -rf "/tmp/gh.tar.gz" "/tmp/gh_${GH_CLI_VERSION}_linux_${gh_arch}" \
     && sed -i 's|http://deb.debian.org|https://deb.debian.org|g' /etc/apt/sources.list.d/debian.sources \
     && rm -f /tmp/nono.deb /tmp/gws.tar.gz /tmp/caddy.tar.gz /tmp/process-compose.tar.gz \
     && rm -rf /tmp/aws /tmp/awscliv2.zip \
@@ -77,6 +85,25 @@ RUN { \
       echo "export HOMEBREW_NO_AUTO_UPDATE=1"; \
       echo "export HOMEBREW_INSTALL_FROM_API=1"; \
     } > /etc/profile.d/doh-bin.sh
+
+# System-wide git config: route github.com authentication through a
+# placeholder credential helper. Git Basic-encodes the placeholder
+# password and sends it via HTTPS_PROXY (set in supervisor.sh) to the
+# integrations broker, which terminates TLS, looks up the user's real
+# GitHub token from DOH, swaps the Authorization header, and forwards.
+# The placeholder string never reaches GitHub, and no real token ever
+# lives inside the sandbox — `cat /etc/gitconfig` and
+# `/proc/<pid>/environ` only ever show this placeholder.
+#
+# Only github.com is needed: git smart-HTTP only ever talks to github.com.
+# api.github.com and codeload.github.com are reached via curl/REST, not
+# git, and the broker handles authentication for those independently
+# (curl/REST callers must send the Authorization header themselves; the
+# broker swaps whatever placeholder is there).
+RUN { \
+      echo "[credential \"https://github.com\"]"; \
+      echo "    helper = \"!f(){ echo username=x-access-token; echo password=DOH_PLACEHOLDER; }; f\""; \
+    } >> /etc/gitconfig
 
 COPY --chmod=755 build/prune-skills.sh /tmp/prune-skills.sh
 RUN git clone --depth 1 --branch v2026.5.7 https://github.com/NousResearch/hermes-agent.git \

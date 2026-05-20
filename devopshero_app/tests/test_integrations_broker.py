@@ -110,19 +110,31 @@ class TestRewriteAuthorization(unittest.TestCase):
 
     def test_existing_authorization_is_replaced(self) -> None:
         hdrs = [(b"authorization", b"Bearer SANDBOX-DUMMY"), (b"content-type", b"application/json")]
-        out = broker.tls_intercept._rewrite_authorization(headers=hdrs, token="REAL-TOKEN", upstream_host="gmail.googleapis.com")
+        out = broker.tls_intercept._rewrite_authorization(
+            headers=hdrs, token="REAL-TOKEN",
+            auth_format=broker.tls_intercept.AUTH_FORMAT_BEARER,
+            upstream_host="gmail.googleapis.com",
+        )
         auth = dict([(n.lower(), v) for n, v in out])[b"authorization"]
         self.assertEqual(auth, b"Bearer REAL-TOKEN")
 
     def test_missing_authorization_gets_injected(self) -> None:
         hdrs = [(b"content-type", b"application/json")]
-        out = broker.tls_intercept._rewrite_authorization(headers=hdrs, token="T", upstream_host="gmail.googleapis.com")
+        out = broker.tls_intercept._rewrite_authorization(
+            headers=hdrs, token="T",
+            auth_format=broker.tls_intercept.AUTH_FORMAT_BEARER,
+            upstream_host="gmail.googleapis.com",
+        )
         auth = dict([(n.lower(), v) for n, v in out])[b"authorization"]
         self.assertEqual(auth, b"Bearer T")
 
     def test_host_is_set_to_upstream(self) -> None:
         hdrs = [(b"host", b"whatever"), (b"authorization", b"Bearer x")]
-        out = broker.tls_intercept._rewrite_authorization(headers=hdrs, token="T", upstream_host="gmail.googleapis.com")
+        out = broker.tls_intercept._rewrite_authorization(
+            headers=hdrs, token="T",
+            auth_format=broker.tls_intercept.AUTH_FORMAT_BEARER,
+            upstream_host="gmail.googleapis.com",
+        )
         host = dict([(n.lower(), v) for n, v in out])[b"host"]
         self.assertEqual(host, b"gmail.googleapis.com")
 
@@ -132,10 +144,26 @@ class TestRewriteAuthorization(unittest.TestCase):
             (b"proxy-connection", b"keep-alive"),
             (b"proxy-authorization", b"Basic xxx"),
         ]
-        out = broker.tls_intercept._rewrite_authorization(headers=hdrs, token="T", upstream_host="gmail.googleapis.com")
+        out = broker.tls_intercept._rewrite_authorization(
+            headers=hdrs, token="T",
+            auth_format=broker.tls_intercept.AUTH_FORMAT_BEARER,
+            upstream_host="gmail.googleapis.com",
+        )
         names = [n.lower() for n, _ in out]
         self.assertNotIn(b"proxy-connection", names)
         self.assertNotIn(b"proxy-authorization", names)
+
+    def test_basic_x_access_token_format_for_github(self) -> None:
+        import base64
+        hdrs = [(b"authorization", b"Basic SANDBOX-PLACEHOLDER")]
+        out = broker.tls_intercept._rewrite_authorization(
+            headers=hdrs, token="ghs_real_token",
+            auth_format=broker.tls_intercept.AUTH_FORMAT_BASIC_X_ACCESS_TOKEN,
+            upstream_host="github.com",
+        )
+        auth = dict([(n.lower(), v) for n, v in out])[b"authorization"]
+        expected = b"Basic " + base64.b64encode(b"x-access-token:ghs_real_token")
+        self.assertEqual(auth, expected)
 
 
 class TestCertMinter(unittest.TestCase):
@@ -171,7 +199,7 @@ class TestCertMinter(unittest.TestCase):
 class _StubAggregator:
     """Minimal MCPAggregator surface for the unified-status + control-app tests."""
 
-    async def status_items(self, request: object) -> list:
+    async def status_items(self) -> list:
         return []
 
     def routes(self, prefix: str) -> list:
@@ -179,7 +207,7 @@ class _StubAggregator:
 
 
 class TestControlIntegrations(unittest.IsolatedAsyncioTestCase):
-    """The /integrations endpoint refreshes every TLS-intercept provider before rendering."""
+    """/integrations renders from cache; it must NOT force a refresh on every read."""
 
     def setUp(self) -> None:
         self.tmp = tempfile.TemporaryDirectory()
@@ -187,7 +215,47 @@ class TestControlIntegrations(unittest.IsolatedAsyncioTestCase):
         root = pathlib.Path(self.tmp.name)
         self.tls_runtime = _make_tls_runtime(ca_dir=root / "ca", private_dir=root / "private")
 
-    async def test_get_integrations_refreshes_then_returns_unified_status(self) -> None:
+    async def test_get_integrations_returns_unified_status(self) -> None:
+        from starlette.testclient import TestClient
+
+        app = broker._build_control_app(
+            aggregator=_StubAggregator(),
+            tls_runtime=self.tls_runtime,
+            control_plane_url="https://doh.example",
+            owner_username="vmendi",
+            env_slug="default",
+        )
+
+        with patch.object(
+            broker.tls_intercept,
+            "fetch_provider_token",
+            return_value=broker.tls_intercept.RefreshResult(
+                status=broker.tls_intercept.STATUS_CONNECTED,
+                access_token="fresh-token",
+                expires_in=3600,
+            ),
+        ):
+            with TestClient(app) as client:
+                resp = client.get("/integrations")
+                self.assertEqual(resp.status_code, 200)
+                payload = resp.json()
+
+        items_by_slug = {item["slug"]: item for item in payload["items"]}
+        self.assertEqual(items_by_slug["google"]["kind"], "tls_intercept")
+        self.assertEqual(items_by_slug["google"]["status"], "connected")
+        self.assertEqual(
+            await self.tls_runtime._token_store.token_for_host(host="gmail.googleapis.com"),
+            "fresh-token",
+        )
+
+    async def test_status_does_not_re_refresh_when_cache_is_fresh(self) -> None:
+        """Two back-to-back status reads should hit DOH at most once per provider.
+
+        Regression guard for the original behavior where /integrations
+        force-refreshed every TLS provider on every read — for GitHub that
+        rotates the refresh_token and invalidates any in-flight access
+        token used by concurrent git/gh requests through the proxy.
+        """
         from starlette.testclient import TestClient
 
         app = broker._build_control_app(
@@ -208,18 +276,42 @@ class TestControlIntegrations(unittest.IsolatedAsyncioTestCase):
             ),
         ) as fetch_mock:
             with TestClient(app) as client:
-                resp = client.get("/integrations")
-                self.assertEqual(resp.status_code, 200)
-                payload = resp.json()
+                client.get("/integrations")
+                client.get("/integrations")
+                client.get("/integrations")
 
-        items_by_slug = {item["slug"]: item for item in payload["items"]}
-        self.assertEqual(items_by_slug["google"]["kind"], "tls_intercept")
-        self.assertEqual(items_by_slug["google"]["status"], "connected")
-        self.assertEqual(
-            await self.tls_runtime._token_store.token_for_host(host="gmail.googleapis.com"),
-            "fresh-token",
+        # Provider count == once-per-provider regardless of how many reads.
+        self.assertEqual(fetch_mock.call_count, len(broker.tls_intercept.TLS_INTERCEPT_PROVIDERS))
+
+    async def test_invalidate_endpoint_drops_cache(self) -> None:
+        """POST /integrations/invalidate_tls_cache evicts every cached entry."""
+        from starlette.testclient import TestClient
+
+        app = broker._build_control_app(
+            aggregator=_StubAggregator(),
+            tls_runtime=self.tls_runtime,
+            control_plane_url="https://doh.example",
+            owner_username="vmendi",
+            env_slug="default",
         )
-        fetch_mock.assert_called_once()
+
+        with patch.object(
+            broker.tls_intercept,
+            "fetch_provider_token",
+            return_value=broker.tls_intercept.RefreshResult(
+                status=broker.tls_intercept.STATUS_CONNECTED,
+                access_token="fresh-token",
+                expires_in=3600,
+            ),
+        ) as fetch_mock:
+            with TestClient(app) as client:
+                client.get("/integrations")  # fills cache
+                client.post("/integrations/invalidate_tls_cache")
+                client.get("/integrations")  # cache cleared, refetches
+
+        # Once per provider on first GET, then once again per provider
+        # on the second GET because invalidate dropped the cache.
+        self.assertEqual(fetch_mock.call_count, 2 * len(broker.tls_intercept.TLS_INTERCEPT_PROVIDERS))
 
 
 class TestLazyTokenForHost(unittest.IsolatedAsyncioTestCase):
@@ -309,6 +401,8 @@ class TestFetchProviderTokenClassification(unittest.TestCase):
             label="Test",
             refresh_path="/api/x",
             hosts=("example.invalid",),
+            logo_url="/extensions/test.svg",
+            auth_format=broker.tls_intercept.AUTH_FORMAT_BEARER,
         )
         if 200 <= status < 300:
             opener = _FakeResp(status=status, body=body)

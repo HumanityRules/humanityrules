@@ -30,7 +30,12 @@ terminal:
   backend: local
   modal_mode: auto
   timeout: 180
-  env_passthrough: []
+  # GITHUB_TOKEN is a placeholder ("DOH_PLACEHOLDER") set by supervisor.sh.
+  # The integrations broker swaps it for the user's real, short-lived token
+  # on its way out to api.github.com — see template_repos/hermes_agent/
+  # doh_runtime/tls_intercept.py. The placeholder is harmless; without
+  # passthrough, gh prints "please run gh auth login" inside the sandbox.
+  env_passthrough: [GITHUB_TOKEN]
   persistent_shell: true
   docker_image: ''
   docker_mount_cwd_to_workspace: false
