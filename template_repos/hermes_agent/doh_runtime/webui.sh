@@ -75,9 +75,10 @@ start_gateway() {
     # ~60s cron tick thread spawns. --replace clears any stale gateway.pid
     # left over from a previous container run that crashed before atexit
     # could remove it.
-    echo "[webui] Starting Hermes gateway (cron ticker)..."
+    echo "[webui] Starting Hermes gateway (cron ticker + loopback API server)..."
     cd "$HERMES_WEBUI_AGENT_DIR"
-    "$HERMES_WEBUI_PYTHON" -m hermes_cli.main gateway run --replace -v 2>&1 &
+    API_SERVER_ENABLED=true \
+        "$HERMES_WEBUI_PYTHON" -m hermes_cli.main gateway run --replace -v 2>&1 &
     GATEWAY_PID=$!
 }
 

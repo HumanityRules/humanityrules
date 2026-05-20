@@ -1,5 +1,56 @@
 # DevOpsHero Development Journal
 
+## 2026-05-20 01:16 - [Deployment] Hermes loopback API server for in-sandbox webapps
+
+**Conversation:** [2026-05-20-0116-5e765d0d.md](conversations/2026-05-20-0116-5e765d0d.md)
+
+Turned on Hermes' OpenAI-compatible API server inside the agent sandbox so user-deployed webapps (the ones supervised by process-compose on ports 4000–4019) can call a fully-featured Hermes agent at `http://127.0.0.1:8642/v1/...` with no credential plumbing. Loopback-only — nothing exposed outside the sandbox.
+
+### What the change is
+
+Two lines, two files:
+
+- `doh_runtime/webui.sh:80` — prefix the gateway launch with `API_SERVER_ENABLED=true`. The gateway is the 4th sibling started inside nono (it was already running as the cron ticker — see the prior 2026-05-19 entry); flipping this env var makes the same process additionally bind a port and serve `/v1/chat/completions`, `/v1/responses`, `/v1/runs`, `/v1/models`, `/v1/capabilities`. Defaults give us `127.0.0.1:8642`, no auth key (loopback bypass), model name = profile name.
+- `doh_runtime/hermes-nono-profile.json` — add `8642` to **both** `listen_port` and `open_port`. See "the bind-permission-denied gotcha" below.
+
+### Why it's worth doing now (and why loopback)
+
+The activation path inside Hermes is purely env-driven: `gateway/config.py:1368` reads `API_SERVER_ENABLED` / `API_SERVER_KEY` and instantiates `gateway/platforms/api_server.py`. So enabling it costs nothing on the DOH side as long as we keep it loopback. There is no DOH-side credential to provision, no UI surface, no policy-proxy bypass to design — the api_server is reachable only by other processes inside the same nono sandbox, which already trust each other (they share a uid, a venv, a workspace).
+
+The discussion explicitly considered exposing it publicly via Caddy/ALB and rejected that path for now. Real-world need (an Open WebUI / LibreChat user) hasn't materialized, and the auth design is non-trivial: Hermes' `API_SERVER_KEY` model is a flat bearer token, parallel to (not inside) WorkOS, with separate revocation/audit. That is a customer-driven decision, not a speculative one. Documented here so a future reader doesn't have to re-derive the trade.
+
+### The bind-permission-denied gotcha
+
+First boot after only adding 8642 to `listen_port` produced:
+
+```
+[Errno 13] error while attempting to bind on address ('127.0.0.1', 8642): permission denied
+```
+
+nono enforces port allocation through **two** lists. Re-reading the existing profile made the convention obvious:
+
+- `listen_port` — ports the sandboxed process is allowed to *create a listening socket on*.
+- `open_port` — ports the sandbox is allowed to *connect/route to* (which evidently also covers the bind path; without it nono refuses the bind even when `listen_port` permits it).
+
+Every port the sandbox actually binds (8787 Caddy, 8789 WebUI, 9956 process-compose, the 4xxx app ports) appears in **both** lists. The 990x ports (aws-signer, integrations-broker, mcp-aggregator) appear *only* in `open_port` because those daemons run *outside* nono and the sandbox only connects to them. Lesson: when the sandbox is the listener, both lists need the port. When the sandbox is the client, `open_port` alone suffices.
+
+### What this buys
+
+A vibe-coded webapp running at `4000-4019` can:
+
+```python
+import openai
+client = openai.OpenAI(base_url="http://127.0.0.1:8642/v1", api_key="unused")
+client.chat.completions.create(model="hermes-agent", messages=[...])
+```
+
+…and get the full Hermes agent: same skills, same tools, same memory, same provider routing (Bedrock / Opus 4.7 by default for new deployments). No Anthropic API key, no provider selection, no key rotation. This is a meaningful primitive for the "AI-native deployment platform" pillar — it lets user webapps treat the host agent as a built-in LLM dependency.
+
+### Operational notes
+
+- `response_store.db` lives under `HERMES_HOME` = `/workspace/.hermes`, which is on the persistent root and survives redeploys. Disk grows with API usage; not currently capped.
+- Verification deferred. The agent offered to run a labelled CH Sandbox deploy; user accepted the change without that step. If a future regression shows up, reproduce by hitting `127.0.0.1:8642/v1/models` from the in-sandbox terminal and confirming it returns the profile-name model.
+
 ## 2026-05-19 19:55 - [Deployment] Hermes cron scheduler: run the gateway as a 4th sibling
 
 Scheduled Hermes cron jobs (`cron.scheduler.tick()`) were never firing in DOH-shipped Hermes containers. The agent could *create* jobs (the `cronjob` toolset is registered in `config.yaml.template` and the `cron` extra is installed) but the JSON store at `~/.hermes/cron/jobs.json` just accumulated entries with their `next_run_at` slipping further into the past — nothing ever picked them up.
