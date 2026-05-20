@@ -160,8 +160,11 @@ RUN cd "$HERMES_WEBUI_DIR" \
 # Empty user venv shared by terminal and execute_code's project mode. Lives on
 # the persistent root: rsynced into /var/lib/devopshero/hermes-roots/{slug} on
 # first boot and preserved across redeploys, so the agent's installs (pip,
-# apt-get) survive container restarts.
-RUN uv venv --python /usr/local/bin/python3 "${HERMES_WEBUI_DEFAULT_WORKSPACE}/.venv"
+# apt-get) survive container restarts. --seed installs pip/setuptools/wheel
+# into the venv's bin/ so `which pip` resolves to the venv's own launcher,
+# which auto-targets /workspace/.venv/lib for installs (instead of falling
+# through to the root-owned system pip and silently landing in ~/.local).
+RUN uv venv --seed --python /usr/local/bin/python3 "${HERMES_WEBUI_DEFAULT_WORKSPACE}/.venv"
 
 # Linuxbrew bootstrap. Bottles are RPATH-locked to /home/linuxbrew/.linuxbrew,
 # so we install at the canonical prefix and let the persistent-root rsync

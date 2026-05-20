@@ -89,3 +89,20 @@ exist in DOH's policy-proxy flow and strands the user after reauth.
 **Fix:** Honor the policy proxy's `X-DOH-Auth-URL` response header on
 401. The frontend performs a top-level navigation to that URL, avoiding
 cross-origin fetch redirects that the WebUI CSP blocks.
+
+### `05-compact-activity-default-off.patch`
+
+**Target:** `api/config.py` (`_SETTINGS_DEFAULTS["simplified_tool_calling"]`).
+
+**Problem:** Upstream defaults the "Compact tool activity" setting to
+`True`, which hides individual tool calls and thinking blocks behind a
+single collapsed disclosure. For our deploy/debug-heavy workflows we
+want the full tool stream visible by default so users can see exactly
+what the agent is doing without an extra click per turn.
+
+**Fix:** Flip `_SETTINGS_DEFAULTS["simplified_tool_calling"]` to `False`.
+Per-instance `settings.json` overrides still win, so any user who
+explicitly turns it back on (or whose `settings.json` was already
+materialised by an earlier save) keeps their preference. Fresh deploys
+get the new default. There is no env var knob for this in upstream,
+hence the patch.

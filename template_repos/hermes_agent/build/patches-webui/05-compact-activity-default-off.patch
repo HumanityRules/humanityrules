@@ -1,0 +1,11 @@
+--- a/api/config.py
++++ b/api/config.py
+@@ -3933,7 +3933,7 @@
+     "sound_enabled": False,  # play notification sound when assistant finishes
+     "notifications_enabled": False,  # browser notification when tab is in background
+     "show_thinking": True,  # show/hide thinking/reasoning blocks in chat view
+-    "simplified_tool_calling": True,  # group tools/thinking into one quiet activity disclosure
++    "simplified_tool_calling": False,  # DOH: default to full tool activity (upstream defaults this to True)
+     "api_redact_enabled": True,  # redact sensitive data (API keys, secrets) from API responses
+     "sidebar_density": "compact",  # compact | detailed
+     "auto_title_refresh_every": "0",  # adaptive title refresh: 0=off, 5/10/20=every N exchanges
