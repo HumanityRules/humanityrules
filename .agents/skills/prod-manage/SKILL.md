@@ -80,7 +80,7 @@ Operations that modify state for environments and deployments.
 
 ## Ad-hoc Model Queries (`doh_query`)
 
-Query any model without shell quoting issues. **Use this instead of `shell -c`** for inspecting data.
+For one-off inspection, prefer `doh_query` over `shell -c` — you get filtering, ordering, JSON output, and a tidy table view without writing Python.
 
 ### Infrastructure
 
@@ -150,21 +150,20 @@ For local-exec mode (commands in `LOCAL_EXEC_COMMANDS`), the script:
 3. Dispatcher calls back into `prod_manage.sh doh_query AWSAccount … --format json` and `… Environment … --format json` to fetch `aws_account_id`, `external_id`, `aws_region`, `slug`
 4. Dispatcher `exec`s `uv run manage.py <cmd>` LOCALLY with those four values injected as raw-mode args, replacing the original `--account/--env/--org`
 
-## Shell Quoting Limitations
+## Shell Quoting
 
-**Avoid `shell -c` with complex Python code.** Commands pass through multiple shell layers (local → AWS CLI → ECS → bash → Python), causing quote mangling.
+`prod_manage.sh` base64-encodes the full command before handing it to `aws ecs execute-command`, so quotes, spaces, `$`, backticks, backslashes, and newlines all pass through untouched. Anything you can type into a normal Django `manage.py shell -c "..."` works here too.
 
-**Bad** (quotes get mangled):
+Examples that all work:
+
 ```bash
 ./prod_manage.sh shell -c "from devopshero_app.models import Repository; print(Repository.objects.get(id='abc'))"
+
+./prod_manage.sh shell -c "import json; print(json.dumps({'a': 1, 'b': [\"two\", 'three']}))"
+
+./prod_manage.sh shell -c "from devopshero_app.models import User
+for u in User.objects.filter(email__icontains='example.com'):
+    print(u.email)"
 ```
 
-**Good** (use `doh_query` instead):
-```bash
-./prod_manage.sh doh_query Repository full_name default_branch --filter id=abc
-```
-
-If you must use `shell -c`, avoid string literals with quotes. This works:
-```bash
-./prod_manage.sh shell -c "from devopshero_app.models import Repository; [print(r.full_name) for r in Repository.objects.all()]"
-```
+`doh_query` is still the more ergonomic choice for plain reads (no Python, filters via `--filter key=value`, formatted output). `shell -c` is the right tool when you need real Python — ad-hoc joins, custom logic, bulk updates, or destructive operations like `.delete()`.

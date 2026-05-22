@@ -78,13 +78,19 @@ echo "Connecting to task: ${TASK_ARN##*/}"
 echo "Running: manage.py $@"
 echo "---"
 
-# Build the command - escape arguments properly
-MANAGE_CMD="uv run python manage.py"
+# Build the bash-quoted command, then base64-encode it so the value we hand to
+# `--command` contains zero shell-special characters (no quotes, no spaces in
+# the payload — only `[A-Za-z0-9+/=]` plus the literal `bash`, `-c`, `echo`,
+# `base64`, and `-d`). Earlier attempts to pass quotes through the chain failed
+# because `--command` traverses multiple shell-parsing layers (local bash, the
+# SSM agent's argv split, and the remote `bash -c`), and bash's `'\''` escape
+# only survives one of those. With base64 there is nothing to mangle: only the
+# final `bash` after `base64 -d` sees real quotes.
+FULL_CMD="uv run python manage.py"
 for arg in "$@"; do
-    # Escape single quotes in arguments
-    escaped_arg=$(printf '%s' "$arg" | sed "s/'/'\\\\''/g")
-    MANAGE_CMD="$MANAGE_CMD '$escaped_arg'"
+    FULL_CMD+=" $(printf '%q' "$arg")"
 done
+B64=$(printf '%s' "$FULL_CMD" | base64 | tr -d '\n')
 
 # Execute command via ECS exec
 aws ecs execute-command \
@@ -92,4 +98,4 @@ aws ecs execute-command \
     --task "${TASK_ARN}" \
     --container devopshero \
     --interactive \
-    --command "/bin/bash -c \"$MANAGE_CMD\""
+    --command "bash -c \"echo $B64 | base64 -d | bash\""
