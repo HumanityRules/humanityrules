@@ -1,5 +1,41 @@
 # DevOpsHero Development Journal
 
+## 2026-05-22 13:06 - [ControlPlane] Aurora scale-to-zero with worker keep-awake middleware
+
+**Conversation:** [2026-05-22-1307-4a3514df.md](conversations/2026-05-22-1307-4a3514df.md)
+
+The DOH control-plane Aurora Serverless v2 cluster was costing ~$50/month, almost entirely from the 0.5-ACU floor (0.5 ACU × $0.12/ACU-hr × 730 hr ≈ $43.80/month) — query volume is negligible at pre-beta scale. We evaluated several alternatives (RDS PostgreSQL on `db.t4g.micro`/`small`, Neon, self-host) and ultimately picked the simplest: keep Aurora Serverless v2 but flip `serverless_v2_min_capacity=0` with `serverless_v2_auto_pause_duration=10 min`, so the cluster pauses entirely when idle and resumes on the first connection (~15 s cold start, acceptable for pre-beta team-only usage).
+
+The catch: the in-process job worker had been polling the DB every 1 second forever (`_stop_flag.wait(timeout=1.0)` since commit `5706738`, Jan 21 2026), which would defeat auto-pause. So we added a sliding "keep-awake" window driven by authenticated requests:
+
+- New `keep_awake_for(seconds)` API in `job_worker.py` extends a monotonic deadline; only ever moves forward, no lock needed (single writer + GIL).
+- Worker loop now picks 1 s polling when the deadline is in the future, otherwise sleeps on a new `_wake_event` for up to 1 hour (idle ceiling, defence-in-depth against missed wake-ups).
+- New `KeepWorkerAwakeMiddleware` (`devopshero_app/keep_awake_middleware.py`) extends the deadline by 4 hours on every authenticated request — registered immediately after `AuthenticationMiddleware`.
+- `start_worker()` pins the deadline to `+inf` for labeled CLI workers (parallel verification), since they don't see web traffic.
+- `stop_worker()` now also `_wake_event.set()`s to break out of long idle waits cleanly.
+
+Net effect: the cluster stays warm whenever the team is actively using the system (sliding 4 h window per click), and pauses cleanly overnight / weekends. Expected savings: ~80–90 % of the compute floor depending on actual idle hours, dropping the monthly bill to mostly storage (~$1–2/month) plus active-use ACU.
+
+### Important correction to a prior journal entry
+
+The Feb 4 2026 entry ("Aurora Serverless cold start causing production timeouts", around line 6985) attributed 30 s ALB timeouts to "0.5 ACU cold starts" and "fixed" them by raising min capacity to 1 ACU. That diagnosis was wrong: at min=0.5 the instance is always running (no pause exists when min > 0), and the worker was polling every second anyway, so there was no "cold" state to resume from. The actual cause was almost certainly **connection pool exhaustion** at low ACU — the same entry notes "`db_connections 15` returned to pool, only 4 in CloudWatch", and at 0.5 ACU PostgreSQL `max_connections` is ~45, easily blown by a 500 req/min burst with SSE. This was confirmed six days later when commit `e24e24f` ("Fix connection pool exhaustion that caused site hangs during deployments") raised `max_size=200` and added `connections.close_all()` — the real fix. The 0.5 → 1 ACU bump just papered over the symptom by doubling `max_connections`. (User declined to edit the old entry; this correction lives here for searchability.)
+
+This matters because the prior "lesson" that "0.5 ACU is too aggressive for users" doesn't transfer to the 0.5 → 0 decision. Going to min=0 introduces a *different* kind of latency (true 15 s pause-resume on the first hit after idle) but doesn't reintroduce the connection-pool issue — that one is permanently fixed.
+
+**Key points:**
+
+- **Cost driver was the floor, not the workload.** The $50 was almost entirely the 0.5-ACU minimum × 730 hours; query volume contributed cents. The lever is the floor, not query optimization or instance sizing.
+- **Aurora Serverless v2 supports min=0 with auto-pause.** Launched late 2024 by AWS, requires Postgres ≥ 13.15/14.12/15.7/16.3 (we're on 16.4). CDK property is `serverless_v2_auto_pause_duration: Duration` (300 s–24 h, default 300 s).
+- **The job worker's 1 s poll silently defeats auto-pause.** Any always-on background polling against the DB prevents the cluster from ever being idle from Aurora's perspective. Had to fix this for the pause to actually fire.
+- **Sliding-window keep-awake beats a manual button.** Original design had an admin "stay awake for N hours" button. Vmendi simplified: any authenticated request resets a 4 h sliding window. Mental model is "if I'm working, the system is warm" — no separate UX, no IAM changes, no scheduler.
+- **Belt-and-suspenders kicks aren't needed.** Considered also calling `_wake_event.set()` from job-creation paths. Dropped: any HTTP-driven job creation goes through the middleware *before* the view runs, so the worker is already woken; the explicit kick would shave at most ~1 s off pickup latency.
+- **Labeled CLI workers need special handling.** The `start_worker(label=...)` path is used by `manage.py run_job_worker --label foo` for parallel verification — those processes don't serve web traffic, so the middleware never fires for them. Pinned their deadline to `+inf` in `start_worker` so they always poll at 1 s.
+- **Sliding window only grows.** `keep_awake_for(60)` after `keep_awake_for(4*3600)` doesn't shorten the deadline. This makes the API safe to call from anywhere without coordination.
+- **`time.monotonic()` not `time.time()`.** Avoids any wall-clock weirdness (NTP adjustments, DST). The deadline is process-local anyway since the state is in-memory.
+- **In-memory state is fine here.** Single ECS task today; on restart the next authenticated request re-arms the timer. No DB row needed (and we explicitly don't want one — writing to the DB to track "is the user active" defeats the goal).
+- **Verification used `cdk synth` to inspect `ServerlessV2ScalingConfiguration`.** Confirmed `MinCapacity=0`, `MaxCapacity=4`, `SecondsUntilAutoPause=600` in the synthesized template before deploying.
+- **Post-deploy signal: `ServerlessDatabaseCapacity` should hit 0.** That's the CloudWatch metric to watch — if it never drops to zero overnight, something (forgotten browser tab, agent runner, external pinger) is keeping a connection open.
+
 ## 2026-05-20 15:05 - [Onboarding] WorkOS as a second policy-proxy provider, plus control-plane invites
 
 **Conversation:** [2026-05-20-1505-0278fc35.md](conversations/2026-05-20-1505-0278fc35.md)

@@ -26,6 +26,26 @@ logger = logging.getLogger(__name__)
 # Global flag to stop the worker
 _stop_flag = threading.Event()
 
+# Wakes the worker out of its idle sleep — set by stop_worker() and by
+# keep_awake_for() (called from KeepWorkerAwakeMiddleware on every authenticated
+# request).
+_wake_event = threading.Event()
+
+# Active-polling deadline (time.monotonic()-based). When the current time is
+# below this value the worker polls every _ACTIVE_POLL_INTERVAL_SECONDS;
+# otherwise it sleeps on _wake_event until kicked or until the idle ceiling
+# elapses. Plain assignment is fine under the GIL — the only writer is
+# keep_awake_for() and it only ever moves the deadline forward.
+_keep_awake_until_monotonic: float = 0.0
+
+# Active-polling cadence (matches the original 1s loop) and idle ceiling. The
+# idle ceiling caps how long a quiescent worker can sit before re-checking, as
+# defence-in-depth against missed wake-ups; jobs created via web requests are
+# normally picked up well before this fires because the same request also
+# extends the keep-awake deadline.
+_ACTIVE_POLL_INTERVAL_SECONDS = 1.0
+_IDLE_POLL_INTERVAL_SECONDS = 3600.0
+
 # Track the worker thread
 _worker_thread: threading.Thread | None = None
 
@@ -34,6 +54,15 @@ _worker_thread: threading.Thread | None = None
 # exact label and skips env-level jobs entirely (those are reserved for the
 # unscoped main worker).
 _worker_label: str = ""
+
+
+def keep_awake_for(seconds: float) -> None:
+    """Extend the worker's active-polling window to at least `seconds` from now."""
+    global _keep_awake_until_monotonic
+    new_deadline = time.monotonic() + seconds
+    if new_deadline > _keep_awake_until_monotonic:
+        _keep_awake_until_monotonic = new_deadline
+    _wake_event.set()
 
 
 def _claim_pending_app_deployment(label: str) -> Deployment | None:
@@ -328,8 +357,16 @@ def _worker_loop() -> None:
             # lifetime, reducing the pool available for web requests and agent sessions.
             connections.close_all()
 
-        # Sleep before next poll
-        _stop_flag.wait(timeout=1.0)
+        # Pick poll cadence based on whether an authenticated user has touched
+        # the app recently. Labeled CLI workers pin the deadline to +inf in
+        # start_worker() so they always take the active branch.
+        if time.monotonic() < _keep_awake_until_monotonic:
+            timeout = _ACTIVE_POLL_INTERVAL_SECONDS
+        else:
+            timeout = _IDLE_POLL_INTERVAL_SECONDS
+
+        _wake_event.wait(timeout=timeout)
+        _wake_event.clear()
 
     logger.info("Job worker stopped")
 
@@ -339,8 +376,12 @@ def start_worker(label: str) -> None:
 
     Safe to call multiple times — only one worker will run per process.
     Call this from AppConfig.ready() or a management command.
+
+    Labeled workers run inside CLI/management-command processes that don't
+    serve web traffic, so the keep-awake middleware never extends their
+    active-polling window. Pin the deadline to +inf so they poll continuously.
     """
-    global _worker_thread, _worker_label
+    global _worker_thread, _worker_label, _keep_awake_until_monotonic
 
     if _worker_thread is not None and _worker_thread.is_alive():
         logger.error("Job worker already running")
@@ -348,6 +389,9 @@ def start_worker(label: str) -> None:
 
     _worker_label = label
     _stop_flag.clear()
+    _wake_event.clear()
+    if label != "":
+        _keep_awake_until_monotonic = float("inf")
     _worker_thread = threading.Thread(
         target=_worker_loop,
         name="job-worker",
@@ -372,6 +416,7 @@ def stop_worker() -> None:
 
     logger.info("Stopping job worker...")
     _stop_flag.set()
+    _wake_event.set()  # break out of any pending idle wait
     _worker_thread.join(timeout=5.0)
 
     if _worker_thread.is_alive():
