@@ -275,17 +275,10 @@
   animation: none;
 }
 
-/* Fix el-options popover width to match the anchor button */
-el-select {
-  anchor-name: --select-anchor;
-}
-
-el-options[popover] {
-  position-anchor: --select-anchor;
-  /* Use anchor-size where supported, with fallback */
-  width: 15rem;
-  width: anchor-size(width);
-}
+/* Per-instance `anchor-name`/`position-anchor` and the matching width fallback
+   live inline in `_dropdown_select.html` so each `<el-select>` is anchored to
+   its own button. A single global anchor name caused popovers to resolve
+   `anchor-size(width)` against an unrelated `<el-select>` on the same page. */
 
 /* Markdown styling for streaming chat messages */
 .markdown-content {
