@@ -506,9 +506,22 @@ def install_auth_routes(
     secrets_client: Any,
 ) -> None:
     """Attach runtime state (config + http client) and mount the auth router."""
-    app.state.auth_runtime = load_runtime_config(
+    runtime = load_runtime_config(
         secret_arn=cfg.auth_config_secret_arn, secrets_client=secrets_client,
     )
+    if runtime.provider == PROVIDER_OIDC:
+        assert runtime.oidc is not None
+        logger.info(
+            "auth runtime loaded provider=oidc env_domain=%s issuer=%s client_id=%s jwt_kid=%s",
+            cfg.env_domain, runtime.oidc.issuer_url, runtime.oidc.client_id, runtime.jwt_key.kid,
+        )
+    else:
+        assert runtime.workos is not None
+        logger.info(
+            "auth runtime loaded provider=workos env_domain=%s client_id=%s jwt_kid=%s",
+            cfg.env_domain, runtime.workos.client_id, runtime.jwt_key.kid,
+        )
+    app.state.auth_runtime = runtime
     # Shared async httpx client for Okta calls (token + userinfo).
     app.state.http_client = httpx.AsyncClient(
         timeout=httpx.Timeout(connect=5.0, read=10.0, write=5.0, pool=5.0),
