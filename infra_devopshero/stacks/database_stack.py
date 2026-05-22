@@ -49,8 +49,14 @@ class DatabaseStack(Stack):
             vpc=vpc,
             subnet_group=subnet_group,
             security_groups=[self.security_group],
-            serverless_v2_min_capacity=0.5,
-            serverless_v2_max_capacity=4,    # Scale up under load
+            # min=0 enables scale-to-zero auto-pause. Cluster pauses after the duration
+            # below of no user-initiated connections; first connection after that resumes
+            # in up to ~15s. The job worker's keep-awake middleware (devopshero_app/
+            # keep_awake_middleware.py) prevents pausing while authenticated users are
+            # actively interacting with the system.
+            serverless_v2_min_capacity=0,
+            serverless_v2_max_capacity=4,
+            serverless_v2_auto_pause_duration=Duration.minutes(10),
             writer=rds.ClusterInstance.serverless_v2("writer"),
             readers=[],
             storage_encrypted=True,
