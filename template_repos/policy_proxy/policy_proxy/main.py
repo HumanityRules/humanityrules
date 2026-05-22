@@ -14,15 +14,25 @@ def main() -> None:
         level=logging.INFO,
         format="%(asctime)s %(levelname)s %(name)s %(message)s",
     )
+    logger = logging.getLogger("policy_proxy.main")
     role = config_mod.role_from_env()
     if role == config_mod.ROLE_AUTH:
         auth_cfg = config_mod.load_auth_config_from_env()
+        logger.info(
+            "policy-proxy starting role=auth listen_port=%d env_domain=%s auth_base_url=%s secret_arn=%s",
+            auth_cfg.listen_port, auth_cfg.env_domain, auth_cfg.auth_base_url, auth_cfg.auth_config_secret_arn,
+        )
         fastapi_app = app_mod.create_auth_app(
             cfg=auth_cfg, secrets_client=auth_mod.new_secrets_client(),
         )
         listen_port = auth_cfg.listen_port
     else:
         proxy_cfg = config_mod.load_proxy_config_from_env()
+        logger.info(
+            "policy-proxy starting role=proxy listen_port=%d app=%s env=%s upstream=%s:%d",
+            proxy_cfg.listen_port, proxy_cfg.app_id, proxy_cfg.env_slug,
+            proxy_cfg.upstream_host, proxy_cfg.upstream_port,
+        )
         fastapi_app = app_mod.create_app(cfg=proxy_cfg)
         listen_port = proxy_cfg.listen_port
 
