@@ -4,7 +4,7 @@ WORKDIR /app
 
 # Install curl for health checks, Node.js for CDK/jsii, git for repo cloning, openssh-client + rsync for remote builder
 RUN apt-get update && apt-get install -y --no-install-recommends curl gnupg git openssh-client rsync unzip && \
-    curl -fsSL https://deb.nodesource.com/setup_20.x | bash - && \
+    curl -fsSL https://deb.nodesource.com/setup_24.x | bash - && \
     apt-get install -y nodejs && \
     rm -rf /var/lib/apt/lists/*
 
