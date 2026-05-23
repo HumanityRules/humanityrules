@@ -93,6 +93,7 @@ def test_allow_proxies_to_upstream(policy_proxy_config, fake_jwks_client, jwt_mi
         # Validate the policy proxy forwarded the identity headers.
         assert request.headers["x-auth-user"] == "vmendi"
         assert request.headers["x-auth-sub"] == "okta|vmendi"
+        assert request.headers["x-auth-provider"] == "oidc"
         return httpx.Response(200, content=_streamed_body(b"hello from upstream"))
 
     client = _mk_client(policy_proxy_config, fake_jwks_client, pdp, upstream)
@@ -272,7 +273,8 @@ def test_cache_misses_across_different_users(policy_proxy_config, fake_jwks_clie
     async def pdp(request: httpx.Request) -> httpx.Response:
         import json
         body = json.loads(request.content)
-        pdp_calls.append(body["oidc_sub"])
+        assert body["provider"] == "oidc"
+        pdp_calls.append(body["sub"])
         return httpx.Response(200, json={"decision": "allow", "reason": "ok"})
 
     async def upstream(request: httpx.Request) -> httpx.Response:

@@ -17,8 +17,14 @@ LEEWAY_SECONDS = 30
 
 @dataclass(frozen=True)
 class SessionIdentity:
-    """The verified claims we care about from a session JWT."""
-    oidc_sub: str
+    """The verified claims we care about from a session JWT.
+
+    ``sub`` is the IdP's stable identifier — for ``provider="workos"`` it's
+    the WorkOS user id, for ``provider="oidc"`` it's the OIDC subject claim.
+    The PDP needs ``provider`` to know which User column to look up against.
+    """
+    sub: str
+    provider: str
     username: str
     email: str
 
@@ -52,11 +58,15 @@ def verify_session_jwt(*, jwt_value: str, jwks_client: jwt.PyJWKClient, env_doma
     sub = claims.get("sub")
     username = claims.get("username")
     email = claims.get("email", "")
-    if not (isinstance(sub, str) and isinstance(username, str)):
+    provider = claims.get("provider")
+    if not (
+        isinstance(sub, str) and isinstance(username, str)
+        and isinstance(provider, str) and provider in ("workos", "oidc")
+    ):
         logger.error("jwt reject reason=missing-claim")
         return None
 
-    return SessionIdentity(oidc_sub=sub, username=username, email=email)
+    return SessionIdentity(sub=sub, provider=provider, username=username, email=email)
 
 
 def session_jwt_exp(jwt_value: str) -> int | None:
