@@ -47,6 +47,10 @@ SECRET_DEFINITIONS = {
         "POSTHOG_HOST",
         "POSTHOG_PROXY_HOST",
     ],
+    "devopshero/prod/env-sso": [
+        "DOH_ENV_SESSION_JWT_PRIVATE_KEY",
+        "DOH_ENV_SESSION_JWT_KID",
+    ],
 }
 
 
