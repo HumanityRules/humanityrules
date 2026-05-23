@@ -242,10 +242,11 @@ class ContainerConfig:
     # Opt this container in to the DOH control-plane bearer overlay:
     # DOH_ENV_BEARER (from shared-secrets), DOH_ENV_SLUG, and DOH_OWNER_USERNAME (if
     # the owning App has an owner tag). Any env-resident component that calls
-    # the DOH control plane sets this — policy proxies (PDP calls) and Hermes
-    # (token refresh) today; future env-resident services later. The IAM grant
-    # to read shared-secrets is added to the task role iff any container in
-    # the task declares this.
+    # the DOH control plane sets this — Hermes (token refresh) today; future
+    # env-resident services later. Policy-proxy containers receive the overlay
+    # implicitly from image_source=policy_proxy, so templates do not need to set
+    # this knob for them. The IAM grant to read shared-secrets is added to the
+    # task role iff any container needs the overlay.
     requires_env_bearer: bool = False
 
 
@@ -313,9 +314,13 @@ class AppConfig:
     # user. None for apps without an owner tag (typical multi-user apps).
     owner_username: str | None = None
 
+    def container_needs_env_bearer(self, container: ContainerConfig) -> bool:
+        """True if this container should receive the DOH control-plane bearer overlay."""
+        return container.requires_env_bearer or container.image_source == ImageSource.POLICY_PROXY
+
     def needs_env_bearer(self) -> bool:
-        """True if any container in the task opts into the DOH control-plane bearer overlay."""
-        return any(c.requires_env_bearer for c in self.containers)
+        """True if any container in the task needs the DOH control-plane bearer overlay."""
+        return any(self.container_needs_env_bearer(container=c) for c in self.containers)
 
     def alb_target(self) -> ContainerConfig | None:
         """Return the ALB-target ContainerConfig, or None if no ALB exposure."""

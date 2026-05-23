@@ -275,7 +275,6 @@ _HERMES_POLICY_PROXY_CONTAINER = {
     ],
     "environment": {},
     "configurable_variables": [],
-    "requires_env_bearer": True,
 }
 
 
