@@ -4,7 +4,7 @@ See `docs/integrations_broker_design.md`. The authenticated DOH user
 starts at `/integrations/google/start?rd=<URL>` (where `rd` points at the
 Hermes WebUI in a customer env), consents at Google, and lands back at
 `/integrations/google/callback`. The callback persists the refresh_token in
-DOH's DB as an IntegrationUserGrant row; no long-lived Google credentials
+DOH's DB as an IntegrationUserCredential row; no long-lived Google credentials
 cross into the customer env.
 """
 
@@ -18,7 +18,7 @@ from django.http import HttpRequest, HttpResponse, HttpResponseBadRequest
 from django.shortcuts import redirect
 from django.utils import timezone
 
-from devopshero_app.models import Environment, IntegrationConfig, IntegrationUserGrant
+from devopshero_app.models import App, Environment, IntegrationConfig, IntegrationUserCredential, ResourceTag
 
 logger = logging.getLogger(__name__)
 
@@ -73,6 +73,25 @@ def _resolve_env_by_rd(rd: str) -> Environment | None:
     return None
 
 
+def _resolve_owned_app_slug(app_slug: str, env: Environment, owner_username: str) -> str | None:
+    """Return app_slug when it identifies an app owned by the user in env's org."""
+    if not app_slug:
+        return None
+    app = App.objects.filter(
+        organization=env.aws_account.organization,
+        slug=app_slug,
+    ).first()
+    if app is None:
+        return None
+    owner_tag = ResourceTag.objects.filter(
+        resource_type=ResourceTag.ResourceType.APP,
+        app=app,
+        key="owner",
+        value=owner_username,
+    ).first()
+    return app.slug if owner_tag is not None else None
+
+
 @login_required
 def integrations_google_oauth_start(request: HttpRequest) -> HttpResponse:
     """Validate `rd`, stash state, redirect to Google's OAuth consent screen."""
@@ -80,6 +99,13 @@ def integrations_google_oauth_start(request: HttpRequest) -> HttpResponse:
     env = _resolve_env_by_rd(rd=rd)
     if env is None:
         return HttpResponseBadRequest("Invalid or unknown rd")
+    app_slug = _resolve_owned_app_slug(
+        app_slug=request.GET.get("app_slug", ""),
+        env=env,
+        owner_username=request.user.username,
+    )
+    if app_slug is None:
+        return HttpResponseBadRequest("Invalid or unauthorized app_slug")
 
     try:
         google_cfg = IntegrationConfig.objects.get(provider=IntegrationConfig.Provider.GOOGLE)
@@ -93,7 +119,8 @@ def integrations_google_oauth_start(request: HttpRequest) -> HttpResponse:
     request.session["google_oauth_state"] = state
     request.session["google_oauth_payload"] = {
         "rd": rd,
-        "env_slug": env.slug,
+        "env_id": str(env.id),
+        "app_slug": app_slug,
         "owner_username": request.user.username,
     }
 
@@ -166,9 +193,10 @@ def integrations_google_oauth_callback(request: HttpRequest) -> HttpResponse:
         return HttpResponseBadRequest("Invalid state")
 
     rd = payload.get("rd", "")
-    env_slug = payload.get("env_slug", "")
+    env_id = payload.get("env_id", "")
+    app_slug = payload.get("app_slug", "")
     owner_username = payload.get("owner_username", "")
-    if not rd or not env_slug or not owner_username:
+    if not rd or not env_id or not app_slug or not owner_username:
         return HttpResponseBadRequest("Corrupt session payload")
 
     # Defense in depth: the authenticated user must own the session payload.
@@ -187,9 +215,9 @@ def integrations_google_oauth_callback(request: HttpRequest) -> HttpResponse:
         return HttpResponseBadRequest("Google integration not configured")
 
     try:
-        env = Environment.objects.get(slug=env_slug)
+        env = Environment.objects.get(id=env_id)
     except Environment.DoesNotExist:
-        logger.error("google callback failed: env_slug=%s not found", env_slug)
+        logger.error("google callback failed: env_id=%s not found", env_id)
         return HttpResponseBadRequest("Environment not found")
 
     try:
@@ -218,27 +246,28 @@ def integrations_google_oauth_callback(request: HttpRequest) -> HttpResponse:
     if not refresh_token:
         logger.error(
             "google token exchange returned no refresh_token env=%s user=%s",
-            env_slug, owner_username,
+            env.slug, owner_username,
         )
         return HttpResponseBadRequest(
             "Google did not return a refresh_token. Revoke the app at "
             "myaccount.google.com and reconnect."
         )
 
-    IntegrationUserGrant.objects.update_or_create(
-        user=request.user,
+    IntegrationUserCredential.objects.update_or_create(
+        owner_user=request.user,
         environment=env,
-        provider=IntegrationUserGrant.Provider.GOOGLE,
+        app_slug=app_slug,
+        provider=IntegrationUserCredential.Provider.GOOGLE,
         defaults={
-            "refresh_token": refresh_token,
-            "scope": token_response.get("scope", ""),
-            "granted_at": timezone.now(),
+            "credentials": {"refresh_token": refresh_token},
+            "config": {"scope": token_response.get("scope", "")},
+            "metadata": {"connected_at": timezone.now().isoformat()},
             "last_refreshed_at": None,
         },
     )
     logger.info(
-        "google integration stored env=%s owner=%s",
-        env_slug, owner_username,
+        "google integration stored env=%s owner=%s app=%s",
+        env.slug, owner_username, app_slug,
     )
 
     return redirect(_append_query(rd, {"connected": "google"}))
@@ -276,23 +305,26 @@ def integrations_google_oauth_disconnect(request: HttpRequest) -> HttpResponse:
     if env is None:
         return HttpResponseBadRequest("Invalid or unknown rd")
 
-    integration = IntegrationUserGrant.objects.filter(
-        user=request.user,
+    app_slug = request.GET.get("app_slug", "")
+    integration = IntegrationUserCredential.objects.filter(
+        owner_user=request.user,
         environment=env,
-        provider=IntegrationUserGrant.Provider.GOOGLE,
+        app_slug=app_slug,
+        provider=IntegrationUserCredential.Provider.GOOGLE,
     ).first()
     if integration is not None:
-        refresh_token = integration.refresh_token
+        refresh_token = integration.credentials.get("refresh_token", "")
         integration.delete()
-        _revoke_google_refresh_token(refresh_token=refresh_token)
+        if refresh_token:
+            _revoke_google_refresh_token(refresh_token=refresh_token)
         logger.info(
-            "google integration disconnected env=%s owner=%s",
-            env.slug, request.user.username,
+            "google integration disconnected env=%s owner=%s app=%s",
+            env.slug, request.user.username, app_slug,
         )
     else:
         logger.info(
-            "google disconnect no-op (no grant) env=%s owner=%s",
-            env.slug, request.user.username,
+            "google disconnect no-op (no grant) env=%s owner=%s app=%s",
+            env.slug, request.user.username, app_slug,
         )
 
     return redirect(_append_query(rd, {"disconnected": "google"}))

@@ -15,7 +15,7 @@ import sys
 import tempfile
 import types
 import unittest
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 
 def _install_mcp_aggregator_stub_if_needed() -> None:
@@ -74,6 +74,7 @@ def _make_token_store() -> broker.tls_intercept._TokenStore:
             control_plane_url="https://doh.example",
             bearer="env-bearer",
             owner_username="vmendi",
+            app_slug="hermes",
         ),
         refresh_lead_seconds=broker.tls_intercept.REFRESH_LEAD_SECONDS,
     )
@@ -87,6 +88,7 @@ def _make_tls_runtime(ca_dir: pathlib.Path, private_dir: pathlib.Path) -> broker
             control_plane_url="https://doh.example",
             bearer="env-bearer",
             owner_username="vmendi",
+            app_slug="hermes",
         ),
         refresh_lead_seconds=broker.tls_intercept.REFRESH_LEAD_SECONDS,
         ca_dir=ca_dir,
@@ -165,6 +167,33 @@ class TestRewriteAuthorization(unittest.TestCase):
         expected = b"Basic " + base64.b64encode(b"x-access-token:ghs_real_token")
         self.assertEqual(auth, expected)
 
+    def test_telegram_path_token_is_rewritten_without_authorization_header(self) -> None:
+        provider = broker.tls_intercept.TLS_INTERCEPT_PROVIDERS["telegram"]
+        headers, path = broker.tls_intercept._rewrite_request_for_provider(
+            headers=[
+                (b"host", b"api.telegram.org"),
+                (b"authorization", b"Bearer placeholder"),
+                (b"content-type", b"application/json"),
+            ],
+            path_with_query="/bot000000:DOH_PLACEHOLDER/getUpdates?timeout=20",
+            token="123456:REAL",
+            provider=provider,
+            upstream_host="api.telegram.org",
+        )
+        self.assertEqual(path, "/bot123456:REAL/getUpdates?timeout=20")
+        header_names = [name.lower() for name, _value in headers]
+        self.assertNotIn(b"authorization", header_names)
+        self.assertEqual(dict((name.lower(), value) for name, value in headers)[b"host"], b"api.telegram.org")
+
+    def test_telegram_file_path_token_is_rewritten(self) -> None:
+        self.assertEqual(
+            broker.tls_intercept._rewrite_telegram_path(
+                path_with_query="/file/bot000000:DOH_PLACEHOLDER/documents/file.txt",
+                token="123456:REAL",
+            ),
+            "/file/bot123456:REAL/documents/file.txt",
+        )
+
 
 class TestCertMinter(unittest.TestCase):
 
@@ -222,7 +251,9 @@ class TestControlIntegrations(unittest.IsolatedAsyncioTestCase):
             aggregator=_StubAggregator(),
             tls_runtime=self.tls_runtime,
             control_plane_url="https://doh.example",
+            bearer="env-bearer",
             owner_username="vmendi",
+            app_slug="hermes",
             env_slug="default",
         )
 
@@ -233,6 +264,8 @@ class TestControlIntegrations(unittest.IsolatedAsyncioTestCase):
                 status=broker.tls_intercept.STATUS_CONNECTED,
                 access_token="fresh-token",
                 expires_in=3600,
+                config={},
+                metadata={},
             ),
         ):
             with TestClient(app) as client:
@@ -262,7 +295,9 @@ class TestControlIntegrations(unittest.IsolatedAsyncioTestCase):
             aggregator=_StubAggregator(),
             tls_runtime=self.tls_runtime,
             control_plane_url="https://doh.example",
+            bearer="env-bearer",
             owner_username="vmendi",
+            app_slug="hermes",
             env_slug="default",
         )
 
@@ -273,6 +308,8 @@ class TestControlIntegrations(unittest.IsolatedAsyncioTestCase):
                 status=broker.tls_intercept.STATUS_CONNECTED,
                 access_token="fresh-token",
                 expires_in=3600,
+                config={},
+                metadata={},
             ),
         ) as fetch_mock:
             with TestClient(app) as client:
@@ -291,7 +328,9 @@ class TestControlIntegrations(unittest.IsolatedAsyncioTestCase):
             aggregator=_StubAggregator(),
             tls_runtime=self.tls_runtime,
             control_plane_url="https://doh.example",
+            bearer="env-bearer",
             owner_username="vmendi",
+            app_slug="hermes",
             env_slug="default",
         )
 
@@ -302,6 +341,8 @@ class TestControlIntegrations(unittest.IsolatedAsyncioTestCase):
                 status=broker.tls_intercept.STATUS_CONNECTED,
                 access_token="fresh-token",
                 expires_in=3600,
+                config={},
+                metadata={},
             ),
         ) as fetch_mock:
             with TestClient(app) as client:
@@ -312,6 +353,74 @@ class TestControlIntegrations(unittest.IsolatedAsyncioTestCase):
         # Once per provider on first GET, then once again per provider
         # on the second GET because invalidate dropped the cache.
         self.assertEqual(fetch_mock.call_count, 2 * len(broker.tls_intercept.TLS_INTERCEPT_PROVIDERS))
+
+    async def test_vault_setup_session_forwards_identity_to_doh(self) -> None:
+        """POST /integrations/{provider}/vault/setup-session asks DOH for a submit token."""
+        from starlette.testclient import TestClient
+
+        app = broker._build_control_app(
+            aggregator=_StubAggregator(),
+            tls_runtime=self.tls_runtime,
+            control_plane_url="https://doh.example",
+            bearer="env-bearer",
+            owner_username="vmendi",
+            app_slug="hermes",
+            env_slug="default",
+        )
+
+        with patch.object(
+            broker,
+            "_post_control_plane_json",
+            return_value=(200, {"submit_token": "signed-token"}),
+        ) as post_mock:
+            with TestClient(app) as client:
+                resp = client.post("/integrations/telegram/vault/setup-session?origin=https%3A%2F%2Fhermes.dev.example.com")
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.json()["submit_token"], "signed-token")
+        post_mock.assert_called_once_with(
+            control_plane_url="https://doh.example",
+            bearer="env-bearer",
+            path="/api/integrations/credentials/setup-session",
+            payload={
+                "owner_username": "vmendi",
+                "app_slug": "hermes",
+                "provider": "telegram",
+                "public_origin": "https://hermes.dev.example.com",
+            },
+        )
+
+    async def test_vault_disconnect_invalidates_tls_cache_on_success(self) -> None:
+        """POST /integrations/{provider}/vault/disconnect deletes at DOH and evicts cache."""
+        from starlette.testclient import TestClient
+
+        app = broker._build_control_app(
+            aggregator=_StubAggregator(),
+            tls_runtime=self.tls_runtime,
+            control_plane_url="https://doh.example",
+            bearer="env-bearer",
+            owner_username="vmendi",
+            app_slug="hermes",
+            env_slug="default",
+        )
+
+        with patch.object(broker, "_post_control_plane_json", return_value=(200, {"ok": True})) as post_mock:
+            with patch.object(self.tls_runtime, "invalidate_all", new_callable=AsyncMock) as invalidate_mock:
+                with TestClient(app) as client:
+                    resp = client.post("/integrations/telegram/vault/disconnect")
+
+        self.assertEqual(resp.status_code, 200)
+        post_mock.assert_called_once_with(
+            control_plane_url="https://doh.example",
+            bearer="env-bearer",
+            path="/api/integrations/credentials/disconnect",
+            payload={
+                "owner_username": "vmendi",
+                "app_slug": "hermes",
+                "provider": "telegram",
+            },
+        )
+        invalidate_mock.assert_awaited_once()
 
 
 class TestLazyTokenForHost(unittest.IsolatedAsyncioTestCase):
@@ -328,6 +437,8 @@ class TestLazyTokenForHost(unittest.IsolatedAsyncioTestCase):
                 status=broker.tls_intercept.STATUS_CONNECTED,
                 access_token="T1",
                 expires_in=3600,
+                config={},
+                metadata={},
             ),
         ) as fetch_mock:
             self.assertEqual(await self.token_store.token_for_host(host="gmail.googleapis.com"), "T1")
@@ -340,11 +451,15 @@ class TestLazyTokenForHost(unittest.IsolatedAsyncioTestCase):
                 status=broker.tls_intercept.STATUS_CONNECTED,
                 access_token="T1",
                 expires_in=3600,
+                config={},
+                metadata={},
             ),
             broker.tls_intercept.RefreshResult(
                 status=broker.tls_intercept.STATUS_CONNECTED,
                 access_token="T2",
                 expires_in=3600,
+                config={},
+                metadata={},
             ),
         ]
         with patch.object(broker.tls_intercept, "fetch_provider_token", side_effect=responses):
@@ -366,6 +481,8 @@ class TestLazyTokenForHost(unittest.IsolatedAsyncioTestCase):
                 status=broker.tls_intercept.STATUS_NOT_CONNECTED,
                 access_token=None,
                 expires_in=None,
+                config={},
+                metadata={},
             ),
         ):
             self.assertIsNone(await self.token_store.token_for_host(host="gmail.googleapis.com"))
@@ -395,6 +512,7 @@ class TestFetchProviderTokenClassification(unittest.TestCase):
             control_plane_url="https://example.invalid",
             bearer="b",
             owner_username="u",
+            app_slug="app",
         )
         provider = broker.tls_intercept.TlsProviderSpec(
             slug="test",
@@ -402,6 +520,7 @@ class TestFetchProviderTokenClassification(unittest.TestCase):
             refresh_path="/api/x",
             hosts=("example.invalid",),
             logo_url="/extensions/test.svg",
+            credential_location=broker.tls_intercept.CREDENTIAL_LOCATION_AUTHORIZATION_HEADER,
             auth_format=broker.tls_intercept.AUTH_FORMAT_BEARER,
         )
         if 200 <= status < 300:

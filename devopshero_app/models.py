@@ -1763,53 +1763,55 @@ class IntegrationConfig(models.Model):
         return f"IntegrationConfig({self.provider})"
 
 
-class IntegrationUserGrant(models.Model):
-    """A user's OAuth grant to a third-party provider, scoped to one environment.
-
-    Persists the long-lived refresh_token plus metadata (scopes, timestamps)
-    on DOH's side. Env-resident components (Hermes, etc.) never see the
-    refresh_token or the provider's client_secret — they call DOH's refresh
-    endpoint with the env bearer + owner_username and receive a short-lived
-    access_token. Plaintext at rest (matches existing posture for
-    Organization.oidc_client_secret / IntegrationConfig.config).
-    """
+class IntegrationUserCredential(models.Model):
+    """User-owned integration credentials for one logical app in one environment."""
 
     class Provider(models.TextChoices):
         GOOGLE = "google", "Google"
         GITHUB = "github", "GitHub"
+        TELEGRAM = "telegram", "Telegram"
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid7, editable=False)
-    user = models.ForeignKey(
+    owner_user = models.ForeignKey(
         "User",
         on_delete=models.CASCADE,
-        related_name="integration_grants",
+        related_name="integration_credentials",
     )
     environment = models.ForeignKey(
         Environment,
         on_delete=models.CASCADE,
-        related_name="integration_grants",
+        related_name="integration_credentials",
     )
+    app_slug = models.SlugField(max_length=255)
     provider = models.CharField(max_length=50, choices=Provider.choices)
-    refresh_token = models.TextField()
-    scope = models.TextField(
-        blank=True,
-        help_text="Space-separated scopes granted at auth time (as returned by the provider).",
+    credentials = models.JSONField(
+        default=dict,
+        help_text="Secret provider-owned values supplied by the user, such as refresh tokens or API keys.",
     )
-    granted_at = models.DateTimeField(auto_now_add=True)
+    config = models.JSONField(
+        default=dict,
+        help_text="Non-secret provider configuration for this logical app.",
+    )
+    metadata = models.JSONField(
+        default=dict,
+        help_text="Derived display/status data such as bot usernames or granted scopes.",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
     last_refreshed_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
-        verbose_name = "Integration User Grant"
-        verbose_name_plural = "Integration User Grants"
+        verbose_name = "Integration User Credential"
+        verbose_name_plural = "Integration User Credentials"
         constraints = [
             models.UniqueConstraint(
-                fields=["user", "environment", "provider"],
-                name="unique_user_env_provider",
+                fields=["owner_user", "environment", "app_slug", "provider"],
+                name="unique_owner_env_appslug_provider",
             ),
         ]
 
     def __str__(self) -> str:
-        return f"IntegrationUserGrant({self.user.username}@{self.environment.slug}:{self.provider})"
+        return f"IntegrationUserCredential({self.owner_user.username}@{self.environment.slug}/{self.app_slug}:{self.provider})"
 
 
 # =============================================================================

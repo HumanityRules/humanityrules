@@ -17,6 +17,7 @@ OAuth client secrets, and the env bearer never enter the sandbox.
 Environment contract (set by deploy_app.py's env-bearer overlay):
 - DOH_ENV_BEARER        — bearer for DOH's per-env integration endpoints.
 - DOH_OWNER_USERNAME    — whose grants this container is for.
+- DOH_APP_SLUG          — logical app key for app-scoped credentials.
 - DOH_CONTROL_PLANE_URL — base URL for DOH (e.g. https://devopshero.ai).
 - DOH_ENV_SLUG          — env slug, for logging only.
 
@@ -30,10 +31,13 @@ Required file system:
 import argparse
 import asyncio
 import contextlib
+import json
 import logging
 import os
 import signal
 import sys
+import urllib.error
+import urllib.request
 from pathlib import Path
 
 import uvicorn
@@ -62,6 +66,7 @@ async def _handle_unified_status(
     tls_runtime: tls_intercept.TlsInterceptRuntime,
     control_plane_url: str,
     owner_username: str,
+    app_slug: str,
     env_slug: str,
 ) -> Response:
     """Flat list combining TLS-intercept providers and MCP-aggregator items.
@@ -81,6 +86,7 @@ async def _handle_unified_status(
         "doh_control_plane_url": control_plane_url,
         "env_slug": env_slug,
         "owner_username": owner_username,
+        "app_slug": app_slug,
         "items": items,
     })
 
@@ -93,7 +99,9 @@ def _build_control_app(
     aggregator: mcp_aggregator.MCPAggregator,
     tls_runtime: tls_intercept.TlsInterceptRuntime,
     control_plane_url: str,
+    bearer: str,
     owner_username: str,
+    app_slug: str,
     env_slug: str,
 ) -> Starlette:
     """Wire the unified /__doh_broker/* router for browser-facing integration management."""
@@ -104,6 +112,7 @@ def _build_control_app(
             tls_runtime=tls_runtime,
             control_plane_url=control_plane_url,
             owner_username=owner_username,
+            app_slug=app_slug,
             env_slug=env_slug,
         )
 
@@ -122,14 +131,74 @@ def _build_control_app(
         await tls_runtime.invalidate_all()
         return JSONResponse(content={"ok": True})
 
+    async def vault_setup_session_route(request: Request) -> Response:
+        provider = request.path_params["provider"]
+        public_origin = request.query_params.get("origin", "")
+        status, payload = await asyncio.to_thread(
+            _post_control_plane_json,
+            control_plane_url=control_plane_url,
+            bearer=bearer,
+            path="/api/integrations/credentials/setup-session",
+            payload={
+                "owner_username": owner_username,
+                "app_slug": app_slug,
+                "provider": provider,
+                "public_origin": public_origin,
+            },
+        )
+        return JSONResponse(content=payload, status_code=status)
+
+    async def vault_disconnect_route(request: Request) -> Response:
+        provider = request.path_params["provider"]
+        status, payload = await asyncio.to_thread(
+            _post_control_plane_json,
+            control_plane_url=control_plane_url,
+            bearer=bearer,
+            path="/api/integrations/credentials/disconnect",
+            payload={
+                "owner_username": owner_username,
+                "app_slug": app_slug,
+                "provider": provider,
+            },
+        )
+        if 200 <= status < 300:
+            await tls_runtime.invalidate_all()
+        return JSONResponse(content=payload, status_code=status)
+
     routes = [
         Route(path="/healthz", endpoint=_handle_healthz, methods=["GET"]),
         Route(path="/integrations", endpoint=status_route, methods=["GET"]),
         Route(path="/integrations/refresh_catalog", endpoint=refresh_catalog_route, methods=["POST"]),
         Route(path="/integrations/invalidate_tls_cache", endpoint=invalidate_tls_cache_route, methods=["POST"]),
+        Route(path="/integrations/{provider}/vault/setup-session", endpoint=vault_setup_session_route, methods=["POST"]),
+        Route(path="/integrations/{provider}/vault/disconnect", endpoint=vault_disconnect_route, methods=["POST"]),
         *aggregator.routes(prefix="/integrations"),
     ]
     return Starlette(routes=routes)
+
+
+def _post_control_plane_json(control_plane_url: str, bearer: str, path: str, payload: dict) -> tuple[int, dict]:
+    """POST JSON to DOH from the outside-sandbox broker."""
+    url = f"{control_plane_url.rstrip('/')}{path}"
+    data = json.dumps(payload).encode("utf-8")
+    req = urllib.request.Request(
+        url=url,
+        data=data,
+        method="POST",
+        headers={"Authorization": f"Bearer {bearer}", "Content-Type": "application/json"},
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=30) as response:
+            return response.status, json.loads(response.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        try:
+            body = json.loads(exc.read().decode("utf-8"))
+        except Exception:
+            body = {"error": f"control plane returned HTTP {exc.code}"}
+        return exc.code, body
+    except Exception as exc:
+        logger.error("control plane request failed path=%s: %s", path, exc)
+        return 502, {"error": "control plane request failed"}
 
 
 def _require_env(name: str) -> str:
@@ -157,6 +226,7 @@ async def _run(proxy_port: int, control_port: int, mcp_port: int, ca_dir: Path, 
             control_plane_url=control_plane_url,
             bearer=bearer,
             owner_username=owner_username,
+            app_slug=app_slug,
         ),
         refresh_lead_seconds=tls_intercept.REFRESH_LEAD_SECONDS,
         ca_dir=ca_dir,
@@ -188,7 +258,9 @@ async def _run(proxy_port: int, control_port: int, mcp_port: int, ca_dir: Path, 
         aggregator=aggregator,
         tls_runtime=tls_runtime,
         control_plane_url=control_plane_url,
+        bearer=bearer,
         owner_username=owner_username,
+        app_slug=app_slug,
         env_slug=env_slug,
     )
     control_uvicorn_config = uvicorn.Config(

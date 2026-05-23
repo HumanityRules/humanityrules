@@ -10,7 +10,7 @@ from devopshero_app.models import (
     AWSAccount,
     Environment,
     EnvironmentBearerToken,
-    IntegrationUserGrant,
+    IntegrationUserCredential,
     Organization,
     User,
 )
@@ -40,10 +40,12 @@ class _GithubTokenEndpointTestBase(TestCase):
         EnvironmentBearerToken.objects.create(
             environment=self.env, token_hash=_hash(self.raw_token),
         )
-        self.integration = IntegrationUserGrant.objects.create(
-            user=self.user, environment=self.env,
-            provider=IntegrationUserGrant.Provider.GITHUB,
-            refresh_token="ghr_existing", scope="repo",
+        self.integration = IntegrationUserCredential.objects.create(
+            owner_user=self.user, environment=self.env,
+            app_slug="hermes",
+            provider=IntegrationUserCredential.Provider.GITHUB,
+            credentials={"refresh_token": "ghr_existing"},
+            config={"scope": "repo"},
         )
         self.client = Client()
 
@@ -53,7 +55,7 @@ class _GithubTokenEndpointTestBase(TestCase):
             headers["HTTP_AUTHORIZATION"] = f"Bearer {token}"
         response = self.client.post(
             "/api/integrations/github/token",
-            data=json.dumps(body),
+            data=json.dumps({"app_slug": "hermes", **body}),
             content_type="application/json",
             **headers,
         )
@@ -125,7 +127,7 @@ class TestHappyPath(_GithubTokenEndpointTestBase):
         self.integration.refresh_from_db()
         self.assertIsNotNone(self.integration.last_refreshed_at)
         # GitHub rotates refresh_token on every refresh — we must persist.
-        self.assertEqual(self.integration.refresh_token, "ghr_rotated")
+        self.assertEqual(self.integration.credentials["refresh_token"], "ghr_rotated")
 
 
 class TestConcurrentRefreshRace(_GithubTokenEndpointTestBase):
@@ -137,13 +139,13 @@ class TestConcurrentRefreshRace(_GithubTokenEndpointTestBase):
         # B that R1 is bad_refresh_token (because A consumed it). Naïve
         # code would delete the row — but that row now holds A's valid R2.
         # CAS-on-delete: only delete if the row still holds R1.
-        from devopshero_app.models import IntegrationUserGrant
+        from devopshero_app.models import IntegrationUserCredential
         from unittest.mock import MagicMock, patch
 
         def fake_exchange(*args, **kwargs):
             # A's persist lands while B is still talking to GitHub.
-            IntegrationUserGrant.objects.filter(id=self.integration.id).update(
-                refresh_token="ghr_winner_R2",
+            IntegrationUserCredential.objects.filter(id=self.integration.id).update(
+                credentials={"refresh_token": "ghr_winner_R2"},
             )
             response = MagicMock()
             response.status_code = 200
@@ -165,10 +167,10 @@ class TestConcurrentRefreshRace(_GithubTokenEndpointTestBase):
         self.assertEqual(status, 409)
         # A's row survives intact. B's stale revoke didn't delete it.
         self.assertTrue(
-            IntegrationUserGrant.objects.filter(id=self.integration.id).exists()
+            IntegrationUserCredential.objects.filter(id=self.integration.id).exists()
         )
         self.integration.refresh_from_db()
-        self.assertEqual(self.integration.refresh_token, "ghr_winner_R2")
+        self.assertEqual(self.integration.credentials["refresh_token"], "ghr_winner_R2")
 
     def test_loser_does_not_overwrite_winner(self) -> None:
         # Simulate the race: B reads R1 from the DB. While B's call to
@@ -176,13 +178,13 @@ class TestConcurrentRefreshRace(_GithubTokenEndpointTestBase):
         # B's call returns R3, B then tries to persist R3 — but since the
         # row no longer holds R1 (A wrote R2), B's CAS-on-WHERE update
         # affects 0 rows, leaving R2 intact.
-        from devopshero_app.models import IntegrationUserGrant
+        from devopshero_app.models import IntegrationUserCredential
         from unittest.mock import MagicMock, patch
 
         def fake_exchange(*args, **kwargs):
             # Simulate "A persists R2 while B is mid-flight at GitHub".
-            IntegrationUserGrant.objects.filter(id=self.integration.id).update(
-                refresh_token="ghr_winner_R2",
+            IntegrationUserCredential.objects.filter(id=self.integration.id).update(
+                credentials={"refresh_token": "ghr_winner_R2"},
             )
             response = MagicMock()
             response.status_code = 200
@@ -208,7 +210,7 @@ class TestConcurrentRefreshRace(_GithubTokenEndpointTestBase):
         self.assertEqual(body["access_token"], "ghu_loser_access")
         # But B did NOT overwrite A's R2 with its own R3.
         self.integration.refresh_from_db()
-        self.assertEqual(self.integration.refresh_token, "ghr_winner_R2")
+        self.assertEqual(self.integration.credentials["refresh_token"], "ghr_winner_R2")
 
 
 class TestNotConnected(_GithubTokenEndpointTestBase):
@@ -243,7 +245,7 @@ class TestRevocation(_GithubTokenEndpointTestBase):
             )
         self.assertEqual(status, 410)
         self.assertFalse(
-            IntegrationUserGrant.objects.filter(id=self.integration.id).exists()
+            IntegrationUserCredential.objects.filter(id=self.integration.id).exists()
         )
 
     def test_bad_credentials_also_treated_as_revoked(self) -> None:
@@ -269,7 +271,7 @@ class TestTransientFailures(_GithubTokenEndpointTestBase):
             )
         self.assertEqual(status, 502)
         self.assertTrue(
-            IntegrationUserGrant.objects.filter(id=self.integration.id).exists()
+            IntegrationUserCredential.objects.filter(id=self.integration.id).exists()
         )
 
     def test_unknown_error_returns_502_and_preserves_row(self) -> None:
@@ -282,7 +284,7 @@ class TestTransientFailures(_GithubTokenEndpointTestBase):
             )
         self.assertEqual(status, 502)
         self.assertTrue(
-            IntegrationUserGrant.objects.filter(id=self.integration.id).exists()
+            IntegrationUserCredential.objects.filter(id=self.integration.id).exists()
         )
 
     @override_settings(GITHUB_APP_CLIENT_ID="", GITHUB_APP_CLIENT_SECRET="")

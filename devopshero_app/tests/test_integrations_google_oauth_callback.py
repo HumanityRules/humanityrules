@@ -9,7 +9,7 @@ from devopshero_app.models import (
     AWSAccount,
     Environment,
     IntegrationConfig,
-    IntegrationUserGrant,
+    IntegrationUserCredential,
     Organization,
     User,
 )
@@ -71,12 +71,13 @@ class _CallbackTestBase(TestCase):
             config=VALID_WEB_CONFIG,
         )
 
-    def _seed_session(self, state: str, rd: str, env_slug: str, owner_username: str) -> None:
+    def _seed_session(self, state: str, rd: str, env_id: str, app_slug: str, owner_username: str) -> None:
         session = self.client.session
         session["google_oauth_state"] = state
         session["google_oauth_payload"] = {
             "rd": rd,
-            "env_slug": env_slug,
+            "env_id": env_id,
+            "app_slug": app_slug,
             "owner_username": owner_username,
         }
         session.save()
@@ -98,7 +99,8 @@ class TestIntegrationsGoogleCallbackHappyPath(_CallbackTestBase):
         self._seed_session(
             state="stst",
             rd="https://hermes.dev.example.com/settings/connections",
-            env_slug="staging",
+            env_id=str(self.env.id),
+            app_slug="hermes",
             owner_username="vmendi",
         )
 
@@ -119,14 +121,15 @@ class TestIntegrationsGoogleCallbackHappyPath(_CallbackTestBase):
             "http://testserver/integrations/google/callback",
         )
 
-        # One IntegrationUserGrant row, keyed by (user, env, provider).
-        row = IntegrationUserGrant.objects.get(
-            user=self.user,
+        # One IntegrationUserCredential row, keyed by (owner, env, app_slug, provider).
+        row = IntegrationUserCredential.objects.get(
+            owner_user=self.user,
             environment=self.env,
-            provider=IntegrationUserGrant.Provider.GOOGLE,
+            app_slug="hermes",
+            provider=IntegrationUserCredential.Provider.GOOGLE,
         )
-        self.assertEqual(row.refresh_token, "1//refresh")
-        self.assertIn("gmail.readonly", row.scope)
+        self.assertEqual(row.credentials["refresh_token"], "1//refresh")
+        self.assertIn("gmail.readonly", row.config["scope"])
         self.assertIsNone(row.last_refreshed_at)
 
         # Redirected back to rd with ?connected=google appended, session popped.
@@ -138,17 +141,19 @@ class TestIntegrationsGoogleCallbackHappyPath(_CallbackTestBase):
 
     def test_reconnect_updates_row_in_place(self) -> None:
         """Running through consent again should update the existing row, not duplicate."""
-        IntegrationUserGrant.objects.create(
-            user=self.user,
+        IntegrationUserCredential.objects.create(
+            owner_user=self.user,
             environment=self.env,
-            provider=IntegrationUserGrant.Provider.GOOGLE,
-            refresh_token="old-refresh",
-            scope="stale-scope",
+            app_slug="hermes",
+            provider=IntegrationUserCredential.Provider.GOOGLE,
+            credentials={"refresh_token": "old-refresh"},
+            config={"scope": "stale-scope"},
         )
         self._seed_session(
             state="stst",
             rd="https://hermes.dev.example.com/x",
-            env_slug="staging",
+            env_id=str(self.env.id),
+            app_slug="hermes",
             owner_username="vmendi",
         )
 
@@ -158,20 +163,20 @@ class TestIntegrationsGoogleCallbackHappyPath(_CallbackTestBase):
                 {"code": "c", "state": "stst"},
             )
 
-        rows = IntegrationUserGrant.objects.filter(
-            user=self.user, environment=self.env,
-            provider=IntegrationUserGrant.Provider.GOOGLE,
+        rows = IntegrationUserCredential.objects.filter(
+            owner_user=self.user, environment=self.env, app_slug="hermes",
+            provider=IntegrationUserCredential.Provider.GOOGLE,
         )
         self.assertEqual(rows.count(), 1)
-        self.assertEqual(rows.first().refresh_token, "1//refresh")
-        self.assertIn("gmail.readonly", rows.first().scope)
+        self.assertEqual(rows.first().credentials["refresh_token"], "1//refresh")
+        self.assertIn("gmail.readonly", rows.first().config["scope"])
 
 
 class TestIntegrationsGoogleCallbackRejections(_CallbackTestBase):
 
     def test_rejects_state_mismatch(self) -> None:
         self._seed_session(state="expected", rd="https://hermes.dev.example.com/x",
-                           env_slug="staging", owner_username="vmendi")
+                           env_id=str(self.env.id), app_slug="hermes", owner_username="vmendi")
 
         response = self.client.get(
             reverse("integrations_google_oauth_callback"),
@@ -179,7 +184,7 @@ class TestIntegrationsGoogleCallbackRejections(_CallbackTestBase):
         )
         self.assertEqual(response.status_code, 400)
         self.assertNotIn("google_oauth_state", self.client.session)
-        self.assertFalse(IntegrationUserGrant.objects.exists())
+        self.assertFalse(IntegrationUserCredential.objects.exists())
 
     def test_rejects_missing_state_in_session(self) -> None:
         response = self.client.get(
@@ -205,18 +210,18 @@ class TestIntegrationsGoogleCallbackRejections(_CallbackTestBase):
         )
         self.client.force_login(other)
         self._seed_session(state="stst", rd="https://hermes.dev.example.com/x",
-                           env_slug="staging", owner_username="vmendi")
+                           env_id=str(self.env.id), app_slug="hermes", owner_username="vmendi")
 
         response = self.client.get(
             reverse("integrations_google_oauth_callback"),
             {"code": "c", "state": "stst"},
         )
         self.assertEqual(response.status_code, 400)
-        self.assertFalse(IntegrationUserGrant.objects.exists())
+        self.assertFalse(IntegrationUserCredential.objects.exists())
 
     def test_rejects_when_env_missing(self) -> None:
         self._seed_session(state="stst", rd="https://hermes.dev.example.com/x",
-                           env_slug="nonexistent", owner_username="vmendi")
+                           env_id="00000000-0000-0000-0000-000000000000", app_slug="hermes", owner_username="vmendi")
 
         response = self.client.get(
             reverse("integrations_google_oauth_callback"),
@@ -226,7 +231,7 @@ class TestIntegrationsGoogleCallbackRejections(_CallbackTestBase):
 
     def test_token_exchange_failure_returns_400_and_no_row_written(self) -> None:
         self._seed_session(state="stst", rd="https://hermes.dev.example.com/x",
-                           env_slug="staging", owner_username="vmendi")
+                           env_id=str(self.env.id), app_slug="hermes", owner_username="vmendi")
 
         with patch(
             "devopshero_app.views.integrations.google_oauth.httpx.post",
@@ -237,12 +242,12 @@ class TestIntegrationsGoogleCallbackRejections(_CallbackTestBase):
                 {"code": "c", "state": "stst"},
             )
         self.assertEqual(response.status_code, 400)
-        self.assertFalse(IntegrationUserGrant.objects.exists())
+        self.assertFalse(IntegrationUserCredential.objects.exists())
 
     def test_rejects_when_google_returns_no_refresh_token(self) -> None:
         """Without a refresh_token in the response, DOH can't serve access tokens later."""
         self._seed_session(state="stst", rd="https://hermes.dev.example.com/x",
-                           env_slug="staging", owner_username="vmendi")
+                           env_id=str(self.env.id), app_slug="hermes", owner_username="vmendi")
         body_without_refresh = {
             "access_token": "ya29.access",
             "scope": "https://www.googleapis.com/auth/gmail.readonly",
@@ -256,7 +261,7 @@ class TestIntegrationsGoogleCallbackRejections(_CallbackTestBase):
                 {"code": "c", "state": "stst"},
             )
         self.assertEqual(response.status_code, 400)
-        self.assertFalse(IntegrationUserGrant.objects.exists())
+        self.assertFalse(IntegrationUserCredential.objects.exists())
 
 
 class TestIntegrationsGoogleCallbackRdAppend(_CallbackTestBase):
@@ -265,7 +270,8 @@ class TestIntegrationsGoogleCallbackRdAppend(_CallbackTestBase):
         self._seed_session(
             state="stst",
             rd="https://hermes.dev.example.com/x?foo=bar",
-            env_slug="staging",
+            env_id=str(self.env.id),
+            app_slug="hermes",
             owner_username="vmendi",
         )
 

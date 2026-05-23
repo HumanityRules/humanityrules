@@ -26,6 +26,7 @@ INTEGRATIONS_BROKER_CONTROL_PORT=9951
 MCP_AGGREGATOR_PORT=9952
 AWS_SIGNER_PID=""
 INTEGRATIONS_BROKER_PID=""
+GATEWAY_INTEGRATION_ENV=()
 
 die() {
     echo "FATAL: $*" >&2
@@ -90,13 +91,13 @@ start_aws_signer() {
 }
 
 start_integrations_broker() {
-    # Only when deploy_app.py's env-bearer overlay supplied the identity
-    # triple. Missing any of them = not a personal-assistant deploy (e.g.
+    # Only when deploy_app.py's env-bearer overlay supplied the required
+    # identity. Missing any of them = not a personal-assistant deploy (e.g.
     # local dev), so skip silently — but nono-managed clients will then
     # call Google without HTTPS_PROXY set and get ENOTCONN, which is the
     # expected local-dev behavior.
-    if [ -z "${DOH_ENV_BEARER:-}" ] || [ -z "${DOH_OWNER_USERNAME:-}" ] || [ -z "${DOH_CONTROL_PLANE_URL:-}" ]; then
-        echo "[supervisor] DOH_ENV_BEARER / DOH_OWNER_USERNAME / DOH_CONTROL_PLANE_URL not set; skipping integrations broker"
+    if [ -z "${DOH_ENV_BEARER:-}" ] || [ -z "${DOH_OWNER_USERNAME:-}" ] || [ -z "${DOH_APP_SLUG:-}" ] || [ -z "${DOH_CONTROL_PLANE_URL:-}" ]; then
+        echo "[supervisor] DOH_ENV_BEARER / DOH_OWNER_USERNAME / DOH_APP_SLUG / DOH_CONTROL_PLANE_URL not set; skipping integrations broker"
         return
     fi
     mkdir -p "$INTEGRATIONS_BROKER_CA_DIR" "$INTEGRATIONS_BROKER_PRIVATE_DIR"
@@ -111,6 +112,45 @@ start_integrations_broker() {
     wait_for_port "$INTEGRATIONS_BROKER_PROXY_PORT" "$INTEGRATIONS_BROKER_PID" "integrations-broker-proxy"
     wait_for_port "$INTEGRATIONS_BROKER_CONTROL_PORT" "$INTEGRATIONS_BROKER_PID" "integrations-broker-control"
     wait_for_port "$MCP_AGGREGATOR_PORT" "$INTEGRATIONS_BROKER_PID" "mcp-aggregator"
+}
+
+load_gateway_integration_env() {
+    GATEWAY_INTEGRATION_ENV=()
+    if [ -z "${INTEGRATIONS_BROKER_PID:-}" ]; then
+        return
+    fi
+
+    local env_output
+    if ! env_output=$("$HERMES_WEBUI_PYTHON" - <<'PY'
+import json
+import sys
+import urllib.request
+
+try:
+    with urllib.request.urlopen("http://127.0.0.1:9951/integrations", timeout=30) as response:
+        payload = json.loads(response.read().decode("utf-8"))
+except Exception as exc:
+    print(f"[supervisor] could not load gateway integration env: {exc}", file=sys.stderr)
+    raise SystemExit(0)
+
+for item in payload.get("items", []):
+    if item.get("slug") != "telegram" or item.get("status") != "connected":
+        continue
+    print("TELEGRAM_BOT_TOKEN=000000:DOH_PLACEHOLDER")
+    allowed_users = item.get("config", {}).get("allowed_users") or []
+    if allowed_users:
+        print("TELEGRAM_ALLOWED_USERS=" + ",".join(str(user_id) for user_id in allowed_users if str(user_id)))
+PY
+    ); then
+        echo "[supervisor] Failed to load gateway integration env; continuing without messaging env"
+        return
+    fi
+
+    while IFS= read -r line; do
+        if [ -n "$line" ]; then
+            GATEWAY_INTEGRATION_ENV+=("$line")
+        fi
+    done <<< "$env_output"
 }
 
 export_webui_extension_env() {
@@ -283,6 +323,7 @@ run_in_nono() {
         PATH="$doh_login_path" \
         NO_PROXY=127.0.0.1,localhost \
         "${broker_env[@]}" \
+        "${GATEWAY_INTEGRATION_ENV[@]}" \
         "$@"
 }
 
@@ -299,6 +340,7 @@ main() {
     start_aws_signer
     write_child_aws_config
     start_integrations_broker
+    load_gateway_integration_env
     export_webui_extension_env
 
     # === Stage 2: prep + launch the sandbox. supervisor stays root (it owns

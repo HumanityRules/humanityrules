@@ -240,13 +240,13 @@ class ContainerConfig:
     memory_reservation_mib: int | None = None
 
     # Opt this container in to the DOH control-plane bearer overlay:
-    # DOH_ENV_BEARER (from shared-secrets), DOH_ENV_SLUG, and DOH_OWNER_USERNAME (if
-    # the owning App has an owner tag). Any env-resident component that calls
-    # the DOH control plane sets this — Hermes (token refresh) today; future
-    # env-resident services later. Policy-proxy containers receive the overlay
-    # implicitly from image_source=policy_proxy, so templates do not need to set
-    # this knob for them. The IAM grant to read shared-secrets is added to the
-    # task role iff any container needs the overlay.
+    # DOH_ENV_BEARER (from shared-secrets), DOH_ENV_SLUG, DOH_APP_SLUG, and
+    # DOH_OWNER_USERNAME (if the owning App has an owner tag). Any env-resident
+    # component that calls the DOH control plane sets this — Hermes integrations
+    # today; future env-resident services later. Policy-proxy containers receive
+    # the overlay implicitly from image_source=policy_proxy, so templates do not
+    # need to set this knob for them. The IAM grant to read shared-secrets is
+    # added to the task role iff any container needs the overlay.
     requires_env_bearer: bool = False
 
 

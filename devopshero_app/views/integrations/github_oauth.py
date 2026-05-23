@@ -4,7 +4,7 @@ Distinct from `views/github.py`, which handles the org-admin GitHub App
 *installation* flow used by the DOH control plane to enumerate repos. This
 file is the per-user OAuth dance: an end user inside a Hermes WebUI clicks
 "Connect GitHub", consents at github.com, and a refresh_token is persisted
-on DOH as an IntegrationUserGrant row.
+on DOH as an IntegrationUserCredential row.
 
 We reuse the existing GitHub App's `client_id`/`client_secret` because a
 GitHub App can issue user-to-server tokens via the same OAuth endpoints. The
@@ -29,7 +29,7 @@ from django.http import HttpRequest, HttpResponse, HttpResponseBadRequest
 from django.shortcuts import redirect
 from django.utils import timezone
 
-from devopshero_app.models import Environment, IntegrationUserGrant
+from devopshero_app.models import App, Environment, IntegrationUserCredential, ResourceTag
 
 
 logger = logging.getLogger(__name__)
@@ -56,6 +56,25 @@ def _resolve_env_by_rd(rd: str) -> Environment | None:
     return None
 
 
+def _resolve_owned_app_slug(app_slug: str, env: Environment, owner_username: str) -> str | None:
+    """Return app_slug when it identifies an app owned by the user in env's org."""
+    if not app_slug:
+        return None
+    app = App.objects.filter(
+        organization=env.aws_account.organization,
+        slug=app_slug,
+    ).first()
+    if app is None:
+        return None
+    owner_tag = ResourceTag.objects.filter(
+        resource_type=ResourceTag.ResourceType.APP,
+        app=app,
+        key="owner",
+        value=owner_username,
+    ).first()
+    return app.slug if owner_tag is not None else None
+
+
 def _redirect_uri(request: HttpRequest) -> str:
     """Build the absolute callback URL for this host.
 
@@ -73,6 +92,13 @@ def integrations_github_oauth_start(request: HttpRequest) -> HttpResponse:
     env = _resolve_env_by_rd(rd=rd)
     if env is None:
         return HttpResponseBadRequest("Invalid or unknown rd")
+    app_slug = _resolve_owned_app_slug(
+        app_slug=request.GET.get("app_slug", ""),
+        env=env,
+        owner_username=request.user.username,
+    )
+    if app_slug is None:
+        return HttpResponseBadRequest("Invalid or unauthorized app_slug")
 
     if not settings.GITHUB_APP_CLIENT_ID:
         logger.error("github oauth start failed: GITHUB_APP_CLIENT_ID not configured")
@@ -82,7 +108,8 @@ def integrations_github_oauth_start(request: HttpRequest) -> HttpResponse:
     request.session["github_user_oauth_state"] = state
     request.session["github_user_oauth_payload"] = {
         "rd": rd,
-        "env_slug": env.slug,
+        "env_id": str(env.id),
+        "app_slug": app_slug,
         "owner_username": request.user.username,
     }
 
@@ -140,9 +167,10 @@ def integrations_github_oauth_callback(request: HttpRequest) -> HttpResponse:
         return HttpResponseBadRequest("Invalid state")
 
     rd = payload.get("rd", "")
-    env_slug = payload.get("env_slug", "")
+    env_id = payload.get("env_id", "")
+    app_slug = payload.get("app_slug", "")
     owner_username = payload.get("owner_username", "")
-    if not rd or not env_slug or not owner_username:
+    if not rd or not env_id or not app_slug or not owner_username:
         return HttpResponseBadRequest("Corrupt session payload")
 
     if owner_username != request.user.username:
@@ -157,9 +185,9 @@ def integrations_github_oauth_callback(request: HttpRequest) -> HttpResponse:
         return HttpResponseBadRequest("GitHub integration not configured")
 
     try:
-        env = Environment.objects.get(slug=env_slug)
+        env = Environment.objects.get(id=env_id)
     except Environment.DoesNotExist:
-        logger.error("github callback failed: env_slug=%s not found", env_slug)
+        logger.error("github callback failed: env_id=%s not found", env_id)
         return HttpResponseBadRequest("Environment not found")
 
     try:
@@ -186,27 +214,28 @@ def integrations_github_oauth_callback(request: HttpRequest) -> HttpResponse:
     if not refresh_token or not access_token:
         logger.error(
             "github token exchange missing tokens env=%s owner=%s has_access=%s has_refresh=%s",
-            env_slug, owner_username, bool(access_token), bool(refresh_token),
+            env.slug, owner_username, bool(access_token), bool(refresh_token),
         )
         return HttpResponseBadRequest(
             "GitHub did not return a refresh token. The DOH GitHub App must have "
             "'Expire user authorization tokens' enabled."
         )
 
-    IntegrationUserGrant.objects.update_or_create(
-        user=request.user,
+    IntegrationUserCredential.objects.update_or_create(
+        owner_user=request.user,
         environment=env,
-        provider=IntegrationUserGrant.Provider.GITHUB,
+        app_slug=app_slug,
+        provider=IntegrationUserCredential.Provider.GITHUB,
         defaults={
-            "refresh_token": refresh_token,
-            "scope": token_response.get("scope", ""),
-            "granted_at": timezone.now(),
+            "credentials": {"refresh_token": refresh_token},
+            "config": {"scope": token_response.get("scope", "")},
+            "metadata": {"connected_at": timezone.now().isoformat()},
             "last_refreshed_at": None,
         },
     )
     logger.info(
-        "github integration stored env=%s owner=%s",
-        env_slug, owner_username,
+        "github integration stored env=%s owner=%s app=%s",
+        env.slug, owner_username, app_slug,
     )
 
     return redirect(_append_query(url=rd, extra={"connected": "github"}))
@@ -240,23 +269,26 @@ def integrations_github_oauth_disconnect(request: HttpRequest) -> HttpResponse:
     if env is None:
         return HttpResponseBadRequest("Invalid or unknown rd")
 
-    integration = IntegrationUserGrant.objects.filter(
-        user=request.user,
+    app_slug = request.GET.get("app_slug", "")
+    integration = IntegrationUserCredential.objects.filter(
+        owner_user=request.user,
         environment=env,
-        provider=IntegrationUserGrant.Provider.GITHUB,
+        app_slug=app_slug,
+        provider=IntegrationUserCredential.Provider.GITHUB,
     ).first()
     if integration is not None:
-        refresh_token = integration.refresh_token
+        refresh_token = integration.credentials.get("refresh_token", "")
         integration.delete()
-        _revoke_github_grant(refresh_token=refresh_token)
+        if refresh_token:
+            _revoke_github_grant(refresh_token=refresh_token)
         logger.info(
-            "github integration disconnected env=%s owner=%s",
-            env.slug, request.user.username,
+            "github integration disconnected env=%s owner=%s app=%s",
+            env.slug, request.user.username, app_slug,
         )
     else:
         logger.info(
-            "github disconnect no-op (no grant) env=%s owner=%s",
-            env.slug, request.user.username,
+            "github disconnect no-op (no grant) env=%s owner=%s app=%s",
+            env.slug, request.user.username, app_slug,
         )
 
     return redirect(_append_query(url=rd, extra={"disconnected": "github"}))

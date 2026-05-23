@@ -7,10 +7,14 @@ from django.urls import reverse
 
 from devopshero_app.models import (
     AWSAccount,
+    App,
     Environment,
     IntegrationConfig,
     Organization,
+    Repository,
+    ResourceTag,
     User,
+    Workspace,
 )
 
 
@@ -56,17 +60,52 @@ class TestIntegrationsGoogleStart(TestCase):
             current_organization=self.org,
         )
         self.client.force_login(self.user)
+        self.repository = Repository.objects.create(
+            organization=self.org,
+            provider="github",
+            name="hermes",
+            full_name="org/hermes",
+            default_branch="main",
+            clone_url="https://github.com/org/hermes.git",
+        )
+        self.workspace = Workspace.objects.create(
+            organization=self.org,
+            name="Engineering",
+            slug="engineering",
+        )
+        self.app = App.objects.create(
+            organization=self.org,
+            workspace=self.workspace,
+            repository=self.repository,
+            name="Hermes",
+            slug="hermes",
+            app_type=App.AppType.WEB,
+            build_strategy=App.BuildStrategy.DOCKERFILE,
+            branch="main",
+            container_port=8000,
+            health_check_path="/health",
+        )
+        ResourceTag.objects.create(
+            organization=self.org,
+            resource_type=ResourceTag.ResourceType.APP,
+            app=self.app,
+            key="owner",
+            value=self.user.username,
+        )
 
         self.google_config = IntegrationConfig.objects.create(
             provider=IntegrationConfig.Provider.GOOGLE,
             config=VALID_WEB_CONFIG,
         )
 
+    def _params(self, rd: str) -> dict:
+        return {"rd": rd, "app_slug": self.app.slug}
+
     def test_login_required_when_unauthenticated(self) -> None:
         self.client.logout()
         response = self.client.get(
             reverse("integrations_google_oauth_start"),
-            {"rd": "https://hermes.dev.example.com/x"},
+            self._params(rd="https://hermes.dev.example.com/x"),
         )
         self.assertEqual(response.status_code, 302)
         # The global LOGIN_URL points at WorkOS — we don't care about the destination,
@@ -76,7 +115,7 @@ class TestIntegrationsGoogleStart(TestCase):
     def test_redirects_to_google_with_expected_params(self) -> None:
         response = self.client.get(
             reverse("integrations_google_oauth_start"),
-            {"rd": "https://hermes.dev.example.com/settings/connections"},
+            self._params(rd="https://hermes.dev.example.com/settings/connections"),
         )
         self.assertEqual(response.status_code, 302)
 
@@ -97,7 +136,7 @@ class TestIntegrationsGoogleStart(TestCase):
     def test_stashes_state_and_payload_in_session(self) -> None:
         response = self.client.get(
             reverse("integrations_google_oauth_start"),
-            {"rd": "https://hermes.dev.example.com/x"},
+            self._params(rd="https://hermes.dev.example.com/x"),
         )
         parsed = urlparse(response["Location"])
         state = parse_qs(parsed.query)["state"][0]
@@ -106,14 +145,15 @@ class TestIntegrationsGoogleStart(TestCase):
         self.assertEqual(session["google_oauth_state"], state)
         payload = session["google_oauth_payload"]
         self.assertEqual(payload["rd"], "https://hermes.dev.example.com/x")
-        self.assertEqual(payload["env_slug"], "staging")
+        self.assertEqual(payload["env_id"], str(self.env.id))
+        self.assertEqual(payload["app_slug"], "hermes")
         self.assertEqual(payload["owner_username"], "vmendi")
 
     def test_exact_zone_host_matches(self) -> None:
         # rd host == env zone (no subdomain) should still match.
         response = self.client.get(
             reverse("integrations_google_oauth_start"),
-            {"rd": "https://dev.example.com/x"},
+            self._params(rd="https://dev.example.com/x"),
         )
         self.assertEqual(response.status_code, 302)
         self.assertIn("accounts.google.com", response["Location"])
@@ -121,7 +161,7 @@ class TestIntegrationsGoogleStart(TestCase):
     def test_rejects_rd_with_unknown_host(self) -> None:
         response = self.client.get(
             reverse("integrations_google_oauth_start"),
-            {"rd": "https://hermes.other-domain.com/x"},
+            self._params(rd="https://hermes.other-domain.com/x"),
         )
         self.assertEqual(response.status_code, 400)
         self.assertNotIn("google_oauth_state", self.client.session)
@@ -131,14 +171,14 @@ class TestIntegrationsGoogleStart(TestCase):
         # but is not a subdomain — must be rejected.
         response = self.client.get(
             reverse("integrations_google_oauth_start"),
-            {"rd": "https://evil-dev.example.com/x"},
+            self._params(rd="https://evil-dev.example.com/x"),
         )
         self.assertEqual(response.status_code, 400)
 
     def test_rejects_non_http_scheme(self) -> None:
         response = self.client.get(
             reverse("integrations_google_oauth_start"),
-            {"rd": "javascript:alert(1)"},
+            self._params(rd="javascript:alert(1)"),
         )
         self.assertEqual(response.status_code, 400)
 
@@ -150,7 +190,7 @@ class TestIntegrationsGoogleStart(TestCase):
         self.google_config.delete()
         response = self.client.get(
             reverse("integrations_google_oauth_start"),
-            {"rd": "https://hermes.dev.example.com/x"},
+            self._params(rd="https://hermes.dev.example.com/x"),
         )
         self.assertEqual(response.status_code, 400)
         self.assertIn("setup_google_oauth_client", response.content.decode())
@@ -165,7 +205,7 @@ class TestIntegrationsGoogleStart(TestCase):
 
         response = self.client.get(
             reverse("integrations_google_oauth_start"),
-            {"rd": "https://hermes.dev.example.com/x"},
+            self._params(rd="https://hermes.dev.example.com/x"),
         )
         self.assertEqual(response.status_code, 400)
         self.assertIn("redirect_uri", response.content.decode())
@@ -184,7 +224,7 @@ class TestIntegrationsGoogleStart(TestCase):
 
         response = self.client.get(
             reverse("integrations_google_oauth_start"),
-            {"rd": "https://hermes.dev.example.com/x"},
+            self._params(rd="https://hermes.dev.example.com/x"),
         )
         self.assertEqual(response.status_code, 302)
         parsed = urlparse(response["Location"])
@@ -202,6 +242,6 @@ class TestIntegrationsGoogleStart(TestCase):
         )
         response = self.client.get(
             reverse("integrations_google_oauth_start"),
-            {"rd": "https://anything.com/x"},
+            self._params(rd="https://anything.com/x"),
         )
         self.assertEqual(response.status_code, 400)
