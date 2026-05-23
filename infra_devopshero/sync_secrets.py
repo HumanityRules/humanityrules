@@ -51,6 +51,10 @@ SECRET_DEFINITIONS = {
         "DOH_ENV_SESSION_JWT_PRIVATE_KEY",
         "DOH_ENV_SESSION_JWT_KID",
     ],
+    "devopshero/prod/merge": [
+        "MERGE_AGENT_HANDLER_API_KEY",
+        "MERGE_TOOL_PACK_ID",
+    ],
 }
 
 
