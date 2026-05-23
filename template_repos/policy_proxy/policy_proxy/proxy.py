@@ -36,7 +36,7 @@ _HOP_BY_HOP_HEADERS = {
 
 _FORBIDDEN_INBOUND_HEADERS = {
     "host",
-    "x-auth-user", "x-auth-sub", "x-auth-email",
+    "x-auth-user", "x-auth-sub", "x-auth-email", "x-auth-provider",
 }
 
 # Headers the websockets library generates itself (or that belong only to the
@@ -86,6 +86,7 @@ async def proxy_to_upstream(
     headers = _filter_request_headers(request.headers)
     headers["X-Auth-User"] = identity.username
     headers["X-Auth-Sub"] = identity.sub
+    headers["X-Auth-Provider"] = identity.provider
     headers["X-Auth-Email"] = identity.email
     original_host = request.headers.get("host", "")
     if original_host:
@@ -202,6 +203,7 @@ async def proxy_to_upstream_ws(
     extra_headers = _filter_ws_handshake_headers(websocket.headers)
     extra_headers.append(("X-Auth-User", identity.username))
     extra_headers.append(("X-Auth-Sub", identity.sub))
+    extra_headers.append(("X-Auth-Provider", identity.provider))
     extra_headers.append(("X-Auth-Email", identity.email))
     if (original_host := websocket.headers.get("host")):
         extra_headers.append(("X-Forwarded-Host", original_host))

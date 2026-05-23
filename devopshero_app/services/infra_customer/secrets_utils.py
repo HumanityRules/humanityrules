@@ -9,12 +9,9 @@ import hashlib
 import json
 import logging
 import secrets
-import uuid
 
 import boto3
 from botocore.exceptions import ClientError
-from cryptography.hazmat.primitives import serialization
-from cryptography.hazmat.primitives.asymmetric import rsa
 
 from .appconfig import AppConfig
 
@@ -259,127 +256,14 @@ def ensure_env_bearer_token_exists(session: boto3.Session, env) -> str:
     return arn
 
 
-def _generate_rsa_keypair_pem() -> tuple[bytes, bytes]:
-    private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
-    private_pem = private_key.private_bytes(
-        encoding=serialization.Encoding.PEM,
-        format=serialization.PrivateFormat.PKCS8,
-        encryption_algorithm=serialization.NoEncryption(),
-    )
-    public_pem = private_key.public_key().public_bytes(
-        encoding=serialization.Encoding.PEM,
-        format=serialization.PublicFormat.SubjectPublicKeyInfo,
-    )
-    return private_pem, public_pem
-
-
-def ensure_env_policy_proxy_auth_config_exists(session: boto3.Session, env) -> str:
-    """Ensure the env's auth-service config secret exists and return its ARN.
-
-    The payload shape depends on the Organization's auth_provider:
-
-    - ``oidc`` (enterprise org with its own OIDC issuer; Okta today)::
-
-        {
-          "provider":    "oidc",
-          "oidc_config": {"issuer_url": "...", "client_id": "...", "client_secret": "..."},
-          "jwt_key":     {"private_pem": "...", "public_pem": "...", "kid": "..."}
-        }
-
-    - ``workos`` (personal/social-login org)::
-
-        {
-          "provider":      "workos",
-          "workos_config": {"client_id": "..."},
-          "jwt_key":       {"private_pem": "...", "public_pem": "...", "kid": "..."}
-        }
-
-    On re-run, the provider config is refreshed from settings/Organization but the
-    jwt_key block is carried forward unchanged — rotating it would require a
-    coordinated redeploy of the auth service + all policy proxies in the env
-    (see docs/policy_proxy_design.md).
-    """
-    from django.conf import settings as django_settings
-
-    from ...models import Organization
-
-    organization = env.aws_account.organization
-
-    secret_name = f"devopshero/{env.slug}/policy-proxy-auth-config"
-    sm_client = session.client("secretsmanager")
-
-    existing: dict = {}
-    try:
-        response = sm_client.get_secret_value(SecretId=secret_name)
-        existing = json.loads(response["SecretString"])
-    except ClientError as e:
-        if e.response["Error"]["Code"] != "ResourceNotFoundException":
-            raise
-
-    jwt_key = existing.get("jwt_key")
-    if not jwt_key:
-        private_pem, public_pem = _generate_rsa_keypair_pem()
-        jwt_key = {
-            "private_pem": private_pem.decode("ascii"),
-            "public_pem": public_pem.decode("ascii"),
-            "kid": f"{env.slug}-{uuid.uuid4().hex[:8]}",
-        }
-
-    if organization.auth_provider == Organization.AuthProvider.WORKOS:
-        if not django_settings.WORKOS_CLIENT_ID:
-            raise RuntimeError(
-                f"WORKOS_CLIENT_ID is not configured; cannot provision "
-                f"WorkOS auth service for env '{env.slug}'.",
-            )
-        payload = {
-            "provider": "workos",
-            "workos_config": {
-                "client_id": django_settings.WORKOS_CLIENT_ID,
-            },
-            "jwt_key": jwt_key,
-        }
-        description = (
-            f"Policy-proxy auth-service config for env '{env.slug}' "
-            f"(WorkOS social login, shared DOH WorkOS app)"
-        )
-    else:
-        if not (organization.oidc_issuer_url and organization.oidc_client_id and organization.oidc_client_secret):
-            raise RuntimeError(
-                f"Organization '{organization.slug}' has no OIDC config; cannot provision "
-                f"auth service for env '{env.slug}'. Run setup_oidc_org first.",
-            )
-        payload = {
-            "provider": "oidc",
-            "oidc_config": {
-                "issuer_url": organization.oidc_issuer_url,
-                "client_id": organization.oidc_client_id,
-                "client_secret": organization.oidc_client_secret,
-            },
-            "jwt_key": jwt_key,
-        }
-        description = (
-            f"Policy-proxy auth-service config for env '{env.slug}' "
-            f"(OIDC sourced from Organization '{organization.slug}')"
-        )
-
-    return _create_or_merge_secret(
-        sm_client=sm_client,
-        secret_name=secret_name,
-        description=description,
-        values_to_write=payload,
-        merge_mode=False,
-    )
-
-
 def ensure_env_policy_proxy_secrets_exist(session: boto3.Session, env) -> dict[str, str]:
     """Top-level helper: provision per-env policy-proxy secrets and return their ARNs.
 
-    Returns a dict with keys: 'shared_secrets_arn', 'policy_proxy_auth_config_arn'.
-    Called from the deploy pipeline before the AuthServiceStack runs.
+    Returns a dict with keys: 'shared_secrets_arn'. Called from the deploy
+    pipeline before the policy-proxy stack runs.
     """
     return {
         "shared_secrets_arn": ensure_env_bearer_token_exists(session=session, env=env),
-        "policy_proxy_auth_config_arn": ensure_env_policy_proxy_auth_config_exists(session=session, env=env),
     }
 
 

@@ -22,25 +22,21 @@ async def evaluate(
     pdp_url: str,
     env_bearer_token: str,
     app_id: str,
+    provider: str,
     sub: str,
     username: str,
-    provider: str,
     path: str,
 ) -> PdpDecision | None:
-    """Call the PDP. Returns None if the call itself fails (treat as deny).
-
-    ``provider`` selects which DOH User column the PDP looks ``sub`` up in
-    (``oidc_sub`` for okta, ``workos_user_id`` for workos).
-    """
+    """Call the PDP. Returns None if the call itself fails (treat as deny)."""
     try:
         response = await http_client.post(
             pdp_url,
             headers={"Authorization": f"Bearer {env_bearer_token}"},
             json={
                 "app_id": app_id,
+                "provider": provider,
                 "sub": sub,
                 "username": username,
-                "provider": provider,
                 "path": path,
             },
             timeout=PDP_TIMEOUT_SECONDS,

@@ -201,6 +201,11 @@ GITHUB_WEBHOOK_SECRET = os.environ.get("GITHUB_WEBHOOK_SECRET")
 # DevOpsHero API Configuration
 DOH_API_SECRET_KEY = os.environ.get("DOH_API_SECRET_KEY")
 
+# Central RS256 keypair for env-SSO session JWTs. The control plane mints session
+# tokens here; per-env policy-proxy sidecars verify them via /.well-known/jwks.json.
+DOH_ENV_SESSION_JWT_PRIVATE_KEY = os.environ.get("DOH_ENV_SESSION_JWT_PRIVATE_KEY", "").replace("\\n", "\n")
+DOH_ENV_SESSION_JWT_KID = os.environ.get("DOH_ENV_SESSION_JWT_KID")
+
 # Merge.dev Agent Handler — single tenant-wide API key + Tool Pack.
 # Stored only on DOH; never injected into customer-deployed Hermes containers.
 MERGE_AGENT_HANDLER_API_KEY = os.environ.get("MERGE_AGENT_HANDLER_API_KEY")

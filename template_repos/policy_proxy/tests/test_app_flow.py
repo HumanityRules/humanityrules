@@ -52,8 +52,8 @@ def test_missing_cookie_redirects_to_auth(policy_proxy_config, fake_jwks_client)
     location = response.headers["location"]
     parsed = urlparse(location)
     assert parsed.scheme == "https"
-    assert parsed.netloc == "auth.ch-sandbox.chsandbox.com"
-    assert parsed.path == "/start"
+    assert parsed.netloc == "auth.doh-sandbox.dohsandbox.com"
+    assert parsed.path == "/auth/env-start"
     rd = parse_qs(parsed.query)["rd"][0]
     assert rd.endswith("/chat/new")
 
@@ -66,7 +66,7 @@ def test_missing_cookie_api_returns_401_with_auth_url(policy_proxy_config, fake_
         raise AssertionError("upstream should not be called")
 
     client = _mk_client(policy_proxy_config, fake_jwks_client, pdp, upstream)
-    referer = "https://vmendi-hermes.ch-sandbox.chsandbox.com/"
+    referer = "https://vmendi-hermes.doh-sandbox.dohsandbox.com/"
     response = client.get(
         "/api/sessions",
         headers={
@@ -80,8 +80,8 @@ def test_missing_cookie_api_returns_401_with_auth_url(policy_proxy_config, fake_
     auth_url = response.headers[app_mod.AUTH_URL_HEADER]
     parsed = urlparse(auth_url)
     assert parsed.scheme == "https"
-    assert parsed.netloc == "auth.ch-sandbox.chsandbox.com"
-    assert parsed.path == "/start"
+    assert parsed.netloc == "auth.doh-sandbox.dohsandbox.com"
+    assert parsed.path == "/auth/env-start"
     assert parse_qs(parsed.query)["rd"] == [referer]
 
 
@@ -93,6 +93,7 @@ def test_allow_proxies_to_upstream(policy_proxy_config, fake_jwks_client, jwt_mi
         # Validate the policy proxy forwarded the identity headers.
         assert request.headers["x-auth-user"] == "vmendi"
         assert request.headers["x-auth-sub"] == "okta|vmendi"
+        assert request.headers["x-auth-provider"] == "oidc"
         return httpx.Response(200, content=_streamed_body(b"hello from upstream"))
 
     client = _mk_client(policy_proxy_config, fake_jwks_client, pdp, upstream)
@@ -155,7 +156,7 @@ def test_tampered_cookie_redirects_to_auth(policy_proxy_config, fake_jwks_client
         follow_redirects=False,
     )
     assert response.status_code == 302
-    assert response.headers["location"].startswith(policy_proxy_config.auth_base_url + "/start")
+    assert response.headers["location"].startswith(policy_proxy_config.auth_base_url + "/auth/env-start")
 
 
 def test_tampered_cookie_api_returns_401_with_auth_url(policy_proxy_config, fake_jwks_client, jwt_minter) -> None:
@@ -169,7 +170,7 @@ def test_tampered_cookie_api_returns_401_with_auth_url(policy_proxy_config, fake
     token = jwt_minter()
     h, p, s = token.split(".")
     bad = f"{h}.{p}.{s[:-2]}XY"
-    referer = "https://vmendi-hermes.ch-sandbox.chsandbox.com/"
+    referer = "https://vmendi-hermes.doh-sandbox.dohsandbox.com/"
 
     response = client.get(
         "/api/session",
@@ -219,7 +220,7 @@ def test_navigation_fetch_metadata_redirects_even_for_api_path(policy_proxy_conf
     )
 
     assert response.status_code == 302
-    assert response.headers["location"].startswith(policy_proxy_config.auth_base_url + "/start")
+    assert response.headers["location"].startswith(policy_proxy_config.auth_base_url + "/auth/env-start")
 
 
 def test_healthz_returns_ok_without_auth(policy_proxy_config, fake_jwks_client) -> None:
@@ -272,6 +273,7 @@ def test_cache_misses_across_different_users(policy_proxy_config, fake_jwks_clie
     async def pdp(request: httpx.Request) -> httpx.Response:
         import json
         body = json.loads(request.content)
+        assert body["provider"] == "oidc"
         pdp_calls.append(body["sub"])
         return httpx.Response(200, json={"decision": "allow", "reason": "ok"})
 
