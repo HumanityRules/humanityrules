@@ -132,9 +132,9 @@ class TestPDPEvaluation(PDPTestBase):
         status, body = self._post(
             body={
                 "app_id": "vmendi-hermes",
+                "provider": "oidc",
                 "sub": "okta|vmendi",
                 "username": "vmendi",
-                "provider": "oidc",
                 "path": "/chat/new",
             },
             token=self.raw_token,
@@ -146,9 +146,9 @@ class TestPDPEvaluation(PDPTestBase):
         status, body = self._post(
             body={
                 "app_id": "vmendi-hermes",
+                "provider": "oidc",
                 "sub": "okta|alice",
                 "username": "alice",
-                "provider": "oidc",
                 "path": "/chat/new",
             },
             token=self.raw_token,
@@ -161,9 +161,9 @@ class TestPDPEvaluation(PDPTestBase):
         status, body = self._post(
             body={
                 "app_id": "does-not-exist",
+                "provider": "oidc",
                 "sub": "okta|vmendi",
                 "username": "vmendi",
-                "provider": "oidc",
                 "path": "/",
             },
             token=self.raw_token,
@@ -185,9 +185,9 @@ class TestPDPEvaluation(PDPTestBase):
         status, body = self._post(
             body={
                 "app_id": "vmendi-hermes",
+                "provider": "oidc",
                 "sub": "okta|vmendi",
                 "username": "vmendi",
-                "provider": "oidc",
                 "path": "/",
             },
             token=other_token_raw,
@@ -200,9 +200,9 @@ class TestPDPEvaluation(PDPTestBase):
         status, body = self._post(
             body={
                 "app_id": "vmendi-hermes",
+                "provider": "oidc",
                 "sub": "okta|ghost",
                 "username": "ghost",
-                "provider": "oidc",
                 "path": "/",
             },
             token=self.raw_token,
@@ -211,55 +211,46 @@ class TestPDPEvaluation(PDPTestBase):
         self.assertEqual(body["decision"], "deny")
         self.assertEqual(body["reason"], "user-not-found")
 
-    def test_workos_provider_dispatches_to_workos_user_id(self) -> None:
-        """A workos-tagged sub is matched against User.workos_user_id, not oidc_sub."""
-        workos_owner = User.objects.create_user(
-            username="workos-vmendi", password="pw", current_organization=self.org,
-            workos_user_id="user_01HXYZ", email="vmendi@gmail.com",
-        )
-        IdentityAttribute.objects.create(
-            organization=self.org, user=workos_owner, key="username", value="workos-vmendi",
-        )
-        ResourceTag.objects.filter(
-            organization=self.org, resource_type="app", app=self.app, key="owner",
-        ).update(value="workos-vmendi")
-
+    def test_unknown_workos_sub_returns_deny(self) -> None:
+        """A WorkOS sub that doesn't match any User.workos_user_id is user-not-found."""
         status, body = self._post(
             body={
                 "app_id": "vmendi-hermes",
-                "sub": "user_01HXYZ",
-                "username": "workos-vmendi",
                 "provider": "workos",
+                "sub": "user_01H_unknown",
+                "username": "ghost@example.com",
                 "path": "/",
+            },
+            token=self.raw_token,
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(body["decision"], "deny")
+        self.assertEqual(body["reason"], "user-not-found")
+
+    def test_workos_owner_receives_allow(self) -> None:
+        """A user looked up by workos_user_id is authorized identically to the OIDC path."""
+        self.owner.workos_user_id = "user_01H_vmendi"
+        self.owner.save()
+        status, body = self._post(
+            body={
+                "app_id": "vmendi-hermes",
+                "provider": "workos",
+                "sub": "user_01H_vmendi",
+                "username": "vmendi",
+                "path": "/chat/new",
             },
             token=self.raw_token,
         )
         self.assertEqual(status, 200)
         self.assertEqual(body["decision"], "allow")
 
-    def test_workos_sub_against_oidc_user_returns_deny(self) -> None:
-        """An okta sub presented as if it were a workos id must not match an oidc_sub user."""
-        status, body = self._post(
-            body={
-                "app_id": "vmendi-hermes",
-                "sub": "okta|vmendi",
-                "username": "vmendi",
-                "provider": "workos",
-                "path": "/",
-            },
-            token=self.raw_token,
-        )
-        self.assertEqual(status, 200)
-        self.assertEqual(body["decision"], "deny")
-        self.assertEqual(body["reason"], "user-not-found")
-
     def test_unknown_provider_returns_400(self) -> None:
         status, body = self._post(
             body={
                 "app_id": "vmendi-hermes",
+                "provider": "facebook",
                 "sub": "x",
                 "username": "x",
-                "provider": "google-direct",
                 "path": "/",
             },
             token=self.raw_token,

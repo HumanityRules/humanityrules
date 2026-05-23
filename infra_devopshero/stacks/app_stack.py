@@ -103,6 +103,7 @@ class AppStack(Stack):
         bedrock_secret = secretsmanager.Secret.from_secret_name_v2(self, "BedrockSecret", "devopshero/prod/bedrock")
         api_secret = secretsmanager.Secret.from_secret_name_v2(self, "ApiSecret", "devopshero/prod/api")
         posthog_secret = secretsmanager.Secret.from_secret_name_v2(self, "PosthogSecret", "devopshero/prod/posthog")
+        env_sso_secret = secretsmanager.Secret.from_secret_name_v2(self, "EnvSsoSecret", "devopshero/prod/env-sso")
 
         # All secrets needed by the app (shared between migration and app containers)
         app_secrets = {
@@ -129,6 +130,8 @@ class AppStack(Stack):
             "POSTHOG_API_KEY": ecs.Secret.from_secrets_manager(posthog_secret, field="POSTHOG_API_KEY"),
             "POSTHOG_HOST": ecs.Secret.from_secrets_manager(posthog_secret, field="POSTHOG_HOST"),
             "POSTHOG_PROXY_HOST": ecs.Secret.from_secrets_manager(posthog_secret, field="POSTHOG_PROXY_HOST"),
+            "DOH_ENV_SESSION_JWT_PRIVATE_KEY": ecs.Secret.from_secrets_manager(env_sso_secret, field="DOH_ENV_SESSION_JWT_PRIVATE_KEY"),
+            "DOH_ENV_SESSION_JWT_KID": ecs.Secret.from_secrets_manager(env_sso_secret, field="DOH_ENV_SESSION_JWT_KID"),
         }
 
         # Init container - runs Django migrations and ensures superuser before app starts

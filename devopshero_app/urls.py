@@ -109,6 +109,11 @@ urlpatterns = [
     path("oidc/login/", views.oidc_login, name="oidc_login"),
     path("oidc/callback/", views.oidc_callback, name="oidc_callback"),
 
+    # Env-SSO: control plane owns the OAuth dance for every customer env
+    path("auth/env-start", views.env_start, name="env_start"),
+    path("auth/env-callback", views.env_callback, name="env_callback"),
+    path(".well-known/jwks.json", views.env_jwks, name="env_jwks"),
+
     # Onboarding
     path("onboarding/", views.onboarding, name="onboarding"),
 

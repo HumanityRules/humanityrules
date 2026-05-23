@@ -5,8 +5,8 @@ A tiny reverse proxy that sits in front of apps deployed by DevOps Hero and enfo
 ## What it does, per request
 
 1. Reads the `doh_session` cookie.
-2. If missing or invalid, 302s to `https://auth.<env-domain>/start?rd=<current-url>` for the OAuth dance.
-3. Verifies the JWT against the env's public key (fetched from `/.well-known/jwks.json` at startup).
+2. If missing or invalid, 302s to `https://devopshero.ai/auth/env-start?rd=<current-url>` for the OAuth dance. The control plane mints a session JWT and bounces back to `/__doh_session_install?token=...&rd=...`, which sets the env-scoped cookie and redirects the browser to `rd`.
+3. Verifies the JWT against the central JWKS (fetched from `/.well-known/jwks.json`, cached 15 min). The `aud` claim must match `DOH_ENV_DOMAIN` to block cross-env replay (the env's DNS zone is globally unique; `DOH_ENV_SLUG` is only unique per AWS account).
 4. POSTs to DOH's PDP endpoint with `{app_id, oidc_sub, username, path}` and `Authorization: Bearer <DOH_ENV_BEARER>`.
 5. On `allow`, proxies to the app container on localhost, injecting trusted identity headers.
 6. On `deny`, returns a 403 with a short message.
@@ -20,10 +20,10 @@ requests still receive the `302` directly.
 | Var | Example | Purpose |
 | --- | --- | --- |
 | `DOH_APP_ID` | `vmendi-hermes` | App slug, sent in the PDP request. |
-| `DOH_ENV_SLUG` | `ch-sandbox` | For log lines only. |
-| `DOH_ENV_DOMAIN` | `ch-sandbox.chsandbox.com` | Parent domain the session cookie is scoped to. |
-| `DOH_AUTH_BASE_URL` | `https://auth.ch-sandbox.chsandbox.com` | Where to redirect for login. |
-| `DOH_JWKS_URL` | `https://auth.ch-sandbox.chsandbox.com/.well-known/jwks.json` | JWT verification keys. |
+| `DOH_ENV_SLUG` | `doh-sandbox` | For log lines only. |
+| `DOH_ENV_DOMAIN` | `doh-sandbox.dohsandbox.com` | Parent domain the session cookie is scoped to. |
+| `DOH_AUTH_BASE_URL` | `https://devopshero.ai` | Control-plane base URL; the sidecar bounces unauthenticated requests to `<base>/auth/env-start`. |
+| `DOH_JWKS_URL` | `https://devopshero.ai/.well-known/jwks.json` | Central JWKS endpoint for verifying session JWTs. |
 | `DOH_PDP_URL` | `https://devopshero.ai/api/pdp/evaluate` | Central authorization endpoint. |
 | `DOH_ENV_BEARER` | 64 random chars | Environment bearer token. From Secrets Manager. Used by any env component calling the DOH control plane. |
 | `DOH_UPSTREAM_HOST` | `127.0.0.1` | The app container. |

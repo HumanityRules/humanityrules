@@ -1,18 +1,16 @@
-"""FastAPI application for the policy proxy.
+"""FastAPI application for the per-app policy-proxy sidecar.
 
-Two roles share this binary:
+The sidecar verifies the session cookie via the central JWKS, runs PDP, and
+proxies authorized traffic to the upstream container.
 
-- proxy (default): the per-app sidecar. `create_app(cfg)` builds the sidecar
-  FastAPI app with the PDP + upstream proxy catch-all.
-- auth: the singleton auth service. `create_auth_app(cfg, secrets_client)`
-  builds a FastAPI app with only the OAuth/JWKS routes.
-
-`main.py` dispatches on DOH_ROLE at startup. Keeping the two factories in one
-module lets both roles share the `/__policy_proxy/healthz` endpoint and the
-common FastAPI scaffolding without pulling the auth code into sidecar images.
+It also exposes ``/__doh_session_install``, the landing path the control plane
+redirects browsers to after a successful IdP dance: it verifies the session
+JWT minted upstream, sets the ``doh_session`` cookie scoped to the env domain,
+and bounces the browser to the original ``rd`` URL.
 """
 
 import logging
+import time
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from typing import Any
@@ -23,7 +21,6 @@ import jwt
 from fastapi import FastAPI, Request, WebSocket
 from fastapi.responses import PlainTextResponse, RedirectResponse, Response
 
-from . import auth as auth_mod
 from . import config as config_mod
 from . import jwt_verify
 from . import pdp as pdp_mod
@@ -34,7 +31,9 @@ logger = logging.getLogger(__name__)
 
 JWKS_CACHE_TTL_SECONDS = 15 * 60
 INTERNAL_PATH_PREFIX = "/__policy_proxy"
+SESSION_INSTALL_PATH = "/__doh_session_install"
 AUTH_URL_HEADER = "X-DOH-Auth-URL"
+MIN_COOKIE_TTL_SECONDS = 60
 
 # WebSocket close codes used when we reject an upgrade.
 WS_CLOSE_AUTH_REQUIRED = 4401
@@ -64,27 +63,29 @@ async def _authorize_session(
     if not cookie_value:
         return _AuthDecision(identity=None, reject="auth")
 
-    identity = jwt_verify.verify_session_cookie(
-        jwt_value=cookie_value, jwks_client=state.jwks_client,
+    identity = jwt_verify.verify_session_jwt(
+        jwt_value=cookie_value,
+        jwks_client=state.jwks_client,
+        env_domain=state.config.env_domain,
     )
     if identity is None:
         return _AuthDecision(identity=None, reject="auth")
 
-    decision = state.pdp_cache.get(identity.sub)
+    decision = state.pdp_cache.get(provider=identity.provider, sub=identity.sub)
     if decision is None:
         decision = await pdp_mod.evaluate(
             http_client=state.http_client,
             pdp_url=state.config.pdp_url,
             env_bearer_token=state.config.env_bearer_token,
             app_id=state.config.app_id,
+            provider=identity.provider,
             sub=identity.sub,
             username=identity.username,
-            provider=identity.provider,
             path=path,
         )
         if decision is None:
             return _AuthDecision(identity=identity, reject="pdp-down")
-        state.pdp_cache.put(identity.sub, decision)
+        state.pdp_cache.put(provider=identity.provider, sub=identity.sub, decision=decision)
 
     if decision.decision != "allow":
         logger.info(
@@ -133,8 +134,15 @@ def _extract_reauth_return_url(request: Request, cfg: config_mod.PolicyProxyConf
 
 
 def _auth_start_url(return_url: str, cfg: config_mod.PolicyProxyConfig) -> str:
-    """Build the auth Lambda /start URL for the target return URL."""
-    return f"{cfg.auth_base_url}/start?rd={quote(return_url, safe='')}"
+    """Build the control-plane env-start URL for the target return URL."""
+    return f"{cfg.auth_base_url}/auth/env-start?rd={quote(return_url, safe='')}"
+
+
+def _session_cookie(*, jwt_value: str, env_domain: str, ttl_seconds: int) -> str:
+    return (
+        f"{jwt_verify.SESSION_COOKIE_NAME}={jwt_value}; Domain=.{env_domain}; Path=/; "
+        f"Max-Age={ttl_seconds}; Secure; HttpOnly; SameSite=Lax"
+    )
 
 
 def _is_fetch_request(request: Request) -> bool:
@@ -192,6 +200,43 @@ def create_app(cfg: config_mod.PolicyProxyConfig) -> FastAPI:
     @app.get(f"{INTERNAL_PATH_PREFIX}/healthz")
     async def healthz() -> Response:
         return PlainTextResponse(content="ok")
+
+    @app.get(SESSION_INSTALL_PATH)
+    async def session_install(request: Request) -> Response:
+        token = request.query_params.get("token", "")
+        rd = request.query_params.get("rd", "")
+        if not token or not rd:
+            return PlainTextResponse(content="missing token or rd", status_code=400)
+        if not _is_valid_return_url(url=rd, cfg=cfg):
+            return PlainTextResponse(content="invalid rd", status_code=400)
+
+        identity = jwt_verify.verify_session_jwt(
+            jwt_value=token,
+            jwks_client=request.app.state.jwks_client,
+            env_domain=cfg.env_domain,
+        )
+        if identity is None:
+            return PlainTextResponse(content="invalid session token", status_code=401)
+
+        exp = jwt_verify.session_jwt_exp(jwt_value=token)
+        if exp is None:
+            return PlainTextResponse(content="malformed session token", status_code=401)
+        cookie_ttl = max(MIN_COOKIE_TTL_SECONDS, exp - int(time.time()))
+
+        logger.info(
+            "session install env=%s user=%s -> %s", cfg.env_slug, identity.username, rd,
+        )
+        return Response(
+            status_code=302,
+            headers={
+                "location": rd,
+                "set-cookie": _session_cookie(
+                    jwt_value=token, env_domain=cfg.env_domain, ttl_seconds=cookie_ttl,
+                ),
+                "cache-control": "no-store",
+                "referrer-policy": "no-referrer",
+            },
+        )
 
     @app.api_route("/{path:path}", methods=["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"])
     async def catch_all(request: Request, path: str) -> Response:
@@ -261,23 +306,4 @@ def create_app(cfg: config_mod.PolicyProxyConfig) -> FastAPI:
                 websocket=websocket, code=WS_CLOSE_SERVICE_UNAVAILABLE,
             )
 
-    return app
-
-
-def create_auth_app(cfg: config_mod.AuthServiceConfig, secrets_client: Any) -> FastAPI:
-    """Build the FastAPI app for the auth-service role (no proxy/PDP paths)."""
-
-    @asynccontextmanager
-    async def lifespan(app: FastAPI):
-        yield
-        await app.state.http_client.aclose()
-
-    app = FastAPI(lifespan=lifespan)
-    app.state.config = cfg
-
-    @app.get(f"{INTERNAL_PATH_PREFIX}/healthz")
-    async def healthz() -> Response:
-        return PlainTextResponse(content="ok")
-
-    auth_mod.install_auth_routes(app=app, cfg=cfg, secrets_client=secrets_client)
     return app

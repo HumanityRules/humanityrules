@@ -31,6 +31,7 @@ def jwt_minter(rsa_keypair):
         provider: str = "oidc",
         exp_offset: int = 3600,
         kid: str = TEST_KID,
+        aud: str = "doh-sandbox.dohsandbox.com",
     ) -> str:
         now = int(time.time())
         claims = {
@@ -38,6 +39,7 @@ def jwt_minter(rsa_keypair):
             "username": username,
             "email": email,
             "provider": provider,
+            "aud": aud,
             "iat": now,
             "exp": now + exp_offset,
         }
@@ -53,10 +55,10 @@ def jwt_minter(rsa_keypair):
 def policy_proxy_config() -> config_mod.PolicyProxyConfig:
     return config_mod.PolicyProxyConfig(
         app_id="vmendi-hermes",
-        env_slug="ch-sandbox",
-        env_domain="ch-sandbox.chsandbox.com",
-        auth_base_url="https://auth.ch-sandbox.chsandbox.com",
-        jwks_url="https://auth.ch-sandbox.chsandbox.com/.well-known/jwks.json",
+        env_slug="doh-sandbox",
+        env_domain="doh-sandbox.dohsandbox.com",
+        auth_base_url="https://auth.doh-sandbox.dohsandbox.com",
+        jwks_url="https://auth.doh-sandbox.dohsandbox.com/.well-known/jwks.json",
         pdp_url="https://devopshero.ai/api/pdp/evaluate",
         env_bearer_token="t" * 64,
         upstream_host="127.0.0.1",

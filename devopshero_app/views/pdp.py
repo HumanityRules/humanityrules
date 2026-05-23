@@ -40,16 +40,19 @@ def pdp_evaluate(request: HttpRequest) -> JsonResponse:
 
     app_id = payload.get("app_id")
     sub = payload.get("sub")
-    username = payload.get("username")
     provider = payload.get("provider")
+    username = payload.get("username")
     path = payload.get("path", "")
-    if not (isinstance(app_id, str) and isinstance(sub, str) and isinstance(username, str) and isinstance(provider, str)):
+    if not (
+        isinstance(app_id, str) and isinstance(sub, str)
+        and isinstance(username, str) and isinstance(provider, str)
+    ):
         return JsonResponse(
-            {"error": "app_id, sub, username, and provider are required strings"},
+            {"error": "app_id, sub, provider, and username are required strings"},
             status=400,
         )
-    if provider not in ("oidc", "workos"):
-        return JsonResponse({"error": f"unsupported provider {provider!r}"}, status=400)
+    if provider not in ("workos", "oidc"):
+        return JsonResponse({"error": f"unknown provider {provider!r}"}, status=400)
 
     organization = environment.aws_account.organization
 
@@ -69,7 +72,12 @@ def pdp_evaluate(request: HttpRequest) -> JsonResponse:
         )
         return JsonResponse({"decision": "deny", "reason": "app-not-in-env"})
 
-    user = _find_user_by_provider_sub(provider=provider, sub=sub)
+    # WorkOS users carry sub=workos_user_id; OIDC users carry sub=<oidc subject>.
+    # The session JWT's `provider` claim picks which column we look up against.
+    if provider == "workos":
+        user = User.objects.filter(workos_user_id=sub).first()
+    else:
+        user = User.objects.filter(oidc_sub=sub).first()
     if user is None:
         logger.info(
             "pdp deny reason=user-not-found env=%s app=%s provider=%s sub=%s path=%s",
@@ -92,10 +100,3 @@ def pdp_evaluate(request: HttpRequest) -> JsonResponse:
         environment.slug, app.slug, username, provider, sub, path,
     )
     return JsonResponse({"decision": "deny", "reason": "no-matching-policy"})
-
-
-def _find_user_by_provider_sub(provider: str, sub: str) -> User | None:
-    """Look the User row up against the column matching the IdP that minted `sub`."""
-    if provider == "workos":
-        return User.objects.filter(workos_user_id=sub).first()
-    return User.objects.filter(oidc_sub=sub).first()

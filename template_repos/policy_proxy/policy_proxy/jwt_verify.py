@@ -13,24 +13,29 @@ ACCEPTED_ALGORITHMS = ["RS256", "EdDSA"]
 # JWT clock skew tolerance, seconds. ECS task clocks are usually tight; this is
 # a small safety margin against normal NTP drift.
 LEEWAY_SECONDS = 30
-ACCEPTED_PROVIDERS = {"oidc", "workos"}
 
 
 @dataclass(frozen=True)
 class SessionIdentity:
     """The verified claims we care about from a session JWT.
 
-    ``sub`` is opaque from the proxy's point of view — its meaning depends on
-    ``provider``. The PDP uses both fields together to look up a User row.
+    ``sub`` is the IdP's stable identifier — for ``provider="workos"`` it's
+    the WorkOS user id, for ``provider="oidc"`` it's the OIDC subject claim.
+    The PDP needs ``provider`` to know which User column to look up against.
     """
     sub: str
+    provider: str
     username: str
     email: str
-    provider: str
 
 
-def verify_session_cookie(jwt_value: str, jwks_client: jwt.PyJWKClient) -> SessionIdentity | None:
-    """Verify a JWT cookie. Returns claims on success, None on failure (log + redirect)."""
+def verify_session_jwt(*, jwt_value: str, jwks_client: jwt.PyJWKClient, env_domain: str) -> SessionIdentity | None:
+    """Verify a session JWT. ``aud`` must equal ``env_domain`` to block cross-env replay.
+
+    The env's DNS zone is globally unique (one per env), unlike ``env_slug`` which is only
+    unique per AWS account. With a single central JWKS, only a globally unique audience
+    can prevent replay across envs that happen to share a slug in different accounts.
+    """
     try:
         signing_key = jwks_client.get_signing_key_from_jwt(jwt_value).key
     except jwt.PyJWTError as exc:
@@ -43,7 +48,8 @@ def verify_session_cookie(jwt_value: str, jwks_client: jwt.PyJWKClient) -> Sessi
             key=signing_key,
             algorithms=ACCEPTED_ALGORITHMS,
             leeway=LEEWAY_SECONDS,
-            options={"require": ["exp", "iat", "sub"]},
+            audience=env_domain,
+            options={"require": ["exp", "iat", "sub", "aud"]},
         )
     except jwt.PyJWTError as exc:
         logger.error("jwt reject reason=invalid err=%s", exc)
@@ -53,11 +59,23 @@ def verify_session_cookie(jwt_value: str, jwks_client: jwt.PyJWKClient) -> Sessi
     username = claims.get("username")
     email = claims.get("email", "")
     provider = claims.get("provider")
-    if not (isinstance(sub, str) and isinstance(username, str) and isinstance(provider, str)):
+    if not (
+        isinstance(sub, str) and isinstance(username, str)
+        and isinstance(provider, str) and provider in ("workos", "oidc")
+    ):
         logger.error("jwt reject reason=missing-claim")
         return None
-    if provider not in ACCEPTED_PROVIDERS:
-        logger.error("jwt reject reason=unknown-provider provider=%r", provider)
-        return None
 
-    return SessionIdentity(sub=sub, username=username, email=email, provider=provider)
+    return SessionIdentity(sub=sub, provider=provider, username=username, email=email)
+
+
+def session_jwt_exp(jwt_value: str) -> int | None:
+    """Return the ``exp`` claim from an *unverified* JWT, for cookie Max-Age sizing."""
+    try:
+        claims = jwt.decode(jwt_value, options={"verify_signature": False})
+    except jwt.PyJWTError:
+        return None
+    exp = claims.get("exp")
+    if not isinstance(exp, int):
+        return None
+    return exp
