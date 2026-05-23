@@ -22,7 +22,8 @@ async def evaluate(
     pdp_url: str,
     env_bearer_token: str,
     app_id: str,
-    oidc_sub: str,
+    provider: str,
+    sub: str,
     username: str,
     path: str,
 ) -> PdpDecision | None:
@@ -33,7 +34,8 @@ async def evaluate(
             headers={"Authorization": f"Bearer {env_bearer_token}"},
             json={
                 "app_id": app_id,
-                "oidc_sub": oidc_sub,
+                "provider": provider,
+                "sub": sub,
                 "username": username,
                 "path": path,
             },

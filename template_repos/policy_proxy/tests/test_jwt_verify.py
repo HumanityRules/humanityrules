@@ -16,9 +16,30 @@ def test_valid_cookie_returns_identity(fake_jwks_client, jwt_minter) -> None:
         jwt_value=token, jwks_client=fake_jwks_client, env_domain=ENV_DOMAIN,
     )
     assert identity is not None
-    assert identity.oidc_sub == "okta|vmendi"
+    assert identity.sub == "okta|vmendi"
+    assert identity.provider == "oidc"
     assert identity.username == "vmendi"
     assert identity.email == "vmendi@example.com"
+
+
+def test_workos_provider_returns_identity(fake_jwks_client, jwt_minter) -> None:
+    """Both providers must verify; the WorkOS branch carries sub=workos_user_id."""
+    token = jwt_minter(sub="user_01H...", provider="workos", username="alice@example.com")
+    identity = jwt_verify.verify_session_jwt(
+        jwt_value=token, jwks_client=fake_jwks_client, env_domain=ENV_DOMAIN,
+    )
+    assert identity is not None
+    assert identity.provider == "workos"
+    assert identity.sub == "user_01H..."
+
+
+def test_unknown_provider_returns_none(fake_jwks_client, jwt_minter) -> None:
+    """Defense-in-depth: unrecognised provider claim must not become a valid identity."""
+    token = jwt_minter(provider="something-else")
+    result = jwt_verify.verify_session_jwt(
+        jwt_value=token, jwks_client=fake_jwks_client, env_domain=ENV_DOMAIN,
+    )
+    assert result is None
 
 
 def test_expired_cookie_returns_none(fake_jwks_client, jwt_minter) -> None:

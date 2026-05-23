@@ -71,20 +71,21 @@ async def _authorize_session(
     if identity is None:
         return _AuthDecision(identity=None, reject="auth")
 
-    decision = state.pdp_cache.get(identity.oidc_sub)
+    decision = state.pdp_cache.get(provider=identity.provider, sub=identity.sub)
     if decision is None:
         decision = await pdp_mod.evaluate(
             http_client=state.http_client,
             pdp_url=state.config.pdp_url,
             env_bearer_token=state.config.env_bearer_token,
             app_id=state.config.app_id,
-            oidc_sub=identity.oidc_sub,
+            provider=identity.provider,
+            sub=identity.sub,
             username=identity.username,
             path=path,
         )
         if decision is None:
             return _AuthDecision(identity=identity, reject="pdp-down")
-        state.pdp_cache.put(identity.oidc_sub, decision)
+        state.pdp_cache.put(provider=identity.provider, sub=identity.sub, decision=decision)
 
     if decision.decision != "allow":
         logger.info(
