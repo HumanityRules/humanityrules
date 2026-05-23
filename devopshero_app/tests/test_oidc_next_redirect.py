@@ -13,7 +13,7 @@ from unittest.mock import patch
 from django.test import TestCase
 from django.urls import reverse
 
-from devopshero_app.models import Organization, User
+from devopshero_app.models import Organization, OrganizationMembership, User
 
 
 class TestOidcLoginNext(TestCase):
@@ -123,13 +123,24 @@ class TestOidcCallbackNext(TestCase):
             },
         )
 
-    def test_callback_redirects_to_safe_next(self) -> None:
-        User.objects.create_user(
-            username="vmendi",
-            email="vmendi@example.com",
+    def _create_oidc_member(self, username: str, email: str, oidc_sub: str) -> User:
+        user = User.objects.create_user(
+            username=username,
+            email=email,
             password="pw",
-            oidc_sub="sub-1",
+            oidc_sub=oidc_sub,
             current_organization=self.org,
+        )
+        OrganizationMembership.objects.create(
+            user=user,
+            organization=self.org,
+            role=OrganizationMembership.Role.MEMBER,
+        )
+        return user
+
+    def test_callback_redirects_to_safe_next(self) -> None:
+        self._create_oidc_member(
+            username="vmendi", email="vmendi@example.com", oidc_sub="sub-1",
         )
         state = self._seed_callback_session(next_url="/integrations/google/start?rd=x")
 
@@ -147,12 +158,8 @@ class TestOidcCallbackNext(TestCase):
         self.assertNotIn("oidc_next", self.client.session)
 
     def test_callback_without_next_falls_back_to_dashboard(self) -> None:
-        User.objects.create_user(
-            username="vmendi",
-            email="vmendi@example.com",
-            password="pw",
-            oidc_sub="sub-1",
-            current_organization=self.org,
+        self._create_oidc_member(
+            username="vmendi", email="vmendi@example.com", oidc_sub="sub-1",
         )
         state = self._seed_callback_session(next_url=None)
 
@@ -167,12 +174,8 @@ class TestOidcCallbackNext(TestCase):
     def test_callback_ignores_tampered_next_in_session(self) -> None:
         """Defense in depth: even if something managed to stuff an unsafe next
         into the session, the callback revalidates before trusting it."""
-        User.objects.create_user(
-            username="vmendi",
-            email="vmendi@example.com",
-            password="pw",
-            oidc_sub="sub-1",
-            current_organization=self.org,
+        self._create_oidc_member(
+            username="vmendi", email="vmendi@example.com", oidc_sub="sub-1",
         )
         state = self._seed_callback_session(next_url="https://evil.example.com/x")
 
@@ -183,3 +186,39 @@ class TestOidcCallbackNext(TestCase):
             )
 
         self.assertRedirects(response, "/dashboard/", fetch_redirect_response=False)
+
+    def test_callback_rejects_oidc_sub_linked_to_another_org(self) -> None:
+        other_org = Organization.objects.create(
+            name="OtherOrg",
+            slug="otherorg",
+            auth_provider=Organization.AuthProvider.OIDC,
+            oidc_issuer_url="https://other-idp.example.com",
+            oidc_client_id="other-cid",
+            oidc_client_secret="other-csec",
+        )
+        other_user = User.objects.create_user(
+            username="other",
+            email="other@example.com",
+            password="pw",
+            oidc_sub="sub-1",
+            current_organization=other_org,
+        )
+        OrganizationMembership.objects.create(
+            user=other_user,
+            organization=other_org,
+            role=OrganizationMembership.Role.MEMBER,
+        )
+        state = self._seed_callback_session(next_url=None)
+
+        with self._patched_exchange(sub="sub-1", email="vmendi@example.com"):
+            response = self.client.get(
+                reverse("oidc_callback"),
+                {"code": "abc", "state": state},
+            )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertContains(
+            response,
+            "OIDC sub belongs to a different organization",
+            status_code=400,
+        )

@@ -62,7 +62,10 @@ def integrations_google_token_refresh(request: HttpRequest) -> JsonResponse:
         logger.error("google token refresh failed: IntegrationConfig(provider=google) missing")
         return JsonResponse({"error": "google integration not configured"}, status=500)
 
-    user = User.objects.filter(username=owner_username).first()
+    user = User.objects.filter(
+        username=owner_username,
+        organization_memberships__organization=environment.aws_account.organization,
+    ).first()
     if user is None:
         logger.info(
             "google token refresh: user not found env=%s owner=%s",

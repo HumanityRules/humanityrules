@@ -54,7 +54,7 @@ def _resolve_owner_user(owner_username: object, environment: Environment) -> tup
         return None, JsonResponse({"error": "owner_username is required"}, status=400)
     user = User.objects.filter(
         username=owner_username,
-        current_organization=environment.aws_account.organization,
+        organization_memberships__organization=environment.aws_account.organization,
     ).first()
     if user is None:
         return None, JsonResponse({"error": "not connected"}, status=404)

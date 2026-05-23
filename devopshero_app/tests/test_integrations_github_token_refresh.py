@@ -12,6 +12,7 @@ from devopshero_app.models import (
     EnvironmentBearerToken,
     IntegrationUserCredential,
     Organization,
+    OrganizationMembership,
     User,
 )
 
@@ -35,6 +36,9 @@ class _GithubTokenEndpointTestBase(TestCase):
         )
         self.user = User.objects.create_user(
             username="vmendi", password="pw", current_organization=self.org,
+        )
+        OrganizationMembership.objects.create(
+            user=self.user, organization=self.org, role=OrganizationMembership.Role.MEMBER,
         )
         self.raw_token = "g" * 64
         EnvironmentBearerToken.objects.create(
@@ -229,6 +233,37 @@ class TestNotConnected(_GithubTokenEndpointTestBase):
             body={"owner_username": "alice"}, token=self.raw_token,
         )
         self.assertEqual(status, 404)
+
+    def test_user_from_another_org_does_not_satisfy_refresh(self) -> None:
+        other_org = Organization.objects.create(name="Other Org", slug="other-org")
+        other_user = User.objects.create_user(
+            username="outsider", password="pw", current_organization=other_org,
+        )
+        IntegrationUserCredential.objects.create(
+            owner_user=other_user,
+            environment=self.env,
+            app_slug="hermes",
+            provider=IntegrationUserCredential.Provider.GITHUB,
+            credentials={"refresh_token": "ghr_wrong_org"},
+            config={"scope": "repo"},
+        )
+
+        with self._patched_github(
+            status=200,
+            body={
+                "access_token": "ghu_wrong",
+                "refresh_token": "ghr_wrong_rotated",
+                "expires_in": 28800,
+                "token_type": "bearer",
+            },
+        ) as post_mock:
+            status, body = self._post(
+                body={"owner_username": "outsider"}, token=self.raw_token,
+            )
+
+        self.assertEqual(status, 404)
+        self.assertIn("error", body)
+        post_mock.assert_not_called()
 
 
 class TestRevocation(_GithubTokenEndpointTestBase):

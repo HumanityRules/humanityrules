@@ -73,7 +73,10 @@ def integrations_github_token_refresh(request: HttpRequest) -> JsonResponse:
         logger.error("github token refresh failed: GITHUB_APP_CLIENT_ID/SECRET not configured")
         return JsonResponse({"error": "github integration not configured"}, status=500)
 
-    user = User.objects.filter(username=owner_username).first()
+    user = User.objects.filter(
+        username=owner_username,
+        organization_memberships__organization=environment.aws_account.organization,
+    ).first()
     if user is None:
         logger.info(
             "github token refresh: user not found env=%s owner=%s",

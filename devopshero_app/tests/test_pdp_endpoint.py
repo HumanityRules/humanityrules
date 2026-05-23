@@ -12,6 +12,7 @@ from devopshero_app.models import (
     Environment,
     IdentityAttribute,
     Organization,
+    OrganizationMembership,
     Policy,
     Repository,
     ResourceTag,
@@ -48,6 +49,12 @@ class PDPTestBase(TestCase):
         self.stranger = User.objects.create_user(
             username="alice", password="pw", current_organization=self.org,
             oidc_sub="okta|alice",
+        )
+        OrganizationMembership.objects.create(
+            user=self.owner, organization=self.org, role=OrganizationMembership.Role.MEMBER,
+        )
+        OrganizationMembership.objects.create(
+            user=self.stranger, organization=self.org, role=OrganizationMembership.Role.MEMBER,
         )
         self.app = App.objects.create(
             organization=self.org, workspace=self.workspace, repository=self.repo,
@@ -223,6 +230,44 @@ class TestPDPEvaluation(PDPTestBase):
             },
             token=self.raw_token,
         )
+        self.assertEqual(status, 200)
+        self.assertEqual(body["decision"], "deny")
+        self.assertEqual(body["reason"], "user-not-found")
+
+    def test_user_from_another_org_does_not_satisfy_open_app_policy(self) -> None:
+        other_org = Organization.objects.create(name="Other Org", slug="other-org")
+        outsider = User.objects.create_user(
+            username="outsider",
+            password="pw",
+            current_organization=other_org,
+            oidc_sub="okta|outsider",
+        )
+        OrganizationMembership.objects.create(
+            user=outsider, organization=other_org, role=OrganizationMembership.Role.MEMBER,
+        )
+        open_app = App.objects.create(
+            organization=self.org, workspace=self.workspace, repository=self.repo,
+            name="Open App", slug="open-app", app_type="web",
+            build_strategy="dockerfile", branch="main", container_port=8000,
+            health_check_path="/health",
+        )
+        DeploymentBlueprint.objects.create(
+            app=open_app, environment=self.environment,
+            status=DeploymentBlueprint.Status.ACTIVE,
+            cpu=256, memory=512,
+        )
+
+        status, body = self._post(
+            body={
+                "app_id": "open-app",
+                "provider": "oidc",
+                "sub": "okta|outsider",
+                "username": "outsider",
+                "path": "/",
+            },
+            token=self.raw_token,
+        )
+
         self.assertEqual(status, 200)
         self.assertEqual(body["decision"], "deny")
         self.assertEqual(body["reason"], "user-not-found")
