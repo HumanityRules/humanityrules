@@ -7,7 +7,7 @@ A tiny reverse proxy that sits in front of apps deployed by DevOps Hero and enfo
 1. Reads the `doh_session` cookie.
 2. If missing or invalid, 302s to `https://devopshero.ai/auth/env-start?rd=<current-url>` for the OAuth dance. The control plane mints a session JWT and bounces back to `/__doh_session_install?token=...&rd=...`, which sets the env-scoped cookie and redirects the browser to `rd`.
 3. Verifies the JWT against the central JWKS (fetched from `/.well-known/jwks.json`, cached 15 min). The `aud` claim must match `DOH_ENV_DOMAIN` to block cross-env replay (the env's DNS zone is globally unique; `DOH_ENV_SLUG` is only unique per AWS account).
-4. POSTs to DOH's PDP endpoint with `{app_id, oidc_sub, username, path}` and `Authorization: Bearer <DOH_ENV_BEARER>`.
+4. POSTs to DOH's PDP endpoint with `{app_id, provider, sub, username, path}` and `Authorization: Bearer <DOH_ENV_BEARER>`.
 5. On `allow`, proxies to the app container on localhost, injecting trusted identity headers.
 6. On `deny`, returns a 403 with a short message.
 

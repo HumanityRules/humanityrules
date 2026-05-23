@@ -1,9 +1,9 @@
 """Tests for the env-bearer overlay in deploy_app.AppStack.
 
-Verifies that containers with `requires_env_bearer=True` receive the
-DOH_ENV_BEARER secret and the DOH_ENV_SLUG / DOH_CONTROL_PLANE_URL /
-DOH_OWNER_USERNAME / DOH_PUBLIC_HOSTNAME plain vars, and
-that other containers in the same task do not.
+Verifies that containers needing env-bearer receive the DOH_ENV_BEARER
+secret and the DOH_ENV_SLUG / DOH_CONTROL_PLANE_URL / DOH_OWNER_USERNAME /
+DOH_PUBLIC_HOSTNAME plain vars, and that other containers in the same task
+do not.
 """
 
 from aws_cdk import App
@@ -46,7 +46,7 @@ def _render(
         shared_alb_hosted_zone=shared_alb_hosted_zone,
         shared_hosted_zone_id=None,
         env_bearer_shared_secrets_arn=SHARED_SECRETS_ARN,
-        auth_base_url=None,
+        auth_base_url="https://devopshero.ai",
     )
     return Template.from_stack(stack)
 
@@ -145,6 +145,40 @@ class TestEnvBearerOverlay(SimpleTestCase):
         self.assertNotIn("DOH_OWNER_USERNAME", env)
         secret_names = {s["Name"] for s in container.get("Secrets", [])}
         self.assertIn("DOH_ENV_BEARER", secret_names)
+
+    def test_policy_proxy_container_gets_bearer_without_requires_flag(self) -> None:
+        template = _render(
+            containers=[
+                ContainerConfig(
+                    name="policy-proxy",
+                    image_source="policy_proxy",
+                    upstream_container="hermes",
+                    container_port=8443,
+                ),
+                ContainerConfig(
+                    name="hermes",
+                    image_source="dockerfile",
+                    source_repo_path="hermes_agent",
+                    ecr_repo_name="doh/staging/my-app-hermes",
+                    container_port=8787,
+                ),
+            ],
+            owner_username="vmendi",
+        )
+
+        containers = _container_defs_by_name(template)
+        proxy = containers["policy-proxy"]
+        proxy_env = {e["Name"]: e["Value"] for e in proxy.get("Environment", [])}
+        self.assertEqual(proxy_env.get("DOH_ENV_SLUG"), "staging")
+        self.assertEqual(proxy_env.get("DOH_OWNER_USERNAME"), "vmendi")
+        proxy_secret_names = {s["Name"] for s in proxy.get("Secrets", [])}
+        self.assertIn("DOH_ENV_BEARER", proxy_secret_names)
+
+        hermes = containers["hermes"]
+        hermes_env = {e["Name"]: e["Value"] for e in hermes.get("Environment", [])}
+        self.assertNotIn("DOH_ENV_SLUG", hermes_env)
+        hermes_secret_names = {s["Name"] for s in hermes.get("Secrets", [])}
+        self.assertNotIn("DOH_ENV_BEARER", hermes_secret_names)
 
     def test_container_without_flag_gets_no_overlay(self) -> None:
         template = _render(

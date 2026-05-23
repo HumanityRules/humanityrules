@@ -546,13 +546,14 @@ class AppStack(Stack):
                 f"ALB attachment requires one container in the list to be marked as the target."
             )
 
-        # Every container with requires_env_bearer needs the env's shared-secrets
-        # ARN (to mount DOH_ENV_BEARER via ECS secret injection). The policy
-        # proxy needs it too, and additionally requires auth_base_url + upstream
-        # wiring. Validate both preconditions before building resources.
+        # Every container that needs the env-bearer overlay requires the env's
+        # shared-secrets ARN (to mount DOH_ENV_BEARER via ECS secret injection).
+        # Policy-proxy containers need the same bearer implicitly, plus
+        # auth_base_url + upstream wiring. Validate preconditions before
+        # building resources.
         if app_config.needs_env_bearer() and not env_bearer_shared_secrets_arn:
             raise RuntimeError(
-                "App declares requires_env_bearer but env_bearer_shared_secrets_arn "
+                "App needs env bearer but env_bearer_shared_secrets_arn "
                 "is missing — did the orchestration skip ensure_env_bearer_token_exists?",
             )
 
@@ -613,8 +614,8 @@ class AppStack(Stack):
                 resources=[database_connection_secret.secret_arn],
             ))
         if app_config.needs_env_bearer():
-            # Any container with requires_env_bearer reads DOH_ENV_BEARER
-            # from the env's shared-secrets entry via ECS secret injection.
+            # Containers needing env-bearer read DOH_ENV_BEARER from the env's
+            # shared-secrets entry via ECS secret injection.
             task_role.add_to_policy(iam.PolicyStatement(
                 actions=["secretsmanager:GetSecretValue"],
                 resources=[env_bearer_shared_secrets_arn],
@@ -766,7 +767,9 @@ class AppStack(Stack):
 
         # Two platform overlays, computed once so the main container loop stays uniform:
         #
-        # 1. Env-bearer overlay — applied to every container with c.requires_env_bearer=True.
+        # 1. Env-bearer overlay — applied to every container that needs the
+        #    env bearer: explicit requires_env_bearer=True, or a policy-proxy
+        #    container.
         #    Provides DOH_ENV_BEARER (from shared-secrets), DOH_ENV_SLUG,
         #    DOH_CONTROL_PLANE_URL, and DOH_OWNER_USERNAME when the app has
         #    an owner tag. Any env-resident component that calls DOH's
@@ -819,25 +822,27 @@ class AppStack(Stack):
                 app_image_tag=image_tag,
             )
 
+            container_needs_env_bearer = app_config.container_needs_env_bearer(container=c)
+
             # Environment: per-container list of {name, value}, plus the
-            # env-bearer overlay for every container that opts in, plus the
+            # env-bearer overlay for every container that needs it, plus the
             # policy-proxy-specific overlay on the policy-proxy container.
             environment = {e["name"]: e["value"] for e in c.environment_variables}
-            if c.requires_env_bearer:
+            if container_needs_env_bearer:
                 environment.update(env_bearer_environment_overlay)
             if c.image_source == appconfig.ImageSource.POLICY_PROXY:
                 environment.update(policy_proxy_environment_overlay)
 
             # Secrets: the container's declared fields from the shared app_secrets bag,
             # plus database_connection_secret pieces on the ALB-target container only,
-            # plus DOH_ENV_BEARER on any container that opts in.
+            # plus DOH_ENV_BEARER on any container that needs it.
             secrets: dict[str, ecs.Secret] = {}
             if app_secret_resource is not None and c.app_secrets:
                 for field_name in c.app_secrets:
                     secrets[field_name] = ecs.Secret.from_secrets_manager(app_secret_resource, field=field_name)
             if c.name == alb_target.name:
                 secrets.update(alb_target_database_secrets)
-            if c.requires_env_bearer:
+            if container_needs_env_bearer:
                 secrets.update(env_bearer_secret_overlay)
 
             health_check = None
@@ -1232,8 +1237,8 @@ def deploy(
             logger.error("Could not find hosted zone ID for '%(hosted_zone)s', DNS record will not be created", {"hosted_zone": shared_alb_hosted_zone})
 
     # Env-bearer prerequisite: shared-secrets entry + EnvironmentBearerToken row.
-    # Any container in the app that opts into the DOH control-plane bearer
-    # needs this. Idempotent; reused across apps sharing the env.
+    # Any container in the app that needs the DOH control-plane bearer needs
+    # this. Idempotent; reused across apps sharing the env.
     policy_proxy_needed = app_config.policy_proxy_container() is not None
     env_bearer_needed = app_config.needs_env_bearer()
     env_bearer_shared_secrets_arn: str | None = None

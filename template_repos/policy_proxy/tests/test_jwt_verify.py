@@ -53,7 +53,8 @@ def test_expired_cookie_returns_none(fake_jwks_client, jwt_minter) -> None:
 def test_tampered_signature_returns_none(fake_jwks_client, jwt_minter) -> None:
     token = jwt_minter()
     head, payload, sig = token.split(".")
-    flipped_sig = sig[:-1] + ("A" if sig[-1] != "A" else "B")
+    mid = len(sig) // 2
+    flipped_sig = sig[:mid] + ("A" if sig[mid] != "A" else "B") + sig[mid + 1:]
     bad_token = f"{head}.{payload}.{flipped_sig}"
     result = jwt_verify.verify_session_jwt(
         jwt_value=bad_token, jwks_client=fake_jwks_client, env_domain=ENV_DOMAIN,
