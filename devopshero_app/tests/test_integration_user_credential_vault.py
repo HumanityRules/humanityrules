@@ -14,6 +14,7 @@ from devopshero_app.models import (
     EnvironmentBearerToken,
     IntegrationUserCredential,
     Organization,
+    OrganizationMembership,
     Repository,
     ResourceTag,
     User,
@@ -43,6 +44,9 @@ class _CredentialVaultTestBase(TestCase):
             email="vmendi@example.com",
             password="pw",
             current_organization=self.org,
+        )
+        OrganizationMembership.objects.create(
+            user=self.user, organization=self.org, role=OrganizationMembership.Role.MEMBER,
         )
         self.repository = Repository.objects.create(
             organization=self.org,
