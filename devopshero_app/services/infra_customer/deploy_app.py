@@ -771,9 +771,9 @@ class AppStack(Stack):
         #    env bearer: explicit requires_env_bearer=True, or a policy-proxy
         #    container.
         #    Provides DOH_ENV_BEARER (from shared-secrets), DOH_ENV_SLUG,
-        #    DOH_CONTROL_PLANE_URL, and DOH_OWNER_USERNAME when the app has
-        #    an owner tag. Any env-resident component that calls DOH's
-        #    control plane gets this.
+        #    DOH_CONTROL_PLANE_URL, DOH_APP_SLUG, and DOH_OWNER_USERNAME when
+        #    the app has an owner tag. Any env-resident component that calls
+        #    DOH's control plane gets this.
         # 2. Policy-proxy-specific overlay — applied only to the policy-proxy
         #    container. Carries JWT verification URL, upstream wiring, etc.
         env_bearer_environment_overlay: dict[str, str] = {}

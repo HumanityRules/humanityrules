@@ -31,9 +31,16 @@ STATUS_NOT_CONNECTED = "not_connected"
 STATUS_REVOKED = "revoked"
 STATUS_TRANSIENT_ERROR = "transient_error"
 
+# How a provider expects credentials to be injected into the upstream request.
+CREDENTIAL_LOCATION_AUTHORIZATION_HEADER = "authorization_header"
+CREDENTIAL_LOCATION_TELEGRAM_PATH = "telegram_path"
+
 # How a provider expects the rewritten Authorization header to look.
 AUTH_FORMAT_BEARER = "bearer"
 AUTH_FORMAT_BASIC_X_ACCESS_TOKEN = "basic_x_access_token"
+AUTH_FORMAT_NONE = "none"
+
+TELEGRAM_PLACEHOLDER_TOKEN = "000000:DOH_PLACEHOLDER"
 
 _OUTCOMES = {
     200: STATUS_CONNECTED,
@@ -53,6 +60,7 @@ class TlsProviderSpec:
     refresh_path: str
     hosts: tuple[str, ...]
     logo_url: str
+    credential_location: str
     # How the rewritten Authorization header should be encoded. Google takes
     # plain Bearer; GitHub git-smart-HTTP needs HTTP Basic with the token as
     # the password under the `x-access-token` username.
@@ -66,6 +74,7 @@ class DohRefreshConfig:
     control_plane_url: str
     bearer: str
     owner_username: str
+    app_slug: str
 
 
 @dataclass(frozen=True)
@@ -75,6 +84,8 @@ class RefreshResult:
     status: str
     access_token: str | None
     expires_in: int | None
+    config: dict
+    metadata: dict
 
 
 @dataclass
@@ -85,6 +96,8 @@ class _TokenCacheEntry:
     access_token: str | None
     expires_at: float | None
     last_refreshed_at: str | None
+    config: dict
+    metadata: dict
 
     def is_fresh(self, now: float, refresh_lead_seconds: int) -> bool:
         """Return true when the cached token is not close to expiry."""
@@ -111,6 +124,7 @@ TLS_INTERCEPT_PROVIDER_SPECS = (
             "oauth2.googleapis.com",
         ),
         logo_url="/extensions/google-workspace.svg",
+        credential_location=CREDENTIAL_LOCATION_AUTHORIZATION_HEADER,
         auth_format=AUTH_FORMAT_BEARER,
     ),
     TlsProviderSpec(
@@ -127,7 +141,17 @@ TLS_INTERCEPT_PROVIDER_SPECS = (
             "codeload.github.com",
         ),
         logo_url="/extensions/github.svg",
+        credential_location=CREDENTIAL_LOCATION_AUTHORIZATION_HEADER,
         auth_format=AUTH_FORMAT_BASIC_X_ACCESS_TOKEN,
+    ),
+    TlsProviderSpec(
+        slug="telegram",
+        label="Telegram",
+        refresh_path="/api/integrations/telegram/token",
+        hosts=("api.telegram.org",),
+        logo_url="/extensions/telegram.svg",
+        credential_location=CREDENTIAL_LOCATION_TELEGRAM_PATH,
+        auth_format=AUTH_FORMAT_NONE,
     ),
 )
 
@@ -163,7 +187,10 @@ HOST_TO_TLS_PROVIDER = build_host_to_provider(providers=TLS_INTERCEPT_PROVIDERS)
 def fetch_provider_token(refresh_config: DohRefreshConfig, provider: TlsProviderSpec) -> RefreshResult:
     """Call DOH's per-provider refresh endpoint and classify the response."""
     url = f"{refresh_config.control_plane_url.rstrip('/')}{provider.refresh_path}"
-    body = json.dumps({"owner_username": refresh_config.owner_username}).encode("utf-8")
+    body = json.dumps({
+        "owner_username": refresh_config.owner_username,
+        "app_slug": refresh_config.app_slug,
+    }).encode("utf-8")
     req = urllib.request.Request(
         url=url,
         data=body,
@@ -182,18 +209,20 @@ def fetch_provider_token(refresh_config: DohRefreshConfig, provider: TlsProvider
             payload = {}
     except Exception as exc:
         logger.error("refresh network error for %s: %s", provider.refresh_path, exc)
-        return RefreshResult(status=STATUS_TRANSIENT_ERROR, access_token=None, expires_in=None)
+        return RefreshResult(status=STATUS_TRANSIENT_ERROR, access_token=None, expires_in=None, config={}, metadata={})
 
     if status == 200:
         return RefreshResult(
             status=STATUS_CONNECTED,
             access_token=payload["access_token"],
             expires_in=int(payload.get("expires_in", 0)),
+            config=payload.get("config", {}),
+            metadata=payload.get("metadata", {}),
         )
     outcome = _OUTCOMES.get(status, STATUS_TRANSIENT_ERROR)
     if outcome == STATUS_TRANSIENT_ERROR:
         logger.error("refresh got http %d for %s: %s", status, provider.refresh_path, payload.get("error", ""))
-    return RefreshResult(status=outcome, access_token=None, expires_in=None)
+    return RefreshResult(status=outcome, access_token=None, expires_in=None, config={}, metadata={})
 
 
 def _cache_entry_from_refresh_result(result: RefreshResult, now: float) -> _TokenCacheEntry:
@@ -204,6 +233,8 @@ def _cache_entry_from_refresh_result(result: RefreshResult, now: float) -> _Toke
         access_token=result.access_token,
         expires_at=now + result.expires_in if is_connected and result.expires_in is not None else None,
         last_refreshed_at=dt.datetime.now(dt.timezone.utc).isoformat() if is_connected else None,
+        config=result.config if is_connected else {},
+        metadata=result.metadata if is_connected else {},
     )
 
 
@@ -216,6 +247,10 @@ def _status_item_for_provider(provider: TlsProviderSpec, entry: _TokenCacheEntry
         "logo_url": provider.logo_url,
         "status": entry.status if entry is not None else STATUS_TRANSIENT_ERROR,
         "last_refreshed_at": entry.last_refreshed_at if entry is not None else None,
+        "config": entry.config if entry is not None else {},
+        "metadata": entry.metadata if entry is not None else {},
+        "connect_mode": "vault" if provider.credential_location == CREDENTIAL_LOCATION_TELEGRAM_PATH else "oauth",
+        "restart_required_after_save": provider.credential_location == CREDENTIAL_LOCATION_TELEGRAM_PATH,
     }
 
 
@@ -579,15 +614,19 @@ async def _intercept_and_forward(
             if token is None:
                 await _send_provider_not_connected(writer=tls_writer, provider=provider)
                 return
-            forward_headers = _rewrite_authorization(
-                headers=headers, token=token, auth_format=provider.auth_format, upstream_host=host,
+            forward_headers, forward_path = _rewrite_request_for_provider(
+                headers=headers,
+                path_with_query=request_line.decode("iso-8859-1").split(" ", 2)[1],
+                token=token,
+                provider=provider,
+                upstream_host=host,
             )
             try:
                 upstream_status, upstream_headers, upstream_body = await _forward_to_upstream(
                     host=host,
                     port=port,
                     method=request_line.decode("iso-8859-1").split(" ", 1)[0],
-                    path_with_query=request_line.decode("iso-8859-1").split(" ", 2)[1],
+                    path_with_query=forward_path,
                     headers=forward_headers,
                     body=body,
                 )
@@ -730,6 +769,62 @@ def _rewrite_authorization(headers: list[tuple[bytes, bytes]], token: str, auth_
     if not seen_auth:
         rewritten.append((b"Authorization", auth_value))
     return rewritten
+
+
+def _strip_proxy_headers_and_set_host(headers: list[tuple[bytes, bytes]], upstream_host: str) -> list[tuple[bytes, bytes]]:
+    """Remove proxy-only headers and force Host to the upstream hostname."""
+    host_override = upstream_host.encode()
+    rewritten: list[tuple[bytes, bytes]] = []
+    seen_host = False
+    for name, value in headers:
+        if name == b"host":
+            rewritten.append((b"Host", host_override))
+            seen_host = True
+            continue
+        if name in (b"proxy-connection", b"proxy-authorization", b"authorization"):
+            continue
+        rewritten.append((name, value))
+    if not seen_host:
+        rewritten.append((b"Host", host_override))
+    return rewritten
+
+
+def _rewrite_telegram_path(path_with_query: str, token: str) -> str:
+    """Replace the sandbox placeholder token in Telegram Bot API paths."""
+    bot_prefix = f"/bot{TELEGRAM_PLACEHOLDER_TOKEN}/"
+    file_prefix = f"/file/bot{TELEGRAM_PLACEHOLDER_TOKEN}/"
+    if path_with_query.startswith(bot_prefix):
+        return "/bot" + token + "/" + path_with_query[len(bot_prefix):]
+    if path_with_query.startswith(file_prefix):
+        return "/file/bot" + token + "/" + path_with_query[len(file_prefix):]
+    logger.error("telegram request path did not contain expected placeholder token: %s", path_with_query.split("?", 1)[0])
+    return path_with_query
+
+
+def _rewrite_request_for_provider(
+    headers: list[tuple[bytes, bytes]],
+    path_with_query: str,
+    token: str,
+    provider: TlsProviderSpec,
+    upstream_host: str,
+) -> tuple[list[tuple[bytes, bytes]], str]:
+    """Rewrite credentials for the provider-specific upstream API shape."""
+    if provider.credential_location == CREDENTIAL_LOCATION_AUTHORIZATION_HEADER:
+        return (
+            _rewrite_authorization(
+                headers=headers,
+                token=token,
+                auth_format=provider.auth_format,
+                upstream_host=upstream_host,
+            ),
+            path_with_query,
+        )
+    if provider.credential_location == CREDENTIAL_LOCATION_TELEGRAM_PATH:
+        return (
+            _strip_proxy_headers_and_set_host(headers=headers, upstream_host=upstream_host),
+            _rewrite_telegram_path(path_with_query=path_with_query, token=token),
+        )
+    raise ValueError(f"unknown credential_location: {provider.credential_location!r}")
 
 
 async def _forward_to_upstream(

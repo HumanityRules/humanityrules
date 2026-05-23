@@ -7,7 +7,7 @@ from django.test import TestCase
 from devopshero_app.models import (
     AWSAccount,
     Environment,
-    IntegrationUserGrant,
+    IntegrationUserCredential,
     Organization,
     User,
 )
@@ -41,12 +41,13 @@ class _DisconnectTestBase(TestCase):
             current_organization=self.org,
         )
         self.client.force_login(self.user)
-        self.integration = IntegrationUserGrant.objects.create(
-            user=self.user,
+        self.integration = IntegrationUserCredential.objects.create(
+            owner_user=self.user,
             environment=self.env,
-            provider=IntegrationUserGrant.Provider.GOOGLE,
-            refresh_token="stored-refresh-token",
-            scope="openid email",
+            app_slug="hermes",
+            provider=IntegrationUserCredential.Provider.GOOGLE,
+            credentials={"refresh_token": "stored-refresh-token"},
+            config={"scope": "openid email"},
         )
 
 
@@ -57,13 +58,13 @@ class TestDisconnectHappyPath(_DisconnectTestBase):
         with patch(
             "devopshero_app.views.integrations.google_oauth.httpx.post"
         ) as revoke_mock:
-            response = self.client.get(f"/integrations/google/disconnect/?rd={rd}")
+            response = self.client.get(f"/integrations/google/disconnect/?rd={rd}&app_slug=hermes")
 
         self.assertEqual(response.status_code, 302)
         self.assertIn("disconnected=google", response["Location"])
         self.assertIn("hermes.dev.example.com", response["Location"])
         self.assertFalse(
-            IntegrationUserGrant.objects.filter(id=self.integration.id).exists()
+            IntegrationUserCredential.objects.filter(id=self.integration.id).exists()
         )
         # Best-effort revoke invoked with the stored token.
         revoke_mock.assert_called_once()
@@ -80,7 +81,7 @@ class TestDisconnectIdempotent(_DisconnectTestBase):
         with patch(
             "devopshero_app.views.integrations.google_oauth.httpx.post"
         ) as revoke_mock:
-            response = self.client.get(f"/integrations/google/disconnect/?rd={rd}")
+            response = self.client.get(f"/integrations/google/disconnect/?rd={rd}&app_slug=hermes")
 
         self.assertEqual(response.status_code, 302)
         self.assertIn("disconnected=google", response["Location"])
@@ -97,14 +98,14 @@ class TestDisconnectRdValidation(_DisconnectTestBase):
         self.assertEqual(response.status_code, 400)
         # Row preserved — we refused the request before touching state.
         self.assertTrue(
-            IntegrationUserGrant.objects.filter(id=self.integration.id).exists()
+            IntegrationUserCredential.objects.filter(id=self.integration.id).exists()
         )
 
     def test_missing_rd_returns_400(self) -> None:
         response = self.client.get("/integrations/google/disconnect/")
         self.assertEqual(response.status_code, 400)
         self.assertTrue(
-            IntegrationUserGrant.objects.filter(id=self.integration.id).exists()
+            IntegrationUserCredential.objects.filter(id=self.integration.id).exists()
         )
 
 
@@ -116,13 +117,13 @@ class TestDisconnectRevokeFailureNonFatal(_DisconnectTestBase):
             "devopshero_app.views.integrations.google_oauth.httpx.post",
             side_effect=Exception("network down"),
         ):
-            response = self.client.get(f"/integrations/google/disconnect/?rd={rd}")
+            response = self.client.get(f"/integrations/google/disconnect/?rd={rd}&app_slug=hermes")
 
         self.assertEqual(response.status_code, 302)
         self.assertIn("disconnected=google", response["Location"])
         # Row still gone — the row deletion is load-bearing, the revoke is best-effort.
         self.assertFalse(
-            IntegrationUserGrant.objects.filter(id=self.integration.id).exists()
+            IntegrationUserCredential.objects.filter(id=self.integration.id).exists()
         )
 
 
@@ -136,5 +137,5 @@ class TestDisconnectAuth(_DisconnectTestBase):
         self.assertEqual(response.status_code, 302)
         # login_required redirects to settings.LOGIN_URL. The row must survive.
         self.assertTrue(
-            IntegrationUserGrant.objects.filter(id=self.integration.id).exists()
+            IntegrationUserCredential.objects.filter(id=self.integration.id).exists()
         )

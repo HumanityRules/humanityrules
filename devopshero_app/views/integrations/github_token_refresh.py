@@ -3,8 +3,8 @@
 Mirror of `google_token_refresh.py` for GitHub user-to-server tokens.
 Env-resident callers (the integrations broker / TLS-intercept proxy) hit
 this endpoint with `Authorization: Bearer <DOH_ENV_BEARER>` and
-`{"owner_username": "..."}` in the body. DOH resolves the environment from
-the bearer, looks up the user's IntegrationUserGrant row for that env,
+`{"owner_username": "...", "app_slug": "..."}` in the body. DOH resolves the environment from
+the bearer, looks up the user's IntegrationUserCredential row for that logical app,
 exchanges the stored refresh_token with GitHub using DOH's `client_id` +
 `client_secret`, and returns a short-lived access token.
 
@@ -23,7 +23,7 @@ from django.http import HttpRequest, JsonResponse
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_POST
 
-from devopshero_app.models import IntegrationUserGrant, User
+from devopshero_app.models import IntegrationUserCredential, User
 from devopshero_app.views import env_bearer_auth
 
 
@@ -65,6 +65,9 @@ def integrations_github_token_refresh(request: HttpRequest) -> JsonResponse:
     owner_username = payload.get("owner_username")
     if not isinstance(owner_username, str) or not owner_username:
         return JsonResponse({"error": "owner_username is required"}, status=400)
+    app_slug = payload.get("app_slug")
+    if not isinstance(app_slug, str) or not app_slug:
+        return JsonResponse({"error": "app_slug is required"}, status=400)
 
     if not settings.GITHUB_APP_CLIENT_ID or not settings.GITHUB_APP_CLIENT_SECRET:
         logger.error("github token refresh failed: GITHUB_APP_CLIENT_ID/SECRET not configured")
@@ -78,19 +81,26 @@ def integrations_github_token_refresh(request: HttpRequest) -> JsonResponse:
         )
         return JsonResponse({"error": "not connected"}, status=404)
 
-    integration = IntegrationUserGrant.objects.filter(
-        user=user,
+    integration = IntegrationUserCredential.objects.filter(
+        owner_user=user,
         environment=environment,
-        provider=IntegrationUserGrant.Provider.GITHUB,
+        app_slug=app_slug,
+        provider=IntegrationUserCredential.Provider.GITHUB,
     ).first()
     if integration is None:
         logger.info(
-            "github token refresh: no integration row env=%s owner=%s",
-            environment.slug, owner_username,
+            "github token refresh: no integration row env=%s owner=%s app=%s",
+            environment.slug, owner_username, app_slug,
         )
         return JsonResponse({"error": "not connected"}, status=404)
 
-    old_refresh = integration.refresh_token
+    old_refresh = integration.credentials.get("refresh_token", "")
+    if not old_refresh:
+        logger.error(
+            "github token refresh: row missing refresh_token env=%s owner=%s app=%s",
+            environment.slug, owner_username, app_slug,
+        )
+        return JsonResponse({"error": "not connected"}, status=404)
     exchange_result = _exchange_refresh_token(refresh_token=old_refresh)
 
     # Whatever happens next, we must only mutate the row if its
@@ -103,28 +113,28 @@ def integrations_github_token_refresh(request: HttpRequest) -> JsonResponse:
         # Compare-and-swap delete: GitHub said R1 is dead, but if the row
         # has since rotated to R2 (a concurrent winner), R1 being dead is
         # expected — the row is fine. Don't delete a valid grant.
-        deleted, _ = IntegrationUserGrant.objects.filter(
-            id=integration.id, refresh_token=old_refresh,
+        deleted, _ = IntegrationUserCredential.objects.filter(
+            id=integration.id, credentials__refresh_token=old_refresh,
         ).delete()
         if deleted:
             logger.info(
-                "github token refresh: revoked by github, deleted row env=%s owner=%s",
-                environment.slug, owner_username,
+                "github token refresh: revoked by github, deleted row env=%s owner=%s app=%s",
+                environment.slug, owner_username, app_slug,
             )
             return JsonResponse({"error": "revoked, please reconnect"}, status=410)
         # Row already rotated by a concurrent refresh — treat as transient.
         # Caller (broker) retries; _ensure_fresh on the next call reads the
         # winner's R2, which is valid.
         logger.info(
-            "github token refresh: stale revoke (row rotated under us) env=%s owner=%s",
-            environment.slug, owner_username,
+            "github token refresh: stale revoke (row rotated under us) env=%s owner=%s app=%s",
+            environment.slug, owner_username, app_slug,
         )
         return JsonResponse({"error": "stale, retry"}, status=409)
 
     if exchange_result.error is not None:
         logger.error(
-            "github token refresh failed env=%s owner=%s error=%s",
-            environment.slug, owner_username, exchange_result.error,
+            "github token refresh failed env=%s owner=%s app=%s error=%s",
+            environment.slug, owner_username, app_slug, exchange_result.error,
         )
         return JsonResponse({"error": "github token exchange failed"}, status=502)
 
@@ -134,9 +144,9 @@ def integrations_github_token_refresh(request: HttpRequest) -> JsonResponse:
     # value. Affected_rows == 0 just means we lost; our access_token
     # is still valid for ~8h, so we return it without persisting.
     new_refresh = exchange_result.response.get("refresh_token", "") or old_refresh
-    IntegrationUserGrant.objects.filter(
-        id=integration.id, refresh_token=old_refresh,
-    ).update(refresh_token=new_refresh, last_refreshed_at=_now())
+    IntegrationUserCredential.objects.filter(
+        id=integration.id, credentials__refresh_token=old_refresh,
+    ).update(credentials={**integration.credentials, "refresh_token": new_refresh}, last_refreshed_at=_now())
 
     return JsonResponse({
         "access_token": exchange_result.response["access_token"],

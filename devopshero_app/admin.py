@@ -21,7 +21,7 @@ from devopshero_app.models import (
     IdentityAttribute,
     IntegrationConfig,
     IntegrationGitProvider,
-    IntegrationUserGrant,
+    IntegrationUserCredential,
     LLMUsageLog,
     Message,
     Organization,
@@ -463,10 +463,10 @@ class IntegrationConfigAdmin(admin.ModelAdmin):
     readonly_fields = ["id", "created_at", "updated_at"]
 
 
-@admin.register(IntegrationUserGrant)
-class IntegrationUserGrantAdmin(admin.ModelAdmin):
-    list_display = ["user", "environment", "provider", "granted_at", "last_refreshed_at"]
+@admin.register(IntegrationUserCredential)
+class IntegrationUserCredentialAdmin(admin.ModelAdmin):
+    list_display = ["owner_user", "environment", "app_slug", "provider", "created_at", "updated_at", "last_refreshed_at"]
     list_filter = ["provider", "environment"]
-    search_fields = ["user__email", "user__username", "environment__name", "environment__slug", "scope"]
-    readonly_fields = ["id", "refresh_token", "granted_at", "last_refreshed_at"]
-    autocomplete_fields = ["user", "environment"]
+    search_fields = ["owner_user__email", "owner_user__username", "environment__name", "environment__slug", "app_slug"]
+    readonly_fields = ["id", "created_at", "updated_at", "last_refreshed_at"]
+    autocomplete_fields = ["owner_user", "environment"]

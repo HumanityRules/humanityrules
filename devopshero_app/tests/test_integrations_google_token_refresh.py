@@ -11,7 +11,7 @@ from devopshero_app.models import (
     Environment,
     EnvironmentBearerToken,
     IntegrationConfig,
-    IntegrationUserGrant,
+    IntegrationUserCredential,
     Organization,
     User,
 )
@@ -50,10 +50,12 @@ class _TokenEndpointTestBase(TestCase):
             provider=IntegrationConfig.Provider.GOOGLE,
             config=VALID_WEB_CONFIG,
         )
-        self.integration = IntegrationUserGrant.objects.create(
-            user=self.user, environment=self.env,
-            provider=IntegrationUserGrant.Provider.GOOGLE,
-            refresh_token="existing-refresh", scope="gmail.readonly openid email",
+        self.integration = IntegrationUserCredential.objects.create(
+            owner_user=self.user, environment=self.env,
+            app_slug="hermes",
+            provider=IntegrationUserCredential.Provider.GOOGLE,
+            credentials={"refresh_token": "existing-refresh"},
+            config={"scope": "gmail.readonly openid email"},
         )
         self.client = Client()
 
@@ -63,7 +65,7 @@ class _TokenEndpointTestBase(TestCase):
             headers["HTTP_AUTHORIZATION"] = f"Bearer {token}"
         response = self.client.post(
             "/api/integrations/google/token",
-            data=json.dumps(body),
+            data=json.dumps({"app_slug": "hermes", **body}),
             content_type="application/json",
             **headers,
         )
@@ -131,7 +133,7 @@ class TestHappyPath(_TokenEndpointTestBase):
         self.integration.refresh_from_db()
         self.assertIsNotNone(self.integration.last_refreshed_at)
         # refresh_token unchanged (Google didn't rotate it).
-        self.assertEqual(self.integration.refresh_token, "existing-refresh")
+        self.assertEqual(self.integration.credentials["refresh_token"], "existing-refresh")
 
     def test_rotates_refresh_token_when_google_returns_one(self) -> None:
         with self._patched_google(
@@ -146,7 +148,7 @@ class TestHappyPath(_TokenEndpointTestBase):
             self._post(body={"owner_username": "vmendi"}, token=self.raw_token)
 
         self.integration.refresh_from_db()
-        self.assertEqual(self.integration.refresh_token, "new-refresh")
+        self.assertEqual(self.integration.credentials["refresh_token"], "new-refresh")
 
 
 class TestNotConnected(_TokenEndpointTestBase):
@@ -180,7 +182,7 @@ class TestRevocation(_TokenEndpointTestBase):
             )
         self.assertEqual(status, 410)
         self.assertFalse(
-            IntegrationUserGrant.objects.filter(id=self.integration.id).exists()
+            IntegrationUserCredential.objects.filter(id=self.integration.id).exists()
         )
 
 
@@ -197,7 +199,7 @@ class TestTransientFailures(_TokenEndpointTestBase):
         self.assertEqual(status, 502)
         # Row preserved — user hasn't revoked, DOH is just asking again later.
         self.assertTrue(
-            IntegrationUserGrant.objects.filter(id=self.integration.id).exists()
+            IntegrationUserCredential.objects.filter(id=self.integration.id).exists()
         )
 
     def test_integration_config_missing_returns_500(self) -> None:
