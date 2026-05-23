@@ -1,5 +1,77 @@
 # DevOpsHero Development Journal
 
+## 2026-05-22 17:27 - [Architecture] Fold the per-env auth-service into the DOH control plane
+
+Up to now every customer environment ran a singleton `policy-proxy` Fargate task in `DOH_ROLE=auth` mode alongside the per-app sidecars. The auth task owned the OAuth dance with WorkOS/Okta, minted RS256 session JWTs from a per-env keypair stored in the customer's Secrets Manager, and published a per-env JWKS endpoint at `auth.<env-domain>/.well-known/jwks.json`. Two pain points motivated consolidation:
+
+1. **Two policy-proxy deployments per env, tagged with the same `POLICY_PROXY_IMAGE_VERSION` but rolled at different times.** The recent 0.4.0 → 0.4.1 bump made the drift explicit — sidecars and auth task could disagree about which policy-proxy build was live in any given env.
+2. **Per-env IdP redirect-URI registration.** Every env's `auth.<env-domain>/callback` had to live in the WorkOS app's redirect-URI allow-list (Okta likewise per OIDC org). After the fold there's exactly one redirect URI globally: `https://devopshero.ai/auth/env-callback`.
+
+### Trust-model change (accepted)
+
+The RS256 signing key moves from per-env Secrets Manager (in the customer's AWS account, blast radius = one env) to a DOH-controlled secret read by `devopshero.ai` (blast radius = every env). Acceptable because the platform is pre-users, `devopshero.ai` is hardened anyway, and the operational simplification is worth it. All envs are getting recreated as part of the rollout, so no key-migration story is needed.
+
+### Architecture after the change
+
+```
+Browser → app1.<env-domain>/foo            (no cookie)
+    ↓ sidecar 302
+Browser → devopshero.ai/auth/env-start?rd=https://app1.<env-domain>/foo
+    ↓ control plane mints state-JWT, 302
+Browser → workos / okta authorize          (single global redirect_uri)
+    ↓ user completes IdP dance
+Browser → devopshero.ai/auth/env-callback?code=...&state=...
+    ↓ control plane: code-exchange, identity → session-JWT (central key), 302
+Browser → app1.<env-domain>/__doh_session_install?token=<jwt>&rd=...
+    ↓ sidecar: verify JWT via central JWKS, Set-Cookie Domain=.<env-domain>, 302
+Browser → app1.<env-domain>/foo            (cookie present, sidecar verifies, PDP, proxy)
+```
+
+App-to-app navigation inside the same env never re-touches the control plane: cookie is set for `.<env-domain>`, every sidecar verifies it against the same central JWKS (15-min PyJWKClient cache).
+
+### Components
+
+- **Control-plane key custody.** Two new settings in `devopshero_site/settings.py`: `DOH_ENV_SESSION_JWT_PRIVATE_KEY` (PEM, `\n`-unescaped, same pattern as `GITHUB_APP_PRIVATE_KEY`) and `DOH_ENV_SESSION_JWT_KID` (string, leaves a hook for rotation).
+- **Three new control-plane endpoints** in `devopshero_app/views/auth_env_sso.py` — `GET /auth/env-start`, `GET /auth/env-callback`, `GET /.well-known/jwks.json`. State-JWT carries `{rd, env_slug, nonce, iat, exp}` so the callback re-derives the destination from a *signed* claim, not query params. Session JWT carries `aud=<env_domain>` (the env's globally unique DNS zone) so cross-env replay is blocked at the sidecar verifier (`audience=cfg.env_domain` in `jwt.decode`). **Not** `env_slug` — slugs are only unique per AWS account (`Environment.unique_together = (aws_account, slug)`), so two envs in different accounts could share `slug='prod'` and a token minted for one would verify in the other under one central JWKS.
+- **Org dispatch.** `env_start` resolves the env from `rd`'s host (longest-suffix match against `Environment.shared_alb_hosted_zone`), then dispatches by `env.aws_account.organization.auth_provider`: WorkOS-org users hit AuthKit (`provider="authkit"`), OIDC-org users hit `org.oidc_issuer_url + "/v1/authorize"`. Same JWT minted from either branch, distinguished by a `provider` claim.
+- **`/__doh_session_install` on the sidecar.** Single-purpose endpoint that verifies the URL-borne token via JWKS, validates `rd` is inside `cfg.env_domain`, sets `doh_session=<token>; Domain=.<env_domain>; HttpOnly; Secure; SameSite=Lax; Max-Age=<exp-now>`, and 302s to `rd`. `Cache-Control: no-store` and `Referrer-Policy: no-referrer` to keep the URL-borne JWT out of caches and Referer headers.
+
+### What got deleted
+
+- `devopshero_app/services/infra_customer/auth_service.py` (entire CDK stack for the auth Fargate service).
+- `template_repos/policy_proxy/policy_proxy/auth.py` (PKCE state machine, OAuth code exchange, JWT minting — all centralized now).
+- `secrets_utils.ensure_env_policy_proxy_auth_config_exists` and the per-env keypair generator (`_generate_rsa_keypair_pem`).
+- `template_repos/policy_proxy/policy_proxy/main.py`'s `DOH_ROLE` dispatch — the binary is sidecar-only now.
+- The "Phase 1a" auth-service deploy block in `deploy_app.py` (kept the policy-proxy ECR + image push — sidecars still need that image).
+
+### Non-obvious decisions worth recording
+
+- **`<rd-host>` comes from the signed state, not the request.** The callback re-extracts `rd` from the verified state-JWT and only then constructs `<rd-host>/__doh_session_install`. Using request-supplied `rd` would let an attacker substitute a malicious host into the install URL.
+- **The install endpoint validates `rd` *and* `aud`.** `aud != cfg.env_domain` is rejected even with a valid signature — prevents cross-env token replay if a user with a sandbox session is tricked into clicking an install link pointed at prod, *and* prevents replay between siblings that happen to share an `env_slug` in different AWS accounts.
+- **Single global redirect URI on WorkOS.** Going from N to 1 per onboard is the entire point. Reverse-resolving the env from the state-JWT's `env_slug` claim (rather than from the redirect URI's host) is what makes that work.
+- **JWKS cached 5 min on the server (`Cache-Control: public, max-age=300`).** PyJWKClient already caches 15 min on the sidecar side, so the effective combined TTL is ~5–20 min. Long enough to absorb traffic, short enough that a key rotation propagates within an hour without a deploy.
+- **`/auth/env-callback` (no trailing slash) on the redirect URI.** Django's `urls.py` route is registered without trailing slash to match the literal value registered in WorkOS. APPEND_SLASH would break the OAuth match.
+
+### Tests
+
+- `template_repos/policy_proxy/tests/test_session_install.py` (folded into `test_app_flow.py`): valid-token install → 302 + Set-Cookie; bad signature → 401; `aud` mismatch → 401; `rd` outside env-domain → 400.
+- `devopshero_app/tests/test_auth_env_sso.py` (new, 15 tests): `rd` validation; longest-zone match (`x.staging.prod.workos-customer.com` resolves to the deeper `staging.prod.workos-customer.com` env, not the parent `prod.workos-customer.com`); state-JWT round-trip; expired-state rejection; `state.env_slug` must match the env resolved from `rd` (defense in depth — both are signed); WorkOS branch via mocked `authenticate_with_code`; OIDC branch via mocked `_exchange_oidc_code`; JWKS shape + cache header.
+- `policy_proxy/tests/test_jwt_verify.py` rewritten to call `verify_session_jwt(env_domain=...)` and added `aud_mismatch`, `missing_aud`, and a `same_slug_different_domain_does_not_replay` regression that explicitly reproduces the cross-account-same-slug scenario.
+- `test_auth_env_sso.py::test_session_audience_is_env_domain_not_slug` builds two envs in different AWS accounts that share `slug='workos-prod'` with different `shared_alb_hosted_zone`s and asserts a token minted for one fails `audience=` verification against the other.
+- `template_repos/policy_proxy/tests/test_auth.py` and `test_auth_workos.py` deleted — they covered the per-env minting code that's gone.
+
+Full Django suite passes (5 unrelated `test_mcp_aggregator_state_change` errors are pre-existing test-order pollution from `test_integrations_broker`'s `sys.modules` stub; reproduced on `main`).
+
+### Rollout
+
+Bumped `POLICY_PROXY_IMAGE_VERSION` 0.4.1 → 0.5.0. Plan is: merge → DOH control plane redeploys with new endpoints + central signing key + sidecar-only image; tear down all existing customer envs (Humanity Rules Sandbox today) and recreate fresh; smoke-test that the recreated env logs in via the central flow and that two apps in the same env share the cookie without re-login.
+
+**Key points:**
+- One signing key replaces N. Blast radius is bigger; ergonomics win is bigger.
+- `rd` and `aud` get validated at *every* trust boundary — the control-plane callback (signed state), the install endpoint (cookie domain + audience), and the regular request path (audience). Defense in depth, not redundancy.
+- `Cache-Control: no-store` on the install 302 isn't decoration — without it, intermediaries can cache a one-shot URL-borne JWT.
+- Centralized OAuth means a single global redirect URI on the IdP side. That's the operational lever; everything else (key custody, JWKS publication) follows.
+
 ## 2026-05-20 02:47 - [Bugfix] CAS the GitHub refresh-token endpoint against concurrent rotations
 
 **Conversation:** [2026-05-20-0248-e46cb2d9.md](conversations/2026-05-20-0248-e46cb2d9.md)

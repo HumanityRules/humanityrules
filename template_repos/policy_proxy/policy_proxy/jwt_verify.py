@@ -23,8 +23,13 @@ class SessionIdentity:
     email: str
 
 
-def verify_session_cookie(jwt_value: str, jwks_client: jwt.PyJWKClient) -> SessionIdentity | None:
-    """Verify a JWT cookie. Returns claims on success, None on failure (log + redirect)."""
+def verify_session_jwt(*, jwt_value: str, jwks_client: jwt.PyJWKClient, env_domain: str) -> SessionIdentity | None:
+    """Verify a session JWT. ``aud`` must equal ``env_domain`` to block cross-env replay.
+
+    The env's DNS zone is globally unique (one per env), unlike ``env_slug`` which is only
+    unique per AWS account. With a single central JWKS, only a globally unique audience
+    can prevent replay across envs that happen to share a slug in different accounts.
+    """
     try:
         signing_key = jwks_client.get_signing_key_from_jwt(jwt_value).key
     except jwt.PyJWTError as exc:
@@ -37,7 +42,8 @@ def verify_session_cookie(jwt_value: str, jwks_client: jwt.PyJWKClient) -> Sessi
             key=signing_key,
             algorithms=ACCEPTED_ALGORITHMS,
             leeway=LEEWAY_SECONDS,
-            options={"require": ["exp", "iat", "sub"]},
+            audience=env_domain,
+            options={"require": ["exp", "iat", "sub", "aud"]},
         )
     except jwt.PyJWTError as exc:
         logger.error("jwt reject reason=invalid err=%s", exc)
@@ -51,3 +57,15 @@ def verify_session_cookie(jwt_value: str, jwks_client: jwt.PyJWKClient) -> Sessi
         return None
 
     return SessionIdentity(oidc_sub=sub, username=username, email=email)
+
+
+def session_jwt_exp(jwt_value: str) -> int | None:
+    """Return the ``exp`` claim from an *unverified* JWT, for cookie Max-Age sizing."""
+    try:
+        claims = jwt.decode(jwt_value, options={"verify_signature": False})
+    except jwt.PyJWTError:
+        return None
+    exp = claims.get("exp")
+    if not isinstance(exp, int):
+        return None
+    return exp

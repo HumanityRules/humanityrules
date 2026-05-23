@@ -149,77 +149,6 @@ class TestEnsureEnvBearerToken(EnvBearerTestBase):
 
 
 # -----------------------------------------------------------------------------
-# ensure_env_policy_proxy_auth_config_exists
-# -----------------------------------------------------------------------------
-
-
-class TestEnsureEnvPolicyProxyAuthConfig(EnvBearerTestBase):
-
-    def test_creates_combined_secret_when_missing(self) -> None:
-        fake = FakeSecretsManager()
-        session = _session_with(fake)
-
-        arn = secrets_utils.ensure_env_policy_proxy_auth_config_exists(session=session, env=self.env)
-        self.assertIn("policy-proxy-auth-config", arn)
-
-        payload = json.loads(fake.store["devopshero/staging/policy-proxy-auth-config"]["SecretString"])
-
-        oidc = payload["oidc_config"]
-        self.assertEqual(oidc["issuer_url"], "https://okta.example.com/oauth2/default")
-        self.assertEqual(oidc["client_id"], "client-abc")
-        self.assertEqual(oidc["client_secret"], "secret-xyz")
-
-        jwt_key = payload["jwt_key"]
-        self.assertIn("private_pem", jwt_key)
-        self.assertIn("public_pem", jwt_key)
-        self.assertTrue(jwt_key["kid"].startswith("staging-"))
-        self.assertIn("BEGIN PRIVATE KEY", jwt_key["private_pem"])
-        self.assertIn("BEGIN PUBLIC KEY", jwt_key["public_pem"])
-
-    def test_preserves_jwt_key_on_rerun(self) -> None:
-        # jwt_key must never be regenerated once created — rotation would
-        # require a coordinated redeploy of the Lambda + all policy proxies.
-        fake = FakeSecretsManager()
-        session = _session_with(fake)
-        secrets_utils.ensure_env_policy_proxy_auth_config_exists(session=session, env=self.env)
-
-        original_jwt_key = json.loads(
-            fake.store["devopshero/staging/policy-proxy-auth-config"]["SecretString"],
-        )["jwt_key"]
-
-        secrets_utils.ensure_env_policy_proxy_auth_config_exists(session=session, env=self.env)
-
-        rerun_jwt_key = json.loads(
-            fake.store["devopshero/staging/policy-proxy-auth-config"]["SecretString"],
-        )["jwt_key"]
-        self.assertEqual(original_jwt_key, rerun_jwt_key)
-
-    def test_rotating_client_secret_is_propagated(self) -> None:
-        fake = FakeSecretsManager()
-        session = _session_with(fake)
-        secrets_utils.ensure_env_policy_proxy_auth_config_exists(session=session, env=self.env)
-
-        self.org.oidc_client_secret = "new-secret-123"
-        self.org.save()
-        secrets_utils.ensure_env_policy_proxy_auth_config_exists(session=session, env=self.env)
-
-        payload = json.loads(fake.store["devopshero/staging/policy-proxy-auth-config"]["SecretString"])
-        self.assertEqual(payload["oidc_config"]["client_secret"], "new-secret-123")
-
-    def test_raises_when_org_has_no_oidc(self) -> None:
-        self.org.oidc_issuer_url = ""
-        self.org.oidc_client_id = ""
-        self.org.oidc_client_secret = ""
-        self.org.save()
-        fake = FakeSecretsManager()
-        session = _session_with(fake)
-
-        with self.assertRaises(RuntimeError) as cm:
-            secrets_utils.ensure_env_policy_proxy_auth_config_exists(session=session, env=self.env)
-        self.assertIn("no OIDC config", str(cm.exception))
-
-
-# -----------------------------------------------------------------------------
 # ensure_env_policy_proxy_secrets_exist (umbrella)
 # -----------------------------------------------------------------------------
 
@@ -232,9 +161,7 @@ class TestEnsureEnvPolicyProxySecrets(EnvBearerTestBase):
 
         result = secrets_utils.ensure_env_policy_proxy_secrets_exist(session=session, env=self.env)
         self.assertIn("shared_secrets_arn", result)
-        self.assertIn("policy_proxy_auth_config_arn", result)
         self.assertIn("devopshero/staging/shared-secrets", fake.store)
-        self.assertIn("devopshero/staging/policy-proxy-auth-config", fake.store)
 
         # Side effect: the EnvironmentBearerToken row exists too.
         self.assertTrue(EnvironmentBearerToken.objects.filter(environment=self.env).exists())

@@ -22,7 +22,6 @@ from aws_cdk import aws_secretsmanager as secretsmanager
 from constructs import Construct
 
 from . import appconfig
-from . import auth_service
 from . import cdk_utils
 from . import cloudformation_utils
 from . import deploy_base
@@ -34,7 +33,7 @@ from . import secrets_utils
 # Policy-proxy image published once per env into doh/{env_slug}/policy-proxy:{tag}.
 # Pinned here rather than on AppConfig: the policy proxy is DOH-owned, not
 # AppTemplate-driven, and a version bump is a platform operation.
-POLICY_PROXY_IMAGE_VERSION = "0.3.0"
+POLICY_PROXY_IMAGE_VERSION = "0.5.0"
 POLICY_PROXY_SOURCE_DIR = Path(__file__).resolve().parents[3] / "template_repos" / "policy_proxy"
 
 # A single flag signals deployment-time capabilities that we need to grant to, at least, the ECS task. 
@@ -1248,12 +1247,7 @@ def deploy(
             session=session, env=env_obj,
         )
 
-    # Policy-proxy prerequisites: additionally, the per-env auth-config secret +
-    # ECR repo + image push + auth Lambda. All idempotent, safe to run on every
-    # policy-proxy deploy. The first policy-proxy deploy in an env does the
-    # heavy lift; subsequent deploys are fast because the secrets, stacks, and
-    # image already exist.
-    policy_proxy_secret_arns: dict[str, str] = {}
+    # Policy-proxy prerequisites: per-env ECR repo + image push.
     policy_proxy_auth_base_url: str | None = None
     if policy_proxy_needed:
         if not shared_alb_hosted_zone or not shared_hosted_zone_id:
@@ -1261,11 +1255,8 @@ def deploy(
             logger.error(msg)
             return DeployResult(success=False, error=msg, service_url="", alb_dns="")
 
-        logger.info("Ensuring per-env policy-proxy infrastructure exists")
-        policy_proxy_secret_arns = secrets_utils.ensure_env_policy_proxy_secrets_exist(
-            session=session, env=env_obj,
-        )
-        policy_proxy_auth_base_url = f"https://auth.{shared_alb_hosted_zone}"
+        secrets_utils.ensure_env_policy_proxy_secrets_exist(session=session, env=env_obj)
+        policy_proxy_auth_base_url = _resolve_control_plane_url()
 
     cdk_app = App(outdir=str(cdk_utils.CDK_OUT_DIR))
 
@@ -1277,36 +1268,11 @@ def deploy(
     )
 
     policy_proxy_ecr_stack = None
-    auth_service_stack = None
     if policy_proxy_needed:
         policy_proxy_ecr_stack = PolicyProxyEcrStack(
             cdk_app,
             f"devopshero-{env_slug}-policy-proxy-ecr",
             env_slug=env_slug,
-        )
-        # Image URI is deterministic from account+region+env+version, so we
-        # can compute it at synth time even though the image is pushed later.
-        policy_proxy_image_uri = (
-            f"{account_id}.dkr.ecr.{region}.amazonaws.com/"
-            f"{policy_proxy_ecr_repo_name(env_slug)}:{POLICY_PROXY_IMAGE_VERSION}"
-        )
-        auth_service_stack = auth_service.AuthServiceStack(
-            cdk_app,
-            f"devopshero-{env_slug}-auth-service",
-            inputs=auth_service.AuthServiceInputs(
-                env_slug=env_slug,
-                env_domain=shared_alb_hosted_zone,
-                policy_proxy_image_uri=policy_proxy_image_uri,
-                policy_proxy_auth_config_secret_arn=policy_proxy_secret_arns["policy_proxy_auth_config_arn"],
-                shared_alb_https_listener_arn=Fn.import_value(
-                    f"devopshero-{env_slug}-shared-alb-https-listener-arn",
-                ),
-                shared_alb_security_group_id=Fn.import_value(
-                    f"devopshero-{env_slug}-shared-alb-sg-id",
-                ),
-                shared_hosted_zone_id=shared_hosted_zone_id,
-                shared_hosted_zone_name=shared_alb_hosted_zone,
-            ),
         )
 
     # Optionally create Aurora cluster (imports VPC from environment's VPC stack exports)
@@ -1346,11 +1312,8 @@ def deploy(
         return DeployResult(success=True, error="", service_url="", alb_dns="")
 
     # Phase 1a: Policy-proxy infra for policy-proxy apps only.
-    # The auth service runs the policy-proxy image, so the image must exist in
-    # ECR before the auth-service stack starts a task from it. Order:
     #   1. Deploy the per-env policy-proxy ECR repo stack.
     #   2. Build + push the policy-proxy image at POLICY_PROXY_IMAGE_VERSION.
-    #   3. Deploy the auth-service stack (its Fargate task pulls that image).
     if policy_proxy_needed:
         if not cdk_utils.deploy_from_assembly(
             assembly_dir=assembly_dir, session=session,
@@ -1375,13 +1338,6 @@ def deploy(
         if not policy_proxy_image_uri:
             logger.error("Policy-proxy image build/push failed")
             return DeployResult(success=False, error="Policy-proxy image build/push failed", service_url="", alb_dns="")
-
-        if not cdk_utils.deploy_from_assembly(
-            assembly_dir=assembly_dir, session=session,
-            stack_names=[f"devopshero-{env_slug}-auth-service"],
-        ):
-            logger.error("CDK deployment failed (auth-service)")
-            return DeployResult(success=False, error="CDK deployment failed (auth-service)", service_url="", alb_dns="")
 
     # Phase 1b: Deploy ECR repo (and Aurora if needed) so the registry exists before the app image push
     pre_app_stacks = [f"{resource_prefix}-ecr"]
