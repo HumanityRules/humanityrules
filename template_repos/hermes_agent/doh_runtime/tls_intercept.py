@@ -293,11 +293,10 @@ class _TokenStore:
             self._cache.pop(slug, None)
 
     async def invalidate_all(self) -> None:
-        """Drop every cached entry. Used by explicit "I just disconnected" signals.
+        """Drop every cached entry after an explicit Refresh all.
 
-        The next status read will lazily refetch. Without this, the cache
-        could keep reporting "connected" for up to one full token lifetime
-        after the user disconnects on DOH's side from the same session.
+        The next status read will lazily refetch every provider, so use
+        provider-scoped invalidation when the changed provider is known.
         """
         async with self._cache_lock:
             self._cache.clear()
@@ -377,6 +376,10 @@ class TlsInterceptRuntime:
     async def status_items(self) -> list[dict]:
         """Return TLS-intercept integration cards."""
         return await self._token_store.status_items()
+
+    async def invalidate(self, slug: str) -> None:
+        """Drop one provider's cached token entry; next status read refetches it."""
+        await self._token_store.invalidate(slug=slug)
 
     async def invalidate_all(self) -> None:
         """Drop every cached token entry; next status read refetches lazily."""

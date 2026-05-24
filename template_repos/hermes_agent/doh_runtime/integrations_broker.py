@@ -121,15 +121,15 @@ def _build_control_app(
         return JSONResponse(content=payload, status_code=200 if ok else 429)
 
     async def invalidate_tls_cache_route(request: Request) -> Response:
-        """Drop cached TLS-intercept tokens so the next status read refetches.
-
-        Posted by the WebUI extension after consuming a `?disconnected=...`
-        sentinel. Without this, a user who just disconnected on DOH would
-        keep seeing "Connected" in the integrations pane until their cached
-        token naturally expired (up to 8h for GitHub).
-        """
+        """Drop every cached TLS-intercept token for explicit Refresh all."""
         await tls_runtime.invalidate_all()
         return JSONResponse(content={"ok": True})
+
+    async def invalidate_provider_tls_cache_route(request: Request) -> Response:
+        """Drop one provider's cached TLS-intercept token after known state changes."""
+        provider = request.path_params["provider"]
+        await tls_runtime.invalidate(slug=provider)
+        return JSONResponse(content={"ok": True, "provider": provider})
 
     async def vault_setup_session_route(request: Request) -> Response:
         provider = request.path_params["provider"]
@@ -162,7 +162,7 @@ def _build_control_app(
             },
         )
         if 200 <= status < 300:
-            await tls_runtime.invalidate_all()
+            await tls_runtime.invalidate(slug=provider)
         return JSONResponse(content=payload, status_code=status)
 
     routes = [
@@ -170,6 +170,7 @@ def _build_control_app(
         Route(path="/integrations", endpoint=status_route, methods=["GET"]),
         Route(path="/integrations/refresh_catalog", endpoint=refresh_catalog_route, methods=["POST"]),
         Route(path="/integrations/invalidate_tls_cache", endpoint=invalidate_tls_cache_route, methods=["POST"]),
+        Route(path="/integrations/{provider}/invalidate_tls_cache", endpoint=invalidate_provider_tls_cache_route, methods=["POST"]),
         Route(path="/integrations/{provider}/vault/setup-session", endpoint=vault_setup_session_route, methods=["POST"]),
         Route(path="/integrations/{provider}/vault/disconnect", endpoint=vault_disconnect_route, methods=["POST"]),
         *aggregator.routes(prefix="/integrations"),

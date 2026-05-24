@@ -406,7 +406,7 @@
         await submitVaultForm(session, form);
         successBox.textContent = 'Saved. Restart this Hermes app for the gateway to use the updated configuration.';
         successBox.style.display = '';
-        await invalidateBrokerTlsCache();
+        await invalidateBrokerTlsCache(item.slug);
         await refreshAndRender();
       } catch (err) {
         errorBox.textContent = err.message || 'Save failed.';
@@ -446,7 +446,6 @@
         method: 'POST',
         cache: 'no-store',
       });
-      await invalidateBrokerTlsCache();
       await refreshAndRender();
     } finally {
       _disconnecting.delete(item.slug);
@@ -569,14 +568,15 @@
     renderPane(_current);
   }
 
-  // Tell the broker to drop its cached TLS-intercept tokens. The broker no
-  // longer force-refreshes on every status read (that was racing in-flight
-  // git/gh requests on GitHub, which rotates tokens), so when we know DOH's
-  // grant state just changed (a connect/disconnect just happened), we have
-  // to nudge the cache ourselves before reading. Best-effort.
-  async function invalidateBrokerTlsCache() {
+  // Tell the broker to drop cached TLS-intercept tokens. Provider-specific
+  // invalidation is used after known connect/disconnect/config changes; the
+  // no-arg form intentionally invalidates all providers for explicit Refresh.
+  async function invalidateBrokerTlsCache(providerSlug) {
     try {
-      await fetch('/__doh_broker/integrations/invalidate_tls_cache', { method: 'POST' });
+      const url = providerSlug
+        ? '/__doh_broker/integrations/' + encodeURIComponent(providerSlug) + '/invalidate_tls_cache'
+        : '/__doh_broker/integrations/invalidate_tls_cache';
+      await fetch(url, { method: 'POST' });
     } catch (_) {
       // Stale-cache survival isn't critical — next 8h's worth of status
       // reads might lie about a disconnect, but the proxy's 401-evict path
@@ -596,7 +596,10 @@
     const qs = params.toString();
     const newUrl = window.location.pathname + (qs ? '?' + qs : '') + window.location.hash;
     window.history.replaceState({}, '', newUrl);
-    return connected ? 'connected' : 'disconnected';
+    return {
+      transition: connected ? 'connected' : 'disconnected',
+      provider: connected || disconnected,
+    };
   }
 
   function ensureSidebarTabAndPane() {
@@ -750,12 +753,11 @@
       // to the Integrations panel.
       window.switchPanel('integrations');
     }
-    // The broker reads from cache; nudge the cache only when we know DOH's
-    // grant state may have just changed (the user came back from a connect
-    // or disconnect round-trip). On normal page loads we render whatever is
-    // cached — fresh enough, and avoids the GitHub refresh-rotation race.
+    // The broker reads from cache; nudge only the provider named by the
+    // OAuth return sentinel. On normal page loads we render whatever is
+    // cached; explicit Refresh is the only UI action that invalidates all.
     if (sentinel) {
-      invalidateBrokerTlsCache().then(refreshAndRender);
+      invalidateBrokerTlsCache(sentinel.provider).then(refreshAndRender);
     } else {
       refreshAndRender();
     }

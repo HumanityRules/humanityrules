@@ -354,6 +354,30 @@ class TestControlIntegrations(unittest.IsolatedAsyncioTestCase):
         # on the second GET because invalidate dropped the cache.
         self.assertEqual(fetch_mock.call_count, 2 * len(broker.tls_intercept.TLS_INTERCEPT_PROVIDERS))
 
+    async def test_provider_invalidate_endpoint_drops_one_provider_cache(self) -> None:
+        """POST /integrations/{provider}/invalidate_tls_cache evicts one provider."""
+        from starlette.testclient import TestClient
+
+        app = broker._build_control_app(
+            aggregator=_StubAggregator(),
+            tls_runtime=self.tls_runtime,
+            control_plane_url="https://doh.example",
+            bearer="env-bearer",
+            owner_username="vmendi",
+            app_slug="hermes",
+            env_slug="default",
+        )
+
+        with patch.object(self.tls_runtime, "invalidate", new_callable=AsyncMock) as invalidate_mock:
+            with patch.object(self.tls_runtime, "invalidate_all", new_callable=AsyncMock) as invalidate_all_mock:
+                with TestClient(app) as client:
+                    resp = client.post("/integrations/github/invalidate_tls_cache")
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.json()["provider"], "github")
+        invalidate_mock.assert_awaited_once_with(slug="github")
+        invalidate_all_mock.assert_not_awaited()
+
     async def test_vault_setup_session_forwards_identity_to_doh(self) -> None:
         """POST /integrations/{provider}/vault/setup-session asks DOH for a submit token."""
         from starlette.testclient import TestClient
@@ -390,8 +414,8 @@ class TestControlIntegrations(unittest.IsolatedAsyncioTestCase):
             },
         )
 
-    async def test_vault_disconnect_invalidates_tls_cache_on_success(self) -> None:
-        """POST /integrations/{provider}/vault/disconnect deletes at DOH and evicts cache."""
+    async def test_vault_disconnect_invalidates_only_provider_cache_on_success(self) -> None:
+        """POST /integrations/{provider}/vault/disconnect evicts only that provider."""
         from starlette.testclient import TestClient
 
         app = broker._build_control_app(
@@ -405,9 +429,10 @@ class TestControlIntegrations(unittest.IsolatedAsyncioTestCase):
         )
 
         with patch.object(broker, "_post_control_plane_json", return_value=(200, {"ok": True})) as post_mock:
-            with patch.object(self.tls_runtime, "invalidate_all", new_callable=AsyncMock) as invalidate_mock:
-                with TestClient(app) as client:
-                    resp = client.post("/integrations/telegram/vault/disconnect")
+            with patch.object(self.tls_runtime, "invalidate", new_callable=AsyncMock) as invalidate_mock:
+                with patch.object(self.tls_runtime, "invalidate_all", new_callable=AsyncMock) as invalidate_all_mock:
+                    with TestClient(app) as client:
+                        resp = client.post("/integrations/telegram/vault/disconnect")
 
         self.assertEqual(resp.status_code, 200)
         post_mock.assert_called_once_with(
@@ -420,7 +445,8 @@ class TestControlIntegrations(unittest.IsolatedAsyncioTestCase):
                 "provider": "telegram",
             },
         )
-        invalidate_mock.assert_awaited_once()
+        invalidate_mock.assert_awaited_once_with(slug="telegram")
+        invalidate_all_mock.assert_not_awaited()
 
 
 class TestLazyTokenForHost(unittest.IsolatedAsyncioTestCase):
