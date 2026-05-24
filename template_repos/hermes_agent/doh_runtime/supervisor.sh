@@ -121,13 +121,15 @@ load_gateway_integration_env() {
     fi
 
     local env_output
-    if ! env_output=$("$HERMES_WEBUI_PYTHON" - <<'PY'
+    if ! env_output=$(INTEGRATIONS_BROKER_CONTROL_PORT="$INTEGRATIONS_BROKER_CONTROL_PORT" "$HERMES_WEBUI_PYTHON" - <<'PY'
 import json
+import os
 import sys
 import urllib.request
 
+port = os.environ["INTEGRATIONS_BROKER_CONTROL_PORT"]
 try:
-    with urllib.request.urlopen("http://127.0.0.1:9951/integrations", timeout=30) as response:
+    with urllib.request.urlopen(f"http://127.0.0.1:{port}/integrations", timeout=30) as response:
         payload = json.loads(response.read().decode("utf-8"))
 except Exception as exc:
     print(f"[supervisor] could not load gateway integration env: {exc}", file=sys.stderr)
