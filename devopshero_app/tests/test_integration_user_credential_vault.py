@@ -146,6 +146,26 @@ class TestSetupSession(_CredentialVaultTestBase):
         self.assertEqual(token_payload["app_slug"], "hermes")
         self.assertEqual(token_payload["allowed_origin"], "https://hermes.dev.example.com")
 
+    def test_setup_session_canonicalizes_origin_for_browser_submit(self) -> None:
+        payload = self._setup_payload()
+        payload["public_origin"] = "https://user@Hermes.Dev.Example.Com:443/settings"
+
+        response = self.client.post(
+            "/api/integrations/credentials/setup-session",
+            data=json.dumps(payload),
+            content_type="application/json",
+            **self._env_headers(),
+        )
+
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        token_payload = signing.loads(
+            body["submit_token"],
+            salt=user_credential_vault.SETUP_TOKEN_SALT,
+            max_age=user_credential_vault.SETUP_TOKEN_MAX_AGE_SECONDS,
+        )
+        self.assertEqual(token_payload["allowed_origin"], "https://hermes.dev.example.com")
+
 
 class TestCredentialSubmit(_CredentialVaultTestBase):
 

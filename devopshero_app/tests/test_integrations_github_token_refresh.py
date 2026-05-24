@@ -1,5 +1,6 @@
 """Tests for POST /api/integrations/github/token — env-resident token refresh."""
 
+from datetime import timedelta
 import hashlib
 import json
 from unittest.mock import MagicMock, patch
@@ -103,6 +104,7 @@ class TestAuth(_GithubTokenEndpointTestBase):
 class TestHappyPath(_GithubTokenEndpointTestBase):
 
     def test_returns_access_token_on_success(self) -> None:
+        refreshed_at = self.integration.updated_at + timedelta(minutes=5)
         with self._patched_github(
             status=200,
             body={
@@ -111,7 +113,10 @@ class TestHappyPath(_GithubTokenEndpointTestBase):
                 "expires_in": 28800,
                 "token_type": "bearer",
             },
-        ) as post_mock:
+        ) as post_mock, patch(
+            "devopshero_app.views.integrations.github_token_refresh._now",
+            return_value=refreshed_at,
+        ):
             status, body = self._post(
                 body={"owner_username": "vmendi"}, token=self.raw_token,
             )
@@ -129,7 +134,8 @@ class TestHappyPath(_GithubTokenEndpointTestBase):
         self.assertEqual(kwargs["data"]["client_secret"], "test-secret")
 
         self.integration.refresh_from_db()
-        self.assertIsNotNone(self.integration.last_refreshed_at)
+        self.assertEqual(self.integration.last_refreshed_at, refreshed_at)
+        self.assertEqual(self.integration.updated_at, refreshed_at)
         # GitHub rotates refresh_token on every refresh — we must persist.
         self.assertEqual(self.integration.credentials["refresh_token"], "ghr_rotated")
 
