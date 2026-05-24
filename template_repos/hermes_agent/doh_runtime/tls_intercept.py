@@ -612,6 +612,21 @@ async def _intercept_and_forward(
                 if line in (b"\r\n", b"\n", b""):
                     break
             headers = _parse_headers(lines=headers_raw)
+            path_with_query = request_line.decode("iso-8859-1").split(" ", 2)[1]
+            if (
+                provider.credential_location == CREDENTIAL_LOCATION_TELEGRAM_PATH
+                and not _telegram_path_has_placeholder(path_with_query=path_with_query)
+            ):
+                logger.error(
+                    "telegram request path did not contain expected placeholder token: %s",
+                    path_with_query.split("?", 1)[0],
+                )
+                await _send_json_error(
+                    writer=tls_writer,
+                    status=400,
+                    message="telegram request path must use the DOH placeholder bot token",
+                )
+                return
             body = await _read_body(reader=tls_reader, headers=headers)
             token = await token_store.token_for_host(host=host)
             if token is None:
@@ -619,7 +634,7 @@ async def _intercept_and_forward(
                 return
             forward_headers, forward_path = _rewrite_request_for_provider(
                 headers=headers,
-                path_with_query=request_line.decode("iso-8859-1").split(" ", 2)[1],
+                path_with_query=path_with_query,
                 token=token,
                 provider=provider,
                 upstream_host=host,
@@ -800,8 +815,14 @@ def _rewrite_telegram_path(path_with_query: str, token: str) -> str:
         return "/bot" + token + "/" + path_with_query[len(bot_prefix):]
     if path_with_query.startswith(file_prefix):
         return "/file/bot" + token + "/" + path_with_query[len(file_prefix):]
-    logger.error("telegram request path did not contain expected placeholder token: %s", path_with_query.split("?", 1)[0])
-    return path_with_query
+    raise ValueError("telegram request path must use the DOH placeholder bot token")
+
+
+def _telegram_path_has_placeholder(path_with_query: str) -> bool:
+    """Return true when a Telegram Bot API path carries the sandbox placeholder."""
+    bot_prefix = f"/bot{TELEGRAM_PLACEHOLDER_TOKEN}/"
+    file_prefix = f"/file/bot{TELEGRAM_PLACEHOLDER_TOKEN}/"
+    return path_with_query.startswith(bot_prefix) or path_with_query.startswith(file_prefix)
 
 
 def _rewrite_request_for_provider(
