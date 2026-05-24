@@ -24,6 +24,7 @@ SETUP_TOKEN_MAX_AGE_SECONDS = 5 * 60
 TELEGRAM_TOKEN_RE = re.compile(r"^\d+:[A-Za-z0-9_-]{20,}$")
 TELEGRAM_GET_ME_TIMEOUT_SECONDS = 20
 TELEGRAM_BROKER_CACHE_SECONDS = 60 * 60
+TELEGRAM_INVALID_TOKEN_MESSAGE = "Telegram rejected this bot token. Check that you pasted the complete token from BotFather."
 
 
 def _parse_json_body(request: HttpRequest) -> tuple[dict | None, JsonResponse | None]:
@@ -289,7 +290,12 @@ def _telegram_get_me(bot_token: str) -> tuple[dict | None, str | None]:
     except ValueError:
         return None, "Telegram validation returned a non-JSON response"
     if response.status_code != 200 or body.get("ok") is not True:
-        return None, body.get("description", "Telegram rejected this bot token")
+        description = body.get("description")
+        if response.status_code == 401 or description == "Unauthorized":
+            return None, TELEGRAM_INVALID_TOKEN_MESSAGE
+        if isinstance(description, str) and description:
+            return None, f"Telegram rejected this bot token: {description}"
+        return None, "Telegram rejected this bot token."
     result = body.get("result")
     if not isinstance(result, dict) or result.get("is_bot") is not True:
         return None, "Telegram token did not resolve to a bot"

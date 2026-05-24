@@ -11,6 +11,10 @@
   'use strict';
 
   const INTEGRATIONS_URL = '/__doh_broker/integrations';
+  const VAULT_NETWORK_ERROR = (
+    'Could not reach the DevOps Hero vault. Try again. ' +
+    'If this keeps happening, ask an admin to check this Hermes deployment.'
+  );
 
   let _current = null;
   const _disconnecting = new Set();
@@ -338,7 +342,12 @@
   async function requestVaultSetupSession(item) {
     const url = '/__doh_broker/integrations/' + encodeURIComponent(item.slug) +
       '/vault/setup-session?origin=' + encodeURIComponent(window.location.origin);
-    const response = await fetch(url, { method: 'POST', cache: 'no-store' });
+    let response;
+    try {
+      response = await fetch(url, { method: 'POST', cache: 'no-store' });
+    } catch (_) {
+      throw new Error(VAULT_NETWORK_ERROR);
+    }
     if (!response.ok) {
       let message = 'Could not start the vault setup flow.';
       try { message = (await response.json()).error || message; } catch (_) { /* ignore */ }
@@ -358,16 +367,21 @@
         config[input.name] = value;
       }
     }
-    const response = await fetch(session.action_url, {
-      method: 'POST',
-      credentials: 'omit',
-      headers: { 'Content-Type': 'text/plain' },
-      body: JSON.stringify({
-        submit_token: session.submit_token,
-        credentials,
-        config,
-      }),
-    });
+    let response;
+    try {
+      response = await fetch(session.action_url, {
+        method: 'POST',
+        credentials: 'omit',
+        headers: { 'Content-Type': 'text/plain' },
+        body: JSON.stringify({
+          submit_token: session.submit_token,
+          credentials,
+          config,
+        }),
+      });
+    } catch (_) {
+      throw new Error(VAULT_NETWORK_ERROR);
+    }
     let payload = {};
     try { payload = await response.json(); } catch (_) { /* ignore */ }
     if (!response.ok) throw new Error(payload.error || 'Vault submission failed.');
@@ -376,7 +390,7 @@
 
   function showVaultConfigModal(item, session) {
     const schema = session.schema;
-    const backdrop = elem('div', { class: 'doh-modal-backdrop' });
+    const backdrop = elem('div', { class: 'doh-modal-backdrop doh-vault-backdrop' });
     const close = () => backdrop.remove();
     const errorBox = elem('div', { class: 'doh-vault-error', style: { display: 'none' } });
     const successBox = elem('div', { class: 'doh-vault-success', style: { display: 'none' } });

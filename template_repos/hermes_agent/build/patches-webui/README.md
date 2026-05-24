@@ -106,3 +106,29 @@ explicitly turns it back on (or whose `settings.json` was already
 materialised by an earlier save) keeps their preference. Fresh deploys
 get the new default. There is no env var knob for this in upstream,
 hence the patch.
+
+### `07-doh-broker-proxy.patch`
+
+**Target:** `api/routes.py` (`handle_get`, `handle_post`, broker proxy helper).
+
+**Problem:** The integrations WebUI extension needs a same-origin control
+surface for the loopback integrations broker. Calling the broker directly
+from the browser is impossible because it binds only to `127.0.0.1` inside
+the task.
+
+**Fix:** Add `/__doh_broker/*` as a WebUI reverse proxy to the broker's
+control API on `127.0.0.1:9951`.
+
+### `08-doh-control-plane-csp-connect-src.patch`
+
+**Target:** `api/helpers.py` (`_security_headers`).
+
+**Problem:** Paste-style credentials are submitted directly from the browser
+to the DOH vault endpoint, but the WebUI's enforced CSP only allowed
+`connect-src 'self' https://cdn.jsdelivr.net`. The browser blocked
+`fetch(DOH_CONTROL_PLANE_URL + "/api/integrations/credentials/submit")`
+before CORS or DOH validation could run.
+
+**Fix:** Append the configured `DOH_CONTROL_PLANE_URL` origin to
+`connect-src`. The URL is non-secret and is passed into the WebUI process by
+the supervisor.

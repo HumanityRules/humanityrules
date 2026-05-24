@@ -230,6 +230,12 @@ main.main.showing-integrations > #mainChat { display: none !important; }
   z-index: 9999;
 }
 
+.doh-vault-backdrop {
+  background: rgba(0, 0, 0, 0.42);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+}
+
 .doh-modal {
   background: var(--bg, #1a1a1a);
   color: var(--text);
