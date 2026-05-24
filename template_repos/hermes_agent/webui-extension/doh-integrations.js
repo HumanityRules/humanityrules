@@ -102,12 +102,12 @@
   // bounces to the upstream OAuth, and the callback redirects back.
   function buildTlsConnectUrl(payload, slug, returnTo) {
     const rd = encodeURIComponent(returnTo);
-    return payload.doh_control_plane_url.replace(/\/$/, '') + '/integrations/' + slug + '/start?rd=' + rd;
+    return payload.doh_control_plane_url.replace(/\/$/, '') + '/integrations/' + slug + '/start?rd=' + rd + '&app_slug=' + encodeURIComponent(payload.app_slug || '');
   }
 
   function buildTlsDisconnectUrl(payload, slug, returnTo) {
     const rd = encodeURIComponent(returnTo);
-    return payload.doh_control_plane_url.replace(/\/$/, '') + '/integrations/' + slug + '/disconnect?rd=' + rd;
+    return payload.doh_control_plane_url.replace(/\/$/, '') + '/integrations/' + slug + '/disconnect?rd=' + rd + '&app_slug=' + encodeURIComponent(payload.app_slug || '');
   }
 
   function buildMcpConnectUrl(slug) {
@@ -304,9 +304,159 @@
     return card;
   }
 
+  function fieldInputFor(field) {
+    const id = 'dohVaultField_' + field.name;
+    const wrapper = elem('label', { class: 'doh-vault-field', for: id });
+    wrapper.appendChild(elem('span', { class: 'doh-vault-field-label' }, [
+      field.label + (field.required ? ' *' : ''),
+    ]));
+    let input;
+    if (field.kind === 'textarea') {
+      input = elem('textarea', {
+        id,
+        class: 'doh-vault-input doh-vault-textarea',
+        name: field.name,
+        rows: '4',
+      });
+      input.value = field.value || '';
+    } else {
+      input = elem('input', {
+        id,
+        class: 'doh-vault-input',
+        name: field.name,
+        type: field.kind === 'secret' ? 'password' : 'text',
+        placeholder: field.placeholder || '',
+        autocomplete: 'off',
+      });
+    }
+    input.dataset.kind = field.kind || 'text';
+    wrapper.appendChild(input);
+    if (field.help) wrapper.appendChild(elem('span', { class: 'doh-vault-field-help' }, [field.help]));
+    return wrapper;
+  }
+
+  async function requestVaultSetupSession(item) {
+    const url = '/__doh_broker/integrations/' + encodeURIComponent(item.slug) +
+      '/vault/setup-session?origin=' + encodeURIComponent(window.location.origin);
+    const response = await fetch(url, { method: 'POST', cache: 'no-store' });
+    if (!response.ok) {
+      let message = 'Could not start the vault setup flow.';
+      try { message = (await response.json()).error || message; } catch (_) { /* ignore */ }
+      throw new Error(message);
+    }
+    return await response.json();
+  }
+
+  async function submitVaultForm(session, form) {
+    const credentials = {};
+    const config = {};
+    for (const input of form.querySelectorAll('[name]')) {
+      const value = input.value || '';
+      if (input.dataset.kind === 'secret') {
+        if (value.trim()) credentials[input.name] = value;
+      } else {
+        config[input.name] = value;
+      }
+    }
+    const response = await fetch(session.action_url, {
+      method: 'POST',
+      credentials: 'omit',
+      headers: { 'Content-Type': 'text/plain' },
+      body: JSON.stringify({
+        submit_token: session.submit_token,
+        credentials,
+        config,
+      }),
+    });
+    let payload = {};
+    try { payload = await response.json(); } catch (_) { /* ignore */ }
+    if (!response.ok) throw new Error(payload.error || 'Vault submission failed.');
+    return payload;
+  }
+
+  function showVaultConfigModal(item, session) {
+    const schema = session.schema;
+    const backdrop = elem('div', { class: 'doh-modal-backdrop' });
+    const close = () => backdrop.remove();
+    const errorBox = elem('div', { class: 'doh-vault-error', style: { display: 'none' } });
+    const successBox = elem('div', { class: 'doh-vault-success', style: { display: 'none' } });
+    const form = elem('form', { class: 'doh-vault-form' });
+    for (const field of schema.fields || []) {
+      form.appendChild(fieldInputFor(field));
+    }
+    const saveBtn = elem('button', {
+      class: 'doh-integration-btn doh-integration-btn-primary',
+      type: 'submit',
+    }, ['Save']);
+    form.appendChild(elem('div', { class: 'doh-modal-actions' }, [
+      elem('button', {
+        class: 'doh-integration-btn',
+        type: 'button',
+        onclick: close,
+      }, ['Cancel']),
+      saveBtn,
+    ]));
+    form.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      errorBox.style.display = 'none';
+      successBox.style.display = 'none';
+      saveBtn.disabled = true;
+      saveBtn.textContent = 'Saving…';
+      try {
+        await submitVaultForm(session, form);
+        successBox.textContent = 'Saved. Restart this Hermes app for the gateway to use the updated configuration.';
+        successBox.style.display = '';
+        await invalidateBrokerTlsCache(item.slug);
+        await refreshAndRender();
+      } catch (err) {
+        errorBox.textContent = err.message || 'Save failed.';
+        errorBox.style.display = '';
+      } finally {
+        saveBtn.disabled = false;
+        saveBtn.textContent = 'Save';
+      }
+    });
+    const modal = elem('div', { class: 'doh-modal doh-vault-modal' }, [
+      elem('div', { class: 'doh-modal-title' }, [(schema.status === 'connected' ? 'Configure ' : 'Connect ') + (schema.label || item.label)]),
+      elem('div', { class: 'doh-modal-body' }, [schema.message || 'Credentials are sent directly to the DevOps Hero vault.']),
+      errorBox,
+      successBox,
+      form,
+    ]);
+    backdrop.appendChild(modal);
+    backdrop.addEventListener('click', (e) => { if (e.target === backdrop) close(); });
+    document.body.appendChild(backdrop);
+  }
+
+  async function startVaultConfig(item) {
+    try {
+      const session = await requestVaultSetupSession(item);
+      showVaultConfigModal(item, session);
+    } catch (err) {
+      alert(err.message || 'Could not open the vault dialog.');
+    }
+  }
+
+  async function disconnectVaultProvider(item) {
+    if (_disconnecting.has(item.slug)) return;
+    _disconnecting.add(item.slug);
+    renderPane(_current);
+    try {
+      await fetch('/__doh_broker/integrations/' + encodeURIComponent(item.slug) + '/vault/disconnect', {
+        method: 'POST',
+        cache: 'no-store',
+      });
+      await refreshAndRender();
+    } finally {
+      _disconnecting.delete(item.slug);
+      renderPane(_current);
+    }
+  }
+
   function renderTlsInterceptCard(item, payload) {
     const returnTo = window.location.origin + window.location.pathname;
     const isConnected = item.status === 'connected';
+    const usesVault = item.connect_mode === 'vault';
     const cardClass = isConnected ? 'doh-integration-card' : 'doh-integration-card doh-integration-card-row';
     const card = elem('div', { class: cardClass, dataset: { provider: item.slug } });
     const titleRow = elem('div', { class: 'doh-integration-card-title-row' });
@@ -325,22 +475,42 @@
     if (isConnected) {
       card.appendChild(elem('div', { class: 'doh-integration-card-head' }, [titleRow, statusPill]));
       const body = elem('div', { class: 'doh-integration-card-body' });
+      const botUsername = item.metadata && item.metadata.bot_username;
+      if (botUsername) {
+        body.appendChild(elem('div', { class: 'doh-integration-meta' }, ['Connected as @' + botUsername]));
+      }
       if (item.last_refreshed_at) {
         body.appendChild(elem('div', { class: 'doh-integration-meta' }, [
           'Last refreshed: ' + formatDate(item.last_refreshed_at),
         ]));
       }
-      body.appendChild(elem('button', {
-        class: 'doh-integration-btn doh-integration-btn-secondary',
-        onclick: () => { window.location.href = buildTlsDisconnectUrl(payload, item.slug, returnTo); },
-      }, ['Disconnect']));
+      const actions = elem('div', { class: 'doh-integration-actions' });
+      if (usesVault) {
+        actions.appendChild(elem('button', {
+          class: 'doh-integration-btn',
+          onclick: () => { startVaultConfig(item); },
+        }, ['Configure']));
+        actions.appendChild(elem('button', {
+          class: 'doh-integration-btn doh-integration-btn-secondary',
+          onclick: () => { disconnectVaultProvider(item); },
+        }, [_disconnecting.has(item.slug) ? 'Disconnecting…' : 'Disconnect']));
+      } else {
+        actions.appendChild(elem('button', {
+          class: 'doh-integration-btn doh-integration-btn-secondary',
+          onclick: () => { window.location.href = buildTlsDisconnectUrl(payload, item.slug, returnTo); },
+        }, ['Disconnect']));
+      }
+      body.appendChild(actions);
       card.appendChild(body);
       return card;
     }
 
     const connectBtn = elem('button', {
       class: 'doh-integration-btn',
-      onclick: () => { window.location.href = buildTlsConnectUrl(payload, item.slug, returnTo); },
+      onclick: () => {
+        if (usesVault) startVaultConfig(item);
+        else window.location.href = buildTlsConnectUrl(payload, item.slug, returnTo);
+      },
     }, ['Connect']);
     const trailing = elem('div', { class: 'doh-integration-card-trailing' }, [connectBtn, statusPill]);
     card.appendChild(elem('div', { class: 'doh-integration-card-head' }, [titleRow, trailing]));
@@ -398,14 +568,15 @@
     renderPane(_current);
   }
 
-  // Tell the broker to drop its cached TLS-intercept tokens. The broker no
-  // longer force-refreshes on every status read (that was racing in-flight
-  // git/gh requests on GitHub, which rotates tokens), so when we know DOH's
-  // grant state just changed (a connect/disconnect just happened), we have
-  // to nudge the cache ourselves before reading. Best-effort.
-  async function invalidateBrokerTlsCache() {
+  // Tell the broker to drop cached TLS-intercept tokens. Provider-specific
+  // invalidation is used after known connect/disconnect/config changes; the
+  // no-arg form intentionally invalidates all providers for explicit Refresh.
+  async function invalidateBrokerTlsCache(providerSlug) {
     try {
-      await fetch('/__doh_broker/integrations/invalidate_tls_cache', { method: 'POST' });
+      const url = providerSlug
+        ? '/__doh_broker/integrations/' + encodeURIComponent(providerSlug) + '/invalidate_tls_cache'
+        : '/__doh_broker/integrations/invalidate_tls_cache';
+      await fetch(url, { method: 'POST' });
     } catch (_) {
       // Stale-cache survival isn't critical — next 8h's worth of status
       // reads might lie about a disconnect, but the proxy's 401-evict path
@@ -425,7 +596,10 @@
     const qs = params.toString();
     const newUrl = window.location.pathname + (qs ? '?' + qs : '') + window.location.hash;
     window.history.replaceState({}, '', newUrl);
-    return connected ? 'connected' : 'disconnected';
+    return {
+      transition: connected ? 'connected' : 'disconnected',
+      provider: connected || disconnected,
+    };
   }
 
   function ensureSidebarTabAndPane() {
@@ -579,12 +753,11 @@
       // to the Integrations panel.
       window.switchPanel('integrations');
     }
-    // The broker reads from cache; nudge the cache only when we know DOH's
-    // grant state may have just changed (the user came back from a connect
-    // or disconnect round-trip). On normal page loads we render whatever is
-    // cached — fresh enough, and avoids the GitHub refresh-rotation race.
+    // The broker reads from cache; nudge only the provider named by the
+    // OAuth return sentinel. On normal page loads we render whatever is
+    // cached; explicit Refresh is the only UI action that invalidates all.
     if (sentinel) {
-      invalidateBrokerTlsCache().then(refreshAndRender);
+      invalidateBrokerTlsCache(sentinel.provider).then(refreshAndRender);
     } else {
       refreshAndRender();
     }

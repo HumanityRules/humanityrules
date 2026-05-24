@@ -241,16 +241,23 @@ def oidc_callback(request):
     post_login_redirect = next_url or "/dashboard/"
 
     # Canonical path: existing OIDC user, matched by stable sub.
-    try:
-        user = User.objects.get(oidc_sub=userinfo["sub"])
+    user = User.objects.filter(
+        oidc_sub=userinfo["sub"],
+        organization_memberships__organization=org,
+    ).first()
+    if user is not None:
         user.email = userinfo["email"]
         user.first_name = userinfo["first_name"]
         user.last_name = userinfo["last_name"]
         user.save()
         login(request, user)
         return redirect(post_login_redirect)
-    except User.DoesNotExist:
-        pass
+    if User.objects.filter(oidc_sub=userinfo["sub"]).exists():
+        logger.error(
+            "oidc sub belongs to a different organization login_org=%s sub=%s email=%s",
+            org.slug, userinfo["sub"], userinfo["email"],
+        )
+        return HttpResponseBadRequest("OIDC sub belongs to a different organization")
 
     # Identity-linking path: an existing DOH user (typically WorkOS-onboarded)
     # hitting /oidc/login/ for the first time. Match on (org, email) and

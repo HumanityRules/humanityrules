@@ -75,9 +75,15 @@ def pdp_evaluate(request: HttpRequest) -> JsonResponse:
     # WorkOS users carry sub=workos_user_id; OIDC users carry sub=<oidc subject>.
     # The session JWT's `provider` claim picks which column we look up against.
     if provider == "workos":
-        user = User.objects.filter(workos_user_id=sub).first()
+        user = User.objects.filter(
+            workos_user_id=sub,
+            organization_memberships__organization=organization,
+        ).first()
     else:
-        user = User.objects.filter(oidc_sub=sub).first()
+        user = User.objects.filter(
+            oidc_sub=sub,
+            organization_memberships__organization=organization,
+        ).first()
     if user is None:
         logger.info(
             "pdp deny reason=user-not-found env=%s app=%s provider=%s sub=%s path=%s",

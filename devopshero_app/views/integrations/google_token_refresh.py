@@ -2,10 +2,11 @@
 
 See `docs/integrations_broker_design.md`. Env-resident callers
 (Hermes integrations broker, etc.) hit this endpoint with `Authorization: Bearer
-<DOH_ENV_BEARER>` and `{"owner_username": "..."}` in the body. DOH resolves
-the environment from the bearer, looks up the user's IntegrationUserGrant
-row for that env, exchanges the stored refresh token with Google using DOH's
-OAuth client_secret, and returns a short-lived access token.
+<DOH_ENV_BEARER>` and `{"owner_username": "...", "app_slug": "..."}` in the
+body. DOH resolves the environment from the bearer, looks up the user's
+IntegrationUserCredential row for that logical app, exchanges the stored
+refresh token with Google using DOH's OAuth client_secret, and returns a
+short-lived access token.
 
 The refresh_token and DOH's OAuth client_secret never cross the customer/DOH
 boundary. If Google has revoked the refresh_token, the row is deleted and
@@ -20,7 +21,7 @@ from django.http import HttpRequest, JsonResponse
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_POST
 
-from devopshero_app.models import IntegrationConfig, IntegrationUserGrant, User
+from devopshero_app.models import IntegrationConfig, IntegrationUserCredential, User
 from devopshero_app.views import env_bearer_auth
 
 logger = logging.getLogger(__name__)
@@ -51,6 +52,9 @@ def integrations_google_token_refresh(request: HttpRequest) -> JsonResponse:
         return JsonResponse(
             {"error": "owner_username is required"}, status=400,
         )
+    app_slug = payload.get("app_slug")
+    if not isinstance(app_slug, str) or not app_slug:
+        return JsonResponse({"error": "app_slug is required"}, status=400)
 
     try:
         google_cfg = IntegrationConfig.objects.get(provider=IntegrationConfig.Provider.GOOGLE)
@@ -58,7 +62,10 @@ def integrations_google_token_refresh(request: HttpRequest) -> JsonResponse:
         logger.error("google token refresh failed: IntegrationConfig(provider=google) missing")
         return JsonResponse({"error": "google integration not configured"}, status=500)
 
-    user = User.objects.filter(username=owner_username).first()
+    user = User.objects.filter(
+        username=owner_username,
+        organization_memberships__organization=environment.aws_account.organization,
+    ).first()
     if user is None:
         logger.info(
             "google token refresh: user not found env=%s owner=%s",
@@ -66,42 +73,51 @@ def integrations_google_token_refresh(request: HttpRequest) -> JsonResponse:
         )
         return JsonResponse({"error": "not connected"}, status=404)
 
-    integration = IntegrationUserGrant.objects.filter(
-        user=user,
+    integration = IntegrationUserCredential.objects.filter(
+        owner_user=user,
         environment=environment,
-        provider=IntegrationUserGrant.Provider.GOOGLE,
+        app_slug=app_slug,
+        provider=IntegrationUserCredential.Provider.GOOGLE,
     ).first()
     if integration is None:
         logger.info(
-            "google token refresh: no integration row env=%s owner=%s",
-            environment.slug, owner_username,
+            "google token refresh: no integration row env=%s owner=%s app=%s",
+            environment.slug, owner_username, app_slug,
+        )
+        return JsonResponse({"error": "not connected"}, status=404)
+
+    refresh_token = integration.credentials.get("refresh_token", "")
+    if not refresh_token:
+        logger.error(
+            "google token refresh: row missing refresh_token env=%s owner=%s app=%s",
+            environment.slug, owner_username, app_slug,
         )
         return JsonResponse({"error": "not connected"}, status=404)
 
     exchange_result = _exchange_refresh_token(
         web=google_cfg.config,
-        refresh_token=integration.refresh_token,
+        refresh_token=refresh_token,
     )
     if exchange_result.revoked:
         logger.info(
-            "google token refresh: revoked by google, deleting row env=%s owner=%s",
-            environment.slug, owner_username,
+            "google token refresh: revoked by google, deleting row env=%s owner=%s app=%s",
+            environment.slug, owner_username, app_slug,
         )
         integration.delete()
         return JsonResponse({"error": "revoked, please reconnect"}, status=410)
     if exchange_result.error is not None:
         logger.error(
-            "google token refresh failed env=%s owner=%s error=%s",
-            environment.slug, owner_username, exchange_result.error,
+            "google token refresh failed env=%s owner=%s app=%s error=%s",
+            environment.slug, owner_username, app_slug, exchange_result.error,
         )
         return JsonResponse({"error": "google token exchange failed"}, status=502)
 
     # Google occasionally rotates the refresh_token; persist the new one when it does.
     new_refresh = exchange_result.response.get("refresh_token")
-    if new_refresh and new_refresh != integration.refresh_token:
-        integration.refresh_token = new_refresh
+    if new_refresh and new_refresh != refresh_token:
+        integration.credentials = {**integration.credentials, "refresh_token": new_refresh}
     integration.last_refreshed_at = _now()
-    integration.save(update_fields=["refresh_token", "last_refreshed_at"])
+    integration.save(update_fields=["credentials", "last_refreshed_at", "updated_at"])
 
     return JsonResponse({
         "access_token": exchange_result.response["access_token"],
