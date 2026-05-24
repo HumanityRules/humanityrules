@@ -4,6 +4,7 @@ import hashlib
 import json
 from unittest.mock import MagicMock, patch
 
+import httpx
 from django.core import signing
 from django.test import Client, TestCase
 
@@ -224,6 +225,32 @@ class TestCredentialSubmit(_CredentialVaultTestBase):
         )
 
         self.assertEqual(response.status_code, 403)
+        self.assertFalse(IntegrationUserCredential.objects.exists())
+
+    def test_submit_does_not_echo_telegram_token_from_transport_error(self) -> None:
+        _status, session = self._post_setup_session()
+        bot_token = "123456:abcdefghijklmnopqrstuvwxyz"
+        with patch(
+            "devopshero_app.views.integrations.user_credential_vault.httpx.get",
+            side_effect=httpx.ConnectError(
+                f"boom https://api.telegram.org/bot{bot_token}/getMe"
+            ),
+        ):
+            response = self.client.post(
+                "/api/integrations/credentials/submit",
+                data=json.dumps({
+                    "submit_token": session["submit_token"],
+                    "credentials": {"bot_token": bot_token},
+                    "config": {"allowed_users": "111"},
+                }),
+                content_type="text/plain",
+                HTTP_ORIGIN="https://hermes.dev.example.com",
+            )
+
+        self.assertEqual(response.status_code, 400)
+        body = response.json()
+        self.assertEqual(body["error"], "Telegram validation failed. Please try again.")
+        self.assertNotIn(bot_token, response.content.decode("utf-8"))
         self.assertFalse(IntegrationUserCredential.objects.exists())
 
 

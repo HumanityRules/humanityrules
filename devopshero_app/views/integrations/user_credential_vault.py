@@ -268,7 +268,8 @@ def _telegram_get_me(bot_token: str) -> tuple[dict | None, str | None]:
             timeout=TELEGRAM_GET_ME_TIMEOUT_SECONDS,
         )
     except httpx.HTTPError as exc:
-        return None, f"Telegram validation failed: {exc}"
+        logger.error("telegram validation request failed: %s", exc.__class__.__name__)
+        return None, "Telegram validation failed. Please try again."
     try:
         body = response.json()
     except ValueError:
