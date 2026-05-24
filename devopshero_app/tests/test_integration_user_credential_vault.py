@@ -273,6 +273,34 @@ class TestCredentialSubmit(_CredentialVaultTestBase):
         self.assertNotIn(bot_token, response.content.decode("utf-8"))
         self.assertFalse(IntegrationUserCredential.objects.exists())
 
+    def test_submit_rewrites_telegram_unauthorized_error(self) -> None:
+        _status, session = self._post_setup_session()
+        telegram_response = MagicMock()
+        telegram_response.status_code = 401
+        telegram_response.json.return_value = {"ok": False, "description": "Unauthorized"}
+
+        with patch(
+            "devopshero_app.views.integrations.user_credential_vault.httpx.get",
+            return_value=telegram_response,
+        ):
+            response = self.client.post(
+                "/api/integrations/credentials/submit",
+                data=json.dumps({
+                    "submit_token": session["submit_token"],
+                    "credentials": {"bot_token": "123456:abcdefghijklmnopqrstuvwxyz"},
+                    "config": {"allowed_users": "111"},
+                }),
+                content_type="text/plain",
+                HTTP_ORIGIN="https://hermes.dev.example.com",
+            )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(
+            response.json()["error"],
+            user_credential_vault.TELEGRAM_INVALID_TOKEN_MESSAGE,
+        )
+        self.assertFalse(IntegrationUserCredential.objects.exists())
+
 
 class TestTelegramBrokerToken(_CredentialVaultTestBase):
 

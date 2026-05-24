@@ -322,6 +322,7 @@ run_in_nono() {
         HOMEBREW_INSTALL_FROM_API=1 \
         VIRTUAL_ENV="${HERMES_WEBUI_DEFAULT_WORKSPACE}/.venv" \
         DOH_LOGIN_PATH="$doh_login_path" \
+        DOH_CONTROL_PLANE_URL="${DOH_CONTROL_PLANE_URL:-}" \
         PATH="$doh_login_path" \
         NO_PROXY=127.0.0.1,localhost \
         "${broker_env[@]}" \
