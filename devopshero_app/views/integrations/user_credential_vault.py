@@ -97,12 +97,26 @@ def _normalize_origin(public_origin: object, environment: Environment) -> tuple[
     if parsed.scheme not in ("http", "https") or not parsed.hostname:
         return None, JsonResponse({"error": "invalid public_origin"}, status=400)
     hostname = parsed.hostname.lower()
+    try:
+        port = parsed.port
+    except ValueError:
+        return None, JsonResponse({"error": "invalid public_origin"}, status=400)
+    origin = _canonical_origin(scheme=parsed.scheme, hostname=hostname, port=port)
     zone = environment.shared_alb_hosted_zone.lower()
     if zone and (hostname == zone or hostname.endswith("." + zone)):
-        return f"{parsed.scheme}://{parsed.netloc}", None
+        return origin, None
     if settings.DEBUG and hostname in ("127.0.0.1", "localhost"):
-        return f"{parsed.scheme}://{parsed.netloc}", None
+        return origin, None
     return None, JsonResponse({"error": "public_origin is not allowed for this environment"}, status=400)
+
+
+def _canonical_origin(scheme: str, hostname: str, port: int | None) -> str:
+    """Build the browser Origin form: lowercase host, no userinfo, default ports omitted."""
+    scheme = scheme.lower()
+    host = f"[{hostname}]" if ":" in hostname and not hostname.startswith("[") else hostname
+    if port is None or (scheme == "http" and port == 80) or (scheme == "https" and port == 443):
+        return f"{scheme}://{host}"
+    return f"{scheme}://{host}:{port}"
 
 
 def _schema_for_provider(provider: str, existing: IntegrationUserCredential | None) -> dict:

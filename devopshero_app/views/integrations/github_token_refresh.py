@@ -147,9 +147,14 @@ def integrations_github_token_refresh(request: HttpRequest) -> JsonResponse:
     # value. Affected_rows == 0 just means we lost; our access_token
     # is still valid for ~8h, so we return it without persisting.
     new_refresh = exchange_result.response.get("refresh_token", "") or old_refresh
+    refreshed_at = _now()
     IntegrationUserCredential.objects.filter(
         id=integration.id, credentials__refresh_token=old_refresh,
-    ).update(credentials={**integration.credentials, "refresh_token": new_refresh}, last_refreshed_at=_now())
+    ).update(
+        credentials={**integration.credentials, "refresh_token": new_refresh},
+        last_refreshed_at=refreshed_at,
+        updated_at=refreshed_at,
+    )
 
     return JsonResponse({
         "access_token": exchange_result.response["access_token"],
