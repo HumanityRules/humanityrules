@@ -194,6 +194,45 @@ class TestRewriteAuthorization(unittest.TestCase):
             "/file/bot123456:REAL/documents/file.txt",
         )
 
+    def test_telegram_path_rewrite_fails_closed_without_placeholder(self) -> None:
+        provider = broker.tls_intercept.TLS_INTERCEPT_PROVIDERS["telegram"]
+
+        with self.assertRaisesRegex(ValueError, "placeholder"):
+            broker.tls_intercept._rewrite_request_for_provider(
+                headers=[(b"host", b"api.telegram.org")],
+                path_with_query="/bot000000%3ADOH_PLACEHOLDER/sendMessage",
+                token="123456:REAL",
+                provider=provider,
+                upstream_host="api.telegram.org",
+            )
+
+    def test_telegram_placeholder_detection_rejects_malformed_paths(self) -> None:
+        self.assertTrue(
+            broker.tls_intercept._telegram_path_has_placeholder(
+                path_with_query="/bot000000:DOH_PLACEHOLDER/getMe",
+            )
+        )
+        self.assertTrue(
+            broker.tls_intercept._telegram_path_has_placeholder(
+                path_with_query="/file/bot000000:DOH_PLACEHOLDER/documents/file.txt",
+            )
+        )
+        self.assertFalse(
+            broker.tls_intercept._telegram_path_has_placeholder(
+                path_with_query="//bot000000:DOH_PLACEHOLDER/getMe",
+            )
+        )
+        self.assertFalse(
+            broker.tls_intercept._telegram_path_has_placeholder(
+                path_with_query="/BOT000000:DOH_PLACEHOLDER/getMe",
+            )
+        )
+        self.assertFalse(
+            broker.tls_intercept._telegram_path_has_placeholder(
+                path_with_query="/bot000000%3ADOH_PLACEHOLDER/getMe",
+            )
+        )
+
 
 class TestCertMinter(unittest.TestCase):
 
