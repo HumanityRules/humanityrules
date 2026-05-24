@@ -316,10 +316,6 @@ run_in_nono() {
         AWS_EC2_METADATA_DISABLED=true \
         HOME="$HERMES_WEBUI_DEFAULT_WORKSPACE" \
         HERMES_WEBUI_PORT=8789 \
-        HOMEBREW_PREFIX=/home/linuxbrew/.linuxbrew \
-        HOMEBREW_NO_ANALYTICS=1 \
-        HOMEBREW_NO_AUTO_UPDATE=1 \
-        HOMEBREW_INSTALL_FROM_API=1 \
         VIRTUAL_ENV="${HERMES_WEBUI_DEFAULT_WORKSPACE}/.venv" \
         DOH_LOGIN_PATH="$doh_login_path" \
         DOH_CONTROL_PLANE_URL="${DOH_CONTROL_PLANE_URL:-}" \
