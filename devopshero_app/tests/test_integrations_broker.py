@@ -186,15 +186,22 @@ class TestRewriteAuthorization(unittest.TestCase):
         self.assertEqual(dict((name.lower(), value) for name, value in headers)[b"host"], b"api.telegram.org")
 
     def test_telegram_file_path_token_is_rewritten(self) -> None:
-        self.assertEqual(
-            broker.tls_intercept._rewrite_telegram_path(
-                path_with_query="/file/bot000000:DOH_PLACEHOLDER/documents/file.txt",
-                token="123456:REAL",
-            ),
-            "/file/bot123456:REAL/documents/file.txt",
+        provider = broker.tls_intercept.TLS_INTERCEPT_PROVIDERS["telegram"]
+        _headers, path = broker.tls_intercept._rewrite_request_for_provider(
+            headers=[(b"host", b"api.telegram.org")],
+            path_with_query="/file/bot000000:DOH_PLACEHOLDER/documents/file.txt",
+            token="123456:REAL",
+            provider=provider,
+            upstream_host="api.telegram.org",
         )
+        self.assertEqual(path, "/file/bot123456:REAL/documents/file.txt")
 
-    def test_telegram_path_rewrite_fails_closed_without_placeholder(self) -> None:
+    def test_url_rewrite_fails_closed_without_placeholder(self) -> None:
+        """A URL-rewrite provider must reject paths missing its placeholder.
+
+        Url-encoded placeholders (e.g. `%3A` instead of `:`) don't substring-match
+        and must be rejected so we never forward an un-rewritten URL upstream.
+        """
         provider = broker.tls_intercept.TLS_INTERCEPT_PROVIDERS["telegram"]
 
         with self.assertRaisesRegex(ValueError, "placeholder"):
@@ -205,33 +212,6 @@ class TestRewriteAuthorization(unittest.TestCase):
                 provider=provider,
                 upstream_host="api.telegram.org",
             )
-
-    def test_telegram_placeholder_detection_rejects_malformed_paths(self) -> None:
-        self.assertTrue(
-            broker.tls_intercept._telegram_path_has_placeholder(
-                path_with_query="/bot000000:DOH_PLACEHOLDER/getMe",
-            )
-        )
-        self.assertTrue(
-            broker.tls_intercept._telegram_path_has_placeholder(
-                path_with_query="/file/bot000000:DOH_PLACEHOLDER/documents/file.txt",
-            )
-        )
-        self.assertFalse(
-            broker.tls_intercept._telegram_path_has_placeholder(
-                path_with_query="//bot000000:DOH_PLACEHOLDER/getMe",
-            )
-        )
-        self.assertFalse(
-            broker.tls_intercept._telegram_path_has_placeholder(
-                path_with_query="/BOT000000:DOH_PLACEHOLDER/getMe",
-            )
-        )
-        self.assertFalse(
-            broker.tls_intercept._telegram_path_has_placeholder(
-                path_with_query="/bot000000%3ADOH_PLACEHOLDER/getMe",
-            )
-        )
 
 
 class TestCertMinter(unittest.TestCase):
@@ -585,8 +565,9 @@ class TestFetchProviderTokenClassification(unittest.TestCase):
             refresh_path="/api/x",
             hosts=("example.invalid",),
             logo_url="/extensions/test.svg",
-            credential_location=broker.tls_intercept.CREDENTIAL_LOCATION_AUTHORIZATION_HEADER,
-            auth_format=broker.tls_intercept.AUTH_FORMAT_BEARER,
+            credential_method=broker.tls_intercept.OAuthHeader(
+                auth_format=broker.tls_intercept.AUTH_FORMAT_BEARER,
+            ),
         )
         if 200 <= status < 300:
             opener = _FakeResp(status=status, body=body)

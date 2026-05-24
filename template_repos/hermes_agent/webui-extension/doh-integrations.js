@@ -402,32 +402,47 @@
       class: 'doh-integration-btn doh-integration-btn-primary',
       type: 'submit',
     }, ['Save']);
-    form.appendChild(elem('div', { class: 'doh-modal-actions' }, [
+    const actions = elem('div', { class: 'doh-modal-actions' }, [
       elem('button', {
         class: 'doh-integration-btn',
         type: 'button',
         onclick: close,
       }, ['Cancel']),
       saveBtn,
-    ]));
+    ]);
+    form.appendChild(actions);
+    const showCloseAction = () => {
+      actions.replaceChildren(elem('button', {
+        class: 'doh-integration-btn doh-integration-btn-primary',
+        type: 'button',
+        onclick: close,
+      }, ['Close']));
+    };
     form.addEventListener('submit', async (event) => {
       event.preventDefault();
+      let saved = false;
       errorBox.style.display = 'none';
       successBox.style.display = 'none';
       saveBtn.disabled = true;
       saveBtn.textContent = 'Saving…';
       try {
         await submitVaultForm(session, form);
+        saved = true;
         successBox.textContent = 'Saved. Restart this Hermes app for the gateway to use the updated configuration.';
         successBox.style.display = '';
-        await invalidateBrokerTlsCache(item.slug);
-        await refreshAndRender();
+        showCloseAction();
+        try {
+          await invalidateBrokerTlsCache(item.slug);
+          await refreshAndRender();
+        } catch (_) { /* saved; sidebar refresh can recover on next open */ }
       } catch (err) {
         errorBox.textContent = err.message || 'Save failed.';
         errorBox.style.display = '';
       } finally {
-        saveBtn.disabled = false;
-        saveBtn.textContent = 'Save';
+        if (!saved) {
+          saveBtn.disabled = false;
+          saveBtn.textContent = 'Save';
+        }
       }
     });
     const modal = elem('div', { class: 'doh-modal doh-vault-modal' }, [

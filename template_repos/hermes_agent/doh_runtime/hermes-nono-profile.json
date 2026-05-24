@@ -11,6 +11,10 @@
     "allow_vars": [
       "DOH_BIN_DIR",
       "DOH_LOGIN_PATH",
+      "HOMEBREW_PREFIX",
+      "HOMEBREW_NO_ANALYTICS",
+      "HOMEBREW_NO_AUTO_UPDATE",
+      "HOMEBREW_INSTALL_FROM_API",
       "DOH_CONTROL_PLANE_URL",
       "DOH_ROOT",
       "DOH_RUN_DIR",

@@ -15,6 +15,7 @@ import urllib.error
 import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
+from typing import ClassVar
 
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
@@ -31,16 +32,9 @@ STATUS_NOT_CONNECTED = "not_connected"
 STATUS_REVOKED = "revoked"
 STATUS_TRANSIENT_ERROR = "transient_error"
 
-# How a provider expects credentials to be injected into the upstream request.
-CREDENTIAL_LOCATION_AUTHORIZATION_HEADER = "authorization_header"
-CREDENTIAL_LOCATION_TELEGRAM_PATH = "telegram_path"
-
-# How a provider expects the rewritten Authorization header to look.
+# Authorization header encodings used by OAuthHeader providers.
 AUTH_FORMAT_BEARER = "bearer"
 AUTH_FORMAT_BASIC_X_ACCESS_TOKEN = "basic_x_access_token"
-AUTH_FORMAT_NONE = "none"
-
-TELEGRAM_PLACEHOLDER_TOKEN = "000000:DOH_PLACEHOLDER"
 
 _OUTCOMES = {
     200: STATUS_CONNECTED,
@@ -52,6 +46,37 @@ _OUTCOMES = {
 
 
 @dataclass(frozen=True)
+class OAuthHeader:
+    """Browser-OAuth integration; token injected as Authorization header.
+
+    `auth_format` selects the header encoding: Google takes plain Bearer;
+    GitHub git-smart-HTTP needs HTTP Basic with the token as the password
+    under the `x-access-token` username.
+    """
+
+    auth_format: str
+    connect_mode: ClassVar[str] = "oauth"
+    restart_required_after_save: ClassVar[bool] = False
+
+
+@dataclass(frozen=True)
+class VaultUrlRewrite:
+    """Vault-pasted credential; injected by replacing a placeholder in the URL.
+
+    The sandbox client uses `placeholder` in the URL where the real secret
+    would go (e.g. Telegram's `/bot{token}/` path); the proxy substitutes
+    the live token before forwarding.
+    """
+
+    placeholder: str
+    connect_mode: ClassVar[str] = "vault"
+    restart_required_after_save: ClassVar[bool] = True
+
+
+CredentialMethod = OAuthHeader | VaultUrlRewrite
+
+
+@dataclass(frozen=True)
 class TlsProviderSpec:
     """Static config for one provider whose HTTPS traffic is intercepted."""
 
@@ -60,11 +85,7 @@ class TlsProviderSpec:
     refresh_path: str
     hosts: tuple[str, ...]
     logo_url: str
-    credential_location: str
-    # How the rewritten Authorization header should be encoded. Google takes
-    # plain Bearer; GitHub git-smart-HTTP needs HTTP Basic with the token as
-    # the password under the `x-access-token` username.
-    auth_format: str
+    credential_method: CredentialMethod
 
 
 @dataclass(frozen=True)
@@ -124,8 +145,7 @@ TLS_INTERCEPT_PROVIDER_SPECS = (
             "oauth2.googleapis.com",
         ),
         logo_url="/extensions/google-workspace.svg",
-        credential_location=CREDENTIAL_LOCATION_AUTHORIZATION_HEADER,
-        auth_format=AUTH_FORMAT_BEARER,
+        credential_method=OAuthHeader(auth_format=AUTH_FORMAT_BEARER),
     ),
     TlsProviderSpec(
         slug="github",
@@ -141,8 +161,7 @@ TLS_INTERCEPT_PROVIDER_SPECS = (
             "codeload.github.com",
         ),
         logo_url="/extensions/github.svg",
-        credential_location=CREDENTIAL_LOCATION_AUTHORIZATION_HEADER,
-        auth_format=AUTH_FORMAT_BASIC_X_ACCESS_TOKEN,
+        credential_method=OAuthHeader(auth_format=AUTH_FORMAT_BASIC_X_ACCESS_TOKEN),
     ),
     TlsProviderSpec(
         slug="telegram",
@@ -150,8 +169,7 @@ TLS_INTERCEPT_PROVIDER_SPECS = (
         refresh_path="/api/integrations/telegram/token",
         hosts=("api.telegram.org",),
         logo_url="/extensions/telegram.svg",
-        credential_location=CREDENTIAL_LOCATION_TELEGRAM_PATH,
-        auth_format=AUTH_FORMAT_NONE,
+        credential_method=VaultUrlRewrite(placeholder="000000:DOH_PLACEHOLDER"),
     ),
 )
 
@@ -240,6 +258,7 @@ def _cache_entry_from_refresh_result(result: RefreshResult, now: float) -> _Toke
 
 def _status_item_for_provider(provider: TlsProviderSpec, entry: _TokenCacheEntry | None) -> dict:
     """Serialize one TLS-intercept provider for the unified integrations payload."""
+    method = provider.credential_method
     return {
         "kind": "tls_intercept",
         "slug": provider.slug,
@@ -249,8 +268,8 @@ def _status_item_for_provider(provider: TlsProviderSpec, entry: _TokenCacheEntry
         "last_refreshed_at": entry.last_refreshed_at if entry is not None else None,
         "config": entry.config if entry is not None else {},
         "metadata": entry.metadata if entry is not None else {},
-        "connect_mode": "vault" if provider.credential_location == CREDENTIAL_LOCATION_TELEGRAM_PATH else "oauth",
-        "restart_required_after_save": provider.credential_location == CREDENTIAL_LOCATION_TELEGRAM_PATH,
+        "connect_mode": method.connect_mode,
+        "restart_required_after_save": method.restart_required_after_save,
     }
 
 
@@ -613,18 +632,17 @@ async def _intercept_and_forward(
                     break
             headers = _parse_headers(lines=headers_raw)
             path_with_query = request_line.decode("iso-8859-1").split(" ", 2)[1]
-            if (
-                provider.credential_location == CREDENTIAL_LOCATION_TELEGRAM_PATH
-                and not _telegram_path_has_placeholder(path_with_query=path_with_query)
-            ):
+            method = provider.credential_method
+            if isinstance(method, VaultUrlRewrite) and method.placeholder not in path_with_query:
                 logger.error(
-                    "telegram request path did not contain expected placeholder token: %s",
+                    "%s request path did not contain expected placeholder: %s",
+                    provider.slug,
                     path_with_query.split("?", 1)[0],
                 )
                 await _send_json_error(
                     writer=tls_writer,
                     status=400,
-                    message="telegram request path must use the DOH placeholder bot token",
+                    message=f"{provider.slug} request URL must contain the DOH placeholder",
                 )
                 return
             body = await _read_body(reader=tls_reader, headers=headers)
@@ -807,24 +825,6 @@ def _strip_proxy_headers_and_set_host(headers: list[tuple[bytes, bytes]], upstre
     return rewritten
 
 
-def _rewrite_telegram_path(path_with_query: str, token: str) -> str:
-    """Replace the sandbox placeholder token in Telegram Bot API paths."""
-    bot_prefix = f"/bot{TELEGRAM_PLACEHOLDER_TOKEN}/"
-    file_prefix = f"/file/bot{TELEGRAM_PLACEHOLDER_TOKEN}/"
-    if path_with_query.startswith(bot_prefix):
-        return "/bot" + token + "/" + path_with_query[len(bot_prefix):]
-    if path_with_query.startswith(file_prefix):
-        return "/file/bot" + token + "/" + path_with_query[len(file_prefix):]
-    raise ValueError("telegram request path must use the DOH placeholder bot token")
-
-
-def _telegram_path_has_placeholder(path_with_query: str) -> bool:
-    """Return true when a Telegram Bot API path carries the sandbox placeholder."""
-    bot_prefix = f"/bot{TELEGRAM_PLACEHOLDER_TOKEN}/"
-    file_prefix = f"/file/bot{TELEGRAM_PLACEHOLDER_TOKEN}/"
-    return path_with_query.startswith(bot_prefix) or path_with_query.startswith(file_prefix)
-
-
 def _rewrite_request_for_provider(
     headers: list[tuple[bytes, bytes]],
     path_with_query: str,
@@ -833,22 +833,25 @@ def _rewrite_request_for_provider(
     upstream_host: str,
 ) -> tuple[list[tuple[bytes, bytes]], str]:
     """Rewrite credentials for the provider-specific upstream API shape."""
-    if provider.credential_location == CREDENTIAL_LOCATION_AUTHORIZATION_HEADER:
+    method = provider.credential_method
+    if isinstance(method, OAuthHeader):
         return (
             _rewrite_authorization(
                 headers=headers,
                 token=token,
-                auth_format=provider.auth_format,
+                auth_format=method.auth_format,
                 upstream_host=upstream_host,
             ),
             path_with_query,
         )
-    if provider.credential_location == CREDENTIAL_LOCATION_TELEGRAM_PATH:
+    if isinstance(method, VaultUrlRewrite):
+        if method.placeholder not in path_with_query:
+            raise ValueError(f"{provider.slug} request URL must contain the DOH placeholder")
         return (
             _strip_proxy_headers_and_set_host(headers=headers, upstream_host=upstream_host),
-            _rewrite_telegram_path(path_with_query=path_with_query, token=token),
+            path_with_query.replace(method.placeholder, token),
         )
-    raise ValueError(f"unknown credential_location: {provider.credential_location!r}")
+    raise ValueError(f"unknown credential_method: {method!r}")
 
 
 async def _forward_to_upstream(
