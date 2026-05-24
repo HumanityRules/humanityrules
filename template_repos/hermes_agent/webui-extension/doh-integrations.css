@@ -143,6 +143,12 @@ main.main.showing-integrations > #mainChat { display: none !important; }
   color: var(--muted);
 }
 
+.doh-integration-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
 .doh-integration-btn {
   align-self: flex-start;
   padding: 6px 12px;
@@ -252,4 +258,71 @@ main.main.showing-integrations > #mainChat { display: none !important; }
   display: flex;
   gap: 8px;
   justify-content: flex-end;
+}
+
+.doh-vault-modal {
+  max-width: 520px;
+}
+
+.doh-vault-form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.doh-vault-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.doh-vault-field-label {
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.doh-vault-field-help {
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.doh-vault-input {
+  width: 100%;
+  min-height: 34px;
+  border: 1px solid var(--border2);
+  border-radius: 6px;
+  background: var(--code-bg);
+  color: var(--text);
+  padding: 7px 9px;
+  font: inherit;
+  font-size: 12px;
+  box-sizing: border-box;
+}
+
+.doh-vault-textarea {
+  min-height: 88px;
+  resize: vertical;
+}
+
+.doh-vault-error,
+.doh-vault-success {
+  font-size: 12px;
+  line-height: 1.45;
+  border-radius: 6px;
+  padding: 8px 10px;
+  margin-bottom: 12px;
+}
+
+.doh-vault-error {
+  color: #fca5a5;
+  border: 1px solid rgba(248, 113, 113, 0.35);
+  background: rgba(127, 29, 29, 0.18);
+}
+
+.doh-vault-success {
+  color: #86efac;
+  border: 1px solid rgba(34, 197, 94, 0.35);
+  background: rgba(20, 83, 45, 0.18);
 }

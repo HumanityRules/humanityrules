@@ -22,7 +22,7 @@ from django.http import HttpRequest, JsonResponse, StreamingHttpResponse
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_GET, require_POST
 
-from devopshero_app.models import App, User
+from devopshero_app.models import App, ResourceTag, User
 from devopshero_app.views import env_bearer_auth
 
 logger = logging.getLogger(__name__)
@@ -82,14 +82,26 @@ def _resolve_caller(request: HttpRequest) -> tuple[App, User] | JsonResponse:
     if not isinstance(owner_username, str) or not owner_username:
         return JsonResponse({"error": "owner_username is required"}, status=400)
 
-    user = User.objects.filter(username=owner_username).first()
+    organization = environment.aws_account.organization
+    user = User.objects.filter(
+        username=owner_username,
+        organization_memberships__organization=organization,
+    ).first()
     if user is None:
         return JsonResponse({"error": "owner user not found"}, status=404)
 
-    organization = environment.aws_account.organization
     app = App.objects.filter(organization=organization, slug=app_slug).first()
     if app is None:
         return JsonResponse({"error": "app not found in env's organization"}, status=404)
+    owner_tag_exists = ResourceTag.objects.filter(
+        organization=organization,
+        resource_type=ResourceTag.ResourceType.APP,
+        app=app,
+        key="owner",
+        value=user.username,
+    ).exists()
+    if not owner_tag_exists:
+        return JsonResponse({"error": "app is not owned by requested user"}, status=403)
 
     return app, user
 
