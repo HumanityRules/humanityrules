@@ -305,7 +305,13 @@ def integrations_google_oauth_disconnect(request: HttpRequest) -> HttpResponse:
     if env is None:
         return HttpResponseBadRequest("Invalid or unknown rd")
 
-    app_slug = request.GET.get("app_slug", "")
+    app_slug = _resolve_owned_app_slug(
+        app_slug=request.GET.get("app_slug", ""),
+        env=env,
+        owner_username=request.user.username,
+    )
+    if app_slug is None:
+        return HttpResponseBadRequest("Invalid or unauthorized app_slug")
     integration = IntegrationUserCredential.objects.filter(
         owner_user=request.user,
         environment=env,
