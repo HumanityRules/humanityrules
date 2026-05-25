@@ -83,10 +83,10 @@
         }
         return;
       }
-      // User asked for a fresh view — drop the broker's cached tokens too,
-      // not just the MCP catalog, so TLS-intercept providers re-resolve
-      // their grant state on next read. Trades a token rotation for an
-      // accurate "Connected" / "Not connected" indicator on demand.
+      // User asked for a fresh view — invalidate the broker's TLS cache too,
+      // not just the MCP catalog. That POST clears entries and the broker
+      // hook refetches from DOH before we render; the GET is read-only.
+      // Trades a token rotation for accurate Connected / Not connected labels.
       await invalidateBrokerTlsCache();
       await refreshAndRender();
     } catch (_) {
@@ -125,6 +125,7 @@
       case 'connected': return 'Connected';
       case 'not_connected': return 'Not connected';
       case 'token_expired': return 'Token expired';
+      case 'transient_error': return 'Checking…';
       case 'starting': return 'Starting…';
       default: return '—';
     }

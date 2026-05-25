@@ -122,11 +122,6 @@ main.main.showing-integrations > #mainChat { display: none !important; }
   border-color: rgba(34, 197, 94, 0.35);
 }
 
-.doh-integration-card-status[data-status="revoked"] {
-  color: #e8a030;
-  border-color: rgba(232, 160, 48, 0.35);
-}
-
 .doh-integration-card-status[data-status="transient_error"] {
   color: var(--muted);
 }
