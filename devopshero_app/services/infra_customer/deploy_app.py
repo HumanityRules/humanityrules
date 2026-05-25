@@ -7,6 +7,8 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import boto3
+
+from devopshero_app.models import Environment
 from aws_cdk import App, Aws, CfnOutput, Duration, Fn, RemovalPolicy, SecretValue, Stack, Tags
 from aws_cdk import aws_ec2 as ec2
 from aws_cdk import aws_ecr as ecr
@@ -1165,6 +1167,7 @@ def deploy(
     app_config: appconfig.AppConfig,
     image_tag: str,
     env_slug: str,
+    environment: Environment,
     subdomain: str,
     synth_only: bool,
     shared_alb_hosted_zone: str | None,
@@ -1243,13 +1246,10 @@ def deploy(
     env_bearer_needed = app_config.needs_env_bearer()
     env_bearer_shared_secrets_arn: str | None = None
 
-    from devopshero_app.models import Environment
-    env_obj = Environment.objects.get(slug=env_slug)
-
     if env_bearer_needed:
         logger.info("Ensuring per-env bearer token exists")
         env_bearer_shared_secrets_arn = secrets_utils.ensure_env_bearer_token_exists(
-            session=session, env=env_obj,
+            session=session, env=environment,
         )
 
     # Policy-proxy prerequisites: per-env ECR repo + image push.
@@ -1260,7 +1260,7 @@ def deploy(
             logger.error(msg)
             return DeployResult(success=False, error=msg, service_url="", alb_dns="")
 
-        secrets_utils.ensure_env_policy_proxy_secrets_exist(session=session, env=env_obj)
+        secrets_utils.ensure_env_policy_proxy_secrets_exist(session=session, env=environment)
         policy_proxy_auth_base_url = _resolve_control_plane_url()
 
     cdk_app = App(outdir=str(cdk_utils.CDK_OUT_DIR))

@@ -21,6 +21,7 @@ from devopshero_app.services.infra_customer import iam_utils
 from devopshero_app.services.infra_customer import secrets_utils
 
 from . import app_deployment_teardown_executor
+from . import tenant_consistency
 
 logger = logging.getLogger(__name__)
 
@@ -133,6 +134,13 @@ def run_removal(job_id: str) -> bool:
         .select_related("aws_account")
         .distinct()
     )
+
+    try:
+        for env in environments:
+            tenant_consistency.assert_app_owns_environment(app=app, environment=env)
+    except tenant_consistency.TenantConsistencyError as exc:
+        _fail(job, app, f"Refused: {exc}")
+        return False
 
     try:
         if job.delete_persistent_data:
