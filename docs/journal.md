@@ -1,5 +1,57 @@
 # DevOpsHero Development Journal
 
+## 2026-05-25 13:58 - [Bugfix] Tier 1 multi-tenant scoping audit: three fixes + AGENTS.md rule + RLS reminder doc
+
+**Conversation:** [2026-05-25-1400-5ef180fc.md](conversations/2026-05-25-1400-5ef180fc.md)
+
+A previous commit (`03ca6c0`, since refined to `1be3208`) fixed an unscoped user lookup in the OAuth token-refresh path: the view took a `user_id` from the validated env-bearer payload and resolved it via `User.objects.get(id=...)` with no `organization=` filter. The narrow fix was right. The category of bug it represented — "fetch a tenant-owned row by a client-supplied id without an org filter" — was the real concern. This session generalized that worry into a strategy and worked the first tier of the strategy to completion.
+
+**Strategy framing.** Three layered defenses, cheapest-first: (1) custom ORM manager that requires explicit `.scoped(org)` to avoid raising; (2) Semgrep CI rule flagging `.filter(id=)` / `.get(id=)` on tenant-owned models that lacks an `organization=` sibling; (3) Postgres RLS as the floor that catches raw SQL and anything that goes around the ORM. Independently of those, do a one-time manual audit of the hot paths, stratified by risk. We did the audit (Tier 1 = views) this session; the rest sits behind future-flag-protected work.
+
+**The fixes (commit `43d5e3e`).** Three sites in `devopshero_app/views/`, all the same family — collapse client-supplied identifier resolution into a single atomic scoped lookup:
+
+- **`integrations/{google,github}_oauth.py::_resolve_env_by_rd`** — was iterating *every* `Environment` in the system, matching by hostname suffix on `shared_alb_hosted_zone`. A logged-in DOH user could pass an `rd` whose host belonged to a stranger org's env, and the OAuth start would happily stash credentials against that env. Token-retrieval paths (commit `1be3208`) already membership-checked, so the credential was unreachable, but it polluted the target env and confused audit. Helper now takes `user` and filters `Environment.objects.filter(aws_account__organization__memberships__user=user)`. Severity downgraded from MEDIUM to LOW after re-evaluating in light of the retrieval-side fix.
+
+- **`security_abac.py`** — six fetch-then-verify pairs of the form `member = get_object_or_404(User, id=user_id); get_object_or_404(OrganizationMembership, organization=org, user=member)`. Safe today (the second call enforces tenant boundary), but brittle: a future refactor could drop the verify line and silently leak. Collapsed to `get_object_or_404(User, id=user_id, organization_memberships__organization=org)` — the scope is now part of the same query that materializes the row.
+
+- **`security_permissions_editor.py`** — `Conversation.objects.filter(context_app_permission_request=apr).first()` returned whatever conversation existed for that APR, regardless of which user opened it. APRs are keyed by (app, env), so multiple users in the same org can open the same editor — the second visitor would inherit the first visitor's LLM chat history. Not cross-tenant (APR is org-scoped), but within-org cross-user disclosure of free-text LLM drafts. Picked Option A (per-user thread: add `user=request.user` to the filter) over Option B (shared APR-owned conversation, drop user FK) because A is a one-line change and matches the model's existing required `Conversation.user` FK.
+
+**Test patterns.** Each fix added (a) `OrganizationMembership` rows to existing test setUps that had been creating `User(current_organization=...)` *without* a membership (latent test-data bug exposed by the new scoping) and (b) one cross-org regression test per fix. The Conversation fix needed `unittest.mock.patch` on `iam_utils.read_app_permissions_policy` and `list_resources_for_services` to keep the test hermetic without AWS creds — the editor view is the first test to actually exercise that code path.
+
+**Three findings deliberately not turned into code:** (#1) the `1be3208` improvement of `current_organization=` → `organization_memberships__organization=` had already landed — I initially mis-read `git status` and thought it was uncommitted, then corrected myself once I ran `git diff HEAD` and `git log`. (#4-adjacent) the within-org cross-user `Conversation` leak was the original Option-B-shaped concern, kept as Option A for now. No semgrep rule added yet — that's a Tier 2 follow-up.
+
+**New AGENTS.md rules.** Two short sections at the project root:
+
+- **`# Multi-tenancy`** — one-paragraph nudge ("Every query on a tenant-owned model must be scoped to the caller's org. When fetching a row by a client-supplied id, the org filter (direct or transitive) is part of the lookup — never a separate verify-after step.") This is a *nudge* in the sense that the agent knows what multi-tenancy is; the rule only re-points attention.
+
+- **`# Writing rules for agents`** — meta-rule that emerged from iterating on the first one. After the user said "I'd like to tell future agents to be careful... what AGENTS.md?" and then "Write another rule that makes you write that kind of message for yourself," landed on: "Agent-facing rules nudge for what the agent already knows, and convey what it had to discover by acting. Skip explanations the next agent could write itself. Keep the codebase-specific facts — paths, model and function names, project conventions — that it couldn't otherwise know." Important refinement caught by the user: my first draft said "rules nudge, they don't teach" — wrong, because agents discover codebase-specific facts by acting and *those* genuinely need to be transferred. Final phrasing distinguishes the two modes.
+
+**Doc housekeeping that fell out of the meta-rule.** Applied the new "rules nudge" principle retroactively to existing docs:
+
+- **New `docs/tenant_isolation_rls_note.md`** — personal note (Victor explicit, no other readers) sketching the layered defense strategy and the flag-gated Postgres RLS shape if it ever gets implemented. Includes both Pattern A (role swap: `app_user` vs `app_admin` DB role chosen by `RLS_ENFORCEMENT` env var, restart-to-flip, clean policies) and Pattern B (GUC in policy: `current_setting('app.rls_enforcement', true) IS DISTINCT FROM 'on' OR ...` clause in every policy, middleware sets the GUC per request, live toggle). Recommendation: Pattern A for the eventual implementation. Doc is ~40 lines, deliberately list-shaped, not a dissertation.
+
+- **Moved `# Browser Testing (Local Dev Login)`** out of root AGENTS.md into `docs/local_dev_login.md`. Left a one-line pointer in AGENTS.md. The full curl-session-cookie recipe doesn't need to be in every agent's context window.
+
+- **Trimmed eight overlong entries in `docs/AGENTS.md`** that were trying to summarize entire docs inline (3-5 sentences each, with parenthetical lists). Each is now one short tag + "Open when..." trigger. The agent can read the actual doc if it needs more.
+
+**Commits this session:** `43d5e3e` (the three view fixes + tests). The AGENTS.md/docs changes are uncommitted at the time of this journal entry — `/journal commit` should bundle them.
+
+**Key points:**
+
+- **The bug class is "queryset resolving a tenant-owned object by a client-supplied identifier, without scoping by the org the caller already established trust within."** Naming it this way (vs "OAuth bug" or "ABAC bug") makes the audit heuristic mechanical: any view that takes a UUID from request and reaches for `.get(id=)` or `.filter(id=)` on a tenant-owned model is a candidate.
+
+- **Atomic scoped lookups > fetch-then-verify.** Both are safe today, but the atomic form keeps the scope in the same query that returns the row — there's nothing for a future refactor to accidentally drop.
+
+- **`organization_memberships__organization=org` beats `current_organization=org` for User lookups.** `current_organization` reflects the user's active session selection (a soft preference), not their authorization to be acted upon as that org's member. A multi-org user switching tabs can desync `current_organization` and still be the correct subject for a different org's mutation. The membership-relation form is the actual tenant boundary.
+
+- **Severity re-evaluation after upstream fixes.** The `_resolve_env_by_rd` weakness *would* have been MEDIUM (cred routed to stranger env) but the retrieval-side check from `1be3208` had already landed, making it LOW (data pollution only). Always re-rate the same finding against the current tree, not the tree at the time the suspect code was written.
+
+- **Tests had latent setUp bugs masking the new scoping.** Three test files created `User(current_organization=org)` without an `OrganizationMembership` row. Production code didn't catch this because none of the production lookups went through the relation; my new lookups do. Test data needs to mirror production data shape — added the missing rows.
+
+- **Comment hygiene.** First attempt at each fix included an inline comment narrating the bug ("Without filtering by user, the second visitor would inherit the first visitor's LLM chat history"). User called it out: comments should describe present invariants, not past bugs. All such comments deleted or trimmed.
+
+- **The "writing rules for agents" rule applies to itself.** First version said "rules nudge, they don't teach" — too broad. Corrected version distinguishes "nudge for things the agent already knows" from "teach the codebase-specific facts that only acting reveals." Without the second clause, the rule would push agents to write less of e.g. "Always use `uv run`" (which is genuinely a discovered fact) and more cryptic single-word reminders.
+
 ## 2026-05-24 13:49 - [Integrations] Gateway env writing + targeted process restart on vault credential changes
 
 **Conversation:** [2026-05-24-1351-46f87daa.md](conversations/2026-05-24-1351-46f87daa.md)

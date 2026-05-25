@@ -29,37 +29,14 @@ We abbreviate the name of DevOps Hero as DOH.
 **When authoring or modifying any `.py` file in this project, invoke the `python-style` skill.** It holds the project's Python style rules (function signatures, argument passing, imports, type hints, docstrings, Django async ORM, logging level, file naming). Loading it only when needed keeps this file lean.
 
 
-# Browser Testing (Local Dev Login)
+# Multi-tenancy
 
-The app uses WorkOS AuthKit for authentication, which requires an external OAuth flow. For local browser testing, use the **dev login endpoint** (available only when `DEBUG=True`):
+**Every query on a tenant-owned model must be scoped to the caller's org.** When fetching a row by a client-supplied id, the org filter (direct or transitive) is part of the lookup — never a separate verify-after step.
 
-```
-http://127.0.0.1:8000/auth/dev-login/
-```
 
-This auto-logs in as the first superuser and redirects to `/dashboard/`. Use the `next` query param to land on a specific page:
+# Browser Testing
 
-```
-http://127.0.0.1:8000/auth/dev-login/?next=/deploy/new/default/<repo-id>/
-```
-
-For `curl` testing, create a session directly and use it as a cookie:
-
-```bash
-uv run manage.py shell -c "
-from django.contrib.sessions.backends.db import SessionStore
-from devopshero_app.models import User
-u = User.objects.get(email='vmendi@gmail.com')
-s = SessionStore()
-s['_auth_user_id'] = str(u.pk)
-s['_auth_user_backend'] = 'django.contrib.auth.backends.ModelBackend'
-s['_auth_user_hash'] = u.get_session_auth_hash()
-s.create()
-print(s.session_key)
-"
-```
-
-Then pass the printed session key: `curl -b "sessionid=<key>" http://127.0.0.1:8000/...`
+**For local dev login (`/auth/dev-login/` or session-cookie curl), see `docs/local_dev_login.md`.**
 
 
 # Documentation
@@ -75,3 +52,8 @@ See **`docs/AGENTS.md`** for the documentation index.
 # Markdown formatting
 
 **Avoid markdown tables.** They render poorly in terminals and diffs. Use bulleted lists with bold labels instead.
+
+
+# Writing rules for agents
+
+**Agent-facing rules nudge for what the agent already knows, and convey what it had to discover by acting.** When adding to AGENTS.md or a skill, skip explanations and examples the next agent could write itself from its own memory, which is the same as yours. Keep the codebase-specific facts — for example paths, model and function names, project conventions — that it couldn't otherwise know.
