@@ -60,15 +60,36 @@ class OAuthHeader:
 
 
 @dataclass(frozen=True)
+class GatewayEnvBinding:
+    """One env var the in-sandbox gateway reads at startup.
+
+    `source` is either the literal `"placeholder"` (use the URL-rewrite
+    placeholder verbatim — the broker swaps the real token on the wire)
+    or a key in the connected provider's `config` dict. `list_separator`
+    joins list-shaped config (e.g. `allowed_users`) into a single string.
+    """
+
+    env_var: str
+    source: str
+    list_separator: str | None = None
+
+
+@dataclass(frozen=True)
 class VaultUrlRewrite:
     """Vault-pasted credential; injected by replacing a placeholder in the URL.
 
     The sandbox client uses `placeholder` in the URL where the real secret
     would go (e.g. Telegram's `/bot{token}/` path); the proxy substitutes
     the live token before forwarding.
+
+    `gateway_env` declares the env vars the in-sandbox Hermes gateway
+    needs at startup to activate the matching platform binding (presence
+    of the var, not its value, is what gates activation — see
+    `hermes_cli/tools_config.py:_get_enabled_platforms`).
     """
 
     placeholder: str
+    gateway_env: tuple[GatewayEnvBinding, ...] = ()
     connect_mode: ClassVar[str] = "vault"
     restart_required_after_save: ClassVar[bool] = True
 
@@ -169,7 +190,13 @@ TLS_INTERCEPT_PROVIDER_SPECS = (
         refresh_path="/api/integrations/telegram/token",
         hosts=("api.telegram.org",),
         logo_url="/extensions/telegram.svg",
-        credential_method=VaultUrlRewrite(placeholder="000000:DOH_PLACEHOLDER"),
+        credential_method=VaultUrlRewrite(
+            placeholder="000000:DOH_PLACEHOLDER",
+            gateway_env=(
+                GatewayEnvBinding(env_var="TELEGRAM_BOT_TOKEN", source="placeholder"),
+                GatewayEnvBinding(env_var="TELEGRAM_ALLOWED_USERS", source="allowed_users", list_separator=","),
+            ),
+        ),
     ),
 )
 
@@ -216,7 +243,11 @@ def fetch_provider_token(refresh_config: DohRefreshConfig, provider: TlsProvider
         headers={"Authorization": f"Bearer {refresh_config.bearer}", "Content-Type": "application/json"},
     )
     try:
-        with urllib.request.urlopen(req, timeout=30) as response:
+        # In-VPC JSON POST to our own control plane; healthy P99 is tens of
+        # ms. 5s is a generous ceiling that still keeps the proxy hot path,
+        # the post-vault-save modal, and broker bootstrap (under
+        # supervisor's 10s wait_for_port) all well inside their budgets.
+        with urllib.request.urlopen(req, timeout=5) as response:
             status = response.status
             payload = json.loads(response.read().decode("utf-8"))
     except urllib.error.HTTPError as exc:
@@ -241,6 +272,93 @@ def fetch_provider_token(refresh_config: DohRefreshConfig, provider: TlsProvider
     if outcome == STATUS_TRANSIENT_ERROR:
         logger.error("refresh got http %d for %s: %s", status, provider.refresh_path, payload.get("error", ""))
     return RefreshResult(status=outcome, access_token=None, expires_in=None, config={}, metadata={})
+
+
+GATEWAY_ENV_BLOCK_BEGIN = "# === DOH-MANAGED-INTEGRATIONS BEGIN ==="
+GATEWAY_ENV_BLOCK_END = "# === DOH-MANAGED-INTEGRATIONS END ==="
+
+
+def _render_gateway_env_lines(provider: TlsProviderSpec, method: VaultUrlRewrite, config: dict) -> list[str]:
+    """Project one connected vault provider's gateway_env bindings into KEY=VALUE lines."""
+    lines: list[str] = []
+    for binding in method.gateway_env:
+        if binding.source == "placeholder":
+            value = method.placeholder
+        else:
+            raw = config.get(binding.source)
+            if raw is None:
+                continue
+            if isinstance(raw, list):
+                if binding.list_separator is None:
+                    raise ValueError(
+                        f"{provider.slug}: list-shaped config {binding.source!r} requires list_separator"
+                    )
+                value = binding.list_separator.join(str(item) for item in raw if str(item))
+                if not value:
+                    continue
+            else:
+                value = str(raw)
+        lines.append(f"{binding.env_var}={value}")
+    return lines
+
+
+def render_managed_block(snapshot: list[tuple[TlsProviderSpec, dict, dict, str]]) -> str:
+    """Render the gateway env managed block from a token-store snapshot.
+
+    Includes only providers whose `credential_method` is `VaultUrlRewrite`
+    and whose status is `STATUS_CONNECTED`. Other providers contribute no
+    env vars (OAuth providers don't activate gateway platforms; disconnected
+    vault providers should leave the gateway without their env vars).
+    """
+    body_lines: list[str] = []
+    for provider, config, _metadata, status in snapshot:
+        if status != STATUS_CONNECTED:
+            continue
+        method = provider.credential_method
+        if not isinstance(method, VaultUrlRewrite):
+            continue
+        body_lines.extend(_render_gateway_env_lines(provider=provider, method=method, config=config))
+    if not body_lines:
+        return ""
+    return "\n".join([GATEWAY_ENV_BLOCK_BEGIN, *body_lines, GATEWAY_ENV_BLOCK_END]) + "\n"
+
+
+def write_gateway_env_file(env_path: Path, managed_block: str) -> None:
+    """Replace the DOH-managed block in `env_path` atomically.
+
+    Lines outside the sentinels (user/onboarding-set keys) are preserved.
+    Empty managed block (no vault providers connected) strips the sentinels
+    entirely.
+    """
+    existing_lines: list[str] = []
+    if env_path.exists():
+        existing_lines = env_path.read_text(encoding="utf-8").splitlines()
+    preserved: list[str] = []
+    in_block = False
+    for line in existing_lines:
+        stripped = line.strip()
+        if stripped == GATEWAY_ENV_BLOCK_BEGIN:
+            in_block = True
+            continue
+        if stripped == GATEWAY_ENV_BLOCK_END:
+            in_block = False
+            continue
+        if not in_block:
+            preserved.append(line)
+    while preserved and preserved[-1] == "":
+        preserved.pop()
+    parts: list[str] = []
+    if preserved:
+        parts.append("\n".join(preserved) + "\n")
+    if managed_block:
+        if parts:
+            parts.append("\n")
+        parts.append(managed_block)
+    new_contents = "".join(parts)
+    env_path.parent.mkdir(parents=True, exist_ok=True)
+    tmp_path = env_path.with_suffix(env_path.suffix + ".tmp")
+    tmp_path.write_text(new_contents, encoding="utf-8")
+    os.replace(tmp_path, env_path)
 
 
 def _cache_entry_from_refresh_result(result: RefreshResult, now: float) -> _TokenCacheEntry:
@@ -371,6 +489,7 @@ class TlsInterceptRuntime:
         refresh_lead_seconds: int,
         ca_dir: Path,
         private_dir: Path,
+        on_user_invalidate=None,
     ) -> None:
         self._token_store = _TokenStore(
             providers=providers,
@@ -379,6 +498,12 @@ class TlsInterceptRuntime:
         )
         self._cert_minter = _CertMinter(ca_dir=ca_dir, private_dir=private_dir)
         self._cert_minter.bootstrap()
+        # `on_user_invalidate(slug | None)` runs after a user-initiated
+        # invalidate (vault save/disconnect, per-provider or all-providers
+        # cache flush). The proxy hot-path 401 eviction calls the inner
+        # token store directly and does NOT trigger this — that path is
+        # not a credential change, just a cached-token rotation.
+        self._on_user_invalidate = on_user_invalidate
 
     async def start_proxy_server(self, host: str, port: int) -> asyncio.Server:
         """Start the local HTTPS proxy server."""
@@ -399,10 +524,48 @@ class TlsInterceptRuntime:
     async def invalidate(self, slug: str) -> None:
         """Drop one provider's cached token entry; next status read refetches it."""
         await self._token_store.invalidate(slug=slug)
+        if self._on_user_invalidate is not None:
+            await self._on_user_invalidate(slug)
 
     async def invalidate_all(self) -> None:
         """Drop every cached token entry; next status read refetches lazily."""
         await self._token_store.invalidate_all()
+        if self._on_user_invalidate is not None:
+            await self._on_user_invalidate(None)
+
+    async def refresh_all(self) -> None:
+        """Force a refetch of every provider so the cache reflects current DOH state.
+
+        Refreshes run concurrently — sequential refreshes worst-case at
+        N × 30s (the urlopen timeout in fetch_provider_token), which would
+        exceed supervisor's wait_for_port budget if the control plane is
+        slow. With gather, the floor is one slow call regardless of N.
+        """
+        await asyncio.gather(
+            *(
+                self._token_store._ensure_fresh(provider=provider)
+                for provider in self._token_store._providers.values()
+            )
+        )
+
+    async def gateway_env_snapshot(self) -> list[tuple[TlsProviderSpec, dict, dict, str]]:
+        """Pair every provider with its connected config for env-file rendering.
+
+        Returns `(provider, config, metadata, status)` tuples drawn from the
+        current cache (no refetch). The broker calls `refresh_all()` first
+        when it wants the cache aligned with DOH state.
+        """
+        async with self._token_store._cache_lock:
+            snapshot = dict(self._token_store._cache)
+        return [
+            (
+                provider,
+                (snapshot[slug].config if slug in snapshot else {}),
+                (snapshot[slug].metadata if slug in snapshot else {}),
+                (snapshot[slug].status if slug in snapshot else STATUS_NOT_CONNECTED),
+            )
+            for slug, provider in self._token_store._providers.items()
+        ]
 
 
 class _CertMinter:

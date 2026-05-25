@@ -428,13 +428,24 @@
       try {
         await submitVaultForm(session, form);
         saved = true;
-        successBox.textContent = 'Saved. Restart this Hermes app for the gateway to use the updated configuration.';
+        successBox.textContent = 'Saved. Reconnecting the gateway…';
         successBox.style.display = '';
-        showCloseAction();
+        let restarted = true;
         try {
           await invalidateBrokerTlsCache(item.slug);
+        } catch (err) {
+          restarted = false;
+          successBox.textContent =
+            err.message ||
+            'Saved, but the gateway restart failed. Redeploy this Hermes app to apply the new credentials.';
+        }
+        showCloseAction();
+        try {
           await refreshAndRender();
-        } catch (_) { /* saved; sidebar refresh can recover on next open */ }
+        } catch (_) { /* sidebar refresh can recover on next open */ }
+        if (restarted) {
+          successBox.textContent = 'Saved. The gateway is using the new credentials.';
+        }
       } catch (err) {
         errorBox.textContent = err.message || 'Save failed.';
         errorBox.style.display = '';
@@ -600,17 +611,26 @@
   // Tell the broker to drop cached TLS-intercept tokens. Provider-specific
   // invalidation is used after known connect/disconnect/config changes; the
   // no-arg form intentionally invalidates all providers for explicit Refresh.
+  //
+  // For vault providers the broker also rewrites the gateway's .env file and
+  // restarts the gateway via process-compose. Both failure modes (network
+  // error reaching the broker, or 5xx from the broker) propagate to the
+  // caller — for vault saves the modal turns these into "Saved, but the
+  // gateway restart failed — redeploy". Cache-hint callers (Refresh button,
+  // OAuth-return sentinel) catch and ignore: the proxy's 401-evict path
+  // recovers stale tokens on the first real call.
   async function invalidateBrokerTlsCache(providerSlug) {
-    try {
-      const url = providerSlug
-        ? '/__doh_broker/integrations/' + encodeURIComponent(providerSlug) + '/invalidate_tls_cache'
-        : '/__doh_broker/integrations/invalidate_tls_cache';
-      await fetch(url, { method: 'POST' });
-    } catch (_) {
-      // Stale-cache survival isn't critical — next 8h's worth of status
-      // reads might lie about a disconnect, but the proxy's 401-evict path
-      // catches it on the first real call.
-    }
+    const url = providerSlug
+      ? '/__doh_broker/integrations/' + encodeURIComponent(providerSlug) + '/invalidate_tls_cache'
+      : '/__doh_broker/integrations/invalidate_tls_cache';
+    const response = await fetch(url, { method: 'POST' });
+    if (response.ok) return;
+    let payload = {};
+    try { payload = await response.json(); } catch (_) { /* ignore */ }
+    throw new Error(
+      payload.error ||
+        'Saved, but the gateway restart failed. Redeploy this Hermes app to apply the new credentials.',
+    );
   }
 
   // Drop any ?connected=/?disconnected= sentinel once we've acted on it,
@@ -786,7 +806,12 @@
     // OAuth return sentinel. On normal page loads we render whatever is
     // cached; explicit Refresh is the only UI action that invalidates all.
     if (sentinel) {
-      invalidateBrokerTlsCache(sentinel.provider).then(refreshAndRender);
+      // Cache-hint only — if the broker is unreachable or returns 5xx,
+      // the proxy's 401-evict path will recover stale tokens on the next
+      // real call. Render the panel either way.
+      invalidateBrokerTlsCache(sentinel.provider)
+        .catch(() => {})
+        .then(refreshAndRender);
     } else {
       refreshAndRender();
     }

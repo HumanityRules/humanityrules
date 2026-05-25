@@ -1,8 +1,12 @@
 """Shared helpers for the webapps mechanism.
 
 Imported by both the `webapps` CLI and the `__admin` webapp. Source of truth
-is /workspace/webapps/process-compose.yaml; routes.caddy is regenerated from
-it on every mutation. See docs/webapps_design.md.
+is /workspace/.config/process-compose/process-compose.yaml; routes.caddy is
+regenerated from it on every mutation. See docs/webapps_design.md.
+
+`webapps/` holds user-facing artifacts (their projects, their logs);
+`.config/` holds DOH supervision config (the process-compose YAML, the caddy
+routes). Both live under $HOME=/workspace so the sandbox owns them.
 """
 from __future__ import annotations
 
@@ -18,11 +22,14 @@ from pathlib import Path
 import yaml
 
 WEBAPPS_ROOT = Path("/workspace/webapps")
-PROCESS_COMPOSE_YAML = WEBAPPS_ROOT / "process-compose.yaml"
-CADDY_ROUTES = WEBAPPS_ROOT / "routes.caddy"
+PROCESS_COMPOSE_DIR = Path("/workspace/.config/process-compose")
+PROCESS_COMPOSE_YAML = PROCESS_COMPOSE_DIR / "process-compose.yaml"
+CADDY_CONFIG_DIR = Path("/workspace/.config/caddy")
+CADDY_ROUTES = CADDY_CONFIG_DIR / "routes.caddy"
 PROJECTS_DIR = WEBAPPS_ROOT / "projects"
 LOGS_DIR = WEBAPPS_ROOT / "logs"
-LOCK_FILE = WEBAPPS_ROOT / ".lock"
+LOCK_FILE = PROCESS_COMPOSE_DIR / ".webapps.lock"
+SYSTEM_SLUG_PREFIX = "system."
 
 PORT_MIN = 4000
 PORT_MAX = 4019
@@ -40,7 +47,7 @@ def die(msg: str, code: int = 1) -> None:
 
 
 def ensure_layout() -> None:
-    for p in (WEBAPPS_ROOT, PROJECTS_DIR, LOGS_DIR):
+    for p in (WEBAPPS_ROOT, PROJECTS_DIR, LOGS_DIR, PROCESS_COMPOSE_DIR, CADDY_CONFIG_DIR):
         p.mkdir(parents=True, exist_ok=True)
     if not PROCESS_COMPOSE_YAML.exists():
         PROCESS_COMPOSE_YAML.write_text('version: "0.5"\nprocesses: {}\n')
@@ -123,6 +130,11 @@ def next_free_port(doc: dict) -> int:
 
 
 def validate_slug(slug: str) -> None:
+    if slug.startswith(SYSTEM_SLUG_PREFIX):
+        die(
+            f"invalid slug {slug!r}: the {SYSTEM_SLUG_PREFIX!r} prefix is reserved "
+            "for DOH-managed system processes; pick another name"
+        )
     if not SLUG_PATTERN.match(slug):
         die(
             f"invalid slug {slug!r}: lowercase letters/digits/hyphens, "

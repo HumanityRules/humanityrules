@@ -609,3 +609,176 @@ class TestFetchProviderTokenClassification(unittest.TestCase):
             self._run(status=503, payload={"error": "try later"}).status,
             broker.tls_intercept.STATUS_TRANSIENT_ERROR,
         )
+
+
+class TestGatewayEnvRender(unittest.TestCase):
+    """Render the DOH-managed block from a token-store snapshot."""
+
+    def _telegram_provider(self) -> "broker.tls_intercept.TlsProviderSpec":
+        return broker.tls_intercept.TLS_INTERCEPT_PROVIDERS["telegram"]
+
+    def _google_provider(self) -> "broker.tls_intercept.TlsProviderSpec":
+        return broker.tls_intercept.TLS_INTERCEPT_PROVIDERS["google"]
+
+    def test_connected_vault_provider_renders_managed_block(self) -> None:
+        snapshot = [
+            (
+                self._telegram_provider(),
+                {"allowed_users": [42, 7]},
+                {},
+                broker.tls_intercept.STATUS_CONNECTED,
+            ),
+        ]
+        block = broker.tls_intercept.render_managed_block(snapshot=snapshot)
+        self.assertIn(broker.tls_intercept.GATEWAY_ENV_BLOCK_BEGIN, block)
+        self.assertIn(broker.tls_intercept.GATEWAY_ENV_BLOCK_END, block)
+        self.assertIn("TELEGRAM_BOT_TOKEN=000000:DOH_PLACEHOLDER", block)
+        self.assertIn("TELEGRAM_ALLOWED_USERS=42,7", block)
+
+    def test_disconnected_vault_provider_renders_empty_block(self) -> None:
+        snapshot = [
+            (
+                self._telegram_provider(),
+                {},
+                {},
+                broker.tls_intercept.STATUS_NOT_CONNECTED,
+            ),
+        ]
+        block = broker.tls_intercept.render_managed_block(snapshot=snapshot)
+        self.assertEqual(block, "")
+
+    def test_oauth_provider_contributes_no_env_lines(self) -> None:
+        """OAuth providers (Google, GitHub) don't activate gateway platforms."""
+        snapshot = [
+            (
+                self._google_provider(),
+                {"some_key": "some_value"},
+                {},
+                broker.tls_intercept.STATUS_CONNECTED,
+            ),
+        ]
+        block = broker.tls_intercept.render_managed_block(snapshot=snapshot)
+        self.assertEqual(block, "")
+
+    def test_missing_list_config_skips_binding(self) -> None:
+        """A connected provider without the optional list field omits its env var."""
+        snapshot = [
+            (
+                self._telegram_provider(),
+                {},  # no allowed_users
+                {},
+                broker.tls_intercept.STATUS_CONNECTED,
+            ),
+        ]
+        block = broker.tls_intercept.render_managed_block(snapshot=snapshot)
+        self.assertIn("TELEGRAM_BOT_TOKEN=000000:DOH_PLACEHOLDER", block)
+        self.assertNotIn("TELEGRAM_ALLOWED_USERS", block)
+
+    def test_write_preserves_outside_lines_and_replaces_managed_block(self) -> None:
+        """Lines outside the sentinel block survive; the block is fully replaced."""
+        with tempfile.TemporaryDirectory() as tmp:
+            env_path = pathlib.Path(tmp) / ".env"
+            env_path.write_text(
+                "USER_KEY=keep-me\n"
+                f"{broker.tls_intercept.GATEWAY_ENV_BLOCK_BEGIN}\n"
+                "STALE_VAR=old-value\n"
+                f"{broker.tls_intercept.GATEWAY_ENV_BLOCK_END}\n"
+                "ANOTHER=also-keep\n",
+                encoding="utf-8",
+            )
+            snapshot = [
+                (
+                    self._telegram_provider(),
+                    {"allowed_users": [1]},
+                    {},
+                    broker.tls_intercept.STATUS_CONNECTED,
+                ),
+            ]
+            block = broker.tls_intercept.render_managed_block(snapshot=snapshot)
+            broker.tls_intercept.write_gateway_env_file(env_path=env_path, managed_block=block)
+            text = env_path.read_text(encoding="utf-8")
+
+        self.assertIn("USER_KEY=keep-me", text)
+        self.assertIn("ANOTHER=also-keep", text)
+        self.assertNotIn("STALE_VAR=old-value", text)
+        self.assertIn("TELEGRAM_BOT_TOKEN=000000:DOH_PLACEHOLDER", text)
+        self.assertIn("TELEGRAM_ALLOWED_USERS=1", text)
+
+    def test_write_empty_block_strips_sentinels_entirely(self) -> None:
+        """Disconnect path: empty managed block leaves no DOH-managed sentinels."""
+        with tempfile.TemporaryDirectory() as tmp:
+            env_path = pathlib.Path(tmp) / ".env"
+            env_path.write_text(
+                "USER_KEY=keep-me\n"
+                f"{broker.tls_intercept.GATEWAY_ENV_BLOCK_BEGIN}\n"
+                "TELEGRAM_BOT_TOKEN=000000:DOH_PLACEHOLDER\n"
+                f"{broker.tls_intercept.GATEWAY_ENV_BLOCK_END}\n",
+                encoding="utf-8",
+            )
+            broker.tls_intercept.write_gateway_env_file(env_path=env_path, managed_block="")
+            text = env_path.read_text(encoding="utf-8")
+
+        self.assertEqual(text, "USER_KEY=keep-me\n")
+
+
+class TestGatewayEnvHookIntegration(unittest.IsolatedAsyncioTestCase):
+    """User-initiated invalidate triggers env render + restart for vault providers."""
+
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.env_path = pathlib.Path(self.tmp.name) / "hermes.env"
+
+    def _make_runtime(self, on_user_invalidate=None) -> "broker.tls_intercept.TlsInterceptRuntime":
+        root = pathlib.Path(self.tmp.name)
+        return broker.tls_intercept.TlsInterceptRuntime(
+            providers=broker.tls_intercept.TLS_INTERCEPT_PROVIDERS,
+            refresh_config=broker.tls_intercept.DohRefreshConfig(
+                control_plane_url="https://doh.example",
+                bearer="env-bearer",
+                owner_username="vmendi",
+                app_slug="hermes",
+            ),
+            refresh_lead_seconds=broker.tls_intercept.REFRESH_LEAD_SECONDS,
+            ca_dir=root / "ca",
+            private_dir=root / "private",
+            on_user_invalidate=on_user_invalidate,
+        )
+
+    async def test_invalidate_fires_on_user_invalidate_hook(self) -> None:
+        seen: list[str | None] = []
+
+        async def on_user_invalidate(slug: str | None) -> None:
+            seen.append(slug)
+
+        runtime = self._make_runtime(on_user_invalidate=on_user_invalidate)
+        await runtime.invalidate(slug="telegram")
+        await runtime.invalidate_all()
+        self.assertEqual(seen, ["telegram", None])
+
+    async def test_proxy_hot_path_eviction_does_not_fire_hook(self) -> None:
+        """Inner token_store.invalidate (used by proxy 401-evict path) bypasses the hook.
+
+        Credential changes go through `runtime.invalidate`, not the inner
+        store. A 401-eviction during normal traffic must NOT trigger a
+        gateway restart.
+        """
+        seen: list[str | None] = []
+
+        async def on_user_invalidate(slug: str | None) -> None:
+            seen.append(slug)
+
+        runtime = self._make_runtime(on_user_invalidate=on_user_invalidate)
+        await runtime._token_store.invalidate(slug="telegram")
+        self.assertEqual(seen, [])
+
+    async def test_slug_requires_restart_only_for_vault_providers(self) -> None:
+        """OAuth providers don't need a gateway restart when their cache flips."""
+        runtime = self._make_runtime()
+        self.assertTrue(broker._slug_requires_restart(slug="telegram", runtime=runtime))
+        self.assertFalse(broker._slug_requires_restart(slug="google", runtime=runtime))
+        self.assertFalse(broker._slug_requires_restart(slug="github", runtime=runtime))
+        # Unknown slug: don't restart.
+        self.assertFalse(broker._slug_requires_restart(slug="bogus", runtime=runtime))
+        # None (Refresh-all) covers any vault provider in scope.
+        self.assertTrue(broker._slug_requires_restart(slug=None, runtime=runtime))

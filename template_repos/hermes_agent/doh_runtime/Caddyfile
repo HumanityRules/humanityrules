@@ -11,7 +11,7 @@
 }
 
 :8787 {
-	import /workspace/webapps/routes.caddy
+	import /workspace/.config/caddy/routes.caddy
 	reverse_proxy 127.0.0.1:8789 {
 		# Pass through the X-Forwarded-Host policy-proxy already set (the
 		# browser's original Host). Caddy's reverse_proxy default would
