@@ -11,6 +11,7 @@ from devopshero_app.models import (
     Environment,
     IntegrationConfig,
     Organization,
+    OrganizationMembership,
     Repository,
     ResourceTag,
     User,
@@ -58,6 +59,9 @@ class TestIntegrationsGoogleStart(TestCase):
             email="vmendi@example.com",
             password="pw",
             current_organization=self.org,
+        )
+        OrganizationMembership.objects.create(
+            user=self.user, organization=self.org, role=OrganizationMembership.Role.MEMBER,
         )
         self.client.force_login(self.user)
         self.repository = Repository.objects.create(
@@ -245,3 +249,29 @@ class TestIntegrationsGoogleStart(TestCase):
             self._params(rd="https://anything.com/x"),
         )
         self.assertEqual(response.status_code, 400)
+
+    def test_rejects_rd_pointing_at_stranger_org_env(self) -> None:
+        # An env exists in another org whose zone the rd would suffix-match.
+        # The authenticated user is not a member of that org, so the start view
+        # must refuse to bind the OAuth flow to it — otherwise the credential
+        # row would be written against a stranger env (orphan, unreachable
+        # post-fix, but still pollution + audit confusion).
+        other_org = Organization.objects.create(name="OtherOrg", slug="otherorg")
+        other_aws = AWSAccount.objects.create(
+            organization=other_org, name="OtherProd", aws_account_id="999988887777",
+        )
+        Environment.objects.create(
+            aws_account=other_aws,
+            name="OtherStaging",
+            slug="other-staging",
+            aws_region="us-east-1",
+            shared_alb_hosted_zone="stranger.example.com",
+        )
+
+        response = self.client.get(
+            reverse("integrations_google_oauth_start"),
+            self._params(rd="https://hermes.stranger.example.com/x"),
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertNotIn("google_oauth_state", self.client.session)
+        self.assertNotIn("google_oauth_payload", self.client.session)

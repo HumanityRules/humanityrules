@@ -18,7 +18,7 @@ from django.http import HttpRequest, HttpResponse, HttpResponseBadRequest
 from django.shortcuts import redirect
 from django.utils import timezone
 
-from devopshero_app.models import App, Environment, IntegrationConfig, IntegrationUserCredential, ResourceTag
+from devopshero_app.models import App, Environment, IntegrationConfig, IntegrationUserCredential, ResourceTag, User
 
 logger = logging.getLogger(__name__)
 
@@ -53,12 +53,13 @@ def _pick_redirect_uri(request: HttpRequest, configured: list[str]) -> str:
     )
 
 
-def _resolve_env_by_rd(rd: str) -> Environment | None:
+def _resolve_env_by_rd(rd: str, user: User) -> Environment | None:
     """Return the Environment whose shared_alb_hosted_zone suffixes *rd*'s host, or None.
 
     We accept any URL whose host is a subdomain of a known env's hosted zone —
     e.g. rd `https://hermes.dev.example.com/x` matches an Environment with
-    `shared_alb_hosted_zone = "dev.example.com"`.
+    `shared_alb_hosted_zone = "dev.example.com"`. Scoped to envs in orgs *user*
+    is a member of.
     """
     if not rd:
         return None
@@ -66,7 +67,13 @@ def _resolve_env_by_rd(rd: str) -> Environment | None:
     if parsed.scheme not in ("http", "https") or not parsed.hostname:
         return None
     host = parsed.hostname.lower()
-    for env in Environment.objects.exclude(shared_alb_hosted_zone="").only("id", "slug", "shared_alb_hosted_zone"):
+    candidates = (
+        Environment.objects
+        .exclude(shared_alb_hosted_zone="")
+        .filter(aws_account__organization__memberships__user=user)
+        .only("id", "slug", "shared_alb_hosted_zone")
+    )
+    for env in candidates:
         zone = env.shared_alb_hosted_zone.lower()
         if host == zone or host.endswith("." + zone):
             return env
@@ -96,7 +103,7 @@ def _resolve_owned_app_slug(app_slug: str, env: Environment, owner_username: str
 def integrations_google_oauth_start(request: HttpRequest) -> HttpResponse:
     """Validate `rd`, stash state, redirect to Google's OAuth consent screen."""
     rd = request.GET.get("rd", "")
-    env = _resolve_env_by_rd(rd=rd)
+    env = _resolve_env_by_rd(rd=rd, user=request.user)
     if env is None:
         return HttpResponseBadRequest("Invalid or unknown rd")
     app_slug = _resolve_owned_app_slug(
@@ -301,7 +308,7 @@ def integrations_google_oauth_disconnect(request: HttpRequest) -> HttpResponse:
     reflects the disconnect immediately.
     """
     rd = request.GET.get("rd", "")
-    env = _resolve_env_by_rd(rd=rd)
+    env = _resolve_env_by_rd(rd=rd, user=request.user)
     if env is None:
         return HttpResponseBadRequest("Invalid or unknown rd")
 

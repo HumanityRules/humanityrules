@@ -137,10 +137,7 @@ def security_people_detail(request: HttpRequest, user_id: UUID) -> HttpResponse:
         return denied
 
     org = request.user.current_organization
-    member = get_object_or_404(User, id=user_id)
-
-    # Verify user belongs to org
-    get_object_or_404(OrganizationMembership, organization=org, user=member)
+    member = get_object_or_404(User, id=user_id, organization_memberships__organization=org)
 
     attrs = abac.get_effective_attributes(org, member)
     system_attrs = [(k, v, s) for k, v, s in attrs if s == "system"]
@@ -178,8 +175,7 @@ def security_people_attribute_add(request: HttpRequest, user_id: UUID) -> HttpRe
         return denied
 
     org = request.user.current_organization
-    member = get_object_or_404(User, id=user_id)
-    get_object_or_404(OrganizationMembership, organization=org, user=member)
+    member = get_object_or_404(User, id=user_id, organization_memberships__organization=org)
 
     key = request.POST.get("key", "").strip()
     value = request.POST.get("value", "").strip()
@@ -198,8 +194,7 @@ def security_people_attribute_remove(request: HttpRequest, user_id: UUID, attrib
         return denied
 
     org = request.user.current_organization
-    member = get_object_or_404(User, id=user_id)
-    get_object_or_404(OrganizationMembership, organization=org, user=member)
+    member = get_object_or_404(User, id=user_id, organization_memberships__organization=org)
 
     IdentityAttribute.objects.filter(id=attribute_id, organization=org, user=member).delete()
 
@@ -215,8 +210,7 @@ def security_people_group_add(request: HttpRequest, user_id: UUID) -> HttpRespon
         return denied
 
     org = request.user.current_organization
-    member = get_object_or_404(User, id=user_id)
-    get_object_or_404(OrganizationMembership, organization=org, user=member)
+    member = get_object_or_404(User, id=user_id, organization_memberships__organization=org)
 
     group_id = request.POST.get("group_id", "").strip()
     if group_id:
@@ -235,8 +229,7 @@ def security_people_group_remove(request: HttpRequest, user_id: UUID, membership
         return denied
 
     org = request.user.current_organization
-    member = get_object_or_404(User, id=user_id)
-    get_object_or_404(OrganizationMembership, organization=org, user=member)
+    member = get_object_or_404(User, id=user_id, organization_memberships__organization=org)
 
     GroupMembership.objects.filter(id=membership_id, user=member, group__organization=org).delete()
 
@@ -442,8 +435,7 @@ def security_group_member_add(request: HttpRequest, group_id: UUID) -> HttpRespo
 
     user_id = request.POST.get("user_id", "").strip()
     if user_id:
-        user = get_object_or_404(User, id=user_id)
-        get_object_or_404(OrganizationMembership, organization=org, user=user)
+        user = get_object_or_404(User, id=user_id, organization_memberships__organization=org)
         GroupMembership.objects.get_or_create(group=group, user=user)
 
     return _render_group_members_partial(request, org, group)
