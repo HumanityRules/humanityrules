@@ -51,7 +51,10 @@ async def _require_workspace(conversation: Conversation) -> Workspace:
             "No workspace context for this conversation. "
             "Start a new conversation from a workspace page to set the context."
         )
-    return await Workspace.objects.select_related("organization").aget(id=conversation.context_workspace_id)
+    return await Workspace.objects.select_related("organization").aget(
+        id=conversation.context_workspace_id,
+        organization=conversation.organization,
+    )
 
 
 async def _require_aws_account(conversation: Conversation) -> AWSAccount:
@@ -73,7 +76,10 @@ async def _require_app_permission_request(conversation: Conversation) -> AppPerm
         )
     return await AppPermissionRequest.objects.select_related(
         "app", "environment", "environment__aws_account",
-    ).aget(id=conversation.context_app_permission_request_id)
+    ).aget(
+        id=conversation.context_app_permission_request_id,
+        app__organization=conversation.organization,
+    )
 
 
 def _mcp_response(data: Any) -> dict[str, Any]:

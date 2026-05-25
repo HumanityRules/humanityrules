@@ -46,7 +46,10 @@ async def deploy_blueprint(conversation: Conversation) -> DeployBlueprintResult:
 
     blueprint = await DeploymentBlueprint.objects.select_related(
         "app", "app__repository", "environment",
-    ).aget(id=conversation.context_deployment_blueprint_id)
+    ).aget(
+        id=conversation.context_deployment_blueprint_id,
+        app__workspace__organization=conversation.organization,
+    )
 
     if blueprint.status not in (DeploymentBlueprint.Status.DRAFT, DeploymentBlueprint.Status.FAILED):
         raise ValueError(

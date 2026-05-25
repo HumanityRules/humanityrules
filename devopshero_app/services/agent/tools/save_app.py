@@ -63,7 +63,7 @@ async def save_app(
     existing_app_id = conversation.context_app_id
 
     if existing_app_id:
-        app = await App.objects.aget(id=existing_app_id)
+        app = await App.objects.aget(id=existing_app_id, workspace=workspace)
 
         app.name = name
         app.app_type = app_type

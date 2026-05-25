@@ -63,9 +63,13 @@ async def save_environment(
     existing_environment_id = conversation.context_environment_id
 
     if existing_environment_id:
-        environment = await models.Environment.objects.select_related("aws_account").aget(id=existing_environment_id)
-        if environment.aws_account_id != aws_account.id:
-            raise ValueError("The current environment belongs to a different AWS account.")
+        try:
+            environment = await models.Environment.objects.select_related("aws_account").aget(
+                id=existing_environment_id,
+                aws_account=aws_account,
+            )
+        except models.Environment.DoesNotExist:
+            raise ValueError("The current environment does not exist or belongs to a different AWS account.")
         if environment.status not in EDITABLE_ENVIRONMENT_STATUSES:
             raise ValueError(
                 f"Environment '{environment.name}' is in '{environment.status}' state and cannot be edited. "
