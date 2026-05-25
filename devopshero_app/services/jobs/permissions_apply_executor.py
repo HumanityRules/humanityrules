@@ -11,6 +11,8 @@ from devopshero_app import models
 from devopshero_app.services import permissions as permissions_service
 from devopshero_app.services.infra_customer import iam_utils
 
+from . import tenant_consistency
+
 logger = logging.getLogger(__name__)
 
 
@@ -28,6 +30,15 @@ def run_apply(app_permission_request_id: str) -> bool:
         ).get(id=app_permission_request_id)
     except models.AppPermissionRequest.DoesNotExist:
         logger.error("AppPermissionRequest %s not found", app_permission_request_id)
+        return False
+
+    try:
+        tenant_consistency.assert_apr_consistent(apr)
+    except tenant_consistency.TenantConsistencyError as exc:
+        logger.error("Refusing to apply permissions: %s", exc)
+        apr.status = models.AppPermissionRequest.Status.FAILED
+        apr.status_message = f"Refused: {exc}"
+        apr.save(update_fields=["status", "status_message", "updated_at"])
         return False
 
     logger.info(

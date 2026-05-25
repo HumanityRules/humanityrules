@@ -15,6 +15,7 @@ from devopshero_app import models
 from devopshero_app.services import infra_customer
 
 from . import job_logging
+from . import tenant_consistency
 
 logger = logging.getLogger(__name__)
 
@@ -83,6 +84,16 @@ def run_teardown(deployment_id: str) -> bool:
         ).get(id=deployment_id)
     except models.Deployment.DoesNotExist:
         logger.error("Deployment %(deployment_id)s not found", {"deployment_id": deployment_id})
+        return False
+
+    try:
+        tenant_consistency.assert_deployment_consistent(deployment)
+    except tenant_consistency.TenantConsistencyError as exc:
+        logger.error("Refusing to tear down deployment: %(msg)s", {"msg": str(exc)})
+        deployment.status = models.Deployment.Status.FAILED
+        deployment.status_message = f"Refused: {exc}"
+        deployment.completed_at = timezone.now()
+        deployment.save()
         return False
 
     environment = deployment.environment

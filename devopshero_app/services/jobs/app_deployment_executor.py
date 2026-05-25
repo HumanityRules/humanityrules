@@ -17,6 +17,7 @@ import devopshero_app.services.jobs.app_deployment_debug_simulator as app_deploy
 
 from . import app_config_builder
 from . import job_logging
+from . import tenant_consistency
 
 logger = logging.getLogger(__name__)
 
@@ -70,6 +71,16 @@ def run_deployment(deployment_id: str) -> bool:
         ).get(id=deployment_id)
     except models.Deployment.DoesNotExist:
         logger.error("Deployment %(deployment_id)s not found", {"deployment_id": deployment_id})
+        return False
+
+    try:
+        tenant_consistency.assert_deployment_consistent(deployment)
+    except tenant_consistency.TenantConsistencyError as exc:
+        logger.error("Refusing to run deployment: %(msg)s", {"msg": str(exc)})
+        deployment.status = models.Deployment.Status.FAILED
+        deployment.status_message = f"Refused: {exc}"
+        deployment.completed_at = timezone.now()
+        deployment.save()
         return False
 
     blueprint = deployment.blueprint
@@ -136,6 +147,7 @@ def run_deployment(deployment_id: str) -> bool:
                 app_config=app_config,
                 image_tag=deployment.image_tag,
                 env_slug=environment.slug,
+                environment=environment,
                 subdomain=deployment.subdomain or app.slug,
                 synth_only=False,
                 shared_alb_hosted_zone=environment.shared_alb_hosted_zone or None,

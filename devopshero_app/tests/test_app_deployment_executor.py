@@ -125,3 +125,49 @@ class TestAppDeploymentExecutor(TestCase):
             any("skipping repository clone and AWS calls" in message for message in log_messages)
         )
 
+    def test_run_deployment_refuses_cross_tenant_row(self) -> None:
+        """A Deployment whose app and environment belong to different orgs must be refused."""
+        other_org = models.Organization.objects.create(name="Other Org", slug="other-org")
+        other_aws_account = models.AWSAccount.objects.create(organization=other_org, name="Other AWS")
+        other_env = models.Environment.objects.create(
+            aws_account=other_aws_account,
+            name="Other Staging",
+            slug="other-staging",
+            aws_region="us-east-1",
+            status=models.Environment.Status.READY,
+            shared_alb_hosted_zone="other.example.com",
+        )
+        blueprint = models.DeploymentBlueprint.objects.create(
+            app=self.app,
+            environment=other_env,
+            status=models.DeploymentBlueprint.Status.DRAFT,
+            branch="main",
+            cpu=256,
+            memory=512,
+            containers=[{"name": "myapp", "environment_variables": [], "app_secrets": {}}],
+            subdomain="",
+            created_by=self.user,
+        )
+        deployment = models.Deployment.objects.create(
+            blueprint=blueprint,
+            app=self.app,
+            environment=other_env,
+            git_ref="main",
+            git_commit_sha="",
+            git_commit_message="",
+            image_tag="myapp-test",
+            status=models.Deployment.Status.PENDING,
+            status_message="",
+            created_by=self.user,
+        )
+
+        with patch("devopshero_app.services.jobs.app_deployment_executor.infra_customer.deploy_app.deploy") as deploy_mock:
+            success = app_deployment_executor.run_deployment(deployment_id=str(deployment.id))
+
+        self.assertFalse(success)
+        deploy_mock.assert_not_called()
+
+        deployment.refresh_from_db()
+        self.assertEqual(deployment.status, models.Deployment.Status.FAILED)
+        self.assertIn("Refused", deployment.status_message)
+
