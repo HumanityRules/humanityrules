@@ -291,6 +291,11 @@ def _telegram_get_me(bot_token: str) -> tuple[dict | None, str | None]:
         return None, "Telegram validation returned a non-JSON response"
     if response.status_code != 200 or body.get("ok") is not True:
         description = body.get("description")
+        logger.error(
+            "telegram getMe rejected token: status=%d description=%r",
+            response.status_code,
+            description,
+        )
         if response.status_code == 401 or description == "Unauthorized":
             return None, TELEGRAM_INVALID_TOKEN_MESSAGE
         if isinstance(description, str) and description:
@@ -298,6 +303,7 @@ def _telegram_get_me(bot_token: str) -> tuple[dict | None, str | None]:
         return None, "Telegram rejected this bot token."
     result = body.get("result")
     if not isinstance(result, dict) or result.get("is_bot") is not True:
+        logger.error("telegram getMe returned a non-bot result: %r", result)
         return None, "Telegram token did not resolve to a bot"
     return result, None
 
@@ -401,8 +407,31 @@ def integrations_credential_submit(request: HttpRequest) -> JsonResponse:
     else:
         credential = None
         validation_error = "unsupported credential provider"
+        logger.error(
+            "vault credential submit: unsupported provider=%r owner=%s env=%s app=%s",
+            provider,
+            owner_user.username,
+            environment.slug,
+            app_slug,
+        )
     if validation_error is not None:
+        logger.error(
+            "vault credential save rejected: provider=%s owner=%s env=%s app=%s reason=%r",
+            provider,
+            owner_user.username,
+            environment.slug,
+            app_slug,
+            validation_error,
+        )
         return _cors_json_response({"error": validation_error}, status=400, allowed_origin=allowed_origin)
+    logger.info(
+        "vault credential connected: provider=%s owner=%s env=%s app=%s metadata=%r",
+        provider,
+        owner_user.username,
+        environment.slug,
+        app_slug,
+        credential.metadata,
+    )
     return _cors_json_response(
         {
             "ok": True,
@@ -442,12 +471,20 @@ def integrations_credential_disconnect(request: HttpRequest) -> JsonResponse:
     provider, provider_error = _provider_from_payload(provider=payload.get("provider"))
     if provider_error is not None:
         return provider_error
-    IntegrationUserCredential.objects.filter(
+    deleted_count, _ = IntegrationUserCredential.objects.filter(
         owner_user=owner_user,
         environment=environment,
         app_slug=app_slug,
         provider=provider,
     ).delete()
+    logger.info(
+        "vault credential disconnected: provider=%s owner=%s env=%s app=%s rows=%d",
+        provider,
+        owner_user.username,
+        environment.slug,
+        app_slug,
+        deleted_count,
+    )
     return JsonResponse({"ok": True, "status": "not_connected"})
 
 

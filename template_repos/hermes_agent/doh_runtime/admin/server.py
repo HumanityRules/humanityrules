@@ -14,6 +14,7 @@ from fastapi import FastAPI, HTTPException
 
 from webapps_lib import (
     LOGS_DIR,
+    SYSTEM_SLUG_PREFIX,
     is_routed,
     load_yaml,
     port_from_entry,
@@ -40,7 +41,7 @@ def list_webapps() -> dict:
             "restarts": st.get("restarts", 0),
             "routed": is_routed(entry),
             "url": url_for(slug) if is_routed(entry) else None,
-            "is_internal": slug.startswith("__"),
+            "is_internal": slug.startswith("__") or slug.startswith(SYSTEM_SLUG_PREFIX),
         })
     return {"items": items}
 

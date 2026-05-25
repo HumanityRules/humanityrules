@@ -56,6 +56,9 @@ DEFAULT_MCP_PORT = 9952
 DEFAULT_CA_DIR = Path("/run/doh/integrations-broker/ca")
 DEFAULT_PRIVATE_DIR = Path("/run/doh/integrations-broker/private")
 DEFAULT_MCP_PERSISTENT_DIR = Path("/hermes-persistent-root/mcp-aggregator")
+DEFAULT_GATEWAY_ENV_PATH = Path("/workspace/.hermes/.env")
+DEFAULT_PROCESS_COMPOSE_URL = "http://127.0.0.1:9956"
+GATEWAY_PROCESS_NAME = "system.gateway"
 
 logger = logging.getLogger("integrations_broker")
 
@@ -122,13 +125,22 @@ def _build_control_app(
 
     async def invalidate_tls_cache_route(request: Request) -> Response:
         """Drop every cached TLS-intercept token for explicit Refresh all."""
-        await tls_runtime.invalidate_all()
+        try:
+            await tls_runtime.invalidate_all()
+        except RuntimeError as exc:
+            return JSONResponse(content={"ok": False, "error": str(exc)}, status_code=502)
         return JSONResponse(content={"ok": True})
 
     async def invalidate_provider_tls_cache_route(request: Request) -> Response:
         """Drop one provider's cached TLS-intercept token after known state changes."""
         provider = request.path_params["provider"]
-        await tls_runtime.invalidate(slug=provider)
+        try:
+            await tls_runtime.invalidate(slug=provider)
+        except RuntimeError as exc:
+            return JSONResponse(
+                content={"ok": False, "provider": provider, "error": str(exc)},
+                status_code=502,
+            )
         return JSONResponse(content={"ok": True, "provider": provider})
 
     async def vault_setup_session_route(request: Request) -> Response:
@@ -162,7 +174,13 @@ def _build_control_app(
             },
         )
         if 200 <= status < 300:
-            await tls_runtime.invalidate(slug=provider)
+            try:
+                await tls_runtime.invalidate(slug=provider)
+            except RuntimeError as exc:
+                return JSONResponse(
+                    content={**payload, "ok": False, "error": str(exc)},
+                    status_code=502,
+                )
         return JSONResponse(content=payload, status_code=status)
 
     routes = [
@@ -202,6 +220,95 @@ def _post_control_plane_json(control_plane_url: str, bearer: str, path: str, pay
         return 502, {"error": "control plane request failed"}
 
 
+def _post_process_compose_restart(process_compose_url: str, process_name: str) -> tuple[int, str]:
+    """Tell process-compose's REST API to restart the gateway entry."""
+    url = f"{process_compose_url.rstrip('/')}/process/restart/{process_name}"
+    req = urllib.request.Request(url=url, method="POST")
+    try:
+        with urllib.request.urlopen(req, timeout=30) as response:
+            return response.status, response.read().decode("utf-8")
+    except urllib.error.HTTPError as exc:
+        try:
+            body = exc.read().decode("utf-8")
+        except Exception:
+            body = ""
+        return exc.code, body
+    except Exception as exc:
+        logger.error("process-compose restart failed for %s: %s", process_name, exc)
+        return 502, str(exc)
+
+
+async def _render_gateway_env_file(
+    tls_runtime: tls_intercept.TlsInterceptRuntime,
+    env_path: Path,
+) -> None:
+    """Write the DOH-managed block of the gateway env file from current cache state."""
+    snapshot = await tls_runtime.gateway_env_snapshot()
+    block = tls_intercept.render_managed_block(snapshot=snapshot)
+    await asyncio.to_thread(tls_intercept.write_gateway_env_file, env_path, block)
+    logger.info("rewrote gateway env at %s (%d bytes)", env_path, len(block))
+
+
+async def _bootstrap_gateway_env(
+    tls_runtime: tls_intercept.TlsInterceptRuntime,
+    env_path: Path,
+) -> None:
+    """At broker startup: refresh every provider, then render env file once."""
+    await tls_runtime.refresh_all()
+    await _render_gateway_env_file(tls_runtime=tls_runtime, env_path=env_path)
+
+
+def _build_on_user_invalidate(
+    tls_runtime_holder: dict,
+    env_path: Path,
+    process_compose_url: str,
+):
+    """Return the hook that re-renders env and restarts the gateway when needed.
+
+    Uses a holder dict because the runtime is constructed *with* this hook,
+    creating a chicken-and-egg. The broker fills `tls_runtime_holder["runtime"]`
+    immediately after construction.
+    """
+
+    async def on_user_invalidate(slug: str | None) -> None:
+        runtime = tls_runtime_holder["runtime"]
+        await runtime.refresh_all()
+        await _render_gateway_env_file(tls_runtime=runtime, env_path=env_path)
+        if not _slug_requires_restart(slug=slug, runtime=runtime):
+            return
+        status, body = await asyncio.to_thread(
+            _post_process_compose_restart,
+            process_compose_url,
+            GATEWAY_PROCESS_NAME,
+        )
+        if not (200 <= status < 300):
+            logger.error("gateway restart returned %d: %s", status, body)
+            raise RuntimeError(
+                f"gateway restart failed (process-compose returned {status}); "
+                f"please redeploy the app to apply the new credentials"
+            )
+        logger.info("gateway restart kicked off after invalidate(slug=%s)", slug)
+
+    return on_user_invalidate
+
+
+def _slug_requires_restart(slug: str | None, runtime: tls_intercept.TlsInterceptRuntime) -> bool:
+    """A user-invalidate triggers a gateway restart only when a vault provider was touched.
+
+    `slug=None` (Refresh-all) restarts only if any vault provider is in scope —
+    this catches the corner case where Refresh-all reveals state diverged
+    silently. Per-provider invalidates restart only for vault providers
+    whose `restart_required_after_save` is True.
+    """
+    providers = runtime._token_store._providers
+    if slug is None:
+        return any(spec.credential_method.restart_required_after_save for spec in providers.values())
+    spec = providers.get(slug)
+    if spec is None:
+        return False
+    return spec.credential_method.restart_required_after_save
+
+
 def _require_env(name: str) -> str:
     value = os.environ.get(name, "")
     if not value:
@@ -210,7 +317,16 @@ def _require_env(name: str) -> str:
     return value
 
 
-async def _run(proxy_port: int, control_port: int, mcp_port: int, ca_dir: Path, private_dir: Path, mcp_persistent_dir: Path) -> None:
+async def _run(
+    proxy_port: int,
+    control_port: int,
+    mcp_port: int,
+    ca_dir: Path,
+    private_dir: Path,
+    mcp_persistent_dir: Path,
+    gateway_env_path: Path,
+    process_compose_url: str,
+) -> None:
     control_plane_url = _require_env(name="DOH_CONTROL_PLANE_URL")
     bearer = _require_env(name="DOH_ENV_BEARER")
     owner_username = _require_env(name="DOH_OWNER_USERNAME")
@@ -221,6 +337,12 @@ async def _run(proxy_port: int, control_port: int, mcp_port: int, ca_dir: Path, 
         owner_username, env_slug, control_plane_url, proxy_port, control_port, mcp_port,
     )
 
+    tls_runtime_holder: dict = {}
+    on_user_invalidate = _build_on_user_invalidate(
+        tls_runtime_holder=tls_runtime_holder,
+        env_path=gateway_env_path,
+        process_compose_url=process_compose_url,
+    )
     tls_runtime = tls_intercept.TlsInterceptRuntime(
         providers=tls_intercept.TLS_INTERCEPT_PROVIDERS,
         refresh_config=tls_intercept.DohRefreshConfig(
@@ -232,7 +354,14 @@ async def _run(proxy_port: int, control_port: int, mcp_port: int, ca_dir: Path, 
         refresh_lead_seconds=tls_intercept.REFRESH_LEAD_SECONDS,
         ca_dir=ca_dir,
         private_dir=private_dir,
+        on_user_invalidate=on_user_invalidate,
     )
+    tls_runtime_holder["runtime"] = tls_runtime
+    # Render the gateway env file from current DOH state before opening the
+    # control port. supervisor.sh's wait_for_port on the control port doubles
+    # as the synchronization point: by the time it returns, the file is on
+    # disk and webui.sh can launch the gateway with current credentials.
+    await _bootstrap_gateway_env(tls_runtime=tls_runtime, env_path=gateway_env_path)
 
     loop = asyncio.get_running_loop()
     stop = loop.create_future()
@@ -299,6 +428,8 @@ def main() -> None:
     parser.add_argument("--ca-dir", type=Path, default=DEFAULT_CA_DIR)
     parser.add_argument("--private-dir", type=Path, default=DEFAULT_PRIVATE_DIR)
     parser.add_argument("--mcp-persistent-dir", type=Path, default=DEFAULT_MCP_PERSISTENT_DIR)
+    parser.add_argument("--gateway-env-path", type=Path, default=DEFAULT_GATEWAY_ENV_PATH)
+    parser.add_argument("--process-compose-url", default=DEFAULT_PROCESS_COMPOSE_URL)
     args = parser.parse_args()
     try:
         asyncio.run(
@@ -309,6 +440,8 @@ def main() -> None:
                 ca_dir=args.ca_dir,
                 private_dir=args.private_dir,
                 mcp_persistent_dir=args.mcp_persistent_dir,
+                gateway_env_path=args.gateway_env_path,
+                process_compose_url=args.process_compose_url,
             )
         )
     except KeyboardInterrupt:

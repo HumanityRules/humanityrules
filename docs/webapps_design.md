@@ -55,18 +55,24 @@ Three things to notice:
 
 [process-compose](https://github.com/F1bonacc1/process-compose) is a single Go binary that supervises long-running processes from a YAML file. We picked it after rejecting "write our own watcher" — process-compose's `project update` does surgical reload (only changed processes restart, new ones start, removed ones stop, readiness probes honored), which is exactly what we need.
 
-**State lives at `/workspace/webapps/`:**
+**State lives under `/workspace/`, split between user-facing artifacts and DOH supervision config:**
 
 ```
 /workspace/webapps/
-  process-compose.yaml        # the supervisor's source-of-truth
-  routes.caddy                # generated routes file (rewritten on every CLI mutation)
-  projects/<slug>/            # user code lives here
-  logs/<slug>.log             # captured stdout/stderr, written by process-compose
-  .lock                       # flock target for YAML mutations
+  projects/<slug>/                              # user code lives here
+  logs/<slug>.log                               # captured stdout/stderr, written by process-compose
+
+/workspace/.config/process-compose/
+  process-compose.yaml                          # the supervisor's source-of-truth
+  .webapps.lock                                 # flock target for YAML mutations
+
+/workspace/.config/caddy/
+  routes.caddy                                  # generated routes file (rewritten on every CLI mutation)
 ```
 
 `process-compose.yaml` is the **only** source of truth. `routes.caddy` is fully derived from it: every CLI mutation rebuilds the file from scratch by walking the YAML's enabled processes. The port lives in one place — the process's `environment: [WEBAPP_PORT=<port>]` — and the route generator reads it from there. No shadow copies, no synchronization concerns.
+
+The split keeps `/workspace/webapps/` as a pure user-data directory (their projects, their logs) and parks DOH-internal supervision config under `/workspace/.config/` alongside other tools' state (Caddy already writes `.config/caddy/autosave.json` there). All four paths are hermeswebui-owned so the sandbox can mutate them; the broker (root) can still read them from outside the sandbox if needed.
 
 `/workspace` is on the persistent root, so this whole layout survives container restarts. process-compose, on cold start, reads the existing YAML and restores supervision; Caddy boots with the existing `routes.caddy` (which the last CLI mutation left correct) and routes are back instantly.
 
@@ -85,7 +91,7 @@ webapps set-env <slug> KEY=VALUE [KEY2=VALUE2 ...]
 webapps delete <slug> --yes
 ```
 
-`/opt/doh/runtime/webapps`, ~310 lines, shebang pinned to `/opt/hermes/webui/venv/bin/python3` (it imports pyyaml, which the system python doesn't have but the Hermes serving venv does). All YAML mutations are wrapped in `flock /workspace/webapps/.lock` so concurrent invocations don't tear writes. The CLI's `regenerate_routes(doc)` is called inside the lock on every mutation; it rewrites `routes.caddy` end-to-end from the YAML.
+`/opt/doh/runtime/webapps`, ~310 lines, shebang pinned to `/opt/hermes/webui/venv/bin/python3` (it imports pyyaml, which the system python doesn't have but the Hermes serving venv does). All YAML mutations are wrapped in `flock /workspace/.config/process-compose/.webapps.lock` so concurrent invocations don't tear writes. The CLI's `regenerate_routes(doc)` is called inside the lock on every mutation; it rewrites `routes.caddy` end-to-end from the YAML.
 
 **Key contract decisions:**
 
@@ -126,7 +132,7 @@ The same `header_up X-Forwarded-Host` lives in the top-level Caddyfile's WebUI f
 }
 
 :8787 {
-    import /workspace/webapps/routes.caddy
+    import /workspace/.config/caddy/routes.caddy
     reverse_proxy 127.0.0.1:8789 {
         header_up X-Forwarded-Host {header.X-Forwarded-Host}
     }

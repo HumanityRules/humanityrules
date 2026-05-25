@@ -5,6 +5,17 @@ AWS_STS_PORT=9901
 AWS_BEDROCK_PORT=9902
 AWS_BEDROCK_RUNTIME_PORT=9903
 
+# Exports below trickle through runuser → nono (allow_vars) into the sandbox.
+#
+# 8789 frees 8787 for Caddy. Public traffic flows:
+#   ALB → policy-proxy:8788 (auth gate) → Caddy:8787 → user app on 4xxx
+#                                                   ↘ fallback → WebUI:8789
+export HERMES_WEBUI_PORT=8789
+
+# Prevent AWS SDKs in the sandbox from discovering the ECS task role via IMDS.
+# All AWS access flows through the aws_signer proxy on 9901-9903 instead.
+export AWS_EC2_METADATA_DISABLED=true
+
 : "${DOH_BIN_DIR:?DOH_BIN_DIR must be set}"
 : "${DOH_ROOT:?DOH_ROOT must be set}"
 : "${DOH_RUN_DIR:?DOH_RUN_DIR must be set}"
@@ -26,7 +37,6 @@ INTEGRATIONS_BROKER_CONTROL_PORT=9951
 MCP_AGGREGATOR_PORT=9952
 AWS_SIGNER_PID=""
 INTEGRATIONS_BROKER_PID=""
-GATEWAY_INTEGRATION_ENV=()
 
 die() {
     echo "FATAL: $*" >&2
@@ -107,52 +117,12 @@ start_integrations_broker() {
         --control-port "$INTEGRATIONS_BROKER_CONTROL_PORT" \
         --mcp-port "$MCP_AGGREGATOR_PORT" \
         --ca-dir "$INTEGRATIONS_BROKER_CA_DIR" \
-        --private-dir "$INTEGRATIONS_BROKER_PRIVATE_DIR" &
+        --private-dir "$INTEGRATIONS_BROKER_PRIVATE_DIR" \
+        --gateway-env-path "${HERMES_HOME}/.env" &
     INTEGRATIONS_BROKER_PID=$!
     wait_for_port "$INTEGRATIONS_BROKER_PROXY_PORT" "$INTEGRATIONS_BROKER_PID" "integrations-broker-proxy"
     wait_for_port "$INTEGRATIONS_BROKER_CONTROL_PORT" "$INTEGRATIONS_BROKER_PID" "integrations-broker-control"
     wait_for_port "$MCP_AGGREGATOR_PORT" "$INTEGRATIONS_BROKER_PID" "mcp-aggregator"
-}
-
-load_gateway_integration_env() {
-    GATEWAY_INTEGRATION_ENV=()
-    if [ -z "${INTEGRATIONS_BROKER_PID:-}" ]; then
-        return
-    fi
-
-    local env_output
-    if ! env_output=$(INTEGRATIONS_BROKER_CONTROL_PORT="$INTEGRATIONS_BROKER_CONTROL_PORT" "$HERMES_WEBUI_PYTHON" - <<'PY'
-import json
-import os
-import sys
-import urllib.request
-
-port = os.environ["INTEGRATIONS_BROKER_CONTROL_PORT"]
-try:
-    with urllib.request.urlopen(f"http://127.0.0.1:{port}/integrations", timeout=30) as response:
-        payload = json.loads(response.read().decode("utf-8"))
-except Exception as exc:
-    print(f"[supervisor] could not load gateway integration env: {exc}", file=sys.stderr)
-    raise SystemExit(0)
-
-for item in payload.get("items", []):
-    if item.get("slug") != "telegram" or item.get("status") != "connected":
-        continue
-    print("TELEGRAM_BOT_TOKEN=000000:DOH_PLACEHOLDER")
-    allowed_users = item.get("config", {}).get("allowed_users") or []
-    if allowed_users:
-        print("TELEGRAM_ALLOWED_USERS=" + ",".join(str(user_id) for user_id in allowed_users if str(user_id)))
-PY
-    ); then
-        echo "[supervisor] Failed to load gateway integration env; continuing without messaging env"
-        return
-    fi
-
-    while IFS= read -r line; do
-        if [ -n "$line" ]; then
-            GATEWAY_INTEGRATION_ENV+=("$line")
-        fi
-    done <<< "$env_output"
 }
 
 export_webui_extension_env() {
@@ -305,24 +275,19 @@ run_in_nono() {
     # into both tools: terminal resolves python/pip via PATH, execute_code's
     # project mode walks $VIRTUAL_ENV when picking the child interpreter
     # (hermes-agent tools/code_execution_tool.py:_resolve_child_python).
-    # HERMES_WEBUI_PORT=8789 frees 8787 for Caddy. Public traffic flows:
-    #   ALB → policy-proxy:8788 (auth gate) → Caddy:8787 → user app on 4xxx
-    #                                                   ↘ fallback → WebUI:8789
-    # 8788 is owned by policy-proxy (separate container, shared net ns), so
-    # WebUI cannot use it; 8787 is now owned by Caddy.
+    # Only env vars set/transformed here go through /usr/bin/env. Plain
+    # pass-throughs (AWS_DEFAULT_REGION, AWS_EC2_METADATA_DISABLED,
+    # HERMES_WEBUI_PORT, DOH_CONTROL_PLANE_URL, HERMES_WEBUI_* extension vars,
+    # ...) trickle via nono's allow_vars instead — exported earlier in this
+    # script or inherited from the ECS task definition.
     runuser -u hermeswebui -- "$DOH_BIN_DIR/nono" "${nono_args[@]}" -- /usr/bin/env \
         ANTHROPIC_BEDROCK_BASE_URL="http://127.0.0.1:${AWS_BEDROCK_RUNTIME_PORT}" \
-        AWS_DEFAULT_REGION="$AWS_DEFAULT_REGION" \
-        AWS_EC2_METADATA_DISABLED=true \
         HOME="$HERMES_WEBUI_DEFAULT_WORKSPACE" \
-        HERMES_WEBUI_PORT=8789 \
         VIRTUAL_ENV="${HERMES_WEBUI_DEFAULT_WORKSPACE}/.venv" \
         DOH_LOGIN_PATH="$doh_login_path" \
-        DOH_CONTROL_PLANE_URL="${DOH_CONTROL_PLANE_URL:-}" \
         PATH="$doh_login_path" \
         NO_PROXY=127.0.0.1,localhost \
         "${broker_env[@]}" \
-        "${GATEWAY_INTEGRATION_ENV[@]}" \
         "$@"
 }
 
@@ -339,7 +304,6 @@ main() {
     start_aws_signer
     write_child_aws_config
     start_integrations_broker
-    load_gateway_integration_env
     export_webui_extension_env
 
     # === Stage 2: prep + launch the sandbox. supervisor stays root (it owns

@@ -1,5 +1,31 @@
 # DevOpsHero Development Journal
 
+## 2026-05-24 13:49 - [Integrations] Gateway env writing + targeted process restart on vault credential changes
+
+**Conversation:** [2026-05-24-1351-46f87daa.md](conversations/2026-05-24-1351-46f87daa.md)
+
+The Hermes gateway is the long-running process that activates messaging-platform bindings (Telegram today, more later) by reading env vars at startup. Until this change, picking up a newly-saved Telegram token required a full container redeploy: the user pasted creds into the WebUI modal, the broker stored them in the DOH vault, but nothing wrote them into `${HERMES_HOME}/.env` and nothing restarted the gateway. This session implemented the in-place reconnect loop end-to-end, per `docs/gateway_env_and_restart_design.md`.
+
+**The integration model: vault credentials are projected into env vars by the broker, not consumed live.** Hermes' gateway only reads `.env` once at startup — no live IPC with the broker, no token rotation hot-path. So the broker's job on a successful vault setup is twofold: (1) rewrite `.env` so the next startup sees the right values, (2) trigger that next startup. We considered putting the rewrite logic on the live token-store hook, but the proxy 401-evict hot-path also calls `_TokenStore.invalidate` and we absolutely don't want every transient 401 to bounce the gateway. Solution: hook on the **outer** `TlsInterceptRuntime.invalidate` wrapper (only user-initiated routes go through it); inner-store invalidate stays silent. Tests pin both paths.
+
+**Key points:**
+
+- **`GatewayEnvBinding` discriminated-union extension to `VaultUrlRewrite`.** Each vault provider declares its env-var bindings as `(env_var, source, list_separator?)` tuples. `source="placeholder"` projects the URL-rewrite placeholder (e.g. Telegram's bot token); other sources name a key in the connected provider's config dict (e.g. `allowed_users`). `list_separator` lets list-shaped configs flatten to `,`-joined env var values. This keeps "what env vars does provider X feed the gateway?" in one place — the provider's spec — instead of scattered across supervisor.sh shell snippets. The old `load_gateway_integration_env` bash+Python heredoc that hardcoded telegram is gone.
+
+- **Sentinel-block managed `.env` rewrite.** Verified Hermes only reads `${HERMES_HOME}/.env` (single file — `get_env_path()` returns `get_hermes_home() / ".env"` and there's no other reader). That validated the sentinel approach: `# === DOH-MANAGED-INTEGRATIONS BEGIN/END ===` brackets the broker's section, and `write_gateway_env_file` strips/replaces atomically via tempfile + `os.replace()`. Lines outside the block survive Hermes' own `save_env_value`. Empty block → sentinels stripped entirely (clean disconnect state).
+
+- **Process-compose REST restart, not signal kill.** `system.gateway` is now a process-compose entry (seeded by a new `process_compose_seed.py` helper before `process-compose up`). The broker calls `POST /process/restart/system.gateway` — process-compose handles graceful TERM + restart in-process. No supervisor PID juggling, no SIGTERM bash. The `system.` prefix on slugs is reserved (validation lives in `webapps_lib.validate_slug`) so user webapps can't collide with managed processes.
+
+- **Holder-dict pattern to break a chicken-and-egg.** The `on_user_invalidate` hook needs a reference to the runtime to call `refresh_all()` and `gateway_env_snapshot()`, but the runtime constructor takes the hook as a param. Resolved with `tls_runtime_holder = {}`; the closure reads `tls_runtime_holder["runtime"]` lazily. Build hook → build runtime with hook → set `holder["runtime"] = runtime`. Bootstrapping then calls `_bootstrap_gateway_env` (one-shot refresh + render) BEFORE opening the control port — supervisor's `wait_for_port` is the natural sync barrier, so by the time anything else can hit the broker, `.env` is already current.
+
+- **502 surface for restart failures.** Broker routes catch `RuntimeError` from the hook and return `{ok: False, error: ...}`. The modal's `invalidateBrokerTlsCache` no longer swallows broker errors — network errors stay swallowed (the user already saved successfully) but 5xx with a body now throws so the success-toast can switch to "Saved, but gateway restart failed — please redeploy." This was a deliberate tradeoff: the save itself succeeded (token is in the vault), so the modal's primary state is success, but the user needs to know the gateway hasn't picked up yet.
+
+- **Webui.sh seed-functions split.** Initial pass had `seed_process_compose_layout` doing both `mkdir webapps/{projects,logs}` and `mkdir $DOH_RUN_DIR` plus writing the YAML. Reviewer flagged: separation of concerns, and `$DOH_RUN_DIR` doesn't need its own mkdir — it's owned outside this script. Split into `seed_webapps_layout` (webapps dirs + `routes.caddy`) and `seed_process_compose_layout` (just the YAML), no `$DOH_RUN_DIR` mkdir.
+
+- **Naming correction caught early.** Initial framing called this "any URL-rewrite provider" — but that's the implementation mechanism, not the abstraction. Corrected to "any gateway provider" since future gateway integrations may not use URL rewrites at all (e.g. OAuth-bound providers that still need to feed env vars to the gateway process).
+
+- **Test coverage.** 9 new cases across `TestGatewayEnvRender` (rendering: connected/disconnected vault, OAuth contributes nothing, missing list config skips that binding only, sentinel preservation/stripping) and `TestGatewayEnvHookIntegration` (runtime-level invalidate fires hook with correct slug; inner store invalidate doesn't fire — the hot-path bypass guard; `_slug_requires_restart` selectivity). All 37 tests in the broker suite pass.
+
 ## 2026-05-20 15:05 - [Onboarding] WorkOS as a second policy-proxy provider, plus control-plane invites
 
 **Conversation:** [2026-05-20-1505-0278fc35.md](conversations/2026-05-20-1505-0278fc35.md)
