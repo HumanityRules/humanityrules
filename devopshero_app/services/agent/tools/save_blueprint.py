@@ -207,7 +207,7 @@ async def save_blueprint(
     if existing_blueprint_id:
         blueprint = await DeploymentBlueprint.objects.select_related(
             "app__repository", "environment",
-        ).aget(id=existing_blueprint_id)
+        ).aget(id=existing_blueprint_id, app__workspace=workspace)
 
         if blueprint.status not in (DeploymentBlueprint.Status.DRAFT, DeploymentBlueprint.Status.FAILED):
             raise ValueError(
@@ -263,14 +263,16 @@ async def save_blueprint(
             )
 
         from devopshero_app.models import App
-        app = await App.objects.select_related("repository").aget(id=conversation.context_app_id)
+        app = await App.objects.select_related("repository").aget(
+            id=conversation.context_app_id, workspace=workspace,
+        )
         open_blueprint_statuses = [
             DeploymentBlueprint.Status.DRAFT,
             DeploymentBlueprint.Status.FAILED,
             DeploymentBlueprint.Status.DEPLOYING,
         ]
         open_blueprint = await DeploymentBlueprint.objects.filter(
-            app_id=conversation.context_app_id,
+            app=app,
             status__in=open_blueprint_statuses,
         ).order_by("-created_at").afirst()
         if open_blueprint:

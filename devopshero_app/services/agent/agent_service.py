@@ -176,6 +176,7 @@ class MainAgent:
         if conversation.context_repository_id:
             repository = await Repository.objects.select_related("integration").aget(
                 id=conversation.context_repository_id,
+                organization=conversation.organization,
             )
             await asyncio.to_thread(
                 repo_service.clone_repository,
@@ -680,15 +681,24 @@ async def _maybe_generate_title(conversation: Conversation, user_message: str, a
         aws_account_name = None
 
         if conversation.context_workspace_id:
-            ws = await Workspace.objects.only("name").aget(id=conversation.context_workspace_id)
+            ws = await Workspace.objects.only("name").aget(
+                id=conversation.context_workspace_id,
+                organization=conversation.organization,
+            )
             workspace_name = ws.name
 
         if conversation.context_repository_id:
-            repo = await Repository.objects.only("full_name").aget(id=conversation.context_repository_id)
+            repo = await Repository.objects.only("full_name").aget(
+                id=conversation.context_repository_id,
+                organization=conversation.organization,
+            )
             repo_name = repo.full_name
 
         if conversation.context_aws_account_id:
-            account = await AWSAccount.objects.only("name").aget(id=conversation.context_aws_account_id)
+            account = await AWSAccount.objects.only("name").aget(
+                id=conversation.context_aws_account_id,
+                organization=conversation.organization,
+            )
             aws_account_name = account.name
 
         # Generate title in thread (anthropic client is sync)
