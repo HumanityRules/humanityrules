@@ -137,10 +137,14 @@ class RefreshResult:
 
 @dataclass
 class _TokenCacheEntry:
-    """One working access_token plus the metadata we hand to the gateway/UI.
+    """An access_token we minted successfully, plus the metadata we hand to
+    the gateway/UI.
 
-    The cache contains entries ONLY for connected providers. A missing entry
-    means "not connected".
+    The cache only ever gains entries via a successful refresh, so a missing
+    entry means "not connected". An entry that's been sitting in the cache
+    long enough can passively expire (real time crossing `expires_at`); read
+    sites that surface "is this connected?" must filter on `is_usable` rather
+    than just presence — see `_live_entry`.
     """
 
     access_token: str
@@ -398,12 +402,30 @@ def _cache_entry_from_connected_result(result: RefreshResult, now: float) -> _To
     )
 
 
+def _live_entry(snapshot: dict[str, _TokenCacheEntry], slug: str, now: float) -> _TokenCacheEntry | None:
+    """Return the cached entry for `slug` only if its token has not expired.
+
+    Encapsulates the contract that "the cache may carry an expired entry
+    until something prunes it, so don't treat presence as connected".
+    Every read site that wants to surface or act on cache state goes
+    through this so the answer matches what the proxy would actually
+    serve.
+    """
+    entry = snapshot.get(slug)
+    if entry is None:
+        return None
+    if not entry.is_usable(now=now):
+        return None
+    return entry
+
+
 def _status_item_for_provider(provider: TlsProviderSpec, entry: _TokenCacheEntry | None) -> dict:
     """Serialize one TLS-intercept provider for the unified integrations payload.
 
-    Connected = we have a cache entry; not_connected = we don't. There's no
-    third state on this path: transient errors during refresh leave the cache
-    untouched, so the previous entry (if any) keeps representing the truth.
+    Connected = caller passed a live entry; not_connected = they didn't. The
+    caller is expected to have filtered out expired entries (typically via
+    `_live_entry`), so this function treats `entry is None` as the sole
+    signal for "not connected".
     """
     method = provider.credential_method
     is_connected = entry is not None
@@ -486,12 +508,20 @@ class _TokenStore:
 
         Cache writes happen on three paths: boot bootstrap, the proxy hot path
         (`token_for_host` near-expiry refresh), and explicit user invalidate.
-        Status reads are a pure projection of whatever those paths produced.
+        Status reads are a pure projection of whatever those paths produced,
+        filtered to entries that are still usable — a cached token can age
+        past `expires_at` between writes (e.g. a transient refresh-ahead
+        failure followed by no further activity), and we must not report
+        "connected" for a token the proxy can no longer serve.
         """
         async with self._cache_lock:
             snapshot = dict(self._cache)
+        now = time.monotonic()
         return [
-            _status_item_for_provider(provider=provider, entry=snapshot.get(provider.slug))
+            _status_item_for_provider(
+                provider=provider,
+                entry=_live_entry(snapshot=snapshot, slug=provider.slug, now=now),
+            )
             for provider in self._providers.values()
         ]
 
@@ -515,11 +545,18 @@ class _TokenStore:
             if entry is not None and entry.is_fresh(now=time.monotonic(), refresh_lead_seconds=self._refresh_lead_seconds):
                 return entry
             await self._refresh_provider(provider=provider)
+            now = time.monotonic()
             async with self._cache_lock:
                 entry = self._cache.get(provider.slug)
+                if entry is not None and not entry.is_usable(now=now):
+                    # Cache hygiene: a transient refresh leaves the prior
+                    # entry intact, but if even that prior entry is now
+                    # expired it can't help anyone. Drop it so subsequent
+                    # status reads see a consistent "not connected" without
+                    # waiting for the next near-expiry refresh-ahead.
+                    self._cache.pop(provider.slug, None)
+                    entry = None
             if entry is None:
-                return None
-            if not entry.is_usable(now=time.monotonic()):
                 return None
             return entry
 
@@ -631,16 +668,20 @@ class TlsInterceptRuntime:
     async def gateway_env_snapshot(self) -> list[tuple[TlsProviderSpec, dict]]:
         """Pair every connected provider with its cached config for env rendering.
 
-        Returns `(provider, config)` tuples for providers currently in the
-        cache (cache presence == connected). Disconnected providers are
-        absent from the result. The broker calls `refresh_all()` first when
-        it wants the cache aligned with DOH state.
+        Returns `(provider, config)` tuples for providers whose cached token
+        is still usable. An entry whose `expires_at` has slipped into the
+        past gets filtered out so we don't bake stale credentials into the
+        gateway env — matching what the proxy hot path would actually serve.
+        The broker calls `refresh_all()` first when it wants the cache
+        aligned with DOH state.
         """
         async with self._token_store._cache_lock:
             snapshot = dict(self._token_store._cache)
+        now = time.monotonic()
         return [
             (self._token_store._providers[slug], entry.config)
             for slug, entry in snapshot.items()
+            if entry.is_usable(now=now)
         ]
 
 

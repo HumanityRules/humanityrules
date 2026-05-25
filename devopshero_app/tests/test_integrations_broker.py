@@ -470,6 +470,77 @@ class TestControlIntegrations(unittest.IsolatedAsyncioTestCase):
 
         self.assertIsNone(token)
 
+    async def test_status_items_treat_expired_entry_as_not_connected(self) -> None:
+        """The UI must say "not connected" for an entry that's outlived its
+        token, even if no refresh has run to prune the cache yet.
+
+        Status reads don't go through `_ensure_fresh`, so without filtering
+        on `is_usable` an expired entry would still surface as connected —
+        a lie relative to what the proxy hot path would actually serve.
+        """
+        import time
+        store = self.tls_runtime._token_store
+        store._cache["google"] = broker.tls_intercept._TokenCacheEntry(
+            access_token="EXPIRED",
+            expires_at=time.monotonic() - 10,
+            last_refreshed_at="2026-05-25T22:00:00+00:00",
+            config={}, metadata={},
+        )
+
+        items_by_slug = {item["slug"]: item for item in await store.status_items()}
+        self.assertEqual(items_by_slug["google"]["status"], "not_connected")
+
+    async def test_gateway_env_snapshot_excludes_expired_entries(self) -> None:
+        """An expired entry must not contribute env bindings to the gateway —
+        we'd be baking in credentials the proxy can no longer mint a token
+        for, and the rendered env would lie to platform tools.
+        """
+        import time
+        store = self.tls_runtime._token_store
+        store._cache["telegram"] = broker.tls_intercept._TokenCacheEntry(
+            access_token="EXPIRED",
+            expires_at=time.monotonic() - 10,
+            last_refreshed_at="2026-05-25T22:00:00+00:00",
+            config={"bot_token": "STALE"},
+            metadata={},
+        )
+
+        snapshot = await self.tls_runtime.gateway_env_snapshot()
+        slugs = [provider.slug for provider, _config in snapshot]
+        self.assertNotIn("telegram", slugs)
+
+    async def test_ensure_fresh_prunes_expired_entry_after_transient(self) -> None:
+        """Cache hygiene: when a refresh-ahead transient lands on an entry
+        that has aged past expires_at, `_ensure_fresh` should drop it rather
+        than leave a zombie entry sitting in the cache.
+
+        Read sites already filter via `_live_entry`, so this is purely about
+        keeping the cache representation honest for consumers that iterate
+        raw entries (e.g. gateway env rendering, debug introspection).
+        """
+        import time
+        store = self.tls_runtime._token_store
+        store._cache["google"] = broker.tls_intercept._TokenCacheEntry(
+            access_token="EXPIRED",
+            expires_at=time.monotonic() - 10,
+            last_refreshed_at="2026-05-25T22:00:00+00:00",
+            config={}, metadata={},
+        )
+
+        provider = broker.tls_intercept.TLS_INTERCEPT_PROVIDERS["google"]
+        with patch.object(
+            broker.tls_intercept,
+            "fetch_provider_token",
+            return_value=broker.tls_intercept.RefreshResult(
+                outcome=broker.tls_intercept.REFRESH_OUTCOME_TRANSIENT,
+                access_token=None, expires_in=None, config={}, metadata={},
+            ),
+        ):
+            entry = await store._ensure_fresh(provider=provider)
+
+        self.assertIsNone(entry)
+        self.assertNotIn("google", store._cache)
+
     async def test_invalidate_endpoint_drops_cache(self) -> None:
         """POST /integrations/invalidate_tls_cache evicts every cached entry."""
         from starlette.testclient import TestClient
