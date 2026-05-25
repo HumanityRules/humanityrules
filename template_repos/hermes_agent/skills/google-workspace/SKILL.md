@@ -103,4 +103,4 @@ All commands return JSON. Parse with `jq` or read directly. Key fields:
 - **503 "google integration not connected in DOH"** — the user hasn't connected Google yet (or disconnected it). Ask them to connect from the Integrations pane.
 - **`HttpError 403: Insufficient Permission`** — missing API scope. User needs to reconnect with the needed scopes.
 - **`HttpError 403: Access Not Configured`** — Google API not enabled. Surface to the user; they need to get it enabled.
-- **`invalid_grant`** — refresh token revoked at Google's end. The broker will report `revoked` status; user needs to reconnect.
+- **`invalid_grant`** — refresh token revoked at Google's end. The Integrations pane will show Google as not connected; user needs to reconnect.

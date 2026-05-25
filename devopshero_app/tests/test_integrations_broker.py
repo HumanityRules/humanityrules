@@ -282,7 +282,7 @@ class TestControlIntegrations(unittest.IsolatedAsyncioTestCase):
             broker.tls_intercept,
             "fetch_provider_token",
             return_value=broker.tls_intercept.RefreshResult(
-                outcome=broker.tls_intercept.REFRESH_OUTCOME_CONNECTED,
+                outcome=broker.tls_intercept.REFRESH_OUTCOME_HAS_TOKEN,
                 access_token="fresh-token",
                 expires_in=3600,
                 config={},
@@ -334,7 +334,7 @@ class TestControlIntegrations(unittest.IsolatedAsyncioTestCase):
         """A transient refresh outcome must not write a sentinel into an empty cache."""
         responses = [
             broker.tls_intercept.RefreshResult(
-                outcome=broker.tls_intercept.REFRESH_OUTCOME_CONNECTED,
+                outcome=broker.tls_intercept.REFRESH_OUTCOME_HAS_TOKEN,
                 access_token="T1", expires_in=3600, config={}, metadata={},
             ),
             broker.tls_intercept.RefreshResult(
@@ -406,7 +406,7 @@ class TestControlIntegrations(unittest.IsolatedAsyncioTestCase):
             fetch_calls.append("first")
             delayed.wait(timeout=5)
             return broker.tls_intercept.RefreshResult(
-                outcome=broker.tls_intercept.REFRESH_OUTCOME_CONNECTED,
+                outcome=broker.tls_intercept.REFRESH_OUTCOME_HAS_TOKEN,
                 access_token="STALE-IN-FLIGHT", expires_in=3600,
                 config={}, metadata={},
             )
@@ -488,7 +488,7 @@ class TestControlIntegrations(unittest.IsolatedAsyncioTestCase):
             broker.tls_intercept,
             "fetch_provider_token",
             return_value=broker.tls_intercept.RefreshResult(
-                outcome=broker.tls_intercept.REFRESH_OUTCOME_CONNECTED,
+                outcome=broker.tls_intercept.REFRESH_OUTCOME_HAS_TOKEN,
                 access_token="fresh-token",
                 expires_in=3600,
                 config={},
@@ -609,7 +609,7 @@ class TestLazyTokenForHost(unittest.IsolatedAsyncioTestCase):
             broker.tls_intercept,
             "fetch_provider_token",
             return_value=broker.tls_intercept.RefreshResult(
-                outcome=broker.tls_intercept.REFRESH_OUTCOME_CONNECTED,
+                outcome=broker.tls_intercept.REFRESH_OUTCOME_HAS_TOKEN,
                 access_token="T1",
                 expires_in=3600,
                 config={},
@@ -623,14 +623,14 @@ class TestLazyTokenForHost(unittest.IsolatedAsyncioTestCase):
     async def test_refresh_when_within_lead_window(self) -> None:
         responses = [
             broker.tls_intercept.RefreshResult(
-                outcome=broker.tls_intercept.REFRESH_OUTCOME_CONNECTED,
+                outcome=broker.tls_intercept.REFRESH_OUTCOME_HAS_TOKEN,
                 access_token="T1",
                 expires_in=3600,
                 config={},
                 metadata={},
             ),
             broker.tls_intercept.RefreshResult(
-                outcome=broker.tls_intercept.REFRESH_OUTCOME_CONNECTED,
+                outcome=broker.tls_intercept.REFRESH_OUTCOME_HAS_TOKEN,
                 access_token="T2",
                 expires_in=3600,
                 config={},
@@ -713,7 +713,7 @@ class TestFetchProviderTokenClassification(unittest.TestCase):
 
     def test_200_is_connected(self) -> None:
         out = self._run(status=200, payload={"access_token": "abc", "expires_in": 3600})
-        self.assertEqual(out.outcome, broker.tls_intercept.REFRESH_OUTCOME_CONNECTED)
+        self.assertEqual(out.outcome, broker.tls_intercept.REFRESH_OUTCOME_HAS_TOKEN)
         self.assertEqual(out.access_token, "abc")
         self.assertEqual(out.expires_in, 3600)
 
@@ -899,7 +899,7 @@ class TestGatewayEnvHookIntegration(unittest.IsolatedAsyncioTestCase):
             broker.tls_intercept,
             "fetch_provider_token",
             return_value=broker.tls_intercept.RefreshResult(
-                outcome=broker.tls_intercept.REFRESH_OUTCOME_CONNECTED,
+                outcome=broker.tls_intercept.REFRESH_OUTCOME_HAS_TOKEN,
                 access_token="t", expires_in=3600, config={}, metadata={},
             ),
         ) as fetch_mock:

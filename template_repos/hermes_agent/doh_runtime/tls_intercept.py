@@ -15,7 +15,7 @@ import urllib.error
 import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
-from typing import ClassVar
+from typing import ClassVar, Literal
 
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
@@ -110,15 +110,16 @@ class DohRefreshConfig:
     app_slug: str
 
 
-# DOH's per-provider token endpoint can return one of three logical outcomes:
-# - "connected": a fresh access_token (with expiry/config/metadata).
-# - "absent":    the user is not connected (404), or DOH just deleted the row
-#                after the provider revoked the refresh_token (410). The two
-#                are indistinguishable for the broker — both mean "no token
-#                available, the user must (re)connect".
-# - "transient": network error, 5xx, or any other failure we should not let
-#                overwrite a working cache entry.
-REFRESH_OUTCOME_CONNECTED = "connected"
+# Internal tags from DOH's per-provider token endpoint (distinct from browser
+# STATUS_* strings). DOH can return:
+# - has_token:  a fresh access_token (with expiry/config/metadata).
+# - absent:     user not connected (404), or DOH deleted the row after the
+#               provider revoked the refresh_token (410).
+# - transient:  network error, 5xx, or other failure that must not overwrite
+#               a working cache entry.
+RefreshOutcome = Literal["has_token", "absent", "transient"]
+
+REFRESH_OUTCOME_HAS_TOKEN = "has_token"
 REFRESH_OUTCOME_ABSENT = "absent"
 REFRESH_OUTCOME_TRANSIENT = "transient"
 
@@ -127,7 +128,7 @@ REFRESH_OUTCOME_TRANSIENT = "transient"
 class RefreshResult:
     """Outcome from DOH's per-provider token endpoint."""
 
-    outcome: str
+    outcome: RefreshOutcome
     access_token: str | None
     expires_in: int | None
     config: dict
@@ -281,7 +282,7 @@ def fetch_provider_token(refresh_config: DohRefreshConfig, provider: TlsProvider
 
     if status == 200:
         return RefreshResult(
-            outcome=REFRESH_OUTCOME_CONNECTED,
+            outcome=REFRESH_OUTCOME_HAS_TOKEN,
             access_token=payload["access_token"],
             expires_in=int(payload.get("expires_in", 0)),
             config=payload.get("config", {}),
@@ -383,7 +384,7 @@ def write_gateway_env_file(env_path: Path, managed_block: str) -> None:
 def _cache_entry_from_connected_result(result: RefreshResult, now: float) -> _TokenCacheEntry:
     """Build a cache entry from a connected refresh result.
 
-    Caller is responsible for only invoking this on `REFRESH_OUTCOME_CONNECTED`
+    Caller is responsible for only invoking this on `REFRESH_OUTCOME_HAS_TOKEN`
     results — absent/transient outcomes don't have a token to cache.
     """
     if result.expires_in is None:
@@ -537,7 +538,7 @@ class _TokenStore:
             refresh_config=self._refresh_config,
             provider=provider,
         )
-        if result.outcome == REFRESH_OUTCOME_CONNECTED:
+        if result.outcome == REFRESH_OUTCOME_HAS_TOKEN:
             entry = _cache_entry_from_connected_result(result=result, now=time.monotonic())
             async with self._cache_lock:
                 self._cache[provider.slug] = entry
