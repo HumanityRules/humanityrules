@@ -10,6 +10,7 @@ from devopshero_app.models import (
     Environment,
     IntegrationUserCredential,
     Organization,
+    OrganizationMembership,
     Repository,
     ResourceTag,
     User,
@@ -43,6 +44,9 @@ class _DisconnectTestBase(TestCase):
             email="vmendi@example.com",
             password="pw",
             current_organization=self.org,
+        )
+        OrganizationMembership.objects.create(
+            user=self.user, organization=self.org, role=OrganizationMembership.Role.MEMBER,
         )
         self.client.force_login(self.user)
         self.repository = Repository.objects.create(
@@ -125,6 +129,29 @@ class TestDisconnectRdValidation(_DisconnectTestBase):
     def test_bad_rd_host_returns_400(self) -> None:
         response = self.client.get(
             "/integrations/github/disconnect/?rd=https://attacker.example.net/"
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertTrue(
+            IntegrationUserCredential.objects.filter(id=self.integration.id).exists()
+        )
+
+    def test_rd_pointing_at_stranger_org_env_returns_400(self) -> None:
+        # An env in a foreign org happens to use a hosted zone the rd suffix-matches.
+        # The auth'd user is not a member of that org — disconnect must refuse.
+        other_org = Organization.objects.create(name="OtherOrg", slug="otherorg")
+        other_aws = AWSAccount.objects.create(
+            organization=other_org, name="OtherProd", aws_account_id="999988887777",
+        )
+        Environment.objects.create(
+            aws_account=other_aws,
+            name="OtherStaging",
+            slug="other-staging",
+            aws_region="us-east-1",
+            shared_alb_hosted_zone="stranger.example.com",
+        )
+
+        response = self.client.get(
+            "/integrations/github/disconnect/?rd=https://hermes.stranger.example.com/&app_slug=hermes"
         )
         self.assertEqual(response.status_code, 400)
         self.assertTrue(

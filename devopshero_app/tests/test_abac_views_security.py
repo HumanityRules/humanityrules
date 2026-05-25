@@ -5,6 +5,7 @@ Permissions editor (approve) requires environment:approve.
 """
 
 import json
+from unittest.mock import patch
 
 from django.test import TestCase
 
@@ -12,6 +13,7 @@ from devopshero_app.models import (
     AWSAccount,
     App,
     AppPermissionRequest,
+    Conversation,
     Environment,
     Group,
     GroupAttribute,
@@ -150,6 +152,42 @@ class TestSecuritySettingsEndpoints(TestCase):
         )
         self.assertEqual(response.status_code, 403)
 
+    # --- Cross-org user_id regression (must not leak across tenants) ---
+
+    def test_people_detail_404_for_stranger_user_id(self) -> None:
+        # A user from another org is not visible — even to an admin of *this* org.
+        other_org = Organization.objects.create(name="Other Org", slug="other-org-people")
+        stranger = User.objects.create_user(
+            username="stranger", password="x", current_organization=other_org,
+        )
+        OrganizationMembership.objects.create(
+            organization=other_org, user=stranger, role=OrganizationMembership.Role.MEMBER,
+        )
+
+        self.client.force_login(self.admin_user)
+        response = self.client.get(f"/security/people/{stranger.id}/", **HTMX)
+        self.assertEqual(response.status_code, 404)
+
+    def test_people_attribute_add_404_for_stranger_user_id(self) -> None:
+        other_org = Organization.objects.create(name="Other Org", slug="other-org-attr")
+        stranger = User.objects.create_user(
+            username="stranger-attr", password="x", current_organization=other_org,
+        )
+        OrganizationMembership.objects.create(
+            organization=other_org, user=stranger, role=OrganizationMembership.Role.MEMBER,
+        )
+
+        self.client.force_login(self.admin_user)
+        response = self.client.post(
+            f"/security/people/{stranger.id}/attributes/add/",
+            {"key": "k", "value": "v"},
+        )
+        self.assertEqual(response.status_code, 404)
+        # And no attribute leaked into our org against the stranger.
+        self.assertFalse(
+            IdentityAttribute.objects.filter(user=stranger).exists()
+        )
+
     # --- Groups List, Create, Detail, Delete ---
 
     def test_admin_can_access_groups_list(self) -> None:
@@ -255,6 +293,27 @@ class TestSecuritySettingsEndpoints(TestCase):
             f"/security/groups/{self.group.id}/members/{self.group_membership.id}/remove/",
         )
         self.assertEqual(response.status_code, 403)
+
+    def test_group_member_add_404_for_stranger_user_id(self) -> None:
+        # Admin tries to add a stranger (different org's user) to a group in this org.
+        other_org = Organization.objects.create(name="Other Org", slug="other-org-gm")
+        stranger = User.objects.create_user(
+            username="stranger-gm", password="x", current_organization=other_org,
+        )
+        OrganizationMembership.objects.create(
+            organization=other_org, user=stranger, role=OrganizationMembership.Role.MEMBER,
+        )
+
+        self.client.force_login(self.admin_user)
+        response = self.client.post(
+            f"/security/groups/{self.group.id}/members/add/",
+            {"user_id": str(stranger.id)},
+        )
+        self.assertEqual(response.status_code, 404)
+        # And no membership row leaked.
+        self.assertFalse(
+            GroupMembership.objects.filter(group=self.group, user=stranger).exists()
+        )
 
     # --- Policies List, Create, Detail, Delete ---
 
@@ -369,3 +428,36 @@ class TestPermissionsEditorEndpoints(TestCase):
         self.client.force_login(self.non_approver_user)
         response = self.client.post(f"/security/permissions/{self.apr.id}/apply/")
         self.assertEqual(response.status_code, 403)
+
+    def test_permissions_editor_uses_per_user_conversations(self) -> None:
+        # Two users from the same org open the editor for the same app+env.
+        # Each must get their own Conversation — the second visitor must NOT
+        # inherit the first visitor's LLM chat history.
+        editor_url = (
+            f"/security/permissions/editor/?context_app={self.app.slug}"
+            f"&context_environment={self.env.slug}"
+        )
+
+        # Mock AWS calls so the view doesn't try to assume roles during tests.
+        with patch(
+            "devopshero_app.services.permissions.iam_utils.read_app_permissions_policy",
+            return_value=[],
+        ), patch(
+            "devopshero_app.services.permissions.iam_utils.list_resources_for_services",
+            return_value={},
+        ):
+            self.client.force_login(self.approver_user)
+            response_a = self.client.get(editor_url, **HTMX)
+            self.assertEqual(response_a.status_code, 200)
+
+            self.client.force_login(self.non_approver_user)
+            response_b = self.client.get(editor_url, **HTMX)
+            self.assertEqual(response_b.status_code, 200)
+
+        conversations = Conversation.objects.filter(
+            context_app_permission_request__app=self.app,
+            context_app_permission_request__environment=self.env,
+        )
+        self.assertEqual(conversations.count(), 2)
+        user_ids = set(conversations.values_list("user_id", flat=True))
+        self.assertEqual(user_ids, {self.approver_user.id, self.non_approver_user.id})

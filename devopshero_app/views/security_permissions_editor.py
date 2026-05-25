@@ -191,6 +191,7 @@ def security_permissions_editor(request: HttpRequest) -> HttpResponse:
 
     conversation = models.Conversation.objects.filter(
         context_app_permission_request=app_permission_request,
+        user=request.user,
     ).first()
     if not conversation:
         conversation = agent_service.create_conversation(

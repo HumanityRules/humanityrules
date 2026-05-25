@@ -29,7 +29,7 @@ from django.http import HttpRequest, HttpResponse, HttpResponseBadRequest
 from django.shortcuts import redirect
 from django.utils import timezone
 
-from devopshero_app.models import App, Environment, IntegrationUserCredential, ResourceTag
+from devopshero_app.models import App, Environment, IntegrationUserCredential, ResourceTag, User
 
 
 logger = logging.getLogger(__name__)
@@ -41,15 +41,24 @@ GITHUB_API_BASE = "https://api.github.com"
 GITHUB_TOKEN_EXCHANGE_TIMEOUT_SECONDS = 30
 
 
-def _resolve_env_by_rd(rd: str) -> Environment | None:
-    """Return the Environment whose shared_alb_hosted_zone suffixes rd's host, or None."""
+def _resolve_env_by_rd(rd: str, user: User) -> Environment | None:
+    """Return the Environment whose shared_alb_hosted_zone suffixes rd's host, or None.
+
+    Scoped to envs in orgs *user* is a member of.
+    """
     if not rd:
         return None
     parsed = urlparse(rd)
     if parsed.scheme not in ("http", "https") or not parsed.hostname:
         return None
     host = parsed.hostname.lower()
-    for env in Environment.objects.exclude(shared_alb_hosted_zone="").only("id", "slug", "shared_alb_hosted_zone"):
+    candidates = (
+        Environment.objects
+        .exclude(shared_alb_hosted_zone="")
+        .filter(aws_account__organization__memberships__user=user)
+        .only("id", "slug", "shared_alb_hosted_zone")
+    )
+    for env in candidates:
         zone = env.shared_alb_hosted_zone.lower()
         if host == zone or host.endswith("." + zone):
             return env
@@ -89,7 +98,7 @@ def _redirect_uri(request: HttpRequest) -> str:
 def integrations_github_oauth_start(request: HttpRequest) -> HttpResponse:
     """Validate `rd`, stash state, redirect to GitHub's OAuth consent screen."""
     rd = request.GET.get("rd", "")
-    env = _resolve_env_by_rd(rd=rd)
+    env = _resolve_env_by_rd(rd=rd, user=request.user)
     if env is None:
         return HttpResponseBadRequest("Invalid or unknown rd")
     app_slug = _resolve_owned_app_slug(
@@ -265,7 +274,7 @@ def _revoke_github_grant(refresh_token: str) -> None:
 def integrations_github_oauth_disconnect(request: HttpRequest) -> HttpResponse:
     """Disconnect the authenticated user's GitHub grant for the env resolved from `rd`."""
     rd = request.GET.get("rd", "")
-    env = _resolve_env_by_rd(rd=rd)
+    env = _resolve_env_by_rd(rd=rd, user=request.user)
     if env is None:
         return HttpResponseBadRequest("Invalid or unknown rd")
 
