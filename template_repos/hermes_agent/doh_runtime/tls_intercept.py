@@ -27,22 +27,13 @@ logger = logging.getLogger("tls_intercept")
 
 REFRESH_LEAD_SECONDS = 300
 
+# Browser-facing status strings rendered by the WebUI extension.
 STATUS_CONNECTED = "connected"
 STATUS_NOT_CONNECTED = "not_connected"
-STATUS_REVOKED = "revoked"
-STATUS_TRANSIENT_ERROR = "transient_error"
 
 # Authorization header encodings used by OAuthHeader providers.
 AUTH_FORMAT_BEARER = "bearer"
 AUTH_FORMAT_BASIC_X_ACCESS_TOKEN = "basic_x_access_token"
-
-_OUTCOMES = {
-    200: STATUS_CONNECTED,
-    404: STATUS_NOT_CONNECTED,
-    410: STATUS_REVOKED,
-    401: STATUS_TRANSIENT_ERROR,
-    500: STATUS_TRANSIENT_ERROR,
-}
 
 
 @dataclass(frozen=True)
@@ -119,11 +110,24 @@ class DohRefreshConfig:
     app_slug: str
 
 
+# DOH's per-provider token endpoint can return one of three logical outcomes:
+# - "connected": a fresh access_token (with expiry/config/metadata).
+# - "absent":    the user is not connected (404), or DOH just deleted the row
+#                after the provider revoked the refresh_token (410). The two
+#                are indistinguishable for the broker — both mean "no token
+#                available, the user must (re)connect".
+# - "transient": network error, 5xx, or any other failure we should not let
+#                overwrite a working cache entry.
+REFRESH_OUTCOME_CONNECTED = "connected"
+REFRESH_OUTCOME_ABSENT = "absent"
+REFRESH_OUTCOME_TRANSIENT = "transient"
+
+
 @dataclass(frozen=True)
 class RefreshResult:
     """Outcome from DOH's per-provider token endpoint."""
 
-    status: str
+    outcome: str
     access_token: str | None
     expires_in: int | None
     config: dict
@@ -132,22 +136,32 @@ class RefreshResult:
 
 @dataclass
 class _TokenCacheEntry:
-    """Cached token state for one TLS-intercept provider."""
+    """One working access_token plus the metadata we hand to the gateway/UI.
 
-    status: str
-    access_token: str | None
-    expires_at: float | None
-    last_refreshed_at: str | None
+    The cache contains entries ONLY for connected providers. A missing entry
+    means "not connected".
+    """
+
+    access_token: str
+    expires_at: float
+    last_refreshed_at: str
     config: dict
     metadata: dict
 
     def is_fresh(self, now: float, refresh_lead_seconds: int) -> bool:
-        """Return true when the cached token is not close to expiry."""
-        if self.status != STATUS_CONNECTED:
-            return False
-        if self.expires_at is None:
-            return False
+        """Return true when the token has enough life left to skip refresh."""
         return self.expires_at - now > refresh_lead_seconds
+
+    def is_usable(self, now: float) -> bool:
+        """Return true when the token has not yet expired.
+
+        Distinct from `is_fresh`: a token can be unfresh (inside the lead
+        window, so we'd prefer to refresh) yet still usable (expires_at is
+        in the future). The proxy hot path serves usable tokens when a
+        refresh-ahead transiently failed — better than failing the
+        sandbox's request because DOH had a hiccup.
+        """
+        return self.expires_at > now
 
 
 TLS_INTERCEPT_PROVIDER_SPECS = (
@@ -230,7 +244,12 @@ HOST_TO_TLS_PROVIDER = build_host_to_provider(providers=TLS_INTERCEPT_PROVIDERS)
 
 
 def fetch_provider_token(refresh_config: DohRefreshConfig, provider: TlsProviderSpec) -> RefreshResult:
-    """Call DOH's per-provider refresh endpoint and classify the response."""
+    """Call DOH's per-provider refresh endpoint and classify the response.
+
+    404 (no IntegrationUserCredential row) and 410 (refresh_token revoked
+    upstream; DOH just deleted the row) both collapse to `absent` — once the
+    row is gone, the only user action either signal warrants is "connect".
+    """
     url = f"{refresh_config.control_plane_url.rstrip('/')}{provider.refresh_path}"
     body = json.dumps({
         "owner_username": refresh_config.owner_username,
@@ -258,20 +277,20 @@ def fetch_provider_token(refresh_config: DohRefreshConfig, provider: TlsProvider
             payload = {}
     except Exception as exc:
         logger.error("refresh network error for %s: %s", provider.refresh_path, exc)
-        return RefreshResult(status=STATUS_TRANSIENT_ERROR, access_token=None, expires_in=None, config={}, metadata={})
+        return RefreshResult(outcome=REFRESH_OUTCOME_TRANSIENT, access_token=None, expires_in=None, config={}, metadata={})
 
     if status == 200:
         return RefreshResult(
-            status=STATUS_CONNECTED,
+            outcome=REFRESH_OUTCOME_CONNECTED,
             access_token=payload["access_token"],
             expires_in=int(payload.get("expires_in", 0)),
             config=payload.get("config", {}),
             metadata=payload.get("metadata", {}),
         )
-    outcome = _OUTCOMES.get(status, STATUS_TRANSIENT_ERROR)
-    if outcome == STATUS_TRANSIENT_ERROR:
-        logger.error("refresh got http %d for %s: %s", status, provider.refresh_path, payload.get("error", ""))
-    return RefreshResult(status=outcome, access_token=None, expires_in=None, config={}, metadata={})
+    if status in (404, 410):
+        return RefreshResult(outcome=REFRESH_OUTCOME_ABSENT, access_token=None, expires_in=None, config={}, metadata={})
+    logger.error("refresh got http %d for %s: %s", status, provider.refresh_path, payload.get("error", ""))
+    return RefreshResult(outcome=REFRESH_OUTCOME_TRANSIENT, access_token=None, expires_in=None, config={}, metadata={})
 
 
 GATEWAY_ENV_BLOCK_BEGIN = "# === DOH-MANAGED-INTEGRATIONS BEGIN ==="
@@ -302,18 +321,18 @@ def _render_gateway_env_lines(provider: TlsProviderSpec, method: VaultUrlRewrite
     return lines
 
 
-def render_managed_block(snapshot: list[tuple[TlsProviderSpec, dict, dict, str]]) -> str:
+def render_managed_block(snapshot: list[tuple[TlsProviderSpec, dict]]) -> str:
     """Render the gateway env managed block from a token-store snapshot.
 
-    Includes only providers whose `credential_method` is `VaultUrlRewrite`
-    and whose status is `STATUS_CONNECTED`. Other providers contribute no
-    env vars (OAuth providers don't activate gateway platforms; disconnected
-    vault providers should leave the gateway without their env vars).
+    The snapshot lists only connected providers (cache presence == connected,
+    by the token-store contract). Each tuple is `(provider, config)`. Only
+    `VaultUrlRewrite` credential methods carry `gateway_env` bindings today,
+    so they're the only ones that produce lines here; if an OAuth provider
+    ever needs to surface env vars to the gateway, we'll need a different
+    way to signal "this provider has gateway env to render".
     """
     body_lines: list[str] = []
-    for provider, config, _metadata, status in snapshot:
-        if status != STATUS_CONNECTED:
-            continue
+    for provider, config in snapshot:
         method = provider.credential_method
         if not isinstance(method, VaultUrlRewrite):
             continue
@@ -361,31 +380,41 @@ def write_gateway_env_file(env_path: Path, managed_block: str) -> None:
     os.replace(tmp_path, env_path)
 
 
-def _cache_entry_from_refresh_result(result: RefreshResult, now: float) -> _TokenCacheEntry:
-    """Convert a refresh result into the internal cache shape."""
-    is_connected = result.status == STATUS_CONNECTED
+def _cache_entry_from_connected_result(result: RefreshResult, now: float) -> _TokenCacheEntry:
+    """Build a cache entry from a connected refresh result.
+
+    Caller is responsible for only invoking this on `REFRESH_OUTCOME_CONNECTED`
+    results — absent/transient outcomes don't have a token to cache.
+    """
+    if result.expires_in is None:
+        raise ValueError("connected refresh result must carry expires_in")
     return _TokenCacheEntry(
-        status=result.status,
         access_token=result.access_token,
-        expires_at=now + result.expires_in if is_connected and result.expires_in is not None else None,
-        last_refreshed_at=dt.datetime.now(dt.timezone.utc).isoformat() if is_connected else None,
-        config=result.config if is_connected else {},
-        metadata=result.metadata if is_connected else {},
+        expires_at=now + result.expires_in,
+        last_refreshed_at=dt.datetime.now(dt.timezone.utc).isoformat(),
+        config=result.config,
+        metadata=result.metadata,
     )
 
 
 def _status_item_for_provider(provider: TlsProviderSpec, entry: _TokenCacheEntry | None) -> dict:
-    """Serialize one TLS-intercept provider for the unified integrations payload."""
+    """Serialize one TLS-intercept provider for the unified integrations payload.
+
+    Connected = we have a cache entry; not_connected = we don't. There's no
+    third state on this path: transient errors during refresh leave the cache
+    untouched, so the previous entry (if any) keeps representing the truth.
+    """
     method = provider.credential_method
+    is_connected = entry is not None
     return {
         "kind": "tls_intercept",
         "slug": provider.slug,
         "label": provider.label,
         "logo_url": provider.logo_url,
-        "status": entry.status if entry is not None else STATUS_TRANSIENT_ERROR,
-        "last_refreshed_at": entry.last_refreshed_at if entry is not None else None,
-        "config": entry.config if entry is not None else {},
-        "metadata": entry.metadata if entry is not None else {},
+        "status": STATUS_CONNECTED if is_connected else STATUS_NOT_CONNECTED,
+        "last_refreshed_at": entry.last_refreshed_at if is_connected else None,
+        "config": entry.config if is_connected else {},
+        "metadata": entry.metadata if is_connected else {},
         "connect_mode": method.connect_mode,
         "restart_required_after_save": method.restart_required_after_save,
     }
@@ -416,39 +445,48 @@ class _TokenStore:
         if provider is None:
             return None
         entry = await self._ensure_fresh(provider=provider)
+        if entry is None:
+            return None
         return entry.access_token
 
     async def invalidate(self, slug: str) -> None:
-        """Drop the cached token for a provider (e.g. after upstream 401).
+        """Drop the cached token for a provider, racing-safely.
 
-        Forces the next `token_for_host` call to refetch from DOH. If DOH
-        has since deleted the grant (user revoked), the next refresh
-        returns 404 → status flips to not_connected → integrations pane
-        updates without ceremony.
+        Takes the per-provider refresh_lock around the cache pop. Without
+        this, an in-flight `_ensure_fresh` for the same slug could land its
+        (now stale) write into the cache *after* the pop, and a subsequent
+        `_ensure_fresh` would find that fresh-looking stale entry and skip
+        the refetch — silently swallowing the user's Disconnect/vault-save.
+        Serializing through the refresh_lock makes the stale write land
+        first, then the pop, then the next refresh starts from an empty
+        cache and actually hits DOH.
         """
-        async with self._cache_lock:
-            self._cache.pop(slug, None)
+        await self._invalidate_one(slug=slug)
 
     async def invalidate_all(self) -> None:
-        """Drop every cached entry after an explicit Refresh all.
+        """Drop every cached entry. Used by the explicit Refresh-all path.
 
-        The next status read will lazily refetch every provider, so use
-        provider-scoped invalidation when the changed provider is known.
+        Per-slug invalidation runs concurrently — each takes its own
+        provider's refresh_lock, so they never block each other.
         """
-        async with self._cache_lock:
-            self._cache.clear()
+        await asyncio.gather(*(self._invalidate_one(slug=slug) for slug in self._providers))
+
+    async def _invalidate_one(self, slug: str) -> None:
+        """Take the provider's refresh_lock, then pop its cache entry."""
+        lock = self._refresh_locks.get(slug)
+        if lock is None:
+            return
+        async with lock:
+            async with self._cache_lock:
+                self._cache.pop(slug, None)
 
     async def status_items(self) -> list[dict]:
-        """Return TLS-intercept integration cards for the unified status payload.
+        """Render integration cards from the current cache; never calls DOH.
 
-        Uses `_ensure_fresh` per provider (single-flight, refetches only when
-        the cached entry is missing or near expiry). Avoids the previous
-        "force-refresh on every page open" pattern, which on GitHub would
-        rotate the refresh_token and invalidate the in-flight access token —
-        racing any concurrent git/gh request through the proxy.
+        Cache writes happen on three paths: boot bootstrap, the proxy hot path
+        (`token_for_host` near-expiry refresh), and explicit user invalidate.
+        Status reads are a pure projection of whatever those paths produced.
         """
-        for provider in self._providers.values():
-            await self._ensure_fresh(provider=provider)
         async with self._cache_lock:
             snapshot = dict(self._cache)
         return [
@@ -456,27 +494,61 @@ class _TokenStore:
             for provider in self._providers.values()
         ]
 
-    async def _ensure_fresh(self, provider: TlsProviderSpec) -> _TokenCacheEntry:
-        """Single-flight refresh if the cached token is missing or near expiry."""
+    async def _ensure_fresh(self, provider: TlsProviderSpec) -> _TokenCacheEntry | None:
+        """Single-flight refresh when the cached token is missing or near expiry.
+
+        Returns the cache entry to use for this request, or None when the
+        provider is genuinely unavailable. The two cases to keep separate:
+
+        - **Refresh succeeded** (connected/absent): the cache reflects DOH
+          truth, so we return whatever's now in the cache.
+        - **Refresh transient-failed**: the cache is untouched. If we had a
+          prior entry that's still un-expired, hand it back — the proxy
+          can use it for the rest of its expires_at window rather than
+          surfacing "not connected" to the sandbox because DOH hiccuped.
+          Only return None when even the prior token is past expiry.
+        """
         async with self._refresh_locks[provider.slug]:
             async with self._cache_lock:
                 entry = self._cache.get(provider.slug)
             if entry is not None and entry.is_fresh(now=time.monotonic(), refresh_lead_seconds=self._refresh_lead_seconds):
                 return entry
-            return await self._refresh_provider(provider=provider)
+            await self._refresh_provider(provider=provider)
+            async with self._cache_lock:
+                entry = self._cache.get(provider.slug)
+            if entry is None:
+                return None
+            if not entry.is_usable(now=time.monotonic()):
+                return None
+            return entry
 
-    async def _refresh_provider(self, provider: TlsProviderSpec) -> _TokenCacheEntry:
-        """Refresh one provider and update the cache."""
+    async def _refresh_provider(self, provider: TlsProviderSpec) -> None:
+        """Refresh one provider and apply the outcome to the cache.
+
+        Side-effect only — callers re-read the cache to learn the result:
+
+        - connected → write the new entry.
+        - absent → drop any prior entry (idempotent).
+        - transient → leave the cache untouched (don't replace a working
+          token with a sentinel; the prior entry, if any, stays available).
+        """
         result = await asyncio.to_thread(
             fetch_provider_token,
             refresh_config=self._refresh_config,
             provider=provider,
         )
-        entry = _cache_entry_from_refresh_result(result=result, now=time.monotonic())
-        async with self._cache_lock:
-            self._cache[provider.slug] = entry
-        logger.info("refreshed %s: %s", provider.slug, entry.status)
-        return entry
+        if result.outcome == REFRESH_OUTCOME_CONNECTED:
+            entry = _cache_entry_from_connected_result(result=result, now=time.monotonic())
+            async with self._cache_lock:
+                self._cache[provider.slug] = entry
+            logger.info("refreshed %s: connected", provider.slug)
+            return
+        if result.outcome == REFRESH_OUTCOME_ABSENT:
+            async with self._cache_lock:
+                self._cache.pop(provider.slug, None)
+            logger.info("refreshed %s: not_connected", provider.slug)
+            return
+        logger.info("refreshed %s: transient error (cache untouched)", provider.slug)
 
 
 class TlsInterceptRuntime:
@@ -522,16 +594,23 @@ class TlsInterceptRuntime:
         return await self._token_store.status_items()
 
     async def invalidate(self, slug: str) -> None:
-        """Drop one provider's cached token entry; next status read refetches it."""
+        """Drop one provider's cached token entry and fire the user-invalidate hook."""
         await self._token_store.invalidate(slug=slug)
         if self._on_user_invalidate is not None:
             await self._on_user_invalidate(slug)
 
     async def invalidate_all(self) -> None:
-        """Drop every cached token entry; next status read refetches lazily."""
+        """Drop every cached token entry and fire the user-invalidate hook."""
         await self._token_store.invalidate_all()
         if self._on_user_invalidate is not None:
             await self._on_user_invalidate(None)
+
+    async def refresh_slug(self, slug: str) -> None:
+        """Force a single-provider refetch so the cache reflects current DOH state."""
+        provider = self._token_store._providers.get(slug)
+        if provider is None:
+            return
+        await self._token_store._ensure_fresh(provider=provider)
 
     async def refresh_all(self) -> None:
         """Force a refetch of every provider so the cache reflects current DOH state.
@@ -548,23 +627,19 @@ class TlsInterceptRuntime:
             )
         )
 
-    async def gateway_env_snapshot(self) -> list[tuple[TlsProviderSpec, dict, dict, str]]:
-        """Pair every provider with its connected config for env-file rendering.
+    async def gateway_env_snapshot(self) -> list[tuple[TlsProviderSpec, dict]]:
+        """Pair every connected provider with its cached config for env rendering.
 
-        Returns `(provider, config, metadata, status)` tuples drawn from the
-        current cache (no refetch). The broker calls `refresh_all()` first
-        when it wants the cache aligned with DOH state.
+        Returns `(provider, config)` tuples for providers currently in the
+        cache (cache presence == connected). Disconnected providers are
+        absent from the result. The broker calls `refresh_all()` first when
+        it wants the cache aligned with DOH state.
         """
         async with self._token_store._cache_lock:
             snapshot = dict(self._token_store._cache)
         return [
-            (
-                provider,
-                (snapshot[slug].config if slug in snapshot else {}),
-                (snapshot[slug].metadata if slug in snapshot else {}),
-                (snapshot[slug].status if slug in snapshot else STATUS_NOT_CONNECTED),
-            )
-            for slug, provider in self._token_store._providers.items()
+            (self._token_store._providers[slug], entry.config)
+            for slug, entry in snapshot.items()
         ]
 
 

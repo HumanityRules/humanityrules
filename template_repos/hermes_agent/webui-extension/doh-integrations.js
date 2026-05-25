@@ -125,8 +125,6 @@
       case 'connected': return 'Connected';
       case 'not_connected': return 'Not connected';
       case 'token_expired': return 'Token expired';
-      case 'revoked': return 'Revoked';
-      case 'transient_error': return 'Checking…';
       case 'starting': return 'Starting…';
       default: return '—';
     }

@@ -74,13 +74,9 @@ async def _handle_unified_status(
 ) -> Response:
     """Flat list combining TLS-intercept providers and MCP-aggregator items.
 
-    Uses cached TLS-intercept entries (refreshed lazily by the proxy hot
-    path or near expiry). A previous version force-refreshed every TLS
-    provider on every status read, which on GitHub rotated the
-    refresh_token and invalidated any in-flight access_token — racing
-    concurrent git/gh requests through the proxy. If the caller knows the
-    cache is stale (e.g. the user just clicked Disconnect on DOH and
-    landed back here), they should POST /__doh_broker/integrations/invalidate
+    Reads cached TLS-intercept entries; refresh happens lazily (proxy hot
+    path or near expiry). Callers that need fresh state (e.g. after a
+    Disconnect on DOH) must POST /__doh_broker/integrations/invalidate_tls_cache
     first.
     """
     items = await tls_runtime.status_items()
@@ -268,11 +264,19 @@ def _build_on_user_invalidate(
     Uses a holder dict because the runtime is constructed *with* this hook,
     creating a chicken-and-egg. The broker fills `tls_runtime_holder["runtime"]`
     immediately after construction.
+
+    When `slug` is set (a single provider was just connected/disconnected),
+    only that provider is re-fetched from DOH — refreshing every disconnected
+    provider on each connect would spam DOH with `no integration row` 404s.
+    `slug=None` (explicit Refresh-all) does fan out to every provider.
     """
 
     async def on_user_invalidate(slug: str | None) -> None:
         runtime = tls_runtime_holder["runtime"]
-        await runtime.refresh_all()
+        if slug is None:
+            await runtime.refresh_all()
+        else:
+            await runtime.refresh_slug(slug=slug)
         await _render_gateway_env_file(tls_runtime=runtime, env_path=env_path)
         if not _slug_requires_restart(slug=slug, runtime=runtime):
             return
