@@ -274,6 +274,7 @@ def build_app_config_from_blueprint(blueprint: DeploymentBlueprint, repo_path: P
         platform_capabilities=list(template.platform_capabilities or []),
         owner_username=owner_username,
         serialize_task_replacement=template.serialize_task_replacement,
+        enable_subhosting=template.enable_subhosting,
     )
 
 

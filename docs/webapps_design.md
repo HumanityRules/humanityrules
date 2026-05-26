@@ -1,24 +1,25 @@
 # Webapps Design
 
-How a Hermes agent builds, runs, and serves user-built web apps (any language: Python, Node, Elixir, Go, …) at the same hostname as the WebUI, under `/webapps/<slug>/`. No DNS changes, no per-app ALB rules, no extra hostnames.
+How a Hermes agent builds, runs, and serves user-built web apps (any language: Python, Node, Elixir, Go, …) as per-app sub-subdomains of the agent's hostname (`<slug>.<agent-host>`). One-time wildcard infra at agent-deploy time; zero per-app DNS, cert, or ALB work after that.
 
 ## The core constraint
 
-The user types into the agent: "build me a dashboard." The agent writes code, runs it, and tells the user *where to click*. That URL must be on the agent's **own** hostname (`https://hermes-<slug>.<env>/...`) — anything else means propagating DNS, adding ALB listener rules per app, and explaining "why does my dashboard live on a different host than my agent?"
+The user types into the agent: "build me a dashboard." The agent writes code, runs it, and tells the user *where to click*. That URL must be on the agent's **own** hostname tree (`https://...<agent-host>/...`) — anything entirely elsewhere means explaining "why does my dashboard live on a different host than my agent?"
 
-So *something inside the agent's container* has to recognize `/webapps/<slug>/` as non-WebUI traffic and route it to a separate per-app process.
+The realization that decides this design: DOH already controls Route 53, ACM, and the ALB for every customer environment, so the cost of giving each agent its own wildcard subdomain space is **once per agent at deploy time**, not per webapp. Once that's in place, host-keyed routing inside the container handles new webapps for free.
 
 ## The choice space
 
-Five shapes were considered before settling on one:
+Two shapes ended up being seriously considered:
 
-1. **Static-only via a WebUI patch.** A single patch in `patches-webui/` mounts `/webapps/<slug>` to a static directory under `/workspace`. Tiny patch surface, but no Python/Node/Elixir backends — a hard ceiling.
-2. **ASGI sub-app inside WebUI.** Mount user Python apps as ASGI children of the WebUI process. Works only for Python; couples user code to the Hermes WebUI lifecycle.
-3. **Python reverse-proxy patch in WebUI.** ~200 lines of Starlette middleware in `patches-webui/`. Polyglot. Cost: every Hermes upstream bump is a place the patch can conflict — we already pay this tax on five other patches.
-4. **fd-handoff via `SCM_RIGHTS`.** A tiny router peeks the request line, then passes the raw socket fd to the chosen backend over a Unix socket. Beautifully zero-copy. Founders on HTTP/1.1 keep-alive (one connection, many requests on different paths) and HTTP/2 multiplexing — once you've handed the fd to backend A, request #2 going to backend B is wrong. The only escape is forcing `Connection: close`, which kills perf and HTTP/2 entirely.
-5. **eBPF sockmap.** Same handoff benefits, in-kernel L7 parsing. Likely blocked on Fargate (no `CAP_BPF` / `CAP_SYS_ADMIN`); HTTP parsing in eBPF's bounded-loop world is genuinely painful.
+1. **Path-prefix under the agent host (`<agent-host>/webapps/<slug>/`).** The original design. Each app is a path-prefixed reverse-proxy route. Costs nothing at deploy time. *Pays a recurring tax* per webapp: frameworks must honor `X-Forwarded-Prefix`, prebuilt SPAs with absolute `/assets/...` paths break, JS-hardcoded `/api` and `/ws` calls need rewriting or shimming, every new framework adds another gotcha to document.
+2. **Per-app sub-subdomain (`<slug>.<agent-host>`).** Each webapp gets its own host. Apps see `/` as their public root — no prefix, no `X-Forwarded-Prefix`, no shims, no rewriting. Prebuilt SPAs, dev servers, Phoenix LiveView, ttyd, Streamlit — all just work because they think they're at the root of a host. *One-time tax* at agent deploy: a per-agent wildcard ACM cert, a wildcard Route 53 record, and the agent's ALB listener rule widened to include `*.<agent-host>`.
 
-**Choice: a Caddy reverse-proxy sidecar.** Native WebSocket / SSE / streaming, single ~40MB binary, zero WebUI patches. The data-path cost is fine because Caddy is already optimal at the things that matter (`splice(2)` for zero-copy, native HTTP/2 demux, WS upgrades). The architectural lesson behind rejecting (4)/(5): **HTTP/1.1 keep-alive + HTTP/2 multiplexing make L7 routing a per-*request* decision, not per-*connection*.** Anything wanting to stay out of the data path either pins one backend per connection (breaks the model) or pushes parsing into the kernel (overkill, possibly disallowed). Caddy in the data path is correct, not a compromise.
+**Choice: per-app subdomain.** The tax shape inverts: option (1) charges every webapp install, every framework adoption, every prebuilt-SPA case forever; option (2) charges once per agent and never again. The agent-side complexity collapses — Caddy distinguishes apps by Host header instead of stripping a path prefix, the skill loses its per-framework gotcha pages, and the system has no opinion about what an app does with its own URLs.
+
+The earlier design rejected this on the grounds of "propagating DNS, adding ALB listener rules per app." That framing was wrong once DOH owns the DNS+ACM+ALB triad: a single wildcard record/cert/rule covers all of an agent's webapps. Per-webapp cost is zero.
+
+Below the routing-keyed-by decision, the Caddy-sidecar shape from the path-prefix design carries over verbatim. Native WS/SSE/streaming, single ~40MB binary, zero WebUI patches; data-path costs are negligible because Caddy is already optimal at `splice(2)`/HTTP/2 demux/WS upgrades. Earlier alternatives (fd-handoff via `SCM_RIGHTS`, eBPF sockmap, ASGI sub-app, WebUI middleware patch) all founder on HTTP/1.1 keep-alive + HTTP/2 multiplexing making L7 routing a per-*request* decision rather than per-*connection*.
 
 ## The topology
 
@@ -26,30 +27,31 @@ Five shapes were considered before settling on one:
 Browser
   │
   ▼
-ALB :443 (host: hermes-<slug>.<env>.com)
+ALB :443 (host: hermes-<slug>.<env>.com  OR  <app>.hermes-<slug>.<env>.com)
   │
-  ▼
-ECS task — three containers in shared network namespace:
+  ▼  (one listener rule per agent; host condition matches bare + *.<agent-host>)
+ECS task — two containers in shared network namespace:
 
   ┌────────────────────────┐  ┌───────────────────────────────────┐
   │ policy-proxy container │  │ hermes container (nono sandbox)   │
   │                        │  │                                   │
-  │ uvicorn :8788 ────────┐│  │ Caddy :8787  ──── /webapps/X/* ─→ │
-  │ (auth gate, JWT,      ││──┘                                  │
-  │  per-request PDP)     ││─→ everything else  ───────────────→ │
-  │                        │  │ Hermes WebUI :8789                │
+  │ uvicorn :8788 ────────┐│  │ Caddy :8787 ──── <slug>.<host> ──→ │
+  │ (auth gate, JWT,      ││──┘                                   │
+  │  per-request PDP)     ││──→ bare <host> + path /webapps/__* ─→ │
+  │                        │  │ Hermes WebUI :8789 / __admin       │
   │  → upstream :8787      │  │                                   │
-  │                        │  │ process-compose :9956 (admin API) │
+  │                        │  │ process-compose :9956             │
   │                        │  │                                   │
   │                        │  │ user webapps :4000–4019           │
   └────────────────────────┘  └───────────────────────────────────┘
 ```
 
-Three things to notice:
+Four things to notice:
 
-- **Policy-proxy already terminates auth at port 8788** (the ALB target). It forwards authenticated traffic to `127.0.0.1:8787`, where Caddy now listens. Containers in this AppTemplate share a network namespace (awsvpc), so policy-proxy on 0.0.0.0:8788 and Caddy on :8787 talk loopback-to-loopback.
-- **Caddy fans out from there.** `/webapps/<slug>/*` → per-app loopback port. Everything else → WebUI on **8789** (was 8787; moved to clear the way for Caddy).
-- **Both Caddy and process-compose run inside the existing nono sandbox alongside WebUI.** They have no credentials the LLM mustn't read; their config is derived from agent-written files. The trust boundary rule is: "outside nono only for processes that hold secrets the LLM can't see." Caddy isn't one of those.
+- **Policy-proxy already terminates auth at port 8788** (the ALB target). It forwards authenticated traffic to `127.0.0.1:8787`, where Caddy listens. Containers in this AppTemplate share a network namespace (awsvpc), so policy-proxy on 0.0.0.0:8788 and Caddy on :8787 talk loopback-to-loopback.
+- **One ALB target group, one listener rule, both hostname shapes.** ALB's host condition matches `<agent-host>` *and* `*.<agent-host>` in the same rule — same target group either way. Per-webapp ALB cost is zero.
+- **Caddy keys on Host header.** `<slug>.<agent-host>` → per-app loopback port (from a generated site-block matcher in `routes.caddy`). Bare `<agent-host>` → WebUI on **8789**, plus path-based routing for `__*` platform-internal slugs (e.g. `__admin`) so the WebUI's same-origin extension can call them without CORS.
+- **Auth is a non-event for subdomains.** The session cookie is already scoped `Domain=.<env-domain>` (env-wide), and the control-plane auth flow's return-URL validator accepts any host under the env parent domain — so login flows for `<slug>.<agent-host>` use the same machinery as the bare agent host with no auth-side changes.
 
 ## The supervisor: process-compose
 
@@ -97,31 +99,53 @@ webapps delete <slug> --yes
 
 - **`create` errors on collision.** If the slug exists, the agent must `delete` first. No "create-or-update."
 - **Port allocation is automatic.** The CLI scans the YAML, picks the next free port in 4000–4019 (the range is allowlisted in the nono profile), and writes `WEBAPP_PORT` into the process's env. The agent's `--command` references `$WEBAPP_PORT`. The route generator parses `WEBAPP_PORT` back out of the YAML — single encoding.
-- **Readiness gating.** After `process-compose project update`, the CLI polls until process-compose reports `is_ready == "Ready"` (or timeout). The Caddy route is added to `routes.caddy` **only after** readiness passes — this avoids the brief window where `/webapps/<slug>/` would 502 because the upstream isn't accepting connections yet.
+- **Readiness gating.** After `process-compose project update`, the CLI polls until process-compose reports `is_ready == "Ready"` (or timeout). The Caddy route is added to `routes.caddy` **only after** readiness passes — this avoids the brief window where the user's URL would 502 because the upstream isn't accepting connections yet.
 - **Readiness probe is a TCP-bind check.** process-compose has only `exec` and `http_get` probes (no native `tcp_socket`), so the CLI emits `bash -c 'echo > /dev/tcp/127.0.0.1/<port>'`. Tells you the app bound the port; doesn't tell you the app is *correct*. That's the bare minimum we want for `webapps create` to claim success.
 - **`stop` sets `disabled: true` and regenerates `routes.caddy`** (the disabled entry is skipped, so the route disappears). `start` reverses it.
 - **`delete` is total.** Removes the YAML entry, regenerates routes (so the route is gone), removes the log file, and `rm -rf projects/<slug>/`. The skill tells the agent to confirm explicitly with the user before passing `--yes`.
 - **`set-env` ships in v1.** Surgical: only the affected process restarts. Without this, every env change would be a delete (now total!) + recreate.
 
-## The Caddy route block (per-app, in `routes.caddy`)
+## The Caddy route blocks (per-app, in `routes.caddy`)
+
+Two shapes, depending on slug. The CLI's `regenerate_routes(doc)` picks the right one per process and rewrites the file end-to-end on every mutation.
+
+**Routing matches on `X-Forwarded-Host`, not `Host`.** Policy-proxy strips the browser's `Host` (httpx replaces it with the upstream `127.0.0.1:8787` when forwarding) and copies the original value into `X-Forwarded-Host`. Caddy's `host` matcher reads `r.Host`, which by the time the request reaches Caddy is loopback — so every route block uses `header X-Forwarded-Host …` to read the value policy-proxy preserved for us.
+
+**User slug → X-Forwarded-Host-matched site block (the common case):**
 
 ```caddy
-redir /webapps/<slug> /webapps/<slug>/ 308
-handle_path /webapps/<slug>/* {
-    reverse_proxy 127.0.0.1:<port> {
-        header_up X-Forwarded-Host {header.X-Forwarded-Host}
-        header_up X-Forwarded-Prefix /webapps/<slug>
+@webapp_<slug> header X-Forwarded-Host <slug>.<agent-host>
+handle @webapp_<slug> {
+    reverse_proxy 127.0.0.1:<port>
+}
+```
+
+That's the whole route. No `X-Forwarded-Prefix`, no `X-Forwarded-Host` rewrite at the upstream — the app sees `/` as its public root because the actual path is `/`. Absolute paths (`/assets/...`, `/api/...`, `/ws`) work without any per-framework configuration.
+
+**Platform-internal slug (`__*`) → path-matched block on the bare host:**
+
+```caddy
+@webapp___admin_root {
+    header X-Forwarded-Host <agent-host>
+    path /webapps/__admin
+}
+redir @webapp___admin_root /webapps/__admin/ 308
+
+@webapp___admin {
+    header X-Forwarded-Host <agent-host>
+    path /webapps/__admin/*
+}
+handle @webapp___admin {
+    handle_path /webapps/__admin/* {
+        reverse_proxy 127.0.0.1:<port> {
+            header_up X-Forwarded-Host {header.X-Forwarded-Host}
+            header_up X-Forwarded-Prefix /webapps/__admin
+        }
     }
 }
 ```
 
-Three lines that all earn their keep:
-
-- **`redir /webapps/<slug> /webapps/<slug>/ 308`** — Caddy's `handle_path /webapps/<slug>/*` matcher requires at least one character after the trailing slash. Without the redir, a bare `/webapps/<slug>` (no slash) falls through to the WebUI catch-all and returns 404. Browsers follow 308 transparently.
-- **`header_up X-Forwarded-Host {header.X-Forwarded-Host}`** — policy-proxy already sets `X-Forwarded-Host: hermes-<slug>.<env>.com`. Caddy's `reverse_proxy` would otherwise *append* its own `X-Forwarded-Host: 127.0.0.1:8787` (the immediate Host from policy-proxy's perspective). WebUI's CSRF gate iterates all `X-Forwarded-Host` values, finds the loopback first, and rejects POSTs as cross-origin (403). Replacing the header with the inbound value preserves policy-proxy's intent. (`{header.X-Forwarded-Host}` is the Caddyfile placeholder — `{>X-Forwarded-Host}` is JSON-config syntax and Caddy forwards it as a literal string.)
-- **`X-Forwarded-Prefix /webapps/<slug>`** — `handle_path` strips the prefix before forwarding, so the upstream sees a bare `/`. Frameworks that generate absolute URLs (Phoenix LiveView, Express, Rails, FastAPI) use this header to know the public base path. The skill includes per-framework configuration notes.
-
-The same `header_up X-Forwarded-Host` lives in the top-level Caddyfile's WebUI fallback, for the same reason — without it, every WebUI POST through Caddy would 403 with "Cross-origin request rejected."
+Internal slugs stay path-based on the bare host because their *only* consumer is the WebUI extension running at the same host — same-origin `fetch('/webapps/__admin/api/...')` works without CORS gymnastics. The `__` prefix in the slug regex is the cue that flips the routing shape. The `header_up X-Forwarded-Host` line propagates policy-proxy's value to the upstream against Caddy's default behavior of appending the immediate (loopback) Host.
 
 ## The full Caddyfile
 
@@ -133,8 +157,16 @@ The same `header_up X-Forwarded-Host` lives in the top-level Caddyfile's WebUI f
 
 :8787 {
     import /workspace/.config/caddy/routes.caddy
-    reverse_proxy 127.0.0.1:8789 {
-        header_up X-Forwarded-Host {header.X-Forwarded-Host}
+
+    @bare header X-Forwarded-Host {$DOH_PUBLIC_HOSTNAME}
+    handle @bare {
+        reverse_proxy 127.0.0.1:8789 {
+            header_up X-Forwarded-Host {header.X-Forwarded-Host}
+        }
+    }
+
+    handle {
+        respond "unknown host" 404
     }
 }
 ```
@@ -142,6 +174,10 @@ The same `header_up X-Forwarded-Host` lives in the top-level Caddyfile's WebUI f
 `admin off` because we never use the admin API; the CLI drives Caddy by rewriting `routes.caddy` and letting `--watch` (passed at startup) pick up the change. `auto_https off` because TLS terminates upstream at the ALB; everything inside the container is plaintext loopback.
 
 `routes.caddy` is seeded with the placeholder content `# no routes` on first boot so it always exists — Caddy's `import` would fail loudly on a missing file.
+
+`{$DOH_PUBLIC_HOSTNAME}` is Caddy's parse-time env-var interpolation. The variable is exported by the env-bearer overlay and survives the nono sandbox env scrub (see "Public hostname injection" below).
+
+The two trailing `handle` blocks are mutually exclusive with the per-slug `handle` blocks imported above them: Caddy picks the *first matching* `handle` per request. `@bare` fires for the agent's own host (everything not already claimed by a per-slug block — WebUI, plus path-based `__admin`). The empty trailing `handle` is the catch-all for unmatched hosts; returns 404 instead of an empty 200.
 
 ## Network: nono profile additions
 
@@ -156,13 +192,25 @@ The hermes container runs inside a nono sandbox. Three additions to `hermes-nono
 
 The agent prints the URL for the user to click. To do that, it needs to know the public hostname. The container doesn't know it by default — it just sees its own loopback addresses.
 
-**Solution: the CDK extends the env-bearer overlay with `DOH_PUBLIC_HOSTNAME`** (`{subdomain}.{shared_alb_hosted_zone}`) when both are present. Every container with `requires_env_bearer=True` gets it injected at task-definition build time. The nono profile allow-lists the variable so it survives the sandbox env scrub. The `webapps` CLI's `url_for(slug)` reads `DOH_PUBLIC_HOSTNAME`; if missing, it prints `<your-agent-hostname>` as a placeholder. The skill instructs the agent to (i) always render the URL as a clickable markdown link, and (ii) substitute the user-visible hostname from the browser's address bar if the placeholder appears.
+**Solution: the CDK extends the env-bearer overlay with `DOH_PUBLIC_HOSTNAME`** (`{subdomain}.{shared_alb_hosted_zone}`) when both are present. Every container with `requires_env_bearer=True` gets it injected at task-definition build time. The nono profile allow-lists the variable so it survives the sandbox env scrub. Both the `webapps` CLI's `url_for(slug)` *and* Caddy's `{$DOH_PUBLIC_HOSTNAME}` (in the Caddyfile and in the routes generated by the CLI) read it. If missing in the CLI, it prints `<your-agent-hostname>` as a placeholder. The skill instructs the agent to (i) always render the URL as a clickable markdown link, and (ii) substitute the user-visible hostname from the browser's address bar if the placeholder appears.
+
+## Per-agent wildcard infra (CDK)
+
+The shape that makes `<slug>.<agent-host>` actually resolve and TLS-handshake at the ALB is provisioned once per agent, in `_setup_shared_alb_routing` of `deploy_app.py`, gated by `AppConfig.enable_subhosting` (which `app_config_builder.py` reads from `AppTemplate.enable_subhosting`). Three resources:
+
+- **Per-agent wildcard ACM cert: `*.<agent-host>`** — DNS-validated through the env's existing hosted zone, so issuance is fully automated. The env-level wildcard cert covers only `<agent-host>` (one label deep); ACM wildcards match a single label, so sub-subdomains need their own cert.
+- **Wildcard Route 53 A-alias: `*.<agent-host>` → ALB** — alongside the existing apex record (`<agent-host>` → ALB). One record per agent; new webapps never trigger DNS work.
+- **ALB listener-rule host condition widened to `[<agent-host>, *.<agent-host>]`** — same rule, same target group. Per-webapp ALB cost is zero. The wildcard cert is attached to the listener as an SNI cert via `ApplicationListenerCertificate`.
+
+For agents *without* the flag (most templates), the path-prefix mechanism still works — the CLI generates path-based blocks for `__*` slugs on the bare host, the wildcard infra isn't created, and creating a user slug would fail at the ALB because `<slug>.<agent-host>` has no DNS record. In practice only Hermes Personal sets the flag; future templates that ship webapp registration would do the same.
+
+ACM/ALB SNI listener cert count caps at 25 per listener by default (raisable via support ticket). For pre-beta scale that's a non-issue.
 
 ## Two known restrictions on what runs inside
 
 **Apps must bind to `127.0.0.1`, not `0.0.0.0`.** Caddy is the only thing that should be reachable from outside the container — apps go through Caddy's reverse_proxy, no shortcut. Many frameworks default to all-interfaces; they need explicit configuration. The skill calls this out in the Don'ts.
 
-**Phoenix needs explicit endpoint binding.** Phoenix's HTTP port is configurable; generated apps usually read `PORT`, so `PORT=$WEBAPP_PORT mix phx.server` is the right dev-server shape when the endpoint is configured to bind loopback. For durable apps, **Phoenix releases are the preferred shape**: `MIX_ENV=prod mix release`, then run the release binary from `webapps create --command` with the same `127.0.0.1:$WEBAPP_PORT` binding. WebSocket support itself is unaffected — Caddy's `reverse_proxy` upgrades transparently, verified end-to-end with a Python `websockets` echo server.
+**Phoenix needs explicit endpoint binding.** Phoenix's HTTP port is configurable; generated apps usually read `PORT`, so `PORT=$WEBAPP_PORT mix phx.server` is the right dev-server shape when the endpoint is configured to bind loopback. For durable apps, **Phoenix releases are the preferred shape**: `MIX_ENV=prod mix release`, then run the release binary from `webapps create --command` with the same `127.0.0.1:$WEBAPP_PORT` binding. WebSocket support itself is unaffected — Caddy's `reverse_proxy` upgrades transparently. With per-app subdomains, no `URL_PATH_PREFIX` or LiveSocket-URL rewriting is needed — Phoenix lives at the root of its host.
 
 ## Lifecycle: cold start
 
@@ -179,7 +227,7 @@ End-to-end verified on `hermes-vmendi-webapps`: created `persist-test`, killed t
 
 ## Admin webapp & sidebar UI
 
-The WebUI's "Web Apps" panel is a thin reader on top of a **platform-owned webapp**, `__admin`. Rather than carve a one-off API path through Caddy → process-compose's admin port, we dogfood the same mechanism the agent uses: `__admin` is registered in `process-compose.yaml` like any other webapp, and the WebUI extension fetches `/webapps/__admin/api/webapps` same-origin. The path goes through policy-proxy → Caddy → loopback to the FastAPI admin process exactly like a user app would.
+The WebUI's "Web Apps" panel is a thin reader on top of a **platform-owned webapp**, `__admin`. Rather than carve a one-off API path through Caddy → process-compose's admin port, we dogfood the same mechanism the agent uses: `__admin` is registered in `process-compose.yaml` like any other webapp, and the WebUI extension fetches `/webapps/__admin/api/webapps` same-origin. The path goes through policy-proxy → Caddy → loopback to the FastAPI admin process exactly like a user app would. **The `__admin` slug stays path-routed on the bare agent host** (not on a subdomain) so the WebUI extension's same-origin fetch keeps working without CORS — `__*` slugs are the documented exception to the per-app-subdomain rule.
 
 This buys three things:
 
@@ -219,5 +267,7 @@ No mutation endpoints: start/stop/restart/delete stay on the CLI. The panel poll
 - **`template_repos/hermes_agent/doh_runtime/supervisor.sh`** — exports `HERMES_WEBUI_PORT=8789` so WebUI clears port 8787 for Caddy.
 - **`template_repos/hermes_agent/doh_runtime/hermes-nono-profile.json`** — port allow-lists, binary read-allows, `DOH_PUBLIC_HOSTNAME` allow_vars entry.
 - **`template_repos/hermes_agent/Dockerfile`** — downloads Caddy + process-compose binaries; symlinks the CLI onto PATH.
-- **`template_repos/hermes_agent/skills/webapps/SKILL.md`** — agent-facing contract, worked example, per-framework `X-Forwarded-Prefix` notes, Don'ts.
-- **`devopshero_app/services/infra_customer/deploy_app.py`** — injects `DOH_PUBLIC_HOSTNAME` into the env-bearer overlay (around line 783).
+- **`template_repos/hermes_agent/skills/webapps/SKILL.md`** — agent-facing contract, worked example, Don'ts.
+- **`devopshero_app/services/infra_customer/deploy_app.py`** — injects `DOH_PUBLIC_HOSTNAME` into the env-bearer overlay; provisions per-agent wildcard cert + Route 53 record + ALB host condition when `AppConfig.enable_subhosting` is True.
+- **`devopshero_app/services/infra_customer/appconfig.py`** — `AppConfig.enable_subhosting` field gating the wildcard-infra provisioning.
+- **`devopshero_app/models.py`** — `AppTemplate.enable_subhosting` flag stored on the template; `app_config_builder.py` projects it into AppConfig at build time.

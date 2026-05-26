@@ -208,7 +208,7 @@ def cmd_delete(args: argparse.Namespace) -> None:
 def main() -> None:
     p = argparse.ArgumentParser(
         prog="webapps",
-        description="Manage user-built web apps served at /webapps/<slug>/.",
+        description="Manage user-built web apps served at https://<slug>.<agent-host>/.",
     )
     sub = p.add_subparsers(dest="cmd", required=True)
 
