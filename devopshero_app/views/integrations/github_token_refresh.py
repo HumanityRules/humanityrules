@@ -26,7 +26,14 @@ logger = logging.getLogger(__name__)
 
 
 GITHUB_TOKEN_URL = "https://github.com/login/oauth/access_token"
-GITHUB_TOKEN_EXCHANGE_TIMEOUT_SECONDS = 30
+# GitHub's refresh-token exchange is a single small POST. Healthy P99 is
+# well under 1s; setting the ceiling at 5s means the broker's batch
+# refresh (which runs all providers in parallel) is naturally bounded by
+# the slowest single exchange, no separate batch deadline needed. If
+# upstream is taking longer than 5s, surfacing `transient` (cache-
+# preserving) beats hanging a user request on a refresh that's about to
+# fail anyway.
+GITHUB_TOKEN_EXCHANGE_TIMEOUT_SECONDS = 5
 
 # GitHub returns an HTTP 200 with an error JSON body when the refresh_token
 # is no longer valid. These are the codes that indicate a permanent failure

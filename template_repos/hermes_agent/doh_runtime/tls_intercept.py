@@ -273,11 +273,13 @@ def fetch_provider_tokens_batch(refresh_config: DohRefreshConfig, slugs: list[st
     )
     try:
         # In-VPC JSON POST to our own control plane; healthy P99 is tens
-        # of ms. DOH processes the providers in parallel server-side so
-        # the wall-clock floor is one slow provider, not the sum. The 5s
-        # ceiling keeps broker bootstrap inside supervisor's 10s
-        # wait_for_port budget.
-        with urllib.request.urlopen(req, timeout=5) as response:
+        # of ms. DOH processes the providers in parallel server-side, so
+        # wall-clock = max(per-provider upstream exchange) + DB / JSON
+        # overhead. Each helper's upstream timeout is 5s, so the ceiling
+        # here is ~5s + a small slack budget for executor dispatch and
+        # marshalling — 7s. Still well inside supervisor's 10s
+        # wait_for_port budget on broker bootstrap.
+        with urllib.request.urlopen(req, timeout=7) as response:
             payload = json.loads(response.read().decode("utf-8"))
     except urllib.error.HTTPError as exc:
         logger.error("refresh got http %d", exc.code)
