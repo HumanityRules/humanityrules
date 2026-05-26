@@ -462,19 +462,19 @@ class TestControlIntegrations(unittest.IsolatedAsyncioTestCase):
     async def test_invalidate_races_with_inflight_refresh(self) -> None:
         """Invalidate must serialize behind an in-flight refresh for the same slug.
 
-        Without the per-provider refresh_lock around the cache pop, this
-        sequence used to silently lose the invalidate:
-          1. Proxy hot path calls `_ensure_fresh`, holds refresh_lock,
-             starts the DOH refresh fetch (slow).
+        Without the store lock around fetch+apply, this sequence used to
+        silently lose the invalidate:
+          1. Proxy hot path's `_ensure_fresh` starts the DOH refresh
+             fetch (slow).
           2. User clicks Disconnect → `invalidate(slug)` clears the cache.
-          3. Proxy's in-flight fetch resolves and writes a (now stale) entry
-             back into the cache.
+          3. Proxy's in-flight fetch resolves and writes a (now stale)
+             entry back into the cache.
           4. Hook fires `refresh_slug` → `_ensure_fresh` reads the
              fresh-looking stale entry and returns without refetching.
 
         Correct behavior: invalidate waits for the in-flight refresh, the
-        stale write lands, invalidate then pops it, and the hook's
-        subsequent refresh starts from an empty cache and re-asks DOH.
+        stale write lands, invalidate pops it, and the hook's refresh
+        starts from an empty cache and re-asks DOH.
         """
         import threading
         fetch_calls: list[str] = []
@@ -511,19 +511,66 @@ class TestControlIntegrations(unittest.IsolatedAsyncioTestCase):
             proxy_task = asyncio.create_task(store.token_for_host(host="gmail.googleapis.com"))
             self.assertTrue(await asyncio.to_thread(started.wait, timeout=5))
             invalidate_task = asyncio.create_task(store.invalidate(slug="google"))
-            await asyncio.sleep(0)  # let invalidate queue on the refresh_lock
+            await asyncio.sleep(0)  # let invalidate queue on the store lock
             delayed.set()  # release the proxy's in-flight refresh
             await proxy_task
             await invalidate_task
 
-            # Hook step: refresh_slug-equivalent. Must see an empty cache
-            # and re-ask DOH (the second_absent stub fires here).
-            provider = broker.tls_intercept.TLS_INTERCEPT_PROVIDERS["google"]
-            hook_entry = await store._ensure_fresh(provider=provider)
+            # Hook step: the disconnect hook calls refresh_slug. It must
+            # see an empty cache and re-ask DOH (second_absent fires here).
+            await store.refresh(slug="google")
 
         self.assertEqual(fetch_calls, ["first", "second"])
         self.assertNotIn("google", store._cache)
-        self.assertIsNone(hook_entry)
+
+    async def test_parked_refresh_all_cannot_overwrite_concurrent_invalidate(self) -> None:
+        """A parked refresh_all() must not resurrect a token across a concurrent invalidate.
+
+        Pre-single-lock repro (fetch happens outside any lock, then per-slug
+        locks taken to apply):
+          1. refresh_all() fetches outside the per-slug lock and parks at DOH.
+          2. invalidate("google") clears the cache (its per-slug lock is free).
+          3. refresh_all() resumes and applies its stale has_token result for
+             google, undoing the invalidate.
+
+        Single-lock makes this impossible: refresh_all holds `_lock`
+        across fetch+apply, so invalidate queues behind it. By the time
+        invalidate runs, refresh_all's stale write has already landed
+        and invalidate pops it cleanly. The other providers' writes
+        survive — only google's was invalidated.
+        """
+        import threading
+        delayed = threading.Event()
+        started = threading.Event()
+
+        def parked_has_token(refresh_config: object, slugs: list[str]) -> object:
+            started.set()
+            delayed.wait(timeout=5)
+            return {
+                slug: broker.tls_intercept.RefreshResult(
+                    outcome=broker.tls_intercept.REFRESH_OUTCOME_HAS_TOKEN,
+                    access_token=f"STALE-{slug}", expires_in=3600,
+                    config={}, metadata={},
+                )
+                for slug in slugs
+            }
+
+        store = self.tls_runtime._token_store
+        with patch.object(broker.tls_intercept, "fetch_provider_tokens_batch", side_effect=parked_has_token):
+            refresh_all_task = asyncio.create_task(store.refresh_all())
+            self.assertTrue(await asyncio.to_thread(started.wait, timeout=5))
+            invalidate_task = asyncio.create_task(store.invalidate(slug="google"))
+            await asyncio.sleep(0)  # let invalidate queue on the store lock
+            delayed.set()
+            await refresh_all_task
+            await invalidate_task
+
+        # google's STALE write landed during refresh_all, then invalidate
+        # popped it. github + telegram were untouched by the invalidate
+        # so their refresh_all writes survive.
+        self.assertNotIn("google", store._cache)
+        self.assertEqual(store._cache["github"].access_token, "STALE-github")
+        self.assertEqual(store._cache["telegram"].access_token, "STALE-telegram")
 
     async def test_transient_with_expired_cache_returns_none(self) -> None:
         """A transient refresh on a cache entry that's already past expires_at
@@ -582,7 +629,7 @@ class TestControlIntegrations(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("telegram", slugs)
         self.assertNotIn("telegram", store._cache)
 
-    async def test_ensure_fresh_prunes_expired_entry_after_transient(self) -> None:
+    async def test_proxy_hot_path_prunes_expired_entry_after_transient(self) -> None:
         """Transient refresh on an expired entry must leave the cache empty."""
         import time
         store = self.tls_runtime._token_store
@@ -593,7 +640,6 @@ class TestControlIntegrations(unittest.IsolatedAsyncioTestCase):
             config={}, metadata={},
         )
 
-        provider = broker.tls_intercept.TLS_INTERCEPT_PROVIDERS["google"]
         with patch.object(
             broker.tls_intercept,
             "fetch_provider_tokens_batch",
@@ -602,9 +648,9 @@ class TestControlIntegrations(unittest.IsolatedAsyncioTestCase):
                 access_token=None, expires_in=None, config={}, metadata={},
             )),
         ):
-            entry = await store._ensure_fresh(provider=provider)
+            token = await store.token_for_host(host="gmail.googleapis.com")
 
-        self.assertIsNone(entry)
+        self.assertIsNone(token)
         self.assertNotIn("google", store._cache)
 
     async def test_invalidate_endpoint_drops_cache(self) -> None:

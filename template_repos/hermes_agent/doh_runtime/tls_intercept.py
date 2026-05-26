@@ -444,19 +444,29 @@ def _status_item_for_provider(provider: TlsProviderSpec, entry: _TokenCacheEntry
 
 
 class _TokenStore:
-    """Token cache and refresh coordinator for TLS-intercept providers."""
+    """Token cache + refresh coordinator for TLS-intercept providers.
+
+    A single `asyncio.Lock` serializes every cache mutation and every
+    read that needs an internally-consistent view (status render,
+    gateway env snapshot, proxy hot-path single-flight refresh).
+    Replaces the older per-slug `_refresh_locks` + `_cache_lock` pair —
+    the additional cross-slug parallelism that bought us doesn't matter
+    in this broker (3 providers, low concurrent traffic, in-VPC DOH),
+    and a single lock makes "a parked fetch wrote past an invalidate"
+    structurally impossible: fetch and apply always run under the same
+    lock together.
+    """
 
     def __init__(self, providers: dict[str, TlsProviderSpec], refresh_config: DohRefreshConfig, refresh_lead_seconds: int) -> None:
         self._providers = providers
         self._host_to_provider = build_host_to_provider(providers=providers)
         self._refresh_config = refresh_config
         self._refresh_lead_seconds = refresh_lead_seconds
-        self._refresh_locks = {slug: asyncio.Lock() for slug in providers}
+        self._lock = asyncio.Lock()
         self._cache: dict[str, _TokenCacheEntry] = {}
-        self._cache_lock = asyncio.Lock()
 
     def provider_for_host(self, host: str) -> TlsProviderSpec | None:
-        """Return the provider that owns an upstream hostname."""
+        """Lock-free: reads the immutable host→provider map built at init."""
         slug = self._host_to_provider.get(_normalize_connect_host(host=host))
         if slug is None:
             return None
@@ -467,117 +477,68 @@ class _TokenStore:
         provider = self.provider_for_host(host=host)
         if provider is None:
             return None
-        entry = await self._ensure_fresh(provider=provider)
+        async with self._lock:
+            entry = await self._ensure_fresh_locked(provider=provider)
         if entry is None:
             return None
         return entry.access_token
 
     async def invalidate(self, slug: str) -> None:
-        """Drop the cached token for a provider, racing-safely.
-
-        Takes the per-provider refresh_lock around the cache pop. Without
-        this, an in-flight `_ensure_fresh` for the same slug could land its
-        (now stale) write into the cache *after* the pop, and a subsequent
-        `_ensure_fresh` would find that fresh-looking stale entry and skip
-        the refetch — silently swallowing the user's Disconnect/vault-save.
-        Serializing through the refresh_lock makes the stale write land
-        first, then the pop, then the next refresh starts from an empty
-        cache and actually hits DOH.
-        """
-        await self._invalidate_one(slug=slug)
+        """Drop the cached token for a provider."""
+        async with self._lock:
+            self._cache.pop(slug, None)
 
     async def invalidate_all(self) -> None:
-        """Drop every cached entry. Used by the explicit Refresh-all path.
-
-        Per-slug invalidation runs concurrently — each takes its own
-        provider's refresh_lock, so they never block each other.
-        """
-        await asyncio.gather(*(self._invalidate_one(slug=slug) for slug in self._providers))
-
-    async def _invalidate_one(self, slug: str) -> None:
-        """Take the provider's refresh_lock, then pop its cache entry."""
-        lock = self._refresh_locks.get(slug)
-        if lock is None:
-            return
-        async with lock:
-            async with self._cache_lock:
-                self._cache.pop(slug, None)
+        """Drop every cached token entry."""
+        async with self._lock:
+            self._cache.clear()
 
     async def refresh(self, slug: str) -> None:
         """Refetch one provider from DOH even when the cache is fresh."""
         if slug not in self._providers:
             return
-        await self._refresh_batch(slugs=[slug])
+        async with self._lock:
+            await self._refresh_locked(slugs=[slug])
 
     async def refresh_all(self) -> None:
-        """Refetch every provider in one DOH round-trip."""
-        await self._refresh_batch(slugs=list(self._providers))
-
-    async def _refresh_batch(self, slugs: list[str]) -> None:
-        """Fetch the slugs in one DOH POST; apply each result under its provider's refresh_lock.
-
-        The fetch happens outside any per-slug lock so a slow DOH round-trip
-        doesn't stall concurrent per-slug operations (the proxy hot-path's
-        `_ensure_fresh`, `invalidate`, etc.). Only the cache mutation
-        acquires the lock, and per-slug applies run concurrently.
-        """
-        results = await asyncio.to_thread(
-            fetch_provider_tokens_batch,
-            refresh_config=self._refresh_config,
-            slugs=slugs,
-        )
-        await asyncio.gather(*(
-            self._apply_under_lock(slug=slug, result=results[slug])
-            for slug in slugs
-        ))
-
-    async def _apply_under_lock(self, slug: str, result: RefreshResult) -> None:
-        """Acquire the provider's refresh_lock, then apply the refresh outcome to the cache."""
-        async with self._refresh_locks[slug]:
-            await self._apply(provider=self._providers[slug], result=result)
-
-    def _prune_expired_locked(self, now: float) -> None:
-        """Drop expired cache entries. Caller must hold `_cache_lock`."""
-        expired_slugs = [
-            slug
-            for slug, entry in self._cache.items()
-            if not entry.is_usable(now=now)
-        ]
-        for slug in expired_slugs:
-            self._cache.pop(slug, None)
-
-    async def _cache_snapshot(self) -> dict[str, _TokenCacheEntry]:
-        """Return a snapshot after pruning expired token entries."""
-        now = time.monotonic()
-        async with self._cache_lock:
-            self._prune_expired_locked(now=now)
-            return dict(self._cache)
-
-    async def _cached_entry(self, slug: str) -> _TokenCacheEntry | None:
-        """Return one cached entry after pruning expired token entries."""
-        now = time.monotonic()
-        async with self._cache_lock:
-            self._prune_expired_locked(now=now)
-            return self._cache.get(slug)
+        """Refetch every provider in one batched DOH round-trip."""
+        async with self._lock:
+            await self._refresh_locked(slugs=list(self._providers))
 
     async def status_items(self) -> list[dict]:
         """Render integration cards from the current cache; never calls DOH.
 
-        Cache writes happen on three paths: boot bootstrap, the proxy hot path
-        (`token_for_host` near-expiry refresh), and explicit user invalidate.
-        Status reads are a pure projection of the usable cache snapshot.
+        Cache writes happen on three paths: boot bootstrap, the proxy hot
+        path (`token_for_host` near-expiry refresh), and explicit user
+        invalidate/refresh. Status reads are a pure projection of the
+        usable cache.
         """
-        snapshot = await self._cache_snapshot()
-        return [
-            _status_item_for_provider(provider=provider, entry=snapshot.get(provider.slug))
-            for provider in self._providers.values()
-        ]
+        async with self._lock:
+            self._prune_expired_locked(now=time.monotonic())
+            return [
+                _status_item_for_provider(provider=provider, entry=self._cache.get(provider.slug))
+                for provider in self._providers.values()
+            ]
 
-    async def _ensure_fresh(self, provider: TlsProviderSpec) -> _TokenCacheEntry | None:
-        """Single-flight refresh when the cached token is missing or near expiry.
+    async def gateway_env_snapshot(self) -> list[tuple[TlsProviderSpec, dict]]:
+        """Pair every connected provider with its cached config for env rendering.
+
+        Returns `(provider, config)` tuples for providers currently in
+        the usable cache. The broker calls `refresh_all()` first when it
+        wants the cache aligned with DOH state.
+        """
+        async with self._lock:
+            self._prune_expired_locked(now=time.monotonic())
+            return [
+                (self._providers[slug], entry.config)
+                for slug, entry in self._cache.items()
+            ]
+
+    async def _ensure_fresh_locked(self, provider: TlsProviderSpec) -> _TokenCacheEntry | None:
+        """Single-flight refresh when the cached token is missing or near expiry. Caller holds `_lock`.
 
         Returns the cache entry to use for this request, or None when the
-        provider is genuinely unavailable. The two cases to keep separate:
+        provider is genuinely unavailable. Two cases to keep separate:
 
         - **Refresh succeeded** (has_token/absent): the cache reflects DOH
           truth, so we return whatever's now in the cache.
@@ -587,25 +548,33 @@ class _TokenStore:
           surfacing "not connected" to the sandbox because DOH hiccuped.
           Only return None when even the prior token is past expiry.
         """
-        async with self._refresh_locks[provider.slug]:
-            entry = await self._cached_entry(slug=provider.slug)
-            if entry is not None and entry.is_fresh(now=time.monotonic(), refresh_lead_seconds=self._refresh_lead_seconds):
-                return entry
-            # Caller already holds this slug's refresh_lock, so we fetch +
-            # apply directly rather than going through `_refresh_batch`
-            # (which would try to re-acquire the same lock and deadlock).
-            results = await asyncio.to_thread(
-                fetch_provider_tokens_batch,
-                refresh_config=self._refresh_config,
-                slugs=[provider.slug],
-            )
-            await self._apply(provider=provider, result=results[provider.slug])
-            return await self._cached_entry(slug=provider.slug)
+        now = time.monotonic()
+        self._prune_expired_locked(now=now)
+        entry = self._cache.get(provider.slug)
+        if entry is not None and entry.is_fresh(now=now, refresh_lead_seconds=self._refresh_lead_seconds):
+            return entry
+        await self._refresh_locked(slugs=[provider.slug])
+        return self._cache.get(provider.slug)
 
-    async def _apply(self, provider: TlsProviderSpec, result: RefreshResult) -> None:
-        """Apply a fetched refresh outcome to the cache. Caller holds the provider's refresh_lock.
+    async def _refresh_locked(self, slugs: list[str]) -> None:
+        """Fetch the slugs in one DOH POST and apply each result. Caller holds `_lock`.
 
-        Side-effect only — callers re-read the cache to learn the result:
+        Holding the lock across both fetch and apply (rather than
+        dropping it during the network call) is what prevents a parked
+        fetch from overwriting a concurrent invalidate. The cost is
+        small in practice: ~tens of ms per refresh, and at most one
+        refresh per provider per token lifetime hits this path.
+        """
+        results = await asyncio.to_thread(
+            fetch_provider_tokens_batch,
+            refresh_config=self._refresh_config,
+            slugs=slugs,
+        )
+        for slug in slugs:
+            self._apply_locked(provider=self._providers[slug], result=results[slug])
+
+    def _apply_locked(self, provider: TlsProviderSpec, result: RefreshResult) -> None:
+        """Apply one refresh outcome to the cache. Caller holds `_lock`.
 
         - has_token → write the new entry.
         - absent → drop any prior entry (idempotent).
@@ -613,17 +582,24 @@ class _TokenStore:
           token with a sentinel; the prior entry, if any, stays available).
         """
         if result.outcome == REFRESH_OUTCOME_HAS_TOKEN:
-            entry = _cache_entry_from_connected_result(result=result, now=time.monotonic())
-            async with self._cache_lock:
-                self._cache[provider.slug] = entry
+            self._cache[provider.slug] = _cache_entry_from_connected_result(result=result, now=time.monotonic())
             logger.info("refreshed %s: connected", provider.slug)
             return
         if result.outcome == REFRESH_OUTCOME_ABSENT:
-            async with self._cache_lock:
-                self._cache.pop(provider.slug, None)
+            self._cache.pop(provider.slug, None)
             logger.info("refreshed %s: not_connected", provider.slug)
             return
         logger.info("refreshed %s: transient error (cache untouched)", provider.slug)
+
+    def _prune_expired_locked(self, now: float) -> None:
+        """Drop expired cache entries. Caller holds `_lock`."""
+        expired_slugs = [
+            slug
+            for slug, entry in self._cache.items()
+            if not entry.is_usable(now=now)
+        ]
+        for slug in expired_slugs:
+            self._cache.pop(slug, None)
 
 
 class TlsInterceptRuntime:
@@ -689,17 +665,8 @@ class TlsInterceptRuntime:
         await self._token_store.refresh_all()
 
     async def gateway_env_snapshot(self) -> list[tuple[TlsProviderSpec, dict]]:
-        """Pair every connected provider with its cached config for env rendering.
-
-        Returns `(provider, config)` tuples for providers currently in the
-        usable cache. The broker calls `refresh_all()` first when it wants
-        the cache aligned with DOH state.
-        """
-        snapshot = await self._token_store._cache_snapshot()
-        return [
-            (self._token_store._providers[slug], entry.config)
-            for slug, entry in snapshot.items()
-        ]
+        """Pair every connected provider with its cached config for env rendering."""
+        return await self._token_store.gateway_env_snapshot()
 
 
 class _CertMinter:
