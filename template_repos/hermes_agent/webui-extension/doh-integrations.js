@@ -26,6 +26,7 @@
         if (k === 'style' && typeof props[k] === 'object') Object.assign(el.style, props[k]);
         else if (k === 'dataset' && typeof props[k] === 'object') Object.assign(el.dataset, props[k]);
         else if (k.startsWith('on') && typeof props[k] === 'function') el.addEventListener(k.slice(2), props[k]);
+        else if (k === 'disabled') el.disabled = !!props[k];
         else el.setAttribute(k, props[k]);
       }
     }
@@ -290,7 +291,7 @@
           }
         },
       };
-      if (pending) btnProps.disabled = '';
+      if (pending) btnProps.disabled = true;
       const disconnectBtn = elem('button', btnProps, [pending ? 'Disconnecting…' : 'Disconnect']);
       card.appendChild(elem('div', { class: 'doh-integration-card-head' }, [titleRow, statusPill]));
       card.appendChild(elem('div', { class: 'doh-integration-card-body' }, [disconnectBtn]));
@@ -531,10 +532,15 @@
           class: 'doh-integration-btn',
           onclick: () => { startVaultConfig(item); },
         }, ['Configure']));
-        actions.appendChild(elem('button', {
+        const vaultDisconnectPending = _disconnecting.has(item.slug);
+        const vaultDisconnectProps = {
           class: 'doh-integration-btn doh-integration-btn-secondary',
           onclick: () => { disconnectVaultProvider(item); },
-        }, [_disconnecting.has(item.slug) ? 'Disconnecting…' : 'Disconnect']));
+        };
+        if (vaultDisconnectPending) vaultDisconnectProps.disabled = true;
+        actions.appendChild(elem('button', vaultDisconnectProps, [
+          vaultDisconnectPending ? 'Disconnecting…' : 'Disconnect',
+        ]));
       } else {
         actions.appendChild(elem('button', {
           class: 'doh-integration-btn doh-integration-btn-secondary',
