@@ -17,6 +17,7 @@ from django.db import transaction
 
 from devopshero_app import models
 from devopshero_app.services.infra_customer import cloudformation_utils
+from devopshero_app.services.infra_customer import deploy_app
 from devopshero_app.services.infra_customer import iam_utils
 from devopshero_app.services.infra_customer import secrets_utils
 
@@ -141,6 +142,16 @@ def run_removal(job_id: str) -> bool:
     except tenant_consistency.TenantConsistencyError as exc:
         _fail(job, app, f"Refused: {exc}")
         return False
+
+    # Tear down the per-agent wildcard cert stack (if any) in every env
+    # the app exists in. Outside the per-deployment teardown so a normal
+    # "shutdown" keeps the cert for redeploy; only full removal deletes it.
+    # No-op when the app/env combo never opted into subhosting.
+    for env in environments:
+        session = _get_env_session(env)
+        if not deploy_app.teardown_cert_stack(session=session, env_slug=env.slug, app_name=app.slug):
+            _fail(job, app, f"Cert stack teardown failed in env '{env.slug}'")
+            return False
 
     try:
         if job.delete_persistent_data:
