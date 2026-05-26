@@ -307,11 +307,31 @@ class TestCertMinter(unittest.TestCase):
 class _StubAggregator:
     """Minimal MCPAggregator surface for the unified-status + control-app tests."""
 
+    def __init__(self, *, cooldown_remaining: int | None, refresh_payload: tuple[bool, dict]) -> None:
+        self._cooldown_remaining = cooldown_remaining
+        self._refresh_payload = refresh_payload
+        self.refresh_calls = 0
+
     async def status_items(self) -> list:
         return []
 
     def routes(self, prefix: str) -> list:
         return []
+
+    def cooldown_remaining_seconds(self) -> int | None:
+        return self._cooldown_remaining
+
+    async def refresh_catalog(self) -> tuple[bool, dict]:
+        self.refresh_calls += 1
+        return self._refresh_payload
+
+
+def _ready_stub_aggregator() -> _StubAggregator:
+    """Stub aggregator for tests that don't exercise the refresh route."""
+    return _StubAggregator(
+        cooldown_remaining=None,
+        refresh_payload=(True, {"ok": True, "tools": 0, "connectors": 0}),
+    )
 
 
 class TestControlIntegrations(unittest.IsolatedAsyncioTestCase):
@@ -328,7 +348,7 @@ class TestControlIntegrations(unittest.IsolatedAsyncioTestCase):
         from starlette.testclient import TestClient
 
         app = broker._build_control_app(
-            aggregator=_StubAggregator(),
+            aggregator=_ready_stub_aggregator(),
             tls_runtime=self.tls_runtime,
             control_plane_url="https://doh.example",
             bearer="env-bearer",
@@ -653,12 +673,16 @@ class TestControlIntegrations(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(token)
         self.assertNotIn("google", store._cache)
 
-    async def test_invalidate_endpoint_drops_cache(self) -> None:
-        """POST /integrations/invalidate_tls_cache evicts every cached entry."""
+    async def test_refresh_endpoint_reloads_catalog_and_drops_tls_cache(self) -> None:
+        """POST /integrations/refresh fans out catalog reload + all-providers TLS invalidate."""
         from starlette.testclient import TestClient
 
+        aggregator = _StubAggregator(
+            cooldown_remaining=None,
+            refresh_payload=(True, {"ok": True, "tools": 12, "connectors": 3}),
+        )
         app = broker._build_control_app(
-            aggregator=_StubAggregator(),
+            aggregator=aggregator,
             tls_runtime=self.tls_runtime,
             control_plane_url="https://doh.example",
             bearer="env-bearer",
@@ -681,17 +705,78 @@ class TestControlIntegrations(unittest.IsolatedAsyncioTestCase):
             await self.tls_runtime.refresh_slug(slug="google")
             self.assertIn("google", self.tls_runtime._token_store._cache)
             with TestClient(app) as client:
-                resp = client.post("/integrations/invalidate_tls_cache")
+                resp = client.post("/integrations/refresh")
 
         self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.json(), {"ok": True, "tools": 12, "connectors": 3})
+        self.assertEqual(aggregator.refresh_calls, 1)
         self.assertEqual(self.tls_runtime._token_store._cache, {})
+
+    async def test_refresh_endpoint_cooldown_skips_tls_invalidate(self) -> None:
+        """Cooldown 429 must short-circuit before invalidate_all fires (would kick the gateway)."""
+        from starlette.testclient import TestClient
+
+        aggregator = _StubAggregator(
+            cooldown_remaining=17,
+            refresh_payload=(True, {"ok": True, "tools": 0, "connectors": 0}),
+        )
+        app = broker._build_control_app(
+            aggregator=aggregator,
+            tls_runtime=self.tls_runtime,
+            control_plane_url="https://doh.example",
+            bearer="env-bearer",
+            owner_username="vmendi",
+            app_slug="hermes",
+            env_slug="default",
+        )
+
+        with patch.object(self.tls_runtime, "invalidate_all", new_callable=AsyncMock) as invalidate_all_mock:
+            with TestClient(app) as client:
+                resp = client.post("/integrations/refresh")
+
+        self.assertEqual(resp.status_code, 429)
+        self.assertEqual(resp.json(), {"error": "refresh_cooldown", "retry_after_seconds": 17})
+        invalidate_all_mock.assert_not_awaited()
+        self.assertEqual(aggregator.refresh_calls, 0)
+
+    async def test_refresh_endpoint_surfaces_gateway_restart_failure(self) -> None:
+        """Catalog refresh succeeded but TLS invalidate's gateway restart failed -> 502 with error."""
+        from starlette.testclient import TestClient
+
+        aggregator = _StubAggregator(
+            cooldown_remaining=None,
+            refresh_payload=(True, {"ok": True, "tools": 1, "connectors": 1}),
+        )
+        app = broker._build_control_app(
+            aggregator=aggregator,
+            tls_runtime=self.tls_runtime,
+            control_plane_url="https://doh.example",
+            bearer="env-bearer",
+            owner_username="vmendi",
+            app_slug="hermes",
+            env_slug="default",
+        )
+
+        with patch.object(
+            self.tls_runtime,
+            "invalidate_all",
+            new_callable=AsyncMock,
+            side_effect=RuntimeError("gateway restart failed (process-compose returned 502)"),
+        ):
+            with TestClient(app) as client:
+                resp = client.post("/integrations/refresh")
+
+        self.assertEqual(resp.status_code, 502)
+        body = resp.json()
+        self.assertFalse(body["ok"])
+        self.assertIn("gateway restart failed", body["error"])
 
     async def test_provider_invalidate_endpoint_drops_one_provider_cache(self) -> None:
         """POST /integrations/{provider}/invalidate_tls_cache evicts one provider."""
         from starlette.testclient import TestClient
 
         app = broker._build_control_app(
-            aggregator=_StubAggregator(),
+            aggregator=_ready_stub_aggregator(),
             tls_runtime=self.tls_runtime,
             control_plane_url="https://doh.example",
             bearer="env-bearer",
@@ -715,7 +800,7 @@ class TestControlIntegrations(unittest.IsolatedAsyncioTestCase):
         from starlette.testclient import TestClient
 
         app = broker._build_control_app(
-            aggregator=_StubAggregator(),
+            aggregator=_ready_stub_aggregator(),
             tls_runtime=self.tls_runtime,
             control_plane_url="https://doh.example",
             bearer="env-bearer",
@@ -751,7 +836,7 @@ class TestControlIntegrations(unittest.IsolatedAsyncioTestCase):
         from starlette.testclient import TestClient
 
         app = broker._build_control_app(
-            aggregator=_StubAggregator(),
+            aggregator=_ready_stub_aggregator(),
             tls_runtime=self.tls_runtime,
             control_plane_url="https://doh.example",
             bearer="env-bearer",

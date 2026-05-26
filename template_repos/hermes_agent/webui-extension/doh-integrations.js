@@ -63,7 +63,12 @@
     _refreshInflight = true;
     if (btn) btn.disabled = true;
     try {
-      const response = await fetch('/__doh_broker/integrations/refresh_catalog', {
+      // One round-trip: the broker reloads the MCP catalog AND invalidates the
+      // all-providers TLS cache (which refetches from DOH and, for vault
+      // providers, restarts the gateway). Cooldown 429 short-circuits before
+      // the TLS side runs, so repeated clicks while the cooldown is active
+      // can't keep kicking the gateway.
+      const response = await fetch('/__doh_broker/integrations/refresh', {
         method: 'POST',
         cache: 'no-store',
       });
@@ -77,17 +82,14 @@
         return;
       }
       if (!response.ok) {
+        let message = 'Refresh failed. Please try again.';
+        try { message = (await response.json()).error || message; } catch (_) { /* ignore */ }
         if (note) {
-          note.textContent = 'Refresh failed. Please try again.';
+          note.textContent = message;
           note.style.display = '';
         }
         return;
       }
-      // User asked for a fresh view — invalidate the broker's TLS cache too,
-      // not just the MCP catalog. That POST clears entries and the broker
-      // hook refetches from DOH before we render; the GET is read-only.
-      // Trades a token rotation for accurate Connected / Not connected labels.
-      await invalidateBrokerTlsCache();
       await refreshAndRender();
     } catch (_) {
       if (note) {
@@ -607,21 +609,20 @@
     renderPane(_current);
   }
 
-  // Tell the broker to drop cached TLS-intercept tokens. Provider-specific
-  // invalidation is used after known connect/disconnect/config changes; the
-  // no-arg form intentionally invalidates all providers for explicit Refresh.
+  // Tell the broker to drop one provider's cached TLS-intercept token after a
+  // known connect/disconnect/config change (vault save, OAuth-return sentinel).
+  // The explicit-Refresh-all path goes through /__doh_broker/integrations/refresh
+  // instead, which fans out catalog reload + all-providers TLS invalidate.
   //
   // For vault providers the broker also rewrites the gateway's .env file and
   // restarts the gateway via process-compose. Both failure modes (network
   // error reaching the broker, or 5xx from the broker) propagate to the
   // caller — for vault saves the modal turns these into "Saved, but the
-  // gateway restart failed — redeploy". Cache-hint callers (Refresh button,
-  // OAuth-return sentinel) catch and ignore: the proxy's 401-evict path
-  // recovers stale tokens on the first real call.
+  // gateway restart failed — redeploy". Cache-hint callers (OAuth-return
+  // sentinel) catch and ignore: the proxy's 401-evict path recovers stale
+  // tokens on the first real call.
   async function invalidateBrokerTlsCache(providerSlug) {
-    const url = providerSlug
-      ? '/__doh_broker/integrations/' + encodeURIComponent(providerSlug) + '/invalidate_tls_cache'
-      : '/__doh_broker/integrations/invalidate_tls_cache';
+    const url = '/__doh_broker/integrations/' + encodeURIComponent(providerSlug) + '/invalidate_tls_cache';
     const response = await fetch(url, { method: 'POST' });
     if (response.ok) return;
     let payload = {};
