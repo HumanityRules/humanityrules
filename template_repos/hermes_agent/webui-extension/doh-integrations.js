@@ -62,7 +62,10 @@
     const note = document.getElementById('dohIntegrationRefreshNote');
     if (note) { note.style.display = 'none'; note.textContent = ''; }
     _refreshInflight = true;
-    if (btn) btn.disabled = true;
+    if (btn) {
+      btn.disabled = true;
+      btn.textContent = 'Refreshing…';
+    }
     try {
       // One round-trip: the broker reloads the MCP catalog AND invalidates the
       // all-providers TLS cache (which refetches from DOH and, for vault
@@ -99,7 +102,10 @@
       }
     } finally {
       _refreshInflight = false;
-      if (btn) btn.disabled = false;
+      if (btn) {
+        btn.disabled = false;
+        btn.textContent = 'Refresh';
+      }
     }
   }
 
