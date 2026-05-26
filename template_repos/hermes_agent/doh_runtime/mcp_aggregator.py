@@ -240,12 +240,23 @@ class MCPAggregator:
         logger.info("MCP aggregator listening on 127.0.0.1:%d", self._port)
         await server.serve()
 
+    def cooldown_remaining_seconds(self) -> int | None:
+        """Seconds left on the refresh cooldown, or None if a refresh is allowed now.
+
+        Exposed so callers (the broker's unified `/integrations/refresh` route)
+        can gate on cooldown *before* firing co-routines whose side effects
+        shouldn't run during a no-op refresh.
+        """
+        elapsed = time.time() - self._last_refresh_ts
+        if elapsed < REFRESH_COOLDOWN_SECONDS:
+            return int(REFRESH_COOLDOWN_SECONDS - elapsed) + 1
+        return None
+
     async def refresh_catalog(self) -> tuple[bool, dict]:
         """User-facing Refresh button hits this. Returns (ok, payload)."""
-        now = time.time()
-        elapsed = now - self._last_refresh_ts
-        if elapsed < REFRESH_COOLDOWN_SECONDS:
-            return False, {"error": "refresh_cooldown", "retry_after_seconds": int(REFRESH_COOLDOWN_SECONDS - elapsed) + 1}
+        remaining = self.cooldown_remaining_seconds()
+        if remaining is not None:
+            return False, {"error": "refresh_cooldown", "retry_after_seconds": remaining}
         async with self._refresh_lock:
             self._last_refresh_ts = time.time()
             for backend in self._backends:

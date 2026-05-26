@@ -75,9 +75,11 @@ async def _handle_unified_status(
     """Flat list combining TLS-intercept providers and MCP-aggregator items.
 
     Reads cached TLS-intercept entries; refresh happens lazily (proxy hot
-    path or near expiry). Callers that need fresh state (e.g. after a
-    Disconnect on DOH) must POST /__doh_broker/integrations/invalidate_tls_cache
-    first.
+    path or near expiry). Callers that need fresh state must POST
+    /__doh_broker/integrations/{provider}/invalidate_tls_cache for one provider
+    (e.g. after a Disconnect on DOH) or /__doh_broker/integrations/refresh
+    for the explicit-Refresh path (MCP catalog reload + all-providers TLS
+    invalidate in one shot).
     """
     items = await tls_runtime.status_items()
     items.extend(await aggregator.status_items())
@@ -115,17 +117,40 @@ def _build_control_app(
             env_slug=env_slug,
         )
 
-    async def refresh_catalog_route(request: Request) -> Response:
-        ok, payload = await aggregator.refresh_catalog()
-        return JSONResponse(content=payload, status_code=200 if ok else 429)
+    async def refresh_route(request: Request) -> Response:
+        """Explicit-Refresh: reload the MCP catalog and drop the all-providers TLS cache.
 
-    async def invalidate_tls_cache_route(request: Request) -> Response:
-        """Drop every cached TLS-intercept token for explicit Refresh all."""
-        try:
-            await tls_runtime.invalidate_all()
-        except RuntimeError as exc:
-            return JSONResponse(content={"ok": False, "error": str(exc)}, status_code=502)
-        return JSONResponse(content={"ok": True})
+        Cooldown is owned by the catalog side. If a refresh ran within
+        REFRESH_COOLDOWN_SECONDS we return 429 *without* firing the TLS
+        invalidate — otherwise smashing the Refresh button on cooldown would
+        repeatedly trigger `invalidate_all`'s `on_user_invalidate` hook
+        (DOH round-trip + gateway-env rewrite + gateway restart for vault
+        providers). Once past the cooldown gate, the two sides run
+        concurrently — they share no state and the slower of the two sets
+        the round-trip latency.
+        """
+        remaining = aggregator.cooldown_remaining_seconds()
+        if remaining is not None:
+            return JSONResponse(
+                content={"error": "refresh_cooldown", "retry_after_seconds": remaining},
+                status_code=429,
+            )
+
+        async def _safe_invalidate_all() -> str | None:
+            try:
+                await tls_runtime.invalidate_all()
+            except RuntimeError as exc:
+                return str(exc)
+            return None
+
+        catalog_result, tls_error = await asyncio.gather(
+            aggregator.refresh_catalog(),
+            _safe_invalidate_all(),
+        )
+        if tls_error is not None:
+            return JSONResponse(content={"ok": False, "error": tls_error}, status_code=502)
+        ok, payload = catalog_result
+        return JSONResponse(content=payload, status_code=200 if ok else 429)
 
     async def invalidate_provider_tls_cache_route(request: Request) -> Response:
         """Drop one provider's cached TLS-intercept token after known state changes."""
@@ -182,8 +207,7 @@ def _build_control_app(
     routes = [
         Route(path="/healthz", endpoint=_handle_healthz, methods=["GET"]),
         Route(path="/integrations", endpoint=status_route, methods=["GET"]),
-        Route(path="/integrations/refresh_catalog", endpoint=refresh_catalog_route, methods=["POST"]),
-        Route(path="/integrations/invalidate_tls_cache", endpoint=invalidate_tls_cache_route, methods=["POST"]),
+        Route(path="/integrations/refresh", endpoint=refresh_route, methods=["POST"]),
         Route(path="/integrations/{provider}/invalidate_tls_cache", endpoint=invalidate_provider_tls_cache_route, methods=["POST"]),
         Route(path="/integrations/{provider}/vault/setup-session", endpoint=vault_setup_session_route, methods=["POST"]),
         Route(path="/integrations/{provider}/vault/disconnect", endpoint=vault_disconnect_route, methods=["POST"]),
