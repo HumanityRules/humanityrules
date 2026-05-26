@@ -408,12 +408,15 @@ def integrations_merge_disconnect(request: HttpRequest) -> JsonResponse:
 def integrations_merge_mcp(request: HttpRequest) -> StreamingHttpResponse | JsonResponse:
     """Streaming-HTTP MCP relay. Sandbox → aggregator → here → Merge.
 
+    Forwards POST (JSON-RPC), GET (SSE listening stream), DELETE (session
+    terminate) verbatim — the three client-side methods MCP Streamable HTTP
+    defines. POST-only would push fastmcp into its 405-fallback path and
+    emit two GET retries + one DELETE per session as DOH WARN log noise.
+
     DOH derives tool_pack_id and registered_user_id from authenticated state;
-    the broker has no way to influence which Merge target this hits. The body
-    (an MCP JSON-RPC frame, possibly large/streaming) is forwarded verbatim;
-    upstream response is streamed back as-is.
+    the broker has no way to influence which Merge target this hits.
     """
-    if request.method != "POST":
+    if request.method not in ("POST", "GET", "DELETE"):
         return JsonResponse({"error": "method not allowed"}, status=405)
     resolved = _resolve_caller(request=request)
     if isinstance(resolved, JsonResponse):
@@ -438,10 +441,14 @@ def integrations_merge_mcp(request: HttpRequest) -> StreamingHttpResponse | Json
     # the agent's catalog mirrors what's actually callable. The full firehose
     # ballooned the prompt past the context window with ~1500 tool defs.
     upstream_url = f"{MERGE_API_BASE}/api/v1/tool-packs/{pack_id}/registered-users/{rid}/mcp/?authenticated_only=true"
+    # Forward MCP Streamable HTTP correlation headers (session/protocol/
+    # last-event-id) when set, so DELETE terminates the right session and
+    # SSE GETs can resume by Last-Event-Id.
     upstream_headers = {
         "Authorization": f"Bearer {api_key}",
         "Content-Type": request.headers.get("Content-Type", "application/json"),
         "Accept": request.headers.get("Accept", "application/json, text/event-stream"),
+        **{h: request.headers[h] for h in ("Mcp-Session-Id", "Mcp-Protocol-Version", "Last-Event-Id") if h in request.headers},
     }
     timeout = httpx.Timeout(
         connect=MERGE_MCP_CONNECT_TIMEOUT_SECONDS,
@@ -456,13 +463,13 @@ def integrations_merge_mcp(request: HttpRequest) -> StreamingHttpResponse | Json
     try:
         upstream = client.send(
             request=client.build_request(
-                method="POST", url=upstream_url, headers=upstream_headers, content=request.body,
+                method=request.method, url=upstream_url, headers=upstream_headers, content=request.body,
             ),
             stream=True,
         )
     except httpx.HTTPError as exc:
         client.close()
-        logger.error("merge mcp upstream connect failed: %s", exc)
+        logger.error("merge mcp upstream %s failed: %s", request.method, exc)
         return JsonResponse({"error": "merge upstream error"}, status=502)
 
     def iter_and_close():
