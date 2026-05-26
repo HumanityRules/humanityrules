@@ -116,11 +116,13 @@ Two shapes, depending on slug. The CLI's `regenerate_routes(doc)` picks the righ
 ```caddy
 @webapp_<slug> header X-Forwarded-Host <slug>.<agent-host>
 handle @webapp_<slug> {
-    reverse_proxy 127.0.0.1:<port>
+    reverse_proxy 127.0.0.1:<port> {
+        header_up X-Forwarded-Host {header.X-Forwarded-Host}
+    }
 }
 ```
 
-That's the whole route. No `X-Forwarded-Prefix`, no `X-Forwarded-Host` rewrite at the upstream — the app sees `/` as its public root because the actual path is `/`. Absolute paths (`/assets/...`, `/api/...`, `/ws`) work without any per-framework configuration.
+The app sees `/` as its public root because the actual path is `/`. Absolute paths (`/assets/...`, `/api/...`, `/ws`) work without any per-framework configuration. The `header_up X-Forwarded-Host` propagates policy-proxy's preserved value on to the upstream; without it, Caddy's reverse_proxy default of "set X-Forwarded-Host from the inbound Host" would substitute the `127.0.0.1:8787` loopback host policy-proxy gave Caddy, and link helpers / OpenAPI server URLs / OAuth callbacks would see the wrong hostname.
 
 **Platform-internal slug (`__*`) → path-matched block on the bare host:**
 
