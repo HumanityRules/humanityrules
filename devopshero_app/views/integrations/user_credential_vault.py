@@ -488,29 +488,15 @@ def integrations_credential_disconnect(request: HttpRequest) -> JsonResponse:
     return JsonResponse({"ok": True, "status": "not_connected"})
 
 
-@csrf_exempt
-@require_POST
-def integrations_telegram_token(request: HttpRequest) -> JsonResponse:
-    """Return the app-scoped Telegram bot token to the outside-sandbox broker."""
-    environment, auth_error = _resolve_env_bearer_context(request=request)
-    if auth_error is not None:
-        return auth_error
-    payload, parse_error = _parse_json_body(request=request)
-    if parse_error is not None:
-        return parse_error
-    owner_user, owner_error = _resolve_owner_user(
-        owner_username=payload.get("owner_username"),
-        environment=environment,
-    )
-    if owner_error is not None:
-        return owner_error
-    app_slug, app_error = _resolve_owned_app_slug(
-        app_slug=payload.get("app_slug"),
-        environment=environment,
-        owner_user=owner_user,
-    )
-    if app_error is not None:
-        return app_error
+def refresh_telegram_outcome(environment: Environment, owner_user: User, app_slug: str) -> dict:
+    """Compute the broker-shaped refresh outcome for Telegram (no upstream exchange).
+
+    Telegram bot tokens never expire on the provider side, so this is a
+    plain DB read. `expires_in` is the broker's cache lifetime, not a
+    Telegram-imposed deadline. Invoked by the batched DOH refresh
+    endpoint (`views/integrations/token_refresh_batch.py`) alongside the
+    OAuth provider helpers.
+    """
     credential = IntegrationUserCredential.objects.filter(
         owner_user=owner_user,
         environment=environment,
@@ -518,14 +504,14 @@ def integrations_telegram_token(request: HttpRequest) -> JsonResponse:
         provider=IntegrationUserCredential.Provider.TELEGRAM,
     ).first()
     if credential is None:
-        return JsonResponse({"error": "not connected"}, status=404)
+        return {"outcome": "absent"}
     bot_token = credential.credentials.get("bot_token", "")
     if not bot_token:
-        return JsonResponse({"error": "not connected"}, status=404)
-    return JsonResponse({
+        return {"outcome": "absent"}
+    return {
+        "outcome": "has_token",
         "access_token": bot_token,
         "expires_in": TELEGRAM_BROKER_CACHE_SECONDS,
-        "token_type": "TelegramBotToken",
         "config": credential.config,
         "metadata": credential.metadata,
-    })
+    }

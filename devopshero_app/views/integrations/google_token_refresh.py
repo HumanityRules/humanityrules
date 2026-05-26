@@ -1,28 +1,22 @@
-"""Env-resident-component → DOH refresh endpoint for Google access tokens.
+"""Google access-token refresh helper invoked by the batched DOH refresh endpoint.
 
-See `docs/integrations_broker_design.md`. Env-resident callers
-(Hermes integrations broker, etc.) hit this endpoint with `Authorization: Bearer
-<DOH_ENV_BEARER>` and `{"owner_username": "...", "app_slug": "..."}` in the
-body. DOH resolves the environment from the bearer, looks up the user's
-IntegrationUserCredential row for that logical app, exchanges the stored
-refresh token with Google using DOH's OAuth client_secret, and returns a
-short-lived access token.
+`refresh_google_outcome` exchanges the user's stored refresh_token with
+Google using DOH's OAuth client_secret and returns a broker-shaped
+`{outcome, access_token?, expires_in?, config, metadata}` dict. The
+batched endpoint (`views/integrations/token_refresh_batch.py`) calls
+this from a worker thread alongside the other providers.
 
-The refresh_token and DOH's OAuth client_secret never cross the customer/DOH
-boundary. If Google has revoked the refresh_token, the row is deleted and
-410 is returned so the caller surfaces a reconnect prompt to the user.
+The refresh_token and DOH's OAuth client_secret never cross the
+customer/DOH boundary. If Google has revoked the refresh_token, the row
+is deleted and the outcome flips to `absent` so the WebUI extension
+prompts the user to reconnect.
 """
 
-import json
 import logging
 
 import httpx
-from django.http import HttpRequest, JsonResponse
-from django.views.decorators.csrf import csrf_exempt
-from django.views.decorators.http import require_POST
 
-from devopshero_app.models import IntegrationConfig, IntegrationUserCredential, User
-from devopshero_app.views import env_bearer_auth
+from devopshero_app.models import Environment, IntegrationConfig, IntegrationUserCredential, User
 
 logger = logging.getLogger(__name__)
 
@@ -30,69 +24,37 @@ logger = logging.getLogger(__name__)
 GOOGLE_TOKEN_EXCHANGE_TIMEOUT_SECONDS = 30
 
 
-@csrf_exempt
-@require_POST
-def integrations_google_token_refresh(request: HttpRequest) -> JsonResponse:
-    """Exchange a stored refresh_token for a short-lived Google access token."""
-    raw_token = env_bearer_auth.extract_bearer_token(request=request)
-    if raw_token is None:
-        return JsonResponse({"error": "missing bearer token"}, status=401)
+def refresh_google_outcome(environment: Environment, owner_user: User, app_slug: str) -> dict:
+    """Compute the broker-shaped refresh outcome for one (env, owner, app).
 
-    environment = env_bearer_auth.resolve_env_from_token(raw_token=raw_token)
-    if environment is None:
-        return JsonResponse({"error": "invalid bearer token"}, status=401)
-
-    try:
-        payload = json.loads(request.body)
-    except json.JSONDecodeError:
-        return JsonResponse({"error": "invalid JSON body"}, status=400)
-
-    owner_username = payload.get("owner_username")
-    if not isinstance(owner_username, str) or not owner_username:
-        return JsonResponse(
-            {"error": "owner_username is required"}, status=400,
-        )
-    app_slug = payload.get("app_slug")
-    if not isinstance(app_slug, str) or not app_slug:
-        return JsonResponse({"error": "app_slug is required"}, status=400)
-
+    Returns `{outcome, access_token?, expires_in?, config?, metadata?}`
+    where `outcome` is `"has_token" | "absent" | "transient"`. The
+    `absent` (disconnected) path is intentionally silent — the broker
+    asks every Refresh-all/bootstrap, and most providers are typically
+    disconnected, so logging that as an error would be log spam.
+    """
     try:
         google_cfg = IntegrationConfig.objects.get(provider=IntegrationConfig.Provider.GOOGLE)
     except IntegrationConfig.DoesNotExist:
         logger.error("google token refresh failed: IntegrationConfig(provider=google) missing")
-        return JsonResponse({"error": "google integration not configured"}, status=500)
-
-    user = User.objects.filter(
-        username=owner_username,
-        organization_memberships__organization=environment.aws_account.organization,
-    ).first()
-    if user is None:
-        logger.info(
-            "google token refresh: user not found env=%s owner=%s",
-            environment.slug, owner_username,
-        )
-        return JsonResponse({"error": "not connected"}, status=404)
+        return {"outcome": "transient"}
 
     integration = IntegrationUserCredential.objects.filter(
-        owner_user=user,
+        owner_user=owner_user,
         environment=environment,
         app_slug=app_slug,
         provider=IntegrationUserCredential.Provider.GOOGLE,
     ).first()
     if integration is None:
-        logger.info(
-            "google token refresh: no integration row env=%s owner=%s app=%s",
-            environment.slug, owner_username, app_slug,
-        )
-        return JsonResponse({"error": "not connected"}, status=404)
+        return {"outcome": "absent"}
 
     refresh_token = integration.credentials.get("refresh_token", "")
     if not refresh_token:
         logger.error(
             "google token refresh: row missing refresh_token env=%s owner=%s app=%s",
-            environment.slug, owner_username, app_slug,
+            environment.slug, owner_user.username, app_slug,
         )
-        return JsonResponse({"error": "not connected"}, status=404)
+        return {"outcome": "absent"}
 
     exchange_result = _exchange_refresh_token(
         web=google_cfg.config,
@@ -101,29 +63,30 @@ def integrations_google_token_refresh(request: HttpRequest) -> JsonResponse:
     if exchange_result.revoked:
         logger.info(
             "google token refresh: revoked by google, deleting row env=%s owner=%s app=%s",
-            environment.slug, owner_username, app_slug,
+            environment.slug, owner_user.username, app_slug,
         )
         integration.delete()
-        return JsonResponse({"error": "revoked, please reconnect"}, status=410)
+        return {"outcome": "absent"}
     if exchange_result.error is not None:
         logger.error(
             "google token refresh failed env=%s owner=%s app=%s error=%s",
-            environment.slug, owner_username, app_slug, exchange_result.error,
+            environment.slug, owner_user.username, app_slug, exchange_result.error,
         )
-        return JsonResponse({"error": "google token exchange failed"}, status=502)
+        return {"outcome": "transient"}
 
-    # Google occasionally rotates the refresh_token; persist the new one when it does.
     new_refresh = exchange_result.response.get("refresh_token")
     if new_refresh and new_refresh != refresh_token:
         integration.credentials = {**integration.credentials, "refresh_token": new_refresh}
     integration.last_refreshed_at = _now()
     integration.save(update_fields=["credentials", "last_refreshed_at", "updated_at"])
 
-    return JsonResponse({
+    return {
+        "outcome": "has_token",
         "access_token": exchange_result.response["access_token"],
         "expires_in": int(exchange_result.response.get("expires_in", 0)),
-        "token_type": exchange_result.response.get("token_type", "Bearer"),
-    })
+        "config": {},
+        "metadata": {},
+    }
 
 
 class _ExchangeResult:

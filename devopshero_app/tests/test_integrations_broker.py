@@ -19,6 +19,16 @@ import unittest
 from unittest.mock import AsyncMock, patch
 
 
+def _batched(*, slug: str, result) -> dict:
+    """Build a fake one-slug DOH response map for mocking `fetch_provider_tokens_batch`.
+
+    The broker only ever asks DOH about slugs it knows; in tests every
+    refresh path under inspection is single-provider, so one-key maps are
+    enough.
+    """
+    return {slug: result}
+
+
 def _install_mcp_aggregator_stub_if_needed() -> None:
     """Stub MCPAggregator only when the local test env lacks FastMCP."""
     if "mcp_aggregator" in sys.modules:
@@ -329,14 +339,14 @@ class TestControlIntegrations(unittest.IsolatedAsyncioTestCase):
 
         with patch.object(
             broker.tls_intercept,
-            "fetch_provider_token",
-            return_value=broker.tls_intercept.RefreshResult(
+            "fetch_provider_tokens_batch",
+            return_value=_batched(slug="google", result=broker.tls_intercept.RefreshResult(
                 outcome=broker.tls_intercept.REFRESH_OUTCOME_HAS_TOKEN,
                 access_token="fresh-token",
                 expires_in=3600,
                 config={},
                 metadata={},
-            ),
+            )),
         ) as fetch_mock:
             await self.tls_runtime.refresh_slug(slug="google")
             self.assertEqual(fetch_mock.call_count, 1)
@@ -361,17 +371,17 @@ class TestControlIntegrations(unittest.IsolatedAsyncioTestCase):
         )
 
     async def test_absent_provider_is_not_cached(self) -> None:
-        """A 404/410 from DOH must remove (not store) the cache entry."""
+        """An `absent` outcome from DOH must remove (not store) the cache entry."""
         with patch.object(
             broker.tls_intercept,
-            "fetch_provider_token",
-            return_value=broker.tls_intercept.RefreshResult(
+            "fetch_provider_tokens_batch",
+            return_value=_batched(slug="google", result=broker.tls_intercept.RefreshResult(
                 outcome=broker.tls_intercept.REFRESH_OUTCOME_ABSENT,
                 access_token=None,
                 expires_in=None,
                 config={},
                 metadata={},
-            ),
+            )),
         ):
             await self.tls_runtime.refresh_slug(slug="google")
 
@@ -382,16 +392,16 @@ class TestControlIntegrations(unittest.IsolatedAsyncioTestCase):
     async def test_refresh_slug_refetches_even_when_cache_is_fresh(self) -> None:
         """Explicit refresh must hit DOH even when the cached token is still fresh."""
         responses = [
-            broker.tls_intercept.RefreshResult(
+            _batched(slug="google", result=broker.tls_intercept.RefreshResult(
                 outcome=broker.tls_intercept.REFRESH_OUTCOME_HAS_TOKEN,
                 access_token="T1", expires_in=3600, config={}, metadata={},
-            ),
-            broker.tls_intercept.RefreshResult(
+            )),
+            _batched(slug="google", result=broker.tls_intercept.RefreshResult(
                 outcome=broker.tls_intercept.REFRESH_OUTCOME_HAS_TOKEN,
                 access_token="T2", expires_in=3600, config={}, metadata={},
-            ),
+            )),
         ]
-        with patch.object(broker.tls_intercept, "fetch_provider_token", side_effect=responses) as fetch_mock:
+        with patch.object(broker.tls_intercept, "fetch_provider_tokens_batch", side_effect=responses) as fetch_mock:
             await self.tls_runtime.refresh_slug(slug="google")
             await self.tls_runtime.refresh_slug(slug="google")
 
@@ -401,16 +411,16 @@ class TestControlIntegrations(unittest.IsolatedAsyncioTestCase):
     async def test_transient_after_eviction_does_not_fabricate_entry(self) -> None:
         """A transient refresh outcome must not write a sentinel into an empty cache."""
         responses = [
-            broker.tls_intercept.RefreshResult(
+            _batched(slug="google", result=broker.tls_intercept.RefreshResult(
                 outcome=broker.tls_intercept.REFRESH_OUTCOME_HAS_TOKEN,
                 access_token="T1", expires_in=3600, config={}, metadata={},
-            ),
-            broker.tls_intercept.RefreshResult(
+            )),
+            _batched(slug="google", result=broker.tls_intercept.RefreshResult(
                 outcome=broker.tls_intercept.REFRESH_OUTCOME_TRANSIENT,
                 access_token=None, expires_in=None, config={}, metadata={},
-            ),
+            )),
         ]
-        with patch.object(broker.tls_intercept, "fetch_provider_token", side_effect=responses):
+        with patch.object(broker.tls_intercept, "fetch_provider_tokens_batch", side_effect=responses):
             await self.tls_runtime.refresh_slug(slug="google")
             await self.tls_runtime._token_store.invalidate(slug="google")
             await self.tls_runtime.refresh_slug(slug="google")
@@ -437,11 +447,11 @@ class TestControlIntegrations(unittest.IsolatedAsyncioTestCase):
         )
         with patch.object(
             broker.tls_intercept,
-            "fetch_provider_token",
-            return_value=broker.tls_intercept.RefreshResult(
+            "fetch_provider_tokens_batch",
+            return_value=_batched(slug="google", result=broker.tls_intercept.RefreshResult(
                 outcome=broker.tls_intercept.REFRESH_OUTCOME_TRANSIENT,
                 access_token=None, expires_in=None, config={}, metadata={},
-            ),
+            )),
         ):
             token = await store.token_for_host(host="gmail.googleapis.com")
 
@@ -455,7 +465,7 @@ class TestControlIntegrations(unittest.IsolatedAsyncioTestCase):
         Without the per-provider refresh_lock around the cache pop, this
         sequence used to silently lose the invalidate:
           1. Proxy hot path calls `_ensure_fresh`, holds refresh_lock,
-             starts `fetch_provider_token` (slow).
+             starts the DOH refresh fetch (slow).
           2. User clicks Disconnect → `invalidate(slug)` clears the cache.
           3. Proxy's in-flight fetch resolves and writes a (now stale) entry
              back into the cache.
@@ -471,22 +481,22 @@ class TestControlIntegrations(unittest.IsolatedAsyncioTestCase):
         started = threading.Event()
         delayed = threading.Event()
 
-        def first_stale(refresh_config: object, provider: object) -> object:
+        def first_stale(refresh_config: object, slugs: list[str]) -> object:
             fetch_calls.append("first")
             started.set()
             delayed.wait(timeout=5)
-            return broker.tls_intercept.RefreshResult(
+            return _batched(slug="google", result=broker.tls_intercept.RefreshResult(
                 outcome=broker.tls_intercept.REFRESH_OUTCOME_HAS_TOKEN,
                 access_token="STALE-IN-FLIGHT", expires_in=3600,
                 config={}, metadata={},
-            )
+            ))
 
-        def second_absent(refresh_config: object, provider: object) -> object:
+        def second_absent(refresh_config: object, slugs: list[str]) -> object:
             fetch_calls.append("second")
-            return broker.tls_intercept.RefreshResult(
+            return _batched(slug="google", result=broker.tls_intercept.RefreshResult(
                 outcome=broker.tls_intercept.REFRESH_OUTCOME_ABSENT,
                 access_token=None, expires_in=None, config={}, metadata={},
-            )
+            ))
 
         fetches = [first_stale, second_absent]
         idx = 0
@@ -497,7 +507,7 @@ class TestControlIntegrations(unittest.IsolatedAsyncioTestCase):
             return fn(*args, **kwargs)
 
         store = self.tls_runtime._token_store
-        with patch.object(broker.tls_intercept, "fetch_provider_token", side_effect=dispatch):
+        with patch.object(broker.tls_intercept, "fetch_provider_tokens_batch", side_effect=dispatch):
             proxy_task = asyncio.create_task(store.token_for_host(host="gmail.googleapis.com"))
             self.assertTrue(await asyncio.to_thread(started.wait, timeout=5))
             invalidate_task = asyncio.create_task(store.invalidate(slug="google"))
@@ -530,11 +540,11 @@ class TestControlIntegrations(unittest.IsolatedAsyncioTestCase):
         )
         with patch.object(
             broker.tls_intercept,
-            "fetch_provider_token",
-            return_value=broker.tls_intercept.RefreshResult(
+            "fetch_provider_tokens_batch",
+            return_value=_batched(slug="google", result=broker.tls_intercept.RefreshResult(
                 outcome=broker.tls_intercept.REFRESH_OUTCOME_TRANSIENT,
                 access_token=None, expires_in=None, config={}, metadata={},
-            ),
+            )),
         ):
             token = await store.token_for_host(host="gmail.googleapis.com")
 
@@ -586,11 +596,11 @@ class TestControlIntegrations(unittest.IsolatedAsyncioTestCase):
         provider = broker.tls_intercept.TLS_INTERCEPT_PROVIDERS["google"]
         with patch.object(
             broker.tls_intercept,
-            "fetch_provider_token",
-            return_value=broker.tls_intercept.RefreshResult(
+            "fetch_provider_tokens_batch",
+            return_value=_batched(slug="google", result=broker.tls_intercept.RefreshResult(
                 outcome=broker.tls_intercept.REFRESH_OUTCOME_TRANSIENT,
                 access_token=None, expires_in=None, config={}, metadata={},
-            ),
+            )),
         ):
             entry = await store._ensure_fresh(provider=provider)
 
@@ -613,14 +623,14 @@ class TestControlIntegrations(unittest.IsolatedAsyncioTestCase):
 
         with patch.object(
             broker.tls_intercept,
-            "fetch_provider_token",
-            return_value=broker.tls_intercept.RefreshResult(
+            "fetch_provider_tokens_batch",
+            return_value=_batched(slug="google", result=broker.tls_intercept.RefreshResult(
                 outcome=broker.tls_intercept.REFRESH_OUTCOME_HAS_TOKEN,
                 access_token="fresh-token",
                 expires_in=3600,
                 config={},
                 metadata={},
-            ),
+            )),
         ):
             await self.tls_runtime.refresh_slug(slug="google")
             self.assertIn("google", self.tls_runtime._token_store._cache)
@@ -734,14 +744,14 @@ class TestLazyTokenForHost(unittest.IsolatedAsyncioTestCase):
     async def test_first_call_fetches_subsequent_calls_use_cache(self) -> None:
         with patch.object(
             broker.tls_intercept,
-            "fetch_provider_token",
-            return_value=broker.tls_intercept.RefreshResult(
+            "fetch_provider_tokens_batch",
+            return_value=_batched(slug="google", result=broker.tls_intercept.RefreshResult(
                 outcome=broker.tls_intercept.REFRESH_OUTCOME_HAS_TOKEN,
                 access_token="T1",
                 expires_in=3600,
                 config={},
                 metadata={},
-            ),
+            )),
         ) as fetch_mock:
             self.assertEqual(await self.token_store.token_for_host(host="gmail.googleapis.com"), "T1")
             self.assertEqual(await self.token_store.token_for_host(host="drive.googleapis.com"), "T1")
@@ -749,56 +759,64 @@ class TestLazyTokenForHost(unittest.IsolatedAsyncioTestCase):
 
     async def test_refresh_when_within_lead_window(self) -> None:
         responses = [
-            broker.tls_intercept.RefreshResult(
+            _batched(slug="google", result=broker.tls_intercept.RefreshResult(
                 outcome=broker.tls_intercept.REFRESH_OUTCOME_HAS_TOKEN,
                 access_token="T1",
                 expires_in=3600,
                 config={},
                 metadata={},
-            ),
-            broker.tls_intercept.RefreshResult(
+            )),
+            _batched(slug="google", result=broker.tls_intercept.RefreshResult(
                 outcome=broker.tls_intercept.REFRESH_OUTCOME_HAS_TOKEN,
                 access_token="T2",
                 expires_in=3600,
                 config={},
                 metadata={},
-            ),
+            )),
         ]
-        with patch.object(broker.tls_intercept, "fetch_provider_token", side_effect=responses):
+        with patch.object(broker.tls_intercept, "fetch_provider_tokens_batch", side_effect=responses):
             self.assertEqual(await self.token_store.token_for_host(host="gmail.googleapis.com"), "T1")
             # Backdate the cached entry past the lead window to force a refresh.
             self.token_store._cache["google"].expires_at = self.token_store._cache["google"].expires_at - 3600
             self.assertEqual(await self.token_store.token_for_host(host="gmail.googleapis.com"), "T2")
 
     async def test_unknown_host_returns_none_without_fetching(self) -> None:
-        with patch.object(broker.tls_intercept, "fetch_provider_token") as fetch_mock:
+        with patch.object(broker.tls_intercept, "fetch_provider_tokens_batch") as fetch_mock:
             self.assertIsNone(await self.token_store.token_for_host(host="api.tavily.com"))
             fetch_mock.assert_not_called()
 
     async def test_absent_outcome_leaves_cache_empty(self) -> None:
-        """A 404/410 from DOH yields no cache entry — disconnected = absent, not a sentinel."""
+        """An `absent` outcome from DOH yields no cache entry — disconnected = absent, not a sentinel."""
         with patch.object(
             broker.tls_intercept,
-            "fetch_provider_token",
-            return_value=broker.tls_intercept.RefreshResult(
+            "fetch_provider_tokens_batch",
+            return_value=_batched(slug="google", result=broker.tls_intercept.RefreshResult(
                 outcome=broker.tls_intercept.REFRESH_OUTCOME_ABSENT,
                 access_token=None,
                 expires_in=None,
                 config={},
                 metadata={},
-            ),
+            )),
         ):
             self.assertIsNone(await self.token_store.token_for_host(host="gmail.googleapis.com"))
         self.assertNotIn("google", self.token_store._cache)
 
 
-class TestFetchProviderTokenClassification(unittest.TestCase):
-    """Drive fetch_provider_token through each outcome by faking urlopen."""
+class TestFetchProviderTokensBatch(unittest.TestCase):
+    """Parse DOH's `/api/integrations/tokens` response into a slug→RefreshResult map."""
 
-    def _run(self, status: int, payload: dict | None) -> broker.tls_intercept.RefreshResult:
+    def _refresh_config(self) -> "broker.tls_intercept.DohRefreshConfig":
+        return broker.tls_intercept.DohRefreshConfig(
+            control_plane_url="https://doh.example",
+            bearer="env-bearer",
+            owner_username="vmendi",
+            app_slug="hermes",
+        )
+
+    def _run_with_response(self, payload: dict) -> dict:
         class _FakeResp:
-            def __init__(self, status: int, body: bytes) -> None:
-                self.status = status
+            def __init__(self, body: bytes) -> None:
+                self.status = 200
                 self._body = body
             def read(self) -> bytes:
                 return self._body
@@ -808,66 +826,124 @@ class TestFetchProviderTokenClassification(unittest.TestCase):
                 return False
 
         import json as _json
+        opener = _FakeResp(body=_json.dumps(payload).encode())
+        with patch.object(broker.tls_intercept.urllib.request, "urlopen", return_value=opener):
+            return broker.tls_intercept.fetch_provider_tokens_batch(
+                refresh_config=self._refresh_config(),
+                slugs=["google", "github", "telegram"],
+            )
+
+    def test_mixed_outcomes_parse_per_slug(self) -> None:
+        results = self._run_with_response(payload={
+            "results": {
+                "google": {
+                    "outcome": "has_token",
+                    "access_token": "g-abc",
+                    "expires_in": 3600,
+                    "config": {},
+                    "metadata": {},
+                },
+                "github": {"outcome": "absent"},
+                "telegram": {"outcome": "transient"},
+            },
+        })
+
+        self.assertEqual(results["google"].outcome, broker.tls_intercept.REFRESH_OUTCOME_HAS_TOKEN)
+        self.assertEqual(results["google"].access_token, "g-abc")
+        self.assertEqual(results["google"].expires_in, 3600)
+        self.assertEqual(results["github"].outcome, broker.tls_intercept.REFRESH_OUTCOME_ABSENT)
+        self.assertEqual(results["telegram"].outcome, broker.tls_intercept.REFRESH_OUTCOME_TRANSIENT)
+
+    def test_telegram_config_and_metadata_pass_through(self) -> None:
+        results = self._run_with_response(payload={
+            "results": {
+                "google": {"outcome": "absent"},
+                "github": {"outcome": "absent"},
+                "telegram": {
+                    "outcome": "has_token",
+                    "access_token": "123:REAL",
+                    "expires_in": 3600,
+                    "config": {"allowed_users": ["42", "7"]},
+                    "metadata": {"bot_username": "doh_bot"},
+                },
+            },
+        })
+        self.assertEqual(results["telegram"].config, {"allowed_users": ["42", "7"]})
+        self.assertEqual(results["telegram"].metadata, {"bot_username": "doh_bot"})
+
+    def test_slug_missing_from_response_is_transient(self) -> None:
+        """A partial server response must NOT clear the broker's cache for the missing slug."""
+        results = self._run_with_response(payload={"results": {"google": {"outcome": "absent"}}})
+        self.assertEqual(results["github"].outcome, broker.tls_intercept.REFRESH_OUTCOME_TRANSIENT)
+        self.assertEqual(results["telegram"].outcome, broker.tls_intercept.REFRESH_OUTCOME_TRANSIENT)
+
+    def test_network_error_returns_transient_for_every_slug(self) -> None:
+        """Any urlopen failure must surface as transient across the board, preserving the cache."""
+        with patch.object(
+            broker.tls_intercept.urllib.request,
+            "urlopen",
+            side_effect=OSError("connection refused"),
+        ):
+            results = broker.tls_intercept.fetch_provider_tokens_batch(
+                refresh_config=self._refresh_config(),
+                slugs=["google", "github", "telegram"],
+            )
+        for slug in ("google", "github", "telegram"):
+            self.assertEqual(results[slug].outcome, broker.tls_intercept.REFRESH_OUTCOME_TRANSIENT)
+
+    def test_http_error_returns_transient_for_every_slug(self) -> None:
         import urllib.error
-
-        body = _json.dumps(payload or {}).encode()
-        refresh_config = broker.tls_intercept.DohRefreshConfig(
-            control_plane_url="https://example.invalid",
-            bearer="b",
-            owner_username="u",
-            app_slug="app",
+        http_err = urllib.error.HTTPError(
+            url="https://doh.example/api/integrations/tokens", code=500, msg="x", hdrs={}, fp=None,
         )
-        provider = broker.tls_intercept.TlsProviderSpec(
-            slug="test",
-            label="Test",
-            refresh_path="/api/x",
-            hosts=("example.invalid",),
-            logo_url="/extensions/test.svg",
-            credential_method=broker.tls_intercept.OAuthHeader(
-                auth_format=broker.tls_intercept.AUTH_FORMAT_BEARER,
+        with patch.object(broker.tls_intercept.urllib.request, "urlopen", side_effect=http_err):
+            results = broker.tls_intercept.fetch_provider_tokens_batch(
+                refresh_config=self._refresh_config(),
+                slugs=["google", "github"],
+            )
+        self.assertEqual(results["google"].outcome, broker.tls_intercept.REFRESH_OUTCOME_TRANSIENT)
+        self.assertEqual(results["github"].outcome, broker.tls_intercept.REFRESH_OUTCOME_TRANSIENT)
+
+
+class TestRefreshAllBatchedApply(unittest.IsolatedAsyncioTestCase):
+    """`_TokenStore.refresh_all` must apply batched results under per-slug refresh_locks."""
+
+    async def test_has_token_writes_absent_drops_transient_leaves(self) -> None:
+        """One batched call covers all three apply paths."""
+        import time
+        store = _make_token_store()
+        store._cache["github"] = broker.tls_intercept._TokenCacheEntry(
+            access_token="PRIOR-GITHUB",
+            expires_at=time.monotonic() + 600,
+            last_refreshed_at="2026-05-25T22:00:00+00:00",
+            config={}, metadata={},
+        )
+
+        batched_results = {
+            "google": broker.tls_intercept.RefreshResult(
+                outcome=broker.tls_intercept.REFRESH_OUTCOME_HAS_TOKEN,
+                access_token="G", expires_in=3600, config={}, metadata={},
             ),
-        )
-        if 200 <= status < 300:
-            opener = _FakeResp(status=status, body=body)
-            with patch.object(broker.tls_intercept.urllib.request, "urlopen", return_value=opener):
-                return broker.tls_intercept.fetch_provider_token(refresh_config=refresh_config, provider=provider)
-        raise_with = urllib.error.HTTPError(
-            url="https://example.invalid", code=status, msg="x", hdrs={}, fp=None,
-        )
-        raise_with.read = lambda: body  # type: ignore[assignment]
-        with patch.object(broker.tls_intercept.urllib.request, "urlopen", side_effect=raise_with):
-            return broker.tls_intercept.fetch_provider_token(refresh_config=refresh_config, provider=provider)
+            "github": broker.tls_intercept.RefreshResult(
+                outcome=broker.tls_intercept.REFRESH_OUTCOME_TRANSIENT,
+                access_token=None, expires_in=None, config={}, metadata={},
+            ),
+            "telegram": broker.tls_intercept.RefreshResult(
+                outcome=broker.tls_intercept.REFRESH_OUTCOME_ABSENT,
+                access_token=None, expires_in=None, config={}, metadata={},
+            ),
+        }
+        with patch.object(
+            broker.tls_intercept,
+            "fetch_provider_tokens_batch",
+            return_value=batched_results,
+        ) as batch_mock:
+            await store.refresh_all()
 
-    def test_200_is_connected(self) -> None:
-        out = self._run(status=200, payload={"access_token": "abc", "expires_in": 3600})
-        self.assertEqual(out.outcome, broker.tls_intercept.REFRESH_OUTCOME_HAS_TOKEN)
-        self.assertEqual(out.access_token, "abc")
-        self.assertEqual(out.expires_in, 3600)
-
-    def test_404_is_absent(self) -> None:
-        self.assertEqual(self._run(status=404, payload={}).outcome, broker.tls_intercept.REFRESH_OUTCOME_ABSENT)
-
-    def test_410_is_absent(self) -> None:
-        """410 (refresh_token revoked, row deleted) collapses to absent: same user action as 404."""
-        self.assertEqual(self._run(status=410, payload={}).outcome, broker.tls_intercept.REFRESH_OUTCOME_ABSENT)
-
-    def test_401_is_transient(self) -> None:
-        self.assertEqual(
-            self._run(status=401, payload={"error": "bad bearer"}).outcome,
-            broker.tls_intercept.REFRESH_OUTCOME_TRANSIENT,
-        )
-
-    def test_500_is_transient(self) -> None:
-        self.assertEqual(
-            self._run(status=500, payload={"error": "bad config"}).outcome,
-            broker.tls_intercept.REFRESH_OUTCOME_TRANSIENT,
-        )
-
-    def test_503_is_transient(self) -> None:
-        self.assertEqual(
-            self._run(status=503, payload={"error": "try later"}).outcome,
-            broker.tls_intercept.REFRESH_OUTCOME_TRANSIENT,
-        )
+        self.assertEqual(batch_mock.call_count, 1)
+        self.assertEqual(store._cache["google"].access_token, "G")
+        self.assertEqual(store._cache["github"].access_token, "PRIOR-GITHUB")  # transient ⇒ preserved
+        self.assertNotIn("telegram", store._cache)
 
 
 class TestGatewayEnvRender(unittest.TestCase):
@@ -1024,19 +1100,26 @@ class TestGatewayEnvHookIntegration(unittest.IsolatedAsyncioTestCase):
 
         with patch.object(
             broker.tls_intercept,
-            "fetch_provider_token",
-            return_value=broker.tls_intercept.RefreshResult(
+            "fetch_provider_tokens_batch",
+            return_value=_batched(slug="google", result=broker.tls_intercept.RefreshResult(
                 outcome=broker.tls_intercept.REFRESH_OUTCOME_HAS_TOKEN,
                 access_token="t", expires_in=3600, config={}, metadata={},
-            ),
+            )),
         ) as fetch_mock:
             await on_user_invalidate("google")
 
-        # Exactly one refresh (the named slug), not one per provider.
+        # Exactly one DOH round-trip and only for the named slug, not one per provider.
         self.assertEqual(fetch_mock.call_count, 1)
+        self.assertEqual(fetch_mock.call_args.kwargs["slugs"], ["google"])
 
-    async def test_invalidate_all_still_refreshes_every_provider(self) -> None:
-        """Explicit Refresh-all (slug=None) must fan out to every provider."""
+    async def test_invalidate_all_uses_single_batched_call(self) -> None:
+        """Explicit Refresh-all collapses to one DOH round-trip across every provider.
+
+        The previous per-slug fan-out emitted one `INFO no integration row`
+        Django log line per disconnected provider on every Refresh-all.
+        Coalescing into a single POST (where `absent` is a normal entry,
+        not a 4xx) makes that log line disappear.
+        """
         runtime = self._make_runtime()
         tls_runtime_holder: dict = {"runtime": runtime}
         on_user_invalidate = broker._build_on_user_invalidate(
@@ -1045,18 +1128,25 @@ class TestGatewayEnvHookIntegration(unittest.IsolatedAsyncioTestCase):
             process_compose_url="http://127.0.0.1:9999",
         )
 
-        with patch.object(
-            broker.tls_intercept,
-            "fetch_provider_token",
-            return_value=broker.tls_intercept.RefreshResult(
+        absent_for_every_slug = {
+            slug: broker.tls_intercept.RefreshResult(
                 outcome=broker.tls_intercept.REFRESH_OUTCOME_ABSENT,
                 access_token=None, expires_in=None, config={}, metadata={},
-            ),
-        ) as fetch_mock, patch.object(
+            )
+            for slug in broker.tls_intercept.TLS_INTERCEPT_PROVIDERS
+        }
+
+        with patch.object(
+            broker.tls_intercept,
+            "fetch_provider_tokens_batch",
+            return_value=absent_for_every_slug,
+        ) as batch_mock, patch.object(
             broker,
             "_post_process_compose_restart",
             return_value=(200, "ok"),
         ):
             await on_user_invalidate(None)
 
-        self.assertEqual(fetch_mock.call_count, len(broker.tls_intercept.TLS_INTERCEPT_PROVIDERS))
+        self.assertEqual(batch_mock.call_count, 1)
+        called_slugs = batch_mock.call_args.kwargs["slugs"]
+        self.assertEqual(set(called_slugs), set(broker.tls_intercept.TLS_INTERCEPT_PROVIDERS))
