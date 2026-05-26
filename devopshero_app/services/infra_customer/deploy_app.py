@@ -521,6 +521,73 @@ def _compute_listener_rule_priority(app_name: str) -> int:
     return (hash(app_name) % 40000) + 1000
 
 
+def cert_stack_name(env_slug: str, app_name: str) -> str:
+    """Per-app wildcard cert stack name. Created only when enable_subhosting=True."""
+    return f"doh-{env_slug}-{app_name}-cert"
+
+
+def subhosting_wildcard_cert_export_name(resource_prefix: str) -> str:
+    """CFN export of the wildcard cert ARN, written by CertStack and read by AppStack."""
+    return f"{resource_prefix}-subhosting-wildcard-cert-arn"
+
+
+class CertStack(Stack):
+    """Per-agent wildcard ACM cert (`*.<agent-host>`), isolated from app lifecycle.
+
+    Owns only the cert resource and a CFN export of its ARN. The app stack
+    imports the ARN and owns the SAN attachment to the shared ALB listener.
+
+    Why a separate stack: ACM's `DeleteCertificate` is eventually consistent
+    with respect to listener-certificate detach. Destroying the cert and
+    the attachment in one CFN destroy hits a `ResourceInUseException` race
+    (~10s window). With the cert in its own stack, an app-stack teardown
+    only detaches; the cert is never a candidate for delete in that path.
+    Full agent removal then deletes this stack on its own — by then the
+    attachment has been gone for a while, ACM has caught up, no race.
+
+    See aws/aws-cdk#36265, hashicorp/terraform-provider-aws#3866.
+    """
+
+    def __init__(
+        self,
+        scope: Construct,
+        construct_id: str,
+        app_config: appconfig.AppConfig,
+        env_slug: str,
+        resource_prefix: str,
+        subdomain: str,
+        shared_alb_hosted_zone: str,
+        shared_hosted_zone_id: str,
+        **kwargs,
+    ) -> None:
+        super().__init__(scope, construct_id, **kwargs)
+
+        app_hostname = f"{subdomain}.{shared_alb_hosted_zone}"
+
+        hosted_zone = route53.HostedZone.from_hosted_zone_attributes(
+            self, "HostedZone",
+            hosted_zone_id=shared_hosted_zone_id,
+            zone_name=shared_alb_hosted_zone,
+        )
+
+        # ACM wildcards only match one label deep, so the env-level
+        # *.<env-domain> doesn't cover sub-subdomains under <agent-host>.
+        # DNS-validated through the same hosted zone — fully automated.
+        wildcard_cert = acm.Certificate(
+            self, "WildcardCertificate",
+            domain_name=f"*.{app_hostname}",
+            validation=acm.CertificateValidation.from_dns(hosted_zone),
+        )
+        Tags.of(wildcard_cert).add("App", app_config.app_name)
+        Tags.of(wildcard_cert).add("Env", env_slug)
+
+        CfnOutput(
+            self, "WildcardCertificateArn",
+            value=wildcard_cert.certificate_arn,
+            export_name=subhosting_wildcard_cert_export_name(resource_prefix=resource_prefix),
+        )
+
+
 class AppStack(Stack):
     """DevOpsHero App Stack - ECS Service with shared ALB routing."""
 
@@ -1080,10 +1147,15 @@ class AppStack(Stack):
 
         When app_config.enable_subhosting is True (used by Hermes), the rule
         also matches *.<agent-host> so the in-container Caddy sidecar can
-        serve user webapps as sub-subdomains. That requires a per-agent
-        wildcard ACM cert attached to the HTTPS listener via SNI plus a
-        wildcard A-alias record. The env-level wildcard cert only covers one
-        label deep (*.<env-domain>); sub-subdomains need their own cert.
+        serve user webapps as sub-subdomains. That requires the per-agent
+        wildcard ACM cert (provisioned in the sibling -cert stack) attached
+        to the HTTPS listener via SNI, plus a wildcard A-alias record. The
+        env-level wildcard cert only covers one label deep (*.<env-domain>),
+        so sub-subdomains need their own cert.
+
+        The cert lives in -cert, not here, so an -app-stack teardown only
+        detaches the cert (no DeleteCertificate call) and the ACM
+        eventual-consistency race is dodged on the common shutdown path.
         """
         priority = _compute_listener_rule_priority(subdomain)
         prefix = f"devopshero-{env_slug}"
@@ -1173,30 +1245,20 @@ class AppStack(Stack):
                     target=route53.RecordTarget.from_alias(targets.LoadBalancerTarget(shared_alb)),
                 )
 
-                # Per-agent wildcard cert: *.<agent-host>. The env-level
-                # *.<env-domain> cert doesn't cover sub-subdomains because
-                # ACM wildcards only match one label. DNS-validated through
-                # the same hosted zone, so issuance is fully automated.
-                wildcard_cert = acm.Certificate(
-                    self, "SubhostingWildcardCertificate",
-                    domain_name=f"*.{app_hostname}",
-                    validation=acm.CertificateValidation.from_dns(hosted_zone),
-                )
-
                 if https_listener is not None:
-                    # Attach to the listener as an SNI cert alongside the
-                    # env-level *.<env-domain>. ALB picks per-request via SNI.
+                    # Wildcard cert is owned by the sibling -cert stack;
+                    # we only attach it here as a SAN on the shared ALB
+                    # listener. ALB picks per-request via SNI alongside
+                    # the env-level *.<env-domain>.
+                    wildcard_cert = acm.Certificate.from_certificate_arn(
+                        self, "ImportedSubhostingWildcardCertificate",
+                        Fn.import_value(subhosting_wildcard_cert_export_name(resource_prefix=resource_prefix)),
+                    )
                     elbv2.ApplicationListenerCertificate(
                         self, "SubhostingWildcardListenerCertificate",
                         listener=https_listener,
                         certificates=[wildcard_cert],
                     )
-
-                CfnOutput(
-                    self, "SubhostingWildcardCertificateArn",
-                    value=wildcard_cert.certificate_arn,
-                    export_name=f"{resource_prefix}-subhosting-wildcard-cert-arn",
-                )
 
         CfnOutput(self, "SharedAlbDns", value=shared_alb_dns, export_name=f"{resource_prefix}-shared-alb-dns")
 
@@ -1246,6 +1308,8 @@ def deploy(
     app_stack_names = [f"{resource_prefix}-ecr", f"{resource_prefix}-app"]
     if app_config.database_config:
         app_stack_names.append(f"{resource_prefix}-aurora")
+    if app_config.enable_subhosting:
+        app_stack_names.append(cert_stack_name(env_slug=env_slug, app_name=app_config.app_name))
     cloudformation_utils.cleanup_rollback_complete_stacks(cf_client, app_stack_names)
 
     # Verify infrastructure exists
@@ -1339,6 +1403,25 @@ def deploy(
         )
         aurora_connection_secret = aurora_stack.connection_secret
 
+    # Per-agent wildcard cert lives in its own stack so the cert outlives
+    # any single deployment. Created lazily; only Hermes uses subhosting today.
+    subhosting_active = bool(
+        app_config.enable_subhosting and shared_alb_hosted_zone and shared_hosted_zone_id
+    )
+    cert_stack = None
+    if subhosting_active:
+        assert shared_alb_hosted_zone is not None and shared_hosted_zone_id is not None
+        cert_stack = CertStack(
+            scope=cdk_app,
+            construct_id=cert_stack_name(env_slug=env_slug, app_name=app_config.app_name),
+            app_config=app_config,
+            env_slug=env_slug,
+            resource_prefix=resource_prefix,
+            subdomain=subdomain,
+            shared_alb_hosted_zone=shared_alb_hosted_zone,
+            shared_hosted_zone_id=shared_hosted_zone_id,
+        )
+
     app_stack = AppStack(
         scope=cdk_app,
         construct_id=f"{resource_prefix}-app",
@@ -1356,6 +1439,8 @@ def deploy(
     app_stack.add_dependency(ecr_stack)
     if aurora_stack:
         app_stack.add_dependency(aurora_stack)
+    if cert_stack:
+        app_stack.add_dependency(cert_stack)
 
     assembly_dir = cdk_utils.synth_cdk_app(cdk_app)
 
@@ -1390,14 +1475,19 @@ def deploy(
             logger.error("Policy-proxy image build/push failed")
             return DeployResult(success=False, error="Policy-proxy image build/push failed", service_url="", alb_dns="")
 
-    # Phase 1b: Deploy ECR repo (and Aurora if needed) so the registry exists before the app image push
+    # Phase 1b: Deploy stacks the App stack depends on. ECR must exist before
+    # we push images. Aurora must exist before the App stack imports its
+    # connection secret. The wildcard cert stack must exist before the App
+    # stack's listener-certificate attachment imports its ARN.
     pre_app_stacks = [f"{resource_prefix}-ecr"]
     if aurora_stack:
         pre_app_stacks.append(f"{resource_prefix}-aurora")
+    if cert_stack:
+        pre_app_stacks.append(cert_stack_name(env_slug=env_slug, app_name=app_config.app_name))
 
     if not cdk_utils.deploy_from_assembly(assembly_dir=assembly_dir, session=session, stack_names=pre_app_stacks):
-        logger.error("CDK deployment failed (ECR/Aurora)")
-        return DeployResult(success=False, error="CDK deployment failed (ECR/Aurora)", service_url="", alb_dns="")
+        logger.error("CDK deployment failed (pre-app stacks)")
+        return DeployResult(success=False, error="CDK deployment failed (pre-app stacks)", service_url="", alb_dns="")
 
     # Phase 2a: Verify all prebuilt containers exist in ECR before we start
     # building the dockerfile ones. Hard-fail here with a clear operator
@@ -1477,11 +1567,16 @@ def teardown(
     has_database: bool,
     dockerfile_ecr_repo_names: list[str],
 ) -> bool:
-    """
-    Delete app-specific CDK stacks (ECR, ALB, ECS service, Aurora if applicable).
+    """Delete app-specific CDK stacks (ECR, ALB, ECS service, Aurora if applicable).
 
     Prebuilt-container repos are per-env shared resources and are not torn
     down here — only the per-app dockerfile ECR repos get emptied.
+
+    The per-agent wildcard cert stack (-cert, when subhosting is enabled)
+    is deliberately left in place: an app-stack teardown is the "shutdown
+    until next deploy" path, and keeping the cert means the redeploy
+    skips the DNS-validation round-trip and avoids the ACM in-use race.
+    Full agent removal calls teardown_cert_stack to clean it up.
     """
     cf_client = session.client("cloudformation")
 
@@ -1515,3 +1610,36 @@ def teardown(
     logger.error("Some stacks failed to delete")
 
     return all_success
+
+
+def teardown_cert_stack(session: boto3.Session, env_slug: str, app_name: str) -> bool:
+    """Delete the per-agent wildcard cert stack as part of full app removal.
+
+    Lives outside the per-deployment teardown so a normal "shutdown" keeps
+    the cert around for redeploy. Called only by app removal.
+
+    By the time we reach this path the listener-certificate attachment
+    (in the -app stack) has been gone for a while, so ACM's `InUseBy`
+    cache should have cleared. As insurance against the eventual-consistency
+    window, retry once after a 60s sleep on failure — CFN re-skips
+    already-deleted resources, so the second attempt is the one cert delete
+    that hadn't propagated the first time.
+    """
+    import time
+
+    cf_client = session.client("cloudformation")
+    stack_name = cert_stack_name(env_slug=env_slug, app_name=app_name)
+
+    if not cloudformation_utils.stack_exists(cf_client, stack_name):
+        logger.info("No cert stack '%(stack)s' to delete (skipping)", {"stack": stack_name})
+        return True
+
+    logger.info("Tearing down cert stack '%(stack)s'", {"stack": stack_name})
+    if cloudformation_utils.delete_stack_and_wait(cf_client, stack_name=stack_name):
+        return True
+
+    logger.error(
+        "Cert stack delete failed; retrying once after ACM eventual-consistency window (60s)"
+    )
+    time.sleep(60)
+    return cloudformation_utils.delete_stack_and_wait(cf_client, stack_name=stack_name)
