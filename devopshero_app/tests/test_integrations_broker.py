@@ -400,10 +400,12 @@ class TestControlIntegrations(unittest.IsolatedAsyncioTestCase):
         """
         import threading
         fetch_calls: list[str] = []
+        started = threading.Event()
         delayed = threading.Event()
 
         def first_stale(refresh_config: object, provider: object) -> object:
             fetch_calls.append("first")
+            started.set()
             delayed.wait(timeout=5)
             return broker.tls_intercept.RefreshResult(
                 outcome=broker.tls_intercept.REFRESH_OUTCOME_HAS_TOKEN,
@@ -429,9 +431,9 @@ class TestControlIntegrations(unittest.IsolatedAsyncioTestCase):
         store = self.tls_runtime._token_store
         with patch.object(broker.tls_intercept, "fetch_provider_token", side_effect=dispatch):
             proxy_task = asyncio.create_task(store.token_for_host(host="gmail.googleapis.com"))
-            await asyncio.sleep(0.05)  # let proxy reach asyncio.to_thread
+            self.assertTrue(await asyncio.to_thread(started.wait, timeout=5))
             invalidate_task = asyncio.create_task(store.invalidate(slug="google"))
-            await asyncio.sleep(0.05)  # let invalidate queue on the refresh_lock
+            await asyncio.sleep(0)  # let invalidate queue on the refresh_lock
             delayed.set()  # release the proxy's in-flight refresh
             await proxy_task
             await invalidate_task
@@ -470,14 +472,8 @@ class TestControlIntegrations(unittest.IsolatedAsyncioTestCase):
 
         self.assertIsNone(token)
 
-    async def test_status_items_treat_expired_entry_as_not_connected(self) -> None:
-        """The UI must say "not connected" for an entry that's outlived its
-        token, even if no refresh has run to prune the cache yet.
-
-        Status reads don't go through `_ensure_fresh`, so without filtering
-        on `is_usable` an expired entry would still surface as connected —
-        a lie relative to what the proxy hot path would actually serve.
-        """
+    async def test_status_items_prunes_expired_entry_before_render(self) -> None:
+        """Status reads must prune expired entries before projecting connected state."""
         import time
         store = self.tls_runtime._token_store
         store._cache["google"] = broker.tls_intercept._TokenCacheEntry(
@@ -489,12 +485,10 @@ class TestControlIntegrations(unittest.IsolatedAsyncioTestCase):
 
         items_by_slug = {item["slug"]: item for item in await store.status_items()}
         self.assertEqual(items_by_slug["google"]["status"], "not_connected")
+        self.assertNotIn("google", store._cache)
 
     async def test_gateway_env_snapshot_excludes_expired_entries(self) -> None:
-        """An expired entry must not contribute env bindings to the gateway —
-        we'd be baking in credentials the proxy can no longer mint a token
-        for, and the rendered env would lie to platform tools.
-        """
+        """Expired entries must be pruned before rendering gateway env bindings."""
         import time
         store = self.tls_runtime._token_store
         store._cache["telegram"] = broker.tls_intercept._TokenCacheEntry(
@@ -508,16 +502,10 @@ class TestControlIntegrations(unittest.IsolatedAsyncioTestCase):
         snapshot = await self.tls_runtime.gateway_env_snapshot()
         slugs = [provider.slug for provider, _config in snapshot]
         self.assertNotIn("telegram", slugs)
+        self.assertNotIn("telegram", store._cache)
 
     async def test_ensure_fresh_prunes_expired_entry_after_transient(self) -> None:
-        """Cache hygiene: when a refresh-ahead transient lands on an entry
-        that has aged past expires_at, `_ensure_fresh` should drop it rather
-        than leave a zombie entry sitting in the cache.
-
-        Read sites already filter via `_live_entry`, so this is purely about
-        keeping the cache representation honest for consumers that iterate
-        raw entries (e.g. gateway env rendering, debug introspection).
-        """
+        """Transient refresh on an expired entry must leave the cache empty."""
         import time
         store = self.tls_runtime._token_store
         store._cache["google"] = broker.tls_intercept._TokenCacheEntry(
