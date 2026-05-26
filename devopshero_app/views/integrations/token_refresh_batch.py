@@ -88,10 +88,10 @@ def integrations_tokens_batch(request: HttpRequest) -> JsonResponse:
 
     # Each helper does DB reads + (for OAuth providers) an outbound HTTPS
     # refresh to the upstream provider. Run them in parallel so worst-case
-    # wall-clock is one slow provider, not the sum across providers. The
-    # batched call is on the broker bootstrap critical path (supervisor's
-    # 10s wait_for_port budget), so we can't afford N × per-provider
-    # timeout there if one upstream is hiccuping.
+    # wall-clock is one slow provider, not the sum across providers. Each
+    # helper's upstream timeout is 5s, so the whole batch is naturally
+    # bounded by ~5s + DB / marshalling overhead — well inside the
+    # broker's 7s urlopen ceiling, no separate batch deadline needed.
     handlers_to_run = {
         slug: _OUTCOME_HANDLERS[slug]
         for slug in requested_providers
