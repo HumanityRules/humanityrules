@@ -1,30 +1,25 @@
-"""Env-resident-component → DOH refresh endpoint for GitHub access tokens.
+"""GitHub access-token refresh helper invoked by the batched DOH refresh endpoint.
 
 Mirror of `google_token_refresh.py` for GitHub user-to-server tokens.
-Env-resident callers (the integrations broker / TLS-intercept proxy) hit
-this endpoint with `Authorization: Bearer <DOH_ENV_BEARER>` and
-`{"owner_username": "...", "app_slug": "..."}` in the body. DOH resolves the environment from
-the bearer, looks up the user's IntegrationUserCredential row for that logical app,
-exchanges the stored refresh_token with GitHub using DOH's `client_id` +
-`client_secret`, and returns a short-lived access token.
+`refresh_github_outcome` exchanges the user's stored refresh_token with
+GitHub using DOH's `client_id` + `client_secret` and returns a
+broker-shaped `{outcome, access_token?, expires_in?, config, metadata}`
+dict. The batched endpoint (`views/integrations/token_refresh_batch.py`)
+calls this from a worker thread alongside the other providers.
 
 GitHub rotates the refresh_token on every successful refresh — we always
 persist the new one. A 6-month idle window invalidates the refresh; GitHub
-returns 200 with `error=bad_refresh_token` (or similar). We delete the row
-and 410 the caller, mirroring Google's invalid_grant path.
+returns 200 with `error=bad_refresh_token` (or similar). We delete the
+row and the outcome flips to `absent` so the WebUI extension prompts the
+user to reconnect, mirroring Google's invalid_grant path.
 """
 
-import json
 import logging
 
 import httpx
 from django.conf import settings
-from django.http import HttpRequest, JsonResponse
-from django.views.decorators.csrf import csrf_exempt
-from django.views.decorators.http import require_POST
 
-from devopshero_app.models import IntegrationUserCredential, User
-from devopshero_app.views import env_bearer_auth
+from devopshero_app.models import Environment, IntegrationUserCredential, User
 
 
 logger = logging.getLogger(__name__)
@@ -35,8 +30,8 @@ GITHUB_TOKEN_EXCHANGE_TIMEOUT_SECONDS = 30
 
 # GitHub returns an HTTP 200 with an error JSON body when the refresh_token
 # is no longer valid. These are the codes that indicate a permanent failure
-# and should trigger row deletion + 410 to the caller (vs a transient error
-# that should be retried).
+# and should trigger row deletion (the outcome flips to `absent` so the
+# UI prompts a reconnect), vs a transient error that should be retried.
 _REVOKED_ERROR_CODES = frozenset({
     "bad_refresh_token",
     "bad_credentials",
@@ -45,65 +40,34 @@ _REVOKED_ERROR_CODES = frozenset({
 })
 
 
-@csrf_exempt
-@require_POST
-def integrations_github_token_refresh(request: HttpRequest) -> JsonResponse:
-    """Exchange a stored refresh_token for a short-lived GitHub access token."""
-    raw_token = env_bearer_auth.extract_bearer_token(request=request)
-    if raw_token is None:
-        return JsonResponse({"error": "missing bearer token"}, status=401)
+def refresh_github_outcome(environment: Environment, owner_user: User, app_slug: str) -> dict:
+    """Compute the broker-shaped refresh outcome for one (env, owner, app).
 
-    environment = env_bearer_auth.resolve_env_from_token(raw_token=raw_token)
-    if environment is None:
-        return JsonResponse({"error": "invalid bearer token"}, status=401)
-
-    try:
-        payload = json.loads(request.body)
-    except json.JSONDecodeError:
-        return JsonResponse({"error": "invalid JSON body"}, status=400)
-
-    owner_username = payload.get("owner_username")
-    if not isinstance(owner_username, str) or not owner_username:
-        return JsonResponse({"error": "owner_username is required"}, status=400)
-    app_slug = payload.get("app_slug")
-    if not isinstance(app_slug, str) or not app_slug:
-        return JsonResponse({"error": "app_slug is required"}, status=400)
-
+    Mirror of `refresh_google_outcome` for GitHub. CAS-delete-on-revoked
+    and CAS-update-on-rotate semantics are preserved (see inline comments).
+    A lost CAS race surfaces as `transient`, just like a network blip:
+    the next refresh sees the winner's rotated R2.
+    """
     if not settings.GITHUB_APP_CLIENT_ID or not settings.GITHUB_APP_CLIENT_SECRET:
         logger.error("github token refresh failed: GITHUB_APP_CLIENT_ID/SECRET not configured")
-        return JsonResponse({"error": "github integration not configured"}, status=500)
-
-    user = User.objects.filter(
-        username=owner_username,
-        organization_memberships__organization=environment.aws_account.organization,
-    ).first()
-    if user is None:
-        logger.info(
-            "github token refresh: user not found env=%s owner=%s",
-            environment.slug, owner_username,
-        )
-        return JsonResponse({"error": "not connected"}, status=404)
+        return {"outcome": "transient"}
 
     integration = IntegrationUserCredential.objects.filter(
-        owner_user=user,
+        owner_user=owner_user,
         environment=environment,
         app_slug=app_slug,
         provider=IntegrationUserCredential.Provider.GITHUB,
     ).first()
     if integration is None:
-        logger.info(
-            "github token refresh: no integration row env=%s owner=%s app=%s",
-            environment.slug, owner_username, app_slug,
-        )
-        return JsonResponse({"error": "not connected"}, status=404)
+        return {"outcome": "absent"}
 
     old_refresh = integration.credentials.get("refresh_token", "")
     if not old_refresh:
         logger.error(
             "github token refresh: row missing refresh_token env=%s owner=%s app=%s",
-            environment.slug, owner_username, app_slug,
+            environment.slug, owner_user.username, app_slug,
         )
-        return JsonResponse({"error": "not connected"}, status=404)
+        return {"outcome": "absent"}
     exchange_result = _exchange_refresh_token(refresh_token=old_refresh)
 
     # Whatever happens next, we must only mutate the row if its
@@ -122,24 +86,24 @@ def integrations_github_token_refresh(request: HttpRequest) -> JsonResponse:
         if deleted:
             logger.info(
                 "github token refresh: revoked by github, deleted row env=%s owner=%s app=%s",
-                environment.slug, owner_username, app_slug,
+                environment.slug, owner_user.username, app_slug,
             )
-            return JsonResponse({"error": "revoked, please reconnect"}, status=410)
-        # Row already rotated by a concurrent refresh — treat as transient.
-        # Caller (broker) retries; _ensure_fresh on the next call reads the
-        # winner's R2, which is valid.
+            return {"outcome": "absent"}
+        # Row already rotated by a concurrent refresh — surface as
+        # transient so we don't overwrite the winner's cache; the next
+        # call reads the winner's R2.
         logger.info(
             "github token refresh: stale revoke (row rotated under us) env=%s owner=%s app=%s",
-            environment.slug, owner_username, app_slug,
+            environment.slug, owner_user.username, app_slug,
         )
-        return JsonResponse({"error": "stale, retry"}, status=409)
+        return {"outcome": "transient"}
 
     if exchange_result.error is not None:
         logger.error(
             "github token refresh failed env=%s owner=%s app=%s error=%s",
-            environment.slug, owner_username, app_slug, exchange_result.error,
+            environment.slug, owner_user.username, app_slug, exchange_result.error,
         )
-        return JsonResponse({"error": "github token exchange failed"}, status=502)
+        return {"outcome": "transient"}
 
     # Compare-and-swap update: only rotate if the row still holds R1. A
     # peer who also got back a successful rotation may have already
@@ -156,11 +120,13 @@ def integrations_github_token_refresh(request: HttpRequest) -> JsonResponse:
         updated_at=refreshed_at,
     )
 
-    return JsonResponse({
+    return {
+        "outcome": "has_token",
         "access_token": exchange_result.response["access_token"],
         "expires_in": int(exchange_result.response.get("expires_in", 0)),
-        "token_type": exchange_result.response.get("token_type", "Bearer"),
-    })
+        "config": {},
+        "metadata": {},
+    }
 
 
 class _ExchangeResult:

@@ -94,7 +94,6 @@ class TlsProviderSpec:
 
     slug: str
     label: str
-    refresh_path: str
     hosts: tuple[str, ...]
     logo_url: str
     credential_method: CredentialMethod
@@ -110,12 +109,12 @@ class DohRefreshConfig:
     app_slug: str
 
 
-# Internal tags from DOH's per-provider token endpoint (distinct from browser
-# STATUS_* strings). DOH can return:
+# Internal tags from DOH's refresh endpoint (distinct from browser
+# STATUS_* strings). For each requested slug, DOH returns one of:
 # - has_token:  a fresh access_token (with expiry/config/metadata).
-# - absent:     user not connected (404), or DOH deleted the row after the
-#               provider revoked the refresh_token (410).
-# - transient:  network error, 5xx, or other failure that must not overwrite
+# - absent:     user not connected, or DOH just deleted the row after
+#               the upstream provider revoked the refresh_token.
+# - transient:  network error or other failure that must not overwrite
 #               a working cache entry.
 RefreshOutcome = Literal["has_token", "absent", "transient"]
 
@@ -126,7 +125,7 @@ REFRESH_OUTCOME_TRANSIENT = "transient"
 
 @dataclass(frozen=True)
 class RefreshResult:
-    """Outcome from DOH's per-provider token endpoint."""
+    """Outcome for one provider in a DOH refresh response."""
 
     outcome: RefreshOutcome
     access_token: str | None
@@ -169,7 +168,6 @@ TLS_INTERCEPT_PROVIDER_SPECS = (
     TlsProviderSpec(
         slug="google",
         label="Google Workspace",
-        refresh_path="/api/integrations/google/token",
         hosts=(
             "gmail.googleapis.com",
             "calendar-json.googleapis.com",
@@ -186,7 +184,6 @@ TLS_INTERCEPT_PROVIDER_SPECS = (
     TlsProviderSpec(
         slug="github",
         label="GitHub",
-        refresh_path="/api/integrations/github/token",
         hosts=(
             # github.com handles git smart-HTTP (clone/push) and OAuth
             # endpoints; api.github.com handles REST (incl. `gh` CLI);
@@ -202,7 +199,6 @@ TLS_INTERCEPT_PROVIDER_SPECS = (
     TlsProviderSpec(
         slug="telegram",
         label="Telegram",
-        refresh_path="/api/integrations/telegram/token",
         hosts=("api.telegram.org",),
         logo_url="/extensions/telegram.svg",
         credential_method=VaultUrlRewrite(
@@ -250,17 +246,24 @@ TLS_INTERCEPT_PROVIDERS = build_provider_registry(provider_specs=TLS_INTERCEPT_P
 HOST_TO_TLS_PROVIDER = build_host_to_provider(providers=TLS_INTERCEPT_PROVIDERS)
 
 
-def fetch_provider_token(refresh_config: DohRefreshConfig, provider: TlsProviderSpec) -> RefreshResult:
-    """Call DOH's per-provider refresh endpoint and classify the response.
+def fetch_provider_tokens_batch(refresh_config: DohRefreshConfig, slugs: list[str]) -> dict[str, RefreshResult]:
+    """Refresh many provider tokens in one POST to DOH; returns a slug→RefreshResult map.
 
-    404 (no IntegrationUserCredential row) and 410 (refresh_token revoked
-    upstream; DOH just deleted the row) both collapse to `absent` — once the
-    row is gone, the only user action either signal warrants is "connect".
+    DOH's `/api/integrations/tokens` is the broker's only refresh path —
+    both Refresh-all/bootstrap and single-slug refresh (after a
+    connect/disconnect) call this with the appropriate slug list. The
+    endpoint returns `absent` as a normal entry rather than HTTP 404,
+    so a disconnected provider doesn't generate log spam.
+
+    Any transport-level error, unparseable response, or slug missing
+    from the response map surfaces as TRANSIENT for that slug, so the
+    cache stays intact.
     """
-    url = f"{refresh_config.control_plane_url.rstrip('/')}{provider.refresh_path}"
+    url = f"{refresh_config.control_plane_url.rstrip('/')}/api/integrations/tokens"
     body = json.dumps({
         "owner_username": refresh_config.owner_username,
         "app_slug": refresh_config.app_slug,
+        "providers": list(slugs),
     }).encode("utf-8")
     req = urllib.request.Request(
         url=url,
@@ -269,34 +272,47 @@ def fetch_provider_token(refresh_config: DohRefreshConfig, provider: TlsProvider
         headers={"Authorization": f"Bearer {refresh_config.bearer}", "Content-Type": "application/json"},
     )
     try:
-        # In-VPC JSON POST to our own control plane; healthy P99 is tens of
-        # ms. 5s is a generous ceiling that still keeps the proxy hot path,
-        # the post-vault-save modal, and broker bootstrap (under
-        # supervisor's 10s wait_for_port) all well inside their budgets.
+        # In-VPC JSON POST to our own control plane; healthy P99 is tens
+        # of ms. DOH processes the providers in parallel server-side so
+        # the wall-clock floor is one slow provider, not the sum. The 5s
+        # ceiling keeps broker bootstrap inside supervisor's 10s
+        # wait_for_port budget.
         with urllib.request.urlopen(req, timeout=5) as response:
-            status = response.status
             payload = json.loads(response.read().decode("utf-8"))
     except urllib.error.HTTPError as exc:
-        status = exc.code
-        try:
-            payload = json.loads(exc.read().decode("utf-8"))
-        except Exception:
-            payload = {}
+        logger.error("refresh got http %d", exc.code)
+        return {slug: _transient_result() for slug in slugs}
     except Exception as exc:
-        logger.error("refresh network error for %s: %s", provider.refresh_path, exc)
-        return RefreshResult(outcome=REFRESH_OUTCOME_TRANSIENT, access_token=None, expires_in=None, config={}, metadata={})
+        logger.error("refresh network error: %s", exc)
+        return {slug: _transient_result() for slug in slugs}
 
-    if status == 200:
+    results_payload = payload.get("results")
+    if not isinstance(results_payload, dict):
+        logger.error("refresh response missing/malformed 'results' map")
+        return {slug: _transient_result() for slug in slugs}
+    return {slug: _refresh_result_from_entry(entry=results_payload.get(slug)) for slug in slugs}
+
+
+def _refresh_result_from_entry(entry: object) -> RefreshResult:
+    """Translate one slug's entry in the DOH response into a RefreshResult."""
+    if not isinstance(entry, dict):
+        return _transient_result()
+    outcome = entry.get("outcome")
+    if outcome == REFRESH_OUTCOME_HAS_TOKEN:
         return RefreshResult(
             outcome=REFRESH_OUTCOME_HAS_TOKEN,
-            access_token=payload["access_token"],
-            expires_in=int(payload.get("expires_in", 0)),
-            config=payload.get("config", {}),
-            metadata=payload.get("metadata", {}),
+            access_token=entry["access_token"],
+            expires_in=int(entry.get("expires_in", 0)),
+            config=entry.get("config", {}),
+            metadata=entry.get("metadata", {}),
         )
-    if status in (404, 410):
+    if outcome == REFRESH_OUTCOME_ABSENT:
         return RefreshResult(outcome=REFRESH_OUTCOME_ABSENT, access_token=None, expires_in=None, config={}, metadata={})
-    logger.error("refresh got http %d for %s: %s", status, provider.refresh_path, payload.get("error", ""))
+    return _transient_result()
+
+
+def _transient_result() -> RefreshResult:
+    """Build a transient-outcome RefreshResult sentinel for cache-preserving failures."""
     return RefreshResult(outcome=REFRESH_OUTCOME_TRANSIENT, access_token=None, expires_in=None, config={}, metadata={})
 
 
@@ -489,11 +505,36 @@ class _TokenStore:
 
     async def refresh(self, slug: str) -> None:
         """Refetch one provider from DOH even when the cache is fresh."""
-        provider = self._providers.get(slug)
-        if provider is None:
+        if slug not in self._providers:
             return
+        await self._refresh_batch(slugs=[slug])
+
+    async def refresh_all(self) -> None:
+        """Refetch every provider in one DOH round-trip."""
+        await self._refresh_batch(slugs=list(self._providers))
+
+    async def _refresh_batch(self, slugs: list[str]) -> None:
+        """Fetch the slugs in one DOH POST; apply each result under its provider's refresh_lock.
+
+        The fetch happens outside any per-slug lock so a slow DOH round-trip
+        doesn't stall concurrent per-slug operations (the proxy hot-path's
+        `_ensure_fresh`, `invalidate`, etc.). Only the cache mutation
+        acquires the lock, and per-slug applies run concurrently.
+        """
+        results = await asyncio.to_thread(
+            fetch_provider_tokens_batch,
+            refresh_config=self._refresh_config,
+            slugs=slugs,
+        )
+        await asyncio.gather(*(
+            self._apply_under_lock(slug=slug, result=results[slug])
+            for slug in slugs
+        ))
+
+    async def _apply_under_lock(self, slug: str, result: RefreshResult) -> None:
+        """Acquire the provider's refresh_lock, then apply the refresh outcome to the cache."""
         async with self._refresh_locks[slug]:
-            await self._refresh_provider(provider=provider)
+            await self._apply(provider=self._providers[slug], result=result)
 
     def _prune_expired_locked(self, now: float) -> None:
         """Drop expired cache entries. Caller must hold `_cache_lock`."""
@@ -538,7 +579,7 @@ class _TokenStore:
         Returns the cache entry to use for this request, or None when the
         provider is genuinely unavailable. The two cases to keep separate:
 
-        - **Refresh succeeded** (connected/absent): the cache reflects DOH
+        - **Refresh succeeded** (has_token/absent): the cache reflects DOH
           truth, so we return whatever's now in the cache.
         - **Refresh transient-failed**: the cache is untouched. If we had a
           prior entry that's still un-expired, hand it back — the proxy
@@ -550,27 +591,27 @@ class _TokenStore:
             entry = await self._cached_entry(slug=provider.slug)
             if entry is not None and entry.is_fresh(now=time.monotonic(), refresh_lead_seconds=self._refresh_lead_seconds):
                 return entry
-            await self._refresh_provider(provider=provider)
-            entry = await self._cached_entry(slug=provider.slug)
-            if entry is None:
-                return None
-            return entry
+            # Caller already holds this slug's refresh_lock, so we fetch +
+            # apply directly rather than going through `_refresh_batch`
+            # (which would try to re-acquire the same lock and deadlock).
+            results = await asyncio.to_thread(
+                fetch_provider_tokens_batch,
+                refresh_config=self._refresh_config,
+                slugs=[provider.slug],
+            )
+            await self._apply(provider=provider, result=results[provider.slug])
+            return await self._cached_entry(slug=provider.slug)
 
-    async def _refresh_provider(self, provider: TlsProviderSpec) -> None:
-        """Refresh one provider and apply the outcome to the cache.
+    async def _apply(self, provider: TlsProviderSpec, result: RefreshResult) -> None:
+        """Apply a fetched refresh outcome to the cache. Caller holds the provider's refresh_lock.
 
         Side-effect only — callers re-read the cache to learn the result:
 
-        - connected → write the new entry.
+        - has_token → write the new entry.
         - absent → drop any prior entry (idempotent).
         - transient → leave the cache untouched (don't replace a working
           token with a sentinel; the prior entry, if any, stays available).
         """
-        result = await asyncio.to_thread(
-            fetch_provider_token,
-            refresh_config=self._refresh_config,
-            provider=provider,
-        )
         if result.outcome == REFRESH_OUTCOME_HAS_TOKEN:
             entry = _cache_entry_from_connected_result(result=result, now=time.monotonic())
             async with self._cache_lock:
@@ -644,19 +685,8 @@ class TlsInterceptRuntime:
         await self._token_store.refresh(slug=slug)
 
     async def refresh_all(self) -> None:
-        """Force a refetch of every provider so the cache reflects current DOH state.
-
-        Refreshes run concurrently — sequential refreshes worst-case at
-        N × 5s (the urlopen timeout in fetch_provider_token), which would
-        exceed supervisor's wait_for_port budget if the control plane is
-        slow. With gather, the floor is one slow call regardless of N.
-        """
-        await asyncio.gather(
-            *(
-                self._token_store.refresh(slug=slug)
-                for slug in self._token_store._providers
-            )
-        )
+        """Force a refetch of every provider in one DOH round-trip."""
+        await self._token_store.refresh_all()
 
     async def gateway_env_snapshot(self) -> list[tuple[TlsProviderSpec, dict]]:
         """Pair every connected provider with its cached config for env rendering.

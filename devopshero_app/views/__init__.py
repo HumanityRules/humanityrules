@@ -38,18 +38,16 @@ from .integrations.google_oauth import (
     integrations_google_oauth_callback,
     integrations_google_oauth_disconnect,
 )
-from .integrations.google_token_refresh import integrations_google_token_refresh
 from .integrations.github_oauth import (
     integrations_github_oauth_start,
     integrations_github_oauth_callback,
     integrations_github_oauth_disconnect,
 )
-from .integrations.github_token_refresh import integrations_github_token_refresh
+from .integrations.token_refresh_batch import integrations_tokens_batch
 from .integrations.user_credential_vault import (
     integrations_credential_disconnect,
     integrations_credential_setup_session,
     integrations_credential_submit,
-    integrations_telegram_token,
 )
 from .integrations.merge_handler import (
     integrations_merge_ensure_registered_user,
@@ -170,15 +168,13 @@ __all__ = [
     "integrations_google_oauth_start",
     "integrations_google_oauth_callback",
     "integrations_google_oauth_disconnect",
-    "integrations_google_token_refresh",
     "integrations_github_oauth_start",
     "integrations_github_oauth_callback",
     "integrations_github_oauth_disconnect",
-    "integrations_github_token_refresh",
+    "integrations_tokens_batch",
     "integrations_credential_disconnect",
     "integrations_credential_setup_session",
     "integrations_credential_submit",
-    "integrations_telegram_token",
     "integrations_merge_ensure_registered_user",
     "integrations_merge_link_token",
     "integrations_merge_connectors",

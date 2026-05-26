@@ -339,8 +339,8 @@ HERMES_PERSONAL_TEMPLATE = {
             "configurable_variables": (
                 _HERMES_LLM_VARS + _HERMES_AWS_DEFAULT_REGION_VAR + _HERMES_TAVILY_VAR
             ),
-            # Supervisor process (outside the nono sandbox) refreshes Google
-            # access tokens by POSTing to DOH /api/integrations/google/token.
+            # Supervisor process (outside the nono sandbox) refreshes provider
+            # access tokens by POSTing to DOH /api/integrations/tokens.
             "requires_env_bearer": True,
         },
         # Policy proxy is tiny (httpx + starlette); 256 MiB is plenty. Must

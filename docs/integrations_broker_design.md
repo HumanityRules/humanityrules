@@ -72,9 +72,9 @@ The `/__mcp_aggregator/*` URL space that earlier holds Notion's OAuth was retire
 
 ### 3. Refresh loops
 
-One coroutine per provider, driven by a single `PROVIDERS` dict at the top of the broker. Each entry: `{label, refresh_path, hosts[]}`. Adding Slack/Notion/Linear is a new dict entry, not new functions.
+One coroutine per provider, driven by a single `PROVIDERS` dict at the top of the broker. Each entry: `{label, hosts[]}`. Adding Slack/Notion/Linear is a new dict entry, not new functions.
 
-Each loop POSTs `{owner_username}` with the env bearer to DOH's `refresh_path`, classifies the response by status code (200 ok / 404 not_connected / 410 revoked / 401+500 fatal / else transient), updates an in-memory `{host: token}` map for its hosts, updates `{slug: state}` for the control API, then sleeps until `expires_in - 5min`. `/kick` uses the same refresh primitive directly and returns after the state update has completed.
+Refresh is one batched call to DOH's `POST /api/integrations/tokens` with `{owner_username, app_slug, providers: [...]}`. DOH returns `{results: {<slug>: {outcome, access_token?, expires_in?, config, metadata}, ...}}` where `outcome` is `has_token | absent | transient` — disconnected providers are normal `absent` entries in the response map, not HTTP 4xx, so they don't generate per-Refresh-all log lines. The broker uses this same endpoint for slug-targeted refreshes (after connect/disconnect), passing a one-element providers list.
 
 Refresh cadence is ~55 minutes when connected. `/kick` replaces the short polling interval the old design used to mask the lack of a synchronous signal.
 
@@ -120,7 +120,6 @@ The sandbox never opens a direct TCP connection to a provider — every connecti
 PROVIDERS = {
     "google": {
         "label": "Google Workspace",
-        "refresh_path": "/api/integrations/google/token",
         "hosts": [
             "gmail.googleapis.com",
             "calendar-json.googleapis.com",
@@ -135,7 +134,7 @@ PROVIDERS = {
 }
 ```
 
-That dict alone drives: which hostnames get MITM'd vs tunneled; which DOH endpoint to call for refresh; the `label` shown in the Integrations UI; and (implicitly) which status key the extension renders.
+That dict alone drives: which hostnames get MITM'd vs tunneled; the `label` shown in the Integrations UI; and (implicitly) which status key the extension renders. The refresh endpoint is global, not per-provider — every slug is named in the one batched `POST /api/integrations/tokens` body.
 
 ## Cert lifecycle
 
@@ -148,8 +147,8 @@ Python's cert validation (OpenSSL) rejects chains missing `SubjectKeyIdentifier`
 
 ## Failure modes
 
-- **User hasn't connected the provider yet.** DOH returns 404. Broker removes the host→token mapping and publishes `status: not_connected`. Subsequent sandbox calls get a synthetic HTTP 503 from the broker with a human-readable message — the sandbox-side skill surfaces it to the user verbatim.
-- **Refresh token revoked at provider** (user revoked, or security system did). DOH returns 410 and deletes the stored grant. Same behavior as not_connected from the broker's side; the UI distinguishes "never connected" from "revoked" via the `status` field.
+- **User hasn't connected the provider yet.** DOH returns `outcome: "absent"` for that slug inside a 200 response. Broker removes the host→token mapping and publishes `status: not_connected`. Subsequent sandbox calls get a synthetic HTTP 503 from the broker with a human-readable message — the sandbox-side skill surfaces it to the user verbatim.
+- **Refresh token revoked at provider** (user revoked, or security system did). DOH deletes the stored grant and returns the same `outcome: "absent"` for that slug. Same behavior as not_connected from the broker's side; the UI distinguishes "never connected" from "revoked" via the `status` field.
 - **Transient DOH failure.** Broker keeps the last in-memory token and retries with exponential backoff. Tool calls continue working until the current token expires.
 - **DOH unreachable long enough to expire the token.** Provider calls start failing with the broker's "integration not connected" 503 once the token is purged — or with provider 401s if the broker still has a stale token. Mitigations: `MIN_SLEEP_SECONDS=30` floor + backoff caps mean retries continue; once DOH is back, `/kick` resyncs instantly.
 - **Customer env compromised.** The attacker gets the env bearer, which can mint access tokens for users already connected in that env — bounded to env users, bounded in token lifetime. They cannot extract refresh tokens (not in the env) and cannot mint for other envs (bearer is env-scoped). They also cannot extract historical access tokens — the broker never persists them.
@@ -168,7 +167,7 @@ Two changes from the pre-broker design:
 Everything above is provider-agnostic. Adding a second provider is:
 
 1. A row in the `PROVIDERS` dict.
-2. A refresh endpoint on DOH at the matching `refresh_path`.
+2. An entry in the `_OUTCOME_HANDLERS` map in `views/integrations/token_refresh_batch.py` — a function that returns `{outcome, access_token?, expires_in?, config, metadata}` for that slug.
 3. A start/disconnect flow pair in DOH that the extension links to.
 4. An entry in the `integrations/` section of the WebUI extension (label, any provider-specific connect URL params).
 

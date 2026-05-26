@@ -135,16 +135,12 @@ urlpatterns = [
     path("api/github/webhook", views.github_webhook, name="github_webhook"),
     #  - pdp_evaluate: called by policy proxies to authorize each request against ABAC
     path("api/pdp/evaluate", views.pdp_evaluate, name="pdp_evaluate"),
-    #  - integrations_google_token_refresh: called by env-resident components (Hermes refresher) to get a fresh Google access token
-    path("api/integrations/google/token", views.integrations_google_token_refresh, name="integrations_google_token_refresh"),
-    #  - integrations_github_token_refresh: called by env-resident components (Hermes refresher) to get a fresh GitHub user-to-server access token
-    path("api/integrations/github/token", views.integrations_github_token_refresh, name="integrations_github_token_refresh"),
+    #  - integrations_tokens_batch: the env-resident broker's single refresh endpoint, both for Refresh-all/bootstrap and for slug-targeted refresh after connect/disconnect
+    path("api/integrations/tokens", views.integrations_tokens_batch, name="integrations_tokens_batch"),
     #  - integrations_credential_setup_session / submit / disconnect: broker-assisted, browser-direct vault flows for paste-style credentials
     path("api/integrations/credentials/setup-session", views.integrations_credential_setup_session, name="integrations_credential_setup_session"),
     path("api/integrations/credentials/submit", views.integrations_credential_submit, name="integrations_credential_submit"),
     path("api/integrations/credentials/disconnect", views.integrations_credential_disconnect, name="integrations_credential_disconnect"),
-    #  - integrations_telegram_token: called by the outside-sandbox broker to inject Telegram Bot API path tokens
-    path("api/integrations/telegram/token", views.integrations_telegram_token, name="integrations_telegram_token"),
     #  - Merge.dev Agent Handler: env-resident components (Hermes broker / MCP aggregator) reach Merge through these. Tenant-wide Merge API key lives only on DOH.
     path("api/integrations/merge/ensure-registered-user", views.integrations_merge_ensure_registered_user, name="integrations_merge_ensure_registered_user"),
     path("api/integrations/merge/link-token", views.integrations_merge_link_token, name="integrations_merge_link_token"),

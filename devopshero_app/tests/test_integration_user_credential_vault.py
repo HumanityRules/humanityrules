@@ -301,29 +301,3 @@ class TestCredentialSubmit(_CredentialVaultTestBase):
         )
         self.assertFalse(IntegrationUserCredential.objects.exists())
 
-
-class TestTelegramBrokerToken(_CredentialVaultTestBase):
-
-    def test_telegram_token_endpoint_returns_secret_and_config(self) -> None:
-        IntegrationUserCredential.objects.create(
-            owner_user=self.user,
-            environment=self.env,
-            app_slug="hermes",
-            provider=IntegrationUserCredential.Provider.TELEGRAM,
-            credentials={"bot_token": "123456:abcdefghijklmnopqrstuvwxyz"},
-            config={"allowed_users": ["111"]},
-            metadata={"bot_username": "hermes_bot"},
-        )
-
-        response = self.client.post(
-            "/api/integrations/telegram/token",
-            data=json.dumps({"owner_username": "vmendi", "app_slug": "hermes"}),
-            content_type="application/json",
-            **self._env_headers(),
-        )
-
-        self.assertEqual(response.status_code, 200)
-        body = response.json()
-        self.assertEqual(body["access_token"], "123456:abcdefghijklmnopqrstuvwxyz")
-        self.assertEqual(body["config"]["allowed_users"], ["111"])
-        self.assertEqual(body["metadata"]["bot_username"], "hermes_bot")
