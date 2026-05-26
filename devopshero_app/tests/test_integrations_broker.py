@@ -108,6 +108,11 @@ class TestHostToProviderRouting(unittest.TestCase):
         self.assertIsNone(store.provider_for_host(host="api.tavily.com"))
         self.assertIsNone(store.provider_for_host(host="example.com"))
 
+    def test_connect_host_routing_is_case_and_trailing_dot_insensitive(self) -> None:
+        store = _make_token_store()
+        self.assertEqual(store.provider_for_host(host="GitHub.COM").slug, "github")
+        self.assertEqual(store.provider_for_host(host="github.com.").slug, "github")
+
 
 class TestRewriteAuthorization(unittest.TestCase):
 
@@ -213,6 +218,50 @@ class TestRewriteAuthorization(unittest.TestCase):
                 provider=provider,
                 upstream_host="api.telegram.org",
             )
+
+
+class TestForwardHeaderNormalization(unittest.TestCase):
+
+    def test_dechunked_request_gets_content_length_and_no_transfer_encoding(self) -> None:
+        out = broker.tls_intercept._normalize_forward_headers(
+            headers=[
+                (b"Host", b"github.com"),
+                (b"Transfer-Encoding", b"chunked"),
+                (b"Connection", b"keep-alive"),
+                (b"Content-Type", b"application/json"),
+            ],
+            body_length=11,
+        )
+
+        by_name = {name.lower(): value for name, value in out}
+        self.assertNotIn(b"transfer-encoding", by_name)
+        self.assertNotIn(b"connection", by_name)
+        self.assertEqual(by_name[b"content-length"], b"11")
+        self.assertEqual(by_name[b"host"], b"github.com")
+
+    def test_existing_content_length_is_replaced(self) -> None:
+        out = broker.tls_intercept._normalize_forward_headers(
+            headers=[
+                (b"Host", b"api.telegram.org"),
+                (b"Content-Length", b"999"),
+            ],
+            body_length=4,
+        )
+
+        content_lengths = [value for name, value in out if name.lower() == b"content-length"]
+        self.assertEqual(content_lengths, [b"4"])
+
+
+class TestHttpParsing(unittest.IsolatedAsyncioTestCase):
+
+    async def test_read_chunked_consumes_trailers(self) -> None:
+        reader = asyncio.StreamReader()
+        reader.feed_data(b"4\r\ntest\r\n0\r\nX-Trailer: one\r\nAnother: two\r\n\r\nNEXT")
+
+        body = await broker.tls_intercept._read_chunked(reader=reader)
+
+        self.assertEqual(body, b"test")
+        self.assertEqual(await reader.readexactly(4), b"NEXT")
 
 
 class TestCertMinter(unittest.TestCase):
@@ -329,6 +378,25 @@ class TestControlIntegrations(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("google", self.tls_runtime._token_store._cache)
         items_by_slug = {item["slug"]: item for item in await self.tls_runtime.status_items()}
         self.assertEqual(items_by_slug["google"]["status"], "not_connected")
+
+    async def test_refresh_slug_refetches_even_when_cache_is_fresh(self) -> None:
+        """Explicit refresh must hit DOH even when the cached token is still fresh."""
+        responses = [
+            broker.tls_intercept.RefreshResult(
+                outcome=broker.tls_intercept.REFRESH_OUTCOME_HAS_TOKEN,
+                access_token="T1", expires_in=3600, config={}, metadata={},
+            ),
+            broker.tls_intercept.RefreshResult(
+                outcome=broker.tls_intercept.REFRESH_OUTCOME_HAS_TOKEN,
+                access_token="T2", expires_in=3600, config={}, metadata={},
+            ),
+        ]
+        with patch.object(broker.tls_intercept, "fetch_provider_token", side_effect=responses) as fetch_mock:
+            await self.tls_runtime.refresh_slug(slug="google")
+            await self.tls_runtime.refresh_slug(slug="google")
+
+        self.assertEqual(fetch_mock.call_count, 2)
+        self.assertEqual(self.tls_runtime._token_store._cache["google"].access_token, "T2")
 
     async def test_transient_after_eviction_does_not_fabricate_entry(self) -> None:
         """A transient refresh outcome must not write a sentinel into an empty cache."""
