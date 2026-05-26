@@ -226,17 +226,23 @@ def build_provider_registry(provider_specs: tuple[TlsProviderSpec, ...]) -> dict
     return providers
 
 
+def _normalize_connect_host(host: str) -> str:
+    """Canonicalize CONNECT hostnames before provider routing."""
+    return host.strip().rstrip(".").lower()
+
+
 def build_host_to_provider(providers: dict[str, TlsProviderSpec]) -> dict[str, str]:
     """Map intercepted upstream hosts to provider slugs and fail on overlap."""
     host_to_provider: dict[str, str] = {}
     for slug, spec in providers.items():
         for host in spec.hosts:
-            existing_slug = host_to_provider.get(host)
+            normalized_host = _normalize_connect_host(host=host)
+            existing_slug = host_to_provider.get(normalized_host)
             if existing_slug is not None:
                 raise RuntimeError(
-                    f"TLS-intercept host {host!r} is claimed by both {existing_slug!r} and {slug!r}"
+                    f"TLS-intercept host {normalized_host!r} is claimed by both {existing_slug!r} and {slug!r}"
                 )
-            host_to_provider[host] = slug
+            host_to_provider[normalized_host] = slug
     return host_to_provider
 
 
@@ -435,7 +441,7 @@ class _TokenStore:
 
     def provider_for_host(self, host: str) -> TlsProviderSpec | None:
         """Return the provider that owns an upstream hostname."""
-        slug = self._host_to_provider.get(host)
+        slug = self._host_to_provider.get(_normalize_connect_host(host=host))
         if slug is None:
             return None
         return self._providers[slug]
@@ -480,6 +486,14 @@ class _TokenStore:
         async with lock:
             async with self._cache_lock:
                 self._cache.pop(slug, None)
+
+    async def refresh(self, slug: str) -> None:
+        """Refetch one provider from DOH even when the cache is fresh."""
+        provider = self._providers.get(slug)
+        if provider is None:
+            return
+        async with self._refresh_locks[slug]:
+            await self._refresh_provider(provider=provider)
 
     def _prune_expired_locked(self, now: float) -> None:
         """Drop expired cache entries. Caller must hold `_cache_lock`."""
@@ -627,10 +641,7 @@ class TlsInterceptRuntime:
 
     async def refresh_slug(self, slug: str) -> None:
         """Force a single-provider refetch so the cache reflects current DOH state."""
-        provider = self._token_store._providers.get(slug)
-        if provider is None:
-            return
-        await self._token_store._ensure_fresh(provider=provider)
+        await self._token_store.refresh(slug=slug)
 
     async def refresh_all(self) -> None:
         """Force a refetch of every provider so the cache reflects current DOH state.
@@ -642,8 +653,8 @@ class TlsInterceptRuntime:
         """
         await asyncio.gather(
             *(
-                self._token_store._ensure_fresh(provider=provider)
-                for provider in self._token_store._providers.values()
+                self._token_store.refresh(slug=slug)
+                for slug in self._token_store._providers
             )
         )
 
@@ -810,7 +821,8 @@ async def _handle_proxy_conn(
         if method.upper() != "CONNECT":
             await _send_raw(writer=writer, status=405, body=b"only CONNECT is supported")
             return
-        host, _, port_str = target.partition(":")
+        raw_host, _, port_str = target.partition(":")
+        host = _normalize_connect_host(host=raw_host)
         port = int(port_str) if port_str else 443
         provider = token_store.provider_for_host(host=host)
         if provider is None:
@@ -1000,8 +1012,9 @@ def _parse_headers(lines: list[bytes]) -> list[tuple[bytes, bytes]]:
 
 
 def _header_value(headers: list[tuple[bytes, bytes]], name: bytes) -> bytes | None:
+    normalized_name = name.lower()
     for n, v in headers:
-        if n == name:
+        if n.lower() == normalized_name:
             return v.lower()
     return None
 
@@ -1026,7 +1039,10 @@ async def _read_chunked(reader: asyncio.StreamReader) -> bytes:
         size_line = await reader.readline()
         size = int(size_line.strip().split(b";")[0], 16)
         if size == 0:
-            await reader.readline()
+            while True:
+                trailer_line = await reader.readline()
+                if trailer_line in (b"\r\n", b"\n", b""):
+                    break
             return b"".join(chunks)
         chunks.append(await reader.readexactly(size))
         await reader.readline()
@@ -1081,6 +1097,34 @@ def _strip_proxy_headers_and_set_host(headers: list[tuple[bytes, bytes]], upstre
     return rewritten
 
 
+def _normalize_forward_headers(headers: list[tuple[bytes, bytes]], body_length: int) -> list[tuple[bytes, bytes]]:
+    """Strip stale client-side framing before replaying the request upstream."""
+    headers_to_strip = frozenset({
+        b"connection",
+        b"content-length",
+        b"keep-alive",
+        b"proxy-authenticate",
+        b"proxy-authorization",
+        b"proxy-connection",
+        b"te",
+        b"trailer",
+        b"transfer-encoding",
+        b"upgrade",
+    })
+    normalized: list[tuple[bytes, bytes]] = []
+    body_was_framed = False
+    for name, value in headers:
+        lowered_name = name.lower()
+        if lowered_name in (b"content-length", b"transfer-encoding"):
+            body_was_framed = True
+        if lowered_name in headers_to_strip:
+            continue
+        normalized.append((name, value))
+    if body_length > 0 or body_was_framed:
+        normalized.append((b"Content-Length", str(body_length).encode()))
+    return normalized
+
+
 def _rewrite_request_for_provider(
     headers: list[tuple[bytes, bytes]],
     path_with_query: str,
@@ -1122,8 +1166,9 @@ async def _forward_to_upstream(
     ctx = ssl.create_default_context()
     upstream_reader, upstream_writer = await asyncio.open_connection(host=host, port=port, ssl=ctx, server_hostname=host)
     try:
+        normalized_headers = _normalize_forward_headers(headers=headers, body_length=len(body))
         request = method.encode() + b" " + path_with_query.encode() + b" HTTP/1.1\r\n"
-        for name, value in headers:
+        for name, value in normalized_headers:
             request += name + b": " + value + b"\r\n"
         request += b"\r\n"
         upstream_writer.write(request)
