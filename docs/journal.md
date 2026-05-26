@@ -1,5 +1,24 @@
 # DevOpsHero Development Journal
 
+## 2026-05-26 12:48 - [Bugfix] Hermes WebUI manual cron failures traced to `nono` blocking `/dev/shm`
+
+**Conversation:** [2026-05-26-1248-4840db9d.md](conversations/2026-05-26-1248-4840db9d.md)
+
+A user-created Hermes WebUI cron job in `hermes-vmendi00` (`52f739ee51e0`, "Hermes WebUI + Agent daily upgrade report") failed every manual run with only "access denied" visible in the UI. The first useful split was layer-by-layer: the app container and policy proxy were healthy, WebUI API calls worked, the job row existed with `last_error: [Errno 13] Permission denied`, and the failure reproduced immediately through `POST /api/crons/run`. The decisive evidence came from `/workspace/.hermes/logs/agent.log`: the exception happened before the agent started, in `api.routes._run_cron_job_in_profile_subprocess`, while Python created `multiprocessing.Queue(maxsize=1)`. That queue constructs a `_multiprocessing.SemLock`, which Python backs with POSIX semaphore/shared-memory machinery exposed through `/dev/shm`.
+
+The denial was not from ECS, Linux file ownership, network, auth, or SELinux. `/dev/shm` was mounted normally in the container and `multiprocessing.Queue()` worked as both `root` and `hermeswebui` outside `nono`. The same probe failed inside the active `hermes-nono-profile.json`, confirming the sandbox filesystem allowlist was the denying layer. A temporary WebUI cron job failed the same way through the manual-run API, proving the bug was host/app-level for that WebUI execution path rather than intrinsic to the upgrade-report prompt.
+
+The subtle correction was comparing against the production-control-plane `hermes-vmendi00`, whose scheduled cron jobs had been working. That app did **not** have `/dev/shm` enabled either: same profile shape, same `nono` denial for `multiprocessing.Queue`. The difference was execution path. Scheduled jobs run through the gateway cron ticker, which calls `cron.scheduler.run_job()` directly and never creates a `multiprocessing.Queue`; manual WebUI "run now" wraps the job in a spawned child process and uses a queue to return the result. So production scheduled cron success did not exonerate the sandbox restriction; it showed the failure is specific to the manual-run wrapper.
+
+We decided to allow only `/dev/shm` in the Hermes `nono` profile, not broader `/dev`. That restores common runtime compatibility for Python multiprocessing semaphores and other shared-memory users while avoiding device-node exposure. The blast radius is a writable, container-local tmpfs IPC surface, not host-level shared memory. This is an intentional compatibility exception; a narrower upstream-style code fix would be to replace the manual-run `multiprocessing.Queue` result channel with `multiprocessing.Pipe`, which was also verified to work inside `nono`.
+
+**Key points:**
+- `PermissionError: [Errno 13] Permission denied` on a Python `multiprocessing.Queue` can be an IPC/sandbox denial, not ordinary filesystem ownership.
+- `/dev/shm` was absent from `hermes-nono-profile.json`; adding exactly `"/dev/shm"` to `filesystem.allow` fixes the sandbox capability without granting all of `/dev`.
+- Scheduled cron and manual WebUI cron are different execution paths. Scheduled jobs can work while `/api/crons/run` fails because only manual runs use the spawned subprocess plus queue wrapper.
+- Production comparison must use the production control-plane DB. The local DB had a non-assumable placeholder `Production AWS` row, while prod had Course Hero's `sandbox` environment and the deployed app at `hermes-vmendi00.dohsandbox.com`.
+- The `prod_manage.sh` helper can wedge if several ECS Exec sessions are opened in parallel from this agent harness; serial prod DB queries completed cleanly.
+
 ## 2026-05-26 09:56 - [Deployment] Webapps redesign: per-app subdomains end the SPA-hosting pain, and a `Host` vs `X-Forwarded-Host` slip-up cost a redeploy
 
 **Conversation:** [2026-05-26-0958-bbd36bea.md](conversations/2026-05-26-0958-bbd36bea.md)
