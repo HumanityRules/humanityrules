@@ -10,6 +10,7 @@ import boto3
 
 from devopshero_app.models import Environment
 from aws_cdk import App, Aws, CfnOutput, Duration, Fn, RemovalPolicy, SecretValue, Stack, Tags
+from aws_cdk import aws_certificatemanager as acm
 from aws_cdk import aws_ec2 as ec2
 from aws_cdk import aws_ecr as ecr
 from aws_cdk import aws_ecs as ecs
@@ -1075,29 +1076,40 @@ class AppStack(Stack):
         shared_alb_hosted_zone: str | None,
         shared_hosted_zone_id: str | None,
     ) -> None:
-        """Configure routing rules on the shared ALB and create per-app DNS record."""
-        # Use subdomain for listener priority to ensure uniqueness per Route53 record
+        """Configure routing rules on the shared ALB and create per-app DNS record.
+
+        When app_config.enable_subhosting is True (used by Hermes), the rule
+        also matches *.<agent-host> so the in-container Caddy sidecar can
+        serve user webapps as sub-subdomains. That requires a per-agent
+        wildcard ACM cert attached to the HTTPS listener via SNI plus a
+        wildcard A-alias record. The env-level wildcard cert only covers one
+        label deep (*.<env-domain>); sub-subdomains need their own cert.
+        """
         priority = _compute_listener_rule_priority(subdomain)
         prefix = f"devopshero-{env_slug}"
 
-        # Import shared ALB DNS for output
         shared_alb_dns = Fn.import_value(f"{prefix}-shared-alb-dns")
 
-        # Add HTTP listener rule (always)
         http_listener = elbv2.ApplicationListener.from_application_listener_attributes(
             self, "ImportedHttpListener",
             listener_arn=self.environment_infra.shared_alb_http_listener_arn,
             security_group=self.environment_infra.shared_alb_security_group,
         )
 
-        # Determine the host header for routing
+        # Hermes (and any other template that opts in) routes traffic from
+        # both <agent-host> and *.<agent-host> to the same task — same ALB
+        # target group, same policy-proxy, same Caddy. Caddy then distinguishes
+        # by Host header. Both kinds of traffic share a single ALB rule.
+        subhosting = bool(app_config.enable_subhosting and shared_alb_hosted_zone)
+
         if shared_alb_hosted_zone:
-            # Use subdomain + hosted zone for the hostname (subdomain may differ from app_name)
             app_hostname = f"{subdomain}.{shared_alb_hosted_zone}"
-            host_condition = elbv2.ListenerCondition.host_headers([app_hostname])
+            host_patterns = [app_hostname, f"*.{app_hostname}"] if subhosting else [app_hostname]
+            host_condition = elbv2.ListenerCondition.host_headers(host_patterns)
         else:
             # HTTP-only mode: route by path prefix since no domain
             app_hostname = None
+            host_patterns = []
             host_condition = elbv2.ListenerCondition.path_patterns([f"/{subdomain}/*"])
 
         elbv2.ApplicationListenerRule(
@@ -1108,7 +1120,6 @@ class AppStack(Stack):
             target_groups=[target_group],
         )
 
-        # Add HTTPS listener rule if hosted zone is configured
         if shared_alb_hosted_zone and self.environment_infra.shared_alb_https_listener_arn:
             https_listener = elbv2.ApplicationListener.from_application_listener_attributes(
                 self, "ImportedHttpsListener",
@@ -1120,14 +1131,14 @@ class AppStack(Stack):
                 self, "HttpsListenerRule",
                 listener=https_listener,
                 priority=priority,
-                conditions=[elbv2.ListenerCondition.host_headers([app_hostname])],
+                conditions=[elbv2.ListenerCondition.host_headers(host_patterns)],
                 target_groups=[target_group],
             )
 
             CfnOutput(self, "HttpsUrl", value=f"https://{app_hostname}", export_name=f"{resource_prefix}-https-url")
+        else:
+            https_listener = None
 
-        # Create per-app DNS record pointing to this environment's ALB
-        # This allows multiple environments to share the same hosted zone without conflicts
         if shared_alb_hosted_zone and shared_hosted_zone_id and app_hostname:
             hosted_zone = route53.HostedZone.from_hosted_zone_attributes(
                 self, "HostedZone",
@@ -1135,7 +1146,6 @@ class AppStack(Stack):
                 zone_name=shared_alb_hosted_zone,
             )
 
-            # Import the shared ALB for the Route53 alias target
             # DNS name and canonical hosted zone ID are required for Route53 alias records
             shared_alb = elbv2.ApplicationLoadBalancer.from_application_load_balancer_attributes(
                 self, "ImportedSharedAlb",
@@ -1151,6 +1161,42 @@ class AppStack(Stack):
                 record_name=app_hostname,
                 target=route53.RecordTarget.from_alias(targets.LoadBalancerTarget(shared_alb)),
             )
+
+            if subhosting:
+                # Wildcard A-alias so any sub-subdomain (e.g. hud.<agent-host>)
+                # also resolves to the ALB. Single record per agent; webapp
+                # creation in the container adds no DNS work.
+                route53.ARecord(
+                    self, "SubhostingWildcardDnsRecord",
+                    zone=hosted_zone,
+                    record_name=f"*.{app_hostname}",
+                    target=route53.RecordTarget.from_alias(targets.LoadBalancerTarget(shared_alb)),
+                )
+
+                # Per-agent wildcard cert: *.<agent-host>. The env-level
+                # *.<env-domain> cert doesn't cover sub-subdomains because
+                # ACM wildcards only match one label. DNS-validated through
+                # the same hosted zone, so issuance is fully automated.
+                wildcard_cert = acm.Certificate(
+                    self, "SubhostingWildcardCertificate",
+                    domain_name=f"*.{app_hostname}",
+                    validation=acm.CertificateValidation.from_dns(hosted_zone),
+                )
+
+                if https_listener is not None:
+                    # Attach to the listener as an SNI cert alongside the
+                    # env-level *.<env-domain>. ALB picks per-request via SNI.
+                    elbv2.ApplicationListenerCertificate(
+                        self, "SubhostingWildcardListenerCertificate",
+                        listener=https_listener,
+                        certificates=[wildcard_cert],
+                    )
+
+                CfnOutput(
+                    self, "SubhostingWildcardCertificateArn",
+                    value=wildcard_cert.certificate_arn,
+                    export_name=f"{resource_prefix}-subhosting-wildcard-cert-arn",
+                )
 
         CfnOutput(self, "SharedAlbDns", value=shared_alb_dns, export_name=f"{resource_prefix}-shared-alb-dns")
 

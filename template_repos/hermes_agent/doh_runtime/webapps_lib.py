@@ -4,6 +4,15 @@ Imported by both the `webapps` CLI and the `__admin` webapp. Source of truth
 is /workspace/.config/process-compose/process-compose.yaml; routes.caddy is
 regenerated from it on every mutation. See docs/webapps_design.md.
 
+User webapps live at <slug>.<agent-host> (Host-based Caddy routing). The
+per-agent ALB wildcard cert + Route 53 wildcard record + listener-rule host
+condition that make those URLs resolve are provisioned at agent-deploy time
+when the AppTemplate sets `enable_subhosting=True`.
+
+Platform-internal slugs (those starting with `__`, e.g. `__admin`) stay at
+<agent-host>/webapps/<slug>/ so the WebUI's same-origin extension can call
+their APIs without CORS surgery.
+
 `webapps/` holds user-facing artifacts (their projects, their logs);
 `.config/` holds DOH supervision config (the process-compose YAML, the caddy
 routes). Both live under $HOME=/workspace so the sandbox owns them.
@@ -38,7 +47,11 @@ PROCESS_COMPOSE_PORT = "9956"
 DEFAULT_TIMEOUT_SECONDS = 90
 # Optional `__` prefix marks platform-internal slugs (e.g. __admin). No
 # enforcement: bootstrap wins the cold-start race; agent attempts collide.
+# Internal slugs are routed by path (<host>/webapps/<slug>/); user slugs are
+# routed by host (<slug>.<host>/). See route generation below.
 SLUG_PATTERN = re.compile(r"^(?:__)?[a-z][a-z0-9-]{0,30}[a-z0-9]$")
+INTERNAL_SLUG_PREFIX = "__"
+PUBLIC_HOSTNAME_ENV = "DOH_PUBLIC_HOSTNAME"
 
 
 def die(msg: str, code: int = 1) -> None:
@@ -143,26 +156,96 @@ def validate_slug(slug: str) -> None:
         )
 
 
-def route_block(slug: str, port: int) -> str:
+def is_internal_slug(slug: str) -> bool:
+    """Platform-internal slug (`__admin`, future runtime-admin webapps)."""
+    return slug.startswith(INTERNAL_SLUG_PREFIX)
+
+
+def matcher_name(slug: str) -> str:
+    """Caddy named-matcher token for *slug*; sanitized for valid Caddyfile syntax."""
+    return "webapp_" + slug.replace("-", "_").lstrip("_")
+
+
+def public_hostname() -> str:
+    """Read the agent's public hostname from the env-bearer overlay var.
+
+    `DOH_PUBLIC_HOSTNAME` is allow-listed in the nono profile and injected
+    by CDK at task-definition build time (see deploy_app.py).
+    """
+    host = os.environ.get(PUBLIC_HOSTNAME_ENV)
+    if not host:
+        die(
+            f"{PUBLIC_HOSTNAME_ENV} is not set; webapps routing requires it. "
+            "This usually means the AppTemplate isn't wired for env-bearer overlay.",
+        )
+    return host
+
+
+def route_block_subhost(slug: str, port: int, base_host: str) -> str:
+    """Caddy site-matcher block for a user webapp at <slug>.<base-host>.
+
+    Per-app wildcard cert + DNS + ALB host condition (provisioned at
+    agent-deploy time when enable_subhosting=True) make these reachable
+    end-to-end without per-webapp infra work.
+
+    Matches on X-Forwarded-Host, not Host: policy-proxy strips Host (httpx
+    rewrites it to the upstream's 127.0.0.1:8787) and copies the original
+    value into X-Forwarded-Host before forwarding to Caddy.
+    """
+    name = matcher_name(slug)
     return (
-        f"redir /webapps/{slug} /webapps/{slug}/ 308\n"
-        f"handle_path /webapps/{slug}/* {{\n"
-        f"\treverse_proxy 127.0.0.1:{port} {{\n"
-        f"\t\theader_up X-Forwarded-Host {{header.X-Forwarded-Host}}\n"
-        f"\t\theader_up X-Forwarded-Prefix /webapps/{slug}\n"
+        f"@{name} header X-Forwarded-Host {slug}.{base_host}\n"
+        f"handle @{name} {{\n"
+        f"\treverse_proxy 127.0.0.1:{port}\n"
+        f"}}\n"
+    )
+
+
+def route_block_internal(slug: str, port: int, base_host: str) -> str:
+    """Caddy block for a platform-internal slug at <base-host>/webapps/<slug>/.
+
+    Stays path-based on the bare host so the WebUI extension can call its API
+    same-origin. X-Forwarded-Prefix gives the upstream the public base path
+    if it needs to generate absolute URLs.
+
+    Matches on X-Forwarded-Host (not Host) for the same reason as
+    route_block_subhost — policy-proxy rewrites Host on the way in.
+    """
+    name = matcher_name(slug)
+    return (
+        f"@{name}_root {{\n"
+        f"\theader X-Forwarded-Host {base_host}\n"
+        f"\tpath /webapps/{slug}\n"
+        f"}}\n"
+        f"redir @{name}_root /webapps/{slug}/ 308\n"
+        f"@{name} {{\n"
+        f"\theader X-Forwarded-Host {base_host}\n"
+        f"\tpath /webapps/{slug}/*\n"
+        f"}}\n"
+        f"handle @{name} {{\n"
+        f"\thandle_path /webapps/{slug}/* {{\n"
+        f"\t\treverse_proxy 127.0.0.1:{port} {{\n"
+        f"\t\t\theader_up X-Forwarded-Host {{header.X-Forwarded-Host}}\n"
+        f"\t\t\theader_up X-Forwarded-Prefix /webapps/{slug}\n"
+        f"\t\t}}\n"
         f"\t}}\n"
         f"}}\n"
     )
 
 
 def regenerate_routes(doc: dict) -> None:
+    base_host = public_hostname()
     blocks: list[str] = []
     for slug, entry in sorted(doc.get("processes", {}).items()):
         if entry.get("disabled"):
             continue
         port = port_from_entry(entry)
-        if port is not None:
-            blocks.append(route_block(slug=slug, port=port))
+        if port is None:
+            continue
+        if is_internal_slug(slug):
+            blocks.append(route_block_internal(slug=slug, port=port, base_host=base_host))
+        else:
+            blocks.append(route_block_subhost(slug=slug, port=port, base_host=base_host))
     CADDY_ROUTES.write_text("".join(blocks) if blocks else "# no routes\n")
 
 
@@ -210,5 +293,13 @@ def wait_for_ready(slug: str, timeout: int) -> dict:
 
 
 def url_for(slug: str) -> str:
-    host = os.environ.get("DOH_PUBLIC_HOSTNAME") or "<your-agent-hostname>"
-    return f"https://{host}/webapps/{slug}/"
+    """User-facing URL for a webapp.
+
+    User slugs live at <slug>.<agent-host>; platform-internal slugs (`__*`)
+    stay at <agent-host>/webapps/<slug>/ so the WebUI's same-origin extension
+    can reach them without CORS.
+    """
+    host = os.environ.get(PUBLIC_HOSTNAME_ENV) or "<your-agent-hostname>"
+    if is_internal_slug(slug):
+        return f"https://{host}/webapps/{slug}/"
+    return f"https://{slug}.{host}/"

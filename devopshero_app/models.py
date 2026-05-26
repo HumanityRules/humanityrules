@@ -698,6 +698,14 @@ class AppTemplate(models.Model):
     # stop and start can overlap, trading a checkpoint race for zero-downtime.
     serialize_task_replacement = models.BooleanField(default=False)
 
+    # When True, deploy provisions per-agent wildcard infra so the agent can
+    # serve user webapps at sub-subdomains (<slug>.<agent-host>) instead of
+    # path prefixes (<agent-host>/webapps/<slug>/): an ACM cert covering
+    # *.<agent-host>, a wildcard A-alias record, and the ALB listener rule's
+    # host condition widened to include *.<agent-host>. The Hermes agent's
+    # Caddy sidecar then routes by Host header. See docs/webapps_design.md.
+    enable_subhosting = models.BooleanField(default=False)
+
     # Template for the default App Name shown on the deploy form. Tokens:
     #   {username} - owner's username; email local-part with non-alnum stripped
     #   {index}    - zero-padded (2-digit) counter that picks the lowest free slug in the org
