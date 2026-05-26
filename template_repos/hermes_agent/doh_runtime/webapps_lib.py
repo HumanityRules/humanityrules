@@ -191,12 +191,20 @@ def route_block_subhost(slug: str, port: int, base_host: str) -> str:
     Matches on X-Forwarded-Host, not Host: policy-proxy strips Host (httpx
     rewrites it to the upstream's 127.0.0.1:8787) and copies the original
     value into X-Forwarded-Host before forwarding to Caddy.
+
+    The `header_up X-Forwarded-Host` line propagates policy-proxy's value
+    on to the user webapp. Caddy's reverse_proxy default for that header
+    is "set from the inbound Host", which here would mean 127.0.0.1:8787 —
+    clobbering the public hostname before any link helper, OpenAPI server
+    URL, OAuth callback, or redirect could see it.
     """
     name = matcher_name(slug)
     return (
         f"@{name} header X-Forwarded-Host {slug}.{base_host}\n"
         f"handle @{name} {{\n"
-        f"\treverse_proxy 127.0.0.1:{port}\n"
+        f"\treverse_proxy 127.0.0.1:{port} {{\n"
+        f"\t\theader_up X-Forwarded-Host {{header.X-Forwarded-Host}}\n"
+        f"\t}}\n"
         f"}}\n"
     )
 
