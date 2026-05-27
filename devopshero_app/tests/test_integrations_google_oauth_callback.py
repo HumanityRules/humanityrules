@@ -1,4 +1,4 @@
-"""Tests for /integrations/google/callback/ — persists refresh_token on DOH."""
+"""Tests for /integrations/user/google/callback/ — persists refresh_token on DOH."""
 
 from unittest.mock import MagicMock, patch
 
@@ -21,8 +21,8 @@ VALID_WEB_CONFIG = {
     "auth_uri": "https://accounts.google.com/o/oauth2/auth",
     "token_uri": "https://oauth2.googleapis.com/token",
     "redirect_uris": [
-        "http://testserver/integrations/google/callback",
-        "https://devopshero.ai/integrations/google/callback",
+        "http://testserver/integrations/user/google/callback/",
+        "https://devopshero.ai/integrations/user/google/callback/",
     ],
 }
 
@@ -106,7 +106,7 @@ class TestIntegrationsGoogleCallbackHappyPath(_CallbackTestBase):
 
         with self._patched_google(body=None) as post_mock:
             response = self.client.get(
-                reverse("integrations_google_oauth_callback"),
+                reverse("integrations_user_google_callback"),
                 {"code": "auth-code", "state": "stst"},
             )
 
@@ -118,7 +118,7 @@ class TestIntegrationsGoogleCallbackHappyPath(_CallbackTestBase):
         self.assertEqual(kwargs["data"]["grant_type"], "authorization_code")
         self.assertEqual(
             kwargs["data"]["redirect_uri"],
-            "http://testserver/integrations/google/callback",
+            "http://testserver/integrations/user/google/callback/",
         )
 
         # One IntegrationUserCredential row, keyed by (owner, env, app_slug, provider).
@@ -159,7 +159,7 @@ class TestIntegrationsGoogleCallbackHappyPath(_CallbackTestBase):
 
         with self._patched_google(body=None):
             self.client.get(
-                reverse("integrations_google_oauth_callback"),
+                reverse("integrations_user_google_callback"),
                 {"code": "c", "state": "stst"},
             )
 
@@ -179,7 +179,7 @@ class TestIntegrationsGoogleCallbackRejections(_CallbackTestBase):
                            env_id=str(self.env.id), app_slug="hermes", owner_username="vmendi")
 
         response = self.client.get(
-            reverse("integrations_google_oauth_callback"),
+            reverse("integrations_user_google_callback"),
             {"code": "c", "state": "wrong"},
         )
         self.assertEqual(response.status_code, 400)
@@ -188,14 +188,14 @@ class TestIntegrationsGoogleCallbackRejections(_CallbackTestBase):
 
     def test_rejects_missing_state_in_session(self) -> None:
         response = self.client.get(
-            reverse("integrations_google_oauth_callback"),
+            reverse("integrations_user_google_callback"),
             {"code": "c", "state": "x"},
         )
         self.assertEqual(response.status_code, 400)
 
     def test_rejects_when_google_returns_error(self) -> None:
         response = self.client.get(
-            reverse("integrations_google_oauth_callback"),
+            reverse("integrations_user_google_callback"),
             {"error": "access_denied"},
         )
         self.assertEqual(response.status_code, 400)
@@ -213,7 +213,7 @@ class TestIntegrationsGoogleCallbackRejections(_CallbackTestBase):
                            env_id=str(self.env.id), app_slug="hermes", owner_username="vmendi")
 
         response = self.client.get(
-            reverse("integrations_google_oauth_callback"),
+            reverse("integrations_user_google_callback"),
             {"code": "c", "state": "stst"},
         )
         self.assertEqual(response.status_code, 400)
@@ -224,7 +224,7 @@ class TestIntegrationsGoogleCallbackRejections(_CallbackTestBase):
                            env_id="00000000-0000-0000-0000-000000000000", app_slug="hermes", owner_username="vmendi")
 
         response = self.client.get(
-            reverse("integrations_google_oauth_callback"),
+            reverse("integrations_user_google_callback"),
             {"code": "c", "state": "stst"},
         )
         self.assertEqual(response.status_code, 400)
@@ -238,7 +238,7 @@ class TestIntegrationsGoogleCallbackRejections(_CallbackTestBase):
             side_effect=RuntimeError("boom"),
         ):
             response = self.client.get(
-                reverse("integrations_google_oauth_callback"),
+                reverse("integrations_user_google_callback"),
                 {"code": "c", "state": "stst"},
             )
         self.assertEqual(response.status_code, 400)
@@ -257,7 +257,7 @@ class TestIntegrationsGoogleCallbackRejections(_CallbackTestBase):
 
         with self._patched_google(body=body_without_refresh):
             response = self.client.get(
-                reverse("integrations_google_oauth_callback"),
+                reverse("integrations_user_google_callback"),
                 {"code": "c", "state": "stst"},
             )
         self.assertEqual(response.status_code, 400)
@@ -277,7 +277,7 @@ class TestIntegrationsGoogleCallbackRdAppend(_CallbackTestBase):
 
         with self._patched_google(body=None):
             response = self.client.get(
-                reverse("integrations_google_oauth_callback"),
+                reverse("integrations_user_google_callback"),
                 {"code": "c", "state": "stst"},
             )
 

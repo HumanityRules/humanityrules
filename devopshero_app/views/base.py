@@ -46,7 +46,7 @@ def get_app_shell_context(request, current_page):
         navigation_items.append(
             {
                 "name": "Integrations",
-                "url": "/integrations/aws-accounts/",
+                "url": "/integrations/org/aws-accounts/",
                 "icon": "integrations",
                 "is_active": current_page == "integrations",
             },

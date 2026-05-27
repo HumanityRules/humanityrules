@@ -1,4 +1,4 @@
-"""Tests for /integrations/google/disconnect/ — removes stored Google grant."""
+"""Tests for /integrations/user/google/disconnect/ — removes stored Google grant."""
 
 from unittest.mock import patch
 
@@ -98,7 +98,7 @@ class TestDisconnectHappyPath(_DisconnectTestBase):
         with patch(
             "devopshero_app.views.integrations.google_oauth.httpx.post"
         ) as revoke_mock:
-            response = self.client.get(f"/integrations/google/disconnect/?rd={rd}&app_slug=hermes")
+            response = self.client.get(f"/integrations/user/google/disconnect/?rd={rd}&app_slug=hermes")
 
         self.assertEqual(response.status_code, 302)
         self.assertIn("disconnected=google", response["Location"])
@@ -121,7 +121,7 @@ class TestDisconnectIdempotent(_DisconnectTestBase):
         with patch(
             "devopshero_app.views.integrations.google_oauth.httpx.post"
         ) as revoke_mock:
-            response = self.client.get(f"/integrations/google/disconnect/?rd={rd}&app_slug=hermes")
+            response = self.client.get(f"/integrations/user/google/disconnect/?rd={rd}&app_slug=hermes")
 
         self.assertEqual(response.status_code, 302)
         self.assertIn("disconnected=google", response["Location"])
@@ -133,7 +133,7 @@ class TestDisconnectRdValidation(_DisconnectTestBase):
 
     def test_bad_rd_host_returns_400(self) -> None:
         response = self.client.get(
-            "/integrations/google/disconnect/?rd=https://attacker.example.net/"
+            "/integrations/user/google/disconnect/?rd=https://attacker.example.net/"
         )
         self.assertEqual(response.status_code, 400)
         # Row preserved — we refused the request before touching state.
@@ -157,7 +157,7 @@ class TestDisconnectRdValidation(_DisconnectTestBase):
         )
 
         response = self.client.get(
-            "/integrations/google/disconnect/?rd=https://hermes.stranger.example.com/&app_slug=hermes"
+            "/integrations/user/google/disconnect/?rd=https://hermes.stranger.example.com/&app_slug=hermes"
         )
         self.assertEqual(response.status_code, 400)
         # Our own row is untouched.
@@ -170,7 +170,7 @@ class TestDisconnectRdValidation(_DisconnectTestBase):
         with patch(
             "devopshero_app.views.integrations.google_oauth.httpx.post"
         ) as revoke_mock:
-            response = self.client.get(f"/integrations/google/disconnect/?rd={rd}")
+            response = self.client.get(f"/integrations/user/google/disconnect/?rd={rd}")
 
         self.assertEqual(response.status_code, 400)
         self.assertTrue(
@@ -183,7 +183,7 @@ class TestDisconnectRdValidation(_DisconnectTestBase):
         with patch(
             "devopshero_app.views.integrations.google_oauth.httpx.post"
         ) as revoke_mock:
-            response = self.client.get(f"/integrations/google/disconnect/?rd={rd}&app_slug=other")
+            response = self.client.get(f"/integrations/user/google/disconnect/?rd={rd}&app_slug=other")
 
         self.assertEqual(response.status_code, 400)
         self.assertTrue(
@@ -192,7 +192,7 @@ class TestDisconnectRdValidation(_DisconnectTestBase):
         revoke_mock.assert_not_called()
 
     def test_missing_rd_returns_400(self) -> None:
-        response = self.client.get("/integrations/google/disconnect/")
+        response = self.client.get("/integrations/user/google/disconnect/")
         self.assertEqual(response.status_code, 400)
         self.assertTrue(
             IntegrationUserCredential.objects.filter(id=self.integration.id).exists()
@@ -207,7 +207,7 @@ class TestDisconnectRevokeFailureNonFatal(_DisconnectTestBase):
             "devopshero_app.views.integrations.google_oauth.httpx.post",
             side_effect=Exception("network down"),
         ):
-            response = self.client.get(f"/integrations/google/disconnect/?rd={rd}&app_slug=hermes")
+            response = self.client.get(f"/integrations/user/google/disconnect/?rd={rd}&app_slug=hermes")
 
         self.assertEqual(response.status_code, 302)
         self.assertIn("disconnected=google", response["Location"])
@@ -222,7 +222,7 @@ class TestDisconnectAuth(_DisconnectTestBase):
     def test_logged_out_redirects_to_login(self) -> None:
         self.client.logout()
         response = self.client.get(
-            "/integrations/google/disconnect/?rd=https://hermes.dev.example.com/"
+            "/integrations/user/google/disconnect/?rd=https://hermes.dev.example.com/"
         )
         self.assertEqual(response.status_code, 302)
         # login_required redirects to settings.LOGIN_URL. The row must survive.

@@ -527,8 +527,14 @@ def cert_stack_name(env_slug: str, app_name: str) -> str:
 
 
 def subhosting_wildcard_cert_export_name(resource_prefix: str) -> str:
-    """CFN export of the wildcard cert ARN, written by CertStack and read by AppStack."""
-    return f"{resource_prefix}-subhosting-wildcard-cert-arn"
+    """CFN export of the wildcard cert ARN, written by CertStack and read by AppStack.
+
+    Distinct from the legacy `{prefix}-subhosting-wildcard-cert-arn` that
+    pre-Option-B `-app` stacks emitted: those are still live until each app
+    gets its first redeploy under the new layout, so a colliding name would
+    refuse the new `-cert` stack creation.
+    """
+    return f"{resource_prefix}-cert-stack-wildcard-arn"
 
 
 class CertStack(Stack):

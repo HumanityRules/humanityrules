@@ -3,7 +3,7 @@
 These are the patches the Google Workspace integration design calls for in
 `docs/integrations_broker_design.md`: the OIDC entry point must honor
 a validated `next` so the post-auth redirect can land on
-`/integrations/google/start`. Validation uses
+`/integrations/user/google/start/`. Validation uses
 `django.utils.http.url_has_allowed_host_and_scheme` so `next` cannot be used as
 an open redirector.
 """
@@ -31,13 +31,13 @@ class TestOidcLoginNext(TestCase):
     def test_safe_next_is_stashed_in_session(self) -> None:
         response = self.client.get(
             reverse("oidc_login"),
-            {"org": self.org.slug, "next": "/integrations/google/start?rd=x"},
+            {"org": self.org.slug, "next": "/integrations/user/google/start/?rd=x"},
         )
         self.assertEqual(response.status_code, 302)
         self.assertIn("idp.example.com/v1/authorize", response["Location"])
         self.assertEqual(
             self.client.session["oidc_next"],
-            "/integrations/google/start?rd=x",
+            "/integrations/user/google/start/?rd=x",
         )
 
     def test_unsafe_next_is_rejected_but_login_still_proceeds(self) -> None:
@@ -59,11 +59,11 @@ class TestOidcLoginNext(TestCase):
 
         response = self.client.get(
             reverse("oidc_login"),
-            {"org": self.org.slug, "next": "/integrations/google/start?rd=x"},
+            {"org": self.org.slug, "next": "/integrations/user/google/start/?rd=x"},
         )
         self.assertRedirects(
             response,
-            "/integrations/google/start?rd=x",
+            "/integrations/user/google/start/?rd=x",
             fetch_redirect_response=False,
         )
 
@@ -142,7 +142,7 @@ class TestOidcCallbackNext(TestCase):
         self._create_oidc_member(
             username="vmendi", email="vmendi@example.com", oidc_sub="sub-1",
         )
-        state = self._seed_callback_session(next_url="/integrations/google/start?rd=x")
+        state = self._seed_callback_session(next_url="/integrations/user/google/start/?rd=x")
 
         with self._patched_exchange(sub="sub-1", email="vmendi@example.com"):
             response = self.client.get(
@@ -152,7 +152,7 @@ class TestOidcCallbackNext(TestCase):
 
         self.assertRedirects(
             response,
-            "/integrations/google/start?rd=x",
+            "/integrations/user/google/start/?rd=x",
             fetch_redirect_response=False,
         )
         self.assertNotIn("oidc_next", self.client.session)

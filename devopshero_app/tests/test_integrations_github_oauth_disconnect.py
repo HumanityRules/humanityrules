@@ -1,4 +1,4 @@
-"""Tests for /integrations/github/disconnect/ - removes stored GitHub grant."""
+"""Tests for /integrations/user/github/disconnect/ - removes stored GitHub grant."""
 
 from unittest.mock import patch
 
@@ -98,7 +98,7 @@ class TestDisconnectHappyPath(_DisconnectTestBase):
         with patch(
             "devopshero_app.views.integrations.github_oauth._revoke_github_grant"
         ) as revoke_mock:
-            response = self.client.get(f"/integrations/github/disconnect/?rd={rd}&app_slug=hermes")
+            response = self.client.get(f"/integrations/user/github/disconnect/?rd={rd}&app_slug=hermes")
 
         self.assertEqual(response.status_code, 302)
         self.assertIn("disconnected=github", response["Location"])
@@ -117,7 +117,7 @@ class TestDisconnectIdempotent(_DisconnectTestBase):
         with patch(
             "devopshero_app.views.integrations.github_oauth._revoke_github_grant"
         ) as revoke_mock:
-            response = self.client.get(f"/integrations/github/disconnect/?rd={rd}&app_slug=hermes")
+            response = self.client.get(f"/integrations/user/github/disconnect/?rd={rd}&app_slug=hermes")
 
         self.assertEqual(response.status_code, 302)
         self.assertIn("disconnected=github", response["Location"])
@@ -128,7 +128,7 @@ class TestDisconnectRdValidation(_DisconnectTestBase):
 
     def test_bad_rd_host_returns_400(self) -> None:
         response = self.client.get(
-            "/integrations/github/disconnect/?rd=https://attacker.example.net/"
+            "/integrations/user/github/disconnect/?rd=https://attacker.example.net/"
         )
         self.assertEqual(response.status_code, 400)
         self.assertTrue(
@@ -151,7 +151,7 @@ class TestDisconnectRdValidation(_DisconnectTestBase):
         )
 
         response = self.client.get(
-            "/integrations/github/disconnect/?rd=https://hermes.stranger.example.com/&app_slug=hermes"
+            "/integrations/user/github/disconnect/?rd=https://hermes.stranger.example.com/&app_slug=hermes"
         )
         self.assertEqual(response.status_code, 400)
         self.assertTrue(
@@ -159,7 +159,7 @@ class TestDisconnectRdValidation(_DisconnectTestBase):
         )
 
     def test_missing_rd_returns_400(self) -> None:
-        response = self.client.get("/integrations/github/disconnect/")
+        response = self.client.get("/integrations/user/github/disconnect/")
         self.assertEqual(response.status_code, 400)
         self.assertTrue(
             IntegrationUserCredential.objects.filter(id=self.integration.id).exists()
@@ -170,7 +170,7 @@ class TestDisconnectRdValidation(_DisconnectTestBase):
         with patch(
             "devopshero_app.views.integrations.github_oauth._revoke_github_grant"
         ) as revoke_mock:
-            response = self.client.get(f"/integrations/github/disconnect/?rd={rd}")
+            response = self.client.get(f"/integrations/user/github/disconnect/?rd={rd}")
 
         self.assertEqual(response.status_code, 400)
         self.assertTrue(
@@ -183,7 +183,7 @@ class TestDisconnectRdValidation(_DisconnectTestBase):
         with patch(
             "devopshero_app.views.integrations.github_oauth._revoke_github_grant"
         ) as revoke_mock:
-            response = self.client.get(f"/integrations/github/disconnect/?rd={rd}&app_slug=other")
+            response = self.client.get(f"/integrations/user/github/disconnect/?rd={rd}&app_slug=other")
 
         self.assertEqual(response.status_code, 400)
         self.assertTrue(
@@ -197,7 +197,7 @@ class TestDisconnectAuth(_DisconnectTestBase):
     def test_logged_out_redirects_to_login(self) -> None:
         self.client.logout()
         response = self.client.get(
-            "/integrations/github/disconnect/?rd=https://hermes.dev.example.com/"
+            "/integrations/user/github/disconnect/?rd=https://hermes.dev.example.com/"
         )
         self.assertEqual(response.status_code, 302)
         self.assertTrue(

@@ -27,21 +27,29 @@ from .settings import (
     settings_organization,
     settings_billing,
 )
-from .integrations.integrations_page import (
+from .integrations.org_aws import (
+    aws_install_account_callback,
+    integrations_org_aws_accounts,
+    integrations_org_aws_accounts_add,
     integrations_root,
-    integrations_aws_accounts,
-    integrations_aws_accounts_add,
-    integrations_git_integrations,
+)
+from .integrations.org_github import (
+    github_webhook,
+    integrations_org_github,
+    integrations_org_github_callback,
+    integrations_org_github_connect,
+    integrations_org_github_select_installation,
+    integrations_org_github_setup,
 )
 from .integrations.google_oauth import (
-    integrations_google_oauth_start,
-    integrations_google_oauth_callback,
-    integrations_google_oauth_disconnect,
+    integrations_user_google_start,
+    integrations_user_google_callback,
+    integrations_user_google_disconnect,
 )
 from .integrations.github_oauth import (
-    integrations_github_oauth_start,
-    integrations_github_oauth_callback,
-    integrations_github_oauth_disconnect,
+    integrations_user_github_start,
+    integrations_user_github_callback,
+    integrations_user_github_disconnect,
 )
 from .integrations.token_refresh_batch import integrations_tokens_batch
 from .integrations.user_credential_vault import (
@@ -62,9 +70,8 @@ from .auth import auth_login, auth_callback, auth_logout, oidc_login, oidc_callb
 from .auth_env_sso import env_start, env_callback, env_jwks
 from .onboarding import onboarding
 from .invites import accept_invite, create_invite, revoke_invite
-from .api import aws_install_account_callback, health_check
+from .health import health_check
 from .pdp import pdp_evaluate
-from .github import github_connect, github_callback, github_setup, github_select_installation, github_webhook
 from .chat import (
     chat_app_deploy,
     chat_list,
@@ -162,15 +169,15 @@ __all__ = [
     "settings_organization",
     "settings_billing",
     "integrations_root",
-    "integrations_aws_accounts",
-    "integrations_aws_accounts_add",
-    "integrations_git_integrations",
-    "integrations_google_oauth_start",
-    "integrations_google_oauth_callback",
-    "integrations_google_oauth_disconnect",
-    "integrations_github_oauth_start",
-    "integrations_github_oauth_callback",
-    "integrations_github_oauth_disconnect",
+    "integrations_org_aws_accounts",
+    "integrations_org_aws_accounts_add",
+    "integrations_org_github",
+    "integrations_user_google_start",
+    "integrations_user_google_callback",
+    "integrations_user_google_disconnect",
+    "integrations_user_github_start",
+    "integrations_user_github_callback",
+    "integrations_user_github_disconnect",
     "integrations_tokens_batch",
     "integrations_credential_disconnect",
     "integrations_credential_setup_session",
@@ -198,10 +205,10 @@ __all__ = [
     "aws_install_account_callback",
     "health_check",
     "pdp_evaluate",
-    "github_connect",
-    "github_callback",
-    "github_setup",
-    "github_select_installation",
+    "integrations_org_github_connect",
+    "integrations_org_github_callback",
+    "integrations_org_github_setup",
+    "integrations_org_github_select_installation",
     "github_webhook",
     "chat_app_deploy",
     "chat_list",

@@ -110,17 +110,17 @@
   }
 
   // TLS-intercept providers all expose the same control-plane URL shape:
-  // /integrations/<slug>/start and /integrations/<slug>/disconnect, with
-  // ?rd=<return_to>. Each provider's `start` view stashes the rd target,
+  // /integrations/user/<slug>/start/ and /integrations/user/<slug>/disconnect/,
+  // with ?rd=<return_to>. Each provider's `start` view stashes the rd target,
   // bounces to the upstream OAuth, and the callback redirects back.
   function buildTlsConnectUrl(payload, slug, returnTo) {
     const rd = encodeURIComponent(returnTo);
-    return payload.doh_control_plane_url.replace(/\/$/, '') + '/integrations/' + slug + '/start?rd=' + rd + '&app_slug=' + encodeURIComponent(payload.app_slug || '');
+    return payload.doh_control_plane_url.replace(/\/$/, '') + '/integrations/user/' + slug + '/start/?rd=' + rd + '&app_slug=' + encodeURIComponent(payload.app_slug || '');
   }
 
   function buildTlsDisconnectUrl(payload, slug, returnTo) {
     const rd = encodeURIComponent(returnTo);
-    return payload.doh_control_plane_url.replace(/\/$/, '') + '/integrations/' + slug + '/disconnect?rd=' + rd + '&app_slug=' + encodeURIComponent(payload.app_slug || '');
+    return payload.doh_control_plane_url.replace(/\/$/, '') + '/integrations/user/' + slug + '/disconnect/?rd=' + rd + '&app_slug=' + encodeURIComponent(payload.app_slug || '');
   }
 
   function buildMcpConnectUrl(slug) {
