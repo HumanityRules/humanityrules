@@ -1,6 +1,6 @@
 """GitHub OAuth start + callback views (per-user, runtime-scoped).
 
-Distinct from `views/github.py`, which handles the org-admin GitHub App
+Distinct from `org_github.py`, which handles the org-admin GitHub App
 *installation* flow used by the DOH control plane to enumerate repos. This
 file is the per-user OAuth dance: an end user inside a Hermes WebUI clicks
 "Connect GitHub", consents at github.com, and a refresh_token is persisted
@@ -91,11 +91,11 @@ def _redirect_uri(request: HttpRequest) -> str:
     Each customer-facing DOH host where users may connect must be listed
     on the GitHub App's settings page.
     """
-    return request.build_absolute_uri("/integrations/github/callback/")
+    return request.build_absolute_uri("/integrations/user/github/callback/")
 
 
 @login_required
-def integrations_github_oauth_start(request: HttpRequest) -> HttpResponse:
+def integrations_user_github_start(request: HttpRequest) -> HttpResponse:
     """Validate `rd`, stash state, redirect to GitHub's OAuth consent screen."""
     rd = request.GET.get("rd", "")
     env = _resolve_env_by_rd(rd=rd, user=request.user)
@@ -159,7 +159,7 @@ def _append_query(url: str, extra: dict[str, str]) -> str:
 
 
 @login_required
-def integrations_github_oauth_callback(request: HttpRequest) -> HttpResponse:
+def integrations_user_github_callback(request: HttpRequest) -> HttpResponse:
     """Exchange GitHub's auth code, persist refresh_token, 302 back to `rd`."""
     if request.GET.get("error"):
         logger.error("github oauth callback error=%s", request.GET.get("error"))
@@ -271,7 +271,7 @@ def _revoke_github_grant(refresh_token: str) -> None:
 
 
 @login_required
-def integrations_github_oauth_disconnect(request: HttpRequest) -> HttpResponse:
+def integrations_user_github_disconnect(request: HttpRequest) -> HttpResponse:
     """Disconnect the authenticated user's GitHub grant for the env resolved from `rd`."""
     rd = request.GET.get("rd", "")
     env = _resolve_env_by_rd(rd=rd, user=request.user)

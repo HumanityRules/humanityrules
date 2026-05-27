@@ -1,11 +1,11 @@
 """Google Workspace OAuth start + callback views.
 
 See `docs/integrations_broker_design.md`. The authenticated DOH user
-starts at `/integrations/google/start?rd=<URL>` (where `rd` points at the
-Hermes WebUI in a customer env), consents at Google, and lands back at
-`/integrations/google/callback`. The callback persists the refresh_token in
-DOH's DB as an IntegrationUserCredential row; no long-lived Google credentials
-cross into the customer env.
+starts at `/integrations/user/google/start/?rd=<URL>` (where `rd` points at
+the Hermes WebUI in a customer env), consents at Google, and lands back at
+`/integrations/user/google/callback/`. The callback persists the refresh_token
+in DOH's DB as an IntegrationUserCredential row; no long-lived Google
+credentials cross into the customer env.
 """
 
 import logging
@@ -100,7 +100,7 @@ def _resolve_owned_app_slug(app_slug: str, env: Environment, owner_username: str
 
 
 @login_required
-def integrations_google_oauth_start(request: HttpRequest) -> HttpResponse:
+def integrations_user_google_start(request: HttpRequest) -> HttpResponse:
     """Validate `rd`, stash state, redirect to Google's OAuth consent screen."""
     rd = request.GET.get("rd", "")
     env = _resolve_env_by_rd(rd=rd, user=request.user)
@@ -183,7 +183,7 @@ def _append_query(url: str, extra: dict[str, str]) -> str:
 
 
 @login_required
-def integrations_google_oauth_callback(request: HttpRequest) -> HttpResponse:
+def integrations_user_google_callback(request: HttpRequest) -> HttpResponse:
     """Exchange Google's auth code, persist refresh_token on DOH, 302 back to `rd`."""
     if request.GET.get("error"):
         logger.error("google oauth callback error=%s", request.GET.get("error"))
@@ -299,7 +299,7 @@ def _revoke_google_refresh_token(refresh_token: str) -> None:
 
 
 @login_required
-def integrations_google_oauth_disconnect(request: HttpRequest) -> HttpResponse:
+def integrations_user_google_disconnect(request: HttpRequest) -> HttpResponse:
     """Disconnect the authenticated user's Google grant for the env resolved from `rd`.
 
     Idempotent: returns 302 to `rd?disconnected=google` whether a row existed

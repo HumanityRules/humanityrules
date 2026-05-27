@@ -35,7 +35,7 @@ GOOGLE_WEB_CONFIG = {
     "client_secret": "csecret",
     "auth_uri": "https://accounts.google.com/o/oauth2/auth",
     "token_uri": "https://oauth2.googleapis.com/token",
-    "redirect_uris": ["https://devopshero.ai/integrations/google/callback"],
+    "redirect_uris": ["https://devopshero.ai/integrations/user/google/callback/"],
 }
 
 

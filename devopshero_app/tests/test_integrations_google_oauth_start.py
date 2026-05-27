@@ -1,4 +1,4 @@
-"""Tests for /integrations/google/start/ — the OAuth kickoff view."""
+"""Tests for /integrations/user/google/start/ — the OAuth kickoff view."""
 
 from urllib.parse import parse_qs, urlparse
 
@@ -25,8 +25,8 @@ VALID_WEB_CONFIG = {
     "auth_uri": "https://accounts.google.com/o/oauth2/auth",
     "token_uri": "https://oauth2.googleapis.com/token",
     "redirect_uris": [
-        "http://testserver/integrations/google/callback",
-        "https://devopshero.ai/integrations/google/callback",
+        "http://testserver/integrations/user/google/callback/",
+        "https://devopshero.ai/integrations/user/google/callback/",
     ],
 }
 
@@ -108,7 +108,7 @@ class TestIntegrationsGoogleStart(TestCase):
     def test_login_required_when_unauthenticated(self) -> None:
         self.client.logout()
         response = self.client.get(
-            reverse("integrations_google_oauth_start"),
+            reverse("integrations_user_google_start"),
             self._params(rd="https://hermes.dev.example.com/x"),
         )
         self.assertEqual(response.status_code, 302)
@@ -118,7 +118,7 @@ class TestIntegrationsGoogleStart(TestCase):
 
     def test_redirects_to_google_with_expected_params(self) -> None:
         response = self.client.get(
-            reverse("integrations_google_oauth_start"),
+            reverse("integrations_user_google_start"),
             self._params(rd="https://hermes.dev.example.com/settings/connections"),
         )
         self.assertEqual(response.status_code, 302)
@@ -131,7 +131,7 @@ class TestIntegrationsGoogleStart(TestCase):
         params = parse_qs(parsed.query)
         self.assertEqual(params["client_id"], ["cid-123.apps.googleusercontent.com"])
         self.assertEqual(params["response_type"], ["code"])
-        self.assertEqual(params["redirect_uri"], ["http://testserver/integrations/google/callback"])
+        self.assertEqual(params["redirect_uri"], ["http://testserver/integrations/user/google/callback/"])
         self.assertEqual(params["access_type"], ["offline"])
         self.assertEqual(params["prompt"], ["consent"])
         self.assertIn("https://www.googleapis.com/auth/gmail.readonly", params["scope"][0])
@@ -139,7 +139,7 @@ class TestIntegrationsGoogleStart(TestCase):
 
     def test_stashes_state_and_payload_in_session(self) -> None:
         response = self.client.get(
-            reverse("integrations_google_oauth_start"),
+            reverse("integrations_user_google_start"),
             self._params(rd="https://hermes.dev.example.com/x"),
         )
         parsed = urlparse(response["Location"])
@@ -156,7 +156,7 @@ class TestIntegrationsGoogleStart(TestCase):
     def test_exact_zone_host_matches(self) -> None:
         # rd host == env zone (no subdomain) should still match.
         response = self.client.get(
-            reverse("integrations_google_oauth_start"),
+            reverse("integrations_user_google_start"),
             self._params(rd="https://dev.example.com/x"),
         )
         self.assertEqual(response.status_code, 302)
@@ -164,7 +164,7 @@ class TestIntegrationsGoogleStart(TestCase):
 
     def test_rejects_rd_with_unknown_host(self) -> None:
         response = self.client.get(
-            reverse("integrations_google_oauth_start"),
+            reverse("integrations_user_google_start"),
             self._params(rd="https://hermes.other-domain.com/x"),
         )
         self.assertEqual(response.status_code, 400)
@@ -174,26 +174,26 @@ class TestIntegrationsGoogleStart(TestCase):
         # "evil-dev.example.com" ends with the zone string "dev.example.com"
         # but is not a subdomain — must be rejected.
         response = self.client.get(
-            reverse("integrations_google_oauth_start"),
+            reverse("integrations_user_google_start"),
             self._params(rd="https://evil-dev.example.com/x"),
         )
         self.assertEqual(response.status_code, 400)
 
     def test_rejects_non_http_scheme(self) -> None:
         response = self.client.get(
-            reverse("integrations_google_oauth_start"),
+            reverse("integrations_user_google_start"),
             self._params(rd="javascript:alert(1)"),
         )
         self.assertEqual(response.status_code, 400)
 
     def test_rejects_missing_rd(self) -> None:
-        response = self.client.get(reverse("integrations_google_oauth_start"))
+        response = self.client.get(reverse("integrations_user_google_start"))
         self.assertEqual(response.status_code, 400)
 
     def test_errors_when_google_integration_not_configured(self) -> None:
         self.google_config.delete()
         response = self.client.get(
-            reverse("integrations_google_oauth_start"),
+            reverse("integrations_user_google_start"),
             self._params(rd="https://hermes.dev.example.com/x"),
         )
         self.assertEqual(response.status_code, 400)
@@ -203,12 +203,12 @@ class TestIntegrationsGoogleStart(TestCase):
         # OAuth client has registered URIs, but none match this request's host.
         self.google_config.config = {
             **self.google_config.config,
-            "redirect_uris": ["https://some-other-host.example.com/integrations/google/callback"],
+            "redirect_uris": ["https://some-other-host.example.com/integrations/user/google/callback/"],
         }
         self.google_config.save()
 
         response = self.client.get(
-            reverse("integrations_google_oauth_start"),
+            reverse("integrations_user_google_start"),
             self._params(rd="https://hermes.dev.example.com/x"),
         )
         self.assertEqual(response.status_code, 400)
@@ -219,21 +219,21 @@ class TestIntegrationsGoogleStart(TestCase):
         self.google_config.config = {
             **self.google_config.config,
             "redirect_uris": [
-                "https://devopshero.ai/integrations/google/callback",
-                "http://testserver/integrations/google/callback",
-                "https://devopshero.ngrok.io/integrations/google/callback",
+                "https://devopshero.ai/integrations/user/google/callback/",
+                "http://testserver/integrations/user/google/callback/",
+                "https://devopshero.ngrok.io/integrations/user/google/callback/",
             ],
         }
         self.google_config.save()
 
         response = self.client.get(
-            reverse("integrations_google_oauth_start"),
+            reverse("integrations_user_google_start"),
             self._params(rd="https://hermes.dev.example.com/x"),
         )
         self.assertEqual(response.status_code, 302)
         parsed = urlparse(response["Location"])
         params = parse_qs(parsed.query)
-        self.assertEqual(params["redirect_uri"], ["http://testserver/integrations/google/callback"])
+        self.assertEqual(params["redirect_uri"], ["http://testserver/integrations/user/google/callback/"])
 
     def test_ignores_envs_with_blank_hosted_zone(self) -> None:
         # A second env exists but has no hosted zone — it must not match any rd.
@@ -245,7 +245,7 @@ class TestIntegrationsGoogleStart(TestCase):
             shared_alb_hosted_zone="",
         )
         response = self.client.get(
-            reverse("integrations_google_oauth_start"),
+            reverse("integrations_user_google_start"),
             self._params(rd="https://anything.com/x"),
         )
         self.assertEqual(response.status_code, 400)
@@ -269,7 +269,7 @@ class TestIntegrationsGoogleStart(TestCase):
         )
 
         response = self.client.get(
-            reverse("integrations_google_oauth_start"),
+            reverse("integrations_user_google_start"),
             self._params(rd="https://hermes.stranger.example.com/x"),
         )
         self.assertEqual(response.status_code, 400)

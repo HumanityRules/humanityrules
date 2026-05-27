@@ -88,16 +88,7 @@ urlpatterns = [
     path("settings/personal/", views.settings_personal, name="settings_personal"),
     path("settings/organization/", views.settings_organization, name="settings_organization"),
     path("settings/billing/", views.settings_billing, name="settings_billing"),
-    path("integrations/", views.integrations_root, name="integrations_root"),
-    path("integrations/aws-accounts/", views.integrations_aws_accounts, name="integrations_aws_accounts"),
-    path("integrations/aws-accounts/add/", views.integrations_aws_accounts_add, name="integrations_aws_accounts_add"),
-    path("integrations/git-integrations/", views.integrations_git_integrations, name="integrations_git_integrations"),
-    path("integrations/google/start/", views.integrations_google_oauth_start, name="integrations_google_oauth_start"),
-    path("integrations/google/callback/", views.integrations_google_oauth_callback, name="integrations_google_oauth_callback"),
-    path("integrations/google/disconnect/", views.integrations_google_oauth_disconnect, name="integrations_google_oauth_disconnect"),
-    path("integrations/github/start/", views.integrations_github_oauth_start, name="integrations_github_oauth_start"),
-    path("integrations/github/callback/", views.integrations_github_oauth_callback, name="integrations_github_oauth_callback"),
-    path("integrations/github/disconnect/", views.integrations_github_oauth_disconnect, name="integrations_github_oauth_disconnect"),
+
     path("random-quote/", views.random_quote, name="random_quote"),
     path("switch-organization/", views.switch_organization, name="switch_organization"),
 
@@ -122,14 +113,31 @@ urlpatterns = [
     path("settings/invites/create/", views.create_invite, name="invite_create"),
     path("settings/invites/<uuid:invite_id>/revoke/", views.revoke_invite, name="invite_revoke"),
 
-    # GitHub App integration
-    path("github/connect", views.github_connect, name="github_connect"),
-    path("github/callback", views.github_callback, name="github_callback"),
-    path("github/setup", views.github_setup, name="github_setup"),
-    path("github/select-installation", views.github_select_installation, name="github_select_installation"),
+    # Integrations — organization-level (org admin configures once at /integrations/;
+    # persists AWSAccount / IntegrationGitProvider keyed by organization).
+    path("integrations/", views.integrations_root, name="integrations_root"),
+    path("integrations/org/aws-accounts/", views.integrations_org_aws_accounts, name="integrations_org_aws_accounts"),
+    path("integrations/org/aws-accounts/add/", views.integrations_org_aws_accounts_add, name="integrations_org_aws_accounts_add"),
 
-    # API endpoints
-    #  - aws_install_account_callback: called by Lambda after customer deploys the CloudFormation stack, not browsers
+    # GitHub integration: org-level (org admin configures once at /integrations/;
+    path("integrations/org/github/", views.integrations_org_github, name="integrations_org_github"),
+    # GitHub App install flow: launched from the GitHub tab; binds installation_id to the org.
+    path("integrations/org/github/connect/", views.integrations_org_github_connect, name="integrations_org_github_connect"),
+    path("integrations/org/github/callback/", views.integrations_org_github_callback, name="integrations_org_github_callback"),
+    path("integrations/org/github/setup/", views.integrations_org_github_setup, name="integrations_org_github_setup"),
+    path("integrations/org/github/select-installation/", views.integrations_org_github_select_installation, name="integrations_org_github_select_installation"),
+
+    # Integrations — per-user (each user grants OAuth from inside a deployed app).
+    # Persists IntegrationUserCredential keyed by (owner_user, environment, app_slug, provider).
+    # No long-lived secrets ever reach the customer env.
+    path("integrations/user/google/start/", views.integrations_user_google_start, name="integrations_user_google_start"),
+    path("integrations/user/google/callback/", views.integrations_user_google_callback, name="integrations_user_google_callback"),
+    path("integrations/user/google/disconnect/", views.integrations_user_google_disconnect, name="integrations_user_google_disconnect"),
+    path("integrations/user/github/start/", views.integrations_user_github_start, name="integrations_user_github_start"),
+    path("integrations/user/github/callback/", views.integrations_user_github_callback, name="integrations_user_github_callback"),
+    path("integrations/user/github/disconnect/", views.integrations_user_github_disconnect, name="integrations_user_github_disconnect"),
+
+    # API endpoints (view implementations live under views/integrations/ or views/pdp.py)
     path("api/aws/install-account-callback", views.aws_install_account_callback, name="aws_install_account_callback"),
     #  - github_webhook: receives push/installation events from GitHub
     path("api/github/webhook", views.github_webhook, name="github_webhook"),

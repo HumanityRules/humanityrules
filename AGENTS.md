@@ -59,3 +59,5 @@ See **`docs/AGENTS.md`** for the documentation index.
 **Agent-facing rules nudge for what the agent already knows, and convey what it had to discover by acting.** When adding to AGENTS.md or a skill, skip explanations and examples the next agent could write itself from its own memory, which is the same as yours. Keep the codebase-specific facts — for example paths, model and function names, project conventions — that it couldn't otherwise know.
 
 **Freshness misleads.** Whatever occupied your attention while doing the work feels load-bearing in the document you write at the end. To a reader who didn't share that hour — including yourself days later — most of it isn't. The test: would this sentence earn its place if you'd written it cold, with no recent context? If it only makes sense in light of what you just did, drop it.
+
+**Prefer numbered lists in replies.** When presenting options, recommendations, or multi-item analysis to the user, use numbered lists instead of bullet points so they can refer to items by number ("do 2 and 4").
