@@ -62,6 +62,58 @@ main.main.showing-webapps > #mainChat { display: none !important; }
   color: var(--muted);
   font-size: 13px;
   padding: 16px 0;
+  line-height: 1.5;
+}
+
+.doh-webapp-empty-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+  margin-bottom: 6px;
+}
+
+.doh-webapp-empty-hint {
+  margin: 0 0 4px;
+}
+
+.doh-webapp-empty-example {
+  margin-top: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-width: 520px;
+}
+
+.doh-webapp-empty-example-label {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.doh-webapp-empty-chat-composer {
+  padding: 12px 16px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--code-bg);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.18);
+}
+
+.doh-webapp-empty-chat-prompt {
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--text);
+}
+
+.doh-webapp-summary-empty-title {
+  font-weight: 500;
+  color: var(--text);
+  margin-bottom: 4px;
+}
+
+.doh-webapp-summary-empty-hint {
+  font-size: 11px;
 }
 
 .doh-webapp-card {

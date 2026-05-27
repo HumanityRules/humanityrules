@@ -5,8 +5,9 @@
 // per-provider cards from the integrations broker's unified control API. The
 // broker is reached same-origin via the WebUI reverse-proxy patch
 // (patches-webui/07-doh-broker-proxy.patch). Connect / Disconnect for TLS-
-// intercept providers (Google) are top-level navigations to DOH's control
-// plane; MCP-aggregator providers (Notion) flow entirely through the broker.
+// intercept providers (Google, GitHub) are top-level navigations to DOH's control
+// plane for Connect; Disconnect goes through the broker so the Integrations pane
+// stays open. MCP-aggregator providers (Notion) flow entirely through the broker.
 (() => {
   'use strict';
 
@@ -109,18 +110,11 @@
     }
   }
 
-  // TLS-intercept providers all expose the same control-plane URL shape:
-  // /integrations/user/<slug>/start/ and /integrations/user/<slug>/disconnect/,
-  // with ?rd=<return_to>. Each provider's `start` view stashes the rd target,
-  // bounces to the upstream OAuth, and the callback redirects back.
+  // TLS-intercept providers expose /integrations/user/<slug>/start/ for Connect
+  // (top-level navigation to DOH). Disconnect goes through the broker.
   function buildTlsConnectUrl(payload, slug, returnTo) {
     const rd = encodeURIComponent(returnTo);
     return payload.doh_control_plane_url.replace(/\/$/, '') + '/integrations/user/' + slug + '/start/?rd=' + rd + '&app_slug=' + encodeURIComponent(payload.app_slug || '');
-  }
-
-  function buildTlsDisconnectUrl(payload, slug, returnTo) {
-    const rd = encodeURIComponent(returnTo);
-    return payload.doh_control_plane_url.replace(/\/$/, '') + '/integrations/user/' + slug + '/disconnect/?rd=' + rd + '&app_slug=' + encodeURIComponent(payload.app_slug || '');
   }
 
   function buildMcpConnectUrl(slug) {
@@ -501,6 +495,28 @@
     }
   }
 
+  async function disconnectOAuthProvider(item) {
+    if (_disconnecting.has(item.slug)) return;
+    _disconnecting.add(item.slug);
+    renderPane(_current);
+    try {
+      const response = await fetch('/__doh_broker/integrations/' + encodeURIComponent(item.slug) + '/oauth/disconnect', {
+        method: 'POST',
+        cache: 'no-store',
+      });
+      if (!response.ok) {
+        let message = 'Disconnect failed. Please try again.';
+        try { message = (await response.json()).error || message; } catch (_) { /* ignore */ }
+        alert(message);
+        return;
+      }
+      await refreshAndRender();
+    } finally {
+      _disconnecting.delete(item.slug);
+      renderPane(_current);
+    }
+  }
+
   function renderTlsInterceptCard(item, payload) {
     const returnTo = window.location.origin + window.location.pathname;
     const isConnected = item.status === 'connected';
@@ -548,10 +564,15 @@
           vaultDisconnectPending ? 'Disconnecting…' : 'Disconnect',
         ]));
       } else {
-        actions.appendChild(elem('button', {
+        const oauthDisconnectPending = _disconnecting.has(item.slug);
+        const oauthDisconnectProps = {
           class: 'doh-integration-btn doh-integration-btn-secondary',
-          onclick: () => { window.location.href = buildTlsDisconnectUrl(payload, item.slug, returnTo); },
-        }, ['Disconnect']));
+          onclick: () => { disconnectOAuthProvider(item); },
+        };
+        if (oauthDisconnectPending) oauthDisconnectProps.disabled = true;
+        actions.appendChild(elem('button', oauthDisconnectProps, [
+          oauthDisconnectPending ? 'Disconnecting…' : 'Disconnect',
+        ]));
       }
       body.appendChild(actions);
       card.appendChild(body);

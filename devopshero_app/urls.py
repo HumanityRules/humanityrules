@@ -132,10 +132,11 @@ urlpatterns = [
     # No long-lived secrets ever reach the customer env.
     path("integrations/user/google/start/", views.integrations_user_google_start, name="integrations_user_google_start"),
     path("integrations/user/google/callback/", views.integrations_user_google_callback, name="integrations_user_google_callback"),
-    path("integrations/user/google/disconnect/", views.integrations_user_google_disconnect, name="integrations_user_google_disconnect"),
     path("integrations/user/github/start/", views.integrations_user_github_start, name="integrations_user_github_start"),
     path("integrations/user/github/callback/", views.integrations_user_github_callback, name="integrations_user_github_callback"),
-    path("integrations/user/github/disconnect/", views.integrations_user_github_disconnect, name="integrations_user_github_disconnect"),
+    # Connect is the browser OAuth round-trip above (start → provider → callback).
+    # Disconnect is broker-only: the Hermes WebUI POSTs to /__doh_broker/integrations/{slug}/oauth/disconnect,
+    # which forwards here with the env bearer — see api/integrations/user/disconnect below.
 
     # API endpoints (view implementations live under views/integrations/ or views/pdp.py)
     path("api/aws/install-account-callback", views.aws_install_account_callback, name="aws_install_account_callback"),
@@ -143,12 +144,19 @@ urlpatterns = [
     path("api/github/webhook", views.github_webhook, name="github_webhook"),
     #  - pdp_evaluate: called by policy proxies to authorize each request against ABAC
     path("api/pdp/evaluate", views.pdp_evaluate, name="pdp_evaluate"),
+    
     #  - integrations_tokens_batch: the env-resident broker's single refresh endpoint, both for Refresh-all/bootstrap and for slug-targeted refresh after connect/disconnect
     path("api/integrations/tokens", views.integrations_tokens_batch, name="integrations_tokens_batch"),
+    #  - integrations_user_oauth_disconnect: deletes google/github IntegrationUserCredential rows for the
+    #    owner/app in the request; called by the broker after the user clicks Disconnect in Hermes (not a
+    #    browser redirect — unlike Connect, which uses the /integrations/user/*/start|callback/ routes above).
+    path("api/integrations/user/disconnect", views.integrations_user_oauth_disconnect, name="integrations_user_oauth_disconnect"),
+
     #  - integrations_credential_setup_session / submit / disconnect: broker-assisted, browser-direct vault flows for paste-style credentials
     path("api/integrations/credentials/setup-session", views.integrations_credential_setup_session, name="integrations_credential_setup_session"),
     path("api/integrations/credentials/submit", views.integrations_credential_submit, name="integrations_credential_submit"),
     path("api/integrations/credentials/disconnect", views.integrations_credential_disconnect, name="integrations_credential_disconnect"),
+
     #  - Merge.dev Agent Handler: env-resident components (Hermes broker / MCP aggregator) reach Merge through these. Tenant-wide Merge API key lives only on DOH.
     path("api/integrations/merge/ensure-registered-user", views.integrations_merge_ensure_registered_user, name="integrations_merge_ensure_registered_user"),
     path("api/integrations/merge/link-token", views.integrations_merge_link_token, name="integrations_merge_link_token"),

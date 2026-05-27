@@ -865,6 +865,38 @@ class TestControlIntegrations(unittest.IsolatedAsyncioTestCase):
         invalidate_mock.assert_awaited_once_with(slug="telegram")
         invalidate_all_mock.assert_not_awaited()
 
+    async def test_oauth_disconnect_invalidates_only_provider_cache_on_success(self) -> None:
+        """POST /integrations/{provider}/oauth/disconnect evicts only that provider."""
+        from starlette.testclient import TestClient
+
+        app = broker._build_control_app(
+            aggregator=_ready_stub_aggregator(),
+            tls_runtime=self.tls_runtime,
+            control_plane_url="https://doh.example",
+            bearer="env-bearer",
+            owner_username="vmendi",
+            app_slug="hermes",
+            env_slug="default",
+        )
+
+        with patch.object(broker, "_post_control_plane_json", return_value=(200, {"ok": True})) as post_mock:
+            with patch.object(self.tls_runtime, "invalidate", new_callable=AsyncMock) as invalidate_mock:
+                with TestClient(app) as client:
+                    resp = client.post("/integrations/github/oauth/disconnect")
+
+        self.assertEqual(resp.status_code, 200)
+        post_mock.assert_called_once_with(
+            control_plane_url="https://doh.example",
+            bearer="env-bearer",
+            path="/api/integrations/user/disconnect",
+            payload={
+                "owner_username": "vmendi",
+                "app_slug": "hermes",
+                "provider": "github",
+            },
+        )
+        invalidate_mock.assert_awaited_once_with(slug="github")
+
 
 class TestLazyTokenForHost(unittest.IsolatedAsyncioTestCase):
     """The TLS token store fetches lazily and reuses the cache until near-expiry."""
