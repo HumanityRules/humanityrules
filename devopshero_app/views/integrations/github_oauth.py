@@ -259,7 +259,9 @@ def _revoke_github_grant(refresh_token: str) -> None:
     if not settings.GITHUB_APP_CLIENT_ID or not settings.GITHUB_APP_CLIENT_SECRET:
         return
     try:
-        httpx.delete(
+        # httpx.delete() has no json= param; GitHub's grant endpoint needs a JSON body.
+        httpx.request(
+            "DELETE",
             f"{GITHUB_API_BASE}/applications/{settings.GITHUB_APP_CLIENT_ID}/grant",
             auth=(settings.GITHUB_APP_CLIENT_ID, settings.GITHUB_APP_CLIENT_SECRET),
             headers={"Accept": "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28"},
@@ -268,42 +270,3 @@ def _revoke_github_grant(refresh_token: str) -> None:
         )
     except Exception as exc:
         logger.error("github revoke best-effort failed: %s", exc)
-
-
-@login_required
-def integrations_user_github_disconnect(request: HttpRequest) -> HttpResponse:
-    """Disconnect the authenticated user's GitHub grant for the env resolved from `rd`."""
-    rd = request.GET.get("rd", "")
-    env = _resolve_env_by_rd(rd=rd, user=request.user)
-    if env is None:
-        return HttpResponseBadRequest("Invalid or unknown rd")
-
-    app_slug = _resolve_owned_app_slug(
-        app_slug=request.GET.get("app_slug", ""),
-        env=env,
-        owner_username=request.user.username,
-    )
-    if app_slug is None:
-        return HttpResponseBadRequest("Invalid or unauthorized app_slug")
-    integration = IntegrationUserCredential.objects.filter(
-        owner_user=request.user,
-        environment=env,
-        app_slug=app_slug,
-        provider=IntegrationUserCredential.Provider.GITHUB,
-    ).first()
-    if integration is not None:
-        refresh_token = integration.credentials.get("refresh_token", "")
-        integration.delete()
-        if refresh_token:
-            _revoke_github_grant(refresh_token=refresh_token)
-        logger.info(
-            "github integration disconnected env=%s owner=%s app=%s",
-            env.slug, request.user.username, app_slug,
-        )
-    else:
-        logger.info(
-            "github disconnect no-op (no grant) env=%s owner=%s app=%s",
-            env.slug, request.user.username, app_slug,
-        )
-
-    return redirect(_append_query(url=rd, extra={"disconnected": "github"}))

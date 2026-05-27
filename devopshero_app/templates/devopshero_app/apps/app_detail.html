@@ -33,18 +33,19 @@
     {# App details and tags side by side #}
     <div class="grid grid-cols-1 sm:grid-cols-2 gap-6 mb-6">
         <div class="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-4">
-            <dl class="grid grid-cols-3 gap-4 text-sm">
-                <div>
+            <dl class="grid grid-cols-3 text-sm">
+                <div class="min-w-0">
                     <dt class="text-gray-500 dark:text-gray-400">App Type</dt>
                     <dd class="mt-1 font-medium text-gray-900 dark:text-white">{{ app.get_app_type_display }}</dd>
                 </div>
-                <div>
+                <div class="min-w-0">
                     <dt class="text-gray-500 dark:text-gray-400">Created</dt>
                     <dd class="mt-1 font-medium text-gray-900 dark:text-white">{{ app.created_at|date:"M j, Y" }}</dd>
                 </div>
-                <div>
+                <div class="min-w-0">
                     <dt class="text-gray-500 dark:text-gray-400">Created By</dt>
-                    <dd class="mt-1 font-medium text-gray-900 dark:text-white">{{ app.created_by.email|default:"—" }}</dd>
+                    <dd class="mt-1 font-medium text-gray-900 dark:text-white truncate"
+                        {% if app.created_by.email %}title="{{ app.created_by.email }}"{% endif %}>{{ app.created_by.email|default:"—" }}</dd>
                 </div>
             </dl>
         </div>

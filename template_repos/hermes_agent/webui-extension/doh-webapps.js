@@ -48,6 +48,28 @@
     return status;
   }
 
+  function visibleItems(payload) {
+    if (!payload) return [];
+    return (payload.items || []).filter((it) => _showInternal || !it.is_internal);
+  }
+
+  function emptyStateNode() {
+    return elem('div', { class: 'doh-webapp-empty' }, [
+      elem('div', { class: 'doh-webapp-empty-title' }, ['No web apps yet']),
+      elem('p', { class: 'doh-webapp-empty-hint' }, [
+        'Web apps are created by talking to the agent in chat. Describe what you want — a dashboard, API, or internal tool — and the agent will build and deploy it here.',
+      ]),
+      elem('div', { class: 'doh-webapp-empty-example' }, [
+        elem('div', { class: 'doh-webapp-empty-example-label' }, ['Example prompt']),
+        elem('div', { class: 'doh-webapp-empty-chat-composer' }, [
+          elem('div', { class: 'doh-webapp-empty-chat-prompt' }, [
+            'Build me a hello-world webapp',
+          ]),
+        ]),
+      ]),
+    ]);
+  }
+
   function renderSummary(payload) {
     const summary = document.getElementById('dohWebappsSummary');
     if (!summary) return;
@@ -56,14 +78,19 @@
       summary.appendChild(document.createTextNode('Status unavailable.'));
       return;
     }
-    const items = (payload.items || []).filter((it) => _showInternal || !it.is_internal);
+    const items = visibleItems(payload);
     const running = items.filter((it) => it.status === 'Running' && it.is_ready === 'Ready').length;
     const total = items.length;
-    summary.appendChild(document.createTextNode(
-      total === 0
-        ? 'No web apps yet.'
-        : running + ' of ' + total + ' running'
-    ));
+    if (total === 0) {
+      summary.appendChild(elem('div', { class: 'doh-webapp-summary-empty' }, [
+        elem('div', { class: 'doh-webapp-summary-empty-title' }, ['No web apps yet']),
+        elem('div', { class: 'doh-webapp-summary-empty-hint' }, [
+          'Ask the agent in chat to create one.',
+        ]),
+      ]));
+      return;
+    }
+    summary.appendChild(document.createTextNode(running + ' of ' + total + ' running'));
   }
 
   function renderRow(item) {
@@ -118,11 +145,9 @@
       return;
     }
 
-    const items = (payload.items || []).filter((it) => _showInternal || !it.is_internal);
+    const items = visibleItems(payload);
     if (items.length === 0) {
-      list.appendChild(elem('div', { class: 'doh-webapp-empty' }, [
-        'No web apps yet. Ask the agent to build one.',
-      ]));
+      list.appendChild(emptyStateNode());
       return;
     }
     for (const item of items) list.appendChild(renderRow(item));
@@ -209,7 +234,7 @@
         elem('div', { class: 'doh-webapp-page-head' }, [
           elem('div', { class: 'doh-webapp-page-title' }, ['Web Apps']),
           elem('div', { class: 'doh-webapp-page-meta' }, [
-            'Apps the agent built, served at /webapps/<slug>/ on this hostname.',
+            'Apps the agent built, each at its own subdomain (<slug>.<hostname>).',
           ]),
         ]),
         elem('div', { class: 'doh-webapp-list', id: 'dohWebappsList' }),

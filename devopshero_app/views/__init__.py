@@ -44,14 +44,13 @@ from .integrations.org_github import (
 from .integrations.google_oauth import (
     integrations_user_google_start,
     integrations_user_google_callback,
-    integrations_user_google_disconnect,
 )
 from .integrations.github_oauth import (
     integrations_user_github_start,
     integrations_user_github_callback,
-    integrations_user_github_disconnect,
 )
 from .integrations.token_refresh_batch import integrations_tokens_batch
+from .integrations.user_oauth_disconnect import integrations_user_oauth_disconnect
 from .integrations.user_credential_vault import (
     integrations_credential_disconnect,
     integrations_credential_setup_session,
@@ -174,11 +173,10 @@ __all__ = [
     "integrations_org_github",
     "integrations_user_google_start",
     "integrations_user_google_callback",
-    "integrations_user_google_disconnect",
     "integrations_user_github_start",
     "integrations_user_github_callback",
-    "integrations_user_github_disconnect",
     "integrations_tokens_batch",
+    "integrations_user_oauth_disconnect",
     "integrations_credential_disconnect",
     "integrations_credential_setup_session",
     "integrations_credential_submit",
