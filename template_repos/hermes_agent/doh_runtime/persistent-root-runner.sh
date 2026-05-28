@@ -26,8 +26,8 @@ format_duration_ms() {
     printf "%d.%03ds" "$((duration_ms / 1000))" "$((duration_ms % 1000))"
 }
 
-is_empty_dir() {
-    [ -z "$(find "$HERMES_PERSISTENT_ROOT" -mindepth 1 -maxdepth 1 -print -quit)" ]
+persistent_root_initialized() {
+    [ -f "${HERMES_PERSISTENT_ROOT}/.doh-hermes-persistent-root" ]
 }
 
 checkpoint_archive_path() {
@@ -272,10 +272,10 @@ main() {
     fi
 
     mkdir -p "$HERMES_PERSISTENT_ROOT"
-    if is_empty_dir; then
-        restore_persistent_root_from_checkpoint || initialize_persistent_root
-    else
+    if persistent_root_initialized; then
         reuse_persistent_root
+    else
+        restore_persistent_root_from_checkpoint || initialize_persistent_root
     fi
 
     sync_image_owned_dirs

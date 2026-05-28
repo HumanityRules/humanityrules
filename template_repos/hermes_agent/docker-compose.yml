@@ -1,0 +1,68 @@
+# Local Hermes agent — same image as DOH deploys, without the control plane.
+#
+#   docker compose up --build
+#
+# Browser entry (via local_policy_proxy): http://localhost:8788
+#   - WebUI, Web Apps panel, /webapps/__admin, user apps at <slug>.localhost:8788
+#
+# Hermes Caddy/WebUI ports are not published to the host; reach them through
+# local_policy_proxy (template_repos/local_policy_proxy) or docker exec.
+#
+# webui-extension/ is bind-mounted into the chroot; edits show up after a
+# browser refresh. Rebuild/restart for Dockerfile, patches, or doh_runtime changes.
+#
+# LLM calls are optional: dummy AWS credentials satisfy aws-signer startup.
+# Copy .env.example to .env and override only if you want real Bedrock/Tavily.
+
+services:
+  hermes:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: hermes-agent:local
+    container_name: hermes-agent-local
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-local-dev}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-local-dev}
+      AWS_DEFAULT_REGION: ${AWS_DEFAULT_REGION:-${AWS_BEDROCK_REGION:-us-east-1}}
+      DOH_LLM_PROVIDER: ${DOH_LLM_PROVIDER:-bedrock}
+      DOH_LLM_MODEL: ${DOH_LLM_MODEL:-us.anthropic.claude-sonnet-4-6}
+      DOH_PUBLIC_HOSTNAME: localhost
+      HERMES_WEBUI_SKIP_ONBOARDING: ${HERMES_WEBUI_SKIP_ONBOARDING:-1}
+    expose:
+      - "8787"
+    volumes:
+      - hermes-data:/hermes-persistent-root
+      - ./webui-extension:/hermes-persistent-root/opt/doh/webui-extension
+    cap_add:
+      - SYS_ADMIN
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://127.0.0.1:8789/health"]
+      interval: 15s
+      timeout: 5s
+      start_period: 120s
+      retries: 5
+    restart: unless-stopped
+
+  local_policy_proxy:
+    build:
+      context: ../local_policy_proxy
+      dockerfile: Dockerfile
+    image: local-policy-proxy:local
+    container_name: local-policy-proxy-local
+    environment:
+      DOH_UPSTREAM_HOST: hermes
+      DOH_UPSTREAM_PORT: 8787
+      DOH_LISTEN_PORT: 8788
+    ports:
+      - "8788:8788"
+    depends_on:
+      hermes:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  hermes-data:

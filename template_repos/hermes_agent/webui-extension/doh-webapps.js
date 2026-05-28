@@ -57,15 +57,8 @@
     return elem('div', { class: 'doh-webapp-empty' }, [
       elem('div', { class: 'doh-webapp-empty-title' }, ['No web apps yet']),
       elem('p', { class: 'doh-webapp-empty-hint' }, [
-        'Web apps are created by talking to the agent in chat. Describe what you want — a dashboard, API, or internal tool — and the agent will build and deploy it here.',
-      ]),
-      elem('div', { class: 'doh-webapp-empty-example' }, [
-        elem('div', { class: 'doh-webapp-empty-example-label' }, ['Example prompt']),
-        elem('div', { class: 'doh-webapp-empty-chat-composer' }, [
-          elem('div', { class: 'doh-webapp-empty-chat-prompt' }, [
-            'Build me a hello-world webapp',
-          ]),
-        ]),
+        'Web apps are created by talking to the agent in chat. For example, you can ask the agent: ',
+        elem('span', null, ['Build me a San Francisco Weather dashboard webapp.']),
       ]),
     ]);
   }
