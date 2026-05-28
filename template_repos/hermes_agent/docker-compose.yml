@@ -11,8 +11,9 @@
 # webui-extension/ is bind-mounted into the chroot; edits show up after a
 # browser refresh. Rebuild/restart for Dockerfile, patches, or doh_runtime changes.
 #
-# LLM calls are optional: dummy AWS credentials satisfy aws-signer startup.
-# Copy .env.example to .env and override only if you want real Bedrock/Tavily.
+# Bedrock LLM: mounts host ~/.aws and uses AWS_PROFILE (default bedrock_dev).
+# Override AWS_PROFILE in .env, or set AWS_ACCESS_KEY_ID/SECRET there to skip
+# the mount. SSO profiles need a writable ~/.aws mount — change :ro to :rw.
 
 services:
   hermes:
@@ -25,8 +26,7 @@ services:
       - path: .env
         required: false
     environment:
-      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-local-dev}
-      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-local-dev}
+      AWS_PROFILE: ${AWS_PROFILE:-bedrock_dev}
       AWS_DEFAULT_REGION: ${AWS_DEFAULT_REGION:-${AWS_BEDROCK_REGION:-us-east-1}}
       DOH_LLM_PROVIDER: ${DOH_LLM_PROVIDER:-bedrock}
       DOH_LLM_MODEL: ${DOH_LLM_MODEL:-us.anthropic.claude-sonnet-4-6}
@@ -37,6 +37,7 @@ services:
     volumes:
       - hermes-data:/hermes-persistent-root
       - ./webui-extension:/hermes-persistent-root/opt/doh/webui-extension
+      - ${HOME}/.aws:/hermes-persistent-root/root/.aws:ro
     cap_add:
       - SYS_ADMIN
     healthcheck:

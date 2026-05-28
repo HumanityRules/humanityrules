@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+from urllib.parse import urlparse, urlunparse
 
 import httpx
 from fastapi import Request
@@ -25,6 +26,7 @@ _HOP_BY_HOP_HEADERS = {
 }
 
 _FORBIDDEN_INBOUND_HEADERS = {"host"}
+_ORIGIN_LIKE_HEADERS = frozenset({"origin", "referer"})
 
 
 def _host_for_caddy(host: str) -> str:
@@ -41,6 +43,24 @@ def _host_for_caddy(host: str) -> str:
     return host
 
 
+def _strip_port_from_url(value: str) -> str:
+    """Drop explicit :port from http(s) URLs so WebUI CSRF matches DOH_PUBLIC_HOSTNAME."""
+    parsed = urlparse(value)
+    if parsed.scheme not in ("http", "https") or not parsed.hostname or parsed.port is None:
+        return value
+    host = parsed.hostname
+    netloc = f"[{host}]" if ":" in host else host
+    return urlunparse((
+        parsed.scheme, netloc, parsed.path, parsed.params, parsed.query, parsed.fragment,
+    ))
+
+
+def _normalize_origin_like_header(name: str, value: str) -> str:
+    if name.lower() not in _ORIGIN_LIKE_HEADERS:
+        return value
+    return _strip_port_from_url(value=value)
+
+
 _WS_HANDSHAKE_HEADERS = {
     "host",
     "connection", "upgrade",
@@ -55,7 +75,7 @@ def _filter_request_headers(headers) -> dict[str, str]:
         lower = name.lower()
         if lower in _HOP_BY_HOP_HEADERS or lower in _FORBIDDEN_INBOUND_HEADERS:
             continue
-        out[name] = value
+        out[name] = _normalize_origin_like_header(name=name, value=value)
     return out
 
 
@@ -122,7 +142,7 @@ def _filter_ws_handshake_headers(headers) -> list[tuple[str, str]]:
         lower = name.lower()
         if lower in _WS_HANDSHAKE_HEADERS or lower in _FORBIDDEN_INBOUND_HEADERS:
             continue
-        out.append((name, value))
+        out.append((name, _normalize_origin_like_header(name=name, value=value)))
     return out
 
 

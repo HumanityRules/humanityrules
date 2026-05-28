@@ -54,6 +54,17 @@ class PortConfig:
     upstream_host: str
 
 
+def _reload_session_credentials(session: Session) -> None:
+    # Shared-credentials and env-based providers cache on the session.
+    # Clearing forces botocore to re-read ~/.aws on the next get_credentials().
+    session._credentials = None
+
+
+def _upstream_expired_token(upstream: urllib3.HTTPResponse) -> bool:
+    error_type = upstream.headers.get("x-amzn-errortype", "")
+    return error_type.startswith("ExpiredTokenException")
+
+
 def _build_handler(cfg: PortConfig, session: Session, pool: urllib3.HTTPSConnectionPool):
     class Handler(BaseHTTPRequestHandler):
         # HTTP/1.0: response ends at connection close, so we don't have to
@@ -71,35 +82,55 @@ def _build_handler(cfg: PortConfig, session: Session, pool: urllib3.HTTPSConnect
                 k: v for k, v in self.headers.items()
                 if k.lower() not in _STRIP_BEFORE_SIGN
             }
-            aws_request = AWSRequest(
-                method=self.command,
-                url=f"https://{cfg.upstream_host}{self.path}",
-                data=body,
-                headers=outbound_headers,
-            )
-            credentials = session.get_credentials()
-            if credentials is None:
-                self.send_error(500, "no AWS credentials available")
-                return
-            SigV4Auth(credentials.get_frozen_credentials(), cfg.service, cfg.region).add_auth(aws_request)
 
-            try:
-                upstream = pool.urlopen(
+            upstream = None
+            for attempt in range(2):
+                aws_request = AWSRequest(
                     method=self.command,
-                    url=self.path,
-                    body=body,
-                    headers=dict(aws_request.headers),
-                    preload_content=False,
-                    redirect=False,
-                    retries=False,
+                    url=f"https://{cfg.upstream_host}{self.path}",
+                    data=body,
+                    headers=outbound_headers,
                 )
-            except Exception as exc:
-                logger.error("upstream error port=%d err=%s", cfg.port, exc)
+                credentials = session.get_credentials()
+                if credentials is None:
+                    self.send_error(500, "no AWS credentials available")
+                    return
+                SigV4Auth(
+                    credentials.get_frozen_credentials(), cfg.service, cfg.region,
+                ).add_auth(aws_request)
+
                 try:
-                    self.send_error(502, f"upstream unreachable: {exc}")
-                except Exception:
-                    pass
-                return
+                    upstream = pool.urlopen(
+                        method=self.command,
+                        url=self.path,
+                        body=body,
+                        headers=dict(aws_request.headers),
+                        preload_content=False,
+                        redirect=False,
+                        retries=False,
+                    )
+                except Exception as exc:
+                    logger.error("upstream error port=%d err=%s", cfg.port, exc)
+                    try:
+                        self.send_error(502, f"upstream unreachable: {exc}")
+                    except Exception:
+                        pass
+                    return
+
+                if (
+                    upstream.status == 403
+                    and _upstream_expired_token(upstream)
+                    and attempt == 0
+                ):
+                    upstream.drain_conn()
+                    upstream.release_conn()
+                    logger.info(
+                        "expired AWS credentials on port=%d; reloading and retrying once",
+                        cfg.port,
+                    )
+                    _reload_session_credentials(session)
+                    continue
+                break
 
             try:
                 self.send_response(upstream.status)
