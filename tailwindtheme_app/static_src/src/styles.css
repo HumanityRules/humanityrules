@@ -20,6 +20,28 @@
   button:disabled {
     cursor: not-allowed;
   }
+
+  /* Hide the click-caret everywhere; restore it only where the user types.
+     `caret-color` inherits, so transparency on <html> reaches all descendants;
+     `auto` on inputs/textareas brings the typing caret back to UA default.
+     `user-select` is untouched, so selection and copy keep working. */
+  html {
+    caret-color: transparent;
+  }
+  input,
+  textarea {
+    caret-color: auto;
+  }
+
+  /* Read-only text controls: no blinking caret, no text-edit cursor.
+     Scoped to input/textarea because :read-only also matches non-editable
+     elements like <div>. Per-element utilities (e.g. cursor-not-allowed)
+     still win when the element is temporarily read-only mid-request. */
+  input[readonly],
+  textarea[readonly] {
+    caret-color: transparent;
+    cursor: default;
+  }
 }
 
 /* ===== Custom Colors for Landing Page ===== */

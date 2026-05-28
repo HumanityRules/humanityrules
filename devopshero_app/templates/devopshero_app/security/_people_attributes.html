@@ -72,5 +72,5 @@
 {# Direct attributes (editable) #}
 <div class="mb-6">
     <h3 class="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Direct Attributes</h3>
-    {% include "devopshero_app/partials/_kv_tag_editor.html" with items=direct_attr_objects url_base=url_base hx_target="#people-attributes" can_edit=True empty_text="None" key_width="w-24" value_width="w-28" %}
+    {% include "devopshero_app/partials/_kv_tag_editor.html" with items=direct_attr_objects url_base=url_base hx_target="#people-attributes" can_edit=True suggested_keys=suggested_keys suggested_values=suggested_values empty_text="None" %}
 </div>
