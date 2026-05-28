@@ -2,7 +2,9 @@
 
 Dev-only stand-in for [`policy_proxy`](../policy_proxy/) when running Hermes via `template_repos/hermes_agent/docker-compose.yml`.
 
-Production `policy_proxy` verifies SSO, runs PDP, and sets `X-Forwarded-Host` before forwarding to Caddy on :8787. This package does **only** the forward + `X-Forwarded-Host` copy (same header behavior as `policy_proxy/proxy.py`), with no auth.
+Production `policy_proxy` verifies SSO, runs PDP, and sets `X-Forwarded-Host` before forwarding to Caddy on :8787. This package does **only** the forward + header normalization (same `X-Forwarded-Host` behavior as `policy_proxy/proxy.py`), with no auth.
+
+Also strips the listen port from `Origin` and `Referer` (e.g. `http://localhost:8788` → `http://localhost`) so Hermes WebUI's CSRF check matches `DOH_PUBLIC_HOSTNAME`.
 
 ## Config
 
