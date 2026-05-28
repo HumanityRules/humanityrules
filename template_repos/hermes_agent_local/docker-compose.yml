@@ -1,24 +1,26 @@
-# Local Hermes agent — same image as DOH deploys, without the control plane.
+# Local Hermes stack — same image as DOH deploys, without the control plane.
 #
+#   cd template_repos/hermes_agent_local
+#   cp .env.example .env   # optional
 #   docker compose up --build
 #
-# Browser entry (via local_policy_proxy): http://localhost:8788
+# Browser entry: http://localhost:8788
 #   - WebUI, Web Apps panel, /webapps/__admin, user apps at <slug>.localhost:8788
 #
 # Hermes Caddy/WebUI ports are not published to the host; reach them through
-# local_policy_proxy (template_repos/local_policy_proxy) or docker exec.
+# local_policy_proxy (bundled here) or docker exec.
 #
-# webui-extension/ is bind-mounted into the chroot; edits show up after a
+# webui-extension/ is bind-mounted from ../hermes_agent; edits show up after a
 # browser refresh. Rebuild/restart for Dockerfile, patches, or doh_runtime changes.
 #
-# Bedrock LLM: mounts host ~/.aws and uses AWS_PROFILE (default bedrock_dev).
-# Override AWS_PROFILE in .env, or set AWS_ACCESS_KEY_ID/SECRET there to skip
-# the mount. SSO profiles need a writable ~/.aws mount — change :ro to :rw.
+# Bedrock: mounts host ~/.aws and uses AWS_PROFILE (default bedrock_dev). Run
+# refresh-bedrock-creds.sh periodically, or bedrock-creds-launchagent.sh
+# on macOS so opsh keeps the profile fresh for Claude Code and this stack.
 
 services:
   hermes:
     build:
-      context: .
+      context: ../hermes_agent
       dockerfile: Dockerfile
     image: hermes-agent:local
     container_name: hermes-agent-local
@@ -36,7 +38,7 @@ services:
       - "8787"
     volumes:
       - hermes-data:/hermes-persistent-root
-      - ./webui-extension:/hermes-persistent-root/opt/doh/webui-extension
+      - ../hermes_agent/webui-extension:/hermes-persistent-root/opt/doh/webui-extension
       - ${HOME}/.aws:/hermes-persistent-root/root/.aws:ro
     cap_add:
       - SYS_ADMIN
@@ -50,7 +52,7 @@ services:
 
   local_policy_proxy:
     build:
-      context: ../local_policy_proxy
+      context: ./local_policy_proxy
       dockerfile: Dockerfile
     image: local-policy-proxy:local
     container_name: local-policy-proxy-local

@@ -1,5 +1,23 @@
 # DevOpsHero Development Journal
 
+## 2026-05-28 00:52 - [DevEx] `hermes_agent_local` bundle + Bedrock cred refresh for local compose
+
+**Conversation:** [2026-05-28-0052-b646f267.md](conversations/2026-05-28-0052-b646f267.md)
+
+Victor wanted local Hermes dev tooling in one place: compose, the dev policy proxy, and host-side Bedrock credential refresh — not scattered under `hermes_agent/` and `local_policy_proxy/`.
+
+**Claude Code vs Hermes credential paths.** On Victor's Mac, Claude Code refreshes Bedrock via `awsAuthRefresh: "opsh -c bedrock"` in `~/.claude/settings.json`, writing STS creds into `~/.aws/credentials` (`bedrock_dev`, ~1h TTL). Hermes compose bind-mounts that file read-only. `aws_signer` held a single botocore `Session` and cached creds until process restart — so a host refresh did not help a running container.
+
+**`aws_signer` fix (minimal prod impact).** On upstream HTTP 403 with `x-amzn-errortype: ExpiredTokenException`, drain the error body, clear `session._credentials`, re-read from the provider, retry once. Happy path unchanged; ECS task-role creds already auto-refresh and rarely hit this branch. Rejected per-request `Session()` creation ( unnecessary credential-chain overhead) and compose-only workarounds (watch/restart, sidecar IMDS) in favor of this single retry hook.
+
+**`template_repos/hermes_agent_local/`.** New sibling of `hermes_agent/`: `docker-compose.yml` (builds `../hermes_agent`, mounts `webui-extension` + `~/.aws`), vendored `local_policy_proxy/`, `.env.example`, and host scripts `refresh-bedrock-creds.sh` + `bedrock-creds-launchagent.sh` (`install` / `start` / `stop`; 45-minute LaunchAgent interval, no run-at-login). Removed `hermes_agent/docker-compose.yml`; old `template_repos/local_policy_proxy/` is a redirect stub only.
+
+**Key points:**
+- Local stack entry: `cd template_repos/hermes_agent_local && docker compose up --build` → http://localhost:8788
+- Host must keep `~/.aws` fresh (`opsh`); Hermes picks up changes after expired-token retry, not proactively
+- `bedrock-creds-launchagent.sh start` for unattended refresh when Claude Code is idle
+- Production Hermes image/runtime stays in `hermes_agent/`; this folder is wiring only
+
 ## 2026-05-28 00:15 - [DevEx] Local Hermes via compose: `local_policy_proxy` shim + persistent-root init fix
 
 **Conversation:** [2026-05-28-0015-1512a25d.md](conversations/2026-05-28-0015-1512a25d.md)
