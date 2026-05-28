@@ -1000,12 +1000,6 @@
   .grid-cols-\[auto_auto\] {
     grid-template-columns: auto auto;
   }
-  .grid-cols-\[repeat\(auto-fit\,minmax\(min\(100\%\,7\.5rem\)\,1fr\)\)\] {
-    grid-template-columns: repeat(auto-fit,minmax(min(100%, 7.5rem),1fr));
-  }
-  .grid-cols-\[repeat\(auto-fit\,minmax\(min\(100\%\,10rem\)\,1fr\)\)\] {
-    grid-template-columns: repeat(auto-fit,minmax(min(100%, 10rem),1fr));
-  }
   .grid-rows-\[0fr\] {
     grid-template-rows: 0fr;
   }
@@ -4436,6 +4430,16 @@
   }
   button:disabled {
     cursor: not-allowed;
+  }
+  html {
+    caret-color: transparent;
+  }
+  input, textarea {
+    caret-color: auto;
+  }
+  input[readonly], textarea[readonly] {
+    caret-color: transparent;
+    cursor: default;
   }
 }
 .gradient-text {

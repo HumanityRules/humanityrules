@@ -162,7 +162,7 @@ def security_people_detail(request: HttpRequest, user_id: UUID) -> HttpResponse:
     context["group_memberships"] = group_memberships
     context["available_groups"] = available_groups
     context["url_base"] = f"/security/people/{member.id}/attributes/"
-    context["suggested_keys"], context["suggested_values"] = abac.get_identity_attribute_suggestions(org)
+    context["suggested_keys"], context["suggested_values"] = abac.get_identity_attribute_suggestions(org=org)
     return render(request, "devopshero_app/security/security_people_detail.html", context=context)
 
 
@@ -198,7 +198,7 @@ def security_people_attribute_remove(request: HttpRequest, user_id: UUID, attrib
 
     IdentityAttribute.objects.filter(id=attribute_id, organization=org, user=member).delete()
 
-    return _render_people_attributes_partial(request, org, member)
+    return _render_people_attributes_partial(request=request, org=org, member=member)
 
 
 @login_required
@@ -248,7 +248,7 @@ def _render_people_attributes_partial(request: HttpRequest, org: Organization, m
         id__in=group_memberships.values_list("group_id", flat=True),
     ).order_by("name")
 
-    suggested_keys, suggested_values = abac.get_identity_attribute_suggestions(org)
+    suggested_keys, suggested_values = abac.get_identity_attribute_suggestions(org=org)
     return render(request, "devopshero_app/security/_people_attributes.html", {
         "member": member,
         "system_attrs": system_attrs,
