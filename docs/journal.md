@@ -1,5 +1,27 @@
 # DevOpsHero Development Journal
 
+## 2026-05-28 00:15 - [DevEx] Local Hermes via compose: `local_policy_proxy` shim + persistent-root init fix
+
+**Conversation:** [2026-05-28-0015-1512a25d.md](conversations/2026-05-28-0015-1512a25d.md)
+
+Victor wanted to run the Hermes agent stack locally (no DOH deploy) for fast WebUI/extension iteration, without needing Bedrock. We added `template_repos/hermes_agent/docker-compose.yml` building the same production image, with `webui-extension/` bind-mounted into the chroot at `/hermes-persistent-root/opt/doh/webui-extension` so JS/CSS edits show up after a browser refresh.
+
+**Why the UI “did nothing” on first bring-up.** We initially pointed browsers at `:8789` (Hermes WebUI direct). The Web Apps panel fetches `/webapps/__admin/api/webapps`, which is served by Caddy on `:8787` behind the same routing model as production (policy-proxy sets `X-Forwarded-Host`, Caddy matches on that header). Direct `:8789` and bare `:8787` both fail that contract — same class of bug we fixed for subhosting in prod, but without any forwarder locally.
+
+**Option B: `local_policy_proxy` alongside `policy_proxy`.** Victor asked that the dev shim live in `template_repos/local_policy_proxy/` (not buried under `hermes_agent/docker/`), named consistently with the production sidecar. It reuses the forwarding shape of `policy_proxy/proxy.py` (HTTP streaming + WebSocket pump, strip `Host`, set `X-Forwarded-Host`) but skips SSO/PDP entirely. Compose wires `local_policy_proxy` → `hermes:8787`; the browser entry is **http://localhost:8788**. Hermes no longer publishes `:8787`/`:8789` to the host.
+
+**Port stripping on `X-Forwarded-Host`.** First proxy version copied `Host: localhost:8788` verbatim; Caddy’s bare-host matcher expects `DOH_PUBLIC_HOSTNAME=localhost` without port → `"unknown host" 404`. Fix: strip the port in `local_policy_proxy` when synthesizing `X-Forwarded-Host` (subdomains like `hello.localhost:8788` → `hello.localhost`).
+
+**Persistent-root init trap with bind mounts.** Binding `webui-extension` under `/hermes-persistent-root/opt/doh/...` before first boot made `is_empty_dir` false while the rootfs was still uninitialized (no `/usr/bin/setsid` inside chroot). Switched init detection to the `.doh-hermes-persistent-root` marker file instead of “directory non-empty” — correct for prod edge cases too (partial mounts). Separate gotcha: mounting `doh_runtime/` read-only made image-owned `rsync --delete` fail with exit 23; we dropped that mount and rely on image rebuild for runtime changes. Host `webapps` CLI script needed `chmod +x` or nono saw `Permission denied` after rsync copied mode `644`.
+
+**What works locally now.** WebUI + extensions over `:8788`; Web Apps admin API returns JSON; `__admin` and `system.gateway` supervised by process-compose. User webapps at `http://<slug>.localhost:8788/` once created via agent/`webapps` CLI (still no wildcard DNS/TLS — HTTP + `*.localhost` is enough). LLM remains optional (dummy AWS creds satisfy `aws-signer` startup). Integrations panel still needs control-plane + broker env — out of scope for this slice.
+
+**Key points:**
+- Local dev URL is `:8788` through `local_policy_proxy`, not `:8789`.
+- Production Hermes routing code unchanged; dev parity is a second container, not Caddy edits.
+- `hermes-data` Docker volume holds the chroot persistent root; survives `compose down`, wiped with `down -v`.
+- First boot rsync is slow (~minutes); reuse is fast.
+
 ## 2026-05-26 12:48 - [Bugfix] Hermes WebUI manual cron failures traced to `nono` blocking `/dev/shm`
 
 **Conversation:** [2026-05-26-1248-4840db9d.md](conversations/2026-05-26-1248-4840db9d.md)
