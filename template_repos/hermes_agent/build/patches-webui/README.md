@@ -73,9 +73,15 @@ the dropdown ends up showing ~10 entries instead of the 3 we want.
 **Fix:** Return an empty list from `_handle_live_models` when
 `provider == "bedrock"`. The static endpoint still serves our three
 curated entries via `providers.bedrock.models`, and the frontend
-merge becomes a no-op. Other providers (OpenRouter, Anthropic,
-Copilot, etc.) keep their live discovery — DOH deployments on those
-providers genuinely want to see account-available models.
+merge becomes a no-op.
+
+**Companion config:** `supervisor.sh` sets `providers.only_configured:
+true` for Bedrock deployments so the picker shows only providers listed
+under `providers:` (today just `bedrock`). That hides GitHub Copilot and
+other factory-default groups that Hermes would otherwise surface when
+`GITHUB_TOKEN` or other credentials look valid. Patch 03 is still
+required: `only_configured` does not stop Bedrock live discovery from
+inflating the Bedrock group itself.
 
 ### `04-policy-proxy-reauth-url.patch`
 
