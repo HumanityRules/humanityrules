@@ -34,6 +34,14 @@ services:
       DOH_LLM_MODEL: ${DOH_LLM_MODEL:-us.anthropic.claude-sonnet-4-6}
       DOH_PUBLIC_HOSTNAME: localhost
       HERMES_WEBUI_SKIP_ONBOARDING: ${HERMES_WEBUI_SKIP_ONBOARDING:-1}
+      # Integrations broker identity. supervisor.sh starts the broker only when
+      # all four are set; locally they point it at the laptop's Django (via the
+      # devopshero.ngrok.io tunnel) as one existing App owned by one user. Seed
+      # the matching DB rows with: uv run manage.py seed_local_integrations.
+      DOH_CONTROL_PLANE_URL: ${DOH_CONTROL_PLANE_URL:-https://devopshero.ngrok.io}
+      DOH_ENV_BEARER: ${DOH_ENV_BEARER:-}
+      DOH_OWNER_USERNAME: ${DOH_OWNER_USERNAME:-}
+      DOH_APP_SLUG: ${DOH_APP_SLUG:-}
     expose:
       - "8787"
     volumes:

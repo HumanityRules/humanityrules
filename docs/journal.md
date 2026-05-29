@@ -1,5 +1,29 @@
 # DevOpsHero Development Journal
 
+## 2026-05-29 16:27 - [DevEx] Make integrations work in the local Hermes compose stack
+
+**Conversation:** [2026-05-29-1628-6a4806b3.md](conversations/2026-05-29-1628-6a4806b3.md)
+
+The local `hermes_agent_local` docker-compose stack (added a few commits earlier) had a dead Integrations panel. Diagnosis: `supervisor.sh` only starts `integrations_broker.py` when all four of `DOH_CONTROL_PLANE_URL` / `DOH_ENV_BEARER` / `DOH_OWNER_USERNAME` / `DOH_APP_SLUG` are set, and the local compose set none. No broker → empty panel + sandbox clients hitting Google/GitHub with no `HTTPS_PROXY` (ENOTCONN), which `supervisor.sh` itself calls "expected local-dev behavior."
+
+**Chose the ngrok path over a local control-plane shim.** Victor pointed out that `devopshero.ngrok.io` already tunnels to the laptop's Django (`:8000`), and the journal/`_resolve_control_plane_url()` confirm ngrok is the established, "load-bearing" mechanism for localhost-control-plane work — the Google/GitHub OAuth pipeline is already built to round-trip through it (host-aware `redirect_uri` selection, etc.). So the broker just needs to point at `https://devopshero.ngrok.io` as one existing App owned by one user. No new shim code.
+
+**The local container does NOT need to be "deployed."** Important realization: the integration credential is keyed by `(owner_user, environment, app_slug, provider)` with no link to a running ECS task or deployment. Both ends line up by identity alone — connect-time resolves env from the `rd` host + app from `app_slug` (checking only that the App belongs to the env's org and has the owner tag), and refresh-time resolves env from the bearer + app/owner from the env vars. So the running compose container simply *impersonates* the identity of an existing App (`hermes-vmendi00` / `vmendi@gmail.com`); the four env vars **are** that identity.
+
+**The single real blocker was the `rd` host check.** The OAuth start view (`google_oauth.py:_resolve_env_by_rd`) suffix-matches the WebUI return URL's host against `Environment.shared_alb_hosted_zone`. The local WebUI is `http://localhost:8788`, host `localhost`; the only Course Hero env had zone `chsandbox.com`, so the connect flow would die at "Invalid or unknown rd." Fix: a DB-only `Environment` (slug `local`, zone `localhost`) under the CH Sandbox account.
+
+**Created the env with status=READY on purpose.** `job_worker.py:70` polls `status=PENDING` envs and provisions them (real VPC/cluster CloudFormation). `doh_control create-env` sets PENDING — wrong tool, it'd try to spin up infra in the customer account. So the new `seed_local_integrations` command writes the row directly as `READY`, same philosophy as the pre-existing `doh_seed_env_bearer` (pure local Layer-2 seed, no AWS).
+
+**`seed_local_integrations` validates rather than creates the App/owner/user.** Those are real rows Victor already owns; the command takes `--app-slug`/`--owner-username` and fails loudly if the App, owner `ResourceTag`, or org membership is missing — exactly the misconfig that would otherwise surface as a silent `absent` at refresh time. It creates only the env + mints a fixed bearer (`local-dev-bearer-token`), then prints the `.env` block to paste.
+
+**Verified end-to-end short of the human OAuth click.** After recreating the `hermes` container: broker boots (`proxy listening 9950`, `control API listening 9951`, `catalog loaded: 104 tool entries, 150 connectors`); `GET :8788/__doh_broker/integrations` returns 200 with the full provider list all `not_connected` (panel alive); authed Connect-Google start 302s to Google's consent screen with the correct `redirect_uri=https://devopshero.ngrok.io/.../callback/`. Negative probes confirmed the fix is load-bearing: non-matching `rd` host → 400 "Invalid or unknown rd", bad/unowned `app_slug` → 400. The consent→callback→credential-write tail needs a real browser click and was left to manual testing.
+
+**Key points:**
+- Containers had been up 38h, predating the compose edit; a plain `docker compose up` didn't recreate `hermes`. Forced recreate to load the new env — worth remembering when a compose env edit "doesn't take."
+- `.env` is gitignored, so the bearer/identity values stay local; `.env.example` + compose comments document the wiring and point at the seed command.
+- The four broker vars use `${VAR:-}` defaults in compose so the stack still runs broker-less (the original behavior) when `.env` doesn't set them.
+- Proved the control-plane half independently before touching the container: `POST /api/integrations/tokens` with the seeded bearer returned 200 `{google: absent, github: absent}` through the tunnel.
+
 ## 2026-05-29 14:45 - [Deployment] Grant Hermes task role read-only billing + proxy Cost Explorer through aws_signer
 
 **Conversation:** [2026-05-29-1447-9abe1d11.md](conversations/2026-05-29-1447-9abe1d11.md)
