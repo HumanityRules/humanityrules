@@ -177,6 +177,10 @@ def main():
         PortConfig(9901, "sts",     args.region, "sts.amazonaws.com"),
         PortConfig(9902, "bedrock", args.region, f"bedrock.{args.region}.amazonaws.com"),
         PortConfig(9903, "bedrock", args.region, f"bedrock-runtime.{args.region}.amazonaws.com"),
+        # Cost Explorer is a global service: the endpoint and credential scope
+        # are always us-east-1 regardless of the deploy region, so we pin both
+        # here rather than using args.region.
+        PortConfig(9904, "ce", "us-east-1", "ce.us-east-1.amazonaws.com"),
     ]
 
     for cfg in configs:
