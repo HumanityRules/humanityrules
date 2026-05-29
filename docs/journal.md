@@ -1,5 +1,25 @@
 # DevOpsHero Development Journal
 
+## 2026-05-29 14:45 - [Deployment] Grant Hermes task role read-only billing + proxy Cost Explorer through aws_signer
+
+**Conversation:** [2026-05-29-1447-9abe1d11.md](conversations/2026-05-29-1447-9abe1d11.md)
+
+Victor wanted the `doh-default-hermes-vmendi00-task-role` (Hermes personal-assistant app, env `default`, in the Humanity Rules Sandbox customer account `266117665083`) to read AWS Billing/Cost Management. Two distinct layers turned out to be needed: the IAM grant, and the egress path. The grant alone is necessary but not sufficient — the sandboxed Hermes process never sees real credentials, so any AWS call it makes must traverse the `aws_signer` SigV4 proxy, which only listens for an explicit set of services.
+
+**IAM inline policy (applied live, out-of-band from CDK).** Added inline policy `BillingReadOnlyAccess` to the role via assume-role into the customer account (DOH control-plane creds → STS assume `devopshero-<external_id>` with external-id). Action set mirrors AWS's managed `AWSBillingReadOnlyAccess` (fetched its v27 document as the authoritative reference rather than hand-rolling): `billing:Get*/List*`, `ce:*` read, `cur:*`, `budgets:Describe*/ViewBudget`, `invoicing`, `payments`, `purchase-orders`, `freetier`, `tax`, `account:GetAccountInformation`, `aws-portal:ViewBilling`, sustainability footprint. Read-verbs only. The role's CDK-managed `TaskRoleDefaultPolicy*` was left untouched. Note this change lives only in the account, not in `deploy_app.py` — a redeploy won't remove it (CDK only manages policies it created) but won't recreate it either; not captured in code.
+
+**aws_signer only proxies an allowlist.** `aws_signer.py` binds 127.0.0.1:9901/9902/9903 for sts/bedrock/bedrock-runtime and signs each request with the ECS task-role creds outside the nono sandbox. There was no listener for Cost Explorer, so a billing call from the agent had nowhere to go even with the IAM grant. Added a 4th port **9904 → `ce`**.
+
+**Cost Explorer is global — pinned to us-east-1.** Verified via botocore's endpoint resolver: `ce` resolves to `ce.us-east-1.amazonaws.com` with credential scope `us-east-1` for every region. So the new `PortConfig(9904, "ce", "us-east-1", "ce.us-east-1.amazonaws.com")` pins both endpoint and signing region rather than using `args.region` (unlike the bedrock ports). The botocore config service-key is `cost_explorer` (snake-cased serviceId), mirroring the existing `bedrock_runtime` key — verified against the service model, not guessed.
+
+**Three files, one egress path.** `aws_signer.py` (new PortConfig), `supervisor.sh` (`AWS_CE_PORT=9904`, a `wait_for_port`, and a `cost_explorer` endpoint block in the child `.aws/config`), and `hermes-nono-profile.json` (opened port 9904 in the sandbox `open_port` list). Comments enumerating "9901-9903" bumped to "9901-9904".
+
+**Key points:**
+- IAM grant is evaluated at request time — effective immediately, no credential refresh needed; but useless until the egress path exists.
+- Only `ce` was wired. The IAM policy also grants `billing`/`budgets`/`cur`/`invoicing`/etc., which hit different endpoints and would each need their own PortConfig. CE backs "what did I spend" cost queries — the likely intent.
+- Template-repo files are baked into the Hermes image: the running `hermes-vmendi00` task needs a rebuild + redeploy to pick this up.
+- `aws_signer`'s creds refresh is event-driven, not scheduled: botocore auto-refreshes task-role creds before expiry, plus a reactive single retry on `ExpiredTokenException` (clears `session._credentials`). No periodic timer.
+
 ## 2026-05-28 00:52 - [DevEx] `hermes_agent_local` bundle + Bedrock cred refresh for local compose
 
 **Conversation:** [2026-05-28-0052-b646f267.md](conversations/2026-05-28-0052-b646f267.md)
