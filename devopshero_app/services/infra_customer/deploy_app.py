@@ -776,12 +776,25 @@ class AppStack(Stack):
             # 4-GiB task-level value we'd otherwise advertise.
             all_have_hard_cap = all(c.memory_limit_mib is not None for c in app_config.containers)
             task_memory_mib = None if all_have_hard_cap else str(app_config.memory)
+            cpu_reservations = [c.cpu_reservation for c in app_config.containers]
+            if any(reservation is not None for reservation in cpu_reservations) and not all(
+                reservation is not None for reservation in cpu_reservations
+            ):
+                raise ValueError(
+                    f"App '{app_config.app_name}' mixes containers with and without cpu_reservation; "
+                    "set cpu_reservation on every container or on none"
+                )
+            all_have_cpu_reservation = all(reservation is not None for reservation in cpu_reservations)
+            # Omit task-level cpu when every container declares cpu_reservation:
+            # ECS reserves the sum for placement but Linux CPU shares let a task
+            # burst to the full node when neighbors are idle.
+            task_cpu = None if all_have_cpu_reservation else str(app_config.cpu)
             task_definition = ecs.TaskDefinition(
                 self, "TaskDefinition",
                 compatibility=ecs.Compatibility.EC2,
                 network_mode=ecs.NetworkMode.AWS_VPC,
                 family=resource_prefix[:255],
-                cpu=str(app_config.cpu),
+                cpu=task_cpu,
                 memory_mib=task_memory_mib,
                 execution_role=self.environment_infra.task_execution_role,
                 task_role=task_role,
@@ -960,6 +973,7 @@ class AppStack(Stack):
                 user=c.user,
                 privileged=c.privileged or None,
                 stop_timeout=Duration.seconds(c.stop_timeout) if c.stop_timeout else None,
+                cpu=c.cpu_reservation,
                 memory_limit_mib=c.memory_limit_mib,
                 memory_reservation_mib=c.memory_reservation_mib,
             )

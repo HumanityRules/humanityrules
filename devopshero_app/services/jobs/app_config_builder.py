@@ -160,6 +160,7 @@ def _build_container_config(
         stop_timeout=template_container.get("stop_timeout") or None,
         memory_limit_mib=template_container.get("memory_limit_mib") or None,
         memory_reservation_mib=template_container.get("memory_reservation_mib") or None,
+        cpu_reservation=template_container.get("cpu_reservation") or None,
         requires_env_bearer=bool(template_container.get("requires_env_bearer", False)),
     )
 
