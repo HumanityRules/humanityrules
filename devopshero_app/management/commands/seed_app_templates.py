@@ -328,6 +328,10 @@ HERMES_PERSONAL_TEMPLATE = {
             ],
             "linux_capabilities": ["SYS_ADMIN"],
             "stop_timeout": 120,
+            # Placement reservation: 1 vCPU so two hermes tasks fit on one
+            # m8g.large (2048 CPU units). Linux CPU shares — not a hard cap —
+            # let a task burst to the full node when its neighbor is idle.
+            "cpu_reservation": 1024,
             # Placement reservation: 2 GiB so two hermes tasks fit on one
             # m8g.large (~7747 MiB usable). Hard cap: 4 GiB — the container
             # can burst there when alone on the node. Under host memory
@@ -350,7 +354,7 @@ HERMES_PERSONAL_TEMPLATE = {
         # Policy proxy is tiny (httpx + starlette); 256 MiB is plenty. Must
         # be set so the task has no container without a memory cap (ECS
         # requires task-level OR per-container memory on EC2).
-        {**_HERMES_POLICY_PROXY_CONTAINER, "memory_limit_mib": 256},
+        {**_HERMES_POLICY_PROXY_CONTAINER, "cpu_reservation": 128, "memory_limit_mib": 256},
     ],
     "default_tags": [{"key": "app-type", "value": "personal-assistant"}],
     "prefill_name": "hermes-{username}{index}",

@@ -239,6 +239,12 @@ class ContainerConfig:
     # bursty-but-usually-idle containers (e.g. two hermes tasks on one m8g).
     memory_reservation_mib: int | None = None
 
+    # Container-level CPU reservation in ECS CPU units (1024 = 1 vCPU). On EC2
+    # Linux this drives placement and relative CPU shares, not a hard runtime
+    # cap — omit task-level cpu when every container sets this so tasks can
+    # burst to the full node when neighbors are idle.
+    cpu_reservation: int | None = None
+
     # Opt this container in to the DOH control-plane bearer overlay:
     # DOH_ENV_BEARER (from shared-secrets), DOH_ENV_SLUG, DOH_APP_SLUG, and
     # DOH_OWNER_USERNAME (if the owning App has an owner tag). Any env-resident
@@ -258,7 +264,7 @@ class AppConfig:
     app_name: str  # e.g., "simple-dashboard" — used in resource names
 
     # Task-level resources (shared across containers)
-    cpu: int  # ECS task CPU units (256, 512, 1024, etc.)
+    cpu: int  # ECS task CPU units on Fargate; on EC2 used only when containers omit cpu_reservation
     # Task-level memory in MiB. Always applied on Fargate (where it's the
     # task size). On EC2 it's also applied as the task-level ceiling unless
     # every container sets its own memory_limit_mib, in which case the
