@@ -1,22 +1,22 @@
-"""The single env-resident-component → DOH refresh endpoint.
+"""Batched integration token refresh for env-resident Hermes brokers.
 
-The broker used to fan out one POST per provider to per-provider
-`/api/integrations/<slug>/token` endpoints; each disconnected provider
-returned HTTP 404 + an `INFO no integration row` Django log line.
-Refresh-all on a fresh sandbox routinely emitted three logs that all
-meant "the user hasn't connected anything yet" — log spam masquerading
-as signal.
+POST /api/integrations/tokens (env bearer auth) returns a per-slug outcome
+map for the requested providers. The Hermes integration broker calls this at
+bootstrap (Refresh-all) and after connect/disconnect (single-slug list).
 
-This endpoint folds all of that into one round-trip with `absent` as a
-normal entry in the response map:
-
-    POST /api/integrations/tokens
     body: {owner_username, app_slug, providers: ["google", "github", ...]}
     resp: 200 {results: {<slug>: {outcome, secrets?, expires_in?, config, metadata}, ...}}
 
-`outcome` is `"has_token" | "absent" | "transient"`. The broker uses the
-same endpoint for single-slug refresh (after a connect/disconnect),
-just with a one-element providers list.
+Each slug routes to a provider outcome helper (OAuth token exchange or vault
+DB read). Helpers run in parallel via ThreadPoolExecutor so wall-clock time
+is bounded by the slowest helper (~5s upstream ceiling per OAuth provider),
+not the sum across slugs.
+
+`outcome` is `has_token`, `absent`, or `transient`. `absent` means no
+connected integration row — a normal 200 entry, not an HTTP error. Unknown
+slugs and users with no org membership on the env also return `absent`.
+Handler exceptions surface as `transient` so the broker can keep serving a
+still-valid cached token when refresh fails transiently.
 """
 
 import json
@@ -34,7 +34,7 @@ from devopshero_app.views.integrations import (
     github_token_refresh,
     google_token_refresh,
     slack_vault,
-    user_credential_vault,
+    telegram_vault,
 )
 
 logger = logging.getLogger(__name__)
@@ -43,7 +43,7 @@ logger = logging.getLogger(__name__)
 _OUTCOME_HANDLERS = {
     "google": google_token_refresh.refresh_google_outcome,
     "github": github_token_refresh.refresh_github_outcome,
-    "telegram": user_credential_vault.refresh_telegram_outcome,
+    "telegram": telegram_vault.refresh_telegram_outcome,
     "slack": slack_vault.refresh_slack_outcome,
 }
 
