@@ -1,6 +1,6 @@
---- a/api/config.py	1970-01-01 00:00:00
-+++ b/api/config.py	1970-01-01 00:00:00
-@@ -3525,7 +3525,13 @@
+--- a/api/config.py
++++ b/api/config.py
+@@ -4300,7 +4300,13 @@
                      if isinstance(provider_cfg, dict) and "models" in provider_cfg:
                          cfg_models = provider_cfg["models"]
                          if isinstance(cfg_models, dict):

@@ -1,4 +1,4 @@
-FROM ghcr.io/nesquena/hermes-webui:0.51.63
+FROM ghcr.io/nesquena/hermes-webui:0.51.160
 
 USER root
 
@@ -8,7 +8,7 @@ ARG CADDY_VERSION=2.11.3
 ARG PROCESS_COMPOSE_VERSION=1.110.0
 ARG TTYD_VERSION=1.7.7
 ARG GH_CLI_VERSION=2.92.0
-ARG HERMES_AGENT_EXTRAS=modal,daytona,vercel,messaging,matrix,cron,cli,dev,tts-premium,slack,pty,honcho,mcp,homeassistant,sms,acp,voice,dingtalk,feishu,google,bedrock,web
+ARG HERMES_AGENT_EXTRAS=messaging,matrix,cron,cli,dev,tts-premium,slack,pty,honcho,mcp,sms,acp,voice,google,bedrock,web
 
 # Runtime layout: /opt/doh and /opt/hermes are image-owned and refreshed into
 # the persistent root on every start. /workspace is user-owned persistent state;
@@ -110,7 +110,7 @@ RUN { \
     } >> /etc/gitconfig
 
 COPY --chmod=755 build/prune-skills.sh /tmp/prune-skills.sh
-RUN git clone --depth 1 --branch v2026.5.7 https://github.com/NousResearch/hermes-agent.git \
+RUN git clone --depth 1 --branch v2026.5.29.2 https://github.com/NousResearch/hermes-agent.git \
         "$HERMES_WEBUI_AGENT_DIR" \
     && /tmp/prune-skills.sh "$HERMES_WEBUI_AGENT_DIR/skills" \
     && rm -f /tmp/prune-skills.sh \
@@ -159,6 +159,7 @@ fastmcp>=3.0,<4
 uvicorn>=0.30,<1
 fastapi>=0.110,<1
 rank_bm25>=0.2,<1
+anthropic==0.87.0
 EOF
 
 WORKDIR /
