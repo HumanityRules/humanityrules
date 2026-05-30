@@ -19,6 +19,17 @@ set -euo pipefail
 : "${HERMES_WEBUI_PORT:?HERMES_WEBUI_PORT must be set}"
 : "${HERMES_WEBUI_PYTHON:?HERMES_WEBUI_PYTHON must be set}"
 
+# Loopback Hermes agent API (gateway's api_server platform, 127.0.0.1:8642).
+# Enabled for in-sandbox webapps that want to call a full Hermes agent at
+# http://127.0.0.1:8642/v1/. Upstream *requires* a bearer key even for
+# loopback binds, so we mint a fixed one here. This is NOT a secret: it only
+# guards a loopback port inside this nono sandbox, where every process already
+# shares a uid, venv, and workspace and fully trusts its siblings. Exporting it
+# here makes it visible to the gateway AND to every process-compose child
+# (webapps inherit the parent env), so webapps read it from $API_SERVER_KEY.
+export API_SERVER_ENABLED=true
+export API_SERVER_KEY=doh-loopback-gateway-key
+
 CADDY_PORT=8787
 PROCESS_COMPOSE_PORT=9956
 WEBAPPS_ROOT=/workspace/webapps
@@ -109,10 +120,12 @@ bootstrap_gateway_process() {
     # via REST when vault credentials change without bouncing the whole
     # container. --replace clears any stale gateway.pid left over from a
     # previous container run that crashed before atexit could remove it.
+    #
+    # API_SERVER_ENABLED / API_SERVER_KEY are exported at container scope (top
+    # of this file) so both the gateway and webapp children inherit them.
     "$HERMES_WEBUI_PYTHON" /opt/doh/runtime/process_compose_seed.py system.gateway \
         --command "$HERMES_WEBUI_PYTHON -m hermes_cli.main gateway run --replace -v" \
-        --cwd "$HERMES_WEBUI_AGENT_DIR" \
-        --env API_SERVER_ENABLED=true
+        --cwd "$HERMES_WEBUI_AGENT_DIR"
 }
 
 wait_for_webui() {
