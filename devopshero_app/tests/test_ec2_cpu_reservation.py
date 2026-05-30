@@ -99,10 +99,15 @@ class Ec2CpuReservationTests(SimpleTestCase):
         self.assertEqual(props["Cpu"], "1024")
         self.assertNotIn("Cpu", props["ContainerDefinitions"][0])
 
-    def test_hermes_template_reserves_one_vcpu_per_container(self) -> None:
+    def test_hermes_template_packs_two_tasks_per_m8g_large(self) -> None:
         template = seed_app_templates.HERMES_PERSONAL_TEMPLATE
 
         hermes = next(c for c in template["containers"] if c["name"] == "hermes")
         proxy = next(c for c in template["containers"] if c["name"] == "policy-proxy")
-        self.assertEqual(hermes["cpu_reservation"], 1024)
+        self.assertEqual(hermes["cpu_reservation"], 896)
         self.assertEqual(proxy["cpu_reservation"], 128)
+        # ECS sums every container's reservation for placement; the per-task
+        # total must be <= 1024 so two tasks fit on one m8g.large (2048 units).
+        per_task_cpu = hermes["cpu_reservation"] + proxy["cpu_reservation"]
+        self.assertEqual(per_task_cpu, 1024)
+        self.assertLessEqual(per_task_cpu * 2, 2048)

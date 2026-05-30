@@ -328,10 +328,13 @@ HERMES_PERSONAL_TEMPLATE = {
             ],
             "linux_capabilities": ["SYS_ADMIN"],
             "stop_timeout": 120,
-            # Placement reservation: 1 vCPU so two hermes tasks fit on one
-            # m8g.large (2048 CPU units). Linux CPU shares — not a hard cap —
-            # let a task burst to the full node when its neighbor is idle.
-            "cpu_reservation": 1024,
+            # Placement reservation: 896 CPU units. The proxy reserves the
+            # other 128, so a task totals 1024 and two fit on one m8g.large
+            # (2048 CPU units) — ECS sums every container's reservation for
+            # placement, so the proxy's 128 counts here too. Linux CPU shares —
+            # not a hard cap — let a task burst to the full node when its
+            # neighbor is idle.
+            "cpu_reservation": 896,
             # Placement reservation: 2 GiB so two hermes tasks fit on one
             # m8g.large (~7747 MiB usable). Hard cap: 4 GiB — the container
             # can burst there when alone on the node. Under host memory
