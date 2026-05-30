@@ -390,29 +390,11 @@
     return payload;
   }
 
-  function showGenericVaultConfigModal(item, session) {
-    const schema = session.schema;
-    const backdrop = elem('div', { class: 'doh-modal-backdrop doh-vault-backdrop' });
-    const close = () => backdrop.remove();
-    const errorBox = elem('div', { class: 'doh-vault-error', style: { display: 'none' } });
-    const successBox = elem('div', { class: 'doh-vault-success', style: { display: 'none' } });
-    const form = elem('form', { class: 'doh-vault-form' });
-    for (const field of schema.fields || []) {
-      form.appendChild(fieldInputFor(field));
-    }
-    const saveBtn = elem('button', {
-      class: 'doh-integration-btn doh-integration-btn-primary',
-      type: 'submit',
-    }, ['Save']);
-    const actions = elem('div', { class: 'doh-modal-actions' }, [
-      elem('button', {
-        class: 'doh-integration-btn',
-        type: 'button',
-        onclick: close,
-      }, ['Cancel']),
-      saveBtn,
-    ]);
-    form.appendChild(actions);
+  // Wire a vault form's submit: POST to DOH, restart the gateway, swap the
+  // action row to a Close button, and refresh the pane. Shared by the generic
+  // and Slack renderers so the save/restart/refresh flow is single-sourced.
+  function wireVaultSubmit(opts) {
+    const { form, session, item, saveBtn, actions, errorBox, successBox, close } = opts;
     const showCloseAction = () => {
       actions.replaceChildren(elem('button', {
         class: 'doh-integration-btn doh-integration-btn-primary',
@@ -458,9 +440,139 @@
         }
       }
     });
+  }
+
+  function showGenericVaultConfigModal(item, session) {
+    const schema = session.schema;
+    const backdrop = elem('div', { class: 'doh-modal-backdrop doh-vault-backdrop' });
+    const close = () => backdrop.remove();
+    const errorBox = elem('div', { class: 'doh-vault-error', style: { display: 'none' } });
+    const successBox = elem('div', { class: 'doh-vault-success', style: { display: 'none' } });
+    const form = elem('form', { class: 'doh-vault-form' });
+    for (const field of schema.fields || []) {
+      form.appendChild(fieldInputFor(field));
+    }
+    const saveBtn = elem('button', {
+      class: 'doh-integration-btn doh-integration-btn-primary',
+      type: 'submit',
+    }, ['Save']);
+    const actions = elem('div', { class: 'doh-modal-actions' }, [
+      elem('button', {
+        class: 'doh-integration-btn',
+        type: 'button',
+        onclick: close,
+      }, ['Cancel']),
+      saveBtn,
+    ]);
+    form.appendChild(actions);
+    wireVaultSubmit({ form, session, item, saveBtn, actions, errorBox, successBox, close });
     const modal = elem('div', { class: 'doh-modal doh-vault-modal' }, [
       elem('div', { class: 'doh-modal-title' }, [(schema.status === 'connected' ? 'Configure ' : 'Connect ') + (schema.label || item.label)]),
       elem('div', { class: 'doh-modal-body' }, [schema.message || 'Credentials are sent directly to the DevOps Hero vault.']),
+      errorBox,
+      successBox,
+      form,
+    ]);
+    backdrop.appendChild(modal);
+    backdrop.addEventListener('click', (e) => { if (e.target === backdrop) close(); });
+    document.body.appendChild(backdrop);
+  }
+
+  // Build the Slack "Create app" prefill URL for one mode by embedding that
+  // mode's manifest. The operator clicks it, Slack opens Create-New-App with
+  // everything pre-filled (incl. Socket Mode), then generates the app-level
+  // token and installs to get the bot token.
+  function slackCreateAppUrl(schema, mode) {
+    const manifest = (schema.manifests || {})[mode];
+    if (!manifest) return null;
+    return 'https://api.slack.com/apps?new_app=1&manifest_json=' +
+      encodeURIComponent(JSON.stringify(manifest));
+  }
+
+  function showSlackConfigModal(item, session) {
+    const schema = session.schema;
+    const backdrop = elem('div', { class: 'doh-modal-backdrop doh-vault-backdrop' });
+    const close = () => backdrop.remove();
+    const errorBox = elem('div', { class: 'doh-vault-error', style: { display: 'none' } });
+    const successBox = elem('div', { class: 'doh-vault-success', style: { display: 'none' } });
+    const form = elem('form', { class: 'doh-vault-form' });
+
+    // Never preselect a disabled mode: a stale credential could carry a mode
+    // since turned off (the backend would then reject Save). Clamp to the
+    // server's selected_mode only if it's enabled, else the first enabled mode.
+    const enabledModes = (schema.modes || []).filter((m) => m.enabled);
+    const preferred = schema.selected_mode || 'company_wide';
+    let selectedMode =
+      enabledModes.some((m) => m.value === preferred) ? preferred
+      : (enabledModes[0] ? enabledModes[0].value : preferred);
+    // Hidden input carries the chosen mode to the backend as config.workspace_scope
+    // (submitVaultForm routes non-secret named inputs into `config`).
+    const modeInput = elem('input', { type: 'hidden', name: 'workspace_scope' });
+    modeInput.value = selectedMode;
+
+    // The prefill link is rebuilt whenever the mode changes — each mode embeds
+    // a different manifest (different scopes + event subscriptions).
+    const createLink = elem('a', {
+      class: 'doh-integration-btn doh-integration-btn-primary doh-slack-create-link',
+      target: '_blank',
+      rel: 'noopener noreferrer',
+    }, ['Create Slack app ↗']);
+    const syncCreateLink = () => {
+      const url = slackCreateAppUrl(schema, selectedMode);
+      if (url) { createLink.href = url; createLink.style.display = ''; }
+      else { createLink.removeAttribute('href'); createLink.style.display = 'none'; }
+    };
+
+    // Radios deliberately carry NO `name` attribute: submitVaultForm scrapes
+    // every `[name]` input into credentials/config, so a named radio would
+    // leak a bogus field. The chosen value flows only through `modeInput`.
+    // Mutual exclusion is done in JS by unchecking siblings on change.
+    const modeChoices = elem('div', { class: 'doh-slack-modes' });
+    const radios = [];
+    for (const mode of schema.modes || []) {
+      const radio = elem('input', { type: 'radio', value: mode.value });
+      radio.checked = mode.value === selectedMode;
+      if (!mode.enabled) radio.disabled = true;
+      radio.addEventListener('change', () => {
+        if (!radio.checked) return;
+        for (const other of radios) { if (other !== radio) other.checked = false; }
+        selectedMode = mode.value;
+        modeInput.value = selectedMode;
+        syncCreateLink();
+      });
+      radios.push(radio);
+      const labelText = mode.label + (mode.enabled ? '' : ' (coming soon)');
+      modeChoices.appendChild(elem('label', { class: 'doh-slack-mode' }, [radio, elem('span', null, [labelText])]));
+    }
+
+    const steps = elem('ol', { class: 'doh-slack-steps' }, [
+      elem('li', null, ['Click ', elem('b', null, ['Create Slack app']), ' and create it in your workspace.']),
+      elem('li', null, ['On the app page, generate an ', elem('b', null, ['App-level token']), ' (scope connections:write).']),
+      elem('li', null, [elem('b', null, ['Install']), ' the app to your workspace to get the ', elem('b', null, ['Bot token']), '.']),
+      elem('li', null, ['Paste both tokens below.']),
+    ]);
+
+    form.appendChild(modeInput);
+    form.appendChild(elem('div', { class: 'doh-vault-field-label' }, ['Agent type']));
+    form.appendChild(modeChoices);
+    form.appendChild(elem('div', { class: 'doh-slack-create-row' }, [createLink]));
+    form.appendChild(steps);
+    for (const field of schema.fields || []) {
+      form.appendChild(fieldInputFor(field));
+    }
+    syncCreateLink();
+
+    const saveBtn = elem('button', { class: 'doh-integration-btn doh-integration-btn-primary', type: 'submit' }, ['Save']);
+    const actions = elem('div', { class: 'doh-modal-actions' }, [
+      elem('button', { class: 'doh-integration-btn', type: 'button', onclick: close }, ['Cancel']),
+      saveBtn,
+    ]);
+    form.appendChild(actions);
+    wireVaultSubmit({ form, session, item, saveBtn, actions, errorBox, successBox, close });
+
+    const modal = elem('div', { class: 'doh-modal doh-vault-modal' }, [
+      elem('div', { class: 'doh-modal-title' }, [(schema.status === 'connected' ? 'Configure ' : 'Connect ') + (schema.label || item.label)]),
+      elem('div', { class: 'doh-modal-body' }, [schema.message || 'Tokens are sent directly to the DevOps Hero vault.']),
       errorBox,
       successBox,
       form,
@@ -476,7 +588,9 @@
   // manifest prefill link + two tokens) register a custom renderer here,
   // keyed by slug; everything else falls back to the generic one. All
   // renderers share the same setup-session/submit/restart plumbing.
-  const _VAULT_RENDERERS = {};
+  const _VAULT_RENDERERS = {
+    slack: showSlackConfigModal,
+  };
 
   async function startVaultConfig(item) {
     try {

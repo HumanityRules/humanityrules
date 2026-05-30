@@ -327,3 +327,45 @@ main.main.showing-integrations > #mainChat { display: none !important; }
   border: 1px solid rgba(34, 197, 94, 0.35);
   background: rgba(20, 83, 45, 0.18);
 }
+
+/* Slack config modal: mode selector, prefill link, numbered steps. */
+.doh-slack-modes {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.doh-slack-mode {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text);
+  font-size: 13px;
+}
+
+.doh-slack-mode input:disabled + span {
+  color: var(--muted);
+}
+
+.doh-slack-create-row {
+  display: flex;
+}
+
+.doh-slack-create-link {
+  text-decoration: none;
+}
+
+.doh-slack-steps {
+  margin: 0;
+  padding-left: 18px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.5;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.doh-slack-steps b {
+  color: var(--text);
+}
