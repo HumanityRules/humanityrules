@@ -1,6 +1,6 @@
 --- a/api/routes.py
 +++ b/api/routes.py
-@@ -3521,6 +3521,12 @@
+@@ -8363,6 +8363,12 @@
          # works even when hermes_cli is not on sys.path.
          from api.config import _resolve_provider_alias
          provider = _resolve_provider_alias(provider)
@@ -10,6 +10,6 @@
 +        # foundation model in the account showing up in the dropdown.
 +        if provider == "bedrock":
 +            return j(handler, {"provider": provider, "models": [], "count": 0})
-
+ 
          cache_key = _live_models_cache_key(provider)
          cached = _get_cached_live_models(cache_key)

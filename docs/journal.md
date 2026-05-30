@@ -1,5 +1,23 @@
 # DevOpsHero Development Journal
 
+## 2026-05-29 20:10 - [Integrations] Hermes Agent + WebUI pin bump (v2026.5.7 → v2026.5.29.2 / 0.51.63 → 0.51.160)
+
+**Conversation:** [2026-05-29-2010-1a1bca6b.md](conversations/2026-05-29-2010-1a1bca6b.md)
+
+Bumped both Hermes pins in `template_repos/hermes_agent/Dockerfile`, re-anchored all 8 DOH-owned patches against the new upstream, and verified the whole thing end-to-end against a live Bedrock completion in the local compose stack. Started from the `hermes-update-check` skill's delta report.
+
+**The build applies patches with `patch -p1 -F 0` — zero fuzz tolerance.** This is the load-bearing constraint for the whole exercise: any drifted context line (not just a changed anchor) is a hard build failure. Dry-running the old patches against fresh upstream showed only 2 of 8 still applied. Rather than hand-edit headers, I regenerated each patch by applying the intended change to a pristine copy of the upstream file and `diff -u`'ing — that guarantees exact-context output that survives `-F 0`. Then re-verified all 8 apply with rc=0 and the patched Python still compiles.
+
+**Agent `run_agent.py` was split apart (14,648 → 4,616 lines).** The conversation loop, adapters, and helpers moved into `agent/*.py` modules. Our `04-stop-answer-as-reasoning.patch` targeted `run_agent.py`; the exact block moved verbatim into `agent/conversation_loop.py` with `self.` → `agent.`. Retargeted the patch there. Upstream behavior we object to (emitting top-level assistant content as a `reasoning.available` event) is unchanged, so the patch is still needed.
+
+**The real surprise was a runtime crash, not a build failure: `The 'anthropic' package is required for the Bedrock provider`.** Root cause is a dependency restructure between our pins. Up to v2026.5.7, `anthropic` was a *base* dependency of hermes-agent, so it was always present — and our Bedrock deploys route Claude through the `AnthropicBedrock` SDK (`agent/anthropic_adapter.py:build_anthropic_bedrock_client`) for prompt caching, thinking budgets, and 1M context. As of v2026.5.29.2, upstream moved `anthropic` out of base deps into an optional `anthropic` extra + runtime auto-install via `tools/lazy_deps.py` (their 2026-05-12 supply-chain hardening after the "Mini Shai-Hulud" worm hit `mistralai` on PyPI). Our locked-down sandbox (egress only through the broker, no arbitrary runtime pip) can't lazy-install, and the `bedrock` extra only pulls `boto3` — not `anthropic`. So the AnthropicBedrock path had no SDK.
+
+**Fix: pin `anthropic==0.87.0` explicitly in the Dockerfile's `/apptoo/requirements.txt` append.** Version detail that matters — the `anthropic` *extra* pins `0.86.0`, but `lazy_deps.py` wants `0.87.0` (CVE-2026-34450/34452). `lazy_deps._is_satisfied` does a version check and would attempt a (blocked) upgrade at runtime if it found `0.86.0`. Pinning `0.87.0` to match `LAZY_DEPS["provider.anthropic"]` makes the runtime check a clean no-op. This gotcha will recur on every future bump — saved to memory and must re-check the lazy_deps pin each time.
+
+**Trimmed dead/niche extras from `HERMES_AGENT_EXTRAS`.** The build warned `does not have an extra named 'vercel'` — upstream removed the `vercel` extra entirely (silently ignored, install continued). Removed it, then on review also dropped `modal`, `daytona`, `homeassistant` (unused), and `dingtalk` + `feishu` (Chinese enterprise messengers — DingTalk/Alibaba and Feishu/Lark/ByteDance bot SDKs — niche for a Western deployment). Verified each remaining extra is still declared in upstream's `pyproject.toml`.
+
+**Verified end-to-end, not just at build.** Built the image (patches applied in-image, `anthropic 0.87.0` + `AnthropicBedrock` present), brought up the local Bedrock stack, and drove a real completion through the WebUI chat API (`session/new` → `chat/start`): the agent replied `PONG` via `provider=bedrock` hitting `bedrock-runtime.us-east-1.amazonaws.com` (`in=18433 out=6 latency=1.9s`), zero anthropic/import errors in the logs. The original crash path is fixed. The only log errors were the pre-existing, unrelated `API_SERVER_KEY is required` gateway warning (optional component we don't run locally; predates this change). Note: the extras were trimmed *after* this build, so a fresh build to confirm the slimmed install resolves cleanly is still outstanding.
+
 ## 2026-05-29 16:27 - [DevEx] Make integrations work in the local Hermes compose stack
 
 **Conversation:** [2026-05-29-1628-6a4806b3.md](conversations/2026-05-29-1628-6a4806b3.md)

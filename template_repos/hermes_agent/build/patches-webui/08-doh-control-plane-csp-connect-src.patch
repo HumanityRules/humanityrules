@@ -1,9 +1,11 @@
 --- a/api/helpers.py
 +++ b/api/helpers.py
-@@ -37,6 +37,30 @@
+@@ -34,6 +34,30 @@
+     resolved = (root / requested).resolve()
+     resolved.relative_to(root.resolve())  # raises ValueError if outside root
      return resolved
- 
- 
++
++
 +def _doh_control_plane_csp_origin() -> str:
 +    """Return the configured DOH control-plane origin for connect-src."""
 +    from urllib.parse import urlparse
@@ -26,17 +28,15 @@
 +    ):
 +        host = f"{host}:{port}"
 +    return f" {scheme}://{host}"
-+
-+
+ 
+ 
  def _security_headers(handler):
-     """Add security headers to every response."""
-     handler.send_header('X-Content-Type-Options', 'nosniff')
 @@ -46,7 +70,7 @@
          "default-src 'self' https://*.cloudflareaccess.com; "
          "script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://static.cloudflareinsights.com; "
          "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://fonts.googleapis.com; "
--        "img-src 'self' data: https: blob:; font-src 'self' data: https://cdn.jsdelivr.net https://fonts.gstatic.com; connect-src 'self' https://cdn.jsdelivr.net; "
-+        f"img-src 'self' data: https: blob:; font-src 'self' data: https://cdn.jsdelivr.net https://fonts.gstatic.com; connect-src 'self' https://cdn.jsdelivr.net{_doh_control_plane_csp_origin()}; "
+-        "img-src 'self' data: https: blob:; font-src 'self' data: https://fonts.gstatic.com; connect-src 'self' https://cdn.jsdelivr.net; "
++        f"img-src 'self' data: https: blob:; font-src 'self' data: https://fonts.gstatic.com; connect-src 'self' https://cdn.jsdelivr.net{_doh_control_plane_csp_origin()}; "
          "manifest-src 'self' https://*.cloudflareaccess.com; "
          "base-uri 'self'; form-action 'self'"
      )

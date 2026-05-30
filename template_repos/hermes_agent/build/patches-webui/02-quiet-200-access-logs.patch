@@ -1,11 +1,11 @@
 --- a/server.py
 +++ b/server.py
-@@ -52,6 +52,8 @@
-
+@@ -273,6 +273,8 @@
+ 
      def log_request(self, code: str='-', size: str='-') -> None:
          """Structured JSON logs for each request."""
 +        if str(code) == '200':
 +            return
          import json as _json
          duration_ms = round((time.time() - getattr(self, '_req_t0', time.time())) * 1000, 1)
-         record = _json.dumps({
+         remote = '-'

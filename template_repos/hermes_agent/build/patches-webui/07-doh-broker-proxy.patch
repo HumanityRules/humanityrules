@@ -1,19 +1,19 @@
 --- a/api/routes.py
 +++ b/api/routes.py
-@@ -3098,6 +3098,12 @@
+@@ -3958,6 +3958,12 @@
+ 
  def handle_get(handler, parsed) -> bool:
      """Handle all GET routes. Returns True if handled, False for 404."""
-
++
 +    # DOH: same-origin reverse proxy for the integrations broker's control
 +    # API. Covers all integration management surfaces (status, OAuth start /
 +    # callback, disconnect). See template_repos/hermes_agent/integrations_broker.py.
 +    if parsed.path.startswith("/__doh_broker/"):
 +        return _doh_broker_proxy(handler, parsed, method="GET", body=b"")
-+
+ 
      if parsed.path.startswith("/session/static/"):
          # Strip the leading "/session" so _serve_static() sees a path that
-         # starts with "/static/" (its required prefix). _serve_static enforces
-@@ -4139,6 +4145,17 @@
+@@ -5200,6 +5206,17 @@
  def handle_post(handler, parsed) -> bool:
      """Handle all POST routes. Returns True if handled, False for 404."""
      diag = RequestDiagnostics.maybe_start("POST", parsed.path, logger=logger)
@@ -31,11 +31,10 @@
      if parsed.path == "/api/csp-report":
          if diag:
              diag.stage("csp_report")
-@@ -5606,6 +5624,42 @@
-             return _kanban_unknown_endpoint(handler, parsed, "DELETE")
+@@ -6971,7 +6988,43 @@
          return True
      return False
-+
+ 
 +
 +# DOH: /__doh_broker/* → 127.0.0.1:9951 (the integrations broker's unified
 +# control API: TLS-intercept providers like Google plus MCP-aggregator
@@ -43,7 +42,7 @@
 +# transport and is never reached by the browser.
 +def _doh_broker_proxy(handler, parsed, method: str, body: bytes) -> bool:
 +    import http.client as _httpclient
-+
+ 
 +    upstream_path = parsed.path[len("/__doh_broker"):] or "/"
 +    if parsed.query:
 +        upstream_path += "?" + parsed.query
@@ -71,6 +70,8 @@
 +    handler.end_headers()
 +    handler.wfile.write(payload)
 +    return True
-
- # ── GET route helpers ─────────────────────────────────────────────────────────
-
++
++
+ def handle_put(handler, parsed) -> bool:
+     """Handle all PUT routes. Returns True if handled, False for 404."""
+     if not _check_csrf(handler):
