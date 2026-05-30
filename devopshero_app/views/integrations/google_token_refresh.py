@@ -2,7 +2,7 @@
 
 `refresh_google_outcome` exchanges the user's stored refresh_token with
 Google using DOH's OAuth client_secret and returns a broker-shaped
-`{outcome, access_token?, expires_in?, config, metadata}` dict. The
+`{outcome, secrets?, expires_in?, config, metadata}` dict. The
 batched endpoint (`views/integrations/token_refresh_batch.py`) calls
 this from a worker thread alongside the other providers.
 
@@ -34,7 +34,7 @@ GOOGLE_TOKEN_EXCHANGE_TIMEOUT_SECONDS = 5
 def refresh_google_outcome(environment: Environment, owner_user: User, app_slug: str) -> dict:
     """Compute the broker-shaped refresh outcome for one (env, owner, app).
 
-    Returns `{outcome, access_token?, expires_in?, config?, metadata?}`
+    Returns `{outcome, secrets?, expires_in?, config?, metadata?}`
     where `outcome` is `"has_token" | "absent" | "transient"`. The
     `absent` (disconnected) path is intentionally silent — the broker
     asks every Refresh-all/bootstrap, and most providers are typically
@@ -89,7 +89,7 @@ def refresh_google_outcome(environment: Environment, owner_user: User, app_slug:
 
     return {
         "outcome": "has_token",
-        "access_token": exchange_result.response["access_token"],
+        "secrets": {"access_token": exchange_result.response["access_token"]},
         "expires_in": int(exchange_result.response.get("expires_in", 0)),
         "config": {},
         "metadata": {},

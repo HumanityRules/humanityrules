@@ -390,7 +390,7 @@
     return payload;
   }
 
-  function showVaultConfigModal(item, session) {
+  function showGenericVaultConfigModal(item, session) {
     const schema = session.schema;
     const backdrop = elem('div', { class: 'doh-modal-backdrop doh-vault-backdrop' });
     const close = () => backdrop.remove();
@@ -470,10 +470,19 @@
     document.body.appendChild(backdrop);
   }
 
+  // Per-provider config-modal renderers. The generic `showGenericVaultConfigModal`
+  // renders any flat `schema.fields` form (Telegram and friends). Providers
+  // whose setup needs more than a flat form (e.g. Slack's mode selector +
+  // manifest prefill link + two tokens) register a custom renderer here,
+  // keyed by slug; everything else falls back to the generic one. All
+  // renderers share the same setup-session/submit/restart plumbing.
+  const _VAULT_RENDERERS = {};
+
   async function startVaultConfig(item) {
     try {
       const session = await requestVaultSetupSession(item);
-      showVaultConfigModal(item, session);
+      const renderer = _VAULT_RENDERERS[item.slug] || showGenericVaultConfigModal;
+      renderer(item, session);
     } catch (err) {
       alert(err.message || 'Could not open the vault dialog.');
     }

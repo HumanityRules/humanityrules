@@ -28,6 +28,8 @@ The main developer documentation lives in the docs/ subdirectory. **When creatin
 
 - **`docs/app_removal_data_cleanup_audit.md`** — Audit of what `AppRemovalJob`'s flags cover, and the gap: `IntegrationUserCredential` rows have no FK to `App` and are never cleaned up. Open when reworking app removal, debugging phantom reconnects after recreating an app, or auditing GDPR. Snapshot 2026-05-24.
 
+- **`docs/slack_integration_design.md`** — How a Hermes agent connects to Slack via Socket Mode: personal vs company-wide modes, the prefill-URL manifest onboarding flow, why the customer must create the app, and the two-manifest privacy model. Open when working on the Slack integration, the integrations-panel config dialog, or reasoning about Slack token ownership.
+
 - **`docs/gateway_env_and_restart_design.md`** — How vault-style credentials whose env presence activates a gateway platform binding (Telegram today) reach the in-sandbox Hermes gateway, and how the gateway is restarted in place without redeploying. Open when adding a gateway-activating provider or debugging gateway env propagation.
 
 - **`docs/webapps_design.md`** — How a Hermes agent serves user-built web apps at `/webapps/<slug>/` via a Caddy sidecar (port topology, `webapps` CLI, `routes.caddy` regeneration, `X-Forwarded-Prefix` framework configs). Open when working on the webapps mechanism, debugging cross-origin or routing issues, or adding a new framework.

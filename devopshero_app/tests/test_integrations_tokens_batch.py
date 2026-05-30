@@ -200,7 +200,7 @@ class TestConnectedProvidersReturnHasToken(_BatchTokensEndpointTestBase):
         self.assertEqual(status, 200)
         google_result = body["results"]["google"]
         self.assertEqual(google_result["outcome"], "has_token")
-        self.assertEqual(google_result["access_token"], "ya29.fresh")
+        self.assertEqual(google_result["secrets"], {"access_token": "ya29.fresh"})
         self.assertEqual(google_result["expires_in"], 3599)
         self.assertEqual(google_result["config"], {})
         self.assertEqual(google_result["metadata"], {})
@@ -225,7 +225,7 @@ class TestConnectedProvidersReturnHasToken(_BatchTokensEndpointTestBase):
         self.assertEqual(status, 200)
         tg = body["results"]["telegram"]
         self.assertEqual(tg["outcome"], "has_token")
-        self.assertEqual(tg["access_token"], "123456:REAL")
+        self.assertEqual(tg["secrets"], {"bot_token": "123456:REAL"})
         self.assertEqual(tg["config"], {"allowed_users": ["42", "7"]})
         self.assertEqual(tg["metadata"], {"bot_id": 123456, "bot_username": "doh_bot"})
 
