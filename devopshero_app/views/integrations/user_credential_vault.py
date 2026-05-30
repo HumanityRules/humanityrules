@@ -15,6 +15,7 @@ from django.views.decorators.http import require_POST
 
 from devopshero_app.models import App, Environment, IntegrationUserCredential, ResourceTag, User
 from devopshero_app.views import env_bearer_auth
+from devopshero_app.views.integrations import slack_vault
 
 logger = logging.getLogger(__name__)
 
@@ -531,8 +532,10 @@ def refresh_telegram_outcome(environment: Environment, owner_user: User, app_slu
 # config_payload) -> (IntegrationUserCredential | None, error_message | None).
 _SCHEMA_BUILDERS = {
     IntegrationUserCredential.Provider.TELEGRAM: _telegram_schema,
+    IntegrationUserCredential.Provider.SLACK: slack_vault.slack_schema,
 }
 
 _CREDENTIAL_SAVERS = {
     IntegrationUserCredential.Provider.TELEGRAM: _save_telegram_credentials,
+    IntegrationUserCredential.Provider.SLACK: slack_vault.save_slack_credentials,
 }
