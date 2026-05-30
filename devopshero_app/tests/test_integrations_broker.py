@@ -192,7 +192,7 @@ class TestRewriteAuthorization(unittest.TestCase):
                 (b"content-type", b"application/json"),
             ],
             path_with_query="/bot000000:DOH_PLACEHOLDER/getUpdates?timeout=20",
-            token="123456:REAL",
+            secrets={"bot_token": "123456:REAL"},
             provider=provider,
             upstream_host="api.telegram.org",
         )
@@ -206,7 +206,7 @@ class TestRewriteAuthorization(unittest.TestCase):
         _headers, path = broker.tls_intercept._rewrite_request_for_provider(
             headers=[(b"host", b"api.telegram.org")],
             path_with_query="/file/bot000000:DOH_PLACEHOLDER/documents/file.txt",
-            token="123456:REAL",
+            secrets={"bot_token": "123456:REAL"},
             provider=provider,
             upstream_host="api.telegram.org",
         )
@@ -224,9 +224,46 @@ class TestRewriteAuthorization(unittest.TestCase):
             broker.tls_intercept._rewrite_request_for_provider(
                 headers=[(b"host", b"api.telegram.org")],
                 path_with_query="/bot000000%3ADOH_PLACEHOLDER/sendMessage",
-                token="123456:REAL",
+                secrets={"bot_token": "123456:REAL"},
                 provider=provider,
                 upstream_host="api.telegram.org",
+            )
+
+    def test_slack_app_token_placeholder_selects_app_token(self) -> None:
+        """A request bearing the app-token placeholder gets the real app token."""
+        provider = broker.tls_intercept.TLS_INTERCEPT_PROVIDERS["slack"]
+        headers, path = broker.tls_intercept._rewrite_request_for_provider(
+            headers=[(b"host", b"slack.com"), (b"authorization", b"Bearer xapp-DOH_PLACEHOLDER")],
+            path_with_query="/api/apps.connections.open",
+            secrets={"app_token": "xapp-REAL", "bot_token": "xoxb-REAL"},
+            provider=provider,
+            upstream_host="slack.com",
+        )
+        self.assertEqual(path, "/api/apps.connections.open")
+        self.assertEqual(dict((n.lower(), v) for n, v in headers)[b"authorization"], b"Bearer xapp-REAL")
+
+    def test_slack_bot_token_placeholder_selects_bot_token(self) -> None:
+        """A request bearing the bot-token placeholder gets the real bot token."""
+        provider = broker.tls_intercept.TLS_INTERCEPT_PROVIDERS["slack"]
+        headers, _path = broker.tls_intercept._rewrite_request_for_provider(
+            headers=[(b"host", b"slack.com"), (b"authorization", b"Bearer xoxb-DOH_PLACEHOLDER")],
+            path_with_query="/api/chat.postMessage",
+            secrets={"app_token": "xapp-REAL", "bot_token": "xoxb-REAL"},
+            provider=provider,
+            upstream_host="slack.com",
+        )
+        self.assertEqual(dict((n.lower(), v) for n, v in headers)[b"authorization"], b"Bearer xoxb-REAL")
+
+    def test_slack_unknown_placeholder_fails_closed(self) -> None:
+        """An unrecognized bearer must raise rather than forward an un-swapped token."""
+        provider = broker.tls_intercept.TLS_INTERCEPT_PROVIDERS["slack"]
+        with self.assertRaises(broker.tls_intercept._SecretSelectionError):
+            broker.tls_intercept._rewrite_request_for_provider(
+                headers=[(b"host", b"slack.com"), (b"authorization", b"Bearer xoxb-NOT-OURS")],
+                path_with_query="/api/chat.postMessage",
+                secrets={"app_token": "xapp-REAL", "bot_token": "xoxb-REAL"},
+                provider=provider,
+                upstream_host="slack.com",
             )
 
 
@@ -1114,6 +1151,10 @@ class TestRefreshAllBatchedApply(unittest.IsolatedAsyncioTestCase):
                 outcome=broker.tls_intercept.REFRESH_OUTCOME_ABSENT,
                 secrets=None, expires_in=None, config={}, metadata={},
             ),
+            "slack": broker.tls_intercept.RefreshResult(
+                outcome=broker.tls_intercept.REFRESH_OUTCOME_ABSENT,
+                secrets=None, expires_in=None, config={}, metadata={},
+            ),
         }
         with patch.object(
             broker.tls_intercept,
@@ -1136,6 +1177,17 @@ class TestGatewayEnvRender(unittest.TestCase):
 
     def _google_provider(self) -> "broker.tls_intercept.TlsProviderSpec":
         return broker.tls_intercept.TLS_INTERCEPT_PROVIDERS["google"]
+
+    def _slack_provider(self) -> "broker.tls_intercept.TlsProviderSpec":
+        return broker.tls_intercept.TLS_INTERCEPT_PROVIDERS["slack"]
+
+    def test_slack_vault_header_provider_renders_both_placeholders(self) -> None:
+        """VaultHeaderInject renders one env var per placeholder plus list config."""
+        snapshot = [(self._slack_provider(), {"allowed_users": ["U1", "U2"]})]
+        block = broker.tls_intercept.render_managed_block(snapshot=snapshot)
+        self.assertIn("SLACK_APP_TOKEN=xapp-DOH_PLACEHOLDER", block)
+        self.assertIn("SLACK_BOT_TOKEN=xoxb-DOH_PLACEHOLDER", block)
+        self.assertIn("SLACK_ALLOWED_USERS=U1,U2", block)
 
     def test_connected_vault_provider_renders_managed_block(self) -> None:
         snapshot = [(self._telegram_provider(), {"allowed_users": [42, 7]})]

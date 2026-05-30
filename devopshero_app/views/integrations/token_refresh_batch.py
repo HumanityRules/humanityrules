@@ -33,6 +33,7 @@ from devopshero_app.views import env_bearer_auth
 from devopshero_app.views.integrations import (
     github_token_refresh,
     google_token_refresh,
+    slack_vault,
     user_credential_vault,
 )
 
@@ -43,6 +44,7 @@ _OUTCOME_HANDLERS = {
     "google": google_token_refresh.refresh_google_outcome,
     "github": github_token_refresh.refresh_github_outcome,
     "telegram": user_credential_vault.refresh_telegram_outcome,
+    "slack": slack_vault.refresh_slack_outcome,
 }
 
 

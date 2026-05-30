@@ -1778,6 +1778,7 @@ class IntegrationUserCredential(models.Model):
         GOOGLE = "google", "Google"
         GITHUB = "github", "GitHub"
         TELEGRAM = "telegram", "Telegram"
+        SLACK = "slack", "Slack"
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid7, editable=False)
     owner_user = models.ForeignKey(

@@ -85,7 +85,39 @@ class VaultUrlRewrite:
     restart_required_after_save: ClassVar[bool] = True
 
 
-CredentialMethod = OAuthHeader | VaultUrlRewrite
+@dataclass(frozen=True)
+class VaultHeaderInject:
+    """Vault-pasted, header-injected, multi-secret credential (Slack).
+
+    Hybrid of the other two methods: it's vault-pasted like `VaultUrlRewrite`
+    (connect_mode `vault`, restart-required, carries `gateway_env` bindings),
+    but the secret rides an `Authorization: Bearer` header like `OAuthHeader`
+    rather than a URL placeholder.
+
+    A provider here carries more than one secret (Slack's app + bot token).
+    Selection is by **placeholder reverse-map, not request path**: the gateway
+    env hands the sandbox a distinct placeholder bearer per secret, and the
+    sandbox already sends the correct token per call (the app token opens the
+    Socket Mode connection; the bot token posts messages). The proxy reads the
+    incoming placeholder bearer and swaps in the matching real secret — no
+    per-request path logic. `placeholders` maps secret_name -> placeholder.
+    """
+
+    placeholders: dict[str, str]
+    gateway_env: tuple[GatewayEnvBinding, ...] = ()
+    auth_format: str = AUTH_FORMAT_BEARER
+    connect_mode: ClassVar[str] = "vault"
+    restart_required_after_save: ClassVar[bool] = True
+
+    def secret_for_placeholder(self, bearer_token: str) -> str | None:
+        """Reverse-map an incoming placeholder bearer to its secret name."""
+        for secret_name, placeholder in self.placeholders.items():
+            if placeholder == bearer_token:
+                return secret_name
+        return None
+
+
+CredentialMethod = OAuthHeader | VaultUrlRewrite | VaultHeaderInject
 
 
 @dataclass(frozen=True)
@@ -225,6 +257,27 @@ TLS_INTERCEPT_PROVIDER_SPECS = (
             ),
         ),
     ),
+    TlsProviderSpec(
+        slug="slack",
+        label="Slack",
+        # Only the Slack Web API (REST) is intercepted. The Socket Mode
+        # `wss://` host is not listed here, so it falls through to a plain
+        # CONNECT tunnel — it carries only the short-lived ticket from
+        # apps.connections.open, not a long-lived token.
+        hosts=("slack.com", "www.slack.com"),
+        logo_url="/extensions/slack.svg",
+        credential_method=VaultHeaderInject(
+            placeholders={
+                "app_token": "xapp-DOH_PLACEHOLDER",
+                "bot_token": "xoxb-DOH_PLACEHOLDER",
+            },
+            gateway_env=(
+                GatewayEnvBinding(env_var="SLACK_APP_TOKEN", source="app_token"),
+                GatewayEnvBinding(env_var="SLACK_BOT_TOKEN", source="bot_token"),
+                GatewayEnvBinding(env_var="SLACK_ALLOWED_USERS", source="allowed_users", list_separator=","),
+            ),
+        ),
+    ),
 )
 
 
@@ -352,12 +405,27 @@ GATEWAY_ENV_BLOCK_BEGIN = "# === DOH-MANAGED-INTEGRATIONS BEGIN ==="
 GATEWAY_ENV_BLOCK_END = "# === DOH-MANAGED-INTEGRATIONS END ==="
 
 
-def _render_gateway_env_lines(provider: TlsProviderSpec, method: VaultUrlRewrite, config: dict) -> list[str]:
+def _placeholder_for_binding(method: "VaultUrlRewrite | VaultHeaderInject", source: str) -> str | None:
+    """Resolve a binding's placeholder value, or None if `source` isn't a placeholder ref.
+
+    `VaultUrlRewrite` has one placeholder, referenced by the literal `"placeholder"`.
+    `VaultHeaderInject` has many; a binding references one by its secret name
+    (a key in `method.placeholders`).
+    """
+    if isinstance(method, VaultUrlRewrite):
+        return method.placeholder if source == "placeholder" else None
+    if source in method.placeholders:
+        return method.placeholders[source]
+    return None
+
+
+def _render_gateway_env_lines(provider: TlsProviderSpec, method: "VaultUrlRewrite | VaultHeaderInject", config: dict) -> list[str]:
     """Project one connected vault provider's gateway_env bindings into KEY=VALUE lines."""
     lines: list[str] = []
     for binding in method.gateway_env:
-        if binding.source == "placeholder":
-            value = method.placeholder
+        placeholder_value = _placeholder_for_binding(method=method, source=binding.source)
+        if placeholder_value is not None:
+            value = placeholder_value
         else:
             raw = config.get(binding.source)
             if raw is None:
@@ -381,15 +449,15 @@ def render_managed_block(snapshot: list[tuple[TlsProviderSpec, dict]]) -> str:
 
     The snapshot lists only connected providers (cache presence == connected,
     by the token-store contract). Each tuple is `(provider, config)`. Only
-    `VaultUrlRewrite` credential methods carry `gateway_env` bindings today,
-    so they're the only ones that produce lines here; if an OAuth provider
-    ever needs to surface env vars to the gateway, we'll need a different
-    way to signal "this provider has gateway env to render".
+    vault credential methods (`VaultUrlRewrite`, `VaultHeaderInject`) carry
+    `gateway_env` bindings, so they're the only ones that produce lines here;
+    if an OAuth provider ever needs to surface env vars to the gateway, we'll
+    need a different way to signal "this provider has gateway env to render".
     """
     body_lines: list[str] = []
     for provider, config in snapshot:
         method = provider.credential_method
-        if not isinstance(method, VaultUrlRewrite):
+        if not isinstance(method, (VaultUrlRewrite, VaultHeaderInject)):
             continue
         body_lines.extend(_render_gateway_env_lines(provider=provider, method=method, config=config))
     if not body_lines:
@@ -506,8 +574,13 @@ class _TokenStore:
             return None
         return self._providers[slug]
 
-    async def token_for_host(self, host: str) -> str | None:
-        """Return a fresh token for an upstream host, or None when disconnected."""
+    async def secrets_for_host(self, host: str) -> dict[str, str] | None:
+        """Return the fresh secrets map for an upstream host, or None when disconnected.
+
+        Multi-secret providers (Slack) need the whole map so the request
+        rewrite can pick the right secret per call; single-secret providers
+        get a one-entry map.
+        """
         provider = self.provider_for_host(host=host)
         if provider is None:
             return None
@@ -515,9 +588,17 @@ class _TokenStore:
             entry = await self._ensure_fresh_locked(provider=provider)
         if entry is None:
             return None
-        # Single-secret providers today; Slice 3 adds a per-request selector
-        # for multi-secret providers (Slack's bot vs app token).
-        return _primary_secret(entry.secrets)
+        return entry.secrets
+
+    async def token_for_host(self, host: str) -> str | None:
+        """Return a single fresh token for an upstream host, or None when disconnected.
+
+        Convenience wrapper over `secrets_for_host` for single-secret providers.
+        """
+        secrets = await self.secrets_for_host(host=host)
+        if secrets is None:
+            return None
+        return _primary_secret(secrets)
 
     async def invalidate(self, slug: str) -> None:
         """Drop the cached token for a provider."""
@@ -947,17 +1028,26 @@ async def _intercept_and_forward(
                 )
                 return
             body = await _read_body(reader=tls_reader, headers=headers)
-            token = await token_store.token_for_host(host=host)
-            if token is None:
+            secrets = await token_store.secrets_for_host(host=host)
+            if secrets is None:
                 await _send_provider_not_connected(writer=tls_writer, provider=provider)
                 return
-            forward_headers, forward_path = _rewrite_request_for_provider(
-                headers=headers,
-                path_with_query=path_with_query,
-                token=token,
-                provider=provider,
-                upstream_host=host,
-            )
+            try:
+                forward_headers, forward_path = _rewrite_request_for_provider(
+                    headers=headers,
+                    path_with_query=path_with_query,
+                    secrets=secrets,
+                    provider=provider,
+                    upstream_host=host,
+                )
+            except _SecretSelectionError as exc:
+                logger.error("%s secret selection failed: %s", provider.slug, exc)
+                await _send_json_error(
+                    writer=tls_writer,
+                    status=400,
+                    message=f"{provider.slug}: {exc}",
+                )
+                return
             try:
                 upstream_status, upstream_headers, upstream_body = await _forward_to_upstream(
                     host=host,
@@ -1091,6 +1181,18 @@ def _build_authorization_value(token: str, auth_format: str) -> bytes:
     raise ValueError(f"unknown auth_format: {auth_format!r}")
 
 
+class _SecretSelectionError(Exception):
+    """A VaultHeaderInject request didn't carry a resolvable placeholder bearer."""
+
+
+def _strip_bearer_prefix(value: bytes) -> str:
+    """Return the token from a `Bearer <token>` header value (case-insensitive prefix)."""
+    text = value.decode("iso-8859-1").strip()
+    if text[:7].lower() == "bearer ":
+        return text[7:].strip()
+    return text
+
+
 def _rewrite_authorization(headers: list[tuple[bytes, bytes]], token: str, auth_format: str, upstream_host: str) -> list[tuple[bytes, bytes]]:
     auth_value = _build_authorization_value(token=token, auth_format=auth_format)
     host_override = upstream_host.encode()
@@ -1161,13 +1263,47 @@ def _normalize_forward_headers(headers: list[tuple[bytes, bytes]], body_length: 
 def _rewrite_request_for_provider(
     headers: list[tuple[bytes, bytes]],
     path_with_query: str,
-    token: str,
+    secrets: dict[str, str],
     provider: TlsProviderSpec,
     upstream_host: str,
 ) -> tuple[list[tuple[bytes, bytes]], str]:
-    """Rewrite credentials for the provider-specific upstream API shape."""
+    """Rewrite credentials for the provider-specific upstream API shape.
+
+    Single-secret methods (OAuthHeader, VaultUrlRewrite) use the sole secret.
+    VaultHeaderInject selects per request by reverse-mapping the incoming
+    placeholder bearer to its secret name. Raises `_SecretSelectionError`
+    when the request doesn't carry a recognizable placeholder.
+    """
     method = provider.credential_method
     if isinstance(method, OAuthHeader):
+        return (
+            _rewrite_authorization(
+                headers=headers,
+                token=_primary_secret(secrets),
+                auth_format=method.auth_format,
+                upstream_host=upstream_host,
+            ),
+            path_with_query,
+        )
+    if isinstance(method, VaultUrlRewrite):
+        token = _primary_secret(secrets)
+        if method.placeholder not in path_with_query:
+            raise ValueError(f"{provider.slug} request URL must contain the DOH placeholder")
+        return (
+            _strip_proxy_headers_and_set_host(headers=headers, upstream_host=upstream_host),
+            path_with_query.replace(method.placeholder, token),
+        )
+    if isinstance(method, VaultHeaderInject):
+        # Read the raw (case-preserving) Authorization value — _header_value
+        # lowercases, which would mangle a mixed-case placeholder token.
+        incoming = next((v for n, v in headers if n.lower() == b"authorization"), None)
+        bearer = _strip_bearer_prefix(incoming) if incoming is not None else None
+        secret_name = method.secret_for_placeholder(bearer) if bearer is not None else None
+        if secret_name is None:
+            raise _SecretSelectionError("request Authorization did not carry a known DOH placeholder")
+        token = secrets.get(secret_name)
+        if not token:
+            raise _SecretSelectionError(f"no cached secret for {secret_name!r}")
         return (
             _rewrite_authorization(
                 headers=headers,
@@ -1176,13 +1312,6 @@ def _rewrite_request_for_provider(
                 upstream_host=upstream_host,
             ),
             path_with_query,
-        )
-    if isinstance(method, VaultUrlRewrite):
-        if method.placeholder not in path_with_query:
-            raise ValueError(f"{provider.slug} request URL must contain the DOH placeholder")
-        return (
-            _strip_proxy_headers_and_set_host(headers=headers, upstream_host=upstream_host),
-            path_with_query.replace(method.placeholder, token),
         )
     raise ValueError(f"unknown credential_method: {method!r}")
 

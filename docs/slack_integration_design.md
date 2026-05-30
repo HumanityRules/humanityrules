@@ -94,3 +94,26 @@ Key traced facts (slack_sdk):
 - The Socket Mode WebSocket clients (built-in and aiohttp) honor `proxy=`/`HTTPS_PROXY` and tunnel the WebSocket via HTTP `CONNECT`, so the in-sandbox gateway reaches Slack through the broker.
 
 Slack token presence activating the gateway binding mirrors the Telegram pattern in [gateway_env_and_restart_design.md](gateway_env_and_restart_design.md).
+
+## Implementation plan (slices)
+
+Built in independently-reviewable slices. **Slices 1 + 2 + Merge exclusion are committed** (`27cf637`):
+
+- Slice 1 — `secrets: dict[str,str]` map replaced the single `access_token` on `RefreshResult`/`_TokenCacheEntry` end to end (DOH handlers emit `{"secrets": {...}}`; broker parses/caches). Behavior-preserving for google/github/telegram. Malformed/empty secret values degrade to a cache-preserving transient.
+- Slice 2 — provider dispatch registries: `_SCHEMA_BUILDERS`/`_CREDENTIAL_SAVERS` (backend, `user_credential_vault.py`) and `_VAULT_RENDERERS` slug→renderer (frontend, `doh-integrations.js`, default `showGenericVaultConfigModal`).
+- Merge exclusion — `"slack"` added to `merge_excluded` in `mcp_aggregator.py`.
+
+**Slice 3 (in progress) — Slack backend.** Decisions locked:
+
+- Provider enum `SLACK = "slack"` added; migration `0062_alter_integrationusercredential_provider.py`.
+- **New credential method `VaultHeaderInject`** (neither `OAuthHeader` nor `VaultUrlRewrite` fit): Slack is *vault-pasted* (connect_mode `vault`, restart-required, has `gateway_env` bindings) **and** *header-injected* (`Authorization: Bearer`, not URL rewrite) **and** *multi-secret*.
+- **Secret selection = reverse-map by placeholder (option b), NOT path-based.** The gateway env gives Hermes two distinct placeholder bearers (`xapp-…PLACEHOLDER`, `xoxb-…PLACEHOLDER`); Hermes already sends the correct token per call (app token opens the socket, bot token posts), so the broker just maps the incoming placeholder bearer → real secret name. **No per-request path logic in the hot path**, no `secret_selector` callable needed for Slack. Shape:
+  - `placeholders: dict[str,str]` — secret_name → placeholder bearer (e.g. `{"app_token": "xapp-DOH_PLACEHOLDER", "bot_token": "xoxb-DOH_PLACEHOLDER"}`)
+  - `gateway_env` bindings map `SLACK_APP_TOKEN`/`SLACK_BOT_TOKEN` (+ `SLACK_ALLOWED_USERS` for personal mode) from those placeholders/config.
+- `TlsProviderSpec` hosts: `slack.com`, `www.slack.com` (REST). The `wss://` Socket Mode host is NOT intercepted — it passes through `_tunnel_opaque` as a plain CONNECT tunnel (carries only the disposable ticket).
+- Validator: `xoxb-` via `auth.test`, `xapp-` via `apps.connections.open`. `refresh_slack_outcome` returns `secrets={"app_token","bot_token"}`.
+- Hot path: match incoming `Authorization: Bearer <placeholder>` → reverse-map to secret name via `placeholders` → swap to real secret. Falls back cleanly for single-secret providers.
+
+**Slice 4 — Slack UI.** Custom `_VAULT_RENDERERS["slack"]` modal: Personal/Company-wide selector (personal disabled "coming soon" for now), manifest prefill link, two token fields. Company-wide is the only mode wired initially.
+
+Provider-split summary (both backend and UI fork in the same places, everything else generic): schema builder, credential saver/validator, refresh outcome, `TlsProviderSpec`, UI renderer.
