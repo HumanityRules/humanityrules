@@ -148,6 +148,8 @@ class TestSlackSubmit(_SlackVaultTestBase):
         cred = IntegrationUserCredential.objects.get(provider=IntegrationUserCredential.Provider.SLACK)
         self.assertEqual(cred.credentials, {"app_token": "xapp-abc", "bot_token": "xoxb-abc"})
         self.assertEqual(cred.config["workspace_scope"], slack_vault.MODE_COMPANY_WIDE)
+        # Company-wide must opt into allow-all; the gateway denies by default.
+        self.assertEqual(cred.config["allow_all_users"], "true")
         self.assertEqual(cred.metadata["team_id"], "T1")
 
     def test_submit_rejects_malformed_bot_token(self) -> None:

@@ -28,7 +28,7 @@ This is by design (a supply-chain guardrail): spawning apps with arbitrary scope
 DOH's integrations panel renders a **manifest prefill URL**:
 
 ```
-https://api.slack.com/apps?new_app=1&manifest_yaml=<URL-encoded manifest>
+https://api.slack.com/apps?new_app=1&manifest_json=<URL-encoded manifest>
 ```
 
 The operator's steps (~4 guided clicks, no manual config — the manifest carries all scopes/subscriptions):
@@ -50,20 +50,28 @@ The config dialog has a **Personal / Company-wide selector**. The selector drive
 | Can receive DMs | yes (owner's) | **no — not subscribed** |
 | Can be @-mentioned in channels | no | yes |
 | Audience | owner only | anyone in an invited channel |
-| `SLACK_ALLOWED_USERS` | `<owner_id>` (single entry) | unset (allow all) |
+| `SLACK_ALLOW_ALL_USERS` | unset | `true` |
+| `SLACK_ALLOWED_USERS` | `<owner_id>` (single entry) | unset |
 | Memory | private to owner | **shared / global (intended)** |
 | Unauthorized sender | silent-ignore | n/a |
 
 Defense in depth — two independent layers:
 
 1. **Subscription** (manifest): personal can't be @-mentioned in channels; company-wide can't be DMed. Structural.
-2. **Sender allowlist** (`SLACK_ALLOWED_USERS`): personal additionally ignores anyone but the owner. Runtime.
+2. **Runtime auth** (gateway env): personal uses `SLACK_ALLOWED_USERS` (owner only); company-wide sets `SLACK_ALLOW_ALL_USERS=true` (the gateway denies by default — an unset allowlist is *not* allow-all).
 
 If one layer is misconfigured, the other still holds.
 
-### Personal mode = `SLACK_ALLOWED_USERS` with one entry
+### The gateway denies by default — company-wide must opt in
 
-"Reply only to this user_id" is **not** a new gateway capability — it's the existing `SLACK_ALLOWED_USERS` allowlist set to exactly the owner's `user_id`. Company-wide leaves it unset (allow all). `SLACK_ALLOWED_USERS` is a general sender allowlist, not DM-specific.
+**Important:** the upstream Hermes gateway's `_is_user_authorized` defaults to **deny**. Its precedence is: per-platform allow-all flag → env allowlist → DM pairing → global allow-all → *default deny*. An unset `SLACK_ALLOWED_USERS` is **not** "allow all" — it's "deny all". So company-wide mode must explicitly set **`SLACK_ALLOW_ALL_USERS=true`**, or every user is rejected (`Unauthorized user: …`).
+
+How each mode opens access (rendered into `/workspace/.hermes/.env` from the Slack `config`):
+
+- **Company-wide** → `config["allow_all_users"] = "true"` → `SLACK_ALLOW_ALL_USERS=true`. No allowlist.
+- **Personal** (not yet enabled) → `config["allowed_users"] = [owner_id]` → `SLACK_ALLOWED_USERS=<owner_id>`. No allow-all flag.
+
+`SLACK_ALLOWED_USERS` is a general sender allowlist, not DM-specific; "reply only to this user_id" is just that allowlist with one entry.
 
 ### Identity capture (personal mode)
 
@@ -73,7 +81,7 @@ Note: `message.im` delivers DMs from *any* user, not just the owner. The `event.
 
 ## Company-wide: shared state is intended
 
-A company-wide agent is **one agent with one memory/session**, shared across all users. This is a feature, not a bug — org-wide accumulated knowledge. Suppressing DMs (by not subscribing to `message.im`) avoids the *illusion* of a private side-channel, keeping the shared-conversation privacy model honest. Anyone in an invited channel can drive the bot; no allowlist.
+A company-wide agent is **one agent with one memory/session**, shared across all users. This is a feature, not a bug — org-wide accumulated knowledge. Suppressing DMs (by not subscribing to `message.im`) avoids the *illusion* of a private side-channel, keeping the shared-conversation privacy model honest. Anyone in an invited channel can drive the bot (`SLACK_ALLOW_ALL_USERS=true`; no per-user allowlist).
 
 ## Sandbox credential isolation
 
@@ -95,25 +103,33 @@ Key traced facts (slack_sdk):
 
 Slack token presence activating the gateway binding mirrors the Telegram pattern in [gateway_env_and_restart_design.md](gateway_env_and_restart_design.md).
 
-## Implementation plan (slices)
+## Implementation
 
-Built in independently-reviewable slices. **Slices 1 + 2 + Merge exclusion are committed** (`27cf637`):
+Slack reuses the generic integration credential plumbing; the provider-specific
+parts fork in five places, everything else is shared:
 
-- Slice 1 — `secrets: dict[str,str]` map replaced the single `access_token` on `RefreshResult`/`_TokenCacheEntry` end to end (DOH handlers emit `{"secrets": {...}}`; broker parses/caches). Behavior-preserving for google/github/telegram. Malformed/empty secret values degrade to a cache-preserving transient.
-- Slice 2 — provider dispatch registries: `_SCHEMA_BUILDERS`/`_CREDENTIAL_SAVERS` (backend, `user_credential_vault.py`) and `_VAULT_RENDERERS` slug→renderer (frontend, `doh-integrations.js`, default `showGenericVaultConfigModal`).
-- Merge exclusion — `"slack"` added to `merge_excluded` in `mcp_aggregator.py`.
+- **Credential method `VaultHeaderInject`** (`tls_intercept.py`) — neither `OAuthHeader`
+  nor `VaultUrlRewrite` fit: Slack is *vault-pasted* (connect_mode `vault`, restart-
+  required, has `gateway_env` bindings) **and** *header-injected* (`Authorization: Bearer`,
+  not URL rewrite) **and** *multi-secret*.
+- **Secret selection by placeholder reverse-map, not request path.** The gateway env
+  hands the sandbox two distinct placeholder bearers (`xapp-…PLACEHOLDER`,
+  `xoxb-…PLACEHOLDER`); the sandbox already sends the correct token per call (app token
+  opens the socket, bot token posts), so the proxy maps the incoming placeholder bearer →
+  real secret name. No per-request path logic in the hot path. `placeholders` is a
+  secret_name → placeholder map; the hot path fails closed on an unknown bearer.
+- **`TlsProviderSpec` hosts** `slack.com`, `www.slack.com` (REST only). The `wss://`
+  Socket Mode host is not intercepted — it passes through as a plain CONNECT tunnel
+  (carries only the disposable ticket).
+- **Validation** (`slack_vault.py`) — `xoxb-` via `auth.test`, `xapp-` via
+  `apps.connections.open`. `refresh_slack_outcome` returns both secrets.
+- **UI** — a custom `_VAULT_RENDERERS["slack"]` modal: mode selector, manifest prefill
+  link, two token fields.
 
-**Slice 3 (in progress) — Slack backend.** Decisions locked:
+The shared pieces carry both secrets via the `secrets: dict[str,str]` map on
+`RefreshResult`/`_TokenCacheEntry`, and Slack registers into the per-provider dispatch
+tables (`_SCHEMA_BUILDERS`/`_CREDENTIAL_SAVERS`, `_OUTCOME_HANDLERS`, `_VAULT_RENDERERS`).
+The Merge `slack` connector is excluded so it never appears beside the native one.
 
-- Provider enum `SLACK = "slack"` added; migration `0062_alter_integrationusercredential_provider.py`.
-- **New credential method `VaultHeaderInject`** (neither `OAuthHeader` nor `VaultUrlRewrite` fit): Slack is *vault-pasted* (connect_mode `vault`, restart-required, has `gateway_env` bindings) **and** *header-injected* (`Authorization: Bearer`, not URL rewrite) **and** *multi-secret*.
-- **Secret selection = reverse-map by placeholder (option b), NOT path-based.** The gateway env gives Hermes two distinct placeholder bearers (`xapp-…PLACEHOLDER`, `xoxb-…PLACEHOLDER`); Hermes already sends the correct token per call (app token opens the socket, bot token posts), so the broker just maps the incoming placeholder bearer → real secret name. **No per-request path logic in the hot path**, no `secret_selector` callable needed for Slack. Shape:
-  - `placeholders: dict[str,str]` — secret_name → placeholder bearer (e.g. `{"app_token": "xapp-DOH_PLACEHOLDER", "bot_token": "xoxb-DOH_PLACEHOLDER"}`)
-  - `gateway_env` bindings map `SLACK_APP_TOKEN`/`SLACK_BOT_TOKEN` (+ `SLACK_ALLOWED_USERS` for personal mode) from those placeholders/config.
-- `TlsProviderSpec` hosts: `slack.com`, `www.slack.com` (REST). The `wss://` Socket Mode host is NOT intercepted — it passes through `_tunnel_opaque` as a plain CONNECT tunnel (carries only the disposable ticket).
-- Validator: `xoxb-` via `auth.test`, `xapp-` via `apps.connections.open`. `refresh_slack_outcome` returns `secrets={"app_token","bot_token"}`.
-- Hot path: match incoming `Authorization: Bearer <placeholder>` → reverse-map to secret name via `placeholders` → swap to real secret. Falls back cleanly for single-secret providers.
-
-**Slice 4 — Slack UI.** Custom `_VAULT_RENDERERS["slack"]` modal: Personal/Company-wide selector (personal disabled "coming soon" for now), manifest prefill link, two token fields. Company-wide is the only mode wired initially.
-
-Provider-split summary (both backend and UI fork in the same places, everything else generic): schema builder, credential saver/validator, refresh outcome, `TlsProviderSpec`, UI renderer.
+Personal mode's manifest is defined but the mode is disabled: it needs an owner-only
+allowlist plus email→user_id resolution that isn't implemented.

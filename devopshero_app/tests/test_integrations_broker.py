@@ -1189,6 +1189,18 @@ class TestGatewayEnvRender(unittest.TestCase):
         self.assertIn("SLACK_BOT_TOKEN=xoxb-DOH_PLACEHOLDER", block)
         self.assertIn("SLACK_ALLOWED_USERS=U1,U2", block)
 
+    def test_slack_company_wide_renders_allow_all_flag(self) -> None:
+        """Company-wide config (allow_all_users) renders SLACK_ALLOW_ALL_USERS=true.
+
+        The upstream gateway denies users by default, so this flag is what
+        lets anyone in an invited channel drive a company-wide bot.
+        """
+        snapshot = [(self._slack_provider(), {"workspace_scope": "company_wide", "allow_all_users": "true"})]
+        block = broker.tls_intercept.render_managed_block(snapshot=snapshot)
+        self.assertIn("SLACK_ALLOW_ALL_USERS=true", block)
+        # No per-user allowlist in company-wide mode.
+        self.assertNotIn("SLACK_ALLOWED_USERS=", block)
+
     def test_connected_vault_provider_renders_managed_block(self) -> None:
         snapshot = [(self._telegram_provider(), {"allowed_users": [42, 7]})]
         block = broker.tls_intercept.render_managed_block(snapshot=snapshot)
