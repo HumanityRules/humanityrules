@@ -130,7 +130,7 @@ class BedrockPlatformCapabilityTests(SimpleTestCase):
         self.assertEqual(hermes["environment"]["HERMES_WEBUI_HOST"], "127.0.0.1")
         self.assertEqual(hermes["memory_reservation_mib"], 2048)
         self.assertEqual(hermes["memory_limit_mib"], 4096)
-        self.assertEqual(hermes["cpu_reservation"], 1024)
+        self.assertEqual(hermes["cpu_reservation"], 896)
 
         variable_names = {var["name"] for var in hermes["configurable_variables"]}
         self.assertNotIn("HERMES_WEBUI_PASSWORD", variable_names)

@@ -35,9 +35,9 @@ APP_TOKEN_RE = re.compile(r"^xapp-[A-Za-z0-9-]+$")
 MODE_COMPANY_WIDE = "company_wide"
 MODE_PERSONAL = "personal"
 
-# Only company-wide is wired end to end today; personal mode is defined in
-# the schema/manifest but offered as disabled in the UI until its owner-only
-# allowlist + email→user_id resolution path is finished (Slice 4+).
+# Modes the backend accepts. Personal mode's manifest is defined but it is
+# not enabled: it requires an owner-only allowlist plus email→user_id
+# resolution that isn't implemented, so the UI offers it disabled.
 _ENABLED_MODES = frozenset({MODE_COMPANY_WIDE})
 
 
@@ -171,7 +171,12 @@ def save_slack_credentials(
         if error is not None:
             return None, error
 
+    # The gateway denies by default; each mode opens access differently.
+    # Company-wide: anyone in an invited channel (SLACK_ALLOW_ALL_USERS=true).
+    # Personal (not yet enabled): owner-only via SLACK_ALLOWED_USERS, no allow-all.
     config = {"workspace_scope": mode}
+    if mode == MODE_COMPANY_WIDE:
+        config["allow_all_users"] = "true"
     metadata = existing.metadata if existing is not None else {}
     if bot_identity:
         metadata = {

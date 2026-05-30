@@ -158,9 +158,9 @@ REFRESH_OUTCOME_TRANSIENT = "transient"
 def _primary_secret(secrets: dict[str, str]) -> str:
     """Return the sole secret for a single-secret provider.
 
-    Every TLS-intercept provider today carries exactly one secret, so the
-    primary is unambiguous. Slice 3 (Slack) introduces a per-request secret
-    selector for multi-secret providers; until then the hot path uses this.
+    Single-secret methods (OAuthHeader, VaultUrlRewrite) carry exactly one
+    secret, so the primary is unambiguous. Multi-secret providers (Slack)
+    select per request in `_rewrite_request_for_provider` and don't use this.
     """
     return next(iter(secrets.values()))
 
@@ -274,6 +274,11 @@ TLS_INTERCEPT_PROVIDER_SPECS = (
             gateway_env=(
                 GatewayEnvBinding(env_var="SLACK_APP_TOKEN", source="app_token"),
                 GatewayEnvBinding(env_var="SLACK_BOT_TOKEN", source="bot_token"),
+                # The gateway denies users by default. Company-wide mode sets
+                # allow_all_users in config (→ SLACK_ALLOW_ALL_USERS=true);
+                # personal mode instead sets allowed_users (owner only). Each
+                # binding renders only when its config key is present.
+                GatewayEnvBinding(env_var="SLACK_ALLOW_ALL_USERS", source="allow_all_users"),
                 GatewayEnvBinding(env_var="SLACK_ALLOWED_USERS", source="allowed_users", list_separator=","),
             ),
         ),
