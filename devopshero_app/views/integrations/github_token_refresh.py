@@ -3,7 +3,7 @@
 Mirror of `google_token_refresh.py` for GitHub user-to-server tokens.
 `refresh_github_outcome` exchanges the user's stored refresh_token with
 GitHub using DOH's `client_id` + `client_secret` and returns a
-broker-shaped `{outcome, access_token?, expires_in?, config, metadata}`
+broker-shaped `{outcome, secrets?, expires_in?, config, metadata}`
 dict. The batched endpoint (`views/integrations/token_refresh_batch.py`)
 calls this from a worker thread alongside the other providers.
 
@@ -129,7 +129,7 @@ def refresh_github_outcome(environment: Environment, owner_user: User, app_slug:
 
     return {
         "outcome": "has_token",
-        "access_token": exchange_result.response["access_token"],
+        "secrets": {"access_token": exchange_result.response["access_token"]},
         "expires_in": int(exchange_result.response.get("expires_in", 0)),
         "config": {},
         "metadata": {},

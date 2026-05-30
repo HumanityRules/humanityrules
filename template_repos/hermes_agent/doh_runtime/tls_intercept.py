@@ -111,7 +111,7 @@ class DohRefreshConfig:
 
 # Internal tags from DOH's refresh endpoint (distinct from browser
 # STATUS_* strings). For each requested slug, DOH returns one of:
-# - has_token:  a fresh access_token (with expiry/config/metadata).
+# - has_token:  a fresh secrets map (with expiry/config/metadata).
 # - absent:     user not connected, or DOH just deleted the row after
 #               the upstream provider revoked the refresh_token.
 # - transient:  network error or other failure that must not overwrite
@@ -123,12 +123,27 @@ REFRESH_OUTCOME_ABSENT = "absent"
 REFRESH_OUTCOME_TRANSIENT = "transient"
 
 
+def _primary_secret(secrets: dict[str, str]) -> str:
+    """Return the sole secret for a single-secret provider.
+
+    Every TLS-intercept provider today carries exactly one secret, so the
+    primary is unambiguous. Slice 3 (Slack) introduces a per-request secret
+    selector for multi-secret providers; until then the hot path uses this.
+    """
+    return next(iter(secrets.values()))
+
+
 @dataclass(frozen=True)
 class RefreshResult:
-    """Outcome for one provider in a DOH refresh response."""
+    """Outcome for one provider in a DOH refresh response.
+
+    `secrets` is a name→value map (e.g. `{"access_token": "ya29…"}`), so a
+    provider can carry more than one credential (Slack's bot + app token).
+    `None` for the absent/transient outcomes, which have nothing to cache.
+    """
 
     outcome: RefreshOutcome
-    access_token: str | None
+    secrets: dict[str, str] | None
     expires_in: int | None
     config: dict
     metadata: dict
@@ -136,13 +151,14 @@ class RefreshResult:
 
 @dataclass
 class _TokenCacheEntry:
-    """One usable access_token plus the metadata we hand to the gateway/UI.
+    """One provider's usable secrets plus the metadata we hand to the gateway/UI.
 
+    `secrets` is a name→value map; single-secret providers carry one entry.
     The token store prunes expired entries before returning cache snapshots,
     so cache presence means "connected".
     """
 
-    access_token: str
+    secrets: dict[str, str]
     expires_at: float
     last_refreshed_at: str
     config: dict
@@ -301,21 +317,35 @@ def _refresh_result_from_entry(entry: object) -> RefreshResult:
         return _transient_result()
     outcome = entry.get("outcome")
     if outcome == REFRESH_OUTCOME_HAS_TOKEN:
+        secrets = entry.get("secrets")
+        if not isinstance(secrets, dict) or not secrets:
+            logger.error("refresh has_token entry missing non-empty 'secrets' map")
+            return _transient_result()
+        # Reject (don't coerce) malformed entries: a non-string/empty value
+        # would otherwise be cached and sent upstream as a literal bearer
+        # token (e.g. str(None) == "None"). Degrade to a cache-preserving
+        # transient instead, exactly like a network failure.
+        if not all(
+            isinstance(name, str) and name and isinstance(value, str) and value
+            for name, value in secrets.items()
+        ):
+            logger.error("refresh has_token entry has non-string/empty secret name or value")
+            return _transient_result()
         return RefreshResult(
             outcome=REFRESH_OUTCOME_HAS_TOKEN,
-            access_token=entry["access_token"],
+            secrets=dict(secrets),
             expires_in=int(entry.get("expires_in", 0)),
             config=entry.get("config", {}),
             metadata=entry.get("metadata", {}),
         )
     if outcome == REFRESH_OUTCOME_ABSENT:
-        return RefreshResult(outcome=REFRESH_OUTCOME_ABSENT, access_token=None, expires_in=None, config={}, metadata={})
+        return RefreshResult(outcome=REFRESH_OUTCOME_ABSENT, secrets=None, expires_in=None, config={}, metadata={})
     return _transient_result()
 
 
 def _transient_result() -> RefreshResult:
     """Build a transient-outcome RefreshResult sentinel for cache-preserving failures."""
-    return RefreshResult(outcome=REFRESH_OUTCOME_TRANSIENT, access_token=None, expires_in=None, config={}, metadata={})
+    return RefreshResult(outcome=REFRESH_OUTCOME_TRANSIENT, secrets=None, expires_in=None, config={}, metadata={})
 
 
 GATEWAY_ENV_BLOCK_BEGIN = "# === DOH-MANAGED-INTEGRATIONS BEGIN ==="
@@ -413,8 +443,10 @@ def _cache_entry_from_connected_result(result: RefreshResult, now: float) -> _To
     """
     if result.expires_in is None:
         raise ValueError("connected refresh result must carry expires_in")
+    if not result.secrets:
+        raise ValueError("connected refresh result must carry secrets")
     return _TokenCacheEntry(
-        access_token=result.access_token,
+        secrets=result.secrets,
         expires_at=now + result.expires_in,
         last_refreshed_at=dt.datetime.now(dt.timezone.utc).isoformat(),
         config=result.config,
@@ -483,7 +515,9 @@ class _TokenStore:
             entry = await self._ensure_fresh_locked(provider=provider)
         if entry is None:
             return None
-        return entry.access_token
+        # Single-secret providers today; Slice 3 adds a per-request selector
+        # for multi-secret providers (Slack's bot vs app token).
+        return _primary_secret(entry.secrets)
 
     async def invalidate(self, slug: str) -> None:
         """Drop the cached token for a provider."""

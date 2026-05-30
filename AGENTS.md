@@ -39,6 +39,11 @@ We abbreviate the name of DevOps Hero as DOH.
 **For local dev login (`/auth/dev-login/` or session-cookie curl), see `docs/local_dev_login.md`.**
 
 
+# Git
+
+**Commit directly to `main`.** This repo does not use feature branches — do not create a branch before committing unless explicitly asked.
+
+
 # Documentation
 
 See **`docs/AGENTS.md`** for the documentation index.

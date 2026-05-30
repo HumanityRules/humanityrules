@@ -12,7 +12,7 @@ normal entry in the response map:
 
     POST /api/integrations/tokens
     body: {owner_username, app_slug, providers: ["google", "github", ...]}
-    resp: 200 {results: {<slug>: {outcome, access_token?, expires_in?, config, metadata}, ...}}
+    resp: 200 {results: {<slug>: {outcome, secrets?, expires_in?, config, metadata}, ...}}
 
 `outcome` is `"has_token" | "absent" | "transient"`. The broker uses the
 same endpoint for single-slug refresh (after a connect/disconnect),

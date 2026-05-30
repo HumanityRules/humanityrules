@@ -85,7 +85,7 @@ def _resolve_owned_app_slug(app_slug: object, environment: Environment, owner_us
 
 def _provider_from_payload(provider: object) -> tuple[str | None, JsonResponse | None]:
     """Validate a provider slug for the paste-style vault surface."""
-    if provider != IntegrationUserCredential.Provider.TELEGRAM:
+    if provider not in _SCHEMA_BUILDERS:
         return None, JsonResponse({"error": "unsupported credential provider"}, status=400)
     return str(provider), None
 
@@ -120,44 +120,50 @@ def _canonical_origin(scheme: str, hostname: str, port: int | None) -> str:
     return f"{scheme}://{host}:{port}"
 
 
+def _telegram_schema(existing: IntegrationUserCredential | None) -> dict:
+    """Build the generic paste-form schema for Telegram."""
+    allowed_users = []
+    secret_configured = False
+    metadata = {}
+    if existing is not None:
+        allowed_users = existing.config.get("allowed_users", [])
+        secret_configured = bool(existing.credentials.get("bot_token"))
+        metadata = existing.metadata
+    return {
+        "provider": "telegram",
+        "label": "Telegram",
+        "status": "connected" if existing is not None else "not_connected",
+        "secret_configured": secret_configured,
+        "metadata": metadata,
+        "message": "Credentials are sent directly to the DevOps Hero vault. Your Hermes agent does not receive or store them.",
+        "restart_required_after_save": True,
+        "fields": [
+            {
+                "name": "bot_token",
+                "label": "Bot token",
+                "kind": "secret",
+                "required": existing is None,
+                "placeholder": "123456789:AA...",
+                "help": "Paste the token from BotFather. Leave blank to keep the current token.",
+            },
+            {
+                "name": "allowed_users",
+                "label": "Allowed Telegram user IDs",
+                "kind": "textarea",
+                "required": False,
+                "value": "\n".join(allowed_users),
+                "help": "One numeric Telegram user ID per line, or comma-separated.",
+            },
+        ],
+    }
+
+
 def _schema_for_provider(provider: str, existing: IntegrationUserCredential | None) -> dict:
-    """Return the generic form schema for one paste-style provider."""
-    if provider == IntegrationUserCredential.Provider.TELEGRAM:
-        allowed_users = []
-        secret_configured = False
-        metadata = {}
-        if existing is not None:
-            allowed_users = existing.config.get("allowed_users", [])
-            secret_configured = bool(existing.credentials.get("bot_token"))
-            metadata = existing.metadata
-        return {
-            "provider": "telegram",
-            "label": "Telegram",
-            "status": "connected" if existing is not None else "not_connected",
-            "secret_configured": secret_configured,
-            "metadata": metadata,
-            "message": "Credentials are sent directly to the DevOps Hero vault. Your Hermes agent does not receive or store them.",
-            "restart_required_after_save": True,
-            "fields": [
-                {
-                    "name": "bot_token",
-                    "label": "Bot token",
-                    "kind": "secret",
-                    "required": existing is None,
-                    "placeholder": "123456789:AA...",
-                    "help": "Paste the token from BotFather. Leave blank to keep the current token.",
-                },
-                {
-                    "name": "allowed_users",
-                    "label": "Allowed Telegram user IDs",
-                    "kind": "textarea",
-                    "required": False,
-                    "value": "\n".join(allowed_users),
-                    "help": "One numeric Telegram user ID per line, or comma-separated.",
-                },
-            ],
-        }
-    raise ValueError(f"unsupported provider: {provider!r}")
+    """Return the form schema for one paste-style provider via the registry."""
+    builder = _SCHEMA_BUILDERS.get(provider)
+    if builder is None:
+        raise ValueError(f"unsupported provider: {provider!r}")
+    return builder(existing)
 
 
 def _setup_token_payload(
@@ -396,8 +402,9 @@ def integrations_credential_submit(request: HttpRequest) -> JsonResponse:
         return _cors_json_response({"error": "credentials and config must be objects"}, status=400, allowed_origin=allowed_origin)
 
     provider = token_payload["provider"]
-    if provider == IntegrationUserCredential.Provider.TELEGRAM:
-        credential, validation_error = _save_telegram_credentials(
+    saver = _CREDENTIAL_SAVERS.get(provider)
+    if saver is not None:
+        credential, validation_error = saver(
             owner_user=owner_user,
             environment=environment,
             app_slug=app_slug,
@@ -510,8 +517,22 @@ def refresh_telegram_outcome(environment: Environment, owner_user: User, app_slu
         return {"outcome": "absent"}
     return {
         "outcome": "has_token",
-        "access_token": bot_token,
+        "secrets": {"bot_token": bot_token},
         "expires_in": TELEGRAM_BROKER_CACHE_SECONDS,
         "config": credential.config,
         "metadata": credential.metadata,
     }
+
+
+# Per-provider dispatch tables for the paste-style vault surface. A provider
+# is "supported" here iff it has a schema builder; setup-session, submit, and
+# disconnect all gate on these registries instead of hardcoding one provider.
+# Saver signature: (owner_user, environment, app_slug, credentials_payload,
+# config_payload) -> (IntegrationUserCredential | None, error_message | None).
+_SCHEMA_BUILDERS = {
+    IntegrationUserCredential.Provider.TELEGRAM: _telegram_schema,
+}
+
+_CREDENTIAL_SAVERS = {
+    IntegrationUserCredential.Provider.TELEGRAM: _save_telegram_credentials,
+}
