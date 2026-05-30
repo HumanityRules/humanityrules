@@ -105,3 +105,27 @@ Use the *exact host* from the CLI's output, with the trailing slash.
 - **404 Not Found in browser**: either the slug is wrong, the app is stopped, or you typoed the subdomain. `webapps list` shows current routes and their URLs.
 - **DNS not resolving / cert warning**: the agent itself is missing the per-agent wildcard infra (would be a platform-deploy problem, not a webapp problem). Report to the user; you cannot fix this from inside the agent.
 - **`EACCES` / "permission denied" on bind**: the app is trying to bind to a port outside the allowed range (4000–4019). Configure the app to bind only to `$WEBAPP_PORT`.
+
+
+## Calling the Hermes agent from a webapp
+
+A webapp can call a full Hermes agent over a loopback API — no API keys to provision, no model plumbing. The gateway exposes an OpenAI-compatible server at `http://127.0.0.1:8642/v1/...`:
+
+- `POST /v1/chat/completions`, `POST /v1/responses` — OpenAI-compatible chat
+- `POST /v1/runs` — start an agent run (returns a `run_id`); `GET /v1/runs/{id}/events` to stream
+- `GET /v1/models`, `GET /v1/capabilities`
+
+Authenticate with a bearer token read from the `API_SERVER_KEY` env var, which every webapp inherits automatically:
+
+```python
+import os, httpx
+resp = httpx.post(
+    "http://127.0.0.1:8642/v1/chat/completions",
+    headers={"Authorization": f"Bearer {os.environ['API_SERVER_KEY']}"},
+    json={"messages": [{"role": "user", "content": "..."}]},
+)
+```
+
+The `model` field is optional — if omitted the gateway uses its active agent profile. To advertise a specific model name, `GET /v1/models` first and use the `id` it returns.
+
+This endpoint is loopback-only inside the sandbox — never expose it through your webapp to the public route.
