@@ -135,8 +135,8 @@ urlpatterns = [
     path("integrations/user/github/start/", views.integrations_user_github_start, name="integrations_user_github_start"),
     path("integrations/user/github/callback/", views.integrations_user_github_callback, name="integrations_user_github_callback"),
     # Connect is the browser OAuth round-trip above (start → provider → callback).
-    # Disconnect is broker-only: the Hermes WebUI POSTs to /__doh_broker/integrations/{slug}/oauth/disconnect,
-    # which forwards here with the env bearer — see api/integrations/user/disconnect below.
+    # Disconnect is broker-only: the Hermes WebUI POSTs to /__doh_broker/integrations/{slug}/tls/disconnect,
+    # which forwards here with the env bearer — see the disconnect handler under api/integrations below.
 
     # API endpoints (view implementations live under views/integrations/ or views/pdp.py)
     path("api/aws/install-account-callback", views.aws_install_account_callback, name="aws_install_account_callback"),
@@ -147,14 +147,11 @@ urlpatterns = [
     
     #  - integrations_tokens_batch: the env-resident broker's single refresh endpoint, both for Refresh-all/bootstrap and for slug-targeted refresh after connect/disconnect
     path("api/integrations/tokens", views.integrations_tokens_batch, name="integrations_tokens_batch"),
-    #  - integrations_user_oauth_disconnect: deletes google/github IntegrationUserCredential rows for the
-    #    owner/app in the request; called by the broker after the user clicks Disconnect in Hermes (not a
-    #    browser redirect — unlike Connect, which uses the /integrations/user/*/start|callback/ routes above).
-    path("api/integrations/user/disconnect", views.integrations_user_oauth_disconnect, name="integrations_user_oauth_disconnect"),
-
-    #  - integrations_credential_setup_session / submit / disconnect: broker-assisted, browser-direct vault flows for paste-style credentials
+    #  - integrations_credential_setup_session / submit: broker-assisted, browser-direct vault flows for paste-style credentials
     path("api/integrations/credentials/setup-session", views.integrations_credential_setup_session, name="integrations_credential_setup_session"),
     path("api/integrations/credentials/submit", views.integrations_credential_submit, name="integrations_credential_submit"),
+    #  - disconnect: one handler for every provider kind — deletes the IntegrationUserCredential row and, for
+    #    OAuth providers, best-effort revokes upstream. The broker posts all disconnects here.
     path("api/integrations/credentials/disconnect", views.integrations_credential_disconnect, name="integrations_credential_disconnect"),
 
     #  - Merge.dev Agent Handler: env-resident components (Hermes broker / MCP aggregator) reach Merge through these. Tenant-wide Merge API key lives only on DOH.

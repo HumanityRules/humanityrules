@@ -1,7 +1,7 @@
 """
 Org-level GitHub App integration: tab UI, installation OAuth flow, and webhooks.
 
-Distinct from `github_oauth.py`, which handles per-user OAuth inside deployed apps.
+Distinct from `provider_github.py`, which handles per-user OAuth inside deployed apps.
 
 Flow:
 1. /integrations/org/github/connect/ → OAuth authorize redirect

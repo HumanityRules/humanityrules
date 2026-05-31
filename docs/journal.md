@@ -1,5 +1,36 @@
 # DevOpsHero Development Journal
 
+## 2026-05-30 17:29 - [Integrations] Symmetric provider refactor (one module + one registry per provider)
+
+**Conversation:** [2026-05-30-1729-5e3e2d93.md](conversations/2026-05-30-1729-5e3e2d93.md)
+
+Restructured `views/integrations/` so the four per-user providers (Google, GitHub, Slack, Telegram) are organized symmetrically, to cut the cognitive load of "where does provider X live and what can it do." Started from a structure where a provider's identity was smeared across three dispatch tables in three files and the OAuth pair (google/github) duplicated helpers verbatim while the vault pair (slack/telegram) shared a core. Four moves, all approved up front via AskUserQuestion; the user added the `provider_<slug>.py` naming convention.
+
+**The end state is one file per provider + two registry-driven endpoint files.** `provider_<google|github|slack|telegram>.py` each expose a uniform interface; `provider_common.py` holds what they'd otherwise duplicate; `provider_registry.py` is the single `slug → ProviderSpec(kind, module)` table; `token_refresh_batch.py` and `provider_disconnect.py` are the two cross-provider endpoints that dispatch through the registry. The old `google_token_refresh.py`/`github_token_refresh.py` (merged into their oauth files) and `user_oauth_disconnect.py` (merged into `provider_disconnect.py`) are gone.
+
+**Move 1 (shared core) before Move 3 (merge).** Extracted the verbatim-duplicated OAuth-flow helpers (`resolve_env_by_rd`, `resolve_owned_app_slug`, `append_query`), the refresh plumbing (`ExchangeResult`, `now`), and — the real single-sourcing win — the broker-outcome constructors `has_token()/absent()/transient()`. Before, each of four refresh helpers hand-built the `{outcome, secrets?, expires_in?, config, metadata}` dict; the OAuth-returns-empty-config/metadata vs vault-returns-real-values difference *looked* like drift because nothing stated the intent. Now it's a typed constructor.
+
+**Move 2 (one registry) is the biggest cognitive-load win.** `ProviderKind.OAUTH|VAULT` replaces the old implicit "is it a key in `_SCHEMA_BUILDERS`?" tests. "Vault provider" is now `spec.kind == VAULT`; "can revoke upstream" is `spec.kind == OAUTH`. Adding a provider is one registry row + one module, not edits to three tables in three files keyed two different ways (`_OUTCOME_HANDLERS` used bare strings; the others used the `Provider` enum).
+
+**Critical design constraint — the registry stores the *module*, not bound functions.** Endpoints resolve `spec.module.refresh_outcome` / `.revoke` at call time. This late binding is deliberate: it keeps `unittest.mock.patch("…provider_x.fn")` test seams working after the rename. That's why the whole test migration was mechanical path renames with zero restructuring — patch paths, logger names (`assertNoLogs(logger="…provider_google")`), and module aliases all just moved.
+
+**Move 4 (merge the two disconnect endpoints) was the cross-boundary one — scoped carefully before touching code.** The two DOH views were ~90% identical (the only real difference: OAuth revokes upstream after delete, which the registry now expresses). But the disconnect flow spans three layers in the *vendored* Hermes template (`template_repos/hermes_agent/`): broker route → WebUI JS → broker tests. Investigated the broker first and found the gateway-restart decision is made *inside* `tls_runtime.invalidate(slug)` via `_slug_requires_restart` (reading each provider's `restart_required_after_save` flag), **not** by which disconnect route was hit — so the two broker routes were pure duplication with no behavioral asymmetry.
+
+**Collapsing to a single disconnect path could NOT reuse the bare `/disconnect` name.** The MCP aggregator already owns `/integrations/{provider}/disconnect` (Notion/Merge), which is the original reason the TLS-intercept providers used `/vault/` and `/oauth/` sub-prefixes. Starlette matches first-by-path and the TLS routes mount before the aggregator's, so a bare `/disconnect` would hijack aggregator disconnects. Chose `/integrations/{provider}/tls/disconnect`, consistent with the existing "TLS-intercept" naming (`renderTlsInterceptCard`, `TlsInterceptRuntime`). WebUI's `disconnectVaultProvider` + `disconnectOAuthProvider` merged into `disconnectTlsProvider` (kept the OAuth version's error-alerting — the superset).
+
+**"Deploy from scratch" → dropped all the legacy/back-compat machinery.** The unified handler had initially kept *both* DOH URLs (`/credentials/disconnect` + `/user/disconnect`) plus a `views/__init__.py` alias, as a version-skew shim for in-flight brokers on old runtime code. When the user confirmed a from-scratch deploy (Hermes containers rebuilt too, so every broker speaks the new protocol), that shim protected a transition that isn't happening — removed the route, the alias, its `__all__` entry, and the two-path docstrings. There's now exactly one disconnect path end-to-end: WebUI `/tls/disconnect` → broker → DOH `/credentials/disconnect`. The assumption this rests on (no long-lived customer container left on pre-unification runtime) is safe in paused pre-beta but was made explicit rather than buried.
+
+**Verification was static by the user's choice for the template layer.** 119 tests across the broker + DOH integration suites stay green throughout; `manage.py check` clean; `py_compile` + `node --check` on the two edited template files. The end-to-end deploy (deploy AppTemplate → boot container → click Disconnect) that `template_repos/hermes_agent/AGENTS.md` calls for on broker/extension changes is deferred to the actual deploy — unit tests don't catch patch-application or container-boot regressions.
+
+**Key points:**
+- One `provider_<slug>.py` per provider + one `provider_registry.py` replaces three dispatch tables in three files; the OAuth pair now shares a core like the vault pair already did.
+- Registry stores the module (late binding), not bound functions — preserves every `mock.patch("…module.attr")` test seam, making the test migration pure path renames.
+- `provider_common.has_token()/absent()/transient()` single-source the broker-outcome contract that four helpers used to hand-build; the OAuth-vs-vault empty-config difference is now intentional, not apparent drift.
+- Merging the github oauth+refresh files surfaced a latent collision: two `GITHUB_TOKEN_EXCHANGE_TIMEOUT_SECONDS` constants with different values (30s code-exchange, 5s refresh). Preserved both as distinct names rather than silently collapsing.
+- Move 4 spans the vendored Hermes template (broker + WebUI + broker tests); the gateway-restart decision lives in `invalidate(slug)`, not the route, so the two routes were safe to merge.
+- Couldn't reuse `/disconnect` (MCP aggregator owns it); chose `/tls/disconnect` under the existing TLS-intercept naming.
+- From-scratch deploy removes the need for the back-compat shim entirely — one disconnect path, no aliases, no dead routes.
+
 ## 2026-05-29 23:15 - [Integrations] Native Slack (Socket Mode) integration
 
 **Conversation:** [2026-05-29-2316-84456c23.md](conversations/2026-05-29-2316-84456c23.md)

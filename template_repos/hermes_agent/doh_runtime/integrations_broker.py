@@ -181,7 +181,16 @@ def _build_control_app(
         )
         return JSONResponse(content=payload, status_code=status)
 
-    async def vault_disconnect_route(request: Request) -> Response:
+    async def disconnect_route(request: Request) -> Response:
+        """Disconnect any TLS-intercept provider (vault or OAuth).
+
+        DOH's unified disconnect handler deletes the credential row and, for
+        OAuth providers, best-effort revokes upstream — the provider kind is
+        resolved server-side, so the broker forwards both kinds identically.
+        On success we drop only this provider's cached token (a vault provider
+        additionally triggers a gateway restart inside `invalidate`, keyed off
+        its `restart_required_after_save` flag, not off this route).
+        """
         provider = request.path_params["provider"]
         status, payload = await asyncio.to_thread(
             _post_control_plane_json,
@@ -204,37 +213,16 @@ def _build_control_app(
                 )
         return JSONResponse(content=payload, status_code=status)
 
-    async def oauth_disconnect_route(request: Request) -> Response:
-        provider = request.path_params["provider"]
-        status, payload = await asyncio.to_thread(
-            _post_control_plane_json,
-            control_plane_url=control_plane_url,
-            bearer=bearer,
-            path="/api/integrations/user/disconnect",
-            payload={
-                "owner_username": owner_username,
-                "app_slug": app_slug,
-                "provider": provider,
-            },
-        )
-        if 200 <= status < 300:
-            try:
-                await tls_runtime.invalidate(slug=provider)
-            except RuntimeError as exc:
-                return JSONResponse(
-                    content={**payload, "ok": False, "error": str(exc)},
-                    status_code=502,
-                )
-        return JSONResponse(content=payload, status_code=status)
-
     routes = [
         Route(path="/healthz", endpoint=_handle_healthz, methods=["GET"]),
         Route(path="/integrations", endpoint=status_route, methods=["GET"]),
         Route(path="/integrations/refresh", endpoint=refresh_route, methods=["POST"]),
         Route(path="/integrations/{provider}/invalidate_tls_cache", endpoint=invalidate_provider_tls_cache_route, methods=["POST"]),
         Route(path="/integrations/{provider}/vault/setup-session", endpoint=vault_setup_session_route, methods=["POST"]),
-        Route(path="/integrations/{provider}/vault/disconnect", endpoint=vault_disconnect_route, methods=["POST"]),
-        Route(path="/integrations/{provider}/oauth/disconnect", endpoint=oauth_disconnect_route, methods=["POST"]),
+        # One disconnect path for every TLS-intercept provider (vault + OAuth).
+        # Sits under the /tls/ sub-prefix so it doesn't collide with the MCP
+        # aggregator's own /integrations/{provider}/disconnect (Notion/Merge).
+        Route(path="/integrations/{provider}/tls/disconnect", endpoint=disconnect_route, methods=["POST"]),
         *aggregator.routes(prefix="/integrations"),
     ]
     return Starlette(routes=routes)

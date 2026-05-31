@@ -1,4 +1,4 @@
-"""Tests for POST /api/integrations/user/disconnect — broker OAuth disconnect."""
+"""Tests for POST /api/integrations/credentials/disconnect — broker OAuth disconnect."""
 
 import hashlib
 import json
@@ -106,7 +106,7 @@ class TestUserOAuthDisconnectApi(TestCase):
         if bearer is not None:
             headers["HTTP_AUTHORIZATION"] = f"Bearer {bearer}"
         return self.client.post(
-            "/api/integrations/user/disconnect",
+            "/api/integrations/credentials/disconnect",
             data=json.dumps(payload),
             content_type="application/json",
             **headers,
@@ -114,7 +114,7 @@ class TestUserOAuthDisconnectApi(TestCase):
 
     def test_disconnect_deletes_row(self) -> None:
         with patch(
-            "devopshero_app.views.integrations.github_oauth._revoke_github_grant"
+            "devopshero_app.views.integrations.provider_github.revoke"
         ) as revoke_mock:
             response = self._post({
                 "owner_username": "vmendi",
@@ -131,16 +131,18 @@ class TestUserOAuthDisconnectApi(TestCase):
 
     def test_missing_bearer_returns_401(self) -> None:
         response = self.client.post(
-            "/api/integrations/user/disconnect",
+            "/api/integrations/credentials/disconnect",
             data={"owner_username": "vmendi", "app_slug": "hermes", "provider": "github"},
             content_type="application/json",
         )
         self.assertEqual(response.status_code, 401)
 
     def test_unsupported_provider_returns_400(self) -> None:
+        # An unregistered slug is rejected. Registered providers of any kind
+        # (OAuth or vault) are valid through this unified endpoint.
         response = self._post({
             "owner_username": "vmendi",
             "app_slug": "hermes",
-            "provider": "telegram",
+            "provider": "bogus-provider",
         }, bearer=self.raw_token)
         self.assertEqual(response.status_code, 400)

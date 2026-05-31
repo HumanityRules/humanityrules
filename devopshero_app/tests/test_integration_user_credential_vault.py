@@ -21,7 +21,7 @@ from devopshero_app.models import (
     User,
     Workspace,
 )
-from devopshero_app.views.integrations import telegram_vault, user_credential_vault
+from devopshero_app.views.integrations import provider_telegram, user_credential_vault
 
 
 def _hash(raw: str) -> str:
@@ -121,7 +121,7 @@ class _CredentialVaultTestBase(TestCase):
             },
         }
         return patch(
-            "devopshero_app.views.integrations.telegram_vault.httpx.get",
+            "devopshero_app.views.integrations.provider_telegram.httpx.get",
             return_value=telegram_response,
         )
 
@@ -251,7 +251,7 @@ class TestCredentialSubmit(_CredentialVaultTestBase):
         _status, session = self._post_setup_session()
         bot_token = "123456:abcdefghijklmnopqrstuvwxyz"
         with patch(
-            "devopshero_app.views.integrations.telegram_vault.httpx.get",
+            "devopshero_app.views.integrations.provider_telegram.httpx.get",
             side_effect=httpx.ConnectError(
                 f"boom https://api.telegram.org/bot{bot_token}/getMe"
             ),
@@ -280,7 +280,7 @@ class TestCredentialSubmit(_CredentialVaultTestBase):
         telegram_response.json.return_value = {"ok": False, "description": "Unauthorized"}
 
         with patch(
-            "devopshero_app.views.integrations.telegram_vault.httpx.get",
+            "devopshero_app.views.integrations.provider_telegram.httpx.get",
             return_value=telegram_response,
         ):
             response = self.client.post(
@@ -297,7 +297,7 @@ class TestCredentialSubmit(_CredentialVaultTestBase):
         self.assertEqual(response.status_code, 400)
         self.assertEqual(
             response.json()["error"],
-            telegram_vault.TELEGRAM_INVALID_TOKEN_MESSAGE,
+            provider_telegram.TELEGRAM_INVALID_TOKEN_MESSAGE,
         )
         self.assertFalse(IntegrationUserCredential.objects.exists())
 

@@ -602,28 +602,15 @@
     }
   }
 
-  async function disconnectVaultProvider(item) {
+  // One disconnect path for every TLS-intercept provider (vault + OAuth).
+  // The broker resolves the provider kind server-side, so both kinds POST
+  // here identically.
+  async function disconnectTlsProvider(item) {
     if (_disconnecting.has(item.slug)) return;
     _disconnecting.add(item.slug);
     renderPane(_current);
     try {
-      await fetch('/__doh_broker/integrations/' + encodeURIComponent(item.slug) + '/vault/disconnect', {
-        method: 'POST',
-        cache: 'no-store',
-      });
-      await refreshAndRender();
-    } finally {
-      _disconnecting.delete(item.slug);
-      renderPane(_current);
-    }
-  }
-
-  async function disconnectOAuthProvider(item) {
-    if (_disconnecting.has(item.slug)) return;
-    _disconnecting.add(item.slug);
-    renderPane(_current);
-    try {
-      const response = await fetch('/__doh_broker/integrations/' + encodeURIComponent(item.slug) + '/oauth/disconnect', {
+      const response = await fetch('/__doh_broker/integrations/' + encodeURIComponent(item.slug) + '/tls/disconnect', {
         method: 'POST',
         cache: 'no-store',
       });
@@ -680,7 +667,7 @@
         const vaultDisconnectPending = _disconnecting.has(item.slug);
         const vaultDisconnectProps = {
           class: 'doh-integration-btn doh-integration-btn-secondary',
-          onclick: () => { disconnectVaultProvider(item); },
+          onclick: () => { disconnectTlsProvider(item); },
         };
         if (vaultDisconnectPending) vaultDisconnectProps.disabled = true;
         actions.appendChild(elem('button', vaultDisconnectProps, [
@@ -690,7 +677,7 @@
         const oauthDisconnectPending = _disconnecting.has(item.slug);
         const oauthDisconnectProps = {
           class: 'doh-integration-btn doh-integration-btn-secondary',
-          onclick: () => { disconnectOAuthProvider(item); },
+          onclick: () => { disconnectTlsProvider(item); },
         };
         if (oauthDisconnectPending) oauthDisconnectProps.disabled = true;
         actions.appendChild(elem('button', oauthDisconnectProps, [

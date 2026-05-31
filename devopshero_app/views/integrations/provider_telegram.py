@@ -1,9 +1,11 @@
-"""Telegram vault helpers: schema, credential validation, and refresh outcome.
+"""Telegram vault provider: schema, credential validation, and refresh outcome.
 
 Telegram is a paste-style vault provider: the operator pastes a BotFather
 bot token and optional allowed user IDs. Registered into the generic vault
-surface via the dispatch tables in `user_credential_vault.py`; the batched
-refresh endpoint (`token_refresh_batch.py`) calls `refresh_telegram_outcome`.
+surface via `provider_registry`; the batched refresh endpoint
+(`token_refresh_batch.py`) calls `refresh_outcome`. Exposes the uniform
+vault-provider interface (`schema`, `save_credentials`, `refresh_outcome`)
+shared with `provider_slack`.
 """
 
 import logging
@@ -13,6 +15,7 @@ import httpx
 from django.utils import timezone
 
 from devopshero_app.models import Environment, IntegrationUserCredential, User
+from devopshero_app.views.integrations import provider_common
 
 logger = logging.getLogger(__name__)
 
@@ -25,7 +28,7 @@ TELEGRAM_BROKER_CACHE_SECONDS = 60 * 60
 TELEGRAM_INVALID_TOKEN_MESSAGE = "Telegram rejected this bot token. Check that you pasted the complete token from BotFather."
 
 
-def telegram_schema(existing: IntegrationUserCredential | None) -> dict:
+def schema(existing: IntegrationUserCredential | None) -> dict:
     """Build the generic paste-form schema for Telegram."""
     allowed_users = []
     secret_configured = False
@@ -112,7 +115,7 @@ def _telegram_get_me(bot_token: str) -> tuple[dict | None, str | None]:
     return result, None
 
 
-def save_telegram_credentials(
+def save_credentials(
     owner_user: User,
     environment: Environment,
     app_slug: str,
@@ -165,7 +168,7 @@ def save_telegram_credentials(
     return credential, None
 
 
-def refresh_telegram_outcome(environment: Environment, owner_user: User, app_slug: str) -> dict:
+def refresh_outcome(environment: Environment, owner_user: User, app_slug: str) -> dict:
     """Compute the broker-shaped refresh outcome for Telegram (no upstream exchange).
 
     Telegram bot tokens never expire on the provider side, so this is a
@@ -179,14 +182,13 @@ def refresh_telegram_outcome(environment: Environment, owner_user: User, app_slu
         provider=IntegrationUserCredential.Provider.TELEGRAM,
     ).first()
     if credential is None:
-        return {"outcome": "absent"}
+        return provider_common.absent()
     bot_token = credential.credentials.get("bot_token", "")
     if not bot_token:
-        return {"outcome": "absent"}
-    return {
-        "outcome": "has_token",
-        "secrets": {"bot_token": bot_token},
-        "expires_in": TELEGRAM_BROKER_CACHE_SECONDS,
-        "config": credential.config,
-        "metadata": credential.metadata,
-    }
+        return provider_common.absent()
+    return provider_common.has_token(
+        secrets={"bot_token": bot_token},
+        expires_in=TELEGRAM_BROKER_CACHE_SECONDS,
+        config=credential.config,
+        metadata=credential.metadata,
+    )

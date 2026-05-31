@@ -128,8 +128,8 @@ class TestDisconnectedProvidersReturnAbsent(_BatchTokensEndpointTestBase):
 
     def test_every_unconnected_provider_is_absent_in_a_200_response(self) -> None:
         """No 4xx, no `INFO no integration row` — the entire reason this endpoint exists."""
-        with self.assertNoLogs(logger="devopshero_app.views.integrations.google_token_refresh", level=logging.INFO), \
-             self.assertNoLogs(logger="devopshero_app.views.integrations.github_token_refresh", level=logging.INFO):
+        with self.assertNoLogs(logger="devopshero_app.views.integrations.provider_google", level=logging.INFO), \
+             self.assertNoLogs(logger="devopshero_app.views.integrations.provider_github", level=logging.INFO):
             status, body = self._post(
                 body={
                     "owner_username": "vmendi",
@@ -189,7 +189,7 @@ class TestConnectedProvidersReturnHasToken(_BatchTokensEndpointTestBase):
             "access_token": "ya29.fresh", "expires_in": 3599, "token_type": "Bearer",
         }
         with patch(
-            "devopshero_app.views.integrations.google_token_refresh.httpx.post",
+            "devopshero_app.views.integrations.provider_google.httpx.post",
             return_value=http_response,
         ):
             status, body = self._post(
@@ -246,7 +246,7 @@ class TestMixedConnectedAndAbsent(_BatchTokensEndpointTestBase):
             "access_token": "ya29.fresh", "expires_in": 3599, "token_type": "Bearer",
         }
         with patch(
-            "devopshero_app.views.integrations.google_token_refresh.httpx.post",
+            "devopshero_app.views.integrations.provider_google.httpx.post",
             return_value=http_response,
         ):
             status, body = self._post(
