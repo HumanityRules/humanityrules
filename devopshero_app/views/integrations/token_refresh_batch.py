@@ -19,7 +19,6 @@ Handler exceptions surface as `transient` so the broker can keep serving a
 still-valid cached token when refresh fails transiently.
 """
 
-import json
 import logging
 from concurrent.futures import ThreadPoolExecutor
 
@@ -29,8 +28,7 @@ from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_POST
 
 from devopshero_app.models import Environment, User
-from devopshero_app.views import env_bearer_auth
-from devopshero_app.views.integrations import provider_registry
+from devopshero_app.views.integrations import broker_request_context, provider_registry
 
 logger = logging.getLogger(__name__)
 
@@ -39,17 +37,12 @@ logger = logging.getLogger(__name__)
 @require_POST
 def integrations_tokens_batch(request: HttpRequest) -> JsonResponse:
     """Refresh many providers in one round-trip; `absent` is a normal result, not 404."""
-    raw_token = env_bearer_auth.extract_bearer_token(request=request)
-    if raw_token is None:
-        return JsonResponse({"error": "missing bearer token"}, status=401)
-    environment = env_bearer_auth.resolve_env_from_token(raw_token=raw_token)
-    if environment is None:
-        return JsonResponse({"error": "invalid bearer token"}, status=401)
-
-    try:
-        payload = json.loads(request.body)
-    except json.JSONDecodeError:
-        return JsonResponse({"error": "invalid JSON body"}, status=400)
+    environment, auth_error = broker_request_context.resolve_env_bearer_context(request=request)
+    if auth_error is not None:
+        return auth_error
+    payload, parse_error = broker_request_context.parse_json_body(request=request)
+    if parse_error is not None:
+        return parse_error
 
     owner_username = payload.get("owner_username")
     if not isinstance(owner_username, str) or not owner_username:
