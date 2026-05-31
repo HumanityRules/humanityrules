@@ -18,13 +18,7 @@ from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_POST
 
 from devopshero_app.models import Environment, IntegrationUserCredential, User
-from devopshero_app.views.integrations import provider_registry
-from devopshero_app.views.integrations.user_credential_vault import (
-    _parse_json_body,
-    _resolve_env_bearer_context,
-    _resolve_owned_app_slug,
-    _resolve_owner_user,
-)
+from devopshero_app.views.integrations import broker_request_context, provider_registry
 
 logger = logging.getLogger(__name__)
 
@@ -75,19 +69,19 @@ def disconnect_user_integration(
 @require_POST
 def integrations_credential_disconnect(request: HttpRequest) -> JsonResponse:
     """Delete a user credential row (any provider) on behalf of the env-resident broker."""
-    environment, auth_error = _resolve_env_bearer_context(request=request)
+    environment, auth_error = broker_request_context.resolve_env_bearer_context(request=request)
     if auth_error is not None:
         return auth_error
-    payload, parse_error = _parse_json_body(request=request)
+    payload, parse_error = broker_request_context.parse_json_body(request=request)
     if parse_error is not None:
         return parse_error
-    owner_user, owner_error = _resolve_owner_user(
+    owner_user, owner_error = broker_request_context.resolve_owner_user(
         owner_username=payload.get("owner_username"),
         environment=environment,
     )
     if owner_error is not None:
         return owner_error
-    app_slug, app_error = _resolve_owned_app_slug(
+    app_slug, app_error = broker_request_context.resolve_owned_app_slug(
         app_slug=payload.get("app_slug"),
         environment=environment,
         owner_user=owner_user,

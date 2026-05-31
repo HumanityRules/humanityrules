@@ -1,6 +1,5 @@
 """DOH-hosted vault endpoints for user-owned integration credentials."""
 
-import json
 import logging
 from urllib.parse import urlparse
 
@@ -10,71 +9,14 @@ from django.http import HttpRequest, JsonResponse
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_POST
 
-from devopshero_app.models import App, Environment, IntegrationUserCredential, ResourceTag, User
-from devopshero_app.views import env_bearer_auth
-from devopshero_app.views.integrations import provider_registry
+from devopshero_app.models import Environment, IntegrationUserCredential, User
+from devopshero_app.views.integrations import broker_request_context, provider_registry
 
 logger = logging.getLogger(__name__)
 
 
 SETUP_TOKEN_SALT = "devopshero.integrations.user_credential_setup.v1"
 SETUP_TOKEN_MAX_AGE_SECONDS = 5 * 60
-
-
-def _parse_json_body(request: HttpRequest) -> tuple[dict | None, JsonResponse | None]:
-    """Parse JSON from an API request body."""
-    try:
-        payload = json.loads(request.body.decode("utf-8"))
-    except (UnicodeDecodeError, json.JSONDecodeError):
-        return None, JsonResponse({"error": "invalid JSON body"}, status=400)
-    if not isinstance(payload, dict):
-        return None, JsonResponse({"error": "JSON object body is required"}, status=400)
-    return payload, None
-
-
-def _resolve_env_bearer_context(request: HttpRequest) -> tuple[Environment | None, JsonResponse | None]:
-    """Resolve the env bearer used by broker-to-DOH integration endpoints."""
-    raw_token = env_bearer_auth.extract_bearer_token(request=request)
-    if raw_token is None:
-        return None, JsonResponse({"error": "missing bearer token"}, status=401)
-    environment = env_bearer_auth.resolve_env_from_token(raw_token=raw_token)
-    if environment is None:
-        return None, JsonResponse({"error": "invalid bearer token"}, status=401)
-    return environment, None
-
-
-def _resolve_owner_user(owner_username: object, environment: Environment) -> tuple[User | None, JsonResponse | None]:
-    """Resolve and validate the owner user for the environment's organization."""
-    if not isinstance(owner_username, str) or not owner_username:
-        return None, JsonResponse({"error": "owner_username is required"}, status=400)
-    user = User.objects.filter(
-        username=owner_username,
-        organization_memberships__organization=environment.aws_account.organization,
-    ).first()
-    if user is None:
-        return None, JsonResponse({"error": "not connected"}, status=404)
-    return user, None
-
-
-def _resolve_owned_app_slug(app_slug: object, environment: Environment, owner_user: User) -> tuple[str | None, JsonResponse | None]:
-    """Resolve app_slug and verify it belongs to owner_user in the env's organization."""
-    if not isinstance(app_slug, str) or not app_slug:
-        return None, JsonResponse({"error": "app_slug is required"}, status=400)
-    app = App.objects.filter(
-        organization=environment.aws_account.organization,
-        slug=app_slug,
-    ).first()
-    if app is None:
-        return None, JsonResponse({"error": "app not found"}, status=404)
-    owner_tag = ResourceTag.objects.filter(
-        resource_type=ResourceTag.ResourceType.APP,
-        app=app,
-        key="owner",
-        value=owner_user.username,
-    ).first()
-    if owner_tag is None:
-        return None, JsonResponse({"error": "app is not owned by requested user"}, status=403)
-    return app.slug, None
 
 
 def _provider_from_payload(provider: object) -> tuple[str | None, JsonResponse | None]:
@@ -144,19 +86,19 @@ def _setup_token_payload(
 @require_POST
 def integrations_credential_setup_session(request: HttpRequest) -> JsonResponse:
     """Mint a short-lived browser-to-DOH credential submission session."""
-    environment, auth_error = _resolve_env_bearer_context(request=request)
+    environment, auth_error = broker_request_context.resolve_env_bearer_context(request=request)
     if auth_error is not None:
         return auth_error
-    payload, parse_error = _parse_json_body(request=request)
+    payload, parse_error = broker_request_context.parse_json_body(request=request)
     if parse_error is not None:
         return parse_error
-    owner_user, owner_error = _resolve_owner_user(
+    owner_user, owner_error = broker_request_context.resolve_owner_user(
         owner_username=payload.get("owner_username"),
         environment=environment,
     )
     if owner_error is not None:
         return owner_error
-    app_slug, app_error = _resolve_owned_app_slug(
+    app_slug, app_error = broker_request_context.resolve_owned_app_slug(
         app_slug=payload.get("app_slug"),
         environment=environment,
         owner_user=owner_user,
@@ -225,7 +167,7 @@ def _load_setup_token(token: object) -> tuple[dict | None, JsonResponse | None]:
 @require_POST
 def integrations_credential_submit(request: HttpRequest) -> JsonResponse:
     """Accept direct browser-to-DOH credential submissions for setup sessions."""
-    payload, parse_error = _parse_json_body(request=request)
+    payload, parse_error = broker_request_context.parse_json_body(request=request)
     if parse_error is not None:
         return parse_error
     token_payload, token_error = _load_setup_token(token=payload.get("submit_token"))
@@ -242,7 +184,7 @@ def integrations_credential_submit(request: HttpRequest) -> JsonResponse:
     except (User.DoesNotExist, Environment.DoesNotExist):
         return _cors_json_response({"error": "setup context no longer exists"}, status=404, allowed_origin=allowed_origin)
 
-    app_slug, app_error = _resolve_owned_app_slug(
+    app_slug, app_error = broker_request_context.resolve_owned_app_slug(
         app_slug=token_payload["app_slug"],
         environment=environment,
         owner_user=owner_user,
