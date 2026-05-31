@@ -1,4 +1,4 @@
-"""GitHub OAuth start + callback views (per-user, runtime-scoped).
+"""GitHub per-user integration: OAuth connect + token refresh (runtime-scoped).
 
 Distinct from `org_github.py`, which handles the org-admin GitHub App
 *installation* flow used by the DOH control plane to enumerate repos. This
@@ -16,11 +16,18 @@ them), but a token's effective access on a repo is gated by whether the App
 is installed on the owning account/org. GitHub stitches authorize+install
 into one flow when the user authorizes from an account that hasn't
 installed the App — no separate install step required from the WebUI.
+
+Refresh (`refresh_outcome`) mirrors `provider_google`: it exchanges the
+stored refresh_token and returns a broker-shaped outcome dict for the batched
+endpoint. GitHub rotates the refresh_token on every successful refresh — we
+always persist the new one. A 6-month idle window invalidates the refresh
+(GitHub returns 200 with `error=bad_refresh_token` or similar); we delete the
+row and the outcome flips to `absent` so the WebUI prompts a reconnect.
 """
 
 import logging
 import secrets
-from urllib.parse import urlencode, urlparse
+from urllib.parse import urlencode
 
 import httpx
 from django.conf import settings
@@ -29,7 +36,8 @@ from django.http import HttpRequest, HttpResponse, HttpResponseBadRequest
 from django.shortcuts import redirect
 from django.utils import timezone
 
-from devopshero_app.models import App, Environment, IntegrationUserCredential, ResourceTag, User
+from devopshero_app.models import Environment, IntegrationUserCredential, User
+from devopshero_app.views.integrations import provider_common
 
 
 logger = logging.getLogger(__name__)
@@ -39,49 +47,24 @@ GITHUB_AUTHORIZE_URL = "https://github.com/login/oauth/authorize"
 GITHUB_TOKEN_URL = "https://github.com/login/oauth/access_token"
 GITHUB_API_BASE = "https://api.github.com"
 GITHUB_TOKEN_EXCHANGE_TIMEOUT_SECONDS = 30
+# GitHub's refresh-token exchange is a single small POST. Healthy P99 is
+# well under 1s; setting the ceiling at 5s means the broker's batch refresh
+# (which runs all providers in parallel) is naturally bounded by the slowest
+# single exchange, no separate batch deadline needed. If upstream is taking
+# longer than 5s, surfacing `transient` (cache-preserving) beats hanging a
+# user request on a refresh that's about to fail anyway.
+GITHUB_TOKEN_REFRESH_TIMEOUT_SECONDS = 5
 
-
-def _resolve_env_by_rd(rd: str, user: User) -> Environment | None:
-    """Return the Environment whose shared_alb_hosted_zone suffixes rd's host, or None.
-
-    Scoped to envs in orgs *user* is a member of.
-    """
-    if not rd:
-        return None
-    parsed = urlparse(rd)
-    if parsed.scheme not in ("http", "https") or not parsed.hostname:
-        return None
-    host = parsed.hostname.lower()
-    candidates = (
-        Environment.objects
-        .exclude(shared_alb_hosted_zone="")
-        .filter(aws_account__organization__memberships__user=user)
-        .only("id", "slug", "shared_alb_hosted_zone")
-    )
-    for env in candidates:
-        zone = env.shared_alb_hosted_zone.lower()
-        if host == zone or host.endswith("." + zone):
-            return env
-    return None
-
-
-def _resolve_owned_app_slug(app_slug: str, env: Environment, owner_username: str) -> str | None:
-    """Return app_slug when it identifies an app owned by the user in env's org."""
-    if not app_slug:
-        return None
-    app = App.objects.filter(
-        organization=env.aws_account.organization,
-        slug=app_slug,
-    ).first()
-    if app is None:
-        return None
-    owner_tag = ResourceTag.objects.filter(
-        resource_type=ResourceTag.ResourceType.APP,
-        app=app,
-        key="owner",
-        value=owner_username,
-    ).first()
-    return app.slug if owner_tag is not None else None
+# GitHub returns an HTTP 200 with an error JSON body when the refresh_token
+# is no longer valid. These are the codes that indicate a permanent failure
+# and should trigger row deletion (the outcome flips to `absent` so the
+# UI prompts a reconnect), vs a transient error that should be retried.
+_REVOKED_ERROR_CODES = frozenset({
+    "bad_refresh_token",
+    "bad_credentials",
+    "unauthorized_client",
+    "invalid_grant",
+})
 
 
 def _redirect_uri(request: HttpRequest) -> str:
@@ -98,10 +81,10 @@ def _redirect_uri(request: HttpRequest) -> str:
 def integrations_user_github_start(request: HttpRequest) -> HttpResponse:
     """Validate `rd`, stash state, redirect to GitHub's OAuth consent screen."""
     rd = request.GET.get("rd", "")
-    env = _resolve_env_by_rd(rd=rd, user=request.user)
+    env = provider_common.resolve_env_by_rd(rd=rd, user=request.user)
     if env is None:
         return HttpResponseBadRequest("Invalid or unknown rd")
-    app_slug = _resolve_owned_app_slug(
+    app_slug = provider_common.resolve_owned_app_slug(
         app_slug=request.GET.get("app_slug", ""),
         env=env,
         owner_username=request.user.username,
@@ -149,13 +132,6 @@ def _exchange_github_code(code: str, redirect_uri: str) -> dict:
     )
     response.raise_for_status()
     return response.json()
-
-
-def _append_query(url: str, extra: dict[str, str]) -> str:
-    parsed = urlparse(url)
-    encoded = urlencode(extra)
-    combined = f"{parsed.query}&{encoded}" if parsed.query else encoded
-    return parsed._replace(query=combined).geturl()
 
 
 @login_required
@@ -247,10 +223,147 @@ def integrations_user_github_callback(request: HttpRequest) -> HttpResponse:
         env.slug, owner_username, app_slug,
     )
 
-    return redirect(_append_query(url=rd, extra={"connected": "github"}))
+    return redirect(provider_common.append_query(url=rd, extra={"connected": "github"}))
 
 
-def _revoke_github_grant(refresh_token: str) -> None:
+def refresh_outcome(environment: Environment, owner_user: User, app_slug: str) -> dict:
+    """Compute the broker-shaped refresh outcome for one (env, owner, app).
+
+    Mirror of `provider_google.refresh_outcome`. CAS-delete-on-revoked and
+    CAS-update-on-rotate semantics are preserved (see inline comments). A
+    lost CAS race surfaces as `transient`, just like a network blip: the
+    next refresh sees the winner's rotated R2.
+    """
+    if not settings.GITHUB_APP_CLIENT_ID or not settings.GITHUB_APP_CLIENT_SECRET:
+        logger.error("github token refresh failed: GITHUB_APP_CLIENT_ID/SECRET not configured")
+        return provider_common.transient()
+
+    integration = IntegrationUserCredential.objects.filter(
+        owner_user=owner_user,
+        environment=environment,
+        app_slug=app_slug,
+        provider=IntegrationUserCredential.Provider.GITHUB,
+    ).first()
+    if integration is None:
+        return provider_common.absent()
+
+    old_refresh = integration.credentials.get("refresh_token", "")
+    if not old_refresh:
+        logger.error(
+            "github token refresh: row missing refresh_token env=%s owner=%s app=%s",
+            environment.slug, owner_user.username, app_slug,
+        )
+        return provider_common.absent()
+    exchange_result = _exchange_refresh_token(refresh_token=old_refresh)
+
+    # Whatever happens next, we must only mutate the row if its
+    # refresh_token is still old_refresh. Two callers can read the same
+    # R1, race at GitHub's token endpoint, and disagree on what the row
+    # should look like — but only one of them was actually authoritative
+    # (the one whose R1 the row still holds at decision time).
+
+    if exchange_result.revoked:
+        # Compare-and-swap delete: GitHub said R1 is dead, but if the row
+        # has since rotated to R2 (a concurrent winner), R1 being dead is
+        # expected — the row is fine. Don't delete a valid grant.
+        deleted, _ = IntegrationUserCredential.objects.filter(
+            id=integration.id, credentials__refresh_token=old_refresh,
+        ).delete()
+        if deleted:
+            logger.info(
+                "github token refresh: revoked by github, deleted row env=%s owner=%s app=%s",
+                environment.slug, owner_user.username, app_slug,
+            )
+            return provider_common.absent()
+        # Row already rotated by a concurrent refresh — surface as
+        # transient so we don't overwrite the winner's cache; the next
+        # call reads the winner's R2.
+        logger.info(
+            "github token refresh: stale revoke (row rotated under us) env=%s owner=%s app=%s",
+            environment.slug, owner_user.username, app_slug,
+        )
+        return provider_common.transient()
+
+    if exchange_result.error is not None:
+        logger.error(
+            "github token refresh failed env=%s owner=%s app=%s error=%s",
+            environment.slug, owner_user.username, app_slug, exchange_result.error,
+        )
+        return provider_common.transient()
+
+    # Compare-and-swap update: only rotate if the row still holds R1. A
+    # peer who also got back a successful rotation may have already
+    # written R2 — in that case our new_refresh would be a now-orphan
+    # value. Affected_rows == 0 just means we lost; our access_token
+    # is still valid for ~8h, so we return it without persisting.
+    new_refresh = exchange_result.response.get("refresh_token", "") or old_refresh
+    refreshed_at = provider_common.now()
+    IntegrationUserCredential.objects.filter(
+        id=integration.id, credentials__refresh_token=old_refresh,
+    ).update(
+        credentials={**integration.credentials, "refresh_token": new_refresh},
+        last_refreshed_at=refreshed_at,
+        updated_at=refreshed_at,
+    )
+
+    return provider_common.has_token(
+        secrets={"access_token": exchange_result.response["access_token"]},
+        expires_in=int(exchange_result.response.get("expires_in", 0)),
+        config={},
+        metadata={},
+    )
+
+
+def _exchange_refresh_token(refresh_token: str) -> provider_common.ExchangeResult:
+    """POST to GitHub's token endpoint with grant_type=refresh_token.
+
+    GitHub's quirk: failed refreshes return HTTP 200 with an error body, not
+    a 4xx. Classification keys off the JSON `error` field, not status code.
+    """
+    try:
+        response = httpx.post(
+            GITHUB_TOKEN_URL,
+            headers={"Accept": "application/json"},
+            data={
+                "client_id": settings.GITHUB_APP_CLIENT_ID,
+                "client_secret": settings.GITHUB_APP_CLIENT_SECRET,
+                "refresh_token": refresh_token,
+                "grant_type": "refresh_token",
+            },
+            timeout=GITHUB_TOKEN_REFRESH_TIMEOUT_SECONDS,
+        )
+    except httpx.HTTPError as exc:
+        return provider_common.ExchangeResult(response=None, revoked=False, error=f"network: {exc}")
+
+    if response.status_code != 200:
+        return provider_common.ExchangeResult(
+            response=None, revoked=False,
+            error=f"http {response.status_code}",
+        )
+
+    try:
+        body = response.json()
+    except ValueError:
+        return provider_common.ExchangeResult(response=None, revoked=False, error="non-json-200")
+
+    if "error" in body:
+        if body["error"] in _REVOKED_ERROR_CODES:
+            return provider_common.ExchangeResult(response=None, revoked=True, error=None)
+        return provider_common.ExchangeResult(
+            response=None, revoked=False,
+            error=f"github error: {body['error']}",
+        )
+
+    if "access_token" not in body:
+        return provider_common.ExchangeResult(
+            response=None, revoked=False,
+            error="missing access_token in response",
+        )
+
+    return provider_common.ExchangeResult(response=body, revoked=False, error=None)
+
+
+def revoke(refresh_token: str) -> None:
     """Best-effort revoke at GitHub's grants endpoint.
 
     Failure doesn't block the local deletion — the row removal is the

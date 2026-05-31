@@ -869,7 +869,7 @@ class TestControlIntegrations(unittest.IsolatedAsyncioTestCase):
         )
 
     async def test_vault_disconnect_invalidates_only_provider_cache_on_success(self) -> None:
-        """POST /integrations/{provider}/vault/disconnect evicts only that provider."""
+        """POST /integrations/{provider}/tls/disconnect evicts only that provider (vault)."""
         from starlette.testclient import TestClient
 
         app = broker._build_control_app(
@@ -886,7 +886,7 @@ class TestControlIntegrations(unittest.IsolatedAsyncioTestCase):
             with patch.object(self.tls_runtime, "invalidate", new_callable=AsyncMock) as invalidate_mock:
                 with patch.object(self.tls_runtime, "invalidate_all", new_callable=AsyncMock) as invalidate_all_mock:
                     with TestClient(app) as client:
-                        resp = client.post("/integrations/telegram/vault/disconnect")
+                        resp = client.post("/integrations/telegram/tls/disconnect")
 
         self.assertEqual(resp.status_code, 200)
         post_mock.assert_called_once_with(
@@ -903,7 +903,7 @@ class TestControlIntegrations(unittest.IsolatedAsyncioTestCase):
         invalidate_all_mock.assert_not_awaited()
 
     async def test_oauth_disconnect_invalidates_only_provider_cache_on_success(self) -> None:
-        """POST /integrations/{provider}/oauth/disconnect evicts only that provider."""
+        """POST /integrations/{provider}/tls/disconnect evicts only that provider (OAuth)."""
         from starlette.testclient import TestClient
 
         app = broker._build_control_app(
@@ -919,13 +919,16 @@ class TestControlIntegrations(unittest.IsolatedAsyncioTestCase):
         with patch.object(broker, "_post_control_plane_json", return_value=(200, {"ok": True})) as post_mock:
             with patch.object(self.tls_runtime, "invalidate", new_callable=AsyncMock) as invalidate_mock:
                 with TestClient(app) as client:
-                    resp = client.post("/integrations/github/oauth/disconnect")
+                    resp = client.post("/integrations/github/tls/disconnect")
 
         self.assertEqual(resp.status_code, 200)
+        # OAuth and vault disconnects now share one broker path and one DOH
+        # endpoint; DOH resolves the provider kind and revokes upstream for
+        # OAuth providers server-side.
         post_mock.assert_called_once_with(
             control_plane_url="https://doh.example",
             bearer="env-bearer",
-            path="/api/integrations/user/disconnect",
+            path="/api/integrations/credentials/disconnect",
             payload={
                 "owner_username": "vmendi",
                 "app_slug": "hermes",

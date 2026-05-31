@@ -30,22 +30,9 @@ from django.views.decorators.http import require_POST
 
 from devopshero_app.models import Environment, User
 from devopshero_app.views import env_bearer_auth
-from devopshero_app.views.integrations import (
-    github_token_refresh,
-    google_token_refresh,
-    slack_vault,
-    telegram_vault,
-)
+from devopshero_app.views.integrations import provider_registry
 
 logger = logging.getLogger(__name__)
-
-
-_OUTCOME_HANDLERS = {
-    "google": google_token_refresh.refresh_google_outcome,
-    "github": github_token_refresh.refresh_github_outcome,
-    "telegram": telegram_vault.refresh_telegram_outcome,
-    "slack": slack_vault.refresh_slack_outcome,
-}
 
 
 @csrf_exempt
@@ -94,21 +81,21 @@ def integrations_tokens_batch(request: HttpRequest) -> JsonResponse:
     # helper's upstream timeout is 5s, so the whole batch is naturally
     # bounded by ~5s + DB / marshalling overhead — well inside the
     # broker's 7s urlopen ceiling, no separate batch deadline needed.
-    handlers_to_run = {
-        slug: _OUTCOME_HANDLERS[slug]
+    specs_to_run = {
+        slug: spec
         for slug in requested_providers
-        if slug in _OUTCOME_HANDLERS
+        if (spec := provider_registry.get(provider=slug)) is not None
     }
     results: dict[str, dict] = {
         slug: {"outcome": "absent"}
         for slug in requested_providers
-        if slug not in _OUTCOME_HANDLERS
+        if slug not in specs_to_run
     }
-    if handlers_to_run:
-        with ThreadPoolExecutor(max_workers=len(handlers_to_run)) as executor:
+    if specs_to_run:
+        with ThreadPoolExecutor(max_workers=len(specs_to_run)) as executor:
             future_to_slug = {
-                executor.submit(_run_handler, handler, environment, user, app_slug): slug
-                for slug, handler in handlers_to_run.items()
+                executor.submit(_run_handler, spec.module.refresh_outcome, environment, user, app_slug): slug
+                for slug, spec in specs_to_run.items()
             }
             for future in future_to_slug:
                 slug = future_to_slug[future]

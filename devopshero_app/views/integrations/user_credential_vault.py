@@ -12,7 +12,7 @@ from django.views.decorators.http import require_POST
 
 from devopshero_app.models import App, Environment, IntegrationUserCredential, ResourceTag, User
 from devopshero_app.views import env_bearer_auth
-from devopshero_app.views.integrations import slack_vault, telegram_vault
+from devopshero_app.views.integrations import provider_registry
 
 logger = logging.getLogger(__name__)
 
@@ -79,9 +79,9 @@ def _resolve_owned_app_slug(app_slug: object, environment: Environment, owner_us
 
 def _provider_from_payload(provider: object) -> tuple[str | None, JsonResponse | None]:
     """Validate a provider slug for the paste-style vault surface."""
-    if provider not in _SCHEMA_BUILDERS:
+    if not isinstance(provider, str) or provider_registry.get_of_kind(provider=provider, kind=provider_registry.ProviderKind.VAULT) is None:
         return None, JsonResponse({"error": "unsupported credential provider"}, status=400)
-    return str(provider), None
+    return provider, None
 
 
 def _normalize_origin(public_origin: object, environment: Environment) -> tuple[str | None, JsonResponse | None]:
@@ -116,10 +116,10 @@ def _canonical_origin(scheme: str, hostname: str, port: int | None) -> str:
 
 def _schema_for_provider(provider: str, existing: IntegrationUserCredential | None) -> dict:
     """Return the form schema for one paste-style provider via the registry."""
-    builder = _SCHEMA_BUILDERS.get(provider)
-    if builder is None:
+    spec = provider_registry.get_of_kind(provider=provider, kind=provider_registry.ProviderKind.VAULT)
+    if spec is None:
         raise ValueError(f"unsupported provider: {provider!r}")
-    return builder(existing)
+    return spec.module.schema(existing)
 
 
 def _setup_token_payload(
@@ -256,9 +256,9 @@ def integrations_credential_submit(request: HttpRequest) -> JsonResponse:
         return _cors_json_response({"error": "credentials and config must be objects"}, status=400, allowed_origin=allowed_origin)
 
     provider = token_payload["provider"]
-    saver = _CREDENTIAL_SAVERS.get(provider)
-    if saver is not None:
-        credential, validation_error = saver(
+    spec = provider_registry.get_of_kind(provider=provider, kind=provider_registry.ProviderKind.VAULT)
+    if spec is not None:
+        credential, validation_error = spec.module.save_credentials(
             owner_user=owner_user,
             environment=environment,
             app_slug=app_slug,
@@ -304,62 +304,3 @@ def integrations_credential_submit(request: HttpRequest) -> JsonResponse:
         status=200,
         allowed_origin=allowed_origin,
     )
-
-
-@csrf_exempt
-@require_POST
-def integrations_credential_disconnect(request: HttpRequest) -> JsonResponse:
-    """Delete a paste-style user credential row."""
-    environment, auth_error = _resolve_env_bearer_context(request=request)
-    if auth_error is not None:
-        return auth_error
-    payload, parse_error = _parse_json_body(request=request)
-    if parse_error is not None:
-        return parse_error
-    owner_user, owner_error = _resolve_owner_user(
-        owner_username=payload.get("owner_username"),
-        environment=environment,
-    )
-    if owner_error is not None:
-        return owner_error
-    app_slug, app_error = _resolve_owned_app_slug(
-        app_slug=payload.get("app_slug"),
-        environment=environment,
-        owner_user=owner_user,
-    )
-    if app_error is not None:
-        return app_error
-    provider, provider_error = _provider_from_payload(provider=payload.get("provider"))
-    if provider_error is not None:
-        return provider_error
-    deleted_count, _ = IntegrationUserCredential.objects.filter(
-        owner_user=owner_user,
-        environment=environment,
-        app_slug=app_slug,
-        provider=provider,
-    ).delete()
-    logger.info(
-        "vault credential disconnected: provider=%s owner=%s env=%s app=%s rows=%d",
-        provider,
-        owner_user.username,
-        environment.slug,
-        app_slug,
-        deleted_count,
-    )
-    return JsonResponse({"ok": True, "status": "not_connected"})
-
-
-# Per-provider dispatch tables for the paste-style vault surface. A provider
-# is "supported" here iff it has a schema builder; setup-session, submit, and
-# disconnect all gate on these registries instead of hardcoding one provider.
-# Saver signature: (owner_user, environment, app_slug, credentials_payload,
-# config_payload) -> (IntegrationUserCredential | None, error_message | None).
-_SCHEMA_BUILDERS = {
-    IntegrationUserCredential.Provider.TELEGRAM: telegram_vault.telegram_schema,
-    IntegrationUserCredential.Provider.SLACK: slack_vault.slack_schema,
-}
-
-_CREDENTIAL_SAVERS = {
-    IntegrationUserCredential.Provider.TELEGRAM: telegram_vault.save_telegram_credentials,
-    IntegrationUserCredential.Provider.SLACK: slack_vault.save_slack_credentials,
-}

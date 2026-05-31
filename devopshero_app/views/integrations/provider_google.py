@@ -1,11 +1,21 @@
-"""Google Workspace OAuth start + callback views.
+"""Google Workspace per-user integration: OAuth connect + token refresh.
 
-See `docs/integrations_broker_design.md`. The authenticated DOH user
-starts at `/integrations/user/google/start/?rd=<URL>` (where `rd` points at
-the Hermes WebUI in a customer env), consents at Google, and lands back at
-`/integrations/user/google/callback/`. The callback persists the refresh_token
-in DOH's DB as an IntegrationUserCredential row; no long-lived Google
-credentials cross into the customer env.
+Connect (browser redirect dance): the authenticated DOH user starts at
+`/integrations/user/google/start/?rd=<URL>` (where `rd` points at the Hermes
+WebUI in a customer env), consents at Google, and lands back at
+`/integrations/user/google/callback/`. The callback persists the
+refresh_token in DOH's DB as an IntegrationUserCredential row; no long-lived
+Google credentials cross into the customer env.
+
+Refresh (`refresh_outcome`): exchanges the stored refresh_token with Google
+using DOH's OAuth client_secret and returns a broker-shaped outcome dict. The
+batched refresh endpoint (`token_refresh_batch.py`) calls this from a worker
+thread alongside the other providers. The refresh_token and DOH's
+client_secret never cross the customer/DOH boundary; if Google has revoked
+the refresh_token the row is deleted and the outcome flips to `absent` so the
+WebUI prompts a reconnect.
+
+See `docs/integrations_broker_design.md`.
 """
 
 import logging
@@ -18,7 +28,8 @@ from django.http import HttpRequest, HttpResponse, HttpResponseBadRequest
 from django.shortcuts import redirect
 from django.utils import timezone
 
-from devopshero_app.models import App, Environment, IntegrationConfig, IntegrationUserCredential, ResourceTag, User
+from devopshero_app.models import Environment, IntegrationConfig, IntegrationUserCredential, User
+from devopshero_app.views.integrations import provider_common
 
 logger = logging.getLogger(__name__)
 
@@ -33,6 +44,14 @@ GOOGLE_SCOPES = [
     "openid",
     "email",
 ]
+
+# Google's refresh-token exchange is a single small POST. Healthy P99 is
+# well under 1s; setting the ceiling at 5s means the broker's batch refresh
+# (which runs all providers in parallel) is naturally bounded by the slowest
+# single exchange, no separate batch deadline needed. If upstream is taking
+# longer than 5s, surfacing `transient` (cache-preserving) beats hanging a
+# user request on a refresh that's about to fail anyway.
+GOOGLE_TOKEN_EXCHANGE_TIMEOUT_SECONDS = 5
 
 
 def _pick_redirect_uri(request: HttpRequest, configured: list[str]) -> str:
@@ -53,60 +72,14 @@ def _pick_redirect_uri(request: HttpRequest, configured: list[str]) -> str:
     )
 
 
-def _resolve_env_by_rd(rd: str, user: User) -> Environment | None:
-    """Return the Environment whose shared_alb_hosted_zone suffixes *rd*'s host, or None.
-
-    We accept any URL whose host is a subdomain of a known env's hosted zone —
-    e.g. rd `https://hermes.dev.example.com/x` matches an Environment with
-    `shared_alb_hosted_zone = "dev.example.com"`. Scoped to envs in orgs *user*
-    is a member of.
-    """
-    if not rd:
-        return None
-    parsed = urlparse(rd)
-    if parsed.scheme not in ("http", "https") or not parsed.hostname:
-        return None
-    host = parsed.hostname.lower()
-    candidates = (
-        Environment.objects
-        .exclude(shared_alb_hosted_zone="")
-        .filter(aws_account__organization__memberships__user=user)
-        .only("id", "slug", "shared_alb_hosted_zone")
-    )
-    for env in candidates:
-        zone = env.shared_alb_hosted_zone.lower()
-        if host == zone or host.endswith("." + zone):
-            return env
-    return None
-
-
-def _resolve_owned_app_slug(app_slug: str, env: Environment, owner_username: str) -> str | None:
-    """Return app_slug when it identifies an app owned by the user in env's org."""
-    if not app_slug:
-        return None
-    app = App.objects.filter(
-        organization=env.aws_account.organization,
-        slug=app_slug,
-    ).first()
-    if app is None:
-        return None
-    owner_tag = ResourceTag.objects.filter(
-        resource_type=ResourceTag.ResourceType.APP,
-        app=app,
-        key="owner",
-        value=owner_username,
-    ).first()
-    return app.slug if owner_tag is not None else None
-
-
 @login_required
 def integrations_user_google_start(request: HttpRequest) -> HttpResponse:
     """Validate `rd`, stash state, redirect to Google's OAuth consent screen."""
     rd = request.GET.get("rd", "")
-    env = _resolve_env_by_rd(rd=rd, user=request.user)
+    env = provider_common.resolve_env_by_rd(rd=rd, user=request.user)
     if env is None:
         return HttpResponseBadRequest("Invalid or unknown rd")
-    app_slug = _resolve_owned_app_slug(
+    app_slug = provider_common.resolve_owned_app_slug(
         app_slug=request.GET.get("app_slug", ""),
         env=env,
         owner_username=request.user.username,
@@ -172,14 +145,6 @@ def _exchange_google_code(web: dict, code: str, redirect_uri: str) -> dict:
     )
     response.raise_for_status()
     return response.json()
-
-
-def _append_query(url: str, extra: dict[str, str]) -> str:
-    parsed = urlparse(url)
-    existing = parsed.query
-    encoded = urlencode(extra)
-    combined = f"{existing}&{encoded}" if existing else encoded
-    return parsed._replace(query=combined).geturl()
 
 
 @login_required
@@ -277,10 +242,118 @@ def integrations_user_google_callback(request: HttpRequest) -> HttpResponse:
         env.slug, owner_username, app_slug,
     )
 
-    return redirect(_append_query(rd, {"connected": "google"}))
+    return redirect(provider_common.append_query(url=rd, extra={"connected": "google"}))
 
 
-def _revoke_google_refresh_token(refresh_token: str) -> None:
+def refresh_outcome(environment: Environment, owner_user: User, app_slug: str) -> dict:
+    """Compute the broker-shaped refresh outcome for one (env, owner, app).
+
+    Returns a `provider_common` outcome dict where `outcome` is
+    `has_token | absent | transient`. The `absent` (disconnected) path is
+    intentionally silent — the broker asks every Refresh-all/bootstrap, and
+    most providers are typically disconnected, so logging that as an error
+    would be log spam.
+    """
+    try:
+        google_cfg = IntegrationConfig.objects.get(provider=IntegrationConfig.Provider.GOOGLE)
+    except IntegrationConfig.DoesNotExist:
+        logger.error("google token refresh failed: IntegrationConfig(provider=google) missing")
+        return provider_common.transient()
+
+    integration = IntegrationUserCredential.objects.filter(
+        owner_user=owner_user,
+        environment=environment,
+        app_slug=app_slug,
+        provider=IntegrationUserCredential.Provider.GOOGLE,
+    ).first()
+    if integration is None:
+        return provider_common.absent()
+
+    refresh_token = integration.credentials.get("refresh_token", "")
+    if not refresh_token:
+        logger.error(
+            "google token refresh: row missing refresh_token env=%s owner=%s app=%s",
+            environment.slug, owner_user.username, app_slug,
+        )
+        return provider_common.absent()
+
+    exchange_result = _exchange_refresh_token(
+        web=google_cfg.config,
+        refresh_token=refresh_token,
+    )
+    if exchange_result.revoked:
+        logger.info(
+            "google token refresh: revoked by google, deleting row env=%s owner=%s app=%s",
+            environment.slug, owner_user.username, app_slug,
+        )
+        integration.delete()
+        return provider_common.absent()
+    if exchange_result.error is not None:
+        logger.error(
+            "google token refresh failed env=%s owner=%s app=%s error=%s",
+            environment.slug, owner_user.username, app_slug, exchange_result.error,
+        )
+        return provider_common.transient()
+
+    new_refresh = exchange_result.response.get("refresh_token")
+    if new_refresh and new_refresh != refresh_token:
+        integration.credentials = {**integration.credentials, "refresh_token": new_refresh}
+    integration.last_refreshed_at = provider_common.now()
+    integration.save(update_fields=["credentials", "last_refreshed_at", "updated_at"])
+
+    return provider_common.has_token(
+        secrets={"access_token": exchange_result.response["access_token"]},
+        expires_in=int(exchange_result.response.get("expires_in", 0)),
+        config={},
+        metadata={},
+    )
+
+
+def _exchange_refresh_token(web: dict, refresh_token: str) -> provider_common.ExchangeResult:
+    """POST to Google's token endpoint with grant_type=refresh_token.
+
+    Classifies the response into one of three buckets:
+    - revoked: Google returned 400 invalid_grant (or similar refresh-token
+      rejection). The stored token is unusable; caller should delete the row.
+    - error: any other failure (network, 5xx, non-JSON).
+    - response: the raw JSON from Google.
+    """
+    try:
+        response = httpx.post(
+            web["token_uri"],
+            data={
+                "client_id": web["client_id"],
+                "client_secret": web["client_secret"],
+                "refresh_token": refresh_token,
+                "grant_type": "refresh_token",
+            },
+            timeout=GOOGLE_TOKEN_EXCHANGE_TIMEOUT_SECONDS,
+        )
+    except httpx.HTTPError as exc:
+        return provider_common.ExchangeResult(response=None, revoked=False, error=f"network: {exc}")
+
+    if response.status_code == 200:
+        try:
+            return provider_common.ExchangeResult(response=response.json(), revoked=False, error=None)
+        except ValueError:
+            return provider_common.ExchangeResult(response=None, revoked=False, error="non-json-200")
+
+    # Google's refresh-token rejection returns 400 with
+    # {"error": "invalid_grant", ...}. Treat as revoked.
+    try:
+        body = response.json()
+    except ValueError:
+        body = {}
+    if response.status_code == 400 and body.get("error") == "invalid_grant":
+        return provider_common.ExchangeResult(response=None, revoked=True, error=None)
+
+    return provider_common.ExchangeResult(
+        response=None, revoked=False,
+        error=f"http {response.status_code}: {body.get('error', 'unknown')}",
+    )
+
+
+def revoke(refresh_token: str) -> None:
     """Best-effort revoke at Google's oauth2 endpoint.
 
     Failure doesn't block the local deletion — the row removal is the

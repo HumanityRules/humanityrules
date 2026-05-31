@@ -1,12 +1,13 @@
-"""Slack vault helpers: schema, credential validation, and refresh outcome.
+"""Slack vault provider: schema, credential validation, and refresh outcome.
 
 Slack is a paste-style vault provider like Telegram, but with two secrets
 (an app-level token `xapp-` for the Socket Mode handshake and a bot token
 `xoxb-` for the Web API) and a richer setup flow (a Personal/Company-wide
 mode selector plus a manifest prefill link the operator uses to create the
-Slack app). Registered into the generic vault surface via the dispatch
-tables in `user_credential_vault.py`; the batched refresh endpoint
-(`token_refresh_batch.py`) calls `refresh_slack_outcome`.
+Slack app). Registered into the generic vault surface via `provider_registry`;
+the batched refresh endpoint (`token_refresh_batch.py`) calls `refresh_outcome`.
+Exposes the uniform vault-provider interface (`schema`, `save_credentials`,
+`refresh_outcome`) shared with `provider_telegram`.
 
 See docs/slack_integration_design.md for the ownership/privacy model.
 """
@@ -18,6 +19,7 @@ import httpx
 from django.utils import timezone
 
 from devopshero_app.models import Environment, IntegrationUserCredential, User
+from devopshero_app.views.integrations import provider_common
 
 logger = logging.getLogger(__name__)
 
@@ -66,7 +68,7 @@ def _slack_manifest(mode: str) -> dict:
     }
 
 
-def slack_schema(existing: IntegrationUserCredential | None) -> dict:
+def schema(existing: IntegrationUserCredential | None) -> dict:
     """Build the Slack setup schema consumed by the custom WebUI renderer."""
     mode = MODE_COMPANY_WIDE
     metadata = {}
@@ -132,7 +134,7 @@ def _validate_app_token(app_token: str) -> tuple[None, str | None]:
     return None, error
 
 
-def save_slack_credentials(
+def save_credentials(
     owner_user: User,
     environment: Environment,
     app_slug: str,
@@ -201,7 +203,7 @@ def save_slack_credentials(
     return credential, None
 
 
-def refresh_slack_outcome(environment: Environment, owner_user: User, app_slug: str) -> dict:
+def refresh_outcome(environment: Environment, owner_user: User, app_slug: str) -> dict:
     """Compute the broker-shaped refresh outcome for Slack (plain DB read).
 
     Returns both secrets so the broker can inject the app token on the Socket
@@ -215,15 +217,14 @@ def refresh_slack_outcome(environment: Environment, owner_user: User, app_slug: 
         provider=IntegrationUserCredential.Provider.SLACK,
     ).first()
     if credential is None:
-        return {"outcome": "absent"}
+        return provider_common.absent()
     app_token = credential.credentials.get("app_token", "")
     bot_token = credential.credentials.get("bot_token", "")
     if not app_token or not bot_token:
-        return {"outcome": "absent"}
-    return {
-        "outcome": "has_token",
-        "secrets": {"app_token": app_token, "bot_token": bot_token},
-        "expires_in": SLACK_BROKER_CACHE_SECONDS,
-        "config": credential.config,
-        "metadata": credential.metadata,
-    }
+        return provider_common.absent()
+    return provider_common.has_token(
+        secrets={"app_token": app_token, "bot_token": bot_token},
+        expires_in=SLACK_BROKER_CACHE_SECONDS,
+        config=credential.config,
+        metadata=credential.metadata,
+    )

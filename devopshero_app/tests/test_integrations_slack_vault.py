@@ -19,7 +19,7 @@ from devopshero_app.models import (
     User,
     Workspace,
 )
-from devopshero_app.views.integrations import slack_vault
+from devopshero_app.views.integrations import provider_slack
 
 
 def _hash(raw: str) -> str:
@@ -108,7 +108,7 @@ class _SlackVaultTestBase(TestCase):
             if url.endswith("/auth.test"):
                 return self._ok_response({"team": "Acme", "team_id": "T1", "user_id": "U1"})
             return self._ok_response({"url": "wss://example"})
-        return patch("devopshero_app.views.integrations.slack_vault.httpx.post", side_effect=_fake_post)
+        return patch("devopshero_app.views.integrations.provider_slack.httpx.post", side_effect=_fake_post)
 
 
 class TestSlackSetupSession(_SlackVaultTestBase):
@@ -118,14 +118,14 @@ class TestSlackSetupSession(_SlackVaultTestBase):
         self.assertEqual(status, 200)
         schema = body["schema"]
         self.assertEqual(schema["provider"], "slack")
-        self.assertEqual(schema["selected_mode"], slack_vault.MODE_COMPANY_WIDE)
+        self.assertEqual(schema["selected_mode"], provider_slack.MODE_COMPANY_WIDE)
         mode_values = {m["value"]: m["enabled"] for m in schema["modes"]}
-        self.assertTrue(mode_values[slack_vault.MODE_COMPANY_WIDE])
-        self.assertFalse(mode_values[slack_vault.MODE_PERSONAL])
-        company = schema["manifests"][slack_vault.MODE_COMPANY_WIDE]
+        self.assertTrue(mode_values[provider_slack.MODE_COMPANY_WIDE])
+        self.assertFalse(mode_values[provider_slack.MODE_PERSONAL])
+        company = schema["manifests"][provider_slack.MODE_COMPANY_WIDE]
         self.assertTrue(company["settings"]["socket_mode_enabled"])
         self.assertEqual(company["settings"]["event_subscriptions"]["bot_events"], ["app_mention"])
-        personal = schema["manifests"][slack_vault.MODE_PERSONAL]
+        personal = schema["manifests"][provider_slack.MODE_PERSONAL]
         self.assertEqual(personal["settings"]["event_subscriptions"]["bot_events"], ["message.im"])
 
 
@@ -139,7 +139,7 @@ class TestSlackSubmit(_SlackVaultTestBase):
                 data=json.dumps({
                     "submit_token": session["submit_token"],
                     "credentials": {"app_token": "xapp-abc", "bot_token": "xoxb-abc"},
-                    "config": {"workspace_scope": slack_vault.MODE_COMPANY_WIDE},
+                    "config": {"workspace_scope": provider_slack.MODE_COMPANY_WIDE},
                 }),
                 content_type="text/plain",
                 HTTP_ORIGIN="https://hermes.dev.example.com",
@@ -147,7 +147,7 @@ class TestSlackSubmit(_SlackVaultTestBase):
         self.assertEqual(response.status_code, 200)
         cred = IntegrationUserCredential.objects.get(provider=IntegrationUserCredential.Provider.SLACK)
         self.assertEqual(cred.credentials, {"app_token": "xapp-abc", "bot_token": "xoxb-abc"})
-        self.assertEqual(cred.config["workspace_scope"], slack_vault.MODE_COMPANY_WIDE)
+        self.assertEqual(cred.config["workspace_scope"], provider_slack.MODE_COMPANY_WIDE)
         # Company-wide must opt into allow-all; the gateway denies by default.
         self.assertEqual(cred.config["allow_all_users"], "true")
         self.assertEqual(cred.metadata["team_id"], "T1")
@@ -160,7 +160,7 @@ class TestSlackSubmit(_SlackVaultTestBase):
                 data=json.dumps({
                     "submit_token": session["submit_token"],
                     "credentials": {"app_token": "xapp-abc", "bot_token": "not-a-token"},
-                    "config": {"workspace_scope": slack_vault.MODE_COMPANY_WIDE},
+                    "config": {"workspace_scope": provider_slack.MODE_COMPANY_WIDE},
                 }),
                 content_type="text/plain",
                 HTTP_ORIGIN="https://hermes.dev.example.com",
@@ -176,7 +176,7 @@ class TestSlackSubmit(_SlackVaultTestBase):
                 data=json.dumps({
                     "submit_token": session["submit_token"],
                     "credentials": {"app_token": "xapp-abc", "bot_token": "xoxb-abc"},
-                    "config": {"workspace_scope": slack_vault.MODE_PERSONAL},
+                    "config": {"workspace_scope": provider_slack.MODE_PERSONAL},
                 }),
                 content_type="text/plain",
                 HTTP_ORIGIN="https://hermes.dev.example.com",
@@ -194,13 +194,13 @@ class TestSlackRefreshOutcome(_SlackVaultTestBase):
             app_slug="hermes",
             provider=IntegrationUserCredential.Provider.SLACK,
             credentials={"app_token": "xapp-abc", "bot_token": "xoxb-abc"},
-            config={"workspace_scope": slack_vault.MODE_COMPANY_WIDE},
+            config={"workspace_scope": provider_slack.MODE_COMPANY_WIDE},
             metadata={"team_id": "T1"},
         )
-        outcome = slack_vault.refresh_slack_outcome(environment=self.env, owner_user=self.user, app_slug="hermes")
+        outcome = provider_slack.refresh_outcome(environment=self.env, owner_user=self.user, app_slug="hermes")
         self.assertEqual(outcome["outcome"], "has_token")
         self.assertEqual(outcome["secrets"], {"app_token": "xapp-abc", "bot_token": "xoxb-abc"})
 
     def test_refresh_absent_when_not_connected(self) -> None:
-        outcome = slack_vault.refresh_slack_outcome(environment=self.env, owner_user=self.user, app_slug="hermes")
+        outcome = provider_slack.refresh_outcome(environment=self.env, owner_user=self.user, app_slug="hermes")
         self.assertEqual(outcome, {"outcome": "absent"})

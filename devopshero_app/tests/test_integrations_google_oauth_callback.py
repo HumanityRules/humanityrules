@@ -88,7 +88,7 @@ class _CallbackTestBase(TestCase):
         token_response.json.return_value = body if body is not None else GOOGLE_TOKEN_RESPONSE
         token_response.raise_for_status.return_value = None
         return patch(
-            "devopshero_app.views.integrations.google_oauth.httpx.post",
+            "devopshero_app.views.integrations.provider_google.httpx.post",
             return_value=token_response,
         )
 
@@ -234,7 +234,7 @@ class TestIntegrationsGoogleCallbackRejections(_CallbackTestBase):
                            env_id=str(self.env.id), app_slug="hermes", owner_username="vmendi")
 
         with patch(
-            "devopshero_app.views.integrations.google_oauth.httpx.post",
+            "devopshero_app.views.integrations.provider_google.httpx.post",
             side_effect=RuntimeError("boom"),
         ):
             response = self.client.get(
