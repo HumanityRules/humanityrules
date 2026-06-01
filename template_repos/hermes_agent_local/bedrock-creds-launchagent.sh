@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# macOS LaunchAgent for refresh-bedrock-creds.sh (every 45 minutes, not at login).
+# macOS LaunchAgent for refresh-bedrock-creds.sh (every 10 minutes, not at login).
 set -euo pipefail
 
 if [[ "$(uname -s)" != "Darwin" ]]; then
@@ -41,7 +41,7 @@ write_plist() {
     <string>${REFRESH_SCRIPT}</string>
   </array>
   <key>StartInterval</key>
-  <integer>2700</integer>
+  <integer>600</integer>
   <key>StandardOutPath</key>
   <string>${LOG_DIR}/bedrock-creds.log</string>
   <key>StandardErrorPath</key>
@@ -53,7 +53,7 @@ EOF
 
 cmd_install() {
     write_plist
-    echo "Installed ${PLIST_PATH} (every 45 minutes; not loaded — run '$(basename "$0") start')"
+    echo "Installed ${PLIST_PATH} (every 10 minutes; not loaded — run '$(basename "$0") start')"
     echo "Logs: ${LOG_DIR}/bedrock-creds.{log,err}"
 }
 
@@ -61,7 +61,7 @@ cmd_start() {
     write_plist
     launchctl bootout "${GUI_DOMAIN}/${LABEL}" 2>/dev/null || true
     launchctl bootstrap "$GUI_DOMAIN" "$PLIST_PATH"
-    echo "Started ${LABEL} (every 45 minutes; first run after interval unless you run refresh-bedrock-creds.sh)"
+    echo "Started ${LABEL} (every 10 minutes; first run after interval unless you run refresh-bedrock-creds.sh)"
     echo "Logs: ${LOG_DIR}/bedrock-creds.{log,err}"
 }
 
