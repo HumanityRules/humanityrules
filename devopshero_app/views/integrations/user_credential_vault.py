@@ -9,7 +9,7 @@ from django.http import HttpRequest, JsonResponse
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_POST
 
-from devopshero_app.models import Environment, IntegrationUserCredential, User
+from devopshero_app.models import App, Environment, IntegrationUserCredential, User
 from devopshero_app.views.integrations import broker_request_context, provider_registry
 
 logger = logging.getLogger(__name__)
@@ -56,12 +56,12 @@ def _canonical_origin(scheme: str, hostname: str, port: int | None) -> str:
     return f"{scheme}://{host}:{port}"
 
 
-def _schema_for_provider(provider: str, existing: IntegrationUserCredential | None) -> dict:
+def _schema_for_provider(provider: str, existing: IntegrationUserCredential | None, app: App | None) -> dict:
     """Return the form schema for one paste-style provider via the registry."""
     spec = provider_registry.get_of_kind(provider=provider, kind=provider_registry.ProviderKind.VAULT)
     if spec is None:
         raise ValueError(f"unsupported provider: {provider!r}")
-    return spec.module.schema(existing)
+    return spec.module.schema(existing, app)
 
 
 def _setup_token_payload(
@@ -121,6 +121,12 @@ def integrations_credential_setup_session(request: HttpRequest) -> JsonResponse:
         app_slug=app_slug,
         provider=provider,
     ).first()
+    # The Slack schema seeds its default app name from the deploying app's
+    # template; resolve_owned_app_slug already verified ownership by slug.
+    app = App.objects.select_related("source_template").filter(
+        organization=environment.aws_account.organization,
+        slug=app_slug,
+    ).first()
     submit_payload = _setup_token_payload(
         owner_user=owner_user,
         environment=environment,
@@ -133,7 +139,7 @@ def integrations_credential_setup_session(request: HttpRequest) -> JsonResponse:
         "action_url": request.build_absolute_uri("/api/integrations/credentials/submit"),
         "submit_token": submit_token,
         "expires_in": SETUP_TOKEN_MAX_AGE_SECONDS,
-        "schema": _schema_for_provider(provider=provider, existing=existing),
+        "schema": _schema_for_provider(provider=provider, existing=existing, app=app),
     })
 
 

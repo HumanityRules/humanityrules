@@ -40,13 +40,39 @@ The operator's steps (~4 guided clicks, no manual config — the manifest carrie
 
 The two tokens come from two different actions (generate vs. install), so the DOH UI asks for both explicitly and should **verify on paste**: `apps.connections.open` for `xapp-`, `auth.test` for `xoxb-`.
 
+## App name (operator-editable, defaults to the template name)
+
+The config dialog has an editable **App name** field. It feeds **both** Slack
+manifest name fields — there is no single "bot name vs app name" toggle; one
+entry drives both, sanitized per Slack's differing field rules:
+
+- `display_information.name` (the app's name on its page / install dialog) — **≤35 chars**, any characters, used verbatim.
+- `features.bot_user.display_name` (the bot as it posts in channels/DMs) — **≤80 chars**, restricted to `[a-z0-9._-]`; the name is lowercased and non-matching runs collapse to `-`.
+
+The **default** is the deploying app's template name — `App.source_template.name`
+(the `AppTemplate.name` chosen in the DOH control plane at deploy time, e.g.
+"Hermes Agent"). If there is no template (the `SET_NULL` edge case) or the
+operator clears the field, it falls back to `"Slackbot"` / `"slackbot"`.
+
+The chosen name is persisted in the Slack `config["app_name"]` so it
+repopulates on reopen (the template default only seeds the first connect). The
+name lives **inside the manifest JSON** the operator clicks, so the WebUI
+re-encodes the prefill URL on every keystroke. Sanitization is mirrored in
+Python (`provider_slack.py`) and JS (`doh-integrations.js`) so the live link
+matches what the server bakes and stores.
+
+**The name only affects app *creation*.** Like any manifest change, renaming in
+DOH does not touch an already-created Slack app (see "Changing the manifest…"
+below); an existing install must re-apply the manifest and reinstall to pick up
+a new name.
+
 ## Two modes, two manifests
 
 The config dialog has a **Personal / Company-wide selector**. The selector drives **which manifest** the prefill URL carries — so the privacy model is enforced **structurally** (what Slack delivers), not just in gateway logic.
 
 | | **Personal** | **Company-wide** |
 |---|---|---|
-| Subscribes to | `message.im` only | `app_mention` (+ channel history) |
+| Subscribes to | `message.im` only | `app_mention` + `message.channels` + `message.groups` |
 | Can receive DMs | yes (owner's) | **no — not subscribed** |
 | Can be @-mentioned in channels | no | yes |
 | Audience | owner only | anyone in an invited channel |
@@ -82,6 +108,16 @@ Note: `message.im` delivers DMs from *any* user, not just the owner. The `event.
 ## Company-wide: shared state is intended
 
 A company-wide agent is **one agent with one memory/session**, shared across all users. This is a feature, not a bug — org-wide accumulated knowledge. Suppressing DMs (by not subscribing to `message.im`) avoids the *illusion* of a private side-channel, keeping the shared-conversation privacy model honest. Anyone in an invited channel can drive the bot (`SLACK_ALLOW_ALL_USERS=true`; no per-user allowlist).
+
+### Why company-wide subscribes to `message.channels`, not just `app_mention`
+
+`app_mention` fires **only** on messages that explicitly `@`-mention the bot ([docs](https://docs.slack.dev/reference/events/app_mention)) — *"you'll receive only the messages pertinent to your app."* It does **not** fire for ordinary replies in a thread, even one the bot was just mentioned in and is actively answering. The upstream gateway is built to follow a thread once pulled in (it records the thread in `_mentioned_threads` on the first mention, then auto-responds to subsequent non-mention replies via the `in_mentioned_thread` / `reply_to_bot_thread` / active-session branches in `_handle_slack_message`), but that logic only runs on events Slack delivers. Under an `app_mention`-only subscription Slack delivers nothing for the follow-ups, so the bot goes silent after the first turn.
+
+`message.channels` (backed by `channels:history`) and `message.groups` (backed by `groups:history`) deliver every public- and private-channel message into the generic `message` handler; the gateway's gating then decides what to answer. Private-channel events arrive with `channel_type == "group"`, which the gateway treats as a channel (not a DM — `is_dm` is only `im`/`mpim`), so they flow through the same mention/thread gating. This does **not** weaken the privacy model: there is still no `message.im` subscription, so company-wide DMs remain structurally impossible.
+
+The manifest also carries `channels:read`, `groups:read`, `im:read`, `mpim:read`. These are unrelated to message routing — the gateway's `channel_directory._build_slack` calls `users.conversations` to resolve channels by name, and Slack requires all four `*:read` scopes for that method regardless of the `types` filter. Without them the directory build logs a `missing_scope` error (harmless to routing, but noisy and it breaks name lookup).
+
+**Changing the manifest does not touch an already-created Slack app.** Existing company-wide installs must re-apply the manifest (or add the `message.channels` / `message.groups` subscriptions and the new scopes by hand) and **reinstall to the workspace**. New installs via the prefill URL pick it up automatically. The bot must also be **invited to each private channel** it should follow — `groups:history` grants access only to private channels the bot is a member of.
 
 ## Sandbox credential isolation
 
@@ -123,8 +159,9 @@ parts fork in five places, everything else is shared:
   (carries only the disposable ticket).
 - **Validation** (`slack_vault.py`) — `xoxb-` via `auth.test`, `xapp-` via
   `apps.connections.open`. `refresh_slack_outcome` returns both secrets.
-- **UI** — a custom `_VAULT_RENDERERS["slack"]` modal: mode selector, manifest prefill
-  link, two token fields.
+- **UI** — a custom `_VAULT_RENDERERS["slack"]` modal: editable app-name field
+  (defaults to the template name, re-bakes both manifest names on edit), mode
+  selector, manifest prefill link, two token fields.
 
 The shared pieces carry both secrets via the `secrets: dict[str,str]` map on
 `RefreshResult`/`_TokenCacheEntry`, and Slack registers into the per-provider dispatch

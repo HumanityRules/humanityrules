@@ -9,6 +9,7 @@ from django.test import Client, TestCase
 from devopshero_app.models import (
     AWSAccount,
     App,
+    AppTemplate,
     Environment,
     EnvironmentBearerToken,
     IntegrationUserCredential,
@@ -124,9 +125,55 @@ class TestSlackSetupSession(_SlackVaultTestBase):
         self.assertFalse(mode_values[provider_slack.MODE_PERSONAL])
         company = schema["manifests"][provider_slack.MODE_COMPANY_WIDE]
         self.assertTrue(company["settings"]["socket_mode_enabled"])
-        self.assertEqual(company["settings"]["event_subscriptions"]["bot_events"], ["app_mention"])
+        # Company-wide subscribes to public/private channel messages (not just
+        # app_mention) so the gateway can follow non-mention replies in an
+        # active thread, and carries the *:read scopes users.conversations needs
+        # for the directory.
+        self.assertEqual(
+            company["settings"]["event_subscriptions"]["bot_events"],
+            ["app_mention", "message.channels", "message.groups"],
+        )
+        company_scopes = company["oauth_config"]["scopes"]["bot"]
+        self.assertIn("channels:history", company_scopes)
+        self.assertIn("groups:history", company_scopes)
+        self.assertIn("channels:read", company_scopes)
+        self.assertIn("groups:read", company_scopes)
         personal = schema["manifests"][provider_slack.MODE_PERSONAL]
         self.assertEqual(personal["settings"]["event_subscriptions"]["bot_events"], ["message.im"])
+
+    def test_app_name_defaults_to_template_name_and_feeds_both_manifest_names(self) -> None:
+        template = AppTemplate.objects.create(
+            name="Hermes Agent",
+            slug="hermes-agent",
+            description="Template",
+            icon="robot",
+            category="ai-assistant",
+            cpu=1024,
+            memory=2048,
+            containers=[],
+            is_active=True,
+        )
+        self.app.source_template = template
+        self.app.save(update_fields=["source_template"])
+
+        status, body = self._post_setup_session()
+        self.assertEqual(status, 200)
+        schema = body["schema"]
+        self.assertEqual(schema["app_name"], "Hermes Agent")
+        company = schema["manifests"][provider_slack.MODE_COMPANY_WIDE]
+        # The app name feeds both name fields, sanitized per Slack's rules:
+        # display name verbatim, bot display_name lowercased with spaces -> '-'.
+        self.assertEqual(company["display_information"]["name"], "Hermes Agent")
+        self.assertEqual(company["features"]["bot_user"]["display_name"], "hermes-agent")
+
+    def test_app_name_falls_back_when_no_template(self) -> None:
+        # The base App has no source_template; default is the generic fallback.
+        _status, body = self._post_setup_session()
+        schema = body["schema"]
+        self.assertEqual(schema["app_name"], provider_slack.SLACK_DEFAULT_APP_NAME)
+        company = schema["manifests"][provider_slack.MODE_COMPANY_WIDE]
+        self.assertEqual(company["display_information"]["name"], "Slackbot")
+        self.assertEqual(company["features"]["bot_user"]["display_name"], "slackbot")
 
 
 class TestSlackSubmit(_SlackVaultTestBase):
@@ -151,6 +198,26 @@ class TestSlackSubmit(_SlackVaultTestBase):
         # Company-wide must opt into allow-all; the gateway denies by default.
         self.assertEqual(cred.config["allow_all_users"], "true")
         self.assertEqual(cred.metadata["team_id"], "T1")
+
+    def test_submit_persists_app_name_and_reopen_carries_it(self) -> None:
+        _status, session = self._post_setup_session()
+        with self._patched_slack_api():
+            response = self.client.post(
+                "/api/integrations/credentials/submit",
+                data=json.dumps({
+                    "submit_token": session["submit_token"],
+                    "credentials": {"app_token": "xapp-abc", "bot_token": "xoxb-abc"},
+                    "config": {"workspace_scope": provider_slack.MODE_COMPANY_WIDE, "app_name": "My Cool Bot"},
+                }),
+                content_type="text/plain",
+                HTTP_ORIGIN="https://hermes.dev.example.com",
+            )
+        self.assertEqual(response.status_code, 200)
+        cred = IntegrationUserCredential.objects.get(provider=IntegrationUserCredential.Provider.SLACK)
+        self.assertEqual(cred.config["app_name"], "My Cool Bot")
+        # Reopening the setup session seeds the saved name, not the template default.
+        _status, body = self._post_setup_session()
+        self.assertEqual(body["schema"]["app_name"], "My Cool Bot")
 
     def test_submit_rejects_malformed_bot_token(self) -> None:
         _status, session = self._post_setup_session()

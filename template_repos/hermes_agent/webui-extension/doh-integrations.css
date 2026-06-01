@@ -168,7 +168,7 @@ main.main.showing-integrations > #mainChat { display: none !important; }
 
 .doh-integration-btn-primary {
   background: var(--accent);
-  color: #fff;
+  color: #000;
   border-color: var(--accent);
 }
 

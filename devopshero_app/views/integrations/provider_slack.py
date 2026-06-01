@@ -18,7 +18,7 @@ import re
 import httpx
 from django.utils import timezone
 
-from devopshero_app.models import Environment, IntegrationUserCredential, User
+from devopshero_app.models import App, Environment, IntegrationUserCredential, User
 from devopshero_app.views.integrations import provider_common
 
 logger = logging.getLogger(__name__)
@@ -33,6 +33,17 @@ SLACK_BROKER_CACHE_SECONDS = 60 * 60
 BOT_TOKEN_RE = re.compile(r"^xoxb-[A-Za-z0-9-]+$")
 APP_TOKEN_RE = re.compile(r"^xapp-[A-Za-z0-9-]+$")
 
+# Slack manifest name limits (https://docs.slack.dev/reference/app-manifest):
+# display_information.name is <=35 chars (any character); bot_user.display_name
+# is <=80 chars restricted to [a-z0-9._-]. The operator's single "App name"
+# entry feeds both, sanitized per field. The default is the deploying app's
+# template name (App.source_template.name), set in the DOH control plane.
+SLACK_APP_NAME_MAX_LEN = 35
+SLACK_BOT_NAME_MAX_LEN = 80
+SLACK_DEFAULT_APP_NAME = "Slackbot"
+SLACK_DEFAULT_BOT_NAME = "slackbot"
+_BOT_NAME_DISALLOWED_RE = re.compile(r"[^a-z0-9._-]+")
+
 # Mode keys stored in `config["workspace_scope"]`.
 MODE_COMPANY_WIDE = "company_wide"
 MODE_PERSONAL = "personal"
@@ -43,23 +54,65 @@ MODE_PERSONAL = "personal"
 _ENABLED_MODES = frozenset({MODE_COMPANY_WIDE})
 
 
-def _slack_manifest(mode: str) -> dict:
+def _clean_app_name(raw: str) -> str:
+    """Clamp the operator's name to the app-name field (<=35 chars, any chars)."""
+    name = raw.strip()[:SLACK_APP_NAME_MAX_LEN].strip()
+    return name or SLACK_DEFAULT_APP_NAME
+
+
+def _clean_bot_name(raw: str) -> str:
+    """Derive the bot display name (<=80 chars, [a-z0-9._-]) from the app name."""
+    name = _BOT_NAME_DISALLOWED_RE.sub("-", raw.strip().lower()).strip("-")[:SLACK_BOT_NAME_MAX_LEN].strip("-")
+    return name or SLACK_DEFAULT_BOT_NAME
+
+
+def _default_app_name(app: App | None) -> str:
+    """Default Slack name: the deploying app's template name, else the fallback."""
+    if app is not None and app.source_template is not None:
+        return _clean_app_name(app.source_template.name)
+    return SLACK_DEFAULT_APP_NAME
+
+
+def _slack_manifest(mode: str, app_name: str) -> dict:
     """Build the Slack app manifest for one mode (drives the prefill URL).
 
     Both modes enable Socket Mode (so the operator can generate an app-level
     token). They differ in event subscriptions and scopes so the privacy
     model is structural: company-wide can't be DMed (no `message.im`),
     personal can't be @-mentioned in channels (no `app_mention`).
+
+    `app_name` is the operator-chosen name; it feeds both the app's
+    `display_information.name` and the channel-facing `bot_user.display_name`,
+    sanitized per Slack's differing field rules.
     """
     if mode == MODE_PERSONAL:
         bot_scopes = ["chat:write", "im:history", "users:read.email"]
         bot_events = ["message.im"]
     else:
-        bot_scopes = ["app_mentions:read", "chat:write", "channels:history"]
-        bot_events = ["app_mention"]
+        # `app_mention` alone fires only on messages that explicitly @-mention
+        # the bot, so non-mention replies in an active thread never reach the
+        # gateway and it can't follow the conversation. `message.channels` /
+        # `message.groups` (backed by `channels:history` / `groups:history`)
+        # deliver every public- / private-channel message; the gateway's own
+        # gating then decides what to answer (mention, mentioned-thread,
+        # bot-thread, or active session). The `*:read` scopes are required by
+        # `users.conversations`, which the gateway calls to build its channel
+        # directory — Slack demands all four regardless of the conversation
+        # types requested.
+        bot_scopes = [
+            "app_mentions:read",
+            "chat:write",
+            "channels:history",
+            "groups:history",
+            "channels:read",
+            "groups:read",
+            "im:read",
+            "mpim:read",
+        ]
+        bot_events = ["app_mention", "message.channels", "message.groups"]
     return {
-        "display_information": {"name": "DevOps Hero"},
-        "features": {"bot_user": {"display_name": "devopshero", "always_online": True}},
+        "display_information": {"name": _clean_app_name(app_name)},
+        "features": {"bot_user": {"display_name": _clean_bot_name(app_name), "always_online": True}},
         "oauth_config": {"scopes": {"bot": bot_scopes}},
         "settings": {
             "socket_mode_enabled": True,
@@ -68,13 +121,17 @@ def _slack_manifest(mode: str) -> dict:
     }
 
 
-def schema(existing: IntegrationUserCredential | None) -> dict:
+def schema(existing: IntegrationUserCredential | None, app: App | None) -> dict:
     """Build the Slack setup schema consumed by the custom WebUI renderer."""
     mode = MODE_COMPANY_WIDE
     metadata = {}
+    app_name = _default_app_name(app)
     if existing is not None:
         mode = existing.config.get("workspace_scope", MODE_COMPANY_WIDE)
         metadata = existing.metadata
+        # Keep the operator's previously-chosen name on reopen; the template
+        # default only seeds the first connect.
+        app_name = existing.config.get("app_name") or app_name
     return {
         "provider": "slack",
         "label": "Slack",
@@ -83,13 +140,19 @@ def schema(existing: IntegrationUserCredential | None) -> dict:
         "message": "Tokens are sent directly to the DevOps Hero vault. Your Hermes agent never receives or stores them.",
         "restart_required_after_save": True,
         "selected_mode": mode,
+        "app_name": app_name,
+        "app_name_max_len": SLACK_APP_NAME_MAX_LEN,
         "modes": [
             {"value": MODE_COMPANY_WIDE, "label": "Company-wide (shared bot in channels)", "enabled": MODE_COMPANY_WIDE in _ENABLED_MODES},
             {"value": MODE_PERSONAL, "label": "Personal (your DMs only)", "enabled": MODE_PERSONAL in _ENABLED_MODES},
         ],
         # The renderer URL-encodes the chosen mode's manifest into
-        # https://api.slack.com/apps?new_app=1&manifest_json=<...>
-        "manifests": {MODE_COMPANY_WIDE: _slack_manifest(mode=MODE_COMPANY_WIDE), MODE_PERSONAL: _slack_manifest(mode=MODE_PERSONAL)},
+        # https://api.slack.com/apps?new_app=1&manifest_json=<...>, re-baking the
+        # operator's app name into both manifests as it is edited.
+        "manifests": {
+            MODE_COMPANY_WIDE: _slack_manifest(mode=MODE_COMPANY_WIDE, app_name=app_name),
+            MODE_PERSONAL: _slack_manifest(mode=MODE_PERSONAL, app_name=app_name),
+        },
         "fields": [
             {"name": "app_token", "label": "App-level token (xapp-)", "kind": "secret", "required": existing is None, "placeholder": "xapp-..."},
             {"name": "bot_token", "label": "Bot token (xoxb-)", "kind": "secret", "required": existing is None, "placeholder": "xoxb-..."},
@@ -176,7 +239,7 @@ def save_credentials(
     # The gateway denies by default; each mode opens access differently.
     # Company-wide: anyone in an invited channel (SLACK_ALLOW_ALL_USERS=true).
     # Personal (not yet enabled): owner-only via SLACK_ALLOWED_USERS, no allow-all.
-    config = {"workspace_scope": mode}
+    config = {"workspace_scope": mode, "app_name": _clean_app_name(str(config_payload.get("app_name", "") or ""))}
     if mode == MODE_COMPANY_WIDE:
         config["allow_all_users"] = "true"
     metadata = existing.metadata if existing is not None else {}

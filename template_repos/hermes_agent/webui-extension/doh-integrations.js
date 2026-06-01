@@ -478,13 +478,33 @@
     document.body.appendChild(backdrop);
   }
 
+  // Slack manifest name rules (https://docs.slack.dev/reference/app-manifest):
+  // display_information.name is <=35 chars (any character); bot_user.display_name
+  // is <=80 chars restricted to [a-z0-9._-]. Mirrors provider_slack.py so the
+  // live prefill URL matches what the server bakes/persists.
+  const SLACK_APP_NAME_MAX_LEN = 35;
+  const SLACK_BOT_NAME_MAX_LEN = 80;
+  function slackCleanAppName(raw) {
+    return (raw || '').trim().slice(0, SLACK_APP_NAME_MAX_LEN).trim() || 'Slackbot';
+  }
+  function slackCleanBotName(raw) {
+    const name = (raw || '').trim().toLowerCase()
+      .replace(/[^a-z0-9._-]+/g, '-').replace(/^-+|-+$/g, '')
+      .slice(0, SLACK_BOT_NAME_MAX_LEN).replace(/^-+|-+$/g, '');
+    return name || 'slackbot';
+  }
+
   // Build the Slack "Create app" prefill URL for one mode by embedding that
-  // mode's manifest. The operator clicks it, Slack opens Create-New-App with
-  // everything pre-filled (incl. Socket Mode), then generates the app-level
-  // token and installs to get the bot token.
-  function slackCreateAppUrl(schema, mode) {
-    const manifest = (schema.manifests || {})[mode];
-    if (!manifest) return null;
+  // mode's manifest, re-baking the operator's chosen app name into both name
+  // fields. The operator clicks it, Slack opens Create-New-App with everything
+  // pre-filled (incl. Socket Mode), then generates the app-level token and
+  // installs to get the bot token.
+  function slackCreateAppUrl(schema, mode, appName) {
+    const base = (schema.manifests || {})[mode];
+    if (!base) return null;
+    const manifest = JSON.parse(JSON.stringify(base));
+    if (manifest.display_information) manifest.display_information.name = slackCleanAppName(appName);
+    if (manifest.features && manifest.features.bot_user) manifest.features.bot_user.display_name = slackCleanBotName(appName);
     return 'https://api.slack.com/apps?new_app=1&manifest_json=' +
       encodeURIComponent(JSON.stringify(manifest));
   }
@@ -510,18 +530,32 @@
     const modeInput = elem('input', { type: 'hidden', name: 'workspace_scope' });
     modeInput.value = selectedMode;
 
-    // The prefill link is rebuilt whenever the mode changes — each mode embeds
-    // a different manifest (different scopes + event subscriptions).
+    // Editable app name (named so submitVaultForm routes it into `config`).
+    // Defaults to the deploying app's template name; drives both Slack name
+    // fields in the prefill manifest, so editing it rebuilds the link.
+    const nameInput = elem('input', {
+      class: 'doh-vault-input',
+      name: 'app_name',
+      type: 'text',
+      maxlength: String(schema.app_name_max_len || SLACK_APP_NAME_MAX_LEN),
+      autocomplete: 'off',
+    });
+    nameInput.value = schema.app_name || '';
+
+    // The prefill link is rebuilt whenever the mode or app name changes — each
+    // mode embeds a different manifest (scopes + subscriptions), and the name
+    // is re-baked into both manifest name fields.
     const createLink = elem('a', {
       class: 'doh-integration-btn doh-integration-btn-primary doh-slack-create-link',
       target: '_blank',
       rel: 'noopener noreferrer',
     }, ['Create Slack app ↗']);
     const syncCreateLink = () => {
-      const url = slackCreateAppUrl(schema, selectedMode);
+      const url = slackCreateAppUrl(schema, selectedMode, nameInput.value);
       if (url) { createLink.href = url; createLink.style.display = ''; }
       else { createLink.removeAttribute('href'); createLink.style.display = 'none'; }
     };
+    nameInput.addEventListener('input', syncCreateLink);
 
     // Radios deliberately carry NO `name` attribute: submitVaultForm scrapes
     // every `[name]` input into credentials/config, so a named radio would
@@ -553,6 +587,11 @@
     ]);
 
     form.appendChild(modeInput);
+    form.appendChild(elem('label', { class: 'doh-vault-field' }, [
+      elem('span', { class: 'doh-vault-field-label' }, ['App name']),
+      nameInput,
+      elem('span', { class: 'doh-vault-field-help' }, ['Shown in Slack as the app and bot name. Defaults to your agent template.']),
+    ]));
     form.appendChild(elem('div', { class: 'doh-vault-field-label' }, ['Agent type']));
     form.appendChild(modeChoices);
     form.appendChild(elem('div', { class: 'doh-slack-create-row' }, [createLink]));
