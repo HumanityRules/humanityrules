@@ -1,3 +1,5 @@
+# syntax=docker/dockerfile:1
+
 FROM ghcr.io/nesquena/hermes-webui:0.51.160
 
 USER root
@@ -8,6 +10,7 @@ ARG CADDY_VERSION=2.11.3
 ARG PROCESS_COMPOSE_VERSION=1.110.0
 ARG TTYD_VERSION=1.7.7
 ARG GH_CLI_VERSION=2.92.0
+ARG HERMES_AGENT_REF=v2026.5.29.2
 ARG HERMES_AGENT_EXTRAS=messaging,matrix,cron,cli,dev,tts-premium,slack,pty,honcho,mcp,sms,acp,voice,google,bedrock,web
 
 # Runtime layout: /opt/doh and /opt/hermes are image-owned and refreshed into
@@ -35,7 +38,9 @@ ENV HOMEBREW_NO_AUTO_UPDATE=1
 ENV HOMEBREW_INSTALL_FROM_API=1
 ENV PATH=${DOH_BIN_DIR}:${PATH}
 
-RUN mkdir -p "$DOH_BIN_DIR" \
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt,sharing=locked \
+    mkdir -p "$DOH_BIN_DIR" \
     && apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates curl file git libdbus-1-3 patch procps rsync unzip zstd \
     && arch="$(dpkg --print-architecture)" \
@@ -72,8 +77,7 @@ RUN mkdir -p "$DOH_BIN_DIR" \
     && rm -rf "/tmp/gh.tar.gz" "/tmp/gh_${GH_CLI_VERSION}_linux_${gh_arch}" \
     && sed -i 's|http://deb.debian.org|https://deb.debian.org|g' /etc/apt/sources.list.d/debian.sources \
     && rm -f /tmp/nono.deb /tmp/gws.tar.gz /tmp/caddy.tar.gz /tmp/process-compose.tar.gz \
-    && rm -rf /tmp/aws /tmp/awscliv2.zip \
-    && rm -rf /var/lib/apt/lists/*
+    && rm -rf /tmp/aws /tmp/awscliv2.zip
 
 # Ensure the sandbox's intended PATH survives login-shell resets. Debian's
 # /etc/profile rewrites PATH from scratch for non-root uids; Hermes' terminal
@@ -110,34 +114,20 @@ RUN { \
     } >> /etc/gitconfig
 
 COPY --chmod=755 build/prune-skills.sh /tmp/prune-skills.sh
-RUN git clone --depth 1 --branch v2026.5.29.2 https://github.com/NousResearch/hermes-agent.git \
-        "$HERMES_WEBUI_AGENT_DIR" \
+COPY --chmod=755 build/apply-patches.py /tmp/apply-patches.py
+
+# Cache mount id includes HERMES_AGENT_REF so a version bump gets a fresh clone
+# instead of rsyncing a stale tree left by the previous ref.
+RUN --mount=type=cache,id=hermes-agent-git-${HERMES_AGENT_REF},target=/root/.cache/hermes-agent-git,sharing=locked \
+    if [ -d /root/.cache/hermes-agent-git/.git ] || [ -f /root/.cache/hermes-agent-git/HEAD ]; then \
+        rsync -a --delete /root/.cache/hermes-agent-git/ "$HERMES_WEBUI_AGENT_DIR/"; \
+    else \
+        git clone --depth 1 --branch ${HERMES_AGENT_REF} https://github.com/NousResearch/hermes-agent.git "$HERMES_WEBUI_AGENT_DIR" \
+        && rsync -a "$HERMES_WEBUI_AGENT_DIR/" /root/.cache/hermes-agent-git/; \
+    fi \
     && /tmp/prune-skills.sh "$HERMES_WEBUI_AGENT_DIR/skills" \
     && rm -f /tmp/prune-skills.sh \
     && rm -rf "$HERMES_WEBUI_AGENT_DIR/.git"
-
-# DOH-owned skills. Dropped into the bundled external skills dir so Hermes can
-# read them without copying them into the user-owned $HERMES_HOME.
-# Our `google-workspace` replaces the pruned upstream one and uses
-# platform-managed auth (see template_repos/hermes_agent/skills/google-workspace/).
-COPY skills/google-workspace /opt/hermes/agent/skills/productivity/google-workspace
-COPY skills/posthog /opt/hermes/agent/skills/productivity/posthog
-COPY skills/webapps /opt/hermes/agent/skills/development/webapps
-
-COPY SOUL.md /opt/hermes/SOUL.md
-COPY config.yaml.template /opt/hermes/config.yaml.template
-COPY --chmod=755 build/apply-patches.py /tmp/apply-patches.py
-COPY doh_runtime /opt/doh/runtime
-
-# Expose the webapps CLI on PATH. Source-of-truth lives in doh_runtime/ so the
-# whole runtime tree COPYs together; the symlink lets the agent type `webapps`.
-RUN chmod +x /opt/doh/runtime/webapps \
-    && ln -s /opt/doh/runtime/webapps /opt/doh/bin/webapps
-
-# DOH-owned WebUI extension bundle. Loaded by Hermes WebUI per docs/EXTENSIONS.md
-# when the three HERMES_WEBUI_EXTENSION_* env vars are set (see supervisor.sh).
-# The sandbox reads this directory so the WebUI can serve the extension bundle.
-COPY webui-extension /opt/doh/webui-extension
 
 # WebUI lives in the base image at /apptoo/. Patch it before copying it into
 # $HERMES_WEBUI_DIR so the installed venv and precompiled bytecode use patched source.
@@ -178,7 +168,8 @@ RUN mkdir -p /home/linuxbrew && chown hermeswebui:hermeswebui /home/linuxbrew
 
 USER hermeswebui
 
-RUN cd "$HERMES_WEBUI_DIR" \
+RUN --mount=type=cache,target=/uv_cache,uid=1024,gid=1024 \
+    cd "$HERMES_WEBUI_DIR" \
     && export UV_CACHE_DIR=/uv_cache \
     && uv venv "$HERMES_WEBUI_DIR/venv" \
     && . "$HERMES_WEBUI_DIR/venv/bin/activate" \
@@ -211,6 +202,26 @@ RUN mkdir -p /home/linuxbrew/.linuxbrew/bin \
        /home/linuxbrew/.linuxbrew/bin/brew --version
 
 USER root
+
+# DOH-owned source below this line. Keep these COPY layers last so edits to
+# doh_runtime/, webui-extension/, and skills/ reuse the cached dependency
+# layers above instead of re-running uv pip install and Linuxbrew bootstrap.
+COPY skills/google-workspace /opt/hermes/agent/skills/productivity/google-workspace
+COPY skills/posthog /opt/hermes/agent/skills/productivity/posthog
+COPY skills/webapps /opt/hermes/agent/skills/development/webapps
+COPY SOUL.md /opt/hermes/SOUL.md
+COPY config.yaml.template /opt/hermes/config.yaml.template
+COPY doh_runtime /opt/doh/runtime
+
+# Expose the webapps CLI on PATH. Source-of-truth lives in doh_runtime/ so the
+# whole runtime tree COPYs together; the symlink lets the agent type `webapps`.
+RUN chmod +x /opt/doh/runtime/webapps \
+    && ln -sf /opt/doh/runtime/webapps /opt/doh/bin/webapps
+
+# DOH-owned WebUI extension bundle. Loaded by Hermes WebUI per docs/EXTENSIONS.md
+# when the three HERMES_WEBUI_EXTENSION_* env vars are set (see supervisor.sh).
+# The sandbox reads this directory so the WebUI can serve the extension bundle.
+COPY webui-extension /opt/doh/webui-extension
 
 WORKDIR ${HERMES_WEBUI_DEFAULT_WORKSPACE}
 

@@ -10,8 +10,10 @@
 # Hermes Caddy/WebUI ports are not published to the host; reach them through
 # local_policy_proxy (bundled here) or docker exec.
 #
-# webui-extension/ is bind-mounted from ../hermes_agent; edits show up after a
-# browser refresh. Rebuild/restart for Dockerfile, patches, or doh_runtime changes.
+# Any change (webui-extension, Dockerfile, patches, doh_runtime) requires a
+# rebuild + restart: `docker compose up --build`. The persistent-root runner
+# rsyncs the baked /opt/doh over the live tree on every start, so a bind mount
+# would just be clobbered — hence no source mounts here.
 #
 # Bedrock: mounts host ~/.aws and uses AWS_PROFILE (default bedrock_dev). Run
 # refresh-bedrock-creds.sh periodically, or bedrock-creds-launchagent.sh
@@ -22,6 +24,8 @@ services:
     build:
       context: ../hermes_agent
       dockerfile: Dockerfile
+      cache_from:
+        - hermes-agent:local
     image: hermes-agent:local
     container_name: hermes-agent-local
     env_file:
@@ -46,7 +50,6 @@ services:
       - "8787"
     volumes:
       - hermes-data:/hermes-persistent-root
-      - ../hermes_agent/webui-extension:/hermes-persistent-root/opt/doh/webui-extension
       - ${HOME}/.aws:/hermes-persistent-root/root/.aws:ro
     cap_add:
       - SYS_ADMIN

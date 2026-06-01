@@ -1,0 +1,11 @@
+# Docs and editor metadata — not copied into the image.
+AGENTS.md
+CLAUDE.md
+.env
+.env.*
+.env.example
+
+# Python/build artifacts in the build context.
+**/__pycache__
+**/*.py[cod]
+**/.pytest_cache

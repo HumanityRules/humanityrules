@@ -1,5 +1,27 @@
 # DevOpsHero Development Journal
 
+## 2026-06-01 13:40 - [DevEx] Hermes local rebuild caching — layer order + BuildKit mounts
+
+**Conversation:** [2026-06-01-1340-ebe6d005.md](conversations/2026-06-01-1340-ebe6d005.md)
+
+Victor wanted `hermes_agent_local` to be more agile for day-to-day Hermes work. We brainstormed faster builds, background `:next` images, and compose auto-sync, but he prioritized **reliability** first — discovering that bind-mounted edits were being clobbered by the persistent-root rsync on container start was a bummer. This session focused on the rebuild loop: when only DOH source changes (`doh_runtime/`, `webui-extension/`, `skills/`), `docker compose up --build` should be fast and predictable.
+
+**Root cause: Dockerfile layer order, not missing BuildKit.** The Hermes Dockerfile had `COPY doh_runtime`, skills, and `webui-extension` *before* the expensive `uv pip install` and Linuxbrew bootstrap layers. Docker invalidates a layer and everything after it when inputs change — so any routine source edit re-ran multi-minute dependency installs even though those steps don't depend on DOH runtime code at all.
+
+**Fix: late COPYs for DOH-owned source.** Moved `skills/`, `SOUL.md`, `config.yaml.template`, `doh_runtime/`, and `webui-extension/` to the end of the Dockerfile, after pip install and brew. Incremental rebuild after a `doh_runtime` edit now only reruns those final COPY/RUN layers (~1s locally); `uv pip install` and Linuxbrew stay `CACHED`.
+
+**Additional caching for when heavy layers do bust.** BuildKit cache mounts on apt and `uv` (uid 1024 for `hermeswebui`); git-clone cache mount for upstream Hermes agent with `ARG HERMES_AGENT_REF` and `id=hermes-agent-git-${HERMES_AGENT_REF}` so a version bump gets a fresh clone instead of rsyncing a stale tree from the previous ref's cache slot; new `.dockerignore` to trim build context; `cache_from: hermes-agent:local` in `hermes_agent_local/docker-compose.yml`. Updated README to document rebuild/caching behavior (replacing stale "edit extension → browser reload" guidance — bind mounts were removed because startup rsync clobbers them).
+
+**Git cache mount keying — caught in review.** BuildKit cache mounts are keyed by mount `id`/target, not git ref. Without ref in the `id`, bumping `v2026.5.29.2` would rerun the layer but could rsync the old clone from cache. Centralized the pin as `HERMES_AGENT_REF` and included it in the mount id.
+
+**Still open (not this session).** Startup rsync in `persistent-root-runner.sh` still overwrites live trees from the baked image — rebuild+restart is the reliable path today; live sync / dev entrypoint bypass is the next reliability win.
+
+**Key points:**
+- Routine DOH source edits → ~1s rebuild; slow rebuilds only when patches, upstream pin, or Dockerfile structure change.
+- Layer order is the main lever; cache mounts speed cold builds and patch busts.
+- `HERMES_AGENT_REF` in cache mount `id` prevents stale upstream agent on version bump.
+- Bind-mount clobber on container start remains; fast rebuild makes "rebuild to pick up edits" tolerable until dev-mode sync lands.
+
 ## 2026-05-30 17:29 - [Integrations] Symmetric provider refactor (one module + one registry per provider)
 
 **Conversation:** [2026-05-30-1729-5e3e2d93.md](conversations/2026-05-30-1729-5e3e2d93.md)
