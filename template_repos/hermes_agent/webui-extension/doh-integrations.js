@@ -569,6 +569,28 @@
       ownerEmailField.style.display = selectedMode === 'personal' ? '' : 'none';
     };
 
+    // Home channel (company-wide only). Optional C… id the bot is invited to;
+    // where the gateway delivers cron/proactive output. Personal mode resolves
+    // the owner's DM automatically, so this field is hidden there.
+    const homeChannelInput = elem('input', {
+      class: 'doh-vault-input',
+      name: 'home_channel',
+      type: 'text',
+      placeholder: 'C0123456789',
+      autocomplete: 'off',
+    });
+    homeChannelInput.value = schema.home_channel || '';
+    const homeChannelField = elem('label', { class: 'doh-vault-field' }, [
+      elem('span', { class: 'doh-vault-field-label' }, ['Home channel (optional)']),
+      homeChannelInput,
+      elem('span', { class: 'doh-vault-field-help' }, [
+        'Channel ID where cron results and proactive messages are posted. Invite the bot to that channel first. Leave blank to set it later with !sethome in the channel.',
+      ]),
+    ]);
+    const syncHomeChannel = () => {
+      homeChannelField.style.display = selectedMode === 'company_wide' ? '' : 'none';
+    };
+
     // The prefill link is rebuilt whenever the mode or app name changes — each
     // mode embeds a different manifest (scopes + subscriptions), and the name
     // is re-baked into both manifest name fields.
@@ -601,6 +623,7 @@
         modeInput.value = selectedMode;
         syncCreateLink();
         syncOwnerEmail();
+        syncHomeChannel();
       });
       radios.push(radio);
       const labelText = mode.label + (mode.enabled ? '' : ' (coming soon)');
@@ -623,6 +646,7 @@
     form.appendChild(elem('div', { class: 'doh-vault-field-label' }, ['Agent type']));
     form.appendChild(modeChoices);
     form.appendChild(ownerEmailField);
+    form.appendChild(homeChannelField);
     form.appendChild(elem('div', { class: 'doh-slack-create-row' }, [createLink]));
     form.appendChild(steps);
     for (const field of schema.fields || []) {
@@ -630,6 +654,7 @@
     }
     syncCreateLink();
     syncOwnerEmail();
+    syncHomeChannel();
 
     const saveBtn = elem('button', { class: 'doh-integration-btn doh-integration-btn-primary', type: 'submit' }, ['Save']);
     const actions = elem('div', { class: 'doh-modal-actions' }, [

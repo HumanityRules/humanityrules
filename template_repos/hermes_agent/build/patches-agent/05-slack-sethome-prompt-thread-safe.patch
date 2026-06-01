@@ -1,0 +1,31 @@
+Make the Slack "no home channel" prompt recommend a thread-safe command.
+
+Upstream tells Slack users to run `/hermes sethome`, but Slack blocks native
+slash commands inside threads ("/hermes is not supported in threads. Sorry!"),
+so the instruction fails for anyone replying in a thread. The gateway already
+ships a thread-safe alternate prefix: a leading `!` on a known command is
+rewritten to `/` (see SlackAdapter, the `original_text.startswith("!")` block).
+`sethome` is a known gateway command, so `!sethome` dispatches in both DMs and
+threads. Point the Slack prompt at that instead of the slash command.
+
+Slack-only: the non-Slack branch keeps `/sethome` unchanged.
+
+--- a/gateway/run.py
++++ b/gateway/run.py
+@@ -8720,11 +8720,12 @@
+             platform_name = source.platform.value
+             env_key = _home_target_env_var(platform_name)
+             if not os.getenv(env_key):
+-                # Slack dispatches all Hermes commands through a single
+-                # parent slash command `/hermes`; bare `/sethome` is not
+-                # registered and would fail with "app did not respond".
++                # Slack blocks native slash commands inside threads, so
++                # `/hermes sethome` fails there. The adapter rewrites a
++                # leading `!` on a known command to `/`, so `!sethome`
++                # dispatches in both DMs and threads -- recommend that.
+                 sethome_cmd = (
+-                    "/hermes sethome"
++                    "!sethome"
+                     if source.platform == Platform.SLACK
+                     else "/sethome"
+                 )
