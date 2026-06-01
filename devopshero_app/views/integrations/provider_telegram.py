@@ -14,7 +14,7 @@ import re
 import httpx
 from django.utils import timezone
 
-from devopshero_app.models import Environment, IntegrationUserCredential, User
+from devopshero_app.models import App, Environment, IntegrationUserCredential, User
 from devopshero_app.views.integrations import provider_common
 
 logger = logging.getLogger(__name__)
@@ -28,8 +28,8 @@ TELEGRAM_BROKER_CACHE_SECONDS = 60 * 60
 TELEGRAM_INVALID_TOKEN_MESSAGE = "Telegram rejected this bot token. Check that you pasted the complete token from BotFather."
 
 
-def schema(existing: IntegrationUserCredential | None) -> dict:
-    """Build the generic paste-form schema for Telegram."""
+def schema(existing: IntegrationUserCredential | None, app: App | None) -> dict:
+    """Build the generic paste-form schema for Telegram (`app` unused — Slack-only)."""
     allowed_users = []
     secret_configured = False
     metadata = {}
