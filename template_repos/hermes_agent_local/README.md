@@ -9,6 +9,12 @@ Production Hermes image and runtime live in `../hermes_agent`. This folder only 
 ```bash
 cd template_repos/hermes_agent_local
 cp .env.example .env    # optional
+docker compose watch    # recommended while developing — rebuilds on save
+```
+
+One-shot (no file watcher):
+
+```bash
 docker compose up --build
 ```
 
@@ -41,21 +47,25 @@ On macOS, run a LaunchAgent (~every 45 minutes; does not refresh at login):
 
 Requires `opsh` on `PATH` (CourseHero OPS console) and a working `bedrock_dev` profile in `~/.aws/config`.
 
-## Rebuilds and caching
+## Rebuilds, watch, and caching
 
 The Hermes Dockerfile keeps DOH-owned source (`doh_runtime/`, `webui-extension/`, `skills/`) in **late COPY layers** so routine edits reuse cached `uv pip install` and Linuxbrew layers instead of rebuilding them.
 
-After changing source, rebuild and restart:
+**While developing**, leave `docker compose watch` running. On save it rebuilds the Hermes image (~1s for source edits), recreates the container, and the persistent-root runner rsyncs the new `/opt/doh` tree on start — the reliable path (no bind mounts that get clobbered).
+
+Manual rebuild:
 
 ```bash
 docker compose up --build
 ```
 
+After a watch-triggered rebuild, Hermes is unavailable until the healthcheck passes (up to ~2 minutes with the current `start_period`). Reload the browser once http://localhost:8788 responds again.
+
 Rebuilds are slow only when patches, upstream pins, or Dockerfile structure change. BuildKit cache mounts (apt, uv, git clones) speed cold builds and cache busts.
 
 ## Iterating on the WebUI extension
 
-Edit files under `../hermes_agent/webui-extension/`, then `docker compose up --build`. The persistent-root runner rsyncs baked `/opt/doh` on every container start, so bind mounts would be clobbered — a rebuild is the reliable path today.
+Edit files under `../hermes_agent/webui-extension/` while `docker compose watch` is running; reload the browser after the container comes back healthy.
 
 ## Standalone policy proxy
 
