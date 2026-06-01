@@ -103,11 +103,27 @@ class _SlackVaultTestBase(TestCase):
         resp.json.return_value = {"ok": True, **payload}
         return resp
 
-    def _patched_slack_api(self):
-        """Patch httpx.post so auth.test and apps.connections.open both succeed."""
+    def _err_response(self, error: str) -> MagicMock:
+        resp = MagicMock()
+        resp.status_code = 200
+        resp.json.return_value = {"ok": False, "error": error}
+        return resp
+
+    def _patched_slack_api(self, lookup_user=None, lookup_error=None):
+        """Patch httpx.post so auth.test / apps.connections.open / lookupByEmail succeed.
+
+        `lookup_user` overrides the users.lookupByEmail user object (personal
+        mode); `lookup_error` makes that one call return ok=false with the code.
+        """
+        user = lookup_user if lookup_user is not None else {"id": "UOWNER", "real_name": "Jane Doe", "name": "jane"}
+
         def _fake_post(url, **kwargs):
             if url.endswith("/auth.test"):
                 return self._ok_response({"team": "Acme", "team_id": "T1", "user_id": "U1"})
+            if url.endswith("/users.lookupByEmail"):
+                if lookup_error is not None:
+                    return self._err_response(lookup_error)
+                return self._ok_response({"user": user})
             return self._ok_response({"url": "wss://example"})
         return patch("devopshero_app.views.integrations.provider_slack.httpx.post", side_effect=_fake_post)
 
@@ -122,7 +138,9 @@ class TestSlackSetupSession(_SlackVaultTestBase):
         self.assertEqual(schema["selected_mode"], provider_slack.MODE_COMPANY_WIDE)
         mode_values = {m["value"]: m["enabled"] for m in schema["modes"]}
         self.assertTrue(mode_values[provider_slack.MODE_COMPANY_WIDE])
-        self.assertFalse(mode_values[provider_slack.MODE_PERSONAL])
+        self.assertTrue(mode_values[provider_slack.MODE_PERSONAL])
+        # The owner-email field is prefilled with the deploying user's DOH email.
+        self.assertEqual(schema["owner_email"], self.user.email)
         company = schema["manifests"][provider_slack.MODE_COMPANY_WIDE]
         self.assertTrue(company["settings"]["socket_mode_enabled"])
         # Company-wide subscribes to public/private channel messages (not just
@@ -140,6 +158,18 @@ class TestSlackSetupSession(_SlackVaultTestBase):
         self.assertIn("groups:read", company_scopes)
         personal = schema["manifests"][provider_slack.MODE_PERSONAL]
         self.assertEqual(personal["settings"]["event_subscriptions"]["bot_events"], ["message.im"])
+        # users:read.email is an extension scope; Slack rejects the manifest
+        # unless its base scope users:read is also present.
+        personal_scopes = personal["oauth_config"]["scopes"]["bot"]
+        self.assertIn("users:read", personal_scopes)
+        self.assertIn("users:read.email", personal_scopes)
+        # Personal mode must enable a writable Messages tab or the user has no
+        # compose box and can never DM the bot (Slack's default is read-only).
+        personal_home = personal["features"]["app_home"]
+        self.assertTrue(personal_home["messages_tab_enabled"])
+        self.assertFalse(personal_home["messages_tab_read_only_enabled"])
+        # Company-wide subscribes to no DMs, so it carries no app_home block.
+        self.assertNotIn("app_home", company["features"])
 
     def test_app_name_defaults_to_template_name_and_feeds_both_manifest_names(self) -> None:
         template = AppTemplate.objects.create(
@@ -235,21 +265,165 @@ class TestSlackSubmit(_SlackVaultTestBase):
         self.assertEqual(response.status_code, 400)
         self.assertFalse(IntegrationUserCredential.objects.exists())
 
-    def test_submit_rejects_personal_mode_while_disabled(self) -> None:
+    def test_submit_transport_failure_is_not_reported_as_rejection(self) -> None:
+        _status, session = self._post_setup_session()
+        with patch(
+            "devopshero_app.views.integrations.provider_slack.httpx.post",
+            side_effect=__import__("httpx").ConnectError("boom"),
+        ):
+            response = self.client.post(
+                "/api/integrations/credentials/submit",
+                data=json.dumps({
+                    "submit_token": session["submit_token"],
+                    "credentials": {"app_token": "xapp-abc", "bot_token": "xoxb-abc"},
+                    "config": {"workspace_scope": provider_slack.MODE_COMPANY_WIDE},
+                }),
+                content_type="text/plain",
+                HTTP_ORIGIN="https://hermes.dev.example.com",
+            )
+        self.assertEqual(response.status_code, 400)
+        error = response.json()["error"]
+        # A network blip must not leak the sentinel or claim the token was rejected.
+        self.assertNotIn("request_failed", error)
+        self.assertNotIn("rejected", error)
+        self.assertIn("unreachable", error)
+
+    def _submit_personal(self, owner_email: str, lookup_user=None, lookup_error=None):
+        _status, session = self._post_setup_session()
+        with self._patched_slack_api(lookup_user=lookup_user, lookup_error=lookup_error):
+            return self.client.post(
+                "/api/integrations/credentials/submit",
+                data=json.dumps({
+                    "submit_token": session["submit_token"],
+                    "credentials": {"app_token": "xapp-abc", "bot_token": "xoxb-abc"},
+                    "config": {"workspace_scope": provider_slack.MODE_PERSONAL, "owner_email": owner_email},
+                }),
+                content_type="text/plain",
+                HTTP_ORIGIN="https://hermes.dev.example.com",
+            )
+
+    def test_submit_personal_resolves_owner_and_stores_allowlist(self) -> None:
+        response = self._submit_personal(owner_email="jane@example.com")
+        self.assertEqual(response.status_code, 200)
+        cred = IntegrationUserCredential.objects.get(provider=IntegrationUserCredential.Provider.SLACK)
+        self.assertEqual(cred.config["workspace_scope"], provider_slack.MODE_PERSONAL)
+        # Personal opens access via an owner-only allowlist, never allow-all.
+        self.assertEqual(cred.config["allowed_users"], ["UOWNER"])
+        self.assertNotIn("allow_all_users", cred.config)
+        # The resolved name is shown back; the email is never persisted.
+        self.assertEqual(cred.metadata["owner_name"], "Jane Doe")
+        self.assertEqual(cred.metadata["owner_user_id"], "UOWNER")
+        self.assertNotIn("jane@example.com", json.dumps(cred.config))
+
+    def test_submit_personal_rejects_unknown_email(self) -> None:
+        response = self._submit_personal(owner_email="ghost@example.com", lookup_error="users_not_found")
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("No Slack user found", response.json()["error"])
+        self.assertFalse(IntegrationUserCredential.objects.exists())
+
+    def test_submit_personal_requires_owner_email(self) -> None:
+        response = self._submit_personal(owner_email="")
+        self.assertEqual(response.status_code, 400)
+        self.assertFalse(IntegrationUserCredential.objects.exists())
+
+    def test_submit_personal_missing_scope_explains_recreate(self) -> None:
+        # A company-wide bot token reused for personal mode lacks users:read.email.
+        response = self._submit_personal(owner_email="jane@example.com", lookup_error="missing_scope")
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("Personal link", response.json()["error"])
+        self.assertFalse(IntegrationUserCredential.objects.exists())
+
+    def test_reconfigure_personal_without_email_keeps_owner(self) -> None:
+        self.assertEqual(self._submit_personal(owner_email="jane@example.com").status_code, 200)
+        # Reopen: an owner is bound, so the email field is blanked and owner_name shown.
+        _status, body = self._post_setup_session()
+        self.assertEqual(body["schema"]["owner_email"], "")
+        self.assertEqual(body["schema"]["owner_name"], "Jane Doe")
+        # Save with a blank email (e.g. just renaming) keeps the bound owner —
+        # no re-resolution, no silent rebind to the DOH email.
+        _status, session = self._post_setup_session()
+        with patch("devopshero_app.views.integrations.provider_slack._resolve_owner_user_id") as resolve:
+            response = self.client.post(
+                "/api/integrations/credentials/submit",
+                data=json.dumps({
+                    "submit_token": session["submit_token"],
+                    "credentials": {},
+                    "config": {"workspace_scope": provider_slack.MODE_PERSONAL, "owner_email": "", "app_name": "Renamed"},
+                }),
+                content_type="text/plain",
+                HTTP_ORIGIN="https://hermes.dev.example.com",
+            )
+        self.assertEqual(response.status_code, 200)
+        resolve.assert_not_called()
+        cred = IntegrationUserCredential.objects.get(provider=IntegrationUserCredential.Provider.SLACK)
+        self.assertEqual(cred.config["allowed_users"], ["UOWNER"])
+        self.assertEqual(cred.metadata["owner_name"], "Jane Doe")
+        self.assertEqual(cred.config["app_name"], "Renamed")
+
+    def test_switching_personal_to_company_wide_clears_owner_and_allowlist(self) -> None:
+        self.assertEqual(self._submit_personal(owner_email="jane@example.com").status_code, 200)
+        _status, session = self._post_setup_session()
+        # A mode switch needs a new Slack app, so fresh tokens come with it.
+        with self._patched_slack_api():
+            response = self.client.post(
+                "/api/integrations/credentials/submit",
+                data=json.dumps({
+                    "submit_token": session["submit_token"],
+                    "credentials": {"app_token": "xapp-new", "bot_token": "xoxb-new"},
+                    "config": {"workspace_scope": provider_slack.MODE_COMPANY_WIDE},
+                }),
+                content_type="text/plain",
+                HTTP_ORIGIN="https://hermes.dev.example.com",
+            )
+        self.assertEqual(response.status_code, 200)
+        cred = IntegrationUserCredential.objects.get(provider=IntegrationUserCredential.Provider.SLACK)
+        self.assertEqual(cred.config["allow_all_users"], "true")
+        self.assertNotIn("allowed_users", cred.config)
+        # Stale owner identity must not linger, or the card keeps showing it.
+        self.assertNotIn("owner_user_id", cred.metadata)
+        self.assertNotIn("owner_name", cred.metadata)
+
+    def test_switching_mode_with_kept_tokens_is_rejected(self) -> None:
+        # The mode lives in the Slack app's manifest, so a switch needs a new
+        # app + fresh tokens; flipping it against kept tokens would "connect" a
+        # bot subscribed to the wrong events.
+        self.assertEqual(self._submit_personal(owner_email="jane@example.com").status_code, 200)
         _status, session = self._post_setup_session()
         with self._patched_slack_api():
             response = self.client.post(
                 "/api/integrations/credentials/submit",
                 data=json.dumps({
                     "submit_token": session["submit_token"],
-                    "credentials": {"app_token": "xapp-abc", "bot_token": "xoxb-abc"},
-                    "config": {"workspace_scope": provider_slack.MODE_PERSONAL},
+                    "credentials": {},
+                    "config": {"workspace_scope": provider_slack.MODE_COMPANY_WIDE},
                 }),
                 content_type="text/plain",
                 HTTP_ORIGIN="https://hermes.dev.example.com",
             )
         self.assertEqual(response.status_code, 400)
-        self.assertFalse(IntegrationUserCredential.objects.exists())
+        self.assertIn("new Slack app", response.json()["error"])
+        # The stored credential keeps its original personal-mode binding.
+        cred = IntegrationUserCredential.objects.get(provider=IntegrationUserCredential.Provider.SLACK)
+        self.assertEqual(cred.config["workspace_scope"], provider_slack.MODE_PERSONAL)
+
+    def test_personal_token_replace_requires_fresh_owner_email(self) -> None:
+        # A new bot token may be a different workspace, where the kept user_id
+        # names someone else — re-entering the email is mandatory.
+        self.assertEqual(self._submit_personal(owner_email="jane@example.com").status_code, 200)
+        _status, session = self._post_setup_session()
+        with self._patched_slack_api():
+            response = self.client.post(
+                "/api/integrations/credentials/submit",
+                data=json.dumps({
+                    "submit_token": session["submit_token"],
+                    "credentials": {"app_token": "xapp-new", "bot_token": "xoxb-new"},
+                    "config": {"workspace_scope": provider_slack.MODE_PERSONAL, "owner_email": ""},
+                }),
+                content_type="text/plain",
+                HTTP_ORIGIN="https://hermes.dev.example.com",
+            )
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("Slack email", response.json()["error"])
 
 
 class TestSlackRefreshOutcome(_SlackVaultTestBase):

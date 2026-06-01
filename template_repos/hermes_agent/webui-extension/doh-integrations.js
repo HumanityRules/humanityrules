@@ -542,6 +542,33 @@
     });
     nameInput.value = schema.app_name || '';
 
+    // Owner email (personal mode only). Named so submitVaultForm routes it into
+    // `config`; the backend resolves it to a Slack user_id at save and never
+    // persists the address. Prefilled with the deploying user's DOH email.
+    const ownerEmailInput = elem('input', {
+      class: 'doh-vault-input',
+      name: 'owner_email',
+      type: 'email',
+      placeholder: 'you@company.com',
+      autocomplete: 'off',
+    });
+    ownerEmailInput.value = schema.owner_email || '';
+    // On reconfigure an owner is already bound (server blanks owner_email and
+    // sends owner_name); a blank email keeps that owner. Say so, or the empty
+    // field reads as "no owner set".
+    const ownerHelp = schema.owner_name
+      ? 'Currently replies to ' + schema.owner_name + '. Leave blank to keep them, or enter a different Slack email to change.'
+      : 'The bot will reply only to this person. Use the email tied to your Slack account.';
+    const ownerEmailField = elem('label', { class: 'doh-vault-field' }, [
+      elem('span', { class: 'doh-vault-field-label' }, ['Your Slack email']),
+      ownerEmailInput,
+      elem('span', { class: 'doh-vault-field-help' }, [ownerHelp]),
+    ]);
+    // Only personal mode collects an owner; show/hide as the mode changes.
+    const syncOwnerEmail = () => {
+      ownerEmailField.style.display = selectedMode === 'personal' ? '' : 'none';
+    };
+
     // The prefill link is rebuilt whenever the mode or app name changes — each
     // mode embeds a different manifest (scopes + subscriptions), and the name
     // is re-baked into both manifest name fields.
@@ -573,6 +600,7 @@
         selectedMode = mode.value;
         modeInput.value = selectedMode;
         syncCreateLink();
+        syncOwnerEmail();
       });
       radios.push(radio);
       const labelText = mode.label + (mode.enabled ? '' : ' (coming soon)');
@@ -594,12 +622,14 @@
     ]));
     form.appendChild(elem('div', { class: 'doh-vault-field-label' }, ['Agent type']));
     form.appendChild(modeChoices);
+    form.appendChild(ownerEmailField);
     form.appendChild(elem('div', { class: 'doh-slack-create-row' }, [createLink]));
     form.appendChild(steps);
     for (const field of schema.fields || []) {
       form.appendChild(fieldInputFor(field));
     }
     syncCreateLink();
+    syncOwnerEmail();
 
     const saveBtn = elem('button', { class: 'doh-integration-btn doh-integration-btn-primary', type: 'submit' }, ['Save']);
     const actions = elem('div', { class: 'doh-modal-actions' }, [
@@ -691,6 +721,11 @@
       const botUsername = item.metadata && item.metadata.bot_username;
       if (botUsername) {
         body.appendChild(elem('div', { class: 'doh-integration-meta' }, ['Connected as @' + botUsername]));
+      }
+      // Slack personal mode resolves an owner; only that provider sets it.
+      const ownerName = item.metadata && item.metadata.owner_name;
+      if (ownerName) {
+        body.appendChild(elem('div', { class: 'doh-integration-meta' }, ['Replies only to ' + ownerName]));
       }
       if (item.last_refreshed_at) {
         body.appendChild(elem('div', { class: 'doh-integration-meta' }, [

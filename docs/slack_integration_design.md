@@ -79,14 +79,14 @@ The config dialog has a **Personal / Company-wide selector**. The selector drive
 | `SLACK_ALLOW_ALL_USERS` | unset | `true` |
 | `SLACK_ALLOWED_USERS` | `<owner_id>` (single entry) | unset |
 | Memory | private to owner | **shared / global (intended)** |
-| Unauthorized sender | silent-ignore | n/a |
+| Unauthorized sender | **pairing offered** (see below) | n/a |
 
 Defense in depth — two independent layers:
 
 1. **Subscription** (manifest): personal can't be @-mentioned in channels; company-wide can't be DMed. Structural.
-2. **Runtime auth** (gateway env): personal uses `SLACK_ALLOWED_USERS` (owner only); company-wide sets `SLACK_ALLOW_ALL_USERS=true` (the gateway denies by default — an unset allowlist is *not* allow-all).
+2. **Runtime auth** (gateway env): personal uses `SLACK_ALLOWED_USERS` (resolved owner `user_id`); company-wide sets `SLACK_ALLOW_ALL_USERS=true` (the gateway denies by default — an unset allowlist is *not* allow-all).
 
-If one layer is misconfigured, the other still holds.
+If one layer is misconfigured, the other still holds — **except** that the gateway's pairing flow can admit users the allowlist doesn't (see "Personal mode admits strangers via pairing" below). So layer 2's "owner only" is not currently a hard guarantee.
 
 ### The gateway denies by default — company-wide must opt in
 
@@ -95,15 +95,26 @@ If one layer is misconfigured, the other still holds.
 How each mode opens access (rendered into `/workspace/.hermes/.env` from the Slack `config`):
 
 - **Company-wide** → `config["allow_all_users"] = "true"` → `SLACK_ALLOW_ALL_USERS=true`. No allowlist.
-- **Personal** (not yet enabled) → `config["allowed_users"] = [owner_id]` → `SLACK_ALLOWED_USERS=<owner_id>`. No allow-all flag.
+- **Personal** → `config["allowed_users"] = [owner_id]` → `SLACK_ALLOWED_USERS=<owner_id>`. No allow-all flag.
 
 `SLACK_ALLOWED_USERS` is a general sender allowlist, not DM-specific; "reply only to this user_id" is just that allowlist with one entry.
 
 ### Identity capture (personal mode)
 
-Collect the owner's **email** at config time (low friction) → resolve via `users.lookupByEmail` (needs `users:read.email` scope) → **store the resolved `user_id`**, never the email. Slack events identify senders by `user_id`; emails/display names change, IDs don't. Show the resolved name back for confirmation ("This agent will reply only to *Jane Doe*").
+Collect the owner's **email** at config time (low friction, prefilled with the deploying user's DOH email) → resolve via `users.lookupByEmail` (needs **both** `users:read` and its extension `users:read.email` — Slack rejects a manifest carrying the extension without its base scope) → **store the resolved `user_id`** in `config["allowed_users"]`, never the email. Slack events identify senders by `user_id`; emails/display names change, IDs don't. The resolved name is stored in `metadata["owner_name"]` and shown back on the connected card ("Replies only to *Jane Doe*"). Resolution runs DOH-side (`provider_slack._resolve_owner_user_id`, an httpx call like `auth.test`). An email that isn't a member of that workspace (`users_not_found`) fails the save with a clear message.
 
-Note: `message.im` delivers DMs from *any* user, not just the owner. The `event.user == owner_id` allowlist check is therefore load-bearing; everyone else is silently ignored.
+**Owner-freshness is coupled to token-freshness.** A resolved `user_id` is only valid against the workspace of the bot token that resolved it. So: a blank email on save **keeps** the bound owner (a name-only reconfigure), but submitting a **new bot token** *requires* re-entering the email — the old `user_id` may name a different person in the new token's workspace. And because the mode is baked into the Slack app's manifest (subscriptions + scopes), **switching modes requires creating a new Slack app and pasting fresh tokens**; DOH refuses to flip the stored mode against tokens kept from the old app, which would otherwise write (say) company-wide env over an app that only emits `message.im`.
+
+### Personal mode admits strangers via pairing (owner-only is under evaluation)
+
+`message.im` delivers DMs from *any* workspace user, not just the owner. The doc previously claimed the `SLACK_ALLOWED_USERS` check silently drops everyone else — **that is wrong**, verified against the built gateway (`gateway/run.py`):
+
+- An unauthorized DM does **not** silent-ignore. `_handle_message` runs the **pairing flow** by default: it replies to the stranger with a pairing code and tells them to ask the bot owner to run `hermes pairing approve slack <code>`. So a personal bot actively messages every coworker who DMs it.
+- `_is_user_authorized` checks the **pairing store before** the `SLACK_ALLOWED_USERS` allowlist. Any user approved into pairing is admitted regardless of the allowlist — so "owner only" holds only as long as nobody is ever paired, and pairing is on by default.
+
+Suppressing this needs `unauthorized_dm_behavior = "ignore"`, which the gateway reads **only** from `~/.hermes/config.yaml` / `gateway.json` — there is **no env-var override** (`gateway/config.py` `_apply_env_overrides` doesn't touch it). The integrations broker's only lever is the `.env` managed block (env vars), so it cannot set this today without either patching the gateway to read a new env var (the parallel to the `SLACK_ALLOW_ALL_USERS` fix) or giving the broker a second write target (`config.yaml`).
+
+**Current decision:** ship personal mode with pairing as-is and treat strict owner-only as *under evaluation*, pending how the pairing UX actually feels in use. The `SLACK_ALLOWED_USERS=<owner_id>` allowlist still makes the owner the only *pre-approved* user; pairing is an additive, owner-gated escalation, not an open door.
 
 ## Company-wide: shared state is intended
 
@@ -157,16 +168,23 @@ parts fork in five places, everything else is shared:
 - **`TlsProviderSpec` hosts** `slack.com`, `www.slack.com` (REST only). The `wss://`
   Socket Mode host is not intercepted — it passes through as a plain CONNECT tunnel
   (carries only the disposable ticket).
-- **Validation** (`slack_vault.py`) — `xoxb-` via `auth.test`, `xapp-` via
-  `apps.connections.open`. `refresh_slack_outcome` returns both secrets.
+- **Validation** (`provider_slack.py`) — `xoxb-` via `auth.test`, `xapp-` via
+  `apps.connections.open`; personal-mode owner email via `users.lookupByEmail`.
+  `refresh_outcome` returns both secrets.
 - **UI** — a custom `_VAULT_RENDERERS["slack"]` modal: editable app-name field
   (defaults to the template name, re-bakes both manifest names on edit), mode
-  selector, manifest prefill link, two token fields.
+  selector, manifest prefill link, two token fields, and an owner-email field
+  shown only when Personal is selected.
 
 The shared pieces carry both secrets via the `secrets: dict[str,str]` map on
-`RefreshResult`/`_TokenCacheEntry`, and Slack registers into the per-provider dispatch
-tables (`_SCHEMA_BUILDERS`/`_CREDENTIAL_SAVERS`, `_OUTCOME_HANDLERS`, `_VAULT_RENDERERS`).
-The Merge `slack` connector is excluded so it never appears beside the native one.
+`RefreshResult`/`_TokenCacheEntry`, and Slack registers as one `provider_slack`
+module behind the `provider_registry` (`ProviderKind.VAULT`), with a custom
+`_VAULT_RENDERERS["slack"]` WebUI renderer. The Merge `slack` connector is excluded
+so it never appears beside the native one.
 
-Personal mode's manifest is defined but the mode is disabled: it needs an owner-only
-allowlist plus email→user_id resolution that isn't implemented.
+Both modes are enabled. Personal mode resolves the owner's email to a Slack
+`user_id` at save and stores it as the sole `SLACK_ALLOWED_USERS` entry; its
+manifest additionally enables a writable Messages tab
+(`features.app_home.messages_tab_enabled: true`,
+`messages_tab_read_only_enabled: false`) — without it Slack hides the DM compose
+box (its default is tab-on-but-read-only) and `message.im` never fires.

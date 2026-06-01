@@ -48,10 +48,11 @@ _BOT_NAME_DISALLOWED_RE = re.compile(r"[^a-z0-9._-]+")
 MODE_COMPANY_WIDE = "company_wide"
 MODE_PERSONAL = "personal"
 
-# Modes the backend accepts. Personal mode's manifest is defined but it is
-# not enabled: it requires an owner-only allowlist plus email→user_id
-# resolution that isn't implemented, so the UI offers it disabled.
-_ENABLED_MODES = frozenset({MODE_COMPANY_WIDE})
+# Modes the backend accepts. Both are enabled. Personal mode resolves the
+# owner's email to a Slack user_id at save time and stores it as the sole
+# SLACK_ALLOWED_USERS entry (see save_credentials); company-wide opts into
+# SLACK_ALLOW_ALL_USERS instead.
+_ENABLED_MODES = frozenset({MODE_COMPANY_WIDE, MODE_PERSONAL})
 
 
 def _clean_app_name(raw: str) -> str:
@@ -86,8 +87,19 @@ def _slack_manifest(mode: str, app_name: str) -> dict:
     sanitized per Slack's differing field rules.
     """
     if mode == MODE_PERSONAL:
-        bot_scopes = ["chat:write", "im:history", "users:read.email"]
+        # users:read.email is an *extension* of users:read; Slack rejects a
+        # manifest that requests the extension without its base scope
+        # ("Missing bot extension scopes `users:read`"). Both are needed to
+        # resolve the owner's email to a user_id via users.lookupByEmail.
+        # im:write lets us open the owner's DM channel (conversations.open) at
+        # save time and store its D… id as the home channel — see save_credentials.
+        bot_scopes = ["chat:write", "im:history", "im:write", "users:read", "users:read.email"]
         bot_events = ["message.im"]
+        # A user can only DM the bot if the Messages tab is enabled AND not
+        # read-only — Slack's default is tab-on-but-read-only, which hides the
+        # compose box, so message.im would never fire. read_only=False is the
+        # load-bearing field. Company-wide subscribes to no DMs and omits this.
+        app_home = {"messages_tab_enabled": True, "messages_tab_read_only_enabled": False}
     else:
         # `app_mention` alone fires only on messages that explicitly @-mention
         # the bot, so non-mention replies in an active thread never reach the
@@ -110,9 +122,13 @@ def _slack_manifest(mode: str, app_name: str) -> dict:
             "mpim:read",
         ]
         bot_events = ["app_mention", "message.channels", "message.groups"]
+        app_home = None
+    features = {"bot_user": {"display_name": _clean_bot_name(app_name), "always_online": True}}
+    if app_home is not None:
+        features["app_home"] = app_home
     return {
         "display_information": {"name": _clean_app_name(app_name)},
-        "features": {"bot_user": {"display_name": _clean_bot_name(app_name), "always_online": True}},
+        "features": features,
         "oauth_config": {"scopes": {"bot": bot_scopes}},
         "settings": {
             "socket_mode_enabled": True,
@@ -121,17 +137,28 @@ def _slack_manifest(mode: str, app_name: str) -> dict:
     }
 
 
-def schema(existing: IntegrationUserCredential | None, app: App | None) -> dict:
+def schema(existing: IntegrationUserCredential | None, app: App | None, owner_user: User | None) -> dict:
     """Build the Slack setup schema consumed by the custom WebUI renderer."""
     mode = MODE_COMPANY_WIDE
     metadata = {}
     app_name = _default_app_name(app)
+    # Prefill the owner-email field with the deploying user's DOH email so the
+    # common case (the owner connecting their own DMs) is one keystroke. Personal
+    # mode resolves it to a Slack user_id at save (see save_credentials).
+    owner_email = owner_user.email if owner_user is not None else ""
+    owner_name = ""
     if existing is not None:
         mode = existing.config.get("workspace_scope", MODE_COMPANY_WIDE)
         metadata = existing.metadata
         # Keep the operator's previously-chosen name on reopen; the template
         # default only seeds the first connect.
         app_name = existing.config.get("app_name") or app_name
+        owner_name = metadata.get("owner_name", "")
+        # An owner is already bound: blank the email field so a name-only
+        # reconfigure keeps that owner rather than silently rebinding to the
+        # DOH email (which may differ from the bound Slack account).
+        if metadata.get("owner_user_id"):
+            owner_email = ""
     return {
         "provider": "slack",
         "label": "Slack",
@@ -142,6 +169,8 @@ def schema(existing: IntegrationUserCredential | None, app: App | None) -> dict:
         "selected_mode": mode,
         "app_name": app_name,
         "app_name_max_len": SLACK_APP_NAME_MAX_LEN,
+        "owner_email": owner_email,
+        "owner_name": owner_name,
         "modes": [
             {"value": MODE_COMPANY_WIDE, "label": "Company-wide (shared bot in channels)", "enabled": MODE_COMPANY_WIDE in _ENABLED_MODES},
             {"value": MODE_PERSONAL, "label": "Personal (your DMs only)", "enabled": MODE_PERSONAL in _ENABLED_MODES},
@@ -160,25 +189,51 @@ def schema(existing: IntegrationUserCredential | None, app: App | None) -> dict:
     }
 
 
-def _slack_api_post(method: str, token: str) -> tuple[dict | None, str | None]:
-    """POST to one Slack Web API method with a Bearer token; return (body, error)."""
+# Sentinel error codes for failures that have no Slack `error` string (transport
+# fault or non-JSON body), distinct from a real Slack `ok:false` error code.
+SLACK_ERROR_REQUEST_FAILED = "request_failed"
+SLACK_ERROR_BAD_RESPONSE = "bad_response"
+
+
+def _slack_transport_error(error_code: str) -> str | None:
+    """Return a clean retry message for a transport/bad-response sentinel, else None.
+
+    Real Slack error codes (e.g. `invalid_auth`, `users_not_found`) return None
+    so the caller can phrase a code-specific message; the two sentinels mean we
+    never reached a Slack verdict, so "rejected" would be a lie.
+    """
+    if error_code in (SLACK_ERROR_REQUEST_FAILED, SLACK_ERROR_BAD_RESPONSE):
+        return "Slack was unreachable or returned an unexpected response. Please try again."
+    return None
+
+
+def _slack_api_post(method: str, token: str, data: dict | None) -> tuple[dict | None, str | None]:
+    """POST to one Slack Web API method with a Bearer token; return (body, error_code).
+
+    On failure the second element is the raw Slack `error` code (e.g.
+    `users_not_found`, `invalid_auth`) or one of the SLACK_ERROR_* sentinels.
+    Callers turn the code into a user-facing message — the same fault means
+    different things per method (a bad token vs. an unknown email).
+    """
     try:
         response = httpx.post(
             f"{SLACK_API_BASE}/{method}",
             headers={"Authorization": f"Bearer {token}"},
+            data=data,
             timeout=SLACK_VALIDATION_TIMEOUT_SECONDS,
         )
     except httpx.HTTPError as exc:
         logger.error("slack %s request failed: %s", method, exc.__class__.__name__)
-        return None, "Slack validation failed. Please try again."
+        return None, SLACK_ERROR_REQUEST_FAILED
     try:
         body = response.json()
     except ValueError:
-        return None, f"Slack {method} returned a non-JSON response"
+        logger.error("slack %s returned a non-JSON response", method)
+        return None, SLACK_ERROR_BAD_RESPONSE
     if not isinstance(body, dict) or body.get("ok") is not True:
         error = body.get("error") if isinstance(body, dict) else None
-        logger.error("slack %s rejected token: error=%r", method, error)
-        return None, f"Slack rejected this token: {error or 'unknown error'}"
+        logger.error("slack %s failed: error=%r", method, error)
+        return None, error or SLACK_ERROR_BAD_RESPONSE
     return body, None
 
 
@@ -186,15 +241,52 @@ def _validate_bot_token(bot_token: str) -> tuple[dict | None, str | None]:
     """Validate a bot token via auth.test; return (identity, error)."""
     if BOT_TOKEN_RE.match(bot_token) is None:
         return None, "bot_token does not look like a Slack bot token (expected xoxb-…)"
-    return _slack_api_post(method="auth.test", token=bot_token)
+    body, error = _slack_api_post(method="auth.test", token=bot_token, data=None)
+    if error is not None:
+        return None, _slack_transport_error(error) or f"Slack rejected this bot token: {error}"
+    return body, None
 
 
 def _validate_app_token(app_token: str) -> tuple[None, str | None]:
     """Validate an app-level token by opening (and discarding) a Socket Mode URL."""
     if APP_TOKEN_RE.match(app_token) is None:
         return None, "app_token does not look like a Slack app-level token (expected xapp-…)"
-    _body, error = _slack_api_post(method="apps.connections.open", token=app_token)
-    return None, error
+    _body, error = _slack_api_post(method="apps.connections.open", token=app_token, data=None)
+    if error is not None:
+        return None, _slack_transport_error(error) or f"Slack rejected this app-level token: {error}"
+    return None, None
+
+
+def _resolve_owner_user_id(bot_token: str, owner_email: str) -> tuple[dict | None, str | None]:
+    """Resolve a personal-mode owner email to a Slack user via users.lookupByEmail.
+
+    Returns the Slack `user` object (carries `id` and the display name) so the
+    caller can store the user_id as the allowlist and show the name back. The
+    email itself is never persisted — only the resolved user_id.
+    """
+    email = owner_email.strip()
+    if not email:
+        return None, "An owner email is required for personal mode."
+    body, error = _slack_api_post(method="users.lookupByEmail", token=bot_token, data={"email": email})
+    if error is not None:
+        transport = _slack_transport_error(error)
+        if transport is not None:
+            return None, transport
+        # users_not_found means the email isn't a member of the bot's workspace
+        # — the common operator mistake (wrong address, or not in this Slack).
+        if error == "users_not_found":
+            return None, f"No Slack user found for {email} in this workspace. Use the email tied to your Slack account."
+        # missing_scope means the bot token lacks users:read.email — the signature
+        # of a company-wide app token reused for personal mode (its manifest omits
+        # that scope). Tell the operator to recreate the app from the personal link.
+        if error == "missing_scope":
+            return None, "This bot token can't look up users. Create the app from the Personal link above (it adds the needed scope) and paste its new bot token."
+        return None, f"Slack could not look up that email: {error}"
+    user = body.get("user") if isinstance(body, dict) else None
+    if not isinstance(user, dict) or not user.get("id"):
+        logger.error("slack users.lookupByEmail returned no user id: body=%r", body)
+        return None, "Slack did not return a user for that email."
+    return user, None
 
 
 def save_credentials(
@@ -224,6 +316,16 @@ def save_credentials(
     if not bot_token or not app_token:
         return None, "both app_token and bot_token are required"
 
+    # A mode is baked into the Slack app's manifest (subscriptions + scopes),
+    # not just our env: company-wide subscribes to channel events, personal to
+    # message.im. Switching modes therefore needs a *different* Slack app, so we
+    # refuse to flip the stored mode against tokens kept from the old app — that
+    # would write company-wide env over an app that only emits message.im (or
+    # vice versa) and "connect" a bot that silently receives nothing.
+    prior_mode = existing.config.get("workspace_scope") if existing is not None else None
+    if prior_mode is not None and prior_mode != mode and not (submitted_bot and submitted_app):
+        return None, "Switching modes needs a new Slack app. Create it from the link above and paste both new tokens."
+
     # Only validate freshly-submitted tokens; an unchanged token kept from the
     # existing row was already validated when it was first saved.
     bot_identity = {}
@@ -238,10 +340,10 @@ def save_credentials(
 
     # The gateway denies by default; each mode opens access differently.
     # Company-wide: anyone in an invited channel (SLACK_ALLOW_ALL_USERS=true).
-    # Personal (not yet enabled): owner-only via SLACK_ALLOWED_USERS, no allow-all.
+    # Personal: owner-only via SLACK_ALLOWED_USERS=<resolved user_id>, no
+    # allow-all. Note the gateway's pairing flow can still admit other users
+    # (it bypasses this allowlist) — see docs/slack_integration_design.md.
     config = {"workspace_scope": mode, "app_name": _clean_app_name(str(config_payload.get("app_name", "") or ""))}
-    if mode == MODE_COMPANY_WIDE:
-        config["allow_all_users"] = "true"
     metadata = existing.metadata if existing is not None else {}
     if bot_identity:
         metadata = {
@@ -250,6 +352,39 @@ def save_credentials(
             "bot_user_id": bot_identity.get("user_id", ""),
             "validated_at": timezone.now().isoformat(),
         }
+
+    if mode == MODE_COMPANY_WIDE:
+        config["allow_all_users"] = "true"
+        # Drop any owner identity left over from a prior personal-mode save, so
+        # the connected card doesn't keep showing "Replies only to …".
+        metadata = {k: v for k, v in metadata.items() if k not in ("owner_user_id", "owner_name")}
+    else:
+        # Resolve only a freshly-submitted email (mirrors the token-freshness
+        # rule above): a name-only reconfigure submits a blank email and keeps
+        # the bound owner, rather than silently rebinding to a possibly-
+        # different account. A fresh bot-token submit rebuilds `metadata`
+        # above, so re-merge the owner keys either way.
+        submitted_email = str(config_payload.get("owner_email", "") or "").strip()
+        # A kept owner_user_id is only valid against the kept bot token's
+        # workspace. If the bot token is being replaced, the old user_id may
+        # name someone in a different workspace, so a fresh email is required —
+        # owner-freshness is coupled to token-freshness.
+        if submitted_bot and not submitted_email:
+            return None, "Re-enter the owner's Slack email when you change the bot token."
+        if submitted_email:
+            owner, owner_error = _resolve_owner_user_id(bot_token=bot_token, owner_email=submitted_email)
+            if owner_error is not None:
+                return None, owner_error
+            owner_user_id = owner["id"]
+            owner_name = owner.get("real_name") or owner.get("name", "")
+        else:
+            existing_metadata = existing.metadata if existing is not None else {}
+            owner_user_id = existing_metadata.get("owner_user_id", "")
+            owner_name = existing_metadata.get("owner_name", "")
+            if not owner_user_id:
+                return None, "An owner email is required for personal mode."
+        config["allowed_users"] = [owner_user_id]
+        metadata = {**metadata, "owner_user_id": owner_user_id, "owner_name": owner_name}
 
     credential, _ = IntegrationUserCredential.objects.update_or_create(
         owner_user=owner_user,

@@ -28,8 +28,8 @@ TELEGRAM_BROKER_CACHE_SECONDS = 60 * 60
 TELEGRAM_INVALID_TOKEN_MESSAGE = "Telegram rejected this bot token. Check that you pasted the complete token from BotFather."
 
 
-def schema(existing: IntegrationUserCredential | None, app: App | None) -> dict:
-    """Build the generic paste-form schema for Telegram (`app` unused — Slack-only)."""
+def schema(existing: IntegrationUserCredential | None, app: App | None, owner_user: User | None) -> dict:
+    """Build the generic paste-form schema for Telegram (`app`/`owner_user` unused — Slack-only)."""
     allowed_users = []
     secret_configured = False
     metadata = {}
