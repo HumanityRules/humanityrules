@@ -41,9 +41,21 @@ On macOS, run a LaunchAgent (~every 45 minutes; does not refresh at login):
 
 Requires `opsh` on `PATH` (HumanityRules OPS console) and a working `bedrock_dev` profile in `~/.aws/config`.
 
+## Rebuilds and caching
+
+The Hermes Dockerfile keeps DOH-owned source (`doh_runtime/`, `webui-extension/`, `skills/`) in **late COPY layers** so routine edits reuse cached `uv pip install` and Linuxbrew layers instead of rebuilding them.
+
+After changing source, rebuild and restart:
+
+```bash
+docker compose up --build
+```
+
+Rebuilds are slow only when patches, upstream pins, or Dockerfile structure change. BuildKit cache mounts (apt, uv, git clones) speed cold builds and cache busts.
+
 ## Iterating on the WebUI extension
 
-Edit files under `../hermes_agent/webui-extension/`; reload the browser. Rebuild the stack for Dockerfile, patch, or `doh_runtime` changes.
+Edit files under `../hermes_agent/webui-extension/`, then `docker compose up --build`. The persistent-root runner rsyncs baked `/opt/doh` on every container start, so bind mounts would be clobbered — a rebuild is the reliable path today.
 
 ## Standalone policy proxy
 
