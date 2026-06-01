@@ -105,6 +105,20 @@ Collect the owner's **email** at config time (low friction, prefilled with the d
 
 **Owner-freshness is coupled to token-freshness.** A resolved `user_id` is only valid against the workspace of the bot token that resolved it. So: a blank email on save **keeps** the bound owner (a name-only reconfigure), but submitting a **new bot token** *requires* re-entering the email — the old `user_id` may name a different person in the new token's workspace. And because the mode is baked into the Slack app's manifest (subscriptions + scopes), **switching modes requires creating a new Slack app and pasting fresh tokens**; DOH refuses to flip the stored mode against tokens kept from the old app, which would otherwise write (say) company-wide env over an app that only emits `message.im`.
 
+### Home channel (personal mode)
+
+The upstream gateway uses a per-platform **home channel** as the delivery target for cron output, scheduled jobs, and proactive/cross-platform messages (anything that isn't a direct reply to the user). When `SLACK_HOME_CHANNEL` is unset, the gateway prompts the user on their *first* message in any new session — *"No home channel is set for Slack… type /sethome…"* — which is noisy for a personal bot whose obvious home is the owner's own DM.
+
+So in personal mode DOH resolves it at connect time: right after `users.lookupByEmail` gives the owner's `user_id`, `provider_slack._open_owner_dm_channel` calls `conversations.open(users=<owner_id>)` with the bot token and stores the returned **DM channel id** (`D…`) in `config["home_channel"]`. The broker projects that into `SLACK_HOME_CHANNEL` via a `GatewayEnvBinding` (`tls_intercept.py`), so the gateway boots with a home channel already set and never prompts. **Why the `D…` id and not the `U…` user_id:** `chat.postMessage(channel=<U…>)` lands in the user's *Slackbot* DM, not the bot's DM with them ([Slack docs](https://docs.slack.dev/messaging/sending-and-scheduling-messages)) — only the `D…` channel id targets the right conversation. Opening that DM needs the `im:write` scope, which is why the personal manifest carries it (`channel:write` is not required — `conversations.open` + `chat:write` suffice).
+
+Home-channel freshness rides owner-freshness: a fresh email re-resolves both the `user_id` and the DM; a blank-email reconfigure keeps the previously-stored `home_channel`. **Existing personal apps created before this change** lack `im:write`; their next reconnect from the Personal manifest link adds the scope, and if a stale bot token hits `conversations.open` with `missing_scope` the save fails with a recreate-the-app message.
+
+**Company-wide** can't auto-resolve a home channel (no single owner to DM, and the bot isn't a member of any channel until a human `/invite`s it). So the setup dialog offers an **optional** `home_channel` field (a `C…` id the operator names after inviting the bot); it's stored unvalidated in `config["home_channel"]` and projected to `SLACK_HOME_CHANNEL` by the same binding. Left blank, the gateway prompts once per new session and the operator runs `!sethome` in the target channel instead.
+
+### Setting the home channel from a thread (`!sethome`, not a slash command)
+
+We do **not** declare a `/hermes` slash command in the manifest. Slack blocks native developer slash commands inside threads ("/hermes is not supported in threads. Sorry!"), and declaring one also drags in the `commands` scope and an `interactivity` block. Instead we rely on the gateway's built-in alternate prefix: a leading `!` on a known command is rewritten to `/` (SlackAdapter), so `!sethome` dispatches in both DMs and threads. The patch `build/patches-agent/05-slack-sethome-prompt-thread-safe.patch` rewords the gateway's own "no home channel" prompt (Slack branch only) from `/hermes sethome` to `!sethome` to match.
+
 ### Personal mode admits strangers via pairing (owner-only is under evaluation)
 
 `message.im` delivers DMs from *any* workspace user, not just the owner. The doc previously claimed the `SLACK_ALLOWED_USERS` check silently drops everyone else — **that is wrong**, verified against the built gateway (`gateway/run.py`):

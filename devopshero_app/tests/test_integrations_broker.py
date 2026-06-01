@@ -1186,11 +1186,13 @@ class TestGatewayEnvRender(unittest.TestCase):
 
     def test_slack_vault_header_provider_renders_both_placeholders(self) -> None:
         """VaultHeaderInject renders one env var per placeholder plus list config."""
-        snapshot = [(self._slack_provider(), {"allowed_users": ["U1", "U2"]})]
+        snapshot = [(self._slack_provider(), {"allowed_users": ["U1", "U2"], "home_channel": "DOWNER"})]
         block = broker.tls_intercept.render_managed_block(snapshot=snapshot)
         self.assertIn("SLACK_APP_TOKEN=xapp-DOH_PLACEHOLDER", block)
         self.assertIn("SLACK_BOT_TOKEN=xoxb-DOH_PLACEHOLDER", block)
         self.assertIn("SLACK_ALLOWED_USERS=U1,U2", block)
+        # Personal mode resolves the owner DM as the home channel.
+        self.assertIn("SLACK_HOME_CHANNEL=DOWNER", block)
 
     def test_slack_company_wide_renders_allow_all_flag(self) -> None:
         """Company-wide config (allow_all_users) renders SLACK_ALLOW_ALL_USERS=true.
@@ -1203,6 +1205,8 @@ class TestGatewayEnvRender(unittest.TestCase):
         self.assertIn("SLACK_ALLOW_ALL_USERS=true", block)
         # No per-user allowlist in company-wide mode.
         self.assertNotIn("SLACK_ALLOWED_USERS=", block)
+        # No single owner to DM, so no home channel is rendered.
+        self.assertNotIn("SLACK_HOME_CHANNEL=", block)
 
     def test_connected_vault_provider_renders_managed_block(self) -> None:
         snapshot = [(self._telegram_provider(), {"allowed_users": [42, 7]})]

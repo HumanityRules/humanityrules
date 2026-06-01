@@ -124,6 +124,8 @@ class _SlackVaultTestBase(TestCase):
                 if lookup_error is not None:
                     return self._err_response(lookup_error)
                 return self._ok_response({"user": user})
+            if url.endswith("/conversations.open"):
+                return self._ok_response({"channel": {"id": "DOWNER"}})
             return self._ok_response({"url": "wss://example"})
         return patch("devopshero_app.views.integrations.provider_slack.httpx.post", side_effect=_fake_post)
 
@@ -163,6 +165,9 @@ class TestSlackSetupSession(_SlackVaultTestBase):
         personal_scopes = personal["oauth_config"]["scopes"]["bot"]
         self.assertIn("users:read", personal_scopes)
         self.assertIn("users:read.email", personal_scopes)
+        # im:write lets save_credentials open the owner's DM (conversations.open)
+        # to resolve the home channel.
+        self.assertIn("im:write", personal_scopes)
         # Personal mode must enable a writable Messages tab or the user has no
         # compose box and can never DM the bot (Slack's default is read-only).
         personal_home = personal["features"]["app_home"]
@@ -228,6 +233,25 @@ class TestSlackSubmit(_SlackVaultTestBase):
         # Company-wide must opt into allow-all; the gateway denies by default.
         self.assertEqual(cred.config["allow_all_users"], "true")
         self.assertEqual(cred.metadata["team_id"], "T1")
+        # No home channel submitted → none stored (gateway prompts / sethome).
+        self.assertNotIn("home_channel", cred.config)
+
+    def test_submit_company_wide_stores_optional_home_channel(self) -> None:
+        _status, session = self._post_setup_session()
+        with self._patched_slack_api():
+            response = self.client.post(
+                "/api/integrations/credentials/submit",
+                data=json.dumps({
+                    "submit_token": session["submit_token"],
+                    "credentials": {"app_token": "xapp-abc", "bot_token": "xoxb-abc"},
+                    "config": {"workspace_scope": provider_slack.MODE_COMPANY_WIDE, "home_channel": "C0HOME"},
+                }),
+                content_type="text/plain",
+                HTTP_ORIGIN="https://hermes.dev.example.com",
+            )
+        self.assertEqual(response.status_code, 200)
+        cred = IntegrationUserCredential.objects.get(provider=IntegrationUserCredential.Provider.SLACK)
+        self.assertEqual(cred.config["home_channel"], "C0HOME")
 
     def test_submit_persists_app_name_and_reopen_carries_it(self) -> None:
         _status, session = self._post_setup_session()
@@ -310,6 +334,8 @@ class TestSlackSubmit(_SlackVaultTestBase):
         # Personal opens access via an owner-only allowlist, never allow-all.
         self.assertEqual(cred.config["allowed_users"], ["UOWNER"])
         self.assertNotIn("allow_all_users", cred.config)
+        # The bot↔owner DM is resolved and stored as the home channel.
+        self.assertEqual(cred.config["home_channel"], "DOWNER")
         # The resolved name is shown back; the email is never persisted.
         self.assertEqual(cred.metadata["owner_name"], "Jane Doe")
         self.assertEqual(cred.metadata["owner_user_id"], "UOWNER")
@@ -359,6 +385,8 @@ class TestSlackSubmit(_SlackVaultTestBase):
         self.assertEqual(cred.config["allowed_users"], ["UOWNER"])
         self.assertEqual(cred.metadata["owner_name"], "Jane Doe")
         self.assertEqual(cred.config["app_name"], "Renamed")
+        # Owner kept → home channel resolved at first connect is preserved.
+        self.assertEqual(cred.config["home_channel"], "DOWNER")
 
     def test_switching_personal_to_company_wide_clears_owner_and_allowlist(self) -> None:
         self.assertEqual(self._submit_personal(owner_email="jane@example.com").status_code, 200)

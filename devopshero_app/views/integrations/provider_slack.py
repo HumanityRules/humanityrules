@@ -147,12 +147,18 @@ def schema(existing: IntegrationUserCredential | None, app: App | None, owner_us
     # mode resolves it to a Slack user_id at save (see save_credentials).
     owner_email = owner_user.email if owner_user is not None else ""
     owner_name = ""
+    # Company-wide has no single owner to DM, so the home channel (where the
+    # gateway delivers cron/proactive output) can't be auto-resolved like
+    # personal mode does — the operator names a channel the bot is invited to.
+    # Optional: left blank, the gateway prompts once and they can run !sethome.
+    home_channel = ""
     if existing is not None:
         mode = existing.config.get("workspace_scope", MODE_COMPANY_WIDE)
         metadata = existing.metadata
         # Keep the operator's previously-chosen name on reopen; the template
         # default only seeds the first connect.
         app_name = existing.config.get("app_name") or app_name
+        home_channel = existing.config.get("home_channel", "") if mode == MODE_COMPANY_WIDE else ""
         owner_name = metadata.get("owner_name", "")
         # An owner is already bound: blank the email field so a name-only
         # reconfigure keeps that owner rather than silently rebinding to the
@@ -171,6 +177,7 @@ def schema(existing: IntegrationUserCredential | None, app: App | None, owner_us
         "app_name_max_len": SLACK_APP_NAME_MAX_LEN,
         "owner_email": owner_email,
         "owner_name": owner_name,
+        "home_channel": home_channel,
         "modes": [
             {"value": MODE_COMPANY_WIDE, "label": "Company-wide (shared bot in channels)", "enabled": MODE_COMPANY_WIDE in _ENABLED_MODES},
             {"value": MODE_PERSONAL, "label": "Personal (your DMs only)", "enabled": MODE_PERSONAL in _ENABLED_MODES},
@@ -289,6 +296,33 @@ def _resolve_owner_user_id(bot_token: str, owner_email: str) -> tuple[dict | Non
     return user, None
 
 
+def _open_owner_dm_channel(bot_token: str, owner_user_id: str) -> tuple[str | None, str | None]:
+    """Open the bot↔owner DM via conversations.open; return (channel_id, error).
+
+    The returned `D…` channel id is the personal-mode home channel (where the
+    gateway delivers cron output and proactive messages). Passing the owner's
+    `U…` id directly to chat.postMessage would land in their Slackbot DM, not
+    the bot's, so we resolve the real DM channel here. Needs the `im:write`
+    scope the personal manifest carries.
+    """
+    body, error = _slack_api_post(method="conversations.open", token=bot_token, data={"users": owner_user_id})
+    if error is not None:
+        transport = _slack_transport_error(error)
+        if transport is not None:
+            return None, transport
+        # missing_scope means the bot token predates the im:write addition — a
+        # personal app created before this change. Reinstalling picks it up.
+        if error == "missing_scope":
+            return None, "This bot token can't open a DM. Recreate the app from the Personal link above (it adds the needed scope) and paste its new bot token."
+        return None, f"Slack could not open the owner's DM: {error}"
+    channel = body.get("channel") if isinstance(body, dict) else None
+    channel_id = channel.get("id") if isinstance(channel, dict) else None
+    if not channel_id:
+        logger.error("slack conversations.open returned no channel id: body=%r", body)
+        return None, "Slack did not return a DM channel for the owner."
+    return channel_id, None
+
+
 def save_credentials(
     owner_user: User,
     environment: Environment,
@@ -358,6 +392,13 @@ def save_credentials(
         # Drop any owner identity left over from a prior personal-mode save, so
         # the connected card doesn't keep showing "Replies only to …".
         metadata = {k: v for k, v in metadata.items() if k not in ("owner_user_id", "owner_name")}
+        # Optional operator-named home channel (a C… id the bot is invited to).
+        # No validation: the bot isn't a member of any channel until a human
+        # invites it, so we can't verify the id here — left blank, the gateway
+        # prompts once and the operator can run !sethome instead.
+        home_channel = str(config_payload.get("home_channel", "") or "").strip()
+        if home_channel:
+            config["home_channel"] = home_channel
     else:
         # Resolve only a freshly-submitted email (mirrors the token-freshness
         # rule above): a name-only reconfigure submits a blank email and keeps
@@ -377,13 +418,24 @@ def save_credentials(
                 return None, owner_error
             owner_user_id = owner["id"]
             owner_name = owner.get("real_name") or owner.get("name", "")
+            # Resolve the bot↔owner DM now so the gateway has a home channel for
+            # cron output and proactive messages — suppresses the first-message
+            # "no home channel" prompt. Home-channel freshness follows owner
+            # (and thus token) freshness: a fresh email re-resolves the DM.
+            home_channel, home_error = _open_owner_dm_channel(bot_token=bot_token, owner_user_id=owner_user_id)
+            if home_error is not None:
+                return None, home_error
         else:
             existing_metadata = existing.metadata if existing is not None else {}
             owner_user_id = existing_metadata.get("owner_user_id", "")
             owner_name = existing_metadata.get("owner_name", "")
             if not owner_user_id:
                 return None, "An owner email is required for personal mode."
+            # Owner kept (name-only reconfigure) → keep the DM resolved last time.
+            home_channel = existing.config.get("home_channel", "") if existing is not None else ""
         config["allowed_users"] = [owner_user_id]
+        if home_channel:
+            config["home_channel"] = home_channel
         metadata = {**metadata, "owner_user_id": owner_user_id, "owner_name": owner_name}
 
     credential, _ = IntegrationUserCredential.objects.update_or_create(
