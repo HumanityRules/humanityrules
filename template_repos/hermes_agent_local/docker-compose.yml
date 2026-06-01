@@ -2,7 +2,8 @@
 #
 #   cd template_repos/hermes_agent_local
 #   cp .env.example .env   # optional
-#   docker compose up --build
+#   docker compose watch   # dev: auto-rebuild on source save (recommended)
+#   docker compose up --build   # one-shot
 #
 # Browser entry: http://localhost:8788
 #   - WebUI, Web Apps panel, /webapps/__admin, user apps at <slug>.localhost:8788
@@ -10,10 +11,9 @@
 # Hermes Caddy/WebUI ports are not published to the host; reach them through
 # local_policy_proxy (bundled here) or docker exec.
 #
-# Any change (webui-extension, Dockerfile, patches, doh_runtime) requires a
-# rebuild + restart: `docker compose up --build`. The persistent-root runner
-# rsyncs the baked /opt/doh over the live tree on every start, so a bind mount
-# would just be clobbered — hence no source mounts here.
+# `docker compose watch` rebuilds the Hermes image when DOH source changes (~1s
+# with layer cache), recreates the container, and the persistent-root runner
+# rsyncs the new /opt/doh tree on start — reliable, no bind-mount clobber.
 #
 # Bedrock: mounts host ~/.aws and uses AWS_PROFILE (default bedrock_dev). Run
 # refresh-bedrock-creds.sh periodically, or bedrock-creds-launchagent.sh
@@ -60,6 +60,26 @@ services:
       start_period: 120s
       retries: 5
     restart: unless-stopped
+    develop:
+      watch:
+        # Rebuild + recreate on save. Paths are relative to this compose file.
+        # Late Dockerfile COPY layers make these rebuilds fast (~1s).
+        - path: ../hermes_agent/doh_runtime
+          action: rebuild
+        - path: ../hermes_agent/webui-extension
+          action: rebuild
+        - path: ../hermes_agent/skills
+          action: rebuild
+        - path: ../hermes_agent/build/patches-agent
+          action: rebuild
+        - path: ../hermes_agent/build/patches-webui
+          action: rebuild
+        - path: ../hermes_agent/Dockerfile
+          action: rebuild
+        - path: ../hermes_agent/SOUL.md
+          action: rebuild
+        - path: ../hermes_agent/config.yaml.template
+          action: rebuild
 
   local_policy_proxy:
     build:
