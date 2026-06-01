@@ -1,6 +1,6 @@
 ---
 name: ask-codex
-description: Query GPT-5.5 for external perspective on current problem
+description: Manually query GPT-5.5 via Codex for an external perspective on the current problem. Use only when the user invokes /ask-codex or explicitly asks to ask Codex.
 disable-model-invocation: true
 ---
 
@@ -8,11 +8,13 @@ disable-model-invocation: true
 
 Query GPT-5.5 for external perspective. Codex has NO conversation context.
 
+Do not run Codex in the background. Use the bundled script below and wait for it to finish. The script prints only Codex's final assistant message to stdout; if it times out or fails, report that failure instead of polling an empty output file.
+
 ## Steps
 
 ### 1. Synthesize
-- Objective and success criteria
 From the current conversation (ignore resolved topics):
+- Objective and success criteria
 - Constraints
 - What's been tried
 - Specific blocker
@@ -24,20 +26,25 @@ End with: "Structure response as: Summary (bullets), Recommendations (ranked), R
 
 ### 3. Execute
 
+Write the question to a temporary file and run:
+
 ```bash
-QUESTION="$(cat <<'EOF'
+QUESTION_FILE="$(mktemp -t ask-codex-question.XXXXXX.md)"
+cat > "$QUESTION_FILE" <<'EOF'
 ...your multiline question here...
 EOF
-)"
 
-codex exec --skip-git-repo-check \
-  --sandbox workspace-write \
-  --model gpt-5.5 \
-  -c model_reasoning_effort="xhigh" \
-  "$QUESTION"
+.agents/skills/ask-codex/scripts/ask_codex.sh "$QUESTION_FILE"
 ```
 
-The final answer prints to stdout after a metadata header and a `tokens used` footer — ignore those and use the assistant message.
+Defaults:
+- Model: `gpt-5.5`
+- Effort: `xhigh`
+- Fast mode: on (`service_tier="fast"`)
+- Sandbox: `read-only`
+- Timeout: 900 seconds
+
+Use `ASK_CODEX_FAST=0` only if the fast service tier is causing a problem. For normal reviews, keep the prompt focused and avoid pasting huge diffs; include the specific files or hunks that matter.
 
 ### 4. Present the insight
 

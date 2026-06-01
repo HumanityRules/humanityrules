@@ -56,12 +56,12 @@ def _canonical_origin(scheme: str, hostname: str, port: int | None) -> str:
     return f"{scheme}://{host}:{port}"
 
 
-def _schema_for_provider(provider: str, existing: IntegrationUserCredential | None, app: App | None) -> dict:
+def _schema_for_provider(provider: str, existing: IntegrationUserCredential | None, app: App | None, owner_user: User) -> dict:
     """Return the form schema for one paste-style provider via the registry."""
     spec = provider_registry.get_of_kind(provider=provider, kind=provider_registry.ProviderKind.VAULT)
     if spec is None:
         raise ValueError(f"unsupported provider: {provider!r}")
-    return spec.module.schema(existing, app)
+    return spec.module.schema(existing, app, owner_user)
 
 
 def _setup_token_payload(
@@ -139,7 +139,7 @@ def integrations_credential_setup_session(request: HttpRequest) -> JsonResponse:
         "action_url": request.build_absolute_uri("/api/integrations/credentials/submit"),
         "submit_token": submit_token,
         "expires_in": SETUP_TOKEN_MAX_AGE_SECONDS,
-        "schema": _schema_for_provider(provider=provider, existing=existing, app=app),
+        "schema": _schema_for_provider(provider=provider, existing=existing, app=app, owner_user=owner_user),
     })
 
 
