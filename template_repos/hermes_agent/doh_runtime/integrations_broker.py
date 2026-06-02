@@ -20,6 +20,7 @@ Environment contract (set by deploy_app.py's env-bearer overlay):
 - DOH_APP_SLUG          — logical app key for app-scoped credentials.
 - DOH_CONTROL_PLANE_URL — base URL for DOH (e.g. https://devopshero.ai).
 - DOH_ENV_SLUG          — env slug, for logging only.
+- DOH_MERGE_INTEGRATION_ENABLED — optional; false disables all Merge.dev connectors.
 
 Required file system:
 - BROKER_CA_DIR must be writable by the broker user. The CA bundle is written
@@ -59,6 +60,8 @@ DEFAULT_MCP_PERSISTENT_DIR = Path("/hermes-persistent-root/mcp-aggregator")
 DEFAULT_GATEWAY_ENV_PATH = Path("/workspace/.hermes/.env")
 DEFAULT_PROCESS_COMPOSE_URL = "http://127.0.0.1:9956"
 GATEWAY_PROCESS_NAME = "system.gateway"
+_TRUE_ENV_VALUES = frozenset({"1", "true", "yes", "on"})
+_FALSE_ENV_VALUES = frozenset({"0", "false", "no", "off"})
 
 logger = logging.getLogger("integrations_broker")
 
@@ -357,6 +360,20 @@ def _require_env(name: str) -> str:
     return value
 
 
+def _env_flag_enabled(*, name: str, default: bool) -> bool:
+    """Parse a bool-ish environment flag, falling back on empty or invalid values."""
+    value = os.environ.get(name, "")
+    if not value:
+        return default
+    normalized = value.strip().lower()
+    if normalized in _TRUE_ENV_VALUES:
+        return True
+    if normalized in _FALSE_ENV_VALUES:
+        return False
+    logger.error("Invalid boolean value for %s=%r; using default %s", name, value, default)
+    return default
+
+
 async def _run(
     proxy_port: int,
     control_port: int,
@@ -372,9 +389,10 @@ async def _run(
     owner_username = _require_env(name="DOH_OWNER_USERNAME")
     app_slug = _require_env(name="DOH_APP_SLUG")
     env_slug = os.environ.get("DOH_ENV_SLUG", "")
+    merge_enabled = _env_flag_enabled(name="DOH_MERGE_INTEGRATION_ENABLED", default=True)
     logger.info(
-        "starting integrations_broker for owner=%s env=%s against %s (proxy=%d, control=%d, mcp=%d)",
-        owner_username, env_slug, control_plane_url, proxy_port, control_port, mcp_port,
+        "starting integrations_broker for owner=%s env=%s against %s (proxy=%d, control=%d, mcp=%d, merge_enabled=%s)",
+        owner_username, env_slug, control_plane_url, proxy_port, control_port, mcp_port, merge_enabled,
     )
 
     tls_runtime_holder: dict = {}
@@ -422,6 +440,7 @@ async def _run(
         doh_env_bearer=bearer,
         doh_app_slug=app_slug,
         doh_owner_username=owner_username,
+        merge_enabled=merge_enabled,
     )
 
     control_app = _build_control_app(

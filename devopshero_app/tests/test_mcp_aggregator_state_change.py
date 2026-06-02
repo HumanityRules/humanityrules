@@ -23,6 +23,7 @@ import importlib.util
 import json
 import pathlib
 import sys
+import tempfile
 import types
 import unittest
 from unittest.mock import AsyncMock
@@ -183,6 +184,38 @@ class _FakeBackend:
 
     async def invalidate_caches(self) -> None:
         return None
+
+
+class TestAggregatorMergeDisabled(unittest.IsolatedAsyncioTestCase):
+    """The Merge flag removes only Merge-backed catalog/status/routes."""
+
+    async def asyncSetUp(self) -> None:
+        self.tempdir = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tempdir.cleanup)
+        self.agg = mcp_aggregator.MCPAggregator(
+            port=9952,
+            persistent_dir=pathlib.Path(self.tempdir.name),
+            public_base_url="https://hermes.example",
+            doh_control_plane_url="https://doh.example",
+            doh_env_bearer="b",
+            doh_app_slug="hermes-test",
+            doh_owner_username="vmendi",
+            merge_enabled=False,
+        )
+
+    async def test_disabled_constructor_omits_merge_backend(self) -> None:
+        self.assertIsNone(self.agg._merge_backend)
+        self.assertNotIn("merge", {backend.name for backend in self.agg._backends})
+
+    async def test_disabled_routes_omit_merge_routes(self) -> None:
+        paths = {route.path for route in self.agg.routes(prefix="/integrations")}
+        self.assertNotIn("/integrations/merge/link-token", paths)
+        self.assertNotIn("/integrations/merge/connector-status", paths)
+        self.assertNotIn("/integrations/merge/disconnect", paths)
+
+    async def test_disabled_status_items_omit_merge_connectors(self) -> None:
+        items = await self.agg.status_items()
+        self.assertNotIn("merge_connector", {item["kind"] for item in items})
 
 
 class TestCatalogStoreDrop(unittest.IsolatedAsyncioTestCase):

@@ -77,6 +77,22 @@ def _load_broker_module() -> types.ModuleType:
 broker = _load_broker_module()
 
 
+class TestEnvironmentFlags(unittest.TestCase):
+
+    def test_merge_flag_defaults_enabled_when_absent(self) -> None:
+        with patch.dict(broker.os.environ, {}, clear=True):
+            self.assertTrue(broker._env_flag_enabled(name="DOH_MERGE_INTEGRATION_ENABLED", default=True))
+
+    def test_merge_flag_false_values_disable(self) -> None:
+        for value in ("0", "false", "no", "off", "FALSE"):
+            with patch.dict(broker.os.environ, {"DOH_MERGE_INTEGRATION_ENABLED": value}, clear=True):
+                self.assertFalse(broker._env_flag_enabled(name="DOH_MERGE_INTEGRATION_ENABLED", default=True))
+
+    def test_merge_flag_invalid_falls_back_to_default(self) -> None:
+        with patch.dict(broker.os.environ, {"DOH_MERGE_INTEGRATION_ENABLED": "wat"}, clear=True):
+            self.assertTrue(broker._env_flag_enabled(name="DOH_MERGE_INTEGRATION_ENABLED", default=True))
+
+
 def _make_token_store() -> broker.tls_intercept._TokenStore:
     """Create a fresh TLS token store for isolated broker tests."""
     return broker.tls_intercept._TokenStore(

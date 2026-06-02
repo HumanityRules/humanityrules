@@ -139,6 +139,7 @@ class MCPAggregator:
         doh_env_bearer: str,
         doh_app_slug: str,
         doh_owner_username: str,
+        merge_enabled: bool,
     ) -> None:
         self._port = port
         self._persistent_dir = persistent_dir
@@ -156,7 +157,7 @@ class MCPAggregator:
         self._refresh_lock = asyncio.Lock()
         self._last_refresh_ts: float = 0.0
 
-        # Merge (relayed via DOH, not DCR) first, then one Backend per connector spec.
+        # Merge (relayed via DOH, not DCR) first when enabled, then one Backend per connector spec.
         # Each spec.make_backend gets its own subdir under persistent_dir for any
         # extra state the connector wants to keep (e.g. PostHog's session config).
         # Native connectors win over same-slug Merge connectors in the catalog
@@ -164,16 +165,19 @@ class MCPAggregator:
         # are also "native" in this sense — DOH manages their auth directly, so
         # the equivalent Merge connector would just duplicate the surface and
         # confuse the agent.
-        merge_excluded = frozenset(set(DCR_CONNECTORS_BY_SLUG.keys()) | {"github", "slack"})
-        self._merge_backend = MergeBackend(
-            doh_control_plane_url=self._doh_control_plane_url,
-            doh_env_bearer=self._doh_env_bearer,
-            doh_app_slug=self._doh_app_slug,
-            doh_owner_username=self._doh_owner_username,
-            excluded_connector_slugs=merge_excluded,
-            on_config_change=self._on_state_change,
-        )
-        self._backends: list[mcp_top_level_tools.Backend] = [self._merge_backend]
+        self._merge_backend: MergeBackend | None = None
+        self._backends: list[mcp_top_level_tools.Backend] = []
+        if merge_enabled:
+            merge_excluded = frozenset(set(DCR_CONNECTORS_BY_SLUG.keys()) | {"github", "slack"})
+            self._merge_backend = MergeBackend(
+                doh_control_plane_url=self._doh_control_plane_url,
+                doh_env_bearer=self._doh_env_bearer,
+                doh_app_slug=self._doh_app_slug,
+                doh_owner_username=self._doh_owner_username,
+                excluded_connector_slugs=merge_excluded,
+                on_config_change=self._on_state_change,
+            )
+            self._backends.append(self._merge_backend)
         for spec in DCR_CONNECTORS:
             backend = spec.make_backend(
                 oauth_state=self._oauth_states[spec.slug],
@@ -220,8 +224,11 @@ class MCPAggregator:
         return None
 
     async def serve(self) -> None:
-        await self._merge_backend.boot()
-        connect_kinds: dict[str, str] = {"merge": "magic_link"}
+        if self._merge_backend is not None:
+            await self._merge_backend.boot()
+        connect_kinds: dict[str, str] = {}
+        if self._merge_backend is not None:
+            connect_kinds["merge"] = "magic_link"
         for spec in DCR_CONNECTORS:
             connect_kinds[spec.slug] = spec.connect_kind
         mcp_top_level_tools.register(
@@ -271,11 +278,14 @@ class MCPAggregator:
         Merge owns its own routes under merge_backend.routes(prefix=...); the aggregator
         composes both URL surfaces into one list so the broker mounts them in one shot.
         """
+        merge_routes: list[Route] = []
+        if self._merge_backend is not None:
+            merge_routes = self._merge_backend.routes(prefix=prefix)
         return [
             Route(path=f"{prefix}/{{provider}}/oauth/start", endpoint=self.handle_oauth_start, methods=["GET"]),
             Route(path=f"{prefix}/{{provider}}/oauth/callback", endpoint=self.handle_oauth_callback, methods=["GET"]),
             Route(path=f"{prefix}/{{provider}}/disconnect", endpoint=self.handle_disconnect, methods=["POST"]),
-            *self._merge_backend.routes(prefix=prefix),
+            *merge_routes,
         ]
 
     async def _current_access_token(self, slug: str) -> str | None:
@@ -296,7 +306,9 @@ class MCPAggregator:
         the broker never has to know Merge or PostHog or Notion exist.
         """
         items: list[dict] = []
-        merge_connectors = await self._merge_backend.fetch_connectors()
+        merge_connectors: list[dict] = []
+        if self._merge_backend is not None:
+            merge_connectors = await self._merge_backend.fetch_connectors()
         merge_connectors_by_slug: dict[str, dict] = {}
         for connector in merge_connectors:
             merge_slug = connector.get("slug")
@@ -316,14 +328,15 @@ class MCPAggregator:
                 item["logo_url"] = merge_connector.get("logo_url")
             items.append(item)
 
-        for connector in self._merge_backend.filter_visible_connectors(connectors=merge_connectors):
-            items.append({
-                "kind": "merge_connector",
-                "slug": connector.get("slug"),
-                "label": connector.get("name"),
-                "logo_url": connector.get("logo_url"),
-                "status": connector.get("status", "unknown"),
-            })
+        if self._merge_backend is not None:
+            for connector in self._merge_backend.filter_visible_connectors(connectors=merge_connectors):
+                items.append({
+                    "kind": "merge_connector",
+                    "slug": connector.get("slug"),
+                    "label": connector.get("name"),
+                    "logo_url": connector.get("logo_url"),
+                    "status": connector.get("status", "unknown"),
+                })
         return items
 
     async def handle_disconnect(self, request: Request) -> Response:
