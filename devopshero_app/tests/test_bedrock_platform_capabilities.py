@@ -127,7 +127,6 @@ class BedrockPlatformCapabilityTests(SimpleTestCase):
         self.assertEqual(hermes["efs_mounts"], ["checkpoint"])
         self.assertNotIn("depends_on", hermes)
         self.assertEqual(hermes["stop_timeout"], 120)
-        self.assertEqual(hermes["environment"]["HERMES_WEBUI_HOST"], "127.0.0.1")
         self.assertEqual(hermes["memory_reservation_mib"], 2048)
         self.assertEqual(hermes["memory_limit_mib"], 4096)
         self.assertEqual(hermes["cpu_reservation"], 896)

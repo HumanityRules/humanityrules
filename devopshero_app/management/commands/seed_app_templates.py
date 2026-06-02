@@ -293,10 +293,7 @@ HERMES_PERSONAL_TEMPLATE = {
             "health_check_command": "",
             "health_check_grace_period": 60,
             "efs_mounts": ["checkpoint"],
-            # Policy proxy fronts the task; pin the WebUI to loopback so only
-            # the proxy (sharing the task network namespace) can reach it.
             "environment": {
-                "HERMES_WEBUI_HOST": "127.0.0.1",
                 "DOH_MERGE_INTEGRATION_ENABLED": "true",
             },
             "host_mounts": [

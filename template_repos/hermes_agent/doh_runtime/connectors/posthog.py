@@ -337,6 +337,7 @@ def _make_backend(*, oauth_state, refresh_fn, persistent_dir: Path, on_config_ch
 SPEC = DCRConnectorSpec(
     slug="posthog",
     label="PostHog",
+    logo_url="/extensions/posthog.svg",
     upstream_url="https://mcp.posthog.com/mcp",
     oauth_metadata_url="https://mcp.posthog.com/.well-known/oauth-authorization-server",
     default_scope=_DEFAULT_SCOPE,
