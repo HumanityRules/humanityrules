@@ -1,0 +1,253 @@
+/* Tron Terminal Style — drop-in stylesheet
+ * Pair with JetBrains Mono via Google Fonts.
+ * See SKILL.md for tokens, rules, and pitfalls.
+ *
+ * This stylesheet assumes you also include the animated Vanta background
+ * (see references/animated-background.md). If you don't, the page still
+ * works but reads a bit empty — give body a `background: #00080d` rule.
+ */
+
+:root {
+  --bg:        #001218;
+  --bg-2:      #001a23;
+  --line:      #0e3a4a;
+  --line-2:    #15596f;
+  --text:      #d4f5ff;
+  --muted:     #5b8a99;
+  --cyan:      #5ff7ff;
+  --cyan-dim:  #2bb8c7;
+  --amber:     #ffb454;
+  --green:     #6fffb0;
+  --red:       #ff7a7a;
+}
+
+* { box-sizing: border-box; }
+html { scrollbar-gutter: stable; }
+html, body {
+  /* No background here — Vanta canvas (z-index: -2) sits behind body.
+     Painting body would cover the animation. If you're skipping Vanta,
+     add `background: #00080d` to body instead. */
+  color: var(--text); min-height: 100%;
+}
+body {
+  margin: 0; padding: 1.2em 1.5em 2em;
+  font-family: "JetBrains Mono", "IBM Plex Mono", "Fira Code", "Consolas",
+               ui-monospace, monospace;
+  font-size: 14px; line-height: 1.4; letter-spacing: .2px;
+  position: relative; overflow-x: hidden;
+  /* Vertically center .layout when content is shorter than viewport;
+     falls back to top-anchored scrolling when taller. */
+  min-height: 100vh;
+  display: flex; flex-direction: column; justify-content: center;
+}
+/* Soft cyan vignette only — no opaque base layer (would cover Vanta) */
+body::before {
+  content: ""; position: fixed; inset: 0; z-index: -1; pointer-events: none;
+  background:
+    radial-gradient(60vmax 50vmax at 50% -10%, rgba(0,54,68,.45) 0%, transparent 60%),
+    radial-gradient(50vmax 40vmax at 50% 110%, rgba(0,42,54,.45) 0%, transparent 65%);
+}
+/* Faint horizontal scanlines */
+body::after {
+  content: ""; position: fixed; inset: 0; z-index: -1; pointer-events: none;
+  background: repeating-linear-gradient(
+    to bottom,
+    rgba(0,0,0,0) 0,
+    rgba(0,0,0,0) 2px,
+    rgba(0, 30, 40, .35) 3px,
+    rgba(0,0,0,0) 4px
+  );
+  mix-blend-mode: multiply;
+}
+
+/* 2-column responsive layout. h1 spans both columns. */
+.layout {
+  max-width: 1180px; margin: 0 auto;
+  display: grid; grid-template-columns: minmax(320px, 380px) 1fr;
+  gap: 1em; align-items: start;
+}
+@media (max-width: 880px) {
+  .layout { grid-template-columns: 1fr; }
+}
+
+h1 {
+  grid-column: 1 / -1;
+  margin: 0 0 .4em;
+  font-size: 1.25em; font-weight: 700;
+  letter-spacing: 5px; text-transform: uppercase;
+  color: var(--cyan);
+  text-shadow: 0 0 8px rgba(95, 247, 255, .55),
+               0 0 22px rgba(95, 247, 255, .25);
+}
+h1::before { content: "▮ "; color: var(--cyan); }
+h1::after  { content: " ▮"; color: var(--cyan); }
+
+h2 {
+  margin: 0 0 .7em;
+  font-size: .82em; font-weight: 700;
+  text-transform: uppercase; letter-spacing: 3px;
+  color: var(--cyan-dim);
+  border-bottom: 1px solid var(--line);
+  padding: 0 0 .45em;
+}
+
+/* Panel = frosted-glass HUD frame.
+ *
+ * Translucent tint + backdrop blur lets the animated background show through
+ * (mesh, halo, topology, whatever you wired up via Vanta) without making text
+ * hard to read. Sharp 0-radius corners + cyan border + corner ticks = HUD.
+ *
+ * If you're NOT using an animated background, this still works fine — the
+ * blur is a no-op against the static body gradient.
+ */
+.panel {
+  background: rgba(0, 24, 32, 0.32);
+  backdrop-filter: blur(6px) saturate(120%);
+  -webkit-backdrop-filter: blur(6px) saturate(120%);
+  border: 1px solid var(--line-2);
+  border-radius: 0;
+  padding: .9em 1.1em;
+  box-shadow:
+    0 0 0 1px rgba(95, 247, 255, .10),
+    inset 0 0 24px rgba(0, 200, 230, .06),
+    0 0 30px rgba(0, 50, 65, .35);
+  position: relative;
+}
+/* HUD corner ticks (top-left + bottom-right) */
+.panel::before, .panel::after {
+  content: ""; position: absolute; width: 12px; height: 12px;
+  border: 1px solid var(--cyan);
+  pointer-events: none;
+}
+.panel::before { top: -1px; left: -1px;
+                 border-right: 0; border-bottom: 0; }
+.panel::after  { bottom: -1px; right: -1px;
+                 border-left: 0; border-top: 0; }
+
+/* "// label" tag above the panel — translucent, matches panel top */
+.panel-label {
+  position: absolute; top: -.7em; left: 14px;
+  background: rgba(0, 18, 24, 0.85);
+  padding: 0 .6em;
+  color: var(--cyan-dim);
+  font-size: .72em; letter-spacing: 3px; text-transform: uppercase;
+}
+
+/* Footer panel — full-width thin status bar */
+.footer-panel {
+  grid-column: 1 / -1;
+  margin-top: .8em;
+  text-align: center;
+  padding: .7em 1.1em;
+  color: var(--muted);
+  letter-spacing: 1.5px;
+  font-size: .72em;
+  text-transform: uppercase;
+}
+
+form { display: grid; grid-template-columns: 1fr; gap: .6em; }
+.field { display: grid; gap: .25em; }
+label {
+  color: var(--muted);
+  font-size: .7em; font-weight: 600;
+  text-transform: uppercase; letter-spacing: 2.5px;
+}
+label::before { content: "> "; color: var(--cyan-dim); }
+
+input, select, button {
+  font: inherit; font-size: .9em;
+  background: var(--bg-2); color: var(--text);
+  border: 1px solid var(--line-2); border-radius: 0;
+  padding: .4em .65em;
+  transition: border-color .15s, box-shadow .15s;
+}
+input:hover, select:hover { border-color: var(--cyan-dim); }
+input:focus, select:focus {
+  outline: none; border-color: var(--cyan);
+  box-shadow: 0 0 0 1px var(--cyan),
+              0 0 12px rgba(95, 247, 255, .35),
+              inset 0 0 8px rgba(95, 247, 255, .15);
+}
+/* Custom CSS-only select arrow */
+select {
+  -webkit-appearance: none; appearance: none;
+  background-image:
+    linear-gradient(45deg, transparent 50%, var(--cyan-dim) 50%),
+    linear-gradient(135deg, var(--cyan-dim) 50%, transparent 50%);
+  background-position:
+    calc(100% - 18px) center, calc(100% - 13px) center;
+  background-size: 5px 5px, 5px 5px;
+  background-repeat: no-repeat;
+  padding-right: 2em;
+}
+button {
+  cursor: pointer; margin-top: .25em;
+  background: transparent; color: var(--cyan);
+  border: 1px solid var(--cyan);
+  text-transform: uppercase; letter-spacing: 4px; font-weight: 700;
+  padding: .55em 1.2em; font-size: .75em;
+  box-shadow: 0 0 0 1px rgba(95,247,255,.18),
+              inset 0 0 14px rgba(95,247,255,.08),
+              0 0 16px rgba(95,247,255,.18);
+  transition: background .15s, color .15s, box-shadow .15s, transform .1s;
+}
+button:hover {
+  background: var(--cyan); color: #00131a;
+  box-shadow: 0 0 0 1px var(--cyan),
+              0 0 22px rgba(95,247,255,.55);
+}
+button:active { transform: translateY(1px); }
+
+table {
+  border-collapse: collapse; width: 100%;
+  background: transparent;
+  font-variant-numeric: tabular-nums;
+}
+th, td {
+  text-align: left; padding: .4em .7em;
+  border-bottom: 1px solid var(--line);
+}
+th {
+  color: var(--cyan-dim); font-weight: 600;
+  font-size: .72em; letter-spacing: 2.5px;
+  text-transform: uppercase;
+  border-bottom: 1px solid var(--line-2);
+}
+tbody tr { transition: background .12s; }
+tbody tr:hover {
+  background: rgba(95, 247, 255, .04);
+  box-shadow: inset 2px 0 0 var(--cyan);
+}
+tbody tr:last-child td { border-bottom: 0; }
+td { font-size: 1em; }
+
+/* Highlight utilities */
+.target {
+  color: var(--amber); font-weight: 700;
+  text-shadow: 0 0 8px rgba(255, 180, 84, .55);
+}
+.early { color: var(--green); }
+.late  { color: var(--red); }
+small  { color: var(--muted); }
+p      { color: var(--muted); }
+
+::selection { background: var(--cyan); color: #00131a; }
+
+/* Optional empty-state block for results panels */
+.empty {
+  text-align: center; color: var(--muted);
+  padding: 1.4em 1em; font-size: .9em; letter-spacing: 1.5px;
+}
+.empty strong {
+  color: var(--cyan); display: block; margin-bottom: .5em;
+  font-size: 1.05em; letter-spacing: 3px; text-transform: uppercase;
+  text-shadow: 0 0 10px rgba(95,247,255,.45);
+}
+
+/* Optional blinking cursor — <h2>Status<span class="cursor"></span></h2> */
+.cursor::after {
+  content: "_"; color: var(--cyan);
+  animation: blink 1s steps(2, jump-none) infinite;
+  margin-left: .15em;
+}
+@keyframes blink { 50% { opacity: 0; } }

@@ -24,9 +24,51 @@ Usage: $(basename "$0") <command>
 EOF
 }
 
+launchagent_path() {
+    local dir
+    dir="$(dirname "$1")"
+    if [ "$dir" = "." ]; then
+        return
+    fi
+    printf '%s\n' "$dir"
+}
+
+build_launchagent_path() {
+    local opsh_bin="$1"
+    local aws_bin
+    aws_bin="$(command -v aws 2>/dev/null || true)"
+    local -a parts=(
+        "$(launchagent_path "$opsh_bin")"
+        "$(launchagent_path "$aws_bin")"
+        /opt/homebrew/bin
+        /usr/local/bin
+        /usr/bin
+        /bin
+        /usr/sbin
+        /sbin
+    )
+    local part seen=""
+    for part in "${parts[@]}"; do
+        [ -n "$part" ] || continue
+        case ":$seen:" in
+            *":$part:"*) continue ;;
+        esac
+        seen="${seen:+$seen:}$part"
+    done
+    printf '%s' "$seen"
+}
+
 write_plist() {
     mkdir -p "$LOG_DIR"
     chmod +x "$REFRESH_SCRIPT"
+
+    local opsh_bin="${OPSH_BIN:-$(command -v opsh 2>/dev/null || true)}"
+    if [ -z "$opsh_bin" ]; then
+        echo "opsh not found on PATH; install CourseHero ops-console or set OPSH_BIN before install/start" >&2
+        exit 1
+    fi
+    local launch_path
+    launch_path="$(build_launchagent_path "$opsh_bin")"
 
     cat >"$PLIST_PATH" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
@@ -40,6 +82,15 @@ write_plist() {
   <array>
     <string>${REFRESH_SCRIPT}</string>
   </array>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>OPSH_BIN</key>
+    <string>${opsh_bin}</string>
+    <key>PATH</key>
+    <string>${launch_path}</string>
+    <key>AWS_PROFILE</key>
+    <string>bedrock_dev</string>
+  </dict>
   <key>StartInterval</key>
   <integer>600</integer>
   <key>StandardOutPath</key>

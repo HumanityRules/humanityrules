@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Tron Terminal Style — Example</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+<!-- Vanta canvas mounts here. Scripts at end of body. -->
+<div id="bg-fx"></div>
+
+<div class="layout">
+
+  <h1>Mission Control</h1>
+
+  <aside class="panel">
+    <span class="panel-label">// control</span>
+    <h2>Inputs</h2>
+    <form>
+      <div class="field">
+        <label for="target">Target</label>
+        <input id="target" name="target" placeholder="enter value">
+      </div>
+      <div class="field">
+        <label for="mode">Mode</label>
+        <select id="mode" name="mode">
+          <option>Standard</option>
+          <option>Extended</option>
+          <option>Diagnostic</option>
+        </select>
+      </div>
+      <button type="submit">Execute</button>
+    </form>
+  </aside>
+
+  <section class="panel">
+    <span class="panel-label">// output</span>
+    <h2>Results</h2>
+    <table>
+      <thead>
+        <tr><th>ID</th><th>Time</th><th>Status</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>A-101</td><td>09:12</td><td class="early">on time</td></tr>
+        <tr><td>A-102</td><td><span class="target">09:24</span></td><td>queued</td></tr>
+        <tr><td>A-103</td><td>09:41</td><td class="late">+3 min</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <footer class="panel footer-panel">
+    <span class="panel-label">// status</span>
+    <small>system online · last sync 12:00:00 · v1.0.0</small>
+  </footer>
+
+</div>
+
+<!-- Animated background — see references/animated-background.md
+     for HALO and TOPOLOGY alternatives. -->
+<script src="https://cdn.jsdelivr.net/npm/three@0.134.0/build/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/vanta@0.5.24/dist/vanta.net.min.js"></script>
+<script>
+  if (window.VANTA && window.VANTA.NET) {
+    VANTA.NET({
+      el: "#bg-fx",
+      mouseControls: true, touchControls: true, gyroControls: false,
+      minHeight: 200, minWidth: 200, scale: 1, scaleMobile: 1,
+      color: 0x5ff7ff,
+      backgroundColor: 0x00080d,
+      points: 9.00,
+      maxDistance: 22.00,
+      spacing: 17.00,
+      showDots: false
+    });
+  }
+</script>
+</body>
+</html>
