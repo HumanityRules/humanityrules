@@ -46,6 +46,7 @@ services:
       DOH_ENV_BEARER: ${DOH_ENV_BEARER:-}
       DOH_OWNER_USERNAME: ${DOH_OWNER_USERNAME:-}
       DOH_APP_SLUG: ${DOH_APP_SLUG:-}
+      DOH_MERGE_INTEGRATION_ENABLED: ${DOH_MERGE_INTEGRATION_ENABLED:-true}
     expose:
       - "8787"
     volumes:
