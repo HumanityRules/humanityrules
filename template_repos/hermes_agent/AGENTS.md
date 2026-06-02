@@ -23,6 +23,8 @@ The unscoped main worker (no `--label`) keeps running and serves UI traffic + en
 
 **AppTemplate reseeding:** If you update the AppTemplate, don't forget to call seed_app_templates so that they are updated in the database.
 
+**AWS signer service list:** When adding or removing a supported AWS service in `doh_runtime/aws_signer.py` or the child AWS config in `doh_runtime/supervisor.sh`, update `skills/development/aws-cli/SKILL.md`'s signer services list in the same change.
+
 ## Test environment
 
 - **AWS Account:** `CH Sandbox`.
