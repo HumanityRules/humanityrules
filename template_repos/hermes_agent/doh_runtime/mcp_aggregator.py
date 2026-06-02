@@ -309,11 +309,6 @@ class MCPAggregator:
         merge_connectors: list[dict] = []
         if self._merge_backend is not None:
             merge_connectors = await self._merge_backend.fetch_connectors()
-        merge_connectors_by_slug: dict[str, dict] = {}
-        for connector in merge_connectors:
-            merge_slug = connector.get("slug")
-            if isinstance(merge_slug, str) and merge_slug:
-                merge_connectors_by_slug[merge_slug] = connector
 
         for slug, spec in DCR_CONNECTORS_BY_SLUG.items():
             oauth = self._oauth_states[slug]
@@ -323,9 +318,8 @@ class MCPAggregator:
                 "label": spec.label,
                 "status": "connected" if oauth.has_token else "not_connected",
             }
-            merge_connector = merge_connectors_by_slug.get(slug)
-            if merge_connector is not None:
-                item["logo_url"] = merge_connector.get("logo_url")
+            if spec.logo_url is not None:
+                item["logo_url"] = spec.logo_url
             items.append(item)
 
         if self._merge_backend is not None:

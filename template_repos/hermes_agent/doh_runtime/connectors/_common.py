@@ -48,6 +48,7 @@ class DCRConnectorSpec:
     """
     slug: str
     label: str
+    logo_url: str | None
     upstream_url: str
     oauth_metadata_url: str
     default_scope: str | None  # None when the AS ignores scope (Notion).

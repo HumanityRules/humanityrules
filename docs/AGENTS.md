@@ -18,6 +18,8 @@ The main developer documentation lives in the docs/ subdirectory. **When creatin
 
 - **`docs/mcp_aggregator_design.md`** — Architecture for MCP server integration in Hermes (Notion today). Open when adding MCP providers, working on the aggregator (in `integrations_broker.py`), or reasoning about the sandbox ↔ MCP trust boundary.
 
+- **`docs/openai_codex_integration_design.md`** — Design (not yet implemented) for using a user's ChatGPT subscription (Codex OAuth) as a Hermes LLM backend with the refresh token held outside the sandbox: TLS-intercept of `chatgpt.com` injecting bearer + `ChatGPT-Account-ID`, broker-run device flow with DOH storing the token, and the verified codex/Hermes wire facts. Open when implementing or revisiting the Codex/ChatGPT-subscription integration.
+
 - **`docs/merge_integration_design.md`** — Architecture for the Merge.dev integration that surfaces ~150 SaaS connectors to Hermes through one MCP endpoint. Open when working on Merge, debugging Merge tools, or reasoning about which DOH-tenant secrets can/can't enter customer containers.
 
 - **`docs/dcr_candidates/`** — Per-vendor research on remote-MCP + DCR candidates. Start with `SUMMARY.md` for the tier ranking. Open when planning the next direct-MCP integration.

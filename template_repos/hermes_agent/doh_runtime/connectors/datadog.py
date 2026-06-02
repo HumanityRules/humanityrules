@@ -346,6 +346,7 @@ def _make_backend(*, oauth_state, refresh_fn, persistent_dir: Path, on_config_ch
 SPEC = DCRConnectorSpec(
     slug="datadog",
     label="Datadog",
+    logo_url=None,
     # Real MCP endpoint per the DCR registration response (`mcp_resource_uri`)
     # and the protected-resource metadata at /.well-known/oauth-protected-resource.
     # `mcp.datadoghq.com/mcp` returns 404; the resource lives under /api/unstable/.

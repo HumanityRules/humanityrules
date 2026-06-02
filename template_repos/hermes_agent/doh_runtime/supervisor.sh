@@ -11,6 +11,10 @@ AWS_CE_PORT=9904
 # 8789 frees 8787 for Caddy. Public traffic flows:
 #   ALB → policy-proxy:8788 (auth gate) → Caddy:8787 → user app on 4xxx
 #                                                   ↘ fallback → WebUI:8789
+# Upstream hermes-webui defaults HERMES_WEBUI_HOST to 0.0.0.0; pin loopback so
+# the WebUI is not reachable on the task ENI (policy proxy reaches Caddy on
+# :8787; Caddy reverse-proxies to 127.0.0.1:8789).
+export HERMES_WEBUI_HOST=127.0.0.1
 export HERMES_WEBUI_PORT=8789
 
 # Prevent AWS SDKs in the sandbox from discovering the ECS task role via IMDS.
@@ -283,7 +287,8 @@ run_in_nono() {
     # (hermes-agent tools/code_execution_tool.py:_resolve_child_python).
     # Only env vars set/transformed here go through /usr/bin/env. Plain
     # pass-throughs (AWS_DEFAULT_REGION, AWS_EC2_METADATA_DISABLED,
-    # HERMES_WEBUI_PORT, DOH_CONTROL_PLANE_URL, HERMES_WEBUI_* extension vars,
+    # HERMES_WEBUI_HOST, HERMES_WEBUI_PORT, DOH_CONTROL_PLANE_URL,
+    # HERMES_WEBUI_* extension vars,
     # ...) trickle via nono's allow_vars instead — exported earlier in this
     # script or inherited from the ECS task definition.
     runuser -u hermeswebui -- "$DOH_BIN_DIR/nono" "${nono_args[@]}" -- /usr/bin/env \
