@@ -169,7 +169,7 @@ write_providers_block() {
     if [ "$DOH_LLM_PROVIDER" = "bedrock" ]; then
         cat > "$providers_block_file" <<'EOF'
 providers:
-  only_configured: true
+  only_configured: false
   bedrock:
     models:
       'us.anthropic.claude-opus-4-7': "Opus 4.7"

@@ -76,12 +76,10 @@ curated entries via `providers.bedrock.models`, and the frontend
 merge becomes a no-op.
 
 **Companion config:** `supervisor.sh` sets `providers.only_configured:
-true` for Bedrock deployments so the picker shows only providers listed
-under `providers:` (today just `bedrock`). That hides GitHub Copilot and
-other factory-default groups that Hermes would otherwise surface when
-`GITHUB_TOKEN` or other credentials look valid. Patch 03 is still
-required: `only_configured` does not stop Bedrock live discovery from
-inflating the Bedrock group itself.
+false` for Bedrock deployments so the picker can also show factory-default
+groups that Hermes surfaces when `GITHUB_TOKEN` or other credentials look
+valid. Patch 03 is still required: `only_configured` does not stop Bedrock
+live discovery from inflating the Bedrock group itself.
 
 ### `04-policy-proxy-reauth-url.patch`
 
