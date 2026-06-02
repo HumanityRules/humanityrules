@@ -1,6 +1,6 @@
 ---
 name: webapps
-description: Build, run, and serve user web apps. Use when the user asks for a web app, dashboard, site, or HTTP service that should be reachable from outside the agent.
+description: Build, run, and serve user web apps. Use when the user asks for a web, a web app, dashboard, site, or HTTP service that should be reachable from outside the agent.
 
 version: 2.0.0
 license: MIT
@@ -11,7 +11,7 @@ metadata:
 
 # Webapps
 
-Use this skill when the user asks you to build a web app, dashboard, microsite, or HTTP service. The user will be able to reach the app in a browser at a subdomain of the agent's hostname.
+The user will be able to reach the app in a browser at a subdomain of the agent's hostname.
 
 ## What this gives you
 
@@ -95,21 +95,17 @@ Use the *exact host* from the CLI's output, with the trailing slash.
 - **Don't run `webapps delete <slug> --yes` without first telling the user what will be removed and getting explicit confirmation.** Delete is total: route, supervision, logs, AND `projects/<slug>/`.
 - **Don't bind the app to anything other than `127.0.0.1:$WEBAPP_PORT`.** Apps must listen on loopback only. Many frameworks default to `0.0.0.0`; explicitly bind to `127.0.0.1`.
 - **Don't put your project source elsewhere.** Keep code under `/workspace/webapps/projects/<slug>/`. The CLI's `delete` cleans that path; if your code is somewhere else, deletion will leave orphans.
-- **Don't create or delete slugs starting with `__`.** They're reserved for platform internals (e.g. `__admin`). Pick a slug that begins with a letter.
+- **Don't create or delete slugs starting with `__`.** They're reserved for platform internals Pick a slug that begins with a letter.
 - **Don't plan nor offer to build an authentication feature to the user for the web app.** The app does not need any authentication mechanism because the platform provides for it through a policy proxy.
 
 ## Failure modes
 
-- **"did not become ready"** after `webapps create`: check `webapps logs <slug>`. The app probably crashed at startup, didn't bind the port, or bound the wrong port (must use `$WEBAPP_PORT`).
-- **502 Bad Gateway in browser**: the app crashed after registering. `webapps list` will show non-`Ready`. Logs have the trace.
-- **404 Not Found in browser**: either the slug is wrong, the app is stopped, or you typoed the subdomain. `webapps list` shows current routes and their URLs.
-- **DNS not resolving / cert warning**: the agent itself is missing the per-agent wildcard infra (would be a platform-deploy problem, not a webapp problem). Report to the user; you cannot fix this from inside the agent.
 - **`EACCES` / "permission denied" on bind**: the app is trying to bind to a port outside the allowed range (4000–4019). Configure the app to bind only to `$WEBAPP_PORT`.
 
 
 ## Calling the Hermes agent from a webapp
 
-A webapp can call a full Hermes agent over a loopback API — no API keys to provision, no model plumbing. The gateway exposes an OpenAI-compatible server at `http://127.0.0.1:8642/v1/...`:
+A webapp can call a full Hermes agent over a loopback API: The gateway exposes an OpenAI-compatible server at `http://127.0.0.1:8642/v1/...`:
 
 - `POST /v1/chat/completions`, `POST /v1/responses` — OpenAI-compatible chat
 - `POST /v1/runs` — start an agent run (returns a `run_id`); `GET /v1/runs/{id}/events` to stream

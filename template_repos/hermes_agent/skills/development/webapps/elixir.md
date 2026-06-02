@@ -1,6 +1,6 @@
 # Phoenix / Elixir on webapps
 
-Read this *before* scaffolding any Elixir or Phoenix app under `webapps`. The sandbox has three traps that fire on every Mix 1.19+ project and on every Erlang release; all three have fixes you must apply up front.
+The sandbox has three traps that fire on every Mix 1.19+ project and on every Erlang release; all three have fixes you must apply up front.
 
 ## Endpoint config
 

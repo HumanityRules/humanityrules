@@ -206,9 +206,7 @@ USER root
 # DOH-owned source below this line. Keep these COPY layers last so edits to
 # doh_runtime/, webui-extension/, and skills/ reuse the cached dependency
 # layers above instead of re-running uv pip install and Linuxbrew bootstrap.
-COPY skills/google-workspace /opt/hermes/agent/skills/productivity/google-workspace
-COPY skills/posthog /opt/hermes/agent/skills/productivity/posthog
-COPY skills/webapps /opt/hermes/agent/skills/development/webapps
+COPY skills/ /opt/hermes/agent/skills/
 COPY SOUL.md /opt/hermes/SOUL.md
 COPY config.yaml.template /opt/hermes/config.yaml.template
 COPY doh_runtime /opt/doh/runtime
