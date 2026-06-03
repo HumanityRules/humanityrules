@@ -87,11 +87,7 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
 # the container) keeps brew, doh-bin, and system bins reachable so basic
 # tools still work.
 RUN { \
-      echo 'export PATH="${DOH_LOGIN_PATH:-/opt/doh/bin:/home/linuxbrew/.linuxbrew/bin:/home/linuxbrew/.linuxbrew/sbin:/usr/local/bin:/usr/local/sbin:/usr/bin:/usr/sbin:/bin:/sbin}"'; \
-      echo "export HOMEBREW_PREFIX=/home/linuxbrew/.linuxbrew"; \
-      echo "export HOMEBREW_NO_ANALYTICS=1"; \
-      echo "export HOMEBREW_NO_AUTO_UPDATE=1"; \
-      echo "export HOMEBREW_INSTALL_FROM_API=1"; \
+      echo 'export PATH="${DOH_LOGIN_PATH:-/opt/doh/bin:${HOMEBREW_PREFIX}/bin:${HOMEBREW_PREFIX}/sbin:/usr/local/bin:/usr/local/sbin:/usr/bin:/usr/sbin:/bin:/sbin}"'; \
     } > /etc/profile.d/doh-bin.sh
 
 # System-wide git config: route github.com authentication through a
@@ -119,7 +115,8 @@ COPY --chmod=755 build/apply-patches.py /tmp/apply-patches.py
 # Cache mount id includes HERMES_AGENT_REF so a version bump gets a fresh clone
 # instead of rsyncing a stale tree left by the previous ref.
 RUN --mount=type=cache,id=hermes-agent-git-${HERMES_AGENT_REF},target=/root/.cache/hermes-agent-git,sharing=locked \
-    if [ -d /root/.cache/hermes-agent-git/.git ] || [ -f /root/.cache/hermes-agent-git/HEAD ]; then \
+    mkdir -p "$HERMES_WEBUI_AGENT_DIR" \
+    && if [ -d /root/.cache/hermes-agent-git/.git ] || [ -f /root/.cache/hermes-agent-git/HEAD ]; then \
         rsync -a --delete /root/.cache/hermes-agent-git/ "$HERMES_WEBUI_AGENT_DIR/"; \
     else \
         git clone --depth 1 --branch ${HERMES_AGENT_REF} https://github.com/NousResearch/hermes-agent.git "$HERMES_WEBUI_AGENT_DIR" \
@@ -162,7 +159,7 @@ RUN mkdir -p /uv_cache "$HERMES_WEBUI_DIR" "$HERMES_HOME" "$HERMES_WEBUI_DEFAULT
     && chown -R hermeswebui:hermeswebui /uv_cache "$HERMES_ROOT" "$HERMES_HOME" "$HERMES_WEBUI_DEFAULT_WORKSPACE"
 
 # /home is preserved by persistent-root-runner.sh's full-rootfs rsync and
-# tar checkpoint, so brew installs under /home/linuxbrew/.linuxbrew survive
+# tar checkpoint, so brew installs under $HOMEBREW_PREFIX survive
 # redeploys without any extra plumbing.
 RUN mkdir -p /home/linuxbrew && chown hermeswebui:hermeswebui /home/linuxbrew
 
@@ -189,17 +186,15 @@ RUN --mount=type=cache,target=/uv_cache,uid=1024,gid=1024 \
 # through to the root-owned system pip and silently landing in ~/.local).
 RUN uv venv --seed --python /usr/local/bin/python3 "${HERMES_WEBUI_DEFAULT_WORKSPACE}/.venv"
 
-# Linuxbrew bootstrap. Bottles are RPATH-locked to /home/linuxbrew/.linuxbrew,
-# so we install at the canonical prefix and let the persistent-root rsync
-# preserve the tree across redeploys (including the agent's `brew install`s).
+# Linuxbrew bootstrap. Bottles are RPATH-locked to HOMEBREW_PREFIX, so we
+# install at the canonical prefix and let the persistent-root rsync preserve
+# the tree across redeploys (including the agent's `brew install`s).
 # HOMEBREW_INSTALL_FROM_API skips cloning the multi-GB homebrew-core tap;
 # brew fetches formula JSON on demand.
-RUN mkdir -p /home/linuxbrew/.linuxbrew/bin \
-    && git clone --depth=1 https://github.com/Homebrew/brew \
-         /home/linuxbrew/.linuxbrew/Homebrew \
-    && ln -s ../Homebrew/bin/brew /home/linuxbrew/.linuxbrew/bin/brew \
-    && HOMEBREW_NO_AUTO_UPDATE=1 HOMEBREW_NO_ANALYTICS=1 HOMEBREW_INSTALL_FROM_API=1 \
-       /home/linuxbrew/.linuxbrew/bin/brew --version
+RUN mkdir -p "${HOMEBREW_PREFIX}/bin" \
+    && git clone --depth=1 https://github.com/Homebrew/brew "${HOMEBREW_PREFIX}/Homebrew" \
+    && ln -s ../Homebrew/bin/brew "${HOMEBREW_PREFIX}/bin/brew" \
+    && "${HOMEBREW_PREFIX}/bin/brew" --version
 
 USER root
 
