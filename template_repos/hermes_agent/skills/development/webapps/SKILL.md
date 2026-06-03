@@ -57,6 +57,10 @@ webapps delete <slug> --yes
 - **`--cwd`**: absolute path to the project working directory (typically `/workspace/webapps/projects/<slug>`).
 - **`--timeout`**: seconds to wait for readiness (default 90; bump for slow first-compile stacks like Phoenix).
 
+## Dependencies
+
+Before `webapps create`, install whatever runtime dependencies the project needs — if it has a manifest or install step, use that (`requirements.txt` or `pyproject.toml` for Python, `package.json` for Node, `mix.exs` / `mix deps.get` for Elixir, and so on). README "Run" sections are often incomplete; check the source if anything looks missing. Do not register the app until dependencies are installed and a quick smoke test passes (e.g. the start command runs without an immediate import/build error).
+
 ## Worked example: a static site
 
 ```bash
@@ -78,8 +82,8 @@ Use the *exact host* from the CLI's output, with the trailing slash.
 
 ## Lifecycle patterns
 
-- **Create:** scaffold under `/workspace/webapps/projects/<slug>/`, then `webapps create` with `$WEBAPP_PORT` in the command. Verify with `webapps list` (must be `Ready`) and `webapps logs` before reporting the URL.
-- **Fix and redeploy after a crash:** `webapps logs <slug>`, edit, `webapps restart <slug>`.
+- **Create:** scaffold under `/workspace/webapps/projects/<slug>/`, install dependencies if the app needs them, then `webapps create` with `$WEBAPP_PORT` in the command. Verify with `webapps list` (must be `Ready`) and `webapps logs` before reporting the URL.
+- **Fix and redeploy after a crash:** `webapps logs <slug>`, fix the app (including missing deps), `webapps restart <slug>`.
 - **Change env:** `webapps set-env <slug> KEY=VALUE`.
 - **Take down (reversible):** `webapps stop <slug>`. Source under `projects/<slug>/` is preserved.
 - **Delete (total):** confirm with the user that source code AND logs will be removed, then `webapps delete <slug> --yes`.
