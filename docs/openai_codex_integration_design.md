@@ -2,7 +2,7 @@
 
 Use a user's ChatGPT subscription (Codex OAuth) as a Hermes LLM backend, with the refresh token held outside the sandbox. Companion to `integrations_broker_design.md` for TLS-intercept mechanics.
 
-Status: design only.
+Status: implemented (backend + WebUI device dialog). Not yet wired: deploy-time selection of `DOH_LLM_PROVIDER=openai-codex` (a deploy_app.py concern, not in this repo).
 
 ## Decisions
 
@@ -11,6 +11,7 @@ Status: design only.
 - **Device flow, not redirect.** Codex uses OpenAI's first-party public client on an Auth0 tenant we don't administer, so we can't register a `devopshero.ai` callback. Device flow needs no callback of ours.
 - **Broker polls, DOH stores.** The minutes-long poll loop fits the always-on broker, not stateless Django. On success the broker hands the refresh token to DOH, which owns storage, refresh, revoke, and cross-app reuse. Cost: refresh token transits broker memory once (acceptable — broker is outside the sandbox).
 - **Provider selection: set `DOH_LLM_PROVIDER=openai-codex`.** Hermes ships this provider and the Responses dialect natively; no agent code needed.
+- **Broker injects `ChatGPT-Account-ID`** (not a JWT-shaped placeholder). Account-id never enters the sandbox; placeholder stays a plain non-JWT sentinel.
 
 ## Wire contract
 
@@ -23,10 +24,12 @@ Status: design only.
 
 ```
 Connect (once per env):
-  Broker requests device code ──▶ auth.openai.com
+  Broker POST auth.openai.com/api/accounts/deviceauth/usercode {client_id}
+    ──▶ {user_code, device_auth_id, interval}
   WebUI shows user_code + auth.openai.com/codex/device   (user approves in own browser)
-  Broker polls oauth/token ──▶ refresh_token + access_token
-  Broker POSTs refresh_token ──▶ DOH (stored as openai-codex credential)
+  Broker polls .../deviceauth/token  (200=approved → authorization_code + code_verifier; 403/404=pending)
+  Broker POST .../oauth/token grant_type=authorization_code ──▶ refresh_token + access_token
+  Broker POSTs refresh_token ──▶ DOH (validated + stored as openai-codex credential)
 
 Inference (steady state):
   Sandbox Hermes ──▶ chatgpt.com  (placeholder bearer, no account-id, cloudflare headers)
@@ -34,34 +37,33 @@ Inference (steady state):
   Access token comes from DOH via existing /api/integrations/tokens (DOH refreshes)
 ```
 
-## Work — DOH control plane
+Device flow is OpenAI's bespoke `deviceauth` JSON API, **not** RFC 8628 / `oauth/token` polling. The PKCE `code_verifier` is generated server-side and returned in the approval body — the client never computes a challenge.
 
-- New endpoint to receive the device-flow refresh token and store it as an `openai-codex` credential (keyed `owner+app`).
-- Extend `/api/integrations/tokens` for `openai-codex`: mint an access token from the refresh token, derive `chatgpt_account_id`, return both in `secrets` (multi-secret shape already exists for Slack).
-- Disconnect via the existing unified handler.
+## DOH control plane
 
-## Work — broker (`doh_runtime/`)
+- `provider_openai_codex.py`: OAUTH-kind provider. `refresh_outcome` exchanges the stored refresh_token (`grant_type=refresh_token`, public `client_id`, no secret) and returns two secrets — `access_token` + `chatgpt_account_id` (JWT claim, no verification). `revoke` is a no-op (no revocation endpoint for this public client). Registered in `provider_registry.py`; enum member added to `IntegrationUserCredential.Provider` (migration 0063).
+- `codex_device.py`: new endpoint `POST /api/integrations/credentials/codex-device-complete` (env-bearer). Validates the refresh_token by minting once (must yield a `chatgpt_account_id`), then stores the row. Disconnect reuses the unified handler.
 
-- Device-flow init + poll loop, exposed on the 9951 control API for the WebUI. Reference request shapes from Hermes `hermes_cli/auth.py` codex path.
-- POST the refresh token to DOH on success.
-- New `TlsProviderSpec(slug="openai-codex", hosts=("chatgpt.com",))`.
-- New credential method: inject `Authorization: Bearer` **and** `ChatGPT-Account-ID` from the secrets map, without stripping the sandbox's cloudflare headers. Existing `OAuthHeader` only does Authorization; closest precedent is Slack's `VaultHeaderInject`, but bearer-plus-extra-header is new — write it clean.
+## Broker (`doh_runtime/`)
 
-## Seed the placeholder (required for model A)
+- `codex_device_flow.py`: the device handshake + minutes-long poll as a background asyncio task; one in-flight session. Exposed on the 9951 control API as `openai-codex/device/{start,status,cancel}`. On success POSTs the refresh_token to DOH (`codex-device-complete`) and drops the codex TLS cache.
+- `tls_intercept.py`: `OAuthHeaderMultiInject` credential method (`connect_mode="device"`) — swaps the bearer via the existing `_rewrite_authorization`, then injects named extra headers via `_inject_headers` (which can't be spoofed — it overrides any client-sent value). Cloudflare headers pass through untouched (the rewrite only ever touches Authorization/Host/proxy + the named header). `TlsProviderSpec(slug="openai-codex", hosts=("chatgpt.com",))`.
+- WebUI `doh-integrations.js`: `connect_mode === 'device'` → `startCodexDevice` (a code+link dialog that polls status). Disconnect reuses the unified TLS path.
 
-Hermes won't emit a request unless `~/.hermes/auth.json` has a codex token. Write a placeholder block at `providers.openai-codex.tokens` at container boot, before the gateway starts. Tested against the pin:
+## Dropdown visibility (secondary-provider case)
 
-- Needs **both** `access_token` and `refresh_token` as non-empty strings, else load raises. Use a non-JWT sentinel for both.
-- A non-JWT sentinel reads as non-expiring → Hermes never self-refreshes, never calls the network, never rewrites `auth.json`. These are the properties model A depends on.
-- Keep it in the `tokens` singleton, not `credential_pool`.
-- To pin at implementation: the exact write path/lock contract for auth.json (it's structured and file-locked, unlike the `GITHUB_TOKEN` env placeholder).
+The WebUI model picker derives availability from **local** state only (`config.yaml` + `auth.json`); a DOH-side credential is invisible to it. Codex is a *secondary* provider that must appear **only while connected** — so the broker mirrors connect-state into auth.json:
 
-## Open decision — account-id injection
+- `codex_auth_marker.py` writes the placeholder `providers.openai-codex` block on connect, clears it on disconnect (the agent's locked/atomic `_save_codex_tokens` / `clear_provider_auth`). Presence — not value — is the picker's signal; the picker's cache keys on a semantic hash of auth.json that includes this block, so add/remove flips it and the next `/api/models` rebuild shows/hides Codex **without a WebUI restart**.
+- Run via `runuser -u hermeswebui` from the (root) broker, at the same two hook points that invalidate the codex TLS cache (`_store_codex_refresh_token` on connect; `disconnect_route` when slug is codex). Keeps auth.json owned 0600 by the gateway user.
+- `config.yaml` `model.provider` (the real default, e.g. bedrock) wins over auth.json's `active_provider`, so the marker doesn't hijack the default — verified. Codex shows as a secondary pick.
+- **Not** a generalized post-connect WebUI restart: other providers contribute no dropdown entries, and codex needs no gateway env (unlike GitHub's `GITHUB_TOKEN`, whose restart is for env propagation, not the picker). A restart is also the wrong layer — it's server-side and can't repopulate an already-loaded tab (see client refresh below).
+- **Client refresh.** The marker makes `/api/models` *return* Codex, but the composer/Settings model dropdowns are populated once at boot and only re-fetched on a Settings provider change — not on an integrations connect — so a loaded tab shows Codex only after a full page reload. The device dialog's completion branch (and the disconnect path) therefore call the host app's `window._refreshModelDropdownsAfterProviderChange()` — the same global the Settings flow uses — guarded by `typeof`. `populateModelDropdown` itself has no client-side cache (fresh `/api/models` fetch each call), so this is sufficient; no reload needed.
 
-- **A1 (preferred): broker injects `ChatGPT-Account-ID`.** Account-id never enters the sandbox.
-- **A2: JWT-shaped placeholder** carrying the real (non-secret) account-id, so Hermes emits the header and the broker only swaps the bearer (plain `OAuthHeader`, no new method). Viable — Hermes reads the claim from an unsigned JWT — but leaks the account-id into the sandbox and the placeholder must avoid a future `exp` or it triggers self-refresh.
+## Placeholder seed (model A — default-provider case)
 
-## To pin at implementation
+`seed_codex_placeholder.py`, run from `supervisor.sh` (Stage 1, only when `DOH_LLM_PROVIDER=openai-codex`, before the gateway starts) via the agent's own `_save_codex_tokens` — gets locking + atomic write + `active_provider` for free. Seeds a non-JWT sentinel for both `access_token` and `refresh_token`. The sentinel reads as non-expiring (no JWT `exp`), so Hermes never self-refreshes and never rewrites `auth.json`; only the singleton is written (no `credential_pool`, so the singleton-first resolver wins). Idempotent — leaves a real token untouched.
 
-- Device-authorization endpoint URL + params (scopes, PKCE for device grant) — read from codex `login/src/device_code_auth.rs` or Hermes's codex path.
-- Broker must preserve the cloudflare headers end-to-end (the egress test was direct, not through the proxy).
+This is for when Codex is the **default** backend (agent needs a token present to emit at boot). When Codex is **secondary**, the boot seed doesn't run; the connect-time marker above writes the same block. Both paths write the identical placeholder block and are idempotent, so they don't conflict.
+
+One known edge: a real upstream 401 triggers Hermes's `force_refresh`, which fails against the sentinel refresh_token and surfaces a relogin error. Acceptable — a genuinely dead token does need a reconnect.

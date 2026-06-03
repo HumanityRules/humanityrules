@@ -36,6 +36,7 @@ import json
 import logging
 import os
 import signal
+import subprocess
 import sys
 import urllib.error
 import urllib.request
@@ -47,6 +48,7 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 from starlette.routing import Route
 
+import codex_device_flow
 import mcp_aggregator
 import tls_intercept
 
@@ -61,6 +63,10 @@ DEFAULT_GATEWAY_ENV_PATH = Path("/workspace/.hermes/.env")
 DEFAULT_PROCESS_COMPOSE_URL = "http://127.0.0.1:9956"
 GATEWAY_PROCESS_NAME = "system.gateway"
 WEBUI_PROCESS_NAME = "system.webui"
+# The in-sandbox gateway user; auth.json must stay owned by it (mode 0600), so
+# the root broker drops to it via runuser when it touches the local auth store.
+GATEWAY_USER = "hermeswebui"
+CODEX_PROVIDER_SLUG = "openai-codex"
 _TRUE_ENV_VALUES = frozenset({"1", "true", "yes", "on"})
 _FALSE_ENV_VALUES = frozenset({"0", "false", "no", "off"})
 
@@ -103,6 +109,7 @@ async def _handle_healthz(request: Request) -> Response:
 def _build_control_app(
     aggregator: mcp_aggregator.MCPAggregator,
     tls_runtime: tls_intercept.TlsInterceptRuntime,
+    codex_flow: codex_device_flow.CodexDeviceFlow,
     control_plane_url: str,
     bearer: str,
     owner_username: str,
@@ -215,7 +222,31 @@ def _build_control_app(
                     content={**payload, "ok": False, "error": str(exc)},
                     status_code=502,
                 )
+            # Remove the local dropdown marker so the WebUI model picker hides
+            # Codex again (inverse of the connect-time marker write).
+            if provider == CODEX_PROVIDER_SLUG:
+                await asyncio.to_thread(_run_codex_auth_marker, "disconnect")
         return JSONResponse(content=payload, status_code=status)
+
+    async def codex_device_start_route(request: Request) -> Response:
+        """Begin a Codex device login; returns the user_code to display immediately."""
+        try:
+            view = await codex_flow.start()
+        except codex_device_flow.CodexDeviceFlowError as exc:
+            return JSONResponse(content={"ok": False, "error": str(exc)}, status_code=502)
+        return JSONResponse(content={"ok": True, **view})
+
+    async def codex_device_status_route(request: Request) -> Response:
+        """Report the in-flight Codex device-login phase (pending/completed/failed)."""
+        view = await codex_flow.status()
+        if view is None:
+            return JSONResponse(content={"ok": True, "phase": None})
+        return JSONResponse(content={"ok": True, **view})
+
+    async def codex_device_cancel_route(request: Request) -> Response:
+        """Cancel an in-flight Codex device login (user closed the dialog)."""
+        await codex_flow.cancel()
+        return JSONResponse(content={"ok": True})
 
     routes = [
         Route(path="/healthz", endpoint=_handle_healthz, methods=["GET"]),
@@ -223,6 +254,10 @@ def _build_control_app(
         Route(path="/integrations/refresh", endpoint=refresh_route, methods=["POST"]),
         Route(path="/integrations/{provider}/invalidate_tls_cache", endpoint=invalidate_provider_tls_cache_route, methods=["POST"]),
         Route(path="/integrations/{provider}/vault/setup-session", endpoint=vault_setup_session_route, methods=["POST"]),
+        # Codex device login: broker-run OAuth device flow (no redirect callback).
+        Route(path="/integrations/openai-codex/device/start", endpoint=codex_device_start_route, methods=["POST"]),
+        Route(path="/integrations/openai-codex/device/status", endpoint=codex_device_status_route, methods=["GET"]),
+        Route(path="/integrations/openai-codex/device/cancel", endpoint=codex_device_cancel_route, methods=["POST"]),
         # One disconnect path for every TLS-intercept provider (vault + OAuth).
         # Sits under the /tls/ sub-prefix so it doesn't collide with the MCP
         # aggregator's own /integrations/{provider}/disconnect (Notion/Merge).
@@ -272,6 +307,42 @@ def _post_process_compose_restart(process_compose_url: str, process_name: str) -
     except Exception as exc:
         logger.error("process-compose restart failed for %s: %s", process_name, exc)
         return 502, str(exc)
+
+
+def _run_codex_auth_marker(action: str) -> bool:
+    """Add/remove the local Codex auth marker (dropdown visibility), as the gateway user.
+
+    `action` is "connect" or "disconnect". The marker writes/clears the
+    placeholder `providers.openai-codex` block in auth.json via the agent's
+    locked, atomic primitives — so the WebUI model picker shows/hides Codex
+    without a restart. We run it through `runuser` because the broker is root
+    and auth.json must stay owned by the sandbox user (mode 0600); a root-owned
+    store or lock file would lock the gateway out. Best-effort: a failure here
+    only means the dropdown is briefly stale, not that the credential is wrong.
+    """
+    python = os.environ.get("HERMES_WEBUI_PYTHON")
+    runtime_dir = os.environ.get("DOH_RUNTIME_DIR")
+    hermes_home = os.environ.get("HERMES_HOME")
+    if not python or not runtime_dir or not hermes_home:
+        logger.error("codex auth marker skipped: HERMES_WEBUI_PYTHON/DOH_RUNTIME_DIR/HERMES_HOME not set")
+        return False
+    script = str(Path(runtime_dir) / "codex_auth_marker.py")
+    try:
+        result = subprocess.run(
+            ["runuser", "-u", GATEWAY_USER, "--", python, script, action],
+            env={**os.environ, "HERMES_HOME": hermes_home},
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+    except Exception as exc:
+        logger.error("codex auth marker (%s) failed to run: %s", action, exc)
+        return False
+    if result.returncode != 0:
+        logger.error("codex auth marker (%s) exited %d: %s", action, result.returncode, result.stderr.strip())
+        return False
+    logger.info("codex auth marker (%s): %s", action, result.stdout.strip())
+    return True
 
 
 async def _render_gateway_env_file(tls_runtime: tls_intercept.TlsInterceptRuntime, env_path: Path) -> bool:
@@ -467,9 +538,44 @@ async def _run(
         merge_enabled=merge_enabled,
     )
 
+    async def _store_codex_refresh_token(refresh_token: str, access_token: str) -> bool:
+        """Persist a device-flow refresh/access token pair to DOH, then refresh the TLS cache.
+
+        We forward BOTH tokens the device flow just produced: DOH derives the
+        chatgpt_account_id from this access token and stores the refresh token
+        without re-minting (re-minting here would rotate the token and add a
+        fragile second OpenAI round-trip on connect). On success we drop the
+        codex TLS cache so the next chatgpt.com request fetches a freshly-minted
+        token instead of waiting out the cache.
+        """
+        status, _ = await asyncio.to_thread(
+            _post_control_plane_json,
+            control_plane_url=control_plane_url,
+            bearer=bearer,
+            path="/api/integrations/credentials/codex-device-complete",
+            payload={
+                "owner_username": owner_username,
+                "app_slug": app_slug,
+                "refresh_token": refresh_token,
+                "access_token": access_token,
+            },
+        )
+        if not (200 <= status < 300):
+            return False
+        with contextlib.suppress(RuntimeError):
+            await tls_runtime.invalidate(slug=CODEX_PROVIDER_SLUG)
+        # Write the local dropdown marker so the WebUI model picker shows Codex
+        # (the real credential is in DOH; this placeholder block is the only
+        # local signal the picker keys on). Best-effort, off the event loop.
+        await asyncio.to_thread(_run_codex_auth_marker, "connect")
+        return True
+
+    codex_flow = codex_device_flow.CodexDeviceFlow(submit_refresh_token=_store_codex_refresh_token)
+
     control_app = _build_control_app(
         aggregator=aggregator,
         tls_runtime=tls_runtime,
+        codex_flow=codex_flow,
         control_plane_url=control_plane_url,
         bearer=bearer,
         owner_username=owner_username,
