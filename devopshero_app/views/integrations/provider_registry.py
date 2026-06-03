@@ -37,6 +37,7 @@ from devopshero_app.models import IntegrationUserCredential
 from devopshero_app.views.integrations import (
     provider_github,
     provider_google,
+    provider_openai_codex,
     provider_slack,
     provider_telegram,
 )
@@ -63,6 +64,7 @@ _SPECS = [
     ProviderSpec(provider=IntegrationUserCredential.Provider.GITHUB, kind=ProviderKind.OAUTH, module=provider_github),
     ProviderSpec(provider=IntegrationUserCredential.Provider.SLACK, kind=ProviderKind.VAULT, module=provider_slack),
     ProviderSpec(provider=IntegrationUserCredential.Provider.TELEGRAM, kind=ProviderKind.VAULT, module=provider_telegram),
+    ProviderSpec(provider=IntegrationUserCredential.Provider.OPENAI_CODEX, kind=ProviderKind.OAUTH, module=provider_openai_codex),
 ]
 
 # Keyed by the provider slug. The keys are `Provider` enum members, which are

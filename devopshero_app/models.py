@@ -1779,6 +1779,7 @@ class IntegrationUserCredential(models.Model):
         GITHUB = "github", "GitHub"
         TELEGRAM = "telegram", "Telegram"
         SLACK = "slack", "Slack"
+        OPENAI_CODEX = "openai-codex", "OpenAI Codex"
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid7, editable=False)
     owner_user = models.ForeignKey(

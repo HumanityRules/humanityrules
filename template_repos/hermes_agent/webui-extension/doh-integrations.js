@@ -592,6 +592,99 @@
     document.body.appendChild(backdrop);
   }
 
+  // ── OpenAI Codex device-login flow ────────────────────────────────
+  // Codex can't use a redirect (OpenAI's Auth0 tenant isn't ours), so the
+  // broker runs OpenAI's device flow: we POST start, show the user a code +
+  // verification URL, then poll status until the broker reports completed or
+  // failed. Everything is broker-side; the browser only displays + polls.
+
+  const CODEX_DEVICE_POLL_MS = 3000;
+
+  async function startCodexDevice(item, revert) {
+    const revertOnce = () => { if (revert) { revert(); revert = null; } };
+    let session;
+    try {
+      const resp = await fetch('/__doh_broker/integrations/openai-codex/device/start', { method: 'POST', cache: 'no-store' });
+      session = await resp.json();
+      if (!resp.ok || !session.ok) throw new Error(session.error || 'Could not start the ChatGPT login.');
+    } catch (err) {
+      alert(err.message || 'Could not start the ChatGPT login.');
+      revertOnce();
+      return;
+    }
+    showCodexDeviceModal(item, session, revertOnce);
+  }
+
+  function showCodexDeviceModal(item, session, onClose) {
+    const backdrop = elem('div', { class: 'doh-modal-backdrop' });
+    let cancelled = false;
+    const close = () => {
+      cancelled = true;
+      backdrop.remove();
+      // Best-effort: tell the broker to drop the in-flight session.
+      fetch('/__doh_broker/integrations/openai-codex/device/cancel', { method: 'POST' }).catch(() => {});
+      if (onClose) onClose();
+    };
+
+    const codeEl = elem('div', { class: 'doh-modal-title', style: { fontFamily: 'monospace', letterSpacing: '0.15em' } }, [session.user_code || '—']);
+    const link = elem('a', { href: session.verification_url, target: '_blank', rel: 'noopener' }, [session.verification_url]);
+    const statusBox = elem('div', { class: 'doh-vault-success' }, ['Waiting for you to approve in your browser…']);
+    const errorBox = elem('div', { class: 'doh-vault-error', style: { display: 'none' } });
+    const cancelBtn = elem('button', { class: 'doh-integration-btn', type: 'button', onclick: close }, ['Cancel']);
+
+    const modal = elem('div', { class: 'doh-modal' }, [
+      elem('div', { class: 'doh-modal-title' }, ['Connect ' + item.label]),
+      elem('div', { class: 'doh-modal-body' }, [
+        'Open the link below, sign in to ChatGPT, and enter this code:',
+      ]),
+      codeEl,
+      elem('div', { class: 'doh-modal-body' }, [link]),
+      statusBox,
+      errorBox,
+      elem('div', { class: 'doh-modal-actions' }, [cancelBtn]),
+    ]);
+    backdrop.appendChild(modal);
+    document.body.appendChild(backdrop);
+
+    // Poll the broker for terminal state.
+    const poll = async () => {
+      if (cancelled) return;
+      let st;
+      try {
+        const resp = await fetch('/__doh_broker/integrations/openai-codex/device/status', { cache: 'no-store' });
+        st = await resp.json();
+      } catch (_) {
+        setTimeout(poll, CODEX_DEVICE_POLL_MS);
+        return;
+      }
+      if (cancelled) return;
+      if (st.phase === 'completed') {
+        backdrop.remove();
+        await refreshAndRender();
+        // Codex is now a selectable LLM provider. The composer/Settings model
+        // dropdowns are populated once at boot and only re-fetched on a Settings
+        // provider change — not on an integrations connect — so refresh them here
+        // (same hook the Settings path uses). Without this, Codex appears in the
+        // picker only after a full page reload. Guarded: the host app fn exists
+        // only inside the chat shell, and is a global (classic <script>).
+        if (typeof window._refreshModelDropdownsAfterProviderChange === 'function') {
+          try { window._refreshModelDropdownsAfterProviderChange(); } catch (_) { /* best-effort */ }
+        }
+        if (onClose) onClose();
+        return;
+      }
+      if (st.phase === 'failed' || st.phase === null) {
+        statusBox.style.display = 'none';
+        errorBox.textContent = st.error || 'ChatGPT login failed. Please try again.';
+        errorBox.style.display = '';
+        cancelBtn.textContent = 'Close';
+        return;
+      }
+      setTimeout(poll, CODEX_DEVICE_POLL_MS);
+    };
+    setTimeout(poll, CODEX_DEVICE_POLL_MS);
+  }
+
   // Slack manifest name rules (https://docs.slack.dev/reference/app-manifest):
   // display_information.name is <=35 chars (any character); bot_user.display_name
   // is <=80 chars restricted to [a-z0-9._-]. Mirrors provider_slack.py so the
@@ -836,6 +929,11 @@
         return;
       }
       await refreshAndRender();
+      // A disconnected LLM provider (Codex) must leave the model dropdown too.
+      // Harmless for non-LLM providers — the rebuild is idempotent.
+      if (typeof window._refreshModelDropdownsAfterProviderChange === 'function') {
+        try { window._refreshModelDropdownsAfterProviderChange(); } catch (_) { /* best-effort */ }
+      }
     } finally {
       _disconnecting.delete(item.slug);
       renderPane(_current);
@@ -846,6 +944,7 @@
     const returnTo = window.location.origin + window.location.pathname;
     const isConnected = item.status === 'connected';
     const usesVault = item.connect_mode === 'vault';
+    const usesDevice = item.connect_mode === 'device';
     const cardClass = isConnected ? 'doh-integration-card' : 'doh-integration-card doh-integration-card-row';
     const card = elem('div', { class: cardClass, dataset: { provider: item.slug } });
     const titleRow = elem('div', { class: 'doh-integration-card-title-row' });
@@ -908,6 +1007,7 @@
       onclick: () => {
         const revert = markConnecting(connectBtn);
         if (usesVault) startVaultConfig(item, revert);
+        else if (usesDevice) startCodexDevice(item, revert);
         else window.location.href = buildTlsConnectUrl(payload, item.slug, returnTo);
       },
     }, ['Connect']);

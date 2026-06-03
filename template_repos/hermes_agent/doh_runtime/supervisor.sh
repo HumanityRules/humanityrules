@@ -229,6 +229,21 @@ ensure_user_runtime_dirs() {
     fi
 }
 
+seed_codex_placeholder() {
+    # Credential model A: when Codex is the LLM backend, Hermes won't emit a
+    # request unless auth.json already holds a codex token, but the *real* token
+    # lives outside the sandbox (the broker swaps it onto the wire). Seed a
+    # non-JWT sentinel so the gateway boots; it reads as never-expiring, so
+    # Hermes never self-refreshes it. Runs before chown_sandbox_paths so the
+    # store (mode 0600) gets handed to hermeswebui with everything else.
+    # Idempotent — the helper leaves any already-present token untouched.
+    if [ "$DOH_LLM_PROVIDER" != "openai-codex" ]; then
+        return
+    fi
+    HERMES_HOME="$HERMES_HOME" "$HERMES_WEBUI_PYTHON" "${DOH_RUNTIME_DIR}/seed_codex_placeholder.py" \
+        || die "failed to seed codex placeholder token"
+}
+
 chown_sandbox_paths() {
     # The sandbox runs as hermeswebui (see run_in_nono). Everything we wrote
     # above ran as root, so hand the paths the sandbox needs to read or write
@@ -306,6 +321,7 @@ main() {
     # sandbox needs to read is chowned to hermeswebui in Stage 2 prep.
     ensure_user_runtime_dirs
     render_hermes_config
+    seed_codex_placeholder
     start_aws_signer
     write_child_aws_config
     start_integrations_broker

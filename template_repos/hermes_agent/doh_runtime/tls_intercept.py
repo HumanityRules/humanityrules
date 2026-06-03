@@ -52,6 +52,33 @@ class OAuthHeader:
 
 
 @dataclass(frozen=True)
+class OAuthHeaderMultiInject:
+    """OAuth integration whose refresh returns several secrets: one bearer + extra headers.
+
+    Like `OAuthHeader`, the credential rides request headers and needs no
+    restart on connect — but DOH returns more than one secret. `bearer_secret`
+    names the one carried as `Authorization: Bearer`; `header_secrets` maps each
+    remaining secret name to the HTTP header it's injected as.
+
+    Codex is the consumer: DOH mints an `access_token` (the bearer) and derives
+    `chatgpt_account_id` (the `ChatGPT-Account-ID` header) from it, and both must
+    reach chatgpt.com on every request. Headers the sandbox already set that we
+    don't name here (e.g. Codex's Cloudflare `originator` / `User-Agent`) pass
+    through untouched — only the bearer and the named headers are rewritten.
+
+    `connect_mode` is `device`: unlike redirect OAuth, the env-resident broker
+    runs OpenAI's device flow itself (no callback of ours), so the WebUI shows a
+    user code rather than a redirect button.
+    """
+
+    bearer_secret: str
+    header_secrets: dict[str, str]  # secret_name -> HTTP header name
+    auth_format: str = AUTH_FORMAT_BEARER
+    connect_mode: ClassVar[str] = "device"
+    restart_required_after_save: ClassVar[bool] = False
+
+
+@dataclass(frozen=True)
 class GatewayEnvBinding:
     """One env var the in-sandbox gateway reads at startup.
 
@@ -126,7 +153,7 @@ class VaultHeaderInject:
         return None
 
 
-CredentialMethod = OAuthHeader | VaultUrlRewrite | VaultHeaderInject
+CredentialMethod = OAuthHeader | OAuthHeaderMultiInject | VaultUrlRewrite | VaultHeaderInject
 
 
 @dataclass(frozen=True)
@@ -297,6 +324,19 @@ TLS_INTERCEPT_PROVIDER_SPECS = (
                 GatewayEnvBinding(env_var="SLACK_ALLOWED_USERS", source="allowed_users", list_separator=","),
                 GatewayEnvBinding(env_var="SLACK_HOME_CHANNEL", source="home_channel"),
             ),
+        ),
+        connected_env=(),
+    ),
+    TlsProviderSpec(
+        slug="openai-codex",
+        label="ChatGPT (Codex)",
+        # The ChatGPT backend Codex talks to. api.openai.com is a different
+        # surface (rejected for ChatGPT-subscription auth) and is not listed.
+        hosts=("chatgpt.com",),
+        logo_url="/extensions/openai.svg",
+        credential_method=OAuthHeaderMultiInject(
+            bearer_secret="access_token",
+            header_secrets={"chatgpt_account_id": "ChatGPT-Account-ID"},
         ),
         connected_env=(),
     ),
@@ -1246,6 +1286,20 @@ def _rewrite_authorization(headers: list[tuple[bytes, bytes]], token: str, auth_
     return rewritten
 
 
+def _inject_headers(headers: list[tuple[bytes, bytes]], extra: dict[bytes, bytes]) -> list[tuple[bytes, bytes]]:
+    """Force `extra` header values, replacing any the client sent (case-insensitive).
+
+    Used after `_rewrite_authorization` to add broker-owned headers (e.g.
+    `ChatGPT-Account-ID`) whose values come from DOH, not the sandbox. A header
+    the sandbox sent under the same name is dropped so the sandbox can't spoof
+    it; every other client header (Codex's Cloudflare `originator`/`User-Agent`)
+    is left as-is.
+    """
+    lowered = {name.lower() for name in extra}
+    kept = [(name, value) for name, value in headers if name.lower() not in lowered]
+    return kept + list(extra.items())
+
+
 def _strip_proxy_headers_and_set_host(headers: list[tuple[bytes, bytes]], upstream_host: str) -> list[tuple[bytes, bytes]]:
     """Remove proxy-only headers and force Host to the upstream hostname."""
     host_override = upstream_host.encode()
@@ -1302,9 +1356,11 @@ def _rewrite_request_for_provider(
     """Rewrite credentials for the provider-specific upstream API shape.
 
     Single-secret methods (OAuthHeader, VaultUrlRewrite) use the sole secret.
-    VaultHeaderInject selects per request by reverse-mapping the incoming
-    placeholder bearer to its secret name. Raises `_SecretSelectionError`
-    when the request doesn't carry a recognizable placeholder.
+    OAuthHeaderMultiInject swaps the bearer and injects its extra header(s)
+    from named secrets, leaving other client headers intact. VaultHeaderInject
+    selects per request by reverse-mapping the incoming placeholder bearer to
+    its secret name. Raises `_SecretSelectionError` when a required secret is
+    missing or the request doesn't carry a recognizable placeholder.
     """
     method = provider.credential_method
     if isinstance(method, OAuthHeader):
@@ -1317,6 +1373,23 @@ def _rewrite_request_for_provider(
             ),
             path_with_query,
         )
+    if isinstance(method, OAuthHeaderMultiInject):
+        bearer = secrets.get(method.bearer_secret)
+        if not bearer:
+            raise _SecretSelectionError(f"no cached secret for {method.bearer_secret!r}")
+        rewritten = _rewrite_authorization(
+            headers=headers,
+            token=bearer,
+            auth_format=method.auth_format,
+            upstream_host=upstream_host,
+        )
+        extra: dict[bytes, bytes] = {}
+        for secret_name, header_name in method.header_secrets.items():
+            value = secrets.get(secret_name)
+            if not value:
+                raise _SecretSelectionError(f"no cached secret for {secret_name!r}")
+            extra[header_name.encode()] = value.encode()
+        return (_inject_headers(headers=rewritten, extra=extra), path_with_query)
     if isinstance(method, VaultUrlRewrite):
         token = _primary_secret(secrets)
         if method.placeholder not in path_with_query:
