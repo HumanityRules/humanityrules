@@ -17,6 +17,8 @@ The user will be able to reach the app in a browser at a subdomain of the agent'
 
 A `webapps` CLI on PATH. It registers a process (any language: Python, Node, Elixir, Go, Rust, …) with a supervisor and adds a same-task reverse-proxy route so the user can reach the app at `https://<slug>.<agent-hostname>/`.
 
+When the user asks you to create/clone the web app from a Git repository, clone it directly inside /workspace/webapps/projects/
+
 ## Mental model
 
 - Each webapp gets its own subdomain: `<slug>.<agent-hostname>`. The agent's wildcard DNS + wildcard TLS cert make any new slug reachable instantly — no DNS work, no per-app infra.
