@@ -1,5 +1,23 @@
 # DevOpsHero Development Journal
 
+## 2026-06-02 19:55 - [Bugfix] Webapps route gap when create readiness fails + dependency skill guidance
+
+**Conversation:** [2026-06-02-1955-f61f7d4a.md](conversations/2026-06-02-1955-f61f7d4a.md)
+
+Victor reported `caltrain.hermes-vmendi00.chsandbox.com` returning **"unknown host"** after the Hermes agent installed the Caltrain planner as a webapp. DNS/TLS/auth were fine — the string is Caddy's catch-all 404 when no route matches the subdomain. The app process was Running/Ready on loopback (`127.0.0.1:4003`), but `routes.caddy` never got a `caltrain.*` block.
+
+**Root cause chain (session `5dd67df7975e`).** The agent cloned `vmendi/caltrain-planner`, ran `pip install flask` (README only mentions Flask), then `webapps create`. `app.py` also imports `requests` for GTFS download — five crash-restarts on `ModuleNotFoundError`, readiness timed out at 90s, and **`webapps create` only called `regenerate_routes` after a successful readiness wait**, so the process was registered but the public URL was not. The agent then `pip install requests` + `webapps restart`; restart only bounced the process — it did not refresh Caddy routes — and the agent reported success anyway.
+
+**Fixes applied:**
+1. **Webapps skill** — new Dependencies section: install runtime deps from manifests (`requirements.txt`, `package.json`, etc.) before `webapps create`; don't trust README alone.
+2. **`webapps create` / `start`** — `regenerate_routes` now runs immediately after saving process-compose YAML, *before* the readiness wait. URL is wired even if the app crash-loops (502 instead of "unknown host"). Failure message now suggests `webapps restart` after fixing, not only delete-and-retry.
+3. **`webapps restart`** — refreshes Caddy routes after bouncing the process, covering the agent's fix-after-failure path.
+
+**Key points:**
+- "Unknown host" on a sub-subdomain = missing Caddy route, not DNS; verify with `X-Forwarded-Host` curl to `:8787`.
+- Readiness timeout + late dependency install was a predictable agent mistake; skill now mandates deps-before-create.
+- Route regeneration must not be gated on readiness alone; restart should refresh routes too.
+
 ## 2026-06-02 17:45 - [Integrations] GitHub credentials connect/disconnect re-architecture + connect-return UX
 
 **Conversation:** [2026-06-02-1747-7c76ff7b.md](conversations/2026-06-02-1747-7c76ff7b.md)

@@ -65,8 +65,8 @@ def cmd_create(args: argparse.Namespace) -> None:
             port=port,
         )
         save_yaml(doc)
+        regenerate_routes(doc)
         if args.no_start:
-            regenerate_routes(doc)
             print(f"webapps: registered {args.slug!r} on port {port} (no-start; supervisor will pick it up).")
             return
         project_update()
@@ -77,12 +77,10 @@ def cmd_create(args: argparse.Namespace) -> None:
         die(
             f"{args.slug} did not become ready (status={state.get('status')}, "
             f"is_ready={state.get('is_ready')}, restarts={state.get('restarts')}). "
-            f"Check `webapps logs {args.slug}` and fix the app, then "
-            f"`webapps delete {args.slug} --yes` and retry."
+            f"Check `webapps logs {args.slug}`, fix the app, then `webapps restart {args.slug}` "
+            f"(or `webapps delete {args.slug} --yes` and retry)."
         )
 
-    with Lock():
-        regenerate_routes(load_yaml())
     print(f"webapps: {args.slug!r} is live at {url_for(args.slug)} (port {port})")
 
 
@@ -127,6 +125,7 @@ def cmd_start(args: argparse.Namespace) -> None:
             die(f"unknown app {args.slug!r}")
         entry.pop("disabled", None)
         save_yaml(doc)
+        regenerate_routes(doc)
         project_update()
 
     print(f"webapps: starting {args.slug!r}; waiting up to {args.timeout}s for readiness...")
@@ -137,8 +136,6 @@ def cmd_start(args: argparse.Namespace) -> None:
             f"Check `webapps logs {args.slug}`."
         )
 
-    with Lock():
-        regenerate_routes(load_yaml())
     print(f"webapps: {args.slug!r} is live at {url_for(args.slug)}")
 
 
@@ -156,7 +153,13 @@ def cmd_stop(args: argparse.Namespace) -> None:
 
 
 def cmd_restart(args: argparse.Namespace) -> None:
+    with Lock():
+        doc = load_yaml()
+        if doc["processes"].get(args.slug) is None:
+            die(f"unknown app {args.slug!r}")
     pc("process", "restart", args.slug)
+    with Lock():
+        regenerate_routes(load_yaml())
     print(f"webapps: {args.slug!r} restarted.")
 
 
