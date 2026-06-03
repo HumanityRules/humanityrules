@@ -31,11 +31,9 @@ export API_SERVER_KEY=doh-loopback-gateway-key
 CADDY_PORT=8787
 SYSTEM_PROCESS_COMPOSE_PORT=9956
 WEBAPPS_PROCESS_COMPOSE_PORT=9957
-WEBAPPS_ROOT=/workspace/webapps
 PROCESS_COMPOSE_ROOT=/workspace/.config/process-compose
 SYSTEM_PROCESS_COMPOSE_YAML="${PROCESS_COMPOSE_ROOT}/system/process-compose.yaml"
 WEBAPPS_PROCESS_COMPOSE_YAML="${PROCESS_COMPOSE_ROOT}/webapps/process-compose.yaml"
-CADDY_ROUTES=/workspace/.config/caddy/routes.caddy
 
 CADDY_PID=""
 SYSTEM_PROCESS_COMPOSE_PID=""
@@ -51,33 +49,6 @@ cleanup() {
 }
 
 trap cleanup EXIT INT TERM
-
-seed_webapps_layout() {
-    mkdir -p "${WEBAPPS_ROOT}/projects" "${WEBAPPS_ROOT}/logs"
-}
-
-seed_caddy_layout() {
-    mkdir -p "$(dirname "$CADDY_ROUTES")"
-    if [ ! -f "$CADDY_ROUTES" ]; then
-        echo '# no routes' > "$CADDY_ROUTES"
-    fi
-}
-
-seed_process_compose_layout() {
-    mkdir -p "$(dirname "$SYSTEM_PROCESS_COMPOSE_YAML")" "$(dirname "$WEBAPPS_PROCESS_COMPOSE_YAML")"
-    if [ ! -f "$SYSTEM_PROCESS_COMPOSE_YAML" ]; then
-        cat > "$SYSTEM_PROCESS_COMPOSE_YAML" <<'EOF'
-version: "0.5"
-processes: {}
-EOF
-    fi
-    if [ ! -f "$WEBAPPS_PROCESS_COMPOSE_YAML" ]; then
-        cat > "$WEBAPPS_PROCESS_COMPOSE_YAML" <<'EOF'
-version: "0.5"
-processes: {}
-EOF
-    fi
-}
 
 start_system_process_compose() {
     echo "[webui] Starting system process-compose on 127.0.0.1:${SYSTEM_PROCESS_COMPOSE_PORT}..."
@@ -174,9 +145,6 @@ wait_for_webui() {
 }
 
 main() {
-    seed_webapps_layout
-    seed_caddy_layout
-    seed_process_compose_layout
     bootstrap_admin_webapp
     bootstrap_gateway_process
     bootstrap_webui_process

@@ -145,9 +145,8 @@ supervisor (root, outside nono):
   launch nono → webui.sh
 
 webui.sh (hermeswebui, inside nono):
-  seed layouts (webapps, caddy, split process-compose dirs)
-  bootstrap_admin_webapp        (writes __admin into the webapps YAML)
-  bootstrap_gateway_process     (writes system.gateway into the system YAML)
+  bootstrap_admin_webapp        (creates webapps layout, writes __admin)
+  bootstrap_gateway_process     (creates system layout, writes system.gateway)
   bootstrap_webui_process       (writes system.webui into the system YAML)
   start system process-compose  (brings up system.gateway + system.webui)
   start webapps process-compose (brings up __admin + user webapps)

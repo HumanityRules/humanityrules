@@ -105,7 +105,7 @@ webapps delete <slug> --yes
 
 - **`create` errors on collision.** If the slug exists, the agent must `delete` first. No "create-or-update."
 - **Port allocation is automatic.** The CLI scans the YAML, picks the next free port in 4000–4019 (the range is allowlisted in the nono profile), and writes `WEBAPP_PORT` into the process's env. The agent's `--command` references `$WEBAPP_PORT`. The route generator parses `WEBAPP_PORT` back out of the YAML — single encoding.
-- **Readiness gating.** After `process-compose project update`, the CLI polls until process-compose reports `is_ready == "Ready"` (or timeout). The Caddy route is added to `routes.caddy` **only after** readiness passes — this avoids the brief window where the user's URL would 502 because the upstream isn't accepting connections yet.
+- **Readiness gating.** The CLI writes the YAML entry, regenerates `routes.caddy`, runs `process-compose project update`, then polls until process-compose reports `is_ready == "Ready"` (or timeout). Readiness gates the CLI's success claim, not route publication: the route can exist while the app is still starting, and it remains if readiness times out. In that case the agent should inspect logs, fix/restart, or delete/recreate the app.
 - **Readiness probe is a TCP-bind check.** process-compose has only `exec` and `http_get` probes (no native `tcp_socket`), so the CLI emits `bash -c 'echo > /dev/tcp/127.0.0.1/<port>'`. Tells you the app bound the port; doesn't tell you the app is *correct*. That's the bare minimum we want for `webapps create` to claim success.
 - **`stop` sets `disabled: true` and regenerates `routes.caddy`** (the disabled entry is skipped, so the route disappears). `start` reverses it.
 - **`delete` is total.** Removes the YAML entry, regenerates routes (so the route is gone), removes the log file, and `rm -rf projects/<slug>/`. The skill tells the agent to confirm explicitly with the user before passing `--yes`.
@@ -224,12 +224,11 @@ ACM/ALB SNI listener cert count caps at 25 per listener by default (raisable via
 
 ECS replaces the task. persistent-root-runner restores `/workspace/` from the persistent volume. webui.sh starts inside nono and:
 
-1. Seeds `/workspace/webapps/` if missing (idempotent, only first boot).
-2. Seeds both split process-compose YAMLs.
-3. Registers `__admin` into the webapps YAML, and `system.gateway` / `system.webui` into the system YAML.
-4. Starts system process-compose on `9956` and webapps process-compose on `9957`.
-5. Waits for WebUI on 8789 to become healthy.
-6. Starts Caddy with `--watch`. Caddy reads the existing `routes.caddy` (left in correct state by the last CLI mutation before shutdown) and routes are live immediately.
+1. Registers `__admin` into the webapps YAML; this also creates the webapps layout and Caddy route file if missing.
+2. Registers `system.gateway` and `system.webui` into the system YAML; this also creates the system project layout if missing.
+3. Starts system process-compose on `9956` and webapps process-compose on `9957`.
+4. Waits for WebUI on 8789 to become healthy.
+5. Starts Caddy with `--watch`. Caddy reads the existing `routes.caddy` (left in correct state by the last CLI mutation before shutdown) and routes are live immediately.
 
 `webapps list` after cold start shows everything with the same state it had before, modulo a few seconds of "Pending → Running" while processes initialize.
 
