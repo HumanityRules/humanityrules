@@ -15,12 +15,13 @@ from fastapi import FastAPI, HTTPException
 from webapps_lib import (
     LOGS_DIR,
     SYSTEM_SLUG_PREFIX,
+    WEBAPPS_PROJECT,
     is_routed,
-    load_yaml,
+    load_process_compose_yaml,
     port_from_entry,
-    process_states,
-    state_for,
     url_for,
+    process_compose_states,
+    process_compose_state_for,
 )
 
 app = FastAPI(title="DOH Admin API")
@@ -28,8 +29,8 @@ app = FastAPI(title="DOH Admin API")
 
 @app.get("/api/webapps")
 def list_webapps() -> dict:
-    doc = load_yaml()
-    states = {s["name"]: s for s in process_states()}
+    doc = load_process_compose_yaml(project=WEBAPPS_PROJECT)
+    states = {s["name"]: s for s in process_compose_states(project=WEBAPPS_PROJECT)}
     items = []
     for slug, entry in sorted(doc.get("processes", {}).items()):
         st = states.get(slug, {})
@@ -48,11 +49,11 @@ def list_webapps() -> dict:
 
 @app.get("/api/webapps/{slug}")
 def detail(slug: str) -> dict:
-    doc = load_yaml()
+    doc = load_process_compose_yaml(project=WEBAPPS_PROJECT)
     entry = doc.get("processes", {}).get(slug)
     if entry is None:
         raise HTTPException(status_code=404)
-    st = state_for(slug) or {}
+    st = process_compose_state_for(project=WEBAPPS_PROJECT, slug=slug) or {}
     return {
         "slug": slug,
         "command": entry.get("command"),

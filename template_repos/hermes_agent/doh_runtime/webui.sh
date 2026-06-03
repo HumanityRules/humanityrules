@@ -1,15 +1,15 @@
 #!/bin/bash
 set -euo pipefail
 
-# Inside nono. Two direct children run here as hermeswebui:
-#   1. process-compose on :9956 — supervises every DOH-managed process inside
-#      nono: system.webui, system.gateway, __admin, plus any user webapps.
-#   2. Caddy on :8787 — policy-proxy forwards here; routes /webapps/* to user apps.
+# Inside nono. Three direct children run here as hermeswebui:
+#   1. system process-compose on :9956 — supervises system.webui and system.gateway.
+#   2. webapps process-compose on :9957 — supervises __admin and user webapps.
+#   3. Caddy on :8787 — policy-proxy forwards here; routes to WebUI and webapps.
 #
 # The Hermes WebUI and gateway are supervised by process-compose so the broker
 # can restart them in place when managed integration env changes.
 #
-# If a direct child exits, we kill the other and exit.
+# If a direct child exits, we kill the others and exit.
 
 : "${HERMES_HOME:?HERMES_HOME must be set}"
 : "${HERMES_WEBUI_AGENT_DIR:?HERMES_WEBUI_AGENT_DIR must be set}"
@@ -29,17 +29,21 @@ export API_SERVER_ENABLED=true
 export API_SERVER_KEY=doh-loopback-gateway-key
 
 CADDY_PORT=8787
-PROCESS_COMPOSE_PORT=9956
+SYSTEM_PROCESS_COMPOSE_PORT=9956
+WEBAPPS_PROCESS_COMPOSE_PORT=9957
 WEBAPPS_ROOT=/workspace/webapps
-PROCESS_COMPOSE_YAML=/workspace/.config/process-compose/process-compose.yaml
+PROCESS_COMPOSE_ROOT=/workspace/.config/process-compose
+SYSTEM_PROCESS_COMPOSE_YAML="${PROCESS_COMPOSE_ROOT}/system/process-compose.yaml"
+WEBAPPS_PROCESS_COMPOSE_YAML="${PROCESS_COMPOSE_ROOT}/webapps/process-compose.yaml"
 CADDY_ROUTES=/workspace/.config/caddy/routes.caddy
 
 CADDY_PID=""
-PROCESS_COMPOSE_PID=""
+SYSTEM_PROCESS_COMPOSE_PID=""
+WEBAPPS_PROCESS_COMPOSE_PID=""
 
 cleanup() {
     set +e
-    for pid in "$PROCESS_COMPOSE_PID" "$CADDY_PID"; do
+    for pid in "$SYSTEM_PROCESS_COMPOSE_PID" "$WEBAPPS_PROCESS_COMPOSE_PID" "$CADDY_PID"; do
         if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
             kill -TERM "$pid" 2>/dev/null
         fi
@@ -60,25 +64,43 @@ seed_caddy_layout() {
 }
 
 seed_process_compose_layout() {
-    mkdir -p "$(dirname "$PROCESS_COMPOSE_YAML")"
-    if [ ! -f "$PROCESS_COMPOSE_YAML" ]; then
-        cat > "$PROCESS_COMPOSE_YAML" <<'EOF'
+    mkdir -p "$(dirname "$SYSTEM_PROCESS_COMPOSE_YAML")" "$(dirname "$WEBAPPS_PROCESS_COMPOSE_YAML")"
+    if [ ! -f "$SYSTEM_PROCESS_COMPOSE_YAML" ]; then
+        cat > "$SYSTEM_PROCESS_COMPOSE_YAML" <<'EOF'
+version: "0.5"
+processes: {}
+EOF
+    fi
+    if [ ! -f "$WEBAPPS_PROCESS_COMPOSE_YAML" ]; then
+        cat > "$WEBAPPS_PROCESS_COMPOSE_YAML" <<'EOF'
 version: "0.5"
 processes: {}
 EOF
     fi
 }
 
-start_process_compose() {
-    echo "[webui] Starting process-compose on 127.0.0.1:${PROCESS_COMPOSE_PORT}..."
+start_system_process_compose() {
+    echo "[webui] Starting system process-compose on 127.0.0.1:${SYSTEM_PROCESS_COMPOSE_PORT}..."
     process-compose up \
-        --config "$PROCESS_COMPOSE_YAML" \
-        --port "$PROCESS_COMPOSE_PORT" \
+        --config "$SYSTEM_PROCESS_COMPOSE_YAML" \
+        --port "$SYSTEM_PROCESS_COMPOSE_PORT" \
         --address 127.0.0.1 \
         --tui=false \
         --keep-project \
         2>&1 &
-    PROCESS_COMPOSE_PID=$!
+    SYSTEM_PROCESS_COMPOSE_PID=$!
+}
+
+start_webapps_process_compose() {
+    echo "[webui] Starting webapps process-compose on 127.0.0.1:${WEBAPPS_PROCESS_COMPOSE_PORT}..."
+    process-compose up \
+        --config "$WEBAPPS_PROCESS_COMPOSE_YAML" \
+        --port "$WEBAPPS_PROCESS_COMPOSE_PORT" \
+        --address 127.0.0.1 \
+        --tui=false \
+        --keep-project \
+        2>&1 &
+    WEBAPPS_PROCESS_COMPOSE_PID=$!
 }
 
 start_caddy() {
@@ -88,11 +110,11 @@ start_caddy() {
 }
 
 bootstrap_admin_webapp() {
-    # Runs *before* process-compose starts. --no-start writes the YAML entry
-    # plus the route, then `process-compose up` brings __admin up alongside
-    # any user webapps from prior boots. Talking to the daemon at this stage
-    # would hang: the `project update` CLI client (subprocess.run) doesn't
-    # return promptly during initial supervision, blocking webui.sh forever.
+    # Runs *before* webapps process-compose starts. --no-start writes the YAML
+    # entry plus the route, then `process-compose up` brings __admin up
+    # alongside any user webapps from prior boots. Talking to the daemon at
+    # this stage would hang: the `project update` CLI client (subprocess.run)
+    # doesn't return promptly during initial supervision, blocking webui.sh forever.
     # --if-missing is the cold-restart idempotence: if __admin is already
     # in the YAML, skip silently.
     webapps create __admin --if-missing --no-start \
@@ -106,24 +128,24 @@ bootstrap_gateway_process() {
     # the broker writes into ${HERMES_HOME}/.env (see
     # docs/gateway_env_and_restart_design.md).
     #
-    # Goes through process-compose so the broker can hot-restart it
+    # Goes through system process-compose so the broker can hot-restart it
     # via REST when vault credentials change without bouncing the whole
     # container. --replace clears any stale gateway.pid left over from a
     # previous container run that crashed before atexit could remove it.
     #
     # API_SERVER_ENABLED / API_SERVER_KEY are exported at container scope (top
     # of this file) so both the gateway and webapp children inherit them.
-    "$HERMES_WEBUI_PYTHON" /opt/doh/runtime/process_compose_seed.py system.gateway \
+    "$HERMES_WEBUI_PYTHON" /opt/doh/runtime/system_process_compose_seed.py system.gateway \
         --command "$HERMES_WEBUI_PYTHON -m hermes_cli.main gateway run --replace -v" \
         --cwd "$HERMES_WEBUI_AGENT_DIR"
 }
 
 bootstrap_webui_process() {
     # profile_env_exec.py overlays ${HERMES_HOME}/.env into WebUI's process env
-    # on every start. Keeping WebUI under process-compose lets the broker
+    # on every start. Keeping WebUI under system process-compose lets the broker
     # restart only WebUI after rewriting connected-provider env such as
     # GITHUB_TOKEN.
-    "$HERMES_WEBUI_PYTHON" /opt/doh/runtime/process_compose_seed.py system.webui \
+    "$HERMES_WEBUI_PYTHON" /opt/doh/runtime/system_process_compose_seed.py system.webui \
         --command "$HERMES_WEBUI_PYTHON /opt/doh/runtime/profile_env_exec.py $HERMES_WEBUI_PYTHON server.py" \
         --cwd "$HERMES_WEBUI_DIR"
 }
@@ -135,9 +157,14 @@ wait_for_webui() {
             echo "[webui] WebUI is healthy."
             return
         fi
-        if ! kill -0 "$PROCESS_COMPOSE_PID" 2>/dev/null; then
-            echo "[webui] FATAL: process-compose exited before WebUI became healthy." >&2
-            wait "$PROCESS_COMPOSE_PID"
+        if ! kill -0 "$SYSTEM_PROCESS_COMPOSE_PID" 2>/dev/null; then
+            echo "[webui] FATAL: system process-compose exited before WebUI became healthy." >&2
+            wait "$SYSTEM_PROCESS_COMPOSE_PID"
+            exit $?
+        fi
+        if ! kill -0 "$WEBAPPS_PROCESS_COMPOSE_PID" 2>/dev/null; then
+            echo "[webui] FATAL: webapps process-compose exited before WebUI became healthy." >&2
+            wait "$WEBAPPS_PROCESS_COMPOSE_PID"
             exit $?
         fi
         sleep 2
@@ -153,12 +180,13 @@ main() {
     bootstrap_admin_webapp
     bootstrap_gateway_process
     bootstrap_webui_process
-    start_process_compose
+    start_system_process_compose
+    start_webapps_process_compose
     wait_for_webui
     start_caddy
 
-    echo "[webui] All services up. caddy=${CADDY_PID} process-compose=${PROCESS_COMPOSE_PID}."
-    wait -n "$CADDY_PID" "$PROCESS_COMPOSE_PID"
+    echo "[webui] All services up. caddy=${CADDY_PID} system_process_compose=${SYSTEM_PROCESS_COMPOSE_PID} webapps_process_compose=${WEBAPPS_PROCESS_COMPOSE_PID}."
+    wait -n "$CADDY_PID" "$SYSTEM_PROCESS_COMPOSE_PID" "$WEBAPPS_PROCESS_COMPOSE_PID"
     exit $?
 }
 

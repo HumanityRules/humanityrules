@@ -40,7 +40,8 @@ ECS task — two containers in shared network namespace:
   │  per-request PDP)     ││──→ bare <host> + path /webapps/__* ─→ │
   │                        │  │ Hermes WebUI :8789 / __admin       │
   │  → upstream :8787      │  │                                   │
-  │                        │  │ process-compose :9956             │
+  │                        │  │ system process-compose :9956      │
+  │                        │  │ webapps process-compose :9957     │
   │                        │  │                                   │
   │                        │  │ user webapps :4000–4019           │
   └────────────────────────┘  └───────────────────────────────────┘
@@ -55,7 +56,10 @@ Four things to notice:
 
 ## The supervisor: process-compose
 
-[process-compose](https://github.com/F1bonacc1/process-compose) is a single Go binary that supervises long-running processes from a YAML file. We picked it after rejecting "write our own watcher" — process-compose's `project update` does surgical reload (only changed processes restart, new ones start, removed ones stop, readiness probes honored), which is exactly what we need.
+[process-compose](https://github.com/F1bonacc1/process-compose) is a single Go binary that supervises long-running processes from a YAML file. Hermes runs two independent process-compose daemons inside nono:
+
+1. **System daemon (`127.0.0.1:9956`)** supervises `system.webui` and `system.gateway`. The integrations broker talks to this daemon when it needs to restart one system process after managed env changes.
+2. **Webapps daemon (`127.0.0.1:9957`)** supervises `__admin` and user webapps. The `webapps` CLI talks only to this daemon, so `webapps create/delete/set-env/start/stop` can use `project update` without bouncing WebUI and interrupting active chat streams.
 
 **State lives under `/workspace/`, split between user-facing artifacts and DOH supervision config:**
 
@@ -65,22 +69,24 @@ Four things to notice:
   logs/<slug>.log                               # captured stdout/stderr, written by process-compose
 
 /workspace/.config/process-compose/
-  process-compose.yaml                          # the supervisor's source-of-truth
-  .webapps.lock                                 # flock target for YAML mutations
+  system/process-compose.yaml                   # system daemon source-of-truth
+  system/.system.lock                           # flock target for system seed writes
+  webapps/process-compose.yaml                  # webapps daemon source-of-truth
+  webapps/.webapps.lock                         # flock target for webapp mutations
 
 /workspace/.config/caddy/
   routes.caddy                                  # generated routes file (rewritten on every CLI mutation)
 ```
 
-`process-compose.yaml` is the **only** source of truth. `routes.caddy` is fully derived from it: every CLI mutation rebuilds the file from scratch by walking the YAML's enabled processes. The port lives in one place — the process's `environment: [WEBAPP_PORT=<port>]` — and the route generator reads it from there. No shadow copies, no synchronization concerns.
+`webapps/process-compose.yaml` is the **only** source of truth for webapps. `routes.caddy` is fully derived from it: every CLI mutation rebuilds the file from scratch by walking the YAML's enabled processes. The port lives in one place — the process's `environment: [WEBAPP_PORT=<port>]` — and the route generator reads it from there. No shadow copies, no synchronization concerns.
 
-The split keeps `/workspace/webapps/` as a pure user-data directory (their projects, their logs) and parks DOH-internal supervision config under `/workspace/.config/` alongside other tools' state (Caddy already writes `.config/caddy/autosave.json` there). All four paths are hermeswebui-owned so the sandbox can mutate them; the broker (root) can still read them from outside the sandbox if needed.
+The split keeps `/workspace/webapps/` as a pure user-data directory (their projects, their logs) and parks DOH-internal supervision config under `/workspace/.config/` alongside other tools' state (Caddy already writes `.config/caddy/autosave.json` there). These paths are hermeswebui-owned so the sandbox can mutate them; the broker (root) can still read them from outside the sandbox if needed.
 
-`/workspace` is on the persistent root, so this whole layout survives container restarts. process-compose, on cold start, reads the existing YAML and restores supervision; Caddy boots with the existing `routes.caddy` (which the last CLI mutation left correct) and routes are back instantly.
+`/workspace` is on the persistent root, so this layout survives container restarts. On cold start, each process-compose daemon reads its own YAML and restores supervision; Caddy boots with the existing `routes.caddy` (which the last CLI mutation left correct) and routes are back instantly. The old shared `/workspace/.config/process-compose/process-compose.yaml` path is not read or migrated.
 
 ## The agent's contract: the `webapps` CLI
 
-The agent never touches `process-compose.yaml` or `routes.caddy` directly. It uses a single Python CLI on PATH:
+The agent never touches `webapps/process-compose.yaml` or `routes.caddy` directly. It uses a single Python CLI on PATH:
 
 ```
 webapps create <slug> --command "..." --cwd <path> [--timeout 90]
@@ -93,7 +99,7 @@ webapps set-env <slug> KEY=VALUE [KEY2=VALUE2 ...]
 webapps delete <slug> --yes
 ```
 
-`/opt/doh/runtime/webapps`, ~310 lines, shebang pinned to `/opt/hermes/webui/venv/bin/python3` (it imports pyyaml, which the system python doesn't have but the Hermes serving venv does). All YAML mutations are wrapped in `flock /workspace/.config/process-compose/.webapps.lock` so concurrent invocations don't tear writes. The CLI's `regenerate_routes(doc)` is called inside the lock on every mutation; it rewrites `routes.caddy` end-to-end from the YAML.
+`/opt/doh/runtime/webapps`, ~310 lines, shebang pinned to `/opt/hermes/webui/venv/bin/python3` (it imports pyyaml, which the system python doesn't have but the Hermes serving venv does). All YAML mutations are wrapped in `flock /workspace/.config/process-compose/webapps/.webapps.lock` so concurrent invocations don't tear writes. The CLI's `regenerate_routes(doc)` is called inside the lock on every mutation; it rewrites `routes.caddy` end-to-end from the YAML.
 
 **Key contract decisions:**
 
@@ -183,10 +189,10 @@ The two trailing `handle` blocks are mutually exclusive with the per-slug `handl
 
 ## Network: nono profile additions
 
-The hermes container runs inside a nono sandbox. Three additions to `hermes-nono-profile.json`:
+The hermes container runs inside a nono sandbox. Four additions to `hermes-nono-profile.json`:
 
-- **`network.listen_port`**: adds `8788` (technically owned by policy-proxy, but the shared netns means we'd see EADDRINUSE without it being allowlisted), `8789` (WebUI's new home), `9956` (process-compose admin), and `4000–4019` (user webapps). nono profile JSON uses `Vec<u16>`, no range syntax — the 20 ports are listed individually.
-- **`network.open_port`**: same set, plus the existing 9901–9903 / 9950–9952 for AWS signer + integrations broker.
+- **`network.listen_port`**: adds `8788` (technically owned by policy-proxy, but the shared netns means we'd see EADDRINUSE without it being allowlisted), `8789` (WebUI's new home), `9956` (system process-compose admin), `9957` (webapps process-compose admin), and `4000–4019` (user webapps). nono profile JSON uses `Vec<u16>`, no range syntax — the 20 ports are listed individually.
+- **`network.open_port`**: same set, plus the existing 9901–9904 / 9950–9952 for AWS signer + integrations broker.
 - **`filesystem.read_file`**: adds `/opt/doh/bin/{caddy,process-compose,webapps}` and `/opt/doh/runtime/{Caddyfile,webapps}` so the sandbox can exec them.
 - **`environment.allow_vars`**: adds `DOH_PUBLIC_HOSTNAME` so the CLI can print real URLs (see below).
 
@@ -219,9 +225,11 @@ ACM/ALB SNI listener cert count caps at 25 per listener by default (raisable via
 ECS replaces the task. persistent-root-runner restores `/workspace/` from the persistent volume. webui.sh starts inside nono and:
 
 1. Seeds `/workspace/webapps/` if missing (idempotent, only first boot).
-2. Starts `process-compose up` against the existing YAML — apps marked enabled come back up automatically; ones marked `disabled: true` stay down (process-compose honors disabled on initial up).
-3. Waits for WebUI on 8789 to become healthy.
-4. Starts Caddy with `--watch`. Caddy reads the existing `routes.caddy` (left in correct state by the last CLI mutation before shutdown) and routes are live immediately.
+2. Seeds both split process-compose YAMLs.
+3. Registers `__admin` into the webapps YAML, and `system.gateway` / `system.webui` into the system YAML.
+4. Starts system process-compose on `9956` and webapps process-compose on `9957`.
+5. Waits for WebUI on 8789 to become healthy.
+6. Starts Caddy with `--watch`. Caddy reads the existing `routes.caddy` (left in correct state by the last CLI mutation before shutdown) and routes are live immediately.
 
 `webapps list` after cold start shows everything with the same state it had before, modulo a few seconds of "Pending → Running" while processes initialize.
 
@@ -229,7 +237,7 @@ End-to-end verified on `hermes-vmendi-webapps`: created `persist-test`, killed t
 
 ## Admin webapp & sidebar UI
 
-The WebUI's "Web Apps" panel is a thin reader on top of a **platform-owned webapp**, `__admin`. Rather than carve a one-off API path through Caddy → process-compose's admin port, we dogfood the same mechanism the agent uses: `__admin` is registered in `process-compose.yaml` like any other webapp, and the WebUI extension fetches `/webapps/__admin/api/webapps` same-origin. The path goes through policy-proxy → Caddy → loopback to the FastAPI admin process exactly like a user app would. **The `__admin` slug stays path-routed on the bare agent host** (not on a subdomain) so the WebUI extension's same-origin fetch keeps working without CORS — `__*` slugs are the documented exception to the per-app-subdomain rule.
+The WebUI's "Web Apps" panel is a thin reader on top of a **platform-owned webapp**, `__admin`. Rather than carve a one-off API path through Caddy → process-compose's admin port, we dogfood the same mechanism the agent uses: `__admin` is registered in `webapps/process-compose.yaml` like any other webapp, and the WebUI extension fetches `/webapps/__admin/api/webapps` same-origin. The path goes through policy-proxy → Caddy → loopback to the FastAPI admin process exactly like a user app would. **The `__admin` slug stays path-routed on the bare agent host** (not on a subdomain) so the WebUI extension's same-origin fetch keeps working without CORS — `__*` slugs are the documented exception to the per-app-subdomain rule.
 
 This buys three things:
 
@@ -239,7 +247,7 @@ This buys three things:
 
 **Reserved-prefix convention.** The slug regex (`webapps_lib.SLUG_PATTERN`) accepts an optional `__` prefix. There is **no enforcement** in the CLI — a `__` slug is a Python-dunder-style hint that "this is platform internal," not a hard reservation. The bootstrap (`webapps create __admin --if-missing` in `webui.sh`) wins the cold-start race and registers the slug; subsequent agent attempts to create the same slug collide on the existing entry and error, which is the same behavior as any other slug collision. The skill's Don'ts tell the agent not to touch `__*` slugs.
 
-**Source layout.** `template_repos/hermes_agent/doh_runtime/admin/` (no "webapps" in the name — scope will grow). `__main__.py` reads `WEBAPP_PORT` from the env (set by the supervisor like for any webapp) and serves `server.py`'s FastAPI `app` on `127.0.0.1:$WEBAPP_PORT`. Boot order in `webui.sh`: start process-compose → wait for `/live` → `webapps create __admin --if-missing` → start WebUI → start Caddy. The `--if-missing` flag is idempotent; on a redeploy where `__admin` is already in the YAML, the bootstrap is a no-op.
+**Source layout.** `template_repos/hermes_agent/doh_runtime/admin/` (no "webapps" in the name — scope will grow). `__main__.py` reads `WEBAPP_PORT` from the env (set by the supervisor like for any webapp) and serves `server.py`'s FastAPI `app` on `127.0.0.1:$WEBAPP_PORT`. Boot order in `webui.sh`: `webapps create __admin --if-missing --no-start` writes the webapps YAML and route before the daemon starts; system entries are seeded separately; both process-compose daemons start; WebUI health gates Caddy startup. The `--if-missing` flag is idempotent; on a redeploy where `__admin` is already in the YAML, the bootstrap is a no-op.
 
 **v1 surface.** Read-only:
 

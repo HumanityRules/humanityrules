@@ -62,7 +62,7 @@
       "/opt/doh/runtime/webui.sh",
       "/opt/doh/runtime/webapps",
       "/opt/doh/runtime/webapps_lib.py",
-      "/opt/doh/runtime/process_compose_seed.py",
+      "/opt/doh/runtime/system_process_compose_seed.py",
       "/opt/doh/runtime/profile_env_exec.py",
       "/opt/doh/runtime/admin/__main__.py",
       "/opt/doh/runtime/admin/server.py",
@@ -90,6 +90,7 @@
       8787,
       8789,
       9956,
+      9957,
       4000, 4001, 4002, 4003, 4004, 4005, 4006, 4007, 4008, 4009,
       4010, 4011, 4012, 4013, 4014, 4015, 4016, 4017, 4018, 4019
     ],
@@ -105,6 +106,7 @@
       9951,
       9952,
       9956,
+      9957,
       4000, 4001, 4002, 4003, 4004, 4005, 4006, 4007, 4008, 4009,
       4010, 4011, 4012, 4013, 4014, 4015, 4016, 4017, 4018, 4019
     ]
