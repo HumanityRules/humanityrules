@@ -263,12 +263,6 @@ run_in_nono() {
             # `git clone https://github.com/...` fails verification of the
             # broker's MITM leaf cert with "certificate signer not trusted".
             "GIT_SSL_CAINFO=${INTEGRATIONS_BROKER_CA_DIR}/bundle.pem"
-            # Same placeholder swap as the git credential helper, but for
-            # `gh`: gh reads GITHUB_TOKEN, sends `Authorization: token
-            # DOH_PLACEHOLDER` to api.github.com, the broker swaps it for
-            # the user's real GitHub user-to-server token before forwarding.
-            # No real token ever lives in the sandbox.
-            "GITHUB_TOKEN=DOH_PLACEHOLDER"
         )
     fi
 

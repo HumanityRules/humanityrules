@@ -3,8 +3,8 @@
 //
 // Adds an "Integrations" tab to the WebUI's main left sidebar nav, rendering
 // per-provider cards from the integrations broker's unified control API. The
-// broker is reached same-origin via the WebUI reverse-proxy patch
-// (patches-webui/07-doh-broker-proxy.patch). Connect / Disconnect for TLS-
+// broker is reached same-origin via the Caddy /__doh_broker/* route.
+// Connect / Disconnect for TLS-
 // intercept providers (Google, GitHub) are top-level navigations to DOH's control
 // plane for Connect; Disconnect goes through the broker so the Integrations pane
 // stays open. MCP-aggregator providers (Notion) flow entirely through the broker.
@@ -16,7 +16,6 @@
     'Could not reach the DevOps Hero vault. Try again. ' +
     'If this keeps happening, ask an admin to check this Hermes deployment.'
   );
-
   let _current = null;
   const _disconnecting = new Set();
 
@@ -134,6 +133,93 @@
     }
   }
 
+  // Provider logos are served by the WebUI's static handler (/extensions/*.svg).
+  // Connecting/disconnecting a provider whose env the broker manages (e.g.
+  // GitHub) restarts system.webui, so any <img> requested during that reboot
+  // window fails and the browser never retries it on its own — leaving blank
+  // logos. The connect-return flow already waits for the WebUI before
+  // rendering, but the in-page Disconnect button re-renders during the reboot
+  // with no such gate. Self-heal: on error, re-request with a cache-busting
+  // param (so the browser doesn't serve the failed entry) on a capped backoff
+  // until the WebUI is back. Covers every reboot trigger.
+  function logoImg(url) {
+    const MAX_RETRIES = 10;
+    let tries = 0;
+    const img = elem('img', {
+      class: 'doh-integration-logo',
+      src: url,
+      alt: '',
+      decoding: 'async',
+    });
+    img.addEventListener('error', () => {
+      if (tries >= MAX_RETRIES) return;
+      tries += 1;
+      const delay = Math.min(3000, 300 * Math.pow(2, tries - 1));
+      setTimeout(() => {
+        const sep = url.indexOf('?') === -1 ? '?' : '&';
+        img.src = url + sep + '_retry=' + tries;
+      }, delay);
+    });
+    return img;
+  }
+
+  // Resolve once every logo currently rendered in the list has finished
+  // loading (or errored out), capped by `timeoutMs`. Used before triggering a
+  // WebUI restart: once the logos are in the browser cache, the later
+  // re-render reuses them, so the restart can't blank them.
+  function waitForLogos(timeoutMs) {
+    const list = document.getElementById('dohIntegrationList');
+    const imgs = list ? Array.from(list.querySelectorAll('.doh-integration-logo')) : [];
+    const pending = imgs.filter((img) => !img.complete);
+    if (pending.length === 0) return Promise.resolve();
+    return new Promise((resolve) => {
+      let remaining = pending.length;
+      const done = () => { remaining -= 1; if (remaining === 0) resolve(); };
+      pending.forEach((img) => {
+        img.addEventListener('load', done, { once: true });
+        img.addEventListener('error', done, { once: true });
+      });
+      setTimeout(resolve, timeoutMs);
+    });
+  }
+
+  // Resolve once the WebUI's static handler is serving. We poll a known
+  // WebUI-served asset (our own stylesheet) until it loads. Cache-busted so the
+  // browser can't answer from a stale entry; capped by `timeoutMs`.
+  function waitForWebui(timeoutMs) {
+    const probeUrl = '/extensions/doh-integrations.css';
+    const start = Date.now();
+    return new Promise((resolve) => {
+      const attempt = () => {
+        fetch(probeUrl + '?_probe=' + Date.now(), { method: 'GET', cache: 'no-store' })
+          .then((r) => {
+            if (r.ok) { resolve(); return; }
+            throw new Error('not ready');
+          })
+          .catch(() => {
+            if (Date.now() - start >= timeoutMs) { resolve(); return; }
+            setTimeout(attempt, 400);
+          });
+      };
+      attempt();
+    });
+  }
+
+  // Put a Connect button into its in-flight "Connecting…" state and return a
+  // revert function. For navigation flows (TLS-OAuth, MCP) the page leaves
+  // before revert is ever called, so the label simply persists. For modal
+  // flows (vault, Merge) the caller reverts when the user cancels or it errors.
+  function markConnecting(btn) {
+    if (!btn) return () => {};
+    const original = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = 'Connecting…';
+    return () => {
+      btn.disabled = false;
+      btn.textContent = original;
+    };
+  }
+
   function connectedFirst(a, b) {
     if (a.status === 'connected' && b.status !== 'connected') return -1;
     if (a.status !== 'connected' && b.status === 'connected') return 1;
@@ -144,9 +230,9 @@
 
   // ── Merge connector flow ──────────────────────────────────────────
 
-  function showMergeExplainerModal(item, onContinue) {
+  function showMergeExplainerModal(item, onContinue, onCancel) {
     const backdrop = elem('div', { class: 'doh-modal-backdrop' });
-    const close = () => backdrop.remove();
+    const cancel = () => { backdrop.remove(); if (onCancel) onCancel(); };
     const modal = elem('div', { class: 'doh-modal' }, [
       elem('div', { class: 'doh-modal-title' }, ['Connect ' + item.label]),
       elem('div', { class: 'doh-modal-body' }, [
@@ -157,16 +243,16 @@
       elem('div', { class: 'doh-modal-actions' }, [
         elem('button', {
           class: 'doh-integration-btn',
-          onclick: close,
+          onclick: cancel,
         }, ['Cancel']),
         elem('button', {
           class: 'doh-integration-btn doh-integration-btn-primary',
-          onclick: () => { close(); onContinue(); },
+          onclick: () => { backdrop.remove(); onContinue(); },
         }, ['Continue']),
       ]),
     ]);
     backdrop.appendChild(modal);
-    backdrop.addEventListener('click', (e) => { if (e.target === backdrop) close(); });
+    backdrop.addEventListener('click', (e) => { if (e.target === backdrop) cancel(); });
     document.body.appendChild(backdrop);
   }
 
@@ -190,7 +276,36 @@
     return backdrop;
   }
 
-  async function startMergeConnect(item) {
+  // Floating "in progress" dialog shown after an OAuth-return sentinel, while
+  // the broker primes its cache (and any managed-env WebUI restart settles).
+  // status_items() reads cache-only, so the first render after a connect would
+  // otherwise paint a stale "not connected" card until the invalidate
+  // round-trip lands. The dialog signals work-in-progress over the still-
+  // visible page and blocks interaction; init() removes it once the real
+  // render completes and logos have reloaded. No Cancel: the round-trip is
+  // short and there's nothing to abort.
+  function showTransitionModal(sentinel) {
+    // The catalog (with each provider's properly-cased label) isn't loaded yet
+    // at this point, so the title stays provider-agnostic to avoid mis-casing
+    // a brand name (e.g. "Github"). Only one transition is ever in flight.
+    const title = (sentinel.transition === 'disconnected' ? 'Disconnecting' : 'Finishing connection') + '…';
+    // Transparent backdrop (doh-transition-backdrop): the dialog floats over
+    // the page, which stays visible behind it, and blocks interaction. We do
+    // NOT re-render the page while the dialog is up, so nothing behind it
+    // changes (no stale cards, no blank logos) until the WebUI is back.
+    const backdrop = elem('div', { class: 'doh-modal-backdrop doh-transition-backdrop' });
+    const modal = elem('div', { class: 'doh-modal doh-transition-modal' }, [
+      elem('div', { class: 'doh-transition-spinner' }),
+      elem('div', { class: 'doh-modal-title' }, [title]),
+      elem('div', { class: 'doh-modal-body' }, ['Syncing status with DevOps Hero. This will only take a moment.']),
+    ]);
+    backdrop.appendChild(modal);
+    document.body.appendChild(backdrop);
+    return backdrop;
+  }
+
+  async function startMergeConnect(item, revert) {
+    const revertOnce = () => { if (revert) { revert(); revert = null; } };
     showMergeExplainerModal(item, async () => {
       let resp;
       try {
@@ -201,21 +316,24 @@
         });
       } catch (_) {
         alert('Could not reach the integrations broker. Try again.');
+        revertOnce();
         return;
       }
       if (!resp.ok) {
         alert('Merge link-token request failed.');
+        revertOnce();
         return;
       }
       const data = await resp.json();
       if (!data.magic_link_url) {
         alert('Merge did not return a magic link.');
+        revertOnce();
         return;
       }
       window.open(data.magic_link_url, '_blank');
 
       let stopped = false;
-      const waiting = showMergeWaitingModal(item, () => { stopped = true; });
+      const waiting = showMergeWaitingModal(item, () => { stopped = true; revertOnce(); });
       const start = Date.now();
       const intervalMs = 3000;
       const timeoutMs = 5 * 60 * 1000;
@@ -224,6 +342,7 @@
         if (Date.now() - start > timeoutMs) {
           stopped = true;
           waiting.remove();
+          revertOnce();
           return;
         }
         try {
@@ -244,7 +363,7 @@
         setTimeout(tick, intervalMs);
       };
       setTimeout(tick, intervalMs);
-    });
+    }, revertOnce);
   }
 
   function renderConnectorCard(item) {
@@ -255,13 +374,7 @@
     const card = elem('div', { class: cardClass, dataset: { provider } });
     const titleRow = elem('div', { class: 'doh-integration-card-title-row' });
     if (item.logo_url) {
-      titleRow.appendChild(elem('img', {
-        class: 'doh-integration-logo',
-        src: item.logo_url,
-        alt: '',
-        loading: 'lazy',
-        decoding: 'async',
-      }));
+      titleRow.appendChild(logoImg(item.logo_url));
     }
     titleRow.appendChild(elem('div', { class: 'doh-integration-card-title' }, [item.label || item.slug]));
     const statusPill = elem('div', { class: 'doh-integration-card-status', dataset: { status: item.status } }, [statusLabelFor(item.status)]);
@@ -301,7 +414,8 @@
     const connectBtn = elem('button', {
       class: 'doh-integration-btn',
       onclick: () => {
-        if (isMergeConnector) startMergeConnect(item);
+        const revert = markConnecting(connectBtn);
+        if (isMergeConnector) startMergeConnect(item, revert);
         else window.location.href = buildMcpConnectUrl(item.slug);
       },
     }, ['Connect']);
@@ -442,10 +556,10 @@
     });
   }
 
-  function showGenericVaultConfigModal(item, session) {
+  function showGenericVaultConfigModal(item, session, onClose) {
     const schema = session.schema;
     const backdrop = elem('div', { class: 'doh-modal-backdrop doh-vault-backdrop' });
-    const close = () => backdrop.remove();
+    const close = () => { backdrop.remove(); if (onClose) onClose(); };
     const errorBox = elem('div', { class: 'doh-vault-error', style: { display: 'none' } });
     const successBox = elem('div', { class: 'doh-vault-success', style: { display: 'none' } });
     const form = elem('form', { class: 'doh-vault-form' });
@@ -509,10 +623,10 @@
       encodeURIComponent(JSON.stringify(manifest));
   }
 
-  function showSlackConfigModal(item, session) {
+  function showSlackConfigModal(item, session, onClose) {
     const schema = session.schema;
     const backdrop = elem('div', { class: 'doh-modal-backdrop doh-vault-backdrop' });
-    const close = () => backdrop.remove();
+    const close = () => { backdrop.remove(); if (onClose) onClose(); };
     const errorBox = elem('div', { class: 'doh-vault-error', style: { display: 'none' } });
     const successBox = elem('div', { class: 'doh-vault-success', style: { display: 'none' } });
     const form = elem('form', { class: 'doh-vault-form' });
@@ -686,13 +800,20 @@
     slack: showSlackConfigModal,
   };
 
-  async function startVaultConfig(item) {
+  async function startVaultConfig(item, revert) {
+    // `revert` (from markConnecting) restores the Connect button. Fire it if we
+    // never open the modal (error), or when the user dismisses it without
+    // connecting; a successful save re-renders the card from scratch so the
+    // button is replaced regardless. revert may be omitted (e.g. the Configure
+    // button on an already-connected provider reuses this path).
+    const revertOnce = () => { if (revert) { revert(); revert = null; } };
     try {
       const session = await requestVaultSetupSession(item);
       const renderer = _VAULT_RENDERERS[item.slug] || showGenericVaultConfigModal;
-      renderer(item, session);
+      renderer(item, session, revertOnce);
     } catch (err) {
       alert(err.message || 'Could not open the vault dialog.');
+      revertOnce();
     }
   }
 
@@ -729,13 +850,7 @@
     const card = elem('div', { class: cardClass, dataset: { provider: item.slug } });
     const titleRow = elem('div', { class: 'doh-integration-card-title-row' });
     if (item.logo_url) {
-      titleRow.appendChild(elem('img', {
-        class: 'doh-integration-logo',
-        src: item.logo_url,
-        alt: '',
-        loading: 'lazy',
-        decoding: 'async',
-      }));
+      titleRow.appendChild(logoImg(item.logo_url));
     }
     titleRow.appendChild(elem('div', { class: 'doh-integration-card-title' }, [item.label]));
     const statusPill = elem('div', { class: 'doh-integration-card-status', dataset: { status: item.status } }, [statusLabelFor(item.status)]);
@@ -791,7 +906,8 @@
     const connectBtn = elem('button', {
       class: 'doh-integration-btn',
       onclick: () => {
-        if (usesVault) startVaultConfig(item);
+        const revert = markConnecting(connectBtn);
+        if (usesVault) startVaultConfig(item, revert);
         else window.location.href = buildTlsConnectUrl(payload, item.slug, returnTo);
       },
     }, ['Connect']);
@@ -1039,21 +1155,28 @@
     wrapSwitchPanel();
 
     const sentinel = consumeReturnSentinel();
-    if (sentinel && typeof window.switchPanel === 'function') {
-      // User just came back from DOH's start/disconnect — route them straight
-      // to the Integrations panel.
-      window.switchPanel('integrations');
-    }
-    // The broker reads from cache; nudge only the provider named by the
-    // OAuth return sentinel. On normal page loads we render whatever is
-    // cached; explicit Refresh is the only UI action that invalidates all.
     if (sentinel) {
-      // Cache-hint only — if the broker is unreachable or returns 5xx,
-      // the proxy's 401-evict path will recover stale tokens on the next
-      // real call. Render the panel either way.
-      invalidateBrokerTlsCache(sentinel.provider)
-        .catch(() => {})
-        .then(refreshAndRender);
+      // User just came back from DOH's start/disconnect via a full page load.
+      // Show the dialog first thing so it covers everything (incl. the panel-
+      // switch animation), then do all the work behind it:
+      //   1. switch to our panel + render (WebUI is up, so logos load) and WAIT
+      //      for the logos to cache — the later re-render reuses them so the
+      //      restart can't blank them.
+      //   2. fire the invalidate, which kicks the system.webui restart.
+      //   3. wait for the WebUI to serve again, re-render, then drop the dialog.
+      const transitionModal = showTransitionModal(sentinel);
+      // Yield a frame so the dialog actually paints before the render work
+      // below blocks the main thread — otherwise it'd appear only after.
+      new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)))
+        .then(() => { if (typeof window.switchPanel === 'function') window.switchPanel('integrations'); })
+        .then(refreshAndRender)
+        .then(() => waitForLogos(10000))
+        // Cache-hint only — if the broker is unreachable or returns 5xx, the
+        // proxy's 401-evict path recovers stale tokens on the first real call.
+        .then(() => invalidateBrokerTlsCache(sentinel.provider).catch(() => {}))
+        .then(() => waitForWebui(15000))
+        .then(refreshAndRender)
+        .finally(() => { transitionModal.remove(); });
     } else {
       refreshAndRender();
     }

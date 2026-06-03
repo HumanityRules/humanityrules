@@ -1,17 +1,15 @@
 #!/bin/bash
 set -euo pipefail
 
-# Inside nono. Three siblings run here as hermeswebui:
-#   1. Caddy on :8787 — policy-proxy forwards here; routes /webapps/* to user apps.
-#   2. process-compose on :9956 — supervises every DOH-managed process inside
-#      nono: __admin, system.gateway, plus any user webapps.
-#   3. Hermes WebUI on :8789.
+# Inside nono. Two direct children run here as hermeswebui:
+#   1. process-compose on :9956 — supervises every DOH-managed process inside
+#      nono: system.webui, system.gateway, __admin, plus any user webapps.
+#   2. Caddy on :8787 — policy-proxy forwards here; routes /webapps/* to user apps.
 #
-# The Hermes gateway is supervised by process-compose as `system.gateway`,
-# not started directly here, so the broker can restart it in place when
-# vault credentials change.
+# The Hermes WebUI and gateway are supervised by process-compose so the broker
+# can restart them in place when managed integration env changes.
 #
-# If any child exits, we kill the others and exit.
+# If a direct child exits, we kill the other and exit.
 
 : "${HERMES_HOME:?HERMES_HOME must be set}"
 : "${HERMES_WEBUI_AGENT_DIR:?HERMES_WEBUI_AGENT_DIR must be set}"
@@ -38,11 +36,10 @@ CADDY_ROUTES=/workspace/.config/caddy/routes.caddy
 
 CADDY_PID=""
 PROCESS_COMPOSE_PID=""
-WEBUI_PID=""
 
 cleanup() {
     set +e
-    for pid in "$WEBUI_PID" "$PROCESS_COMPOSE_PID" "$CADDY_PID"; do
+    for pid in "$PROCESS_COMPOSE_PID" "$CADDY_PID"; do
         if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
             kill -TERM "$pid" 2>/dev/null
         fi
@@ -84,13 +81,6 @@ start_process_compose() {
     PROCESS_COMPOSE_PID=$!
 }
 
-start_webui() {
-    echo "[webui] Starting Hermes WebUI on 127.0.0.1:${HERMES_WEBUI_PORT}..."
-    cd "$HERMES_WEBUI_DIR"
-    "$HERMES_WEBUI_PYTHON" server.py 2>&1 &
-    WEBUI_PID=$!
-}
-
 start_caddy() {
     echo "[webui] Starting Caddy on :${CADDY_PORT}..."
     caddy run --config /opt/doh/runtime/Caddyfile --adapter caddyfile --watch 2>&1 &
@@ -128,6 +118,16 @@ bootstrap_gateway_process() {
         --cwd "$HERMES_WEBUI_AGENT_DIR"
 }
 
+bootstrap_webui_process() {
+    # profile_env_exec.py overlays ${HERMES_HOME}/.env into WebUI's process env
+    # on every start. Keeping WebUI under process-compose lets the broker
+    # restart only WebUI after rewriting connected-provider env such as
+    # GITHUB_TOKEN.
+    "$HERMES_WEBUI_PYTHON" /opt/doh/runtime/process_compose_seed.py system.webui \
+        --command "$HERMES_WEBUI_PYTHON /opt/doh/runtime/profile_env_exec.py $HERMES_WEBUI_PYTHON server.py" \
+        --cwd "$HERMES_WEBUI_DIR"
+}
+
 wait_for_webui() {
     echo "[webui] Waiting for WebUI..."
     for _ in $(seq 1 60); do
@@ -135,9 +135,9 @@ wait_for_webui() {
             echo "[webui] WebUI is healthy."
             return
         fi
-        if ! kill -0 "$WEBUI_PID" 2>/dev/null; then
-            echo "[webui] FATAL: WebUI exited before becoming healthy." >&2
-            wait "$WEBUI_PID"
+        if ! kill -0 "$PROCESS_COMPOSE_PID" 2>/dev/null; then
+            echo "[webui] FATAL: process-compose exited before WebUI became healthy." >&2
+            wait "$PROCESS_COMPOSE_PID"
             exit $?
         fi
         sleep 2
@@ -152,13 +152,13 @@ main() {
     seed_process_compose_layout
     bootstrap_admin_webapp
     bootstrap_gateway_process
+    bootstrap_webui_process
     start_process_compose
-    start_webui
     wait_for_webui
     start_caddy
 
-    echo "[webui] All services up. caddy=${CADDY_PID} process-compose=${PROCESS_COMPOSE_PID} webui=${WEBUI_PID}."
-    wait -n "$CADDY_PID" "$PROCESS_COMPOSE_PID" "$WEBUI_PID"
+    echo "[webui] All services up. caddy=${CADDY_PID} process-compose=${PROCESS_COMPOSE_PID}."
+    wait -n "$CADDY_PID" "$PROCESS_COMPOSE_PID"
     exit $?
 }
 
