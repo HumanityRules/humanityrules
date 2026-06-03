@@ -1,13 +1,12 @@
 #!/usr/bin/env python3
-"""Seed a `system.<name>` entry into the shared process-compose YAML.
+"""Seed a `system.<name>` entry into the system process-compose YAML.
 
-System processes (e.g. `system.gateway`) are DOH-managed: they go into the
-same YAML the `webapps` CLI manages, but they don't get Caddy routes and
-the CLI won't let users create a slug starting with `system.`. This tiny
-helper writes the entry idempotently before `process-compose up` runs.
+System processes (e.g. `system.gateway`) are DOH-managed and live in a
+separate process-compose project from webapps. This keeps webapp CRUD reloads
+from touching the WebUI or gateway supervisor.
 
 Usage:
-    process_compose_seed.py system.gateway --command "..." --cwd /path [--env K=V ...]
+    system_process_compose_seed.py system.gateway --command "..." --cwd /path [--env K=V ...]
 """
 from __future__ import annotations
 
@@ -19,11 +18,12 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from webapps_lib import (
     LOGS_DIR,
-    Lock,
+    SYSTEM_PROJECT,
     SYSTEM_SLUG_PREFIX,
+    ProcessComposeLock,
     die,
-    load_yaml,
-    save_yaml,
+    load_process_compose_yaml,
+    save_process_compose_yaml,
 )
 
 
@@ -56,8 +56,8 @@ def main() -> None:
     if not cwd.is_dir():
         die(f"--cwd {cwd} is not a directory")
 
-    with Lock():
-        doc = load_yaml()
+    with ProcessComposeLock(project=SYSTEM_PROJECT):
+        doc = load_process_compose_yaml(project=SYSTEM_PROJECT)
         # Always rewrite — keeps the entry in sync with the latest command/env.
         doc["processes"][args.slug] = _system_process_entry(
             slug=args.slug,
@@ -65,7 +65,7 @@ def main() -> None:
             cwd=str(cwd),
             env_pairs=list(args.env),
         )
-        save_yaml(doc)
+        save_process_compose_yaml(project=SYSTEM_PROJECT, doc=doc)
 
     print(f"process-compose seed: {args.slug!r} written.")
 

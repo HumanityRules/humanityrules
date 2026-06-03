@@ -1,9 +1,10 @@
 #!/opt/hermes/webui/venv/bin/python3
 """DOH webapps CLI: register, manage, and route user-built web apps.
 
-Source of truth: /workspace/.config/process-compose/process-compose.yaml.
-Caddy routes in /workspace/.config/caddy/routes.caddy are regenerated from
-that file on every change.
+Source of truth:
+/workspace/.config/process-compose/webapps/process-compose.yaml. Caddy routes
+in /workspace/.config/caddy/routes.caddy are regenerated from that file on
+every change.
 
 See template_repos/hermes_agent/skills/development/webapps/SKILL.md for the agent contract.
 """
@@ -19,20 +20,19 @@ sys.path.insert(0, "/opt/doh/runtime")
 from webapps_lib import (
     DEFAULT_TIMEOUT_SECONDS,
     LOGS_DIR,
-    PROJECTS_DIR,
-    Lock,
+    WEBAPPS_PROJECT,
+    ProcessComposeLock,
     die,
     is_routed,
-    load_yaml,
+    load_process_compose_yaml,
     make_process_entry,
     next_free_port,
-    pc,
     port_from_entry,
-    process_states,
-    project_update,
+    process_compose_project_update,
+    process_compose_states,
     regenerate_routes,
-    save_yaml,
-    state_for,
+    run_process_compose,
+    save_process_compose_yaml,
     url_for,
     validate_slug,
     wait_for_ready,
@@ -45,8 +45,8 @@ def cmd_create(args: argparse.Namespace) -> None:
     if not cwd.is_dir():
         die(f"--cwd {cwd} is not a directory; create the project first")
 
-    with Lock():
-        doc = load_yaml()
+    with ProcessComposeLock(project=WEBAPPS_PROJECT):
+        doc = load_process_compose_yaml(project=WEBAPPS_PROJECT)
         if args.slug in doc["processes"]:
             if args.if_missing:
                 # Routes file isn't versioned with the YAML, so an interrupted
@@ -64,12 +64,12 @@ def cmd_create(args: argparse.Namespace) -> None:
             cwd=str(cwd),
             port=port,
         )
-        save_yaml(doc)
+        save_process_compose_yaml(project=WEBAPPS_PROJECT, doc=doc)
         regenerate_routes(doc)
         if args.no_start:
             print(f"webapps: registered {args.slug!r} on port {port} (no-start; supervisor will pick it up).")
             return
-        project_update()
+        process_compose_project_update(project=WEBAPPS_PROJECT)
 
     print(f"webapps: registered {args.slug!r} on port {port}; waiting up to {args.timeout}s for readiness...")
     state = wait_for_ready(args.slug, args.timeout)
@@ -85,7 +85,7 @@ def cmd_create(args: argparse.Namespace) -> None:
 
 
 def cmd_list(_args: argparse.Namespace) -> None:
-    doc = load_yaml()
+    doc = load_process_compose_yaml(project=WEBAPPS_PROJECT)
     procs = doc.get("processes", {})
     if not procs:
         print("No webapps yet.")
@@ -94,7 +94,7 @@ def cmd_list(_args: argparse.Namespace) -> None:
         print("  webapps create my-app --command 'python -m http.server $WEBAPP_PORT' --cwd /workspace/webapps/projects/my-app")
         return
 
-    states = {s["name"]: s for s in process_states()}
+    states = {s["name"]: s for s in process_compose_states(project=WEBAPPS_PROJECT)}
     print(f"{'SLUG':<20} {'PORT':<6} {'STATUS':<14} {'READY':<10} {'URL'}")
     for slug, entry in sorted(procs.items()):
         port = port_from_entry(entry)
@@ -118,15 +118,15 @@ def cmd_logs(args: argparse.Namespace) -> None:
 
 
 def cmd_start(args: argparse.Namespace) -> None:
-    with Lock():
-        doc = load_yaml()
+    with ProcessComposeLock(project=WEBAPPS_PROJECT):
+        doc = load_process_compose_yaml(project=WEBAPPS_PROJECT)
         entry = doc["processes"].get(args.slug)
         if entry is None:
             die(f"unknown app {args.slug!r}")
         entry.pop("disabled", None)
-        save_yaml(doc)
+        save_process_compose_yaml(project=WEBAPPS_PROJECT, doc=doc)
         regenerate_routes(doc)
-        project_update()
+        process_compose_project_update(project=WEBAPPS_PROJECT)
 
     print(f"webapps: starting {args.slug!r}; waiting up to {args.timeout}s for readiness...")
     state = wait_for_ready(args.slug, args.timeout)
@@ -140,32 +140,32 @@ def cmd_start(args: argparse.Namespace) -> None:
 
 
 def cmd_stop(args: argparse.Namespace) -> None:
-    with Lock():
-        doc = load_yaml()
+    with ProcessComposeLock(project=WEBAPPS_PROJECT):
+        doc = load_process_compose_yaml(project=WEBAPPS_PROJECT)
         entry = doc["processes"].get(args.slug)
         if entry is None:
             die(f"unknown app {args.slug!r}")
         entry["disabled"] = True
-        save_yaml(doc)
+        save_process_compose_yaml(project=WEBAPPS_PROJECT, doc=doc)
         regenerate_routes(doc)
-        project_update()
+        process_compose_project_update(project=WEBAPPS_PROJECT)
     print(f"webapps: {args.slug!r} stopped (URL now 404s).")
 
 
 def cmd_restart(args: argparse.Namespace) -> None:
-    with Lock():
-        doc = load_yaml()
+    with ProcessComposeLock(project=WEBAPPS_PROJECT):
+        doc = load_process_compose_yaml(project=WEBAPPS_PROJECT)
         if doc["processes"].get(args.slug) is None:
             die(f"unknown app {args.slug!r}")
-    pc("process", "restart", args.slug)
-    with Lock():
-        regenerate_routes(load_yaml())
+    run_process_compose("process", "restart", args.slug, project=WEBAPPS_PROJECT, check=True, capture=False)
+    with ProcessComposeLock(project=WEBAPPS_PROJECT):
+        regenerate_routes(load_process_compose_yaml(project=WEBAPPS_PROJECT))
     print(f"webapps: {args.slug!r} restarted.")
 
 
 def cmd_set_env(args: argparse.Namespace) -> None:
-    with Lock():
-        doc = load_yaml()
+    with ProcessComposeLock(project=WEBAPPS_PROJECT):
+        doc = load_process_compose_yaml(project=WEBAPPS_PROJECT)
         entry = doc["processes"].get(args.slug)
         if entry is None:
             die(f"unknown app {args.slug!r}")
@@ -181,8 +181,8 @@ def cmd_set_env(args: argparse.Namespace) -> None:
             k, v = kv.split("=", 1)
             env_map[k] = v
         entry["environment"] = [f"{k}={v}" for k, v in env_map.items()]
-        save_yaml(doc)
-        project_update()
+        save_process_compose_yaml(project=WEBAPPS_PROJECT, doc=doc)
+        process_compose_project_update(project=WEBAPPS_PROJECT)
     print(f"webapps: env updated for {args.slug!r}.")
 
 
@@ -190,18 +190,18 @@ def cmd_delete(args: argparse.Namespace) -> None:
     if not args.yes:
         die("delete requires --yes (this WILL also remove projects/<slug>/ and logs)")
 
-    with Lock():
-        doc = load_yaml()
+    with ProcessComposeLock(project=WEBAPPS_PROJECT):
+        doc = load_process_compose_yaml(project=WEBAPPS_PROJECT)
         if doc["processes"].pop(args.slug, None) is None:
             die(f"unknown app {args.slug!r}")
-        save_yaml(doc)
+        save_process_compose_yaml(project=WEBAPPS_PROJECT, doc=doc)
         regenerate_routes(doc)
-        project_update()
+        process_compose_project_update(project=WEBAPPS_PROJECT)
 
         log_path = LOGS_DIR / f"{args.slug}.log"
         if log_path.exists():
             log_path.unlink()
-        proj_path = PROJECTS_DIR / args.slug
+        proj_path = Path("/workspace/webapps/projects") / args.slug
         if proj_path.exists():
             shutil.rmtree(proj_path)
 

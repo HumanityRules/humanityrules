@@ -33,7 +33,7 @@ When the user asks you to create/clone the web app from a Git repository, clone 
   logs/<slug>.log                               # captured stdout/stderr
 
 /workspace/.config/process-compose/
-  process-compose.yaml                          # supervisor state — DO NOT EDIT BY HAND
+  webapps/process-compose.yaml                  # webapps supervisor state — DO NOT EDIT BY HAND
 
 /workspace/.config/caddy/
   routes.caddy                                  # generated routes — DO NOT EDIT BY HAND
@@ -95,7 +95,7 @@ Use the *exact host* from the CLI's output, with the trailing slash.
 
 ## Don'ts
 
-- **Don't edit `/workspace/.config/process-compose/process-compose.yaml` or `/workspace/.config/caddy/routes.caddy` by hand.** Use the CLI. Hand-edits will be clobbered.
+- **Don't edit `/workspace/.config/process-compose/webapps/process-compose.yaml` or `/workspace/.config/caddy/routes.caddy` by hand.** Use the CLI. Hand-edits will be clobbered.
 - **Don't pick a port manually.** Use `$WEBAPP_PORT` in `--command`. The CLI assigns ports.
 - **Don't claim success without verifying.** Run `webapps list` after `create`/`start` to confirm the app is `Ready`. If readiness times out, read the logs.
 - **Don't run `webapps delete <slug> --yes` without first telling the user what will be removed and getting explicit confirmation.** Delete is total: route, supervision, logs, AND `projects/<slug>/`.

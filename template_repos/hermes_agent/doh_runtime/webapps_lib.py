@@ -1,8 +1,9 @@
 """Shared helpers for the webapps mechanism.
 
-Imported by both the `webapps` CLI and the `__admin` webapp. Source of truth
-is /workspace/.config/process-compose/process-compose.yaml; routes.caddy is
-regenerated from it on every mutation. See docs/webapps_design.md.
+Imported by both the `webapps` CLI and the `__admin` webapp. Webapp source of
+truth is /workspace/.config/process-compose/webapps/process-compose.yaml;
+routes.caddy is regenerated from it on every mutation. See
+docs/webapps_design.md.
 
 User webapps live at <slug>.<agent-host> (Host-based Caddy routing). The
 per-agent ALB wildcard cert + Route 53 wildcard record + listener-rule host
@@ -26,25 +27,58 @@ import re
 import subprocess
 import sys
 import time
+from dataclasses import dataclass
 from pathlib import Path
 
 import yaml
 
-WEBAPPS_ROOT = Path("/workspace/webapps")
-PROCESS_COMPOSE_DIR = Path("/workspace/.config/process-compose")
-PROCESS_COMPOSE_YAML = PROCESS_COMPOSE_DIR / "process-compose.yaml"
-CADDY_CONFIG_DIR = Path("/workspace/.config/caddy")
-CADDY_ROUTES = CADDY_CONFIG_DIR / "routes.caddy"
-PROJECTS_DIR = WEBAPPS_ROOT / "projects"
-LOGS_DIR = WEBAPPS_ROOT / "logs"
-LOCK_FILE = PROCESS_COMPOSE_DIR / ".webapps.lock"
+
+@dataclass(frozen=True)
+class ProcessComposeProject:
+    name: str
+    config_dir: Path
+    port: str
+    lock_name: str
+    required_dirs: tuple[Path, ...]
+    route_file: Path | None
+
+    @property
+    def yaml_path(self) -> Path:
+        return self.config_dir / "process-compose.yaml"
+
+    @property
+    def lock_file(self) -> Path:
+        return self.config_dir / self.lock_name
+
+
+LOGS_DIR = Path("/workspace/webapps/logs")
 SYSTEM_SLUG_PREFIX = "system."
 
 PORT_MIN = 4000
 PORT_MAX = 4019
 PROCESS_COMPOSE_ADDR = "127.0.0.1"
-PROCESS_COMPOSE_PORT = "9956"
 DEFAULT_TIMEOUT_SECONDS = 90
+WEBAPPS_PROJECT = ProcessComposeProject(
+    name="webapps",
+    config_dir=Path("/workspace/.config/process-compose/webapps"),
+    port="9957",
+    lock_name=".webapps.lock",
+    required_dirs=(
+        Path("/workspace/webapps"),
+        Path("/workspace/webapps/projects"),
+        Path("/workspace/.config/caddy"),
+        LOGS_DIR,
+    ),
+    route_file=Path("/workspace/.config/caddy/routes.caddy"),
+)
+SYSTEM_PROJECT = ProcessComposeProject(
+    name="system",
+    config_dir=Path("/workspace/.config/process-compose/system"),
+    port="9956",
+    lock_name=".system.lock",
+    required_dirs=(LOGS_DIR,),
+    route_file=None,
+)
 # Optional `__` prefix marks platform-internal slugs (e.g. __admin). No
 # enforcement: bootstrap wins the cold-start race; agent attempts collide.
 # Internal slugs are routed by path (<host>/webapps/<slug>/); user slugs are
@@ -59,63 +93,66 @@ def die(msg: str, code: int = 1) -> None:
     sys.exit(code)
 
 
-def ensure_layout() -> None:
-    for p in (WEBAPPS_ROOT, PROJECTS_DIR, LOGS_DIR, PROCESS_COMPOSE_DIR, CADDY_CONFIG_DIR):
-        p.mkdir(parents=True, exist_ok=True)
-    if not PROCESS_COMPOSE_YAML.exists():
-        PROCESS_COMPOSE_YAML.write_text('version: "0.5"\nprocesses: {}\n')
-    if not CADDY_ROUTES.exists():
-        CADDY_ROUTES.write_text("# no routes\n")
+def ensure_process_compose_layout(project: ProcessComposeProject) -> None:
+    for path in (*project.required_dirs, project.config_dir):
+        path.mkdir(parents=True, exist_ok=True)
+    if not project.yaml_path.exists():
+        project.yaml_path.write_text('version: "0.5"\nprocesses: {}\n')
+    if project.route_file is not None and not project.route_file.exists():
+        project.route_file.write_text("# no routes\n")
 
 
-class Lock:
-    def __enter__(self):
-        ensure_layout()
-        self.fh = open(LOCK_FILE, "w")
+class ProcessComposeLock:
+    def __init__(self, project: ProcessComposeProject) -> None:
+        self.project = project
+
+    def __enter__(self) -> "ProcessComposeLock":
+        ensure_process_compose_layout(project=self.project)
+        self.fh = open(self.project.lock_file, "w")
         fcntl.flock(self.fh.fileno(), fcntl.LOCK_EX)
         return self
 
-    def __exit__(self, *_exc):
+    def __exit__(self, *_exc: object) -> None:
         fcntl.flock(self.fh.fileno(), fcntl.LOCK_UN)
         self.fh.close()
 
 
-def load_yaml() -> dict:
-    raw = yaml.safe_load(PROCESS_COMPOSE_YAML.read_text()) or {}
+def load_process_compose_yaml(project: ProcessComposeProject) -> dict:
+    raw = yaml.safe_load(project.yaml_path.read_text()) or {}
     raw.setdefault("version", "0.5")
     raw.setdefault("processes", {})
     return raw
 
 
-def save_yaml(doc: dict) -> None:
-    tmp = PROCESS_COMPOSE_YAML.with_suffix(".yaml.tmp")
+def save_process_compose_yaml(project: ProcessComposeProject, doc: dict) -> None:
+    tmp = project.yaml_path.with_suffix(".yaml.tmp")
     tmp.write_text(yaml.safe_dump(doc, sort_keys=False))
-    tmp.replace(PROCESS_COMPOSE_YAML)
+    tmp.replace(project.yaml_path)
 
 
-def pc(*args: str, check: bool = True, capture: bool = False) -> subprocess.CompletedProcess:
+def run_process_compose(*args: str, project: ProcessComposeProject, check: bool, capture: bool) -> subprocess.CompletedProcess:
     cmd = [
         "process-compose",
         "--address", PROCESS_COMPOSE_ADDR,
-        "--port", PROCESS_COMPOSE_PORT,
+        "--port", project.port,
         *args,
     ]
     return subprocess.run(cmd, check=check, capture_output=capture, text=True)
 
 
-def project_update() -> None:
-    pc("project", "update", "--config", str(PROCESS_COMPOSE_YAML))
+def process_compose_project_update(project: ProcessComposeProject) -> None:
+    run_process_compose("project", "update", "--config", str(project.yaml_path), project=project, check=True, capture=False)
 
 
-def process_states() -> list[dict]:
-    res = pc("list", "-o", "json", check=False, capture=True)
+def process_compose_states(project: ProcessComposeProject) -> list[dict]:
+    res = run_process_compose("list", "-o", "json", project=project, check=False, capture=True)
     if res.returncode != 0:
         die(f"process-compose list failed: {res.stderr.strip()}")
     return json.loads(res.stdout or "[]")
 
 
-def state_for(slug: str) -> dict | None:
-    return next((s for s in process_states() if s.get("name") == slug), None)
+def process_compose_state_for(project: ProcessComposeProject, slug: str) -> dict | None:
+    return next((s for s in process_compose_states(project=project) if s.get("name") == slug), None)
 
 
 def port_from_entry(entry: dict) -> int | None:
@@ -254,7 +291,10 @@ def regenerate_routes(doc: dict) -> None:
             blocks.append(route_block_internal(slug=slug, port=port, base_host=base_host))
         else:
             blocks.append(route_block_subhost(slug=slug, port=port, base_host=base_host))
-    CADDY_ROUTES.write_text("".join(blocks) if blocks else "# no routes\n")
+    route_file = WEBAPPS_PROJECT.route_file
+    if route_file is None:
+        die("webapps project is missing a Caddy routes file")
+    route_file.write_text("".join(blocks) if blocks else "# no routes\n")
 
 
 def is_routed(entry: dict) -> bool:
@@ -288,7 +328,7 @@ def make_process_entry(slug: str, command: str, cwd: str, port: int) -> dict:
 def wait_for_ready(slug: str, timeout: int) -> dict:
     deadline = time.time() + timeout
     while time.time() < deadline:
-        state = state_for(slug)
+        state = process_compose_state_for(project=WEBAPPS_PROJECT, slug=slug)
         if state is None:
             time.sleep(0.5)
             continue
@@ -297,7 +337,11 @@ def wait_for_ready(slug: str, timeout: int) -> dict:
         if state.get("status") == "Error":
             return state
         time.sleep(0.5)
-    return state_for(slug) or {"name": slug, "status": "unknown", "is_ready": "Unknown"}
+    return process_compose_state_for(project=WEBAPPS_PROJECT, slug=slug) or {
+        "name": slug,
+        "status": "unknown",
+        "is_ready": "Unknown",
+    }
 
 
 def url_for(slug: str) -> str:

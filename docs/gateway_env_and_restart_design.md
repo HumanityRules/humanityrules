@@ -96,12 +96,21 @@ providers (Telegram) keep it `True`. The same trigger covers connect
 empties it; the gateway either picks up the platform binding or boots
 without it.
 
-### Process supervision: one yaml for everything
+### Process supervision: split system and webapps projects
 
-Every DOH-supervised process inside nono lives in
-`/workspace/.config/process-compose/process-compose.yaml` —
-`__admin`, `system.gateway`, and any user webapps. Generated Caddy
-routes live alongside at `/workspace/.config/caddy/routes.caddy`.
+DOH-supervised processes inside nono are split across two
+process-compose daemons:
+
+1. `127.0.0.1:9956` reads
+   `/workspace/.config/process-compose/system/process-compose.yaml`
+   and supervises `system.gateway` plus `system.webui`.
+2. `127.0.0.1:9957` reads
+   `/workspace/.config/process-compose/webapps/process-compose.yaml`
+   and supervises `__admin` plus user webapps.
+
+Generated Caddy routes live at
+`/workspace/.config/caddy/routes.caddy` and are derived only from the
+webapps YAML.
 
 Naming:
 
@@ -110,9 +119,9 @@ Naming:
   `system.gateway`).
 - Everything else — user webapps.
 
-The `webapps` CLI rejects creating slugs starting with `system.` or
-`__`. System entries are seeded by `webui.sh` directly via
-`process_compose_seed.py`.
+The `webapps` CLI rejects creating slugs starting with `system.` and
+talks only to the webapps daemon. System entries are seeded by
+`webui.sh` directly via `system_process_compose_seed.py`.
 
 ### Failure surface
 
@@ -136,11 +145,14 @@ supervisor (root, outside nono):
   launch nono → webui.sh
 
 webui.sh (hermeswebui, inside nono):
-  seed layouts (webapps, caddy, process-compose dirs)
-  bootstrap_admin_webapp        (writes __admin into the YAML)
-  bootstrap_gateway_process     (writes system.gateway into the YAML)
-  start process-compose         (brings up __admin, system.gateway, user webapps)
-  start_webui / start_caddy
+  seed layouts (webapps, caddy, split process-compose dirs)
+  bootstrap_admin_webapp        (writes __admin into the webapps YAML)
+  bootstrap_gateway_process     (writes system.gateway into the system YAML)
+  bootstrap_webui_process       (writes system.webui into the system YAML)
+  start system process-compose  (brings up system.gateway + system.webui)
+  start webapps process-compose (brings up __admin + user webapps)
+  wait_for_webui
+  start_caddy
 ```
 
 ## Why not …
@@ -159,7 +171,9 @@ webui.sh (hermeswebui, inside nono):
   restart signal?** Two writers to the restart trigger, ordering
   ambiguity. The broker is the only component that observes the *event*
   in real time; signaling from anywhere else means polling.
-- **Why not two process-compose instances (system + webapps)?**
-  Considered; rejected. Single-daemon, single-port, single-YAML is
-  fewer moving parts. The `system.` prefix + CLI assertion is
-  sufficient guardrail against name collisions.
+- **Why split process-compose instances (system + webapps)?**
+  `process-compose project update` applies at daemon/project scope. If
+  webapp CRUD shares a project with `system.webui`, registering a webapp
+  can restart WebUI and interrupt an active chat stream. Splitting the
+  projects keeps the existing simple YAML + `project update` workflow for
+  webapps while constraining its blast radius to `__admin` and user apps.
