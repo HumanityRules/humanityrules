@@ -35,7 +35,6 @@ import yaml
 
 @dataclass(frozen=True)
 class ProcessComposeProject:
-    name: str
     config_dir: Path
     port: str
     lock_name: str
@@ -59,12 +58,10 @@ PORT_MAX = 4019
 PROCESS_COMPOSE_ADDR = "127.0.0.1"
 DEFAULT_TIMEOUT_SECONDS = 90
 WEBAPPS_PROJECT = ProcessComposeProject(
-    name="webapps",
     config_dir=Path("/workspace/.config/process-compose/webapps"),
     port="9957",
     lock_name=".webapps.lock",
     required_dirs=(
-        Path("/workspace/webapps"),
         Path("/workspace/webapps/projects"),
         Path("/workspace/.config/caddy"),
         LOGS_DIR,
@@ -72,7 +69,6 @@ WEBAPPS_PROJECT = ProcessComposeProject(
     route_file=Path("/workspace/.config/caddy/routes.caddy"),
 )
 SYSTEM_PROJECT = ProcessComposeProject(
-    name="system",
     config_dir=Path("/workspace/.config/process-compose/system"),
     port="9956",
     lock_name=".system.lock",
