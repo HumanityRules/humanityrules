@@ -1197,6 +1197,9 @@ class TestGatewayEnvRender(unittest.TestCase):
     def _google_provider(self) -> "broker.tls_intercept.TlsProviderSpec":
         return broker.tls_intercept.TLS_INTERCEPT_PROVIDERS["google"]
 
+    def _github_provider(self) -> "broker.tls_intercept.TlsProviderSpec":
+        return broker.tls_intercept.TLS_INTERCEPT_PROVIDERS["github"]
+
     def _slack_provider(self) -> "broker.tls_intercept.TlsProviderSpec":
         return broker.tls_intercept.TLS_INTERCEPT_PROVIDERS["slack"]
 
@@ -1237,10 +1240,17 @@ class TestGatewayEnvRender(unittest.TestCase):
         self.assertEqual(broker.tls_intercept.render_managed_block(snapshot=[]), "")
 
     def test_oauth_provider_contributes_no_env_lines(self) -> None:
-        """OAuth providers (Google, GitHub) don't activate gateway platforms."""
+        """Google stays env-free; its helper injects a subprocess-local sentinel."""
         snapshot = [(self._google_provider(), {"some_key": "some_value"})]
         block = broker.tls_intercept.render_managed_block(snapshot=snapshot)
         self.assertEqual(block, "")
+
+    def test_connected_github_renders_github_placeholder(self) -> None:
+        """GitHub env appears only through the connected-provider snapshot."""
+        snapshot = [(self._github_provider(), {})]
+        block = broker.tls_intercept.render_managed_block(snapshot=snapshot)
+        self.assertIn("GITHUB_TOKEN=DOH_PLACEHOLDER", block)
+        self.assertNotIn("COPILOT_GITHUB_TOKEN", block)
 
     def test_missing_list_config_skips_binding(self) -> None:
         """A connected provider without the optional list field omits its env var."""
@@ -1263,9 +1273,10 @@ class TestGatewayEnvRender(unittest.TestCase):
             )
             snapshot = [(self._telegram_provider(), {"allowed_users": [1]})]
             block = broker.tls_intercept.render_managed_block(snapshot=snapshot)
-            broker.tls_intercept.write_gateway_env_file(env_path=env_path, managed_block=block)
+            changed = broker.tls_intercept.write_gateway_env_file(env_path=env_path, managed_block=block)
             text = env_path.read_text(encoding="utf-8")
 
+        self.assertTrue(changed)
         self.assertIn("USER_KEY=keep-me", text)
         self.assertIn("ANOTHER=also-keep", text)
         self.assertNotIn("STALE_VAR=old-value", text)
@@ -1283,10 +1294,23 @@ class TestGatewayEnvRender(unittest.TestCase):
                 f"{broker.tls_intercept.GATEWAY_ENV_BLOCK_END}\n",
                 encoding="utf-8",
             )
-            broker.tls_intercept.write_gateway_env_file(env_path=env_path, managed_block="")
+            changed = broker.tls_intercept.write_gateway_env_file(env_path=env_path, managed_block="")
             text = env_path.read_text(encoding="utf-8")
 
+        self.assertTrue(changed)
         self.assertEqual(text, "USER_KEY=keep-me\n")
+
+    def test_write_identical_block_reports_no_change(self) -> None:
+        """The broker uses this to avoid unnecessary process restarts."""
+        with tempfile.TemporaryDirectory() as tmp:
+            env_path = pathlib.Path(tmp) / ".env"
+            snapshot = [(self._github_provider(), {})]
+            block = broker.tls_intercept.render_managed_block(snapshot=snapshot)
+            first_changed = broker.tls_intercept.write_gateway_env_file(env_path=env_path, managed_block=block)
+            second_changed = broker.tls_intercept.write_gateway_env_file(env_path=env_path, managed_block=block)
+
+        self.assertTrue(first_changed)
+        self.assertFalse(second_changed)
 
 
 class TestGatewayEnvHookIntegration(unittest.IsolatedAsyncioTestCase):
@@ -1351,6 +1375,19 @@ class TestGatewayEnvHookIntegration(unittest.IsolatedAsyncioTestCase):
         # None (Refresh-all) covers any vault provider in scope.
         self.assertTrue(broker._slug_requires_restart(slug=None, runtime=runtime))
 
+    async def test_processes_requiring_restart_separates_gateway_and_webui(self) -> None:
+        """Vault env restarts gateway; GitHub placeholder env restarts WebUI."""
+        runtime = self._make_runtime()
+        self.assertEqual(
+            broker._processes_requiring_restart(slug="telegram", runtime=runtime),
+            (broker.GATEWAY_PROCESS_NAME,),
+        )
+        self.assertEqual(
+            broker._processes_requiring_restart(slug="github", runtime=runtime),
+            (broker.WEBUI_PROCESS_NAME,),
+        )
+        self.assertEqual(broker._processes_requiring_restart(slug="google", runtime=runtime), ())
+
     async def test_per_slug_invalidate_refreshes_only_that_slug(self) -> None:
         """Slug-targeted invalidate must NOT fan out to disconnected providers.
 
@@ -1380,6 +1417,38 @@ class TestGatewayEnvHookIntegration(unittest.IsolatedAsyncioTestCase):
         # Exactly one DOH round-trip and only for the named slug, not one per provider.
         self.assertEqual(fetch_mock.call_count, 1)
         self.assertEqual(fetch_mock.call_args.kwargs["slugs"], ["google"])
+
+    async def test_github_invalidate_rewrites_env_and_restarts_webui(self) -> None:
+        """GitHub connect/disconnect reloads WebUI so provider env is re-read."""
+        runtime = self._make_runtime()
+        tls_runtime_holder: dict = {"runtime": runtime}
+        on_user_invalidate = broker._build_on_user_invalidate(
+            tls_runtime_holder=tls_runtime_holder,
+            env_path=self.env_path,
+            process_compose_url="http://127.0.0.1:9999",
+        )
+
+        with patch.object(
+            broker.tls_intercept,
+            "fetch_provider_tokens_batch",
+            return_value=_batched(slug="github", result=broker.tls_intercept.RefreshResult(
+                outcome=broker.tls_intercept.REFRESH_OUTCOME_HAS_TOKEN,
+                secrets={"access_token": "ghu_token"}, expires_in=3600, config={}, metadata={},
+            )),
+        ), patch.object(
+            broker,
+            "_post_process_compose_restart",
+            return_value=(200, "ok"),
+        ) as restart_mock:
+            await on_user_invalidate("github")
+
+        text = self.env_path.read_text(encoding="utf-8")
+        self.assertIn("GITHUB_TOKEN=DOH_PLACEHOLDER", text)
+        self.assertNotIn("COPILOT_GITHUB_TOKEN", text)
+        restart_mock.assert_called_once_with(
+            process_compose_url="http://127.0.0.1:9999",
+            process_name=broker.WEBUI_PROCESS_NAME,
+        )
 
     async def test_invalidate_all_uses_single_batched_call(self) -> None:
         """Explicit Refresh-all collapses to one DOH round-trip across every provider.

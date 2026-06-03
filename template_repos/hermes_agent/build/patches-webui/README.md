@@ -77,9 +77,9 @@ merge becomes a no-op.
 
 **Companion config:** `supervisor.sh` sets `providers.only_configured:
 false` for Bedrock deployments so the picker can also show factory-default
-groups that Hermes surfaces when `GITHUB_TOKEN` or other credentials look
-valid. Patch 03 is still required: `only_configured` does not stop Bedrock
-live discovery from inflating the Bedrock group itself.
+groups that Hermes surfaces when other credentials look valid. Patch 03 is
+still required: `only_configured` does not stop Bedrock live discovery from
+inflating the Bedrock group itself.
 
 ### `04-policy-proxy-reauth-url.patch`
 
@@ -111,18 +111,6 @@ materialised by an earlier save) keeps their preference. Fresh deploys
 get the new default. There is no env var knob for this in upstream,
 hence the patch.
 
-### `07-doh-broker-proxy.patch`
-
-**Target:** `api/routes.py` (`handle_get`, `handle_post`, broker proxy helper).
-
-**Problem:** The integrations WebUI extension needs a same-origin control
-surface for the loopback integrations broker. Calling the broker directly
-from the browser is impossible because it binds only to `127.0.0.1` inside
-the task.
-
-**Fix:** Add `/__doh_broker/*` as a WebUI reverse proxy to the broker's
-control API on `127.0.0.1:9951`.
-
 ### `08-doh-control-plane-csp-connect-src.patch`
 
 **Target:** `api/helpers.py` (`_security_headers`).
@@ -136,3 +124,16 @@ before CORS or DOH validation could run.
 **Fix:** Append the configured `DOH_CONTROL_PLANE_URL` origin to
 `connect-src`. The URL is non-secret and is passed into the WebUI process by
 the supervisor.
+
+### `09-doh-disable-copilot-model-provider.patch`
+
+**Target:** `api/routes.py` (`/api/models` response).
+
+**Problem:** DOH writes `GITHUB_TOKEN=DOH_PLACEHOLDER` only so terminal/git/gh
+children can send a sentinel through the integrations broker. Upstream WebUI
+also treats GitHub credentials or stale Copilot auth-store entries as Copilot
+model-provider auth, but the DOH GitHub integration cannot mint a Copilot API
+token.
+
+**Fix:** Remove Copilot groups from the `/api/models` response in the DOH
+WebUI build.

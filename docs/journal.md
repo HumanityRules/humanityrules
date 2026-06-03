@@ -1,5 +1,36 @@
 # DevOpsHero Development Journal
 
+## 2026-06-02 17:45 - [Integrations] GitHub credentials connect/disconnect re-architecture + connect-return UX
+
+**Conversation:** [2026-06-02-1747-7c76ff7b.md](conversations/2026-06-02-1747-7c76ff7b.md)
+
+Reviewed and refined a worktree change that makes the sandbox GitHub credentials (`GITHUB_TOKEN`) get **created on connect and removed on disconnect**, instead of being baked in unconditionally at container boot. Two intertwined threads: the runtime/broker re-architecture, and the WebUI connect-return UX.
+
+**Re-architecture (broker + webui.sh + tls_intercept).** The placeholder env is now connection-scoped: providers declare a `connected_env` tuple (GitHub → `GITHUB_TOKEN=DOH_PLACEHOLDER`), and `render_managed_block` emits those lines only for connected providers. `write_gateway_env_file` now returns whether contents changed, so the broker skips needless restarts. Restarts are split per-process: vault providers bounce `system.gateway`, `connected_env` providers bounce `system.webui`. WebUI moved under process-compose (`system.webui`) launched via the new `profile_env_exec.py`, which overlays `${HERMES_HOME}/.env` at every start — so the broker can restart just WebUI to re-read the placeholder env after connect/disconnect. The load-bearing enabler: the broker control API moved off the WebUI reverse-proxy onto a Caddy `/__doh_broker/*` route (deleted patch 07), so restarting WebUI mid-request no longer severs the disconnect/invalidate response.
+
+**Why patch 06 exists (the key investigation).** Confirmed against the pinned upstream (`v2026.5.29.2`) that `GITHUB_TOKEN` is blocked from terminal/execute_code children by three independent mechanisms (copilot's `api_key_env_vars`, `OPTIONAL_ENV_VARS` category=tool, and the `_SECRET_SUBSTRINGS` "TOKEN" rule), and that `env_passthrough` is *deliberately refused* for blocklisted credentials (GHSA-rhgp-j443-p4rf). **Crucial finding:** the original approach worked under the *previous* pin `v2026.5.7`, where `_load_config_passthrough` had no credential filter — the June-1 bump to `v2026.5.29.2` silently closed that hole, breaking `gh` and necessitating patch 06. Stock Hermes only makes `gh` work by having the user run `gh auth login` (writes a real token to `~/.config/gh/hosts.yml`) — exactly what DOH avoids. So a patch is unavoidable if we want `gh` with the on-the-wire swap model.
+
+**Patch 06 generalized.** Rewrote it to gate on the **value** (`DOH_PLACEHOLDER`) rather than a hardcoded variable-name list. Any env var whose value is exactly `DOH_PLACEHOLDER` passes through both scrubbers; real credentials never carry that value so they stay blocked. This decouples the patch from the provider set (no edit needed when providers change — e.g. the Copilot revert). Verified: strict `patch -p1 -F 0` dry-run applies clean, both files parse, behavioral tests confirm placeholder-valued vars pass and real secrets are blocked.
+
+**Copilot reverted** (kept the re-architecture). Dropped `COPILOT_GITHUB_TOKEN` from `connected_env` and patch 06; tests updated to assert its absence. Added patch 09 to disable the upstream Copilot model provider.
+
+**Connect-return UX (the long tail).** GitHub Connect is a full page reload: control plane → GitHub OAuth → 302 back to the integrations page with `?connected=github`. On return, the broker cache isn't primed (status is cache-only) AND connecting restarts `system.webui` — so the page reappeared with a stale "not connected" card and then blank logos (served by the rebooting WebUI). Iterated through several approaches with Victor:
+- Added a transition modal; debated opaque vs transparent backdrop (settled on transparent + blur — opaque/transparent flip-flopped as we understood the real problem).
+- Realized the true fix is **ordering, not occlusion**: render normally while WebUI is still up (logos load + browser-cache), THEN show the modal, THEN trigger the invalidate/reboot, wait for WebUI to serve again (`waitForWebui` polls our own stylesheet), and re-render once — the cached logos mean the re-render can't blank.
+- `waitForLogos` gates the reboot trigger on logos actually being cached first.
+- Modal shown first-thing on return (covers the panel-switch animation too), with a `requestAnimationFrame` yield so it paints before the synchronous render blocks the thread.
+- Kept the logo self-heal retry (cache-busted re-request on error) for the in-page Disconnect path, which re-renders during reboot with no modal gate.
+
+**Learnings / corrections.**
+- A "wait for WebUI up" probe right after invalidate false-positives on the still-alive *old* process (restart hasn't taken effect yet). Briefly tried down→up detection, but Victor's simpler call won: cache the logos *before* the reboot, then waiting-for-up is sufficient.
+- The "weird sideways animation" Victor saw is upstream's native panel-switch transition, only visible when coming *from* the workspace panel. Decided not to suppress it.
+
+**Key points:**
+- Connection-scoped placeholder env; per-process restart (gateway vs webui); broker moved to Caddy route so WebUI restart doesn't sever responses.
+- Patch 06 is unavoidable for `gh` (upstream blocks `GITHUB_TOKEN` 3 ways + refuses passthrough); the old approach only worked on the pre-bump Hermes pin.
+- Patch 06 now gates on the placeholder *value*, not variable names — provider-set-agnostic.
+- Connect-return UX fix is about render ordering: load+cache logos while WebUI is up → reboot → wait-for-up → single re-render.
+
 ## 2026-06-01 13:40 - [DevEx] Hermes local rebuild caching — layer order + BuildKit mounts
 
 **Conversation:** [2026-06-01-1340-ebe6d005.md](conversations/2026-06-01-1340-ebe6d005.md)

@@ -265,6 +265,44 @@ main.main.showing-integrations > #mainChat { display: none !important; }
   max-width: 520px;
 }
 
+/* Connect/disconnect waiting overlay: a floating dialog (spinner + centered
+   copy) over a transparent backdrop, so the page behind stays visible. The
+   backdrop still covers the viewport to block interaction. The page is NOT
+   re-rendered while this is up — we hold the existing view until the WebUI has
+   rebooted, then render once, so cards never paint against a down WebUI. */
+.doh-transition-backdrop {
+  background: rgba(0, 0, 0, 0.42);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+}
+
+.doh-transition-modal {
+  max-width: 360px;
+  text-align: center;
+}
+
+.doh-transition-modal .doh-modal-body {
+  margin-bottom: 0;
+}
+
+.doh-transition-spinner {
+  width: 28px;
+  height: 28px;
+  margin: 2px auto 14px;
+  border: 3px solid var(--border2);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: doh-transition-spin 0.8s linear infinite;
+}
+
+@keyframes doh-transition-spin {
+  to { transform: rotate(360deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .doh-transition-spinner { animation-duration: 2s; }
+}
+
 .doh-vault-form {
   display: flex;
   flex-direction: column;

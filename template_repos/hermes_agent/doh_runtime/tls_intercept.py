@@ -34,6 +34,7 @@ STATUS_NOT_CONNECTED = "not_connected"
 # Authorization header encodings used by OAuthHeader providers.
 AUTH_FORMAT_BEARER = "bearer"
 AUTH_FORMAT_BASIC_X_ACCESS_TOKEN = "basic_x_access_token"
+DOH_PLACEHOLDER_VALUE = "DOH_PLACEHOLDER"
 
 
 @dataclass(frozen=True)
@@ -63,6 +64,14 @@ class GatewayEnvBinding:
     env_var: str
     source: str
     list_separator: str | None = None
+
+
+@dataclass(frozen=True)
+class ConnectedEnvBinding:
+    """One static env var rendered only while the provider is connected."""
+
+    env_var: str
+    value: str
 
 
 @dataclass(frozen=True)
@@ -129,6 +138,7 @@ class TlsProviderSpec:
     hosts: tuple[str, ...]
     logo_url: str
     credential_method: CredentialMethod
+    connected_env: tuple[ConnectedEnvBinding, ...]
 
 
 @dataclass(frozen=True)
@@ -228,6 +238,7 @@ TLS_INTERCEPT_PROVIDER_SPECS = (
         ),
         logo_url="/extensions/google-workspace.svg",
         credential_method=OAuthHeader(auth_format=AUTH_FORMAT_BEARER),
+        connected_env=(),
     ),
     TlsProviderSpec(
         slug="github",
@@ -243,6 +254,9 @@ TLS_INTERCEPT_PROVIDER_SPECS = (
         ),
         logo_url="/extensions/github.svg",
         credential_method=OAuthHeader(auth_format=AUTH_FORMAT_BASIC_X_ACCESS_TOKEN),
+        connected_env=(
+            ConnectedEnvBinding(env_var="GITHUB_TOKEN", value=DOH_PLACEHOLDER_VALUE),
+        ),
     ),
     TlsProviderSpec(
         slug="telegram",
@@ -256,6 +270,7 @@ TLS_INTERCEPT_PROVIDER_SPECS = (
                 GatewayEnvBinding(env_var="TELEGRAM_ALLOWED_USERS", source="allowed_users", list_separator=","),
             ),
         ),
+        connected_env=(),
     ),
     TlsProviderSpec(
         slug="slack",
@@ -280,8 +295,10 @@ TLS_INTERCEPT_PROVIDER_SPECS = (
                 # binding renders only when its config key is present.
                 GatewayEnvBinding(env_var="SLACK_ALLOW_ALL_USERS", source="allow_all_users"),
                 GatewayEnvBinding(env_var="SLACK_ALLOWED_USERS", source="allowed_users", list_separator=","),
+                GatewayEnvBinding(env_var="SLACK_HOME_CHANNEL", source="home_channel"),
             ),
         ),
+        connected_env=(),
     ),
 )
 
@@ -449,18 +466,23 @@ def _render_gateway_env_lines(provider: TlsProviderSpec, method: "VaultUrlRewrit
     return lines
 
 
+def _render_connected_env_lines(provider: TlsProviderSpec) -> list[str]:
+    """Project provider-level connected env bindings into KEY=VALUE lines."""
+    return [f"{binding.env_var}={binding.value}" for binding in provider.connected_env]
+
+
 def render_managed_block(snapshot: list[tuple[TlsProviderSpec, dict]]) -> str:
-    """Render the gateway env managed block from a token-store snapshot.
+    """Render the profile env managed block from a token-store snapshot.
 
     The snapshot lists only connected providers (cache presence == connected,
-    by the token-store contract). Each tuple is `(provider, config)`. Only
-    vault credential methods (`VaultUrlRewrite`, `VaultHeaderInject`) carry
-    `gateway_env` bindings, so they're the only ones that produce lines here;
-    if an OAuth provider ever needs to surface env vars to the gateway, we'll
-    need a different way to signal "this provider has gateway env to render".
+    by the token-store contract). Each tuple is `(provider, config)`. Provider
+    `connected_env` bindings are static placeholders surfaced to WebUI/CLI
+    processes; vault credential methods additionally project `gateway_env`
+    bindings for gateway platform activation.
     """
     body_lines: list[str] = []
     for provider, config in snapshot:
+        body_lines.extend(_render_connected_env_lines(provider=provider))
         method = provider.credential_method
         if not isinstance(method, (VaultUrlRewrite, VaultHeaderInject)):
             continue
@@ -470,16 +492,18 @@ def render_managed_block(snapshot: list[tuple[TlsProviderSpec, dict]]) -> str:
     return "\n".join([GATEWAY_ENV_BLOCK_BEGIN, *body_lines, GATEWAY_ENV_BLOCK_END]) + "\n"
 
 
-def write_gateway_env_file(env_path: Path, managed_block: str) -> None:
+def write_gateway_env_file(env_path: Path, managed_block: str) -> bool:
     """Replace the DOH-managed block in `env_path` atomically.
 
     Lines outside the sentinels (user/onboarding-set keys) are preserved.
-    Empty managed block (no vault providers connected) strips the sentinels
-    entirely.
+    Empty managed block strips the sentinels entirely. Returns true when the
+    file contents changed.
     """
+    old_contents = ""
     existing_lines: list[str] = []
     if env_path.exists():
-        existing_lines = env_path.read_text(encoding="utf-8").splitlines()
+        old_contents = env_path.read_text(encoding="utf-8")
+        existing_lines = old_contents.splitlines()
     preserved: list[str] = []
     in_block = False
     for line in existing_lines:
@@ -502,10 +526,13 @@ def write_gateway_env_file(env_path: Path, managed_block: str) -> None:
             parts.append("\n")
         parts.append(managed_block)
     new_contents = "".join(parts)
+    if new_contents == old_contents:
+        return False
     env_path.parent.mkdir(parents=True, exist_ok=True)
     tmp_path = env_path.with_suffix(env_path.suffix + ".tmp")
     tmp_path.write_text(new_contents, encoding="utf-8")
     os.replace(tmp_path, env_path)
+    return True
 
 
 def _cache_entry_from_connected_result(result: RefreshResult, now: float) -> _TokenCacheEntry:

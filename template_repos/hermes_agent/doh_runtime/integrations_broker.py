@@ -7,7 +7,7 @@ Runs as a supervisor-managed sidecar process. It starts:
    by `tls_intercept.TlsInterceptRuntime`.
 
 2. The integrations control API on 127.0.0.1:9951, reached same-origin by the
-   WebUI extension via the /__doh_broker/* reverse-proxy patch. This API owns
+   WebUI extension via Caddy's /__doh_broker/* route. This API owns
    the unified browser-facing integration status surface and mounts the
    MCP-aggregator management routes under /integrations.
 
@@ -60,6 +60,7 @@ DEFAULT_MCP_PERSISTENT_DIR = Path("/hermes-persistent-root/mcp-aggregator")
 DEFAULT_GATEWAY_ENV_PATH = Path("/workspace/.hermes/.env")
 DEFAULT_PROCESS_COMPOSE_URL = "http://127.0.0.1:9956"
 GATEWAY_PROCESS_NAME = "system.gateway"
+WEBUI_PROCESS_NAME = "system.webui"
 _TRUE_ENV_VALUES = frozenset({"1", "true", "yes", "on"})
 _FALSE_ENV_VALUES = frozenset({"0", "false", "no", "off"})
 
@@ -256,7 +257,7 @@ def _post_control_plane_json(control_plane_url: str, bearer: str, path: str, pay
 
 
 def _post_process_compose_restart(process_compose_url: str, process_name: str) -> tuple[int, str]:
-    """Tell process-compose's REST API to restart the gateway entry."""
+    """Tell process-compose's REST API to restart one entry."""
     url = f"{process_compose_url.rstrip('/')}/process/restart/{process_name}"
     req = urllib.request.Request(url=url, method="POST")
     try:
@@ -273,15 +274,16 @@ def _post_process_compose_restart(process_compose_url: str, process_name: str) -
         return 502, str(exc)
 
 
-async def _render_gateway_env_file(
-    tls_runtime: tls_intercept.TlsInterceptRuntime,
-    env_path: Path,
-) -> None:
-    """Write the DOH-managed block of the gateway env file from current cache state."""
+async def _render_gateway_env_file(tls_runtime: tls_intercept.TlsInterceptRuntime, env_path: Path) -> bool:
+    """Write the DOH-managed profile env block from current cache state."""
     snapshot = await tls_runtime.gateway_env_snapshot()
     block = tls_intercept.render_managed_block(snapshot=snapshot)
-    await asyncio.to_thread(tls_intercept.write_gateway_env_file, env_path, block)
-    logger.info("rewrote gateway env at %s (%d bytes)", env_path, len(block))
+    changed = await asyncio.to_thread(tls_intercept.write_gateway_env_file, env_path=env_path, managed_block=block)
+    if changed:
+        logger.info("rewrote managed env at %s (%d bytes)", env_path, len(block))
+    else:
+        logger.info("managed env unchanged at %s", env_path)
+    return changed
 
 
 async def _bootstrap_gateway_env(
@@ -316,23 +318,34 @@ def _build_on_user_invalidate(
             await runtime.refresh_all()
         else:
             await runtime.refresh_slug(slug=slug)
-        await _render_gateway_env_file(tls_runtime=runtime, env_path=env_path)
-        if not _slug_requires_restart(slug=slug, runtime=runtime):
+        env_changed = await _render_gateway_env_file(tls_runtime=runtime, env_path=env_path)
+        if not env_changed:
             return
-        status, body = await asyncio.to_thread(
-            _post_process_compose_restart,
-            process_compose_url,
-            GATEWAY_PROCESS_NAME,
-        )
-        if not (200 <= status < 300):
-            logger.error("gateway restart returned %d: %s", status, body)
-            raise RuntimeError(
-                f"gateway restart failed (process-compose returned {status}); "
-                f"please redeploy the app to apply the new credentials"
+        for process_name in _processes_requiring_restart(slug=slug, runtime=runtime):
+            status, body = await asyncio.to_thread(
+                _post_process_compose_restart,
+                process_compose_url=process_compose_url,
+                process_name=process_name,
             )
-        logger.info("gateway restart kicked off after invalidate(slug=%s)", slug)
+            if not (200 <= status < 300):
+                logger.error("%s restart returned %d: %s", process_name, status, body)
+                raise RuntimeError(
+                    f"{process_name} restart failed (process-compose returned {status}); "
+                    f"please redeploy the app to apply the new credentials"
+                )
+            logger.info("%s restart kicked off after invalidate(slug=%s)", process_name, slug)
 
     return on_user_invalidate
+
+
+def _processes_requiring_restart(slug: str | None, runtime: tls_intercept.TlsInterceptRuntime) -> tuple[str, ...]:
+    """Return process-compose entries that must reload after provider state changes."""
+    processes: list[str] = []
+    if _slug_requires_restart(slug=slug, runtime=runtime):
+        processes.append(GATEWAY_PROCESS_NAME)
+    if _slug_requires_webui_restart(slug=slug, runtime=runtime):
+        processes.append(WEBUI_PROCESS_NAME)
+    return tuple(processes)
 
 
 def _slug_requires_restart(slug: str | None, runtime: tls_intercept.TlsInterceptRuntime) -> bool:
@@ -350,6 +363,17 @@ def _slug_requires_restart(slug: str | None, runtime: tls_intercept.TlsIntercept
     if spec is None:
         return False
     return spec.credential_method.restart_required_after_save
+
+
+def _slug_requires_webui_restart(slug: str | None, runtime: tls_intercept.TlsInterceptRuntime) -> bool:
+    """Restart WebUI when a touched provider contributes process env lines."""
+    providers = runtime._token_store._providers
+    if slug is None:
+        return any(spec.connected_env for spec in providers.values())
+    spec = providers.get(slug)
+    if spec is None:
+        return False
+    return bool(spec.connected_env)
 
 
 def _require_env(name: str) -> str:
@@ -415,10 +439,10 @@ async def _run(
         on_user_invalidate=on_user_invalidate,
     )
     tls_runtime_holder["runtime"] = tls_runtime
-    # Render the gateway env file from current DOH state before opening the
+    # Render the managed profile env file from current DOH state before opening the
     # control port. supervisor.sh's wait_for_port on the control port doubles
     # as the synchronization point: by the time it returns, the file is on
-    # disk and webui.sh can launch the gateway with current credentials.
+    # disk and webui.sh can launch process-compose children with current env.
     await _bootstrap_gateway_env(tls_runtime=tls_runtime, env_path=gateway_env_path)
 
     loop = asyncio.get_running_loop()
