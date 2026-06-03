@@ -23,7 +23,7 @@ export MIX_OS_CONCURRENCY_LOCK=0
 Same problem, no env-var off-switch. Replace its compiled BEAM with a no-op once after `brew install elixir`:
 
 ```bash
-pubsub=/home/linuxbrew/.linuxbrew/opt/elixir/lib/elixir/lib/mix/ebin/Elixir.Mix.PubSub.beam
+pubsub="${HOMEBREW_PREFIX}/opt/elixir/lib/elixir/lib/mix/ebin/Elixir.Mix.PubSub.beam"
 [ -f "$pubsub.orig" ] || cp "$pubsub" "$pubsub.orig"
 ```
 

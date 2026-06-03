@@ -34,6 +34,7 @@ export AWS_EC2_METADATA_DISABLED=true
 : "${HERMES_WEBUI_PYTHON:?HERMES_WEBUI_PYTHON must be set}"
 : "${HERMES_WEBUI_SKIP_ONBOARDING:?HERMES_WEBUI_SKIP_ONBOARDING must be set}"
 : "${HERMES_WEBUI_STATE_DIR:?HERMES_WEBUI_STATE_DIR must be set}"
+: "${HOMEBREW_PREFIX:?HOMEBREW_PREFIX must be set}"
 
 INTEGRATIONS_BROKER_CA_DIR="${DOH_RUN_DIR}/integrations-broker/ca"
 INTEGRATIONS_BROKER_PRIVATE_DIR="${DOH_RUN_DIR}/integrations-broker/private"
@@ -281,7 +282,7 @@ run_in_nono() {
         )
     fi
 
-    local doh_login_path="${HERMES_WEBUI_DEFAULT_WORKSPACE}/.venv/bin:${DOH_BIN_DIR}:/home/linuxbrew/.linuxbrew/bin:/home/linuxbrew/.linuxbrew/sbin:/usr/local/bin:/usr/local/sbin:/usr/bin:/usr/sbin:/bin:/sbin"
+    local doh_login_path="${HERMES_WEBUI_DEFAULT_WORKSPACE}/.venv/bin:${DOH_BIN_DIR}:${HOMEBREW_PREFIX}/bin:${HOMEBREW_PREFIX}/sbin:/usr/local/bin:/usr/local/sbin:/usr/bin:/usr/sbin:/bin:/sbin"
 
     # Drop privileges to hermeswebui before launching the sandbox so the LLM,
     # terminal, and execute_code all run as UID 1024. Combined with nono's
