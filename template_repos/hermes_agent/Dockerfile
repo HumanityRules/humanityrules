@@ -146,6 +146,9 @@ RUN mkdir -p /home/linuxbrew && chown hermeswebui:hermeswebui /home/linuxbrew
 
 USER hermeswebui
 
+# Build the image-owned WebUI/Hermes venv. Install the local Hermes Agent
+# project (${HERMES_WEBUI_AGENT_DIR}/pyproject.toml) with DOH-selected extras
+# (${HERMES_AGENT_EXTRAS}) into this venv.
 RUN --mount=type=cache,target=/uv_cache,uid=1024,gid=1024 \
     cd "$HERMES_WEBUI_DIR" \
     && export UV_CACHE_DIR=/uv_cache \
