@@ -11,9 +11,13 @@ set -euo pipefail
 #
 # If a direct child exits, we kill the others and exit.
 
+: "${DOH_RUNTIME_DIR:?DOH_RUNTIME_DIR must be set}"
 : "${HERMES_HOME:?HERMES_HOME must be set}"
+: "${AWS_DEFAULT_REGION:?AWS_DEFAULT_REGION must be set}"
 : "${HERMES_WEBUI_AGENT_DIR:?HERMES_WEBUI_AGENT_DIR must be set}"
+: "${HERMES_WEBUI_DEFAULT_WORKSPACE:?HERMES_WEBUI_DEFAULT_WORKSPACE must be set}"
 : "${HERMES_WEBUI_DIR:?HERMES_WEBUI_DIR must be set}"
+: "${HERMES_WEBUI_EXTENSION_DIR:?HERMES_WEBUI_EXTENSION_DIR must be set}"
 : "${HERMES_WEBUI_PORT:?HERMES_WEBUI_PORT must be set}"
 : "${HERMES_WEBUI_PYTHON:?HERMES_WEBUI_PYTHON must be set}"
 
@@ -28,6 +32,12 @@ set -euo pipefail
 export API_SERVER_ENABLED=true
 export API_SERVER_KEY=doh-loopback-gateway-key
 
+# Point the WebUI at our extension bundle. EXTENSIONS.md-compliant same-origin
+# URLs — the upstream static handler serves $HERMES_WEBUI_EXTENSION_DIR under
+# /extensions/.
+export HERMES_WEBUI_EXTENSION_SCRIPT_URLS="/extensions/doh-integrations.js,/extensions/doh-webapps.js"
+export HERMES_WEBUI_EXTENSION_STYLESHEET_URLS="/extensions/doh-integrations.css,/extensions/doh-webapps.css"
+
 CADDY_PORT=8787
 SYSTEM_PROCESS_COMPOSE_PORT=9956
 WEBAPPS_PROCESS_COMPOSE_PORT=9957
@@ -39,6 +49,11 @@ CADDY_PID=""
 SYSTEM_PROCESS_COMPOSE_PID=""
 WEBAPPS_PROCESS_COMPOSE_PID=""
 
+die() {
+    echo "FATAL: $*" >&2
+    exit 1
+}
+
 cleanup() {
     set +e
     for pid in "$SYSTEM_PROCESS_COMPOSE_PID" "$WEBAPPS_PROCESS_COMPOSE_PID" "$CADDY_PID"; do
@@ -49,6 +64,11 @@ cleanup() {
 }
 
 trap cleanup EXIT INT TERM
+
+sandbox_seed() {
+    "$HERMES_WEBUI_PYTHON" "${DOH_RUNTIME_DIR}/sandbox_seed.py" \
+        || die "failed to seed sandbox runtime state"
+}
 
 start_system_process_compose() {
     echo "[webui] Starting system process-compose on 127.0.0.1:${SYSTEM_PROCESS_COMPOSE_PORT}..."
@@ -145,6 +165,7 @@ wait_for_webui() {
 }
 
 main() {
+    sandbox_seed
     bootstrap_admin_webapp
     bootstrap_gateway_process
     bootstrap_webui_process

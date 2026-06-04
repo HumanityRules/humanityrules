@@ -95,10 +95,7 @@ wait_for_port() {
 }
 
 start_aws_signer() {
-    # DOH-owned streaming SigV4 proxy. Replaces aws-sigv4-proxy + haproxy —
-    # those buffer the full response body before flushing, which breaks
-    # Bedrock event-stream (see awslabs/aws-sigv4-proxy#250). Runs outside
-    # nono so credentials stay out of the sandboxed Hermes process.
+    # DOH-owned streaming SigV4 proxy
     "$HERMES_WEBUI_PYTHON" "${DOH_RUNTIME_DIR}/aws_signer.py" --region "$AWS_DEFAULT_REGION" &
     AWS_SIGNER_PID=$!
     wait_for_port "$AWS_STS_PORT"             "$AWS_SIGNER_PID" "aws-signer"
@@ -132,61 +129,6 @@ start_integrations_broker() {
     wait_for_port "$MCP_AGGREGATOR_PORT" "$INTEGRATIONS_BROKER_PID" "mcp-aggregator"
 }
 
-export_webui_extension_env() {
-    # Point the WebUI at our extension bundle. EXTENSIONS.md-compliant same-origin
-    # URLs — the upstream static handler serves $HERMES_WEBUI_EXTENSION_DIR under
-    # /extensions/. These three vars are in the nono profile's allow_vars.
-    export HERMES_WEBUI_EXTENSION_SCRIPT_URLS="/extensions/doh-integrations.js,/extensions/doh-webapps.js"
-    export HERMES_WEBUI_EXTENSION_STYLESHEET_URLS="/extensions/doh-integrations.css,/extensions/doh-webapps.css"
-}
-
-write_child_aws_config() {
-    mkdir -p "${HERMES_WEBUI_DEFAULT_WORKSPACE}/.aws"
-    cat > "${HERMES_WEBUI_DEFAULT_WORKSPACE}/.aws/config" <<EOF
-[default]
-region = ${AWS_DEFAULT_REGION}
-services = hermes-nono-endpoints
-
-[services hermes-nono-endpoints]
-sts =
-  endpoint_url = http://127.0.0.1:${AWS_STS_PORT}
-
-bedrock =
-  endpoint_url = http://127.0.0.1:${AWS_BEDROCK_PORT}
-
-bedrock_runtime =
-  endpoint_url = http://127.0.0.1:${AWS_BEDROCK_RUNTIME_PORT}
-
-cost_explorer =
-  endpoint_url = http://127.0.0.1:${AWS_CE_PORT}
-EOF
-
-    cat > "${HERMES_WEBUI_DEFAULT_WORKSPACE}/.aws/credentials" <<'EOF'
-[default]
-aws_access_key_id = dummy
-aws_secret_access_key = dummy
-EOF
-}
-
-write_providers_block() {
-    local providers_block_file="$1"
-
-    if [ "$DOH_LLM_PROVIDER" = "bedrock" ]; then
-        cat > "$providers_block_file" <<'EOF'
-providers:
-  only_configured: false
-  bedrock:
-    models:
-      'us.anthropic.claude-opus-4-7': "Opus 4.7"
-      'us.anthropic.claude-sonnet-4-6': "Sonnet 4.6"
-      'us.anthropic.claude-haiku-4-5-20251001-v1:0': "Haiku 4.5"
-EOF
-        return
-    fi
-
-    echo "providers: {}" > "$providers_block_file"
-}
-
 render_hermes_config() {
     local doh_llm_base_url="${DOH_LLM_BASE_URL:-}"
     local doh_aux_provider="${DOH_AUX_PROVIDER:-$DOH_LLM_PROVIDER}"
@@ -198,8 +140,22 @@ render_hermes_config() {
         doh_llm_base_url="https://bedrock-runtime.${AWS_DEFAULT_REGION}.amazonaws.com"
     fi
 
+    mkdir -p "$HERMES_HOME"
+
     providers_block_file=$(mktemp)
-    write_providers_block "$providers_block_file"
+    if [ "$DOH_LLM_PROVIDER" = "bedrock" ]; then
+        cat > "$providers_block_file" <<'EOF'
+providers:
+  only_configured: false
+  bedrock:
+    models:
+      'us.anthropic.claude-opus-4-7': "Opus 4.7"
+      'us.anthropic.claude-sonnet-4-6': "Sonnet 4.6"
+      'us.anthropic.claude-haiku-4-5-20251001-v1:0': "Haiku 4.5"
+EOF
+    else
+        echo "providers: {}" > "$providers_block_file"
+    fi
 
     sed \
         -e "s|__CONFIG_PROVIDER__|${DOH_LLM_PROVIDER}|g" \
@@ -223,33 +179,9 @@ EOF
     fi
 }
 
-ensure_user_runtime_dirs() {
-    mkdir -p "$HERMES_HOME" "$HERMES_WEBUI_DEFAULT_WORKSPACE" "${HERMES_HOME}/skills" "$DOH_RUN_DIR"
-    if [ -f /opt/hermes/SOUL.md ] && [ ! -f "$HERMES_HOME/SOUL.md" ]; then
-        cp /opt/hermes/SOUL.md "$HERMES_HOME/SOUL.md"
-    fi
-}
-
-seed_codex_placeholder() {
-    # Credential model A: when Codex is the LLM backend, Hermes won't emit a
-    # request unless auth.json already holds a codex token, but the *real* token
-    # lives outside the sandbox (the broker swaps it onto the wire). Seed a
-    # non-JWT sentinel so the gateway boots; it reads as never-expiring, so
-    # Hermes never self-refreshes it. Runs before chown_sandbox_paths so the
-    # store (mode 0600) gets handed to hermeswebui with everything else.
-    # Idempotent — the helper leaves any already-present token untouched.
-    if [ "$DOH_LLM_PROVIDER" != "openai-codex" ]; then
-        return
-    fi
-    HERMES_HOME="$HERMES_HOME" "$HERMES_WEBUI_PYTHON" "${DOH_RUNTIME_DIR}/seed_codex_placeholder.py" \
-        || die "failed to seed codex placeholder token"
-}
-
-chown_sandbox_paths() {
-    # The sandbox runs as hermeswebui (see run_in_nono). Everything we wrote
-    # above ran as root, so hand the paths the sandbox needs to read or write
-    # to hermeswebui. The integrations broker's CA bundle stays root-owned but
-    # is mode 0644 (see tls_intercept._write_bundle), so no chown needed there.
+ensure_workspace_ownership() {
+    # Root renders config.yaml and may bootstrap broker-managed .env before
+    # sandbox entry; keep /workspace as the hermeswebui-owned mutable surface.
     chown -R hermeswebui:hermeswebui "$HERMES_WEBUI_DEFAULT_WORKSPACE"
 }
 
@@ -297,10 +229,9 @@ run_in_nono() {
     # (hermes-agent tools/code_execution_tool.py:_resolve_child_python).
     # Only env vars set/transformed here go through /usr/bin/env. Plain
     # pass-throughs (AWS_DEFAULT_REGION, AWS_EC2_METADATA_DISABLED,
-    # HERMES_WEBUI_HOST, HERMES_WEBUI_PORT, DOH_CONTROL_PLANE_URL,
-    # HERMES_WEBUI_* extension vars,
-    # ...) trickle via nono's allow_vars instead — exported earlier in this
-    # script or inherited from the ECS task definition.
+    # HERMES_WEBUI_HOST, HERMES_WEBUI_PORT, DOH_CONTROL_PLANE_URL, ...)
+    # trickle via nono's allow_vars instead — exported earlier in this script
+    # or inherited from the ECS task definition.
     runuser -u hermeswebui -- "$DOH_BIN_DIR/nono" "${nono_args[@]}" -- /usr/bin/env \
         ANTHROPIC_BEDROCK_BASE_URL="http://127.0.0.1:${AWS_BEDROCK_RUNTIME_PORT}" \
         HOME="$HERMES_WEBUI_DEFAULT_WORKSPACE" \
@@ -316,22 +247,17 @@ main() {
     require_llm_config
     require_aws_region
 
-    # === Stage 1: root setup. Render configs, start the credential-holding
-    # daemons (aws_signer, integrations_broker) — these stay root so the LLM
-    # can never read their /proc/<pid>/environ. Anything written here that the
-    # sandbox needs to read is chowned to hermeswebui in Stage 2 prep.
-    ensure_user_runtime_dirs
+    # === Stage 1: root setup. Render deployment config and start the
+    # credential-holding daemons (aws_signer, integrations_broker) — these stay
+    # root so the LLM can never read their /proc/<pid>/environ.
     render_hermes_config
-    seed_codex_placeholder
     start_aws_signer
-    write_child_aws_config
     start_integrations_broker
-    export_webui_extension_env
+    ensure_workspace_ownership
 
-    # === Stage 2: prep + launch the sandbox. supervisor stays root (it owns
-    # the daemons started above), but everything inside nono runs as
-    # hermeswebui — see run_in_nono.
-    chown_sandbox_paths
+    # === Stage 2: launch the sandbox. supervisor stays root (it owns the
+    # daemons started above), but everything inside nono runs as hermeswebui —
+    # see run_in_nono.
     run_in_nono "$@" &
     NONO_PID=$!
     wait "$NONO_PID"

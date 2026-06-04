@@ -90,25 +90,6 @@ RUN { \
       echo 'export PATH="${DOH_LOGIN_PATH:-/opt/doh/bin:${HOMEBREW_PREFIX}/bin:${HOMEBREW_PREFIX}/sbin:/usr/local/bin:/usr/local/sbin:/usr/bin:/usr/sbin:/bin:/sbin}"'; \
     } > /etc/profile.d/doh-bin.sh
 
-# System-wide git config: route github.com authentication through a
-# placeholder credential helper. Git Basic-encodes the placeholder
-# password and sends it via HTTPS_PROXY (set in supervisor.sh) to the
-# integrations broker, which terminates TLS, looks up the user's real
-# GitHub token from DOH, swaps the Authorization header, and forwards.
-# The placeholder string never reaches GitHub, and no real token ever
-# lives inside the sandbox — `cat /etc/gitconfig` and
-# `/proc/<pid>/environ` only ever show this placeholder.
-#
-# Only github.com is needed: git smart-HTTP only ever talks to github.com.
-# api.github.com and codeload.github.com are reached via curl/REST, not
-# git, and the broker handles authentication for those independently
-# (curl/REST callers must send the Authorization header themselves; the
-# broker swaps whatever placeholder is there).
-RUN { \
-      echo "[credential \"https://github.com\"]"; \
-      echo "    helper = \"!f(){ echo username=x-access-token; echo password=DOH_PLACEHOLDER; }; f\""; \
-    } >> /etc/gitconfig
-
 COPY --chmod=755 build/prune-skills.sh /tmp/prune-skills.sh
 COPY --chmod=755 build/apply-patches.py /tmp/apply-patches.py
 
@@ -212,7 +193,7 @@ RUN chmod +x /opt/doh/runtime/webapps \
     && ln -sf /opt/doh/runtime/webapps /opt/doh/bin/webapps
 
 # DOH-owned WebUI extension bundle. Loaded by Hermes WebUI per docs/EXTENSIONS.md
-# when the three HERMES_WEBUI_EXTENSION_* env vars are set (see supervisor.sh).
+# when the HERMES_WEBUI_EXTENSION_* env vars are set (see webui.sh).
 # The sandbox reads this directory so the WebUI can serve the extension bundle.
 COPY webui-extension /opt/doh/webui-extension
 
