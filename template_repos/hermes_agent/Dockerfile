@@ -84,10 +84,10 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
 # session snapshot uses `bash -l`, so this drop-in restores the supervisor's
 # DOH_LOGIN_PATH after /etc/profile runs. The fallback (used when a login
 # shell isn't descended from supervisor.sh — e.g. ECS Exec sessions debugging
-# the container) keeps brew, doh-bin, and system bins reachable so basic
-# tools still work.
+# the container) keeps Hermes CLI, brew, doh-bin, and system bins reachable so
+# basic tools still work.
 RUN { \
-      echo 'export PATH="${DOH_LOGIN_PATH:-/opt/doh/bin:${HOMEBREW_PREFIX}/bin:${HOMEBREW_PREFIX}/sbin:/usr/local/bin:/usr/local/sbin:/usr/bin:/usr/sbin:/bin:/sbin}"'; \
+      echo 'export PATH="${DOH_LOGIN_PATH:-/opt/hermes/webui/venv/bin:/opt/doh/bin:${HOMEBREW_PREFIX}/bin:${HOMEBREW_PREFIX}/sbin:/usr/local/bin:/usr/local/sbin:/usr/bin:/usr/sbin:/bin:/sbin}"'; \
     } > /etc/profile.d/doh-bin.sh
 
 COPY --chmod=755 build/prune-skills.sh /tmp/prune-skills.sh

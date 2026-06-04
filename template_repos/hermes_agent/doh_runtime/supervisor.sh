@@ -214,7 +214,7 @@ run_in_nono() {
         )
     fi
 
-    local doh_login_path="${HERMES_WEBUI_DEFAULT_WORKSPACE}/.venv/bin:${DOH_BIN_DIR}:${HOMEBREW_PREFIX}/bin:${HOMEBREW_PREFIX}/sbin:/usr/local/bin:/usr/local/sbin:/usr/bin:/usr/sbin:/bin:/sbin"
+    local doh_login_path="${HERMES_WEBUI_DEFAULT_WORKSPACE}/.venv/bin:${HERMES_WEBUI_DIR}/venv/bin:${DOH_BIN_DIR}:${HOMEBREW_PREFIX}/bin:${HOMEBREW_PREFIX}/sbin:/usr/local/bin:/usr/local/sbin:/usr/bin:/usr/sbin:/bin:/sbin"
 
     # Drop privileges to hermeswebui before launching the sandbox so the LLM,
     # terminal, and execute_code all run as UID 1024. Combined with nono's
@@ -223,10 +223,12 @@ run_in_nono() {
     # unreadable from inside the sandbox. supervisor itself stays root so it
     # can still signal those daemons during cleanup.
     #
-    # VIRTUAL_ENV + venv on PATH wire the user venv (created in the Dockerfile)
-    # into both tools: terminal resolves python/pip via PATH, execute_code's
-    # project mode walks $VIRTUAL_ENV when picking the child interpreter
-    # (hermes-agent tools/code_execution_tool.py:_resolve_child_python).
+    # VIRTUAL_ENV + the workspace venv first on PATH wire the user venv
+    # (created in the Dockerfile) into both tools: terminal resolves
+    # python/pip via PATH, execute_code's project mode walks $VIRTUAL_ENV
+    # when picking the child interpreter. The Hermes WebUI venv follows so
+    # its console scripts (`hermes`, `hermes-agent`) are also reachable.
+    #
     # Only env vars set/transformed here go through /usr/bin/env. Plain
     # pass-throughs (AWS_DEFAULT_REGION, AWS_EC2_METADATA_DISABLED,
     # HERMES_WEBUI_HOST, HERMES_WEBUI_PORT, DOH_CONTROL_PLANE_URL, ...)
