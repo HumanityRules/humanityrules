@@ -1,5 +1,5 @@
 // DOH WebUI extension. Loaded per Hermes' docs/EXTENSIONS.md via the
-// HERMES_WEBUI_EXTENSION_* env vars exported in supervisor.sh.
+// HERMES_WEBUI_EXTENSION_* env vars exported in webui.sh.
 //
 // Adds an "Integrations" tab to the WebUI's main left sidebar nav, rendering
 // per-provider cards from the integrations broker's unified control API. The

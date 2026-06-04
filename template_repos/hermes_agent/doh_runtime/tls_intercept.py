@@ -571,6 +571,9 @@ def write_gateway_env_file(env_path: Path, managed_block: str) -> bool:
     env_path.parent.mkdir(parents=True, exist_ok=True)
     tmp_path = env_path.with_suffix(env_path.suffix + ".tmp")
     tmp_path.write_text(new_contents, encoding="utf-8")
+    if os.geteuid() == 0:
+        parent_stat = env_path.parent.stat()
+        os.chown(tmp_path, parent_stat.st_uid, parent_stat.st_gid)
     os.replace(tmp_path, env_path)
     return True
 

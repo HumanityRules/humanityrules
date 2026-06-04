@@ -62,7 +62,7 @@ The WebUI model picker derives availability from **local** state only (`config.y
 
 ## Placeholder seed (model A — default-provider case)
 
-`seed_codex_placeholder.py`, run from `supervisor.sh` (Stage 1, only when `DOH_LLM_PROVIDER=openai-codex`, before the gateway starts) via the agent's own `_save_codex_tokens` — gets locking + atomic write + `active_provider` for free. Seeds a non-JWT sentinel for both `access_token` and `refresh_token`. The sentinel reads as non-expiring (no JWT `exp`), so Hermes never self-refreshes and never rewrites `auth.json`; only the singleton is written (no `credential_pool`, so the singleton-first resolver wins). Idempotent — leaves a real token untouched.
+`sandbox_seed.py`, run from `webui.sh` before `system.gateway` is seeded, writes the placeholder via the agent's own `_save_codex_tokens` when the rendered `config.yaml` has `model.provider: openai-codex` — gets locking + atomic write + `active_provider` for free. Seeds a non-JWT sentinel for both `access_token` and `refresh_token`. The sentinel reads as non-expiring (no JWT `exp`), so Hermes never self-refreshes and never rewrites `auth.json`; only the singleton is written (no `credential_pool`, so the singleton-first resolver wins). Idempotent — leaves a real token untouched.
 
 This is for when Codex is the **default** backend (agent needs a token present to emit at boot). When Codex is **secondary**, the boot seed doesn't run; the connect-time marker above writes the same block. Both paths write the identical placeholder block and are idempotent, so they don't conflict.
 
