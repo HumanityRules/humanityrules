@@ -13,17 +13,16 @@ metadata:
 
 The user will be able to reach the app in a browser at a subdomain of the agent's hostname.
 
-## What this gives you
-
-A `webapps` CLI on PATH. It registers a process (any language: Python, Node, Elixir, Go, Rust, …) with a supervisor and adds a same-task reverse-proxy route so the user can reach the app at `https://<slug>.<agent-hostname>/`.
+The `webapps` CLI is on PATH. It registers a process (any language: Python, Node, Elixir, Go, Rust, …) with a supervisor and adds a same-task reverse-proxy route so the user can reach the app at `https://<slug>.<agent-hostname>/`.The agent's wildcard DNS + wildcard TLS cert make any new slug reachable instantly — no DNS work, no per-app infra.
 
 When the user asks you to create/clone the web app from a Git repository, clone it directly inside /workspace/webapps/projects/
 
-## Mental model
+## Port constraint (sandbox)
 
-- Each webapp gets its own subdomain: `<slug>.<agent-hostname>`. The agent's wildcard DNS + wildcard TLS cert make any new slug reachable instantly — no DNS work, no per-app infra.
-- The app's view of the world is simple: a request to `https://<slug>.<agent-hostname>/foo/bar` arrives at the app as `GET /foo/bar`. **There is no path prefix.** Absolute paths in HTML, JS, and WebSocket URLs (`/assets/...`, `/api/...`, `/ws`) work without configuration.
-- The app must bind to `127.0.0.1:$WEBAPP_PORT` (the CLI picks the port). Caddy fronts it; nothing else should be reachable.
+The nono sandbox only allows **loopback listens on ports 4000–4019**. The CLI assigns one free port in that range as `$WEBAPP_PORT`. Caddy fronts it.
+
+- Your HTTP server must bind **`127.0.0.1:$WEBAPP_PORT`** — never a fixed port, never `0.0.0.0`.
+- **Any other** `bind(127.0.0.1, …)` on this process (Mix pubsub, EPMD, dev servers on random ports) fails with **`EACCES`** unless it also lands in 4000–4019.
 
 ## The directory contract
 
