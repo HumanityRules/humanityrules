@@ -101,14 +101,14 @@ start_caddy() {
 }
 
 bootstrap_admin_webapp() {
-    # Runs *before* webapps process-compose starts. --no-start writes the YAML
-    # entry plus the route, then `process-compose up` brings __admin up
+    # Runs *before* webapps process-compose starts. --bootstrap-enabled writes
+    # an enabled YAML entry plus the route, then `process-compose up` brings __admin up
     # alongside any user webapps from prior boots. Talking to the daemon at
     # this stage would hang: the `project update` CLI client (subprocess.run)
     # doesn't return promptly during initial supervision, blocking webui.sh forever.
     # --if-missing is the cold-restart idempotence: if __admin is already
     # in the YAML, skip silently.
-    webapps create __admin --if-missing --no-start \
+    webapps create __admin --if-missing --bootstrap-enabled \
         --command "$HERMES_WEBUI_PYTHON -m admin" \
         --cwd /opt/doh/runtime
 }

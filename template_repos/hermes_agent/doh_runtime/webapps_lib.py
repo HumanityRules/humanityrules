@@ -56,7 +56,12 @@ SYSTEM_SLUG_PREFIX = "system."
 PORT_MIN = 4000
 PORT_MAX = 4019
 PROCESS_COMPOSE_ADDR = "127.0.0.1"
-DEFAULT_TIMEOUT_SECONDS = 90
+DEFAULT_TIMEOUT_SECONDS = 75
+READINESS_INITIAL_DELAY_SECONDS = 5
+READINESS_PERIOD_SECONDS = 2
+READINESS_TIMEOUT_SECONDS = 2
+READINESS_SUCCESS_THRESHOLD = 1
+READINESS_FAILURE_THRESHOLD = 30
 WEBAPPS_PROJECT = ProcessComposeProject(
     config_dir=Path("/workspace/.config/process-compose/webapps"),
     port="9957",
@@ -312,11 +317,11 @@ def make_process_entry(slug: str, command: str, cwd: str, port: int) -> dict:
             "exec": {
                 "command": f"bash -c 'echo > /dev/tcp/127.0.0.1/{port}'",
             },
-            "initial_delay_seconds": 1,
-            "period_seconds": 2,
-            "timeout_seconds": 2,
-            "success_threshold": 1,
-            "failure_threshold": 1,
+            "initial_delay_seconds": READINESS_INITIAL_DELAY_SECONDS,
+            "period_seconds": READINESS_PERIOD_SECONDS,
+            "timeout_seconds": READINESS_TIMEOUT_SECONDS,
+            "success_threshold": READINESS_SUCCESS_THRESHOLD,
+            "failure_threshold": READINESS_FAILURE_THRESHOLD,
         },
     }
 

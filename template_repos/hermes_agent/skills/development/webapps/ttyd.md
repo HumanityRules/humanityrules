@@ -7,8 +7,11 @@ Read this *before* registering a `ttyd` web terminal under `webapps`.
 ## Recommended command
 
 ```bash
+mkdir -p /workspace/webapps/projects/term
 webapps create term \
-    --command 'ttyd -W --port "$WEBAPP_PORT" --interface 127.0.0.1 bash'
+    --command 'ttyd -W --port "$WEBAPP_PORT" --interface 127.0.0.1 bash' \
+    --cwd /workspace/webapps/projects/term
+webapps start term
 ```
 
 ## The one flag trap

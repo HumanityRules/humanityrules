@@ -4,7 +4,7 @@ The sandbox has three traps that fire on every Mix 1.19+ project and on every Er
 
 ## Endpoint config
 
-Configure the endpoint to listen on `127.0.0.1:$WEBAPP_PORT` (generated apps usually honor `PORT`, so run with `PORT=$WEBAPP_PORT`). For anything beyond a quick dev server, build a release with `MIX_ENV=prod mix release` and run the release binary from `webapps create --command`.
+Configure the endpoint to listen on `127.0.0.1:$WEBAPP_PORT` (generated apps usually honor `PORT`, so run with `PORT=$WEBAPP_PORT`). For anything beyond a quick dev server, build a release with `MIX_ENV=prod mix release` and register the release binary with `webapps create --command`, then start it with `webapps start`.
 
 ## Sandbox bind restrictions — the three fixes
 
@@ -38,9 +38,9 @@ export RELEASE_DISTRIBUTION=none
 export ERL_EPMD_PORT=-1
 ```
 
-## Symptom: empty `routes.caddy` after first `webapps create`
+## Symptom: `webapps start` times out
 
-The first `webapps create` for an Elixir app will time out on readiness if you skip fix #3 above — `routes.caddy` will stay empty. After fixing the env, `webapps stop && webapps start` regenerates the route block.
+The first `webapps start` for an Elixir app will time out on readiness if you skip fix #3 above. After fixing the launcher/env, run `webapps restart <slug>`.
 
 ## Redeploy after code changes
 
