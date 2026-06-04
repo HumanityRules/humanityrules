@@ -62,6 +62,7 @@ READINESS_PERIOD_SECONDS = 2
 READINESS_TIMEOUT_SECONDS = 2
 READINESS_SUCCESS_THRESHOLD = 1
 READINESS_FAILURE_THRESHOLD = 30
+PROCESS_COMPOSE_TERMINAL_STATUSES = {"Completed", "Error", "Skipped"}
 WEBAPPS_PROJECT = ProcessComposeProject(
     config_dir=Path("/workspace/.config/process-compose/webapps"),
     port="9957",
@@ -326,6 +327,10 @@ def make_process_entry(slug: str, command: str, cwd: str, port: int) -> dict:
     }
 
 
+def process_compose_state_failed_before_ready(state: dict) -> bool:
+    return state.get("status") in PROCESS_COMPOSE_TERMINAL_STATUSES and state.get("is_ready") != "Ready"
+
+
 def wait_for_ready(slug: str, timeout: int) -> dict:
     deadline = time.time() + timeout
     while time.time() < deadline:
@@ -335,7 +340,7 @@ def wait_for_ready(slug: str, timeout: int) -> dict:
             continue
         if state.get("is_ready") == "Ready":
             return state
-        if state.get("status") == "Error":
+        if process_compose_state_failed_before_ready(state=state):
             return state
         time.sleep(0.5)
     return process_compose_state_for(project=WEBAPPS_PROJECT, slug=slug) or {
