@@ -59,7 +59,7 @@ Four things to notice:
 [process-compose](https://github.com/F1bonacc1/process-compose) is a single Go binary that supervises long-running processes from a YAML file. Hermes runs two independent process-compose daemons inside nono:
 
 1. **System daemon (`127.0.0.1:9956`)** supervises `system.webui` and `system.gateway`. The integrations broker talks to this daemon when it needs to restart one system process after managed env changes.
-2. **Webapps daemon (`127.0.0.1:9957`)** supervises `__admin` and user webapps. The `webapps` CLI talks only to this daemon, so `webapps create/delete/set-env/start/stop` can use `project update` without bouncing WebUI and interrupting active chat streams.
+2. **Webapps daemon (`127.0.0.1:9957`)** supervises `__admin` and user webapps. The `webapps` CLI talks only to this daemon when it applies changes, so user webapp lifecycle commands never bounce WebUI or interrupt active chat streams.
 
 **State lives under `/workspace/`, split between user-facing artifacts and DOH supervision config:**
 
@@ -86,16 +86,18 @@ The split keeps `/workspace/webapps/` as a pure user-data directory (their proje
 
 ## The agent's contract: the `webapps` CLI
 
-The agent never touches `webapps/process-compose.yaml` or `routes.caddy` directly. It uses a single Python CLI on PATH:
+The agent uses a single Python CLI on PATH for normal operations. It never edits `routes.caddy` directly, and it should not edit `webapps/process-compose.yaml` by hand for routine changes. `webapps reload` exists to resync the daemon/routes from the YAML source of truth after drift or an explicit break-glass repair that the CLI cannot express.
 
 ```
-webapps create <slug> --command "..." --cwd <path> [--timeout 90]
+webapps create <slug> --command "..." --cwd <path> [--env KEY=VALUE ...]
 webapps list
 webapps logs <slug> [-f]
-webapps start <slug>
+webapps start <slug> [--timeout 75]
 webapps stop <slug>
 webapps restart <slug>
+webapps reload
 webapps set-env <slug> KEY=VALUE [KEY2=VALUE2 ...]
+webapps unregister <slug>
 webapps delete <slug> --yes
 ```
 
@@ -103,11 +105,14 @@ webapps delete <slug> --yes
 
 **Key contract decisions:**
 
-- **`create` errors on collision.** If the slug exists, the agent must `delete` first. No "create-or-update."
+- **`create` errors on collision.** If the slug exists, the agent must `unregister` it first or pick another slug. No "create-or-update."
 - **Port allocation is automatic.** The CLI scans the YAML, picks the next free port in 4000–4019 (the range is allowlisted in the nono profile), and writes `WEBAPP_PORT` into the process's env. The agent's `--command` references `$WEBAPP_PORT`. The route generator parses `WEBAPP_PORT` back out of the YAML — single encoding.
-- **Readiness gating.** The CLI writes the YAML entry, regenerates `routes.caddy`, runs `process-compose project update`, then polls until process-compose reports `is_ready == "Ready"` (or timeout). Readiness gates the CLI's success claim, not route publication: the route can exist while the app is still starting, and it remains if readiness times out. In that case the agent should inspect logs, fix/restart, or delete/recreate the app.
-- **Readiness probe is a TCP-bind check.** process-compose has only `exec` and `http_get` probes (no native `tcp_socket`), so the CLI emits `bash -c 'echo > /dev/tcp/127.0.0.1/<port>'`. Tells you the app bound the port; doesn't tell you the app is *correct*. That's the bare minimum we want for `webapps create` to claim success.
+- **`create` is registration-only for user apps.** It writes a disabled YAML entry, accepts repeated `--env KEY=VALUE` flags, regenerates routes, and returns without talking to the process-compose daemon or waiting for readiness. That lets the agent set env/config before the first process start.
+- **Readiness gating lives on `start`.** `webapps start <slug>` removes `disabled: true`, regenerates `routes.caddy`, runs `process-compose project update`, then polls until process-compose reports `is_ready == "Ready"` (or `--timeout` expires). `--timeout` is only the CLI's outer polling budget; process-compose's readiness probe controls whether the child is stopped/restarted while the CLI waits. Readiness gates the CLI's success claim, not registration: if start times out, the agent should inspect logs, fix/restart, or unregister/recreate the app.
+- **Readiness probe is a TCP-bind check.** process-compose has only `exec` and `http_get` probes (no native `tcp_socket`), so the CLI emits `bash -c 'echo > /dev/tcp/127.0.0.1/<port>'`. The generated probe starts after 5 seconds, checks every 2 seconds, and allows 30 consecutive failures before process-compose stops/restarts the app. That gives slow-start apps about a minute to bind the port while still surfacing genuinely broken processes. The probe tells you the app bound the port; it doesn't tell you the app is *correct*. That's the bare minimum we want for `webapps start` to claim success.
 - **`stop` sets `disabled: true` and regenerates `routes.caddy`** (the disabled entry is skipped, so the route disappears). `start` reverses it.
+- **`unregister` is non-destructive.** Removes the YAML entry, regenerates routes, and runs `project update`, but leaves `projects/<slug>/` and the existing log file in place. This is the normal path for recreating a bad registration without losing source.
+- **`reload` resyncs from the YAML source of truth.** It reloads `/workspace/.config/process-compose/webapps/process-compose.yaml` into the webapps daemon and regenerates `routes.caddy`. It is for YAML/daemon/routes drift and explicit break-glass repairs; normal changes should use typed CLI mutations.
 - **`delete` is total.** Removes the YAML entry, regenerates routes (so the route is gone), removes the log file, and `rm -rf projects/<slug>/`. The skill tells the agent to confirm explicitly with the user before passing `--yes`.
 - **`set-env` ships in v1.** Surgical: only the affected process restarts. Without this, every env change would be a delete (now total!) + recreate.
 
@@ -218,7 +223,7 @@ ACM/ALB SNI listener cert count caps at 25 per listener by default (raisable via
 
 **Apps must bind to `127.0.0.1`, not `0.0.0.0`.** Caddy is the only thing that should be reachable from outside the container — apps go through Caddy's reverse_proxy, no shortcut. Many frameworks default to all-interfaces; they need explicit configuration. The skill calls this out in the Don'ts.
 
-**Phoenix needs explicit endpoint binding.** Phoenix's HTTP port is configurable; generated apps usually read `PORT`, so `PORT=$WEBAPP_PORT mix phx.server` is the right dev-server shape when the endpoint is configured to bind loopback. For durable apps, **Phoenix releases are the preferred shape**: `MIX_ENV=prod mix release`, then run the release binary from `webapps create --command` with the same `127.0.0.1:$WEBAPP_PORT` binding. WebSocket support itself is unaffected — Caddy's `reverse_proxy` upgrades transparently. With per-app subdomains, no `URL_PATH_PREFIX` or LiveSocket-URL rewriting is needed — Phoenix lives at the root of its host.
+**Phoenix needs explicit endpoint binding.** Phoenix's HTTP port is configurable; generated apps usually read `PORT`, so `PORT=$WEBAPP_PORT mix phx.server` is the right dev-server shape when the endpoint is configured to bind loopback. For durable apps, **Phoenix releases are the preferred shape**: `MIX_ENV=prod mix release`, then register the release binary with `webapps create --command` using the same `127.0.0.1:$WEBAPP_PORT` binding and launch it with `webapps start`. WebSocket support itself is unaffected — Caddy's `reverse_proxy` upgrades transparently. With per-app subdomains, no `URL_PATH_PREFIX` or LiveSocket-URL rewriting is needed — Phoenix lives at the root of its host.
 
 ## Lifecycle: cold start
 
@@ -244,9 +249,9 @@ This buys three things:
 - **Room to grow.** The slug is `__admin`, not `__webapps`. The same FastAPI process can host future runtime-admin endpoints (logs viewer, runtime ops) without ever putting "DOH" in a URL or carving a second admin path.
 - **Plain HTTP between browser and backend.** The WebUI extension is the only client; the API speaks ordinary JSON. No SSE, no WebSocket, no integrations broker.
 
-**Reserved-prefix convention.** The slug regex (`webapps_lib.SLUG_PATTERN`) accepts an optional `__` prefix. There is **no enforcement** in the CLI — a `__` slug is a Python-dunder-style hint that "this is platform internal," not a hard reservation. The bootstrap (`webapps create __admin --if-missing` in `webui.sh`) wins the cold-start race and registers the slug; subsequent agent attempts to create the same slug collide on the existing entry and error, which is the same behavior as any other slug collision. The skill's Don'ts tell the agent not to touch `__*` slugs.
+**Reserved-prefix convention.** The slug regex (`webapps_lib.SLUG_PATTERN`) accepts an optional `__` prefix. There is **no enforcement** in the CLI — a `__` slug is a Python-dunder-style hint that "this is platform internal," not a hard reservation. The bootstrap (`webapps create __admin --if-missing --bootstrap-enabled` in `webui.sh`) wins the cold-start race and registers the slug; subsequent agent attempts to create the same slug collide on the existing entry and error, which is the same behavior as any other slug collision. The skill's Don'ts tell the agent not to touch `__*` slugs.
 
-**Source layout.** `template_repos/hermes_agent/doh_runtime/admin/` (no "webapps" in the name — scope will grow). `__main__.py` reads `WEBAPP_PORT` from the env (set by the supervisor like for any webapp) and serves `server.py`'s FastAPI `app` on `127.0.0.1:$WEBAPP_PORT`. Boot order in `webui.sh`: `webapps create __admin --if-missing --no-start` writes the webapps YAML and route before the daemon starts; system entries are seeded separately; both process-compose daemons start; WebUI health gates Caddy startup. The `--if-missing` flag is idempotent; on a redeploy where `__admin` is already in the YAML, the bootstrap is a no-op.
+**Source layout.** `template_repos/hermes_agent/doh_runtime/admin/` (no "webapps" in the name — scope will grow). `__main__.py` reads `WEBAPP_PORT` from the env (set by the supervisor like for any webapp) and serves `server.py`'s FastAPI `app` on `127.0.0.1:$WEBAPP_PORT`. Boot order in `webui.sh`: `webapps create __admin --if-missing --bootstrap-enabled` writes an enabled webapps YAML entry and route before the daemon starts; system entries are seeded separately; both process-compose daemons start; WebUI health gates Caddy startup. The `--if-missing` flag is idempotent; on a redeploy where `__admin` is already in the YAML, the bootstrap is a no-op.
 
 **v1 surface.** Read-only:
 

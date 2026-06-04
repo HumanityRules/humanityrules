@@ -119,10 +119,214 @@ class TestHermesWebappsRuntimeContract(unittest.TestCase):
             text=True,
         )
 
+    def test_webapps_reload_regenerates_routes_and_updates_project(self) -> None:
+        doc = {
+            "version": "0.5",
+            "processes": {
+                "dashboard": {
+                    "command": "uv run app",
+                },
+            },
+        }
+
+        with (
+            patch.object(webapps_cli, "ProcessComposeLock", DummyLock),
+            patch.object(webapps_cli, "load_process_compose_yaml", return_value=doc) as load_yaml,
+            patch.object(webapps_cli, "regenerate_routes") as regenerate_routes,
+            patch.object(webapps_cli, "process_compose_project_update") as project_update,
+            patch("builtins.print"),
+        ):
+            webapps_cli.cmd_reload(types.SimpleNamespace())
+
+        load_yaml.assert_called_once_with(project=webapps_lib.WEBAPPS_PROJECT)
+        regenerate_routes.assert_called_once_with(doc)
+        project_update.assert_called_once_with(project=webapps_lib.WEBAPPS_PROJECT)
+
+    def test_webapps_unregister_removes_supervision_without_deleting_artifacts(self) -> None:
+        saved_calls = []
+        doc = {
+            "version": "0.5",
+            "processes": {
+                "dashboard": {
+                    "command": "uv run app",
+                },
+                "reports": {
+                    "command": "uv run reports",
+                },
+            },
+        }
+
+        def save_doc(*, project: object, doc: dict) -> None:
+            saved_calls.append((project, doc))
+
+        with (
+            patch.object(webapps_cli, "ProcessComposeLock", DummyLock),
+            patch.object(webapps_cli, "load_process_compose_yaml", return_value=doc),
+            patch.object(webapps_cli, "save_process_compose_yaml", side_effect=save_doc) as save_yaml,
+            patch.object(webapps_cli, "regenerate_routes") as regenerate_routes,
+            patch.object(webapps_cli, "process_compose_project_update") as project_update,
+            patch.object(webapps_cli.shutil, "rmtree") as rmtree,
+            patch("builtins.print"),
+        ):
+            webapps_cli.cmd_unregister(types.SimpleNamespace(slug="dashboard"))
+
+        save_yaml.assert_called_once()
+        self.assertEqual(len(saved_calls), 1)
+        project, saved_doc = saved_calls[0]
+        self.assertIs(project, webapps_lib.WEBAPPS_PROJECT)
+        self.assertEqual(set(saved_doc["processes"]), {"reports"})
+        regenerate_routes.assert_called_once_with(saved_doc)
+        project_update.assert_called_once_with(project=webapps_lib.WEBAPPS_PROJECT)
+        rmtree.assert_not_called()
+
+    def test_webapps_create_registers_stopped_entry_with_env_without_starting(self) -> None:
+        saved_calls = []
+
+        def save_doc(*, project: object, doc: dict) -> None:
+            saved_calls.append((project, doc))
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            args = types.SimpleNamespace(
+                slug="dashboard",
+                command="uv run app",
+                cwd=tmpdir,
+                env=["HERMES_WEB_DIST=/workspace/dist", "PYTHONPATH=/workspace/lib"],
+                if_missing=False,
+                bootstrap_enabled=False,
+            )
+            with (
+                patch.object(webapps_cli, "ProcessComposeLock", DummyLock),
+                patch.object(
+                    webapps_cli,
+                    "load_process_compose_yaml",
+                    return_value={"version": "0.5", "processes": {}},
+                ),
+                patch.object(webapps_cli, "save_process_compose_yaml", side_effect=save_doc) as save_yaml,
+                patch.object(webapps_cli, "regenerate_routes") as regenerate_routes,
+                patch.object(webapps_cli, "process_compose_project_update") as project_update,
+                patch.object(webapps_cli, "wait_for_ready") as wait_for_ready,
+                patch("builtins.print"),
+            ):
+                webapps_cli.cmd_create(args)
+
+        save_yaml.assert_called_once()
+        self.assertEqual(len(saved_calls), 1)
+        project, saved_doc = saved_calls[0]
+        self.assertIs(project, webapps_lib.WEBAPPS_PROJECT)
+        entry = saved_doc["processes"]["dashboard"]
+        self.assertEqual(entry["command"], "uv run app")
+        self.assertTrue(entry["disabled"])
+        self.assertEqual(
+            entry["environment"],
+            [
+                "WEBAPP_PORT=4000",
+                "HERMES_WEB_DIST=/workspace/dist",
+                "PYTHONPATH=/workspace/lib",
+            ],
+        )
+        regenerate_routes.assert_called_once_with(saved_doc)
+        project_update.assert_not_called()
+        wait_for_ready.assert_not_called()
+
+    def test_webapps_create_bootstrap_enabled_keeps_admin_enabled_without_starting(self) -> None:
+        saved_calls = []
+
+        def save_doc(*, project: object, doc: dict) -> None:
+            saved_calls.append((project, doc))
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            args = types.SimpleNamespace(
+                slug="__admin",
+                command="python -m admin",
+                cwd=tmpdir,
+                env=[],
+                if_missing=False,
+                bootstrap_enabled=True,
+            )
+            with (
+                patch.object(webapps_cli, "ProcessComposeLock", DummyLock),
+                patch.object(
+                    webapps_cli,
+                    "load_process_compose_yaml",
+                    return_value={"version": "0.5", "processes": {}},
+                ),
+                patch.object(webapps_cli, "save_process_compose_yaml", side_effect=save_doc),
+                patch.object(webapps_cli, "regenerate_routes"),
+                patch.object(webapps_cli, "process_compose_project_update") as project_update,
+                patch.object(webapps_cli, "wait_for_ready") as wait_for_ready,
+                patch("builtins.print"),
+            ):
+                webapps_cli.cmd_create(args)
+
+        self.assertEqual(len(saved_calls), 1)
+        _project, saved_doc = saved_calls[0]
+        self.assertNotIn("disabled", saved_doc["processes"]["__admin"])
+        project_update.assert_not_called()
+        wait_for_ready.assert_not_called()
+
+    def test_webapps_set_env_on_stopped_entry_does_not_update_project(self) -> None:
+        saved_calls = []
+        doc = {
+            "version": "0.5",
+            "processes": {
+                "dashboard": {
+                    "command": "uv run app",
+                    "disabled": True,
+                    "environment": ["WEBAPP_PORT=4000"],
+                },
+            },
+        }
+
+        def save_doc(*, project: object, doc: dict) -> None:
+            saved_calls.append((project, doc))
+
+        with (
+            patch.object(webapps_cli, "ProcessComposeLock", DummyLock),
+            patch.object(webapps_cli, "load_process_compose_yaml", return_value=doc),
+            patch.object(webapps_cli, "save_process_compose_yaml", side_effect=save_doc),
+            patch.object(webapps_cli, "process_compose_project_update") as project_update,
+            patch("builtins.print"),
+        ):
+            webapps_cli.cmd_set_env(types.SimpleNamespace(slug="dashboard", kv=["HERMES_WEB_DIST=/workspace/dist"]))
+
+        self.assertEqual(len(saved_calls), 1)
+        _project, saved_doc = saved_calls[0]
+        self.assertEqual(
+            saved_doc["processes"]["dashboard"]["environment"],
+            [
+                "WEBAPP_PORT=4000",
+                "HERMES_WEB_DIST=/workspace/dist",
+            ],
+        )
+        project_update.assert_not_called()
+
+    def test_webapps_process_entry_allows_slow_start_before_probe_restart(self) -> None:
+        entry = webapps_lib.make_process_entry(
+            slug="dashboard",
+            command="uv run app",
+            cwd="/workspace/webapps/projects/dashboard",
+            port=4005,
+        )
+
+        self.assertEqual(
+            entry["readiness_probe"],
+            {
+                "exec": {
+                    "command": "bash -c 'echo > /dev/tcp/127.0.0.1/4005'",
+                },
+                "initial_delay_seconds": 5,
+                "period_seconds": 2,
+                "timeout_seconds": 2,
+                "success_threshold": 1,
+                "failure_threshold": 30,
+            },
+        )
+
     def test_extensionless_webapps_cli_imports_the_split_runtime_helpers(self) -> None:
         self.assertIs(webapps_cli.WEBAPPS_PROJECT, webapps_lib.WEBAPPS_PROJECT)
         self.assertIs(webapps_cli.process_compose_project_update, webapps_lib.process_compose_project_update)
         self.assertIs(webapps_cli.run_process_compose, webapps_lib.run_process_compose)
+        self.assertEqual(webapps_cli.DEFAULT_TIMEOUT_SECONDS, 75)
 
     def test_system_seeder_writes_only_the_system_yaml(self) -> None:
         saved_calls = []

@@ -25,7 +25,7 @@ Other Vanta effects (BIRDS, CLOUDS, FOG, RINGS, DOTS, GLOBE, WAVES, CELLS, TRUNK
 </body>
 ```
 
-### 2. CSS — already in templates/style.css, but for reference
+### 2. CSS — `templates/style.css` (`#bg-fx` + no opaque html/body bg)
 
 ```css
 #bg-fx {

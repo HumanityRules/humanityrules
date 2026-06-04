@@ -63,7 +63,7 @@ Either alone is half the look. Wire both. See `references/animated-background.md
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&display=swap" rel="stylesheet">
 ```
 
-Body uses JetBrains Mono with `font-size: 14px; line-height: 1.4`. Headings/labels are uppercase with wide letter-spacing (3-5px). Body text stays normal case.
+Body uses JetBrains Mono with `font-size: 14px; line-height: 1.4`. `h1` keeps the author's casing with wide letter-spacing (5px). `h2`, labels, and table headers are uppercase with letter-spacing (3-5px). Body text stays normal case.
 
 ## Page skeleton
 

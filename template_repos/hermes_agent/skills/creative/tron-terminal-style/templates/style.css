@@ -60,6 +60,12 @@ body::after {
   mix-blend-mode: multiply;
 }
 
+/* Vanta canvas mount — fullscreen behind body overlays (z-index: -1). */
+#bg-fx {
+  position: fixed; inset: 0; z-index: -2;
+  pointer-events: none;
+}
+
 /* 2-column responsive layout. h1 spans both columns. */
 .layout {
   max-width: 1180px; margin: 0 auto;
@@ -74,7 +80,7 @@ h1 {
   grid-column: 1 / -1;
   margin: 0 0 .4em;
   font-size: 1.25em; font-weight: 700;
-  letter-spacing: 5px; text-transform: uppercase;
+  letter-spacing: 5px;
   color: var(--cyan);
   text-shadow: 0 0 8px rgba(95, 247, 255, .55),
                0 0 22px rgba(95, 247, 255, .25);
