@@ -139,6 +139,12 @@ render_hermes_config() {
     if [ "$DOH_LLM_PROVIDER" = "bedrock" ]; then
         doh_llm_base_url="https://bedrock-runtime.${AWS_DEFAULT_REGION}.amazonaws.com"
     fi
+    if [ "$DOH_LLM_PROVIDER" = "nous" ] && [ -z "$doh_llm_base_url" ]; then
+        doh_llm_base_url="https://inference-api.nousresearch.com/v1"
+    fi
+    if [ "$doh_aux_provider" = "nous" ] && [ -z "$doh_aux_base_url" ]; then
+        doh_aux_base_url="https://inference-api.nousresearch.com/v1"
+    fi
 
     mkdir -p "$HERMES_HOME"
 

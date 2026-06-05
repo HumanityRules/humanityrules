@@ -744,53 +744,62 @@
     document.body.appendChild(backdrop);
   }
 
-  // ── OpenAI Codex device-login flow ────────────────────────────────
-  // Codex can't use a redirect (OpenAI's Auth0 tenant isn't ours), so the
-  // broker runs OpenAI's device flow: we POST start, show the user a code +
-  // verification URL, then poll status until the broker reports completed or
-  // failed. Everything is broker-side; the browser only displays + polls.
+  // ── OAuth device-login flow ───────────────────────────────────────
+  // Device providers can't use our redirect callback, so the broker runs the
+  // provider's device flow. The browser only starts the session, displays the
+  // code + verification URL, and polls for terminal state.
 
-  const CODEX_DEVICE_POLL_MS = 3000;
+  const DEVICE_POLL_MS = 3000;
 
-  async function startCodexDevice(item, revert) {
+  async function startDeviceConnect(item, revert) {
     const revertOnce = () => { if (revert) { revert(); revert = null; } };
     let session;
     try {
-      const resp = await fetch('/__doh_broker/integrations/openai-codex/device/start', { method: 'POST', cache: 'no-store' });
+      const base = '/__doh_broker/integrations/' + encodeURIComponent(item.slug) + '/device';
+      const resp = await fetch(base + '/start', { method: 'POST', cache: 'no-store' });
       session = await resp.json();
-      if (!resp.ok || !session.ok) throw new Error(session.error || 'Could not start the ChatGPT login.');
+      if (!resp.ok || !session.ok) throw new Error(session.error || 'Could not start the login.');
     } catch (err) {
-      alert(err.message || 'Could not start the ChatGPT login.');
+      alert(err.message || 'Could not start the login.');
       revertOnce();
       return;
     }
-    showCodexDeviceModal(item, session, revertOnce);
+    showDeviceModal(item, session, revertOnce);
   }
 
-  function showCodexDeviceModal(item, session, onClose) {
+  function showDeviceModal(item, session, onClose) {
     const backdrop = elem('div', { class: 'doh-modal-backdrop' });
     let cancelled = false;
+    const base = '/__doh_broker/integrations/' + encodeURIComponent(item.slug) + '/device';
     const close = () => {
       cancelled = true;
       backdrop.remove();
       // Best-effort: tell the broker to drop the in-flight session.
-      fetch('/__doh_broker/integrations/openai-codex/device/cancel', { method: 'POST' }).catch(() => {});
+      fetch(base + '/cancel', { method: 'POST' }).catch(() => {});
       if (onClose) onClose();
     };
 
-    const codeEl = elem('div', { class: 'doh-modal-title', style: { fontFamily: 'monospace', letterSpacing: '0.15em' } }, [session.user_code || '—']);
-    const link = elem('a', { href: session.verification_url, target: '_blank', rel: 'noopener' }, [session.verification_url]);
+    const codeEl = elem('div', { class: 'doh-device-code' }, [session.user_code || '—']);
+    const link = elem('a', {
+      class: 'doh-device-oauth-link',
+      href: session.verification_url,
+      target: '_blank',
+      rel: 'noopener',
+    }, [session.verification_url]);
     const statusBox = elem('div', { class: 'doh-vault-success' }, ['Waiting for you to approve in your browser…']);
     const errorBox = elem('div', { class: 'doh-vault-error', style: { display: 'none' } });
     const cancelBtn = elem('button', { class: 'doh-integration-btn', type: 'button', onclick: close }, ['Cancel']);
 
     const modal = elem('div', { class: 'doh-modal' }, [
       elem('div', { class: 'doh-modal-title' }, ['Connect ' + item.label]),
-      elem('div', { class: 'doh-modal-body' }, [
-        'Open the link below, sign in to ChatGPT, and enter this code:',
+      elem('div', { class: 'doh-modal-body doh-device-step-label' }, [
+        'Open the link below and sign in:',
+      ]),
+      elem('div', { class: 'doh-modal-body doh-device-step-content' }, [link]),
+      elem('div', { class: 'doh-modal-body doh-device-step-label' }, [
+        'After opening the link and signing in, enter this code:',
       ]),
       codeEl,
-      elem('div', { class: 'doh-modal-body' }, [link]),
       statusBox,
       errorBox,
       elem('div', { class: 'doh-modal-actions' }, [cancelBtn]),
@@ -803,10 +812,10 @@
       if (cancelled) return;
       let st;
       try {
-        const resp = await fetch('/__doh_broker/integrations/openai-codex/device/status', { cache: 'no-store' });
+        const resp = await fetch(base + '/status', { cache: 'no-store' });
         st = await resp.json();
       } catch (_) {
-        setTimeout(poll, CODEX_DEVICE_POLL_MS);
+        setTimeout(poll, DEVICE_POLL_MS);
         return;
       }
       if (cancelled) return;
@@ -819,14 +828,14 @@
       }
       if (st.phase === 'failed' || st.phase === null) {
         statusBox.style.display = 'none';
-        errorBox.textContent = st.error || 'ChatGPT login failed. Please try again.';
+        errorBox.textContent = st.error || 'Login failed. Please try again.';
         errorBox.style.display = '';
         cancelBtn.textContent = 'Close';
         return;
       }
-      setTimeout(poll, CODEX_DEVICE_POLL_MS);
+      setTimeout(poll, DEVICE_POLL_MS);
     };
-    setTimeout(poll, CODEX_DEVICE_POLL_MS);
+    setTimeout(poll, DEVICE_POLL_MS);
   }
 
   // Slack manifest name rules (https://docs.slack.dev/reference/app-manifest):
@@ -1114,7 +1123,7 @@
 
     appendConnectFooter(card, titleRow, statusPill, (revert) => {
       if (usesVault) startVaultConfig(item, revert);
-      else if (usesDevice) startCodexDevice(item, revert);
+      else if (usesDevice) startDeviceConnect(item, revert);
       else window.location.href = buildTlsConnectUrl(payload, item.slug, returnTo);
     });
     return card;

@@ -4,9 +4,9 @@ Unlike the redirect-dance OAuth providers (Google, GitHub), Codex connects via
 OpenAI's device flow run *by the env-resident broker* (see
 `doh_runtime/integrations_broker.py`). The broker drives the device handshake,
 then POSTs the resulting refresh_token to DOH at
-`/api/integrations/credentials/codex-device-complete`, which stores it as an
-IntegrationUserCredential row. No browser redirect, no callback of ours, no
-DOH-held client secret — Codex's client is a public OAuth client.
+`/api/integrations/credentials/openai-codex/device-complete`, which stores it
+as an IntegrationUserCredential row. No browser redirect, no callback of ours,
+no DOH-held client secret — Codex's client is a public OAuth client.
 
 Refresh (`refresh_outcome`): exchanges the stored refresh_token at
 `auth.openai.com/oauth/token` (grant_type=refresh_token, public client_id, no
@@ -20,13 +20,10 @@ the outcome flips to `absent`.
 See `docs/openai_codex_integration_design.md`.
 """
 
-import base64
-import binascii
-import json
 import logging
-import time
 
 import httpx
+from django.utils import timezone
 
 from devopshero_app.models import Environment, IntegrationUserCredential, User
 from devopshero_app.views.integrations import provider_common
@@ -50,52 +47,18 @@ CODEX_TOKEN_EXCHANGE_TIMEOUT_SECONDS = 5
 CODEX_DEFAULT_EXPIRES_IN = 3600
 
 
-def _decode_jwt_payload(token: str) -> dict:
-    """Return a JWT's payload claims without verifying the signature, or {} on any failure.
-
-    The account id is a non-secret routing identifier carried in the access
-    token; we only need to read it, exactly as the Hermes codex client does
-    (raw base64url of the second segment, no key, no verification).
-    """
-    parts = token.split(".")
-    if len(parts) < 2:
-        return {}
-    segment = parts[1]
-    padded = segment + "=" * (-len(segment) % 4)
-    try:
-        return json.loads(base64.urlsafe_b64decode(padded))
-    except (binascii.Error, ValueError, UnicodeDecodeError):
-        return {}
-
-
 def _account_id_from_access_token(access_token: str) -> str | None:
     """Extract `chatgpt_account_id` from the access-token JWT, or None if absent.
 
     Claim path matches the Hermes codex client: nested under the
     `https://api.openai.com/auth` namespace claim.
     """
-    claims = _decode_jwt_payload(access_token)
+    claims = provider_common.decode_jwt_payload(token=access_token)
     auth_claim = claims.get("https://api.openai.com/auth")
     if not isinstance(auth_claim, dict):
         return None
     account_id = auth_claim.get("chatgpt_account_id")
     return account_id if isinstance(account_id, str) and account_id else None
-
-
-def _expires_in_from_access_token(access_token: str, fallback: int) -> int:
-    """Derive seconds-until-expiry from the JWT `exp`, falling back when unreadable.
-
-    The broker caches the minted access token for this many seconds, so an
-    accurate value (the token's own `exp`) is preferable to the OAuth
-    response's `expires_in`, which Codex may omit.
-    """
-    claims = _decode_jwt_payload(access_token)
-    exp = claims.get("exp")
-    if isinstance(exp, (int, float)):
-        remaining = int(exp - time.time())
-        if remaining > 0:
-            return remaining
-    return fallback
 
 
 def _exchange_refresh_token(refresh_token: str) -> provider_common.ExchangeResult:
@@ -150,6 +113,44 @@ def _exchange_refresh_token(refresh_token: str) -> provider_common.ExchangeResul
         response=None, revoked=False,
         error=f"http {response.status_code}: {err_code or 'unknown'}",
     )
+
+
+def store_device_credentials(environment: Environment, owner_user: User, app_slug: str, payload: dict) -> tuple[int, dict]:
+    """Store the refresh/access token pair the broker obtained from OpenAI's device flow."""
+    refresh_token = payload.get("refresh_token")
+    if not isinstance(refresh_token, str) or not refresh_token:
+        return 400, {"error": "refresh_token is required"}
+    access_token = payload.get("access_token")
+    if not isinstance(access_token, str) or not access_token:
+        return 400, {"error": "access_token is required"}
+
+    # The broker already exchanged the device authorization_code for this
+    # refresh/access pair, so we do NOT re-mint here: re-minting would rotate
+    # the refresh token (invalidating the one we were handed) and add a fragile
+    # second OpenAI round-trip on connect. We only need the chatgpt_account_id,
+    # which is a claim in the access token the broker forwarded — derive it
+    # directly. If it's absent, this isn't a usable ChatGPT-subscription login.
+    account_id = _account_id_from_access_token(access_token=access_token)
+    if account_id is None:
+        return 400, {"error": "token has no chatgpt_account_id; not a ChatGPT-subscription login"}
+
+    IntegrationUserCredential.objects.update_or_create(
+        owner_user=owner_user,
+        environment=environment,
+        app_slug=app_slug,
+        provider=IntegrationUserCredential.Provider.OPENAI_CODEX,
+        defaults={
+            "credentials": {"refresh_token": refresh_token},
+            "config": {},
+            "metadata": {
+                "chatgpt_account_id": account_id,
+                "connected_at": timezone.now().isoformat(),
+            },
+            "last_refreshed_at": None,
+        },
+    )
+    logger.info("codex integration stored env=%s owner=%s app=%s", environment.slug, owner_user.username, app_slug)
+    return 200, {"ok": True, "provider": IntegrationUserCredential.Provider.OPENAI_CODEX, "status": "connected"}
 
 
 def refresh_outcome(environment: Environment, owner_user: User, app_slug: str) -> dict:
@@ -220,7 +221,10 @@ def refresh_outcome(environment: Environment, owner_user: User, app_slug: str) -
 
     return provider_common.has_token(
         secrets={"access_token": access_token, "chatgpt_account_id": account_id},
-        expires_in=_expires_in_from_access_token(access_token, fallback=CODEX_DEFAULT_EXPIRES_IN),
+        expires_in=provider_common.expires_in_from_access_token(
+            access_token=access_token,
+            fallback=CODEX_DEFAULT_EXPIRES_IN,
+        ),
         config={},
         metadata={},
     )

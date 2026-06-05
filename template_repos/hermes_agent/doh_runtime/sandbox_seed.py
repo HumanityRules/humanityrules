@@ -10,6 +10,8 @@ from pathlib import Path
 
 import yaml
 
+import provider_auth_marker
+
 AWS_STS_PORT = 9901
 AWS_BEDROCK_PORT = 9902
 AWS_BEDROCK_RUNTIME_PORT = 9903
@@ -93,54 +95,47 @@ def configure_github_git_helper() -> None:
     )
 
 
-def _codex_model_provider_configured(config_path: Path) -> bool:
-    """Return whether the rendered runtime config selects Codex as the default provider."""
+def _configured_model_provider(config_path: Path) -> str | None:
+    """Return the rendered runtime config's model provider."""
     try:
         payload = yaml.safe_load(config_path.read_text(encoding="utf-8"))
     except FileNotFoundError:
-        print(f"[sandbox-seed] config not found at {config_path}; skipping codex placeholder")
-        return False
+        print(f"[sandbox-seed] config not found at {config_path}; skipping provider placeholder")
+        return None
     except yaml.YAMLError as exc:
-        print(f"[sandbox-seed] cannot parse {config_path}: {exc}; skipping codex placeholder", file=sys.stderr)
-        return False
+        print(f"[sandbox-seed] cannot parse {config_path}: {exc}; skipping provider placeholder", file=sys.stderr)
+        return None
 
     if not isinstance(payload, dict):
-        return False
+        return None
     model = payload.get("model")
     if not isinstance(model, dict):
-        return False
-    return str(model.get("provider") or "").strip() == "openai-codex"
+        return None
+    provider = str(model.get("provider") or "").strip()
+    return provider or None
 
 
-def seed_codex_placeholder(hermes_home: Path) -> int:
-    """Seed a placeholder Codex token when Codex is the default backend."""
-    if not _codex_model_provider_configured(config_path=hermes_home / "config.yaml"):
+def seed_provider_placeholder(hermes_home: Path) -> int:
+    """Seed a placeholder auth marker when a DOH-managed provider is the default backend."""
+    provider = _configured_model_provider(config_path=hermes_home / "config.yaml")
+    if provider not in provider_auth_marker.SUPPORTED_PROVIDERS:
         return 0
 
-    # Credential model A: the real ChatGPT access token lives outside the
-    # sandbox and the broker swaps it onto the wire, but Hermes will not emit a
-    # Codex request unless auth.json already has both access_token and
-    # refresh_token for openai-codex. Seed only that singleton provider block via
-    # Hermes' own locked/atomic writer.
+    # Credential model A: the real model-provider token lives outside the
+    # sandbox and the broker swaps it onto the wire, but Hermes/WebUI still need
+    # local provider state to render model choices and emit placeholder-backed
+    # requests. Seed only the provider block via Hermes' own locked/atomic writer.
     try:
         from hermes_cli import auth
     except Exception as exc:  # pragma: no cover - import wiring is environment-specific
-        print(f"[sandbox-seed] cannot import hermes_cli.auth: {exc}", file=sys.stderr)
+        print(f"[sandbox-seed] cannot import hermes_cli.auth for {provider}: {exc}", file=sys.stderr)
         return 1
 
     try:
-        existing = auth._read_codex_tokens()
-        tokens = existing.get("tokens", {}) if isinstance(existing, dict) else {}
-        if tokens.get("access_token") and tokens.get("refresh_token"):
-            print("[sandbox-seed] codex token already present; leaving it untouched")
-            return 0
-    except Exception:
-        pass
-
-    # Non-JWT strings have no parseable exp claim, so Hermes treats the sentinel
-    # as non-expiring and does not try to self-refresh or rewrite auth.json.
-    auth._save_codex_tokens({"access_token": "DOH_PLACEHOLDER", "refresh_token": "DOH_PLACEHOLDER"})
-    print(f"[sandbox-seed] seeded placeholder codex token at {auth.get_hermes_home() / 'auth.json'}")
+        provider_auth_marker._connect(auth=auth, provider=provider)
+    except Exception as exc:
+        print(f"[sandbox-seed] failed to seed {provider} placeholder: {exc}", file=sys.stderr)
+        return 1
     return 0
 
 
@@ -153,7 +148,7 @@ def main() -> int:
     write_child_aws_config(workspace=workspace, aws_region=aws_region)
     seed_soul_file(hermes_home=hermes_home)
     configure_github_git_helper()
-    return seed_codex_placeholder(hermes_home=hermes_home)
+    return seed_provider_placeholder(hermes_home=hermes_home)
 
 
 if __name__ == "__main__":

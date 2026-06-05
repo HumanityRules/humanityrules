@@ -9,10 +9,10 @@ its own per-provider dict. Adding a provider is one row here plus its module.
 Two `ProviderKind`s, differing only in how credentials are obtained and torn
 down:
 
-- OAUTH (`provider_google`, `provider_github`): connect via a browser
-  redirect dance (dedicated `integrations_user_<slug>_start/callback` views,
-  not dispatched here), refresh by upstream token exchange, disconnect deletes
-  the row + best-effort upstream `revoke`.
+- OAUTH (`provider_google`, `provider_github`, `provider_openai_codex`,
+  `provider_nous`): connect via a browser redirect dance or broker-run device
+  flow, refresh by upstream token exchange, disconnect deletes the row +
+  best-effort upstream `revoke`.
 - VAULT (`provider_openrouter`, `provider_slack`, `provider_telegram`):
   connect via a browser-direct credential paste (`schema` + `save_credentials`),
   refresh is a DB read, disconnect just deletes the row.
@@ -23,6 +23,8 @@ Uniform module interface by kind:
   `save_credentials(owner_user, environment, app_slug, credentials_payload,
   config_payload) -> (IntegrationUserCredential | None, error | None)`
 - OAUTH only: `revoke(refresh_token) -> None`
+- device-flow OAUTH only: `store_device_credentials(environment, owner_user,
+  app_slug, payload) -> (status, body)`
 
 The spec stores the *module*, not bound functions, so endpoints resolve
 `spec.module.<fn>` at call time. That late binding is deliberate: it keeps
@@ -37,6 +39,7 @@ from devopshero_app.models import IntegrationUserCredential
 from devopshero_app.views.integrations import (
     provider_github,
     provider_google,
+    provider_nous,
     provider_openai_codex,
     provider_openrouter,
     provider_slack,
@@ -67,6 +70,7 @@ _SPECS = [
     ProviderSpec(provider=IntegrationUserCredential.Provider.TELEGRAM, kind=ProviderKind.VAULT, module=provider_telegram),
     ProviderSpec(provider=IntegrationUserCredential.Provider.OPENAI_CODEX, kind=ProviderKind.OAUTH, module=provider_openai_codex),
     ProviderSpec(provider=IntegrationUserCredential.Provider.OPENROUTER, kind=ProviderKind.VAULT, module=provider_openrouter),
+    ProviderSpec(provider=IntegrationUserCredential.Provider.NOUS, kind=ProviderKind.OAUTH, module=provider_nous),
 ]
 
 # Keyed by the provider slug. The keys are `Provider` enum members, which are
