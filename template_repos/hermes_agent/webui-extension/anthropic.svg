@@ -1,5 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Anthropic">
-  <rect width="64" height="64" rx="12" fill="#141413"/>
-  <path fill="#d97757" d="M35.6 16h6.1l11.3 32h-6.4l-2.3-6.6H32.9l-2.3 6.6h-6.4L35.6 16zm-.7 19.9h8l-4-11.4-4 11.4z"/>
-  <path fill="#d97757" d="M20.4 16h6.1l-9.6 32H10.8L20.4 16z"/>
+  <rect width="64" height="64" rx="12" fill="#fff"/>
+  <g transform="translate(5 5) scale(2.25)">
+    <path fill="#d97757" d="M17.3041 3.541h-3.6718l6.696 16.918H24Zm-10.6082 0L0 20.459h3.7442l1.3693-3.5527h7.0052l1.3693 3.5528h3.7442L10.5363 3.5409Zm-.3712 10.2232 2.2914-5.9456 2.2914 5.9456Z"/>
+  </g>
 </svg>
