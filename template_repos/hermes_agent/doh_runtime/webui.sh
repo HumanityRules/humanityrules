@@ -136,12 +136,13 @@ bootstrap_gateway_process() {
 }
 
 bootstrap_webui_process() {
-    # profile_env_exec.py overlays ${HERMES_HOME}/.env into WebUI's process env
-    # on every start. Keeping WebUI under system process-compose lets the broker
-    # restart only WebUI after rewriting connected-provider env such as
-    # GITHUB_TOKEN.
+    # Keeping WebUI under system process-compose lets the broker restart only
+    # WebUI after rewriting connected-provider env such as GITHUB_TOKEN. A
+    # targeted restart spawns a fresh server.py, which imports api.config, whose
+    # module body runs init_profile_state() -> _reload_dotenv(${HERMES_HOME}),
+    # loading the broker's latest .env into os.environ (override) on every start.
     "$HERMES_WEBUI_PYTHON" /opt/doh/runtime/system_process_compose_seed.py system.webui \
-        --command "$HERMES_WEBUI_PYTHON /opt/doh/runtime/profile_env_exec.py $HERMES_WEBUI_PYTHON server.py" \
+        --command "$HERMES_WEBUI_PYTHON server.py" \
         --cwd "$HERMES_WEBUI_DIR"
 }
 
