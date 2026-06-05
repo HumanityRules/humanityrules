@@ -155,8 +155,6 @@ urlpatterns = [
     path("api/integrations/credentials/disconnect", views.integrations_credential_disconnect, name="integrations_credential_disconnect"),
     #  - device-complete: the broker posts device-flow refresh tokens here after the user approves; DOH validates + stores them
     path("api/integrations/credentials/<slug:provider>/device-complete", views.integrations_device_complete, name="integrations_device_complete"),
-    #  - codex-device-complete: compatibility alias for the original Codex-only broker route
-    path("api/integrations/credentials/codex-device-complete", views.integrations_codex_device_complete, name="integrations_codex_device_complete"),
 
     #  - Merge.dev Agent Handler: env-resident components (Hermes broker / MCP aggregator) reach Merge through these. Tenant-wide Merge API key lives only on DOH.
     path("api/integrations/merge/ensure-registered-user", views.integrations_merge_ensure_registered_user, name="integrations_merge_ensure_registered_user"),

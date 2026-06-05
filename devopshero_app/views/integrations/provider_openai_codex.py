@@ -17,13 +17,12 @@ on the wire to chatgpt.com (credential model A1: the account id never enters
 the sandbox). If OpenAI has revoked the refresh_token the row is deleted and
 the outcome flips to `absent`.
 
-See `docs/openai_codex_integration_design.md`.
+See `docs/device_flow_integration_design.md`.
 """
 
 import logging
 
 import httpx
-from django.utils import timezone
 
 from devopshero_app.models import Environment, IntegrationUserCredential, User
 from devopshero_app.views.integrations import provider_common
@@ -118,8 +117,6 @@ def _exchange_refresh_token(refresh_token: str) -> provider_common.ExchangeResul
 def store_device_credentials(environment: Environment, owner_user: User, app_slug: str, payload: dict) -> tuple[int, dict]:
     """Store the refresh/access token pair the broker obtained from OpenAI's device flow."""
     refresh_token = payload.get("refresh_token")
-    if not isinstance(refresh_token, str) or not refresh_token:
-        return 400, {"error": "refresh_token is required"}
     access_token = payload.get("access_token")
     if not isinstance(access_token, str) or not access_token:
         return 400, {"error": "access_token is required"}
@@ -134,23 +131,14 @@ def store_device_credentials(environment: Environment, owner_user: User, app_slu
     if account_id is None:
         return 400, {"error": "token has no chatgpt_account_id; not a ChatGPT-subscription login"}
 
-    IntegrationUserCredential.objects.update_or_create(
-        owner_user=owner_user,
-        environment=environment,
-        app_slug=app_slug,
+    return provider_common.store_oauth_refresh_credential(
         provider=IntegrationUserCredential.Provider.OPENAI_CODEX,
-        defaults={
-            "credentials": {"refresh_token": refresh_token},
-            "config": {},
-            "metadata": {
-                "chatgpt_account_id": account_id,
-                "connected_at": timezone.now().isoformat(),
-            },
-            "last_refreshed_at": None,
-        },
+        environment=environment,
+        owner_user=owner_user,
+        app_slug=app_slug,
+        refresh_token=refresh_token,
+        metadata={"chatgpt_account_id": account_id},
     )
-    logger.info("codex integration stored env=%s owner=%s app=%s", environment.slug, owner_user.username, app_slug)
-    return 200, {"ok": True, "provider": IntegrationUserCredential.Provider.OPENAI_CODEX, "status": "connected"}
 
 
 def refresh_outcome(environment: Environment, owner_user: User, app_slug: str) -> dict:

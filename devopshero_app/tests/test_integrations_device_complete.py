@@ -109,8 +109,7 @@ class TestDeviceComplete(TestCase):
         self.assertEqual(body["provider"], "nous")
         credential = IntegrationUserCredential.objects.get(provider=IntegrationUserCredential.Provider.NOUS)
         self.assertEqual(credential.credentials, {"refresh_token": "nous-refresh"})
-        self.assertEqual(credential.metadata["scope"], "inference:invoke")
-        self.assertEqual(credential.metadata["inference_base_url"], "https://inference-api.nousresearch.com/v1")
+        self.assertEqual(set(credential.metadata), {"connected_at"})
 
     def test_unknown_device_provider_returns_404(self) -> None:
         status, body = self._post(

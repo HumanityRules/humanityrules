@@ -51,7 +51,7 @@ from .integrations.provider_github import (
 )
 from .integrations.token_refresh_batch import integrations_tokens_batch
 from .integrations.provider_disconnect import integrations_credential_disconnect
-from .integrations.provider_device import integrations_codex_device_complete, integrations_device_complete
+from .integrations.provider_device import integrations_device_complete
 from .integrations.user_credential_vault import (
     integrations_credential_setup_session,
     integrations_credential_submit,
@@ -177,7 +177,6 @@ __all__ = [
     "integrations_user_github_callback",
     "integrations_tokens_batch",
     "integrations_credential_disconnect",
-    "integrations_codex_device_complete",
     "integrations_device_complete",
     "integrations_credential_setup_session",
     "integrations_credential_submit",

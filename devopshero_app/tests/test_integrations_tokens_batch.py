@@ -280,7 +280,7 @@ class TestConnectedProvidersReturnHasToken(_BatchTokensEndpointTestBase):
         nous = body["results"]["nous"]
         self.assertEqual(nous["outcome"], "has_token")
         self.assertEqual(nous["secrets"], {"access_token": "nous-access"})
-        self.assertEqual(nous["expires_in"], 1800)
+        self.assertEqual(nous["expires_in"], 3600)
         post_mock.assert_called_once()
         cred = IntegrationUserCredential.objects.get(provider=IntegrationUserCredential.Provider.NOUS)
         self.assertEqual(cred.credentials["refresh_token"], "nous-refresh-new")

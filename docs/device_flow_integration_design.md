@@ -1,6 +1,9 @@
-# OpenAI Codex (ChatGPT-subscription) Integration Design
+# Device-Flow Provider Integration Design
 
-Use a user's ChatGPT subscription (Codex OAuth) as a Hermes LLM backend, with the refresh token held outside the sandbox. Companion to `integrations_broker_design.md` for TLS-intercept mechanics.
+Use broker-run OAuth device flows to connect LLM providers whose refresh tokens
+must stay outside the sandbox. This started with ChatGPT-subscription Codex auth
+and now also covers Nous Portal. Companion to `integrations_broker_design.md`
+for TLS-intercept mechanics.
 
 Status: implemented (backend + WebUI device dialog). Not yet wired: deploy-time selection of `DOH_LLM_PROVIDER=openai-codex` (a deploy_app.py concern, not in this repo).
 
@@ -42,7 +45,7 @@ Device flow is OpenAI's bespoke `deviceauth` JSON API, **not** RFC 8628 / `oauth
 ## DOH control plane
 
 - `provider_openai_codex.py`: OAUTH-kind provider. `refresh_outcome` exchanges the stored refresh_token (`grant_type=refresh_token`, public `client_id`, no secret) and returns two secrets — `access_token` + `chatgpt_account_id` (JWT claim, no verification). `revoke` is a no-op (no revocation endpoint for this public client). Registered in `provider_registry.py`; enum member added to `IntegrationUserCredential.Provider` (migration 0063).
-- `codex_device.py`: generic device completion endpoint `POST /api/integrations/credentials/openai-codex/device-complete` (env-bearer). Dispatches through `provider_registry`; `provider_openai_codex.store_device_credentials` validates the broker-forwarded access token has `chatgpt_account_id`, then stores the refresh token. The legacy `codex-device-complete` URL delegates here. Disconnect reuses the unified handler.
+- `provider_device.py`: generic device completion endpoint `POST /api/integrations/credentials/{provider}/device-complete` (env-bearer). Dispatches through `provider_registry`; `provider_openai_codex.store_device_credentials` validates the broker-forwarded access token has `chatgpt_account_id`, then stores the refresh token. Disconnect reuses the unified handler.
 
 ## Broker (`doh_runtime/`)
 
