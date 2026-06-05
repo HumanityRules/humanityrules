@@ -228,6 +228,63 @@
     return aLabel.localeCompare(bLabel);
   }
 
+  // ── Shared card + disconnect helpers ──────────────────────────────
+
+  // A Disconnect button with the shared in-flight treatment: disabled and
+  // labelled "Disconnecting…" while `key` is in the pending set. `key` is the
+  // value tracked in _disconnecting — the provider slug for TLS-intercept
+  // cards, or the "merge:"/"mcp:"-prefixed provider id for connector cards.
+  function disconnectButton(key, onclick) {
+    const pending = _disconnecting.has(key);
+    const props = { class: 'doh-integration-btn doh-integration-btn-secondary', onclick };
+    if (pending) props.disabled = true;
+    return elem('button', props, [pending ? 'Disconnecting…' : 'Disconnect']);
+  }
+
+  // Run a disconnect with the shared guard/spinner/cleanup dance: no-op if one
+  // is already in flight for `key`; otherwise mark pending and re-render (so the
+  // button shows "Disconnecting…"), run `perform`, then always clear and
+  // re-render. `perform` owns the fetch and any post-disconnect refresh.
+  async function runDisconnect(key, perform) {
+    if (_disconnecting.has(key)) return;
+    _disconnecting.add(key);
+    renderPane(_current);
+    try {
+      await perform();
+    } finally {
+      _disconnecting.delete(key);
+      renderPane(_current);
+    }
+  }
+
+  // Build the shared card shell: the card div (row layout unless connected), a
+  // title row with optional logo + title, and the status pill. `providerKey`
+  // becomes the card's data-provider attribute (slug for TLS, prefixed id for
+  // connectors). Each renderer fills in its own connected/not-connected body.
+  function buildCardScaffold(item, providerKey) {
+    const isConnected = item.status === 'connected';
+    const cardClass = isConnected ? 'doh-integration-card' : 'doh-integration-card doh-integration-card-row';
+    const card = elem('div', { class: cardClass, dataset: { provider: providerKey } });
+    const titleRow = elem('div', { class: 'doh-integration-card-title-row' });
+    if (item.logo_url) titleRow.appendChild(logoImg(item.logo_url));
+    titleRow.appendChild(elem('div', { class: 'doh-integration-card-title' }, [item.label || item.slug]));
+    const statusPill = elem('div', { class: 'doh-integration-card-status', dataset: { status: item.status } }, [statusLabelFor(item.status)]);
+    return { card, titleRow, statusPill, isConnected };
+  }
+
+  // Append the not-connected footer: a Connect button alongside the status pill
+  // in the card's head row. `onConnect` receives the markConnecting revert fn,
+  // which modal flows (vault, Merge) call to restore the button on cancel/error
+  // and navigation flows simply let persist as the page leaves.
+  function appendConnectFooter(card, titleRow, statusPill, onConnect) {
+    const connectBtn = elem('button', {
+      class: 'doh-integration-btn',
+      onclick: () => { onConnect(markConnecting(connectBtn)); },
+    }, ['Connect']);
+    const trailing = elem('div', { class: 'doh-integration-card-trailing' }, [connectBtn, statusPill]);
+    card.appendChild(elem('div', { class: 'doh-integration-card-head' }, [titleRow, trailing]));
+  }
+
   // ── Merge connector flow ──────────────────────────────────────────
 
   function showMergeExplainerModal(item, onContinue, onCancel) {
@@ -369,58 +426,30 @@
   function renderConnectorCard(item) {
     const isMergeConnector = item.kind === 'merge_connector';
     const provider = (isMergeConnector ? 'merge:' : 'mcp:') + item.slug;
-    const isConnected = item.status === 'connected';
-    const cardClass = isConnected ? 'doh-integration-card' : 'doh-integration-card doh-integration-card-row';
-    const card = elem('div', { class: cardClass, dataset: { provider } });
-    const titleRow = elem('div', { class: 'doh-integration-card-title-row' });
-    if (item.logo_url) {
-      titleRow.appendChild(logoImg(item.logo_url));
-    }
-    titleRow.appendChild(elem('div', { class: 'doh-integration-card-title' }, [item.label || item.slug]));
-    const statusPill = elem('div', { class: 'doh-integration-card-status', dataset: { status: item.status } }, [statusLabelFor(item.status)]);
+    const { card, titleRow, statusPill, isConnected } = buildCardScaffold(item, provider);
 
     if (isConnected) {
-      const pending = _disconnecting.has(provider);
-      const btnProps = {
-        class: 'doh-integration-btn doh-integration-btn-secondary',
-        onclick: async () => {
-          if (_disconnecting.has(provider)) return;
-          _disconnecting.add(provider);
-          renderPane(_current);
-          try {
-            if (isMergeConnector) {
-              await fetch('/__doh_broker/integrations/merge/disconnect', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ connector_slug: item.slug }),
-              });
-            } else {
-              await fetch('/__doh_broker/integrations/' + item.slug + '/disconnect', { method: 'POST' });
-            }
-            await refreshAndRender();
-          } finally {
-            _disconnecting.delete(provider);
-            renderPane(_current);
-          }
-        },
-      };
-      if (pending) btnProps.disabled = true;
-      const disconnectBtn = elem('button', btnProps, [pending ? 'Disconnecting…' : 'Disconnect']);
+      const disconnectBtn = disconnectButton(provider, () => runDisconnect(provider, async () => {
+        if (isMergeConnector) {
+          await fetch('/__doh_broker/integrations/merge/disconnect', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ connector_slug: item.slug }),
+          });
+        } else {
+          await fetch('/__doh_broker/integrations/' + item.slug + '/disconnect', { method: 'POST' });
+        }
+        await refreshAndRender();
+      }));
       card.appendChild(elem('div', { class: 'doh-integration-card-head' }, [titleRow, statusPill]));
       card.appendChild(elem('div', { class: 'doh-integration-card-body' }, [disconnectBtn]));
       return card;
     }
 
-    const connectBtn = elem('button', {
-      class: 'doh-integration-btn',
-      onclick: () => {
-        const revert = markConnecting(connectBtn);
-        if (isMergeConnector) startMergeConnect(item, revert);
-        else window.location.href = buildMcpConnectUrl(item.slug);
-      },
-    }, ['Connect']);
-    const trailing = elem('div', { class: 'doh-integration-card-trailing' }, [connectBtn, statusPill]);
-    card.appendChild(elem('div', { class: 'doh-integration-card-head' }, [titleRow, trailing]));
+    appendConnectFooter(card, titleRow, statusPill, (revert) => {
+      if (isMergeConnector) startMergeConnect(item, revert);
+      else window.location.href = buildMcpConnectUrl(item.slug);
+    });
     return card;
   }
 
@@ -1028,11 +1057,8 @@
   // One disconnect path for every TLS-intercept provider (vault + OAuth).
   // The broker resolves the provider kind server-side, so both kinds POST
   // here identically.
-  async function disconnectTlsProvider(item) {
-    if (_disconnecting.has(item.slug)) return;
-    _disconnecting.add(item.slug);
-    renderPane(_current);
-    try {
+  function disconnectTlsProvider(item) {
+    return runDisconnect(item.slug, async () => {
       const response = await fetch('/__doh_broker/integrations/' + encodeURIComponent(item.slug) + '/tls/disconnect', {
         method: 'POST',
         cache: 'no-store',
@@ -1045,25 +1071,14 @@
       }
       await refreshAndRender();
       await refreshModelDropdownsIfProviderAffectsPicker(item);
-    } finally {
-      _disconnecting.delete(item.slug);
-      renderPane(_current);
-    }
+    });
   }
 
   function renderTlsInterceptCard(item, payload) {
     const returnTo = window.location.origin + window.location.pathname;
-    const isConnected = item.status === 'connected';
     const usesVault = item.connect_mode === 'vault';
     const usesDevice = item.connect_mode === 'device';
-    const cardClass = isConnected ? 'doh-integration-card' : 'doh-integration-card doh-integration-card-row';
-    const card = elem('div', { class: cardClass, dataset: { provider: item.slug } });
-    const titleRow = elem('div', { class: 'doh-integration-card-title-row' });
-    if (item.logo_url) {
-      titleRow.appendChild(logoImg(item.logo_url));
-    }
-    titleRow.appendChild(elem('div', { class: 'doh-integration-card-title' }, [item.label]));
-    const statusPill = elem('div', { class: 'doh-integration-card-status', dataset: { status: item.status } }, [statusLabelFor(item.status)]);
+    const { card, titleRow, statusPill, isConnected } = buildCardScaffold(item, item.slug);
 
     if (isConnected) {
       card.appendChild(elem('div', { class: 'doh-integration-card-head' }, [titleRow, statusPill]));
@@ -1082,48 +1097,26 @@
           'Last refreshed: ' + formatDate(item.last_refreshed_at),
         ]));
       }
+      // Both connect modes share one Disconnect button; vault providers add a
+      // Configure button ahead of it.
       const actions = elem('div', { class: 'doh-integration-actions' });
       if (usesVault) {
         actions.appendChild(elem('button', {
           class: 'doh-integration-btn',
           onclick: () => { startVaultConfig(item); },
         }, ['Configure']));
-        const vaultDisconnectPending = _disconnecting.has(item.slug);
-        const vaultDisconnectProps = {
-          class: 'doh-integration-btn doh-integration-btn-secondary',
-          onclick: () => { disconnectTlsProvider(item); },
-        };
-        if (vaultDisconnectPending) vaultDisconnectProps.disabled = true;
-        actions.appendChild(elem('button', vaultDisconnectProps, [
-          vaultDisconnectPending ? 'Disconnecting…' : 'Disconnect',
-        ]));
-      } else {
-        const oauthDisconnectPending = _disconnecting.has(item.slug);
-        const oauthDisconnectProps = {
-          class: 'doh-integration-btn doh-integration-btn-secondary',
-          onclick: () => { disconnectTlsProvider(item); },
-        };
-        if (oauthDisconnectPending) oauthDisconnectProps.disabled = true;
-        actions.appendChild(elem('button', oauthDisconnectProps, [
-          oauthDisconnectPending ? 'Disconnecting…' : 'Disconnect',
-        ]));
       }
+      actions.appendChild(disconnectButton(item.slug, () => { disconnectTlsProvider(item); }));
       body.appendChild(actions);
       card.appendChild(body);
       return card;
     }
 
-    const connectBtn = elem('button', {
-      class: 'doh-integration-btn',
-      onclick: () => {
-        const revert = markConnecting(connectBtn);
-        if (usesVault) startVaultConfig(item, revert);
-        else if (usesDevice) startCodexDevice(item, revert);
-        else window.location.href = buildTlsConnectUrl(payload, item.slug, returnTo);
-      },
-    }, ['Connect']);
-    const trailing = elem('div', { class: 'doh-integration-card-trailing' }, [connectBtn, statusPill]);
-    card.appendChild(elem('div', { class: 'doh-integration-card-head' }, [titleRow, trailing]));
+    appendConnectFooter(card, titleRow, statusPill, (revert) => {
+      if (usesVault) startVaultConfig(item, revert);
+      else if (usesDevice) startCodexDevice(item, revert);
+      else window.location.href = buildTlsConnectUrl(payload, item.slug, returnTo);
+    });
     return card;
   }
 
