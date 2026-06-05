@@ -1782,7 +1782,7 @@ class IntegrationUserCredential(models.Model):
         OPENAI_CODEX = "openai-codex", "OpenAI Codex"
         OPENROUTER = "openrouter", "OpenRouter"
         NOUS = "nous", "Nous Portal"
-        OPENAI = "openai", "OpenAI"
+        OPENAI = "openai-api", "OpenAI API"
         ANTHROPIC = "anthropic", "Anthropic"
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid7, editable=False)

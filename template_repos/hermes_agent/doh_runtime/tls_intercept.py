@@ -388,7 +388,7 @@ TLS_INTERCEPT_PROVIDER_SPECS = (
         affects_model_picker=True,
     ),
     TlsProviderSpec(
-        slug="openai",
+        slug="openai-api",
         label="OpenAI API Key",
         # The OpenAI API surface. chatgpt.com (ChatGPT-subscription auth) is the
         # separate Codex provider and is not listed here.

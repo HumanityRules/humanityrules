@@ -170,7 +170,7 @@ class TestSetupSession(_CredentialVaultTestBase):
         status, body = self._post_setup_session_for_provider(provider=IntegrationUserCredential.Provider.OPENAI)
 
         self.assertEqual(status, 200)
-        self.assertEqual(body["schema"]["provider"], "openai")
+        self.assertEqual(body["schema"]["provider"], "openai-api")
         self.assertEqual(body["schema"]["status"], "not_connected")
         self.assertEqual(body["schema"]["fields"][0]["name"], "api_key")
 

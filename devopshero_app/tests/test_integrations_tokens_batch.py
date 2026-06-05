@@ -259,12 +259,12 @@ class TestConnectedProvidersReturnHasToken(_BatchTokensEndpointTestBase):
         )
 
         status, body = self._post(
-            body={"owner_username": "vmendi", "app_slug": "hermes", "providers": ["openai"]},
+            body={"owner_username": "vmendi", "app_slug": "hermes", "providers": ["openai-api"]},
             token=self.raw_token,
         )
 
         self.assertEqual(status, 200)
-        openai = body["results"]["openai"]
+        openai = body["results"]["openai-api"]
         self.assertEqual(openai["outcome"], "has_token")
         self.assertEqual(openai["secrets"], {"api_key": "sk-real"})
         self.assertEqual(openai["config"], {})
