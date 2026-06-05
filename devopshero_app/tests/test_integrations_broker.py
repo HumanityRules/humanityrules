@@ -139,6 +139,10 @@ class TestHostToProviderRouting(unittest.TestCase):
         self.assertEqual(store.provider_for_host(host="GitHub.COM").slug, "github")
         self.assertEqual(store.provider_for_host(host="github.com.").slug, "github")
 
+    def test_openrouter_host_routes_to_openrouter(self) -> None:
+        store = _make_token_store()
+        self.assertEqual(store.provider_for_host(host="openrouter.ai").slug, "openrouter")
+
 
 class TestRewriteAuthorization(unittest.TestCase):
 
@@ -282,6 +286,18 @@ class TestRewriteAuthorization(unittest.TestCase):
                 upstream_host="slack.com",
             )
 
+    def test_openrouter_placeholder_bearer_is_rewritten(self) -> None:
+        provider = broker.tls_intercept.TLS_INTERCEPT_PROVIDERS["openrouter"]
+        headers, path = broker.tls_intercept._rewrite_request_for_provider(
+            headers=[(b"host", b"openrouter.ai"), (b"authorization", b"Bearer DOH_PLACEHOLDER")],
+            path_with_query="/api/v1/chat/completions",
+            secrets={"api_key": "sk-or-v1-real"},
+            provider=provider,
+            upstream_host="openrouter.ai",
+        )
+        self.assertEqual(path, "/api/v1/chat/completions")
+        self.assertEqual(dict((n.lower(), v) for n, v in headers)[b"authorization"], b"Bearer sk-or-v1-real")
+
 
 class TestForwardHeaderNormalization(unittest.TestCase):
 
@@ -379,6 +395,19 @@ class _StubAggregator:
         return self._refresh_payload
 
 
+class _StubCodexFlow:
+    """Minimal Codex device-flow surface for control-app tests."""
+
+    async def start(self) -> dict:
+        return {"status": "pending"}
+
+    async def status(self) -> dict:
+        return {"status": "idle"}
+
+    async def cancel(self) -> None:
+        return None
+
+
 def _ready_stub_aggregator() -> _StubAggregator:
     """Stub aggregator for tests that don't exercise the refresh route."""
     return _StubAggregator(
@@ -403,6 +432,7 @@ class TestControlIntegrations(unittest.IsolatedAsyncioTestCase):
         app = broker._build_control_app(
             aggregator=_ready_stub_aggregator(),
             tls_runtime=self.tls_runtime,
+            codex_flow=_StubCodexFlow(),
             control_plane_url="https://doh.example",
             bearer="env-bearer",
             owner_username="vmendi",
@@ -442,6 +472,17 @@ class TestControlIntegrations(unittest.IsolatedAsyncioTestCase):
             await self.tls_runtime._token_store.token_for_host(host="gmail.googleapis.com"),
             "fresh-token",
         )
+
+    async def test_model_provider_status_marks_model_picker_affecting_items(self) -> None:
+        """The WebUI extension refreshes model dropdowns only for LLM providers."""
+        items_by_slug = {item["slug"]: item for item in await self.tls_runtime.status_items()}
+
+        self.assertFalse(items_by_slug["google"]["affects_model_picker"])
+        self.assertFalse(items_by_slug["github"]["affects_model_picker"])
+        self.assertFalse(items_by_slug["telegram"]["affects_model_picker"])
+        self.assertFalse(items_by_slug["slack"]["affects_model_picker"])
+        self.assertTrue(items_by_slug["openai-codex"]["affects_model_picker"])
+        self.assertTrue(items_by_slug["openrouter"]["affects_model_picker"])
 
     async def test_absent_provider_is_not_cached(self) -> None:
         """An `absent` outcome from DOH must remove (not store) the cache entry."""
@@ -737,6 +778,7 @@ class TestControlIntegrations(unittest.IsolatedAsyncioTestCase):
         app = broker._build_control_app(
             aggregator=aggregator,
             tls_runtime=self.tls_runtime,
+            codex_flow=_StubCodexFlow(),
             control_plane_url="https://doh.example",
             bearer="env-bearer",
             owner_username="vmendi",
@@ -776,6 +818,7 @@ class TestControlIntegrations(unittest.IsolatedAsyncioTestCase):
         app = broker._build_control_app(
             aggregator=aggregator,
             tls_runtime=self.tls_runtime,
+            codex_flow=_StubCodexFlow(),
             control_plane_url="https://doh.example",
             bearer="env-bearer",
             owner_username="vmendi",
@@ -803,6 +846,7 @@ class TestControlIntegrations(unittest.IsolatedAsyncioTestCase):
         app = broker._build_control_app(
             aggregator=aggregator,
             tls_runtime=self.tls_runtime,
+            codex_flow=_StubCodexFlow(),
             control_plane_url="https://doh.example",
             bearer="env-bearer",
             owner_username="vmendi",
@@ -831,6 +875,7 @@ class TestControlIntegrations(unittest.IsolatedAsyncioTestCase):
         app = broker._build_control_app(
             aggregator=_ready_stub_aggregator(),
             tls_runtime=self.tls_runtime,
+            codex_flow=_StubCodexFlow(),
             control_plane_url="https://doh.example",
             bearer="env-bearer",
             owner_username="vmendi",
@@ -855,6 +900,7 @@ class TestControlIntegrations(unittest.IsolatedAsyncioTestCase):
         app = broker._build_control_app(
             aggregator=_ready_stub_aggregator(),
             tls_runtime=self.tls_runtime,
+            codex_flow=_StubCodexFlow(),
             control_plane_url="https://doh.example",
             bearer="env-bearer",
             owner_username="vmendi",
@@ -891,6 +937,7 @@ class TestControlIntegrations(unittest.IsolatedAsyncioTestCase):
         app = broker._build_control_app(
             aggregator=_ready_stub_aggregator(),
             tls_runtime=self.tls_runtime,
+            codex_flow=_StubCodexFlow(),
             control_plane_url="https://doh.example",
             bearer="env-bearer",
             owner_username="vmendi",
@@ -925,6 +972,7 @@ class TestControlIntegrations(unittest.IsolatedAsyncioTestCase):
         app = broker._build_control_app(
             aggregator=_ready_stub_aggregator(),
             tls_runtime=self.tls_runtime,
+            codex_flow=_StubCodexFlow(),
             control_plane_url="https://doh.example",
             bearer="env-bearer",
             owner_username="vmendi",
@@ -1174,6 +1222,14 @@ class TestRefreshAllBatchedApply(unittest.IsolatedAsyncioTestCase):
                 outcome=broker.tls_intercept.REFRESH_OUTCOME_ABSENT,
                 secrets=None, expires_in=None, config={}, metadata={},
             ),
+            "openai-codex": broker.tls_intercept.RefreshResult(
+                outcome=broker.tls_intercept.REFRESH_OUTCOME_ABSENT,
+                secrets=None, expires_in=None, config={}, metadata={},
+            ),
+            "openrouter": broker.tls_intercept.RefreshResult(
+                outcome=broker.tls_intercept.REFRESH_OUTCOME_ABSENT,
+                secrets=None, expires_in=None, config={}, metadata={},
+            ),
         }
         with patch.object(
             broker.tls_intercept,
@@ -1203,8 +1259,11 @@ class TestGatewayEnvRender(unittest.TestCase):
     def _slack_provider(self) -> "broker.tls_intercept.TlsProviderSpec":
         return broker.tls_intercept.TLS_INTERCEPT_PROVIDERS["slack"]
 
+    def _openrouter_provider(self) -> "broker.tls_intercept.TlsProviderSpec":
+        return broker.tls_intercept.TLS_INTERCEPT_PROVIDERS["openrouter"]
+
     def test_slack_vault_header_provider_renders_both_placeholders(self) -> None:
-        """VaultHeaderInject renders one env var per placeholder plus list config."""
+        """Env bindings render static placeholders plus list config."""
         snapshot = [(self._slack_provider(), {"allowed_users": ["U1", "U2"], "home_channel": "DOWNER"})]
         block = broker.tls_intercept.render_managed_block(snapshot=snapshot)
         self.assertIn("SLACK_APP_TOKEN=xapp-DOH_PLACEHOLDER", block)
@@ -1251,6 +1310,11 @@ class TestGatewayEnvRender(unittest.TestCase):
         block = broker.tls_intercept.render_managed_block(snapshot=snapshot)
         self.assertIn("GITHUB_TOKEN=DOH_PLACEHOLDER", block)
         self.assertNotIn("COPILOT_GITHUB_TOKEN", block)
+
+    def test_connected_openrouter_renders_api_key_placeholder(self) -> None:
+        snapshot = [(self._openrouter_provider(), {})]
+        block = broker.tls_intercept.render_managed_block(snapshot=snapshot)
+        self.assertIn("OPENROUTER_API_KEY=DOH_PLACEHOLDER", block)
 
     def test_missing_list_config_skips_binding(self) -> None:
         """A connected provider without the optional list field omits its env var."""
@@ -1320,6 +1384,7 @@ class TestGatewayEnvHookIntegration(unittest.IsolatedAsyncioTestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
         self.env_path = pathlib.Path(self.tmp.name) / "hermes.env"
+        self.webui_state_dir = pathlib.Path(self.tmp.name) / "webui-state"
 
     def _make_runtime(self, on_user_invalidate=None) -> "broker.tls_intercept.TlsInterceptRuntime":
         root = pathlib.Path(self.tmp.name)
@@ -1364,16 +1429,17 @@ class TestGatewayEnvHookIntegration(unittest.IsolatedAsyncioTestCase):
         await runtime._token_store.invalidate(slug="telegram")
         self.assertEqual(seen, [])
 
-    async def test_slug_requires_restart_only_for_vault_providers(self) -> None:
-        """OAuth providers don't need a gateway restart when their cache flips."""
+    async def test_slug_requires_gateway_restart_only_for_gateway_relevant_providers(self) -> None:
+        """Only providers declaring gateway reload restart system.gateway."""
         runtime = self._make_runtime()
-        self.assertTrue(broker._slug_requires_restart(slug="telegram", runtime=runtime))
-        self.assertFalse(broker._slug_requires_restart(slug="google", runtime=runtime))
-        self.assertFalse(broker._slug_requires_restart(slug="github", runtime=runtime))
+        self.assertTrue(broker._slug_requires_gateway_restart(slug="telegram", runtime=runtime))
+        self.assertTrue(broker._slug_requires_gateway_restart(slug="openrouter", runtime=runtime))
+        self.assertFalse(broker._slug_requires_gateway_restart(slug="google", runtime=runtime))
+        self.assertFalse(broker._slug_requires_gateway_restart(slug="github", runtime=runtime))
         # Unknown slug: don't restart.
-        self.assertFalse(broker._slug_requires_restart(slug="bogus", runtime=runtime))
-        # None (Refresh-all) covers any vault provider in scope.
-        self.assertTrue(broker._slug_requires_restart(slug=None, runtime=runtime))
+        self.assertFalse(broker._slug_requires_gateway_restart(slug="bogus", runtime=runtime))
+        # None (Refresh-all) covers any gateway-restart provider in scope.
+        self.assertTrue(broker._slug_requires_gateway_restart(slug=None, runtime=runtime))
 
     async def test_processes_requiring_restart_separates_gateway_and_webui(self) -> None:
         """Vault env restarts gateway; GitHub placeholder env restarts WebUI."""
@@ -1385,6 +1451,10 @@ class TestGatewayEnvHookIntegration(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(
             broker._processes_requiring_restart(slug="github", runtime=runtime),
             (broker.WEBUI_PROCESS_NAME,),
+        )
+        self.assertEqual(
+            broker._processes_requiring_restart(slug="openrouter", runtime=runtime),
+            (broker.GATEWAY_PROCESS_NAME, broker.WEBUI_PROCESS_NAME),
         )
         self.assertEqual(broker._processes_requiring_restart(slug="google", runtime=runtime), ())
 
@@ -1401,6 +1471,7 @@ class TestGatewayEnvHookIntegration(unittest.IsolatedAsyncioTestCase):
         on_user_invalidate = broker._build_on_user_invalidate(
             tls_runtime_holder=tls_runtime_holder,
             env_path=self.env_path,
+            webui_state_dir=self.webui_state_dir,
             process_compose_url="http://127.0.0.1:9999",
         )
 
@@ -1425,8 +1496,12 @@ class TestGatewayEnvHookIntegration(unittest.IsolatedAsyncioTestCase):
         on_user_invalidate = broker._build_on_user_invalidate(
             tls_runtime_holder=tls_runtime_holder,
             env_path=self.env_path,
+            webui_state_dir=self.webui_state_dir,
             process_compose_url="http://127.0.0.1:9999",
         )
+        self.webui_state_dir.mkdir(parents=True)
+        models_cache = self.webui_state_dir / "models_cache.json"
+        models_cache.write_text("stale", encoding="utf-8")
 
         with patch.object(
             broker.tls_intercept,
@@ -1445,10 +1520,81 @@ class TestGatewayEnvHookIntegration(unittest.IsolatedAsyncioTestCase):
         text = self.env_path.read_text(encoding="utf-8")
         self.assertIn("GITHUB_TOKEN=DOH_PLACEHOLDER", text)
         self.assertNotIn("COPILOT_GITHUB_TOKEN", text)
+        self.assertTrue(models_cache.exists())
         restart_mock.assert_called_once_with(
             process_compose_url="http://127.0.0.1:9999",
             process_name=broker.WEBUI_PROCESS_NAME,
         )
+
+    async def test_openrouter_invalidate_deletes_models_cache_and_restarts_webui(self) -> None:
+        """OpenRouter changes provider availability, so WebUI must rebuild /api/models."""
+        runtime = self._make_runtime()
+        tls_runtime_holder: dict = {"runtime": runtime}
+        on_user_invalidate = broker._build_on_user_invalidate(
+            tls_runtime_holder=tls_runtime_holder,
+            env_path=self.env_path,
+            webui_state_dir=self.webui_state_dir,
+            process_compose_url="http://127.0.0.1:9999",
+        )
+        self.webui_state_dir.mkdir(parents=True)
+        models_cache = self.webui_state_dir / "models_cache.json"
+        models_cache.write_text("stale", encoding="utf-8")
+
+        with patch.object(
+            broker.tls_intercept,
+            "fetch_provider_tokens_batch",
+            return_value=_batched(slug="openrouter", result=broker.tls_intercept.RefreshResult(
+                outcome=broker.tls_intercept.REFRESH_OUTCOME_HAS_TOKEN,
+                secrets={"api_key": "sk-or-v1-real"}, expires_in=3600, config={}, metadata={},
+            )),
+        ), patch.object(
+            broker,
+            "_post_process_compose_restart",
+            return_value=(200, "ok"),
+        ) as restart_mock:
+            await on_user_invalidate("openrouter")
+
+        text = self.env_path.read_text(encoding="utf-8")
+        self.assertIn("OPENROUTER_API_KEY=DOH_PLACEHOLDER", text)
+        self.assertFalse(models_cache.exists())
+        self.assertEqual(
+            [call.kwargs["process_name"] for call in restart_mock.call_args_list],
+            [broker.GATEWAY_PROCESS_NAME, broker.WEBUI_PROCESS_NAME],
+        )
+
+    async def test_codex_invalidate_deletes_models_cache_without_process_restart(self) -> None:
+        """Model-provider cache refresh is generic, even when no env changes."""
+        runtime = self._make_runtime()
+        tls_runtime_holder: dict = {"runtime": runtime}
+        on_user_invalidate = broker._build_on_user_invalidate(
+            tls_runtime_holder=tls_runtime_holder,
+            env_path=self.env_path,
+            webui_state_dir=self.webui_state_dir,
+            process_compose_url="http://127.0.0.1:9999",
+        )
+        self.webui_state_dir.mkdir(parents=True)
+        models_cache = self.webui_state_dir / "models_cache.json"
+        models_cache.write_text("stale", encoding="utf-8")
+
+        with patch.object(
+            broker.tls_intercept,
+            "fetch_provider_tokens_batch",
+            return_value=_batched(slug="openai-codex", result=broker.tls_intercept.RefreshResult(
+                outcome=broker.tls_intercept.REFRESH_OUTCOME_HAS_TOKEN,
+                secrets={"access_token": "codex-access", "chatgpt_account_id": "account-id"},
+                expires_in=3600,
+                config={},
+                metadata={},
+            )),
+        ), patch.object(
+            broker,
+            "_post_process_compose_restart",
+            return_value=(200, "ok"),
+        ) as restart_mock:
+            await on_user_invalidate("openai-codex")
+
+        self.assertFalse(models_cache.exists())
+        restart_mock.assert_not_called()
 
     async def test_invalidate_all_uses_single_batched_call(self) -> None:
         """Explicit Refresh-all collapses to one DOH round-trip across every provider.
@@ -1463,6 +1609,7 @@ class TestGatewayEnvHookIntegration(unittest.IsolatedAsyncioTestCase):
         on_user_invalidate = broker._build_on_user_invalidate(
             tls_runtime_holder=tls_runtime_holder,
             env_path=self.env_path,
+            webui_state_dir=self.webui_state_dir,
             process_compose_url="http://127.0.0.1:9999",
         )
 

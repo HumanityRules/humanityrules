@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="OpenRouter">
+  <rect width="64" height="64" rx="12" fill="#0b0f19"/>
+  <path fill="#fff" d="M12 32c0-11 9-20 20-20h16v8H32c-6.6 0-12 5.4-12 12s5.4 12 12 12h16v8H32c-11 0-20-9-20-20z"/>
+  <path fill="#7dd3fc" d="M34 24h16l8 8-8 8H34v-8h20l-4-4H34z"/>
+</svg>

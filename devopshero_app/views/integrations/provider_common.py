@@ -5,9 +5,9 @@ Two provider families live alongside this module, organized symmetrically:
 - OAuth providers (`provider_google`, `provider_github`): connect via a
   browser redirect dance, refresh by exchanging a stored refresh_token
   upstream, disconnect by deleting the row + best-effort upstream revoke.
-- Vault providers (`provider_slack`, `provider_telegram`): connect via a
-  browser-direct credential paste, refresh by reading the row back, and
-  carry their own non-secret `config`/`metadata`.
+- Vault providers (`provider_openrouter`, `provider_slack`, `provider_telegram`):
+  connect via a browser-direct credential paste, refresh by reading the row
+  back, and carry their own non-secret `config`/`metadata`.
 
 This module holds what both families (or both OAuth providers) would
 otherwise duplicate: the redirect-flow request helpers, the refresh-exchange

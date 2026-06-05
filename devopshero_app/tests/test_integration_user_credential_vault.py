@@ -21,7 +21,7 @@ from devopshero_app.models import (
     User,
     Workspace,
 )
-from devopshero_app.views.integrations import provider_telegram, user_credential_vault
+from devopshero_app.views.integrations import provider_openrouter, provider_telegram, user_credential_vault
 
 
 def _hash(raw: str) -> str:
@@ -92,17 +92,23 @@ class _CredentialVaultTestBase(TestCase):
         return {"HTTP_AUTHORIZATION": f"Bearer {self.raw_env_token}"}
 
     def _setup_payload(self) -> dict:
+        return self._setup_payload_for_provider(provider=IntegrationUserCredential.Provider.TELEGRAM)
+
+    def _setup_payload_for_provider(self, provider: str) -> dict:
         return {
             "owner_username": self.user.username,
             "app_slug": self.app.slug,
-            "provider": IntegrationUserCredential.Provider.TELEGRAM,
+            "provider": provider,
             "public_origin": "https://hermes.dev.example.com",
         }
 
     def _post_setup_session(self) -> tuple[int, dict]:
+        return self._post_setup_session_for_provider(provider=IntegrationUserCredential.Provider.TELEGRAM)
+
+    def _post_setup_session_for_provider(self, provider: str) -> tuple[int, dict]:
         response = self.client.post(
             "/api/integrations/credentials/setup-session",
-            data=json.dumps(self._setup_payload()),
+            data=json.dumps(self._setup_payload_for_provider(provider=provider)),
             content_type="application/json",
             **self._env_headers(),
         )
@@ -145,6 +151,14 @@ class TestSetupSession(_CredentialVaultTestBase):
         self.assertEqual(token_payload["environment_id"], str(self.env.id))
         self.assertEqual(token_payload["app_slug"], "hermes")
         self.assertEqual(token_payload["allowed_origin"], "https://hermes.dev.example.com")
+
+    def test_openrouter_setup_session_returns_generic_vault_schema(self) -> None:
+        status, body = self._post_setup_session_for_provider(provider=IntegrationUserCredential.Provider.OPENROUTER)
+
+        self.assertEqual(status, 200)
+        self.assertEqual(body["schema"]["provider"], "openrouter")
+        self.assertEqual(body["schema"]["status"], "not_connected")
+        self.assertEqual(body["schema"]["fields"][0]["name"], "api_key")
 
     def test_setup_session_canonicalizes_origin_for_browser_submit(self) -> None:
         payload = self._setup_payload()
@@ -301,3 +315,67 @@ class TestCredentialSubmit(_CredentialVaultTestBase):
         )
         self.assertFalse(IntegrationUserCredential.objects.exists())
 
+    def test_submit_saves_openrouter_credential(self) -> None:
+        _status, session = self._post_setup_session_for_provider(provider=IntegrationUserCredential.Provider.OPENROUTER)
+        openrouter_response = MagicMock()
+        openrouter_response.status_code = 200
+        openrouter_response.json.return_value = {
+            "data": {
+                "label": "Production",
+                "limit": 100,
+                "limit_remaining": 74.5,
+                "limit_reset": "monthly",
+            },
+        }
+
+        with patch(
+            "devopshero_app.views.integrations.provider_openrouter.httpx.get",
+            return_value=openrouter_response,
+        ):
+            response = self.client.post(
+                "/api/integrations/credentials/submit",
+                data=json.dumps({
+                    "submit_token": session["submit_token"],
+                    "credentials": {"api_key": "sk-or-v1-real"},
+                    "config": {},
+                }),
+                content_type="text/plain",
+                HTTP_ORIGIN="https://hermes.dev.example.com",
+            )
+
+        self.assertEqual(response.status_code, 200)
+        credential = IntegrationUserCredential.objects.get(
+            owner_user=self.user,
+            environment=self.env,
+            app_slug="hermes",
+            provider=IntegrationUserCredential.Provider.OPENROUTER,
+        )
+        self.assertEqual(credential.credentials["api_key"], "sk-or-v1-real")
+        self.assertEqual(credential.config, {})
+        self.assertEqual(credential.metadata["label"], "Production")
+        self.assertEqual(credential.metadata["limit_remaining"], 74.5)
+
+    def test_submit_rewrites_openrouter_unauthorized_error(self) -> None:
+        _status, session = self._post_setup_session_for_provider(provider=IntegrationUserCredential.Provider.OPENROUTER)
+        openrouter_response = MagicMock()
+        openrouter_response.status_code = 401
+        openrouter_response.json.return_value = {"error": {"message": "No auth credentials found"}}
+
+        with patch(
+            "devopshero_app.views.integrations.provider_openrouter.httpx.get",
+            return_value=openrouter_response,
+        ):
+            response = self.client.post(
+                "/api/integrations/credentials/submit",
+                data=json.dumps({
+                    "submit_token": session["submit_token"],
+                    "credentials": {"api_key": "sk-or-v1-real"},
+                    "config": {},
+                }),
+                content_type="text/plain",
+                HTTP_ORIGIN="https://hermes.dev.example.com",
+            )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()["error"], provider_openrouter.OPENROUTER_INVALID_KEY_MESSAGE)
+        self.assertFalse(IntegrationUserCredential.objects.exists())

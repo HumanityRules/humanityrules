@@ -13,9 +13,9 @@ down:
   redirect dance (dedicated `integrations_user_<slug>_start/callback` views,
   not dispatched here), refresh by upstream token exchange, disconnect deletes
   the row + best-effort upstream `revoke`.
-- VAULT (`provider_slack`, `provider_telegram`): connect via a browser-direct
-  credential paste (`schema` + `save_credentials`), refresh is a DB read,
-  disconnect just deletes the row.
+- VAULT (`provider_openrouter`, `provider_slack`, `provider_telegram`):
+  connect via a browser-direct credential paste (`schema` + `save_credentials`),
+  refresh is a DB read, disconnect just deletes the row.
 
 Uniform module interface by kind:
 - all providers: `refresh_outcome(environment, owner_user, app_slug) -> dict`
@@ -38,6 +38,7 @@ from devopshero_app.views.integrations import (
     provider_github,
     provider_google,
     provider_openai_codex,
+    provider_openrouter,
     provider_slack,
     provider_telegram,
 )
@@ -65,6 +66,7 @@ _SPECS = [
     ProviderSpec(provider=IntegrationUserCredential.Provider.SLACK, kind=ProviderKind.VAULT, module=provider_slack),
     ProviderSpec(provider=IntegrationUserCredential.Provider.TELEGRAM, kind=ProviderKind.VAULT, module=provider_telegram),
     ProviderSpec(provider=IntegrationUserCredential.Provider.OPENAI_CODEX, kind=ProviderKind.OAUTH, module=provider_openai_codex),
+    ProviderSpec(provider=IntegrationUserCredential.Provider.OPENROUTER, kind=ProviderKind.VAULT, module=provider_openrouter),
 ]
 
 # Keyed by the provider slug. The keys are `Provider` enum members, which are
