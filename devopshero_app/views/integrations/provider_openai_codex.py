@@ -150,71 +150,28 @@ def refresh_outcome(environment: Environment, owner_user: User, app_slug: str) -
     account id from is unusable against chatgpt.com, so we surface `transient`
     (and log loudly) rather than cache a half-usable credential.
     """
-    integration = IntegrationUserCredential.objects.filter(
-        owner_user=owner_user,
-        environment=environment,
-        app_slug=app_slug,
+    def build_secrets(access_token: str, response: dict) -> provider_common.RefreshSecrets | None:
+        account_id = _account_id_from_access_token(access_token)
+        if account_id is None:
+            logger.error(
+                "codex token refresh: access_token carries no chatgpt_account_id env=%s owner=%s app=%s",
+                environment.slug, owner_user.username, app_slug,
+            )
+            return None
+        return provider_common.RefreshSecrets(
+            secrets={"access_token": access_token, "chatgpt_account_id": account_id},
+            expires_in=provider_common.expires_in_from_access_token(access_token=access_token, fallback=CODEX_DEFAULT_EXPIRES_IN),
+            row_metadata={"chatgpt_account_id": account_id},
+        )
+
+    return provider_common.run_refresh_exchange(
         provider=IntegrationUserCredential.Provider.OPENAI_CODEX,
-    ).first()
-    if integration is None:
-        return provider_common.absent()
-
-    refresh_token = integration.credentials.get("refresh_token", "")
-    if not refresh_token:
-        logger.error(
-            "codex token refresh: row missing refresh_token env=%s owner=%s app=%s",
-            environment.slug, owner_user.username, app_slug,
-        )
-        return provider_common.absent()
-
-    exchange_result = _exchange_refresh_token(refresh_token=refresh_token)
-    if exchange_result.revoked:
-        logger.info(
-            "codex token refresh: revoked by openai, deleting row env=%s owner=%s app=%s",
-            environment.slug, owner_user.username, app_slug,
-        )
-        integration.delete()
-        return provider_common.absent()
-    if exchange_result.error is not None:
-        logger.error(
-            "codex token refresh failed env=%s owner=%s app=%s error=%s",
-            environment.slug, owner_user.username, app_slug, exchange_result.error,
-        )
-        return provider_common.transient()
-
-    access_token = exchange_result.response.get("access_token", "")
-    if not access_token:
-        logger.error(
-            "codex token refresh: response missing access_token env=%s owner=%s app=%s",
-            environment.slug, owner_user.username, app_slug,
-        )
-        return provider_common.transient()
-
-    account_id = _account_id_from_access_token(access_token)
-    if account_id is None:
-        logger.error(
-            "codex token refresh: access_token carries no chatgpt_account_id env=%s owner=%s app=%s",
-            environment.slug, owner_user.username, app_slug,
-        )
-        return provider_common.transient()
-
-    # OpenAI rotates the refresh_token on each grant; persist the new one or the
-    # next refresh fails. Account id is stable per account but stored for display.
-    new_refresh = exchange_result.response.get("refresh_token")
-    if new_refresh and new_refresh != refresh_token:
-        integration.credentials = {**integration.credentials, "refresh_token": new_refresh}
-    integration.metadata = {**integration.metadata, "chatgpt_account_id": account_id}
-    integration.last_refreshed_at = provider_common.now()
-    integration.save(update_fields=["credentials", "metadata", "last_refreshed_at", "updated_at"])
-
-    return provider_common.has_token(
-        secrets={"access_token": access_token, "chatgpt_account_id": account_id},
-        expires_in=provider_common.expires_in_from_access_token(
-            access_token=access_token,
-            fallback=CODEX_DEFAULT_EXPIRES_IN,
-        ),
-        config={},
-        metadata={},
+        logger=logger,
+        environment=environment,
+        owner_user=owner_user,
+        app_slug=app_slug,
+        exchange=lambda refresh_token: _exchange_refresh_token(refresh_token=refresh_token),
+        build_secrets=build_secrets,
     )
 
 
