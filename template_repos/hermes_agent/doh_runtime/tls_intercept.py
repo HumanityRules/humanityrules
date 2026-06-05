@@ -141,7 +141,24 @@ class VaultHeaderInject:
         return None
 
 
-CredentialMethod = OAuthHeader | OAuthHeaderMultiInject | VaultUrlRewrite | VaultHeaderInject
+@dataclass(frozen=True)
+class VaultApiKeyHeader:
+    """Vault-pasted, single-secret credential injected as a custom auth header (Anthropic).
+
+    Like `VaultHeaderInject`, but the credential rides a provider-specific
+    header (Anthropic's `x-api-key`) rather than `Authorization: Bearer`. The
+    sandbox sends the placeholder as that header's value; the proxy confirms it
+    matches `placeholder` (so the request is ours), then swaps in the real key.
+    Every other client header — notably Anthropic's required `anthropic-version`
+    — passes through untouched, and no `Authorization` header is added.
+    """
+
+    header_name: str
+    placeholder: str
+    connect_mode: ClassVar[ConnectMode] = "vault"
+
+
+CredentialMethod = OAuthHeader | OAuthHeaderMultiInject | VaultUrlRewrite | VaultHeaderInject | VaultApiKeyHeader
 
 
 @dataclass(frozen=True)
@@ -330,7 +347,7 @@ TLS_INTERCEPT_PROVIDER_SPECS = (
     ),
     TlsProviderSpec(
         slug="openai-codex",
-        label="ChatGPT (Codex)",
+        label="OpenAI Codex",
         # The ChatGPT backend Codex talks to. api.openai.com is a different
         # surface (rejected for ChatGPT-subscription auth) and is not listed.
         hosts=("chatgpt.com",),
@@ -365,6 +382,40 @@ TLS_INTERCEPT_PROVIDER_SPECS = (
         ),
         env_bindings=(
             EnvBinding(env_var="OPENROUTER_API_KEY", value=DOH_PLACEHOLDER_VALUE),
+        ),
+        restart_gateway_after_save=True,
+        restart_webui_after_save=True,
+        affects_model_picker=True,
+    ),
+    TlsProviderSpec(
+        slug="openai",
+        label="OpenAI API Key",
+        # The OpenAI API surface. chatgpt.com (ChatGPT-subscription auth) is the
+        # separate Codex provider and is not listed here.
+        hosts=("api.openai.com",),
+        logo_url="/extensions/openai.svg",
+        credential_method=VaultHeaderInject(
+            placeholders={"api_key": DOH_PLACEHOLDER_VALUE},
+        ),
+        env_bindings=(
+            EnvBinding(env_var="OPENAI_API_KEY", value=DOH_PLACEHOLDER_VALUE),
+        ),
+        restart_gateway_after_save=True,
+        restart_webui_after_save=True,
+        affects_model_picker=True,
+    ),
+    TlsProviderSpec(
+        slug="anthropic",
+        label="Anthropic",
+        hosts=("api.anthropic.com",),
+        logo_url="/extensions/anthropic.svg",
+        # Anthropic authenticates with x-api-key, not Authorization: Bearer.
+        credential_method=VaultApiKeyHeader(
+            header_name="x-api-key",
+            placeholder=DOH_PLACEHOLDER_VALUE,
+        ),
+        env_bindings=(
+            EnvBinding(env_var="ANTHROPIC_API_KEY", value=DOH_PLACEHOLDER_VALUE),
         ),
         restart_gateway_after_save=True,
         restart_webui_after_save=True,
@@ -1426,6 +1477,21 @@ def _rewrite_request_for_provider(
                 auth_format=method.auth_format,
                 upstream_host=upstream_host,
             ),
+            path_with_query,
+        )
+    if isinstance(method, VaultApiKeyHeader):
+        # Confirm the request carries our placeholder in the named auth header
+        # (case-preserving read), then swap in the real key. Other headers — incl.
+        # Anthropic's required anthropic-version — pass through untouched.
+        header_lower = method.header_name.lower().encode()
+        incoming = next((v for n, v in headers if n.lower() == header_lower), None)
+        incoming_value = incoming.decode("iso-8859-1").strip() if incoming is not None else None
+        if incoming_value != method.placeholder:
+            raise _SecretSelectionError(f"request {method.header_name} did not carry the DOH placeholder")
+        token = _primary_secret(secrets)
+        stripped = _strip_proxy_headers_and_set_host(headers=headers, upstream_host=upstream_host)
+        return (
+            _inject_headers(headers=stripped, extra={method.header_name.encode(): token.encode()}),
             path_with_query,
         )
     raise ValueError(f"unknown credential_method: {method!r}")
