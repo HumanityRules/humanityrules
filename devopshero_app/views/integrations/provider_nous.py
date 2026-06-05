@@ -27,33 +27,16 @@ NOUS_REVOKING_ERROR_CODES = frozenset({"invalid_grant", "invalid_token", "refres
 
 def _exchange_refresh_token(refresh_token: str) -> provider_common.ExchangeResult:
     """POST grant_type=refresh_token to Nous Portal and classify the result."""
-    try:
-        response = httpx.post(
+    return provider_common.exchange_refresh_token(
+        send=lambda: httpx.post(
             NOUS_OAUTH_TOKEN_URL,
             headers={"x-nous-refresh-token": refresh_token},
             data={"grant_type": "refresh_token", "client_id": NOUS_OAUTH_CLIENT_ID},
             timeout=NOUS_TOKEN_EXCHANGE_TIMEOUT_SECONDS,
-        )
-    except httpx.HTTPError as exc:
-        return provider_common.ExchangeResult(response=None, revoked=False, error=f"network: {exc}")
-
-    if response.status_code == 200:
-        try:
-            return provider_common.ExchangeResult(response=response.json(), revoked=False, error=None)
-        except ValueError:
-            return provider_common.ExchangeResult(response=None, revoked=False, error="non-json-200")
-
-    try:
-        body = response.json()
-    except ValueError:
-        body = {}
-    err_code = str(body.get("error") or "")
-    if response.status_code in (400, 401) and err_code in NOUS_REVOKING_ERROR_CODES:
-        return provider_common.ExchangeResult(response=None, revoked=True, error=None)
-    return provider_common.ExchangeResult(
-        response=None,
-        revoked=False,
-        error=f"http {response.status_code}: {err_code or 'unknown'}",
+        ),
+        revoking_statuses=frozenset({400, 401}),
+        revoking_error_codes=NOUS_REVOKING_ERROR_CODES,
+        error_code_of=lambda body: str(body.get("error") or ""),
     )
 
 
@@ -84,7 +67,7 @@ def refresh_outcome(environment: Environment, owner_user: User, app_slug: str) -
         environment=environment,
         owner_user=owner_user,
         app_slug=app_slug,
-        exchange=lambda refresh_token: _exchange_refresh_token(refresh_token=refresh_token),
+        exchange=_exchange_refresh_token,
         build_secrets=build_secrets,
     )
 
