@@ -149,7 +149,7 @@ class TestHostToProviderRouting(unittest.TestCase):
 
     def test_openai_host_routes_to_openai(self) -> None:
         store = _make_token_store()
-        self.assertEqual(store.provider_for_host(host="api.openai.com").slug, "openai")
+        self.assertEqual(store.provider_for_host(host="api.openai.com").slug, "openai-api")
 
     def test_anthropic_host_routes_to_anthropic(self) -> None:
         store = _make_token_store()
@@ -323,7 +323,7 @@ class TestRewriteAuthorization(unittest.TestCase):
         self.assertEqual(dict((n.lower(), v) for n, v in headers)[b"authorization"], b"Bearer nous-access")
 
     def test_openai_placeholder_bearer_is_rewritten(self) -> None:
-        provider = broker.tls_intercept.TLS_INTERCEPT_PROVIDERS["openai"]
+        provider = broker.tls_intercept.TLS_INTERCEPT_PROVIDERS["openai-api"]
         headers, path = broker.tls_intercept._rewrite_request_for_provider(
             headers=[(b"host", b"api.openai.com"), (b"authorization", b"Bearer DOH_PLACEHOLDER")],
             path_with_query="/v1/chat/completions",
@@ -559,7 +559,7 @@ class TestControlIntegrations(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(items_by_slug["openai-codex"]["affects_model_picker"])
         self.assertTrue(items_by_slug["nous"]["affects_model_picker"])
         self.assertTrue(items_by_slug["openrouter"]["affects_model_picker"])
-        self.assertTrue(items_by_slug["openai"]["affects_model_picker"])
+        self.assertTrue(items_by_slug["openai-api"]["affects_model_picker"])
         self.assertTrue(items_by_slug["anthropic"]["affects_model_picker"])
 
     async def test_absent_provider_is_not_cached(self) -> None:
@@ -1341,7 +1341,7 @@ class TestRefreshAllBatchedApply(unittest.IsolatedAsyncioTestCase):
                 outcome=broker.tls_intercept.REFRESH_OUTCOME_ABSENT,
                 secrets=None, expires_in=None, config={}, metadata={},
             ),
-            "openai": broker.tls_intercept.RefreshResult(
+            "openai-api": broker.tls_intercept.RefreshResult(
                 outcome=broker.tls_intercept.REFRESH_OUTCOME_ABSENT,
                 secrets=None, expires_in=None, config={}, metadata={},
             ),
@@ -1382,7 +1382,7 @@ class TestGatewayEnvRender(unittest.TestCase):
         return broker.tls_intercept.TLS_INTERCEPT_PROVIDERS["openrouter"]
 
     def _openai_provider(self) -> "broker.tls_intercept.TlsProviderSpec":
-        return broker.tls_intercept.TLS_INTERCEPT_PROVIDERS["openai"]
+        return broker.tls_intercept.TLS_INTERCEPT_PROVIDERS["openai-api"]
 
     def _anthropic_provider(self) -> "broker.tls_intercept.TlsProviderSpec":
         return broker.tls_intercept.TLS_INTERCEPT_PROVIDERS["anthropic"]

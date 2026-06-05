@@ -25,7 +25,7 @@ def schema(existing: IntegrationUserCredential | None, app: App | None, owner_us
         secret_configured = bool(existing.credentials.get("api_key"))
         metadata = existing.metadata
     return {
-        "provider": "openai",
+        "provider": "openai-api",
         "label": "OpenAI API Key",
         "status": "connected" if existing is not None else "not_connected",
         "secret_configured": secret_configured,
