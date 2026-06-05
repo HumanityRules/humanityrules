@@ -17,6 +17,7 @@ logger = logging.getLogger(__name__)
 
 SETUP_TOKEN_SALT = "devopshero.integrations.user_credential_setup.v1"
 SETUP_TOKEN_MAX_AGE_SECONDS = 5 * 60
+EXPIRED_SETUP_TOKEN_MESSAGE = "This setup session expired. Close this dialog and click Connect again."
 
 
 def _provider_from_payload(provider: object) -> tuple[str | None, JsonResponse | None]:
@@ -152,7 +153,26 @@ def _cors_json_response(payload: dict, status: int, allowed_origin: str) -> Json
     return response
 
 
-def _load_setup_token(token: object) -> tuple[dict | None, JsonResponse | None]:
+def _invalid_setup_token_response() -> JsonResponse:
+    """Return the intentionally opaque response for invalid setup tokens."""
+    return JsonResponse({"error": "invalid or expired submit_token"}, status=401)
+
+
+def _expired_setup_token_response(token: str, request_origin: str) -> JsonResponse:
+    """Return a CORS-readable expiry error only for the token's signed origin."""
+    try:
+        payload = signing.loads(token, salt=SETUP_TOKEN_SALT, max_age=None)
+    except signing.BadSignature:
+        return _invalid_setup_token_response()
+    if not isinstance(payload, dict) or payload.get("purpose") != "integration_credential_submit":
+        return _invalid_setup_token_response()
+    allowed_origin = payload.get("allowed_origin")
+    if not isinstance(allowed_origin, str) or request_origin != allowed_origin:
+        return _invalid_setup_token_response()
+    return _cors_json_response({"error": EXPIRED_SETUP_TOKEN_MESSAGE}, status=401, allowed_origin=allowed_origin)
+
+
+def _load_setup_token(token: object, request_origin: str) -> tuple[dict | None, JsonResponse | None]:
     """Verify and return a signed setup token payload."""
     if not isinstance(token, str) or not token:
         return None, JsonResponse({"error": "submit_token is required"}, status=400)
@@ -162,9 +182,11 @@ def _load_setup_token(token: object) -> tuple[dict | None, JsonResponse | None]:
             salt=SETUP_TOKEN_SALT,
             max_age=SETUP_TOKEN_MAX_AGE_SECONDS,
         )
+    except signing.SignatureExpired:
+        return None, _expired_setup_token_response(token=token, request_origin=request_origin)
     except signing.BadSignature:
-        return None, JsonResponse({"error": "invalid or expired submit_token"}, status=401)
-    if payload.get("purpose") != "integration_credential_submit":
+        return None, _invalid_setup_token_response()
+    if not isinstance(payload, dict) or payload.get("purpose") != "integration_credential_submit":
         return None, JsonResponse({"error": "invalid submit_token purpose"}, status=401)
     return payload, None
 
@@ -176,11 +198,11 @@ def integrations_credential_submit(request: HttpRequest) -> JsonResponse:
     payload, parse_error = broker_request_context.parse_json_body(request=request)
     if parse_error is not None:
         return parse_error
-    token_payload, token_error = _load_setup_token(token=payload.get("submit_token"))
+    request_origin = request.headers.get("Origin", "")
+    token_payload, token_error = _load_setup_token(token=payload.get("submit_token"), request_origin=request_origin)
     if token_error is not None:
         return token_error
     allowed_origin = token_payload["allowed_origin"]
-    request_origin = request.headers.get("Origin", "")
     if request_origin != allowed_origin:
         return JsonResponse({"error": "origin is not allowed"}, status=403)
 
