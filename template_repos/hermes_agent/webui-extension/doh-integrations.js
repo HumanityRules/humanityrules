@@ -504,9 +504,128 @@
     return payload;
   }
 
-  // Wire a vault form's submit: POST to DOH, restart the gateway, swap the
-  // action row to a Close button, and refresh the pane. Shared by the generic
-  // and Slack renderers so the save/restart/refresh flow is single-sourced.
+  function modelProviderForOption(option) {
+    if (!option) return '';
+    if (option.dataset && option.dataset.provider) return option.dataset.provider;
+    const group = option.parentElement;
+    if (group && group.dataset && group.dataset.provider) return group.dataset.provider;
+    return '';
+  }
+
+  function applyModelsToSelect(select, modelsData) {
+    if (!select || !modelsData || !Array.isArray(modelsData.groups)) return false;
+    const previousOption = select.options[select.selectedIndex] || null;
+    const previousValue = select.value || '';
+    const previousProvider = modelProviderForOption(previousOption);
+    const fragment = document.createDocumentFragment();
+    for (const group of modelsData.groups) {
+      const groupModels = Array.isArray(group.models) ? group.models : [];
+      if (!groupModels.length) continue;
+      const optgroup = document.createElement('optgroup');
+      optgroup.label = group.provider || group.provider_id || 'Models';
+      if (group.provider_id) optgroup.dataset.provider = group.provider_id;
+      for (const model of groupModels) {
+        if (!model || !model.id) continue;
+        const option = document.createElement('option');
+        option.value = model.id;
+        option.textContent = model.label || model.id;
+        if (group.provider_id) option.dataset.provider = group.provider_id;
+        optgroup.appendChild(option);
+      }
+      if (optgroup.children.length) fragment.appendChild(optgroup);
+    }
+    if (!fragment.childNodes.length) return false;
+    select.innerHTML = '';
+    select.appendChild(fragment);
+
+    let selectedOption = null;
+    for (const option of Array.from(select.options)) {
+      if (previousValue && option.value === previousValue && (!previousProvider || modelProviderForOption(option) === previousProvider)) {
+        selectedOption = option;
+        break;
+      }
+      if (!selectedOption && previousValue && option.value === previousValue) selectedOption = option;
+    }
+    if (!selectedOption && modelsData.default_model) {
+      selectedOption = Array.from(select.options).find((option) => option.value === modelsData.default_model) || null;
+    }
+    if (!selectedOption) selectedOption = select.options[0] || null;
+    if (selectedOption) selectedOption.selected = true;
+    return true;
+  }
+
+  function applyModelsToKnownDropdowns(modelsData) {
+    if (!modelsData) return false;
+    if ('active_provider' in modelsData) window._activeProvider = modelsData.active_provider || null;
+    if ('default_model' in modelsData) window._defaultModel = modelsData.default_model || null;
+    if ('configured_model_badges' in modelsData) window._configuredModelBadges = modelsData.configured_model_badges || {};
+    const refreshedComposer = applyModelsToSelect(document.getElementById('modelSelect'), modelsData);
+    const refreshedSettings = applyModelsToSelect(document.getElementById('settingsModel'), modelsData);
+    try {
+      if (typeof syncModelChip === 'function') syncModelChip();
+      const dropdown = document.getElementById('composerModelDropdown');
+      if (dropdown && dropdown.classList.contains('open') && typeof renderModelDropdown === 'function') {
+        renderModelDropdown();
+        if (typeof _positionModelDropdown === 'function') _positionModelDropdown();
+      }
+    } catch (_) { /* best-effort */ }
+    return refreshedComposer || refreshedSettings;
+  }
+
+  async function refreshModelDropdownsIfProviderAffectsPicker(item) {
+    if (!item || !item.affects_model_picker) return;
+    const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+    const fetchModelsData = async () => {
+      const response = await fetch('/api/models', {
+        cache: 'no-store',
+        credentials: 'include',
+      });
+      if (!response.ok) throw new Error('models unavailable');
+      return response.json();
+    };
+    const waitForModelsData = async (timeoutMs) => {
+      const start = Date.now();
+      while (Date.now() - start < timeoutMs) {
+        try {
+          return await fetchModelsData();
+        } catch (_) { /* retry until timeout */ }
+        await wait(400);
+      }
+      try {
+        return await fetchModelsData();
+      } catch (_) {
+        return null;
+      }
+    };
+    const runBestEffort = async (fn) => {
+      if (typeof fn !== 'function') return false;
+      try {
+        const result = fn();
+        if (result && typeof result.then === 'function') await result;
+        return true;
+      } catch (_) {
+        return false;
+      }
+    };
+    try {
+      await waitForWebui(15000);
+      const modelsData = await waitForModelsData(15000);
+      if (typeof window._invalidateSlashModelCache === 'function') {
+        window._invalidateSlashModelCache();
+      }
+      if (typeof window._refreshModelDropdownsAfterProviderChange === 'function') {
+        await runBestEffort(window._refreshModelDropdownsAfterProviderChange);
+      }
+      window._modelDropdownReady = null;
+      await runBestEffort(window._ensureModelDropdownReady);
+      if (typeof populateModelDropdown === 'function') await runBestEffort(populateModelDropdown);
+      applyModelsToKnownDropdowns(modelsData);
+    } catch (_) { /* best-effort */ }
+  }
+
+  // Wire a vault form's submit: POST to DOH, invalidate local provider state,
+  // swap the action row to a Close button, and refresh the pane. Shared by the
+  // generic and Slack renderers so the save/restart/refresh flow is single-sourced.
   function wireVaultSubmit(opts) {
     const { form, session, item, saveBtn, actions, errorBox, successBox, close } = opts;
     const showCloseAction = () => {
@@ -526,7 +645,7 @@
       try {
         await submitVaultForm(session, form);
         saved = true;
-        successBox.textContent = 'Saved. Reconnecting the gateway…';
+        successBox.textContent = 'Saved. Applying credentials…';
         successBox.style.display = '';
         let restarted = true;
         try {
@@ -535,14 +654,18 @@
           restarted = false;
           successBox.textContent =
             err.message ||
-            'Saved, but the gateway restart failed. Redeploy this Hermes app to apply the new credentials.';
+            'Saved, but applying the credentials failed. Redeploy this Hermes app to apply them.';
+        }
+        if (item.affects_model_picker) {
+          successBox.textContent = 'Saved. Updating the model list…';
+          await refreshModelDropdownsIfProviderAffectsPicker(item);
         }
         showCloseAction();
         try {
           await refreshAndRender();
         } catch (_) { /* sidebar refresh can recover on next open */ }
         if (restarted) {
-          successBox.textContent = 'Saved. The gateway is using the new credentials.';
+          successBox.textContent = 'Saved. The new credentials are active.';
         }
       } catch (err) {
         errorBox.textContent = err.message || 'Save failed.';
@@ -661,15 +784,7 @@
       if (st.phase === 'completed') {
         backdrop.remove();
         await refreshAndRender();
-        // Codex is now a selectable LLM provider. The composer/Settings model
-        // dropdowns are populated once at boot and only re-fetched on a Settings
-        // provider change — not on an integrations connect — so refresh them here
-        // (same hook the Settings path uses). Without this, Codex appears in the
-        // picker only after a full page reload. Guarded: the host app fn exists
-        // only inside the chat shell, and is a global (classic <script>).
-        if (typeof window._refreshModelDropdownsAfterProviderChange === 'function') {
-          try { window._refreshModelDropdownsAfterProviderChange(); } catch (_) { /* best-effort */ }
-        }
+        await refreshModelDropdownsIfProviderAffectsPicker(item);
         if (onClose) onClose();
         return;
       }
@@ -929,11 +1044,7 @@
         return;
       }
       await refreshAndRender();
-      // A disconnected LLM provider (Codex) must leave the model dropdown too.
-      // Harmless for non-LLM providers — the rebuild is idempotent.
-      if (typeof window._refreshModelDropdownsAfterProviderChange === 'function') {
-        try { window._refreshModelDropdownsAfterProviderChange(); } catch (_) { /* best-effort */ }
-      }
+      await refreshModelDropdownsIfProviderAffectsPicker(item);
     } finally {
       _disconnecting.delete(item.slug);
       renderPane(_current);
@@ -1072,13 +1183,12 @@
   // The explicit-Refresh-all path goes through /__doh_broker/integrations/refresh
   // instead, which fans out catalog reload + all-providers TLS invalidate.
   //
-  // For vault providers the broker also rewrites the gateway's .env file and
-  // restarts the gateway via process-compose. Both failure modes (network
-  // error reaching the broker, or 5xx from the broker) propagate to the
-  // caller — for vault saves the modal turns these into "Saved, but the
-  // gateway restart failed — redeploy". Cache-hint callers (OAuth-return
-  // sentinel) catch and ignore: the proxy's 401-evict path recovers stale
-  // tokens on the first real call.
+  // For env-backed providers the broker also rewrites the managed profile env
+  // block and restarts whichever process-compose entries the provider declares.
+  // Both failure modes (network error reaching the broker, or 5xx from the
+  // broker) propagate to the caller. Cache-hint callers (OAuth-return sentinel)
+  // catch and ignore: the proxy's 401-evict path recovers stale tokens on the
+  // first real call.
   async function invalidateBrokerTlsCache(providerSlug) {
     const url = '/__doh_broker/integrations/' + encodeURIComponent(providerSlug) + '/invalidate_tls_cache';
     const response = await fetch(url, { method: 'POST' });
@@ -1087,7 +1197,7 @@
     try { payload = await response.json(); } catch (_) { /* ignore */ }
     throw new Error(
       payload.error ||
-        'Saved, but the gateway restart failed. Redeploy this Hermes app to apply the new credentials.',
+        'Saved, but applying the credentials failed. Redeploy this Hermes app to apply them.',
     );
   }
 

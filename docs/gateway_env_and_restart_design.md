@@ -42,24 +42,24 @@ Empty managed block (no vault providers connected) is fine.
 
 ### Spec carries the env mapping
 
-Each provider's `VaultUrlRewrite` declares its env bindings; the broker
-projects connected `_token_store` cache → managed block by following
-those bindings. Telegram:
+Each `TlsProviderSpec` declares its env bindings; the broker projects
+connected `_token_store` cache → managed block by following those bindings.
+Telegram:
 
 ```python
 credential_method=VaultUrlRewrite(
     placeholder="000000:DOH_PLACEHOLDER",
-    gateway_env=(
-        GatewayEnvBinding(env_var="TELEGRAM_BOT_TOKEN", source="placeholder"),
-        GatewayEnvBinding(env_var="TELEGRAM_ALLOWED_USERS", source="allowed_users", list_separator=","),
-    ),
+),
+env_bindings=(
+    EnvBinding(env_var="TELEGRAM_BOT_TOKEN", value="000000:DOH_PLACEHOLDER"),
+    EnvBinding(env_var="TELEGRAM_ALLOWED_USERS", config_key="allowed_users", list_separator=","),
 )
 ```
 
 Adding a future messaging platform that gates activation on env presence
 is one `TlsProviderSpec` entry — no shell, no supervisor changes.
 URL-rewrite providers used only by agent tools (e.g., GitHub) don't
-need `gateway_env` bindings: the broker's TLS interception is enough on
+need env bindings: the broker's TLS interception is enough on
 its own.
 
 ### One render path, two triggers
@@ -78,9 +78,9 @@ subsequent" branch.
 
 ### Targeted restart
 
-`VaultUrlRewrite.restart_required_after_save = True` is load-bearing.
-After the broker rewrites `.env`, if the connected/disconnected
-provider's spec demands a restart, the broker POSTs to process-compose:
+`TlsProviderSpec.restart_gateway_after_save` is load-bearing. After the
+broker rewrites `.env`, if the connected/disconnected provider's spec
+demands a gateway restart, the broker POSTs to process-compose:
 
 ```
 POST http://127.0.0.1:9956/process/restart/system.gateway
@@ -90,11 +90,10 @@ process-compose stops the gateway and respawns it. The fresh process
 inherits the `.env` via Hermes's normal path. WebUI and agent are
 untouched — open chat sessions don't drop.
 
-OAuth providers (Google, GitHub) keep `restart_required = False`. Vault
-providers (Telegram) keep it `True`. The same trigger covers connect
-*and* disconnect: connect populates the managed block, disconnect
-empties it; the gateway either picks up the platform binding or boots
-without it.
+Providers that do not affect gateway startup keep
+`restart_gateway_after_save = False`. The same trigger covers connect
+*and* disconnect: connect populates the managed block, disconnect empties
+it; the gateway either picks up the platform binding or boots without it.
 
 ### Process supervision: split system and webapps projects
 

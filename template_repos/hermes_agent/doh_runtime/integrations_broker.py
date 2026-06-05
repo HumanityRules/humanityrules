@@ -32,6 +32,7 @@ Required file system:
 import argparse
 import asyncio
 import contextlib
+from collections.abc import Awaitable, Callable
 import json
 import logging
 import os
@@ -60,6 +61,7 @@ DEFAULT_CA_DIR = Path("/run/doh/integrations-broker/ca")
 DEFAULT_PRIVATE_DIR = Path("/run/doh/integrations-broker/private")
 DEFAULT_MCP_PERSISTENT_DIR = Path("/hermes-persistent-root/mcp-aggregator")
 DEFAULT_GATEWAY_ENV_PATH = Path("/workspace/.hermes/.env")
+DEFAULT_WEBUI_STATE_DIR = Path("/workspace/.hermes/webui-mvp")
 DEFAULT_PROCESS_COMPOSE_URL = "http://127.0.0.1:9956"
 GATEWAY_PROCESS_NAME = "system.gateway"
 WEBUI_PROCESS_NAME = "system.webui"
@@ -198,9 +200,9 @@ def _build_control_app(
         DOH's unified disconnect handler deletes the credential row and, for
         OAuth providers, best-effort revokes upstream — the provider kind is
         resolved server-side, so the broker forwards both kinds identically.
-        On success we drop only this provider's cached token (a vault provider
-        additionally triggers a gateway restart inside `invalidate`, keyed off
-        its `restart_required_after_save` flag, not off this route).
+        On success we drop only this provider's cached token. Any process
+        restart is selected from the provider spec inside `invalidate`, not off
+        this route.
         """
         provider = request.path_params["provider"]
         status, payload = await asyncio.to_thread(
@@ -367,10 +369,11 @@ async def _bootstrap_gateway_env(
 
 
 def _build_on_user_invalidate(
-    tls_runtime_holder: dict,
+    tls_runtime_holder: dict[str, tls_intercept.TlsInterceptRuntime],
     env_path: Path,
+    webui_state_dir: Path,
     process_compose_url: str,
-):
+) -> Callable[[str | None], Awaitable[None]]:
     """Return the hook that re-renders env and restarts the gateway when needed.
 
     Uses a holder dict because the runtime is constructed *with* this hook,
@@ -390,6 +393,8 @@ def _build_on_user_invalidate(
         else:
             await runtime.refresh_slug(slug=slug)
         env_changed = await _render_gateway_env_file(tls_runtime=runtime, env_path=env_path)
+        if _slug_affects_model_picker(slug=slug, runtime=runtime):
+            await asyncio.to_thread(_delete_webui_models_cache, webui_state_dir=webui_state_dir)
         if not env_changed:
             return
         for process_name in _processes_requiring_restart(slug=slug, runtime=runtime):
@@ -409,42 +414,66 @@ def _build_on_user_invalidate(
     return on_user_invalidate
 
 
+def _delete_webui_models_cache(webui_state_dir: Path) -> bool:
+    """Delete WebUI's persisted /api/models cache without importing WebUI code."""
+    cache_path = webui_state_dir / "models_cache.json"
+    try:
+        cache_path.unlink()
+    except FileNotFoundError:
+        logger.info("WebUI models cache already absent at %s", cache_path)
+        return False
+    except OSError as exc:
+        logger.error("failed to delete WebUI models cache at %s: %s", cache_path, exc)
+        raise RuntimeError(f"failed to delete WebUI models cache at {cache_path}") from exc
+    logger.info("deleted WebUI models cache at %s", cache_path)
+    return True
+
+
+def _slug_affects_model_picker(slug: str | None, runtime: tls_intercept.TlsInterceptRuntime) -> bool:
+    """Return whether a provider state change can alter /api/models output."""
+    providers = runtime._token_store._providers
+    if slug is None:
+        return any(spec.affects_model_picker for spec in providers.values())
+    spec = providers.get(slug)
+    if spec is None:
+        return False
+    return spec.affects_model_picker
+
+
 def _processes_requiring_restart(slug: str | None, runtime: tls_intercept.TlsInterceptRuntime) -> tuple[str, ...]:
     """Return process-compose entries that must reload after provider state changes."""
     processes: list[str] = []
-    if _slug_requires_restart(slug=slug, runtime=runtime):
+    if _slug_requires_gateway_restart(slug=slug, runtime=runtime):
         processes.append(GATEWAY_PROCESS_NAME)
     if _slug_requires_webui_restart(slug=slug, runtime=runtime):
         processes.append(WEBUI_PROCESS_NAME)
     return tuple(processes)
 
 
-def _slug_requires_restart(slug: str | None, runtime: tls_intercept.TlsInterceptRuntime) -> bool:
-    """A user-invalidate triggers a gateway restart only when a vault provider was touched.
+def _slug_requires_gateway_restart(slug: str | None, runtime: tls_intercept.TlsInterceptRuntime) -> bool:
+    """A user-invalidate triggers gateway restart only when the provider declares it.
 
-    `slug=None` (Refresh-all) restarts only if any vault provider is in scope —
-    this catches the corner case where Refresh-all reveals state diverged
-    silently. Per-provider invalidates restart only for vault providers
-    whose `restart_required_after_save` is True.
+    `slug=None` (Refresh-all) restarts only if any provider in scope declares
+    `restart_gateway_after_save`.
     """
     providers = runtime._token_store._providers
     if slug is None:
-        return any(spec.credential_method.restart_required_after_save for spec in providers.values())
+        return any(spec.restart_gateway_after_save for spec in providers.values())
     spec = providers.get(slug)
     if spec is None:
         return False
-    return spec.credential_method.restart_required_after_save
+    return spec.restart_gateway_after_save
 
 
 def _slug_requires_webui_restart(slug: str | None, runtime: tls_intercept.TlsInterceptRuntime) -> bool:
-    """Restart WebUI when a touched provider contributes process env lines."""
+    """Restart WebUI when the touched provider declares that WebUI must reload."""
     providers = runtime._token_store._providers
     if slug is None:
-        return any(spec.connected_env for spec in providers.values())
+        return any(spec.restart_webui_after_save for spec in providers.values())
     spec = providers.get(slug)
     if spec is None:
         return False
-    return bool(spec.connected_env)
+    return spec.restart_webui_after_save
 
 
 def _require_env(name: str) -> str:
@@ -477,6 +506,7 @@ async def _run(
     private_dir: Path,
     mcp_persistent_dir: Path,
     gateway_env_path: Path,
+    webui_state_dir: Path,
     process_compose_url: str,
 ) -> None:
     control_plane_url = _require_env(name="DOH_CONTROL_PLANE_URL")
@@ -494,6 +524,7 @@ async def _run(
     on_user_invalidate = _build_on_user_invalidate(
         tls_runtime_holder=tls_runtime_holder,
         env_path=gateway_env_path,
+        webui_state_dir=webui_state_dir,
         process_compose_url=process_compose_url,
     )
     tls_runtime = tls_intercept.TlsInterceptRuntime(
@@ -618,6 +649,7 @@ def main() -> None:
     parser.add_argument("--private-dir", type=Path, default=DEFAULT_PRIVATE_DIR)
     parser.add_argument("--mcp-persistent-dir", type=Path, default=DEFAULT_MCP_PERSISTENT_DIR)
     parser.add_argument("--gateway-env-path", type=Path, default=DEFAULT_GATEWAY_ENV_PATH)
+    parser.add_argument("--webui-state-dir", type=Path, default=DEFAULT_WEBUI_STATE_DIR)
     parser.add_argument("--process-compose-url", default=DEFAULT_PROCESS_COMPOSE_URL)
     args = parser.parse_args()
     try:
@@ -630,6 +662,7 @@ def main() -> None:
                 private_dir=args.private_dir,
                 mcp_persistent_dir=args.mcp_persistent_dir,
                 gateway_env_path=args.gateway_env_path,
+                webui_state_dir=args.webui_state_dir,
                 process_compose_url=args.process_compose_url,
             )
         )

@@ -229,6 +229,26 @@ class TestConnectedProvidersReturnHasToken(_BatchTokensEndpointTestBase):
         self.assertEqual(tg["config"], {"allowed_users": ["42", "7"]})
         self.assertEqual(tg["metadata"], {"bot_id": 123456, "bot_username": "doh_bot"})
 
+    def test_openrouter_has_token_carries_api_key(self) -> None:
+        IntegrationUserCredential.objects.create(
+            owner_user=self.user, environment=self.env, app_slug="hermes",
+            provider=IntegrationUserCredential.Provider.OPENROUTER,
+            credentials={"api_key": "sk-or-v1-real"},
+            metadata={"label": "Production"},
+        )
+
+        status, body = self._post(
+            body={"owner_username": "vmendi", "app_slug": "hermes", "providers": ["openrouter"]},
+            token=self.raw_token,
+        )
+
+        self.assertEqual(status, 200)
+        openrouter = body["results"]["openrouter"]
+        self.assertEqual(openrouter["outcome"], "has_token")
+        self.assertEqual(openrouter["secrets"], {"api_key": "sk-or-v1-real"})
+        self.assertEqual(openrouter["config"], {})
+        self.assertEqual(openrouter["metadata"], {"label": "Production"})
+
 
 class TestMixedConnectedAndAbsent(_BatchTokensEndpointTestBase):
 

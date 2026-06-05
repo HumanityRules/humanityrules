@@ -48,7 +48,6 @@ class OAuthHeader:
 
     auth_format: str
     connect_mode: ClassVar[str] = "oauth"
-    restart_required_after_save: ClassVar[bool] = False
 
 
 @dataclass(frozen=True)
@@ -75,30 +74,24 @@ class OAuthHeaderMultiInject:
     header_secrets: dict[str, str]  # secret_name -> HTTP header name
     auth_format: str = AUTH_FORMAT_BEARER
     connect_mode: ClassVar[str] = "device"
-    restart_required_after_save: ClassVar[bool] = False
 
 
 @dataclass(frozen=True)
-class GatewayEnvBinding:
-    """One env var the in-sandbox gateway reads at startup.
-
-    `source` is either the literal `"placeholder"` (use the URL-rewrite
-    placeholder verbatim — the broker swaps the real token on the wire)
-    or a key in the connected provider's `config` dict. `list_separator`
-    joins list-shaped config (e.g. `allowed_users`) into a single string.
-    """
+class EnvBinding:
+    """One env var rendered into the managed profile env block while connected."""
 
     env_var: str
-    source: str
+    value: str | None = None
+    config_key: str | None = None
     list_separator: str | None = None
 
-
-@dataclass(frozen=True)
-class ConnectedEnvBinding:
-    """One static env var rendered only while the provider is connected."""
-
-    env_var: str
-    value: str
+    def __post_init__(self) -> None:
+        has_value = self.value is not None
+        has_config_key = self.config_key is not None
+        if has_value == has_config_key:
+            raise ValueError("EnvBinding must set exactly one of value or config_key")
+        if has_value and self.list_separator is not None:
+            raise ValueError("EnvBinding with a static value cannot set list_separator")
 
 
 @dataclass(frozen=True)
@@ -109,24 +102,19 @@ class VaultUrlRewrite:
     would go (e.g. Telegram's `/bot{token}/` path); the proxy substitutes
     the live token before forwarding.
 
-    `gateway_env` declares the env vars the in-sandbox Hermes gateway
-    needs at startup to activate the matching platform binding (presence
-    of the var, not its value, is what gates activation — see
-    `hermes_cli/tools_config.py:_get_enabled_platforms`).
+    Env vars that expose this placeholder or provider config are declared on
+    `TlsProviderSpec.env_bindings`.
     """
 
     placeholder: str
-    gateway_env: tuple[GatewayEnvBinding, ...] = ()
     connect_mode: ClassVar[str] = "vault"
-    restart_required_after_save: ClassVar[bool] = True
 
 
 @dataclass(frozen=True)
 class VaultHeaderInject:
     """Vault-pasted, header-injected, multi-secret credential (Slack).
 
-    Hybrid of the other two methods: it's vault-pasted like `VaultUrlRewrite`
-    (connect_mode `vault`, restart-required, carries `gateway_env` bindings),
+    Hybrid of the other two methods: it's vault-pasted like `VaultUrlRewrite`,
     but the secret rides an `Authorization: Bearer` header like `OAuthHeader`
     rather than a URL placeholder.
 
@@ -140,10 +128,8 @@ class VaultHeaderInject:
     """
 
     placeholders: dict[str, str]
-    gateway_env: tuple[GatewayEnvBinding, ...] = ()
     auth_format: str = AUTH_FORMAT_BEARER
     connect_mode: ClassVar[str] = "vault"
-    restart_required_after_save: ClassVar[bool] = True
 
     def secret_for_placeholder(self, bearer_token: str) -> str | None:
         """Reverse-map an incoming placeholder bearer to its secret name."""
@@ -165,7 +151,10 @@ class TlsProviderSpec:
     hosts: tuple[str, ...]
     logo_url: str
     credential_method: CredentialMethod
-    connected_env: tuple[ConnectedEnvBinding, ...]
+    env_bindings: tuple[EnvBinding, ...]
+    restart_gateway_after_save: bool
+    restart_webui_after_save: bool
+    affects_model_picker: bool
 
 
 @dataclass(frozen=True)
@@ -265,7 +254,10 @@ TLS_INTERCEPT_PROVIDER_SPECS = (
         ),
         logo_url="/extensions/google-workspace.svg",
         credential_method=OAuthHeader(auth_format=AUTH_FORMAT_BEARER),
-        connected_env=(),
+        env_bindings=(),
+        restart_gateway_after_save=False,
+        restart_webui_after_save=False,
+        affects_model_picker=False,
     ),
     TlsProviderSpec(
         slug="github",
@@ -281,9 +273,12 @@ TLS_INTERCEPT_PROVIDER_SPECS = (
         ),
         logo_url="/extensions/github.svg",
         credential_method=OAuthHeader(auth_format=AUTH_FORMAT_BASIC_X_ACCESS_TOKEN),
-        connected_env=(
-            ConnectedEnvBinding(env_var="GITHUB_TOKEN", value=DOH_PLACEHOLDER_VALUE),
+        env_bindings=(
+            EnvBinding(env_var="GITHUB_TOKEN", value=DOH_PLACEHOLDER_VALUE),
         ),
+        restart_gateway_after_save=False,
+        restart_webui_after_save=True,
+        affects_model_picker=False,
     ),
     TlsProviderSpec(
         slug="telegram",
@@ -292,12 +287,14 @@ TLS_INTERCEPT_PROVIDER_SPECS = (
         logo_url="/extensions/telegram.svg",
         credential_method=VaultUrlRewrite(
             placeholder="000000:DOH_PLACEHOLDER",
-            gateway_env=(
-                GatewayEnvBinding(env_var="TELEGRAM_BOT_TOKEN", source="placeholder"),
-                GatewayEnvBinding(env_var="TELEGRAM_ALLOWED_USERS", source="allowed_users", list_separator=","),
-            ),
         ),
-        connected_env=(),
+        env_bindings=(
+            EnvBinding(env_var="TELEGRAM_BOT_TOKEN", value="000000:DOH_PLACEHOLDER"),
+            EnvBinding(env_var="TELEGRAM_ALLOWED_USERS", config_key="allowed_users", list_separator=","),
+        ),
+        restart_gateway_after_save=True,
+        restart_webui_after_save=False,
+        affects_model_picker=False,
     ),
     TlsProviderSpec(
         slug="slack",
@@ -313,19 +310,21 @@ TLS_INTERCEPT_PROVIDER_SPECS = (
                 "app_token": "xapp-DOH_PLACEHOLDER",
                 "bot_token": "xoxb-DOH_PLACEHOLDER",
             },
-            gateway_env=(
-                GatewayEnvBinding(env_var="SLACK_APP_TOKEN", source="app_token"),
-                GatewayEnvBinding(env_var="SLACK_BOT_TOKEN", source="bot_token"),
-                # The gateway denies users by default. Company-wide mode sets
-                # allow_all_users in config (→ SLACK_ALLOW_ALL_USERS=true);
-                # personal mode instead sets allowed_users (owner only). Each
-                # binding renders only when its config key is present.
-                GatewayEnvBinding(env_var="SLACK_ALLOW_ALL_USERS", source="allow_all_users"),
-                GatewayEnvBinding(env_var="SLACK_ALLOWED_USERS", source="allowed_users", list_separator=","),
-                GatewayEnvBinding(env_var="SLACK_HOME_CHANNEL", source="home_channel"),
-            ),
         ),
-        connected_env=(),
+        env_bindings=(
+            EnvBinding(env_var="SLACK_APP_TOKEN", value="xapp-DOH_PLACEHOLDER"),
+            EnvBinding(env_var="SLACK_BOT_TOKEN", value="xoxb-DOH_PLACEHOLDER"),
+            # The gateway denies users by default. Company-wide mode sets
+            # allow_all_users in config (→ SLACK_ALLOW_ALL_USERS=true);
+            # personal mode instead sets allowed_users (owner only). Each
+            # binding renders only when its config key is present.
+            EnvBinding(env_var="SLACK_ALLOW_ALL_USERS", config_key="allow_all_users"),
+            EnvBinding(env_var="SLACK_ALLOWED_USERS", config_key="allowed_users", list_separator=","),
+            EnvBinding(env_var="SLACK_HOME_CHANNEL", config_key="home_channel"),
+        ),
+        restart_gateway_after_save=True,
+        restart_webui_after_save=False,
+        affects_model_picker=False,
     ),
     TlsProviderSpec(
         slug="openai-codex",
@@ -338,7 +337,25 @@ TLS_INTERCEPT_PROVIDER_SPECS = (
             bearer_secret="access_token",
             header_secrets={"chatgpt_account_id": "ChatGPT-Account-ID"},
         ),
-        connected_env=(),
+        env_bindings=(),
+        restart_gateway_after_save=False,
+        restart_webui_after_save=False,
+        affects_model_picker=True,
+    ),
+    TlsProviderSpec(
+        slug="openrouter",
+        label="OpenRouter",
+        hosts=("openrouter.ai",),
+        logo_url="/extensions/openrouter.svg",
+        credential_method=VaultHeaderInject(
+            placeholders={"api_key": DOH_PLACEHOLDER_VALUE},
+        ),
+        env_bindings=(
+            EnvBinding(env_var="OPENROUTER_API_KEY", value=DOH_PLACEHOLDER_VALUE),
+        ),
+        restart_gateway_after_save=True,
+        restart_webui_after_save=True,
+        affects_model_picker=True,
     ),
 )
 
@@ -467,66 +484,42 @@ GATEWAY_ENV_BLOCK_BEGIN = "# === DOH-MANAGED-INTEGRATIONS BEGIN ==="
 GATEWAY_ENV_BLOCK_END = "# === DOH-MANAGED-INTEGRATIONS END ==="
 
 
-def _placeholder_for_binding(method: "VaultUrlRewrite | VaultHeaderInject", source: str) -> str | None:
-    """Resolve a binding's placeholder value, or None if `source` isn't a placeholder ref.
-
-    `VaultUrlRewrite` has one placeholder, referenced by the literal `"placeholder"`.
-    `VaultHeaderInject` has many; a binding references one by its secret name
-    (a key in `method.placeholders`).
-    """
-    if isinstance(method, VaultUrlRewrite):
-        return method.placeholder if source == "placeholder" else None
-    if source in method.placeholders:
-        return method.placeholders[source]
-    return None
-
-
-def _render_gateway_env_lines(provider: TlsProviderSpec, method: "VaultUrlRewrite | VaultHeaderInject", config: dict) -> list[str]:
-    """Project one connected vault provider's gateway_env bindings into KEY=VALUE lines."""
+def _render_env_lines(provider: TlsProviderSpec, config: dict) -> list[str]:
+    """Project one connected provider's env bindings into KEY=VALUE lines."""
     lines: list[str] = []
-    for binding in method.gateway_env:
-        placeholder_value = _placeholder_for_binding(method=method, source=binding.source)
-        if placeholder_value is not None:
-            value = placeholder_value
-        else:
-            raw = config.get(binding.source)
-            if raw is None:
+    for binding in provider.env_bindings:
+        if binding.value is not None:
+            value = binding.value
+            lines.append(f"{binding.env_var}={value}")
+            continue
+        config_key = binding.config_key
+        if config_key is None:
+            raise ValueError(f"{provider.slug}: env binding {binding.env_var!r} has no value source")
+        raw = config.get(config_key)
+        if raw is None:
+            continue
+        if isinstance(raw, list):
+            if binding.list_separator is None:
+                raise ValueError(f"{provider.slug}: list-shaped config {config_key!r} requires list_separator")
+            value = binding.list_separator.join(str(item) for item in raw if str(item))
+            if not value:
                 continue
-            if isinstance(raw, list):
-                if binding.list_separator is None:
-                    raise ValueError(
-                        f"{provider.slug}: list-shaped config {binding.source!r} requires list_separator"
-                    )
-                value = binding.list_separator.join(str(item) for item in raw if str(item))
-                if not value:
-                    continue
-            else:
-                value = str(raw)
+        else:
+            value = str(raw)
         lines.append(f"{binding.env_var}={value}")
     return lines
-
-
-def _render_connected_env_lines(provider: TlsProviderSpec) -> list[str]:
-    """Project provider-level connected env bindings into KEY=VALUE lines."""
-    return [f"{binding.env_var}={binding.value}" for binding in provider.connected_env]
 
 
 def render_managed_block(snapshot: list[tuple[TlsProviderSpec, dict]]) -> str:
     """Render the profile env managed block from a token-store snapshot.
 
     The snapshot lists only connected providers (cache presence == connected,
-    by the token-store contract). Each tuple is `(provider, config)`. Provider
-    `connected_env` bindings are static placeholders surfaced to WebUI/CLI
-    processes; vault credential methods additionally project `gateway_env`
-    bindings for gateway platform activation.
+    by the token-store contract). Each tuple is `(provider, config)`, and each
+    provider declares the env lines it needs while connected.
     """
     body_lines: list[str] = []
     for provider, config in snapshot:
-        body_lines.extend(_render_connected_env_lines(provider=provider))
-        method = provider.credential_method
-        if not isinstance(method, (VaultUrlRewrite, VaultHeaderInject)):
-            continue
-        body_lines.extend(_render_gateway_env_lines(provider=provider, method=method, config=config))
+        body_lines.extend(_render_env_lines(provider=provider, config=config))
     if not body_lines:
         return ""
     return "\n".join([GATEWAY_ENV_BLOCK_BEGIN, *body_lines, GATEWAY_ENV_BLOCK_END]) + "\n"
@@ -616,7 +609,8 @@ def _status_item_for_provider(provider: TlsProviderSpec, entry: _TokenCacheEntry
         "config": entry.config if is_connected else {},
         "metadata": entry.metadata if is_connected else {},
         "connect_mode": method.connect_mode,
-        "restart_required_after_save": method.restart_required_after_save,
+        "restart_required_after_save": provider.restart_gateway_after_save or provider.restart_webui_after_save,
+        "affects_model_picker": provider.affects_model_picker,
     }
 
 
