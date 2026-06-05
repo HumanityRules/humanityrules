@@ -20,9 +20,11 @@ docs/integrations_broker_design.md.
 
 import base64
 import binascii
+import dataclasses
 import json
 import logging
 import time
+from collections.abc import Callable
 from urllib.parse import urlencode, urlparse
 
 from django.utils import timezone
@@ -162,6 +164,83 @@ def store_oauth_refresh_credential(
     )
     logger.info("%s integration stored env=%s owner=%s app=%s", provider, environment.slug, owner_user.username, app_slug)
     return 200, {"ok": True, "provider": provider, "status": "connected"}
+
+
+@dataclasses.dataclass(frozen=True)
+class RefreshSecrets:
+    """The usable product of a refresh exchange: what to inject + what to persist.
+
+    `secrets`/`expires_in` go to the broker `has_token` outcome; `row_metadata`
+    is merged into the credential row before saving (empty when the provider
+    keeps no derived metadata).
+    """
+
+    secrets: dict
+    expires_in: int
+    row_metadata: dict
+
+
+def run_refresh_exchange(
+    *,
+    provider: str,
+    logger: logging.Logger,
+    environment: Environment,
+    owner_user: User,
+    app_slug: str,
+    exchange: Callable[[str], ExchangeResult],
+    build_secrets: Callable[[str, dict], RefreshSecrets | None],
+) -> dict:
+    """Run the standard refresh-token exchange for one device-flow OAuth credential.
+
+    Fetches the row, exchanges its stored refresh_token via *exchange*, handles
+    the revoked/transient/missing-access_token branches uniformly, rotates a
+    returned refresh_token, then asks *build_secrets* to turn the access token +
+    response into the broker `has_token` payload (returning None → `transient`,
+    for a token the provider deems unusable).
+    """
+    integration = IntegrationUserCredential.objects.filter(
+        owner_user=owner_user,
+        environment=environment,
+        app_slug=app_slug,
+        provider=provider,
+    ).first()
+    if integration is None:
+        return absent()
+
+    refresh_token = integration.credentials.get("refresh_token", "")
+    if not refresh_token:
+        logger.error("%s token refresh: row missing refresh_token env=%s owner=%s app=%s", provider, environment.slug, owner_user.username, app_slug)
+        return absent()
+
+    exchange_result = exchange(refresh_token)
+    if exchange_result.revoked:
+        logger.info("%s token refresh: revoked upstream, deleting row env=%s owner=%s app=%s", provider, environment.slug, owner_user.username, app_slug)
+        integration.delete()
+        return absent()
+    if exchange_result.error is not None:
+        logger.error("%s token refresh failed env=%s owner=%s app=%s error=%s", provider, environment.slug, owner_user.username, app_slug, exchange_result.error)
+        return transient()
+
+    access_token = exchange_result.response.get("access_token", "")
+    if not access_token:
+        logger.error("%s token refresh: response missing access_token env=%s owner=%s app=%s", provider, environment.slug, owner_user.username, app_slug)
+        return transient()
+
+    built = build_secrets(access_token, exchange_result.response)
+    if built is None:
+        return transient()
+
+    new_refresh = exchange_result.response.get("refresh_token")
+    if new_refresh and new_refresh != refresh_token:
+        integration.credentials = {**integration.credentials, "refresh_token": new_refresh}
+    update_fields = ["credentials", "last_refreshed_at", "updated_at"]
+    if built.row_metadata:
+        integration.metadata = {**integration.metadata, **built.row_metadata}
+        update_fields.append("metadata")
+    integration.last_refreshed_at = now()
+    integration.save(update_fields=update_fields)
+
+    return has_token(secrets=built.secrets, expires_in=built.expires_in, config={}, metadata={})
 
 
 # --- Broker refresh-outcome contract -----------------------------------------

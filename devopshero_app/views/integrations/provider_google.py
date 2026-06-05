@@ -260,52 +260,21 @@ def refresh_outcome(environment: Environment, owner_user: User, app_slug: str) -
         logger.error("google token refresh failed: IntegrationConfig(provider=google) missing")
         return provider_common.transient()
 
-    integration = IntegrationUserCredential.objects.filter(
-        owner_user=owner_user,
-        environment=environment,
-        app_slug=app_slug,
+    def build_secrets(access_token: str, response: dict) -> provider_common.RefreshSecrets:
+        return provider_common.RefreshSecrets(
+            secrets={"access_token": access_token},
+            expires_in=int(response.get("expires_in", 0)),
+            row_metadata={},
+        )
+
+    return provider_common.run_refresh_exchange(
         provider=IntegrationUserCredential.Provider.GOOGLE,
-    ).first()
-    if integration is None:
-        return provider_common.absent()
-
-    refresh_token = integration.credentials.get("refresh_token", "")
-    if not refresh_token:
-        logger.error(
-            "google token refresh: row missing refresh_token env=%s owner=%s app=%s",
-            environment.slug, owner_user.username, app_slug,
-        )
-        return provider_common.absent()
-
-    exchange_result = _exchange_refresh_token(
-        web=google_cfg.config,
-        refresh_token=refresh_token,
-    )
-    if exchange_result.revoked:
-        logger.info(
-            "google token refresh: revoked by google, deleting row env=%s owner=%s app=%s",
-            environment.slug, owner_user.username, app_slug,
-        )
-        integration.delete()
-        return provider_common.absent()
-    if exchange_result.error is not None:
-        logger.error(
-            "google token refresh failed env=%s owner=%s app=%s error=%s",
-            environment.slug, owner_user.username, app_slug, exchange_result.error,
-        )
-        return provider_common.transient()
-
-    new_refresh = exchange_result.response.get("refresh_token")
-    if new_refresh and new_refresh != refresh_token:
-        integration.credentials = {**integration.credentials, "refresh_token": new_refresh}
-    integration.last_refreshed_at = provider_common.now()
-    integration.save(update_fields=["credentials", "last_refreshed_at", "updated_at"])
-
-    return provider_common.has_token(
-        secrets={"access_token": exchange_result.response["access_token"]},
-        expires_in=int(exchange_result.response.get("expires_in", 0)),
-        config={},
-        metadata={},
+        logger=logger,
+        environment=environment,
+        owner_user=owner_user,
+        app_slug=app_slug,
+        exchange=lambda refresh_token: _exchange_refresh_token(web=google_cfg.config, refresh_token=refresh_token),
+        build_secrets=build_secrets,
     )
 
 

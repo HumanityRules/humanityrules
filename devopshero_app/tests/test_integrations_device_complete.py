@@ -98,10 +98,6 @@ class TestDeviceComplete(TestCase):
                 "owner_username": self.user.username,
                 "app_slug": self.app.slug,
                 "refresh_token": "nous-refresh",
-                "access_token": "nous-access",
-                "scope": "inference:invoke",
-                "token_type": "Bearer",
-                "inference_base_url": "https://inference-api.nousresearch.com/v1",
             },
         )
 

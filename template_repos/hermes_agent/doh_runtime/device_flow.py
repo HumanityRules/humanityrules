@@ -32,7 +32,6 @@ CODEX_DEVICE_MIN_POLL_SECONDS = 3
 
 NOUS_PROVIDER_SLUG = "nous"
 NOUS_PORTAL_BASE_URL = "https://portal.nousresearch.com"
-NOUS_INFERENCE_BASE_URL = "https://inference-api.nousresearch.com/v1"
 NOUS_OAUTH_CLIENT_ID = "hermes-cli"
 NOUS_INFERENCE_INVOKE_SCOPE = "inference:invoke"
 NOUS_LEGACY_AGENT_KEY_SCOPE = "inference:mint_agent_key"
@@ -193,11 +192,10 @@ class NousDeviceProvider(DeviceProvider):
     slug = NOUS_PROVIDER_SLUG
     display_name = "Nous Portal"
 
-    def __init__(self, portal_base_url: str, client_id: str, scope: str, inference_base_url: str) -> None:
+    def __init__(self, portal_base_url: str, client_id: str, scope: str) -> None:
         self._portal_base_url = portal_base_url.rstrip("/")
         self._client_id = client_id
         self._scope = scope
-        self._inference_base_url = inference_base_url.rstrip("/")
 
     async def start(self) -> DeviceStart:
         """Get a Nous Portal device code and verification URL."""
@@ -249,11 +247,7 @@ class NousDeviceProvider(DeviceProvider):
                         raise DeviceFlowError("Nous Portal token response was not JSON")
                     if not payload.get("access_token") or not payload.get("refresh_token"):
                         raise DeviceFlowError("Nous Portal token response missing access_token/refresh_token")
-                    return {
-                        **payload,
-                        "portal_base_url": self._portal_base_url,
-                        "inference_base_url": payload.get("inference_base_url") or self._inference_base_url,
-                    }
+                    return payload
                 error_code = self._error_code(response=response)
                 if error_code == "authorization_pending":
                     continue
@@ -357,7 +351,6 @@ def build_default_device_flow(submit_tokens: Callable[[str, dict], Awaitable[boo
             portal_base_url=NOUS_PORTAL_BASE_URL,
             client_id=NOUS_OAUTH_CLIENT_ID,
             scope=NOUS_DEFAULT_SCOPE,
-            inference_base_url=NOUS_INFERENCE_BASE_URL,
         ),
     }
     return OAuthDeviceFlow(providers=providers, submit_tokens=submit_tokens)
