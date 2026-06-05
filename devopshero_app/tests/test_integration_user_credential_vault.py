@@ -2,6 +2,7 @@
 
 import hashlib
 import json
+import time
 from unittest.mock import MagicMock, patch
 
 import httpx
@@ -281,6 +282,48 @@ class TestCredentialSubmit(_CredentialVaultTestBase):
         )
 
         self.assertEqual(response.status_code, 403)
+        self.assertFalse(IntegrationUserCredential.objects.exists())
+
+    def test_submit_expired_token_returns_cors_readable_expiry_for_signed_origin(self) -> None:
+        _status, session = self._post_setup_session()
+        expired_time = time.time() + user_credential_vault.SETUP_TOKEN_MAX_AGE_SECONDS + 1
+
+        with patch("django.core.signing.time.time", return_value=expired_time):
+            response = self.client.post(
+                "/api/integrations/credentials/submit",
+                data=json.dumps({
+                    "submit_token": session["submit_token"],
+                    "credentials": {"bot_token": "123456:abcdefghijklmnopqrstuvwxyz"},
+                    "config": {},
+                }),
+                content_type="text/plain",
+                HTTP_ORIGIN="https://hermes.dev.example.com",
+            )
+
+        self.assertEqual(response.status_code, 401)
+        self.assertEqual(response["Access-Control-Allow-Origin"], "https://hermes.dev.example.com")
+        self.assertEqual(response.json()["error"], user_credential_vault.EXPIRED_SETUP_TOKEN_MESSAGE)
+        self.assertFalse(IntegrationUserCredential.objects.exists())
+
+    def test_submit_expired_token_does_not_expose_cors_to_wrong_origin(self) -> None:
+        _status, session = self._post_setup_session()
+        expired_time = time.time() + user_credential_vault.SETUP_TOKEN_MAX_AGE_SECONDS + 1
+
+        with patch("django.core.signing.time.time", return_value=expired_time):
+            response = self.client.post(
+                "/api/integrations/credentials/submit",
+                data=json.dumps({
+                    "submit_token": session["submit_token"],
+                    "credentials": {"bot_token": "123456:abcdefghijklmnopqrstuvwxyz"},
+                    "config": {},
+                }),
+                content_type="text/plain",
+                HTTP_ORIGIN="https://attacker.example.com",
+            )
+
+        self.assertEqual(response.status_code, 401)
+        self.assertNotIn("Access-Control-Allow-Origin", response.headers)
+        self.assertEqual(response.json()["error"], "invalid or expired submit_token")
         self.assertFalse(IntegrationUserCredential.objects.exists())
 
     def test_submit_does_not_echo_telegram_token_from_transport_error(self) -> None:
