@@ -143,6 +143,10 @@ class TestHostToProviderRouting(unittest.TestCase):
         store = _make_token_store()
         self.assertEqual(store.provider_for_host(host="openrouter.ai").slug, "openrouter")
 
+    def test_nous_host_routes_to_nous(self) -> None:
+        store = _make_token_store()
+        self.assertEqual(store.provider_for_host(host="inference-api.nousresearch.com").slug, "nous")
+
 
 class TestRewriteAuthorization(unittest.TestCase):
 
@@ -298,6 +302,18 @@ class TestRewriteAuthorization(unittest.TestCase):
         self.assertEqual(path, "/api/v1/chat/completions")
         self.assertEqual(dict((n.lower(), v) for n, v in headers)[b"authorization"], b"Bearer sk-or-v1-real")
 
+    def test_nous_placeholder_bearer_is_rewritten(self) -> None:
+        provider = broker.tls_intercept.TLS_INTERCEPT_PROVIDERS["nous"]
+        headers, path = broker.tls_intercept._rewrite_request_for_provider(
+            headers=[(b"host", b"inference-api.nousresearch.com"), (b"authorization", b"Bearer DOH_PLACEHOLDER")],
+            path_with_query="/v1/chat/completions",
+            secrets={"access_token": "nous-access"},
+            provider=provider,
+            upstream_host="inference-api.nousresearch.com",
+        )
+        self.assertEqual(path, "/v1/chat/completions")
+        self.assertEqual(dict((n.lower(), v) for n, v in headers)[b"authorization"], b"Bearer nous-access")
+
 
 class TestForwardHeaderNormalization(unittest.TestCase):
 
@@ -395,16 +411,24 @@ class _StubAggregator:
         return self._refresh_payload
 
 
-class _StubCodexFlow:
-    """Minimal Codex device-flow surface for control-app tests."""
+class _StubDeviceFlow:
+    """Minimal device-flow surface for control-app tests."""
 
-    async def start(self) -> dict:
-        return {"status": "pending"}
+    def __init__(self) -> None:
+        self.started: list[str] = []
+        self.statused: list[str] = []
+        self.cancelled: list[str] = []
 
-    async def status(self) -> dict:
-        return {"status": "idle"}
+    async def start(self, provider_slug: str) -> dict:
+        self.started.append(provider_slug)
+        return {"provider": provider_slug, "phase": "pending"}
 
-    async def cancel(self) -> None:
+    async def status(self, provider_slug: str) -> dict:
+        self.statused.append(provider_slug)
+        return {"provider": provider_slug, "phase": "pending"}
+
+    async def cancel(self, provider_slug: str) -> None:
+        self.cancelled.append(provider_slug)
         return None
 
 
@@ -432,7 +456,7 @@ class TestControlIntegrations(unittest.IsolatedAsyncioTestCase):
         app = broker._build_control_app(
             aggregator=_ready_stub_aggregator(),
             tls_runtime=self.tls_runtime,
-            codex_flow=_StubCodexFlow(),
+            oauth_device_flow=_StubDeviceFlow(),
             control_plane_url="https://doh.example",
             bearer="env-bearer",
             owner_username="vmendi",
@@ -482,6 +506,7 @@ class TestControlIntegrations(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(items_by_slug["telegram"]["affects_model_picker"])
         self.assertFalse(items_by_slug["slack"]["affects_model_picker"])
         self.assertTrue(items_by_slug["openai-codex"]["affects_model_picker"])
+        self.assertTrue(items_by_slug["nous"]["affects_model_picker"])
         self.assertTrue(items_by_slug["openrouter"]["affects_model_picker"])
 
     async def test_absent_provider_is_not_cached(self) -> None:
@@ -778,7 +803,7 @@ class TestControlIntegrations(unittest.IsolatedAsyncioTestCase):
         app = broker._build_control_app(
             aggregator=aggregator,
             tls_runtime=self.tls_runtime,
-            codex_flow=_StubCodexFlow(),
+            oauth_device_flow=_StubDeviceFlow(),
             control_plane_url="https://doh.example",
             bearer="env-bearer",
             owner_username="vmendi",
@@ -818,7 +843,7 @@ class TestControlIntegrations(unittest.IsolatedAsyncioTestCase):
         app = broker._build_control_app(
             aggregator=aggregator,
             tls_runtime=self.tls_runtime,
-            codex_flow=_StubCodexFlow(),
+            oauth_device_flow=_StubDeviceFlow(),
             control_plane_url="https://doh.example",
             bearer="env-bearer",
             owner_username="vmendi",
@@ -846,7 +871,7 @@ class TestControlIntegrations(unittest.IsolatedAsyncioTestCase):
         app = broker._build_control_app(
             aggregator=aggregator,
             tls_runtime=self.tls_runtime,
-            codex_flow=_StubCodexFlow(),
+            oauth_device_flow=_StubDeviceFlow(),
             control_plane_url="https://doh.example",
             bearer="env-bearer",
             owner_username="vmendi",
@@ -875,7 +900,7 @@ class TestControlIntegrations(unittest.IsolatedAsyncioTestCase):
         app = broker._build_control_app(
             aggregator=_ready_stub_aggregator(),
             tls_runtime=self.tls_runtime,
-            codex_flow=_StubCodexFlow(),
+            oauth_device_flow=_StubDeviceFlow(),
             control_plane_url="https://doh.example",
             bearer="env-bearer",
             owner_username="vmendi",
@@ -893,6 +918,35 @@ class TestControlIntegrations(unittest.IsolatedAsyncioTestCase):
         invalidate_mock.assert_awaited_once_with(slug="github")
         invalidate_all_mock.assert_not_awaited()
 
+    async def test_device_routes_are_provider_keyed(self) -> None:
+        """Device start/status/cancel routes dispatch by provider slug."""
+        from starlette.testclient import TestClient
+
+        device_stub = _StubDeviceFlow()
+        app = broker._build_control_app(
+            aggregator=_ready_stub_aggregator(),
+            tls_runtime=self.tls_runtime,
+            oauth_device_flow=device_stub,
+            control_plane_url="https://doh.example",
+            bearer="env-bearer",
+            owner_username="vmendi",
+            app_slug="hermes",
+            env_slug="default",
+        )
+
+        with TestClient(app) as client:
+            start_resp = client.post("/integrations/nous/device/start")
+            status_resp = client.get("/integrations/nous/device/status")
+            cancel_resp = client.post("/integrations/nous/device/cancel")
+
+        self.assertEqual(start_resp.status_code, 200)
+        self.assertEqual(start_resp.json()["provider"], "nous")
+        self.assertEqual(status_resp.json()["provider"], "nous")
+        self.assertEqual(cancel_resp.status_code, 200)
+        self.assertEqual(device_stub.started, ["nous"])
+        self.assertEqual(device_stub.statused, ["nous"])
+        self.assertEqual(device_stub.cancelled, ["nous"])
+
     async def test_vault_setup_session_forwards_identity_to_doh(self) -> None:
         """POST /integrations/{provider}/vault/setup-session asks DOH for a submit token."""
         from starlette.testclient import TestClient
@@ -900,7 +954,7 @@ class TestControlIntegrations(unittest.IsolatedAsyncioTestCase):
         app = broker._build_control_app(
             aggregator=_ready_stub_aggregator(),
             tls_runtime=self.tls_runtime,
-            codex_flow=_StubCodexFlow(),
+            oauth_device_flow=_StubDeviceFlow(),
             control_plane_url="https://doh.example",
             bearer="env-bearer",
             owner_username="vmendi",
@@ -937,7 +991,7 @@ class TestControlIntegrations(unittest.IsolatedAsyncioTestCase):
         app = broker._build_control_app(
             aggregator=_ready_stub_aggregator(),
             tls_runtime=self.tls_runtime,
-            codex_flow=_StubCodexFlow(),
+            oauth_device_flow=_StubDeviceFlow(),
             control_plane_url="https://doh.example",
             bearer="env-bearer",
             owner_username="vmendi",
@@ -972,7 +1026,7 @@ class TestControlIntegrations(unittest.IsolatedAsyncioTestCase):
         app = broker._build_control_app(
             aggregator=_ready_stub_aggregator(),
             tls_runtime=self.tls_runtime,
-            codex_flow=_StubCodexFlow(),
+            oauth_device_flow=_StubDeviceFlow(),
             control_plane_url="https://doh.example",
             bearer="env-bearer",
             owner_username="vmendi",
@@ -1230,6 +1284,10 @@ class TestRefreshAllBatchedApply(unittest.IsolatedAsyncioTestCase):
                 outcome=broker.tls_intercept.REFRESH_OUTCOME_ABSENT,
                 secrets=None, expires_in=None, config={}, metadata={},
             ),
+            "nous": broker.tls_intercept.RefreshResult(
+                outcome=broker.tls_intercept.REFRESH_OUTCOME_ABSENT,
+                secrets=None, expires_in=None, config={}, metadata={},
+            ),
         }
         with patch.object(
             broker.tls_intercept,
@@ -1436,6 +1494,7 @@ class TestGatewayEnvHookIntegration(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(broker._slug_requires_gateway_restart(slug="openrouter", runtime=runtime))
         self.assertFalse(broker._slug_requires_gateway_restart(slug="google", runtime=runtime))
         self.assertFalse(broker._slug_requires_gateway_restart(slug="github", runtime=runtime))
+        self.assertFalse(broker._slug_requires_gateway_restart(slug="nous", runtime=runtime))
         # Unknown slug: don't restart.
         self.assertFalse(broker._slug_requires_gateway_restart(slug="bogus", runtime=runtime))
         # None (Refresh-all) covers any gateway-restart provider in scope.
@@ -1457,6 +1516,7 @@ class TestGatewayEnvHookIntegration(unittest.IsolatedAsyncioTestCase):
             (broker.GATEWAY_PROCESS_NAME, broker.WEBUI_PROCESS_NAME),
         )
         self.assertEqual(broker._processes_requiring_restart(slug="google", runtime=runtime), ())
+        self.assertEqual(broker._processes_requiring_restart(slug="nous", runtime=runtime), ())
 
     async def test_per_slug_invalidate_refreshes_only_that_slug(self) -> None:
         """Slug-targeted invalidate must NOT fan out to disconnected providers.

@@ -255,6 +255,34 @@ main.main.showing-integrations > #mainChat { display: none !important; }
   margin-bottom: 18px;
 }
 
+.doh-device-step-label {
+  margin-bottom: 6px;
+}
+
+.doh-device-step-content {
+  margin-bottom: 20px;
+}
+
+.doh-device-oauth-link {
+  display: block;
+  color: var(--accent);
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.doh-device-code {
+  color: var(--text);
+  font-family: monospace;
+  font-size: 24px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  line-height: 1.2;
+  margin-bottom: 22px;
+  text-align: center;
+}
+
 .doh-modal-actions {
   display: flex;
   gap: 8px;

@@ -11,12 +11,17 @@ Two provider families live alongside this module, organized symmetrically:
 
 This module holds what both families (or both OAuth providers) would
 otherwise duplicate: the redirect-flow request helpers, the refresh-exchange
-result wrapper, and the broker-outcome constructors that single-source the
-`{outcome, secrets?, expires_in?, config?, metadata?}` contract the batched
-refresh endpoint returns. See docs/integrations_broker_design.md.
+result wrapper, JWT access-token claim helpers, and the broker-outcome
+constructors that single-source the `{outcome, secrets?, expires_in?, config?,
+metadata?}` contract the batched refresh endpoint returns. See
+docs/integrations_broker_design.md.
 """
 
+import base64
+import binascii
+import json
 import logging
+import time
 from urllib.parse import urlencode, urlparse
 
 from django.utils import timezone
@@ -103,6 +108,30 @@ class ExchangeResult:
 def now() -> timezone.datetime:
     """Indirection for tests to patch."""
     return timezone.now()
+
+
+def decode_jwt_payload(token: str) -> dict:
+    """Return a JWT's payload claims without verifying the signature, or {} on failure."""
+    parts = token.split(".")
+    if len(parts) < 2:
+        return {}
+    segment = parts[1]
+    padded = segment + "=" * (-len(segment) % 4)
+    try:
+        return json.loads(base64.urlsafe_b64decode(padded))
+    except (binascii.Error, ValueError, UnicodeDecodeError):
+        return {}
+
+
+def expires_in_from_access_token(access_token: str, fallback: int) -> int:
+    """Derive seconds-until-expiry from a JWT `exp` claim, or return fallback."""
+    claims = decode_jwt_payload(token=access_token)
+    exp = claims.get("exp")
+    if isinstance(exp, (int, float)):
+        remaining = int(exp - time.time())
+        if remaining > 0:
+            return remaining
+    return fallback
 
 
 # --- Broker refresh-outcome contract -----------------------------------------

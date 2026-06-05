@@ -35,19 +35,21 @@ STATUS_NOT_CONNECTED = "not_connected"
 AUTH_FORMAT_BEARER = "bearer"
 AUTH_FORMAT_BASIC_X_ACCESS_TOKEN = "basic_x_access_token"
 DOH_PLACEHOLDER_VALUE = "DOH_PLACEHOLDER"
+ConnectMode = Literal["oauth", "device", "vault"]
 
 
 @dataclass(frozen=True)
 class OAuthHeader:
-    """Browser-OAuth integration; token injected as Authorization header.
+    """OAuth integration whose token is injected as the Authorization header.
 
     `auth_format` selects the header encoding: Google takes plain Bearer;
     GitHub git-smart-HTTP needs HTTP Basic with the token as the password
-    under the `x-access-token` username.
+    under the `x-access-token` username. Redirect OAuth is the default connect
+    mode; device-flow providers override it explicitly.
     """
 
     auth_format: str
-    connect_mode: ClassVar[str] = "oauth"
+    connect_mode: ConnectMode = "oauth"
 
 
 @dataclass(frozen=True)
@@ -73,7 +75,7 @@ class OAuthHeaderMultiInject:
     bearer_secret: str
     header_secrets: dict[str, str]  # secret_name -> HTTP header name
     auth_format: str = AUTH_FORMAT_BEARER
-    connect_mode: ClassVar[str] = "device"
+    connect_mode: ClassVar[ConnectMode] = "device"
 
 
 @dataclass(frozen=True)
@@ -107,7 +109,7 @@ class VaultUrlRewrite:
     """
 
     placeholder: str
-    connect_mode: ClassVar[str] = "vault"
+    connect_mode: ClassVar[ConnectMode] = "vault"
 
 
 @dataclass(frozen=True)
@@ -129,7 +131,7 @@ class VaultHeaderInject:
 
     placeholders: dict[str, str]
     auth_format: str = AUTH_FORMAT_BEARER
-    connect_mode: ClassVar[str] = "vault"
+    connect_mode: ClassVar[ConnectMode] = "vault"
 
     def secret_for_placeholder(self, bearer_token: str) -> str | None:
         """Reverse-map an incoming placeholder bearer to its secret name."""
@@ -337,6 +339,17 @@ TLS_INTERCEPT_PROVIDER_SPECS = (
             bearer_secret="access_token",
             header_secrets={"chatgpt_account_id": "ChatGPT-Account-ID"},
         ),
+        env_bindings=(),
+        restart_gateway_after_save=False,
+        restart_webui_after_save=False,
+        affects_model_picker=True,
+    ),
+    TlsProviderSpec(
+        slug="nous",
+        label="Nous Portal",
+        hosts=("inference-api.nousresearch.com",),
+        logo_url="/extensions/nous.svg",
+        credential_method=OAuthHeader(auth_format=AUTH_FORMAT_BEARER, connect_mode="device"),
         env_bindings=(),
         restart_gateway_after_save=False,
         restart_webui_after_save=False,

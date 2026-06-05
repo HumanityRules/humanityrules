@@ -134,7 +134,7 @@ class TestDisconnectedProvidersReturnAbsent(_BatchTokensEndpointTestBase):
                 body={
                     "owner_username": "vmendi",
                     "app_slug": "hermes",
-                    "providers": ["google", "github", "telegram"],
+                    "providers": ["google", "github", "telegram", "nous"],
                 },
                 token=self.raw_token,
             )
@@ -146,6 +146,7 @@ class TestDisconnectedProvidersReturnAbsent(_BatchTokensEndpointTestBase):
                 "google": {"outcome": "absent"},
                 "github": {"outcome": "absent"},
                 "telegram": {"outcome": "absent"},
+                "nous": {"outcome": "absent"},
             },
         )
 
@@ -165,12 +166,12 @@ class TestDisconnectedProvidersReturnAbsent(_BatchTokensEndpointTestBase):
         status, body = self._post(
             body={
                 "owner_username": "not-a-user", "app_slug": "hermes",
-                "providers": ["google", "github", "telegram"],
+                "providers": ["google", "github", "telegram", "nous"],
             },
             token=self.raw_token,
         )
         self.assertEqual(status, 200)
-        for slug in ("google", "github", "telegram"):
+        for slug in ("google", "github", "telegram", "nous"):
             self.assertEqual(body["results"][slug], {"outcome": "absent"})
 
 
@@ -248,6 +249,41 @@ class TestConnectedProvidersReturnHasToken(_BatchTokensEndpointTestBase):
         self.assertEqual(openrouter["secrets"], {"api_key": "sk-or-v1-real"})
         self.assertEqual(openrouter["config"], {})
         self.assertEqual(openrouter["metadata"], {"label": "Production"})
+
+    def test_nous_has_token_carries_access_token_and_rotates_refresh_token(self) -> None:
+        IntegrationUserCredential.objects.create(
+            owner_user=self.user,
+            environment=self.env,
+            app_slug="hermes",
+            provider=IntegrationUserCredential.Provider.NOUS,
+            credentials={"refresh_token": "nous-refresh-old"},
+        )
+        http_response = MagicMock()
+        http_response.status_code = 200
+        http_response.json.return_value = {
+            "access_token": "nous-access",
+            "refresh_token": "nous-refresh-new",
+            "expires_in": 1800,
+            "token_type": "Bearer",
+            "scope": "inference:invoke",
+        }
+        with patch(
+            "devopshero_app.views.integrations.provider_nous.httpx.post",
+            return_value=http_response,
+        ) as post_mock:
+            status, body = self._post(
+                body={"owner_username": "vmendi", "app_slug": "hermes", "providers": ["nous"]},
+                token=self.raw_token,
+            )
+
+        self.assertEqual(status, 200)
+        nous = body["results"]["nous"]
+        self.assertEqual(nous["outcome"], "has_token")
+        self.assertEqual(nous["secrets"], {"access_token": "nous-access"})
+        self.assertEqual(nous["expires_in"], 1800)
+        post_mock.assert_called_once()
+        cred = IntegrationUserCredential.objects.get(provider=IntegrationUserCredential.Provider.NOUS)
+        self.assertEqual(cred.credentials["refresh_token"], "nous-refresh-new")
 
 
 class TestMixedConnectedAndAbsent(_BatchTokensEndpointTestBase):

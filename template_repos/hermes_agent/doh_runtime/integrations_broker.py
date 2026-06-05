@@ -49,7 +49,7 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 from starlette.routing import Route
 
-import codex_device_flow
+import device_flow
 import mcp_aggregator
 import tls_intercept
 
@@ -68,7 +68,7 @@ WEBUI_PROCESS_NAME = "system.webui"
 # The in-sandbox gateway user; auth.json must stay owned by it (mode 0600), so
 # the root broker drops to it via runuser when it touches the local auth store.
 GATEWAY_USER = "hermeswebui"
-CODEX_PROVIDER_SLUG = "openai-codex"
+AUTH_MARKER_PROVIDERS = frozenset({"openai-codex", "nous"})
 _TRUE_ENV_VALUES = frozenset({"1", "true", "yes", "on"})
 _FALSE_ENV_VALUES = frozenset({"0", "false", "no", "off"})
 
@@ -111,7 +111,7 @@ async def _handle_healthz(request: Request) -> Response:
 def _build_control_app(
     aggregator: mcp_aggregator.MCPAggregator,
     tls_runtime: tls_intercept.TlsInterceptRuntime,
-    codex_flow: codex_device_flow.CodexDeviceFlow,
+    oauth_device_flow: device_flow.OAuthDeviceFlow,
     control_plane_url: str,
     bearer: str,
     owner_username: str,
@@ -224,30 +224,31 @@ def _build_control_app(
                     content={**payload, "ok": False, "error": str(exc)},
                     status_code=502,
                 )
-            # Remove the local dropdown marker so the WebUI model picker hides
-            # Codex again (inverse of the connect-time marker write).
-            if provider == CODEX_PROVIDER_SLUG:
-                await asyncio.to_thread(_run_codex_auth_marker, "disconnect")
+            if provider in AUTH_MARKER_PROVIDERS:
+                await asyncio.to_thread(_run_provider_auth_marker, provider, "disconnect")
         return JSONResponse(content=payload, status_code=status)
 
-    async def codex_device_start_route(request: Request) -> Response:
-        """Begin a Codex device login; returns the user_code to display immediately."""
+    async def device_start_route(request: Request) -> Response:
+        """Begin a provider device login; returns the user_code to display immediately."""
+        provider = request.path_params["provider"]
         try:
-            view = await codex_flow.start()
-        except codex_device_flow.CodexDeviceFlowError as exc:
+            view = await oauth_device_flow.start(provider_slug=provider)
+        except device_flow.DeviceFlowError as exc:
             return JSONResponse(content={"ok": False, "error": str(exc)}, status_code=502)
         return JSONResponse(content={"ok": True, **view})
 
-    async def codex_device_status_route(request: Request) -> Response:
-        """Report the in-flight Codex device-login phase (pending/completed/failed)."""
-        view = await codex_flow.status()
+    async def device_status_route(request: Request) -> Response:
+        """Report the in-flight device-login phase (pending/completed/failed)."""
+        provider = request.path_params["provider"]
+        view = await oauth_device_flow.status(provider_slug=provider)
         if view is None:
             return JSONResponse(content={"ok": True, "phase": None})
         return JSONResponse(content={"ok": True, **view})
 
-    async def codex_device_cancel_route(request: Request) -> Response:
-        """Cancel an in-flight Codex device login (user closed the dialog)."""
-        await codex_flow.cancel()
+    async def device_cancel_route(request: Request) -> Response:
+        """Cancel an in-flight provider device login (user closed the dialog)."""
+        provider = request.path_params["provider"]
+        await oauth_device_flow.cancel(provider_slug=provider)
         return JSONResponse(content={"ok": True})
 
     routes = [
@@ -256,10 +257,10 @@ def _build_control_app(
         Route(path="/integrations/refresh", endpoint=refresh_route, methods=["POST"]),
         Route(path="/integrations/{provider}/invalidate_tls_cache", endpoint=invalidate_provider_tls_cache_route, methods=["POST"]),
         Route(path="/integrations/{provider}/vault/setup-session", endpoint=vault_setup_session_route, methods=["POST"]),
-        # Codex device login: broker-run OAuth device flow (no redirect callback).
-        Route(path="/integrations/openai-codex/device/start", endpoint=codex_device_start_route, methods=["POST"]),
-        Route(path="/integrations/openai-codex/device/status", endpoint=codex_device_status_route, methods=["GET"]),
-        Route(path="/integrations/openai-codex/device/cancel", endpoint=codex_device_cancel_route, methods=["POST"]),
+        # Device login: broker-run OAuth device flows (no redirect callback).
+        Route(path="/integrations/{provider}/device/start", endpoint=device_start_route, methods=["POST"]),
+        Route(path="/integrations/{provider}/device/status", endpoint=device_status_route, methods=["GET"]),
+        Route(path="/integrations/{provider}/device/cancel", endpoint=device_cancel_route, methods=["POST"]),
         # One disconnect path for every TLS-intercept provider (vault + OAuth).
         # Sits under the /tls/ sub-prefix so it doesn't collide with the MCP
         # aggregator's own /integrations/{provider}/disconnect (Notion/Merge).
@@ -311,14 +312,14 @@ def _post_process_compose_restart(process_compose_url: str, process_name: str) -
         return 502, str(exc)
 
 
-def _run_codex_auth_marker(action: str) -> bool:
-    """Add/remove the local Codex auth marker (dropdown visibility), as the gateway user.
+def _run_provider_auth_marker(provider: str, action: str) -> bool:
+    """Add/remove a local provider auth marker, as the gateway user.
 
     `action` is "connect" or "disconnect". The marker writes/clears the
-    placeholder `providers.openai-codex` block in auth.json via the agent's
-    locked, atomic primitives — so the WebUI model picker shows/hides Codex
-    without a restart. We run it through `runuser` because the broker is root
-    and auth.json must stay owned by the sandbox user (mode 0600); a root-owned
+    placeholder provider block in auth.json via the agent's locked, atomic
+    primitives, so the WebUI model picker shows/hides model providers without a
+    restart. We run it through `runuser` because the broker is root and
+    auth.json must stay owned by the sandbox user (mode 0600); a root-owned
     store or lock file would lock the gateway out. Best-effort: a failure here
     only means the dropdown is briefly stale, not that the credential is wrong.
     """
@@ -326,24 +327,24 @@ def _run_codex_auth_marker(action: str) -> bool:
     runtime_dir = os.environ.get("DOH_RUNTIME_DIR")
     hermes_home = os.environ.get("HERMES_HOME")
     if not python or not runtime_dir or not hermes_home:
-        logger.error("codex auth marker skipped: HERMES_WEBUI_PYTHON/DOH_RUNTIME_DIR/HERMES_HOME not set")
+        logger.error("provider auth marker skipped: HERMES_WEBUI_PYTHON/DOH_RUNTIME_DIR/HERMES_HOME not set")
         return False
-    script = str(Path(runtime_dir) / "codex_auth_marker.py")
+    script = str(Path(runtime_dir) / "provider_auth_marker.py")
     try:
         result = subprocess.run(
-            ["runuser", "-u", GATEWAY_USER, "--", python, script, action],
+            ["runuser", "-u", GATEWAY_USER, "--", python, script, action, provider],
             env={**os.environ, "HERMES_HOME": hermes_home},
             capture_output=True,
             text=True,
             timeout=30,
         )
     except Exception as exc:
-        logger.error("codex auth marker (%s) failed to run: %s", action, exc)
+        logger.error("provider auth marker (%s %s) failed to run: %s", action, provider, exc)
         return False
     if result.returncode != 0:
-        logger.error("codex auth marker (%s) exited %d: %s", action, result.returncode, result.stderr.strip())
+        logger.error("provider auth marker (%s %s) exited %d: %s", action, provider, result.returncode, result.stderr.strip())
         return False
-    logger.info("codex auth marker (%s): %s", action, result.stdout.strip())
+    logger.info("provider auth marker (%s %s): %s", action, provider, result.stdout.strip())
     return True
 
 
@@ -569,44 +570,34 @@ async def _run(
         merge_enabled=merge_enabled,
     )
 
-    async def _store_codex_refresh_token(refresh_token: str, access_token: str) -> bool:
-        """Persist a device-flow refresh/access token pair to DOH, then refresh the TLS cache.
-
-        We forward BOTH tokens the device flow just produced: DOH derives the
-        chatgpt_account_id from this access token and stores the refresh token
-        without re-minting (re-minting here would rotate the token and add a
-        fragile second OpenAI round-trip on connect). On success we drop the
-        codex TLS cache so the next chatgpt.com request fetches a freshly-minted
-        token instead of waiting out the cache.
-        """
+    async def _store_device_tokens(provider: str, tokens: dict) -> bool:
+        """Persist a provider device-flow token payload to DOH, then refresh TLS state."""
+        payload = {
+            "owner_username": owner_username,
+            "app_slug": app_slug,
+            **tokens,
+        }
         status, _ = await asyncio.to_thread(
             _post_control_plane_json,
             control_plane_url=control_plane_url,
             bearer=bearer,
-            path="/api/integrations/credentials/codex-device-complete",
-            payload={
-                "owner_username": owner_username,
-                "app_slug": app_slug,
-                "refresh_token": refresh_token,
-                "access_token": access_token,
-            },
+            path=f"/api/integrations/credentials/{provider}/device-complete",
+            payload=payload,
         )
         if not (200 <= status < 300):
             return False
         with contextlib.suppress(RuntimeError):
-            await tls_runtime.invalidate(slug=CODEX_PROVIDER_SLUG)
-        # Write the local dropdown marker so the WebUI model picker shows Codex
-        # (the real credential is in DOH; this placeholder block is the only
-        # local signal the picker keys on). Best-effort, off the event loop.
-        await asyncio.to_thread(_run_codex_auth_marker, "connect")
+            await tls_runtime.invalidate(slug=provider)
+        if provider in AUTH_MARKER_PROVIDERS:
+            await asyncio.to_thread(_run_provider_auth_marker, provider, "connect")
         return True
 
-    codex_flow = codex_device_flow.CodexDeviceFlow(submit_refresh_token=_store_codex_refresh_token)
+    oauth_device_flow = device_flow.build_default_device_flow(submit_tokens=_store_device_tokens)
 
     control_app = _build_control_app(
         aggregator=aggregator,
         tls_runtime=tls_runtime,
-        codex_flow=codex_flow,
+        oauth_device_flow=oauth_device_flow,
         control_plane_url=control_plane_url,
         bearer=bearer,
         owner_username=owner_username,
