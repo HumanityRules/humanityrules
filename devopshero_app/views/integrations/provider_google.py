@@ -281,14 +281,12 @@ def refresh_outcome(environment: Environment, owner_user: User, app_slug: str) -
 def _exchange_refresh_token(web: dict, refresh_token: str) -> provider_common.ExchangeResult:
     """POST to Google's token endpoint with grant_type=refresh_token.
 
-    Classifies the response into one of three buckets:
-    - revoked: Google returned 400 invalid_grant (or similar refresh-token
-      rejection). The stored token is unusable; caller should delete the row.
-    - error: any other failure (network, 5xx, non-JSON).
-    - response: the raw JSON from Google.
+    Google's refresh-token rejection returns 400 `invalid_grant`; treat that as
+    revoked (the stored token is unusable, caller deletes the row). Any other
+    non-200 / network / non-JSON failure is transient.
     """
-    try:
-        response = httpx.post(
+    return provider_common.exchange_refresh_token(
+        send=lambda: httpx.post(
             web["token_uri"],
             data={
                 "client_id": web["client_id"],
@@ -297,28 +295,10 @@ def _exchange_refresh_token(web: dict, refresh_token: str) -> provider_common.Ex
                 "grant_type": "refresh_token",
             },
             timeout=GOOGLE_TOKEN_EXCHANGE_TIMEOUT_SECONDS,
-        )
-    except httpx.HTTPError as exc:
-        return provider_common.ExchangeResult(response=None, revoked=False, error=f"network: {exc}")
-
-    if response.status_code == 200:
-        try:
-            return provider_common.ExchangeResult(response=response.json(), revoked=False, error=None)
-        except ValueError:
-            return provider_common.ExchangeResult(response=None, revoked=False, error="non-json-200")
-
-    # Google's refresh-token rejection returns 400 with
-    # {"error": "invalid_grant", ...}. Treat as revoked.
-    try:
-        body = response.json()
-    except ValueError:
-        body = {}
-    if response.status_code == 400 and body.get("error") == "invalid_grant":
-        return provider_common.ExchangeResult(response=None, revoked=True, error=None)
-
-    return provider_common.ExchangeResult(
-        response=None, revoked=False,
-        error=f"http {response.status_code}: {body.get('error', 'unknown')}",
+        ),
+        revoking_statuses=frozenset({400}),
+        revoking_error_codes=frozenset({"invalid_grant"}),
+        error_code_of=lambda body: str(body.get("error") or ""),
     )
 
 

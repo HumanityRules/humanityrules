@@ -27,6 +27,7 @@ import time
 from collections.abc import Callable
 from urllib.parse import urlencode, urlparse
 
+import httpx
 from django.utils import timezone
 
 from devopshero_app.models import App, Environment, IntegrationUserCredential, ResourceTag, User
@@ -93,19 +94,60 @@ def append_query(url: str, extra: dict[str, str]) -> str:
     return parsed._replace(query=combined).geturl()
 
 
+@dataclasses.dataclass(frozen=True)
 class ExchangeResult:
     """Outcome of an OAuth refresh-token exchange.
 
     Exactly one of `response`, `revoked`, or `error` is populated on any
     given instance. `revoked` means upstream rejected the refresh_token as
     permanently unusable (caller should delete the row); `error` is any
-    transient/other failure (network, 5xx, non-JSON).
+    transient/other failure (network, 5xx, non-JSON). A None `response` is
+    normalized to `{}` so callers can `.response.get(...)` unconditionally.
     """
 
-    def __init__(self, response: dict | None, revoked: bool, error: str | None) -> None:
-        self.response = response or {}
-        self.revoked = revoked
-        self.error = error
+    response: dict | None
+    revoked: bool
+    error: str | None
+
+    def __post_init__(self) -> None:
+        if self.response is None:
+            object.__setattr__(self, "response", {})
+
+
+def exchange_refresh_token(
+    *,
+    send: Callable[[], httpx.Response],
+    revoking_statuses: frozenset[int],
+    revoking_error_codes: frozenset[str],
+    error_code_of: Callable[[dict], str],
+) -> ExchangeResult:
+    """Run a refresh-token POST and classify it into revoked / error / response.
+
+    *send* performs the provider's own `httpx.post` (kept in the provider module
+    so tests can patch `provider_<slug>.httpx.post`). A 200 yields the parsed
+    body; a non-200 whose status is in *revoking_statuses* and whose
+    *error_code_of(body)* is in *revoking_error_codes* is `revoked`; anything
+    else is a transient `error`. Providers differ only in those three inputs.
+    """
+    try:
+        response = send()
+    except httpx.HTTPError as exc:
+        return ExchangeResult(response=None, revoked=False, error=f"network: {exc}")
+
+    if response.status_code == 200:
+        try:
+            return ExchangeResult(response=response.json(), revoked=False, error=None)
+        except ValueError:
+            return ExchangeResult(response=None, revoked=False, error="non-json-200")
+
+    try:
+        body = response.json()
+    except ValueError:
+        body = {}
+    error_code = error_code_of(body)
+    if response.status_code in revoking_statuses and error_code in revoking_error_codes:
+        return ExchangeResult(response=None, revoked=True, error=None)
+    return ExchangeResult(response=None, revoked=False, error=f"http {response.status_code}: {error_code or 'unknown'}")
 
 
 def now() -> timezone.datetime:
