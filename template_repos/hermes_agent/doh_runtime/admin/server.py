@@ -11,6 +11,7 @@ import sys
 sys.path.insert(0, "/opt/doh/runtime")
 
 from fastapi import FastAPI, HTTPException
+from fastapi.responses import PlainTextResponse
 
 from webapps_lib import (
     LOGS_DIR,
@@ -69,10 +70,15 @@ def detail(slug: str) -> dict:
 
 
 @app.get("/api/webapps/{slug}/logs")
-def logs(slug: str, tail: int = 200) -> dict:
+def logs(slug: str, tail: int = 200, format: str | None = None):
     log_path = LOGS_DIR / f"{slug}.log"
     if not log_path.exists():
+        if format == "text":
+            return PlainTextResponse("", media_type="text/plain; charset=utf-8")
         return {"lines": []}
     tail = max(1, min(tail, 2000))
     with log_path.open() as f:
-        return {"lines": f.readlines()[-tail:]}
+        lines = f.readlines()[-tail:]
+    if format == "text":
+        return PlainTextResponse("".join(lines), media_type="text/plain; charset=utf-8")
+    return {"lines": lines}

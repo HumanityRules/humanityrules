@@ -10,6 +10,10 @@
   const API_URL = '/webapps/__admin/api/webapps';
   const POLL_MS = 3000;
 
+  function logUrlFor(slug) {
+    return API_URL + '/' + encodeURIComponent(slug) + '/logs?format=text';
+  }
+
   let _current = null;
   let _pollTimer = null;
   let _showInternal = false;
@@ -121,6 +125,13 @@
     } else {
       card.appendChild(elem('div', { class: 'doh-webapp-url doh-webapp-url-muted' }, ['(stopped)']));
     }
+
+    card.appendChild(elem('a', {
+      class: 'doh-webapp-logs-link',
+      href: logUrlFor(item.slug),
+      target: '_blank',
+      rel: 'noopener noreferrer',
+    }, ['View logs']));
     return card;
   }
 

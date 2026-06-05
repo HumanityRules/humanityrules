@@ -146,6 +146,16 @@ def process_compose_project_update(project: ProcessComposeProject) -> None:
     run_process_compose("project", "update", "--config", str(project.yaml_path), project=project, check=True, capture=False)
 
 
+def plain_text_log_configuration() -> dict:
+    return {
+        "disable_json": True,
+        "no_metadata": True,
+        "no_color": True,
+        "fields_order": ["message"],
+        "flush_each_line": True,
+    }
+
+
 def process_compose_states(project: ProcessComposeProject) -> list[dict]:
     res = run_process_compose("list", "-o", "json", project=project, check=False, capture=True)
     if res.returncode != 0:
@@ -308,6 +318,7 @@ def make_process_entry(slug: str, command: str, cwd: str, port: int) -> dict:
         "command": command,
         "working_dir": cwd,
         "log_location": str(LOGS_DIR / f"{slug}.log"),
+        "log_configuration": plain_text_log_configuration(),
         "environment": [f"WEBAPP_PORT={port}"],
         "availability": {
             "restart": "on_failure",

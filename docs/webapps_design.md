@@ -66,12 +66,14 @@ Four things to notice:
 ```
 /workspace/webapps/
   projects/<slug>/                              # user code lives here
-  logs/<slug>.log                               # captured stdout/stderr, written by process-compose
+  logs/<slug>.log                               # one plain-text stdout/stderr log per app
 
 /workspace/.config/process-compose/
   system/process-compose.yaml                   # system daemon source-of-truth
+  system/process-compose.log                    # system daemon's own internal process-compose log
   system/.system.lock                           # flock target for system seed writes
   webapps/process-compose.yaml                  # webapps daemon source-of-truth
+  webapps/process-compose.log                   # webapps daemon's own internal process-compose log
   webapps/.webapps.lock                         # flock target for webapp mutations
 
 /workspace/.config/caddy/

@@ -29,7 +29,7 @@ The nono sandbox only allows **loopback listens on ports 4000–4019**. The CLI 
 ```
 /workspace/webapps/
   projects/<slug>/                              # YOUR app source goes here
-  logs/<slug>.log                               # captured stdout/stderr
+  logs/<slug>.log                               # plain-text stdout/stderr for this app
 
 /workspace/.config/process-compose/
   webapps/process-compose.yaml                  # managed by CLI; reload only for resync/repair
