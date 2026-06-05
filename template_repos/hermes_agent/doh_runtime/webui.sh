@@ -42,8 +42,6 @@ CADDY_PORT=8787
 SYSTEM_PROCESS_COMPOSE_PORT=9956
 WEBAPPS_PROCESS_COMPOSE_PORT=9957
 PROCESS_COMPOSE_ROOT=/workspace/.config/process-compose
-SYSTEM_PROCESS_COMPOSE_YAML="${PROCESS_COMPOSE_ROOT}/system/process-compose.yaml"
-WEBAPPS_PROCESS_COMPOSE_YAML="${PROCESS_COMPOSE_ROOT}/webapps/process-compose.yaml"
 
 CADDY_PID=""
 SYSTEM_PROCESS_COMPOSE_PID=""
@@ -72,8 +70,11 @@ sandbox_seed() {
 
 start_system_process_compose() {
     echo "[webui] Starting system process-compose on 127.0.0.1:${SYSTEM_PROCESS_COMPOSE_PORT}..."
-    process-compose up \
-        --config "$SYSTEM_PROCESS_COMPOSE_YAML" \
+    process-compose \
+        --log-file "${PROCESS_COMPOSE_ROOT}/system/process-compose.log" \
+        --log-no-color \
+        up \
+        --config "${PROCESS_COMPOSE_ROOT}/system/process-compose.yaml" \
         --port "$SYSTEM_PROCESS_COMPOSE_PORT" \
         --address 127.0.0.1 \
         --tui=false \
@@ -84,8 +85,11 @@ start_system_process_compose() {
 
 start_webapps_process_compose() {
     echo "[webui] Starting webapps process-compose on 127.0.0.1:${WEBAPPS_PROCESS_COMPOSE_PORT}..."
-    process-compose up \
-        --config "$WEBAPPS_PROCESS_COMPOSE_YAML" \
+    process-compose \
+        --log-file "${PROCESS_COMPOSE_ROOT}/webapps/process-compose.log" \
+        --log-no-color \
+        up \
+        --config "${PROCESS_COMPOSE_ROOT}/webapps/process-compose.yaml" \
         --port "$WEBAPPS_PROCESS_COMPOSE_PORT" \
         --address 127.0.0.1 \
         --tui=false \

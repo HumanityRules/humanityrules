@@ -119,6 +119,18 @@ class TestHermesWebappsRuntimeContract(unittest.TestCase):
             text=True,
         )
 
+    def test_webui_starts_process_compose_with_explicit_internal_log_files(self) -> None:
+        script = (_runtime_dir() / "webui.sh").read_text()
+
+        self.assertIn('--log-file "${PROCESS_COMPOSE_ROOT}/system/process-compose.log"', script)
+        self.assertIn('--log-file "${PROCESS_COMPOSE_ROOT}/webapps/process-compose.log"', script)
+        self.assertIn('--config "${PROCESS_COMPOSE_ROOT}/system/process-compose.yaml"', script)
+        self.assertIn('--config "${PROCESS_COMPOSE_ROOT}/webapps/process-compose.yaml"', script)
+        self.assertNotIn("SYSTEM_PROCESS_COMPOSE_YAML=", script)
+        self.assertNotIn("WEBAPPS_PROCESS_COMPOSE_YAML=", script)
+        self.assertNotIn("SYSTEM_PROCESS_COMPOSE_LOG=", script)
+        self.assertNotIn("WEBAPPS_PROCESS_COMPOSE_LOG=", script)
+
     def test_webapps_reload_regenerates_routes_and_updates_project(self) -> None:
         doc = {
             "version": "0.5",
@@ -216,6 +228,17 @@ class TestHermesWebappsRuntimeContract(unittest.TestCase):
         entry = saved_doc["processes"]["dashboard"]
         self.assertEqual(entry["command"], "uv run app")
         self.assertTrue(entry["disabled"])
+        self.assertEqual(entry["log_location"], "/workspace/webapps/logs/dashboard.log")
+        self.assertEqual(
+            entry["log_configuration"],
+            {
+                "disable_json": True,
+                "no_metadata": True,
+                "no_color": True,
+                "fields_order": ["message"],
+                "flush_each_line": True,
+            },
+        )
         self.assertEqual(
             entry["environment"],
             [
@@ -308,6 +331,17 @@ class TestHermesWebappsRuntimeContract(unittest.TestCase):
             port=4005,
         )
 
+        self.assertEqual(entry["log_location"], "/workspace/webapps/logs/dashboard.log")
+        self.assertEqual(
+            entry["log_configuration"],
+            {
+                "disable_json": True,
+                "no_metadata": True,
+                "no_color": True,
+                "fields_order": ["message"],
+                "flush_each_line": True,
+            },
+        )
         self.assertEqual(
             entry["readiness_probe"],
             {
@@ -364,4 +398,15 @@ class TestHermesWebappsRuntimeContract(unittest.TestCase):
         self.assertIs(project, webapps_lib.SYSTEM_PROJECT)
         self.assertEqual(set(doc["processes"]), {"system.gateway"})
         self.assertEqual(doc["processes"]["system.gateway"]["command"], "gateway run")
+        self.assertEqual(doc["processes"]["system.gateway"]["log_location"], "/workspace/webapps/logs/system.gateway.log")
+        self.assertEqual(
+            doc["processes"]["system.gateway"]["log_configuration"],
+            {
+                "disable_json": True,
+                "no_metadata": True,
+                "no_color": True,
+                "fields_order": ["message"],
+                "flush_each_line": True,
+            },
+        )
         self.assertEqual(doc["processes"]["system.gateway"]["environment"], ["A=B"])

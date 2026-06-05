@@ -170,3 +170,15 @@ main.main.showing-webapps > #mainChat { display: none !important; }
   color: var(--muted);
   font-style: italic;
 }
+
+.doh-webapp-logs-link {
+  font-size: 12px;
+  color: var(--muted);
+  text-decoration: none;
+  align-self: flex-start;
+}
+
+.doh-webapp-logs-link:hover {
+  color: var(--accent, #5aa9ff);
+  text-decoration: underline;
+}

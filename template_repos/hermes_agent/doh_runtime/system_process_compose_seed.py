@@ -23,6 +23,7 @@ from webapps_lib import (
     ProcessComposeLock,
     die,
     load_process_compose_yaml,
+    plain_text_log_configuration,
     save_process_compose_yaml,
 )
 
@@ -32,6 +33,7 @@ def _system_process_entry(slug: str, command: str, cwd: str, env_pairs: list[str
         "command": command,
         "working_dir": cwd,
         "log_location": str(LOGS_DIR / f"{slug}.log"),
+        "log_configuration": plain_text_log_configuration(),
         "environment": env_pairs,
         "availability": {
             "restart": "on_failure",
