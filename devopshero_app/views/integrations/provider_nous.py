@@ -10,7 +10,6 @@ fresh bearer on requests to inference-api.nousresearch.com.
 import logging
 
 import httpx
-from django.utils import timezone
 
 from devopshero_app.models import Environment, IntegrationUserCredential, User
 from devopshero_app.views.integrations import provider_common
@@ -19,21 +18,11 @@ logger = logging.getLogger(__name__)
 
 
 NOUS_PORTAL_BASE_URL = "https://portal.nousresearch.com"
-NOUS_INFERENCE_BASE_URL = "https://inference-api.nousresearch.com/v1"
 NOUS_OAUTH_CLIENT_ID = "hermes-cli"
 NOUS_OAUTH_TOKEN_URL = f"{NOUS_PORTAL_BASE_URL}/api/oauth/token"
 NOUS_TOKEN_EXCHANGE_TIMEOUT_SECONDS = 5
 NOUS_DEFAULT_EXPIRES_IN = 3600
 NOUS_REVOKING_ERROR_CODES = frozenset({"invalid_grant", "invalid_token", "refresh_token_reused"})
-
-
-def _coerce_expires_in(value: object, fallback: int) -> int:
-    """Return a positive expires_in integer from an OAuth response value."""
-    try:
-        expires_in = int(value)
-    except (TypeError, ValueError):
-        return fallback
-    return expires_in if expires_in > 0 else fallback
 
 
 def _exchange_refresh_token(refresh_token: str) -> provider_common.ExchangeResult:
@@ -70,34 +59,14 @@ def _exchange_refresh_token(refresh_token: str) -> provider_common.ExchangeResul
 
 def store_device_credentials(environment: Environment, owner_user: User, app_slug: str, payload: dict) -> tuple[int, dict]:
     """Store the refresh token the broker obtained from Nous Portal's device flow."""
-    refresh_token = payload.get("refresh_token")
-    if not isinstance(refresh_token, str) or not refresh_token:
-        return 400, {"error": "refresh_token is required"}
-
-    metadata = {
-        "connected_at": timezone.now().isoformat(),
-        "portal_base_url": str(payload.get("portal_base_url") or NOUS_PORTAL_BASE_URL),
-        "inference_base_url": str(payload.get("inference_base_url") or NOUS_INFERENCE_BASE_URL),
-    }
-    for key in ("scope", "token_type"):
-        value = payload.get(key)
-        if isinstance(value, str) and value:
-            metadata[key] = value
-
-    IntegrationUserCredential.objects.update_or_create(
-        owner_user=owner_user,
-        environment=environment,
-        app_slug=app_slug,
+    return provider_common.store_oauth_refresh_credential(
         provider=IntegrationUserCredential.Provider.NOUS,
-        defaults={
-            "credentials": {"refresh_token": refresh_token},
-            "config": {},
-            "metadata": metadata,
-            "last_refreshed_at": None,
-        },
+        environment=environment,
+        owner_user=owner_user,
+        app_slug=app_slug,
+        refresh_token=payload.get("refresh_token"),
+        metadata={},
     )
-    logger.info("nous integration stored env=%s owner=%s app=%s", environment.slug, owner_user.username, app_slug)
-    return 200, {"ok": True, "provider": IntegrationUserCredential.Provider.NOUS, "status": "connected"}
 
 
 def refresh_outcome(environment: Environment, owner_user: User, app_slug: str) -> dict:
@@ -133,21 +102,14 @@ def refresh_outcome(environment: Environment, owner_user: User, app_slug: str) -
     new_refresh = exchange_result.response.get("refresh_token")
     if new_refresh and new_refresh != refresh_token:
         integration.credentials = {**integration.credentials, "refresh_token": new_refresh}
-    metadata = dict(integration.metadata)
-    for key in ("scope", "token_type", "inference_base_url"):
-        value = exchange_result.response.get(key)
-        if isinstance(value, str) and value:
-            metadata[key] = value
-    integration.metadata = metadata
     integration.last_refreshed_at = provider_common.now()
-    integration.save(update_fields=["credentials", "metadata", "last_refreshed_at", "updated_at"])
+    integration.save(update_fields=["credentials", "last_refreshed_at", "updated_at"])
 
-    fallback_expires_in = _coerce_expires_in(value=exchange_result.response.get("expires_in"), fallback=NOUS_DEFAULT_EXPIRES_IN)
     return provider_common.has_token(
         secrets={"access_token": access_token},
         expires_in=provider_common.expires_in_from_access_token(
             access_token=access_token,
-            fallback=fallback_expires_in,
+            fallback=NOUS_DEFAULT_EXPIRES_IN,
         ),
         config={},
         metadata={},

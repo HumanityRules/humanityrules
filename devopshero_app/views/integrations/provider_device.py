@@ -6,7 +6,6 @@ from django.http import HttpRequest, JsonResponse
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_POST
 
-from devopshero_app.models import IntegrationUserCredential
 from devopshero_app.views.integrations import broker_request_context, provider_registry
 
 logger = logging.getLogger(__name__)
@@ -47,10 +46,3 @@ def integrations_device_complete(request: HttpRequest, provider: str) -> JsonRes
         payload=payload,
     )
     return JsonResponse(response_payload, status=status)
-
-
-@csrf_exempt
-@require_POST
-def integrations_codex_device_complete(request: HttpRequest) -> JsonResponse:
-    """Compatibility wrapper for the original Codex-only completion URL."""
-    return integrations_device_complete(request=request, provider=IntegrationUserCredential.Provider.OPENAI_CODEX)

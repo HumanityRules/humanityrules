@@ -2,9 +2,10 @@
 
 Two provider families live alongside this module, organized symmetrically:
 
-- OAuth providers (`provider_google`, `provider_github`): connect via a
-  browser redirect dance, refresh by exchanging a stored refresh_token
-  upstream, disconnect by deleting the row + best-effort upstream revoke.
+- OAuth providers (`provider_google`, `provider_github`, `provider_openai_codex`,
+  `provider_nous`): connect via redirect OAuth or a broker-run device flow,
+  refresh by exchanging a stored refresh_token upstream, disconnect by deleting
+  the row + best-effort upstream revoke.
 - Vault providers (`provider_openrouter`, `provider_slack`, `provider_telegram`):
   connect via a browser-direct credential paste, refresh by reading the row
   back, and carry their own non-secret `config`/`metadata`.
@@ -26,7 +27,7 @@ from urllib.parse import urlencode, urlparse
 
 from django.utils import timezone
 
-from devopshero_app.models import App, Environment, ResourceTag, User
+from devopshero_app.models import App, Environment, IntegrationUserCredential, ResourceTag, User
 
 logger = logging.getLogger(__name__)
 
@@ -132,6 +133,35 @@ def expires_in_from_access_token(access_token: str, fallback: int) -> int:
         if remaining > 0:
             return remaining
     return fallback
+
+
+def store_oauth_refresh_credential(
+    *,
+    provider: str,
+    environment: Environment,
+    owner_user: User,
+    app_slug: str,
+    refresh_token: object,
+    metadata: dict,
+) -> tuple[int, dict]:
+    """Validate and store a device-flow OAuth refresh token row."""
+    if not isinstance(refresh_token, str) or not refresh_token:
+        return 400, {"error": "refresh_token is required"}
+
+    IntegrationUserCredential.objects.update_or_create(
+        owner_user=owner_user,
+        environment=environment,
+        app_slug=app_slug,
+        provider=provider,
+        defaults={
+            "credentials": {"refresh_token": refresh_token},
+            "config": {},
+            "metadata": {"connected_at": now().isoformat(), **metadata},
+            "last_refreshed_at": None,
+        },
+    )
+    logger.info("%s integration stored env=%s owner=%s app=%s", provider, environment.slug, owner_user.username, app_slug)
+    return 200, {"ok": True, "provider": provider, "status": "connected"}
 
 
 # --- Broker refresh-outcome contract -----------------------------------------

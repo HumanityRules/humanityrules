@@ -18,7 +18,7 @@ The main developer documentation lives in the docs/ subdirectory. **When creatin
 
 - **`docs/mcp_aggregator_design.md`** — Architecture for MCP server integration in Hermes (Notion today). Open when adding MCP providers, working on the aggregator (in `integrations_broker.py`), or reasoning about the sandbox ↔ MCP trust boundary.
 
-- **`docs/openai_codex_integration_design.md`** — Using a user's ChatGPT subscription (Codex OAuth) as a Hermes LLM backend with the refresh token held outside the sandbox: TLS-intercept of `chatgpt.com` injecting bearer + `ChatGPT-Account-ID`, broker-run device flow with DOH storing the token, the placeholder auth.json seed, and the verified codex/Hermes wire facts. Implemented (backend + WebUI); deploy-time provider selection still pending. Open when revisiting the Codex/ChatGPT-subscription integration.
+- **`docs/device_flow_integration_design.md`** — Broker-run OAuth device flows for LLM providers whose refresh tokens stay outside the sandbox, including Codex/ChatGPT-subscription and Nous Portal: TLS-intercept token injection, DOH-side refresh-token storage, placeholder auth.json seeding, and model-picker visibility. Open when revisiting device-flow LLM provider integrations.
 
 - **`docs/merge_integration_design.md`** — Architecture for the Merge.dev integration that surfaces ~150 SaaS connectors to Hermes through one MCP endpoint. Open when working on Merge, debugging Merge tools, or reasoning about which DOH-tenant secrets can/can't enter customer containers.
 
