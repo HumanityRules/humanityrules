@@ -250,6 +250,44 @@ class TestConnectedProvidersReturnHasToken(_BatchTokensEndpointTestBase):
         self.assertEqual(openrouter["config"], {})
         self.assertEqual(openrouter["metadata"], {"label": "Production"})
 
+    def test_openai_has_token_carries_api_key(self) -> None:
+        IntegrationUserCredential.objects.create(
+            owner_user=self.user, environment=self.env, app_slug="hermes",
+            provider=IntegrationUserCredential.Provider.OPENAI,
+            credentials={"api_key": "sk-real"},
+            metadata={"validated_at": "2026-06-05T00:00:00+00:00"},
+        )
+
+        status, body = self._post(
+            body={"owner_username": "vmendi", "app_slug": "hermes", "providers": ["openai"]},
+            token=self.raw_token,
+        )
+
+        self.assertEqual(status, 200)
+        openai = body["results"]["openai"]
+        self.assertEqual(openai["outcome"], "has_token")
+        self.assertEqual(openai["secrets"], {"api_key": "sk-real"})
+        self.assertEqual(openai["config"], {})
+
+    def test_anthropic_has_token_carries_api_key(self) -> None:
+        IntegrationUserCredential.objects.create(
+            owner_user=self.user, environment=self.env, app_slug="hermes",
+            provider=IntegrationUserCredential.Provider.ANTHROPIC,
+            credentials={"api_key": "sk-ant-real"},
+            metadata={"validated_at": "2026-06-05T00:00:00+00:00"},
+        )
+
+        status, body = self._post(
+            body={"owner_username": "vmendi", "app_slug": "hermes", "providers": ["anthropic"]},
+            token=self.raw_token,
+        )
+
+        self.assertEqual(status, 200)
+        anthropic = body["results"]["anthropic"]
+        self.assertEqual(anthropic["outcome"], "has_token")
+        self.assertEqual(anthropic["secrets"], {"api_key": "sk-ant-real"})
+        self.assertEqual(anthropic["config"], {})
+
     def test_nous_has_token_carries_access_token_and_rotates_refresh_token(self) -> None:
         IntegrationUserCredential.objects.create(
             owner_user=self.user,

@@ -147,6 +147,14 @@ class TestHostToProviderRouting(unittest.TestCase):
         store = _make_token_store()
         self.assertEqual(store.provider_for_host(host="inference-api.nousresearch.com").slug, "nous")
 
+    def test_openai_host_routes_to_openai(self) -> None:
+        store = _make_token_store()
+        self.assertEqual(store.provider_for_host(host="api.openai.com").slug, "openai")
+
+    def test_anthropic_host_routes_to_anthropic(self) -> None:
+        store = _make_token_store()
+        self.assertEqual(store.provider_for_host(host="api.anthropic.com").slug, "anthropic")
+
 
 class TestRewriteAuthorization(unittest.TestCase):
 
@@ -313,6 +321,49 @@ class TestRewriteAuthorization(unittest.TestCase):
         )
         self.assertEqual(path, "/v1/chat/completions")
         self.assertEqual(dict((n.lower(), v) for n, v in headers)[b"authorization"], b"Bearer nous-access")
+
+    def test_openai_placeholder_bearer_is_rewritten(self) -> None:
+        provider = broker.tls_intercept.TLS_INTERCEPT_PROVIDERS["openai"]
+        headers, path = broker.tls_intercept._rewrite_request_for_provider(
+            headers=[(b"host", b"api.openai.com"), (b"authorization", b"Bearer DOH_PLACEHOLDER")],
+            path_with_query="/v1/chat/completions",
+            secrets={"api_key": "sk-real"},
+            provider=provider,
+            upstream_host="api.openai.com",
+        )
+        self.assertEqual(path, "/v1/chat/completions")
+        self.assertEqual(dict((n.lower(), v) for n, v in headers)[b"authorization"], b"Bearer sk-real")
+
+    def test_anthropic_placeholder_x_api_key_is_rewritten(self) -> None:
+        provider = broker.tls_intercept.TLS_INTERCEPT_PROVIDERS["anthropic"]
+        headers, path = broker.tls_intercept._rewrite_request_for_provider(
+            headers=[
+                (b"host", b"api.anthropic.com"),
+                (b"x-api-key", b"DOH_PLACEHOLDER"),
+                (b"anthropic-version", b"2023-06-01"),
+            ],
+            path_with_query="/v1/messages",
+            secrets={"api_key": "sk-ant-real"},
+            provider=provider,
+            upstream_host="api.anthropic.com",
+        )
+        self.assertEqual(path, "/v1/messages")
+        by_name = dict((n.lower(), v) for n, v in headers)
+        # Real key swapped in; anthropic-version preserved; no bogus Authorization added.
+        self.assertEqual(by_name[b"x-api-key"], b"sk-ant-real")
+        self.assertEqual(by_name[b"anthropic-version"], b"2023-06-01")
+        self.assertNotIn(b"authorization", by_name)
+
+    def test_anthropic_request_without_placeholder_is_rejected(self) -> None:
+        provider = broker.tls_intercept.TLS_INTERCEPT_PROVIDERS["anthropic"]
+        with self.assertRaises(broker.tls_intercept._SecretSelectionError):
+            broker.tls_intercept._rewrite_request_for_provider(
+                headers=[(b"host", b"api.anthropic.com"), (b"x-api-key", b"sk-ant-NOT-OURS")],
+                path_with_query="/v1/messages",
+                secrets={"api_key": "sk-ant-real"},
+                provider=provider,
+                upstream_host="api.anthropic.com",
+            )
 
 
 class TestForwardHeaderNormalization(unittest.TestCase):
@@ -508,6 +559,8 @@ class TestControlIntegrations(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(items_by_slug["openai-codex"]["affects_model_picker"])
         self.assertTrue(items_by_slug["nous"]["affects_model_picker"])
         self.assertTrue(items_by_slug["openrouter"]["affects_model_picker"])
+        self.assertTrue(items_by_slug["openai"]["affects_model_picker"])
+        self.assertTrue(items_by_slug["anthropic"]["affects_model_picker"])
 
     async def test_absent_provider_is_not_cached(self) -> None:
         """An `absent` outcome from DOH must remove (not store) the cache entry."""
@@ -1288,6 +1341,14 @@ class TestRefreshAllBatchedApply(unittest.IsolatedAsyncioTestCase):
                 outcome=broker.tls_intercept.REFRESH_OUTCOME_ABSENT,
                 secrets=None, expires_in=None, config={}, metadata={},
             ),
+            "openai": broker.tls_intercept.RefreshResult(
+                outcome=broker.tls_intercept.REFRESH_OUTCOME_ABSENT,
+                secrets=None, expires_in=None, config={}, metadata={},
+            ),
+            "anthropic": broker.tls_intercept.RefreshResult(
+                outcome=broker.tls_intercept.REFRESH_OUTCOME_ABSENT,
+                secrets=None, expires_in=None, config={}, metadata={},
+            ),
         }
         with patch.object(
             broker.tls_intercept,
@@ -1319,6 +1380,12 @@ class TestGatewayEnvRender(unittest.TestCase):
 
     def _openrouter_provider(self) -> "broker.tls_intercept.TlsProviderSpec":
         return broker.tls_intercept.TLS_INTERCEPT_PROVIDERS["openrouter"]
+
+    def _openai_provider(self) -> "broker.tls_intercept.TlsProviderSpec":
+        return broker.tls_intercept.TLS_INTERCEPT_PROVIDERS["openai"]
+
+    def _anthropic_provider(self) -> "broker.tls_intercept.TlsProviderSpec":
+        return broker.tls_intercept.TLS_INTERCEPT_PROVIDERS["anthropic"]
 
     def test_slack_vault_header_provider_renders_both_placeholders(self) -> None:
         """Env bindings render static placeholders plus list config."""
@@ -1373,6 +1440,16 @@ class TestGatewayEnvRender(unittest.TestCase):
         snapshot = [(self._openrouter_provider(), {})]
         block = broker.tls_intercept.render_managed_block(snapshot=snapshot)
         self.assertIn("OPENROUTER_API_KEY=DOH_PLACEHOLDER", block)
+
+    def test_connected_openai_renders_api_key_placeholder(self) -> None:
+        snapshot = [(self._openai_provider(), {})]
+        block = broker.tls_intercept.render_managed_block(snapshot=snapshot)
+        self.assertIn("OPENAI_API_KEY=DOH_PLACEHOLDER", block)
+
+    def test_connected_anthropic_renders_api_key_placeholder(self) -> None:
+        snapshot = [(self._anthropic_provider(), {})]
+        block = broker.tls_intercept.render_managed_block(snapshot=snapshot)
+        self.assertIn("ANTHROPIC_API_KEY=DOH_PLACEHOLDER", block)
 
     def test_missing_list_config_skips_binding(self) -> None:
         """A connected provider without the optional list field omits its env var."""

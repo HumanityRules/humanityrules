@@ -21,7 +21,13 @@ from devopshero_app.models import (
     User,
     Workspace,
 )
-from devopshero_app.views.integrations import provider_openrouter, provider_telegram, user_credential_vault
+from devopshero_app.views.integrations import (
+    provider_anthropic,
+    provider_openai,
+    provider_openrouter,
+    provider_telegram,
+    user_credential_vault,
+)
 
 
 def _hash(raw: str) -> str:
@@ -157,6 +163,22 @@ class TestSetupSession(_CredentialVaultTestBase):
 
         self.assertEqual(status, 200)
         self.assertEqual(body["schema"]["provider"], "openrouter")
+        self.assertEqual(body["schema"]["status"], "not_connected")
+        self.assertEqual(body["schema"]["fields"][0]["name"], "api_key")
+
+    def test_openai_setup_session_returns_generic_vault_schema(self) -> None:
+        status, body = self._post_setup_session_for_provider(provider=IntegrationUserCredential.Provider.OPENAI)
+
+        self.assertEqual(status, 200)
+        self.assertEqual(body["schema"]["provider"], "openai")
+        self.assertEqual(body["schema"]["status"], "not_connected")
+        self.assertEqual(body["schema"]["fields"][0]["name"], "api_key")
+
+    def test_anthropic_setup_session_returns_generic_vault_schema(self) -> None:
+        status, body = self._post_setup_session_for_provider(provider=IntegrationUserCredential.Provider.ANTHROPIC)
+
+        self.assertEqual(status, 200)
+        self.assertEqual(body["schema"]["provider"], "anthropic")
         self.assertEqual(body["schema"]["status"], "not_connected")
         self.assertEqual(body["schema"]["fields"][0]["name"], "api_key")
 
@@ -378,4 +400,122 @@ class TestCredentialSubmit(_CredentialVaultTestBase):
 
         self.assertEqual(response.status_code, 400)
         self.assertEqual(response.json()["error"], provider_openrouter.OPENROUTER_INVALID_KEY_MESSAGE)
+        self.assertFalse(IntegrationUserCredential.objects.exists())
+
+    def test_submit_saves_openai_credential(self) -> None:
+        _status, session = self._post_setup_session_for_provider(provider=IntegrationUserCredential.Provider.OPENAI)
+        openai_response = MagicMock()
+        openai_response.status_code = 200
+        openai_response.json.return_value = {"data": [{"id": "gpt-4o"}]}
+
+        with patch(
+            "devopshero_app.views.integrations.provider_openai.httpx.get",
+            return_value=openai_response,
+        ):
+            response = self.client.post(
+                "/api/integrations/credentials/submit",
+                data=json.dumps({
+                    "submit_token": session["submit_token"],
+                    "credentials": {"api_key": "sk-real"},
+                    "config": {},
+                }),
+                content_type="text/plain",
+                HTTP_ORIGIN="https://hermes.dev.example.com",
+            )
+
+        self.assertEqual(response.status_code, 200)
+        credential = IntegrationUserCredential.objects.get(
+            owner_user=self.user,
+            environment=self.env,
+            app_slug="hermes",
+            provider=IntegrationUserCredential.Provider.OPENAI,
+        )
+        self.assertEqual(credential.credentials["api_key"], "sk-real")
+        self.assertEqual(credential.config, {})
+        self.assertIn("validated_at", credential.metadata)
+
+    def test_submit_rewrites_openai_unauthorized_error(self) -> None:
+        _status, session = self._post_setup_session_for_provider(provider=IntegrationUserCredential.Provider.OPENAI)
+        openai_response = MagicMock()
+        openai_response.status_code = 401
+        openai_response.json.return_value = {"error": {"message": "Incorrect API key"}}
+
+        with patch(
+            "devopshero_app.views.integrations.provider_openai.httpx.get",
+            return_value=openai_response,
+        ):
+            response = self.client.post(
+                "/api/integrations/credentials/submit",
+                data=json.dumps({
+                    "submit_token": session["submit_token"],
+                    "credentials": {"api_key": "sk-real"},
+                    "config": {},
+                }),
+                content_type="text/plain",
+                HTTP_ORIGIN="https://hermes.dev.example.com",
+            )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()["error"], provider_openai.OPENAI_INVALID_KEY_MESSAGE)
+        self.assertFalse(IntegrationUserCredential.objects.exists())
+
+    def test_submit_saves_anthropic_credential(self) -> None:
+        _status, session = self._post_setup_session_for_provider(provider=IntegrationUserCredential.Provider.ANTHROPIC)
+        anthropic_response = MagicMock()
+        anthropic_response.status_code = 200
+        anthropic_response.json.return_value = {"data": [{"id": "claude-opus-4-8"}]}
+
+        with patch(
+            "devopshero_app.views.integrations.provider_anthropic.httpx.get",
+            return_value=anthropic_response,
+        ) as anthropic_get:
+            response = self.client.post(
+                "/api/integrations/credentials/submit",
+                data=json.dumps({
+                    "submit_token": session["submit_token"],
+                    "credentials": {"api_key": "sk-ant-real"},
+                    "config": {},
+                }),
+                content_type="text/plain",
+                HTTP_ORIGIN="https://hermes.dev.example.com",
+            )
+
+        self.assertEqual(response.status_code, 200)
+        # Anthropic validation uses x-api-key + anthropic-version, not Bearer.
+        _args, kwargs = anthropic_get.call_args
+        self.assertEqual(kwargs["headers"]["x-api-key"], "sk-ant-real")
+        self.assertEqual(kwargs["headers"]["anthropic-version"], provider_anthropic.ANTHROPIC_API_VERSION)
+        credential = IntegrationUserCredential.objects.get(
+            owner_user=self.user,
+            environment=self.env,
+            app_slug="hermes",
+            provider=IntegrationUserCredential.Provider.ANTHROPIC,
+        )
+        self.assertEqual(credential.credentials["api_key"], "sk-ant-real")
+        self.assertEqual(credential.config, {})
+        self.assertIn("validated_at", credential.metadata)
+
+    def test_submit_rewrites_anthropic_unauthorized_error(self) -> None:
+        _status, session = self._post_setup_session_for_provider(provider=IntegrationUserCredential.Provider.ANTHROPIC)
+        anthropic_response = MagicMock()
+        anthropic_response.status_code = 401
+        anthropic_response.json.return_value = {"error": {"message": "invalid x-api-key"}}
+
+        with patch(
+            "devopshero_app.views.integrations.provider_anthropic.httpx.get",
+            return_value=anthropic_response,
+        ):
+            response = self.client.post(
+                "/api/integrations/credentials/submit",
+                data=json.dumps({
+                    "submit_token": session["submit_token"],
+                    "credentials": {"api_key": "sk-ant-real"},
+                    "config": {},
+                }),
+                content_type="text/plain",
+                HTTP_ORIGIN="https://hermes.dev.example.com",
+            )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()["error"], provider_anthropic.ANTHROPIC_INVALID_KEY_MESSAGE)
         self.assertFalse(IntegrationUserCredential.objects.exists())
