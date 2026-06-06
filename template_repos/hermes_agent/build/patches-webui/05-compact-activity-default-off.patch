@@ -1,11 +1,11 @@
 --- a/api/config.py
 +++ b/api/config.py
-@@ -4811,7 +4811,7 @@
+@@ -5104,7 +5104,7 @@
      "rtl": False,  # right-to-left chat layout (chat messages + composer only)
      "notifications_enabled": False,  # browser notification when tab is in background
      "show_thinking": True,  # show/hide thinking/reasoning blocks in chat view
 -    "simplified_tool_calling": True,  # render tools/thinking as compact inline timeline activity
 +    "simplified_tool_calling": False,  # DOH: default to full tool activity (upstream defaults this to True)
+     "terminal_auto_expand_on_output": False,  # auto-expand terminal panel when output arrives while collapsed
      "api_redact_enabled": True,  # redact sensitive data (API keys, secrets) from API responses
-     "sidebar_density": "compact",  # compact | detailed
-     "auto_title_refresh_every": "0",  # adaptive title refresh: 0=off, 5/10/20=every N exchanges
+     "dashboard_plugins": {},  # plugin_name -> bool, opt-in per plugin (default off per PF-10b)
