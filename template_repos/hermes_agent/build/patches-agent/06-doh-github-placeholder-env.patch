@@ -12,7 +12,6 @@ DOH_PLACEHOLDER passes through, regardless of name. Real credentials never
 carry this value, so they stay blocked. This lets `gh`, git, and other
 provider-aware tools run inside Hermes without storing user tokens in the
 sandbox, and needs no edit when the set of DOH providers changes.
-
 --- a/tools/environments/local.py
 +++ b/tools/environments/local.py
 @@ -74,6 +74,10 @@
@@ -24,9 +23,9 @@ sandbox, and needs no edit when the set of DOH providers changes.
 +# is safe to surface to sandbox children regardless of the variable name.
 +_DOH_PLACEHOLDER_VALUE = "DOH_PLACEHOLDER"
  
- 
- def _build_provider_env_blocklist() -> frozenset:
-@@ -179,6 +183,11 @@
+ # Hermes-managed AWS *inference* credentials for ``auth_type="aws_sdk"``
+ # providers (Bedrock).  Scoped DELIBERATELY NARROW: this lists only the
+@@ -203,6 +207,11 @@
          pass
  
  
@@ -38,7 +37,7 @@ sandbox, and needs no edit when the set of DOH providers changes.
  def _sanitize_subprocess_env(base_env: dict | None, extra_env: dict | None = None) -> dict:
      """Filter Hermes-managed secrets from a subprocess environment."""
      try:
-@@ -191,14 +200,18 @@
+@@ -215,14 +224,18 @@
      for key, value in (base_env or {}).items():
          if key.startswith(_HERMES_PROVIDER_ENV_FORCE_PREFIX):
              continue
@@ -59,7 +58,7 @@ sandbox, and needs no edit when the set of DOH providers changes.
              sanitized[key] = value
  
      _inject_context_hermes_home(sanitized)
-@@ -289,7 +302,7 @@
+@@ -313,7 +326,7 @@
          if k.startswith(_HERMES_PROVIDER_ENV_FORCE_PREFIX):
              real_key = k[len(_HERMES_PROVIDER_ENV_FORCE_PREFIX):]
              run_env[real_key] = v
@@ -70,7 +69,7 @@ sandbox, and needs no edit when the set of DOH providers changes.
      # The "/usr/bin not already present → inject sane POSIX path" heuristic
 --- a/tools/code_execution_tool.py
 +++ b/tools/code_execution_tool.py
-@@ -113,6 +113,13 @@
+@@ -131,6 +131,13 @@
      "HOMEPATH",         # \Users\<name>
      "COMPUTERNAME",
  })
@@ -84,8 +83,8 @@ sandbox, and needs no edit when the set of DOH providers changes.
  
  
  def _scrub_child_env(source_env, is_passthrough=None, is_windows=None):
-@@ -141,6 +148,9 @@
-     scrubbed = {}
+@@ -168,6 +175,9 @@
+     _dropped_hermes = []
      for k, v in source_env.items():
          if is_passthrough(k):
 +            scrubbed[k] = v

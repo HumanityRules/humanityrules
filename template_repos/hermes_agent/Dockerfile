@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1
 
-FROM ghcr.io/nesquena/hermes-webui:0.51.160
+FROM ghcr.io/nesquena/hermes-webui:0.51.293
 
 USER root
 
@@ -10,7 +10,7 @@ ARG CADDY_VERSION=2.11.3
 ARG PROCESS_COMPOSE_VERSION=1.110.0
 ARG TTYD_VERSION=1.7.7
 ARG GH_CLI_VERSION=2.92.0
-ARG HERMES_AGENT_REF=v2026.5.29.2
+ARG HERMES_AGENT_REF=v2026.6.5
 ARG HERMES_AGENT_EXTRAS=messaging,matrix,cron,cli,dev,tts-premium,slack,pty,honcho,mcp,sms,acp,voice,google,bedrock,web
 
 # Runtime layout: /opt/doh and /opt/hermes are image-owned and refreshed into
@@ -30,6 +30,7 @@ ENV HERMES_WEBUI_STATE_DIR=/workspace/.hermes/webui-mvp
 ENV HERMES_WEBUI_DEFAULT_WORKSPACE=/workspace
 ENV HERMES_WEBUI_SKIP_ONBOARDING=1
 ENV HERMES_WEBUI_EXTENSION_DIR=/opt/doh/webui-extension
+ENV HERMES_WEBUI_TRUST_FORWARDED_HOST=1
 ENV HERMES_PERSISTENT_ROOT=/hermes-persistent-root
 ENV HERMES_CHECKPOINT_ROOT=/hermes-checkpoint
 ENV HOMEBREW_PREFIX=/home/linuxbrew/.linuxbrew
