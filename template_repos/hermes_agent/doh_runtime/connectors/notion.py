@@ -1,4 +1,15 @@
-"""Notion DCR connector. Self-contained: spec + backend + overrides."""
+"""Notion DCR connector. Self-contained: spec + backend + overrides.
+
+═════════════════════════════════════════════════════════════════════════════
+NOT REGISTERED — this module is intentionally absent from DCR_CONNECTORS in
+connectors/__init__.py. Notion is served through Merge.dev's Agent Handler
+(Magic Link OAuth) instead of direct DCR/PKCE against mcp.notion.com.
+
+Re-enable the native connector by adding `_notion.SPEC` to DCR_CONNECTORS —
+one line. That will hide Merge's notion connector again (native wins over
+same-slug Merge connectors).
+═════════════════════════════════════════════════════════════════════════════
+"""
 
 import logging
 from pathlib import Path

@@ -23,7 +23,7 @@ from . import posthog as _posthog
 
 
 DCR_CONNECTORS: list[DCRConnectorSpec] = [
-    _notion.SPEC,
+    # _notion.SPEC,
     _posthog.SPEC,
 ]
 

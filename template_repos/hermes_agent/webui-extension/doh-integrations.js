@@ -293,9 +293,8 @@
     const modal = elem('div', { class: 'doh-modal' }, [
       elem('div', { class: 'doh-modal-title' }, ['Connect ' + item.label]),
       elem('div', { class: 'doh-modal-body' }, [
-        'You’ll authenticate in a new tab via Merge.dev, our integration broker. ' +
-        item.label + ' never sees your password — OAuth happens directly with the provider. ' +
-        'Close the tab when Merge says you’re done; this list will refresh automatically.',
+        'You’ll authenticate in a new tab via Merge.dev, our secure integrations broker. ' +
+        'Authentication happens directly with ' + item.label + '.'
       ]),
       elem('div', { class: 'doh-modal-actions' }, [
         elem('button', {
@@ -310,7 +309,7 @@
     ]);
     backdrop.appendChild(modal);
     backdrop.addEventListener('click', (e) => { if (e.target === backdrop) cancel(); });
-    document.body.appendChild(backdrop);
+    // document.body.appendChild(backdrop);
   }
 
   function showMergeWaitingModal(item, onCancel) {
@@ -363,64 +362,64 @@
 
   async function startMergeConnect(item, revert) {
     const revertOnce = () => { if (revert) { revert(); revert = null; } };
-    showMergeExplainerModal(item, async () => {
-      let resp;
-      try {
-        resp = await fetch('/__doh_broker/integrations/merge/link-token', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ connector_slug: item.slug }),
-        });
-      } catch (_) {
-        alert('Could not reach the integrations broker. Try again.');
-        revertOnce();
-        return;
-      }
-      if (!resp.ok) {
-        alert('Merge link-token request failed.');
-        revertOnce();
-        return;
-      }
-      const data = await resp.json();
-      if (!data.magic_link_url) {
-        alert('Merge did not return a magic link.');
-        revertOnce();
-        return;
-      }
-      window.open(data.magic_link_url, '_blank');
+    // showMergeExplainerModal(item, async () => {
+    let resp;
+    try {
+      resp = await fetch('/__doh_broker/integrations/merge/link-token', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ connector_slug: item.slug }),
+      });
+    } catch (_) {
+      alert('Could not reach the integrations broker. Try again.');
+      revertOnce();
+      return;
+    }
+    if (!resp.ok) {
+      alert('Merge link-token request failed.');
+      revertOnce();
+      return;
+    }
+    const data = await resp.json();
+    if (!data.magic_link_url) {
+      alert('Merge did not return a magic link.');
+      revertOnce();
+      return;
+    }
+    window.open(data.magic_link_url, '_blank');
 
-      let stopped = false;
-      const waiting = showMergeWaitingModal(item, () => { stopped = true; revertOnce(); });
-      const start = Date.now();
-      const intervalMs = 3000;
-      const timeoutMs = 5 * 60 * 1000;
-      const tick = async () => {
-        if (stopped) return;
-        if (Date.now() - start > timeoutMs) {
-          stopped = true;
-          waiting.remove();
-          revertOnce();
-          return;
-        }
-        try {
-          const r = await fetch(
-            '/__doh_broker/integrations/merge/connector-status?connector_slug=' + encodeURIComponent(item.slug),
-            { cache: 'no-store' },
-          );
-          if (r.ok) {
-            const s = await r.json();
-            if (s.status === 'connected') {
-              stopped = true;
-              waiting.remove();
-              await refreshAndRender();
-              return;
-            }
+    let stopped = false;
+    const waiting = showMergeWaitingModal(item, () => { stopped = true; revertOnce(); });
+    const start = Date.now();
+    const intervalMs = 3000;
+    const timeoutMs = 5 * 60 * 1000;
+    const tick = async () => {
+      if (stopped) return;
+      if (Date.now() - start > timeoutMs) {
+        stopped = true;
+        waiting.remove();
+        revertOnce();
+        return;
+      }
+      try {
+        const r = await fetch(
+          '/__doh_broker/integrations/merge/connector-status?connector_slug=' + encodeURIComponent(item.slug),
+          { cache: 'no-store' },
+        );
+        if (r.ok) {
+          const s = await r.json();
+          if (s.status === 'connected') {
+            stopped = true;
+            waiting.remove();
+            await refreshAndRender();
+            return;
           }
-        } catch (_) { /* keep polling */ }
-        setTimeout(tick, intervalMs);
-      };
+        }
+      } catch (_) { /* keep polling */ }
       setTimeout(tick, intervalMs);
-    }, revertOnce);
+    };
+    setTimeout(tick, intervalMs);
+    // }, revertOnce);
   }
 
   function renderConnectorCard(item) {
