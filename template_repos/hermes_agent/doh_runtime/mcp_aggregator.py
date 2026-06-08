@@ -282,10 +282,10 @@ class MCPAggregator:
         if self._merge_backend is not None:
             merge_routes = self._merge_backend.routes(prefix=prefix)
         return [
+            *merge_routes,  # before {provider}/disconnect so that "merge"=={provider} matches that wildcard
             Route(path=f"{prefix}/{{provider}}/oauth/start", endpoint=self.handle_oauth_start, methods=["GET"]),
             Route(path=f"{prefix}/{{provider}}/oauth/callback", endpoint=self.handle_oauth_callback, methods=["GET"]),
             Route(path=f"{prefix}/{{provider}}/disconnect", endpoint=self.handle_disconnect, methods=["POST"]),
-            *merge_routes,
         ]
 
     async def _current_access_token(self, slug: str) -> str | None:

@@ -218,6 +218,30 @@ class TestAggregatorMergeDisabled(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("merge_connector", {item["kind"] for item in items})
 
 
+class TestAggregatorMergeRouteOrder(unittest.IsolatedAsyncioTestCase):
+    """Merge static routes must precede the DCR {provider}/disconnect wildcard."""
+
+    async def asyncSetUp(self) -> None:
+        self.tempdir = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tempdir.cleanup)
+        self.agg = mcp_aggregator.MCPAggregator(
+            port=9952,
+            persistent_dir=pathlib.Path(self.tempdir.name),
+            public_base_url="https://hermes.example",
+            doh_control_plane_url="https://doh.example",
+            doh_env_bearer="b",
+            doh_app_slug="hermes-test",
+            doh_owner_username="vmendi",
+            merge_enabled=True,
+        )
+
+    async def test_merge_disconnect_before_generic_disconnect(self) -> None:
+        paths = [route.path for route in self.agg.routes(prefix="/integrations")]
+        merge_idx = paths.index("/integrations/merge/disconnect")
+        generic_idx = paths.index("/integrations/{provider}/disconnect")
+        self.assertLess(merge_idx, generic_idx)
+
+
 class TestCatalogStoreDrop(unittest.IsolatedAsyncioTestCase):
     """`drop` is the disconnect path: pure dict mutation, no network."""
 
@@ -505,7 +529,7 @@ class TestMergeBackendStateHooks(unittest.IsolatedAsyncioTestCase):
             doh_env_bearer="b",
             doh_app_slug="hermes-test",
             doh_owner_username="vmendi",
-            excluded_connector_slugs=frozenset({"notion", "posthog"}),
+            excluded_connector_slugs=frozenset({"posthog"}),
             on_config_change=self.hook,
         )
 
