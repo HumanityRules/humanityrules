@@ -26,6 +26,8 @@ The main developer documentation lives in the docs/ subdirectory. **When creatin
 
 - **`docs/merge_connectors_auth_audit.md`** — Audit of the 151 Merge Tool Pack connectors: how Merge authenticates each one today, which vendors have an official remote MCP + DCR we could use directly, and where Merge defaults to API-key for a DCR-capable vendor. Open when deciding whether to keep a connector behind Merge or move it direct. Snapshot 2026-05-15.
 
+- **`docs/merge_connectors_ranked.md`** — Popularity ranking of all 151 Merge Tool Pack connectors from external signals (MCP registries, Zapier/Make/Composio, GitHub, BuiltWith, G2). Open when deciding which connectors to disable by default. Regenerate via `docs/_build_merge_connector_rankings.py`.
+
 - **`docs/ui_live_update_contract.md`** — The current live-update contract for HTMX polling, chat-scoped SSE invalidation, and widget fragment refresh patterns. Open when adding or changing live-refresh behavior.
 
 - **`docs/app_removal_data_cleanup_audit.md`** — Audit of what `AppRemovalJob`'s flags cover, and the gap: `IntegrationUserCredential` rows have no FK to `App` and are never cleaned up. Open when reworking app removal, debugging phantom reconnects after recreating an app, or auditing GDPR. Snapshot 2026-05-24.

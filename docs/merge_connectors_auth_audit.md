@@ -18,12 +18,7 @@ This doc answers two **independent** questions:
 
 The two questions don't determine each other. Datadog hosts an official
 MCP server with DCR at `mcp.datadoghq.com`, AND Merge integrates Datadog
-via a two-key API form ([screenshot evidence][datadog-screenshot]). Both
-true at the same time. Earlier versions of this doc conflated the two and
-got several entries wrong (Datadog, Vercel). The structure below keeps
-them separate.
-
-[datadog-screenshot]: see attachment in the conversation that produced this doc
+via a two-key API form.
 
 ## Sources
 

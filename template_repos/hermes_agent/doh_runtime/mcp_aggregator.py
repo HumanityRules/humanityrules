@@ -36,7 +36,7 @@ from pathlib import Path
 
 import httpx
 import uvicorn
-from fastmcp import FastMCP
+from fastmcp import FastMCP  # pyright: ignore[reportMissingImports]
 from starlette.requests import Request
 from starlette.responses import JSONResponse, RedirectResponse, Response
 from starlette.routing import Route
