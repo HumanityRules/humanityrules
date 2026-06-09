@@ -1,6 +1,6 @@
 """Slack vault provider: schema, credential validation, and refresh outcome.
 
-Slack is a paste-style vault provider like Telegram, but with two secrets
+Slack is a paste-style vault provider, but with two secrets
 (an app-level token `xapp-` for the Socket Mode handshake and a bot token
 `xoxb-` for the Web API) and a richer setup flow (a Personal/Company-wide
 mode selector plus a manifest prefill link the operator uses to create the

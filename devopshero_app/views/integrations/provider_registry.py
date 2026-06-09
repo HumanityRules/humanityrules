@@ -14,15 +14,19 @@ down:
   flow, refresh by upstream token exchange, disconnect deletes the row +
   best-effort upstream `revoke`.
 - VAULT (`provider_openrouter`, `provider_openai`, `provider_anthropic`,
-  `provider_slack`, `provider_telegram`): connect via a browser-direct
-  credential paste (`schema` + `save_credentials`), refresh is a DB read,
-  disconnect just deletes the row.
+  `provider_slack`, `provider_telegram`): connect via the browser-direct
+  setup-session surface (`schema` + `save_credentials`), refresh is a DB read,
+  disconnect just deletes the row. The connect UX is either a credential paste
+  form (the default) or, when `schema()` returns `mode=link_poll`, an external
+  deep link the browser polls to completion (Telegram managed bots).
 
 Uniform module interface by kind:
 - all providers: `refresh_outcome(environment, owner_user, app_slug) -> dict`
 - VAULT only: `schema(existing) -> dict`,
   `save_credentials(owner_user, environment, app_slug, credentials_payload,
   config_payload) -> (IntegrationUserCredential | None, error | None)`
+- link+poll VAULT only: `poll_setup(owner_user, environment, app_slug,
+  state) -> (result | None, error | None)`
 - OAUTH only: `revoke(refresh_token) -> None`
 - device-flow OAUTH only: `store_device_credentials(environment, owner_user,
   app_slug, payload) -> (status, body)`

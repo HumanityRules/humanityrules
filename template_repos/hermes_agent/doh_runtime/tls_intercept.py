@@ -743,17 +743,17 @@ class _TokenStore:
         async with self._lock:
             self._cache.clear()
 
-    async def refresh(self, slug: str) -> None:
-        """Refetch one provider from DOH even when the cache is fresh."""
+    async def refresh(self, slug: str) -> bool:
+        """Refetch one provider from DOH even when the cache is fresh; False on transient DOH failure."""
         if slug not in self._providers:
-            return
+            return True
         async with self._lock:
-            await self._refresh_locked(slugs=[slug])
+            return await self._refresh_locked(slugs=[slug])
 
-    async def refresh_all(self) -> None:
-        """Refetch every provider in one batched DOH round-trip."""
+    async def refresh_all(self) -> bool:
+        """Refetch every provider in one batched DOH round-trip; False on transient DOH failure."""
         async with self._lock:
-            await self._refresh_locked(slugs=list(self._providers))
+            return await self._refresh_locked(slugs=list(self._providers))
 
     async def status_items(self) -> list[dict]:
         """Render integration cards from the current cache; never calls DOH.
@@ -806,7 +806,7 @@ class _TokenStore:
         await self._refresh_locked(slugs=[provider.slug])
         return self._cache.get(provider.slug)
 
-    async def _refresh_locked(self, slugs: list[str]) -> None:
+    async def _refresh_locked(self, slugs: list[str]) -> bool:
         """Fetch the slugs in one DOH POST and apply each result. Caller holds `_lock`.
 
         Holding the lock across both fetch and apply (rather than
@@ -814,7 +814,14 @@ class _TokenStore:
         fetch from overwriting a concurrent invalidate. The cost is
         small in practice: ~tens of ms per refresh, and at most one
         refresh per provider per token lifetime hits this path.
+
+        Returns False when *every* slug came back transient — the
+        signature of a failed DOH round-trip — so callers can avoid
+        deriving state (e.g. the gateway env file) from a cache that
+        does not reflect DOH truth.
         """
+        if not slugs:
+            return True
         results = await asyncio.to_thread(
             fetch_provider_tokens_batch,
             refresh_config=self._refresh_config,
@@ -822,6 +829,7 @@ class _TokenStore:
         )
         for slug in slugs:
             self._apply_locked(provider=self._providers[slug], result=results[slug])
+        return any(result.outcome != REFRESH_OUTCOME_TRANSIENT for result in results.values())
 
     def _apply_locked(self, provider: TlsProviderSpec, result: RefreshResult) -> None:
         """Apply one refresh outcome to the cache. Caller holds `_lock`.
@@ -906,13 +914,13 @@ class TlsInterceptRuntime:
         if self._on_user_invalidate is not None:
             await self._on_user_invalidate(None)
 
-    async def refresh_slug(self, slug: str) -> None:
-        """Force a single-provider refetch so the cache reflects current DOH state."""
-        await self._token_store.refresh(slug=slug)
+    async def refresh_slug(self, slug: str) -> bool:
+        """Force a single-provider refetch; False when the DOH round-trip failed transiently."""
+        return await self._token_store.refresh(slug=slug)
 
-    async def refresh_all(self) -> None:
-        """Force a refetch of every provider in one DOH round-trip."""
-        await self._token_store.refresh_all()
+    async def refresh_all(self) -> bool:
+        """Force a refetch of every provider in one DOH round-trip; False on transient failure."""
+        return await self._token_store.refresh_all()
 
     async def gateway_env_snapshot(self) -> list[tuple[TlsProviderSpec, dict]]:
         """Pair every connected provider with its cached config for env rendering."""

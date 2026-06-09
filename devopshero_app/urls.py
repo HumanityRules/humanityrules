@@ -150,6 +150,8 @@ urlpatterns = [
     #  - integrations_credential_setup_session / submit: broker-assisted, browser-direct vault flows for paste-style credentials
     path("api/integrations/credentials/setup-session", views.integrations_credential_setup_session, name="integrations_credential_setup_session"),
     path("api/integrations/credentials/submit", views.integrations_credential_submit, name="integrations_credential_submit"),
+    #  - integrations_credential_poll: browser-direct poll for link-driven vault setups (e.g. Telegram managed bots)
+    path("api/integrations/credentials/poll", views.integrations_credential_poll, name="integrations_credential_poll"),
     #  - disconnect: one handler for every provider kind — deletes the IntegrationUserCredential row and, for
     #    OAuth providers, best-effort revokes upstream. The broker posts all disconnects here.
     path("api/integrations/credentials/disconnect", views.integrations_credential_disconnect, name="integrations_credential_disconnect"),

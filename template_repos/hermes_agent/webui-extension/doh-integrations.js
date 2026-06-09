@@ -708,6 +708,10 @@
   }
 
   function showGenericVaultConfigModal(item, session, onClose) {
+    if (session.schema && session.schema.mode === 'link_poll') {
+      showLinkPollConnectModal(item, session, onClose);
+      return;
+    }
     const schema = session.schema;
     const backdrop = elem('div', { class: 'doh-modal-backdrop doh-vault-backdrop' });
     const close = () => { backdrop.remove(); if (onClose) onClose(); };
@@ -741,6 +745,117 @@
     backdrop.appendChild(modal);
     backdrop.addEventListener('click', (e) => { if (e.target === backdrop) close(); });
     document.body.appendChild(backdrop);
+  }
+
+  // ── Link+poll vault flow ──────────────────────────────────────────
+  // Vault providers whose credential is created in an external app (e.g.
+  // Telegram managed bots) return `schema.mode === 'link_poll'`: the modal
+  // shows a QR code the user scans with their phone, and we poll DOH's
+  // setup-poll endpoint with the session token until the provider reports
+  // the credential as connected. The DOH side then already holds the
+  // secret — nothing is typed or pasted here, and no desktop app is needed.
+
+  const LINK_POLL_MS = 3000;
+
+  function showLinkPollConnectModal(item, session, onClose) {
+    const schema = session.schema;
+    const backdrop = elem('div', { class: 'doh-modal-backdrop doh-vault-backdrop' });
+    let stopped = false;
+    const close = () => { stopped = true; backdrop.remove(); if (onClose) onClose(); };
+
+    const errorBox = elem('div', { class: 'doh-vault-error', style: { display: 'none' } });
+    const statusBox = elem('div', { class: 'doh-vault-success' }, [schema.pending_message || 'Waiting for confirmation…']);
+    const cancelBtn = elem('button', { class: 'doh-integration-btn', type: 'button', onclick: close }, ['Cancel']);
+    const actions = elem('div', { class: 'doh-modal-actions' }, [cancelBtn]);
+
+    const children = [
+      elem('div', { class: 'doh-modal-title' }, ['Connect ' + (schema.label || item.label)]),
+      elem('div', { class: 'doh-modal-body' }, [schema.message || '']),
+    ];
+    if (schema.qr_data_uri) {
+      children.push(elem('div', { class: 'doh-vault-qr-wrap' }, [
+        elem('img', { class: 'doh-vault-qr', src: schema.qr_data_uri, alt: 'QR code', decoding: 'async' }),
+        elem('div', { class: 'doh-vault-qr-caption' }, [schema.qr_caption || 'Scan with your phone']),
+      ]));
+      if (schema.link_note) {
+        children.push(elem('div', { class: 'doh-vault-link-note' }, [schema.link_note]));
+      }
+      children.push(statusBox);
+    } else {
+      // The control plane reported the flow as unavailable (schema.message
+      // says why); there is nothing to open or poll.
+      stopped = true;
+      cancelBtn.textContent = 'Close';
+    }
+    children.push(errorBox, actions);
+    backdrop.appendChild(elem('div', { class: 'doh-modal doh-vault-modal' }, children));
+    backdrop.addEventListener('click', (e) => { if (e.target === backdrop) close(); });
+    document.body.appendChild(backdrop);
+
+    const fail = (message) => {
+      statusBox.style.display = 'none';
+      errorBox.textContent = message || 'Connect failed. Please try again.';
+      errorBox.style.display = '';
+      cancelBtn.textContent = 'Close';
+    };
+
+    // Same post-save dance as wireVaultSubmit: invalidate the broker cache
+    // (which rewrites the gateway env and restarts the gateway), then refresh
+    // the cards.
+    const succeed = async () => {
+      statusBox.textContent = 'Connected. Applying credentials…';
+      let restarted = true;
+      try {
+        await invalidateBrokerTlsCache(item.slug);
+      } catch (err) {
+        restarted = false;
+        statusBox.textContent =
+          err.message ||
+          'Connected, but applying the credentials failed. Redeploy this Hermes app to apply them.';
+      }
+      actions.replaceChildren(elem('button', {
+        class: 'doh-integration-btn doh-integration-btn-primary',
+        type: 'button',
+        onclick: close,
+      }, ['Close']));
+      try {
+        await refreshAndRender();
+      } catch (_) { /* sidebar refresh can recover on next open */ }
+      if (restarted) {
+        statusBox.textContent = 'Connected. The new credentials are active.';
+      }
+    };
+
+    const poll = async () => {
+      if (stopped) return;
+      let response;
+      let payload = {};
+      try {
+        response = await fetch(session.poll_url, {
+          method: 'POST',
+          credentials: 'omit',
+          headers: { 'Content-Type': 'text/plain' },
+          body: JSON.stringify({ submit_token: session.submit_token }),
+        });
+        try { payload = await response.json(); } catch (_) { /* ignore */ }
+      } catch (_) {
+        setTimeout(poll, LINK_POLL_MS); // network blip: keep polling
+        return;
+      }
+      if (stopped) return;
+      if (response.ok && payload.status === 'connected') {
+        stopped = true;
+        await succeed();
+        return;
+      }
+      if (response.ok) {
+        setTimeout(poll, LINK_POLL_MS);
+        return;
+      }
+      stopped = true;
+      fail(payload.error); // expired session or provider error: terminal
+    };
+    if (!stopped) setTimeout(poll, LINK_POLL_MS);
   }
 
   // ── OAuth device-login flow ───────────────────────────────────────
@@ -1036,7 +1151,8 @@
   }
 
   // Per-provider config-modal renderers. The generic `showGenericVaultConfigModal`
-  // renders any flat `schema.fields` form (Telegram and friends). Providers
+  // renders any flat `schema.fields` form, and dispatches `mode: 'link_poll'`
+  // schemas (Telegram managed bots) to the link+poll modal. Providers
   // whose setup needs more than a flat form (e.g. Slack's mode selector +
   // manifest prefill link + two tokens) register a custom renderer here,
   // keyed by slug; everything else falls back to the generic one. All
