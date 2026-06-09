@@ -36,6 +36,8 @@ The main developer documentation lives in the docs/ subdirectory. **When creatin
 
 - **`docs/gateway_env_and_restart_design.md`** — How vault-style credentials whose env presence activates a gateway platform binding (Telegram today) reach the in-sandbox Hermes gateway, and how the gateway is restarted in place without redeploying. Open when adding a gateway-activating provider or debugging gateway env propagation.
 
+- **`docs/telegram_managed_bot_design.md`** — How Telegram connects without the user touching a token: DOH's manager bot + `t.me/newbot` deep link, the generic `link_poll` vault mode (signed provider state + browser poll endpoint), and managed-token rotation on broker refresh. Open when working on the Telegram integration or adding another link-driven vault provider.
+
 - **`docs/webapps_design.md`** — How a Hermes agent serves user-built web apps at `/webapps/<slug>/` via a Caddy sidecar (port topology, `webapps` CLI, `routes.caddy` regeneration, `X-Forwarded-Prefix` framework configs). Open when working on the webapps mechanism, debugging cross-origin or routing issues, or adding a new framework.
 
 - **`docs/tenant_isolation_rls_note.md`** — Personal note (Victor) about the layered defense plan for cross-tenant data leaks and the flag-gated Postgres RLS shape if it ever gets built. Not implemented. Open when revisiting tenant isolation strategy.

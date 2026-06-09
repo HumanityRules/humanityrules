@@ -394,6 +394,36 @@ main.main.showing-integrations > #mainChat { display: none !important; }
   background: rgba(20, 83, 45, 0.18);
 }
 
+/* Link+poll vault modal (Telegram managed bots): QR + waiting state. */
+.doh-vault-qr-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+.doh-vault-qr {
+  width: 180px;
+  height: 180px;
+  border-radius: 8px;
+  /* The SVG already carries its own white quiet zone; the white tile just
+     rounds the corners cleanly on the dark theme. */
+  background: #fff;
+}
+
+.doh-vault-qr-caption {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.doh-vault-link-note {
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--muted);
+  margin-bottom: 14px;
+}
+
 /* Slack config modal: mode selector, prefill link, numbered steps. */
 .doh-slack-modes {
   display: flex;

@@ -210,6 +210,12 @@ DOH_ENV_SESSION_JWT_KID = os.environ.get("DOH_ENV_SESSION_JWT_KID")
 MERGE_AGENT_HANDLER_API_KEY = os.environ.get("MERGE_AGENT_HANDLER_API_KEY")
 MERGE_TOOL_PACK_ID = os.environ.get("MERGE_TOOL_PACK_ID")
 
+# Telegram manager bot (BotFather "Bot Management Mode"): creates and manages
+# per-app bots on behalf of users via t.me/newbot deep links, so they never
+# touch a token. Stored only on DOH; never injected into customer containers.
+TELEGRAM_MANAGER_BOT_TOKEN = os.environ.get("TELEGRAM_MANAGER_BOT_TOKEN")
+TELEGRAM_MANAGER_BOT_USERNAME = os.environ.get("TELEGRAM_MANAGER_BOT_USERNAME", "HumanityRulesBot")
+
 # DevOpsHero AWS Control Plane Credentials (for assuming roles in customer accounts)
 DOH_AWS_ACCESS_KEY = os.environ.get("DOH_AWS_ACCESS_KEY")
 DOH_AWS_SECRET_KEY = os.environ.get("DOH_AWS_SECRET_KEY")

@@ -360,13 +360,62 @@ async def _render_gateway_env_file(tls_runtime: tls_intercept.TlsInterceptRuntim
     return changed
 
 
+# Keeps strong references to fire-and-forget asyncio tasks so they aren't GC'd mid-flight.
+_BACKGROUND_TASKS: set[asyncio.Task] = set()
+
+
 async def _bootstrap_gateway_env(
     tls_runtime: tls_intercept.TlsInterceptRuntime,
     env_path: Path,
+    webui_state_dir: Path,
+    process_compose_url: str,
 ) -> None:
-    """At broker startup: refresh every provider, then render env file once."""
-    await tls_runtime.refresh_all()
-    await _render_gateway_env_file(tls_runtime=tls_runtime, env_path=env_path)
+    """At broker startup: refresh every provider, then render env file once.
+
+    When the bootstrap refresh fails transiently (DOH unreachable, e.g. a 503
+    mid-deploy), the cache is empty but the env file on disk may still hold a
+    good block from the previous broker run — rendering now would strip every
+    integration from the gateway until the next connect/refresh. Instead the
+    existing file is left untouched and a background task retries until DOH
+    answers, then renders and restarts whatever the new block requires.
+    """
+    if await tls_runtime.refresh_all():
+        await _render_gateway_env_file(tls_runtime=tls_runtime, env_path=env_path)
+        return
+    logger.error("bootstrap refresh failed transiently; keeping existing managed env, retrying in background")
+    task = asyncio.create_task(_retry_bootstrap_gateway_env(
+        tls_runtime=tls_runtime,
+        env_path=env_path,
+        webui_state_dir=webui_state_dir,
+        process_compose_url=process_compose_url,
+    ))
+    _BACKGROUND_TASKS.add(task)
+    task.add_done_callback(_BACKGROUND_TASKS.discard)
+
+
+async def _retry_bootstrap_gateway_env(
+    tls_runtime: tls_intercept.TlsInterceptRuntime,
+    env_path: Path,
+    webui_state_dir: Path,
+    process_compose_url: str,
+) -> None:
+    """Retry the bootstrap refresh until DOH answers, then render env and restart affected processes."""
+    delay_seconds = 5
+    while True:
+        await asyncio.sleep(delay_seconds)
+        delay_seconds = min(delay_seconds * 2, 60)
+        if not await tls_runtime.refresh_all():
+            continue
+        logger.info("bootstrap refresh recovered; rendering managed env")
+        try:
+            env_changed = await _render_gateway_env_file(tls_runtime=tls_runtime, env_path=env_path)
+            if _slug_affects_model_picker(slug=None, runtime=tls_runtime):
+                await asyncio.to_thread(_delete_webui_models_cache, webui_state_dir=webui_state_dir)
+            if env_changed:
+                await _restart_processes_for_env_change(runtime=tls_runtime, process_compose_url=process_compose_url, slug=None)
+        except Exception as exc:
+            logger.error("bootstrap recovery render/restart failed: %s; a manual Refresh may be needed", exc)
+        return
 
 
 def _build_on_user_invalidate(
@@ -390,29 +439,43 @@ def _build_on_user_invalidate(
     async def on_user_invalidate(slug: str | None) -> None:
         runtime = tls_runtime_holder["runtime"]
         if slug is None:
-            await runtime.refresh_all()
+            doh_reachable = await runtime.refresh_all()
         else:
-            await runtime.refresh_slug(slug=slug)
+            doh_reachable = await runtime.refresh_slug(slug=slug)
+        if not doh_reachable:
+            # Rendering from a cache that missed its refresh would strip
+            # integrations from the gateway env; keep file and processes as-is.
+            logger.error("refresh after invalidate(slug=%s) failed transiently; managed env left untouched", slug)
+            return
         env_changed = await _render_gateway_env_file(tls_runtime=runtime, env_path=env_path)
         if _slug_affects_model_picker(slug=slug, runtime=runtime):
             await asyncio.to_thread(_delete_webui_models_cache, webui_state_dir=webui_state_dir)
         if not env_changed:
             return
-        for process_name in _processes_requiring_restart(slug=slug, runtime=runtime):
-            status, body = await asyncio.to_thread(
-                _post_process_compose_restart,
-                process_compose_url=process_compose_url,
-                process_name=process_name,
-            )
-            if not (200 <= status < 300):
-                logger.error("%s restart returned %d: %s", process_name, status, body)
-                raise RuntimeError(
-                    f"{process_name} restart failed (process-compose returned {status}); "
-                    f"please redeploy the app to apply the new credentials"
-                )
-            logger.info("%s restart kicked off after invalidate(slug=%s)", process_name, slug)
+        await _restart_processes_for_env_change(runtime=runtime, process_compose_url=process_compose_url, slug=slug)
 
     return on_user_invalidate
+
+
+async def _restart_processes_for_env_change(
+    runtime: tls_intercept.TlsInterceptRuntime,
+    process_compose_url: str,
+    slug: str | None,
+) -> None:
+    """Restart every process the touched provider(s) declare; raises on a failed restart."""
+    for process_name in _processes_requiring_restart(slug=slug, runtime=runtime):
+        status, body = await asyncio.to_thread(
+            _post_process_compose_restart,
+            process_compose_url=process_compose_url,
+            process_name=process_name,
+        )
+        if not (200 <= status < 300):
+            logger.error("%s restart returned %d: %s", process_name, status, body)
+            raise RuntimeError(
+                f"{process_name} restart failed (process-compose returned {status}); "
+                f"please redeploy the app to apply the new credentials"
+            )
+        logger.info("%s restart kicked off after invalidate(slug=%s)", process_name, slug)
 
 
 def _delete_webui_models_cache(webui_state_dir: Path) -> bool:
@@ -546,7 +609,12 @@ async def _run(
     # control port. supervisor.sh's wait_for_port on the control port doubles
     # as the synchronization point: by the time it returns, the file is on
     # disk and webui.sh can launch process-compose children with current env.
-    await _bootstrap_gateway_env(tls_runtime=tls_runtime, env_path=gateway_env_path)
+    await _bootstrap_gateway_env(
+        tls_runtime=tls_runtime,
+        env_path=gateway_env_path,
+        webui_state_dir=webui_state_dir,
+        process_compose_url=process_compose_url,
+    )
 
     loop = asyncio.get_running_loop()
     stop = loop.create_future()

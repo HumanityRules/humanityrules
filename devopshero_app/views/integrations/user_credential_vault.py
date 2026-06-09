@@ -1,5 +1,6 @@
 """DOH-hosted vault endpoints for user-owned integration credentials."""
 
+import dataclasses
 import logging
 from urllib.parse import urlparse
 
@@ -71,8 +72,14 @@ def _setup_token_payload(
     app_slug: str,
     provider: str,
     allowed_origin: str,
+    provider_state: dict | None,
 ) -> dict:
-    """Build the signed setup-session payload."""
+    """Build the signed setup-session payload.
+
+    `provider_state` carries provider-generated session state (e.g. Telegram's
+    suggested bot username) that the poll endpoint must trust — signing it
+    into the token keeps the browser from substituting its own values.
+    """
     return {
         "purpose": "integration_credential_submit",
         "owner_user_id": str(owner_user.id),
@@ -80,6 +87,7 @@ def _setup_token_payload(
         "app_slug": app_slug,
         "provider": provider,
         "allowed_origin": allowed_origin,
+        "provider_state": provider_state,
     }
 
 
@@ -128,19 +136,26 @@ def integrations_credential_setup_session(request: HttpRequest) -> JsonResponse:
         organization=environment.aws_account.organization,
         slug=app_slug,
     ).first()
+    schema = _schema_for_provider(provider=provider, existing=existing, app=app, owner_user=owner_user)
+    # Providers with a link+poll connect flow generate per-session state in
+    # schema() (e.g. the suggested bot username); it travels only inside the
+    # signed token, never as a browser-editable field.
+    provider_state = schema.pop("signed_state", None)
     submit_payload = _setup_token_payload(
         owner_user=owner_user,
         environment=environment,
         app_slug=app_slug,
         provider=provider,
         allowed_origin=allowed_origin,
+        provider_state=provider_state,
     )
     submit_token = signing.dumps(submit_payload, salt=SETUP_TOKEN_SALT, compress=True)
     return JsonResponse({
         "action_url": request.build_absolute_uri("/api/integrations/credentials/submit"),
+        "poll_url": request.build_absolute_uri("/api/integrations/credentials/poll"),
         "submit_token": submit_token,
         "expires_in": SETUP_TOKEN_MAX_AGE_SECONDS,
-        "schema": _schema_for_provider(provider=provider, existing=existing, app=app, owner_user=owner_user),
+        "schema": schema,
     })
 
 
@@ -191,26 +206,32 @@ def _load_setup_token(token: object, request_origin: str) -> tuple[dict | None, 
     return payload, None
 
 
-@csrf_exempt
-@require_POST
-def integrations_credential_submit(request: HttpRequest) -> JsonResponse:
-    """Accept direct browser-to-DOH credential submissions for setup sessions."""
-    payload, parse_error = broker_request_context.parse_json_body(request=request)
-    if parse_error is not None:
-        return parse_error
+@dataclasses.dataclass(frozen=True)
+class _SetupContext:
+    """Resolved identity/scope of one valid browser-direct setup-session request."""
+
+    token_payload: dict
+    allowed_origin: str
+    owner_user: User
+    environment: Environment
+    app_slug: str
+
+
+def _resolve_setup_context(request: HttpRequest, payload: dict) -> tuple[_SetupContext | None, JsonResponse | None]:
+    """Verify the setup token + origin and resolve the owner/env/app it binds."""
     request_origin = request.headers.get("Origin", "")
     token_payload, token_error = _load_setup_token(token=payload.get("submit_token"), request_origin=request_origin)
     if token_error is not None:
-        return token_error
+        return None, token_error
     allowed_origin = token_payload["allowed_origin"]
     if request_origin != allowed_origin:
-        return JsonResponse({"error": "origin is not allowed"}, status=403)
+        return None, JsonResponse({"error": "origin is not allowed"}, status=403)
 
     try:
         owner_user = User.objects.get(id=token_payload["owner_user_id"])
         environment = Environment.objects.get(id=token_payload["environment_id"])
     except (User.DoesNotExist, Environment.DoesNotExist):
-        return _cors_json_response({"error": "setup context no longer exists"}, status=404, allowed_origin=allowed_origin)
+        return None, _cors_json_response({"error": "setup context no longer exists"}, status=404, allowed_origin=allowed_origin)
 
     app_slug, app_error = broker_request_context.resolve_owned_app_slug(
         app_slug=token_payload["app_slug"],
@@ -218,7 +239,31 @@ def integrations_credential_submit(request: HttpRequest) -> JsonResponse:
         owner_user=owner_user,
     )
     if app_error is not None:
-        return _cors_json_response({"error": "app is not available"}, status=403, allowed_origin=allowed_origin)
+        return None, _cors_json_response({"error": "app is not available"}, status=403, allowed_origin=allowed_origin)
+    return _SetupContext(
+        token_payload=token_payload,
+        allowed_origin=allowed_origin,
+        owner_user=owner_user,
+        environment=environment,
+        app_slug=app_slug,
+    ), None
+
+
+@csrf_exempt
+@require_POST
+def integrations_credential_submit(request: HttpRequest) -> JsonResponse:
+    """Accept direct browser-to-DOH credential submissions for setup sessions."""
+    payload, parse_error = broker_request_context.parse_json_body(request=request)
+    if parse_error is not None:
+        return parse_error
+    context, context_error = _resolve_setup_context(request=request, payload=payload)
+    if context_error is not None:
+        return context_error
+    allowed_origin = context.allowed_origin
+    owner_user = context.owner_user
+    environment = context.environment
+    app_slug = context.app_slug
+    token_payload = context.token_payload
 
     credentials_payload = payload.get("credentials", {})
     config_payload = payload.get("config", {})
@@ -273,4 +318,62 @@ def integrations_credential_submit(request: HttpRequest) -> JsonResponse:
         },
         status=200,
         allowed_origin=allowed_origin,
+    )
+
+
+@csrf_exempt
+@require_POST
+def integrations_credential_poll(request: HttpRequest) -> JsonResponse:
+    """Browser-direct poll for link-driven vault setups (e.g. Telegram managed bots).
+
+    Providers whose credential is created in an external app return
+    `signed_state` from `schema()`; the WebUI polls here with the setup token
+    until the provider's `poll_setup` reports the credential as connected.
+    """
+    payload, parse_error = broker_request_context.parse_json_body(request=request)
+    if parse_error is not None:
+        return parse_error
+    context, context_error = _resolve_setup_context(request=request, payload=payload)
+    if context_error is not None:
+        return context_error
+
+    provider = context.token_payload["provider"]
+    spec = provider_registry.get_of_kind(provider=provider, kind=provider_registry.ProviderKind.VAULT)
+    poll_setup = getattr(spec.module, "poll_setup", None) if spec is not None else None
+    provider_state = context.token_payload.get("provider_state")
+    if poll_setup is None or not isinstance(provider_state, dict):
+        return _cors_json_response(
+            {"error": "this provider does not support setup polling"},
+            status=400,
+            allowed_origin=context.allowed_origin,
+        )
+
+    result, poll_error = poll_setup(
+        owner_user=context.owner_user,
+        environment=context.environment,
+        app_slug=context.app_slug,
+        state=provider_state,
+    )
+    if poll_error is not None:
+        logger.error(
+            "vault setup poll failed: provider=%s owner=%s env=%s app=%s reason=%r",
+            provider,
+            context.owner_user.username,
+            context.environment.slug,
+            context.app_slug,
+            poll_error,
+        )
+        return _cors_json_response({"error": poll_error}, status=400, allowed_origin=context.allowed_origin)
+    if result.get("status") == "connected":
+        logger.info(
+            "vault credential connected via setup poll: provider=%s owner=%s env=%s app=%s",
+            provider,
+            context.owner_user.username,
+            context.environment.slug,
+            context.app_slug,
+        )
+    return _cors_json_response(
+        {"ok": True, "provider": provider, **result},
+        status=200,
+        allowed_origin=context.allowed_origin,
     )

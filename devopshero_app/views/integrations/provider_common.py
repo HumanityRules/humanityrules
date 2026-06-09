@@ -7,7 +7,8 @@ Two provider families live alongside this module, organized symmetrically:
   refresh by exchanging a stored refresh_token upstream, disconnect by deleting
   the row + best-effort upstream revoke.
 - Vault providers (`provider_openrouter`, `provider_slack`, `provider_telegram`):
-  connect via a browser-direct credential paste, refresh by reading the row
+  connect via the browser-direct setup-session surface (a credential paste
+  form, or Telegram's link+poll managed-bot flow), refresh by reading the row
   back, and carry their own non-secret `config`/`metadata`.
 
 This module holds what both families (or both OAuth providers) would

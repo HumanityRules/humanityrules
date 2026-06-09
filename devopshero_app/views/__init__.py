@@ -53,6 +53,7 @@ from .integrations.token_refresh_batch import integrations_tokens_batch
 from .integrations.provider_disconnect import integrations_credential_disconnect
 from .integrations.provider_device import integrations_device_complete
 from .integrations.user_credential_vault import (
+    integrations_credential_poll,
     integrations_credential_setup_session,
     integrations_credential_submit,
 )
@@ -180,6 +181,7 @@ __all__ = [
     "integrations_device_complete",
     "integrations_credential_setup_session",
     "integrations_credential_submit",
+    "integrations_credential_poll",
     "integrations_merge_ensure_registered_user",
     "integrations_merge_link_token",
     "integrations_merge_connectors",

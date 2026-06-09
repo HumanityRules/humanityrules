@@ -5,9 +5,8 @@ import json
 import time
 from unittest.mock import MagicMock, patch
 
-import httpx
 from django.core import signing
-from django.test import Client, TestCase
+from django.test import Client, TestCase, override_settings
 
 from devopshero_app.models import (
     AWSAccount,
@@ -33,6 +32,31 @@ from devopshero_app.views.integrations import (
 
 def _hash(raw: str) -> str:
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+
+TELEGRAM_MANAGER_SETTINGS = {
+    "TELEGRAM_MANAGER_BOT_TOKEN": "999999:MANAGER_SECRET",
+    "TELEGRAM_MANAGER_BOT_USERNAME": "DohManagerBot",
+}
+
+
+def _telegram_api_response(result: object) -> MagicMock:
+    """Build a successful Bot API response carrying *result*."""
+    response = MagicMock()
+    response.status_code = 200
+    response.json.return_value = {"ok": True, "result": result}
+    return response
+
+
+def _telegram_managed_bot_update(bot_username: str, bot_id: int, creator_id: int) -> dict:
+    """Build one `managed_bot` update as returned by getUpdates."""
+    return {
+        "update_id": 100,
+        "managed_bot": {
+            "user": {"id": creator_id, "is_bot": False, "first_name": "Victor", "username": "vmendi_tg"},
+            "bot": {"id": bot_id, "is_bot": True, "first_name": "Hermes", "username": bot_username},
+        },
+    }
 
 
 class _CredentialVaultTestBase(TestCase):
@@ -121,33 +145,42 @@ class _CredentialVaultTestBase(TestCase):
         )
         return response.status_code, response.json()
 
-    def _patched_telegram_get_me(self):
-        telegram_response = MagicMock()
-        telegram_response.status_code = 200
-        telegram_response.json.return_value = {
-            "ok": True,
-            "result": {
-                "id": 123456,
-                "is_bot": True,
-                "first_name": "Hermes",
-                "username": "hermes_bot",
-            },
-        }
-        return patch(
-            "devopshero_app.views.integrations.provider_telegram.httpx.get",
-            return_value=telegram_response,
+    def _setup_token_payload(self, session: dict) -> dict:
+        return signing.loads(
+            session["submit_token"],
+            salt=user_credential_vault.SETUP_TOKEN_SALT,
+            max_age=user_credential_vault.SETUP_TOKEN_MAX_AGE_SECONDS,
+        )
+
+    def _post_poll(self, session: dict, origin: str) -> object:
+        return self.client.post(
+            "/api/integrations/credentials/poll",
+            data=json.dumps({"submit_token": session["submit_token"]}),
+            content_type="text/plain",
+            HTTP_ORIGIN=origin,
         )
 
 
 class TestSetupSession(_CredentialVaultTestBase):
 
-    def test_setup_session_returns_schema_and_signed_context(self) -> None:
-        status, body = self._post_setup_session()
+    @override_settings(**TELEGRAM_MANAGER_SETTINGS)
+    def test_setup_session_returns_link_poll_schema_and_signed_context(self) -> None:
+        with patch(
+            "devopshero_app.views.integrations.provider_telegram._link_qr_data_uri",
+            wraps=provider_telegram._link_qr_data_uri,
+        ) as qr_builder:
+            status, body = self._post_setup_session()
 
         self.assertEqual(status, 200)
-        self.assertEqual(body["schema"]["provider"], "telegram")
-        self.assertEqual(body["schema"]["status"], "not_connected")
+        schema = body["schema"]
+        self.assertEqual(schema["provider"], "telegram")
+        self.assertEqual(schema["status"], "not_connected")
+        self.assertEqual(schema["mode"], "link_poll")
+        # The per-session state travels only inside the signed token, never as
+        # a browser-editable schema field.
+        self.assertNotIn("signed_state", schema)
         self.assertIn("submit_token", body)
+        self.assertTrue(body["poll_url"].endswith("/api/integrations/credentials/poll"))
 
         token_payload = signing.loads(
             body["submit_token"],
@@ -158,6 +191,47 @@ class TestSetupSession(_CredentialVaultTestBase):
         self.assertEqual(token_payload["environment_id"], str(self.env.id))
         self.assertEqual(token_payload["app_slug"], "hermes")
         self.assertEqual(token_payload["allowed_origin"], "https://hermes.dev.example.com")
+
+        bot_username = token_payload["provider_state"]["bot_username"]
+        self.assertTrue(bot_username.startswith("hermes_"))
+        self.assertTrue(bot_username.endswith("_bot"))
+        # The creation deep link is delivered only as a QR (pre-rendered on
+        # DOH so the WebUI extension needs no QR library); verify what it
+        # encodes via the builder call.
+        self.assertTrue(schema["qr_data_uri"].startswith("data:image/svg+xml"))
+        qr_builder.assert_called_once_with(
+            link_url=f"https://t.me/newbot/DohManagerBot/{bot_username}?name=Hermes",
+        )
+
+    def test_setup_session_without_manager_bot_reports_unconfigured(self) -> None:
+        with override_settings(TELEGRAM_MANAGER_BOT_TOKEN=None):
+            status, body = self._post_setup_session()
+
+        self.assertEqual(status, 200)
+        schema = body["schema"]
+        self.assertEqual(schema["mode"], "link_poll")
+        self.assertNotIn("qr_data_uri", schema)
+        self.assertEqual(schema["message"], provider_telegram.TELEGRAM_NOT_CONFIGURED_MESSAGE)
+
+    def test_setup_session_for_connected_telegram_returns_config_form(self) -> None:
+        IntegrationUserCredential.objects.create(
+            owner_user=self.user,
+            environment=self.env,
+            app_slug="hermes",
+            provider=IntegrationUserCredential.Provider.TELEGRAM,
+            credentials={"bot_token": "4242:SECRET"},
+            config={"allowed_users": ["777"]},
+            metadata={"bot_id": 4242, "bot_username": "hermes_ab12cd_bot", "managed": True},
+        )
+
+        status, body = self._post_setup_session()
+
+        self.assertEqual(status, 200)
+        schema = body["schema"]
+        self.assertEqual(schema["status"], "connected")
+        self.assertEqual(schema["mode"], "form")
+        self.assertEqual(schema["fields"][0]["name"], "allowed_users")
+        self.assertEqual(schema["fields"][0]["value"], "777")
 
     def test_openrouter_setup_session_returns_generic_vault_schema(self) -> None:
         status, body = self._post_setup_session_for_provider(provider=IntegrationUserCredential.Provider.OPENROUTER)
@@ -204,58 +278,203 @@ class TestSetupSession(_CredentialVaultTestBase):
         self.assertEqual(token_payload["allowed_origin"], "https://hermes.dev.example.com")
 
 
-class TestCredentialSubmit(_CredentialVaultTestBase):
+@override_settings(**TELEGRAM_MANAGER_SETTINGS)
+class TestCredentialPoll(_CredentialVaultTestBase):
 
-    def test_submit_saves_telegram_credential_and_sets_cors(self) -> None:
+    _HTTPX_POST = "devopshero_app.views.integrations.provider_telegram.httpx.post"
+
+    def test_poll_pending_while_bot_not_created_yet(self) -> None:
         _status, session = self._post_setup_session()
 
-        with self._patched_telegram_get_me():
-            response = self.client.post(
-                "/api/integrations/credentials/submit",
-                data=json.dumps({
-                    "submit_token": session["submit_token"],
-                    "credentials": {"bot_token": "123456:abcdefghijklmnopqrstuvwxyz"},
-                    "config": {"allowed_users": "111\n222"},
-                }),
-                content_type="text/plain",
-                HTTP_ORIGIN="https://hermes.dev.example.com",
-            )
+        with patch(self._HTTPX_POST, return_value=_telegram_api_response(result=[])):
+            response = self._post_poll(session=session, origin="https://hermes.dev.example.com")
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response["Access-Control-Allow-Origin"], "https://hermes.dev.example.com")
+        self.assertEqual(response.json()["status"], "pending")
+        self.assertFalse(IntegrationUserCredential.objects.exists())
+
+    def test_poll_ignores_other_bots_managed_updates(self) -> None:
+        _status, session = self._post_setup_session()
+        updates = [_telegram_managed_bot_update(bot_username="somebody_else_bot", bot_id=1, creator_id=2)]
+
+        with patch(self._HTTPX_POST, return_value=_telegram_api_response(result=updates)):
+            response = self._post_poll(session=session, origin="https://hermes.dev.example.com")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["status"], "pending")
+        self.assertFalse(IntegrationUserCredential.objects.exists())
+
+    def test_poll_connects_and_stores_managed_bot_token(self) -> None:
+        _status, session = self._post_setup_session()
+        bot_username = self._setup_token_payload(session=session)["provider_state"]["bot_username"]
+        updates = [_telegram_managed_bot_update(bot_username=bot_username, bot_id=4242, creator_id=777)]
+
+        with patch(
+            self._HTTPX_POST,
+            side_effect=[
+                _telegram_api_response(result=updates),
+                _telegram_api_response(result="4242:NEW_BOT_SECRET"),
+            ],
+        ) as telegram_post:
+            response = self._post_poll(session=session, origin="https://hermes.dev.example.com")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response["Access-Control-Allow-Origin"], "https://hermes.dev.example.com")
+        body = response.json()
+        self.assertEqual(body["status"], "connected")
+        self.assertTrue(body["restart_required"])
+
+        # getManagedBotToken must be called as the manager bot for the new bot's id.
+        token_call_args, token_call_kwargs = telegram_post.call_args_list[1]
+        self.assertIn("999999:MANAGER_SECRET/getManagedBotToken", token_call_args[0])
+        self.assertEqual(token_call_kwargs["json"], {"user_id": 4242})
+
         credential = IntegrationUserCredential.objects.get(
             owner_user=self.user,
             environment=self.env,
             app_slug="hermes",
             provider=IntegrationUserCredential.Provider.TELEGRAM,
         )
-        self.assertEqual(credential.credentials["bot_token"], "123456:abcdefghijklmnopqrstuvwxyz")
-        self.assertEqual(credential.config["allowed_users"], ["111", "222"])
-        self.assertEqual(credential.metadata["bot_username"], "hermes_bot")
+        self.assertEqual(credential.credentials["bot_token"], "4242:NEW_BOT_SECRET")
+        self.assertEqual(credential.config["allowed_users"], ["777"])
+        self.assertEqual(credential.metadata["bot_id"], 4242)
+        self.assertEqual(credential.metadata["bot_username"], bot_username)
+        self.assertTrue(credential.metadata["managed"])
+        self.assertEqual(credential.metadata["creator_telegram_id"], 777)
 
-    def test_submit_can_update_config_without_reentering_secret(self) -> None:
+    def test_poll_reports_error_when_token_fetch_fails(self) -> None:
+        _status, session = self._post_setup_session()
+        bot_username = self._setup_token_payload(session=session)["provider_state"]["bot_username"]
+        updates = [_telegram_managed_bot_update(bot_username=bot_username, bot_id=4242, creator_id=777)]
+        failed_token_response = MagicMock()
+        failed_token_response.status_code = 400
+        failed_token_response.json.return_value = {"ok": False, "description": "Bad Request"}
+
+        with patch(
+            self._HTTPX_POST,
+            side_effect=[_telegram_api_response(result=updates), failed_token_response],
+        ):
+            response = self._post_poll(session=session, origin="https://hermes.dev.example.com")
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()["error"], provider_telegram.TELEGRAM_TOKEN_FETCH_FAILED_MESSAGE)
+        self.assertFalse(IntegrationUserCredential.objects.exists())
+
+    def test_poll_rejects_wrong_origin(self) -> None:
+        _status, session = self._post_setup_session()
+
+        response = self._post_poll(session=session, origin="https://attacker.example.com")
+
+        self.assertEqual(response.status_code, 403)
+        self.assertFalse(IntegrationUserCredential.objects.exists())
+
+    def test_poll_expired_token_returns_cors_readable_expiry(self) -> None:
+        _status, session = self._post_setup_session()
+        expired_time = time.time() + user_credential_vault.SETUP_TOKEN_MAX_AGE_SECONDS + 1
+
+        with patch("django.core.signing.time.time", return_value=expired_time):
+            response = self._post_poll(session=session, origin="https://hermes.dev.example.com")
+
+        self.assertEqual(response.status_code, 401)
+        self.assertEqual(response["Access-Control-Allow-Origin"], "https://hermes.dev.example.com")
+        self.assertEqual(response.json()["error"], user_credential_vault.EXPIRED_SETUP_TOKEN_MESSAGE)
+
+    def test_poll_rejected_for_form_only_provider(self) -> None:
+        _status, session = self._post_setup_session_for_provider(provider=IntegrationUserCredential.Provider.OPENROUTER)
+
+        response = self._post_poll(session=session, origin="https://hermes.dev.example.com")
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()["error"], "this provider does not support setup polling")
+
+
+class TestTelegramRefreshOutcome(_CredentialVaultTestBase):
+
+    def _create_managed_credential(self) -> IntegrationUserCredential:
+        return IntegrationUserCredential.objects.create(
+            owner_user=self.user,
+            environment=self.env,
+            app_slug="hermes",
+            provider=IntegrationUserCredential.Provider.TELEGRAM,
+            credentials={"bot_token": "4242:OLD_SECRET"},
+            config={"allowed_users": ["777"]},
+            metadata={"bot_id": 4242, "bot_username": "hermes_ab12cd_bot", "managed": True},
+        )
+
+    @override_settings(**TELEGRAM_MANAGER_SETTINGS)
+    def test_refresh_refetches_live_token_and_rotates_row(self) -> None:
+        credential = self._create_managed_credential()
+
+        with patch(
+            "devopshero_app.views.integrations.provider_telegram.httpx.post",
+            return_value=_telegram_api_response(result="4242:ROTATED_SECRET"),
+        ):
+            outcome = provider_telegram.refresh_outcome(
+                environment=self.env, owner_user=self.user, app_slug="hermes",
+            )
+
+        self.assertEqual(outcome["outcome"], "has_token")
+        self.assertEqual(outcome["secrets"], {"bot_token": "4242:ROTATED_SECRET"})
+        credential.refresh_from_db()
+        self.assertEqual(credential.credentials["bot_token"], "4242:ROTATED_SECRET")
+
+    @override_settings(**TELEGRAM_MANAGER_SETTINGS)
+    def test_refresh_falls_back_to_stored_token_when_telegram_fails(self) -> None:
+        self._create_managed_credential()
+        failed_response = MagicMock()
+        failed_response.status_code = 500
+        failed_response.json.return_value = {"ok": False, "description": "Internal"}
+
+        with patch(
+            "devopshero_app.views.integrations.provider_telegram.httpx.post",
+            return_value=failed_response,
+        ):
+            outcome = provider_telegram.refresh_outcome(
+                environment=self.env, owner_user=self.user, app_slug="hermes",
+            )
+
+        self.assertEqual(outcome["outcome"], "has_token")
+        self.assertEqual(outcome["secrets"], {"bot_token": "4242:OLD_SECRET"})
+
+    @override_settings(TELEGRAM_MANAGER_BOT_TOKEN=None)
+    def test_refresh_without_manager_bot_is_a_plain_db_read(self) -> None:
+        self._create_managed_credential()
+
+        with patch("devopshero_app.views.integrations.provider_telegram.httpx.post") as telegram_post:
+            outcome = provider_telegram.refresh_outcome(
+                environment=self.env, owner_user=self.user, app_slug="hermes",
+            )
+
+        telegram_post.assert_not_called()
+        self.assertEqual(outcome["outcome"], "has_token")
+        self.assertEqual(outcome["secrets"], {"bot_token": "4242:OLD_SECRET"})
+
+
+class TestCredentialSubmit(_CredentialVaultTestBase):
+
+    def test_submit_updates_allowed_users_for_connected_telegram(self) -> None:
         IntegrationUserCredential.objects.create(
             owner_user=self.user,
             environment=self.env,
             app_slug="hermes",
             provider=IntegrationUserCredential.Provider.TELEGRAM,
-            credentials={"bot_token": "123456:abcdefghijklmnopqrstuvwxyz"},
+            credentials={"bot_token": "4242:SECRET"},
             config={"allowed_users": ["111"]},
-            metadata={"bot_username": "old_bot"},
+            metadata={"bot_id": 4242, "bot_username": "hermes_ab12cd_bot", "managed": True},
         )
         _status, session = self._post_setup_session()
 
-        with self._patched_telegram_get_me():
-            response = self.client.post(
-                "/api/integrations/credentials/submit",
-                data=json.dumps({
-                    "submit_token": session["submit_token"],
-                    "credentials": {},
-                    "config": {"allowed_users": "333,444"},
-                }),
-                content_type="text/plain",
-                HTTP_ORIGIN="https://hermes.dev.example.com",
-            )
+        response = self.client.post(
+            "/api/integrations/credentials/submit",
+            data=json.dumps({
+                "submit_token": session["submit_token"],
+                "credentials": {},
+                "config": {"allowed_users": "333,444"},
+            }),
+            content_type="text/plain",
+            HTTP_ORIGIN="https://hermes.dev.example.com",
+        )
 
         self.assertEqual(response.status_code, 200)
         credential = IntegrationUserCredential.objects.get(
@@ -264,8 +483,27 @@ class TestCredentialSubmit(_CredentialVaultTestBase):
             app_slug="hermes",
             provider=IntegrationUserCredential.Provider.TELEGRAM,
         )
-        self.assertEqual(credential.credentials["bot_token"], "123456:abcdefghijklmnopqrstuvwxyz")
+        # The managed token is never touched by the config form.
+        self.assertEqual(credential.credentials["bot_token"], "4242:SECRET")
         self.assertEqual(credential.config["allowed_users"], ["333", "444"])
+
+    def test_submit_rejects_telegram_config_when_not_connected(self) -> None:
+        _status, session = self._post_setup_session()
+
+        response = self.client.post(
+            "/api/integrations/credentials/submit",
+            data=json.dumps({
+                "submit_token": session["submit_token"],
+                "credentials": {},
+                "config": {"allowed_users": "333"},
+            }),
+            content_type="text/plain",
+            HTTP_ORIGIN="https://hermes.dev.example.com",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("not connected", response.json()["error"])
+        self.assertFalse(IntegrationUserCredential.objects.exists())
 
     def test_submit_rejects_wrong_origin(self) -> None:
         _status, session = self._post_setup_session()
@@ -324,60 +562,6 @@ class TestCredentialSubmit(_CredentialVaultTestBase):
         self.assertEqual(response.status_code, 401)
         self.assertNotIn("Access-Control-Allow-Origin", response.headers)
         self.assertEqual(response.json()["error"], "invalid or expired submit_token")
-        self.assertFalse(IntegrationUserCredential.objects.exists())
-
-    def test_submit_does_not_echo_telegram_token_from_transport_error(self) -> None:
-        _status, session = self._post_setup_session()
-        bot_token = "123456:abcdefghijklmnopqrstuvwxyz"
-        with patch(
-            "devopshero_app.views.integrations.provider_telegram.httpx.get",
-            side_effect=httpx.ConnectError(
-                f"boom https://api.telegram.org/bot{bot_token}/getMe"
-            ),
-        ):
-            response = self.client.post(
-                "/api/integrations/credentials/submit",
-                data=json.dumps({
-                    "submit_token": session["submit_token"],
-                    "credentials": {"bot_token": bot_token},
-                    "config": {"allowed_users": "111"},
-                }),
-                content_type="text/plain",
-                HTTP_ORIGIN="https://hermes.dev.example.com",
-            )
-
-        self.assertEqual(response.status_code, 400)
-        body = response.json()
-        self.assertEqual(body["error"], "Telegram validation failed. Please try again.")
-        self.assertNotIn(bot_token, response.content.decode("utf-8"))
-        self.assertFalse(IntegrationUserCredential.objects.exists())
-
-    def test_submit_rewrites_telegram_unauthorized_error(self) -> None:
-        _status, session = self._post_setup_session()
-        telegram_response = MagicMock()
-        telegram_response.status_code = 401
-        telegram_response.json.return_value = {"ok": False, "description": "Unauthorized"}
-
-        with patch(
-            "devopshero_app.views.integrations.provider_telegram.httpx.get",
-            return_value=telegram_response,
-        ):
-            response = self.client.post(
-                "/api/integrations/credentials/submit",
-                data=json.dumps({
-                    "submit_token": session["submit_token"],
-                    "credentials": {"bot_token": "123456:abcdefghijklmnopqrstuvwxyz"},
-                    "config": {"allowed_users": "111"},
-                }),
-                content_type="text/plain",
-                HTTP_ORIGIN="https://hermes.dev.example.com",
-            )
-
-        self.assertEqual(response.status_code, 400)
-        self.assertEqual(
-            response.json()["error"],
-            provider_telegram.TELEGRAM_INVALID_TOKEN_MESSAGE,
-        )
         self.assertFalse(IntegrationUserCredential.objects.exists())
 
     def test_submit_saves_openrouter_credential(self) -> None:
