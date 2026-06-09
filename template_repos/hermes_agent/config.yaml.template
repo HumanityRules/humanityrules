@@ -158,8 +158,7 @@ delegation:
   - web
 
 skills:
-  external_dirs:
-  - __HERMES_WEBUI_AGENT_SKILLS_DIR__
+  external_dirs: []
   creation_nudge_interval: 15
 
 discord:
