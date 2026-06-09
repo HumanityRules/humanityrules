@@ -1,0 +1,118 @@
+########################################################################################################################
+This list was produced by filtering all connectors from merge_connnectors_ranked.md under 96. **amazon_s3** (Amazon S3)
+plus microsoft_teams_gcc, Google BigQuery, Google Calendar, Google Docs, Google Drive, Google Maps, Google Meet
+Google Sheets, Google Slides, Google Tasks, gmail.
+########################################################################################################################
+
+Merge.dev Tool Pack connectors (96 total)
+Source: GET /api/integrations/merge/connectors via DOH relay
+Fetched: 2026-06-08 from hermes-agent-local (docker compose)
+Format: slug<TAB>display_name
+
+activecampaign	ActiveCampaign
+airtable	Airtable
+amplitude	Amplitude
+apollo	Apollo
+asana	Asana
+attio	Attio
+bamboohr	BambooHR
+calendly	Calendly
+clickup	ClickUp
+cloudflare	Cloudflare
+confluence	Confluence
+contentful	Contentful
+databricks	Databricks
+datadog	Datadog
+dropbox	Dropbox
+dynamics365	Dynamics 365 Sales
+expensify	Expensify
+figma	Figma
+firecrawl	Firecrawl
+freshdesk	Freshdesk
+github	GitHub
+gitlab	GitLab
+gmail	Gmail
+gong	Gong
+grafana	Grafana
+greenhouse	Greenhouse
+hex	Hex
+hubspot	HubSpot
+intercom	Intercom
+jenkins	Jenkins
+jira	Jira
+jira_service_management	Jira Service Management
+klaviyo	Klaviyo
+linear	Linear
+linkedin	LinkedIn
+looker	Looker
+microsoft_teams	Microsoft Teams
+microsoft_teams_gcc	Microsoft Teams GCC High
+miro	Miro
+monday	Monday.com
+n8n	n8n
+netsuite	NetSuite
+notion	Notion
+onedrive	OneDrive
+outlook	Outlook
+pagerduty	PagerDuty
+paypal	PayPal
+pipedrive	Pipedrive
+posthog	PostHog
+quickbooks_online	QuickBooks Online
+ramp	Ramp
+salesforce	Salesforce
+sanity	Sanity
+sendgrid	SendGrid
+sentry	Sentry
+servicenow	ServiceNow
+sharepoint	SharePoint
+shopify	Shopify
+slack	Slack
+smartsheet	Smartsheet
+snowflake	Snowflake
+spotify	Spotify
+square	Square
+strava	Strava
+stripe	Stripe
+supabase	Supabase
+trello	Trello
+tripadvisor	TripAdvisor
+vercel	Vercel
+weather	Weather
+webflow	Webflow
+wix	Wix
+wordpress	WordPress
+workday	Workday
+x	X
+xero	Xero
+yelp	Yelp
+youtube	YouTube
+zendesk	Zendesk
+zendesk_sell	Zendesk Sell
+zohocrm	Zoho CRM
+zohodesk	Zoho Desk
+zoom	Zoom
+
+
+###################################################################################################
+Action required (create our own OAuth app), 22 connectors: 
+All of them removed except Youtube (for which we gave Merge our own client secret from the GWS app).
+Some of them were already removed because they were below the popularity threshold.
+###################################################################################################
+
+bitbucket, box, canva, concur, docusign, foursquare, frameio, 
+gmail, google_bigquery, google_docs, google_drive, google_meet, google_slides, 
+linkedin, netsuite, quickbooks_online, ramp, spotify, ukg_pro_hcm_recruit, xero, youtube, zoominfo
+
+###############################################################################################################
+Focusing on Google's. All removed in favor of our Google Workspace integration. Our GWS integration is missing:
+ google_meet, google_slides, google_bigquery, google_tasks, google_maps
+###############################################################################################################
+Action required (no Merge shared app — you must register OAuth):
+gmail, google_docs, google_drive, google_meet, google_slides, google_bigquery
+
+Not on that list (Merge shared app available):
+google_calendar, google_sheets, google_tasks, google_maps
+
+Our GWS integratin supports then:
+gmail, google_docs, google_drive, google_calendar, google_sheets, google contacts (added in scopes)

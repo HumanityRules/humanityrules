@@ -1,0 +1,156 @@
+Merge.dev Tool Pack connectors (151 total)
+Source: GET /api/v1/tool-packs/{tool_pack_id}/connectors/ via DOH relay
+Fetched: 2026-06-07 from hermes-agent-local (docker compose)
+Format: slug<TAB>display_name
+
+activecampaign	ActiveCampaign
+adobe_pdf_services	Adobe PDF Services
+ahrefs	Ahrefs
+airtable	Airtable
+amadeus	Amadeus
+amazon_s3	Amazon S3
+amplitude	Amplitude
+anaplan	Anaplan
+apollo	Apollo
+arize	Arize
+articulate	Articulate Reach 360
+asana	Asana
+attio	Attio
+aviationstack	Aviationstack
+bamboohr	BambooHR
+basecamp	Basecamp
+biorxiv	bioRxiv
+bitbucket	Bitbucket
+bitly	Bitly
+box	Box
+calendly	Calendly
+canva	Canva
+clickup	ClickUp
+clinicaltrials	ClinicalTrials.gov
+cloudflare	Cloudflare
+cms_coverage	CMS Coverage
+coda	Coda
+compliancequest	ComplianceQuest
+confluence	Confluence
+contentful	Contentful
+crustdata	Crustdata
+databricks	Databricks
+datadog	Datadog
+docusign	DocuSign
+doordash	DoorDash
+dropbox	Dropbox
+duffel	Duffel
+dynamics365	Dynamics 365 Sales
+exa	Exa
+expensify	Expensify
+factset	FactSet
+figma	Figma
+firecrawl	Firecrawl
+fireflies	Fireflies
+firehydrant	FireHydrant
+foursquare	Foursquare
+frameio	Frame.io
+freshbooks	FreshBooks
+freshdesk	Freshdesk
+freshservice	Freshservice
+front	Front
+gamma	Gamma
+github	GitHub
+gitlab	GitLab
+gmail	Gmail
+gong	Gong
+google_bigquery	Google BigQuery
+google_calendar	Google Calendar
+google_docs	Google Docs
+google_drive	Google Drive
+google_maps	Google Maps
+google_meet	Google Meet
+google_sheets	Google Sheets
+google_slides	Google Slides
+google_tasks	Google Tasks
+grafana	Grafana
+greenhouse	Greenhouse
+guru	Guru
+hex	Hex
+hibob	HiBob
+hubspot	HubSpot
+intercom	Intercom
+jenkins	Jenkins
+jira	Jira
+jira_service_management	Jira Service Management
+kintone	Kintone
+klaviyo	Klaviyo
+linear	Linear
+linkedin	LinkedIn
+looker	Looker
+lucidchart	Lucidchart
+make	Make
+microsoft_teams	Microsoft Teams
+microsoft_teams_gcc	Microsoft Teams GCC High
+miro	Miro
+monday	Monday.com
+n8n	n8n
+netsuite	NetSuite
+notion	Notion
+npi_registry	NPI Registry
+onedrive	OneDrive
+onenote	OneNote
+oracle_hcm	Oracle HCM
+oracle_sales_cloud	Oracle Sales Cloud
+oracle_scm	Oracle SCM
+oura	Oura
+outlook	Outlook
+pagerduty	PagerDuty
+paypal	PayPal
+peec	Peec AI
+pipedrive	Pipedrive
+posthog	PostHog
+pubmed	PubMed
+pylon	Pylon
+quartr	Quartr
+quickbooks_online	QuickBooks Online
+ramp	Ramp
+readme	ReadMe
+rootly	Rootly
+sabre	Sabre
+salesforce	Salesforce
+sanity	Sanity
+sapsf	SAP SuccessFactors
+sendgrid	SendGrid
+sentry	Sentry
+servicenow	ServiceNow
+sharepoint	SharePoint
+shopify	Shopify
+slack	Slack
+smartsheet	Smartsheet
+snowflake	Snowflake
+spotify	Spotify
+square	Square
+straker	Straker
+strava	Strava
+stripe	Stripe
+supabase	Supabase
+teamwork	Teamwork.com
+trello	Trello
+tripadvisor	TripAdvisor
+ukg_pro	UKG Pro
+vercel	Vercel
+vestaboard	Vestaboard
+visualping	VisualPing
+weather	Weather
+webflow	Webflow
+whoop	WHOOP
+wikipedia	Wikipedia
+wix	Wix
+wordpress	WordPress
+workday	Workday
+x	X
+xero	Xero
+yelp	Yelp
+youtube	YouTube
+zendesk	Zendesk
+zendesk_sell	Zendesk Sell
+zohocrm	Zoho CRM
+zohodesk	Zoho Desk
+zoom	Zoom
+zoominfo	ZoomInfo
