@@ -651,18 +651,45 @@
     } catch (_) { /* best-effort */ }
   }
 
-  // Wire a vault form's submit: POST to DOH, invalidate local provider state,
-  // swap the action row to a Close button, and refresh the pane. Shared by the
-  // generic and Slack renderers so the save/restart/refresh flow is single-sourced.
+  // Post-save/connect sequence shared by the vault form modals and the
+  // link+poll modal: the credential is already stored on DOH, so invalidate
+  // the broker cache (which rewrites the gateway env and restarts the
+  // gateway), swap the action row to a Close button, and refresh the cards.
+  // `verb` is 'Saved' or 'Connected' depending on how the credential landed.
+  async function applyVaultCredentials({ item, statusEl, actions, close, verb }) {
+    statusEl.textContent = verb + '. Applying credentials…';
+    statusEl.style.display = '';
+    let restarted = true;
+    try {
+      await invalidateBrokerTlsCache(item.slug);
+    } catch (err) {
+      restarted = false;
+      statusEl.textContent =
+        err.message ||
+        verb + ', but applying the credentials failed. Redeploy this Hermes app to apply them.';
+    }
+    if (item.affects_model_picker) {
+      statusEl.textContent = verb + '. Updating the model list…';
+      await refreshModelDropdownsIfProviderAffectsPicker(item);
+    }
+    actions.replaceChildren(elem('button', {
+      class: 'doh-integration-btn doh-integration-btn-primary',
+      type: 'button',
+      onclick: close,
+    }, ['Close']));
+    try {
+      await refreshAndRender();
+    } catch (_) { /* sidebar refresh can recover on next open */ }
+    if (restarted) {
+      statusEl.textContent = verb + '. The new credentials are active.';
+    }
+  }
+
+  // Wire a vault form's submit: POST to DOH, then run the shared apply
+  // sequence. Shared by the generic and Slack renderers so the
+  // save/restart/refresh flow is single-sourced.
   function wireVaultSubmit(opts) {
     const { form, session, item, saveBtn, actions, errorBox, successBox, close } = opts;
-    const showCloseAction = () => {
-      actions.replaceChildren(elem('button', {
-        class: 'doh-integration-btn doh-integration-btn-primary',
-        type: 'button',
-        onclick: close,
-      }, ['Close']));
-    };
     form.addEventListener('submit', async (event) => {
       event.preventDefault();
       let saved = false;
@@ -673,28 +700,7 @@
       try {
         await submitVaultForm(session, form);
         saved = true;
-        successBox.textContent = 'Saved. Applying credentials…';
-        successBox.style.display = '';
-        let restarted = true;
-        try {
-          await invalidateBrokerTlsCache(item.slug);
-        } catch (err) {
-          restarted = false;
-          successBox.textContent =
-            err.message ||
-            'Saved, but applying the credentials failed. Redeploy this Hermes app to apply them.';
-        }
-        if (item.affects_model_picker) {
-          successBox.textContent = 'Saved. Updating the model list…';
-          await refreshModelDropdownsIfProviderAffectsPicker(item);
-        }
-        showCloseAction();
-        try {
-          await refreshAndRender();
-        } catch (_) { /* sidebar refresh can recover on next open */ }
-        if (restarted) {
-          successBox.textContent = 'Saved. The new credentials are active.';
-        }
+        await applyVaultCredentials({ item, statusEl: successBox, actions, close, verb: 'Saved' });
       } catch (err) {
         errorBox.textContent = err.message || 'Save failed.';
         errorBox.style.display = '';
@@ -799,33 +805,6 @@
       cancelBtn.textContent = 'Close';
     };
 
-    // Same post-save dance as wireVaultSubmit: invalidate the broker cache
-    // (which rewrites the gateway env and restarts the gateway), then refresh
-    // the cards.
-    const succeed = async () => {
-      statusBox.textContent = 'Connected. Applying credentials…';
-      let restarted = true;
-      try {
-        await invalidateBrokerTlsCache(item.slug);
-      } catch (err) {
-        restarted = false;
-        statusBox.textContent =
-          err.message ||
-          'Connected, but applying the credentials failed. Redeploy this Hermes app to apply them.';
-      }
-      actions.replaceChildren(elem('button', {
-        class: 'doh-integration-btn doh-integration-btn-primary',
-        type: 'button',
-        onclick: close,
-      }, ['Close']));
-      try {
-        await refreshAndRender();
-      } catch (_) { /* sidebar refresh can recover on next open */ }
-      if (restarted) {
-        statusBox.textContent = 'Connected. The new credentials are active.';
-      }
-    };
-
     const poll = async () => {
       if (stopped) return;
       let response;
@@ -845,7 +824,7 @@
       if (stopped) return;
       if (response.ok && payload.status === 'connected') {
         stopped = true;
-        await succeed();
+        await applyVaultCredentials({ item, statusEl: statusBox, actions, close, verb: 'Connected' });
         return;
       }
       if (response.ok) {

@@ -27,9 +27,8 @@ from devopshero_app.views.integrations import provider_common
 logger = logging.getLogger(__name__)
 
 
-# Capped at 5s because refresh_outcome calls Telegram inside the broker's
-# batched /api/integrations/tokens request, whose client-side budget is 7s —
-# a slow api.telegram.org must not fail the whole batch for every provider.
+# Manager-bot API calls happen only during a connect session (browser poll
+# path); the broker's refresh path never talks to Telegram.
 TELEGRAM_API_TIMEOUT_SECONDS = 5
 # Telegram bot tokens never expire on the provider side, so this is purely
 # the broker's cache lifetime.
@@ -138,7 +137,7 @@ def schema(existing: IntegrationUserCredential | None, app: App | None, owner_us
         "status": "not_connected",
         "mode": "link_poll",
         "message": (
-            "DevOps Hero creates a Telegram bot for this app — no tokens to copy. "
+            "DevOps Hero creates a Telegram bot."
             "Scan the QR code with your phone and confirm the bot in Telegram."
         ),
         "qr_data_uri": _link_qr_data_uri(link_url=link_url),
@@ -177,15 +176,15 @@ def _normalize_telegram_allowed_users(value: object) -> tuple[list[str] | None, 
     return parts, None
 
 
-def _find_managed_bot_creation(expected_username: str) -> tuple[dict, dict | None] | None:
+def _find_managed_bot_creation(expected_username: str) -> dict | None:
     """Scan the manager bot's pending `managed_bot` updates for *expected_username*.
 
     Stateless on purpose: `getUpdates` is called without an offset, so the
     updates are never confirmed and concurrent connect sessions cannot consume
     each other's events. Telegram keeps unconfirmed updates for 24h — far
-    longer than a setup session. Returns the most recent `(bot, creator)`
-    match, or None (no match yet, or a transient API failure — both mean
-    "keep polling").
+    longer than a setup session. Returns the most recent matching
+    `ManagedBotUpdated` dict, or None (no match yet, or a transient API
+    failure — both mean "keep polling").
     """
     result, error = _manager_bot_api(
         method="getUpdates",
@@ -202,7 +201,7 @@ def _find_managed_bot_creation(expected_username: str) -> tuple[dict, dict | Non
         if not isinstance(bot, dict):
             continue
         if str(bot.get("username", "")).lower() == expected_username.lower():
-            match = (bot, managed.get("user"))
+            match = managed
     return match
 
 
@@ -219,22 +218,21 @@ def poll_setup(owner_user: User, environment: Environment, app_slug: str, state:
     if not expected_username:
         return None, "This setup session is missing its bot username. Close this dialog and click Connect again."
 
-    creation = _find_managed_bot_creation(expected_username=expected_username)
-    if creation is None:
+    managed = _find_managed_bot_creation(expected_username=expected_username)
+    if managed is None:
         return {"status": "pending"}, None
-    bot, creator = creation
+    bot = managed["bot"]
+    creator = managed.get("user") if isinstance(managed.get("user"), dict) else {}
 
     token_result, token_error = _manager_bot_api(method="getManagedBotToken", params={"user_id": bot["id"]})
     if token_error is not None or not isinstance(token_result, str) or not token_result:
         return None, TELEGRAM_TOKEN_FETCH_FAILED_MESSAGE
 
-    creator = creator if isinstance(creator, dict) else {}
     allowed_users = [str(creator["id"])] if creator.get("id") is not None else []
     metadata = {
         "bot_id": bot.get("id"),
         "bot_username": bot.get("username", ""),
         "bot_name": bot.get("first_name", ""),
-        "managed": True,
         "creator_telegram_id": creator.get("id"),
         "creator_telegram_username": creator.get("username", ""),
         "validated_at": timezone.now().isoformat(),
@@ -288,13 +286,13 @@ def save_credentials(
 
 
 def refresh_outcome(environment: Environment, owner_user: User, app_slug: str) -> dict:
-    """Compute the broker-shaped refresh outcome for Telegram.
+    """Compute the broker-shaped refresh outcome for Telegram (plain DB read).
 
-    `managed_bot` updates also fire when a bot's token or owner changes, but
-    nothing consumes them outside a connect session — so each broker refresh
-    asks Telegram for the managed bot's current token and falls back to the
-    stored one when the call fails. `expires_in` is the broker's cache
-    lifetime; Telegram tokens never expire on the provider side.
+    Telegram tokens never expire on the provider side, so `expires_in` is
+    purely the broker's cache lifetime. If the user ever revokes the bot's
+    token via BotFather, recovery is a reconnect — we deliberately don't
+    re-fetch the live token here, which keeps Telegram's API out of the
+    broker's batched refresh path.
     """
     credential = IntegrationUserCredential.objects.filter(
         owner_user=owner_user,
@@ -305,20 +303,6 @@ def refresh_outcome(environment: Environment, owner_user: User, app_slug: str) -
     if credential is None:
         return provider_common.absent()
     bot_token = credential.credentials.get("bot_token", "")
-    bot_id = credential.metadata.get("bot_id")
-    if _manager_bot_configured() and bot_id is not None:
-        live_token, token_error = _manager_bot_api(method="getManagedBotToken", params={"user_id": bot_id})
-        if token_error is None and isinstance(live_token, str) and live_token:
-            if live_token != bot_token:
-                credential.credentials = {**credential.credentials, "bot_token": live_token}
-                credential.save(update_fields=["credentials", "updated_at"])
-                logger.info(
-                    "telegram managed bot token rotated: env=%s owner=%s app=%s",
-                    environment.slug,
-                    owner_user.username,
-                    app_slug,
-                )
-            bot_token = live_token
     if not bot_token:
         return provider_common.absent()
     return provider_common.has_token(
