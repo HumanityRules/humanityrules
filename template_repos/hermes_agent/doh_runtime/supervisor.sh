@@ -164,7 +164,6 @@ EOF
         -e "s|__AUX_PROVIDER__|${doh_aux_provider}|g" \
         -e "s|__AUX_MODEL__|${doh_aux_model}|g" \
         -e "s|__AUX_BASE_URL__|${doh_aux_base_url}|g" \
-        -e "s|__HERMES_WEBUI_AGENT_SKILLS_DIR__|${HERMES_WEBUI_AGENT_DIR}/skills|g" \
         -e "/__PROVIDERS_BLOCK__/r ${providers_block_file}" \
         -e "/__PROVIDERS_BLOCK__/d" \
         "$HERMES_CONFIG_TEMPLATE" > "$HERMES_HOME/config.yaml"

@@ -66,6 +66,32 @@ find "$BUNDLED" -name SKILL.md -not -path "*/.git/*" -print0 \
 
 find "$BUNDLED" -name "$KEEP_MARKER" -delete
 
+# Prune individual files INSIDE a kept skill that collide with a real skill
+# name. Hermes' skill loader (skills_tool.py "Strategy 3") rglobs for flat
+# `<name>.md` files anywhere under a search dir and treats each as a skill, so
+# a brand template like popular-web-designs/templates/notion.md registers under
+# the name "notion" — colliding with the productivity/notion skill and tripping
+# the loader's "Ambiguous skill name … Refusing to guess" guard. We can't fix
+# the loader without carrying an upstream patch, so we drop just the colliding
+# template files. Tolerant by design: if upstream renames/removes one, the
+# collision is already gone, so a missing file is logged, not fatal.
+colliding_template_files() {
+    cat <<'EOF'
+creative/popular-web-designs/templates/notion.md
+creative/popular-web-designs/templates/posthog.md
+EOF
+}
+
+while IFS= read -r rel; do
+    [ -z "$rel" ] && continue
+    if [ -f "$BUNDLED/$rel" ]; then
+        rm -f "$BUNDLED/$rel"
+        echo "[skills-allowlist] pruned colliding template file: $rel"
+    else
+        echo "[skills-allowlist] note: colliding template file already absent: $rel" >&2
+    fi
+done < <(colliding_template_files)
+
 while :; do
     before=$(find "$BUNDLED" -type d | wc -l)
     while IFS= read -r -d '' desc; do
