@@ -32,7 +32,6 @@ media/youtube-content
 note-taking/obsidian
 productivity/maps
 productivity/nano-pdf
-productivity/notion
 productivity/ocr-and-documents
 productivity/powerpoint
 research/arxiv
@@ -70,8 +69,7 @@ find "$BUNDLED" -name "$KEEP_MARKER" -delete
 # name. Hermes' skill loader (skills_tool.py "Strategy 3") rglobs for flat
 # `<name>.md` files anywhere under a search dir and treats each as a skill, so
 # a brand template like popular-web-designs/templates/notion.md registers under
-# the name "notion" — colliding with the productivity/notion skill and tripping
-# the loader's "Ambiguous skill name … Refusing to guess" guard. We can't fix
+# the name "notion" — misleading as a Notion integration skill. We can't fix
 # the loader without carrying an upstream patch, so we drop just the colliding
 # template files. Tolerant by design: if upstream renames/removes one, the
 # collision is already gone, so a missing file is logged, not fatal.
