@@ -117,9 +117,9 @@ The aggregator owns the OAuth handlers (DCR, callback, status, disconnect) but t
 
 `MCPAggregator.routes(prefix=...)` returns the Starlette routes the broker splats into its router:
 
-- `GET /__doh_broker/integrations/<provider>/oauth/start?return_to=...` — initiate DCR + authorize.
-- `GET /__doh_broker/integrations/<provider>/oauth/callback?code=...&state=...` — exchange code, store tokens.
-- `POST /__doh_broker/integrations/<provider>/disconnect` — drop tokens, revoke, notify Hermes.
+- `GET /__doh_broker/integrations/mcp/<provider>/oauth/start?return_to=...` — initiate DCR + authorize.
+- `GET /__doh_broker/integrations/mcp/<provider>/oauth/callback?code=...&state=...` — exchange code, store tokens.
+- `POST /__doh_broker/integrations/mcp/<provider>/disconnect` — drop tokens, revoke, notify Hermes.
 
 `GET /__doh_broker/integrations` returns a unified flat list of all integrations (TLS-intercept providers like Google + MCP-aggregator providers like Notion + Merge per-connector cards), each tagged with a `kind` discriminator the WebUI uses to dispatch the right click handlers.
 

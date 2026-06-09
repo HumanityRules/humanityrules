@@ -281,11 +281,12 @@ class MCPAggregator:
         merge_routes: list[Route] = []
         if self._merge_backend is not None:
             merge_routes = self._merge_backend.routes(prefix=prefix)
+        mcp = f"{prefix}/mcp/{{provider}}"
         return [
-            *merge_routes,  # before {provider}/disconnect so that "merge"=={provider} matches that wildcard
-            Route(path=f"{prefix}/{{provider}}/oauth/start", endpoint=self.handle_oauth_start, methods=["GET"]),
-            Route(path=f"{prefix}/{{provider}}/oauth/callback", endpoint=self.handle_oauth_callback, methods=["GET"]),
-            Route(path=f"{prefix}/{{provider}}/disconnect", endpoint=self.handle_disconnect, methods=["POST"]),
+            *merge_routes,
+            Route(path=f"{mcp}/oauth/start", endpoint=self.handle_oauth_start, methods=["GET"]),
+            Route(path=f"{mcp}/oauth/callback", endpoint=self.handle_oauth_callback, methods=["GET"]),
+            Route(path=f"{mcp}/disconnect", endpoint=self.handle_disconnect, methods=["POST"]),
         ]
 
     async def _current_access_token(self, slug: str) -> str | None:
@@ -354,7 +355,7 @@ class MCPAggregator:
             return Response(content="origin query param required on first connect", status_code=400)
         if not self._public_base_url:
             self._public_base_url = origin
-        redirect_uri = origin + f"/__doh_broker/integrations/{provider}/oauth/callback"
+        redirect_uri = origin + f"/__doh_broker/integrations/mcp/{provider}/oauth/callback"
         oauth = self._oauth_states[provider]
 
         metadata = await self._fetch_oauth_metadata(url=spec.oauth_metadata_url)

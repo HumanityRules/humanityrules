@@ -135,7 +135,7 @@ urlpatterns = [
     path("integrations/user/github/start/", views.integrations_user_github_start, name="integrations_user_github_start"),
     path("integrations/user/github/callback/", views.integrations_user_github_callback, name="integrations_user_github_callback"),
     # Connect is the browser OAuth round-trip above (start → provider → callback).
-    # Disconnect is broker-only: the Hermes WebUI POSTs to /__doh_broker/integrations/{slug}/tls/disconnect,
+    # Disconnect is broker-only: the Hermes WebUI POSTs to /__doh_broker/integrations/tls_intercept/{slug}/disconnect,
     # which forwards here with the env bearer — see the disconnect handler under api/integrations below.
 
     # API endpoints (view implementations live under views/integrations/ or views/pdp.py)

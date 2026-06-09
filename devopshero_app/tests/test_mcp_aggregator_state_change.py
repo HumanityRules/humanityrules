@@ -218,8 +218,8 @@ class TestAggregatorMergeDisabled(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("merge_connector", {item["kind"] for item in items})
 
 
-class TestAggregatorMergeRouteOrder(unittest.IsolatedAsyncioTestCase):
-    """Merge static routes must precede the DCR {provider}/disconnect wildcard."""
+class TestAggregatorRouteNamespaces(unittest.IsolatedAsyncioTestCase):
+    """Merge and MCP DCR routes use disjoint path prefixes."""
 
     async def asyncSetUp(self) -> None:
         self.tempdir = tempfile.TemporaryDirectory()
@@ -235,11 +235,11 @@ class TestAggregatorMergeRouteOrder(unittest.IsolatedAsyncioTestCase):
             merge_enabled=True,
         )
 
-    async def test_merge_disconnect_before_generic_disconnect(self) -> None:
-        paths = [route.path for route in self.agg.routes(prefix="/integrations")]
-        merge_idx = paths.index("/integrations/merge/disconnect")
-        generic_idx = paths.index("/integrations/{provider}/disconnect")
-        self.assertLess(merge_idx, generic_idx)
+    async def test_merge_and_mcp_routes_are_namespaced(self) -> None:
+        paths = {route.path for route in self.agg.routes(prefix="/integrations")}
+        self.assertIn("/integrations/merge/disconnect", paths)
+        self.assertIn("/integrations/mcp/{provider}/disconnect", paths)
+        self.assertNotIn("/integrations/{provider}/disconnect", paths)
 
 
 class TestCatalogStoreDrop(unittest.IsolatedAsyncioTestCase):

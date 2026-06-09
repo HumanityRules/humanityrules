@@ -116,10 +116,18 @@
     return payload.doh_control_plane_url.replace(/\/$/, '') + '/integrations/user/' + slug + '/start/?rd=' + rd + '&app_slug=' + encodeURIComponent(payload.app_slug || '');
   }
 
+  function tlsInterceptBrokerPath(slug, action) {
+    return '/__doh_broker/integrations/tls_intercept/' + encodeURIComponent(slug) + '/' + action;
+  }
+
+  function mcpBrokerPath(slug, action) {
+    return '/__doh_broker/integrations/mcp/' + encodeURIComponent(slug) + '/' + action;
+  }
+
   function buildMcpConnectUrl(slug) {
     const returnTo = encodeURIComponent(window.location.origin + window.location.pathname);
     const origin = encodeURIComponent(window.location.origin);
-    return '/__doh_broker/integrations/' + slug + '/oauth/start?return_to=' + returnTo + '&origin=' + origin;
+    return mcpBrokerPath(slug, 'oauth/start') + '?return_to=' + returnTo + '&origin=' + origin;
   }
 
   function statusLabelFor(status) {
@@ -436,7 +444,7 @@
             body: JSON.stringify({ connector_slug: item.slug }),
           });
         } else {
-          await fetch('/__doh_broker/integrations/' + item.slug + '/disconnect', { method: 'POST' });
+          await fetch(mcpBrokerPath(item.slug, 'disconnect'), { method: 'POST' });
         }
         await refreshAndRender();
       }));
@@ -484,8 +492,8 @@
   }
 
   async function requestVaultSetupSession(item) {
-    const url = '/__doh_broker/integrations/' + encodeURIComponent(item.slug) +
-      '/vault/setup-session?origin=' + encodeURIComponent(window.location.origin);
+    const url = tlsInterceptBrokerPath(item.slug, 'setup-session') +
+      '?origin=' + encodeURIComponent(window.location.origin);
     let response;
     try {
       response = await fetch(url, { method: 'POST', cache: 'no-store' });
@@ -850,7 +858,7 @@
     const revertOnce = () => { if (revert) { revert(); revert = null; } };
     let session;
     try {
-      const base = '/__doh_broker/integrations/' + encodeURIComponent(item.slug) + '/device';
+      const base = tlsInterceptBrokerPath(item.slug, 'device');
       const resp = await fetch(base + '/start', { method: 'POST', cache: 'no-store' });
       session = await resp.json();
       if (!resp.ok || !session.ok) throw new Error(session.error || 'Could not start the login.');
@@ -865,7 +873,7 @@
   function showDeviceModal(item, session, onClose) {
     const backdrop = elem('div', { class: 'doh-modal-backdrop' });
     let cancelled = false;
-    const base = '/__doh_broker/integrations/' + encodeURIComponent(item.slug) + '/device';
+    const base = tlsInterceptBrokerPath(item.slug, 'device');
     const close = () => {
       cancelled = true;
       backdrop.remove();
@@ -1164,7 +1172,7 @@
   // here identically.
   function disconnectTlsProvider(item) {
     return runDisconnect(item.slug, async () => {
-      const response = await fetch('/__doh_broker/integrations/' + encodeURIComponent(item.slug) + '/tls/disconnect', {
+      const response = await fetch(tlsInterceptBrokerPath(item.slug, 'disconnect'), {
         method: 'POST',
         cache: 'no-store',
       });
@@ -1280,6 +1288,7 @@
   // known connect/disconnect/config change (vault save, OAuth-return sentinel).
   // The explicit-Refresh-all path goes through /__doh_broker/integrations/refresh
   // instead, which fans out catalog reload + all-providers TLS invalidate.
+  // Per-provider: POST .../tls_intercept/{slug}/invalidate.
   //
   // For env-backed providers the broker also rewrites the managed profile env
   // block and restarts whichever process-compose entries the provider declares.
@@ -1288,7 +1297,7 @@
   // catch and ignore: the proxy's 401-evict path recovers stale tokens on the
   // first real call.
   async function invalidateBrokerTlsCache(providerSlug) {
-    const url = '/__doh_broker/integrations/' + encodeURIComponent(providerSlug) + '/invalidate_tls_cache';
+    const url = tlsInterceptBrokerPath(providerSlug, 'invalidate');
     const response = await fetch(url, { method: 'POST' });
     if (response.ok) return;
     let payload = {};
