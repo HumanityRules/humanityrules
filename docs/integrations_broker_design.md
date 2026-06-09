@@ -62,9 +62,10 @@ Starlette/uvicorn server. One unified URL space for **all** browser-facing integ
 
 - **`GET /healthz`** — liveness.
 - **`GET /integrations`** — flat unified status, one entry per card: `[{kind, slug, label, status, …}, …]`. `kind` is `tls_intercept` (Google), `mcp_aggregator` (Notion), or `merge_connector` (per-Merge-connector entries with `logo_url`).
-- **`POST /integrations/google/kick`** — synchronously refresh every TLS-intercept provider and return the unified status envelope.
-- **`GET /integrations/<provider>/oauth/start`**, **`GET /integrations/<provider>/oauth/callback`**, **`POST /integrations/<provider>/disconnect`** — MCP-aggregator OAuth flow (Notion). The aggregator owns the handlers; the broker mounts them via `MCPAggregator.routes(prefix="/integrations")`.
-- **`GET /integrations/merge/connectors`**, **`GET /integrations/merge/connector-status`**, **`POST /integrations/merge/link-token`**, **`POST /integrations/merge/disconnect`** — Merge passthroughs that forward to DOH with the env bearer attached. See `merge_integration_design.md`.
+- **`POST /integrations/refresh`** — explicit user refresh: reload the MCP catalog and invalidate all TLS-intercept provider caches (cooldown-gated; 429 if called too soon). The WebUI re-fetches `GET /integrations` after a successful refresh.
+- **`POST /integrations/tls_intercept/<provider>/disconnect`**, **`POST /integrations/tls_intercept/<provider>/setup-session`**, **`POST /integrations/tls_intercept/<provider>/invalidate`**, **`POST /integrations/tls_intercept/<provider>/device/start|status|cancel`** — TLS-intercept providers (Google, GitHub, Telegram, Slack, device-flow LLMs). Registered directly on the broker router.
+- **`GET /integrations/mcp/<provider>/oauth/start`**, **`GET /integrations/mcp/<provider>/oauth/callback`**, **`POST /integrations/mcp/<provider>/disconnect`** — MCP-aggregator OAuth flow (Notion). The aggregator owns the handlers; the broker mounts them via `MCPAggregator.routes(prefix="/integrations")`.
+- **`GET /integrations/merge/connector-status`**, **`POST /integrations/merge/link-token`**, **`POST /integrations/merge/disconnect`** — Merge passthroughs that forward to DOH with the env bearer attached. See `merge_integration_design.md`.
 
 Reached from the browser same-origin via a WebUI reverse-proxy patch (`patches-webui/07-doh-broker-proxy.patch`) that forwards `/__doh_broker/*` to `127.0.0.1:9951`. Deliberately bypasses the WebUI's CSRF gate — the broker is loopback-only and the endpoints are stateless.
 
@@ -76,7 +77,7 @@ One coroutine per provider, driven by a single `PROVIDERS` dict at the top of th
 
 Refresh is one batched call to DOH's `POST /api/integrations/tokens` with `{owner_username, app_slug, providers: [...]}`. DOH returns `{results: {<slug>: {outcome, access_token?, expires_in?, config, metadata}, ...}}` where `outcome` is `has_token | absent | transient` — disconnected providers are normal `absent` entries in the response map, not HTTP 4xx, so they don't generate per-Refresh-all log lines. The broker uses this same endpoint for slug-targeted refreshes (after connect/disconnect), passing a one-element providers list.
 
-Refresh cadence is ~55 minutes when connected. `/kick` replaces the short polling interval the old design used to mask the lack of a synchronous signal.
+Refresh cadence is ~55 minutes when connected. `POST /integrations/refresh` is the user-triggered resync; background refresh loops handle steady-state token renewal.
 
 ## What lives where
 
@@ -150,7 +151,7 @@ Python's cert validation (OpenSSL) rejects chains missing `SubjectKeyIdentifier`
 - **User hasn't connected the provider yet.** DOH returns `outcome: "absent"` for that slug inside a 200 response. Broker removes the host→token mapping and publishes `status: not_connected`. Subsequent sandbox calls get a synthetic HTTP 503 from the broker with a human-readable message — the sandbox-side skill surfaces it to the user verbatim.
 - **Refresh token revoked at provider** (user revoked, or security system did). DOH deletes the stored grant and returns the same `outcome: "absent"` for that slug. Same behavior as not_connected from the broker's side; the UI distinguishes "never connected" from "revoked" via the `status` field.
 - **Transient DOH failure.** Broker keeps the last in-memory token and retries with exponential backoff. Tool calls continue working until the current token expires.
-- **DOH unreachable long enough to expire the token.** Provider calls start failing with the broker's "integration not connected" 503 once the token is purged — or with provider 401s if the broker still has a stale token. Mitigations: `MIN_SLEEP_SECONDS=30` floor + backoff caps mean retries continue; once DOH is back, `/kick` resyncs instantly.
+- **DOH unreachable long enough to expire the token.** Provider calls start failing with the broker's "integration not connected" 503 once the token is purged — or with provider 401s if the broker still has a stale token. Mitigations: `MIN_SLEEP_SECONDS=30` floor + backoff caps mean retries continue; once DOH is back, the next background refresh or `POST /integrations/refresh` resyncs.
 - **Customer env compromised.** The attacker gets the env bearer, which can mint access tokens for users already connected in that env — bounded to env users, bounded in token lifetime. They cannot extract refresh tokens (not in the env) and cannot mint for other envs (bearer is env-scoped). They also cannot extract historical access tokens — the broker never persists them.
 - **Malicious skill inside the sandbox.** Can send arbitrary API calls through the broker *for the current user* (this is the point — the broker has to let tool calls through to do work). Cannot read the CA private key (process memory, outside sandbox). Cannot read access tokens (same). Cannot bypass the broker to hit Google directly — the nono profile's `allow_domain` doesn't grant provider hostnames; only the local broker port is reachable.
 

@@ -88,7 +88,7 @@ async def _handle_unified_status(
 
     Reads cached TLS-intercept entries; refresh happens lazily (proxy hot
     path or near expiry). Callers that need fresh state must POST
-    /__doh_broker/integrations/{provider}/invalidate_tls_cache for one provider
+    /__doh_broker/integrations/tls_intercept/{provider}/invalidate for one provider
     (e.g. after a Disconnect on DOH) or /__doh_broker/integrations/refresh
     for the explicit-Refresh path (MCP catalog reload + all-providers TLS
     invalidate in one shot).
@@ -251,20 +251,18 @@ def _build_control_app(
         await oauth_device_flow.cancel(provider_slug=provider)
         return JSONResponse(content={"ok": True})
 
+    tls = "/integrations/tls_intercept/{provider}"
     routes = [
         Route(path="/healthz", endpoint=_handle_healthz, methods=["GET"]),
         Route(path="/integrations", endpoint=status_route, methods=["GET"]),
         Route(path="/integrations/refresh", endpoint=refresh_route, methods=["POST"]),
-        Route(path="/integrations/{provider}/invalidate_tls_cache", endpoint=invalidate_provider_tls_cache_route, methods=["POST"]),
-        Route(path="/integrations/{provider}/vault/setup-session", endpoint=vault_setup_session_route, methods=["POST"]),
+        Route(path=f"{tls}/invalidate", endpoint=invalidate_provider_tls_cache_route, methods=["POST"]),
+        Route(path=f"{tls}/setup-session", endpoint=vault_setup_session_route, methods=["POST"]),
+        Route(path=f"{tls}/disconnect", endpoint=disconnect_route, methods=["POST"]),
         # Device login: broker-run OAuth device flows (no redirect callback).
-        Route(path="/integrations/{provider}/device/start", endpoint=device_start_route, methods=["POST"]),
-        Route(path="/integrations/{provider}/device/status", endpoint=device_status_route, methods=["GET"]),
-        Route(path="/integrations/{provider}/device/cancel", endpoint=device_cancel_route, methods=["POST"]),
-        # One disconnect path for every TLS-intercept provider (vault + OAuth).
-        # Sits under the /tls/ sub-prefix so it doesn't collide with the MCP
-        # aggregator's own /integrations/{provider}/disconnect (Notion/Merge).
-        Route(path="/integrations/{provider}/tls/disconnect", endpoint=disconnect_route, methods=["POST"]),
+        Route(path=f"{tls}/device/start", endpoint=device_start_route, methods=["POST"]),
+        Route(path=f"{tls}/device/status", endpoint=device_status_route, methods=["GET"]),
+        Route(path=f"{tls}/device/cancel", endpoint=device_cancel_route, methods=["POST"]),
         *aggregator.routes(prefix="/integrations"),
     ]
     return Starlette(routes=routes)
