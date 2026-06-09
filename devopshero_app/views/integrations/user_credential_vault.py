@@ -270,26 +270,17 @@ def integrations_credential_submit(request: HttpRequest) -> JsonResponse:
     if not isinstance(credentials_payload, dict) or not isinstance(config_payload, dict):
         return _cors_json_response({"error": "credentials and config must be objects"}, status=400, allowed_origin=allowed_origin)
 
+    # The provider was validated against the registry when the signed token
+    # was minted, so the spec lookup cannot miss.
     provider = token_payload["provider"]
     spec = provider_registry.get_of_kind(provider=provider, kind=provider_registry.ProviderKind.VAULT)
-    if spec is not None:
-        credential, validation_error = spec.module.save_credentials(
-            owner_user=owner_user,
-            environment=environment,
-            app_slug=app_slug,
-            credentials_payload=credentials_payload,
-            config_payload=config_payload,
-        )
-    else:
-        credential = None
-        validation_error = "unsupported credential provider"
-        logger.error(
-            "vault credential submit: unsupported provider=%r owner=%s env=%s app=%s",
-            provider,
-            owner_user.username,
-            environment.slug,
-            app_slug,
-        )
+    credential, validation_error = spec.module.save_credentials(
+        owner_user=owner_user,
+        environment=environment,
+        app_slug=app_slug,
+        credentials_payload=credentials_payload,
+        config_payload=config_payload,
+    )
     if validation_error is not None:
         logger.error(
             "vault credential save rejected: provider=%s owner=%s env=%s app=%s reason=%r",
@@ -337,9 +328,10 @@ def integrations_credential_poll(request: HttpRequest) -> JsonResponse:
     if context_error is not None:
         return context_error
 
+    # Provider validity is guaranteed by the signed token (see submit view).
     provider = context.token_payload["provider"]
     spec = provider_registry.get_of_kind(provider=provider, kind=provider_registry.ProviderKind.VAULT)
-    poll_setup = getattr(spec.module, "poll_setup", None) if spec is not None else None
+    poll_setup = getattr(spec.module, "poll_setup", None)
     provider_state = context.token_payload.get("provider_state")
     if poll_setup is None or not isinstance(provider_state, dict):
         return _cors_json_response(

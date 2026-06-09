@@ -221,7 +221,7 @@ class TestSetupSession(_CredentialVaultTestBase):
             provider=IntegrationUserCredential.Provider.TELEGRAM,
             credentials={"bot_token": "4242:SECRET"},
             config={"allowed_users": ["777"]},
-            metadata={"bot_id": 4242, "bot_username": "hermes_ab12cd_bot", "managed": True},
+            metadata={"bot_id": 4242, "bot_username": "hermes_ab12cd_bot"},
         )
 
         status, body = self._post_setup_session()
@@ -340,7 +340,6 @@ class TestCredentialPoll(_CredentialVaultTestBase):
         self.assertEqual(credential.config["allowed_users"], ["777"])
         self.assertEqual(credential.metadata["bot_id"], 4242)
         self.assertEqual(credential.metadata["bot_username"], bot_username)
-        self.assertTrue(credential.metadata["managed"])
         self.assertEqual(credential.metadata["creator_telegram_id"], 777)
 
     def test_poll_reports_error_when_token_fetch_fails(self) -> None:
@@ -397,48 +396,14 @@ class TestTelegramRefreshOutcome(_CredentialVaultTestBase):
             environment=self.env,
             app_slug="hermes",
             provider=IntegrationUserCredential.Provider.TELEGRAM,
-            credentials={"bot_token": "4242:OLD_SECRET"},
+            credentials={"bot_token": "4242:SECRET"},
             config={"allowed_users": ["777"]},
-            metadata={"bot_id": 4242, "bot_username": "hermes_ab12cd_bot", "managed": True},
+            metadata={"bot_id": 4242, "bot_username": "hermes_ab12cd_bot"},
         )
 
     @override_settings(**TELEGRAM_MANAGER_SETTINGS)
-    def test_refresh_refetches_live_token_and_rotates_row(self) -> None:
-        credential = self._create_managed_credential()
-
-        with patch(
-            "devopshero_app.views.integrations.provider_telegram.httpx.post",
-            return_value=_telegram_api_response(result="4242:ROTATED_SECRET"),
-        ):
-            outcome = provider_telegram.refresh_outcome(
-                environment=self.env, owner_user=self.user, app_slug="hermes",
-            )
-
-        self.assertEqual(outcome["outcome"], "has_token")
-        self.assertEqual(outcome["secrets"], {"bot_token": "4242:ROTATED_SECRET"})
-        credential.refresh_from_db()
-        self.assertEqual(credential.credentials["bot_token"], "4242:ROTATED_SECRET")
-
-    @override_settings(**TELEGRAM_MANAGER_SETTINGS)
-    def test_refresh_falls_back_to_stored_token_when_telegram_fails(self) -> None:
-        self._create_managed_credential()
-        failed_response = MagicMock()
-        failed_response.status_code = 500
-        failed_response.json.return_value = {"ok": False, "description": "Internal"}
-
-        with patch(
-            "devopshero_app.views.integrations.provider_telegram.httpx.post",
-            return_value=failed_response,
-        ):
-            outcome = provider_telegram.refresh_outcome(
-                environment=self.env, owner_user=self.user, app_slug="hermes",
-            )
-
-        self.assertEqual(outcome["outcome"], "has_token")
-        self.assertEqual(outcome["secrets"], {"bot_token": "4242:OLD_SECRET"})
-
-    @override_settings(TELEGRAM_MANAGER_BOT_TOKEN=None)
-    def test_refresh_without_manager_bot_is_a_plain_db_read(self) -> None:
+    def test_refresh_is_a_plain_db_read_never_calling_telegram(self) -> None:
+        """The broker's batched refresh path must stay off Telegram's API."""
         self._create_managed_credential()
 
         with patch("devopshero_app.views.integrations.provider_telegram.httpx.post") as telegram_post:
@@ -448,7 +413,15 @@ class TestTelegramRefreshOutcome(_CredentialVaultTestBase):
 
         telegram_post.assert_not_called()
         self.assertEqual(outcome["outcome"], "has_token")
-        self.assertEqual(outcome["secrets"], {"bot_token": "4242:OLD_SECRET"})
+        self.assertEqual(outcome["secrets"], {"bot_token": "4242:SECRET"})
+        self.assertEqual(outcome["config"], {"allowed_users": ["777"]})
+
+    def test_refresh_without_credential_row_is_absent(self) -> None:
+        outcome = provider_telegram.refresh_outcome(
+            environment=self.env, owner_user=self.user, app_slug="hermes",
+        )
+
+        self.assertEqual(outcome["outcome"], "absent")
 
 
 class TestCredentialSubmit(_CredentialVaultTestBase):
@@ -461,7 +434,7 @@ class TestCredentialSubmit(_CredentialVaultTestBase):
             provider=IntegrationUserCredential.Provider.TELEGRAM,
             credentials={"bot_token": "4242:SECRET"},
             config={"allowed_users": ["111"]},
-            metadata={"bot_id": 4242, "bot_username": "hermes_ab12cd_bot", "managed": True},
+            metadata={"bot_id": 4242, "bot_username": "hermes_ab12cd_bot"},
         )
         _status, session = self._post_setup_session()
 

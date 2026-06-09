@@ -408,11 +408,13 @@ async def _retry_bootstrap_gateway_env(
             continue
         logger.info("bootstrap refresh recovered; rendering managed env")
         try:
-            env_changed = await _render_gateway_env_file(tls_runtime=tls_runtime, env_path=env_path)
-            if _slug_affects_model_picker(slug=None, runtime=tls_runtime):
-                await asyncio.to_thread(_delete_webui_models_cache, webui_state_dir=webui_state_dir)
-            if env_changed:
-                await _restart_processes_for_env_change(runtime=tls_runtime, process_compose_url=process_compose_url, slug=None)
+            await _apply_refreshed_state(
+                runtime=tls_runtime,
+                env_path=env_path,
+                webui_state_dir=webui_state_dir,
+                process_compose_url=process_compose_url,
+                slug=None,
+            )
         except Exception as exc:
             logger.error("bootstrap recovery render/restart failed: %s; a manual Refresh may be needed", exc)
         return
@@ -447,22 +449,38 @@ def _build_on_user_invalidate(
             # integrations from the gateway env; keep file and processes as-is.
             logger.error("refresh after invalidate(slug=%s) failed transiently; managed env left untouched", slug)
             return
-        env_changed = await _render_gateway_env_file(tls_runtime=runtime, env_path=env_path)
-        if _slug_affects_model_picker(slug=slug, runtime=runtime):
-            await asyncio.to_thread(_delete_webui_models_cache, webui_state_dir=webui_state_dir)
-        if not env_changed:
-            return
-        await _restart_processes_for_env_change(runtime=runtime, process_compose_url=process_compose_url, slug=slug)
+        await _apply_refreshed_state(
+            runtime=runtime,
+            env_path=env_path,
+            webui_state_dir=webui_state_dir,
+            process_compose_url=process_compose_url,
+            slug=slug,
+        )
 
     return on_user_invalidate
 
 
-async def _restart_processes_for_env_change(
+async def _apply_refreshed_state(
     runtime: tls_intercept.TlsInterceptRuntime,
+    env_path: Path,
+    webui_state_dir: Path,
     process_compose_url: str,
     slug: str | None,
 ) -> None:
-    """Restart every process the touched provider(s) declare; raises on a failed restart."""
+    """Project a successful refresh onto disk and processes.
+
+    Renders the managed env block, drops WebUI's models cache when the touched
+    provider(s) can change /api/models, and restarts whatever processes the
+    provider(s) declare when the env actually changed. Shared by the
+    user-invalidate hook and the bootstrap recovery task — callers must only
+    invoke it after a refresh that reflected DOH truth. Raises on a failed
+    process restart.
+    """
+    env_changed = await _render_gateway_env_file(tls_runtime=runtime, env_path=env_path)
+    if _slug_affects_model_picker(slug=slug, runtime=runtime):
+        await asyncio.to_thread(_delete_webui_models_cache, webui_state_dir=webui_state_dir)
+    if not env_changed:
+        return
     for process_name in _processes_requiring_restart(slug=slug, runtime=runtime):
         status, body = await asyncio.to_thread(
             _post_process_compose_restart,

@@ -73,9 +73,9 @@ the managed token.
 
 ## Token rotation
 
-`managed_bot` updates also fire when a managed bot's token or owner changes,
-but nothing consumes them outside a connect session. Instead,
-`refresh_outcome` re-fetches the live token via `getManagedBotToken` on
-every broker refresh (hourly cache TTL, plus connect/disconnect/refresh-all
-invalidations) and rotates the stored row when it changed, falling back to
-the stored token when Telegram is unreachable.
+There is none. `refresh_outcome` is a plain DB read (like Slack's): Telegram
+tokens never expire, and putting a `getManagedBotToken` call inside the
+broker's batched refresh would let a slow api.telegram.org fail the whole
+batch. If the user revokes the bot's token via BotFather, the bot stops
+working and recovery is a reconnect — `getUpdates`/`getManagedBotToken` are
+called only during a connect session's polling.
