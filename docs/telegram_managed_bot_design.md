@@ -55,7 +55,7 @@ shape (alongside paste forms and Slack's custom renderer):
   `({"status": "pending"} | {"status": "connected", ...}, error)`.
 - The WebUI's generic vault renderer (`doh-integrations.js`) dispatches
   `mode=link_poll` to a link+poll modal that polls until connected or the
-  5-minute setup token expires.
+  30-minute setup token expires.
 
 **Configure** (already connected) returns a plain `mode=form` schema with
 only `allowed_users`; `save_credentials` is config-only and never touches

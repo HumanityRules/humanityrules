@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 
 
 SETUP_TOKEN_SALT = "devopshero.integrations.user_credential_setup.v1"
-SETUP_TOKEN_MAX_AGE_SECONDS = 5 * 60
+SETUP_TOKEN_MAX_AGE_SECONDS = 30 * 60
 EXPIRED_SETUP_TOKEN_MESSAGE = "This setup session expired. Close this dialog and click Connect again."
 
 
