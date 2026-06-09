@@ -392,7 +392,7 @@
     const waiting = showMergeWaitingModal(item, () => { stopped = true; revertOnce(); });
     const start = Date.now();
     const intervalMs = 3000;
-    const timeoutMs = 5 * 60 * 1000;
+    const timeoutMs = 30 * 60 * 1000;
     const tick = async () => {
       if (stopped) return;
       if (Date.now() - start > timeoutMs) {
@@ -472,7 +472,7 @@
         id,
         class: 'doh-vault-input',
         name: field.name,
-        type: field.kind === 'secret' ? 'password' : 'text',
+        type: 'text',
         placeholder: field.placeholder || '',
         autocomplete: 'off',
       });
@@ -761,7 +761,9 @@
   // the credential as connected. The DOH side then already holds the
   // secret — nothing is typed or pasted here, and no desktop app is needed.
 
-  const LINK_POLL_MS = 3000;
+  // 1s keeps detection feeling instant after the user confirms in Telegram;
+  // each poll is one getUpdates on the DOH side, and sessions cap at 30 min.
+  const LINK_POLL_MS = 1000;
 
   function showLinkPollConnectModal(item, session, onClose) {
     const schema = session.schema;
