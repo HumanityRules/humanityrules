@@ -6,7 +6,9 @@ to add/remove local placeholder blocks in auth.json as the gateway user.
 
 from __future__ import annotations
 
+import base64
 import datetime as dt
+import json
 import os
 import shutil
 import subprocess
@@ -122,30 +124,65 @@ def _connect_codex_auth_marker(auth: object) -> None:
     print(f"[provider-marker] wrote openai-codex placeholder block to {auth.get_hermes_home() / 'auth.json'}")
 
 
+def _build_nous_marker_jwt() -> str:
+    """Build an unsigned placeholder JWT that passes Hermes' local invoke-JWT validation.
+
+    Since Hermes Agent v2026.6.5, `resolve_nous_runtime_credentials` requires the
+    access token to decode as a JWT carrying the `inference:invoke` scope and an
+    unexpired `exp`. A bare sentinel string fails that check, which forces a token
+    refresh against the real Nous portal (not TLS-intercepted) with the placeholder
+    refresh token — the resulting invalid_grant quarantines the whole auth block and
+    empties the WebUI model picker. Hermes only base64-decodes the payload (no
+    signature verification), so an unsigned far-future JWT keeps the marker inert;
+    the broker proxy still swaps the real token onto the wire.
+    """
+    header = {"alg": "none", "typ": "JWT"}
+    claims = {
+        "sub": AUTH_MARKER_SENTINEL,
+        "scope": NOUS_SCOPE,
+        "exp": int(dt.datetime.fromisoformat(NOUS_MARKER_EXPIRES_AT).timestamp()),
+    }
+    segments = [
+        base64.urlsafe_b64encode(json.dumps(part).encode("utf-8")).decode("ascii").rstrip("=")
+        for part in (header, claims)
+    ]
+    # The sentinel rides as the (never-verified) signature segment so the
+    # marker stays grep-able in auth.json.
+    return ".".join([*segments, AUTH_MARKER_SENTINEL])
+
+
+def _is_jwt_shaped(token: object) -> bool:
+    """Return whether a value has JWT structure (three dot-separated segments)."""
+    return isinstance(token, str) and token.count(".") == 2
+
+
 def _connect_nous_auth_marker(auth: object) -> None:
     """Write the Nous placeholder state using upstream's provider-state helper."""
     try:
+        # A pre-JWT marker (bare sentinel) must be upgraded, not kept: Hermes
+        # v2026.6.5+ quarantines it on first credential resolve.
         existing = auth.get_provider_auth_state(NOUS_PROVIDER)
-        if isinstance(existing, dict) and existing.get("refresh_token") and existing.get("agent_key"):
+        if isinstance(existing, dict) and existing.get("refresh_token") and _is_jwt_shaped(existing.get("agent_key")):
             print("[provider-marker] nous block already present; nothing to do")
             return
     except Exception:
         pass
 
     now = dt.datetime.now(tz=dt.timezone.utc).isoformat()
+    marker_jwt = _build_nous_marker_jwt()
     state = {
         "portal_base_url": NOUS_PORTAL_BASE_URL,
         "inference_base_url": NOUS_INFERENCE_BASE_URL,
         "client_id": NOUS_OAUTH_CLIENT_ID,
         "scope": NOUS_SCOPE,
         "token_type": "Bearer",
-        "access_token": AUTH_MARKER_SENTINEL,
+        "access_token": marker_jwt,
         "refresh_token": AUTH_MARKER_SENTINEL,
         "obtained_at": now,
         "expires_at": NOUS_MARKER_EXPIRES_AT,
         "expires_in": 999999999,
         "tls": {"insecure": False, "ca_bundle": None},
-        "agent_key": AUTH_MARKER_SENTINEL,
+        "agent_key": marker_jwt,
         "agent_key_id": None,
         "agent_key_expires_at": NOUS_MARKER_EXPIRES_AT,
         "agent_key_expires_in": 999999999,
@@ -178,7 +215,7 @@ def _disconnect_auth_marker(auth: object, provider: str) -> None:
 def run_auth_marker(*, action: str, provider: str) -> int:
     """Add or remove a DOH-managed provider block in auth.json."""
     try:
-        from hermes_cli import auth
+        from hermes_cli import auth  # pyright: ignore[reportMissingImports]
     except Exception as exc:  # pragma: no cover - import wiring is environment-specific
         print(f"[provider-marker] cannot import hermes_cli.auth: {exc}", file=sys.stderr)
         return 1
