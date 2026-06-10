@@ -1,7 +1,12 @@
-"""Seed sandbox-local runtime files before process-compose starts."""
+"""Seed sandbox-local runtime files before process-compose starts.
+
+Also exposes ``--auth-marker connect|disconnect <provider>`` for the root broker
+to add/remove local placeholder blocks in auth.json as the gateway user.
+"""
 
 from __future__ import annotations
 
+import datetime as dt
 import os
 import shutil
 import subprocess
@@ -10,12 +15,20 @@ from pathlib import Path
 
 import yaml
 
-import provider_auth_marker
-
 AWS_STS_PORT = 9901
 AWS_BEDROCK_PORT = 9902
 AWS_BEDROCK_RUNTIME_PORT = 9903
 AWS_CE_PORT = 9904
+
+AUTH_MARKER_SENTINEL = "DOH_PLACEHOLDER"
+CODEX_PROVIDER = "openai-codex"
+NOUS_PROVIDER = "nous"
+NOUS_PORTAL_BASE_URL = "https://portal.nousresearch.com"
+NOUS_INFERENCE_BASE_URL = "https://inference-api.nousresearch.com/v1"
+NOUS_OAUTH_CLIENT_ID = "hermes-cli"
+NOUS_SCOPE = "inference:invoke inference:mint_agent_key"
+NOUS_MARKER_EXPIRES_AT = "2999-01-01T00:00:00+00:00"
+SUPPORTED_AUTH_MARKER_PROVIDERS = frozenset({CODEX_PROVIDER, NOUS_PROVIDER})
 
 
 def _required_env(name: str) -> str:
@@ -95,6 +108,92 @@ def configure_github_git_helper() -> None:
     )
 
 
+def _connect_codex_auth_marker(auth: object) -> None:
+    """Write the Codex placeholder block unless one is already present."""
+    try:
+        existing = auth._read_codex_tokens()
+        tokens = existing.get("tokens", {}) if isinstance(existing, dict) else {}
+        if tokens.get("access_token") and tokens.get("refresh_token"):
+            print("[provider-marker] openai-codex block already present; nothing to do")
+            return
+    except Exception:
+        pass
+    auth._save_codex_tokens({"access_token": AUTH_MARKER_SENTINEL, "refresh_token": AUTH_MARKER_SENTINEL})
+    print(f"[provider-marker] wrote openai-codex placeholder block to {auth.get_hermes_home() / 'auth.json'}")
+
+
+def _connect_nous_auth_marker(auth: object) -> None:
+    """Write the Nous placeholder state using upstream's provider-state helper."""
+    try:
+        existing = auth.get_provider_auth_state(NOUS_PROVIDER)
+        if isinstance(existing, dict) and existing.get("refresh_token") and existing.get("agent_key"):
+            print("[provider-marker] nous block already present; nothing to do")
+            return
+    except Exception:
+        pass
+
+    now = dt.datetime.now(tz=dt.timezone.utc).isoformat()
+    state = {
+        "portal_base_url": NOUS_PORTAL_BASE_URL,
+        "inference_base_url": NOUS_INFERENCE_BASE_URL,
+        "client_id": NOUS_OAUTH_CLIENT_ID,
+        "scope": NOUS_SCOPE,
+        "token_type": "Bearer",
+        "access_token": AUTH_MARKER_SENTINEL,
+        "refresh_token": AUTH_MARKER_SENTINEL,
+        "obtained_at": now,
+        "expires_at": NOUS_MARKER_EXPIRES_AT,
+        "expires_in": 999999999,
+        "tls": {"insecure": False, "ca_bundle": None},
+        "agent_key": AUTH_MARKER_SENTINEL,
+        "agent_key_id": None,
+        "agent_key_expires_at": NOUS_MARKER_EXPIRES_AT,
+        "agent_key_expires_in": 999999999,
+        "agent_key_reused": False,
+        "agent_key_obtained_at": now,
+    }
+    auth.persist_nous_credentials(creds=state, label="DevOps Hero")
+    if hasattr(auth, "invalidate_nous_auth_status_cache"):
+        auth.invalidate_nous_auth_status_cache()
+    print(f"[provider-marker] wrote nous placeholder block to {auth.get_hermes_home() / 'auth.json'}")
+
+
+def _connect_auth_marker(auth: object, provider: str) -> None:
+    """Write the provider's local placeholder marker."""
+    if provider == CODEX_PROVIDER:
+        _connect_codex_auth_marker(auth=auth)
+        return
+    if provider == NOUS_PROVIDER:
+        _connect_nous_auth_marker(auth=auth)
+        return
+    raise ValueError(f"unsupported provider: {provider}")
+
+
+def _disconnect_auth_marker(auth: object, provider: str) -> None:
+    """Clear the provider's local auth marker."""
+    cleared = auth.clear_provider_auth(provider)
+    print(f"[provider-marker] cleared {provider} block: {cleared}")
+
+
+def run_auth_marker(*, action: str, provider: str) -> int:
+    """Add or remove a DOH-managed provider block in auth.json."""
+    try:
+        from hermes_cli import auth
+    except Exception as exc:  # pragma: no cover - import wiring is environment-specific
+        print(f"[provider-marker] cannot import hermes_cli.auth: {exc}", file=sys.stderr)
+        return 1
+
+    try:
+        if action == "connect":
+            _connect_auth_marker(auth=auth, provider=provider)
+        else:
+            _disconnect_auth_marker(auth=auth, provider=provider)
+    except Exception as exc:
+        print(f"[provider-marker] {action} {provider} failed: {exc}", file=sys.stderr)
+        return 1
+    return 0
+
+
 def _configured_model_provider(config_path: Path) -> str | None:
     """Return the rendered runtime config's model provider."""
     try:
@@ -118,7 +217,7 @@ def _configured_model_provider(config_path: Path) -> str | None:
 def seed_provider_placeholder(hermes_home: Path) -> int:
     """Seed a placeholder auth marker when a DOH-managed provider is the default backend."""
     provider = _configured_model_provider(config_path=hermes_home / "config.yaml")
-    if provider not in provider_auth_marker.SUPPORTED_PROVIDERS:
+    if provider not in SUPPORTED_AUTH_MARKER_PROVIDERS:
         return 0
 
     # Credential model A: the real model-provider token lives outside the
@@ -132,14 +231,14 @@ def seed_provider_placeholder(hermes_home: Path) -> int:
         return 1
 
     try:
-        provider_auth_marker._connect(auth=auth, provider=provider)
+        _connect_auth_marker(auth=auth, provider=provider)
     except Exception as exc:
         print(f"[sandbox-seed] failed to seed {provider} placeholder: {exc}", file=sys.stderr)
         return 1
     return 0
 
 
-def main() -> int:
+def run_boot_seed() -> int:
     """Run all sandbox-local boot seeds."""
     hermes_home = _hermes_home()
     workspace = Path(_required_env(name="HERMES_WEBUI_DEFAULT_WORKSPACE")).expanduser()
@@ -151,5 +250,26 @@ def main() -> int:
     return seed_provider_placeholder(hermes_home=hermes_home)
 
 
+def _dispatch(argv: list[str]) -> int:
+    """Run boot seed or a broker-invoked auth-marker update."""
+    if len(argv) >= 3 and argv[0] == "--auth-marker":
+        action = argv[1]
+        provider = argv[2]
+        if action not in ("connect", "disconnect") or provider not in SUPPORTED_AUTH_MARKER_PROVIDERS:
+            print(
+                "usage: sandbox_seed.py --auth-marker {connect|disconnect} {openai-codex|nous}",
+                file=sys.stderr,
+            )
+            return 2
+        return run_auth_marker(action=action, provider=provider)
+    if argv:
+        print(
+            "usage: sandbox_seed.py [--auth-marker {connect|disconnect} {openai-codex|nous}]",
+            file=sys.stderr,
+        )
+        return 2
+    return run_boot_seed()
+
+
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(_dispatch(argv=sys.argv[1:]))

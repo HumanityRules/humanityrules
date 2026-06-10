@@ -14,15 +14,19 @@ from unittest.mock import patch
 
 def _runtime_dir() -> pathlib.Path:
     repo_root = pathlib.Path(__file__).resolve().parents[2]
-    return repo_root / "template_repos" / "hermes_agent" / "doh_runtime"
+    return repo_root / "template_repos" / "hermes_agent" / "doh_runtime" / "webapps"
+
+
+def _doh_runtime_dir() -> pathlib.Path:
+    return _runtime_dir().parent
 
 
 def _load_runtime_module(name: str, filename: str) -> types.ModuleType:
-    runtime_dir = _runtime_dir()
-    if str(runtime_dir) not in sys.path:
-        sys.path.insert(0, str(runtime_dir))
+    webapps_dir = _runtime_dir()
+    if str(webapps_dir) not in sys.path:
+        sys.path.insert(0, str(webapps_dir))
 
-    script_path = runtime_dir / filename
+    script_path = webapps_dir / filename
     loader = importlib.machinery.SourceFileLoader(name, str(script_path))
     spec = importlib.util.spec_from_loader(name, loader)
     module = importlib.util.module_from_spec(spec)
@@ -120,7 +124,7 @@ class TestHermesWebappsRuntimeContract(unittest.TestCase):
         )
 
     def test_webui_starts_process_compose_with_explicit_internal_log_files(self) -> None:
-        script = (_runtime_dir() / "webui.sh").read_text()
+        script = (_doh_runtime_dir() / "webui.sh").read_text()
 
         self.assertIn('--log-file "${PROCESS_COMPOSE_ROOT}/system/process-compose.log"', script)
         self.assertIn('--log-file "${PROCESS_COMPOSE_ROOT}/webapps/process-compose.log"', script)

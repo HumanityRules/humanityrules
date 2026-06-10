@@ -100,7 +100,7 @@ start_webapps_process_compose() {
 
 start_caddy() {
     echo "[webui] Starting Caddy on :${CADDY_PORT}..."
-    caddy run --config /opt/doh/runtime/Caddyfile --adapter caddyfile --watch 2>&1 &
+    caddy run --config "${DOH_RUNTIME_DIR}/webapps/Caddyfile" --adapter caddyfile --watch 2>&1 &
     CADDY_PID=$!
 }
 
@@ -114,7 +114,7 @@ bootstrap_admin_webapp() {
     # in the YAML, skip silently.
     webapps create __admin --if-missing --bootstrap-enabled \
         --command "$HERMES_WEBUI_PYTHON -m admin" \
-        --cwd /opt/doh/runtime
+        --cwd "${DOH_RUNTIME_DIR}/webapps"
 }
 
 bootstrap_gateway_process() {
@@ -130,7 +130,7 @@ bootstrap_gateway_process() {
     #
     # API_SERVER_ENABLED / API_SERVER_KEY are exported at container scope (top
     # of this file) so both the gateway and webapp children inherit them.
-    "$HERMES_WEBUI_PYTHON" /opt/doh/runtime/system_process_compose_seed.py system.gateway \
+    "$HERMES_WEBUI_PYTHON" "${DOH_RUNTIME_DIR}/webapps/system_process_compose_seed.py" system.gateway \
         --command "$HERMES_WEBUI_PYTHON -m hermes_cli.main gateway run --replace -v" \
         --cwd "$HERMES_WEBUI_AGENT_DIR"
 }
@@ -141,7 +141,7 @@ bootstrap_webui_process() {
     # targeted restart spawns a fresh server.py, which imports api.config, whose
     # module body runs init_profile_state() -> _reload_dotenv(${HERMES_HOME}),
     # loading the broker's latest .env into os.environ (override) on every start.
-    "$HERMES_WEBUI_PYTHON" /opt/doh/runtime/system_process_compose_seed.py system.webui \
+    "$HERMES_WEBUI_PYTHON" "${DOH_RUNTIME_DIR}/webapps/system_process_compose_seed.py" system.webui \
         --command "$HERMES_WEBUI_PYTHON server.py" \
         --cwd "$HERMES_WEBUI_DIR"
 }
