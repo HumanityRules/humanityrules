@@ -116,7 +116,8 @@ start_integrations_broker() {
     fi
     mkdir -p "$INTEGRATIONS_BROKER_CA_DIR" "$INTEGRATIONS_BROKER_PRIVATE_DIR"
     chmod 700 "$INTEGRATIONS_BROKER_PRIVATE_DIR"
-    "$HERMES_WEBUI_PYTHON" "${DOH_RUNTIME_DIR}/integrations_broker.py" \
+    PYTHONPATH="${DOH_RUNTIME_DIR}/integrations" \
+    "$HERMES_WEBUI_PYTHON" "${DOH_RUNTIME_DIR}/integrations/integrations_broker.py" \
         --proxy-port "$INTEGRATIONS_BROKER_PROXY_PORT" \
         --control-port "$INTEGRATIONS_BROKER_CONTROL_PORT" \
         --mcp-port "$MCP_AGGREGATOR_PORT" \

@@ -193,8 +193,8 @@ COPY doh_runtime /opt/doh/runtime
 
 # Expose the webapps CLI on PATH. Source-of-truth lives in doh_runtime/ so the
 # whole runtime tree COPYs together; the symlink lets the agent type `webapps`.
-RUN chmod +x /opt/doh/runtime/webapps \
-    && ln -sf /opt/doh/runtime/webapps /opt/doh/bin/webapps
+RUN chmod +x /opt/doh/runtime/webapps/webapps \
+    && ln -sf /opt/doh/runtime/webapps/webapps /opt/doh/bin/webapps
 
 # DOH-owned WebUI extension bundle. Loaded by Hermes WebUI per docs/EXTENSIONS.md
 # when the HERMES_WEBUI_EXTENSION_* env vars are set (see webui.sh).

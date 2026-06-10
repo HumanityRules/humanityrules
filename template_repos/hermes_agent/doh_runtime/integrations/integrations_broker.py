@@ -327,10 +327,10 @@ def _run_provider_auth_marker(provider: str, action: str) -> bool:
     if not python or not runtime_dir or not hermes_home:
         logger.error("provider auth marker skipped: HERMES_WEBUI_PYTHON/DOH_RUNTIME_DIR/HERMES_HOME not set")
         return False
-    script = str(Path(runtime_dir) / "provider_auth_marker.py")
+    script = str(Path(runtime_dir) / "sandbox_seed.py")
     try:
         result = subprocess.run(
-            ["runuser", "-u", GATEWAY_USER, "--", python, script, action, provider],
+            ["runuser", "-u", GATEWAY_USER, "--", python, script, "--auth-marker", action, provider],
             env={**os.environ, "HERMES_HOME": hermes_home},
             capture_output=True,
             text=True,

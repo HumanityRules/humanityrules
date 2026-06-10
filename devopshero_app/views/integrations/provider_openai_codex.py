@@ -2,7 +2,7 @@
 
 Unlike the redirect-dance OAuth providers (Google, GitHub), Codex connects via
 OpenAI's device flow run *by the env-resident broker* (see
-`doh_runtime/integrations_broker.py`). The broker drives the device handshake,
+`doh_runtime/integrations/integrations_broker.py`). The broker drives the device handshake,
 then POSTs the resulting refresh_token to DOH at
 `/api/integrations/credentials/openai-codex/device-complete`, which stores it
 as an IntegrationUserCredential row. No browser redirect, no callback of ours,

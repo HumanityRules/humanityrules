@@ -101,10 +101,10 @@ def _install_stubs_if_needed() -> None:
 
 
 def _load_runtime_module(name: str) -> types.ModuleType:
-    """Load template_repos/hermes_agent/doh_runtime/<name>.py as a top-level module.
+    """Load template_repos/hermes_agent/doh_runtime/integrations/<name>.py as a top-level module.
 
     Mirrors the load-by-bare-name behaviour of supervisor.sh / production. We
-    add the runtime dir to sys.path so peer modules (`mcp_top_level_tools`,
+    add the integrations dir to sys.path so peer modules (`mcp_top_level_tools`,
     `connectors`, …) resolve.
 
     A sibling test file (test_integrations_broker.py) installs a tiny stub
@@ -113,13 +113,13 @@ def _load_runtime_module(name: str) -> types.ModuleType:
     any cached entry so we always exec the real runtime file.
     """
     repo_root = pathlib.Path(__file__).resolve().parents[2]
-    runtime_dir = repo_root / "template_repos" / "hermes_agent" / "doh_runtime"
-    if str(runtime_dir) not in sys.path:
-        sys.path.insert(0, str(runtime_dir))
+    integrations_dir = repo_root / "template_repos" / "hermes_agent" / "doh_runtime" / "integrations"
+    if str(integrations_dir) not in sys.path:
+        sys.path.insert(0, str(integrations_dir))
     sys.modules.pop(name, None)
-    script_path = runtime_dir / f"{name.split('.')[0]}.py"
+    script_path = integrations_dir / f"{name.split('.')[0]}.py"
     if name.startswith("connectors."):
-        script_path = runtime_dir / "connectors" / f"{name.split('.')[1]}.py"
+        script_path = integrations_dir / "connectors" / f"{name.split('.')[1]}.py"
     spec = importlib.util.spec_from_file_location(name=name, location=str(script_path))
     module = importlib.util.module_from_spec(spec)
     sys.modules[name] = module

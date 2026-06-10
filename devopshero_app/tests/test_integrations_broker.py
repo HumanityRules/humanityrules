@@ -50,19 +50,19 @@ def _install_mcp_aggregator_stub_if_needed() -> None:
 
 
 def _load_broker_module() -> types.ModuleType:
-    """Load template_repos/hermes_agent/doh_runtime/integrations_broker.py as a module.
+    """Load template_repos/hermes_agent/doh_runtime/integrations/integrations_broker.py as a module.
 
-    The broker imports its sibling `mcp_aggregator` module by bare name. When
-    supervisor.sh runs the broker as a script in production, /opt/doh/runtime/
-    is automatically on sys.path. Under pytest we're loading via importlib from
-    the Django repo root, so we have to put the runtime dir on sys.path
-    ourselves before exec_module triggers the bare imports.
+    The broker imports its sibling modules by bare name. When supervisor.sh runs
+    the broker in production, PYTHONPATH includes /opt/doh/runtime/integrations.
+    Under pytest we're loading via importlib from the Django repo root, so we
+    have to put the integrations dir on sys.path ourselves before exec_module
+    triggers the bare imports.
     """
     repo_root = pathlib.Path(__file__).resolve().parents[2]
-    runtime_dir = repo_root / "template_repos" / "hermes_agent" / "doh_runtime"
-    script_path = runtime_dir / "integrations_broker.py"
-    if str(runtime_dir) not in sys.path:
-        sys.path.insert(0, str(runtime_dir))
+    integrations_dir = repo_root / "template_repos" / "hermes_agent" / "doh_runtime" / "integrations"
+    script_path = integrations_dir / "integrations_broker.py"
+    if str(integrations_dir) not in sys.path:
+        sys.path.insert(0, str(integrations_dir))
     _install_mcp_aggregator_stub_if_needed()
     spec = importlib.util.spec_from_file_location(
         name="integrations_broker_under_test",
