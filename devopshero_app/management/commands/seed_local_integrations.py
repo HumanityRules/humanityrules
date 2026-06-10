@@ -14,11 +14,11 @@ Two control-plane checks then have to pass for "Connect Google" to work:
    app from `app_slug` (must be owned by `owner_username` in the env's org).
 
 This command creates that Environment (status READY so the provisioning
-job_worker, which polls PENDING, leaves it alone — no CloudFormation) and mints
-an EnvironmentBearerToken with a known raw value. It does NOT create the App,
-owner tag, or user: those are real rows you already own (e.g. hermes-vmendi00 /
-vmendi@gmail.com). Pass --app-slug / --owner-username only to validate they
-exist and are correctly wired before you start the stack.
+job_worker, which polls PENDING, leaves it alone — no CloudFormation), mints
+an EnvironmentBearerToken with a known raw value, and ensures a DB-only App
+stub (App row + owner tag) for the local compose container to impersonate.
+No AWS deployment or Blueprint is created — the running docker-compose stack
+*is* the app; DOH only needs the identity rows for integrations auth.
 
 Usage:
     uv run manage.py seed_local_integrations \\
@@ -33,16 +33,21 @@ from django.core.management.base import BaseCommand, CommandError
 
 from devopshero_app.models import (
     App,
+    AppTemplate,
     AWSAccount,
     Environment,
     EnvironmentBearerToken,
+    Repository,
     ResourceTag,
     User,
+    Workspace,
 )
 
 DEFAULT_ENV_SLUG = "local"
 DEFAULT_HOSTED_ZONE = "localhost"
 DEFAULT_BEARER = "local-dev-bearer-token"
+DEFAULT_TEMPLATE_SLUG = "hermes-personal"
+DEFAULT_WORKSPACE_SLUG = "default"
 
 
 class Command(BaseCommand):
@@ -56,6 +61,16 @@ class Command(BaseCommand):
         parser.add_argument("--hosted-zone", default=DEFAULT_HOSTED_ZONE, help=f"shared_alb_hosted_zone; must suffix-match the WebUI host (default '{DEFAULT_HOSTED_ZONE}').")
         parser.add_argument("--bearer", default=DEFAULT_BEARER, help=f"Raw bearer to export as DOH_ENV_BEARER (default '{DEFAULT_BEARER}').")
         parser.add_argument("--region", default="us-east-1", help="aws_region for the env row (cosmetic locally; default 'us-east-1').")
+        parser.add_argument(
+            "--template",
+            default=DEFAULT_TEMPLATE_SLUG,
+            help=f"AppTemplate slug for a new local App stub (default '{DEFAULT_TEMPLATE_SLUG}').",
+        )
+        parser.add_argument(
+            "--workspace",
+            default=DEFAULT_WORKSPACE_SLUG,
+            help=f"Workspace slug for a new local App stub (default '{DEFAULT_WORKSPACE_SLUG}').",
+        )
 
     def handle(self, *args, **options) -> None:
         aws_account = self._resolve_aws_account(name=options["aws_account"])
@@ -65,10 +80,12 @@ class Command(BaseCommand):
             hosted_zone=options["hosted_zone"],
             region=options["region"],
         )
-        self._validate_app_and_owner(
+        self._ensure_local_app_stub(
             org=aws_account.organization,
             app_slug=options["app_slug"],
             owner_username=options["owner_username"],
+            template_slug=options["template"],
+            workspace_slug=options["workspace"],
         )
         raw = options["bearer"]
         self._mint_bearer(env=env, raw=raw)
@@ -99,26 +116,123 @@ class Command(BaseCommand):
         self.stdout.write(self.style.SUCCESS(f"{action} Environment slug={env_slug!r} zone={hosted_zone!r} status=READY"))
         return env
 
-    def _validate_app_and_owner(self, org, app_slug: str, owner_username: str) -> None:
-        """Fail loudly now if the App / owner-tag / user wiring won't satisfy the OAuth start view later."""
-        app = App.objects.filter(organization=org, slug=app_slug).first()
-        if app is None:
-            raise CommandError(f"No App slug={app_slug!r} in org {org.name!r}. The local container can only impersonate an existing app.")
-
-        owner_tag = ResourceTag.objects.filter(
-            resource_type=ResourceTag.ResourceType.APP,
-            app=app,
-            key="owner",
-            value=owner_username,
-        ).first()
-        if owner_tag is None:
-            raise CommandError(f"App {app_slug!r} has no owner tag for {owner_username!r}; OAuth start would reject the app_slug.")
-
+    def _ensure_local_app_stub(
+        self,
+        org,
+        app_slug: str,
+        owner_username: str,
+        template_slug: str,
+        workspace_slug: str,
+    ) -> None:
+        """Ensure the local compose container can impersonate *app_slug* in *org*."""
         user = User.objects.filter(username=owner_username, organization_memberships__organization=org).first()
         if user is None:
             raise CommandError(f"No User {owner_username!r} in org {org.name!r}; token refresh would treat every provider as absent.")
 
+        app = App.objects.filter(organization=org, slug=app_slug).first()
+        if app is None:
+            app = self._create_local_app_stub(
+                org=org,
+                app_slug=app_slug,
+                template_slug=template_slug,
+                workspace_slug=workspace_slug,
+                created_by=user,
+            )
+            self.stdout.write(self.style.SUCCESS(f"created local App stub slug={app_slug!r} (no deployment)"))
+        else:
+            self.stdout.write(self.style.SUCCESS(f"found existing App slug={app_slug!r}"))
+
+        owner_tag, created = ResourceTag.objects.get_or_create(
+            organization=org,
+            resource_type=ResourceTag.ResourceType.APP,
+            app=app,
+            key="owner",
+            defaults={"value": owner_username},
+        )
+        if not created and owner_tag.value != owner_username:
+            raise CommandError(
+                f"App {app_slug!r} is owned by {owner_tag.value!r}, not {owner_username!r}; "
+                "pick a different --app-slug or fix the owner tag.",
+            )
+        if created:
+            self.stdout.write(self.style.SUCCESS(f"stamped owner tag {owner_username!r} on App={app_slug!r}"))
+
         self.stdout.write(self.style.SUCCESS(f"validated App={app_slug!r} owner={owner_username!r} (tag + org membership OK)"))
+
+    def _create_local_app_stub(
+        self,
+        org,
+        app_slug: str,
+        template_slug: str,
+        workspace_slug: str,
+        created_by: User,
+    ) -> App:
+        """Create a DB-only Hermes App row the local compose stack impersonates."""
+        try:
+            template = AppTemplate.objects.get(slug=template_slug, is_active=True)
+        except AppTemplate.DoesNotExist:
+            raise CommandError(f"AppTemplate {template_slug!r} not found or not active; run seed_app_templates first.")
+
+        try:
+            workspace = Workspace.objects.get(organization=org, slug=workspace_slug)
+        except Workspace.DoesNotExist:
+            raise CommandError(f"No Workspace slug={workspace_slug!r} in org {org.name!r}.")
+
+        primary = self._primary_build_container(template=template)
+        clone_url = f"doh-template://{primary['source_repo_path']}"
+        repo, _created = Repository.objects.get_or_create(
+            organization=org,
+            full_name=f"template/{template.slug}",
+            defaults={
+                "provider": Repository.Provider.LOCAL,
+                "integration": None,
+                "name": template.name,
+                "clone_url": clone_url,
+                "default_branch": "main",
+            },
+        )
+        app = App.objects.create(
+            organization=org,
+            workspace=workspace,
+            repository=repo,
+            source_template=template,
+            name=app_slug.replace("-", " ").title(),
+            slug=app_slug,
+            app_type=App.AppType.WEB,
+            build_strategy=App.BuildStrategy.DOCKERFILE,
+            dockerfile_path=primary.get("dockerfile_path", ""),
+            container_port=primary["container_port"],
+            health_check_path=primary.get("health_check_path", ""),
+            health_check_command=primary.get("health_check_command", ""),
+            health_check_grace_period=primary.get("health_check_grace_period", 0),
+            branch="",
+            created_by=created_by,
+        )
+        for tag in template.default_tags or []:
+            ResourceTag.objects.get_or_create(
+                organization=org,
+                resource_type=ResourceTag.ResourceType.APP,
+                app=app,
+                key=tag["key"],
+                defaults={"value": tag["value"]},
+            )
+        return app
+
+    def _primary_build_container(self, template: AppTemplate) -> dict:
+        """Return the template's dockerfile-built app container (not the policy proxy)."""
+        target_name = template.alb_target_container
+        target = next((c for c in template.containers if c["name"] == target_name), None)
+        if target is None:
+            raise CommandError(f"Template {template.slug!r} has no alb_target_container {target_name!r}.")
+        if target["image_source"] == "policy_proxy":
+            upstream = target.get("upstream_container")
+            if not upstream:
+                raise CommandError(f"Template {template.slug!r} policy proxy has no upstream_container.")
+            upstream_container = next((c for c in template.containers if c["name"] == upstream), None)
+            if upstream_container is None:
+                raise CommandError(f"Template {template.slug!r} upstream_container {upstream!r} not found.")
+            return upstream_container
+        return target
 
     def _mint_bearer(self, env: Environment, raw: str) -> None:
         """Store only the SHA-256 hash on DOH; the raw value goes in the container's DOH_ENV_BEARER."""
