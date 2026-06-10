@@ -1,68 +1,106 @@
 ---
 name: hermes-update-check
-description: Evaluate whether we can update the pinned Hermes Agent and Hermes WebUI versions, drop or re-anchor any DOH-owned patches under template_repos/hermes_agent/build/patches-agent/ or build/patches-webui/, and what upstream changes have landed since our pins. Use when the user asks about Hermes update status, whether patches are still needed, or what has improved upstream.
+description: Evaluate whether we can update the pinned Hermes Agent and Hermes WebUI versions by rebasing the DOH fork branches (doh/v* in DevOpsHeroAI/hermes-agent and hermes-webui) onto a newer upstream release, which DOH commits drop out as landed-upstream or need re-anchoring, and what upstream changes have landed since our pins. Use when the user asks about Hermes update status, whether our forks still carry needed changes, or what has improved upstream.
 ---
 
 # Hermes Update Check
 
-Two components, same questions for each:
+Updating Hermes = rebasing our fork branch onto a newer upstream release, then moving
+the submodule pin. This skill records where everything lives and the project-specific
+traps a bump can spring.
 
-1. Is there a newer version? How far is upstream ahead of our pin?
-2. For each DOH-owned patch, has the fix landed upstream?
-3. What else changed that matters to us?
+## How DOH's changes are carried
 
-## The two pins
+Both components are **vendored forks**: a private mirror with a `doh/v<upstream-version>`
+branch = upstream-at-that-tag + DOH commits on top. The monorepo points at a chosen
+commit via a git submodule.
 
-Both live in `template_repos/hermes_agent/Dockerfile`:
+- **Agent** — submodule at `template_repos/hermes_agent/vendor/hermes-agent`, pinned to
+  `doh/v<ver>` in `DevOpsHeroAI/hermes-agent` (mirror of `NousResearch/hermes-agent`).
+  The Dockerfile COPYs it verbatim — no base image.
+- **WebUI** — submodule at `vendor/hermes-webui`, pinned to `doh/v<ver>` in
+  `DevOpsHeroAI/hermes-webui` (mirror of `nesquena/hermes-webui`). The Dockerfile does
+  `FROM ghcr.io/nesquena/hermes-webui:${WEBUI_BASE_VERSION}` and overlays the fork
+  source onto `/apptoo` (`build/overlay-webui.sh`).
 
-- **Hermes Agent** — `git clone --branch <tag>` from `NousResearch/hermes-agent` (`ARG HERMES_AGENT_REF`). Patches in `build/patches-agent/`.
-- **Hermes WebUI** — `FROM ghcr.io/nesquena/hermes-webui:<tag>` (source: `nesquena/hermes-webui` on GitHub). Patches in `build/patches-webui/`, applied against `/apptoo/` in the image.
+So the WebUI has **two things that must agree**: the base image tag
+(`WEBUI_BASE_VERSION` ARG) and the fork branch the submodule points at. The fork
+branch commits `.doh-upstream-version`, and `build/check-vendor.sh` fails the build
+if it doesn't equal the base tag. A WebUI bump moves **both** in lockstep.
 
-`build/patches-webui/README.md` documents each WebUI patch; agent patches carry their rationale in the patch header. Read it before deciding the verdict.
+Rebasing happens in the workbench clones at `hermes-vendor-work/<repo>` — the only
+checkouts with full history (the submodules are shallow). There, `origin` is upstream
+and `doh` is the mirror.
 
-**Both patch sets apply via `build/apply-patches.py`, which runs `patch -p1 -F 0` (zero fuzz) — a changed context line is a hard build failure for either set.** Line-number offset is tolerated; changed context is not.
+## Bumping
 
-## Workflow per component
+1. **Pin** = the `doh/v<ver>` the submodule points at; for WebUI also the
+   `WEBUI_BASE_VERSION` ARG. Latest upstream: git tags (agent), container tags (webui).
+2. **Rebase** `doh/v<old>` onto the new tag in the workbench clone.
+3. **Skim these areas** for behavior we depend on:
+   - Agent: Bedrock path, `resolve_provider_client`, prompt caching, provider registry,
+     `tools/lazy_deps.py` pins (esp. `provider.anthropic` — our Dockerfile `anthropic==`
+     pin must match the lazy path, NOT the `pyproject.toml` extra, which can disagree).
+   - WebUI: model list handling, access logs, Bedrock live discovery, reasoning/thinking
+     events, streaming perf, request-gating middleware (see landmines).
+4. **Land it:** push the rebased `doh/v<new>` branch + the new upstream tag to `doh`;
+   for WebUI update `.doh-upstream-version` and `WEBUI_BASE_VERSION` together; check out
+   `doh/v<new>` in the submodule and commit the gitlink via `build/vendor-commit.sh`
+   (not a blind `git add -A` — it can ship an unintended pin bump).
 
-1. **Read the pin** from the Dockerfile.
-2. **List available versions** upstream (git tags for the agent, container tags for the webui) and see how far `main` / latest is ahead.
-3. **For each patch**: read it, identify the target file and the key identifier being changed, fetch the current upstream file, and classify:
-   - **Landed** — upstream already has the fix (verbatim or via refactor that covers our case). Confirm semantics before declaring obsolete.
-   - **Not landed** — our anchor still matches. Keep the patch; check whether it still applies cleanly.
-4. **Background changes worth flagging** — skim the areas we care about:
-   - Agent: Bedrock path, `resolve_provider_client`, prompt caching, provider registry, `tools/lazy_deps.py` pins (esp. `provider.anthropic` — our Dockerfile `anthropic==` pin must match the lazy path, NOT the `pyproject.toml` extra, which can disagree).
-   - WebUI: model list handling, access logs, Bedrock live discovery, reasoning/thinking events, streaming perf, **and request-gating middleware (CSRF / origin / auth) — see "Behavior-change landmines" below.**
+## Behavior-change landmines (a clean rebase is not a working bump)
 
-## Behavior-change landmines (a bump can break runtime even when every patch applies clean)
+Rebase conflicts only surface code we touched. A bump also ships **new behavior** that
+breaks DOH's topology with zero conflicts — so boot the stack and exercise the real
+browser→proxy→Caddy→WebUI path before declaring it safe.
 
-The patch-drift pass only catches code we edited. A WebUI/Agent bump also ships **new behavior** that can break DOH's topology with zero patch conflicts. Before declaring a bump safe, **boot the stack and exercise the real browser→proxy→Caddy→WebUI path**, not just the upstream-tree dry-run. Specifically check:
+- **New request-gating middleware.** Diff for newly-added `_check_csrf` / origin / Host /
+  auth gates on POST/PUT/PATCH. DOH's proxy rewrites `Host` to the loopback upstream and
+  carries the real host in `X-Forwarded-Host`, so any same-origin check that compares
+  `Origin` vs `Host` will 403 unless opted out. (v0.51.267 #3642 added exactly this; fix =
+  `HERMES_WEBUI_TRUST_FORWARDED_HOST=1`.) Grep the new-range changelog for
+  `csrf|cross-origin|forwarded-host|reverse prox` and **read the operator notes** — they
+  call out env vars to set.
+- **A 403/4xx on a POST = likely 501 downstream.** The policy proxy pools connections
+  (httpx); a handler that returns an error without draining the request body desyncs the
+  next pooled request, surfacing as `501 Unsupported method ('<json-body>POST')`. The
+  mangled method line IS the prior request's undrained body — trace back to *which POST got
+  the 4xx*, that's the real bug.
+- **New env vars must be allowlisted twice.** The WebUI runs inside the nono sandbox. A new
+  `HERMES_WEBUI_*` (or any) env var needs BOTH a Dockerfile `ENV` AND an entry in
+  `doh_runtime/hermes-nono-profile.json` `allow_vars` — the sandbox silently strips
+  anything not on the allowlist, so a Dockerfile-only ENV has no effect on `server.py`.
+  (`/proc/<pid>/environ` reads are unreliable here; confirm with `nono run --profile … --
+  env | grep VAR` or a behavioral test.)
+- **Bundled skill set drifts.** `build/prune-skills.sh` allowlists bundled skills by path
+  and `exit 1`s if one is missing → build failure. Upstream moves skills bundled→optional
+  between releases; diff our allowlist against the new tag's `skills/*/SKILL.md` and drop
+  entries that vanished.
+- **Skill-name collisions → "Ambiguous skill name … Refusing to guess".** The loader
+  (`tools/skills_tool.py`, since ~v2026.6.x) hard-errors when one bare name resolves in more
+  than one place, where pre-bump it silently preferred the local copy. Our layout avoids
+  this by keeping `skills.external_dirs: []` (image skills are *seeded* into
+  `$HERMES_HOME/skills` by `sync_skills()`, not read as a second dir — see
+  [[project_hermes_skills_ownership]]). One residual source survives because it reproduces
+  inside the seeded copy: **flat `<name>.md` inside another skill.** Loader "Strategy 3"
+  rglobs for `<name>.md` anywhere under a search dir and treats each as a skill, so
+  `creative/popular-web-designs/templates/{notion,posthog}.md` collide with the
+  `notion`/`posthog` skills. `prune-skills.sh` deletes those specific template files
+  (tolerant — already-absent is logged, not fatal). On bump, re-derive the colliding set:
+  for each `<name>.md` under any kept skill, flag it if a skill dir of that bare name also
+  exists. **Do NOT re-point `external_dirs` at the image tree** — that reintroduces the
+  full 38-way collision.
+- **A skill silently missing from the catalog.** `sync_skills()` copies image skills as the
+  unprivileged agent user; a source file that isn't world-readable (stray 0600) makes
+  `copytree` fail and the skill vanishes with only a `! Failed to copy` log line. The
+  Dockerfile normalizes modes after `COPY skills/`, but if you add DOH skills or a bundled
+  file ships odd perms, confirm `find skills -type f ! -perm -044` is empty.
 
-- **New request-gating middleware.** Diff for newly-added `_check_csrf` / origin / Host / auth gates on POST/PUT/PATCH. DOH's proxy rewrites `Host` to the loopback upstream and carries the real host in `X-Forwarded-Host`, so any same-origin check that compares `Origin` vs `Host` will 403 unless opted out. (v0.51.267 #3642 added exactly this; fix = `HERMES_WEBUI_TRUST_FORWARDED_HOST=1`.) Grep the new-range changelog for `csrf|cross-origin|forwarded-host|reverse prox` and **read the operator notes** — they call out env vars to set.
-- **A 403/4xx on a POST = likely 501 downstream.** The policy proxy pools connections (httpx); a handler that returns an error without draining the request body desyncs the next pooled request, surfacing as `501 Unsupported method ('<json-body>POST')`. The mangled method line IS the prior request's undrained body — trace back to *which POST got the 4xx*, that's the real bug.
-- **New env vars must be allowlisted twice.** The WebUI runs inside the nono sandbox. A new `HERMES_WEBUI_*` (or any) env var needs BOTH a Dockerfile `ENV` AND an entry in `doh_runtime/hermes-nono-profile.json` `allow_vars` — the sandbox silently strips anything not on the allowlist, so a Dockerfile-only ENV has no effect on `server.py`. (`/proc/<pid>/environ` reads are unreliable here; confirm with `nono run --profile … -- env | grep VAR` or a behavioral test.)
-- **Bundled skill set drifts.** `build/prune-skills.sh` allowlists bundled skills by path and `exit 1`s if one is missing → build failure. Upstream moves skills bundled→optional between releases; diff our allowlist against the new tag's `skills/*/SKILL.md` and drop entries that vanished.
-- **Skill-name collisions → "Ambiguous skill name … Refusing to guess".** The loader (`tools/skills_tool.py`, since ~v2026.6.x) hard-errors when one bare name resolves in more than one place, where pre-bump it silently preferred the local copy. Our layout avoids this by keeping `skills.external_dirs: []` (image skills are *seeded* into `$HERMES_HOME/skills` by `sync_skills()`, not read as a second dir — see [[project_hermes_skills_ownership]]). One residual source survives because it reproduces inside the seeded copy: **flat `<name>.md` inside another skill.** Loader "Strategy 3" rglobs for `<name>.md` anywhere under a search dir and treats each as a skill, so `creative/popular-web-designs/templates/{notion,posthog}.md` collide with the `notion`/`posthog` skills. `prune-skills.sh` deletes those specific template files (tolerant — already-absent is logged, not fatal). On bump, re-derive the colliding set: for each `<name>.md` under any kept skill, flag it if a skill dir of that bare name also exists. **Do NOT re-point `external_dirs` at the image tree** — that reintroduces the full 38-way collision.
-- **A skill silently missing from the catalog.** `sync_skills()` copies image skills as the unprivileged agent user; a source file that isn't world-readable (stray 0600) makes `copytree` fail and the skill vanishes with only a `! Failed to copy` log line. The Dockerfile normalizes modes after `COPY skills/`, but if you add DOH skills or a bundled file ships odd perms, confirm `find skills -type f ! -perm -044` is empty.
+## Report
 
-## Verifying re-anchored patches
-
-When a hunk fails on the bumped tree, **regenerate it with `diff -u` against a real `git clone --branch <tag>`**, not a hand-edited header — manual `@@` line-count math is the #1 source of silent re-anchor failures. Note the GitHub `contents` API can return a copy that differs by a few lines from `git clone --branch`; the build uses the clone, so verify against the clone.
-
-## Reporting format
-
-Keep the whole report under ~50 lines. Two sections, Agent and WebUI, each with:
-
-- **Pin** — current version, how far behind latest.
-- **Per-patch verdict** — one bullet per patch: landed / not landed, with a one-line justification pointing at upstream file:line.
-- **Background changes** — 2–4 bullets on areas above, including any behavior-change landmines hit.
-- **Recommendation** — bump or hold, and which patches to delete or re-anchor if bumping. Note the agent and WebUI are version-coupled (e.g. WebUI #3443's `openai-api` picker fix only works because the agent registry uses that slug), so call out when a fix needs both.
-
-The user has context from prior runs; they want the delta.
-
-## Gotchas
-
-- Patch line numbers drift. Grep for the identifier, not the line in the patch header.
-- "Landed" ≠ identical code. A refactor may cover our case differently — verify semantics.
-- Dead patches (the fix landed upstream) apply as a no-op and mask drift. Remove them (e.g. agent `07-package-hermes-cli-subpackages` landed and was deleted at the v2026.6.5 bump).
-- Both patch sets apply via `apply-patches.py` (`patch -p1 -F 0`) at image build — any context-line drift is a build failure, not a silent fuzz. Always dry-run against a fresh `git clone --branch <tag>` before building.
-- "Patches all apply" ≠ "the bump works." Always boot the stack and test the real browser/proxy path — see Behavior-change landmines.
+Under ~50 lines, two sections (Agent, WebUI): pin + how far behind; per-commit verdict
+(landed / clean / needs re-anchor) with an upstream `file:line`; 2–4 background bullets
+including any landmines hit; bump-or-hold recommendation. Agent and WebUI are
+version-coupled (e.g. WebUI #3443's `openai-api` picker fix only works because the agent
+registry uses that slug) — call out fixes that need both. The user has prior-run context;
+give the delta.

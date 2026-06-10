@@ -1,5 +1,40 @@
 # DevOpsHero Development Journal
 
+## 2026-06-10 15:04 - [DevEx] Replace Hermes patch-file system with vendored submodule forks
+
+**Conversation:** [2026-06-10-1506-6f999417.md](conversations/2026-06-10-1506-6f999417.md)
+
+Replaced the patch-file system under `template_repos/hermes_agent/build/patches-{agent,webui}/` (applied at image build by `apply-patches.py` via `patch -p1 -F 0`) with **git submodules of vendored Hermes forks**. DOH changes to Hermes are now commits on a `doh/v<upstream-version>` branch in private mirrors (`DevOpsHeroAI/hermes-agent`, `DevOpsHeroAI/hermes-webui`); the monorepo pins each via a submodule gitlink under `vendor/`.
+
+**Why.** The headline win is **merge ergonomics**, not hermetic builds. `patch -p1 -F 0` is zero-fuzz: any upstream context-line drift is a hard build failure with no path to resolution except hand-rewriting the patch. A `git rebase` of the fork branch onto a new upstream tag gives real 3-way conflict markers and history instead. The pipeline is unusually friendly to submodules because **prod inherits the laptop checkout**: `deploy_app.sh` builds the control-plane image with `COPY . .`, and the Hermes image build context is `template_repos/hermes_agent/` rsynced to the EC2 builder — so once a submodule is materialized locally, its files ride everywhere downstream with no CI/prod credential step. The classic submodule pain doesn't exist here.
+
+**Design decisions (in order of how we arrived at them):**
+- **Ranked ahead of a "build-time clone with a DOH token" design** — that approach forces a push-to-mirror before *every* local build (the clone happens inside `docker build`), killing the edit-iterate loop, and doesn't even buy hermetic builds in return.
+- **Killed the manifest.** Early design had the WebUI overlay rsync only files named in a committed `git diff` manifest (the build context has no `.git`, so the Dockerfile can't compute the diff). Verified instead that the base image's `/apptoo` is a clean `COPY . /apptoo` of upstream at the tag **plus exactly one generated file** (`api/_version.py`). So the fork tree *is* `/apptoo`'s source: rsync the whole fork over `/apptoo`, `--delete`, exclude `.git` + `api/_version.py` + use upstream's own `.dockerignore` as `--exclude-from`. No manifest = no staleness vector.
+- **`vendor/` and `build/` kept separate**, both top-level under `hermes_agent/`. Rejected nesting submodules under `build/` (buries 370 MB in a scripts dir) and rejected moving `prune-skills.sh` into `vendor/` (erodes the "vendor = read-only third-party" signal). `build/` machinery reaches *into* `vendor/` material.
+- **Flat-vendoring considered and deferred.** Flat-vendor (copy materialized trees as plain tracked files, no submodule) erases the gitlink-commit hazard and `.git` plumbing, at the cost of monorepo `.git` history growth. Decided to start with submodules and convert later if `.git` bloat ever bites — flat→submodule and the reverse are both mechanical, and starting submodule is lower-regret given worktrees are no longer in use (the worktree-init tax was the main argument against submodules).
+
+**The GATE (verified before any push).** Extracted `/apptoo` from `ghcr.io/nesquena/hermes-webui:0.51.293` (377 files) and diffed against upstream `v0.51.293` (commit `32d46f44`, 1177 files): the gap is exactly upstream's `.dockerignore` exclusions (`tests/` = 799, `.env*` = 2) plus `api/_version.py` (1177−799−2+1=377), with **zero content differences on shared files**. The whole `--delete` overlay premise rests on this correspondence; it's exact.
+
+**Four hardenings from a Codex review, all adopted after verifying:**
+1. `--delete` on the overlay (not "accept the rare residual") — rsync protects `--exclude`'d paths from deletion, so `_version.py` survives while stale upstream files/renames get reconciled. Makes the materialization guard load-bearing (empty source + `--delete` would wipe `/apptoo`).
+2. `**/.git` in **both** dockerignores — bare `.git` only matches context root, missing nested submodule `.git` *pointer files*. `infra_devopshero/Dockerfile.dockerignore` upgraded; `template_repos/hermes_agent/.dockerignore` had none, so added. Proven: with `**/.git`, `COPY vendor/...` yields a tree with no `.git` — the old `rm -rf .git` in the Dockerfile was dead code and was removed.
+3. WebUI base/source version guard — fork branch commits `.doh-upstream-version`; `check-vendor.sh` fails the build if it ≠ the `WEBUI_BASE_VERSION` ARG. Closes the riskiest silent failure: overlaying fork source from version X onto a base image of version Y.
+4. Materialization guard covers **both** submodules (`agent/pyproject.toml`, `webui/server.py` + `requirements.txt`) before any expensive build step — an unmaterialized submodule COPYs as an empty dir with no error.
+
+**New build scripts** (replacing `apply-patches.py`): `check-vendor.sh` (fail-fast + version guard), `overlay-webui.sh` (the rsync overlay + compileall), `vendor-commit.sh` (does the two-repo dance in the right order — commit on `doh/v*` → push to mirror → bump the gitlink — so a fresh checkout's detached HEAD, push-before-pin, or a blind `git add -A` pin bump can't bite).
+
+**Verified end-to-end:** full `docker build` succeeded; in the built image, agent patches 05/06 are present in `/opt/hermes/agent`, WebUI patches 05/09 in `/opt/hermes/webui`, `_version.py` preserved, `tests/` and `.git` absent, venv `.deps_installed`. The overlay simulation showed exactly the 5 patched source files differ from stock.
+
+**Also:** `HERMES_AGENT_REF` ARG retired (agent is COPY'd, not cloned); the `patch` apt package removed from the image (nothing invokes it now); `docker-compose.yml` watch paths repointed from `build/patches-*` to `vendor/`; `AGENTS.md` gained vendor conventions; `hermes-update-check` skill rewritten around rebase-not-patches and then streamlined to carry only project/external facts (general git competence removed). The full upstream clones live at `~/websites/hermes-vendor-work/` (outside the monorepo) as the rebase workbenches — the only checkouts with full history, since the submodules are shallow.
+
+**Key points:**
+- Sell the change internally as **rebase ergonomics**, not hermetic builds — that's the win felt on every version bump.
+- `/apptoo` = upstream git tree + `api/_version.py` only; this is what made the manifest unnecessary and the whole-tree `--delete` overlay safe. Re-verify this correspondence at any major WebUI bump.
+- Two folders, two jobs: edit/iterate in the **submodule** (build copies its bytes); rebase in the **workbench clone** (only one with full history). In the workbench `origin`=upstream and `doh`=mirror; in the submodule `origin`=mirror (no upstream remote at all).
+- The mirrors are standalone repos (`gh repo create`), **not** GitHub forks — avoids accidental cross-repo PRs against NousResearch/nesquena and the can't-be-private limitation of forks. Nothing auto-syncs; updates are pull-based and deliberate.
+- The WebUI base tag and fork's `.doh-upstream-version` must move in lockstep — `check-vendor.sh` enforces it.
+
 ## 2026-06-02 19:55 - [Bugfix] Webapps route gap when create readiness fails + dependency skill guidance
 
 **Conversation:** [2026-06-02-1955-f61f7d4a.md](conversations/2026-06-02-1955-f61f7d4a.md)

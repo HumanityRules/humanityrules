@@ -71,9 +71,11 @@ services:
           action: rebuild
         - path: ../hermes_agent/skills
           action: rebuild
-        - path: ../hermes_agent/build/patches-agent
+        - path: ../hermes_agent/vendor/hermes-agent
           action: rebuild
-        - path: ../hermes_agent/build/patches-webui
+        - path: ../hermes_agent/vendor/hermes-webui
+          action: rebuild
+        - path: ../hermes_agent/build
           action: rebuild
         - path: ../hermes_agent/Dockerfile
           action: rebuild

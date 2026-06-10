@@ -5,6 +5,13 @@ CLAUDE.md
 .env.*
 .env.example
 
+# Submodule git pointers. vendor/hermes-agent and vendor/hermes-webui are git
+# submodules; each contains a `.git` *file* pointing into the superproject's
+# .git/modules. We want the vendored source in the image but not the dangling
+# pointer. A bare `.git` only matches the context root, so `**/.git` is required
+# to catch the nested submodule pointers at any depth.
+**/.git
+
 # Python/build artifacts in the build context.
 **/__pycache__
 **/*.py[cod]

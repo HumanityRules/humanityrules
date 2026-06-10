@@ -4,8 +4,11 @@
 # relative to the build context, which is the project root (see deploy_app.sh:
 # `docker build -f infra_devopshero/Dockerfile -t devopshero:latest .`).
 
-# Git
-.git
+# Git. `**/.git` (not bare `.git`, which only matches the context root) so the
+# control-plane image's `COPY . .` excludes the nested submodule `.git` pointer
+# files under template_repos/hermes_agent/vendor/ -- they dangle into the
+# superproject's .git/modules and have no meaning inside the image.
+**/.git
 .gitignore
 .gitattributes
 
