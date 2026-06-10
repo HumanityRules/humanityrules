@@ -1,6 +1,11 @@
 # syntax=docker/dockerfile:1
 
-FROM ghcr.io/nesquena/hermes-webui:0.51.293
+ARG WEBUI_BASE_VERSION=0.51.293
+FROM ghcr.io/nesquena/hermes-webui:${WEBUI_BASE_VERSION}
+
+# Re-declare so the post-FROM stage can use it: the vendor guard asserts the
+# webui fork was rebased onto this same upstream version (see check-vendor.sh).
+ARG WEBUI_BASE_VERSION
 
 USER root
 
@@ -10,7 +15,6 @@ ARG CADDY_VERSION=2.11.3
 ARG PROCESS_COMPOSE_VERSION=1.110.0
 ARG TTYD_VERSION=1.7.7
 ARG GH_CLI_VERSION=2.92.0
-ARG HERMES_AGENT_REF=v2026.6.5
 ARG HERMES_AGENT_EXTRAS=messaging,matrix,cron,cli,dev,tts-premium,slack,pty,honcho,mcp,sms,acp,voice,google,bedrock,web
 
 # Runtime layout: /opt/doh and /opt/hermes are image-owned and refreshed into
@@ -43,7 +47,7 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,target=/var/lib/apt,sharing=locked \
     mkdir -p "$DOH_BIN_DIR" \
     && apt-get update \
-    && apt-get install -y --no-install-recommends ca-certificates curl file git libdbus-1-3 patch procps rsync unzip zstd \
+    && apt-get install -y --no-install-recommends ca-certificates curl file git libdbus-1-3 procps rsync unzip zstd \
     && arch="$(dpkg --print-architecture)" \
     && curl -fsSL -o /tmp/nono.deb \
         "https://github.com/always-further/nono/releases/download/v${NONO_VERSION}/nono-cli_${NONO_VERSION}_${arch}.deb" \
@@ -92,31 +96,37 @@ RUN { \
     } > /etc/profile.d/doh-bin.sh
 
 COPY --chmod=755 build/prune-skills.sh /tmp/prune-skills.sh
-COPY --chmod=755 build/apply-patches.py /tmp/apply-patches.py
+COPY --chmod=755 build/check-vendor.sh /tmp/check-vendor.sh
+COPY --chmod=755 build/overlay-webui.sh /tmp/overlay-webui.sh
 
-# Cache mount id includes HERMES_AGENT_REF so a version bump gets a fresh clone
-# instead of rsyncing a stale tree left by the previous ref.
-RUN --mount=type=cache,id=hermes-agent-git-${HERMES_AGENT_REF},target=/root/.cache/hermes-agent-git,sharing=locked \
-    mkdir -p "$HERMES_WEBUI_AGENT_DIR" \
-    && if [ -d /root/.cache/hermes-agent-git/.git ] || [ -f /root/.cache/hermes-agent-git/HEAD ]; then \
-        rsync -a --delete /root/.cache/hermes-agent-git/ "$HERMES_WEBUI_AGENT_DIR/"; \
-    else \
-        git clone --depth 1 --branch ${HERMES_AGENT_REF} https://github.com/NousResearch/hermes-agent.git "$HERMES_WEBUI_AGENT_DIR" \
-        && rsync -a "$HERMES_WEBUI_AGENT_DIR/" /root/.cache/hermes-agent-git/; \
-    fi \
-    && /tmp/prune-skills.sh "$HERMES_WEBUI_AGENT_DIR/skills" \
-    && rm -f /tmp/prune-skills.sh \
-    && rm -rf "$HERMES_WEBUI_AGENT_DIR/.git"
+# Vendored Hermes agent fork (git submodule at vendor/hermes-agent). It carries
+# DOH changes as commits on its doh/v* branch, so we copy it straight into place.
+# The submodule's .git pointer is kept out of the build context by .dockerignore
+# (**/.git). Docker layer caching makes a same-pin rebuild a cache hit.
+COPY vendor/hermes-agent ${HERMES_WEBUI_AGENT_DIR}/
 
-# WebUI lives in the base image at /apptoo/. Patch it before copying it into
-# $HERMES_WEBUI_DIR so the installed venv and precompiled bytecode use patched source.
-COPY build/patches-webui /tmp/patches-webui
-RUN set -eu; \
-    python3 /tmp/apply-patches.py /tmp/patches-webui /apptoo; \
-    python3 -m compileall -q /apptoo || true; \
-    rm -rf /tmp/patches-webui
+# Vendored Hermes webui fork (git submodule at vendor/hermes-webui), staged for
+# the /apptoo overlay below.
+COPY vendor/hermes-webui /tmp/vendor/hermes-webui
 
-COPY build/patches-agent /tmp/patches-agent
+# Fail fast before any expensive work: an unmaterialized submodule COPYs as an
+# empty dir (no error), and overlaying a webui fork rebased onto a different
+# upstream version than the base image is the riskiest silent failure here.
+RUN /tmp/check-vendor.sh "$HERMES_WEBUI_AGENT_DIR" /tmp/vendor/hermes-webui "${WEBUI_BASE_VERSION}" \
+    && rm -f /tmp/check-vendor.sh
+
+# Curate the bundled agent skill set. (The submodule's .git pointer is excluded
+# from the build context by .dockerignore's **/.git, so it never arrives here.)
+RUN /tmp/prune-skills.sh "$HERMES_WEBUI_AGENT_DIR/skills" \
+    && rm -f /tmp/prune-skills.sh
+
+# WebUI lives in the base image at /apptoo/. Overlay the vendored fork onto it
+# (rsync whole tree, --delete, protecting the build-stamped api/_version.py)
+# before it is copied into $HERMES_WEBUI_DIR so the installed venv and
+# precompiled bytecode use the overlaid source.
+RUN /tmp/overlay-webui.sh /tmp/vendor/hermes-webui /apptoo \
+    && rm -f /tmp/overlay-webui.sh \
+    && rm -rf /tmp/vendor
 
 RUN test -f /apptoo/requirements.txt \
     && cat >> /apptoo/requirements.txt <<'EOF'
@@ -135,8 +145,6 @@ WORKDIR /
 
 RUN mkdir -p /uv_cache "$HERMES_WEBUI_DIR" "$HERMES_HOME" "$HERMES_WEBUI_DEFAULT_WORKSPACE" "$HERMES_PERSISTENT_ROOT" "$HERMES_CHECKPOINT_ROOT" "$DOH_RUN_DIR" \
     && rsync -a /apptoo/ "$HERMES_WEBUI_DIR/" \
-    && python3 /tmp/apply-patches.py /tmp/patches-agent "$HERMES_WEBUI_AGENT_DIR" \
-    && rm -rf /tmp/patches-agent \
     && rm -rf /app /apptoo \
     && chown -R hermeswebui:hermeswebui /uv_cache "$HERMES_ROOT" "$HERMES_HOME" "$HERMES_WEBUI_DEFAULT_WORKSPACE"
 
