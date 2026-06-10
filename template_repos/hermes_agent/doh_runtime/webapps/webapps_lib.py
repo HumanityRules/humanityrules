@@ -51,18 +51,13 @@ class ProcessComposeProject:
 
 
 LOGS_DIR = Path("/workspace/webapps/logs")
-SYSTEM_SLUG_PREFIX = "system."
 
 PORT_MIN = 4000
 PORT_MAX = 4019
 PROCESS_COMPOSE_ADDR = "127.0.0.1"
 DEFAULT_TIMEOUT_SECONDS = 75
-READINESS_INITIAL_DELAY_SECONDS = 5
-READINESS_PERIOD_SECONDS = 2
-READINESS_TIMEOUT_SECONDS = 2
-READINESS_SUCCESS_THRESHOLD = 1
-READINESS_FAILURE_THRESHOLD = 30
 PROCESS_COMPOSE_TERMINAL_STATUSES = {"Completed", "Error", "Skipped"}
+
 WEBAPPS_PROJECT = ProcessComposeProject(
     config_dir=Path("/workspace/.config/process-compose/webapps"),
     port="9957",
@@ -81,12 +76,15 @@ SYSTEM_PROJECT = ProcessComposeProject(
     required_dirs=(LOGS_DIR,),
     route_file=None,
 )
+
 # Optional `__` prefix marks platform-internal slugs (e.g. __admin). No
 # enforcement: bootstrap wins the cold-start race; agent attempts collide.
 # Internal slugs are routed by path (<host>/webapps/<slug>/); user slugs are
 # routed by host (<slug>.<host>/). See route generation below.
 SLUG_PATTERN = re.compile(r"^(?:__)?[a-z][a-z0-9-]{0,30}[a-z0-9]$")
 INTERNAL_SLUG_PREFIX = "__"
+SYSTEM_SLUG_PREFIX = "system."
+
 PUBLIC_HOSTNAME_ENV = "DOH_PUBLIC_HOSTNAME"
 
 
@@ -313,6 +311,17 @@ def is_routed(entry: dict) -> bool:
     return not entry.get("disabled") and port_from_entry(entry) is not None
 
 
+def readiness_probe_command(port: int) -> str:
+    request = "GET / HTTP/1.1\\r\\nHost: 127.0.0.1\\r\\nConnection: close\\r\\n\\r\\n"
+    return (
+        'bash -c "'
+        f"exec 3<>/dev/tcp/127.0.0.1/{port} && "
+        f"printf '{request}' >&3 && "
+        "{ IFS= read -r -t 1 _ <&3 || true; }"
+        '"'
+    )
+
+
 def make_process_entry(slug: str, command: str, cwd: str, port: int) -> dict:
     return {
         "command": command,
@@ -327,13 +336,13 @@ def make_process_entry(slug: str, command: str, cwd: str, port: int) -> dict:
         },
         "readiness_probe": {
             "exec": {
-                "command": f"bash -c 'echo > /dev/tcp/127.0.0.1/{port}'",
+                "command": readiness_probe_command(port=port),
             },
-            "initial_delay_seconds": READINESS_INITIAL_DELAY_SECONDS,
-            "period_seconds": READINESS_PERIOD_SECONDS,
-            "timeout_seconds": READINESS_TIMEOUT_SECONDS,
-            "success_threshold": READINESS_SUCCESS_THRESHOLD,
-            "failure_threshold": READINESS_FAILURE_THRESHOLD,
+            "initial_delay_seconds": 5,
+            "period_seconds": 2,
+            "timeout_seconds": 2,
+            "success_threshold": 1,
+            "failure_threshold": 30,
         },
     }
 
