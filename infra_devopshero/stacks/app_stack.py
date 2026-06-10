@@ -105,6 +105,7 @@ class AppStack(Stack):
         posthog_secret = secretsmanager.Secret.from_secret_name_v2(self, "PosthogSecret", "devopshero/prod/posthog")
         env_sso_secret = secretsmanager.Secret.from_secret_name_v2(self, "EnvSsoSecret", "devopshero/prod/env-sso")
         merge_secret = secretsmanager.Secret.from_secret_name_v2(self, "MergeSecret", "devopshero/prod/merge")
+        telegram_secret = secretsmanager.Secret.from_secret_name_v2(self, "TelegramSecret", "devopshero/prod/telegram")
 
         # All secrets needed by the app (shared between migration and app containers)
         app_secrets = {
@@ -135,6 +136,8 @@ class AppStack(Stack):
             "DOH_ENV_SESSION_JWT_KID": ecs.Secret.from_secrets_manager(env_sso_secret, field="DOH_ENV_SESSION_JWT_KID"),
             "MERGE_AGENT_HANDLER_API_KEY": ecs.Secret.from_secrets_manager(merge_secret, field="MERGE_AGENT_HANDLER_API_KEY"),
             "MERGE_TOOL_PACK_ID": ecs.Secret.from_secrets_manager(merge_secret, field="MERGE_TOOL_PACK_ID"),
+            "TELEGRAM_MANAGER_BOT_TOKEN": ecs.Secret.from_secrets_manager(telegram_secret, field="TELEGRAM_MANAGER_BOT_TOKEN"),
+            "TELEGRAM_MANAGER_BOT_USERNAME": ecs.Secret.from_secrets_manager(telegram_secret, field="TELEGRAM_MANAGER_BOT_USERNAME"),
         }
 
         # Init container - runs Django migrations and ensures superuser before app starts

@@ -77,6 +77,7 @@ Secrets are synced from `.env` to AWS Secrets Manager. The mapping is defined in
 - `devopshero/prod/github` — GitHub App credentials
 - `devopshero/prod/bedrock` — Bedrock credentials for AI features
 - `devopshero/prod/api` — DOH_API_SECRET_KEY
+- `devopshero/prod/telegram` — TELEGRAM_MANAGER_BOT_TOKEN, TELEGRAM_MANAGER_BOT_USERNAME
 
 **To update secrets:**
 
