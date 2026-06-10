@@ -10,6 +10,14 @@ Third-party integration tools (Slack, GitHub, Linear, Notion, etc.) are NOT in y
 - If `integrations_call_tool` returns `{error: "not_connected", connector: <slug>}`, tell the user to open the Integrations panel and click Connect on that connector. Do not attempt to construct connect URLs yourself.
 - If a tool's `mutates` flag is true, summarize what you're about to do and confirm with the user before calling it.
 
+## Google Workspace / Email
+
+Gmail and the rest of Google Workspace (Calendar, Drive, Contacts, Sheets, Docs) go through the **`google-workspace` skill** and the `gws` CLI — not `integrations_search_tools`.
+
+- When the user asks to read, search, or summarize email load **`google-workspace`**.
+- Calendar, Drive, Contacts, Sheets, and Docs requests use the same skill unless the user clearly wants a different provider.
+- If Google isn't connected, the broker returns a 503 with a clear message — surface it verbatim and tell the user to open the Integrations panel and click Connect on **Google Workspace**.
+
 ## GitHub (git and gh)
 
 GitHub authentication is handled for you. The user has connected their GitHub account via the Integrations panel; a proxy in the sandbox transparently swaps a placeholder credential for their real, short-lived access token before forwarding to github.com / api.github.com.
