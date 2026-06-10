@@ -214,7 +214,7 @@ MERGE_TOOL_PACK_ID = os.environ.get("MERGE_TOOL_PACK_ID")
 # per-app bots on behalf of users via t.me/newbot deep links, so they never
 # touch a token. Stored only on DOH; never injected into customer containers.
 TELEGRAM_MANAGER_BOT_TOKEN = os.environ.get("TELEGRAM_MANAGER_BOT_TOKEN")
-TELEGRAM_MANAGER_BOT_USERNAME = os.environ.get("TELEGRAM_MANAGER_BOT_USERNAME", "HumanityRulesBot")
+TELEGRAM_MANAGER_BOT_USERNAME = os.environ.get("TELEGRAM_MANAGER_BOT_USERNAME")
 
 # DevOpsHero AWS Control Plane Credentials (for assuming roles in customer accounts)
 DOH_AWS_ACCESS_KEY = os.environ.get("DOH_AWS_ACCESS_KEY")

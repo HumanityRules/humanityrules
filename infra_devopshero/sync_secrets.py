@@ -55,6 +55,10 @@ SECRET_DEFINITIONS = {
         "MERGE_AGENT_HANDLER_API_KEY",
         "MERGE_TOOL_PACK_ID",
     ],
+    "devopshero/prod/telegram": [
+        "TELEGRAM_MANAGER_BOT_TOKEN",
+        "TELEGRAM_MANAGER_BOT_USERNAME",
+    ],
 }
 
 
