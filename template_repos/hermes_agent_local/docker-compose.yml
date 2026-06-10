@@ -2,8 +2,8 @@
 #
 #   cd template_repos/hermes_agent_local
 #   cp .env.example .env   # optional
-#   docker compose watch   # dev: auto-rebuild on source save (recommended)
-#   docker compose up --build   # one-shot
+#   docker compose up --build --watch   # dev: logs + auto-rebuild on save (recommended)
+#   docker compose up --build   # one-shot, no file watcher
 #
 # Browser entry: http://localhost:8788
 #   - WebUI, Web Apps panel, /webapps/__admin, user apps at <slug>.localhost:8788
@@ -11,7 +11,7 @@
 # Hermes Caddy/WebUI ports are not published to the host; reach them through
 # local_policy_proxy (bundled here) or docker exec.
 #
-# `docker compose watch` rebuilds the Hermes image when DOH source changes (~1s
+# `docker compose up --watch` rebuilds the Hermes image when DOH source changes (~1s
 # with layer cache), recreates the container, and the persistent-root runner
 # rsyncs the new /opt/doh tree on start — reliable, no bind-mount clobber.
 #

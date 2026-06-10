@@ -9,7 +9,7 @@ Production Hermes image and runtime live in `../hermes_agent`. This folder only 
 ```bash
 cd template_repos/hermes_agent_local
 cp .env.example .env    # optional
-docker compose watch    # recommended while developing — rebuilds on save
+docker compose up --build --watch    # recommended while developing — logs + rebuilds on save
 ```
 
 One-shot (no file watcher):
@@ -51,7 +51,7 @@ Requires `opsh` on `PATH` (CourseHero OPS console) and a working `bedrock_dev` p
 
 The Hermes Dockerfile keeps DOH-owned source (`doh_runtime/`, `webui-extension/`, `skills/`) in **late COPY layers** so routine edits reuse cached `uv pip install` and Linuxbrew layers instead of rebuilding them.
 
-**While developing**, leave `docker compose watch` running. On save it rebuilds the Hermes image (~1s for source edits), recreates the container, and the persistent-root runner rsyncs the new `/opt/doh` tree on start — the reliable path (no bind mounts that get clobbered).
+**While developing**, leave `docker compose up --watch` running (add `--build` on first run or after Dockerfile changes). Unlike standalone `docker compose watch`, `up --watch` streams container logs like `docker compose up`. On save it rebuilds the Hermes image (~1s for source edits), recreates the container, and the persistent-root runner rsyncs the new `/opt/doh` tree on start — the reliable path (no bind mounts that get clobbered).
 
 Manual rebuild:
 
@@ -65,7 +65,7 @@ Rebuilds are slow only when patches, upstream pins, or Dockerfile structure chan
 
 ## Iterating on the WebUI extension
 
-Edit files under `../hermes_agent/webui-extension/` while `docker compose watch` is running; reload the browser after the container comes back healthy.
+Edit files under `../hermes_agent/webui-extension/` while `docker compose up --watch` is running; reload the browser after the container comes back healthy.
 
 ## Standalone policy proxy
 
