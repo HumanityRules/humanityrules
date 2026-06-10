@@ -353,16 +353,16 @@ class TestHermesWebappsRuntimeContract(unittest.TestCase):
                     "command": (
                         'bash -c "'
                         "exec 3<>/dev/tcp/127.0.0.1/4005 && "
-                        "printf 'GET / HTTP/1.1\\r\\nHost: 127.0.0.1\\r\\nConnection: close\\r\\n\\r\\n' >&3 && "
+                        "printf 'HEAD / HTTP/1.1\\r\\nHost: 127.0.0.1\\r\\nConnection: close\\r\\n\\r\\n' >&3 && "
                         "{ IFS= read -r -t 1 _ <&3 || true; }"
                         '"'
                     ),
                 },
                 "initial_delay_seconds": 5,
-                "period_seconds": 2,
+                "period_seconds": 10,
                 "timeout_seconds": 2,
                 "success_threshold": 1,
-                "failure_threshold": 30,
+                "failure_threshold": 6,
             },
         )
 

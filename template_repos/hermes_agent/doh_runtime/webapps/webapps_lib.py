@@ -312,7 +312,7 @@ def is_routed(entry: dict) -> bool:
 
 
 def readiness_probe_command(port: int) -> str:
-    request = "GET / HTTP/1.1\\r\\nHost: 127.0.0.1\\r\\nConnection: close\\r\\n\\r\\n"
+    request = "HEAD / HTTP/1.1\\r\\nHost: 127.0.0.1\\r\\nConnection: close\\r\\n\\r\\n"
     return (
         'bash -c "'
         f"exec 3<>/dev/tcp/127.0.0.1/{port} && "
@@ -339,10 +339,10 @@ def make_process_entry(slug: str, command: str, cwd: str, port: int) -> dict:
                 "command": readiness_probe_command(port=port),
             },
             "initial_delay_seconds": 5,
-            "period_seconds": 2,
+            "period_seconds": 10,
             "timeout_seconds": 2,
             "success_threshold": 1,
-            "failure_threshold": 30,
+            "failure_threshold": 6,
         },
     }
 
