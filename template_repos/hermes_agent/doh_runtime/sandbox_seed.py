@@ -262,7 +262,7 @@ def seed_provider_placeholder(hermes_home: Path) -> int:
     # local provider state to render model choices and emit placeholder-backed
     # requests. Seed only the provider block via Hermes' own locked/atomic writer.
     try:
-        from hermes_cli import auth
+        from hermes_cli import auth  # pyright: ignore[reportMissingImports]
     except Exception as exc:  # pragma: no cover - import wiring is environment-specific
         print(f"[sandbox-seed] cannot import hermes_cli.auth for {provider}: {exc}", file=sys.stderr)
         return 1
