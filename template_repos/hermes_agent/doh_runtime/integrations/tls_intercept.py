@@ -464,8 +464,7 @@ def fetch_provider_tokens_batch(refresh_config: DohRefreshConfig, slugs: list[st
     DOH's `/api/integrations/tokens` is the broker's only refresh path —
     both Refresh-all/bootstrap and single-slug refresh (after a
     connect/disconnect) call this with the appropriate slug list. The
-    endpoint returns `absent` as a normal entry rather than HTTP 404,
-    so a disconnected provider doesn't generate log spam.
+    endpoint returns `absent` as a normal entry rather than HTTP 404.
 
     Any transport-level error, unparseable response, or slug missing
     from the response map surfaces as TRANSIENT for that slug, so the

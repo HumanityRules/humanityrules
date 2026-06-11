@@ -1856,62 +1856,44 @@ class TestTransientRefreshGuards(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.env_path.read_text(encoding="utf-8"), original)
         restart_mock.assert_not_called()
 
-    async def test_bootstrap_transient_keeps_env_file_and_schedules_retry(self) -> None:
+    async def test_bootstrap_transient_exits_without_touching_env_file(self) -> None:
+        """A failed bootstrap refresh is fatal — the broker exits and ECS restarts the task."""
         original = self._seed_telegram_env_block()
         runtime = self._make_runtime()
-        retry_mock = AsyncMock()
 
         with patch.object(
             broker.tls_intercept,
             "fetch_provider_tokens_batch",
             return_value=self._transient_for_every_slug(),
-        ), patch.object(broker, "_retry_bootstrap_gateway_env", new=retry_mock):
-            await broker._bootstrap_gateway_env(
-                tls_runtime=runtime,
-                env_path=self.env_path,
-                webui_state_dir=self.webui_state_dir,
-                process_compose_url="http://127.0.0.1:9999",
-            )
-            await asyncio.gather(*broker._BACKGROUND_TASKS)
+        ):
+            with self.assertRaises(SystemExit):
+                await broker._bootstrap_gateway_env(tls_runtime=runtime, env_path=self.env_path)
 
         self.assertEqual(self.env_path.read_text(encoding="utf-8"), original)
-        retry_mock.assert_called_once()
 
-    async def test_retry_bootstrap_renders_and_restarts_after_recovery(self) -> None:
-        """Once DOH answers again, the retry task renders the env and restarts the gateway."""
+    async def test_bootstrap_success_renders_env_file(self) -> None:
         # Start from the clobbered/empty state the gateway booted with.
         self.env_path.write_text("", encoding="utf-8")
         runtime = self._make_runtime()
-        recovered_results = {
+        refreshed_results = {
             slug: broker.tls_intercept.RefreshResult(
                 outcome=broker.tls_intercept.REFRESH_OUTCOME_ABSENT,
                 secrets=None, expires_in=None, config={}, metadata={},
             )
             for slug in broker.tls_intercept.TLS_INTERCEPT_PROVIDERS
         }
-        recovered_results["telegram"] = broker.tls_intercept.RefreshResult(
+        refreshed_results["telegram"] = broker.tls_intercept.RefreshResult(
             outcome=broker.tls_intercept.REFRESH_OUTCOME_HAS_TOKEN,
             secrets={"bot_token": "123:abc"}, expires_in=3600, config={"allowed_users": ["123"]}, metadata={},
         )
 
-        with patch("asyncio.sleep", new=AsyncMock()), patch.object(
+        with patch.object(
             broker.tls_intercept,
             "fetch_provider_tokens_batch",
-            return_value=recovered_results,
-        ), patch.object(
-            broker,
-            "_post_process_compose_restart",
-            return_value=(200, "ok"),
-        ) as restart_mock:
-            await broker._retry_bootstrap_gateway_env(
-                tls_runtime=runtime,
-                env_path=self.env_path,
-                webui_state_dir=self.webui_state_dir,
-                process_compose_url="http://127.0.0.1:9999",
-            )
+            return_value=refreshed_results,
+        ):
+            await broker._bootstrap_gateway_env(tls_runtime=runtime, env_path=self.env_path)
 
         text = self.env_path.read_text(encoding="utf-8")
         self.assertIn("TELEGRAM_BOT_TOKEN=000000:DOH_PLACEHOLDER", text)
         self.assertIn("TELEGRAM_ALLOWED_USERS=123", text)
-        restarted = [call.kwargs["process_name"] for call in restart_mock.call_args_list]
-        self.assertIn(broker.GATEWAY_PROCESS_NAME, restarted)

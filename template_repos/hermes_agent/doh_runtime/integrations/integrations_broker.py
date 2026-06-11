@@ -358,64 +358,20 @@ async def _render_gateway_env_file(tls_runtime: tls_intercept.TlsInterceptRuntim
     return changed
 
 
-# Keeps strong references to fire-and-forget asyncio tasks so they aren't GC'd mid-flight.
-_BACKGROUND_TASKS: set[asyncio.Task] = set()
-
-
-async def _bootstrap_gateway_env(
-    tls_runtime: tls_intercept.TlsInterceptRuntime,
-    env_path: Path,
-    webui_state_dir: Path,
-    process_compose_url: str,
-) -> None:
+async def _bootstrap_gateway_env(tls_runtime: tls_intercept.TlsInterceptRuntime, env_path: Path) -> None:
     """At broker startup: refresh every provider, then render env file once.
 
-    When the bootstrap refresh fails transiently (DOH unreachable, e.g. a 503
-    mid-deploy), the cache is empty but the env file on disk may still hold a
-    good block from the previous broker run — rendering now would strip every
-    integration from the gateway until the next connect/refresh. Instead the
-    existing file is left untouched and a background task retries until DOH
-    answers, then renders and restarts whatever the new block requires.
+    A failed refresh (DOH unreachable, e.g. a 503 mid-deploy) is fatal: the
+    broker exits before opening its control port, supervisor.sh tears the
+    container down, and ECS restarts the task until DOH answers. Dying here
+    is what guarantees the gateway/WebUI children only ever launch with an
+    env rendered from live DOH state — no stale-env recovery path needed.
     """
-    if await tls_runtime.refresh_all():
-        await _render_gateway_env_file(tls_runtime=tls_runtime, env_path=env_path)
-        return
-    logger.error("bootstrap refresh failed transiently; keeping existing managed env, retrying in background")
-    task = asyncio.create_task(_retry_bootstrap_gateway_env(
-        tls_runtime=tls_runtime,
-        env_path=env_path,
-        webui_state_dir=webui_state_dir,
-        process_compose_url=process_compose_url,
-    ))
-    _BACKGROUND_TASKS.add(task)
-    task.add_done_callback(_BACKGROUND_TASKS.discard)
-
-
-async def _retry_bootstrap_gateway_env(
-    tls_runtime: tls_intercept.TlsInterceptRuntime,
-    env_path: Path,
-    webui_state_dir: Path,
-    process_compose_url: str,
-) -> None:
-    """Retry the bootstrap refresh until DOH answers, then render env and restart affected processes."""
-    delay_seconds = 5
-    while True:
-        await asyncio.sleep(delay_seconds)
-        delay_seconds = min(delay_seconds * 2, 60)
-        if not await tls_runtime.refresh_all():
-            continue
-        logger.info("bootstrap refresh recovered; rendering managed env")
-        try:
-            await _apply_refreshed_state(
-                runtime=tls_runtime,
-                env_path=env_path,
-                webui_state_dir=webui_state_dir,
-                process_compose_url=process_compose_url,
-                slug=None,
-            )
-        except Exception as exc:
-            logger.error("bootstrap recovery render/restart failed: %s; a manual Refresh may be needed", exc)
-        return
+    if not await tls_runtime.refresh_all():
+        logger.error("FATAL: bootstrap refresh against DOH failed; exiting so ECS restarts the task")
+        sys.exit(1)
+    
+    await _render_gateway_env_file(tls_runtime=tls_runtime, env_path=env_path)
 
 
 def _build_on_user_invalidate(
@@ -469,8 +425,7 @@ async def _apply_refreshed_state(
 
     Renders the managed env block, drops WebUI's models cache when the touched
     provider(s) can change /api/models, and restarts whatever processes the
-    provider(s) declare when the env actually changed. Shared by the
-    user-invalidate hook and the bootstrap recovery task — callers must only
+    provider(s) declare when the env actually changed. Callers must only
     invoke it after a refresh that reflected DOH truth. Raises on a failed
     process restart.
     """
@@ -625,12 +580,7 @@ async def _run(
     # control port. supervisor.sh's wait_for_port on the control port doubles
     # as the synchronization point: by the time it returns, the file is on
     # disk and webui.sh can launch process-compose children with current env.
-    await _bootstrap_gateway_env(
-        tls_runtime=tls_runtime,
-        env_path=gateway_env_path,
-        webui_state_dir=webui_state_dir,
-        process_compose_url=process_compose_url,
-    )
+    await _bootstrap_gateway_env(tls_runtime=tls_runtime, env_path=gateway_env_path)
 
     loop = asyncio.get_running_loop()
     stop = loop.create_future()
