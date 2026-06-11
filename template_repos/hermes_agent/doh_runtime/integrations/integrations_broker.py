@@ -50,7 +50,7 @@ from starlette.responses import JSONResponse, Response
 from starlette.routing import Route
 
 import device_flow
-import mcp_aggregator
+from mcp_aggregator import MCPAggregator
 import tls_intercept
 
 
@@ -77,7 +77,7 @@ logger = logging.getLogger("integrations_broker")
 
 async def _handle_unified_status(
     request: Request,
-    aggregator: mcp_aggregator.MCPAggregator,
+    mcp_aggregator: MCPAggregator,
     tls_runtime: tls_intercept.TlsInterceptRuntime,
     control_plane_url: str,
     owner_username: str,
@@ -94,7 +94,7 @@ async def _handle_unified_status(
     invalidate in one shot).
     """
     items = await tls_runtime.status_items()
-    items.extend(await aggregator.status_items())
+    items.extend(await mcp_aggregator.status_items())
     return JSONResponse(content={
         "doh_control_plane_url": control_plane_url,
         "env_slug": env_slug,
@@ -109,7 +109,7 @@ async def _handle_healthz(request: Request) -> Response:
 
 
 def _build_control_app(
-    aggregator: mcp_aggregator.MCPAggregator,
+    mcp_aggregator: MCPAggregator,
     tls_runtime: tls_intercept.TlsInterceptRuntime,
     oauth_device_flow: device_flow.OAuthDeviceFlow,
     control_plane_url: str,
@@ -122,7 +122,7 @@ def _build_control_app(
     async def status_route(request: Request) -> Response:
         return await _handle_unified_status(
             request=request,
-            aggregator=aggregator,
+            mcp_aggregator=mcp_aggregator,
             tls_runtime=tls_runtime,
             control_plane_url=control_plane_url,
             owner_username=owner_username,
@@ -142,7 +142,7 @@ def _build_control_app(
         concurrently — they share no state and the slower of the two sets
         the round-trip latency.
         """
-        remaining = aggregator.cooldown_remaining_seconds()
+        remaining = mcp_aggregator.cooldown_remaining_seconds()
         if remaining is not None:
             return JSONResponse(
                 content={"error": "refresh_cooldown", "retry_after_seconds": remaining},
@@ -157,7 +157,7 @@ def _build_control_app(
             return None
 
         catalog_result, tls_error = await asyncio.gather(
-            aggregator.refresh_catalog(),
+            mcp_aggregator.refresh_catalog(),
             _safe_invalidate_all(),
         )
         if tls_error is not None:
@@ -263,7 +263,7 @@ def _build_control_app(
         Route(path=f"{tls}/device/start", endpoint=device_start_route, methods=["POST"]),
         Route(path=f"{tls}/device/status", endpoint=device_status_route, methods=["GET"]),
         Route(path=f"{tls}/device/cancel", endpoint=device_cancel_route, methods=["POST"]),
-        *aggregator.routes(prefix="/integrations"),
+        *mcp_aggregator.routes(prefix="/integrations"),
     ]
     return Starlette(routes=routes)
 
@@ -593,7 +593,7 @@ async def _run(
 
     public_base_url = os.environ.get("DOH_APP_PUBLIC_URL")
     mcp_persistent_dir.mkdir(parents=True, exist_ok=True)
-    aggregator = mcp_aggregator.MCPAggregator(
+    mcp_aggregator = MCPAggregator(
         port=mcp_port,
         persistent_dir=mcp_persistent_dir,
         public_base_url=public_base_url,
@@ -629,7 +629,7 @@ async def _run(
     oauth_device_flow = device_flow.build_default_device_flow(submit_tokens=_store_device_tokens)
 
     control_app = _build_control_app(
-        aggregator=aggregator,
+        mcp_aggregator=mcp_aggregator,
         tls_runtime=tls_runtime,
         oauth_device_flow=oauth_device_flow,
         control_plane_url=control_plane_url,
@@ -646,11 +646,11 @@ async def _run(
     logger.info("control API listening on 127.0.0.1:%d", control_port)
 
     async with tls_proxy_server:
-        proxy_task = asyncio.create_task(tls_proxy_server.serve_forever())
+        tls_proxy_task = asyncio.create_task(tls_proxy_server.serve_forever())
         control_task = asyncio.create_task(control_server.serve())
-        mcp_task = asyncio.create_task(aggregator.serve())
+        mcp_aggregator_task = asyncio.create_task(mcp_aggregator.serve())
         done, pending = await asyncio.wait(
-            {stop, proxy_task, control_task, mcp_task},
+            {stop, tls_proxy_task, control_task, mcp_aggregator_task},
             return_when=asyncio.FIRST_COMPLETED,
         )
         for task in pending:
