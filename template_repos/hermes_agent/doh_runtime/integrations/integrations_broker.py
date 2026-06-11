@@ -78,7 +78,7 @@ logger = logging.getLogger("integrations_broker")
 async def _handle_unified_status(
     request: Request,
     mcp_aggregator: MCPAggregator,
-    tls_runtime: tls_intercept.TlsInterceptRuntime,
+    tls_intercept_runtime: tls_intercept.TlsInterceptRuntime,
     control_plane_url: str,
     owner_username: str,
     app_slug: str,
@@ -93,7 +93,7 @@ async def _handle_unified_status(
     for the explicit-Refresh path (MCP catalog reload + all-providers TLS
     invalidate in one shot).
     """
-    items = await tls_runtime.status_items()
+    items = await tls_intercept_runtime.status_items()
     items.extend(await mcp_aggregator.status_items())
     return JSONResponse(content={
         "doh_control_plane_url": control_plane_url,
@@ -110,7 +110,7 @@ async def _handle_healthz(request: Request) -> Response:
 
 def _build_control_app(
     mcp_aggregator: MCPAggregator,
-    tls_runtime: tls_intercept.TlsInterceptRuntime,
+    tls_intercept_runtime: tls_intercept.TlsInterceptRuntime,
     oauth_device_flow: device_flow.OAuthDeviceFlow,
     control_plane_url: str,
     bearer: str,
@@ -123,7 +123,7 @@ def _build_control_app(
         return await _handle_unified_status(
             request=request,
             mcp_aggregator=mcp_aggregator,
-            tls_runtime=tls_runtime,
+            tls_intercept_runtime=tls_intercept_runtime,
             control_plane_url=control_plane_url,
             owner_username=owner_username,
             app_slug=app_slug,
@@ -151,7 +151,7 @@ def _build_control_app(
 
         async def _safe_invalidate_all() -> str | None:
             try:
-                await tls_runtime.invalidate_all()
+                await tls_intercept_runtime.invalidate_all()
             except RuntimeError as exc:
                 return str(exc)
             return None
@@ -169,7 +169,7 @@ def _build_control_app(
         """Drop one provider's cached TLS-intercept token after known state changes."""
         provider = request.path_params["provider"]
         try:
-            await tls_runtime.invalidate(slug=provider)
+            await tls_intercept_runtime.invalidate(slug=provider)
         except RuntimeError as exc:
             return JSONResponse(
                 content={"ok": False, "provider": provider, "error": str(exc)},
@@ -218,7 +218,7 @@ def _build_control_app(
         )
         if 200 <= status < 300:
             try:
-                await tls_runtime.invalidate(slug=provider)
+                await tls_intercept_runtime.invalidate(slug=provider)
             except RuntimeError as exc:
                 return JSONResponse(
                     content={**payload, "ok": False, "error": str(exc)},
@@ -346,9 +346,9 @@ def _run_provider_auth_marker(provider: str, action: str) -> bool:
     return True
 
 
-async def _render_gateway_env_file(tls_runtime: tls_intercept.TlsInterceptRuntime, env_path: Path) -> bool:
+async def _render_gateway_env_file(tls_intercept_runtime: tls_intercept.TlsInterceptRuntime, env_path: Path) -> bool:
     """Write the DOH-managed profile env block from current cache state."""
-    snapshot = await tls_runtime.gateway_env_snapshot()
+    snapshot = await tls_intercept_runtime.gateway_env_snapshot()
     block = tls_intercept.render_managed_block(snapshot=snapshot)
     changed = await asyncio.to_thread(tls_intercept.write_gateway_env_file, env_path=env_path, managed_block=block)
     if changed:
@@ -358,7 +358,7 @@ async def _render_gateway_env_file(tls_runtime: tls_intercept.TlsInterceptRuntim
     return changed
 
 
-async def _bootstrap_gateway_env(tls_runtime: tls_intercept.TlsInterceptRuntime, env_path: Path) -> None:
+async def _bootstrap_gateway_env(tls_intercept_runtime: tls_intercept.TlsInterceptRuntime, env_path: Path) -> None:
     """At broker startup: refresh every provider, then render env file once.
 
     A failed refresh (DOH unreachable, e.g. a 503 mid-deploy) is fatal: the
@@ -367,15 +367,15 @@ async def _bootstrap_gateway_env(tls_runtime: tls_intercept.TlsInterceptRuntime,
     is what guarantees the gateway/WebUI children only ever launch with an
     env rendered from live DOH state — no stale-env recovery path needed.
     """
-    if not await tls_runtime.refresh_all():
+    if not await tls_intercept_runtime.refresh_all():
         logger.error("FATAL: bootstrap refresh against DOH failed; exiting so ECS restarts the task")
         sys.exit(1)
     
-    await _render_gateway_env_file(tls_runtime=tls_runtime, env_path=env_path)
+    await _render_gateway_env_file(tls_intercept_runtime=tls_intercept_runtime, env_path=env_path)
 
 
 def _build_on_user_invalidate(
-    tls_runtime_holder: dict[str, tls_intercept.TlsInterceptRuntime],
+    tls_intercept_runtime_holder: dict[str, tls_intercept.TlsInterceptRuntime],
     env_path: Path,
     webui_state_dir: Path,
     process_compose_url: str,
@@ -383,7 +383,7 @@ def _build_on_user_invalidate(
     """Return the hook that re-renders env and restarts the gateway when needed.
 
     Uses a holder dict because the TLS runtime is constructed *with* this hook,
-    creating a chicken-and-egg. The broker fills `tls_runtime_holder["tls_runtime"]`
+    creating a chicken-and-egg. The broker fills `tls_intercept_runtime_holder["tls_intercept_runtime"]`
     immediately after construction.
 
     When `slug` is set (a single provider was just connected/disconnected),
@@ -393,18 +393,18 @@ def _build_on_user_invalidate(
     """
 
     async def on_user_invalidate(slug: str | None) -> None:
-        tls_runtime = tls_runtime_holder["tls_runtime"]
+        tls_intercept_runtime = tls_intercept_runtime_holder["tls_intercept_runtime"]
         if slug is None:
-            doh_reachable = await tls_runtime.refresh_all()
+            doh_reachable = await tls_intercept_runtime.refresh_all()
         else:
-            doh_reachable = await tls_runtime.refresh_slug(slug=slug)
+            doh_reachable = await tls_intercept_runtime.refresh_slug(slug=slug)
         if not doh_reachable:
             # Rendering from a cache that missed its refresh would strip
             # integrations from the gateway env; keep file and processes as-is.
             logger.error("refresh after invalidate(slug=%s) failed transiently; managed env left untouched", slug)
             return
         await _apply_refreshed_state(
-            tls_runtime=tls_runtime,
+            tls_intercept_runtime=tls_intercept_runtime,
             env_path=env_path,
             webui_state_dir=webui_state_dir,
             process_compose_url=process_compose_url,
@@ -415,7 +415,7 @@ def _build_on_user_invalidate(
 
 
 async def _apply_refreshed_state(
-    tls_runtime: tls_intercept.TlsInterceptRuntime,
+    tls_intercept_runtime: tls_intercept.TlsInterceptRuntime,
     env_path: Path,
     webui_state_dir: Path,
     process_compose_url: str,
@@ -429,12 +429,12 @@ async def _apply_refreshed_state(
     invoke it after a refresh that reflected DOH truth. Raises on a failed
     process restart.
     """
-    env_changed = await _render_gateway_env_file(tls_runtime=tls_runtime, env_path=env_path)
-    if _slug_affects_model_picker(slug=slug, tls_runtime=tls_runtime):
+    env_changed = await _render_gateway_env_file(tls_intercept_runtime=tls_intercept_runtime, env_path=env_path)
+    if _slug_affects_model_picker(slug=slug, tls_intercept_runtime=tls_intercept_runtime):
         await asyncio.to_thread(_delete_webui_models_cache, webui_state_dir=webui_state_dir)
     if not env_changed:
         return
-    for process_name in _processes_requiring_restart(slug=slug, tls_runtime=tls_runtime):
+    for process_name in _processes_requiring_restart(slug=slug, tls_intercept_runtime=tls_intercept_runtime):
         status, body = await asyncio.to_thread(
             _post_process_compose_restart,
             process_compose_url=process_compose_url,
@@ -464,9 +464,9 @@ def _delete_webui_models_cache(webui_state_dir: Path) -> bool:
     return True
 
 
-def _slug_affects_model_picker(slug: str | None, tls_runtime: tls_intercept.TlsInterceptRuntime) -> bool:
+def _slug_affects_model_picker(slug: str | None, tls_intercept_runtime: tls_intercept.TlsInterceptRuntime) -> bool:
     """Return whether a provider state change can alter /api/models output."""
-    providers = tls_runtime._token_store._providers
+    providers = tls_intercept_runtime._token_store._providers
     if slug is None:
         return any(spec.affects_model_picker for spec in providers.values())
     spec = providers.get(slug)
@@ -475,23 +475,23 @@ def _slug_affects_model_picker(slug: str | None, tls_runtime: tls_intercept.TlsI
     return spec.affects_model_picker
 
 
-def _processes_requiring_restart(slug: str | None, tls_runtime: tls_intercept.TlsInterceptRuntime) -> tuple[str, ...]:
+def _processes_requiring_restart(slug: str | None, tls_intercept_runtime: tls_intercept.TlsInterceptRuntime) -> tuple[str, ...]:
     """Return process-compose entries that must reload after provider state changes."""
     processes: list[str] = []
-    if _slug_requires_gateway_restart(slug=slug, tls_runtime=tls_runtime):
+    if _slug_requires_gateway_restart(slug=slug, tls_intercept_runtime=tls_intercept_runtime):
         processes.append(GATEWAY_PROCESS_NAME)
-    if _slug_requires_webui_restart(slug=slug, tls_runtime=tls_runtime):
+    if _slug_requires_webui_restart(slug=slug, tls_intercept_runtime=tls_intercept_runtime):
         processes.append(WEBUI_PROCESS_NAME)
     return tuple(processes)
 
 
-def _slug_requires_gateway_restart(slug: str | None, tls_runtime: tls_intercept.TlsInterceptRuntime) -> bool:
+def _slug_requires_gateway_restart(slug: str | None, tls_intercept_runtime: tls_intercept.TlsInterceptRuntime) -> bool:
     """A user-invalidate triggers gateway restart only when the provider declares it.
 
     `slug=None` (Refresh-all) restarts only if any provider in scope declares
     `restart_gateway_after_save`.
     """
-    providers = tls_runtime._token_store._providers
+    providers = tls_intercept_runtime._token_store._providers
     if slug is None:
         return any(spec.restart_gateway_after_save for spec in providers.values())
     spec = providers.get(slug)
@@ -500,9 +500,9 @@ def _slug_requires_gateway_restart(slug: str | None, tls_runtime: tls_intercept.
     return spec.restart_gateway_after_save
 
 
-def _slug_requires_webui_restart(slug: str | None, tls_runtime: tls_intercept.TlsInterceptRuntime) -> bool:
+def _slug_requires_webui_restart(slug: str | None, tls_intercept_runtime: tls_intercept.TlsInterceptRuntime) -> bool:
     """Restart WebUI when the touched provider declares that WebUI must reload."""
-    providers = tls_runtime._token_store._providers
+    providers = tls_intercept_runtime._token_store._providers
     if slug is None:
         return any(spec.restart_webui_after_save for spec in providers.values())
     spec = providers.get(slug)
@@ -555,14 +555,14 @@ async def _run(
         owner_username, env_slug, control_plane_url, proxy_port, control_port, mcp_port, merge_enabled,
     )
 
-    tls_runtime_holder: dict = {}
+    tls_intercept_runtime_holder: dict = {}
     on_user_invalidate = _build_on_user_invalidate(
-        tls_runtime_holder=tls_runtime_holder,
+        tls_intercept_runtime_holder=tls_intercept_runtime_holder,
         env_path=gateway_env_path,
         webui_state_dir=webui_state_dir,
         process_compose_url=process_compose_url,
     )
-    tls_runtime = tls_intercept.TlsInterceptRuntime(
+    tls_intercept_runtime = tls_intercept.TlsInterceptRuntime(
         providers=tls_intercept.TLS_INTERCEPT_PROVIDERS,
         refresh_config=tls_intercept.DohRefreshConfig(
             control_plane_url=control_plane_url,
@@ -575,12 +575,12 @@ async def _run(
         private_dir=private_dir,
         on_user_invalidate=on_user_invalidate,
     )
-    tls_runtime_holder["tls_runtime"] = tls_runtime
+    tls_intercept_runtime_holder["tls_intercept_runtime"] = tls_intercept_runtime
     # Render the managed profile env file from current DOH state before opening the
     # control port. supervisor.sh's wait_for_port on the control port doubles
     # as the synchronization point: by the time it returns, the file is on
     # disk and webui.sh can launch process-compose children with current env.
-    await _bootstrap_gateway_env(tls_runtime=tls_runtime, env_path=gateway_env_path)
+    await _bootstrap_gateway_env(tls_intercept_runtime=tls_intercept_runtime, env_path=gateway_env_path)
 
     loop = asyncio.get_running_loop()
     stop = loop.create_future()
@@ -588,7 +588,7 @@ async def _run(
         with contextlib.suppress(NotImplementedError, RuntimeError):
             loop.add_signal_handler(sig, lambda s=sig: (logger.info("signal %d; shutting down", s), stop.done() or stop.set_result(None)))
 
-    tls_proxy_server = await tls_runtime.start_proxy_server(host="127.0.0.1", port=proxy_port)
+    tls_proxy_server = await tls_intercept_runtime.start_proxy_server(host="127.0.0.1", port=proxy_port)
     logger.info("proxy listening on 127.0.0.1:%d", proxy_port)
 
     public_base_url = os.environ.get("DOH_APP_PUBLIC_URL")
@@ -621,7 +621,7 @@ async def _run(
         if not (200 <= status < 300):
             return False
         with contextlib.suppress(RuntimeError):
-            await tls_runtime.invalidate(slug=provider)
+            await tls_intercept_runtime.invalidate(slug=provider)
         if provider in AUTH_MARKER_PROVIDERS:
             await asyncio.to_thread(_run_provider_auth_marker, provider, "connect")
         return True
@@ -630,7 +630,7 @@ async def _run(
 
     control_app = _build_control_app(
         mcp_aggregator=mcp_aggregator,
-        tls_runtime=tls_runtime,
+        tls_intercept_runtime=tls_intercept_runtime,
         oauth_device_flow=oauth_device_flow,
         control_plane_url=control_plane_url,
         bearer=bearer,
