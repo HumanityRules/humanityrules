@@ -312,14 +312,7 @@ def is_routed(entry: dict) -> bool:
 
 
 def readiness_probe_command(port: int) -> str:
-    request = "HEAD / HTTP/1.1\\r\\nHost: 127.0.0.1\\r\\nConnection: close\\r\\n\\r\\n"
-    return (
-        'bash -c "'
-        f"exec 3<>/dev/tcp/127.0.0.1/{port} && "
-        f"printf '{request}' >&3 && "
-        "{ IFS= read -r -t 1 _ <&3 || true; }"
-        '"'
-    )
+    return f"bash -c ': <> /dev/tcp/127.0.0.1/{port}'"
 
 
 def make_process_entry(slug: str, command: str, cwd: str, port: int) -> dict:

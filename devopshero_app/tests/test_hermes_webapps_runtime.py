@@ -350,13 +350,7 @@ class TestHermesWebappsRuntimeContract(unittest.TestCase):
             entry["readiness_probe"],
             {
                 "exec": {
-                    "command": (
-                        'bash -c "'
-                        "exec 3<>/dev/tcp/127.0.0.1/4005 && "
-                        "printf 'HEAD / HTTP/1.1\\r\\nHost: 127.0.0.1\\r\\nConnection: close\\r\\n\\r\\n' >&3 && "
-                        "{ IFS= read -r -t 1 _ <&3 || true; }"
-                        '"'
-                    ),
+                    "command": "bash -c ': <> /dev/tcp/127.0.0.1/4005'",
                 },
                 "initial_delay_seconds": 5,
                 "period_seconds": 10,
