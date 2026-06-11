@@ -1566,34 +1566,34 @@ class TestGatewayEnvHookIntegration(unittest.IsolatedAsyncioTestCase):
 
     async def test_slug_requires_gateway_restart_only_for_gateway_relevant_providers(self) -> None:
         """Only providers declaring gateway reload restart system.gateway."""
-        runtime = self._make_runtime()
-        self.assertTrue(broker._slug_requires_gateway_restart(slug="telegram", runtime=runtime))
-        self.assertTrue(broker._slug_requires_gateway_restart(slug="openrouter", runtime=runtime))
-        self.assertFalse(broker._slug_requires_gateway_restart(slug="google", runtime=runtime))
-        self.assertFalse(broker._slug_requires_gateway_restart(slug="github", runtime=runtime))
-        self.assertFalse(broker._slug_requires_gateway_restart(slug="nous", runtime=runtime))
+        tls_runtime = self._make_runtime()
+        self.assertTrue(broker._slug_requires_gateway_restart(slug="telegram", tls_runtime=tls_runtime))
+        self.assertTrue(broker._slug_requires_gateway_restart(slug="openrouter", tls_runtime=tls_runtime))
+        self.assertFalse(broker._slug_requires_gateway_restart(slug="google", tls_runtime=tls_runtime))
+        self.assertFalse(broker._slug_requires_gateway_restart(slug="github", tls_runtime=tls_runtime))
+        self.assertFalse(broker._slug_requires_gateway_restart(slug="nous", tls_runtime=tls_runtime))
         # Unknown slug: don't restart.
-        self.assertFalse(broker._slug_requires_gateway_restart(slug="bogus", runtime=runtime))
+        self.assertFalse(broker._slug_requires_gateway_restart(slug="bogus", tls_runtime=tls_runtime))
         # None (Refresh-all) covers any gateway-restart provider in scope.
-        self.assertTrue(broker._slug_requires_gateway_restart(slug=None, runtime=runtime))
+        self.assertTrue(broker._slug_requires_gateway_restart(slug=None, tls_runtime=tls_runtime))
 
     async def test_processes_requiring_restart_separates_gateway_and_webui(self) -> None:
         """Vault env restarts gateway; GitHub placeholder env restarts WebUI."""
-        runtime = self._make_runtime()
+        tls_runtime = self._make_runtime()
         self.assertEqual(
-            broker._processes_requiring_restart(slug="telegram", runtime=runtime),
+            broker._processes_requiring_restart(slug="telegram", tls_runtime=tls_runtime),
             (broker.GATEWAY_PROCESS_NAME,),
         )
         self.assertEqual(
-            broker._processes_requiring_restart(slug="github", runtime=runtime),
+            broker._processes_requiring_restart(slug="github", tls_runtime=tls_runtime),
             (broker.WEBUI_PROCESS_NAME,),
         )
         self.assertEqual(
-            broker._processes_requiring_restart(slug="openrouter", runtime=runtime),
+            broker._processes_requiring_restart(slug="openrouter", tls_runtime=tls_runtime),
             (broker.GATEWAY_PROCESS_NAME, broker.WEBUI_PROCESS_NAME),
         )
-        self.assertEqual(broker._processes_requiring_restart(slug="google", runtime=runtime), ())
-        self.assertEqual(broker._processes_requiring_restart(slug="nous", runtime=runtime), ())
+        self.assertEqual(broker._processes_requiring_restart(slug="google", tls_runtime=tls_runtime), ())
+        self.assertEqual(broker._processes_requiring_restart(slug="nous", tls_runtime=tls_runtime), ())
 
     async def test_per_slug_invalidate_refreshes_only_that_slug(self) -> None:
         """Slug-targeted invalidate must NOT fan out to disconnected providers.
@@ -1603,8 +1603,8 @@ class TestGatewayEnvHookIntegration(unittest.IsolatedAsyncioTestCase):
         narrows to `refresh_slug(slug)` when a slug is named, so DOH only
         hears about the one that actually changed.
         """
-        runtime = self._make_runtime()
-        tls_runtime_holder: dict = {"runtime": runtime}
+        tls_runtime = self._make_runtime()
+        tls_runtime_holder: dict = {"tls_runtime": tls_runtime}
         on_user_invalidate = broker._build_on_user_invalidate(
             tls_runtime_holder=tls_runtime_holder,
             env_path=self.env_path,
@@ -1628,8 +1628,8 @@ class TestGatewayEnvHookIntegration(unittest.IsolatedAsyncioTestCase):
 
     async def test_github_invalidate_rewrites_env_and_restarts_webui(self) -> None:
         """GitHub connect/disconnect reloads WebUI so provider env is re-read."""
-        runtime = self._make_runtime()
-        tls_runtime_holder: dict = {"runtime": runtime}
+        tls_runtime = self._make_runtime()
+        tls_runtime_holder: dict = {"tls_runtime": tls_runtime}
         on_user_invalidate = broker._build_on_user_invalidate(
             tls_runtime_holder=tls_runtime_holder,
             env_path=self.env_path,
@@ -1665,8 +1665,8 @@ class TestGatewayEnvHookIntegration(unittest.IsolatedAsyncioTestCase):
 
     async def test_openrouter_invalidate_deletes_models_cache_and_restarts_webui(self) -> None:
         """OpenRouter changes provider availability, so WebUI must rebuild /api/models."""
-        runtime = self._make_runtime()
-        tls_runtime_holder: dict = {"runtime": runtime}
+        tls_runtime = self._make_runtime()
+        tls_runtime_holder: dict = {"tls_runtime": tls_runtime}
         on_user_invalidate = broker._build_on_user_invalidate(
             tls_runtime_holder=tls_runtime_holder,
             env_path=self.env_path,
@@ -1701,8 +1701,8 @@ class TestGatewayEnvHookIntegration(unittest.IsolatedAsyncioTestCase):
 
     async def test_codex_invalidate_deletes_models_cache_without_process_restart(self) -> None:
         """Model-provider cache refresh is generic, even when no env changes."""
-        runtime = self._make_runtime()
-        tls_runtime_holder: dict = {"runtime": runtime}
+        tls_runtime = self._make_runtime()
+        tls_runtime_holder: dict = {"tls_runtime": tls_runtime}
         on_user_invalidate = broker._build_on_user_invalidate(
             tls_runtime_holder=tls_runtime_holder,
             env_path=self.env_path,
@@ -1741,8 +1741,8 @@ class TestGatewayEnvHookIntegration(unittest.IsolatedAsyncioTestCase):
         Coalescing into a single POST (where `absent` is a normal entry,
         not a 4xx) makes that log line disappear.
         """
-        runtime = self._make_runtime()
-        tls_runtime_holder: dict = {"runtime": runtime}
+        tls_runtime = self._make_runtime()
+        tls_runtime_holder: dict = {"tls_runtime": tls_runtime}
         on_user_invalidate = broker._build_on_user_invalidate(
             tls_runtime_holder=tls_runtime_holder,
             env_path=self.env_path,
@@ -1819,9 +1819,9 @@ class TestTransientRefreshGuards(unittest.IsolatedAsyncioTestCase):
         }
 
     async def test_refresh_all_reports_doh_reachability(self) -> None:
-        runtime = self._make_runtime()
+        tls_runtime = self._make_runtime()
         with patch.object(broker.tls_intercept, "fetch_provider_tokens_batch", return_value=self._transient_for_every_slug()):
-            self.assertFalse(await runtime.refresh_all())
+            self.assertFalse(await tls_runtime.refresh_all())
         absent_for_every_slug = {
             slug: broker.tls_intercept.RefreshResult(
                 outcome=broker.tls_intercept.REFRESH_OUTCOME_ABSENT,
@@ -1830,13 +1830,13 @@ class TestTransientRefreshGuards(unittest.IsolatedAsyncioTestCase):
             for slug in broker.tls_intercept.TLS_INTERCEPT_PROVIDERS
         }
         with patch.object(broker.tls_intercept, "fetch_provider_tokens_batch", return_value=absent_for_every_slug):
-            self.assertTrue(await runtime.refresh_all())
+            self.assertTrue(await tls_runtime.refresh_all())
 
     async def test_transient_invalidate_keeps_env_file_and_skips_restart(self) -> None:
         original = self._seed_telegram_env_block()
-        runtime = self._make_runtime()
+        tls_runtime = self._make_runtime()
         on_user_invalidate = broker._build_on_user_invalidate(
-            tls_runtime_holder={"runtime": runtime},
+            tls_runtime_holder={"tls_runtime": tls_runtime},
             env_path=self.env_path,
             webui_state_dir=self.webui_state_dir,
             process_compose_url="http://127.0.0.1:9999",
@@ -1859,7 +1859,7 @@ class TestTransientRefreshGuards(unittest.IsolatedAsyncioTestCase):
     async def test_bootstrap_transient_exits_without_touching_env_file(self) -> None:
         """A failed bootstrap refresh is fatal — the broker exits and ECS restarts the task."""
         original = self._seed_telegram_env_block()
-        runtime = self._make_runtime()
+        tls_runtime = self._make_runtime()
 
         with patch.object(
             broker.tls_intercept,
@@ -1867,14 +1867,14 @@ class TestTransientRefreshGuards(unittest.IsolatedAsyncioTestCase):
             return_value=self._transient_for_every_slug(),
         ):
             with self.assertRaises(SystemExit):
-                await broker._bootstrap_gateway_env(tls_runtime=runtime, env_path=self.env_path)
+                await broker._bootstrap_gateway_env(tls_runtime=tls_runtime, env_path=self.env_path)
 
         self.assertEqual(self.env_path.read_text(encoding="utf-8"), original)
 
     async def test_bootstrap_success_renders_env_file(self) -> None:
         # Start from the clobbered/empty state the gateway booted with.
         self.env_path.write_text("", encoding="utf-8")
-        runtime = self._make_runtime()
+        tls_runtime = self._make_runtime()
         refreshed_results = {
             slug: broker.tls_intercept.RefreshResult(
                 outcome=broker.tls_intercept.REFRESH_OUTCOME_ABSENT,
@@ -1892,7 +1892,7 @@ class TestTransientRefreshGuards(unittest.IsolatedAsyncioTestCase):
             "fetch_provider_tokens_batch",
             return_value=refreshed_results,
         ):
-            await broker._bootstrap_gateway_env(tls_runtime=runtime, env_path=self.env_path)
+            await broker._bootstrap_gateway_env(tls_runtime=tls_runtime, env_path=self.env_path)
 
         text = self.env_path.read_text(encoding="utf-8")
         self.assertIn("TELEGRAM_BOT_TOKEN=000000:DOH_PLACEHOLDER", text)
