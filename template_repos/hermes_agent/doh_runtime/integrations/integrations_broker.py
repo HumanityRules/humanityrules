@@ -382,8 +382,8 @@ def _build_on_user_invalidate(
 ) -> Callable[[str | None], Awaitable[None]]:
     """Return the hook that re-renders env and restarts the gateway when needed.
 
-    Uses a holder dict because the runtime is constructed *with* this hook,
-    creating a chicken-and-egg. The broker fills `tls_runtime_holder["runtime"]`
+    Uses a holder dict because the TLS runtime is constructed *with* this hook,
+    creating a chicken-and-egg. The broker fills `tls_runtime_holder["tls_runtime"]`
     immediately after construction.
 
     When `slug` is set (a single provider was just connected/disconnected),
@@ -393,18 +393,18 @@ def _build_on_user_invalidate(
     """
 
     async def on_user_invalidate(slug: str | None) -> None:
-        runtime = tls_runtime_holder["runtime"]
+        tls_runtime = tls_runtime_holder["tls_runtime"]
         if slug is None:
-            doh_reachable = await runtime.refresh_all()
+            doh_reachable = await tls_runtime.refresh_all()
         else:
-            doh_reachable = await runtime.refresh_slug(slug=slug)
+            doh_reachable = await tls_runtime.refresh_slug(slug=slug)
         if not doh_reachable:
             # Rendering from a cache that missed its refresh would strip
             # integrations from the gateway env; keep file and processes as-is.
             logger.error("refresh after invalidate(slug=%s) failed transiently; managed env left untouched", slug)
             return
         await _apply_refreshed_state(
-            runtime=runtime,
+            tls_runtime=tls_runtime,
             env_path=env_path,
             webui_state_dir=webui_state_dir,
             process_compose_url=process_compose_url,
@@ -415,7 +415,7 @@ def _build_on_user_invalidate(
 
 
 async def _apply_refreshed_state(
-    runtime: tls_intercept.TlsInterceptRuntime,
+    tls_runtime: tls_intercept.TlsInterceptRuntime,
     env_path: Path,
     webui_state_dir: Path,
     process_compose_url: str,
@@ -429,12 +429,12 @@ async def _apply_refreshed_state(
     invoke it after a refresh that reflected DOH truth. Raises on a failed
     process restart.
     """
-    env_changed = await _render_gateway_env_file(tls_runtime=runtime, env_path=env_path)
-    if _slug_affects_model_picker(slug=slug, runtime=runtime):
+    env_changed = await _render_gateway_env_file(tls_runtime=tls_runtime, env_path=env_path)
+    if _slug_affects_model_picker(slug=slug, tls_runtime=tls_runtime):
         await asyncio.to_thread(_delete_webui_models_cache, webui_state_dir=webui_state_dir)
     if not env_changed:
         return
-    for process_name in _processes_requiring_restart(slug=slug, runtime=runtime):
+    for process_name in _processes_requiring_restart(slug=slug, tls_runtime=tls_runtime):
         status, body = await asyncio.to_thread(
             _post_process_compose_restart,
             process_compose_url=process_compose_url,
@@ -464,9 +464,9 @@ def _delete_webui_models_cache(webui_state_dir: Path) -> bool:
     return True
 
 
-def _slug_affects_model_picker(slug: str | None, runtime: tls_intercept.TlsInterceptRuntime) -> bool:
+def _slug_affects_model_picker(slug: str | None, tls_runtime: tls_intercept.TlsInterceptRuntime) -> bool:
     """Return whether a provider state change can alter /api/models output."""
-    providers = runtime._token_store._providers
+    providers = tls_runtime._token_store._providers
     if slug is None:
         return any(spec.affects_model_picker for spec in providers.values())
     spec = providers.get(slug)
@@ -475,23 +475,23 @@ def _slug_affects_model_picker(slug: str | None, runtime: tls_intercept.TlsInter
     return spec.affects_model_picker
 
 
-def _processes_requiring_restart(slug: str | None, runtime: tls_intercept.TlsInterceptRuntime) -> tuple[str, ...]:
+def _processes_requiring_restart(slug: str | None, tls_runtime: tls_intercept.TlsInterceptRuntime) -> tuple[str, ...]:
     """Return process-compose entries that must reload after provider state changes."""
     processes: list[str] = []
-    if _slug_requires_gateway_restart(slug=slug, runtime=runtime):
+    if _slug_requires_gateway_restart(slug=slug, tls_runtime=tls_runtime):
         processes.append(GATEWAY_PROCESS_NAME)
-    if _slug_requires_webui_restart(slug=slug, runtime=runtime):
+    if _slug_requires_webui_restart(slug=slug, tls_runtime=tls_runtime):
         processes.append(WEBUI_PROCESS_NAME)
     return tuple(processes)
 
 
-def _slug_requires_gateway_restart(slug: str | None, runtime: tls_intercept.TlsInterceptRuntime) -> bool:
+def _slug_requires_gateway_restart(slug: str | None, tls_runtime: tls_intercept.TlsInterceptRuntime) -> bool:
     """A user-invalidate triggers gateway restart only when the provider declares it.
 
     `slug=None` (Refresh-all) restarts only if any provider in scope declares
     `restart_gateway_after_save`.
     """
-    providers = runtime._token_store._providers
+    providers = tls_runtime._token_store._providers
     if slug is None:
         return any(spec.restart_gateway_after_save for spec in providers.values())
     spec = providers.get(slug)
@@ -500,9 +500,9 @@ def _slug_requires_gateway_restart(slug: str | None, runtime: tls_intercept.TlsI
     return spec.restart_gateway_after_save
 
 
-def _slug_requires_webui_restart(slug: str | None, runtime: tls_intercept.TlsInterceptRuntime) -> bool:
+def _slug_requires_webui_restart(slug: str | None, tls_runtime: tls_intercept.TlsInterceptRuntime) -> bool:
     """Restart WebUI when the touched provider declares that WebUI must reload."""
-    providers = runtime._token_store._providers
+    providers = tls_runtime._token_store._providers
     if slug is None:
         return any(spec.restart_webui_after_save for spec in providers.values())
     spec = providers.get(slug)
@@ -575,7 +575,7 @@ async def _run(
         private_dir=private_dir,
         on_user_invalidate=on_user_invalidate,
     )
-    tls_runtime_holder["runtime"] = tls_runtime
+    tls_runtime_holder["tls_runtime"] = tls_runtime
     # Render the managed profile env file from current DOH state before opening the
     # control port. supervisor.sh's wait_for_port on the control port doubles
     # as the synchronization point: by the time it returns, the file is on
