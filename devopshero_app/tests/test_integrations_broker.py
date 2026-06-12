@@ -258,7 +258,7 @@ class TestRewriteAuthorization(unittest.TestCase):
         """
         provider = tls_providers.TLS_INTERCEPT_PROVIDERS["telegram"]
 
-        with self.assertRaisesRegex(ValueError, "placeholder"):
+        with self.assertRaisesRegex(broker.tls_intercept._SecretSelectionError, "placeholder"):
             broker.tls_intercept._rewrite_request_for_provider(
                 headers=[(b"host", b"api.telegram.org")],
                 path_with_query="/bot000000%3ADOH_PLACEHOLDER/sendMessage",
