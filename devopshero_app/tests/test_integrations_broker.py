@@ -448,8 +448,7 @@ class TestCertMinter(unittest.TestCase):
 class _StubAggregator:
     """Minimal MCPAggregator surface for the unified-status + control-app tests."""
 
-    def __init__(self, *, cooldown_remaining: int | None, refresh_payload: tuple[bool, dict]) -> None:
-        self._cooldown_remaining = cooldown_remaining
+    def __init__(self, *, refresh_payload: dict) -> None:
         self._refresh_payload = refresh_payload
         self.refresh_calls = 0
 
@@ -459,10 +458,7 @@ class _StubAggregator:
     def routes(self, prefix: str) -> list:
         return []
 
-    def cooldown_remaining_seconds(self) -> int | None:
-        return self._cooldown_remaining
-
-    async def refresh_catalog(self) -> tuple[bool, dict]:
+    async def refresh_catalog(self) -> dict:
         self.refresh_calls += 1
         return self._refresh_payload
 
@@ -490,10 +486,7 @@ class _StubDeviceFlow:
 
 def _ready_stub_aggregator() -> _StubAggregator:
     """Stub aggregator for tests that don't exercise the refresh route."""
-    return _StubAggregator(
-        cooldown_remaining=None,
-        refresh_payload=(True, {"ok": True, "tools": 0, "connectors": 0}),
-    )
+    return _StubAggregator(refresh_payload={"ok": True, "tools": 0, "connectors": 0})
 
 
 def _make_control_parts(
@@ -902,10 +895,7 @@ class TestControlIntegrations(unittest.IsolatedAsyncioTestCase):
         """POST /integrations/refresh_all fans out catalog reload + all-providers TLS invalidate."""
         from starlette.testclient import TestClient
 
-        aggregator = _StubAggregator(
-            cooldown_remaining=None,
-            refresh_payload=(True, {"ok": True, "tools": 12, "connectors": 3}),
-        )
+        aggregator = _StubAggregator(refresh_payload={"ok": True, "tools": 12, "connectors": 3})
         parts = self._control_parts(aggregator=aggregator)
 
         google_connected = _batched(slug="google", result=broker.tls_intercept.RefreshResult(
@@ -933,21 +923,28 @@ class TestControlIntegrations(unittest.IsolatedAsyncioTestCase):
             self.assertIn("google", self.tls_intercept_runtime._token_store._cache)
             with TestClient(parts.app) as client:
                 resp = client.post("/integrations/refresh_all")
+                # A successful refresh arms the service-owned cooldown: an
+                # immediate second press is rejected without touching the
+                # catalog or the TLS cache again.
+                resp_on_cooldown = client.post("/integrations/refresh_all")
 
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(resp.json(), {"ok": True, "tools": 12, "connectors": 3})
         self.assertEqual(aggregator.refresh_calls, 1)
         self.assertEqual(self.tls_intercept_runtime._token_store._cache, {})
+        self.assertEqual(resp_on_cooldown.status_code, 429)
+        self.assertEqual(resp_on_cooldown.json()["error"], "refresh_cooldown")
+        self.assertEqual(aggregator.refresh_calls, 1)
 
     async def test_refresh_endpoint_cooldown_skips_tls_invalidate(self) -> None:
         """Cooldown 429 must short-circuit before invalidate_all fires (would kick the gateway)."""
+        import time
         from starlette.testclient import TestClient
 
-        aggregator = _StubAggregator(
-            cooldown_remaining=17,
-            refresh_payload=(True, {"ok": True, "tools": 0, "connectors": 0}),
-        )
+        aggregator = _StubAggregator(refresh_payload={"ok": True, "tools": 0, "connectors": 0})
         parts = self._control_parts(aggregator=aggregator)
+        # 13s into the 30s cooldown window ⇒ int(30 - 13.x) + 1 = 17s left.
+        parts.service._last_refresh_all_ts = time.time() - 13
 
         with patch.object(
             parts.service._tls_intercept_runtime,
@@ -966,10 +963,7 @@ class TestControlIntegrations(unittest.IsolatedAsyncioTestCase):
         """Catalog refresh succeeded but TLS invalidate's gateway restart failed -> 502 with error."""
         from starlette.testclient import TestClient
 
-        aggregator = _StubAggregator(
-            cooldown_remaining=None,
-            refresh_payload=(True, {"ok": True, "tools": 1, "connectors": 1}),
-        )
+        aggregator = _StubAggregator(refresh_payload={"ok": True, "tools": 1, "connectors": 1})
         parts = self._control_parts(aggregator=aggregator)
 
         with patch.object(

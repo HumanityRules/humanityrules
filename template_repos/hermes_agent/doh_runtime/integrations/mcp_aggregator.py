@@ -50,8 +50,6 @@ logger = logging.getLogger("mcp_aggregator")
 
 DEFAULT_MCP_PORT = 9952
 
-REFRESH_COOLDOWN_SECONDS = 30
-
 # OAuth-DCR-PKCE providers, indexed by slug. The OAuth handlers and refresh
 # loop below resolve provider configuration off these specs.
 DCR_CONNECTORS_BY_SLUG: dict[str, DCRConnectorSpec] = {spec.slug: spec for spec in DCR_CONNECTORS}
@@ -155,7 +153,6 @@ class MCPAggregator:
             self._oauth_states[spec.slug] = _OAuthState(provider_dir=persistent_dir / spec.slug)
         self._catalog_store = mcp_top_level_tools.CatalogStore()
         self._refresh_lock = asyncio.Lock()
-        self._last_refresh_ts: float = 0.0
 
         # Merge (relayed via DOH, not DCR) first when enabled, then one Backend per connector spec.
         # Each spec.make_backend gets its own subdir under persistent_dir for any
@@ -186,14 +183,6 @@ class MCPAggregator:
                 on_config_change=self._on_state_change,
             )
             self._backends.append(backend)
-
-    async def _reload_catalog(self) -> None:
-        """Force a full catalog reload, awaiting completion. Used by the user-facing Refresh button."""
-        async with self._refresh_lock:
-            self._last_refresh_ts = time.time()
-            for backend in self._backends:
-                await backend.invalidate_caches()
-            await self._catalog_store.reload(backends=self._backends)
 
     async def _on_state_change(self, backend_name: str, connector: str, transition: mcp_top_level_tools.StateTransition) -> None:
         """Dispatcher every backend's on_config_change is wired to.
@@ -247,30 +236,19 @@ class MCPAggregator:
         logger.info("MCP aggregator listening on 127.0.0.1:%d", self._port)
         await server.serve()
 
-    def cooldown_remaining_seconds(self) -> int | None:
-        """Seconds left on the refresh cooldown, or None if a refresh is allowed now.
+    async def refresh_catalog(self) -> dict:
+        """Reload every backend's tool catalog; returns the browser-facing counts payload.
 
-        Exposed so callers (the broker's unified `/integrations/refresh_all` route)
-        can gate on cooldown *before* firing co-routines whose side effects
-        shouldn't run during a no-op refresh.
+        Pure mechanism: rate limiting of the user-facing Refresh button is
+        policy and lives in `credentials_service`. `_refresh_lock` stays for
+        correctness — it serializes concurrent reloads.
         """
-        elapsed = time.time() - self._last_refresh_ts
-        if elapsed < REFRESH_COOLDOWN_SECONDS:
-            return int(REFRESH_COOLDOWN_SECONDS - elapsed) + 1
-        return None
-
-    async def refresh_catalog(self) -> tuple[bool, dict]:
-        """User-facing Refresh button hits this. Returns (ok, payload)."""
-        remaining = self.cooldown_remaining_seconds()
-        if remaining is not None:
-            return False, {"error": "refresh_cooldown", "retry_after_seconds": remaining}
         async with self._refresh_lock:
-            self._last_refresh_ts = time.time()
             for backend in self._backends:
                 await backend.invalidate_caches()
             await self._catalog_store.reload(backends=self._backends)
         connectors = {(e.backend, e.connector) for e in self._catalog_store.entries.values()}
-        return True, {"ok": True, "tools": len(self._catalog_store.entries), "connectors": len(connectors)}
+        return {"ok": True, "tools": len(self._catalog_store.entries), "connectors": len(connectors)}
 
     def routes(self, prefix: str) -> list[Route]:
         """Routes for the integrations_broker to mount under its unified /__doh_broker/* router.
