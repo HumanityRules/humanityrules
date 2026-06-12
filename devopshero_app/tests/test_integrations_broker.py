@@ -76,6 +76,21 @@ def _load_broker_module() -> types.ModuleType:
 
 broker = _load_broker_module()
 
+# Loading the broker put the integrations dir on sys.path and imported the
+# sibling modules; bind the ones the tests patch/construct directly.
+import credentials_service  # noqa: E402
+import doh_client  # noqa: E402
+
+
+def _make_doh_client() -> doh_client.DohClient:
+    """Build a DohClient with the fixed test identity."""
+    return doh_client.DohClient(
+        control_plane_url="https://doh.example",
+        bearer="env-bearer",
+        owner_username="vmendi",
+        app_slug="hermes",
+    )
+
 
 class TestEnvironmentFlags(unittest.TestCase):
 
@@ -97,12 +112,7 @@ def _make_token_store() -> broker.tls_intercept._TokenStore:
     """Create a fresh TLS token store for isolated broker tests."""
     return broker.tls_intercept._TokenStore(
         providers=broker.tls_intercept.TLS_INTERCEPT_PROVIDERS,
-        refresh_config=broker.tls_intercept.DohRefreshConfig(
-            control_plane_url="https://doh.example",
-            bearer="env-bearer",
-            owner_username="vmendi",
-            app_slug="hermes",
-        ),
+        doh_client=_make_doh_client(),
         refresh_lead_seconds=broker.tls_intercept.REFRESH_LEAD_SECONDS,
     )
 
@@ -111,12 +121,7 @@ def _make_tls_intercept_runtime(ca_dir: pathlib.Path, private_dir: pathlib.Path)
     """Create a fresh TLS-intercept runtime for control-app tests."""
     return broker.tls_intercept.TlsInterceptRuntime(
         providers=broker.tls_intercept.TLS_INTERCEPT_PROVIDERS,
-        refresh_config=broker.tls_intercept.DohRefreshConfig(
-            control_plane_url="https://doh.example",
-            bearer="env-bearer",
-            owner_username="vmendi",
-            app_slug="hermes",
-        ),
+        doh_client=_make_doh_client(),
         refresh_lead_seconds=broker.tls_intercept.REFRESH_LEAD_SECONDS,
         ca_dir=ca_dir,
         private_dir=private_dir,
@@ -491,6 +496,52 @@ def _ready_stub_aggregator() -> _StubAggregator:
     )
 
 
+def _make_control_parts(
+    tls_intercept_runtime: "broker.tls_intercept.TlsInterceptRuntime",
+    aggregator: _StubAggregator,
+    gateway_env_path: pathlib.Path,
+    webui_state_dir: pathlib.Path,
+) -> types.SimpleNamespace:
+    """Wire a control app + CredentialsService the way the broker does at startup."""
+    client = _make_doh_client()
+    service = credentials_service.CredentialsService(
+        doh_client=client,
+        tls_intercept_runtime=tls_intercept_runtime,
+        mcp_aggregator=aggregator,
+        providers=broker.tls_intercept.TLS_INTERCEPT_PROVIDERS,
+        gateway_env_path=gateway_env_path,
+        webui_state_dir=webui_state_dir,
+        process_compose_url="http://127.0.0.1:9999",
+    )
+    device_stub = _StubDeviceFlow()
+    app = broker.control_api.build_control_app(
+        mcp_aggregator=aggregator,
+        tls_intercept_runtime=tls_intercept_runtime,
+        oauth_device_flow=device_stub,
+        credentials_service=service,
+        doh_client=client,
+        env_slug="default",
+    )
+    return types.SimpleNamespace(app=app, service=service, doh_client=client, device_flow=device_stub)
+
+
+def _make_credentials_service(
+    tls_intercept_runtime: "broker.tls_intercept.TlsInterceptRuntime",
+    gateway_env_path: pathlib.Path,
+    webui_state_dir: pathlib.Path,
+) -> credentials_service.CredentialsService:
+    """Build a CredentialsService over a stub aggregator for choreography tests."""
+    return credentials_service.CredentialsService(
+        doh_client=_make_doh_client(),
+        tls_intercept_runtime=tls_intercept_runtime,
+        mcp_aggregator=_ready_stub_aggregator(),
+        providers=broker.tls_intercept.TLS_INTERCEPT_PROVIDERS,
+        gateway_env_path=gateway_env_path,
+        webui_state_dir=webui_state_dir,
+        process_compose_url="http://127.0.0.1:9999",
+    )
+
+
 class TestControlIntegrations(unittest.IsolatedAsyncioTestCase):
     """/integrations renders from cache; it MUST NOT call DOH on the status path."""
 
@@ -499,21 +550,22 @@ class TestControlIntegrations(unittest.IsolatedAsyncioTestCase):
         self.addCleanup(self.tmp.cleanup)
         root = pathlib.Path(self.tmp.name)
         self.tls_intercept_runtime = _make_tls_intercept_runtime(ca_dir=root / "ca", private_dir=root / "private")
+        self.gateway_env_path = root / "hermes.env"
+        self.webui_state_dir = root / "webui-state"
+
+    def _control_parts(self, aggregator: _StubAggregator) -> types.SimpleNamespace:
+        return _make_control_parts(
+            tls_intercept_runtime=self.tls_intercept_runtime,
+            aggregator=aggregator,
+            gateway_env_path=self.gateway_env_path,
+            webui_state_dir=self.webui_state_dir,
+        )
 
     async def test_get_integrations_reads_cache_without_calling_doh(self) -> None:
         """Status reads never call DOH; connected items come from the pre-warmed cache."""
         from starlette.testclient import TestClient
 
-        app = broker._build_control_app(
-            mcp_aggregator=_ready_stub_aggregator(),
-            tls_intercept_runtime=self.tls_intercept_runtime,
-            oauth_device_flow=_StubDeviceFlow(),
-            control_plane_url="https://doh.example",
-            bearer="env-bearer",
-            owner_username="vmendi",
-            app_slug="hermes",
-            env_slug="default",
-        )
+        app = self._control_parts(aggregator=_ready_stub_aggregator()).app
 
         with patch.object(
             broker.tls_intercept,
@@ -661,11 +713,12 @@ class TestControlIntegrations(unittest.IsolatedAsyncioTestCase):
           2. User clicks Disconnect → `invalidate(slug)` clears the cache.
           3. Proxy's in-flight fetch resolves and writes a (now stale)
              entry back into the cache.
-          4. Hook fires `refresh_slug` → `_ensure_fresh` reads the
-             fresh-looking stale entry and returns without refetching.
+          4. The service's post-invalidate `refresh_slug` → `_ensure_fresh`
+             reads the fresh-looking stale entry and returns without
+             refetching.
 
         Correct behavior: invalidate waits for the in-flight refresh, the
-        stale write lands, invalidate pops it, and the hook's refresh
+        stale write lands, invalidate pops it, and the service's refresh
         starts from an empty cache and re-asks DOH.
         """
         import threading
@@ -673,7 +726,7 @@ class TestControlIntegrations(unittest.IsolatedAsyncioTestCase):
         started = threading.Event()
         delayed = threading.Event()
 
-        def first_stale(refresh_config: object, slugs: list[str]) -> object:
+        def first_stale(doh_client: object, slugs: list[str]) -> object:
             fetch_calls.append("first")
             started.set()
             delayed.wait(timeout=5)
@@ -683,7 +736,7 @@ class TestControlIntegrations(unittest.IsolatedAsyncioTestCase):
                 config={}, metadata={},
             ))
 
-        def second_absent(refresh_config: object, slugs: list[str]) -> object:
+        def second_absent(doh_client: object, slugs: list[str]) -> object:
             fetch_calls.append("second")
             return _batched(slug="google", result=broker.tls_intercept.RefreshResult(
                 outcome=broker.tls_intercept.REFRESH_OUTCOME_ABSENT,
@@ -708,8 +761,8 @@ class TestControlIntegrations(unittest.IsolatedAsyncioTestCase):
             await proxy_task
             await invalidate_task
 
-            # Hook step: the disconnect hook calls refresh_slug. It must
-            # see an empty cache and re-ask DOH (second_absent fires here).
+            # Service step: after a disconnect the service calls refresh. It
+            # must see an empty cache and re-ask DOH (second_absent fires here).
             await store.refresh(slug="google")
 
         self.assertEqual(fetch_calls, ["first", "second"])
@@ -735,7 +788,7 @@ class TestControlIntegrations(unittest.IsolatedAsyncioTestCase):
         delayed = threading.Event()
         started = threading.Event()
 
-        def parked_has_token(refresh_config: object, slugs: list[str]) -> object:
+        def parked_has_token(doh_client: object, slugs: list[str]) -> object:
             started.set()
             delayed.wait(timeout=5)
             return {
@@ -846,39 +899,40 @@ class TestControlIntegrations(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("google", store._cache)
 
     async def test_refresh_endpoint_reloads_catalog_and_drops_tls_cache(self) -> None:
-        """POST /integrations/refresh fans out catalog reload + all-providers TLS invalidate."""
+        """POST /integrations/refresh_all fans out catalog reload + all-providers TLS invalidate."""
         from starlette.testclient import TestClient
 
         aggregator = _StubAggregator(
             cooldown_remaining=None,
             refresh_payload=(True, {"ok": True, "tools": 12, "connectors": 3}),
         )
-        app = broker._build_control_app(
-            mcp_aggregator=aggregator,
-            tls_intercept_runtime=self.tls_intercept_runtime,
-            oauth_device_flow=_StubDeviceFlow(),
-            control_plane_url="https://doh.example",
-            bearer="env-bearer",
-            owner_username="vmendi",
-            app_slug="hermes",
-            env_slug="default",
-        )
+        parts = self._control_parts(aggregator=aggregator)
 
+        google_connected = _batched(slug="google", result=broker.tls_intercept.RefreshResult(
+            outcome=broker.tls_intercept.REFRESH_OUTCOME_HAS_TOKEN,
+            secrets={"access_token": "fresh-token"},
+            expires_in=3600,
+            config={},
+            metadata={},
+        ))
+        absent_for_every_slug = {
+            slug: broker.tls_intercept.RefreshResult(
+                outcome=broker.tls_intercept.REFRESH_OUTCOME_ABSENT,
+                secrets=None, expires_in=None, config={}, metadata={},
+            )
+            for slug in broker.tls_intercept.TLS_INTERCEPT_PROVIDERS
+        }
+        # First call pre-warms google; the route's invalidate-all then refreshes
+        # every provider from DOH, which reports them all disconnected.
         with patch.object(
             broker.tls_intercept,
             "fetch_provider_tokens_batch",
-            return_value=_batched(slug="google", result=broker.tls_intercept.RefreshResult(
-                outcome=broker.tls_intercept.REFRESH_OUTCOME_HAS_TOKEN,
-                secrets={"access_token": "fresh-token"},
-                expires_in=3600,
-                config={},
-                metadata={},
-            )),
+            side_effect=[google_connected, absent_for_every_slug],
         ):
             await self.tls_intercept_runtime.refresh_slug(slug="google")
             self.assertIn("google", self.tls_intercept_runtime._token_store._cache)
-            with TestClient(app) as client:
-                resp = client.post("/integrations/refresh")
+            with TestClient(parts.app) as client:
+                resp = client.post("/integrations/refresh_all")
 
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(resp.json(), {"ok": True, "tools": 12, "connectors": 3})
@@ -893,20 +947,15 @@ class TestControlIntegrations(unittest.IsolatedAsyncioTestCase):
             cooldown_remaining=17,
             refresh_payload=(True, {"ok": True, "tools": 0, "connectors": 0}),
         )
-        app = broker._build_control_app(
-            mcp_aggregator=aggregator,
-            tls_intercept_runtime=self.tls_intercept_runtime,
-            oauth_device_flow=_StubDeviceFlow(),
-            control_plane_url="https://doh.example",
-            bearer="env-bearer",
-            owner_username="vmendi",
-            app_slug="hermes",
-            env_slug="default",
-        )
+        parts = self._control_parts(aggregator=aggregator)
 
-        with patch.object(self.tls_intercept_runtime, "invalidate_all", new_callable=AsyncMock) as invalidate_all_mock:
-            with TestClient(app) as client:
-                resp = client.post("/integrations/refresh")
+        with patch.object(
+            parts.service._tls_intercept_runtime,
+            "invalidate_all",
+            new_callable=AsyncMock,
+        ) as invalidate_all_mock:
+            with TestClient(parts.app) as client:
+                resp = client.post("/integrations/refresh_all")
 
         self.assertEqual(resp.status_code, 429)
         self.assertEqual(resp.json(), {"error": "refresh_cooldown", "retry_after_seconds": 17})
@@ -921,25 +970,16 @@ class TestControlIntegrations(unittest.IsolatedAsyncioTestCase):
             cooldown_remaining=None,
             refresh_payload=(True, {"ok": True, "tools": 1, "connectors": 1}),
         )
-        app = broker._build_control_app(
-            mcp_aggregator=aggregator,
-            tls_intercept_runtime=self.tls_intercept_runtime,
-            oauth_device_flow=_StubDeviceFlow(),
-            control_plane_url="https://doh.example",
-            bearer="env-bearer",
-            owner_username="vmendi",
-            app_slug="hermes",
-            env_slug="default",
-        )
+        parts = self._control_parts(aggregator=aggregator)
 
         with patch.object(
-            self.tls_intercept_runtime,
-            "invalidate_all",
+            parts.service,
+            "_refresh_and_apply",
             new_callable=AsyncMock,
             side_effect=RuntimeError("gateway restart failed (process-compose returned 502)"),
         ):
-            with TestClient(app) as client:
-                resp = client.post("/integrations/refresh")
+            with TestClient(parts.app) as client:
+                resp = client.post("/integrations/refresh_all")
 
         self.assertEqual(resp.status_code, 502)
         body = resp.json()
@@ -950,20 +990,15 @@ class TestControlIntegrations(unittest.IsolatedAsyncioTestCase):
         """POST /integrations/tls_intercept/{provider}/invalidate evicts one provider."""
         from starlette.testclient import TestClient
 
-        app = broker._build_control_app(
-            mcp_aggregator=_ready_stub_aggregator(),
-            tls_intercept_runtime=self.tls_intercept_runtime,
-            oauth_device_flow=_StubDeviceFlow(),
-            control_plane_url="https://doh.example",
-            bearer="env-bearer",
-            owner_username="vmendi",
-            app_slug="hermes",
-            env_slug="default",
-        )
+        parts = self._control_parts(aggregator=_ready_stub_aggregator())
 
-        with patch.object(self.tls_intercept_runtime, "invalidate", new_callable=AsyncMock) as invalidate_mock:
-            with patch.object(self.tls_intercept_runtime, "invalidate_all", new_callable=AsyncMock) as invalidate_all_mock:
-                with TestClient(app) as client:
+        with patch.object(parts.service, "credentials_invalidate", new_callable=AsyncMock) as invalidate_mock:
+            with patch.object(
+                parts.service._tls_intercept_runtime,
+                "invalidate_all",
+                new_callable=AsyncMock,
+            ) as invalidate_all_mock:
+                with TestClient(parts.app) as client:
                     resp = client.post("/integrations/tls_intercept/github/invalidate")
 
         self.assertEqual(resp.status_code, 200)
@@ -975,17 +1010,9 @@ class TestControlIntegrations(unittest.IsolatedAsyncioTestCase):
         """Device start/status/cancel routes dispatch by provider slug."""
         from starlette.testclient import TestClient
 
-        device_stub = _StubDeviceFlow()
-        app = broker._build_control_app(
-            mcp_aggregator=_ready_stub_aggregator(),
-            tls_intercept_runtime=self.tls_intercept_runtime,
-            oauth_device_flow=device_stub,
-            control_plane_url="https://doh.example",
-            bearer="env-bearer",
-            owner_username="vmendi",
-            app_slug="hermes",
-            env_slug="default",
-        )
+        parts = self._control_parts(aggregator=_ready_stub_aggregator())
+        device_stub = parts.device_flow
+        app = parts.app
 
         with TestClient(app) as client:
             start_resp = client.post("/integrations/tls_intercept/nous/device/start")
@@ -1000,74 +1027,56 @@ class TestControlIntegrations(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(device_stub.statused, ["nous"])
         self.assertEqual(device_stub.cancelled, ["nous"])
 
-    async def test_vault_setup_session_forwards_identity_to_doh(self) -> None:
-        """POST /integrations/tls_intercept/{provider}/setup-session asks DOH for a submit token."""
+    async def test_vault_setup_session_requests_submit_token_from_doh(self) -> None:
+        """POST /integrations/tls_intercept/{provider}/setup-session asks DOH for a submit token.
+
+        The owner/app identity rides inside DohClient.post_json (see
+        TestDohClient), so the service only supplies the provider fields.
+        """
         from starlette.testclient import TestClient
 
-        app = broker._build_control_app(
-            mcp_aggregator=_ready_stub_aggregator(),
-            tls_intercept_runtime=self.tls_intercept_runtime,
-            oauth_device_flow=_StubDeviceFlow(),
-            control_plane_url="https://doh.example",
-            bearer="env-bearer",
-            owner_username="vmendi",
-            app_slug="hermes",
-            env_slug="default",
-        )
+        parts = self._control_parts(aggregator=_ready_stub_aggregator())
 
         with patch.object(
-            broker,
-            "_post_control_plane_json",
+            parts.doh_client,
+            "post_json",
             return_value=(200, {"submit_token": "signed-token"}),
         ) as post_mock:
-            with TestClient(app) as client:
+            with TestClient(parts.app) as client:
                 resp = client.post("/integrations/tls_intercept/telegram/setup-session?origin=https%3A%2F%2Fhermes.dev.example.com")
 
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(resp.json()["submit_token"], "signed-token")
         post_mock.assert_called_once_with(
-            control_plane_url="https://doh.example",
-            bearer="env-bearer",
             path="/api/integrations/credentials/setup-session",
             payload={
-                "owner_username": "vmendi",
-                "app_slug": "hermes",
                 "provider": "telegram",
                 "public_origin": "https://hermes.dev.example.com",
             },
+            timeout_seconds=30,
         )
 
     async def test_vault_disconnect_invalidates_only_provider_cache_on_success(self) -> None:
         """POST /integrations/tls_intercept/{provider}/disconnect evicts only that provider (vault)."""
         from starlette.testclient import TestClient
 
-        app = broker._build_control_app(
-            mcp_aggregator=_ready_stub_aggregator(),
-            tls_intercept_runtime=self.tls_intercept_runtime,
-            oauth_device_flow=_StubDeviceFlow(),
-            control_plane_url="https://doh.example",
-            bearer="env-bearer",
-            owner_username="vmendi",
-            app_slug="hermes",
-            env_slug="default",
-        )
+        parts = self._control_parts(aggregator=_ready_stub_aggregator())
 
-        with patch.object(broker, "_post_control_plane_json", return_value=(200, {"ok": True})) as post_mock:
-            with patch.object(self.tls_intercept_runtime, "invalidate", new_callable=AsyncMock) as invalidate_mock:
-                with patch.object(self.tls_intercept_runtime, "invalidate_all", new_callable=AsyncMock) as invalidate_all_mock:
-                    with TestClient(app) as client:
+        with patch.object(parts.doh_client, "post_json", return_value=(200, {"ok": True})) as post_mock:
+            with patch.object(parts.service, "credentials_invalidate", new_callable=AsyncMock) as invalidate_mock:
+                with patch.object(
+                    parts.service._tls_intercept_runtime,
+                    "invalidate_all",
+                    new_callable=AsyncMock,
+                ) as invalidate_all_mock:
+                    with TestClient(parts.app) as client:
                         resp = client.post("/integrations/tls_intercept/telegram/disconnect")
 
         self.assertEqual(resp.status_code, 200)
         post_mock.assert_called_once_with(
-            control_plane_url="https://doh.example",
-            bearer="env-bearer",
             path="/api/integrations/credentials/disconnect",
-            payload={
-                "owner_username": "vmendi",
-                "app_slug": "hermes",
-                "provider": "telegram",
-            },
+            payload={"provider": "telegram"},
+            timeout_seconds=30,
         )
         invalidate_mock.assert_awaited_once_with(slug="telegram")
         invalidate_all_mock.assert_not_awaited()
@@ -1076,20 +1085,11 @@ class TestControlIntegrations(unittest.IsolatedAsyncioTestCase):
         """POST /integrations/tls_intercept/{provider}/disconnect evicts only that provider (OAuth)."""
         from starlette.testclient import TestClient
 
-        app = broker._build_control_app(
-            mcp_aggregator=_ready_stub_aggregator(),
-            tls_intercept_runtime=self.tls_intercept_runtime,
-            oauth_device_flow=_StubDeviceFlow(),
-            control_plane_url="https://doh.example",
-            bearer="env-bearer",
-            owner_username="vmendi",
-            app_slug="hermes",
-            env_slug="default",
-        )
+        parts = self._control_parts(aggregator=_ready_stub_aggregator())
 
-        with patch.object(broker, "_post_control_plane_json", return_value=(200, {"ok": True})) as post_mock:
-            with patch.object(self.tls_intercept_runtime, "invalidate", new_callable=AsyncMock) as invalidate_mock:
-                with TestClient(app) as client:
+        with patch.object(parts.doh_client, "post_json", return_value=(200, {"ok": True})) as post_mock:
+            with patch.object(parts.service, "credentials_invalidate", new_callable=AsyncMock) as invalidate_mock:
+                with TestClient(parts.app) as client:
                     resp = client.post("/integrations/tls_intercept/github/disconnect")
 
         self.assertEqual(resp.status_code, 200)
@@ -1097,14 +1097,9 @@ class TestControlIntegrations(unittest.IsolatedAsyncioTestCase):
         # endpoint; DOH resolves the provider kind and revokes upstream for
         # OAuth providers server-side.
         post_mock.assert_called_once_with(
-            control_plane_url="https://doh.example",
-            bearer="env-bearer",
             path="/api/integrations/credentials/disconnect",
-            payload={
-                "owner_username": "vmendi",
-                "app_slug": "hermes",
-                "provider": "github",
-            },
+            payload={"provider": "github"},
+            timeout_seconds=30,
         )
         invalidate_mock.assert_awaited_once_with(slug="github")
 
@@ -1176,34 +1171,69 @@ class TestLazyTokenForHost(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("google", self.token_store._cache)
 
 
+class _FakeUrlopenResponse:
+    """Context-manager stand-in for a urllib response with a JSON body."""
+
+    def __init__(self, body: bytes) -> None:
+        self.status = 200
+        self._body = body
+
+    def read(self) -> bytes:
+        return self._body
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *a):
+        return False
+
+
+class TestDohClient(unittest.TestCase):
+    """DohClient owns the bearer and merges the owner/app identity into every payload."""
+
+    def test_post_json_merges_identity_and_sends_bearer(self) -> None:
+        import json as _json
+        captured: dict = {}
+
+        def fake_urlopen(req, timeout):
+            captured["req"] = req
+            captured["timeout"] = timeout
+            return _FakeUrlopenResponse(body=b'{"ok": true}')
+
+        with patch.object(doh_client.urllib.request, "urlopen", side_effect=fake_urlopen):
+            status, payload = _make_doh_client().post_json(
+                path="/api/integrations/credentials/disconnect",
+                payload={"provider": "telegram"},
+                timeout_seconds=30,
+            )
+
+        self.assertEqual(status, 200)
+        self.assertEqual(payload, {"ok": True})
+        self.assertEqual(captured["timeout"], 30)
+        req = captured["req"]
+        self.assertEqual(req.full_url, "https://doh.example/api/integrations/credentials/disconnect")
+        self.assertEqual(req.get_header("Authorization"), "Bearer env-bearer")
+        self.assertEqual(
+            _json.loads(req.data.decode("utf-8")),
+            {"owner_username": "vmendi", "app_slug": "hermes", "provider": "telegram"},
+        )
+
+    def test_network_error_maps_to_synthetic_502(self) -> None:
+        with patch.object(doh_client.urllib.request, "urlopen", side_effect=OSError("connection refused")):
+            status, payload = _make_doh_client().post_json(path="/api/x", payload={}, timeout_seconds=30)
+        self.assertEqual(status, 502)
+        self.assertIn("error", payload)
+
+
 class TestFetchProviderTokensBatch(unittest.TestCase):
     """Parse DOH's `/api/integrations/tokens` response into a slug→RefreshResult map."""
 
-    def _refresh_config(self) -> "broker.tls_intercept.DohRefreshConfig":
-        return broker.tls_intercept.DohRefreshConfig(
-            control_plane_url="https://doh.example",
-            bearer="env-bearer",
-            owner_username="vmendi",
-            app_slug="hermes",
-        )
-
     def _run_with_response(self, payload: dict) -> dict:
-        class _FakeResp:
-            def __init__(self, body: bytes) -> None:
-                self.status = 200
-                self._body = body
-            def read(self) -> bytes:
-                return self._body
-            def __enter__(self):
-                return self
-            def __exit__(self, *a):
-                return False
-
         import json as _json
-        opener = _FakeResp(body=_json.dumps(payload).encode())
-        with patch.object(broker.tls_intercept.urllib.request, "urlopen", return_value=opener):
+        opener = _FakeUrlopenResponse(body=_json.dumps(payload).encode())
+        with patch.object(doh_client.urllib.request, "urlopen", return_value=opener):
             return broker.tls_intercept.fetch_provider_tokens_batch(
-                refresh_config=self._refresh_config(),
+                doh_client=_make_doh_client(),
                 slugs=["google", "github", "telegram"],
             )
 
@@ -1273,12 +1303,12 @@ class TestFetchProviderTokensBatch(unittest.TestCase):
     def test_network_error_returns_transient_for_every_slug(self) -> None:
         """Any urlopen failure must surface as transient across the board, preserving the cache."""
         with patch.object(
-            broker.tls_intercept.urllib.request,
+            doh_client.urllib.request,
             "urlopen",
             side_effect=OSError("connection refused"),
         ):
             results = broker.tls_intercept.fetch_provider_tokens_batch(
-                refresh_config=self._refresh_config(),
+                doh_client=_make_doh_client(),
                 slugs=["google", "github", "telegram"],
             )
         for slug in ("google", "github", "telegram"):
@@ -1289,9 +1319,9 @@ class TestFetchProviderTokensBatch(unittest.TestCase):
         http_err = urllib.error.HTTPError(
             url="https://doh.example/api/integrations/tokens", code=500, msg="x", hdrs={}, fp=None,
         )
-        with patch.object(broker.tls_intercept.urllib.request, "urlopen", side_effect=http_err):
+        with patch.object(doh_client.urllib.request, "urlopen", side_effect=http_err):
             results = broker.tls_intercept.fetch_provider_tokens_batch(
-                refresh_config=self._refresh_config(),
+                doh_client=_make_doh_client(),
                 slugs=["google", "github"],
             )
         self.assertEqual(results["google"].outcome, broker.tls_intercept.REFRESH_OUTCOME_TRANSIENT)
@@ -1512,7 +1542,7 @@ class TestGatewayEnvRender(unittest.TestCase):
         self.assertFalse(second_changed)
 
 
-class TestGatewayEnvHookIntegration(unittest.IsolatedAsyncioTestCase):
+class TestCredentialsServiceChoreography(unittest.IsolatedAsyncioTestCase):
     """User-initiated invalidate triggers env render + restart for vault providers."""
 
     def setUp(self) -> None:
@@ -1521,96 +1551,57 @@ class TestGatewayEnvHookIntegration(unittest.IsolatedAsyncioTestCase):
         self.env_path = pathlib.Path(self.tmp.name) / "hermes.env"
         self.webui_state_dir = pathlib.Path(self.tmp.name) / "webui-state"
 
-    def _make_runtime(self, on_user_invalidate=None) -> "broker.tls_intercept.TlsInterceptRuntime":
+    def _make_runtime(self) -> "broker.tls_intercept.TlsInterceptRuntime":
         root = pathlib.Path(self.tmp.name)
-        return broker.tls_intercept.TlsInterceptRuntime(
-            providers=broker.tls_intercept.TLS_INTERCEPT_PROVIDERS,
-            refresh_config=broker.tls_intercept.DohRefreshConfig(
-                control_plane_url="https://doh.example",
-                bearer="env-bearer",
-                owner_username="vmendi",
-                app_slug="hermes",
-            ),
-            refresh_lead_seconds=broker.tls_intercept.REFRESH_LEAD_SECONDS,
-            ca_dir=root / "ca",
-            private_dir=root / "private",
-            on_user_invalidate=on_user_invalidate,
+        return _make_tls_intercept_runtime(ca_dir=root / "ca", private_dir=root / "private")
+
+    def _make_service(self) -> credentials_service.CredentialsService:
+        return _make_credentials_service(
+            tls_intercept_runtime=self._make_runtime(),
+            gateway_env_path=self.env_path,
+            webui_state_dir=self.webui_state_dir,
         )
 
-    async def test_invalidate_fires_on_user_invalidate_hook(self) -> None:
-        seen: list[str | None] = []
+    async def test_runtime_invalidate_is_pure_cache_drop(self) -> None:
+        """The TLS runtime fans out no side effects on invalidate.
 
-        async def on_user_invalidate(slug: str | None) -> None:
-            seen.append(slug)
-
-        runtime = self._make_runtime(on_user_invalidate=on_user_invalidate)
-        await runtime.invalidate(slug="telegram")
-        await runtime.invalidate_all()
-        self.assertEqual(seen, ["telegram", None])
-
-    async def test_proxy_hot_path_eviction_does_not_fire_hook(self) -> None:
-        """Inner token_store.invalidate (used by proxy 401-evict path) bypasses the hook.
-
-        Credential changes go through `runtime.invalidate`, not the inner
-        store. A 401-eviction during normal traffic must NOT trigger a
-        gateway restart.
+        Credential-change choreography (DOH refresh, env render, process
+        restarts) belongs to CredentialsService. Both the runtime's public
+        invalidate and the proxy 401-eviction path (inner token store) only
+        touch the cache, so a 401-eviction during normal traffic can never
+        trigger a gateway restart.
         """
-        seen: list[str | None] = []
+        runtime = self._make_runtime()
+        with patch.object(broker.tls_intercept, "fetch_provider_tokens_batch") as fetch_mock:
+            await runtime.invalidate(slug="telegram")
+            await runtime.invalidate_all()
+            await runtime._token_store.invalidate(slug="telegram")
+        fetch_mock.assert_not_called()
 
-        async def on_user_invalidate(slug: str | None) -> None:
-            seen.append(slug)
-
-        runtime = self._make_runtime(on_user_invalidate=on_user_invalidate)
-        await runtime._token_store.invalidate(slug="telegram")
-        self.assertEqual(seen, [])
-
-    async def test_slug_requires_gateway_restart_only_for_gateway_relevant_providers(self) -> None:
-        """Only providers declaring gateway reload restart system.gateway."""
-        tls_intercept_runtime = self._make_runtime()
-        self.assertTrue(broker._slug_requires_gateway_restart(slug="telegram", tls_intercept_runtime=tls_intercept_runtime))
-        self.assertTrue(broker._slug_requires_gateway_restart(slug="openrouter", tls_intercept_runtime=tls_intercept_runtime))
-        self.assertFalse(broker._slug_requires_gateway_restart(slug="google", tls_intercept_runtime=tls_intercept_runtime))
-        self.assertFalse(broker._slug_requires_gateway_restart(slug="github", tls_intercept_runtime=tls_intercept_runtime))
-        self.assertFalse(broker._slug_requires_gateway_restart(slug="nous", tls_intercept_runtime=tls_intercept_runtime))
-        # Unknown slug: don't restart.
-        self.assertFalse(broker._slug_requires_gateway_restart(slug="bogus", tls_intercept_runtime=tls_intercept_runtime))
-        # None (Refresh-all) covers any gateway-restart provider in scope.
-        self.assertTrue(broker._slug_requires_gateway_restart(slug=None, tls_intercept_runtime=tls_intercept_runtime))
-
-    async def test_processes_requiring_restart_separates_gateway_and_webui(self) -> None:
+    async def test_processes_requiring_restart_follow_provider_specs(self) -> None:
         """Vault env restarts gateway; GitHub placeholder env restarts WebUI."""
-        tls_intercept_runtime = self._make_runtime()
-        self.assertEqual(
-            broker._processes_requiring_restart(slug="telegram", tls_intercept_runtime=tls_intercept_runtime),
-            (broker.GATEWAY_PROCESS_NAME,),
-        )
-        self.assertEqual(
-            broker._processes_requiring_restart(slug="github", tls_intercept_runtime=tls_intercept_runtime),
-            (broker.WEBUI_PROCESS_NAME,),
-        )
-        self.assertEqual(
-            broker._processes_requiring_restart(slug="openrouter", tls_intercept_runtime=tls_intercept_runtime),
-            (broker.GATEWAY_PROCESS_NAME, broker.WEBUI_PROCESS_NAME),
-        )
-        self.assertEqual(broker._processes_requiring_restart(slug="google", tls_intercept_runtime=tls_intercept_runtime), ())
-        self.assertEqual(broker._processes_requiring_restart(slug="nous", tls_intercept_runtime=tls_intercept_runtime), ())
+        service = self._make_service()
+        gateway = credentials_service.GATEWAY_PROCESS_NAME
+        webui = credentials_service.WEBUI_PROCESS_NAME
+        self.assertEqual(service._processes_requiring_restart(slug="telegram"), (gateway,))
+        self.assertEqual(service._processes_requiring_restart(slug="github"), (webui,))
+        self.assertEqual(service._processes_requiring_restart(slug="openrouter"), (gateway, webui))
+        self.assertEqual(service._processes_requiring_restart(slug="google"), ())
+        self.assertEqual(service._processes_requiring_restart(slug="nous"), ())
+        # Unknown slug: don't restart.
+        self.assertEqual(service._processes_requiring_restart(slug="bogus"), ())
+        # None (Refresh-all) covers every restart-declaring provider in scope.
+        self.assertEqual(service._processes_requiring_restart(slug=None), (gateway, webui))
 
     async def test_per_slug_invalidate_refreshes_only_that_slug(self) -> None:
         """Slug-targeted invalidate must NOT fan out to disconnected providers.
 
         Connecting one provider used to spam DOH with `no integration row`
-        404s for every other (still disconnected) provider. The hook now
+        404s for every other (still disconnected) provider. The service
         narrows to `refresh_slug(slug)` when a slug is named, so DOH only
         hears about the one that actually changed.
         """
-        tls_intercept_runtime = self._make_runtime()
-        tls_intercept_runtime_holder: dict = {"tls_intercept_runtime": tls_intercept_runtime}
-        on_user_invalidate = broker._build_on_user_invalidate(
-            tls_intercept_runtime_holder=tls_intercept_runtime_holder,
-            env_path=self.env_path,
-            webui_state_dir=self.webui_state_dir,
-            process_compose_url="http://127.0.0.1:9999",
-        )
+        service = self._make_service()
 
         with patch.object(
             broker.tls_intercept,
@@ -1620,7 +1611,7 @@ class TestGatewayEnvHookIntegration(unittest.IsolatedAsyncioTestCase):
                 secrets={"access_token": "t"}, expires_in=3600, config={}, metadata={},
             )),
         ) as fetch_mock:
-            await on_user_invalidate("google")
+            await service.credentials_invalidate(slug="google")
 
         # Exactly one DOH round-trip and only for the named slug, not one per provider.
         self.assertEqual(fetch_mock.call_count, 1)
@@ -1628,14 +1619,7 @@ class TestGatewayEnvHookIntegration(unittest.IsolatedAsyncioTestCase):
 
     async def test_github_invalidate_rewrites_env_and_restarts_webui(self) -> None:
         """GitHub connect/disconnect reloads WebUI so provider env is re-read."""
-        tls_intercept_runtime = self._make_runtime()
-        tls_intercept_runtime_holder: dict = {"tls_intercept_runtime": tls_intercept_runtime}
-        on_user_invalidate = broker._build_on_user_invalidate(
-            tls_intercept_runtime_holder=tls_intercept_runtime_holder,
-            env_path=self.env_path,
-            webui_state_dir=self.webui_state_dir,
-            process_compose_url="http://127.0.0.1:9999",
-        )
+        service = self._make_service()
         self.webui_state_dir.mkdir(parents=True)
         models_cache = self.webui_state_dir / "models_cache.json"
         models_cache.write_text("stale", encoding="utf-8")
@@ -1648,11 +1632,11 @@ class TestGatewayEnvHookIntegration(unittest.IsolatedAsyncioTestCase):
                 secrets={"access_token": "ghu_token"}, expires_in=3600, config={}, metadata={},
             )),
         ), patch.object(
-            broker,
+            credentials_service,
             "_post_process_compose_restart",
             return_value=(200, "ok"),
         ) as restart_mock:
-            await on_user_invalidate("github")
+            await service.credentials_invalidate(slug="github")
 
         text = self.env_path.read_text(encoding="utf-8")
         self.assertIn("GITHUB_TOKEN=DOH_PLACEHOLDER", text)
@@ -1660,19 +1644,12 @@ class TestGatewayEnvHookIntegration(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(models_cache.exists())
         restart_mock.assert_called_once_with(
             process_compose_url="http://127.0.0.1:9999",
-            process_name=broker.WEBUI_PROCESS_NAME,
+            process_name=credentials_service.WEBUI_PROCESS_NAME,
         )
 
     async def test_openrouter_invalidate_deletes_models_cache_and_restarts_webui(self) -> None:
         """OpenRouter changes provider availability, so WebUI must rebuild /api/models."""
-        tls_intercept_runtime = self._make_runtime()
-        tls_intercept_runtime_holder: dict = {"tls_intercept_runtime": tls_intercept_runtime}
-        on_user_invalidate = broker._build_on_user_invalidate(
-            tls_intercept_runtime_holder=tls_intercept_runtime_holder,
-            env_path=self.env_path,
-            webui_state_dir=self.webui_state_dir,
-            process_compose_url="http://127.0.0.1:9999",
-        )
+        service = self._make_service()
         self.webui_state_dir.mkdir(parents=True)
         models_cache = self.webui_state_dir / "models_cache.json"
         models_cache.write_text("stale", encoding="utf-8")
@@ -1685,30 +1662,23 @@ class TestGatewayEnvHookIntegration(unittest.IsolatedAsyncioTestCase):
                 secrets={"api_key": "sk-or-v1-real"}, expires_in=3600, config={}, metadata={},
             )),
         ), patch.object(
-            broker,
+            credentials_service,
             "_post_process_compose_restart",
             return_value=(200, "ok"),
         ) as restart_mock:
-            await on_user_invalidate("openrouter")
+            await service.credentials_invalidate(slug="openrouter")
 
         text = self.env_path.read_text(encoding="utf-8")
         self.assertIn("OPENROUTER_API_KEY=DOH_PLACEHOLDER", text)
         self.assertFalse(models_cache.exists())
         self.assertEqual(
             [call.kwargs["process_name"] for call in restart_mock.call_args_list],
-            [broker.GATEWAY_PROCESS_NAME, broker.WEBUI_PROCESS_NAME],
+            [credentials_service.GATEWAY_PROCESS_NAME, credentials_service.WEBUI_PROCESS_NAME],
         )
 
     async def test_codex_invalidate_deletes_models_cache_without_process_restart(self) -> None:
         """Model-provider cache refresh is generic, even when no env changes."""
-        tls_intercept_runtime = self._make_runtime()
-        tls_intercept_runtime_holder: dict = {"tls_intercept_runtime": tls_intercept_runtime}
-        on_user_invalidate = broker._build_on_user_invalidate(
-            tls_intercept_runtime_holder=tls_intercept_runtime_holder,
-            env_path=self.env_path,
-            webui_state_dir=self.webui_state_dir,
-            process_compose_url="http://127.0.0.1:9999",
-        )
+        service = self._make_service()
         self.webui_state_dir.mkdir(parents=True)
         models_cache = self.webui_state_dir / "models_cache.json"
         models_cache.write_text("stale", encoding="utf-8")
@@ -1724,11 +1694,11 @@ class TestGatewayEnvHookIntegration(unittest.IsolatedAsyncioTestCase):
                 metadata={},
             )),
         ), patch.object(
-            broker,
+            credentials_service,
             "_post_process_compose_restart",
             return_value=(200, "ok"),
         ) as restart_mock:
-            await on_user_invalidate("openai-codex")
+            await service.credentials_invalidate(slug="openai-codex")
 
         self.assertFalse(models_cache.exists())
         restart_mock.assert_not_called()
@@ -1741,14 +1711,7 @@ class TestGatewayEnvHookIntegration(unittest.IsolatedAsyncioTestCase):
         Coalescing into a single POST (where `absent` is a normal entry,
         not a 4xx) makes that log line disappear.
         """
-        tls_intercept_runtime = self._make_runtime()
-        tls_intercept_runtime_holder: dict = {"tls_intercept_runtime": tls_intercept_runtime}
-        on_user_invalidate = broker._build_on_user_invalidate(
-            tls_intercept_runtime_holder=tls_intercept_runtime_holder,
-            env_path=self.env_path,
-            webui_state_dir=self.webui_state_dir,
-            process_compose_url="http://127.0.0.1:9999",
-        )
+        service = self._make_service()
 
         absent_for_every_slug = {
             slug: broker.tls_intercept.RefreshResult(
@@ -1763,11 +1726,11 @@ class TestGatewayEnvHookIntegration(unittest.IsolatedAsyncioTestCase):
             "fetch_provider_tokens_batch",
             return_value=absent_for_every_slug,
         ) as batch_mock, patch.object(
-            broker,
+            credentials_service,
             "_post_process_compose_restart",
             return_value=(200, "ok"),
         ):
-            await on_user_invalidate(None)
+            await service.refresh_all_integrations()
 
         self.assertEqual(batch_mock.call_count, 1)
         called_slugs = batch_mock.call_args.kwargs["slugs"]
@@ -1791,18 +1754,13 @@ class TestTransientRefreshGuards(unittest.IsolatedAsyncioTestCase):
 
     def _make_runtime(self) -> "broker.tls_intercept.TlsInterceptRuntime":
         root = pathlib.Path(self.tmp.name)
-        return broker.tls_intercept.TlsInterceptRuntime(
-            providers=broker.tls_intercept.TLS_INTERCEPT_PROVIDERS,
-            refresh_config=broker.tls_intercept.DohRefreshConfig(
-                control_plane_url="https://doh.example",
-                bearer="env-bearer",
-                owner_username="vmendi",
-                app_slug="hermes",
-            ),
-            refresh_lead_seconds=broker.tls_intercept.REFRESH_LEAD_SECONDS,
-            ca_dir=root / "ca",
-            private_dir=root / "private",
-            on_user_invalidate=None,
+        return _make_tls_intercept_runtime(ca_dir=root / "ca", private_dir=root / "private")
+
+    def _make_service(self) -> credentials_service.CredentialsService:
+        return _make_credentials_service(
+            tls_intercept_runtime=self._make_runtime(),
+            gateway_env_path=self.env_path,
+            webui_state_dir=self.webui_state_dir,
         )
 
     def _seed_telegram_env_block(self) -> str:
@@ -1834,24 +1792,18 @@ class TestTransientRefreshGuards(unittest.IsolatedAsyncioTestCase):
 
     async def test_transient_invalidate_keeps_env_file_and_skips_restart(self) -> None:
         original = self._seed_telegram_env_block()
-        tls_intercept_runtime = self._make_runtime()
-        on_user_invalidate = broker._build_on_user_invalidate(
-            tls_intercept_runtime_holder={"tls_intercept_runtime": tls_intercept_runtime},
-            env_path=self.env_path,
-            webui_state_dir=self.webui_state_dir,
-            process_compose_url="http://127.0.0.1:9999",
-        )
+        service = self._make_service()
 
         with patch.object(
             broker.tls_intercept,
             "fetch_provider_tokens_batch",
             return_value=_batched(slug="telegram", result=broker.tls_intercept._transient_result()),
         ), patch.object(
-            broker,
+            credentials_service,
             "_post_process_compose_restart",
             return_value=(200, "ok"),
         ) as restart_mock:
-            await on_user_invalidate("telegram")
+            await service.credentials_invalidate(slug="telegram")
 
         self.assertEqual(self.env_path.read_text(encoding="utf-8"), original)
         restart_mock.assert_not_called()
@@ -1859,7 +1811,7 @@ class TestTransientRefreshGuards(unittest.IsolatedAsyncioTestCase):
     async def test_bootstrap_transient_exits_without_touching_env_file(self) -> None:
         """A failed bootstrap refresh is fatal — the broker exits and ECS restarts the task."""
         original = self._seed_telegram_env_block()
-        tls_intercept_runtime = self._make_runtime()
+        service = self._make_service()
 
         with patch.object(
             broker.tls_intercept,
@@ -1867,14 +1819,14 @@ class TestTransientRefreshGuards(unittest.IsolatedAsyncioTestCase):
             return_value=self._transient_for_every_slug(),
         ):
             with self.assertRaises(SystemExit):
-                await broker._bootstrap_gateway_env(tls_intercept_runtime=tls_intercept_runtime, env_path=self.env_path)
+                await service.bootstrap()
 
         self.assertEqual(self.env_path.read_text(encoding="utf-8"), original)
 
     async def test_bootstrap_success_renders_env_file(self) -> None:
         # Start from the clobbered/empty state the gateway booted with.
         self.env_path.write_text("", encoding="utf-8")
-        tls_intercept_runtime = self._make_runtime()
+        service = self._make_service()
         refreshed_results = {
             slug: broker.tls_intercept.RefreshResult(
                 outcome=broker.tls_intercept.REFRESH_OUTCOME_ABSENT,
@@ -1892,7 +1844,7 @@ class TestTransientRefreshGuards(unittest.IsolatedAsyncioTestCase):
             "fetch_provider_tokens_batch",
             return_value=refreshed_results,
         ):
-            await broker._bootstrap_gateway_env(tls_intercept_runtime=tls_intercept_runtime, env_path=self.env_path)
+            await service.bootstrap()
 
         text = self.env_path.read_text(encoding="utf-8")
         self.assertIn("TELEGRAM_BOT_TOKEN=000000:DOH_PLACEHOLDER", text)

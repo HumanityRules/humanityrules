@@ -72,7 +72,7 @@
       // providers, restarts the gateway). Cooldown 429 short-circuits before
       // the TLS side runs, so repeated clicks while the cooldown is active
       // can't keep kicking the gateway.
-      const response = await fetch('/__doh_broker/integrations/refresh', {
+      const response = await fetch('/__doh_broker/integrations/refresh_all', {
         method: 'POST',
         cache: 'no-store',
       });
@@ -1286,7 +1286,7 @@
 
   // Tell the broker to drop one provider's cached TLS-intercept token after a
   // known connect/disconnect/config change (vault save, OAuth-return sentinel).
-  // The explicit-Refresh-all path goes through /__doh_broker/integrations/refresh
+  // The explicit-Refresh-all path goes through /__doh_broker/integrations/refresh_all
   // instead, which fans out catalog reload + all-providers TLS invalidate.
   // Per-provider: POST .../tls_intercept/{slug}/invalidate.
   //

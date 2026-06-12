@@ -250,7 +250,7 @@ class MCPAggregator:
     def cooldown_remaining_seconds(self) -> int | None:
         """Seconds left on the refresh cooldown, or None if a refresh is allowed now.
 
-        Exposed so callers (the broker's unified `/integrations/refresh` route)
+        Exposed so callers (the broker's unified `/integrations/refresh_all` route)
         can gate on cooldown *before* firing co-routines whose side effects
         shouldn't run during a no-op refresh.
         """
