@@ -1,4 +1,10 @@
-"""TLS-intercept proxy runtime for platform-managed provider tokens."""
+"""TLS-intercept proxy runtime for platform-managed provider tokens.
+
+The provider catalog (credential-method dataclasses, `TlsProviderSpec`, and
+the per-provider specs) lives in `tls_providers`; this module is the
+mechanism that consumes it: the MITM proxy, the token store, and the cert
+minter, composed by `TlsInterceptRuntime`.
+"""
 
 import asyncio
 import base64
@@ -13,13 +19,14 @@ import ssl
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import ClassVar, Literal
+from typing import Literal
 
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 
 from doh_client import DohClient
+import tls_providers
 
 
 logger = logging.getLogger("tls_intercept")
@@ -30,150 +37,6 @@ REFRESH_LEAD_SECONDS = 300
 # Browser-facing status strings rendered by the WebUI extension.
 STATUS_CONNECTED = "connected"
 STATUS_NOT_CONNECTED = "not_connected"
-
-# Authorization header encodings used by OAuthHeader providers.
-AUTH_FORMAT_BEARER = "bearer"
-AUTH_FORMAT_BASIC_X_ACCESS_TOKEN = "basic_x_access_token"
-DOH_PLACEHOLDER_VALUE = "DOH_PLACEHOLDER"
-ConnectMode = Literal["oauth", "device", "vault"]
-
-
-@dataclass(frozen=True)
-class OAuthHeader:
-    """OAuth integration whose token is injected as the Authorization header.
-
-    `auth_format` selects the header encoding: Google takes plain Bearer;
-    GitHub git-smart-HTTP needs HTTP Basic with the token as the password
-    under the `x-access-token` username. Redirect OAuth is the default connect
-    mode; device-flow providers override it explicitly.
-    """
-
-    auth_format: str
-    connect_mode: ConnectMode = "oauth"
-
-
-@dataclass(frozen=True)
-class OAuthHeaderMultiInject:
-    """OAuth integration whose refresh returns several secrets: one bearer + extra headers.
-
-    Like `OAuthHeader`, the credential rides request headers and needs no
-    restart on connect — but DOH returns more than one secret. `bearer_secret`
-    names the one carried as `Authorization: Bearer`; `header_secrets` maps each
-    remaining secret name to the HTTP header it's injected as.
-
-    Codex is the consumer: DOH mints an `access_token` (the bearer) and derives
-    `chatgpt_account_id` (the `ChatGPT-Account-ID` header) from it, and both must
-    reach chatgpt.com on every request. Headers the sandbox already set that we
-    don't name here (e.g. Codex's Cloudflare `originator` / `User-Agent`) pass
-    through untouched — only the bearer and the named headers are rewritten.
-
-    `connect_mode` is `device`: unlike redirect OAuth, the env-resident broker
-    runs OpenAI's device flow itself (no callback of ours), so the WebUI shows a
-    user code rather than a redirect button.
-    """
-
-    bearer_secret: str
-    header_secrets: dict[str, str]  # secret_name -> HTTP header name
-    auth_format: str = AUTH_FORMAT_BEARER
-    connect_mode: ClassVar[ConnectMode] = "device"
-
-
-@dataclass(frozen=True)
-class EnvBinding:
-    """One env var rendered into the managed profile env block while connected."""
-
-    env_var: str
-    value: str | None = None
-    config_key: str | None = None
-    list_separator: str | None = None
-
-    def __post_init__(self) -> None:
-        has_value = self.value is not None
-        has_config_key = self.config_key is not None
-        if has_value == has_config_key:
-            raise ValueError("EnvBinding must set exactly one of value or config_key")
-        if has_value and self.list_separator is not None:
-            raise ValueError("EnvBinding with a static value cannot set list_separator")
-
-
-@dataclass(frozen=True)
-class VaultUrlRewrite:
-    """Vault-pasted credential; injected by replacing a placeholder in the URL.
-
-    The sandbox client uses `placeholder` in the URL where the real secret
-    would go (e.g. Telegram's `/bot{token}/` path); the proxy substitutes
-    the live token before forwarding.
-
-    Env vars that expose this placeholder or provider config are declared on
-    `TlsProviderSpec.env_bindings`.
-    """
-
-    placeholder: str
-    connect_mode: ClassVar[ConnectMode] = "vault"
-
-
-@dataclass(frozen=True)
-class VaultHeaderInject:
-    """Vault-pasted, header-injected, multi-secret credential (Slack).
-
-    Hybrid of the other two methods: it's vault-pasted like `VaultUrlRewrite`,
-    but the secret rides an `Authorization: Bearer` header like `OAuthHeader`
-    rather than a URL placeholder.
-
-    A provider here carries more than one secret (Slack's app + bot token).
-    Selection is by **placeholder reverse-map, not request path**: the gateway
-    env hands the sandbox a distinct placeholder bearer per secret, and the
-    sandbox already sends the correct token per call (the app token opens the
-    Socket Mode connection; the bot token posts messages). The proxy reads the
-    incoming placeholder bearer and swaps in the matching real secret — no
-    per-request path logic. `placeholders` maps secret_name -> placeholder.
-    """
-
-    placeholders: dict[str, str]
-    auth_format: str = AUTH_FORMAT_BEARER
-    connect_mode: ClassVar[ConnectMode] = "vault"
-
-    def secret_for_placeholder(self, bearer_token: str) -> str | None:
-        """Reverse-map an incoming placeholder bearer to its secret name."""
-        for secret_name, placeholder in self.placeholders.items():
-            if placeholder == bearer_token:
-                return secret_name
-        return None
-
-
-@dataclass(frozen=True)
-class VaultApiKeyHeader:
-    """Vault-pasted, single-secret credential injected as a custom auth header (Anthropic).
-
-    Like `VaultHeaderInject`, but the credential rides a provider-specific
-    header (Anthropic's `x-api-key`) rather than `Authorization: Bearer`. The
-    sandbox sends the placeholder as that header's value; the proxy confirms it
-    matches `placeholder` (so the request is ours), then swaps in the real key.
-    Every other client header — notably Anthropic's required `anthropic-version`
-    — passes through untouched, and no `Authorization` header is added.
-    """
-
-    header_name: str
-    placeholder: str
-    connect_mode: ClassVar[ConnectMode] = "vault"
-
-
-CredentialMethod = OAuthHeader | OAuthHeaderMultiInject | VaultUrlRewrite | VaultHeaderInject | VaultApiKeyHeader
-
-
-@dataclass(frozen=True)
-class TlsProviderSpec:
-    """Static config for one provider whose HTTPS traffic is intercepted."""
-
-    slug: str
-    label: str
-    hosts: tuple[str, ...]
-    logo_url: str
-    credential_method: CredentialMethod
-    env_bindings: tuple[EnvBinding, ...]
-    restart_gateway_after_save: bool
-    restart_webui_after_save: bool
-    affects_model_picker: bool
 
 
 # Internal tags from DOH's refresh endpoint (distinct from browser
@@ -245,207 +108,6 @@ class _TokenCacheEntry:
         sandbox's request because DOH had a hiccup.
         """
         return self.expires_at > now
-
-
-TLS_INTERCEPT_PROVIDER_SPECS = (
-    TlsProviderSpec(
-        slug="google",
-        label="Google Workspace",
-        hosts=(
-            "gmail.googleapis.com",
-            "calendar-json.googleapis.com",
-            "drive.googleapis.com",
-            "docs.googleapis.com",
-            "sheets.googleapis.com",
-            "people.googleapis.com",
-            "www.googleapis.com",
-            "oauth2.googleapis.com",
-        ),
-        logo_url="/extensions/google-workspace.svg",
-        credential_method=OAuthHeader(auth_format=AUTH_FORMAT_BEARER),
-        env_bindings=(),
-        restart_gateway_after_save=False,
-        restart_webui_after_save=False,
-        affects_model_picker=False,
-    ),
-    TlsProviderSpec(
-        slug="github",
-        label="GitHub",
-        hosts=(
-            # github.com handles git smart-HTTP (clone/push) and OAuth
-            # endpoints; api.github.com handles REST (incl. `gh` CLI);
-            # codeload.github.com serves archive/tarball downloads after a
-            # github.com redirect.
-            "github.com",
-            "api.github.com",
-            "codeload.github.com",
-        ),
-        logo_url="/extensions/github.svg",
-        credential_method=OAuthHeader(auth_format=AUTH_FORMAT_BASIC_X_ACCESS_TOKEN),
-        env_bindings=(
-            EnvBinding(env_var="GITHUB_TOKEN", value=DOH_PLACEHOLDER_VALUE),
-        ),
-        restart_gateway_after_save=False,
-        restart_webui_after_save=True,
-        affects_model_picker=False,
-    ),
-    TlsProviderSpec(
-        slug="telegram",
-        label="Telegram",
-        hosts=("api.telegram.org",),
-        logo_url="/extensions/telegram.svg",
-        credential_method=VaultUrlRewrite(
-            placeholder="000000:DOH_PLACEHOLDER",
-        ),
-        env_bindings=(
-            EnvBinding(env_var="TELEGRAM_BOT_TOKEN", value="000000:DOH_PLACEHOLDER"),
-            EnvBinding(env_var="TELEGRAM_ALLOWED_USERS", config_key="allowed_users", list_separator=","),
-        ),
-        restart_gateway_after_save=True,
-        restart_webui_after_save=False,
-        affects_model_picker=False,
-    ),
-    TlsProviderSpec(
-        slug="slack",
-        label="Slack",
-        # Only the Slack Web API (REST) is intercepted. The Socket Mode
-        # `wss://` host is not listed here, so it falls through to a plain
-        # CONNECT tunnel — it carries only the short-lived ticket from
-        # apps.connections.open, not a long-lived token.
-        hosts=("slack.com", "www.slack.com"),
-        logo_url="/extensions/slack.svg",
-        credential_method=VaultHeaderInject(
-            placeholders={
-                "app_token": "xapp-DOH_PLACEHOLDER",
-                "bot_token": "xoxb-DOH_PLACEHOLDER",
-            },
-        ),
-        env_bindings=(
-            EnvBinding(env_var="SLACK_APP_TOKEN", value="xapp-DOH_PLACEHOLDER"),
-            EnvBinding(env_var="SLACK_BOT_TOKEN", value="xoxb-DOH_PLACEHOLDER"),
-            # The gateway denies users by default. Company-wide mode sets
-            # allow_all_users in config (→ SLACK_ALLOW_ALL_USERS=true);
-            # personal mode instead sets allowed_users (owner only). Each
-            # binding renders only when its config key is present.
-            EnvBinding(env_var="SLACK_ALLOW_ALL_USERS", config_key="allow_all_users"),
-            EnvBinding(env_var="SLACK_ALLOWED_USERS", config_key="allowed_users", list_separator=","),
-            EnvBinding(env_var="SLACK_HOME_CHANNEL", config_key="home_channel"),
-        ),
-        restart_gateway_after_save=True,
-        restart_webui_after_save=False,
-        affects_model_picker=False,
-    ),
-    TlsProviderSpec(
-        slug="openai-codex",
-        label="OpenAI Codex",
-        # The ChatGPT backend Codex talks to. api.openai.com is a different
-        # surface (rejected for ChatGPT-subscription auth) and is not listed.
-        hosts=("chatgpt.com",),
-        logo_url="/extensions/openai.svg",
-        credential_method=OAuthHeaderMultiInject(
-            bearer_secret="access_token",
-            header_secrets={"chatgpt_account_id": "ChatGPT-Account-ID"},
-        ),
-        env_bindings=(),
-        restart_gateway_after_save=False,
-        restart_webui_after_save=False,
-        affects_model_picker=True,
-    ),
-    TlsProviderSpec(
-        slug="nous",
-        label="Nous Portal",
-        hosts=("inference-api.nousresearch.com",),
-        logo_url="/extensions/nous.svg",
-        credential_method=OAuthHeader(auth_format=AUTH_FORMAT_BEARER, connect_mode="device"),
-        env_bindings=(),
-        restart_gateway_after_save=False,
-        restart_webui_after_save=False,
-        affects_model_picker=True,
-    ),
-    TlsProviderSpec(
-        slug="openrouter",
-        label="OpenRouter",
-        hosts=("openrouter.ai",),
-        logo_url="/extensions/openrouter.svg",
-        credential_method=VaultHeaderInject(
-            placeholders={"api_key": DOH_PLACEHOLDER_VALUE},
-        ),
-        env_bindings=(
-            EnvBinding(env_var="OPENROUTER_API_KEY", value=DOH_PLACEHOLDER_VALUE),
-        ),
-        restart_gateway_after_save=True,
-        restart_webui_after_save=True,
-        affects_model_picker=True,
-    ),
-    TlsProviderSpec(
-        slug="openai-api",
-        label="OpenAI API Key",
-        # The OpenAI API surface. chatgpt.com (ChatGPT-subscription auth) is the
-        # separate Codex provider and is not listed here.
-        hosts=("api.openai.com",),
-        logo_url="/extensions/openai.svg",
-        credential_method=VaultHeaderInject(
-            placeholders={"api_key": DOH_PLACEHOLDER_VALUE},
-        ),
-        env_bindings=(
-            EnvBinding(env_var="OPENAI_API_KEY", value=DOH_PLACEHOLDER_VALUE),
-        ),
-        restart_gateway_after_save=True,
-        restart_webui_after_save=True,
-        affects_model_picker=True,
-    ),
-    TlsProviderSpec(
-        slug="anthropic",
-        label="Anthropic",
-        hosts=("api.anthropic.com",),
-        logo_url="/extensions/anthropic.svg",
-        # Anthropic authenticates with x-api-key, not Authorization: Bearer.
-        credential_method=VaultApiKeyHeader(
-            header_name="x-api-key",
-            placeholder=DOH_PLACEHOLDER_VALUE,
-        ),
-        env_bindings=(
-            EnvBinding(env_var="ANTHROPIC_API_KEY", value=DOH_PLACEHOLDER_VALUE),
-        ),
-        restart_gateway_after_save=True,
-        restart_webui_after_save=True,
-        affects_model_picker=True,
-    ),
-)
-
-
-def build_provider_registry(provider_specs: tuple[TlsProviderSpec, ...]) -> dict[str, TlsProviderSpec]:
-    """Index provider specs by slug and fail fast on duplicate slugs."""
-    providers: dict[str, TlsProviderSpec] = {}
-    for spec in provider_specs:
-        if spec.slug in providers:
-            raise RuntimeError(f"duplicate TLS-intercept provider slug: {spec.slug}")
-        providers[spec.slug] = spec
-    return providers
-
-
-def _normalize_connect_host(host: str) -> str:
-    """Canonicalize CONNECT hostnames before provider routing."""
-    return host.strip().rstrip(".").lower()
-
-
-def build_host_to_provider(providers: dict[str, TlsProviderSpec]) -> dict[str, str]:
-    """Map intercepted upstream hosts to provider slugs and fail on overlap."""
-    host_to_provider: dict[str, str] = {}
-    for slug, spec in providers.items():
-        for host in spec.hosts:
-            normalized_host = _normalize_connect_host(host=host)
-            existing_slug = host_to_provider.get(normalized_host)
-            if existing_slug is not None:
-                raise RuntimeError(
-                    f"TLS-intercept host {normalized_host!r} is claimed by both {existing_slug!r} and {slug!r}"
-                )
-            host_to_provider[normalized_host] = slug
-    return host_to_provider
-
-
-TLS_INTERCEPT_PROVIDERS = build_provider_registry(provider_specs=TLS_INTERCEPT_PROVIDER_SPECS)
-HOST_TO_TLS_PROVIDER = build_host_to_provider(providers=TLS_INTERCEPT_PROVIDERS)
 
 
 def fetch_provider_tokens_batch(doh_client: DohClient, slugs: list[str]) -> dict[str, RefreshResult]:
@@ -520,97 +182,6 @@ def _transient_result() -> RefreshResult:
     return RefreshResult(outcome=REFRESH_OUTCOME_TRANSIENT, secrets=None, expires_in=None, config={}, metadata={})
 
 
-GATEWAY_ENV_BLOCK_BEGIN = "# === DOH-MANAGED-INTEGRATIONS BEGIN ==="
-GATEWAY_ENV_BLOCK_END = "# === DOH-MANAGED-INTEGRATIONS END ==="
-
-
-def _render_env_lines(provider: TlsProviderSpec, config: dict) -> list[str]:
-    """Project one connected provider's env bindings into KEY=VALUE lines."""
-    lines: list[str] = []
-    for binding in provider.env_bindings:
-        if binding.value is not None:
-            value = binding.value
-            lines.append(f"{binding.env_var}={value}")
-            continue
-        config_key = binding.config_key
-        if config_key is None:
-            raise ValueError(f"{provider.slug}: env binding {binding.env_var!r} has no value source")
-        raw = config.get(config_key)
-        if raw is None:
-            continue
-        if isinstance(raw, list):
-            if binding.list_separator is None:
-                raise ValueError(f"{provider.slug}: list-shaped config {config_key!r} requires list_separator")
-            value = binding.list_separator.join(str(item) for item in raw if str(item))
-            if not value:
-                continue
-        else:
-            value = str(raw)
-        lines.append(f"{binding.env_var}={value}")
-    return lines
-
-
-def render_managed_block(snapshot: list[tuple[TlsProviderSpec, dict]]) -> str:
-    """Render the profile env managed block from a token-store snapshot.
-
-    The snapshot lists only connected providers (cache presence == connected,
-    by the token-store contract). Each tuple is `(provider, config)`, and each
-    provider declares the env lines it needs while connected.
-    """
-    body_lines: list[str] = []
-    for provider, config in snapshot:
-        body_lines.extend(_render_env_lines(provider=provider, config=config))
-    if not body_lines:
-        return ""
-    return "\n".join([GATEWAY_ENV_BLOCK_BEGIN, *body_lines, GATEWAY_ENV_BLOCK_END]) + "\n"
-
-
-def write_gateway_env_file(env_path: Path, managed_block: str) -> bool:
-    """Replace the DOH-managed block in `env_path` atomically.
-
-    Lines outside the sentinels (user/onboarding-set keys) are preserved.
-    Empty managed block strips the sentinels entirely. Returns true when the
-    file contents changed.
-    """
-    old_contents = ""
-    existing_lines: list[str] = []
-    if env_path.exists():
-        old_contents = env_path.read_text(encoding="utf-8")
-        existing_lines = old_contents.splitlines()
-    preserved: list[str] = []
-    in_block = False
-    for line in existing_lines:
-        stripped = line.strip()
-        if stripped == GATEWAY_ENV_BLOCK_BEGIN:
-            in_block = True
-            continue
-        if stripped == GATEWAY_ENV_BLOCK_END:
-            in_block = False
-            continue
-        if not in_block:
-            preserved.append(line)
-    while preserved and preserved[-1] == "":
-        preserved.pop()
-    parts: list[str] = []
-    if preserved:
-        parts.append("\n".join(preserved) + "\n")
-    if managed_block:
-        if parts:
-            parts.append("\n")
-        parts.append(managed_block)
-    new_contents = "".join(parts)
-    if new_contents == old_contents:
-        return False
-    env_path.parent.mkdir(parents=True, exist_ok=True)
-    tmp_path = env_path.with_suffix(env_path.suffix + ".tmp")
-    tmp_path.write_text(new_contents, encoding="utf-8")
-    if os.geteuid() == 0:
-        parent_stat = env_path.parent.stat()
-        os.chown(tmp_path, parent_stat.st_uid, parent_stat.st_gid)
-    os.replace(tmp_path, env_path)
-    return True
-
-
 def _cache_entry_from_connected_result(result: RefreshResult, now: float) -> _TokenCacheEntry:
     """Build a cache entry from a connected refresh result.
 
@@ -630,7 +201,7 @@ def _cache_entry_from_connected_result(result: RefreshResult, now: float) -> _To
     )
 
 
-def _status_item_for_provider(provider: TlsProviderSpec, entry: _TokenCacheEntry | None) -> dict:
+def _status_item_for_provider(provider: tls_providers.TlsProviderSpec, entry: _TokenCacheEntry | None) -> dict:
     """Serialize one TLS-intercept provider for the unified integrations payload.
 
     Connected = cache entry exists; not_connected = it doesn't. The token
@@ -668,17 +239,17 @@ class _TokenStore:
     lock together.
     """
 
-    def __init__(self, providers: dict[str, TlsProviderSpec], doh_client: DohClient, refresh_lead_seconds: int) -> None:
+    def __init__(self, providers: dict[str, tls_providers.TlsProviderSpec], doh_client: DohClient, refresh_lead_seconds: int) -> None:
         self._providers = providers
-        self._host_to_provider = build_host_to_provider(providers=providers)
+        self._host_to_provider = tls_providers.build_host_to_provider(providers=providers)
         self._doh_client = doh_client
         self._refresh_lead_seconds = refresh_lead_seconds
         self._lock = asyncio.Lock()
         self._cache: dict[str, _TokenCacheEntry] = {}
 
-    def provider_for_host(self, host: str) -> TlsProviderSpec | None:
+    def provider_for_host(self, host: str) -> tls_providers.TlsProviderSpec | None:
         """Lock-free: reads the immutable host→provider map built at init."""
-        slug = self._host_to_provider.get(_normalize_connect_host(host=host))
+        slug = self._host_to_provider.get(tls_providers.normalize_connect_host(host=host))
         if slug is None:
             return None
         return self._providers[slug]
@@ -746,7 +317,7 @@ class _TokenStore:
                 for provider in self._providers.values()
             ]
 
-    async def gateway_env_snapshot(self) -> list[tuple[TlsProviderSpec, dict]]:
+    async def gateway_env_snapshot(self) -> list[tuple[tls_providers.TlsProviderSpec, dict]]:
         """Pair every connected provider with its cached config for env rendering.
 
         Returns `(provider, config)` tuples for providers currently in
@@ -760,7 +331,7 @@ class _TokenStore:
                 for slug, entry in self._cache.items()
             ]
 
-    async def _ensure_fresh_locked(self, provider: TlsProviderSpec) -> _TokenCacheEntry | None:
+    async def _ensure_fresh_locked(self, provider: tls_providers.TlsProviderSpec) -> _TokenCacheEntry | None:
         """Single-flight refresh when the cached token is missing or near expiry. Caller holds `_lock`.
 
         Returns the cache entry to use for this request, or None when the
@@ -807,7 +378,7 @@ class _TokenStore:
             self._apply_locked(provider=self._providers[slug], result=results[slug])
         return any(result.outcome != REFRESH_OUTCOME_TRANSIENT for result in results.values())
 
-    def _apply_locked(self, provider: TlsProviderSpec, result: RefreshResult) -> None:
+    def _apply_locked(self, provider: tls_providers.TlsProviderSpec, result: RefreshResult) -> None:
         """Apply one refresh outcome to the cache. Caller holds `_lock`.
 
         - has_token → write the new entry.
@@ -845,7 +416,7 @@ class TlsInterceptRuntime:
     into this runtime — never the other way around.
     """
 
-    def __init__(self, providers: dict[str, TlsProviderSpec], doh_client: DohClient, refresh_lead_seconds: int, ca_dir: Path, private_dir: Path) -> None:
+    def __init__(self, providers: dict[str, tls_providers.TlsProviderSpec], doh_client: DohClient, refresh_lead_seconds: int, ca_dir: Path, private_dir: Path) -> None:
         self._token_store = _TokenStore(
             providers=providers,
             doh_client=doh_client,
@@ -886,7 +457,7 @@ class TlsInterceptRuntime:
         """Force a refetch of every provider in one DOH round-trip; False on transient failure."""
         return await self._token_store.refresh_all()
 
-    async def gateway_env_snapshot(self) -> list[tuple[TlsProviderSpec, dict]]:
+    async def gateway_env_snapshot(self) -> list[tuple[tls_providers.TlsProviderSpec, dict]]:
         """Pair every connected provider with its cached config for env rendering."""
         return await self._token_store.gateway_env_snapshot()
 
@@ -1041,7 +612,7 @@ async def _handle_proxy_conn(
             await _send_raw(writer=writer, status=405, body=b"only CONNECT is supported")
             return
         raw_host, _, port_str = target.partition(":")
-        host = _normalize_connect_host(host=raw_host)
+        host = tls_providers.normalize_connect_host(host=raw_host)
         port = int(port_str) if port_str else 443
         provider = token_store.provider_for_host(host=host)
         if provider is None:
@@ -1083,7 +654,7 @@ async def _intercept_and_forward(
     client_writer: asyncio.StreamWriter,
     host: str,
     port: int,
-    provider: TlsProviderSpec,
+    provider: tls_providers.TlsProviderSpec,
     minter: _CertMinter,
     token_store: _TokenStore,
 ) -> None:
@@ -1120,7 +691,7 @@ async def _intercept_and_forward(
             headers = _parse_headers(lines=headers_raw)
             path_with_query = request_line.decode("iso-8859-1").split(" ", 2)[1]
             method = provider.credential_method
-            if isinstance(method, VaultUrlRewrite) and method.placeholder not in path_with_query:
+            if isinstance(method, tls_providers.VaultUrlRewrite) and method.placeholder not in path_with_query:
                 logger.error(
                     "%s request path did not contain expected placeholder: %s",
                     provider.slug,
@@ -1184,7 +755,7 @@ async def _intercept_and_forward(
             await tls_writer.wait_closed()
 
 
-async def _send_provider_not_connected(writer: asyncio.StreamWriter, provider: TlsProviderSpec) -> None:
+async def _send_provider_not_connected(writer: asyncio.StreamWriter, provider: tls_providers.TlsProviderSpec) -> None:
     """Return a Google-API-shaped not-connected error to the sandbox client."""
     await _send_json_error(
         writer=writer,
@@ -1278,9 +849,9 @@ async def _read_chunked(reader: asyncio.StreamReader) -> bytes:
 
 def _build_authorization_value(token: str, auth_format: str) -> bytes:
     """Encode the upstream Authorization header for a given provider's auth format."""
-    if auth_format == AUTH_FORMAT_BEARER:
+    if auth_format == tls_providers.AUTH_FORMAT_BEARER:
         return b"Bearer " + token.encode()
-    if auth_format == AUTH_FORMAT_BASIC_X_ACCESS_TOKEN:
+    if auth_format == tls_providers.AUTH_FORMAT_BASIC_X_ACCESS_TOKEN:
         creds = b"x-access-token:" + token.encode()
         return b"Basic " + base64.b64encode(creds)
     raise ValueError(f"unknown auth_format: {auth_format!r}")
@@ -1383,7 +954,7 @@ def _rewrite_request_for_provider(
     headers: list[tuple[bytes, bytes]],
     path_with_query: str,
     secrets: dict[str, str],
-    provider: TlsProviderSpec,
+    provider: tls_providers.TlsProviderSpec,
     upstream_host: str,
 ) -> tuple[list[tuple[bytes, bytes]], str]:
     """Rewrite credentials for the provider-specific upstream API shape.
@@ -1396,7 +967,7 @@ def _rewrite_request_for_provider(
     missing or the request doesn't carry a recognizable placeholder.
     """
     method = provider.credential_method
-    if isinstance(method, OAuthHeader):
+    if isinstance(method, tls_providers.OAuthHeader):
         return (
             _rewrite_authorization(
                 headers=headers,
@@ -1406,7 +977,7 @@ def _rewrite_request_for_provider(
             ),
             path_with_query,
         )
-    if isinstance(method, OAuthHeaderMultiInject):
+    if isinstance(method, tls_providers.OAuthHeaderMultiInject):
         bearer = secrets.get(method.bearer_secret)
         if not bearer:
             raise _SecretSelectionError(f"no cached secret for {method.bearer_secret!r}")
@@ -1423,7 +994,7 @@ def _rewrite_request_for_provider(
                 raise _SecretSelectionError(f"no cached secret for {secret_name!r}")
             extra[header_name.encode()] = value.encode()
         return (_inject_headers(headers=rewritten, extra=extra), path_with_query)
-    if isinstance(method, VaultUrlRewrite):
+    if isinstance(method, tls_providers.VaultUrlRewrite):
         token = _primary_secret(secrets)
         if method.placeholder not in path_with_query:
             raise ValueError(f"{provider.slug} request URL must contain the DOH placeholder")
@@ -1431,7 +1002,7 @@ def _rewrite_request_for_provider(
             _strip_proxy_headers_and_set_host(headers=headers, upstream_host=upstream_host),
             path_with_query.replace(method.placeholder, token),
         )
-    if isinstance(method, VaultHeaderInject):
+    if isinstance(method, tls_providers.VaultHeaderInject):
         # Read the raw (case-preserving) Authorization value — _header_value
         # lowercases, which would mangle a mixed-case placeholder token.
         incoming = next((v for n, v in headers if n.lower() == b"authorization"), None)
@@ -1451,7 +1022,7 @@ def _rewrite_request_for_provider(
             ),
             path_with_query,
         )
-    if isinstance(method, VaultApiKeyHeader):
+    if isinstance(method, tls_providers.VaultApiKeyHeader):
         # Confirm the request carries our placeholder in the named auth header
         # (case-preserving read), then swap in the real key. Other headers — incl.
         # Anthropic's required anthropic-version — pass through untouched.

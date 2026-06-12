@@ -51,6 +51,7 @@ import device_flow
 from doh_client import DohClient
 from mcp_aggregator import MCPAggregator
 import tls_intercept
+import tls_providers
 
 
 DEFAULT_PROXY_PORT = 9950
@@ -119,7 +120,7 @@ async def _run(
         app_slug=app_slug,
     )
     tls_intercept_runtime = tls_intercept.TlsInterceptRuntime(
-        providers=tls_intercept.TLS_INTERCEPT_PROVIDERS,
+        providers=tls_providers.TLS_INTERCEPT_PROVIDERS,
         doh_client=doh_client,
         refresh_lead_seconds=tls_intercept.REFRESH_LEAD_SECONDS,
         ca_dir=ca_dir,
@@ -143,7 +144,7 @@ async def _run(
         doh_client=doh_client,
         tls_intercept_runtime=tls_intercept_runtime,
         mcp_aggregator=mcp_aggregator,
-        providers=tls_intercept.TLS_INTERCEPT_PROVIDERS,
+        providers=tls_providers.TLS_INTERCEPT_PROVIDERS,
         gateway_env_path=gateway_env_path,
         webui_state_dir=webui_state_dir,
         process_compose_url=process_compose_url,

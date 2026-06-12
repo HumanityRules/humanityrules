@@ -80,6 +80,7 @@ broker = _load_broker_module()
 # sibling modules; bind the ones the tests patch/construct directly.
 import credentials_service  # noqa: E402
 import doh_client  # noqa: E402
+import tls_providers  # noqa: E402
 
 
 def _make_doh_client() -> doh_client.DohClient:
@@ -111,7 +112,7 @@ class TestEnvironmentFlags(unittest.TestCase):
 def _make_token_store() -> broker.tls_intercept._TokenStore:
     """Create a fresh TLS token store for isolated broker tests."""
     return broker.tls_intercept._TokenStore(
-        providers=broker.tls_intercept.TLS_INTERCEPT_PROVIDERS,
+        providers=tls_providers.TLS_INTERCEPT_PROVIDERS,
         doh_client=_make_doh_client(),
         refresh_lead_seconds=broker.tls_intercept.REFRESH_LEAD_SECONDS,
     )
@@ -120,7 +121,7 @@ def _make_token_store() -> broker.tls_intercept._TokenStore:
 def _make_tls_intercept_runtime(ca_dir: pathlib.Path, private_dir: pathlib.Path) -> broker.tls_intercept.TlsInterceptRuntime:
     """Create a fresh TLS-intercept runtime for control-app tests."""
     return broker.tls_intercept.TlsInterceptRuntime(
-        providers=broker.tls_intercept.TLS_INTERCEPT_PROVIDERS,
+        providers=tls_providers.TLS_INTERCEPT_PROVIDERS,
         doh_client=_make_doh_client(),
         refresh_lead_seconds=broker.tls_intercept.REFRESH_LEAD_SECONDS,
         ca_dir=ca_dir,
@@ -131,8 +132,8 @@ def _make_tls_intercept_runtime(ca_dir: pathlib.Path, private_dir: pathlib.Path)
 class TestHostToProviderRouting(unittest.TestCase):
 
     def test_all_google_hosts_route_to_google(self) -> None:
-        for host in broker.tls_intercept.TLS_INTERCEPT_PROVIDERS["google"].hosts:
-            self.assertEqual(broker.tls_intercept.HOST_TO_TLS_PROVIDER[host], "google")
+        for host in tls_providers.TLS_INTERCEPT_PROVIDERS["google"].hosts:
+            self.assertEqual(tls_providers.HOST_TO_TLS_PROVIDER[host], "google")
 
     def test_unknown_host_returns_none(self) -> None:
         store = _make_token_store()
@@ -167,7 +168,7 @@ class TestRewriteAuthorization(unittest.TestCase):
         hdrs = [(b"authorization", b"Bearer SANDBOX-DUMMY"), (b"content-type", b"application/json")]
         out = broker.tls_intercept._rewrite_authorization(
             headers=hdrs, token="REAL-TOKEN",
-            auth_format=broker.tls_intercept.AUTH_FORMAT_BEARER,
+            auth_format=tls_providers.AUTH_FORMAT_BEARER,
             upstream_host="gmail.googleapis.com",
         )
         auth = dict([(n.lower(), v) for n, v in out])[b"authorization"]
@@ -177,7 +178,7 @@ class TestRewriteAuthorization(unittest.TestCase):
         hdrs = [(b"content-type", b"application/json")]
         out = broker.tls_intercept._rewrite_authorization(
             headers=hdrs, token="T",
-            auth_format=broker.tls_intercept.AUTH_FORMAT_BEARER,
+            auth_format=tls_providers.AUTH_FORMAT_BEARER,
             upstream_host="gmail.googleapis.com",
         )
         auth = dict([(n.lower(), v) for n, v in out])[b"authorization"]
@@ -187,7 +188,7 @@ class TestRewriteAuthorization(unittest.TestCase):
         hdrs = [(b"host", b"whatever"), (b"authorization", b"Bearer x")]
         out = broker.tls_intercept._rewrite_authorization(
             headers=hdrs, token="T",
-            auth_format=broker.tls_intercept.AUTH_FORMAT_BEARER,
+            auth_format=tls_providers.AUTH_FORMAT_BEARER,
             upstream_host="gmail.googleapis.com",
         )
         host = dict([(n.lower(), v) for n, v in out])[b"host"]
@@ -201,7 +202,7 @@ class TestRewriteAuthorization(unittest.TestCase):
         ]
         out = broker.tls_intercept._rewrite_authorization(
             headers=hdrs, token="T",
-            auth_format=broker.tls_intercept.AUTH_FORMAT_BEARER,
+            auth_format=tls_providers.AUTH_FORMAT_BEARER,
             upstream_host="gmail.googleapis.com",
         )
         names = [n.lower() for n, _ in out]
@@ -213,7 +214,7 @@ class TestRewriteAuthorization(unittest.TestCase):
         hdrs = [(b"authorization", b"Basic SANDBOX-PLACEHOLDER")]
         out = broker.tls_intercept._rewrite_authorization(
             headers=hdrs, token="ghs_real_token",
-            auth_format=broker.tls_intercept.AUTH_FORMAT_BASIC_X_ACCESS_TOKEN,
+            auth_format=tls_providers.AUTH_FORMAT_BASIC_X_ACCESS_TOKEN,
             upstream_host="github.com",
         )
         auth = dict([(n.lower(), v) for n, v in out])[b"authorization"]
@@ -221,7 +222,7 @@ class TestRewriteAuthorization(unittest.TestCase):
         self.assertEqual(auth, expected)
 
     def test_telegram_path_token_is_rewritten_without_authorization_header(self) -> None:
-        provider = broker.tls_intercept.TLS_INTERCEPT_PROVIDERS["telegram"]
+        provider = tls_providers.TLS_INTERCEPT_PROVIDERS["telegram"]
         headers, path = broker.tls_intercept._rewrite_request_for_provider(
             headers=[
                 (b"host", b"api.telegram.org"),
@@ -239,7 +240,7 @@ class TestRewriteAuthorization(unittest.TestCase):
         self.assertEqual(dict((name.lower(), value) for name, value in headers)[b"host"], b"api.telegram.org")
 
     def test_telegram_file_path_token_is_rewritten(self) -> None:
-        provider = broker.tls_intercept.TLS_INTERCEPT_PROVIDERS["telegram"]
+        provider = tls_providers.TLS_INTERCEPT_PROVIDERS["telegram"]
         _headers, path = broker.tls_intercept._rewrite_request_for_provider(
             headers=[(b"host", b"api.telegram.org")],
             path_with_query="/file/bot000000:DOH_PLACEHOLDER/documents/file.txt",
@@ -255,7 +256,7 @@ class TestRewriteAuthorization(unittest.TestCase):
         Url-encoded placeholders (e.g. `%3A` instead of `:`) don't substring-match
         and must be rejected so we never forward an un-rewritten URL upstream.
         """
-        provider = broker.tls_intercept.TLS_INTERCEPT_PROVIDERS["telegram"]
+        provider = tls_providers.TLS_INTERCEPT_PROVIDERS["telegram"]
 
         with self.assertRaisesRegex(ValueError, "placeholder"):
             broker.tls_intercept._rewrite_request_for_provider(
@@ -268,7 +269,7 @@ class TestRewriteAuthorization(unittest.TestCase):
 
     def test_slack_app_token_placeholder_selects_app_token(self) -> None:
         """A request bearing the app-token placeholder gets the real app token."""
-        provider = broker.tls_intercept.TLS_INTERCEPT_PROVIDERS["slack"]
+        provider = tls_providers.TLS_INTERCEPT_PROVIDERS["slack"]
         headers, path = broker.tls_intercept._rewrite_request_for_provider(
             headers=[(b"host", b"slack.com"), (b"authorization", b"Bearer xapp-DOH_PLACEHOLDER")],
             path_with_query="/api/apps.connections.open",
@@ -281,7 +282,7 @@ class TestRewriteAuthorization(unittest.TestCase):
 
     def test_slack_bot_token_placeholder_selects_bot_token(self) -> None:
         """A request bearing the bot-token placeholder gets the real bot token."""
-        provider = broker.tls_intercept.TLS_INTERCEPT_PROVIDERS["slack"]
+        provider = tls_providers.TLS_INTERCEPT_PROVIDERS["slack"]
         headers, _path = broker.tls_intercept._rewrite_request_for_provider(
             headers=[(b"host", b"slack.com"), (b"authorization", b"Bearer xoxb-DOH_PLACEHOLDER")],
             path_with_query="/api/chat.postMessage",
@@ -293,7 +294,7 @@ class TestRewriteAuthorization(unittest.TestCase):
 
     def test_slack_unknown_placeholder_fails_closed(self) -> None:
         """An unrecognized bearer must raise rather than forward an un-swapped token."""
-        provider = broker.tls_intercept.TLS_INTERCEPT_PROVIDERS["slack"]
+        provider = tls_providers.TLS_INTERCEPT_PROVIDERS["slack"]
         with self.assertRaises(broker.tls_intercept._SecretSelectionError):
             broker.tls_intercept._rewrite_request_for_provider(
                 headers=[(b"host", b"slack.com"), (b"authorization", b"Bearer xoxb-NOT-OURS")],
@@ -304,7 +305,7 @@ class TestRewriteAuthorization(unittest.TestCase):
             )
 
     def test_openrouter_placeholder_bearer_is_rewritten(self) -> None:
-        provider = broker.tls_intercept.TLS_INTERCEPT_PROVIDERS["openrouter"]
+        provider = tls_providers.TLS_INTERCEPT_PROVIDERS["openrouter"]
         headers, path = broker.tls_intercept._rewrite_request_for_provider(
             headers=[(b"host", b"openrouter.ai"), (b"authorization", b"Bearer DOH_PLACEHOLDER")],
             path_with_query="/api/v1/chat/completions",
@@ -316,7 +317,7 @@ class TestRewriteAuthorization(unittest.TestCase):
         self.assertEqual(dict((n.lower(), v) for n, v in headers)[b"authorization"], b"Bearer sk-or-v1-real")
 
     def test_nous_placeholder_bearer_is_rewritten(self) -> None:
-        provider = broker.tls_intercept.TLS_INTERCEPT_PROVIDERS["nous"]
+        provider = tls_providers.TLS_INTERCEPT_PROVIDERS["nous"]
         headers, path = broker.tls_intercept._rewrite_request_for_provider(
             headers=[(b"host", b"inference-api.nousresearch.com"), (b"authorization", b"Bearer DOH_PLACEHOLDER")],
             path_with_query="/v1/chat/completions",
@@ -328,7 +329,7 @@ class TestRewriteAuthorization(unittest.TestCase):
         self.assertEqual(dict((n.lower(), v) for n, v in headers)[b"authorization"], b"Bearer nous-access")
 
     def test_openai_placeholder_bearer_is_rewritten(self) -> None:
-        provider = broker.tls_intercept.TLS_INTERCEPT_PROVIDERS["openai-api"]
+        provider = tls_providers.TLS_INTERCEPT_PROVIDERS["openai-api"]
         headers, path = broker.tls_intercept._rewrite_request_for_provider(
             headers=[(b"host", b"api.openai.com"), (b"authorization", b"Bearer DOH_PLACEHOLDER")],
             path_with_query="/v1/chat/completions",
@@ -340,7 +341,7 @@ class TestRewriteAuthorization(unittest.TestCase):
         self.assertEqual(dict((n.lower(), v) for n, v in headers)[b"authorization"], b"Bearer sk-real")
 
     def test_anthropic_placeholder_x_api_key_is_rewritten(self) -> None:
-        provider = broker.tls_intercept.TLS_INTERCEPT_PROVIDERS["anthropic"]
+        provider = tls_providers.TLS_INTERCEPT_PROVIDERS["anthropic"]
         headers, path = broker.tls_intercept._rewrite_request_for_provider(
             headers=[
                 (b"host", b"api.anthropic.com"),
@@ -360,7 +361,7 @@ class TestRewriteAuthorization(unittest.TestCase):
         self.assertNotIn(b"authorization", by_name)
 
     def test_anthropic_request_without_placeholder_is_rejected(self) -> None:
-        provider = broker.tls_intercept.TLS_INTERCEPT_PROVIDERS["anthropic"]
+        provider = tls_providers.TLS_INTERCEPT_PROVIDERS["anthropic"]
         with self.assertRaises(broker.tls_intercept._SecretSelectionError):
             broker.tls_intercept._rewrite_request_for_provider(
                 headers=[(b"host", b"api.anthropic.com"), (b"x-api-key", b"sk-ant-NOT-OURS")],
@@ -501,7 +502,7 @@ def _make_control_parts(
         doh_client=client,
         tls_intercept_runtime=tls_intercept_runtime,
         mcp_aggregator=aggregator,
-        providers=broker.tls_intercept.TLS_INTERCEPT_PROVIDERS,
+        providers=tls_providers.TLS_INTERCEPT_PROVIDERS,
         gateway_env_path=gateway_env_path,
         webui_state_dir=webui_state_dir,
         process_compose_url="http://127.0.0.1:9999",
@@ -528,7 +529,7 @@ def _make_credentials_service(
         doh_client=_make_doh_client(),
         tls_intercept_runtime=tls_intercept_runtime,
         mcp_aggregator=_ready_stub_aggregator(),
-        providers=broker.tls_intercept.TLS_INTERCEPT_PROVIDERS,
+        providers=tls_providers.TLS_INTERCEPT_PROVIDERS,
         gateway_env_path=gateway_env_path,
         webui_state_dir=webui_state_dir,
         process_compose_url="http://127.0.0.1:9999",
@@ -910,7 +911,7 @@ class TestControlIntegrations(unittest.IsolatedAsyncioTestCase):
                 outcome=broker.tls_intercept.REFRESH_OUTCOME_ABSENT,
                 secrets=None, expires_in=None, config={}, metadata={},
             )
-            for slug in broker.tls_intercept.TLS_INTERCEPT_PROVIDERS
+            for slug in tls_providers.TLS_INTERCEPT_PROVIDERS
         }
         # First call pre-warms google; the route's invalidate-all then refreshes
         # every provider from DOH, which reports them all disconnected.
@@ -1390,31 +1391,31 @@ class TestRefreshAllBatchedApply(unittest.IsolatedAsyncioTestCase):
 class TestGatewayEnvRender(unittest.TestCase):
     """Render the DOH-managed block from a token-store snapshot."""
 
-    def _telegram_provider(self) -> "broker.tls_intercept.TlsProviderSpec":
-        return broker.tls_intercept.TLS_INTERCEPT_PROVIDERS["telegram"]
+    def _telegram_provider(self) -> "tls_providers.TlsProviderSpec":
+        return tls_providers.TLS_INTERCEPT_PROVIDERS["telegram"]
 
-    def _google_provider(self) -> "broker.tls_intercept.TlsProviderSpec":
-        return broker.tls_intercept.TLS_INTERCEPT_PROVIDERS["google"]
+    def _google_provider(self) -> "tls_providers.TlsProviderSpec":
+        return tls_providers.TLS_INTERCEPT_PROVIDERS["google"]
 
-    def _github_provider(self) -> "broker.tls_intercept.TlsProviderSpec":
-        return broker.tls_intercept.TLS_INTERCEPT_PROVIDERS["github"]
+    def _github_provider(self) -> "tls_providers.TlsProviderSpec":
+        return tls_providers.TLS_INTERCEPT_PROVIDERS["github"]
 
-    def _slack_provider(self) -> "broker.tls_intercept.TlsProviderSpec":
-        return broker.tls_intercept.TLS_INTERCEPT_PROVIDERS["slack"]
+    def _slack_provider(self) -> "tls_providers.TlsProviderSpec":
+        return tls_providers.TLS_INTERCEPT_PROVIDERS["slack"]
 
-    def _openrouter_provider(self) -> "broker.tls_intercept.TlsProviderSpec":
-        return broker.tls_intercept.TLS_INTERCEPT_PROVIDERS["openrouter"]
+    def _openrouter_provider(self) -> "tls_providers.TlsProviderSpec":
+        return tls_providers.TLS_INTERCEPT_PROVIDERS["openrouter"]
 
-    def _openai_provider(self) -> "broker.tls_intercept.TlsProviderSpec":
-        return broker.tls_intercept.TLS_INTERCEPT_PROVIDERS["openai-api"]
+    def _openai_provider(self) -> "tls_providers.TlsProviderSpec":
+        return tls_providers.TLS_INTERCEPT_PROVIDERS["openai-api"]
 
-    def _anthropic_provider(self) -> "broker.tls_intercept.TlsProviderSpec":
-        return broker.tls_intercept.TLS_INTERCEPT_PROVIDERS["anthropic"]
+    def _anthropic_provider(self) -> "tls_providers.TlsProviderSpec":
+        return tls_providers.TLS_INTERCEPT_PROVIDERS["anthropic"]
 
     def test_slack_vault_header_provider_renders_both_placeholders(self) -> None:
         """Env bindings render static placeholders plus list config."""
         snapshot = [(self._slack_provider(), {"allowed_users": ["U1", "U2"], "home_channel": "DOWNER"})]
-        block = broker.tls_intercept.render_managed_block(snapshot=snapshot)
+        block = credentials_service._render_managed_block(snapshot=snapshot)
         self.assertIn("SLACK_APP_TOKEN=xapp-DOH_PLACEHOLDER", block)
         self.assertIn("SLACK_BOT_TOKEN=xoxb-DOH_PLACEHOLDER", block)
         self.assertIn("SLACK_ALLOWED_USERS=U1,U2", block)
@@ -1428,7 +1429,7 @@ class TestGatewayEnvRender(unittest.TestCase):
         lets anyone in an invited channel drive a company-wide bot.
         """
         snapshot = [(self._slack_provider(), {"workspace_scope": "company_wide", "allow_all_users": "true"})]
-        block = broker.tls_intercept.render_managed_block(snapshot=snapshot)
+        block = credentials_service._render_managed_block(snapshot=snapshot)
         self.assertIn("SLACK_ALLOW_ALL_USERS=true", block)
         # No per-user allowlist in company-wide mode.
         self.assertNotIn("SLACK_ALLOWED_USERS=", block)
@@ -1437,48 +1438,48 @@ class TestGatewayEnvRender(unittest.TestCase):
 
     def test_connected_vault_provider_renders_managed_block(self) -> None:
         snapshot = [(self._telegram_provider(), {"allowed_users": [42, 7]})]
-        block = broker.tls_intercept.render_managed_block(snapshot=snapshot)
-        self.assertIn(broker.tls_intercept.GATEWAY_ENV_BLOCK_BEGIN, block)
-        self.assertIn(broker.tls_intercept.GATEWAY_ENV_BLOCK_END, block)
+        block = credentials_service._render_managed_block(snapshot=snapshot)
+        self.assertIn(credentials_service.GATEWAY_ENV_BLOCK_BEGIN, block)
+        self.assertIn(credentials_service.GATEWAY_ENV_BLOCK_END, block)
         self.assertIn("TELEGRAM_BOT_TOKEN=000000:DOH_PLACEHOLDER", block)
         self.assertIn("TELEGRAM_ALLOWED_USERS=42,7", block)
 
     def test_empty_snapshot_renders_empty_block(self) -> None:
         """No connected providers ⇒ no managed block at all (disconnected = absent)."""
-        self.assertEqual(broker.tls_intercept.render_managed_block(snapshot=[]), "")
+        self.assertEqual(credentials_service._render_managed_block(snapshot=[]), "")
 
     def test_oauth_provider_contributes_no_env_lines(self) -> None:
         """Google stays env-free; its helper injects a subprocess-local sentinel."""
         snapshot = [(self._google_provider(), {"some_key": "some_value"})]
-        block = broker.tls_intercept.render_managed_block(snapshot=snapshot)
+        block = credentials_service._render_managed_block(snapshot=snapshot)
         self.assertEqual(block, "")
 
     def test_connected_github_renders_github_placeholder(self) -> None:
         """GitHub env appears only through the connected-provider snapshot."""
         snapshot = [(self._github_provider(), {})]
-        block = broker.tls_intercept.render_managed_block(snapshot=snapshot)
+        block = credentials_service._render_managed_block(snapshot=snapshot)
         self.assertIn("GITHUB_TOKEN=DOH_PLACEHOLDER", block)
         self.assertNotIn("COPILOT_GITHUB_TOKEN", block)
 
     def test_connected_openrouter_renders_api_key_placeholder(self) -> None:
         snapshot = [(self._openrouter_provider(), {})]
-        block = broker.tls_intercept.render_managed_block(snapshot=snapshot)
+        block = credentials_service._render_managed_block(snapshot=snapshot)
         self.assertIn("OPENROUTER_API_KEY=DOH_PLACEHOLDER", block)
 
     def test_connected_openai_renders_api_key_placeholder(self) -> None:
         snapshot = [(self._openai_provider(), {})]
-        block = broker.tls_intercept.render_managed_block(snapshot=snapshot)
+        block = credentials_service._render_managed_block(snapshot=snapshot)
         self.assertIn("OPENAI_API_KEY=DOH_PLACEHOLDER", block)
 
     def test_connected_anthropic_renders_api_key_placeholder(self) -> None:
         snapshot = [(self._anthropic_provider(), {})]
-        block = broker.tls_intercept.render_managed_block(snapshot=snapshot)
+        block = credentials_service._render_managed_block(snapshot=snapshot)
         self.assertIn("ANTHROPIC_API_KEY=DOH_PLACEHOLDER", block)
 
     def test_missing_list_config_skips_binding(self) -> None:
         """A connected provider without the optional list field omits its env var."""
         snapshot = [(self._telegram_provider(), {})]
-        block = broker.tls_intercept.render_managed_block(snapshot=snapshot)
+        block = credentials_service._render_managed_block(snapshot=snapshot)
         self.assertIn("TELEGRAM_BOT_TOKEN=000000:DOH_PLACEHOLDER", block)
         self.assertNotIn("TELEGRAM_ALLOWED_USERS", block)
 
@@ -1488,15 +1489,15 @@ class TestGatewayEnvRender(unittest.TestCase):
             env_path = pathlib.Path(tmp) / ".env"
             env_path.write_text(
                 "USER_KEY=keep-me\n"
-                f"{broker.tls_intercept.GATEWAY_ENV_BLOCK_BEGIN}\n"
+                f"{credentials_service.GATEWAY_ENV_BLOCK_BEGIN}\n"
                 "STALE_VAR=old-value\n"
-                f"{broker.tls_intercept.GATEWAY_ENV_BLOCK_END}\n"
+                f"{credentials_service.GATEWAY_ENV_BLOCK_END}\n"
                 "ANOTHER=also-keep\n",
                 encoding="utf-8",
             )
             snapshot = [(self._telegram_provider(), {"allowed_users": [1]})]
-            block = broker.tls_intercept.render_managed_block(snapshot=snapshot)
-            changed = broker.tls_intercept.write_gateway_env_file(env_path=env_path, managed_block=block)
+            block = credentials_service._render_managed_block(snapshot=snapshot)
+            changed = credentials_service._write_gateway_env_file(env_path=env_path, managed_block=block)
             text = env_path.read_text(encoding="utf-8")
 
         self.assertTrue(changed)
@@ -1512,12 +1513,12 @@ class TestGatewayEnvRender(unittest.TestCase):
             env_path = pathlib.Path(tmp) / ".env"
             env_path.write_text(
                 "USER_KEY=keep-me\n"
-                f"{broker.tls_intercept.GATEWAY_ENV_BLOCK_BEGIN}\n"
+                f"{credentials_service.GATEWAY_ENV_BLOCK_BEGIN}\n"
                 "TELEGRAM_BOT_TOKEN=000000:DOH_PLACEHOLDER\n"
-                f"{broker.tls_intercept.GATEWAY_ENV_BLOCK_END}\n",
+                f"{credentials_service.GATEWAY_ENV_BLOCK_END}\n",
                 encoding="utf-8",
             )
-            changed = broker.tls_intercept.write_gateway_env_file(env_path=env_path, managed_block="")
+            changed = credentials_service._write_gateway_env_file(env_path=env_path, managed_block="")
             text = env_path.read_text(encoding="utf-8")
 
         self.assertTrue(changed)
@@ -1528,9 +1529,9 @@ class TestGatewayEnvRender(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             env_path = pathlib.Path(tmp) / ".env"
             snapshot = [(self._github_provider(), {})]
-            block = broker.tls_intercept.render_managed_block(snapshot=snapshot)
-            first_changed = broker.tls_intercept.write_gateway_env_file(env_path=env_path, managed_block=block)
-            second_changed = broker.tls_intercept.write_gateway_env_file(env_path=env_path, managed_block=block)
+            block = credentials_service._render_managed_block(snapshot=snapshot)
+            first_changed = credentials_service._write_gateway_env_file(env_path=env_path, managed_block=block)
+            second_changed = credentials_service._write_gateway_env_file(env_path=env_path, managed_block=block)
 
         self.assertTrue(first_changed)
         self.assertFalse(second_changed)
@@ -1712,7 +1713,7 @@ class TestCredentialsServiceChoreography(unittest.IsolatedAsyncioTestCase):
                 outcome=broker.tls_intercept.REFRESH_OUTCOME_ABSENT,
                 secrets=None, expires_in=None, config={}, metadata={},
             )
-            for slug in broker.tls_intercept.TLS_INTERCEPT_PROVIDERS
+            for slug in tls_providers.TLS_INTERCEPT_PROVIDERS
         }
 
         with patch.object(
@@ -1728,7 +1729,7 @@ class TestCredentialsServiceChoreography(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(batch_mock.call_count, 1)
         called_slugs = batch_mock.call_args.kwargs["slugs"]
-        self.assertEqual(set(called_slugs), set(broker.tls_intercept.TLS_INTERCEPT_PROVIDERS))
+        self.assertEqual(set(called_slugs), set(tls_providers.TLS_INTERCEPT_PROVIDERS))
 
 
 class TestTransientRefreshGuards(unittest.IsolatedAsyncioTestCase):
@@ -1759,15 +1760,15 @@ class TestTransientRefreshGuards(unittest.IsolatedAsyncioTestCase):
 
     def _seed_telegram_env_block(self) -> str:
         """Write a managed block for a connected Telegram bot; returns the file text."""
-        spec = broker.tls_intercept.TLS_INTERCEPT_PROVIDERS["telegram"]
-        block = broker.tls_intercept.render_managed_block(snapshot=[(spec, {"allowed_users": ["123"]})])
-        broker.tls_intercept.write_gateway_env_file(env_path=self.env_path, managed_block=block)
+        spec = tls_providers.TLS_INTERCEPT_PROVIDERS["telegram"]
+        block = credentials_service._render_managed_block(snapshot=[(spec, {"allowed_users": ["123"]})])
+        credentials_service._write_gateway_env_file(env_path=self.env_path, managed_block=block)
         return self.env_path.read_text(encoding="utf-8")
 
     def _transient_for_every_slug(self) -> dict:
         return {
             slug: broker.tls_intercept._transient_result()
-            for slug in broker.tls_intercept.TLS_INTERCEPT_PROVIDERS
+            for slug in tls_providers.TLS_INTERCEPT_PROVIDERS
         }
 
     async def test_refresh_all_reports_doh_reachability(self) -> None:
@@ -1779,7 +1780,7 @@ class TestTransientRefreshGuards(unittest.IsolatedAsyncioTestCase):
                 outcome=broker.tls_intercept.REFRESH_OUTCOME_ABSENT,
                 secrets=None, expires_in=None, config={}, metadata={},
             )
-            for slug in broker.tls_intercept.TLS_INTERCEPT_PROVIDERS
+            for slug in tls_providers.TLS_INTERCEPT_PROVIDERS
         }
         with patch.object(broker.tls_intercept, "fetch_provider_tokens_batch", return_value=absent_for_every_slug):
             self.assertTrue(await tls_intercept_runtime.refresh_all())
@@ -1826,7 +1827,7 @@ class TestTransientRefreshGuards(unittest.IsolatedAsyncioTestCase):
                 outcome=broker.tls_intercept.REFRESH_OUTCOME_ABSENT,
                 secrets=None, expires_in=None, config={}, metadata={},
             )
-            for slug in broker.tls_intercept.TLS_INTERCEPT_PROVIDERS
+            for slug in tls_providers.TLS_INTERCEPT_PROVIDERS
         }
         refreshed_results["telegram"] = broker.tls_intercept.RefreshResult(
             outcome=broker.tls_intercept.REFRESH_OUTCOME_HAS_TOKEN,
