@@ -690,19 +690,6 @@ async def _intercept_and_forward(
                     break
             headers = _parse_headers(lines=headers_raw)
             path_with_query = request_line.decode("iso-8859-1").split(" ", 2)[1]
-            method = provider.credential_method
-            if isinstance(method, tls_providers.VaultUrlRewrite) and method.placeholder not in path_with_query:
-                logger.error(
-                    "%s request path did not contain expected placeholder: %s",
-                    provider.slug,
-                    path_with_query.split("?", 1)[0],
-                )
-                await _send_json_error(
-                    writer=tls_writer,
-                    status=400,
-                    message=f"{provider.slug} request URL must contain the DOH placeholder",
-                )
-                return
             body = await _read_body(reader=tls_reader, headers=headers)
             secrets = await token_store.secrets_for_host(host=host)
             if secrets is None:
@@ -858,7 +845,11 @@ def _build_authorization_value(token: str, auth_format: str) -> bytes:
 
 
 class _SecretSelectionError(Exception):
-    """A VaultHeaderInject request didn't carry a resolvable placeholder bearer."""
+    """A request didn't carry a recognizable placeholder, or a required secret is missing from the cache.
+
+    Raised by `_rewrite_request_for_provider`; the proxy loop maps it to a 400
+    so an un-rewritten credential is never forwarded upstream.
+    """
 
 
 def _strip_bearer_prefix(value: bytes) -> str:
@@ -997,7 +988,7 @@ def _rewrite_request_for_provider(
     if isinstance(method, tls_providers.VaultUrlRewrite):
         token = _primary_secret(secrets)
         if method.placeholder not in path_with_query:
-            raise ValueError(f"{provider.slug} request URL must contain the DOH placeholder")
+            raise _SecretSelectionError("request URL must contain the DOH placeholder")
         return (
             _strip_proxy_headers_and_set_host(headers=headers, upstream_host=upstream_host),
             path_with_query.replace(method.placeholder, token),
