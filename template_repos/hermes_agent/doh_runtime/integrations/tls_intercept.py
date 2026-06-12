@@ -11,8 +11,6 @@ import os
 import random
 import ssl
 import time
-import urllib.error
-import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
 from typing import ClassVar, Literal
@@ -20,6 +18,8 @@ from typing import ClassVar, Literal
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
+
+from doh_client import DohClient
 
 
 logger = logging.getLogger("tls_intercept")
@@ -174,16 +174,6 @@ class TlsProviderSpec:
     restart_gateway_after_save: bool
     restart_webui_after_save: bool
     affects_model_picker: bool
-
-
-@dataclass(frozen=True)
-class DohRefreshConfig:
-    """DOH identity and endpoint config used to refresh provider access tokens."""
-
-    control_plane_url: str
-    bearer: str
-    owner_username: str
-    app_slug: str
 
 
 # Internal tags from DOH's refresh endpoint (distinct from browser
@@ -458,7 +448,7 @@ TLS_INTERCEPT_PROVIDERS = build_provider_registry(provider_specs=TLS_INTERCEPT_P
 HOST_TO_TLS_PROVIDER = build_host_to_provider(providers=TLS_INTERCEPT_PROVIDERS)
 
 
-def fetch_provider_tokens_batch(refresh_config: DohRefreshConfig, slugs: list[str]) -> dict[str, RefreshResult]:
+def fetch_provider_tokens_batch(doh_client: DohClient, slugs: list[str]) -> dict[str, RefreshResult]:
     """Refresh many provider tokens in one POST to DOH; returns a slug→RefreshResult map.
 
     DOH's `/api/integrations/tokens` is the broker's only refresh path —
@@ -470,33 +460,20 @@ def fetch_provider_tokens_batch(refresh_config: DohRefreshConfig, slugs: list[st
     from the response map surfaces as TRANSIENT for that slug, so the
     cache stays intact.
     """
-    url = f"{refresh_config.control_plane_url.rstrip('/')}/api/integrations/tokens"
-    body = json.dumps({
-        "owner_username": refresh_config.owner_username,
-        "app_slug": refresh_config.app_slug,
-        "providers": list(slugs),
-    }).encode("utf-8")
-    req = urllib.request.Request(
-        url=url,
-        data=body,
-        method="POST",
-        headers={"Authorization": f"Bearer {refresh_config.bearer}", "Content-Type": "application/json"},
+    # In-VPC JSON POST to our own control plane; healthy P99 is tens
+    # of ms. DOH processes the providers in parallel server-side, so
+    # wall-clock = max(per-provider upstream exchange) + DB / JSON
+    # overhead. Each helper's upstream timeout is 5s, so the ceiling
+    # here is ~5s + a small slack budget for executor dispatch and
+    # marshalling — 7s. Still well inside supervisor's 10s
+    # wait_for_port budget on broker bootstrap.
+    status, payload = doh_client.post_json(
+        path="/api/integrations/tokens",
+        payload={"providers": list(slugs)},
+        timeout_seconds=7,
     )
-    try:
-        # In-VPC JSON POST to our own control plane; healthy P99 is tens
-        # of ms. DOH processes the providers in parallel server-side, so
-        # wall-clock = max(per-provider upstream exchange) + DB / JSON
-        # overhead. Each helper's upstream timeout is 5s, so the ceiling
-        # here is ~5s + a small slack budget for executor dispatch and
-        # marshalling — 7s. Still well inside supervisor's 10s
-        # wait_for_port budget on broker bootstrap.
-        with urllib.request.urlopen(req, timeout=7) as response:
-            payload = json.loads(response.read().decode("utf-8"))
-    except urllib.error.HTTPError as exc:
-        logger.error("refresh got http %d", exc.code)
-        return {slug: _transient_result() for slug in slugs}
-    except Exception as exc:
-        logger.error("refresh network error: %s", exc)
+    if not (200 <= status < 300):
+        logger.error("refresh against DOH failed (http %d)", status)
         return {slug: _transient_result() for slug in slugs}
 
     results_payload = payload.get("results")
@@ -691,10 +668,10 @@ class _TokenStore:
     lock together.
     """
 
-    def __init__(self, providers: dict[str, TlsProviderSpec], refresh_config: DohRefreshConfig, refresh_lead_seconds: int) -> None:
+    def __init__(self, providers: dict[str, TlsProviderSpec], doh_client: DohClient, refresh_lead_seconds: int) -> None:
         self._providers = providers
         self._host_to_provider = build_host_to_provider(providers=providers)
-        self._refresh_config = refresh_config
+        self._doh_client = doh_client
         self._refresh_lead_seconds = refresh_lead_seconds
         self._lock = asyncio.Lock()
         self._cache: dict[str, _TokenCacheEntry] = {}
@@ -823,7 +800,7 @@ class _TokenStore:
             return True
         results = await asyncio.to_thread(
             fetch_provider_tokens_batch,
-            refresh_config=self._refresh_config,
+            doh_client=self._doh_client,
             slugs=slugs,
         )
         for slug in slugs:
@@ -860,30 +837,22 @@ class _TokenStore:
 
 
 class TlsInterceptRuntime:
-    """TLS-intercept subsystem: proxy transport, token refresh, and status cards."""
+    """TLS-intercept subsystem: proxy transport, token refresh, and status cards.
 
-    def __init__(
-        self,
-        providers: dict[str, TlsProviderSpec],
-        refresh_config: DohRefreshConfig,
-        refresh_lead_seconds: int,
-        ca_dir: Path,
-        private_dir: Path,
-        on_user_invalidate=None,
-    ) -> None:
+    Pure mechanism: invalidate/refresh only touch the token cache. The
+    choreography that follows a *credential change* (env re-render, process
+    restarts, auth markers) lives in `credentials_service`, which calls down
+    into this runtime — never the other way around.
+    """
+
+    def __init__(self, providers: dict[str, TlsProviderSpec], doh_client: DohClient, refresh_lead_seconds: int, ca_dir: Path, private_dir: Path) -> None:
         self._token_store = _TokenStore(
             providers=providers,
-            refresh_config=refresh_config,
+            doh_client=doh_client,
             refresh_lead_seconds=refresh_lead_seconds,
         )
         self._cert_minter = _CertMinter(ca_dir=ca_dir, private_dir=private_dir)
         self._cert_minter.bootstrap()
-        # `on_user_invalidate(slug | None)` runs after a user-initiated
-        # invalidate (vault save/disconnect, per-provider or all-providers
-        # cache flush). The proxy hot-path 401 eviction calls the inner
-        # token store directly and does NOT trigger this — that path is
-        # not a credential change, just a cached-token rotation.
-        self._on_user_invalidate = on_user_invalidate
 
     async def start_proxy_server(self, host: str, port: int) -> asyncio.Server:
         """Start the local HTTPS proxy server."""
@@ -902,16 +871,12 @@ class TlsInterceptRuntime:
         return await self._token_store.status_items()
 
     async def invalidate(self, slug: str) -> None:
-        """Drop one provider's cached token entry and fire the user-invalidate hook."""
+        """Drop one provider's cached token entry."""
         await self._token_store.invalidate(slug=slug)
-        if self._on_user_invalidate is not None:
-            await self._on_user_invalidate(slug)
 
     async def invalidate_all(self) -> None:
-        """Drop every cached token entry and fire the user-invalidate hook."""
+        """Drop every cached token entry."""
         await self._token_store.invalidate_all()
-        if self._on_user_invalidate is not None:
-            await self._on_user_invalidate(None)
 
     async def refresh_slug(self, slug: str) -> bool:
         """Force a single-provider refetch; False when the DOH round-trip failed transiently."""

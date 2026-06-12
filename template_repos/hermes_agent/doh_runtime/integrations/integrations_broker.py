@@ -1,6 +1,11 @@
 """Outside-the-sandbox broker for per-user third-party integrations.
 
-Runs as a supervisor-managed sidecar process. It starts:
+Runs as a supervisor-managed sidecar process. Pure composition root: it reads
+the environment contract, constructs the subsystems, wires them together, and
+runs the servers. All credential-change choreography lives in
+`credentials_service`; all HTTP parsing lives in `control_api`.
+
+It starts:
 
 1. The TLS-intercept proxy on 127.0.0.1:9950. The nono sandbox gets
    HTTPS_PROXY pointed here and SSL_CERT_FILE pointed at the CA bundle created
@@ -32,24 +37,18 @@ Required file system:
 import argparse
 import asyncio
 import contextlib
-from collections.abc import Awaitable, Callable
-import json
 import logging
 import os
 import signal
-import subprocess
 import sys
-import urllib.error
-import urllib.request
 from pathlib import Path
 
 import uvicorn
-from starlette.applications import Starlette
-from starlette.requests import Request
-from starlette.responses import JSONResponse, Response
-from starlette.routing import Route
 
+import control_api
+from credentials_service import CredentialsService
 import device_flow
+from doh_client import DohClient
 from mcp_aggregator import MCPAggregator
 import tls_intercept
 
@@ -63,452 +62,10 @@ DEFAULT_MCP_PERSISTENT_DIR = Path("/hermes-persistent-root/mcp-aggregator")
 DEFAULT_GATEWAY_ENV_PATH = Path("/workspace/.hermes/.env")
 DEFAULT_WEBUI_STATE_DIR = Path("/workspace/.hermes/webui-mvp")
 DEFAULT_PROCESS_COMPOSE_URL = "http://127.0.0.1:9956"
-GATEWAY_PROCESS_NAME = "system.gateway"
-WEBUI_PROCESS_NAME = "system.webui"
-# The in-sandbox gateway user; auth.json must stay owned by it (mode 0600), so
-# the root broker drops to it via runuser when it touches the local auth store.
-GATEWAY_USER = "hermeswebui"
-AUTH_MARKER_PROVIDERS = frozenset({"openai-codex", "nous"})
 _TRUE_ENV_VALUES = frozenset({"1", "true", "yes", "on"})
 _FALSE_ENV_VALUES = frozenset({"0", "false", "no", "off"})
 
 logger = logging.getLogger("integrations_broker")
-
-
-async def _handle_unified_status(
-    request: Request,
-    mcp_aggregator: MCPAggregator,
-    tls_intercept_runtime: tls_intercept.TlsInterceptRuntime,
-    control_plane_url: str,
-    owner_username: str,
-    app_slug: str,
-    env_slug: str,
-) -> Response:
-    """Flat list combining TLS-intercept providers and MCP-aggregator items.
-
-    Reads cached TLS-intercept entries; refresh happens lazily (proxy hot
-    path or near expiry). Callers that need fresh state must POST
-    /__doh_broker/integrations/tls_intercept/{provider}/invalidate for one provider
-    (e.g. after a Disconnect on DOH) or /__doh_broker/integrations/refresh
-    for the explicit-Refresh path (MCP catalog reload + all-providers TLS
-    invalidate in one shot).
-    """
-    items = await tls_intercept_runtime.status_items()
-    items.extend(await mcp_aggregator.status_items())
-    return JSONResponse(content={
-        "doh_control_plane_url": control_plane_url,
-        "env_slug": env_slug,
-        "owner_username": owner_username,
-        "app_slug": app_slug,
-        "items": items,
-    })
-
-
-async def _handle_healthz(request: Request) -> Response:
-    return JSONResponse(content={"ok": True})
-
-
-def _build_control_app(
-    mcp_aggregator: MCPAggregator,
-    tls_intercept_runtime: tls_intercept.TlsInterceptRuntime,
-    oauth_device_flow: device_flow.OAuthDeviceFlow,
-    control_plane_url: str,
-    bearer: str,
-    owner_username: str,
-    app_slug: str,
-    env_slug: str,
-) -> Starlette:
-    """Wire the unified /__doh_broker/* router for browser-facing integration management."""
-    async def status_route(request: Request) -> Response:
-        return await _handle_unified_status(
-            request=request,
-            mcp_aggregator=mcp_aggregator,
-            tls_intercept_runtime=tls_intercept_runtime,
-            control_plane_url=control_plane_url,
-            owner_username=owner_username,
-            app_slug=app_slug,
-            env_slug=env_slug,
-        )
-
-    async def refresh_route(request: Request) -> Response:
-        """Explicit-Refresh: reload the MCP catalog and drop the all-providers TLS cache.
-
-        Cooldown is owned by the catalog side. If a refresh ran within
-        REFRESH_COOLDOWN_SECONDS we return 429 *without* firing the TLS
-        invalidate — otherwise smashing the Refresh button on cooldown would
-        repeatedly trigger `invalidate_all`'s `on_user_invalidate` hook
-        (DOH round-trip + gateway-env rewrite + gateway restart for vault
-        providers). Once past the cooldown gate, the two sides run
-        concurrently — they share no state and the slower of the two sets
-        the round-trip latency.
-        """
-        remaining = mcp_aggregator.cooldown_remaining_seconds()
-        if remaining is not None:
-            return JSONResponse(
-                content={"error": "refresh_cooldown", "retry_after_seconds": remaining},
-                status_code=429,
-            )
-
-        async def _safe_invalidate_all() -> str | None:
-            try:
-                await tls_intercept_runtime.invalidate_all()
-            except RuntimeError as exc:
-                return str(exc)
-            return None
-
-        catalog_result, tls_error = await asyncio.gather(
-            mcp_aggregator.refresh_catalog(),
-            _safe_invalidate_all(),
-        )
-        if tls_error is not None:
-            return JSONResponse(content={"ok": False, "error": tls_error}, status_code=502)
-        ok, payload = catalog_result
-        return JSONResponse(content=payload, status_code=200 if ok else 429)
-
-    async def invalidate_provider_tls_cache_route(request: Request) -> Response:
-        """Drop one provider's cached TLS-intercept token after known state changes."""
-        provider = request.path_params["provider"]
-        try:
-            await tls_intercept_runtime.invalidate(slug=provider)
-        except RuntimeError as exc:
-            return JSONResponse(
-                content={"ok": False, "provider": provider, "error": str(exc)},
-                status_code=502,
-            )
-        return JSONResponse(content={"ok": True, "provider": provider})
-
-    async def vault_setup_session_route(request: Request) -> Response:
-        provider = request.path_params["provider"]
-        public_origin = request.query_params.get("origin", "")
-        status, payload = await asyncio.to_thread(
-            _post_control_plane_json,
-            control_plane_url=control_plane_url,
-            bearer=bearer,
-            path="/api/integrations/credentials/setup-session",
-            payload={
-                "owner_username": owner_username,
-                "app_slug": app_slug,
-                "provider": provider,
-                "public_origin": public_origin,
-            },
-        )
-        return JSONResponse(content=payload, status_code=status)
-
-    async def disconnect_route(request: Request) -> Response:
-        """Disconnect any TLS-intercept provider (vault or OAuth).
-
-        DOH's unified disconnect handler deletes the credential row and, for
-        OAuth providers, best-effort revokes upstream — the provider kind is
-        resolved server-side, so the broker forwards both kinds identically.
-        On success we drop only this provider's cached token. Any process
-        restart is selected from the provider spec inside `invalidate`, not off
-        this route.
-        """
-        provider = request.path_params["provider"]
-        status, payload = await asyncio.to_thread(
-            _post_control_plane_json,
-            control_plane_url=control_plane_url,
-            bearer=bearer,
-            path="/api/integrations/credentials/disconnect",
-            payload={
-                "owner_username": owner_username,
-                "app_slug": app_slug,
-                "provider": provider,
-            },
-        )
-        if 200 <= status < 300:
-            try:
-                await tls_intercept_runtime.invalidate(slug=provider)
-            except RuntimeError as exc:
-                return JSONResponse(
-                    content={**payload, "ok": False, "error": str(exc)},
-                    status_code=502,
-                )
-            if provider in AUTH_MARKER_PROVIDERS:
-                await asyncio.to_thread(_run_provider_auth_marker, provider, "disconnect")
-        return JSONResponse(content=payload, status_code=status)
-
-    async def device_start_route(request: Request) -> Response:
-        """Begin a provider device login; returns the user_code to display immediately."""
-        provider = request.path_params["provider"]
-        try:
-            view = await oauth_device_flow.start(provider_slug=provider)
-        except device_flow.DeviceFlowError as exc:
-            return JSONResponse(content={"ok": False, "error": str(exc)}, status_code=502)
-        return JSONResponse(content={"ok": True, **view})
-
-    async def device_status_route(request: Request) -> Response:
-        """Report the in-flight device-login phase (pending/completed/failed)."""
-        provider = request.path_params["provider"]
-        view = await oauth_device_flow.status(provider_slug=provider)
-        if view is None:
-            return JSONResponse(content={"ok": True, "phase": None})
-        return JSONResponse(content={"ok": True, **view})
-
-    async def device_cancel_route(request: Request) -> Response:
-        """Cancel an in-flight provider device login (user closed the dialog)."""
-        provider = request.path_params["provider"]
-        await oauth_device_flow.cancel(provider_slug=provider)
-        return JSONResponse(content={"ok": True})
-
-    tls = "/integrations/tls_intercept/{provider}"
-    routes = [
-        Route(path="/healthz", endpoint=_handle_healthz, methods=["GET"]),
-        Route(path="/integrations", endpoint=status_route, methods=["GET"]),
-        Route(path="/integrations/refresh", endpoint=refresh_route, methods=["POST"]),
-        Route(path=f"{tls}/invalidate", endpoint=invalidate_provider_tls_cache_route, methods=["POST"]),
-        Route(path=f"{tls}/setup-session", endpoint=vault_setup_session_route, methods=["POST"]),
-        Route(path=f"{tls}/disconnect", endpoint=disconnect_route, methods=["POST"]),
-        # Device login: broker-run OAuth device flows (no redirect callback).
-        Route(path=f"{tls}/device/start", endpoint=device_start_route, methods=["POST"]),
-        Route(path=f"{tls}/device/status", endpoint=device_status_route, methods=["GET"]),
-        Route(path=f"{tls}/device/cancel", endpoint=device_cancel_route, methods=["POST"]),
-        *mcp_aggregator.routes(prefix="/integrations"),
-    ]
-    return Starlette(routes=routes)
-
-
-def _post_control_plane_json(control_plane_url: str, bearer: str, path: str, payload: dict) -> tuple[int, dict]:
-    """POST JSON to DOH from the outside-sandbox broker."""
-    url = f"{control_plane_url.rstrip('/')}{path}"
-    data = json.dumps(payload).encode("utf-8")
-    req = urllib.request.Request(
-        url=url,
-        data=data,
-        method="POST",
-        headers={"Authorization": f"Bearer {bearer}", "Content-Type": "application/json"},
-    )
-    try:
-        with urllib.request.urlopen(req, timeout=30) as response:
-            return response.status, json.loads(response.read().decode("utf-8"))
-    except urllib.error.HTTPError as exc:
-        try:
-            body = json.loads(exc.read().decode("utf-8"))
-        except Exception:
-            body = {"error": f"control plane returned HTTP {exc.code}"}
-        return exc.code, body
-    except Exception as exc:
-        logger.error("control plane request failed path=%s: %s", path, exc)
-        return 502, {"error": "control plane request failed"}
-
-
-def _post_process_compose_restart(process_compose_url: str, process_name: str) -> tuple[int, str]:
-    """Tell process-compose's REST API to restart one entry."""
-    url = f"{process_compose_url.rstrip('/')}/process/restart/{process_name}"
-    req = urllib.request.Request(url=url, method="POST")
-    try:
-        with urllib.request.urlopen(req, timeout=30) as response:
-            return response.status, response.read().decode("utf-8")
-    except urllib.error.HTTPError as exc:
-        try:
-            body = exc.read().decode("utf-8")
-        except Exception:
-            body = ""
-        return exc.code, body
-    except Exception as exc:
-        logger.error("process-compose restart failed for %s: %s", process_name, exc)
-        return 502, str(exc)
-
-
-def _run_provider_auth_marker(provider: str, action: str) -> bool:
-    """Add/remove a local provider auth marker, as the gateway user.
-
-    `action` is "connect" or "disconnect". The marker writes/clears the
-    placeholder provider block in auth.json via the agent's locked, atomic
-    primitives, so the WebUI model picker shows/hides model providers without a
-    restart. We run it through `runuser` because the broker is root and
-    auth.json must stay owned by the sandbox user (mode 0600); a root-owned
-    store or lock file would lock the gateway out. Best-effort: a failure here
-    only means the dropdown is briefly stale, not that the credential is wrong.
-    """
-    python = os.environ.get("HERMES_WEBUI_PYTHON")
-    runtime_dir = os.environ.get("DOH_RUNTIME_DIR")
-    hermes_home = os.environ.get("HERMES_HOME")
-    if not python or not runtime_dir or not hermes_home:
-        logger.error("provider auth marker skipped: HERMES_WEBUI_PYTHON/DOH_RUNTIME_DIR/HERMES_HOME not set")
-        return False
-    script = str(Path(runtime_dir) / "sandbox_seed.py")
-    try:
-        result = subprocess.run(
-            ["runuser", "-u", GATEWAY_USER, "--", python, script, "--auth-marker", action, provider],
-            env={**os.environ, "HERMES_HOME": hermes_home},
-            capture_output=True,
-            text=True,
-            timeout=30,
-        )
-    except Exception as exc:
-        logger.error("provider auth marker (%s %s) failed to run: %s", action, provider, exc)
-        return False
-    if result.returncode != 0:
-        logger.error("provider auth marker (%s %s) exited %d: %s", action, provider, result.returncode, result.stderr.strip())
-        return False
-    logger.info("provider auth marker (%s %s): %s", action, provider, result.stdout.strip())
-    return True
-
-
-async def _render_gateway_env_file(tls_intercept_runtime: tls_intercept.TlsInterceptRuntime, env_path: Path) -> bool:
-    """Write the DOH-managed profile env block from current cache state."""
-    snapshot = await tls_intercept_runtime.gateway_env_snapshot()
-    block = tls_intercept.render_managed_block(snapshot=snapshot)
-    changed = await asyncio.to_thread(tls_intercept.write_gateway_env_file, env_path=env_path, managed_block=block)
-    if changed:
-        logger.info("rewrote managed env at %s (%d bytes)", env_path, len(block))
-    else:
-        logger.info("managed env unchanged at %s", env_path)
-    return changed
-
-
-async def _bootstrap_gateway_env(tls_intercept_runtime: tls_intercept.TlsInterceptRuntime, env_path: Path) -> None:
-    """At broker startup: refresh every provider, then render env file once.
-
-    A failed refresh (DOH unreachable, e.g. a 503 mid-deploy) is fatal: the
-    broker exits before opening its control port, supervisor.sh tears the
-    container down, and ECS restarts the task until DOH answers. Dying here
-    is what guarantees the gateway/WebUI children only ever launch with an
-    env rendered from live DOH state — no stale-env recovery path needed.
-    """
-    if not await tls_intercept_runtime.refresh_all():
-        logger.error("FATAL: bootstrap refresh against DOH failed; exiting so ECS restarts the task")
-        sys.exit(1)
-    
-    await _render_gateway_env_file(tls_intercept_runtime=tls_intercept_runtime, env_path=env_path)
-
-
-def _build_on_user_invalidate(
-    tls_intercept_runtime_holder: dict[str, tls_intercept.TlsInterceptRuntime],
-    env_path: Path,
-    webui_state_dir: Path,
-    process_compose_url: str,
-) -> Callable[[str | None], Awaitable[None]]:
-    """Return the hook that re-renders env and restarts the gateway when needed.
-
-    Uses a holder dict because the TLS runtime is constructed *with* this hook,
-    creating a chicken-and-egg. The broker fills `tls_intercept_runtime_holder["tls_intercept_runtime"]`
-    immediately after construction.
-
-    When `slug` is set (a single provider was just connected/disconnected),
-    only that provider is re-fetched from DOH — refreshing every disconnected
-    provider on each connect would spam DOH with `no integration row` 404s.
-    `slug=None` (explicit Refresh-all) does fan out to every provider.
-    """
-
-    async def on_user_invalidate(slug: str | None) -> None:
-        tls_intercept_runtime = tls_intercept_runtime_holder["tls_intercept_runtime"]
-        if slug is None:
-            doh_reachable = await tls_intercept_runtime.refresh_all()
-        else:
-            doh_reachable = await tls_intercept_runtime.refresh_slug(slug=slug)
-        if not doh_reachable:
-            # Rendering from a cache that missed its refresh would strip
-            # integrations from the gateway env; keep file and processes as-is.
-            logger.error("refresh after invalidate(slug=%s) failed transiently; managed env left untouched", slug)
-            return
-        await _apply_refreshed_state(
-            tls_intercept_runtime=tls_intercept_runtime,
-            env_path=env_path,
-            webui_state_dir=webui_state_dir,
-            process_compose_url=process_compose_url,
-            slug=slug,
-        )
-
-    return on_user_invalidate
-
-
-async def _apply_refreshed_state(
-    tls_intercept_runtime: tls_intercept.TlsInterceptRuntime,
-    env_path: Path,
-    webui_state_dir: Path,
-    process_compose_url: str,
-    slug: str | None,
-) -> None:
-    """Project a successful refresh onto disk and processes.
-
-    Renders the managed env block, drops WebUI's models cache when the touched
-    provider(s) can change /api/models, and restarts whatever processes the
-    provider(s) declare when the env actually changed. Callers must only
-    invoke it after a refresh that reflected DOH truth. Raises on a failed
-    process restart.
-    """
-    env_changed = await _render_gateway_env_file(tls_intercept_runtime=tls_intercept_runtime, env_path=env_path)
-    if _slug_affects_model_picker(slug=slug, tls_intercept_runtime=tls_intercept_runtime):
-        await asyncio.to_thread(_delete_webui_models_cache, webui_state_dir=webui_state_dir)
-    if not env_changed:
-        return
-    for process_name in _processes_requiring_restart(slug=slug, tls_intercept_runtime=tls_intercept_runtime):
-        status, body = await asyncio.to_thread(
-            _post_process_compose_restart,
-            process_compose_url=process_compose_url,
-            process_name=process_name,
-        )
-        if not (200 <= status < 300):
-            logger.error("%s restart returned %d: %s", process_name, status, body)
-            raise RuntimeError(
-                f"{process_name} restart failed (process-compose returned {status}); "
-                f"please redeploy the app to apply the new credentials"
-            )
-        logger.info("%s restart kicked off after invalidate(slug=%s)", process_name, slug)
-
-
-def _delete_webui_models_cache(webui_state_dir: Path) -> bool:
-    """Delete WebUI's persisted /api/models cache without importing WebUI code."""
-    cache_path = webui_state_dir / "models_cache.json"
-    try:
-        cache_path.unlink()
-    except FileNotFoundError:
-        logger.info("WebUI models cache already absent at %s", cache_path)
-        return False
-    except OSError as exc:
-        logger.error("failed to delete WebUI models cache at %s: %s", cache_path, exc)
-        raise RuntimeError(f"failed to delete WebUI models cache at {cache_path}") from exc
-    logger.info("deleted WebUI models cache at %s", cache_path)
-    return True
-
-
-def _slug_affects_model_picker(slug: str | None, tls_intercept_runtime: tls_intercept.TlsInterceptRuntime) -> bool:
-    """Return whether a provider state change can alter /api/models output."""
-    providers = tls_intercept_runtime._token_store._providers
-    if slug is None:
-        return any(spec.affects_model_picker for spec in providers.values())
-    spec = providers.get(slug)
-    if spec is None:
-        return False
-    return spec.affects_model_picker
-
-
-def _processes_requiring_restart(slug: str | None, tls_intercept_runtime: tls_intercept.TlsInterceptRuntime) -> tuple[str, ...]:
-    """Return process-compose entries that must reload after provider state changes."""
-    processes: list[str] = []
-    if _slug_requires_gateway_restart(slug=slug, tls_intercept_runtime=tls_intercept_runtime):
-        processes.append(GATEWAY_PROCESS_NAME)
-    if _slug_requires_webui_restart(slug=slug, tls_intercept_runtime=tls_intercept_runtime):
-        processes.append(WEBUI_PROCESS_NAME)
-    return tuple(processes)
-
-
-def _slug_requires_gateway_restart(slug: str | None, tls_intercept_runtime: tls_intercept.TlsInterceptRuntime) -> bool:
-    """A user-invalidate triggers gateway restart only when the provider declares it.
-
-    `slug=None` (Refresh-all) restarts only if any provider in scope declares
-    `restart_gateway_after_save`.
-    """
-    providers = tls_intercept_runtime._token_store._providers
-    if slug is None:
-        return any(spec.restart_gateway_after_save for spec in providers.values())
-    spec = providers.get(slug)
-    if spec is None:
-        return False
-    return spec.restart_gateway_after_save
-
-
-def _slug_requires_webui_restart(slug: str | None, tls_intercept_runtime: tls_intercept.TlsInterceptRuntime) -> bool:
-    """Restart WebUI when the touched provider declares that WebUI must reload."""
-    providers = tls_intercept_runtime._token_store._providers
-    if slug is None:
-        return any(spec.restart_webui_after_save for spec in providers.values())
-    spec = providers.get(slug)
-    if spec is None:
-        return False
-    return spec.restart_webui_after_save
 
 
 def _require_env(name: str) -> str:
@@ -555,41 +112,19 @@ async def _run(
         owner_username, env_slug, control_plane_url, proxy_port, control_port, mcp_port, merge_enabled,
     )
 
-    tls_intercept_runtime_holder: dict = {}
-    on_user_invalidate = _build_on_user_invalidate(
-        tls_intercept_runtime_holder=tls_intercept_runtime_holder,
-        env_path=gateway_env_path,
-        webui_state_dir=webui_state_dir,
-        process_compose_url=process_compose_url,
+    doh_client = DohClient(
+        control_plane_url=control_plane_url,
+        bearer=bearer,
+        owner_username=owner_username,
+        app_slug=app_slug,
     )
     tls_intercept_runtime = tls_intercept.TlsInterceptRuntime(
         providers=tls_intercept.TLS_INTERCEPT_PROVIDERS,
-        refresh_config=tls_intercept.DohRefreshConfig(
-            control_plane_url=control_plane_url,
-            bearer=bearer,
-            owner_username=owner_username,
-            app_slug=app_slug,
-        ),
+        doh_client=doh_client,
         refresh_lead_seconds=tls_intercept.REFRESH_LEAD_SECONDS,
         ca_dir=ca_dir,
         private_dir=private_dir,
-        on_user_invalidate=on_user_invalidate,
     )
-    tls_intercept_runtime_holder["tls_intercept_runtime"] = tls_intercept_runtime
-    # Render the managed profile env file from current DOH state before opening the
-    # control port. supervisor.sh's wait_for_port on the control port doubles
-    # as the synchronization point: by the time it returns, the file is on
-    # disk and webui.sh can launch process-compose children with current env.
-    await _bootstrap_gateway_env(tls_intercept_runtime=tls_intercept_runtime, env_path=gateway_env_path)
-
-    loop = asyncio.get_running_loop()
-    stop = loop.create_future()
-    for sig in (signal.SIGTERM, signal.SIGINT):
-        with contextlib.suppress(NotImplementedError, RuntimeError):
-            loop.add_signal_handler(sig, lambda s=sig: (logger.info("signal %d; shutting down", s), stop.done() or stop.set_result(None)))
-
-    tls_proxy_server = await tls_intercept_runtime.start_proxy_server(host="127.0.0.1", port=proxy_port)
-    logger.info("proxy listening on 127.0.0.1:%d", proxy_port)
 
     public_base_url = os.environ.get("DOH_APP_PUBLIC_URL")
     mcp_persistent_dir.mkdir(parents=True, exist_ok=True)
@@ -604,38 +139,38 @@ async def _run(
         merge_enabled=merge_enabled,
     )
 
-    async def _store_device_tokens(provider: str, tokens: dict) -> bool:
-        """Persist a provider device-flow token payload to DOH, then refresh TLS state."""
-        payload = {
-            "owner_username": owner_username,
-            "app_slug": app_slug,
-            **tokens,
-        }
-        status, _ = await asyncio.to_thread(
-            _post_control_plane_json,
-            control_plane_url=control_plane_url,
-            bearer=bearer,
-            path=f"/api/integrations/credentials/{provider}/device-complete",
-            payload=payload,
-        )
-        if not (200 <= status < 300):
-            return False
-        with contextlib.suppress(RuntimeError):
-            await tls_intercept_runtime.invalidate(slug=provider)
-        if provider in AUTH_MARKER_PROVIDERS:
-            await asyncio.to_thread(_run_provider_auth_marker, provider, "connect")
-        return True
+    credentials_service = CredentialsService(
+        doh_client=doh_client,
+        tls_intercept_runtime=tls_intercept_runtime,
+        mcp_aggregator=mcp_aggregator,
+        providers=tls_intercept.TLS_INTERCEPT_PROVIDERS,
+        gateway_env_path=gateway_env_path,
+        webui_state_dir=webui_state_dir,
+        process_compose_url=process_compose_url,
+    )
+    # Render the managed profile env file from current DOH state before opening the
+    # control port. supervisor.sh's wait_for_port on the control port doubles
+    # as the synchronization point: by the time it returns, the file is on
+    # disk and webui.sh can launch process-compose children with current env.
+    await credentials_service.bootstrap()
 
-    oauth_device_flow = device_flow.build_default_device_flow(submit_tokens=_store_device_tokens)
+    loop = asyncio.get_running_loop()
+    stop = loop.create_future()
+    for sig in (signal.SIGTERM, signal.SIGINT):
+        with contextlib.suppress(NotImplementedError, RuntimeError):
+            loop.add_signal_handler(sig, lambda s=sig: (logger.info("signal %d; shutting down", s), stop.done() or stop.set_result(None)))
 
-    control_app = _build_control_app(
+    tls_proxy_server = await tls_intercept_runtime.start_proxy_server(host="127.0.0.1", port=proxy_port)
+    logger.info("proxy listening on 127.0.0.1:%d", proxy_port)
+
+    oauth_device_flow = device_flow.build_default_device_flow(submit_tokens=credentials_service.complete_device_flow)
+
+    control_app = control_api.build_control_app(
         mcp_aggregator=mcp_aggregator,
         tls_intercept_runtime=tls_intercept_runtime,
         oauth_device_flow=oauth_device_flow,
-        control_plane_url=control_plane_url,
-        bearer=bearer,
-        owner_username=owner_username,
-        app_slug=app_slug,
+        credentials_service=credentials_service,
+        doh_client=doh_client,
         env_slug=env_slug,
     )
     control_uvicorn_config = uvicorn.Config(
