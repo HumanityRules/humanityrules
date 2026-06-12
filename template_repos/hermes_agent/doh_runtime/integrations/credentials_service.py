@@ -26,10 +26,14 @@ from pathlib import Path
 from doh_client import DohClient
 from mcp_aggregator import MCPAggregator
 import tls_intercept
+import tls_providers
 
 
 GATEWAY_PROCESS_NAME = "system.gateway"
 WEBUI_PROCESS_NAME = "system.webui"
+# Sentinels around the DOH-managed lines in the gateway profile env file.
+GATEWAY_ENV_BLOCK_BEGIN = "# === DOH-MANAGED-INTEGRATIONS BEGIN ==="
+GATEWAY_ENV_BLOCK_END = "# === DOH-MANAGED-INTEGRATIONS END ==="
 # Rate limit for the user-facing Refresh-all button. Policy, not correctness:
 # concurrent catalog reloads are serialized by the aggregator's own lock.
 REFRESH_COOLDOWN_SECONDS = 30
@@ -49,7 +53,7 @@ class CredentialsService:
         doh_client: DohClient,
         tls_intercept_runtime: tls_intercept.TlsInterceptRuntime,
         mcp_aggregator: MCPAggregator,
-        providers: dict[str, tls_intercept.TlsProviderSpec],
+        providers: dict[str, tls_providers.TlsProviderSpec],
         gateway_env_path: Path,
         webui_state_dir: Path,
         process_compose_url: str,
@@ -231,9 +235,9 @@ class CredentialsService:
     async def _render_gateway_env_file(self) -> bool:
         """Write the DOH-managed profile env block from current cache state."""
         snapshot = await self._tls_intercept_runtime.gateway_env_snapshot()
-        block = tls_intercept.render_managed_block(snapshot=snapshot)
+        block = _render_managed_block(snapshot=snapshot)
         changed = await asyncio.to_thread(
-            tls_intercept.write_gateway_env_file,
+            _write_gateway_env_file,
             env_path=self._gateway_env_path,
             managed_block=block,
         )
@@ -243,7 +247,7 @@ class CredentialsService:
             logger.info("managed env unchanged at %s", self._gateway_env_path)
         return changed
 
-    def _specs_in_scope(self, slug: str | None) -> tuple[tls_intercept.TlsProviderSpec, ...]:
+    def _specs_in_scope(self, slug: str | None) -> tuple[tls_providers.TlsProviderSpec, ...]:
         """Return the provider specs a state change touches: one for a slug, all for None."""
         if slug is None:
             return tuple(self._providers.values())
@@ -261,6 +265,93 @@ class CredentialsService:
         if any(spec.restart_webui_after_save for spec in specs_in_scope):
             processes.append(WEBUI_PROCESS_NAME)
         return tuple(processes)
+
+
+def _render_env_lines(provider: tls_providers.TlsProviderSpec, config: dict) -> list[str]:
+    """Project one connected provider's env bindings into KEY=VALUE lines."""
+    lines: list[str] = []
+    for binding in provider.env_bindings:
+        if binding.value is not None:
+            value = binding.value
+            lines.append(f"{binding.env_var}={value}")
+            continue
+        config_key = binding.config_key
+        if config_key is None:
+            raise ValueError(f"{provider.slug}: env binding {binding.env_var!r} has no value source")
+        raw = config.get(config_key)
+        if raw is None:
+            continue
+        if isinstance(raw, list):
+            if binding.list_separator is None:
+                raise ValueError(f"{provider.slug}: list-shaped config {config_key!r} requires list_separator")
+            value = binding.list_separator.join(str(item) for item in raw if str(item))
+            if not value:
+                continue
+        else:
+            value = str(raw)
+        lines.append(f"{binding.env_var}={value}")
+    return lines
+
+
+def _render_managed_block(snapshot: list[tuple[tls_providers.TlsProviderSpec, dict]]) -> str:
+    """Render the profile env managed block from a token-store snapshot.
+
+    The snapshot lists only connected providers (cache presence == connected,
+    by the token-store contract). Each tuple is `(provider, config)`, and each
+    provider declares the env lines it needs while connected.
+    """
+    body_lines: list[str] = []
+    for provider, config in snapshot:
+        body_lines.extend(_render_env_lines(provider=provider, config=config))
+    if not body_lines:
+        return ""
+    return "\n".join([GATEWAY_ENV_BLOCK_BEGIN, *body_lines, GATEWAY_ENV_BLOCK_END]) + "\n"
+
+
+def _write_gateway_env_file(env_path: Path, managed_block: str) -> bool:
+    """Replace the DOH-managed block in `env_path` atomically.
+
+    Lines outside the sentinels (user/onboarding-set keys) are preserved.
+    Empty managed block strips the sentinels entirely. Returns true when the
+    file contents changed.
+    """
+    old_contents = ""
+    existing_lines: list[str] = []
+    if env_path.exists():
+        old_contents = env_path.read_text(encoding="utf-8")
+        existing_lines = old_contents.splitlines()
+    preserved: list[str] = []
+    in_block = False
+    for line in existing_lines:
+        stripped = line.strip()
+        if stripped == GATEWAY_ENV_BLOCK_BEGIN:
+            in_block = True
+            continue
+        if stripped == GATEWAY_ENV_BLOCK_END:
+            in_block = False
+            continue
+        if not in_block:
+            preserved.append(line)
+    while preserved and preserved[-1] == "":
+        preserved.pop()
+    parts: list[str] = []
+    if preserved:
+        parts.append("\n".join(preserved) + "\n")
+    if managed_block:
+        if parts:
+            parts.append("\n")
+        parts.append(managed_block)
+    new_contents = "".join(parts)
+    if new_contents == old_contents:
+        return False
+    env_path.parent.mkdir(parents=True, exist_ok=True)
+    tmp_path = env_path.with_suffix(env_path.suffix + ".tmp")
+    tmp_path.write_text(new_contents, encoding="utf-8")
+    if os.geteuid() == 0:
+        parent_stat = env_path.parent.stat()
+        os.chown(tmp_path, parent_stat.st_uid, parent_stat.st_gid)
+    os.replace(tmp_path, env_path)
+    return True
 
 
 def _post_process_compose_restart(process_compose_url: str, process_name: str) -> tuple[int, str]:
