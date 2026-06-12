@@ -18,6 +18,7 @@ import logging
 import os
 import subprocess
 import sys
+import time
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -29,6 +30,9 @@ import tls_intercept
 
 GATEWAY_PROCESS_NAME = "system.gateway"
 WEBUI_PROCESS_NAME = "system.webui"
+# Rate limit for the user-facing Refresh-all button. Policy, not correctness:
+# concurrent catalog reloads are serialized by the aggregator's own lock.
+REFRESH_COOLDOWN_SECONDS = 30
 # The in-sandbox gateway user; auth.json must stay owned by it (mode 0600), so
 # the root broker drops to it via runuser when it touches the local auth store.
 GATEWAY_USER = "hermeswebui"
@@ -57,6 +61,7 @@ class CredentialsService:
         self._gateway_env_path = gateway_env_path
         self._webui_state_dir = webui_state_dir
         self._process_compose_url = process_compose_url
+        self._last_refresh_all_ts: float = 0.0
 
     async def bootstrap(self) -> None:
         """At broker startup: refresh every provider, then render the env file once.
@@ -139,18 +144,18 @@ class CredentialsService:
     async def refresh_all_integrations(self) -> tuple[int, dict]:
         """Explicit-Refresh: reload the MCP catalog and drop the all-providers TLS cache.
 
-        Returns the browser-facing `(status, payload)`. Cooldown is owned by
-        the catalog side. If a refresh ran within REFRESH_COOLDOWN_SECONDS we
-        return 429 *without* firing the TLS invalidate — otherwise smashing
-        the Refresh button on cooldown would repeatedly trigger the
-        invalidate choreography (DOH round-trip + gateway-env rewrite +
-        gateway restart for vault providers). Once past the cooldown gate,
-        the two sides run concurrently — they share no state and the slower
-        of the two sets the round-trip latency.
+        Returns the browser-facing `(status, payload)`. If a refresh ran
+        within REFRESH_COOLDOWN_SECONDS we return 429 without firing either
+        side — otherwise smashing the Refresh button would repeatedly trigger
+        the catalog reload and the invalidate choreography (DOH round-trip +
+        gateway-env rewrite + gateway restart for vault providers). Once past
+        the cooldown gate, the two sides run concurrently — they share no
+        state and the slower of the two sets the round-trip latency.
         """
-        remaining = self._mcp_aggregator.cooldown_remaining_seconds()
+        remaining = self._refresh_cooldown_remaining_seconds()
         if remaining is not None:
             return 429, {"error": "refresh_cooldown", "retry_after_seconds": remaining}
+        self._last_refresh_all_ts = time.time()
 
         async def _safe_invalidate_all() -> str | None:
             try:
@@ -160,14 +165,20 @@ class CredentialsService:
                 return str(exc)
             return None
 
-        catalog_result, tls_error = await asyncio.gather(
+        catalog_payload, tls_error = await asyncio.gather(
             self._mcp_aggregator.refresh_catalog(),
             _safe_invalidate_all(),
         )
         if tls_error is not None:
             return 502, {"ok": False, "error": tls_error}
-        ok, payload = catalog_result
-        return (200 if ok else 429), payload
+        return 200, catalog_payload
+
+    def _refresh_cooldown_remaining_seconds(self) -> int | None:
+        """Seconds left on the Refresh-all cooldown, or None when a refresh is allowed now."""
+        elapsed = time.time() - self._last_refresh_all_ts
+        if elapsed < REFRESH_COOLDOWN_SECONDS:
+            return int(REFRESH_COOLDOWN_SECONDS - elapsed) + 1
+        return None
 
     async def _refresh_and_apply(self, slug: str | None) -> None:
         """Refresh from DOH after an invalidate, then project the result onto disk/processes.
