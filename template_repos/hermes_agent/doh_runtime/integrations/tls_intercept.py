@@ -687,17 +687,11 @@ async def _intercept_and_forward(
             headers = _parse_headers(lines=headers_raw)
             path_with_query = request_line.decode("iso-8859-1").split(" ", 2)[1]
             body = await _read_body(reader=tls_reader, headers=headers)
-            secrets = await token_store.secrets_for_host(host=host)
-            if secrets is None:
-                await _send_provider_not_connected(writer=tls_writer, provider=provider)
-                return
             try:
-                forward_headers, forward_path = _rewrite_request_for_provider(
+                addresses_doh_credential = _request_addresses_doh_credential(
                     headers=headers,
                     path_with_query=path_with_query,
-                    secrets=secrets,
                     provider=provider,
-                    upstream_host=host,
                 )
             except _SecretSelectionError as exc:
                 logger.error("%s secret selection failed: %s", provider.slug, exc)
@@ -707,6 +701,30 @@ async def _intercept_and_forward(
                     message=f"{provider.slug}: {exc}",
                 )
                 return
+            if addresses_doh_credential:
+                secrets = await token_store.secrets_for_host(host=host)
+                if secrets is None:
+                    await _send_provider_not_connected(writer=tls_writer, provider=provider)
+                    return
+                try:
+                    forward_headers, forward_path = _rewrite_request_for_provider(
+                        headers=headers,
+                        path_with_query=path_with_query,
+                        secrets=secrets,
+                        provider=provider,
+                        upstream_host=host,
+                    )
+                except _SecretSelectionError as exc:
+                    logger.error("%s secret selection failed: %s", provider.slug, exc)
+                    await _send_json_error(
+                        writer=tls_writer,
+                        status=400,
+                        message=f"{provider.slug}: {exc}",
+                    )
+                    return
+            else:
+                forward_headers = _strip_proxy_headers_and_set_host(headers=headers, upstream_host=host)
+                forward_path = path_with_query
             try:
                 upstream_status, upstream_headers, upstream_body = await _forward_to_upstream(
                     host=host,
@@ -724,8 +742,10 @@ async def _intercept_and_forward(
             # evict it so the next request refetches from DOH. Covers both
             # transient-after-rotation and user-revoked-on-provider-side.
             # We don't retry within this connection — the user's next
-            # request through the proxy hits the refreshed token.
-            if upstream_status == 401:
+            # request through the proxy hits the refreshed token. Anonymous
+            # pass-through 401s must not evict: they never used our token,
+            # so the cached entry is not implicated.
+            if upstream_status == 401 and addresses_doh_credential:
                 await token_store.invalidate(slug=provider.slug)
                 logger.info("evicted %s token cache after upstream 401 from %s", provider.slug, host)
             tls_writer.write(_render_response(status=upstream_status, headers=upstream_headers, body=upstream_body))
@@ -854,6 +874,54 @@ def _strip_bearer_prefix(value: bytes) -> str:
     if text[:7].lower() == "bearer ":
         return text[7:].strip()
     return text
+
+
+def _request_addresses_doh_credential(headers: list[tuple[bytes, bytes]], path_with_query: str, provider: tls_providers.TlsProviderSpec) -> bool:
+    """Decide whether a request asks for DOH's credential or is anonymous public traffic.
+
+    True routes through the token store + rewrite path. OAuth-style methods
+    (OAuthHeader, OAuthHeaderMultiInject) are always True: their convention is
+    inverted — the sandbox sends no marker and the proxy injects
+    unconditionally, so every request implicitly asks for DOH's credential.
+
+    Vault-style methods mark DOH's slot with an explicit placeholder. False
+    means every credential slot is empty — anonymous public traffic (e.g.
+    OpenRouter's unauthenticated /api/v1/models) the proxy forwards as-is,
+    without consulting the token store, so a disconnected provider does not
+    cost one DOH refresh per request. A credential that is neither empty nor
+    a recognized placeholder raises `_SecretSelectionError` (→ 400): BYO keys
+    are neither injected-over nor silently forwarded.
+    """
+    method = provider.credential_method
+    if isinstance(method, (tls_providers.OAuthHeader, tls_providers.OAuthHeaderMultiInject)):
+        return True
+    if isinstance(method, tls_providers.VaultUrlRewrite):
+        # Every Telegram Bot API path embeds a token, so this host has no
+        # anonymous surface: a path without the placeholder carries an
+        # un-rewritable credential, never public traffic.
+        if method.placeholder not in path_with_query:
+            raise _SecretSelectionError("request URL must contain the DOH placeholder")
+        return True
+    if isinstance(method, tls_providers.VaultHeaderInject):
+        incoming = next((v for n, v in headers if n.lower() == b"authorization"), None)
+        if incoming is None:
+            return False
+        if method.secret_for_placeholder(_strip_bearer_prefix(incoming)) is None:
+            raise _SecretSelectionError("request Authorization did not carry a known DOH placeholder")
+        return True
+    if isinstance(method, tls_providers.VaultApiKeyHeader):
+        header_lower = method.header_name.lower().encode()
+        incoming = next((v for n, v in headers if n.lower() == header_lower), None)
+        if incoming is not None:
+            if incoming.decode("iso-8859-1").strip() != method.placeholder:
+                raise _SecretSelectionError(f"request {method.header_name} did not carry the DOH placeholder")
+            return True
+        # No api-key slot, but an Authorization header (e.g. a BYO OAuth
+        # bearer) still counts as credentialed — refuse rather than forward.
+        if any(n.lower() == b"authorization" for n, _v in headers):
+            raise _SecretSelectionError(f"request carried Authorization instead of the {method.header_name} DOH placeholder")
+        return False
+    raise ValueError(f"unknown credential_method: {method!r}")
 
 
 def _rewrite_authorization(headers: list[tuple[bytes, bytes]], token: str, auth_format: str, upstream_host: str) -> list[tuple[bytes, bytes]]:

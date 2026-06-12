@@ -376,6 +376,109 @@ class TestRewriteAuthorization(unittest.TestCase):
             )
 
 
+class TestAnonymousRequestClassification(unittest.TestCase):
+    """Credential-less vault-style requests pass through; everything else stays on the DOH path.
+
+    The classifier runs before the token-store lookup, so an anonymous
+    request (False) must never cost a DOH refresh, a credentialed request
+    (True) follows the rewrite path, and an unrecognized credential raises
+    so BYO keys are never forwarded.
+    """
+
+    def _classify(self, *, slug: str, headers: list[tuple[bytes, bytes]], path: str) -> bool:
+        return broker.tls_intercept._request_addresses_doh_credential(
+            headers=headers,
+            path_with_query=path,
+            provider=tls_providers.TLS_INTERCEPT_PROVIDERS[slug],
+        )
+
+    def test_openrouter_request_without_authorization_is_anonymous(self) -> None:
+        """The webui's public /api/v1/models fetch carries no Authorization — pass through."""
+        self.assertFalse(self._classify(
+            slug="openrouter",
+            headers=[(b"host", b"openrouter.ai"), (b"accept", b"application/json")],
+            path="/api/v1/models",
+        ))
+
+    def test_openrouter_placeholder_bearer_addresses_doh_credential(self) -> None:
+        self.assertTrue(self._classify(
+            slug="openrouter",
+            headers=[(b"authorization", b"Bearer DOH_PLACEHOLDER")],
+            path="/api/v1/chat/completions",
+        ))
+
+    def test_openrouter_unknown_bearer_is_rejected(self) -> None:
+        with self.assertRaises(broker.tls_intercept._SecretSelectionError):
+            self._classify(
+                slug="openrouter",
+                headers=[(b"authorization", b"Bearer sk-or-v1-byo-key")],
+                path="/api/v1/chat/completions",
+            )
+
+    def test_slack_request_without_authorization_is_anonymous(self) -> None:
+        self.assertFalse(self._classify(
+            slug="slack",
+            headers=[(b"host", b"slack.com")],
+            path="/api/api.test",
+        ))
+
+    def test_anthropic_request_without_credentials_is_anonymous(self) -> None:
+        self.assertFalse(self._classify(
+            slug="anthropic",
+            headers=[(b"host", b"api.anthropic.com"), (b"anthropic-version", b"2023-06-01")],
+            path="/v1/models",
+        ))
+
+    def test_anthropic_placeholder_x_api_key_addresses_doh_credential(self) -> None:
+        self.assertTrue(self._classify(
+            slug="anthropic",
+            headers=[(b"x-api-key", b"DOH_PLACEHOLDER")],
+            path="/v1/messages",
+        ))
+
+    def test_anthropic_foreign_x_api_key_is_rejected(self) -> None:
+        with self.assertRaises(broker.tls_intercept._SecretSelectionError):
+            self._classify(
+                slug="anthropic",
+                headers=[(b"x-api-key", b"sk-ant-byo-key")],
+                path="/v1/messages",
+            )
+
+    def test_anthropic_byo_authorization_bearer_is_rejected(self) -> None:
+        """No x-api-key but an Authorization header (e.g. BYO OAuth bearer) must not pass through."""
+        with self.assertRaises(broker.tls_intercept._SecretSelectionError):
+            self._classify(
+                slug="anthropic",
+                headers=[(b"authorization", b"Bearer byo-oauth-token")],
+                path="/v1/messages",
+            )
+
+    def test_oauth_providers_address_doh_credential_even_without_authorization(self) -> None:
+        """OAuth-style requests are implicitly ours — the proxy injects unconditionally."""
+        for slug in ("google", "github", "nous", "openai-codex"):
+            self.assertTrue(self._classify(
+                slug=slug,
+                headers=[(b"host", b"upstream.example")],
+                path="/anything",
+            ))
+
+    def test_telegram_placeholder_path_addresses_doh_credential(self) -> None:
+        self.assertTrue(self._classify(
+            slug="telegram",
+            headers=[(b"host", b"api.telegram.org")],
+            path="/bot000000:DOH_PLACEHOLDER/getUpdates",
+        ))
+
+    def test_telegram_path_without_placeholder_is_rejected(self) -> None:
+        """Every Bot API path embeds a token, so telegram has no anonymous surface."""
+        with self.assertRaises(broker.tls_intercept._SecretSelectionError):
+            self._classify(
+                slug="telegram",
+                headers=[(b"host", b"api.telegram.org")],
+                path="/bot123456:BYO-TOKEN/sendMessage",
+            )
+
+
 class TestForwardHeaderNormalization(unittest.TestCase):
 
     def test_dechunked_request_gets_content_length_and_no_transfer_encoding(self) -> None:
