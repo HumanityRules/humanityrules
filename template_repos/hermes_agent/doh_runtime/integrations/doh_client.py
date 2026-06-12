@@ -7,17 +7,16 @@ to DOH (token refresh, device-flow completion, disconnect, vault setup
 sessions) goes through it — the bearer never leaves this module.
 """
 
-import json
 import logging
-import urllib.error
-import urllib.request
+
+import httpx
 
 
 logger = logging.getLogger("doh_client")
 
 
 class DohClient:
-    """Sync JSON client bound to one env bearer and one owner/app identity."""
+    """Async JSON client bound to one env bearer and one owner/app identity."""
 
     def __init__(self, control_plane_url: str, bearer: str, owner_username: str, app_slug: str) -> None:
         self.control_plane_url = control_plane_url.rstrip("/")
@@ -25,35 +24,31 @@ class DohClient:
         self.app_slug = app_slug
         self._bearer = bearer
 
-    def post_json(self, path: str, payload: dict, timeout_seconds: int) -> tuple[int, dict]:
+    async def post_json(self, path: str, payload: dict, timeout_seconds: int) -> tuple[int, dict]:
         """POST JSON to DOH and return `(status, parsed body)`.
 
         `owner_username` and `app_slug` are merged into every payload — all
         of DOH's per-env integration endpoints take them. Transport failures
-        and unparseable bodies come back as a synthetic 502 so callers only
-        ever branch on the status code.
+        and unparseable success bodies come back as a synthetic 502, and an
+        unparseable error body keeps its real status with a fallback body,
+        so callers only ever branch on the status code.
         """
         url = f"{self.control_plane_url}{path}"
-        data = json.dumps({
+        body = {
             "owner_username": self.owner_username,
             "app_slug": self.app_slug,
             **payload,
-        }).encode("utf-8")
-        req = urllib.request.Request(
-            url=url,
-            data=data,
-            method="POST",
-            headers={"Authorization": f"Bearer {self._bearer}", "Content-Type": "application/json"},
-        )
+        }
         try:
-            with urllib.request.urlopen(req, timeout=timeout_seconds) as response:
-                return response.status, json.loads(response.read().decode("utf-8"))
-        except urllib.error.HTTPError as exc:
-            try:
-                body = json.loads(exc.read().decode("utf-8"))
-            except Exception:
-                body = {"error": f"control plane returned HTTP {exc.code}"}
-            return exc.code, body
+            async with httpx.AsyncClient(timeout=timeout_seconds) as client:
+                response = await client.post(url=url, json=body, headers={"Authorization": f"Bearer {self._bearer}"})
         except Exception as exc:
             logger.error("control plane request failed path=%s: %s", path, exc)
             return 502, {"error": "control plane request failed"}
+        try:
+            return response.status_code, response.json()
+        except Exception as exc:
+            if 200 <= response.status_code < 300:
+                logger.error("control plane request failed path=%s: %s", path, exc)
+                return 502, {"error": "control plane request failed"}
+            return response.status_code, {"error": f"control plane returned HTTP {response.status_code}"}
