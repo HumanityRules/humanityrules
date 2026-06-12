@@ -16,7 +16,11 @@ import sys
 import tempfile
 import types
 import unittest
+from collections.abc import Callable
+from contextlib import AbstractContextManager
 from unittest.mock import AsyncMock, patch
+
+import httpx
 
 
 def _batched(*, slug: str, result) -> dict:
@@ -506,6 +510,9 @@ def _make_control_parts(
         gateway_env_path=gateway_env_path,
         webui_state_dir=webui_state_dir,
         process_compose_url="http://127.0.0.1:9999",
+        webui_python=pathlib.Path("/nonexistent/webui-python"),
+        runtime_dir=pathlib.Path("/nonexistent/doh-runtime"),
+        hermes_home=pathlib.Path("/nonexistent/hermes-home"),
     )
     device_stub = _StubDeviceFlow()
     app = broker.control_api.build_control_app(
@@ -533,6 +540,9 @@ def _make_credentials_service(
         gateway_env_path=gateway_env_path,
         webui_state_dir=webui_state_dir,
         process_compose_url="http://127.0.0.1:9999",
+        webui_python=pathlib.Path("/nonexistent/webui-python"),
+        runtime_dir=pathlib.Path("/nonexistent/doh-runtime"),
+        hermes_home=pathlib.Path("/nonexistent/hermes-home"),
     )
 
 
@@ -715,22 +725,21 @@ class TestControlIntegrations(unittest.IsolatedAsyncioTestCase):
         stale write lands, invalidate pops it, and the service's refresh
         starts from an empty cache and re-asks DOH.
         """
-        import threading
         fetch_calls: list[str] = []
-        started = threading.Event()
-        delayed = threading.Event()
+        started = asyncio.Event()
+        delayed = asyncio.Event()
 
-        def first_stale(doh_client: object, slugs: list[str]) -> object:
+        async def first_stale(doh_client: object, slugs: list[str]) -> object:
             fetch_calls.append("first")
             started.set()
-            delayed.wait(timeout=5)
+            await asyncio.wait_for(delayed.wait(), timeout=5)
             return _batched(slug="google", result=broker.tls_intercept.RefreshResult(
                 outcome=broker.tls_intercept.REFRESH_OUTCOME_HAS_TOKEN,
                 secrets={"access_token": "STALE-IN-FLIGHT"}, expires_in=3600,
                 config={}, metadata={},
             ))
 
-        def second_absent(doh_client: object, slugs: list[str]) -> object:
+        async def second_absent(doh_client: object, slugs: list[str]) -> object:
             fetch_calls.append("second")
             return _batched(slug="google", result=broker.tls_intercept.RefreshResult(
                 outcome=broker.tls_intercept.REFRESH_OUTCOME_ABSENT,
@@ -739,16 +748,16 @@ class TestControlIntegrations(unittest.IsolatedAsyncioTestCase):
 
         fetches = [first_stale, second_absent]
         idx = 0
-        def dispatch(*args: object, **kwargs: object) -> object:
+        async def dispatch(*args: object, **kwargs: object) -> object:
             nonlocal idx
             fn = fetches[min(idx, len(fetches) - 1)]
             idx += 1
-            return fn(*args, **kwargs)
+            return await fn(*args, **kwargs)
 
         store = self.tls_intercept_runtime._token_store
         with patch.object(broker.tls_intercept, "fetch_provider_tokens_batch", side_effect=dispatch):
             proxy_task = asyncio.create_task(store.token_for_host(host="gmail.googleapis.com"))
-            self.assertTrue(await asyncio.to_thread(started.wait, timeout=5))
+            await asyncio.wait_for(started.wait(), timeout=5)
             invalidate_task = asyncio.create_task(store.invalidate(slug="google"))
             await asyncio.sleep(0)  # let invalidate queue on the store lock
             delayed.set()  # release the proxy's in-flight refresh
@@ -778,13 +787,12 @@ class TestControlIntegrations(unittest.IsolatedAsyncioTestCase):
         and invalidate pops it cleanly. The other providers' writes
         survive — only google's was invalidated.
         """
-        import threading
-        delayed = threading.Event()
-        started = threading.Event()
+        delayed = asyncio.Event()
+        started = asyncio.Event()
 
-        def parked_has_token(doh_client: object, slugs: list[str]) -> object:
+        async def parked_has_token(doh_client: object, slugs: list[str]) -> object:
             started.set()
-            delayed.wait(timeout=5)
+            await asyncio.wait_for(delayed.wait(), timeout=5)
             return {
                 slug: broker.tls_intercept.RefreshResult(
                     outcome=broker.tls_intercept.REFRESH_OUTCOME_HAS_TOKEN,
@@ -797,7 +805,7 @@ class TestControlIntegrations(unittest.IsolatedAsyncioTestCase):
         store = self.tls_intercept_runtime._token_store
         with patch.object(broker.tls_intercept, "fetch_provider_tokens_batch", side_effect=parked_has_token):
             refresh_all_task = asyncio.create_task(store.refresh_all())
-            self.assertTrue(await asyncio.to_thread(started.wait, timeout=5))
+            await asyncio.wait_for(started.wait(), timeout=5)
             invalidate_task = asyncio.create_task(store.invalidate(slug="google"))
             await asyncio.sleep(0)  # let invalidate queue on the store lock
             delayed.set()
@@ -1166,37 +1174,34 @@ class TestLazyTokenForHost(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("google", self.token_store._cache)
 
 
-class _FakeUrlopenResponse:
-    """Context-manager stand-in for a urllib response with a JSON body."""
+def _patched_doh_httpx_client(handler: Callable[[httpx.Request], httpx.Response], timeouts: list[int]) -> AbstractContextManager:
+    """Patch doh_client's httpx.AsyncClient with a MockTransport-backed factory; records each client timeout."""
+    # `doh_client.httpx` is the global httpx module, so the factory must hold
+    # the real class — referencing `httpx.AsyncClient` inside it would resolve
+    # to the patched attribute (itself).
+    real_async_client = httpx.AsyncClient
 
-    def __init__(self, body: bytes) -> None:
-        self.status = 200
-        self._body = body
+    def make_client(timeout: int) -> httpx.AsyncClient:
+        timeouts.append(timeout)
+        return real_async_client(transport=httpx.MockTransport(handler), timeout=timeout)
 
-    def read(self) -> bytes:
-        return self._body
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, *a):
-        return False
+    return patch.object(doh_client.httpx, "AsyncClient", make_client)
 
 
-class TestDohClient(unittest.TestCase):
+class TestDohClient(unittest.IsolatedAsyncioTestCase):
     """DohClient owns the bearer and merges the owner/app identity into every payload."""
 
-    def test_post_json_merges_identity_and_sends_bearer(self) -> None:
+    async def test_post_json_merges_identity_and_sends_bearer(self) -> None:
         import json as _json
         captured: dict = {}
+        timeouts: list[int] = []
 
-        def fake_urlopen(req, timeout):
-            captured["req"] = req
-            captured["timeout"] = timeout
-            return _FakeUrlopenResponse(body=b'{"ok": true}')
+        def handler(request: httpx.Request) -> httpx.Response:
+            captured["request"] = request
+            return httpx.Response(status_code=200, json={"ok": True})
 
-        with patch.object(doh_client.urllib.request, "urlopen", side_effect=fake_urlopen):
-            status, payload = _make_doh_client().post_json(
+        with _patched_doh_httpx_client(handler=handler, timeouts=timeouts):
+            status, payload = await _make_doh_client().post_json(
                 path="/api/integrations/credentials/disconnect",
                 payload={"provider": "telegram"},
                 timeout_seconds=30,
@@ -1204,36 +1209,60 @@ class TestDohClient(unittest.TestCase):
 
         self.assertEqual(status, 200)
         self.assertEqual(payload, {"ok": True})
-        self.assertEqual(captured["timeout"], 30)
-        req = captured["req"]
-        self.assertEqual(req.full_url, "https://doh.example/api/integrations/credentials/disconnect")
-        self.assertEqual(req.get_header("Authorization"), "Bearer env-bearer")
+        self.assertEqual(timeouts, [30])
+        request = captured["request"]
+        self.assertEqual(str(request.url), "https://doh.example/api/integrations/credentials/disconnect")
+        self.assertEqual(request.headers["Authorization"], "Bearer env-bearer")
         self.assertEqual(
-            _json.loads(req.data.decode("utf-8")),
+            _json.loads(request.content.decode("utf-8")),
             {"owner_username": "vmendi", "app_slug": "hermes", "provider": "telegram"},
         )
 
-    def test_network_error_maps_to_synthetic_502(self) -> None:
-        with patch.object(doh_client.urllib.request, "urlopen", side_effect=OSError("connection refused")):
-            status, payload = _make_doh_client().post_json(path="/api/x", payload={}, timeout_seconds=30)
+    async def test_network_error_maps_to_synthetic_502(self) -> None:
+        def handler(request: httpx.Request) -> httpx.Response:
+            raise httpx.ConnectError("connection refused")
+
+        with _patched_doh_httpx_client(handler=handler, timeouts=[]):
+            status, payload = await _make_doh_client().post_json(path="/api/x", payload={}, timeout_seconds=30)
         self.assertEqual(status, 502)
         self.assertIn("error", payload)
 
+    async def test_unparseable_success_body_maps_to_synthetic_502(self) -> None:
+        """A 2xx with a non-JSON body degrades to the synthetic 502 — callers never see a parse error."""
+        def handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(status_code=200, content=b"<html>not json</html>")
 
-class TestFetchProviderTokensBatch(unittest.TestCase):
+        with _patched_doh_httpx_client(handler=handler, timeouts=[]):
+            status, payload = await _make_doh_client().post_json(path="/api/x", payload={}, timeout_seconds=30)
+        self.assertEqual(status, 502)
+        self.assertEqual(payload, {"error": "control plane request failed"})
+
+    async def test_unparseable_error_body_keeps_real_status(self) -> None:
+        """A non-2xx with a non-JSON body keeps its real status so callers can branch on it."""
+        def handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(status_code=503, content=b"<html>maintenance</html>")
+
+        with _patched_doh_httpx_client(handler=handler, timeouts=[]):
+            status, payload = await _make_doh_client().post_json(path="/api/x", payload={}, timeout_seconds=30)
+        self.assertEqual(status, 503)
+        self.assertEqual(payload, {"error": "control plane returned HTTP 503"})
+
+
+class TestFetchProviderTokensBatch(unittest.IsolatedAsyncioTestCase):
     """Parse DOH's `/api/integrations/tokens` response into a slug→RefreshResult map."""
 
-    def _run_with_response(self, payload: dict) -> dict:
-        import json as _json
-        opener = _FakeUrlopenResponse(body=_json.dumps(payload).encode())
-        with patch.object(doh_client.urllib.request, "urlopen", return_value=opener):
-            return broker.tls_intercept.fetch_provider_tokens_batch(
+    async def _run_with_response(self, payload: dict) -> dict:
+        def handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(status_code=200, json=payload)
+
+        with _patched_doh_httpx_client(handler=handler, timeouts=[]):
+            return await broker.tls_intercept.fetch_provider_tokens_batch(
                 doh_client=_make_doh_client(),
                 slugs=["google", "github", "telegram"],
             )
 
-    def test_mixed_outcomes_parse_per_slug(self) -> None:
-        results = self._run_with_response(payload={
+    async def test_mixed_outcomes_parse_per_slug(self) -> None:
+        results = await self._run_with_response(payload={
             "results": {
                 "google": {
                     "outcome": "has_token",
@@ -1253,8 +1282,8 @@ class TestFetchProviderTokensBatch(unittest.TestCase):
         self.assertEqual(results["github"].outcome, broker.tls_intercept.REFRESH_OUTCOME_ABSENT)
         self.assertEqual(results["telegram"].outcome, broker.tls_intercept.REFRESH_OUTCOME_TRANSIENT)
 
-    def test_telegram_config_and_metadata_pass_through(self) -> None:
-        results = self._run_with_response(payload={
+    async def test_telegram_config_and_metadata_pass_through(self) -> None:
+        results = await self._run_with_response(payload={
             "results": {
                 "google": {"outcome": "absent"},
                 "github": {"outcome": "absent"},
@@ -1270,18 +1299,18 @@ class TestFetchProviderTokensBatch(unittest.TestCase):
         self.assertEqual(results["telegram"].config, {"allowed_users": ["42", "7"]})
         self.assertEqual(results["telegram"].metadata, {"bot_username": "doh_bot"})
 
-    def test_slug_missing_from_response_is_transient(self) -> None:
+    async def test_slug_missing_from_response_is_transient(self) -> None:
         """A partial server response must NOT clear the broker's cache for the missing slug."""
-        results = self._run_with_response(payload={"results": {"google": {"outcome": "absent"}}})
+        results = await self._run_with_response(payload={"results": {"google": {"outcome": "absent"}}})
         self.assertEqual(results["github"].outcome, broker.tls_intercept.REFRESH_OUTCOME_TRANSIENT)
         self.assertEqual(results["telegram"].outcome, broker.tls_intercept.REFRESH_OUTCOME_TRANSIENT)
 
-    def test_has_token_with_missing_or_malformed_secrets_is_transient(self) -> None:
+    async def test_has_token_with_missing_or_malformed_secrets_is_transient(self) -> None:
         """A has_token entry without a usable secrets map must degrade to transient,
         not crash or coerce a non-string value into a literal bearer token.
         """
         for bad_secrets in ({}, {"access_token": None}, {"access_token": ""}, {"": "tok"}, "nope"):
-            results = self._run_with_response(payload={
+            results = await self._run_with_response(payload={
                 "results": {
                     "google": {"outcome": "has_token", "secrets": bad_secrets, "expires_in": 3600},
                     "github": {"outcome": "absent"},
@@ -1295,27 +1324,25 @@ class TestFetchProviderTokensBatch(unittest.TestCase):
             )
             self.assertIsNone(results["google"].secrets)
 
-    def test_network_error_returns_transient_for_every_slug(self) -> None:
-        """Any urlopen failure must surface as transient across the board, preserving the cache."""
-        with patch.object(
-            doh_client.urllib.request,
-            "urlopen",
-            side_effect=OSError("connection refused"),
-        ):
-            results = broker.tls_intercept.fetch_provider_tokens_batch(
+    async def test_network_error_returns_transient_for_every_slug(self) -> None:
+        """Any transport failure must surface as transient across the board, preserving the cache."""
+        def handler(request: httpx.Request) -> httpx.Response:
+            raise httpx.ConnectError("connection refused")
+
+        with _patched_doh_httpx_client(handler=handler, timeouts=[]):
+            results = await broker.tls_intercept.fetch_provider_tokens_batch(
                 doh_client=_make_doh_client(),
                 slugs=["google", "github", "telegram"],
             )
         for slug in ("google", "github", "telegram"):
             self.assertEqual(results[slug].outcome, broker.tls_intercept.REFRESH_OUTCOME_TRANSIENT)
 
-    def test_http_error_returns_transient_for_every_slug(self) -> None:
-        import urllib.error
-        http_err = urllib.error.HTTPError(
-            url="https://doh.example/api/integrations/tokens", code=500, msg="x", hdrs={}, fp=None,
-        )
-        with patch.object(doh_client.urllib.request, "urlopen", side_effect=http_err):
-            results = broker.tls_intercept.fetch_provider_tokens_batch(
+    async def test_http_error_returns_transient_for_every_slug(self) -> None:
+        def handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(status_code=500, content=b"x")
+
+        with _patched_doh_httpx_client(handler=handler, timeouts=[]):
+            results = await broker.tls_intercept.fetch_provider_tokens_batch(
                 doh_client=_make_doh_client(),
                 slugs=["google", "github"],
             )

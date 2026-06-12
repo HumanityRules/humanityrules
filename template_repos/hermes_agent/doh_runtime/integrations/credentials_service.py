@@ -57,6 +57,9 @@ class CredentialsService:
         gateway_env_path: Path,
         webui_state_dir: Path,
         process_compose_url: str,
+        webui_python: Path,
+        runtime_dir: Path,
+        hermes_home: Path,
     ) -> None:
         self._doh_client = doh_client
         self._tls_intercept_runtime = tls_intercept_runtime
@@ -65,6 +68,9 @@ class CredentialsService:
         self._gateway_env_path = gateway_env_path
         self._webui_state_dir = webui_state_dir
         self._process_compose_url = process_compose_url
+        self._webui_python = webui_python
+        self._runtime_dir = runtime_dir
+        self._hermes_home = hermes_home
         self._last_refresh_all_ts: float = 0.0
 
     async def bootstrap(self) -> None:
@@ -87,8 +93,7 @@ class CredentialsService:
         Passed to `device_flow` as its `submit_tokens` hook — the device flow
         itself never learns about DOH or the TLS cache.
         """
-        status, _ = await asyncio.to_thread(
-            self._doh_client.post_json,
+        status, _ = await self._doh_client.post_json(
             path=f"/api/integrations/credentials/{provider}/device-complete",
             payload=dict(tokens),
             timeout_seconds=30,
@@ -97,8 +102,7 @@ class CredentialsService:
             return False
         with contextlib.suppress(RuntimeError):
             await self.credentials_invalidate(slug=provider)
-        if provider in AUTH_MARKER_PROVIDERS:
-            await asyncio.to_thread(_run_provider_auth_marker, provider=provider, action="connect")
+        await self._apply_auth_marker(provider=provider, action="connect")
         return True
 
     async def credentials_disconnect(self, provider: str) -> tuple[int, dict]:
@@ -110,8 +114,7 @@ class CredentialsService:
         success we drop only this provider's cached token; any process restart
         is selected from the provider spec inside `credentials_invalidate`.
         """
-        status, payload = await asyncio.to_thread(
-            self._doh_client.post_json,
+        status, payload = await self._doh_client.post_json(
             path="/api/integrations/credentials/disconnect",
             payload={"provider": provider},
             timeout_seconds=30,
@@ -122,14 +125,12 @@ class CredentialsService:
             await self.credentials_invalidate(slug=provider)
         except RuntimeError as exc:
             return 502, {**payload, "ok": False, "error": str(exc)}
-        if provider in AUTH_MARKER_PROVIDERS:
-            await asyncio.to_thread(_run_provider_auth_marker, provider=provider, action="disconnect")
+        await self._apply_auth_marker(provider=provider, action="disconnect")
         return status, payload
 
     async def credentials_setup_session(self, provider: str, public_origin: str) -> tuple[int, dict]:
         """Ask DOH for a vault setup-session submit token; returns DOH's `(status, payload)`."""
-        return await asyncio.to_thread(
-            self._doh_client.post_json,
+        return await self._doh_client.post_json(
             path="/api/integrations/credentials/setup-session",
             payload={"provider": provider, "public_origin": public_origin},
             timeout_seconds=30,
@@ -266,6 +267,19 @@ class CredentialsService:
             processes.append(WEBUI_PROCESS_NAME)
         return tuple(processes)
 
+    async def _apply_auth_marker(self, provider: str, action: str) -> None:
+        """Run the local auth marker for providers that declare one; no-op for the rest."""
+        if provider not in AUTH_MARKER_PROVIDERS:
+            return
+        await asyncio.to_thread(
+            _run_provider_auth_marker,
+            provider=provider,
+            action=action,
+            webui_python=self._webui_python,
+            runtime_dir=self._runtime_dir,
+            hermes_home=self._hermes_home,
+        )
+
 
 def _render_env_lines(provider: tls_providers.TlsProviderSpec, config: dict) -> list[str]:
     """Project one connected provider's env bindings into KEY=VALUE lines."""
@@ -387,7 +401,7 @@ def _delete_webui_models_cache(webui_state_dir: Path) -> bool:
     return True
 
 
-def _run_provider_auth_marker(provider: str, action: str) -> bool:
+def _run_provider_auth_marker(provider: str, action: str, webui_python: Path, runtime_dir: Path, hermes_home: Path) -> bool:
     """Add/remove a local provider auth marker, as the gateway user.
 
     `action` is "connect" or "disconnect". The marker writes/clears the
@@ -398,17 +412,11 @@ def _run_provider_auth_marker(provider: str, action: str) -> bool:
     store or lock file would lock the gateway out. Best-effort: a failure here
     only means the dropdown is briefly stale, not that the credential is wrong.
     """
-    python = os.environ.get("HERMES_WEBUI_PYTHON")
-    runtime_dir = os.environ.get("DOH_RUNTIME_DIR")
-    hermes_home = os.environ.get("HERMES_HOME")
-    if not python or not runtime_dir or not hermes_home:
-        logger.error("provider auth marker skipped: HERMES_WEBUI_PYTHON/DOH_RUNTIME_DIR/HERMES_HOME not set")
-        return False
-    script = str(Path(runtime_dir) / "sandbox_seed.py")
+    script = str(runtime_dir / "sandbox_seed.py")
     try:
         result = subprocess.run(
-            ["runuser", "-u", GATEWAY_USER, "--", python, script, "--auth-marker", action, provider],
-            env={**os.environ, "HERMES_HOME": hermes_home},
+            ["runuser", "-u", GATEWAY_USER, "--", str(webui_python), script, "--auth-marker", action, provider],
+            env={**os.environ, "HERMES_HOME": str(hermes_home)},
             capture_output=True,
             text=True,
             timeout=30,

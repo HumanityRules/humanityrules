@@ -27,6 +27,10 @@ Environment contract (set by deploy_app.py's env-bearer overlay):
 - DOH_ENV_SLUG          — env slug, for logging only.
 - DOH_MERGE_INTEGRATION_ENABLED — optional; false disables all Merge.dev connectors.
 
+Also required, set by the Dockerfile: HERMES_WEBUI_PYTHON, DOH_RUNTIME_DIR, and
+HERMES_HOME — passed to CredentialsService so it can run provider auth markers
+as the gateway user.
+
 Required file system:
 - BROKER_CA_DIR must be writable by the broker user. The CA bundle is written
   here on startup for SSL_CERT_FILE to pick up.
@@ -108,6 +112,9 @@ async def _run(
     app_slug = _require_env(name="DOH_APP_SLUG")
     env_slug = os.environ.get("DOH_ENV_SLUG", "")
     merge_enabled = _env_flag_enabled(name="DOH_MERGE_INTEGRATION_ENABLED", default=True)
+    webui_python = Path(_require_env(name="HERMES_WEBUI_PYTHON"))
+    runtime_dir = Path(_require_env(name="DOH_RUNTIME_DIR"))
+    hermes_home = Path(_require_env(name="HERMES_HOME"))
     logger.info(
         "starting integrations_broker for owner=%s env=%s against %s (proxy=%d, control=%d, mcp=%d, merge_enabled=%s)",
         owner_username, env_slug, control_plane_url, proxy_port, control_port, mcp_port, merge_enabled,
@@ -148,6 +155,9 @@ async def _run(
         gateway_env_path=gateway_env_path,
         webui_state_dir=webui_state_dir,
         process_compose_url=process_compose_url,
+        webui_python=webui_python,
+        runtime_dir=runtime_dir,
+        hermes_home=hermes_home,
     )
     # Render the managed profile env file from current DOH state before opening the
     # control port. supervisor.sh's wait_for_port on the control port doubles
@@ -201,7 +211,7 @@ async def _run(
 
 
 def main() -> None:
-    logging.basicConfig(level=logging.INFO, format="[%(asctime)s] [integrations_broker] %(message)s")
+    logging.basicConfig(level=logging.INFO, format="[%(asctime)s] [%(name)s] %(message)s")
     parser = argparse.ArgumentParser()
     parser.add_argument("--proxy-port", type=int, default=DEFAULT_PROXY_PORT)
     parser.add_argument("--control-port", type=int, default=DEFAULT_CONTROL_PORT)

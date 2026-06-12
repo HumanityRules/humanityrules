@@ -28,7 +28,6 @@ logger = logging.getLogger("control_api")
 
 
 async def _handle_unified_status(
-    request: Request,
     mcp_aggregator: MCPAggregator,
     tls_intercept_runtime: tls_intercept.TlsInterceptRuntime,
     doh_client: DohClient,
@@ -69,7 +68,6 @@ def build_control_app(
     """Wire the unified /__doh_broker/* router for browser-facing integration management."""
     async def status_route(request: Request) -> Response:
         return await _handle_unified_status(
-            request=request,
             mcp_aggregator=mcp_aggregator,
             tls_intercept_runtime=tls_intercept_runtime,
             doh_client=doh_client,

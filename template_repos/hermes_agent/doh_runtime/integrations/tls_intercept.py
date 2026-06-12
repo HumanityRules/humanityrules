@@ -110,7 +110,7 @@ class _TokenCacheEntry:
         return self.expires_at > now
 
 
-def fetch_provider_tokens_batch(doh_client: DohClient, slugs: list[str]) -> dict[str, RefreshResult]:
+async def fetch_provider_tokens_batch(doh_client: DohClient, slugs: list[str]) -> dict[str, RefreshResult]:
     """Refresh many provider tokens in one POST to DOH; returns a slug→RefreshResult map.
 
     DOH's `/api/integrations/tokens` is the broker's only refresh path —
@@ -126,10 +126,10 @@ def fetch_provider_tokens_batch(doh_client: DohClient, slugs: list[str]) -> dict
     # of ms. DOH processes the providers in parallel server-side, so
     # wall-clock = max(per-provider upstream exchange) + DB / JSON
     # overhead. Each helper's upstream timeout is 5s, so the ceiling
-    # here is ~5s + a small slack budget for executor dispatch and
-    # marshalling — 7s. Still well inside supervisor's 10s
-    # wait_for_port budget on broker bootstrap.
-    status, payload = doh_client.post_json(
+    # here is ~5s + a small slack budget for marshalling — 7s. Still
+    # well inside supervisor's 10s wait_for_port budget on broker
+    # bootstrap.
+    status, payload = await doh_client.post_json(
         path="/api/integrations/tokens",
         payload={"providers": list(slugs)},
         timeout_seconds=7,
@@ -369,11 +369,7 @@ class _TokenStore:
         """
         if not slugs:
             return True
-        results = await asyncio.to_thread(
-            fetch_provider_tokens_batch,
-            doh_client=self._doh_client,
-            slugs=slugs,
-        )
+        results = await fetch_provider_tokens_batch(doh_client=self._doh_client, slugs=slugs)
         for slug in slugs:
             self._apply_locked(provider=self._providers[slug], result=results[slug])
         return any(result.outcome != REFRESH_OUTCOME_TRANSIENT for result in results.values())
