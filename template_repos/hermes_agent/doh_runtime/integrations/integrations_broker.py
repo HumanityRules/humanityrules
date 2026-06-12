@@ -73,6 +73,16 @@ _FALSE_ENV_VALUES = frozenset({"0", "false", "no", "off"})
 logger = logging.getLogger("integrations_broker")
 
 
+class _AsyncioSslEofFilter(logging.Filter):
+    """Drop asyncio's 'returning true from eof_received() has no effect when using ssl'
+    warning. Stdlib StreamReaderProtocol returns True over SSL transports too
+    (python/cpython#82918); the TLS-intercept path trips it once per Telegram long poll,
+    and it is harmless — the transport closes either way."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        return "eof_received() has no effect when using ssl" not in record.getMessage()
+
+
 def _require_env(name: str) -> str:
     value = os.environ.get(name, "")
     if not value:
@@ -211,7 +221,8 @@ async def _run(
 
 
 def main() -> None:
-    logging.basicConfig(level=logging.INFO, format="[%(asctime)s] [%(name)s] %(message)s")
+    logging.basicConfig(level=logging.INFO, format="[%(asctime)s] [integrations.%(name)s] %(message)s")
+    logging.getLogger("asyncio").addFilter(_AsyncioSslEofFilter())
     parser = argparse.ArgumentParser()
     parser.add_argument("--proxy-port", type=int, default=DEFAULT_PROXY_PORT)
     parser.add_argument("--control-port", type=int, default=DEFAULT_CONTROL_PORT)
