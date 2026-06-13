@@ -293,6 +293,7 @@ class MCPAggregator:
             oauth = self._oauth_states[slug]
             item = {
                 "kind": "mcp_aggregator",
+                "category": "connector",
                 "slug": slug,
                 "label": spec.label,
                 "status": "connected" if oauth.has_token else "not_connected",
@@ -305,6 +306,7 @@ class MCPAggregator:
             for connector in self._merge_backend.filter_visible_connectors(connectors=merge_connectors):
                 items.append({
                     "kind": "merge_connector",
+                    "category": "connector",
                     "slug": connector.get("slug"),
                     "label": connector.get("name"),
                     "logo_url": connector.get("logo_url"),

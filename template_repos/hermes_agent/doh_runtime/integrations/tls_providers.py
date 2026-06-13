@@ -21,6 +21,8 @@ AUTH_FORMAT_BEARER = "bearer"
 AUTH_FORMAT_BASIC_X_ACCESS_TOKEN = "basic_x_access_token"
 DOH_PLACEHOLDER_VALUE = "DOH_PLACEHOLDER"
 ConnectMode = Literal["oauth", "device", "vault"]
+# Which integrations-panel section a provider renders under.
+Category = Literal["model_provider", "connector"]
 
 
 @dataclass(frozen=True)
@@ -158,7 +160,17 @@ class TlsProviderSpec:
     env_bindings: tuple[EnvBinding, ...]
     restart_gateway_after_save: bool
     restart_webui_after_save: bool
-    affects_model_picker: bool
+    category: Category
+
+    @property
+    def affects_model_picker(self) -> bool:
+        """Whether connecting/disconnecting this provider changes /api/models.
+
+        Coextensive with being a model provider — connecting a model provider
+        is precisely what changes the model list, and nothing else does. Derived
+        from `category` so the two can't drift.
+        """
+        return self.category == "model_provider"
 
 
 TLS_INTERCEPT_PROVIDER_SPECS = (
@@ -180,7 +192,7 @@ TLS_INTERCEPT_PROVIDER_SPECS = (
         env_bindings=(),
         restart_gateway_after_save=False,
         restart_webui_after_save=False,
-        affects_model_picker=False,
+        category="connector",
     ),
     TlsProviderSpec(
         slug="github",
@@ -201,7 +213,7 @@ TLS_INTERCEPT_PROVIDER_SPECS = (
         ),
         restart_gateway_after_save=False,
         restart_webui_after_save=True,
-        affects_model_picker=False,
+        category="connector",
     ),
     TlsProviderSpec(
         slug="telegram",
@@ -217,7 +229,7 @@ TLS_INTERCEPT_PROVIDER_SPECS = (
         ),
         restart_gateway_after_save=True,
         restart_webui_after_save=False,
-        affects_model_picker=False,
+        category="connector",
     ),
     TlsProviderSpec(
         slug="slack",
@@ -247,7 +259,7 @@ TLS_INTERCEPT_PROVIDER_SPECS = (
         ),
         restart_gateway_after_save=True,
         restart_webui_after_save=False,
-        affects_model_picker=False,
+        category="connector",
     ),
     TlsProviderSpec(
         slug="openai-codex",
@@ -263,7 +275,7 @@ TLS_INTERCEPT_PROVIDER_SPECS = (
         env_bindings=(),
         restart_gateway_after_save=False,
         restart_webui_after_save=False,
-        affects_model_picker=True,
+        category="model_provider",
     ),
     TlsProviderSpec(
         slug="nous",
@@ -274,7 +286,7 @@ TLS_INTERCEPT_PROVIDER_SPECS = (
         env_bindings=(),
         restart_gateway_after_save=False,
         restart_webui_after_save=False,
-        affects_model_picker=True,
+        category="model_provider",
     ),
     TlsProviderSpec(
         slug="openrouter",
@@ -289,7 +301,7 @@ TLS_INTERCEPT_PROVIDER_SPECS = (
         ),
         restart_gateway_after_save=True,
         restart_webui_after_save=True,
-        affects_model_picker=True,
+        category="model_provider",
     ),
     TlsProviderSpec(
         slug="openai-api",
@@ -306,7 +318,7 @@ TLS_INTERCEPT_PROVIDER_SPECS = (
         ),
         restart_gateway_after_save=True,
         restart_webui_after_save=True,
-        affects_model_picker=True,
+        category="model_provider",
     ),
     TlsProviderSpec(
         slug="anthropic",
@@ -323,7 +335,7 @@ TLS_INTERCEPT_PROVIDER_SPECS = (
         ),
         restart_gateway_after_save=True,
         restart_webui_after_save=True,
-        affects_model_picker=True,
+        category="model_provider",
     ),
 )
 

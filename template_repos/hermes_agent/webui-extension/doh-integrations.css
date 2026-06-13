@@ -28,7 +28,10 @@ main.main.showing-integrations > #mainChat { display: none !important; }
 }
 
 .doh-integration-page-inner {
-  width: min(900px, 100%);
+  /* Max content width for the integrations page. Cards share this space
+     equally across the 4-column grid (see .doh-integration-grid). Raise
+     this value to give each card more horizontal room. */
+  width: min(1100px, 100%);
   margin: 0 auto;
   padding: 28px 32px 48px;
   display: flex;
@@ -77,41 +80,113 @@ main.main.showing-integrations > #mainChat { display: none !important; }
 .doh-integration-list {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 28px;
+}
+
+/* A titled section ("Connected" / "Not connected") wrapping a card grid. */
+.doh-integration-section {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.doh-integration-section-title {
+  font-size: 13px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+}
+
+/* Sub-group heading inside a section (e.g. "Model Providers" / "Connectors"
+   under "Not connected"). Lighter than the section title so the nesting reads
+   as a level down. */
+.doh-integration-subsection-title {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+  opacity: 0.75;
+}
+
+/* Multi-column card grid. Starts at 3 columns and steps down on narrow
+   viewports so cards never get squeezed below a readable width. */
+.doh-integration-grid {
+  display: grid;
+  /* minmax(0, 1fr) — not plain 1fr — so all three tracks stay exactly equal.
+     A bare 1fr track has a min-width:auto floor, letting a card with wide
+     content (long name / refresh line) widen its column past the others. */
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  align-items: stretch;
+}
+
+@media (max-width: 900px) {
+  .doh-integration-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+@media (max-width: 560px) {
+  .doh-integration-grid { grid-template-columns: 1fr; }
 }
 
 .doh-integration-empty {
   color: var(--muted);
   font-size: 13px;
-  padding: 16px 0;
+  padding: 4px 0;
 }
 
+/* Grid cards stretch to the tallest in their row and pin their action body to
+   the bottom (margin-top:auto on the body) so Connect/Disconnect buttons align. */
 .doh-integration-card {
+  display: flex;
+  flex-direction: column;
   border: 1px solid var(--border);
   border-radius: 8px;
-  padding: 14px 16px 10px;
+  padding: 14px 16px;
   background: var(--code-bg);
 }
 
+/* Logo + title on the left, status pill pushed to the right, all on one line.
+   The pill is kept compact (see font/padding below) so even longer names fit
+   beside it without wrapping; the title row truncates rather than wrap the pill,
+   keeping every card's header a single uniform line. nowrap forbids the pill
+   from dropping below the title. */
 .doh-integration-card-head {
   display: flex;
+  flex-direction: row;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
-  margin-bottom: 8px;
+  flex-wrap: nowrap;
+  gap: 8px;
+}
+
+.doh-integration-card-status {
+  flex-shrink: 0;
+}
+
+/* The not-connected "Connect" button living inline in the head row (compact
+   single-row cards). Natural width, pinned right, never shrinks or stretches. */
+.doh-integration-card-head-action {
+  flex: 0 0 auto;
+  align-self: center;
 }
 
 .doh-integration-card-title {
   font-size: 14px;
   font-weight: 600;
   color: var(--text);
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .doh-integration-card-status {
-  font-size: 11px;
+  font-size: 9px;
   text-transform: uppercase;
-  letter-spacing: 0.04em;
-  padding: 2px 8px;
+  letter-spacing: 0.03em;
+  padding: 2px 6px;
   border-radius: 999px;
   border: 1px solid var(--border2);
   color: var(--muted);
@@ -130,7 +205,9 @@ main.main.showing-integrations > #mainChat { display: none !important; }
   display: flex;
   flex-direction: column;
   gap: 8px;
-  margin-top: 12px;
+  /* Push actions to the bottom so buttons line up across a grid row. */
+  margin-top: auto;
+  padding-top: 8px;
 }
 
 .doh-integration-meta {
@@ -138,10 +215,32 @@ main.main.showing-integrations > #mainChat { display: none !important; }
   color: var(--muted);
 }
 
+.doh-integration-meta-refresh {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Footer buttons share the card width equally so the action row reads as a
+   balanced base. Buttons grow to fill but cap at an even split (flex: 1 1 0). */
 .doh-integration-actions {
   display: flex;
-  flex-wrap: wrap;
   gap: 8px;
+}
+
+.doh-integration-actions > .doh-integration-btn {
+  flex: 1 1 0;
+  align-self: auto;
+}
+
+/* A lone action (the not-connected "Connect" button): center it at its natural
+   width instead of stretching to fill the row. */
+.doh-integration-actions-single {
+  justify-content: center;
+}
+
+.doh-integration-actions-single > .doh-integration-btn {
+  flex: 0 0 auto;
 }
 
 .doh-integration-btn {
@@ -176,28 +275,12 @@ main.main.showing-integrations > #mainChat { display: none !important; }
   filter: brightness(1.1);
 }
 
-/* Single-row Merge connector cards: title on the left, button + status on the right. */
-.doh-integration-card-row {
-  padding: 10px 14px;
-}
-.doh-integration-card-row .doh-integration-card-head {
-  margin-bottom: 0;
-}
-.doh-integration-card-trailing {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  flex-shrink: 0;
-}
-.doh-integration-card-trailing .doh-integration-btn {
-  align-self: center;
-}
-
 .doh-integration-card-title-row {
   display: flex;
   align-items: center;
   gap: 10px;
   min-width: 0;
+  flex: 1 1 auto;
 }
 
 .doh-integration-logo {
