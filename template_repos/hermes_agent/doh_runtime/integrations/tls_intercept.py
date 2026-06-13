@@ -212,6 +212,7 @@ def _status_item_for_provider(provider: tls_providers.TlsProviderSpec, entry: _T
     is_connected = entry is not None
     return {
         "kind": "tls_intercept",
+        "category": provider.category,
         "slug": provider.slug,
         "label": provider.label,
         "logo_url": provider.logo_url,

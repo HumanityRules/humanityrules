@@ -228,9 +228,13 @@
     };
   }
 
-  function connectedFirst(a, b) {
-    if (a.status === 'connected' && b.status !== 'connected') return -1;
-    if (a.status !== 'connected' && b.status === 'connected') return 1;
+  // Order within a status group: model providers first, then connectors, then
+  // alphabetical by label. (Cards are split into connected / not-connected
+  // grids upstream of this, so status isn't a key here.)
+  function byCategoryThenLabel(a, b) {
+    const aRank = a.category === 'model_provider' ? 0 : 1;
+    const bRank = b.category === 'model_provider' ? 0 : 1;
+    if (aRank !== bRank) return aRank - bRank;
     const aLabel = (a.label || a.slug || '').toLowerCase();
     const bLabel = (b.label || b.slug || '').toLowerCase();
     return aLabel.localeCompare(bLabel);
@@ -249,6 +253,20 @@
     return elem('button', props, [pending ? 'Disconnecting…' : 'Disconnect']);
   }
 
+  function configureButton(item, connectBtnForRevert) {
+    const canConfigure = item.connect_mode === 'vault';
+    const props = { class: 'doh-integration-btn' };
+    if (canConfigure) {
+      props.onclick = () => {
+        const revert = connectBtnForRevert ? markConnecting(connectBtnForRevert) : undefined;
+        startVaultConfig(item, revert);
+      };
+    } else {
+      props.disabled = true;
+    }
+    return elem('button', props, ['Configure']);
+  }
+
   // Run a disconnect with the shared guard/spinner/cleanup dance: no-op if one
   // is already in flight for `key`; otherwise mark pending and re-render (so the
   // button shows "Disconnecting…"), run `perform`, then always clear and
@@ -265,14 +283,13 @@
     }
   }
 
-  // Build the shared card shell: the card div (row layout unless connected), a
-  // title row with optional logo + title, and the status pill. `providerKey`
+  // Build the shared card shell for the grid: a vertical card with a title row
+  // (optional logo + title) and a status pill in the head. `providerKey`
   // becomes the card's data-provider attribute (slug for TLS, prefixed id for
   // connectors). Each renderer fills in its own connected/not-connected body.
   function buildCardScaffold(item, providerKey) {
     const isConnected = item.status === 'connected';
-    const cardClass = isConnected ? 'doh-integration-card' : 'doh-integration-card doh-integration-card-row';
-    const card = elem('div', { class: cardClass, dataset: { provider: providerKey } });
+    const card = elem('div', { class: 'doh-integration-card', dataset: { provider: providerKey } });
     const titleRow = elem('div', { class: 'doh-integration-card-title-row' });
     if (item.logo_url) titleRow.appendChild(logoImg(item.logo_url));
     titleRow.appendChild(elem('div', { class: 'doh-integration-card-title' }, [item.label || item.slug]));
@@ -280,17 +297,34 @@
     return { card, titleRow, statusPill, isConnected };
   }
 
-  // Append the not-connected footer: a Connect button alongside the status pill
-  // in the card's head row. `onConnect` receives the markConnecting revert fn,
-  // which modal flows (vault, Merge) call to restore the button on cancel/error
-  // and navigation flows simply let persist as the page leaves.
-  function appendConnectFooter(card, titleRow, statusPill, onConnect) {
+  // Append the not-connected footer: a head row (title + status pill) plus a
+  // body holding the Connect button, which the card CSS pins to the bottom so
+  // buttons align across a grid row. `onConnect` receives the markConnecting
+  // revert fn, which modal flows (vault, Merge) call to restore the button on
+  // cancel/error and navigation flows simply let persist as the page leaves.
+  function appendConnectFooter(card, titleRow, statusPill, item, onConnect) {
     const connectBtn = elem('button', {
       class: 'doh-integration-btn',
       onclick: () => { onConnect(markConnecting(connectBtn)); },
     }, ['Connect']);
-    const trailing = elem('div', { class: 'doh-integration-card-trailing' }, [connectBtn, statusPill]);
-    card.appendChild(elem('div', { class: 'doh-integration-card-head' }, [titleRow, trailing]));
+    if (item.status === 'not_connected') {
+      // Compact single-row card: logo + name on the left, Connect on the right.
+      // These cards have nothing else to show, so we drop the redundant
+      // "Not connected" pill (Connect already says as much) and the empty
+      // pinned-to-bottom body that left an awkward gap — no Configure either,
+      // since there's nothing to configure before connecting.
+      connectBtn.classList.add('doh-integration-card-head-action');
+      card.appendChild(elem('div', { class: 'doh-integration-card-head' }, [titleRow, connectBtn]));
+      return;
+    }
+    // Other not-connected states (token expired, checking…) keep the
+    // informative pill in the head and the action in the pinned footer body.
+    card.appendChild(elem('div', { class: 'doh-integration-card-head' }, [titleRow, statusPill]));
+    const body = elem('div', { class: 'doh-integration-card-body' });
+    const actions = elem('div', { class: 'doh-integration-actions doh-integration-actions-single' });
+    actions.appendChild(connectBtn);
+    body.appendChild(actions);
+    card.appendChild(body);
   }
 
   // ── Merge connector flow ──────────────────────────────────────────
@@ -449,11 +483,16 @@
         await refreshAndRender();
       }));
       card.appendChild(elem('div', { class: 'doh-integration-card-head' }, [titleRow, statusPill]));
-      card.appendChild(elem('div', { class: 'doh-integration-card-body' }, [disconnectBtn]));
+      const body = elem('div', { class: 'doh-integration-card-body' });
+      const actions = elem('div', { class: 'doh-integration-actions' });
+      actions.appendChild(configureButton(item));
+      actions.appendChild(disconnectBtn);
+      body.appendChild(actions);
+      card.appendChild(body);
       return card;
     }
 
-    appendConnectFooter(card, titleRow, statusPill, (revert) => {
+    appendConnectFooter(card, titleRow, statusPill, item, (revert) => {
       if (isMergeConnector) startMergeConnect(item, revert);
       else window.location.href = buildMcpConnectUrl(item.slug);
     });
@@ -1196,36 +1235,29 @@
     if (isConnected) {
       card.appendChild(elem('div', { class: 'doh-integration-card-head' }, [titleRow, statusPill]));
       const body = elem('div', { class: 'doh-integration-card-body' });
-      const botUsername = item.metadata && item.metadata.bot_username;
-      if (botUsername) {
-        body.appendChild(elem('div', { class: 'doh-integration-meta' }, ['Connected as @' + botUsername]));
-      }
       // Slack personal mode resolves an owner; only that provider sets it.
       const ownerName = item.metadata && item.metadata.owner_name;
       if (ownerName) {
         body.appendChild(elem('div', { class: 'doh-integration-meta' }, ['Replies only to ' + ownerName]));
       }
       if (item.last_refreshed_at) {
-        body.appendChild(elem('div', { class: 'doh-integration-meta' }, [
+        body.appendChild(elem('div', {
+          class: 'doh-integration-meta doh-integration-meta-refresh',
+          title: 'Last refreshed: ' + formatDate(item.last_refreshed_at),
+        }, [
           'Last refreshed: ' + formatDate(item.last_refreshed_at),
         ]));
       }
-      // Both connect modes share one Disconnect button; vault providers add a
-      // Configure button ahead of it.
+      // Configure is always shown; only vault providers can open the config modal.
       const actions = elem('div', { class: 'doh-integration-actions' });
-      if (usesVault) {
-        actions.appendChild(elem('button', {
-          class: 'doh-integration-btn',
-          onclick: () => { startVaultConfig(item); },
-        }, ['Configure']));
-      }
+      actions.appendChild(configureButton(item));
       actions.appendChild(disconnectButton(item.slug, () => { disconnectTlsProvider(item); }));
       body.appendChild(actions);
       card.appendChild(body);
       return card;
     }
 
-    appendConnectFooter(card, titleRow, statusPill, (revert) => {
+    appendConnectFooter(card, titleRow, statusPill, item, (revert) => {
       if (usesVault) startVaultConfig(item, revert);
       else if (usesDevice) startDeviceConnect(item, revert);
       else window.location.href = buildTlsConnectUrl(payload, item.slug, returnTo);
@@ -1251,6 +1283,58 @@
     ));
   }
 
+  // Render one item's card by kind. TLS-intercept cards need the payload for
+  // their Connect URL; connector cards (MCP + Merge) are self-contained.
+  function renderCard(item, payload) {
+    if (item.kind === 'tls_intercept') return renderTlsInterceptCard(item, payload);
+    if (item.kind === 'mcp_aggregator' || item.kind === 'merge_connector') return renderConnectorCard(item);
+    return null;
+  }
+
+  // Build a responsive card grid for `items`, or null if none render.
+  function buildCardGrid(items, payload) {
+    const grid = elem('div', { class: 'doh-integration-grid' });
+    for (const item of items) {
+      const card = renderCard(item, payload);
+      if (card) grid.appendChild(card);
+    }
+    return grid.children.length ? grid : null;
+  }
+
+  // Append a titled section (heading + responsive card grid) to `container`.
+  // Sections always render their heading so users learn the two groups exist;
+  // an empty section shows `emptyHint` instead of a grid.
+  function appendSection(container, title, items, payload, emptyHint) {
+    const section = elem('div', { class: 'doh-integration-section' }, [
+      elem('div', { class: 'doh-integration-section-title' }, [title]),
+    ]);
+    const grid = buildCardGrid(items, payload);
+    section.appendChild(grid || elem('div', { class: 'doh-integration-empty' }, [emptyHint]));
+    container.appendChild(section);
+  }
+
+  // Append a section whose body is split into labeled sub-groups, each a
+  // sub-heading + its own card grid. Sub-groups with no cards are skipped; if
+  // none have cards, `emptyHint` shows instead. Used by "Not connected" to make
+  // the Model Providers → Connectors ordering explicit rather than implied.
+  function appendGroupedSection(container, title, subGroups, payload, emptyHint) {
+    const section = elem('div', { class: 'doh-integration-section' }, [
+      elem('div', { class: 'doh-integration-section-title' }, [title]),
+    ]);
+    let any = false;
+    for (const sub of subGroups) {
+      const grid = buildCardGrid(sub.items, payload);
+      if (!grid) continue;
+      any = true;
+      section.appendChild(elem('div', { class: 'doh-integration-section' }, [
+        elem('div', { class: 'doh-integration-subsection-title' }, [sub.title]),
+        grid,
+      ]));
+    }
+    if (!any) section.appendChild(elem('div', { class: 'doh-integration-empty' }, [emptyHint]));
+    container.appendChild(section);
+  }
+
   function renderPane(payload) {
     renderSummary(payload);
 
@@ -1265,18 +1349,26 @@
       return;
     }
 
-    const items = (payload.items || []).slice().sort(connectedFirst);
-    if (items.length === 0) {
-      list.appendChild(elem('div', { class: 'doh-integration-empty' }, ['No integrations configured.']));
-      return;
-    }
-    for (const item of items) {
-      if (item.kind === 'tls_intercept') {
-        list.appendChild(renderTlsInterceptCard(item, payload));
-      } else if (item.kind === 'mcp_aggregator' || item.kind === 'merge_connector') {
-        list.appendChild(renderConnectorCard(item));
-      }
-    }
+    // Group by connection status: Connected first, then everything not yet
+    // connected. The Connected grid stays a single grid sorted model-providers-
+    // first; the Not-connected section is split into explicit "Model Providers"
+    // and "Connectors" sub-groups so that ordering is labeled, not just implied.
+    const items = payload.items || [];
+    const isModelProvider = (it) => it.category === 'model_provider';
+    const byLabel = (a, b) =>
+      (a.label || a.slug || '').toLowerCase().localeCompare((b.label || b.slug || '').toLowerCase());
+
+    const connected = items
+      .filter((it) => it.status === 'connected')
+      .slice()
+      .sort(byCategoryThenLabel);
+    const notConnected = items.filter((it) => it.status !== 'connected');
+
+    appendSection(list, 'Connected', connected, payload, 'Nothing connected yet.');
+    appendGroupedSection(list, 'Not connected', [
+      { title: 'Model Providers', items: notConnected.filter(isModelProvider).slice().sort(byLabel) },
+      { title: 'Connectors', items: notConnected.filter((it) => !isModelProvider(it)).slice().sort(byLabel) },
+    ], payload, 'Everything is connected.');
   }
 
   async function refreshAndRender() {
