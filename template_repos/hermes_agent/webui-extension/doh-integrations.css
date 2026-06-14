@@ -284,15 +284,18 @@ main.main.showing-integrations > #mainChat { display: none !important; }
 }
 
 .doh-integration-logo {
-  width: 28px;
-  height: 28px;
+  width: 32px;
+  height: 32px;
   border-radius: 6px;
   /* Pure white tile so dark-on-light logos (Basecamp, Box, bioRxiv, etc.)
      stay readable against our dark theme. Tried softer/translucent variants
      — none worked across the full set of Merge logo styles, so we accept
      the contrast as the cost of universal legibility. */
   background: #fff;
-  padding: 3px;
+  /* Minimal inset so the logo fills more of the tile — the tile stays 28×28
+     (border-box), only the logo grows. Keep a hair of padding so glyphs that
+     bleed to their own edge don't touch the rounded corner. */
+  padding: 1px;
   box-sizing: border-box;
   object-fit: contain;
   flex-shrink: 0;
