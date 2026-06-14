@@ -32,24 +32,41 @@ can't do it for them.
 Posts, replies, deletes, and DMs act publicly on the user's real account —
 confirm intent before writing.
 
-## Cost — read calls bill per post returned
+## Cost — read calls bill per object returned
 
-X bills the user per **post object returned**, not per request, so a single
-read can cost far more than it looks. The billed count is the response's
-`data[]` length **plus** any `includes.tweets[]` from expansions. Only post
-objects count: user-lookup endpoints (`/2/users/me`, `/2/users/by/username/…`)
-return a user object, not posts, and cost nothing — prefer them, e.g.
-`?user.fields=public_metrics` for follower/following counts rather than the
-followers/following list endpoints. A single-post lookup (`/2/tweets/:id`)
-bills exactly 1 and is the cheap path when the user gives a post URL/id.
-`tweet.fields`/`user.fields` annotate existing objects and add nothing billed —
-request `public_metrics` freely. Keep reads minimal:
+X bills per **object returned**, not per request, so a single read can cost
+far more than it looks. Two separately-metered objects bill: **posts**
+(~$0.005 each) and **users** (~$0.01 each) — the billed count is the response's
+`data[]` plus anything pulled into `includes` (`includes.tweets[]`,
+`includes.users[]`). Billing dedups per object per 24h, so refetching the
+*same* post/user is free after the first time.
 
-- Set the smallest `max_results` that answers the question (the timeline/search
-  endpoints reject anything below 5, and default to large pages if you omit it,
-  so always set it explicitly).
-- Avoid `expansions=referenced_tweets.id` unless the user actually needs the
-  referenced posts — it silently adds billed objects (e.g. `max_results=5` with
-  that expansion billed 7 posts, not 5).
-- Never auto-paginate with `next_token` to "get everything" — each page is
-  another ~100 billed posts. Page only when the user explicitly asks for more.
+What this means in practice:
+
+- A single-post lookup (`/2/tweets/:id`) bills 1 post; the cheap path when the
+  user gives a post URL/id.
+- `/2/users/me` and a handful of handle lookups (`/2/users/by/username/…`,
+  `/2/users?ids=…`) are cheap — one distinct user each, and `/2/users/me`
+  dedups across the session. Use `?user.fields=public_metrics` for
+  follower/following *counts* (one user object) instead of listing the accounts.
+- Follower/following/list-member pages (`/2/users/:id/followers`, `/following`)
+  return up to ~100 **distinct** users — ~$1 a page. Treat them like post
+  sweeps: bound hard, never enumerate a large graph to find or count accounts.
+- `tweet.fields`/`user.fields`/`media.fields` only annotate objects already in
+  the response and add nothing — request `public_metrics` freely. Media, list,
+  and DM-event objects are not known to bill as posts or users.
+
+Keep reads minimal:
+
+- Set the smallest `max_results` that answers the question, and always set it
+  explicitly (omitting it defaults to a large page). Floors differ by endpoint:
+  the user-timeline accepts 5–100, but `search/recent` rejects anything below 10.
+- Need a referenced/parent/quoted post? Look it up separately with
+  `/2/tweets/:id` (bills 1) rather than `expansions=referenced_tweets.id`, which
+  pulls — and bills — the referenced post of *every* item in the page (e.g.
+  `max_results=5` with that expansion billed 7, not 5).
+- Never silently paginate or sweep "everything." Each page is ~100 more billed
+  posts, and a `conversation_id` search bills every reply it returns. When the
+  user asks for "all" / a full history / a whole thread, estimate the cost
+  (≈ pages × 100; narrow a conversation search with `from:<author>` to pay only
+  for that author's posts) and confirm before fetching.
