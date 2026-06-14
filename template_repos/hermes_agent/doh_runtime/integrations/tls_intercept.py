@@ -1132,22 +1132,29 @@ async def _forward_to_upstream(
             name, _, value = line.partition(b":")
             response_headers.append((name.strip(), value.strip().rstrip(b"\r\n")))
         resp_body = await _read_response_body(reader=upstream_reader, headers=response_headers, status=status, method=method)
-        # Cost audit for X: X meters per post object returned (not per request),
-        # so log data[] + includes.tweets[] counts per forward to make the real
-        # billed cost of each call visible.
+        # Cost audit for X: X meters per object returned (not per request), and
+        # posts and users are *separately* billed meters (~$0.005 vs ~$0.01),
+        # deduped per object per 24h. Count each by sniffing object shape (a user
+        # object has `username`; a post has `text`/`edit_history_tweet_ids`)
+        # across data[] + includes[] so each audit line maps onto the console's
+        # two meters. Lists/media/DM-events fall into neither and aren't billed.
         if host == "api.x.com":
-            data_n = inc_n = -1
+            posts_n = users_n = -1
             try:
                 parsed = json.loads(resp_body)
-                data = parsed.get("data")
-                data_n = len(data) if isinstance(data, list) else (1 if data is not None else 0)
-                inc = parsed.get("includes", {}).get("tweets")
-                inc_n = len(inc) if isinstance(inc, list) else 0
-            except (ValueError, AttributeError):
+                posts_n = users_n = 0
+                for bucket in (parsed.get("data"), (parsed.get("includes") or {}).get("tweets"), (parsed.get("includes") or {}).get("users")):
+                    items = bucket if isinstance(bucket, list) else ([bucket] if isinstance(bucket, dict) else [])
+                    for item in items:
+                        if "username" in item:
+                            users_n += 1
+                        elif "text" in item or "edit_history_tweet_ids" in item:
+                            posts_n += 1
+            except (ValueError, AttributeError, TypeError):
                 pass
             logger.info(
-                "X-COST-AUDIT method=%s path=%s status=%s data_posts=%s included_posts=%s body_bytes=%s",
-                method, path_with_query, status, data_n, inc_n, len(resp_body),
+                "X-COST-AUDIT method=%s path=%s status=%s posts=%s users=%s body_bytes=%s",
+                method, path_with_query, status, posts_n, users_n, len(resp_body),
             )
         return status, response_headers, resp_body
     finally:
