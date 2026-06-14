@@ -70,3 +70,8 @@ Keep reads minimal:
   user asks for "all" / a full history / a whole thread, estimate the cost
   (≈ pages × 100; narrow a conversation search with `from:<author>` to pay only
   for that author's posts) and confirm before fetching.
+
+The injected token is OAuth 2.0 **user context**, so endpoints that require
+app-only auth are unreachable (403 "Unsupported Authentication") — notably
+full-archive `search/all`. Use `search/recent` (last ~7 days); for older posts,
+tell the user it's out of reach rather than retrying.
