@@ -1756,6 +1756,7 @@ class IntegrationConfig(models.Model):
 
     class Provider(models.TextChoices):
         GOOGLE = "google", "Google"
+        X = "x", "X"
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid7, editable=False)
     provider = models.CharField(max_length=50, choices=Provider.choices, unique=True)
