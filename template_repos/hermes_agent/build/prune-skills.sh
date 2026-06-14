@@ -39,7 +39,6 @@ research/blogwatcher
 research/llm-wiki
 research/polymarket
 research/research-paper-writing
-social-media/xurl
 software-development/plan
 software-development/requesting-code-review
 software-development/systematic-debugging

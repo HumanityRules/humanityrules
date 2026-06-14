@@ -1132,6 +1132,23 @@ async def _forward_to_upstream(
             name, _, value = line.partition(b":")
             response_headers.append((name.strip(), value.strip().rstrip(b"\r\n")))
         resp_body = await _read_response_body(reader=upstream_reader, headers=response_headers, status=status, method=method)
+        # Cost audit for X: X meters per post object returned (not per request),
+        # so log data[] + includes.tweets[] counts per forward to make the real
+        # billed cost of each call visible.
+        if host == "api.x.com":
+            data_n = inc_n = -1
+            try:
+                parsed = json.loads(resp_body)
+                data = parsed.get("data")
+                data_n = len(data) if isinstance(data, list) else (1 if data is not None else 0)
+                inc = parsed.get("includes", {}).get("tweets")
+                inc_n = len(inc) if isinstance(inc, list) else 0
+            except (ValueError, AttributeError):
+                pass
+            logger.info(
+                "X-COST-AUDIT method=%s path=%s status=%s data_posts=%s included_posts=%s body_bytes=%s",
+                method, path_with_query, status, data_n, inc_n, len(resp_body),
+            )
         return status, response_headers, resp_body
     finally:
         with contextlib.suppress(Exception):
