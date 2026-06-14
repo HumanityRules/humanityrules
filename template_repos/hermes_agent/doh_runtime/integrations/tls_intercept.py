@@ -727,13 +727,14 @@ async def _intercept_and_forward(
                 forward_headers = _strip_proxy_headers_and_set_host(headers=headers, upstream_host=host)
                 forward_path = path_with_query
             try:
-                upstream_status, upstream_headers, upstream_body = await _forward_to_upstream(
+                upstream_status, keep_alive = await _forward_to_upstream(
                     host=host,
                     port=port,
                     method=request_line.decode("iso-8859-1").split(" ", 1)[0],
                     path_with_query=forward_path,
                     headers=forward_headers,
                     body=body,
+                    client_writer=tls_writer,
                 )
             except Exception as exc:
                 logger.exception("forward to %s failed", host)
@@ -749,9 +750,7 @@ async def _intercept_and_forward(
             if upstream_status == 401 and addresses_doh_credential:
                 await token_store.invalidate(slug=provider.slug)
                 logger.info("evicted %s token cache after upstream 401 from %s", provider.slug, host)
-            tls_writer.write(_render_response(status=upstream_status, headers=upstream_headers, body=upstream_body))
-            await tls_writer.drain()
-            if _header_value(headers=upstream_headers, name=b"connection") == b"close":
+            if not keep_alive:
                 return
     finally:
         with contextlib.suppress(Exception):
@@ -1103,8 +1102,17 @@ async def _forward_to_upstream(
     path_with_query: str,
     headers: list[tuple[bytes, bytes]],
     body: bytes,
-) -> tuple[int, list[tuple[bytes, bytes]], bytes]:
-    """Open a fresh TLS client to real upstream and replay the request."""
+    client_writer: asyncio.StreamWriter,
+) -> tuple[int, bool]:
+    """Replay the request to the real upstream and relay the response to the client.
+
+    Server-sent-event responses are relayed frame-by-frame so tokens reach the
+    sandbox client live (the agent's per-delta stream callbacks then fire as
+    they arrive instead of all at once); every other response is buffered and
+    re-rendered with a computed Content-Length, preserving the per-object X cost
+    audit. Returns ``(status, keep_alive)``; ``keep_alive`` is False when the
+    client connection must be torn down after this exchange.
+    """
     ctx = ssl.create_default_context()
     upstream_reader, upstream_writer = await asyncio.open_connection(host=host, port=port, ssl=ctx, server_hostname=host)
     try:
@@ -1131,6 +1139,22 @@ async def _forward_to_upstream(
                 continue
             name, _, value = line.partition(b":")
             response_headers.append((name.strip(), value.strip().rstrip(b"\r\n")))
+        connection_keep_alive = _header_value(headers=response_headers, name=b"connection") != b"close"
+
+        # Statuses that cannot carry a body (HEAD, 1xx, 204, 304) fall through
+        # to the buffered no-body path even when mislabeled text/event-stream —
+        # the streaming relay would otherwise wait on EOF as the body delimiter
+        # and hang a perfectly valid response.
+        _can_have_body = not (method.upper() == "HEAD" or 100 <= status < 200 or status in (204, 304))
+        if _can_have_body and _response_is_event_stream(headers=response_headers):
+            framed = await _relay_streaming_response(
+                upstream_reader=upstream_reader,
+                client_writer=client_writer,
+                status=status,
+                headers=response_headers,
+            )
+            return status, connection_keep_alive and framed
+
         resp_body = await _read_response_body(reader=upstream_reader, headers=response_headers, status=status, method=method)
         # Cost audit for X: X meters per object returned (not per request), and
         # posts and users are *separately* billed meters (~$0.005 vs ~$0.01),
@@ -1156,11 +1180,125 @@ async def _forward_to_upstream(
                 "X-COST-AUDIT method=%s path=%s status=%s posts=%s users=%s body_bytes=%s",
                 method, path_with_query, status, posts_n, users_n, len(resp_body),
             )
-        return status, response_headers, resp_body
+        client_writer.write(_render_response(status=status, headers=response_headers, body=resp_body))
+        await client_writer.drain()
+        return status, connection_keep_alive
     finally:
         with contextlib.suppress(Exception):
             upstream_writer.close()
             await upstream_writer.wait_closed()
+
+
+def _response_is_event_stream(headers: list[tuple[bytes, bytes]]) -> bool:
+    """True when the upstream response is a server-sent-event stream."""
+    content_type = _header_value(headers=headers, name=b"content-type") or b""
+    return b"text/event-stream" in content_type
+
+
+async def _relay_streaming_response(
+    upstream_reader: asyncio.StreamReader,
+    client_writer: asyncio.StreamWriter,
+    status: int,
+    headers: list[tuple[bytes, bytes]],
+) -> bool:
+    """Relay an SSE response head + body to the client, flushing per frame.
+
+    Headers are forwarded verbatim (unlike the buffered path, the upstream
+    framing — ``Transfer-Encoding``/``Content-Length`` — is preserved so the
+    client can delimit the body). Returns whether the client connection may be
+    reused: False whenever the body didn't terminate cleanly (connection-close
+    framing, a short ``Content-Length``, or a chunked body without its
+    terminating 0-chunk), since the client's parser can't find a clean boundary
+    and would misframe or hang on the next response sent over the same socket.
+    """
+    head = b"HTTP/1.1 " + str(status).encode() + b" " + _http_reason(status=status).encode() + b"\r\n"
+    for name, value in headers:
+        head += name + b": " + value + b"\r\n"
+    head += b"\r\n"
+    client_writer.write(head)
+    await client_writer.drain()
+
+    transfer_encoding = None
+    content_length = None
+    for name, value in headers:
+        lowered = name.lower()
+        if lowered == b"transfer-encoding":
+            transfer_encoding = value.lower()
+        elif lowered == b"content-length":
+            content_length = value
+    if transfer_encoding == b"chunked":
+        return await _relay_chunked_stream(upstream_reader=upstream_reader, client_writer=client_writer)
+    if content_length is not None:
+        remaining = int(content_length)
+        while remaining > 0:
+            chunk = await upstream_reader.read(min(65536, remaining))
+            if not chunk:
+                # Upstream EOF before the advertised length — the client is
+                # still waiting on the unfulfilled Content-Length, so the
+                # socket can't carry another response.
+                return False
+            remaining -= len(chunk)
+            client_writer.write(chunk)
+            await client_writer.drain()
+        return True
+    # No explicit framing: relay until upstream EOF — the client learns the
+    # body ended only when we close the connection, so it can't be reused.
+    while True:
+        chunk = await upstream_reader.read(65536)
+        if not chunk:
+            break
+        client_writer.write(chunk)
+        await client_writer.drain()
+    return False
+
+
+async def _relay_chunked_stream(upstream_reader: asyncio.StreamReader, client_writer: asyncio.StreamWriter) -> bool:
+    """Relay a chunked upstream body to the client one chunk at a time, flushing each.
+
+    The chunk framing is forwarded verbatim (size line, payload, trailing CRLF,
+    final 0-chunk + trailers) so the client's chunked decoder sees each SSE
+    frame the instant it arrives. Returns True only when the stream closed
+    cleanly with its terminating 0-chunk; a premature EOF, malformed size line,
+    or truncated payload returns False so the caller tears the client
+    connection down rather than reuse a socket the client can't reframe.
+    """
+    while True:
+        size_line = await upstream_reader.readline()
+        if not size_line:
+            return False
+        try:
+            size = int(size_line.strip().split(b";")[0], 16)
+        except ValueError:
+            return False
+        client_writer.write(size_line)
+        if size == 0:
+            # Forward the trailer section up to its terminating blank line. A
+            # bare EOF (b"") before that blank line means the chunked
+            # terminator (0-chunk + trailers + CRLF) never completed, so the
+            # client can't reframe — relay the partial bytes but report
+            # non-reuse.
+            while True:
+                trailer_line = await upstream_reader.readline()
+                if trailer_line == b"":
+                    await client_writer.drain()
+                    return False
+                client_writer.write(trailer_line)
+                if trailer_line in (b"\r\n", b"\n"):
+                    break
+            await client_writer.drain()
+            return True
+        try:
+            chunk = await upstream_reader.readexactly(size)
+        except asyncio.IncompleteReadError as exc:
+            # Forward whatever bytes did arrive so an in-flight frame isn't
+            # silently dropped, but the chunk is short of its declared size —
+            # the client's decoder can't trust the framing from here on.
+            client_writer.write(exc.partial)
+            await client_writer.drain()
+            return False
+        crlf = await upstream_reader.readline()
+        client_writer.write(chunk + crlf)
+        await client_writer.drain()
 
 
 async def _read_response_body(reader: asyncio.StreamReader, headers: list[tuple[bytes, bytes]], status: int, method: str) -> bytes:
