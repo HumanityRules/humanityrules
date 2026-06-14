@@ -49,6 +49,10 @@ from .integrations.provider_github import (
     integrations_user_github_start,
     integrations_user_github_callback,
 )
+from .integrations.provider_x import (
+    integrations_user_x_start,
+    integrations_user_x_callback,
+)
 from .integrations.token_refresh_batch import integrations_tokens_batch
 from .integrations.provider_disconnect import integrations_credential_disconnect
 from .integrations.provider_device import integrations_device_complete
@@ -176,6 +180,8 @@ __all__ = [
     "integrations_user_google_callback",
     "integrations_user_github_start",
     "integrations_user_github_callback",
+    "integrations_user_x_start",
+    "integrations_user_x_callback",
     "integrations_tokens_batch",
     "integrations_credential_disconnect",
     "integrations_device_complete",
