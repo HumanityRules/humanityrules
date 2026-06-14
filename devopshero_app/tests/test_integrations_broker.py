@@ -523,6 +523,257 @@ class TestHttpParsing(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(await reader.readexactly(4), b"NEXT")
 
 
+class _RecordingWriter:
+    """asyncio.StreamWriter stand-in that records writes and drain boundaries.
+
+    Each drain() snapshots everything written since the previous drain, so a
+    streaming relay (one drain per upstream frame) is distinguishable from a
+    buffered one (a single drain carrying the whole body).
+    """
+
+    def __init__(self) -> None:
+        self.chunks: list[bytes] = []
+        self.flushes: list[bytes] = []
+        self._pending = bytearray()
+
+    def write(self, data: bytes) -> None:
+        self.chunks.append(bytes(data))
+        self._pending.extend(data)
+
+    async def drain(self) -> None:
+        self.flushes.append(bytes(self._pending))
+        self._pending = bytearray()
+
+    def all_bytes(self) -> bytes:
+        return b"".join(self.chunks)
+
+
+def _feed_upstream(raw: bytes) -> asyncio.StreamReader:
+    reader = asyncio.StreamReader()
+    reader.feed_data(raw)
+    reader.feed_eof()
+    return reader
+
+
+def _chunk(payload: bytes) -> bytes:
+    """Frame a payload as one HTTP/1.1 chunk (hex size line + CRLF-delimited body)."""
+    return f"{len(payload):x}".encode() + b"\r\n" + payload + b"\r\n"
+
+
+class _StubUpstreamWriter:
+    """Minimal writer for the upstream side of _forward_to_upstream."""
+
+    def write(self, data: bytes) -> None:
+        return None
+
+    async def drain(self) -> None:
+        return None
+
+    def close(self) -> None:
+        return None
+
+    async def wait_closed(self) -> None:
+        return None
+
+
+class TestStreamingRelay(unittest.IsolatedAsyncioTestCase):
+    """_forward_to_upstream relays SSE live and buffers everything else."""
+
+    async def _forward(self, upstream_response: bytes, *, host: str) -> tuple[int, bool, _RecordingWriter]:
+        client_writer = _RecordingWriter()
+        upstream_reader = _feed_upstream(upstream_response)
+
+        async def _fake_open_connection(**kwargs) -> tuple[asyncio.StreamReader, _StubUpstreamWriter]:
+            return upstream_reader, _StubUpstreamWriter()
+
+        with patch.object(broker.tls_intercept.asyncio, "open_connection", _fake_open_connection):
+            status, keep_alive = await broker.tls_intercept._forward_to_upstream(
+                host=host,
+                port=443,
+                method="POST",
+                path_with_query="/v1/chat/completions",
+                headers=[(b"host", host.encode())],
+                body=b"{}",
+                client_writer=client_writer,
+            )
+        return status, keep_alive, client_writer
+
+    async def test_chunked_sse_is_relayed_frame_by_frame(self) -> None:
+        upstream = (
+            b"HTTP/1.1 200 OK\r\n"
+            b"Content-Type: text/event-stream\r\n"
+            b"Transfer-Encoding: chunked\r\n"
+            b"\r\n"
+            + _chunk(b"data: {\"d\":\"Hel\"}\n\n")
+            + _chunk(b"data: {\"d\":\"lo!\"}\n\n")
+            + _chunk(b"data: [DONE]\n\n")
+            + b"0\r\n\r\n"
+        )
+        status, keep_alive, writer = await self._forward(upstream, host="api.openai.com")
+
+        self.assertEqual(status, 200)
+        self.assertTrue(keep_alive)
+        # Status/header preamble preserves the chunked framing verbatim — the
+        # client's chunked decoder is what makes incremental delivery work.
+        full = writer.all_bytes()
+        self.assertIn(b"Content-Type: text/event-stream", full)
+        self.assertIn(b"Transfer-Encoding: chunked", full)
+        self.assertIn(b'data: {"d":"Hel"}', full)
+        self.assertIn(b"data: [DONE]", full)
+        # Each SSE frame flushes separately: head + 3 data frames + terminator.
+        non_empty_flushes = [f for f in writer.flushes if f]
+        self.assertGreaterEqual(len(non_empty_flushes), 4)
+
+    async def test_content_length_sse_is_relayed(self) -> None:
+        payload = b"data: {\"d\":\"hi\"}\n\ndata: [DONE]\n\n"
+        upstream = (
+            b"HTTP/1.1 200 OK\r\n"
+            b"Content-Type: text/event-stream\r\n"
+            b"Content-Length: " + str(len(payload)).encode() + b"\r\n"
+            b"\r\n" + payload
+        )
+        status, keep_alive, writer = await self._forward(upstream, host="api.openai.com")
+
+        self.assertEqual(status, 200)
+        self.assertTrue(keep_alive)
+        self.assertIn(payload, writer.all_bytes())
+
+    async def test_json_response_is_buffered_with_content_length(self) -> None:
+        body = b"{\"ok\":true}"
+        upstream = (
+            b"HTTP/1.1 200 OK\r\n"
+            b"Content-Type: application/json\r\n"
+            b"Content-Length: " + str(len(body)).encode() + b"\r\n"
+            b"\r\n" + body
+        )
+        status, keep_alive, writer = await self._forward(upstream, host="api.anthropic.com")
+
+        self.assertEqual(status, 200)
+        self.assertTrue(keep_alive)
+        full = writer.all_bytes()
+        self.assertIn(b"Content-Length: 11", full)
+        self.assertTrue(full.endswith(body))
+        # Buffered path: the whole response lands in a single flush.
+        self.assertEqual(len([f for f in writer.flushes if f]), 1)
+
+    async def test_eof_framed_sse_marks_connection_not_reusable(self) -> None:
+        upstream = (
+            b"HTTP/1.1 200 OK\r\n"
+            b"Content-Type: text/event-stream\r\n"
+            b"\r\n"
+            b"data: {\"d\":\"x\"}\n\ndata: [DONE]\n\n"
+        )
+        status, keep_alive, writer = await self._forward(upstream, host="api.openai.com")
+
+        self.assertEqual(status, 200)
+        # No Content-Length / chunked framing: EOF is the only end-of-body
+        # signal, so the client connection cannot be reused.
+        self.assertFalse(keep_alive)
+        self.assertIn(b"data: [DONE]", writer.all_bytes())
+
+    async def test_truncated_content_length_sse_marks_connection_not_reusable(self) -> None:
+        # Upstream advertises 40 bytes but EOFs after 15 — the client is left
+        # waiting on the unfulfilled Content-Length, so the socket must not be
+        # reused for a later response.
+        upstream = (
+            b"HTTP/1.1 200 OK\r\n"
+            b"Content-Type: text/event-stream\r\n"
+            b"Content-Length: 40\r\n"
+            b"\r\n"
+            b"data: {\"d\":\"x\"}"
+        )
+        status, keep_alive, writer = await self._forward(upstream, host="api.openai.com")
+
+        self.assertEqual(status, 200)
+        self.assertFalse(keep_alive)
+        # Bytes that did arrive are still forwarded.
+        self.assertIn(b'data: {"d":"x"}', writer.all_bytes())
+
+    async def test_chunked_sse_without_terminator_marks_connection_not_reusable(self) -> None:
+        # A well-formed chunk arrives, then upstream EOFs before the
+        # terminating 0-chunk: the client's chunk decoder has no legal
+        # end-of-body, so reuse would hang or misframe the next response.
+        upstream = (
+            b"HTTP/1.1 200 OK\r\n"
+            b"Content-Type: text/event-stream\r\n"
+            b"Transfer-Encoding: chunked\r\n"
+            b"\r\n"
+            + _chunk(b"data: {\"d\":\"Hel\"}\n\n")
+        )
+        status, keep_alive, writer = await self._forward(upstream, host="api.openai.com")
+
+        self.assertEqual(status, 200)
+        self.assertFalse(keep_alive)
+        self.assertIn(b'data: {"d":"Hel"}', writer.all_bytes())
+
+    async def test_chunked_sse_with_short_payload_marks_connection_not_reusable(self) -> None:
+        # Size line declares 20 bytes but only 5 arrive before EOF: the partial
+        # payload is forwarded, but the framing is broken so the connection is
+        # not reusable.
+        upstream = (
+            b"HTTP/1.1 200 OK\r\n"
+            b"Content-Type: text/event-stream\r\n"
+            b"Transfer-Encoding: chunked\r\n"
+            b"\r\n"
+            b"14\r\nhello"
+        )
+        status, keep_alive, writer = await self._forward(upstream, host="api.openai.com")
+
+        self.assertEqual(status, 200)
+        self.assertFalse(keep_alive)
+        self.assertIn(b"hello", writer.all_bytes())
+
+    async def test_chunked_sse_terminator_without_final_crlf_marks_not_reusable(self) -> None:
+        # Upstream sends the 0-chunk size line but EOFs before the blank line
+        # closing the trailer section: the chunked terminator is incomplete, so
+        # the client can't reframe and the connection must not be reused.
+        upstream = (
+            b"HTTP/1.1 200 OK\r\n"
+            b"Content-Type: text/event-stream\r\n"
+            b"Transfer-Encoding: chunked\r\n"
+            b"\r\n"
+            + _chunk(b"data: [DONE]\n\n")
+            + b"0\r\n"  # last-chunk size line, then EOF — no closing CRLF
+        )
+        status, keep_alive, writer = await self._forward(upstream, host="api.openai.com")
+
+        self.assertEqual(status, 200)
+        self.assertFalse(keep_alive)
+        self.assertIn(b"data: [DONE]", writer.all_bytes())
+
+    async def test_chunked_sse_complete_terminator_is_reusable(self) -> None:
+        # The well-formed counterpart: 0-chunk followed by its closing blank
+        # line. Clean terminator → connection reusable.
+        upstream = (
+            b"HTTP/1.1 200 OK\r\n"
+            b"Content-Type: text/event-stream\r\n"
+            b"Transfer-Encoding: chunked\r\n"
+            b"\r\n"
+            + _chunk(b"data: [DONE]\n\n")
+            + b"0\r\n\r\n"
+        )
+        status, keep_alive, writer = await self._forward(upstream, host="api.openai.com")
+
+        self.assertEqual(status, 200)
+        self.assertTrue(keep_alive)
+        self.assertTrue(writer.all_bytes().endswith(b"0\r\n\r\n"))
+
+    async def test_no_body_status_with_event_stream_type_is_buffered(self) -> None:
+        # A 204 mislabeled text/event-stream must not enter the streaming relay
+        # (which would block on EOF); it takes the buffered no-body path and
+        # the connection stays reusable.
+        upstream = (
+            b"HTTP/1.1 204 No Content\r\n"
+            b"Content-Type: text/event-stream\r\n"
+            b"\r\n"
+        )
+        status, keep_alive, writer = await self._forward(upstream, host="api.openai.com")
+
+        self.assertEqual(status, 204)
+        self.assertTrue(keep_alive)
+        self.assertIn(b"204 No Content", writer.all_bytes())
+
+
 class TestCertMinter(unittest.TestCase):
 
     def test_bootstrap_writes_bundle_and_leaf_mint_returns_ssl_context(self) -> None:
