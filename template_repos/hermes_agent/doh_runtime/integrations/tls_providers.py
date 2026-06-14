@@ -337,6 +337,21 @@ TLS_INTERCEPT_PROVIDER_SPECS = (
         restart_webui_after_save=True,
         category="model_provider",
     ),
+    TlsProviderSpec(
+        slug="x",
+        label="X",
+        # api.x.com serves the X API v2 (xurl's `/2/...` endpoints) and the
+        # OAuth 2.0 token endpoint. The browser OAuth dance (x.com/i/oauth2/
+        # authorize) happens DOH-side, not from the sandbox, so x.com is not
+        # intercepted — only the bearer-carrying API host is.
+        hosts=("api.x.com",),
+        logo_url="/extensions/x.svg",
+        credential_method=OAuthHeader(auth_format=AUTH_FORMAT_BEARER),
+        env_bindings=(),
+        restart_gateway_after_save=False,
+        restart_webui_after_save=False,
+        category="connector",
+    ),
 )
 
 

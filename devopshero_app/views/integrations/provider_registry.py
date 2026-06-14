@@ -51,6 +51,7 @@ from devopshero_app.views.integrations import (
     provider_openrouter,
     provider_slack,
     provider_telegram,
+    provider_x,
 )
 
 
@@ -80,6 +81,7 @@ _SPECS = [
     ProviderSpec(provider=IntegrationUserCredential.Provider.NOUS, kind=ProviderKind.OAUTH, module=provider_nous),
     ProviderSpec(provider=IntegrationUserCredential.Provider.OPENAI, kind=ProviderKind.VAULT, module=provider_openai),
     ProviderSpec(provider=IntegrationUserCredential.Provider.ANTHROPIC, kind=ProviderKind.VAULT, module=provider_anthropic),
+    ProviderSpec(provider=IntegrationUserCredential.Provider.X, kind=ProviderKind.OAUTH, module=provider_x),
 ]
 
 # Keyed by the provider slug. The keys are `Provider` enum members, which are

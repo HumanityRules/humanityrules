@@ -158,14 +158,14 @@ class MCPAggregator:
         # Each spec.make_backend gets its own subdir under persistent_dir for any
         # extra state the connector wants to keep (e.g. PostHog's session config).
         # Native connectors win over same-slug Merge connectors in the catalog
-        # and browser integrations list. TLS-intercept providers (github, slack)
-        # are also "native" in this sense — DOH manages their auth directly, so
-        # the equivalent Merge connector would just duplicate the surface and
+        # and browser integrations list. TLS-intercept providers (github, slack,
+        # x) are also "native" in this sense — DOH manages their auth directly,
+        # so the equivalent Merge connector would just duplicate the surface and
         # confuse the agent.
         self._merge_backend: MergeBackend | None = None
         self._backends: list[mcp_top_level_tools.Backend] = []
         if merge_enabled:
-            merge_excluded = frozenset(set(DCR_CONNECTORS_BY_SLUG.keys()) | {"github", "slack"})
+            merge_excluded = frozenset(set(DCR_CONNECTORS_BY_SLUG.keys()) | {"github", "slack", "x"})
             self._merge_backend = MergeBackend(
                 doh_control_plane_url=self._doh_control_plane_url,
                 doh_env_bearer=self._doh_env_bearer,

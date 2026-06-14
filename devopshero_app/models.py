@@ -1785,6 +1785,7 @@ class IntegrationUserCredential(models.Model):
         NOUS = "nous", "Nous Portal"
         OPENAI = "openai-api", "OpenAI API"
         ANTHROPIC = "anthropic", "Anthropic"
+        X = "x", "X"
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid7, editable=False)
     owner_user = models.ForeignKey(
