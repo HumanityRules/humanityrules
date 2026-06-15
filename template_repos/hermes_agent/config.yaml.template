@@ -197,6 +197,31 @@ group_sessions_per_user: true
 streaming:
   enabled: false
 
+plugins:
+  disabled:
+  - dashboard_auth/basic
+  - dashboard_auth/nous
+  - dashboard_auth/self_hosted
+  - discord-platform
+  - google_chat-platform
+  - image_gen/fal
+  - image_gen/krea
+  - image_gen/openai
+  - image_gen/openai-codex
+  - image_gen/xai
+  - irc-platform
+  - line-platform
+  - mattermost-platform
+  - ntfy-platform
+  - simplex-platform
+  - spotify
+  - video_gen/fal
+  - video_gen/xai
+  - web/brave_free
+  - web/exa
+  - web/parallel
+  - web/searxng
+
 web:
   backend: tavily
 
