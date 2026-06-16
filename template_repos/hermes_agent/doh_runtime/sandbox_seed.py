@@ -23,6 +23,7 @@ AWS_BEDROCK_RUNTIME_PORT = 9903
 AWS_CE_PORT = 9904
 AWS_S3_PORT = 9905
 AWS_S3TABLES_PORT = 9906
+AWS_DYNAMODB_PORT = 9907
 
 AUTH_MARKER_SENTINEL = "DOH_PLACEHOLDER"
 CODEX_PROVIDER = "openai-codex"
@@ -83,6 +84,9 @@ def write_child_aws_config(workspace: Path, aws_region: str) -> None:
                 "",
                 "s3tables =",
                 f"  endpoint_url = http://127.0.0.1:{AWS_S3TABLES_PORT}",
+                "",
+                "dynamodb =",
+                f"  endpoint_url = http://127.0.0.1:{AWS_DYNAMODB_PORT}",
                 "",
             ]
         ),
