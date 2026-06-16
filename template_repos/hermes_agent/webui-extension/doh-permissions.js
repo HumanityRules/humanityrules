@@ -365,7 +365,7 @@
   function renderHeader() {
     const isDraft = _draft.status === 'draft';
     const actions = elem('div', { class: 'doh-perm-actions' }, [
-      isDraft ? elem('button', { type: 'button', class: 'doh-perm-btn doh-perm-btn-ghost', onclick: doRefreshResources }, ['Refresh resources']) : null,
+      isDraft ? elem('button', { type: 'button', class: 'doh-perm-btn doh-perm-btn-ghost', onclick: doRefreshResources }, ['Refresh AWS resources']) : null,
       isDraft && _draft.has_changes ? elem('button', { type: 'button', class: 'doh-perm-btn doh-perm-btn-ghost', onclick: doCancel }, ['Cancel changes']) : null,
       isDraft ? elem('button', { type: 'button', class: 'doh-perm-btn doh-perm-btn-primary', disabled: !_draft.has_changes, onclick: doApply }, ['Apply']) : null,
     ]);
