@@ -14,6 +14,7 @@ from django.views.decorators.http import require_GET, require_POST
 
 from devopshero_app.models import App, AppRemovalJob, Deployment, DeploymentBlueprint, ResourceTag
 from devopshero_app.services import abac
+from devopshero_app.services.cost import panel as cost_panel
 
 from . import abac_view_checks
 from . import base
@@ -585,3 +586,19 @@ def app_remove(request: HttpRequest, app_slug: str) -> HttpResponse:
         "workspace_detail", kwargs={"workspace_slug": app.workspace.slug},
     )
     return response
+
+
+@login_required
+@require_GET
+def app_cost_panel(request: HttpRequest, app_slug: str) -> HttpResponse:
+    """Render the cost-chart fragment for ``app_slug`` (org-scoped), enqueuing a recompute."""
+    organization = request.user.current_organization
+    app = get_object_or_404(App.objects.select_related("workspace"), slug=app_slug, organization=organization)
+    if not abac.check_action(organization, request.user, app.workspace, "workspace", "workspace:view"):
+        return HttpResponse(status=403)
+    # Only a real page view (the shell's initial load) enqueues a recompute. The self-poll sends
+    # ?await=1 and stays read-only, so polling can't spawn an endless chain of refresh jobs.
+    if request.GET.get("await") != "1":
+        cost_panel.enqueue_refresh(app=app)
+    context = cost_panel.build_panel_context(app=app)
+    return render(request, "devopshero_app/apps/_app_cost_chart.html", context)

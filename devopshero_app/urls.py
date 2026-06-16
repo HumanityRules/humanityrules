@@ -6,6 +6,9 @@ urlpatterns = [
     # Health check for ALB/ECS
     path("health/", views.health_check, name="health_check"),
 
+    # App-detail cost panel (HTMX fragment; see docs/app_cost_tracking_design.md)
+    path("apps/<slug:app_slug>/cost-panel/", views.app_cost_panel, name="app_cost_panel"),
+
     path("", views.landing, name="landing"),
     path("waitlist/signup/", views.waitlist_signup, name="waitlist_signup"),
     path("dashboard/", views.dashboard, name="dashboard"),

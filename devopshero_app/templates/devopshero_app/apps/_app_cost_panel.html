@@ -1,0 +1,17 @@
+{# Cost panel shell, included once from app_detail.html; self-loads the chart fragment via HTMX (this initial load enqueues a recompute) so build_app_detail_context / views/apps.py stay untouched. See docs/app_cost_tracking_design.md. #}
+<div class="mb-6">
+    <h2 class="text-lg font-semibold text-gray-900 dark:text-white mb-4">Cost</h2>
+    <div id="app-cost-body-{{ app.id }}"
+         class="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-4"
+         hx-get="{% url 'app_cost_panel' app_slug=app.slug %}"
+         hx-trigger="load"
+         hx-swap="innerHTML">
+        <div class="flex items-center gap-2 py-8 justify-center text-sm text-gray-500 dark:text-gray-400">
+            <svg class="animate-spin h-4 w-4" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.4 0 0 5.4 0 12h4z"></path>
+            </svg>
+            Loading cost…
+        </div>
+    </div>
+</div>
