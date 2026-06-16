@@ -5,6 +5,8 @@ AWS_STS_PORT=9901
 AWS_BEDROCK_PORT=9902
 AWS_BEDROCK_RUNTIME_PORT=9903
 AWS_CE_PORT=9904
+AWS_S3_PORT=9905
+AWS_S3TABLES_PORT=9906
 
 # Exports below trickle through runuser → nono (allow_vars) into the sandbox.
 #
@@ -18,7 +20,7 @@ export HERMES_WEBUI_HOST=127.0.0.1
 export HERMES_WEBUI_PORT=8789
 
 # Prevent AWS SDKs in the sandbox from discovering the ECS task role via IMDS.
-# All AWS access flows through the aws_signer proxy on 9901-9904 instead.
+# All AWS access flows through the aws_signer proxy on 9901-9906 instead.
 export AWS_EC2_METADATA_DISABLED=true
 
 : "${DOH_BIN_DIR:?DOH_BIN_DIR must be set}"
@@ -102,6 +104,8 @@ start_aws_signer() {
     wait_for_port "$AWS_BEDROCK_PORT"         "$AWS_SIGNER_PID" "aws-signer"
     wait_for_port "$AWS_BEDROCK_RUNTIME_PORT" "$AWS_SIGNER_PID" "aws-signer"
     wait_for_port "$AWS_CE_PORT"              "$AWS_SIGNER_PID" "aws-signer"
+    wait_for_port "$AWS_S3_PORT"              "$AWS_SIGNER_PID" "aws-signer"
+    wait_for_port "$AWS_S3TABLES_PORT"        "$AWS_SIGNER_PID" "aws-signer"
 }
 
 start_doh_broker() {
@@ -199,7 +203,7 @@ run_in_nono() {
     # HTTPS_PROXY + SSL_CERT_FILE route in-sandbox clients (gws, curl, etc.)
     # through the integrations broker, which injects per-user access tokens
     # and forwards to real upstreams. NO_PROXY keeps loopback direct so the
-    # sandbox can still reach the AWS signer on 9901-9904 and the broker
+    # sandbox can still reach the AWS signer on 9901-9906 and the broker
     # itself on 9950/9951 without a proxy round-trip.
     local broker_env=()
     if [ -n "${INTEGRATIONS_BROKER_PID:-}" ]; then

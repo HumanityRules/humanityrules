@@ -1,6 +1,7 @@
 """DOH streaming SigV4 proxy — replaces aws-sigv4-proxy + haproxy.
 
-Binds 127.0.0.1:9901/9902/9903 (STS / Bedrock / Bedrock-runtime), signs each
+Binds one 127.0.0.1 port per supported AWS service (STS, Bedrock,
+Bedrock-runtime, Cost Explorer, S3, S3 Tables — see main()), signs each
 inbound request with the ECS task role credentials, and streams request and
 response bodies through without buffering. Started by supervisor.sh outside
 the nono sandbox so credentials never enter the Hermes process environment.
@@ -11,8 +12,13 @@ see awslabs/aws-sigv4-proxy#250. This replacement streams via urllib3's
 preload_content=False so bytes go out as fast as Bedrock produces them.
 
 Limitations:
-- Request bodies are fully read before signing (SigV4 needs the payload
-  hash). Fine for Bedrock; S3 large uploads would need aws-chunked signing.
+- Request bodies are fully read into memory before signing (SigV4 needs the
+  payload hash). Fine for Bedrock and the JSON control-plane APIs (s3tables,
+  s3 metadata ops); large S3 object uploads stay memory-bound, and aws-chunked
+  streaming signing is not implemented.
+- Each port targets a single regional endpoint, so cross-region S3 access
+  (which AWS answers with a 301 redirect) is not followed — buckets must live
+  in the deploy region.
 - HTTP/1.0 on the loopback side — response ends at connection close, so
   upstream Transfer-Encoding: chunked framing doesn't need to be re-emitted.
 """
@@ -24,7 +30,7 @@ from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import urllib3
-from botocore.auth import SigV4Auth
+from botocore.auth import S3SigV4Auth, SigV4Auth
 from botocore.awsrequest import AWSRequest
 from botocore.session import Session
 
@@ -52,6 +58,9 @@ class PortConfig:
     service: str
     region: str
     upstream_host: str
+    # S3 requires the x-amz-content-sha256 header (S3SigV4Auth); the JSON
+    # APIs (sts, bedrock, ce, s3tables) sign with plain SigV4Auth.
+    auth_cls: type[SigV4Auth]
 
 
 def _reload_session_credentials(session: Session) -> None:
@@ -95,7 +104,7 @@ def _build_handler(cfg: PortConfig, session: Session, pool: urllib3.HTTPSConnect
                 if credentials is None:
                     self.send_error(500, "no AWS credentials available")
                     return
-                SigV4Auth(
+                cfg.auth_cls(
                     credentials.get_frozen_credentials(), cfg.service, cfg.region,
                 ).add_auth(aws_request)
 
@@ -174,13 +183,20 @@ def main():
     # bedrock.* and bedrock-runtime.* are scoped to "bedrock" in the
     # credential-scope string.
     configs = [
-        PortConfig(9901, "sts",     args.region, "sts.amazonaws.com"),
-        PortConfig(9902, "bedrock", args.region, f"bedrock.{args.region}.amazonaws.com"),
-        PortConfig(9903, "bedrock", args.region, f"bedrock-runtime.{args.region}.amazonaws.com"),
+        PortConfig(9901, "sts",     args.region, "sts.amazonaws.com", auth_cls=SigV4Auth),
+        PortConfig(9902, "bedrock", args.region, f"bedrock.{args.region}.amazonaws.com", auth_cls=SigV4Auth),
+        PortConfig(9903, "bedrock", args.region, f"bedrock-runtime.{args.region}.amazonaws.com", auth_cls=SigV4Auth),
         # Cost Explorer is a global service: the endpoint and credential scope
         # are always us-east-1 regardless of the deploy region, so we pin both
         # here rather than using args.region.
-        PortConfig(9904, "ce", "us-east-1", "ce.us-east-1.amazonaws.com"),
+        PortConfig(9904, "ce", "us-east-1", "ce.us-east-1.amazonaws.com", auth_cls=SigV4Auth),
+        # S3 signs as "s3" with S3SigV4Auth (adds x-amz-content-sha256). The
+        # sandbox config forces path-style addressing so buckets ride in the
+        # path, not the loopback host.
+        PortConfig(9905, "s3", args.region, f"s3.{args.region}.amazonaws.com", auth_cls=S3SigV4Auth),
+        # S3 Tables is a regional rest-json control-plane API (signing name
+        # "s3tables"), so plain SigV4Auth — same shape as sts/ce.
+        PortConfig(9906, "s3tables", args.region, f"s3tables.{args.region}.amazonaws.com", auth_cls=SigV4Auth),
     ]
 
     for cfg in configs:
