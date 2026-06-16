@@ -18,7 +18,7 @@ from devopshero_app.models import (
     OrganizationMembership,
     User,
 )
-from devopshero_app.services import abac
+from devopshero_app.services import abac_service
 
 
 class InviteFlowTestCase(TestCase):
@@ -37,7 +37,7 @@ class InviteFlowTestCase(TestCase):
         OrganizationMembership.objects.create(
             organization=self.org, user=self.admin, role=OrganizationMembership.Role.ADMIN,
         )
-        abac.bootstrap_organization(organization=self.org, admin_user=self.admin)
+        abac_service.bootstrap_organization(organization=self.org, admin_user=self.admin)
 
         self.member = User.objects.create_user(
             username="member@example.com",

@@ -25,7 +25,7 @@ from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_POST
 
 from devopshero_app.models import IntegrationGitProvider, Organization, Repository
-from devopshero_app.services import abac
+from devopshero_app.services import abac_service
 from devopshero_app.services.gitproviders import github_client
 
 from .. import base
@@ -87,7 +87,7 @@ def integrations_org_github(request: HttpRequest) -> HttpResponse:
 def integrations_org_github_connect(request: HttpRequest) -> HttpResponse:
     """Start GitHub OAuth flow to discover the user's available installations."""
     org = request.user.current_organization
-    if not abac.is_org_admin(organization=org, user=request.user):
+    if not abac_service.is_org_admin(organization=org, user=request.user):
         return HttpResponseForbidden("You must be an organization admin to connect GitHub.")
 
     state = secrets.token_urlsafe(32)
@@ -102,7 +102,7 @@ def integrations_org_github_connect(request: HttpRequest) -> HttpResponse:
 def integrations_org_github_callback(request: HttpRequest) -> HttpResponse:
     """Handle GitHub OAuth callback: exchange code, list installations, redirect to picker."""
     org = request.user.current_organization
-    if not abac.is_org_admin(organization=org, user=request.user):
+    if not abac_service.is_org_admin(organization=org, user=request.user):
         return HttpResponseForbidden("You must be an organization admin to connect GitHub.")
 
     if request.GET.get("installation_id"):
@@ -146,7 +146,7 @@ def integrations_org_github_callback(request: HttpRequest) -> HttpResponse:
 def integrations_org_github_select_installation(request: HttpRequest) -> HttpResponse:
     """Show the installation picker (GET) or connect the selected installation (POST)."""
     org = request.user.current_organization
-    if not abac.is_org_admin(organization=org, user=request.user):
+    if not abac_service.is_org_admin(organization=org, user=request.user):
         return HttpResponseForbidden("You must be an organization admin to connect GitHub.")
 
     if request.method == "POST":
@@ -187,7 +187,7 @@ def _handle_select_installation_post(request: HttpRequest, org: Organization) ->
 def integrations_org_github_setup(request: HttpRequest) -> HttpResponse:
     """Handle GitHub App post-installation redirect (Setup URL)."""
     org = request.user.current_organization
-    if not abac.is_org_admin(organization=org, user=request.user):
+    if not abac_service.is_org_admin(organization=org, user=request.user):
         return HttpResponseForbidden("You must be an organization admin to connect GitHub.")
 
     return _handle_setup(request=request, org=org)

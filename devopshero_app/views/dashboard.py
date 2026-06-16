@@ -4,7 +4,7 @@ from django.http import HttpRequest, HttpResponse
 from django.shortcuts import render
 
 from ..models import App, Datastore, Deployment, Workspace
-from ..services import abac
+from ..services import abac_service
 from . import base
 
 
@@ -28,7 +28,7 @@ def dashboard(request: HttpRequest) -> HttpResponse:
         .values("service_url")[:1]
     )
     visible_workspaces = Workspace.objects.filter(organization=org)
-    visible_workspaces = abac.filter_permitted_resources(
+    visible_workspaces = abac_service.filter_permitted_resources(
         org, request.user, visible_workspaces, "workspace", "workspace:view",
     )
 

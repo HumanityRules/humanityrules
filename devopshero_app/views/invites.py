@@ -25,7 +25,7 @@ from django.urls import reverse
 from django.utils import timezone
 
 from ..models import Organization, OrganizationInvite, OrganizationMembership, User
-from ..services import abac
+from ..services import abac_service
 from . import base
 
 
@@ -200,7 +200,7 @@ def accept_invite(request: HttpRequest, token) -> HttpResponse:
 def _accept_invite_for_user(invite: OrganizationInvite, user: User) -> None:
     """Materialize the membership and switch current_organization."""
     with transaction.atomic():
-        abac.materialize_membership(
+        abac_service.materialize_membership(
             organization=invite.organization, user=user, role=invite.role,
         )
         invite.accepted_at = timezone.now()

@@ -226,7 +226,7 @@ class TestPermissionsApi(TestCase):
     def test_apply_denied_returns_403(self) -> None:
         draft = self._open_draft()
         rid = draft["request_id"]
-        with patch("devopshero_app.views.permissions_api.abac.check_action", return_value=False):
+        with patch("devopshero_app.views.permissions_api.abac_service.check_action", return_value=False):
             response = self._post("/api/permissions/draft/apply", {**self._identity(), "request_id": rid}, bearer=self.raw_token)
         self.assertEqual(response.status_code, 403)
         self.assertEqual(AppPermissionRequest.objects.get(id=rid).status, AppPermissionRequest.Status.DRAFT)
@@ -234,7 +234,7 @@ class TestPermissionsApi(TestCase):
     def test_apply_approved_flips_status(self) -> None:
         draft = self._open_draft()
         rid = draft["request_id"]
-        with patch("devopshero_app.views.permissions_api.abac.check_action", return_value=True):
+        with patch("devopshero_app.views.permissions_api.abac_service.check_action", return_value=True):
             response = self._post("/api/permissions/draft/apply", {**self._identity(), "request_id": rid}, bearer=self.raw_token)
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json(), {"status": "approved_pending_apply", "request_id": rid})

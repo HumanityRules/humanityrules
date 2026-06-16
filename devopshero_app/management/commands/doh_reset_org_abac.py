@@ -16,7 +16,7 @@ Production:
 from django.core.management.base import BaseCommand, CommandError
 
 from devopshero_app.models import App, Organization, OrganizationMembership, Policy, User
-from devopshero_app.services import abac
+from devopshero_app.services import abac_service
 
 
 def _resolve_organization(org_identifier: str) -> Organization:
@@ -88,13 +88,13 @@ class Command(BaseCommand):
             f"Deleted {policy_count} policy row(s) ({deleted_total} total object(s) including cascades, if any).",
         )
 
-        abac.bootstrap_organization(organization=org, admin_user=admin_user)
+        abac_service.bootstrap_organization(organization=org, admin_user=admin_user)
         self.stdout.write(self.style.SUCCESS("Re-ran bootstrap_organization (seed policies)."))
 
         apps = App.objects.filter(organization=org).select_related("source_template")
         n_apps = apps.count()
         for app in apps:
-            abac.create_default_app_policy(app=app)
+            abac_service.create_default_app_policy(app=app)
         self.stdout.write(self.style.SUCCESS(f"Processed {n_apps} app(s) for default app policies."))
 
         self.stdout.write(

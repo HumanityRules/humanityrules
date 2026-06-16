@@ -8,7 +8,7 @@ from django.urls import reverse
 from django.views.decorators.http import require_POST
 
 import devopshero_app.models as models
-from devopshero_app.services import abac
+from devopshero_app.services import abac_service
 
 from . import abac_view_checks
 from . import base
@@ -51,7 +51,7 @@ def build_environments_context(request: HttpRequest) -> dict[str, object]:
         .select_related("aws_account")
         .order_by("aws_account__name", "name")
     )
-    environment_list = abac.filter_permitted_resources(
+    environment_list = abac_service.filter_permitted_resources(
         request.user.current_organization,
         request.user,
         environment_list,
@@ -81,7 +81,7 @@ def build_environment_detail_context(request: HttpRequest, environment: models.E
     ).select_related("app", "app__workspace").order_by("-created_at")[:20]
     tags = models.ResourceTag.objects.filter(environment=environment).order_by("key", "value")
     org = request.user.current_organization
-    can_admin = abac.check_action(org, request.user, environment, "environment", "environment:admin")
+    can_admin = abac_service.check_action(org, request.user, environment, "environment", "environment:admin")
 
     context["environment"] = environment
     context["deployments"] = deployments
@@ -89,7 +89,7 @@ def build_environment_detail_context(request: HttpRequest, environment: models.E
     context["tags_json"] = json.dumps([{"key": tag.key, "value": tag.value} for tag in tags])
     context["can_admin"] = can_admin
     context["url_base"] = f"/environments/{environment.id}/tags/"
-    context["suggested_keys"], context["suggested_values"] = abac.get_resource_tag_suggestions(org, "environment")
+    context["suggested_keys"], context["suggested_values"] = abac_service.get_resource_tag_suggestions(org, "environment")
     return context
 
 
@@ -191,7 +191,7 @@ def environment_tag_add(request: HttpRequest, environment_id: UUID) -> HttpRespo
     url_base = f"/environments/{environment.id}/tags/"
     return render(request, "devopshero_app/partials/_kv_tag_editor.html", {
         "items": tags, "can_edit": True, "url_base": url_base, "hx_target": "#environment-tags", "empty_text": "No tags",
-        **dict(zip(("suggested_keys", "suggested_values"), abac.get_resource_tag_suggestions(org, "environment"))),
+        **dict(zip(("suggested_keys", "suggested_values"), abac_service.get_resource_tag_suggestions(org, "environment"))),
     })
 
 
@@ -212,7 +212,7 @@ def environment_tag_remove(request: HttpRequest, environment_id: UUID, tag_id: U
     url_base = f"/environments/{environment.id}/tags/"
     return render(request, "devopshero_app/partials/_kv_tag_editor.html", {
         "items": tags, "can_edit": True, "url_base": url_base, "hx_target": "#environment-tags", "empty_text": "No tags",
-        **dict(zip(("suggested_keys", "suggested_values"), abac.get_resource_tag_suggestions(org, "environment"))),
+        **dict(zip(("suggested_keys", "suggested_values"), abac_service.get_resource_tag_suggestions(org, "environment"))),
     })
 
 
@@ -242,7 +242,7 @@ def environment_tags_save(request: HttpRequest, environment_id: UUID) -> HttpRes
             )
 
     tags = models.ResourceTag.objects.filter(environment=environment).order_by("key", "value")
-    suggested_keys, suggested_values = abac.get_resource_tag_suggestions(org, "environment")
+    suggested_keys, suggested_values = abac_service.get_resource_tag_suggestions(org, "environment")
     return render(request, "devopshero_app/partials/_security_tags_section.html", {
         "can_admin": True,
         "tags_title": "Environment Tags",

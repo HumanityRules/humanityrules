@@ -5,7 +5,7 @@ from django.http import HttpRequest, HttpResponse
 from django.shortcuts import render
 
 from .. import models
-from ..services import abac
+from ..services import abac_service
 from . import base
 
 logger = logging.getLogger(__name__)
@@ -24,7 +24,7 @@ def security_hub(request: HttpRequest) -> HttpResponse:
         .select_related("app", "environment", "created_by")
         .order_by("-created_at")
     )
-    visible_requests = abac.filter_visible_app_permission_requests(
+    visible_requests = abac_service.filter_visible_app_permission_requests(
         organization=organization,
         user=request.user,
         queryset=all_requests,
