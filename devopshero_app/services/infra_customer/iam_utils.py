@@ -268,10 +268,27 @@ def _access_levels_to_actions(service: str, access_levels: list[str]) -> list[st
     return sorted(actions)
 
 
+def _expand_s3_whole_bucket_resources(resources: list[str]) -> list[str]:
+    """Add the object ARN (bucket/*) for any whole-bucket S3 resource.
+
+    A bare bucket ARN (arn:aws:s3:::bucket, no key) only satisfies bucket-level
+    actions like s3:ListBucket. Object actions (s3:GetObject/PutObject) match
+    arn:aws:s3:::bucket/* instead, so a prefix-less "entire bucket" grant must
+    carry both ARNs — otherwise no object inside the bucket is reachable.
+    """
+    expanded = list(resources)
+    for arn in resources:
+        if arn.startswith("arn:aws:s3:::") and "/" not in arn[len("arn:aws:s3:::"):]:
+            object_arn = f"{arn}/*"
+            if object_arn not in expanded:
+                expanded.append(object_arn)
+    return expanded
+
+
 def _build_iam_policy_document(statements: list[dict]) -> dict:
     """Convert normalized statements to an AWS IAM policy document.
 
-    Input format:  [{"service": "s3", "access_levels": ["Read", "Write"], "resources": ["arn:aws:s3:::my-bucket/*"]}]
+    Input format:  [{"service": "s3", "access_levels": ["Read", "Write"], "resources": ["arn:aws:s3:::my-bucket"]}]
     Output format: standard IAM policy document with Version and Statement list.
     """
     iam_statements = []
@@ -286,6 +303,9 @@ def _build_iam_policy_document(statements: list[dict]) -> dict:
         actions = _access_levels_to_actions(service, access_levels)
         if not actions:
             continue
+
+        if service == "s3":
+            resources = _expand_s3_whole_bucket_resources(resources)
 
         iam_stmt = {
             "Effect": "Allow",

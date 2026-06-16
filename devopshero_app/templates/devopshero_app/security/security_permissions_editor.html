@@ -33,7 +33,7 @@
                 <div class="flex items-center justify-between">
                     <h2 class="text-sm font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">Policy statements</h2>
                     <div class="flex items-center gap-2">
-                    {# Refresh resources button #}
+                    {# Refresh AWS resources button #}
                     <button type="button"
                             class="refresh-resources-btn inline-flex items-center gap-1.5 rounded-md border border-gray-300 px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:text-gray-300 dark:hover:bg-gray-800"
                             hx-post="{% url 'security_permissions_editor_refresh_resources' app_permission_request_id=app_permission_request.id %}"
@@ -43,7 +43,7 @@
                         <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
                             <path stroke-linecap="round" stroke-linejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.992 0 3.181 3.183a8.25 8.25 0 0 0 13.803-3.7M4.031 9.865a8.25 8.25 0 0 1 13.803-3.7l3.181 3.182M21.015 4.356v4.992"/>
                         </svg>
-                        Refresh resources
+                        Refresh AWS resources
                     </button>
                     {# Add service button + picker dropdown #}
                     <div class="relative" id="service-picker-wrapper">
