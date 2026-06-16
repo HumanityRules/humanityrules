@@ -122,7 +122,10 @@ echo "---"
 # would wire the inner shell's stdin to the closed end of the base64 pipe and
 # every interactive command (`shell`, `dbshell`, anything reading stdin) would
 # die instantly with `Cannot perform start session: EOF`.
-FULL_CMD="uv run python manage.py"
+# Customer-account commands (doh_app_shell, doh_app_logs, …) assume roles via
+# DOH_AWS_* creds. The prod container has no .env file — forward from the
+# operator's laptop so Django settings pick them up inside ECS exec.
+FULL_CMD="DOH_AWS_ACCESS_KEY=$(printf '%q' "$DOH_AWS_ACCESS_KEY") DOH_AWS_SECRET_KEY=$(printf '%q' "$DOH_AWS_SECRET_KEY") uv run python manage.py"
 for arg in "$@"; do
     FULL_CMD+=" $(printf '%q' "$arg")"
 done
