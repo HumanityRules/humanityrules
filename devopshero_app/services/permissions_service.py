@@ -255,6 +255,62 @@ def refresh_resources_cache(environment, services):
     return fetched
 
 
+def _service_display_name(service: str) -> str:
+    """Resolve an IAM service prefix to its human-readable name, falling back to the prefix."""
+    try:
+        return policy_sentry_iam_data.get_service_prefix_data(service).get("service_name", service)
+    except Exception:
+        return service
+
+
+def _merge_statements_by_service(statements: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    """Merge statements sharing a service into {service: {access_levels: set, resources: list}}."""
+    grouped: dict[str, dict[str, Any]] = {}
+    for statement in statements:
+        service = statement.get("service", "")
+        if not service:
+            continue
+        entry = grouped.setdefault(service, {"access_levels": set(), "resources": []})
+        entry["access_levels"].update(statement.get("access_levels", []))
+        for resource in statement.get("resources", []):
+            if resource not in entry["resources"]:
+                entry["resources"].append(resource)
+    return grouped
+
+
+def _arn_resource_suffix(arn: str) -> str:
+    """Return the resource portion of an ARN (e.g. a bucket or queue name)."""
+    parts = arn.split(":", 5)
+    return parts[5] if len(parts) == 6 and parts[5] else arn
+
+
+def _resource_lines_for_summary(*, service: str, resources: list[str]) -> list[dict[str, str]]:
+    """Human-readable resource lines for a service's permission-request summary."""
+    if not resources or resources == ["*"]:
+        return [{"label": "Resources", "value": "All resources (*)"}]
+    if service == "s3":
+        lines: list[dict[str, str]] = []
+        for arn in resources:
+            bucket, _, prefix = _arn_resource_suffix(arn).partition("/")
+            lines.append({"label": "Bucket", "value": bucket})
+            lines.append({"label": "Prefix", "value": prefix or "(entire bucket)"})
+        return lines
+    return [{"label": "Resources", "value": ", ".join(_arn_resource_suffix(arn) for arn in resources)}]
+
+
+def summarize_statements_for_display(statements: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Build a read-only summary of permission statements for the Security hub accordion."""
+    summaries: list[dict[str, Any]] = []
+    for service, data in _merge_statements_by_service(statements).items():
+        summaries.append({
+            "service": service,
+            "display_name": _service_display_name(service),
+            "access_levels": sorted(data["access_levels"]),
+            "resource_lines": _resource_lines_for_summary(service=service, resources=data["resources"]),
+        })
+    return summaries
+
+
 def build_service_group_data(
     service: str,
     selected_levels: list[str] | set[str],
@@ -262,11 +318,7 @@ def build_service_group_data(
     available_resources: list[dict[str, str]],
 ) -> dict[str, Any]:
     """Build a render-ready dict for a single service group with access-level toggles."""
-    try:
-        service_data = policy_sentry_iam_data.get_service_prefix_data(service)
-        display_name = service_data.get("service_name", service)
-    except Exception:
-        display_name = service
+    display_name = _service_display_name(service)
 
     selected_set = set(selected_levels)
     access_levels = [{"name": level, "checked": level in selected_set} for level in ACCESS_LEVELS]
@@ -300,32 +352,13 @@ def group_statements_by_service(
     available_resources_by_service: dict[str, list[dict[str, str]]],
 ) -> list[dict[str, Any]]:
     """Merge multiple statements for the same service into one render-ready group."""
-    available = available_resources_by_service
-    grouped = {}
-    for statement in statements:
-        service_name = statement.get("service", "")
-        if not service_name:
-            continue
-        if service_name not in grouped:
-            grouped[service_name] = {
-                "access_levels": set(statement.get("access_levels", [])),
-                "resources": list(statement.get("resources", [])),
-            }
-        else:
-            grouped[service_name]["access_levels"].update(statement.get("access_levels", []))
-            existing = set(grouped[service_name]["resources"])
-            for resource in statement.get("resources", []):
-                if resource not in existing:
-                    grouped[service_name]["resources"].append(resource)
-                    existing.add(resource)
-
     service_groups = []
-    for service_name, data in grouped.items():
+    for service_name, data in _merge_statements_by_service(statements).items():
         group = build_service_group_data(
             service=service_name,
             selected_levels=data["access_levels"],
             resources=data["resources"],
-            available_resources=available.get(service_name, []),
+            available_resources=available_resources_by_service.get(service_name, []),
         )
         service_groups.append(group)
     return service_groups

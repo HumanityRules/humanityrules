@@ -374,7 +374,7 @@
         renderMetaRow('Environment', _draft.environment && _draft.environment.slug),
         renderMetaRow('AWS account', _draft.environment && _draft.environment.aws_account),
       ]),
-      elem('div', { class: 'doh-perm-sub' }, ['AWS permissions this agent requires. Apply requires approval.']),
+      elem('div', { class: 'doh-perm-sub' }, ['AWS permissions this agent requires. After applying your request, you will need to wait for approval.']),
     ]);
   }
 
@@ -388,21 +388,28 @@
       return;
     }
 
+    // Only a DRAFT is editable. Once Apply leaves DRAFT (approved/applying/
+    // applied/failed) the draft-editing components — services, add-service,
+    // rationale — would only offer dead controls (mutations 409), so we drop
+    // them and show just the status banner; for applied/failed it carries the
+    // "Start a new draft" action.
     const isDraft = _draft.status === 'draft';
     const body = elem('div', { class: 'doh-perm-body' }, [
       _errorEl,
       renderStatusBanner(),
-      elem('div', { class: 'doh-perm-section-title' }, ['Services']),
-      ...(_draft.service_groups && _draft.service_groups.length
-        ? _draft.service_groups.map(renderGroup)
-        : [elem('div', { class: 'doh-perm-empty' }, ['No services yet. Add one below.'])]),
-      isDraft ? renderAddService() : null,
-      elem('div', { class: 'doh-perm-section-title' }, ['Rationale']),
-      elem('textarea', {
-        class: 'doh-perm-description', rows: '3', disabled: !isDraft,
-        placeholder: 'Why these permissions are needed (helps the approver).',
-        oninput: (e) => onDescriptionInput(e.target.value),
-      }, [_draft.description || '']),
+      ...(isDraft ? [
+        elem('div', { class: 'doh-perm-section-title' }, ['Services']),
+        ...(_draft.service_groups && _draft.service_groups.length
+          ? _draft.service_groups.map(renderGroup)
+          : [elem('div', { class: 'doh-perm-empty' }, ['No services yet. Add one below.'])]),
+        renderAddService(),
+        elem('div', { class: 'doh-perm-section-title' }, ['Rationale']),
+        elem('textarea', {
+          class: 'doh-perm-description', rows: '3',
+          placeholder: 'Why these permissions are needed (helps the approver).',
+          oninput: (e) => onDescriptionInput(e.target.value),
+        }, [_draft.description || '']),
+      ] : []),
     ]);
     _rootEl.appendChild(elem('div', { class: 'doh-perm-page-inner' }, [renderHeader(), body]));
   }

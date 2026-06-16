@@ -6,6 +6,7 @@ from django.shortcuts import render
 
 from .. import models
 from ..services import abac_service
+from ..services import permissions_service
 from . import base
 
 logger = logging.getLogger(__name__)
@@ -33,6 +34,11 @@ def security_hub(request: HttpRequest) -> HttpResponse:
     context = base.get_app_shell_context(request=request, current_page="security")
     context["active_tab"] = "hub"
     context["permission_issue_rows"] = []
-    context["app_permission_request_rows"] = list(visible_requests[:20])
+    app_permission_request_rows = list(visible_requests[:20])
+    for app_permission_request in app_permission_request_rows:
+        app_permission_request.statement_summaries = permissions_service.summarize_statements_for_display(
+            app_permission_request.statements or [],
+        )
+    context["app_permission_request_rows"] = app_permission_request_rows
 
     return render(request=request, template_name="devopshero_app/security/security_hub.html", context=context)
