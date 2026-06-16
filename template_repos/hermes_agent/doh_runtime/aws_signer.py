@@ -1,7 +1,7 @@
 """DOH streaming SigV4 proxy — replaces aws-sigv4-proxy + haproxy.
 
 Binds one 127.0.0.1 port per supported AWS service (STS, Bedrock,
-Bedrock-runtime, Cost Explorer, S3, S3 Tables — see main()), signs each
+Bedrock-runtime, Cost Explorer, S3, S3 Tables, DynamoDB — see main()), signs each
 inbound request with the ECS task role credentials, and streams request and
 response bodies through without buffering. Started by supervisor.sh outside
 the nono sandbox so credentials never enter the Hermes process environment.
@@ -197,6 +197,9 @@ def main():
         # S3 Tables is a regional rest-json control-plane API (signing name
         # "s3tables"), so plain SigV4Auth — same shape as sts/ce.
         PortConfig(9906, "s3tables", args.region, f"s3tables.{args.region}.amazonaws.com", auth_cls=SigV4Auth),
+        # DynamoDB is a regional JSON-RPC API (signing name "dynamodb"), plain
+        # SigV4Auth — same shape as sts/ce.
+        PortConfig(9907, "dynamodb", args.region, f"dynamodb.{args.region}.amazonaws.com", auth_cls=SigV4Auth),
     ]
 
     for cfg in configs:
