@@ -169,7 +169,10 @@ main.main.showing-permissions > #mainChat { display: none !important; }
 .doh-perm-chip-x:hover { color: var(--text); }
 .doh-perm-all-resources { color: var(--muted); font-size: 12px; }
 
-.doh-perm-add-resource { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+/* Bucket and prefix share equal width and grow to fill the row, pushing the
+   Add button to the right edge. min-width:0 lets the inputs shrink so nothing
+   wraps. */
+.doh-perm-add-resource { display: flex; gap: 8px; align-items: center; }
 .doh-perm-resource-select,
 .doh-perm-s3-prefix,
 .doh-perm-add-service-search {
@@ -181,8 +184,9 @@ main.main.showing-permissions > #mainChat { display: none !important; }
   background: var(--bg);
   color: var(--text);
 }
-.doh-perm-resource-select { min-width: 240px; }
-.doh-perm-s3-prefix { min-width: 160px; }
+.doh-perm-resource-select,
+.doh-perm-s3-prefix { flex: 1 1 0; min-width: 0; }
+.doh-perm-add-resource .doh-perm-btn { flex: 0 0 auto; }
 
 .doh-perm-add-service { margin-top: 14px; }
 .doh-perm-service-picker { position: relative; max-width: 360px; }
