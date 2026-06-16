@@ -127,6 +127,9 @@
         {% endif %}
     </div>
 
+    {# Cost section — self-loads via HTMX; build_app_detail_context stays untouched #}
+    {% include "devopshero_app/apps/_app_cost_panel.html" %}
+
     {# Deployments section #}
     <div>
         <h2 class="text-lg font-semibold text-gray-900 dark:text-white mb-4">Recent Deployments</h2>

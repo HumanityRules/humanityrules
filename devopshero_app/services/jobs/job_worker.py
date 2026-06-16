@@ -12,7 +12,7 @@ import time
 
 from django.db import connections, transaction
 
-from devopshero_app.models import App, AppPermissionRequest, AppRemovalJob, Deployment, Environment
+from devopshero_app.models import App, AppPermissionRequest, AppRemovalJob, CostRefreshJob, Deployment, Environment
 
 from . import app_deployment_executor
 from . import app_deployment_teardown_executor
@@ -20,6 +20,7 @@ from . import app_remove_executor
 from . import environment_provisioning_executor
 from . import environment_teardown_executor
 from . import permissions_apply_executor
+from devopshero_app.services.cost import cost_refresh
 
 logger = logging.getLogger(__name__)
 
@@ -238,6 +239,37 @@ def _run_permissions_apply_thread(app_permission_request_id: str) -> None:
         connections.close_all()
 
 
+def _claim_pending_cost_refresh(label: str) -> CostRefreshJob | None:
+    """Atomically claim a pending cost refresh whose App matches `label`."""
+    with transaction.atomic():
+        job = (
+            CostRefreshJob.objects
+            .select_for_update(skip_locked=True)
+            .filter(status=CostRefreshJob.Status.PENDING, app__label=label)
+            .select_related("app")
+            .first()
+        )
+
+        if job:
+            job.status = CostRefreshJob.Status.RUNNING
+            job.status_message = "Claimed by worker"
+            job.save(update_fields=["status", "status_message", "updated_at"])
+            logger.info(f"Claimed cost refresh {job.id} for app '{job.app.slug}'")
+            return job
+
+    return None
+
+
+def _run_cost_refresh_thread(job_id: str) -> None:
+    """Thread target that runs a single cost refresh."""
+    try:
+        cost_refresh.run_refresh(job_id)
+    except Exception:
+        logger.exception(f"Unhandled error in cost refresh {job_id}")
+    finally:
+        connections.close_all()
+
+
 def _worker_loop() -> None:
     """Main worker loop that polls for pending jobs."""
     label = _worker_label
@@ -319,6 +351,18 @@ def _worker_loop() -> None:
                 )
                 thread.start()
                 logger.info(f"Spawned thread for permissions apply {permissions_apply.id}")
+
+            # Check for pending cost refreshes
+            cost_refresh = _claim_pending_cost_refresh(label=label)
+            if cost_refresh:
+                thread = threading.Thread(
+                    target=_run_cost_refresh_thread,
+                    args=(str(cost_refresh.id),),
+                    name=f"cost-refresh-{cost_refresh.id.hex[:8]}",
+                    daemon=True,
+                )
+                thread.start()
+                logger.info(f"Spawned thread for cost refresh {cost_refresh.id}")
 
         except Exception:
             logger.exception("Error in worker loop")

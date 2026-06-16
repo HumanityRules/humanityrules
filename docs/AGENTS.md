@@ -30,6 +30,8 @@ The main developer documentation lives in the docs/ subdirectory. **When creatin
 
 - **`docs/ui_live_update_contract.md`** — The current live-update contract for HTMX polling, chat-scoped SSE invalidation, and widget fragment refresh patterns. Open when adding or changing live-refresh behavior.
 
+- **`docs/app_cost_tracking_design.md`** — Design for per-day, per-app cost tracking on the app-detail page, starting with Bedrock invocation cost and built as a generic, pluggable cost subsystem (`services/cost/`). Records the locked decisions plus the non-obvious facts from AWS docs and a real log record (cache-token fields, inference-profile-ARN modelId, geo ×1.1 premium, ARN→app forward mapping). Open before implementing cost tracking or adding a new cost source.
+
 - **`docs/app_removal_data_cleanup_audit.md`** — Audit of what `AppRemovalJob`'s flags cover, and the gap: `IntegrationUserCredential` rows have no FK to `App` and are never cleaned up. Open when reworking app removal, debugging phantom reconnects after recreating an app, or auditing GDPR. Snapshot 2026-05-24.
 
 - **`docs/slack_integration_design.md`** — How a Hermes agent connects to Slack via Socket Mode: personal vs company-wide modes, the prefill-URL manifest onboarding flow, why the customer must create the app, and the two-manifest privacy model. Open when working on the Slack integration, the integrations-panel config dialog, or reasoning about Slack token ownership.

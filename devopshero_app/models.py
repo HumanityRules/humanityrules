@@ -1831,6 +1831,109 @@ class IntegrationUserCredential(models.Model):
 
 
 # =============================================================================
+# Cost subsystem models
+# =============================================================================
+# The logic lives in the self-contained devopshero_app/services/cost/ package; the models sit here
+# with the rest of the app's tables. See docs/app_cost_tracking_design.md.
+
+
+class AppDailyCost(models.Model):
+    """One per-day cost figure, keyed ``(app, environment, source, date, subkey)``.
+
+    Source-agnostic by design: Bedrock writes ``source="bedrock"``, ``subkey=<normalized model id>``.
+    Source-specific detail (token counts, flags) lives in ``details`` (JSON), never as columns, so the
+    table stays generic. A row with ``subkey=""`` is a presence sentinel marking that the
+    ``(env, date)`` was computed (possibly with zero cost) — it keeps gap detection unambiguous and is
+    excluded from the per-model chart. Frozen rows (``is_final``) are never re-queried.
+    """
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid7, editable=False)
+    organization = models.ForeignKey(
+        "devopshero_app.Organization", on_delete=models.CASCADE, related_name="app_daily_costs",
+    )
+    app = models.ForeignKey("devopshero_app.App", on_delete=models.CASCADE, related_name="daily_costs")
+    environment = models.ForeignKey(
+        "devopshero_app.Environment", on_delete=models.CASCADE, related_name="app_daily_costs",
+    )
+    source = models.CharField(max_length=32, help_text="Cost source key, e.g. 'bedrock'.")
+    date = models.DateField(help_text="UTC calendar day this cost is attributed to.")
+    subkey = models.CharField(
+        max_length=255,
+        help_text="Source-specific sub-dimension (Bedrock: normalized model id). '' = presence sentinel.",
+    )
+    cost_usd = models.DecimalField(max_digits=12, decimal_places=6, default=0)
+    details = models.JSONField(default=dict, help_text="Source-specific detail (token counts, flags).")
+    is_final = models.BooleanField(
+        default=False,
+        help_text="Frozen: the day has aged past the lag window and is never re-queried.",
+    )
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "App Daily Cost"
+        verbose_name_plural = "App Daily Costs"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["app", "environment", "source", "date", "subkey"],
+                name="unique_app_daily_cost",
+            ),
+        ]
+        indexes = [
+            models.Index(fields=["app", "date"]),
+            models.Index(fields=["organization", "date"]),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.app_id} {self.source}/{self.subkey} {self.date} ${self.cost_usd}"
+
+
+class CostRefreshJob(models.Model):
+    """A queued recompute of one app's costs, claimed and run by the job worker.
+
+    Mirrors the repo's other async tasks: a row in ``PENDING`` is claimed via
+    ``select_for_update(skip_locked=True)`` filtered by ``app__label``, transitioned to ``RUNNING``,
+    then to a terminal status by the executor. The HTMX cost panel polls until the latest job for the
+    app is terminal. ``result`` carries the recomputed rolling-24h figure (kept distinct from the
+    calendar-day bins).
+    """
+
+    class Status(models.TextChoices):
+        PENDING = "pending", "Pending"
+        RUNNING = "running", "Running"
+        SUCCEEDED = "succeeded", "Succeeded"
+        FAILED = "failed", "Failed"
+
+    TERMINAL_STATUSES = (Status.SUCCEEDED, Status.FAILED)
+    ACTIVE_STATUSES = (Status.PENDING, Status.RUNNING)
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid7, editable=False)
+    organization = models.ForeignKey(
+        "devopshero_app.Organization", on_delete=models.CASCADE, related_name="cost_refresh_jobs",
+    )
+    app = models.ForeignKey("devopshero_app.App", on_delete=models.CASCADE, related_name="cost_refresh_jobs")
+    status = models.CharField(max_length=20, choices=Status.choices, default=Status.PENDING)
+    status_message = models.TextField(blank=True)
+    result = models.JSONField(
+        default=dict,
+        help_text="Recompute summary, e.g. {'rolling_24h_usd': '1.23', 'rolling_24h_by_source': {...}}.",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "Cost Refresh Job"
+        verbose_name_plural = "Cost Refresh Jobs"
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["app", "status"]),
+            models.Index(fields=["status"]),
+        ]
+
+    def __str__(self) -> str:
+        return f"CostRefreshJob {self.id} app={self.app_id} {self.status}"
+
+
+# =============================================================================
 # Signals
 # =============================================================================
 
