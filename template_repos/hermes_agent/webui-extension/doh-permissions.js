@@ -229,9 +229,14 @@
       ? elem('input', { class: 'doh-perm-s3-prefix', type: 'text', placeholder: 'key prefix (optional)' })
       : null;
     const addBtn = elem('button', {
-      type: 'button', class: 'doh-perm-btn',
+      type: 'button', class: 'doh-perm-btn doh-perm-btn-primary',
+      disabled: !select.value,
       onclick: () => addResource(group.service, select.value, prefixInput ? prefixInput.value.trim() : ''),
     }, ['Add']);
+    // Add is the required final step, so it stays disabled (and visibly muted)
+    // until a resource is picked — at which point it lights up as the primary
+    // action next to the dropdown. The post-add re-render resets it.
+    select.addEventListener('change', () => { addBtn.disabled = !select.value; });
 
     return elem('div', { class: 'doh-perm-resources' }, [
       chipsRow,
@@ -471,7 +476,7 @@
 
     const sidebarPane = elem('div', { class: 'panel-view', id: 'panelPermissions' }, [
       elem('div', { class: 'panel-head' }, [elem('span', null, ['Permissions'])]),
-      elem('div', { class: 'doh-perm-side-note' }, ['IAM task-role permissions for this deployment.']),
+      elem('div', { class: 'doh-perm-side-note' }, ['AWS permissions this agent requires. After applying your request, you will need to wait for approval.']),
     ]);
     const sidebarBottom = sidebar.querySelector('.sidebar-bottom');
     if (sidebarBottom) sidebar.insertBefore(sidebarPane, sidebarBottom);
