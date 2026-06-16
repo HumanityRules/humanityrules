@@ -19,6 +19,7 @@ from aws_cdk import aws_route53 as route53
 from constructs import Construct
 
 from . import acm_utils
+from . import bedrock_logging_utils
 from . import cdk_utils
 from . import cloudformation_utils
 from . import route53_utils
@@ -343,6 +344,10 @@ class EcsClusterStack(Stack):
             retention=logs.RetentionDays.ONE_MONTH,
             removal_policy=RemovalPolicy.DESTROY,
         )
+
+        # Note: Bedrock invocation logging is configured outside CDK. It is an account+Region
+        # singleton, so its log group and IAM role are shared across environments and created
+        # idempotently via boto3 on deploy. See bedrock_logging_utils.
 
         # Shared ALB Security Group - always created
         self.alb_security_group = ec2.SecurityGroup(
@@ -753,6 +758,9 @@ def deploy(
     success = cdk_utils.deploy_cdk_stacks(cdk_app, session)
 
     if success:
+        # Account+Region-scoped and idempotent: shared across environments, reasserted each deploy.
+        # Non-fatal — the environment is usable even if logging fails to enable.
+        bedrock_logging_utils.ensure_invocation_logging(session=session)
         logger.info("Infrastructure deployment complete for environment '%(env_slug)s'", {"env_slug": env_slug})
 
     return success
@@ -773,6 +781,9 @@ def teardown(session: boto3.Session, env_slug: str) -> bool:
     prefix = f"devopshero-{env_slug}-"
 
     logger.info("Tearing down infrastructure for environment '%(env_slug)s'", {"env_slug": env_slug})
+
+    # Note: Bedrock invocation logging (account+Region-scoped) is intentionally left in place — its
+    # log group/role are shared across environments and there is no account-offboarding hook.
 
     max_rounds = 5
     for round_num in range(1, max_rounds + 1):

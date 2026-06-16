@@ -6,6 +6,7 @@ to customer VPCs via ECS, ALB, and related AWS services.
 """
 
 from . import appconfig
+from . import bedrock_logging_utils
 from . import cdk_utils
 from . import cloudformation_utils
 from . import deploy_app
@@ -19,6 +20,7 @@ from . import vpc_utils
 
 __all__ = [
     "appconfig",
+    "bedrock_logging_utils",
     "cdk_utils",
     "cloudformation_utils",
     "deploy_app",
