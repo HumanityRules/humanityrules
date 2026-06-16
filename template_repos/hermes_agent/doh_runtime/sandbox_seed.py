@@ -21,6 +21,8 @@ AWS_STS_PORT = 9901
 AWS_BEDROCK_PORT = 9902
 AWS_BEDROCK_RUNTIME_PORT = 9903
 AWS_CE_PORT = 9904
+AWS_S3_PORT = 9905
+AWS_S3TABLES_PORT = 9906
 
 AUTH_MARKER_SENTINEL = "DOH_PLACEHOLDER"
 CODEX_PROVIDER = "openai-codex"
@@ -56,6 +58,12 @@ def write_child_aws_config(workspace: Path, aws_region: str) -> None:
                 "[default]",
                 f"region = {aws_region}",
                 "services = hermes-nono-endpoints",
+                # S3 must be path-style: a virtual-host bucket prefix
+                # (bucket.127.0.0.1) can't reach the loopback signer. botocore
+                # already forces path-style for IP endpoints; pin it so a future
+                # default change can't silently break the proxy.
+                "s3 =",
+                "  addressing_style = path",
                 "",
                 "[services hermes-nono-endpoints]",
                 "sts =",
@@ -69,6 +77,12 @@ def write_child_aws_config(workspace: Path, aws_region: str) -> None:
                 "",
                 "cost_explorer =",
                 f"  endpoint_url = http://127.0.0.1:{AWS_CE_PORT}",
+                "",
+                "s3 =",
+                f"  endpoint_url = http://127.0.0.1:{AWS_S3_PORT}",
+                "",
+                "s3tables =",
+                f"  endpoint_url = http://127.0.0.1:{AWS_S3TABLES_PORT}",
                 "",
             ]
         ),

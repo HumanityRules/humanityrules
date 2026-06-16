@@ -22,6 +22,8 @@ Supported signer services:
 - `bedrock` -> `127.0.0.1:9902` -> `bedrock.${AWS_DEFAULT_REGION}.amazonaws.com`
 - `bedrock_runtime` -> `127.0.0.1:9903` -> `bedrock-runtime.${AWS_DEFAULT_REGION}.amazonaws.com` signed as `bedrock`
 - `cost_explorer` -> `127.0.0.1:9904` -> `ce.us-east-1.amazonaws.com`
+- `s3` -> `127.0.0.1:9905` -> `s3.${AWS_DEFAULT_REGION}.amazonaws.com` (path-style; buckets must live in the deploy region — cross-region 301s are not followed)
+- `s3tables` -> `127.0.0.1:9906` -> `s3tables.${AWS_DEFAULT_REGION}.amazonaws.com`
 
 Learned failure pattern: `aws sts get-caller-identity` and Bedrock succeeded
 while services outside this signer list returned
