@@ -171,6 +171,18 @@ urlpatterns = [
     path("api/integrations/merge/disconnect", views.integrations_merge_disconnect, name="integrations_merge_disconnect"),
     path("api/integrations/merge/mcp", views.integrations_merge_mcp, name="integrations_merge_mcp"),
 
+    #  - Permissions editor (self-referential): the env-resident doh_broker relays the Hermes WebUI's
+    #    /permissions/* calls here with the env bearer. Target (app, environment) is resolved from the
+    #    bearer + owner_username/app_slug body, never a parameter. See docs/permissions_broker_design.md.
+    path("api/permissions/draft", views.permissions_draft, name="permissions_draft"),
+    path("api/permissions/draft/statement", views.permissions_statement, name="permissions_statement"),
+    path("api/permissions/draft/description", views.permissions_description, name="permissions_description"),
+    path("api/permissions/draft/cancel", views.permissions_cancel, name="permissions_cancel"),
+    path("api/permissions/draft/apply", views.permissions_apply, name="permissions_apply"),
+    path("api/permissions/draft/refresh-resources", views.permissions_refresh_resources, name="permissions_refresh_resources"),
+    path("api/permissions/resources", views.permissions_resources, name="permissions_resources"),
+    path("api/permissions/service-catalog", views.permissions_service_catalog, name="permissions_service_catalog"),
+
     # Chat / Agent
     path("chat/app_deploy/<slug:workspace_slug>/<str:repo_owner>/<str:repo_name>/", views.chat_app_deploy, name="chat_app_deploy_with_owner"),
     path("chat/app_deploy/<slug:workspace_slug>/<str:repo_name>/", views.chat_app_deploy, name="chat_app_deploy"),

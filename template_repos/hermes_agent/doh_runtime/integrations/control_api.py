@@ -1,9 +1,9 @@
-"""Browser-facing integrations control API (127.0.0.1:9951).
+"""Browser-facing control API (127.0.0.1:9951).
 
-Starlette app mounted by the integrations broker and reached same-origin from
-the WebUI via Caddy's /__doh_broker/* route. Unifies TLS-intercept provider
-management, MCP-aggregator OAuth routes, and Merge passthroughs under one URL
-space.
+Starlette app mounted by `doh_broker` and reached same-origin from the WebUI
+via Caddy's /__doh_broker/* route. Unifies TLS-intercept provider management,
+MCP-aggregator OAuth routes, and Merge passthroughs under /integrations, and the
+self-referential permissions editor under /permissions.
 
 Pure transport: every route parses the request, delegates to
 `credentials_service` (state changes) or reads cached status from the
@@ -22,6 +22,7 @@ from credentials_service import CredentialsService
 import device_flow
 from doh_client import DohClient
 from mcp_aggregator import MCPAggregator
+import permissions_control
 import tls_intercept
 
 logger = logging.getLogger("control_api")
@@ -143,5 +144,6 @@ def build_control_app(
         Route(path=f"{tls}/device/status", endpoint=device_status_route, methods=["GET"]),
         Route(path=f"{tls}/device/cancel", endpoint=device_cancel_route, methods=["POST"]),
         *mcp_aggregator.routes(prefix="/integrations"),
+        *permissions_control.routes(prefix="/permissions", doh_client=doh_client),
     ]
     return Starlette(routes=routes)

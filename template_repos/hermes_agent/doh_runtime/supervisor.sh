@@ -104,20 +104,20 @@ start_aws_signer() {
     wait_for_port "$AWS_CE_PORT"              "$AWS_SIGNER_PID" "aws-signer"
 }
 
-start_integrations_broker() {
+start_doh_broker() {
     # Only when deploy_app.py's env-bearer overlay supplied the required
     # identity. Missing any of them = not a personal-assistant deploy (e.g.
     # local dev), so skip silently — but nono-managed clients will then
     # call Google without HTTPS_PROXY set and get ENOTCONN, which is the
     # expected local-dev behavior.
     if [ -z "${DOH_ENV_BEARER:-}" ] || [ -z "${DOH_OWNER_USERNAME:-}" ] || [ -z "${DOH_APP_SLUG:-}" ] || [ -z "${DOH_CONTROL_PLANE_URL:-}" ]; then
-        echo "[supervisor] DOH_ENV_BEARER / DOH_OWNER_USERNAME / DOH_APP_SLUG / DOH_CONTROL_PLANE_URL not set; skipping integrations broker"
+        echo "[supervisor] DOH_ENV_BEARER / DOH_OWNER_USERNAME / DOH_APP_SLUG / DOH_CONTROL_PLANE_URL not set; skipping doh broker"
         return
     fi
     mkdir -p "$INTEGRATIONS_BROKER_CA_DIR" "$INTEGRATIONS_BROKER_PRIVATE_DIR"
     chmod 700 "$INTEGRATIONS_BROKER_PRIVATE_DIR"
     PYTHONPATH="${DOH_RUNTIME_DIR}/integrations" \
-    "$HERMES_WEBUI_PYTHON" "${DOH_RUNTIME_DIR}/integrations/integrations_broker.py" \
+    "$HERMES_WEBUI_PYTHON" "${DOH_RUNTIME_DIR}/integrations/doh_broker.py" \
         --proxy-port "$INTEGRATIONS_BROKER_PROXY_PORT" \
         --control-port "$INTEGRATIONS_BROKER_CONTROL_PORT" \
         --mcp-port "$MCP_AGGREGATOR_PORT" \
@@ -254,7 +254,7 @@ main() {
     # root so the LLM can never read their /proc/<pid>/environ.
     render_hermes_config
     start_aws_signer
-    start_integrations_broker
+    start_doh_broker
     ensure_workspace_ownership
 
     # === Stage 2: launch the sandbox. supervisor stays root (it owns the

@@ -16,7 +16,7 @@ from claude_agent_sdk import tool, create_sdk_mcp_server
 from django.conf import settings
 
 from devopshero_app.models import AWSAccount, AppPermissionRequest, Conversation, Repository, Workspace
-from devopshero_app.services import permissions as permissions_service
+from devopshero_app.services import permissions_service
 from devopshero_app.services.gitproviders import repo_service
 
 from .tools import (

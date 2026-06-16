@@ -1,0 +1,263 @@
+"""Tests for the bearer-auth /api/permissions/* endpoints (the Hermes editor).
+
+The env-resident doh_broker relays the WebUI's calls here. These exercise the
+JSON twin of the session-auth HTML editor: target resolution from the bearer +
+identity, statement mutation, the draft/apply lifecycle, and ABAC on Apply.
+AWS-touching iam_utils calls are mocked so the suite is hermetic.
+"""
+
+import hashlib
+import json
+from unittest.mock import patch
+
+from django.test import TestCase
+
+from devopshero_app.models import (
+    AWSAccount,
+    App,
+    AppPermissionRequest,
+    AppPermissions,
+    Environment,
+    EnvironmentBearerToken,
+    Organization,
+    OrganizationMembership,
+    Repository,
+    ResourceTag,
+    User,
+    Workspace,
+)
+
+
+def _hash(raw: str) -> str:
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+
+class TestPermissionsApi(TestCase):
+
+    def setUp(self) -> None:
+        self.org = Organization.objects.create(
+            name="Perm Org",
+            slug="perm-org",
+            auth_provider=Organization.AuthProvider.OIDC,
+            oidc_issuer_url="https://idp.example.com",
+            oidc_client_id="cid",
+            oidc_client_secret="csec",
+        )
+        self.aws_account = AWSAccount.objects.create(
+            organization=self.org, name="Prod", aws_account_id="111122223333",
+        )
+        self.env = Environment.objects.create(
+            aws_account=self.aws_account,
+            name="Default",
+            slug="default",
+            aws_region="us-east-1",
+            shared_alb_hosted_zone="dev.example.com",
+        )
+        self.raw_token = "test-bearer"
+        EnvironmentBearerToken.objects.create(environment=self.env, token_hash=_hash(self.raw_token))
+        self.user = User.objects.create_user(
+            username="vmendi", email="vmendi@example.com", password="pw", current_organization=self.org,
+        )
+        OrganizationMembership.objects.create(
+            user=self.user, organization=self.org, role=OrganizationMembership.Role.MEMBER,
+        )
+        self.repository = Repository.objects.create(
+            organization=self.org, provider="github", name="hermes",
+            full_name="org/hermes", default_branch="main", clone_url="https://github.com/org/hermes.git",
+        )
+        self.workspace = Workspace.objects.create(organization=self.org, name="Engineering", slug="engineering")
+        self.app = self._make_app(slug="hermes", name="Hermes", owner_username=self.user.username)
+
+        # No AWS in tests: empty policy baseline and empty resource listings.
+        read_patch = patch(
+            "devopshero_app.services.permissions_service.iam_utils.read_app_permissions_policy", return_value=[],
+        )
+        list_patch = patch(
+            "devopshero_app.services.permissions_service.iam_utils.list_resources_for_services", return_value={},
+        )
+        read_patch.start()
+        list_patch.start()
+        self.addCleanup(read_patch.stop)
+        self.addCleanup(list_patch.stop)
+
+    def _make_app(self, slug: str, name: str, owner_username: str | None) -> App:
+        app = App.objects.create(
+            organization=self.org, workspace=self.workspace, repository=self.repository,
+            name=name, slug=slug, app_type=App.AppType.WEB,
+            build_strategy=App.BuildStrategy.DOCKERFILE, branch="main",
+            container_port=8000, health_check_path="/health",
+        )
+        if owner_username is not None:
+            ResourceTag.objects.create(
+                organization=self.org, resource_type=ResourceTag.ResourceType.APP,
+                app=app, key="owner", value=owner_username,
+            )
+        return app
+
+    def _post(self, path: str, payload: dict, bearer: str | None) -> object:
+        headers = {}
+        if bearer is not None:
+            headers["HTTP_AUTHORIZATION"] = f"Bearer {bearer}"
+        return self.client.post(path, data=json.dumps(payload), content_type="application/json", **headers)
+
+    def _identity(self) -> dict:
+        return {"owner_username": "vmendi", "app_slug": "hermes"}
+
+    def _open_draft(self) -> dict:
+        response = self._post("/api/permissions/draft", self._identity(), bearer=self.raw_token)
+        self.assertEqual(response.status_code, 200)
+        return response.json()
+
+    # ── Auth + target resolution ────────────────────────────────────────────
+
+    def test_missing_bearer_returns_401(self) -> None:
+        response = self._post("/api/permissions/draft", self._identity(), bearer=None)
+        self.assertEqual(response.status_code, 401)
+
+    def test_invalid_bearer_returns_401(self) -> None:
+        response = self._post("/api/permissions/draft", self._identity(), bearer="nope")
+        self.assertEqual(response.status_code, 401)
+
+    def test_unowned_app_returns_403(self) -> None:
+        self._make_app(slug="other", name="Other", owner_username=None)
+        response = self._post(
+            "/api/permissions/draft", {"owner_username": "vmendi", "app_slug": "other"}, bearer=self.raw_token,
+        )
+        self.assertEqual(response.status_code, 403)
+
+    # ── Draft open + poll ─────────────────────────────────────────────────────
+
+    def test_draft_resolve_creates_draft(self) -> None:
+        draft = self._open_draft()
+        self.assertEqual(draft["status"], "draft")
+        self.assertFalse(draft["has_changes"])
+        self.assertEqual(draft["service_groups"], [])
+        self.assertEqual(draft["app"], {"slug": "hermes", "name": "Hermes"})
+        self.assertEqual(draft["environment"]["slug"], "default")
+        self.assertEqual(draft["environment"]["aws_account"], "111122223333")
+        self.assertEqual(AppPermissionRequest.objects.filter(app=self.app, environment=self.env).count(), 1)
+
+    def test_draft_poll_by_request_id_returns_live_status(self) -> None:
+        draft = self._open_draft()
+        apr = AppPermissionRequest.objects.get(id=draft["request_id"])
+        apr.status = AppPermissionRequest.Status.APPLYING
+        apr.save(update_fields=["status"])
+        response = self._post(
+            "/api/permissions/draft", {**self._identity(), "request_id": draft["request_id"]}, bearer=self.raw_token,
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["status"], "applying")
+        # A bare resolve must NOT spawn a second request behind the in-flight one.
+        self.assertEqual(AppPermissionRequest.objects.filter(app=self.app, environment=self.env).count(), 1)
+
+    def test_draft_poll_unknown_request_id_returns_404(self) -> None:
+        response = self._post(
+            "/api/permissions/draft",
+            {**self._identity(), "request_id": "00000000-0000-0000-0000-000000000000"},
+            bearer=self.raw_token,
+        )
+        self.assertEqual(response.status_code, 404)
+
+    # ── Statement mutation ─────────────────────────────────────────────────────
+
+    def test_add_service_then_level(self) -> None:
+        draft = self._open_draft()
+        rid = draft["request_id"]
+        r1 = self._post("/api/permissions/draft/statement", {**self._identity(), "request_id": rid, "action": "add_service", "service": "s3"}, bearer=self.raw_token)
+        self.assertEqual(r1.status_code, 200)
+        groups = r1.json()["service_groups"]
+        self.assertEqual([g["service"] for g in groups], ["s3"])
+
+        r2 = self._post("/api/permissions/draft/statement", {**self._identity(), "request_id": rid, "action": "add_level", "service": "s3", "level": "Read"}, bearer=self.raw_token)
+        self.assertEqual(r2.status_code, 200)
+        body = r2.json()
+        self.assertTrue(body["has_changes"])
+        s3 = next(g for g in body["service_groups"] if g["service"] == "s3")
+        read = next(l for l in s3["access_levels"] if l["name"] == "Read")
+        self.assertTrue(read["checked"])
+
+    def test_statement_on_non_draft_returns_409(self) -> None:
+        draft = self._open_draft()
+        rid = draft["request_id"]
+        apr = AppPermissionRequest.objects.get(id=rid)
+        apr.status = AppPermissionRequest.Status.APPLIED
+        apr.save(update_fields=["status"])
+        response = self._post(
+            "/api/permissions/draft/statement",
+            {**self._identity(), "request_id": rid, "action": "add_service", "service": "s3"},
+            bearer=self.raw_token,
+        )
+        self.assertEqual(response.status_code, 409)
+
+    # ── Description / cancel ───────────────────────────────────────────────────
+
+    def test_description_updates(self) -> None:
+        draft = self._open_draft()
+        rid = draft["request_id"]
+        response = self._post(
+            "/api/permissions/draft/description",
+            {**self._identity(), "request_id": rid, "description": "needs s3 read"},
+            bearer=self.raw_token,
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json(), {"ok": True})
+        self.assertEqual(AppPermissionRequest.objects.get(id=rid).description, "needs s3 read")
+
+    def test_cancel_resets_to_baseline(self) -> None:
+        AppPermissions.objects.create(
+            app=self.app, environment=self.env,
+            statements=[{"service": "sqs", "effect": "Allow", "access_levels": ["Read"], "resources": []}],
+        )
+        draft = self._open_draft()
+        rid = draft["request_id"]
+        apr = AppPermissionRequest.objects.get(id=rid)
+        apr.statements = [{"service": "s3", "effect": "Allow", "access_levels": ["Write"], "resources": []}]
+        apr.save(update_fields=["statements"])
+
+        response = self._post("/api/permissions/draft/cancel", {**self._identity(), "request_id": rid}, bearer=self.raw_token)
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(response.json()["has_changes"])
+        self.assertEqual(
+            [g["service"] for g in response.json()["service_groups"]], ["sqs"],
+        )
+
+    # ── Apply (ABAC) ───────────────────────────────────────────────────────────
+
+    def test_apply_denied_returns_403(self) -> None:
+        draft = self._open_draft()
+        rid = draft["request_id"]
+        with patch("devopshero_app.views.permissions_api.abac.check_action", return_value=False):
+            response = self._post("/api/permissions/draft/apply", {**self._identity(), "request_id": rid}, bearer=self.raw_token)
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(AppPermissionRequest.objects.get(id=rid).status, AppPermissionRequest.Status.DRAFT)
+
+    def test_apply_approved_flips_status(self) -> None:
+        draft = self._open_draft()
+        rid = draft["request_id"]
+        with patch("devopshero_app.views.permissions_api.abac.check_action", return_value=True):
+            response = self._post("/api/permissions/draft/apply", {**self._identity(), "request_id": rid}, bearer=self.raw_token)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json(), {"status": "approved_pending_apply", "request_id": rid})
+        self.assertEqual(
+            AppPermissionRequest.objects.get(id=rid).status, AppPermissionRequest.Status.APPROVED_PENDING_APPLY,
+        )
+
+    # ── Catalog / resources ────────────────────────────────────────────────────
+
+    def test_service_catalog(self) -> None:
+        response = self._post("/api/permissions/service-catalog", self._identity(), bearer=self.raw_token)
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertIn("Read", body["access_levels"])
+        self.assertTrue(any(s["value"] == "s3" and s["is_curated"] for s in body["services"]))
+
+    def test_resources_requires_service(self) -> None:
+        response = self._post("/api/permissions/resources", self._identity(), bearer=self.raw_token)
+        self.assertEqual(response.status_code, 400)
+
+    def test_resources_returns_available(self) -> None:
+        response = self._post(
+            "/api/permissions/resources", {**self._identity(), "service": "s3"}, bearer=self.raw_token,
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json(), {"service": "s3", "available_resources": []})

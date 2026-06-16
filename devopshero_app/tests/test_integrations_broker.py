@@ -1,4 +1,4 @@
-"""Tests for integrations_broker.py.
+"""Tests for doh_broker.py.
 
 The broker runs inside the customer-env Hermes container (not Django), but
 its correctness is load-bearing for the WebUI extension's Integrations pane
@@ -54,7 +54,7 @@ def _install_mcp_aggregator_stub_if_needed() -> None:
 
 
 def _load_broker_module() -> types.ModuleType:
-    """Load template_repos/hermes_agent/doh_runtime/integrations/integrations_broker.py as a module.
+    """Load template_repos/hermes_agent/doh_runtime/integrations/doh_broker.py as a module.
 
     The broker imports its sibling modules by bare name. When supervisor.sh runs
     the broker in production, PYTHONPATH includes /opt/doh/runtime/integrations.
@@ -64,7 +64,7 @@ def _load_broker_module() -> types.ModuleType:
     """
     repo_root = pathlib.Path(__file__).resolve().parents[2]
     integrations_dir = repo_root / "template_repos" / "hermes_agent" / "doh_runtime" / "integrations"
-    script_path = integrations_dir / "integrations_broker.py"
+    script_path = integrations_dir / "doh_broker.py"
     if str(integrations_dir) not in sys.path:
         sys.path.insert(0, str(integrations_dir))
     _install_mcp_aggregator_stub_if_needed()
@@ -1718,44 +1718,25 @@ class TestRefreshAllBatchedApply(unittest.IsolatedAsyncioTestCase):
             config={}, metadata={},
         )
 
+        # refresh_all() batches every configured provider, so the mock must
+        # return a result for each one. Default every slug to ABSENT, then
+        # override the three the test actually exercises. Building from the
+        # registry keeps this robust when new TLS-intercept providers are added.
         batched_results = {
-            "google": broker.tls_intercept.RefreshResult(
-                outcome=broker.tls_intercept.REFRESH_OUTCOME_HAS_TOKEN,
-                secrets={"access_token": "G"}, expires_in=3600, config={}, metadata={},
-            ),
-            "github": broker.tls_intercept.RefreshResult(
-                outcome=broker.tls_intercept.REFRESH_OUTCOME_TRANSIENT,
-                secrets=None, expires_in=None, config={}, metadata={},
-            ),
-            "telegram": broker.tls_intercept.RefreshResult(
+            slug: broker.tls_intercept.RefreshResult(
                 outcome=broker.tls_intercept.REFRESH_OUTCOME_ABSENT,
                 secrets=None, expires_in=None, config={}, metadata={},
-            ),
-            "slack": broker.tls_intercept.RefreshResult(
-                outcome=broker.tls_intercept.REFRESH_OUTCOME_ABSENT,
-                secrets=None, expires_in=None, config={}, metadata={},
-            ),
-            "openai-codex": broker.tls_intercept.RefreshResult(
-                outcome=broker.tls_intercept.REFRESH_OUTCOME_ABSENT,
-                secrets=None, expires_in=None, config={}, metadata={},
-            ),
-            "openrouter": broker.tls_intercept.RefreshResult(
-                outcome=broker.tls_intercept.REFRESH_OUTCOME_ABSENT,
-                secrets=None, expires_in=None, config={}, metadata={},
-            ),
-            "nous": broker.tls_intercept.RefreshResult(
-                outcome=broker.tls_intercept.REFRESH_OUTCOME_ABSENT,
-                secrets=None, expires_in=None, config={}, metadata={},
-            ),
-            "openai-api": broker.tls_intercept.RefreshResult(
-                outcome=broker.tls_intercept.REFRESH_OUTCOME_ABSENT,
-                secrets=None, expires_in=None, config={}, metadata={},
-            ),
-            "anthropic": broker.tls_intercept.RefreshResult(
-                outcome=broker.tls_intercept.REFRESH_OUTCOME_ABSENT,
-                secrets=None, expires_in=None, config={}, metadata={},
-            ),
+            )
+            for slug in tls_providers.TLS_INTERCEPT_PROVIDERS
         }
+        batched_results["google"] = broker.tls_intercept.RefreshResult(
+            outcome=broker.tls_intercept.REFRESH_OUTCOME_HAS_TOKEN,
+            secrets={"access_token": "G"}, expires_in=3600, config={}, metadata={},
+        )
+        batched_results["github"] = broker.tls_intercept.RefreshResult(
+            outcome=broker.tls_intercept.REFRESH_OUTCOME_TRANSIENT,
+            secrets=None, expires_in=None, config={}, metadata={},
+        )
         with patch.object(
             broker.tls_intercept,
             "fetch_provider_tokens_batch",

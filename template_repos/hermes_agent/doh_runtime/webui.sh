@@ -35,8 +35,8 @@ export API_SERVER_KEY=doh-loopback-gateway-key
 # Point the WebUI at our extension bundle. EXTENSIONS.md-compliant same-origin
 # URLs — the upstream static handler serves $HERMES_WEBUI_EXTENSION_DIR under
 # /extensions/.
-export HERMES_WEBUI_EXTENSION_SCRIPT_URLS="/extensions/doh-integrations.js,/extensions/doh-webapps.js"
-export HERMES_WEBUI_EXTENSION_STYLESHEET_URLS="/extensions/doh-integrations.css,/extensions/doh-webapps.css"
+export HERMES_WEBUI_EXTENSION_SCRIPT_URLS="/extensions/doh-integrations.js,/extensions/doh-webapps.js,/extensions/doh-permissions.js"
+export HERMES_WEBUI_EXTENSION_STYLESHEET_URLS="/extensions/doh-integrations.css,/extensions/doh-webapps.css,/extensions/doh-permissions.css"
 
 CADDY_PORT=8787
 SYSTEM_PROCESS_COMPOSE_PORT=9956

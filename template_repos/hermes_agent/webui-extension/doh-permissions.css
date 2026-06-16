@@ -1,0 +1,239 @@
+/* DOH Permissions editor — full-width rail destination.
+   See doh-permissions.js. Colors use the WebUI's CSS variables. */
+
+/* Plug into upstream's main-view switching contract:
+   - hide #mainPermissions by default
+   - reveal it when <main> has `showing-permissions`
+   - force-hide #mainChat in the same state (upstream default-shows it). */
+main.main > #mainPermissions { display: none; }
+main.main.showing-permissions > #mainPermissions { display: flex; }
+main.main.showing-permissions > #mainChat { display: none !important; }
+
+.doh-perm-page {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  background: var(--bg);
+}
+
+.doh-perm-root { display: block; }
+
+.doh-perm-page-inner {
+  max-width: 920px;
+  margin: 0 auto;
+  padding: 28px 24px 80px;
+}
+
+/* Header */
+.doh-perm-head {
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 16px;
+  margin-bottom: 20px;
+}
+.doh-perm-head-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+.doh-perm-title { font-size: 20px; font-weight: 600; color: var(--text); }
+.doh-perm-meta {
+  margin-top: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.doh-perm-meta-row {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  font-size: 13px;
+}
+.doh-perm-meta-label {
+  flex: 0 0 96px;
+  color: var(--muted);
+}
+.doh-perm-meta-value { color: var(--text); }
+.doh-perm-sub { margin-top: 8px; color: var(--muted); font-size: 12px; }
+.doh-perm-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+
+/* Buttons */
+.doh-perm-btn {
+  font: inherit;
+  font-size: 13px;
+  padding: 6px 12px;
+  border-radius: 6px;
+  border: 1px solid var(--border2);
+  background: var(--code-bg);
+  color: var(--text);
+  cursor: pointer;
+}
+.doh-perm-btn:hover { border-color: var(--accent); }
+.doh-perm-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.doh-perm-btn-primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+.doh-perm-btn-ghost { background: transparent; }
+
+/* Inline error + status banners */
+.doh-perm-error {
+  margin-bottom: 14px;
+  padding: 10px 12px;
+  border-radius: 6px;
+  border: 1px solid #b4544e;
+  background: rgba(180, 84, 78, 0.12);
+  color: var(--text);
+  font-size: 13px;
+}
+.doh-perm-banner {
+  margin-bottom: 18px;
+  padding: 12px 14px;
+  border-radius: 8px;
+  border: 1px solid var(--border2);
+  background: var(--code-bg);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  align-items: flex-start;
+}
+.doh-perm-banner-label { font-weight: 600; color: var(--text); }
+.doh-perm-banner-msg { color: var(--muted); font-size: 12px; white-space: pre-wrap; }
+.doh-perm-banner-applied { border-color: #4e9a6a; background: rgba(78, 154, 106, 0.12); }
+.doh-perm-banner-failed { border-color: #b4544e; background: rgba(180, 84, 78, 0.12); }
+
+.doh-perm-section-title {
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--muted);
+  margin: 22px 0 10px;
+}
+
+.doh-perm-description {
+  width: 100%;
+  box-sizing: border-box;
+  font: inherit;
+  font-size: 13px;
+  padding: 10px;
+  border-radius: 6px;
+  border: 1px solid var(--border2);
+  background: var(--code-bg);
+  color: var(--text);
+  resize: vertical;
+}
+
+/* Service group */
+.doh-perm-group {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 14px 16px;
+  margin-bottom: 12px;
+  background: var(--code-bg);
+}
+.doh-perm-group-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+.doh-perm-service { display: flex; align-items: baseline; gap: 8px; }
+.doh-perm-service-name { font-weight: 600; color: var(--text); }
+.doh-perm-service-prefix { color: var(--muted); font-size: 12px; }
+
+.doh-perm-levels { display: flex; flex-wrap: wrap; gap: 14px; margin-bottom: 12px; }
+.doh-perm-level { display: flex; align-items: center; gap: 6px; color: var(--text); font-size: 13px; cursor: pointer; }
+
+/* Resources */
+.doh-perm-resources { display: flex; flex-direction: column; gap: 8px; }
+.doh-perm-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.doh-perm-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 8px;
+  border-radius: 12px;
+  border: 1px solid var(--border2);
+  background: var(--bg);
+  color: var(--text);
+  font-size: 12px;
+  font-family: var(--mono, monospace);
+}
+.doh-perm-chip-x {
+  border: none;
+  background: none;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+  padding: 0;
+}
+.doh-perm-chip-x:hover { color: var(--text); }
+.doh-perm-all-resources { color: var(--muted); font-size: 12px; }
+
+.doh-perm-add-resource { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.doh-perm-resource-select,
+.doh-perm-s3-prefix,
+.doh-perm-add-service-search {
+  font: inherit;
+  font-size: 13px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  border: 1px solid var(--border2);
+  background: var(--bg);
+  color: var(--text);
+}
+.doh-perm-resource-select { min-width: 240px; }
+.doh-perm-s3-prefix { min-width: 160px; }
+
+.doh-perm-add-service { margin-top: 14px; }
+.doh-perm-service-picker { position: relative; max-width: 360px; }
+.doh-perm-add-service-search { width: 100%; box-sizing: border-box; }
+.doh-perm-picker-list {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: calc(100% + 4px);
+  max-height: 280px;
+  overflow-y: auto;
+  border: 1px solid var(--border2);
+  border-radius: 6px;
+  background: var(--bg);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
+  z-index: 20;
+  padding: 4px 0;
+}
+.doh-perm-picker-section {
+  padding: 6px 10px 4px;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--muted);
+}
+.doh-perm-picker-divider {
+  margin: 4px 8px;
+  border-top: 1px solid var(--border);
+}
+.doh-perm-picker-item {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  border: none;
+  background: none;
+  text-align: left;
+  font: inherit;
+  font-size: 13px;
+  padding: 6px 10px;
+  color: var(--text);
+  cursor: pointer;
+}
+.doh-perm-picker-item:hover { background: var(--code-bg); }
+.doh-perm-picker-empty {
+  padding: 10px;
+  text-align: center;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.doh-perm-empty { color: var(--muted); font-size: 13px; padding: 8px 0; }
+
+/* Sidebar pane (visible while Permissions owns the main view) */
+.doh-perm-side-note { padding: 12px 14px; color: var(--muted); font-size: 12px; }
