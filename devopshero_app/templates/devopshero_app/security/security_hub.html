@@ -77,20 +77,18 @@
                                     <p class="text-xs text-gray-600 dark:text-gray-300 whitespace-pre-line">{{ pr.description }}</p>
                                 </div>
                                 {% endif %}
-                                {% for stmt in pr.statements %}
-                                {% if stmt.service %}
+                                {% for summary in pr.statement_summaries %}
                                 <div class="space-y-1 text-xs">
-                                    <p><span class="text-gray-400 dark:text-gray-500">Service:</span> <span class="font-medium text-gray-900 dark:text-white">{{ stmt.service }}</span></p>
-                                    {% if stmt.resources %}
-                                    <p><span class="text-gray-400 dark:text-gray-500">Resources:</span> <span class="text-gray-600 dark:text-gray-300 font-mono">{{ stmt.resources|join:", " }}</span></p>
-                                    {% endif %}
-                                    {% if stmt.access_levels %}
-                                    <p><span class="text-gray-400 dark:text-gray-500">Access levels:</span> <span class="text-indigo-600 dark:text-indigo-400">{{ stmt.access_levels|join:", " }}</span></p>
+                                    <p><span class="text-gray-400 dark:text-gray-500">Service:</span> <span class="font-medium text-gray-900 dark:text-white">{{ summary.display_name }}</span> <span class="text-gray-400 dark:text-gray-500">({{ summary.service }})</span></p>
+                                    {% for line in summary.resource_lines %}
+                                    <p><span class="text-gray-400 dark:text-gray-500">{{ line.label }}:</span> <span class="text-gray-600 dark:text-gray-300 font-mono">{{ line.value }}</span></p>
+                                    {% endfor %}
+                                    {% if summary.access_levels %}
+                                    <p><span class="text-gray-400 dark:text-gray-500">Access levels:</span> <span class="text-indigo-600 dark:text-indigo-400">{{ summary.access_levels|join:", " }}</span></p>
                                     {% endif %}
                                 </div>
-                                {% endif %}
                                 {% endfor %}
-                                {% if not pr.statements %}
+                                {% if not pr.statement_summaries %}
                                 <p class="text-xs text-gray-400 dark:text-gray-500 italic">No statements (policy cleared)</p>
                                 {% endif %}
                             </div>
