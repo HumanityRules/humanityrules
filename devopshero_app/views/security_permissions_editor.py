@@ -1,6 +1,5 @@
 import json
 import logging
-from typing import Any
 from urllib.parse import urlencode
 from uuid import UUID
 
@@ -8,125 +7,14 @@ from django.contrib.auth.decorators import login_required
 from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, render
 from django.views.decorators.http import require_POST
-from policy_sentry.shared import iam_data as policy_sentry_iam_data
 
 from .. import models
 from ..services.agent import agent_service
-from ..services import permissions as permissions_service
+from ..services import permissions_service
 from . import abac_view_checks
 from . import base
 
 logger = logging.getLogger(__name__)
-
-
-CURATED_SERVICES = {"s3", "sqs", "dynamodb", "secretsmanager", "kms", "sns", "ssm", "logs", "ecs", "ecr", "lambda", "ses"}
-
-ACCESS_LEVELS = ["Read", "Write", "List", "Tagging", "Permissions management"]
-
-RESOURCE_PLACEHOLDERS = {
-    "s3": "Select S3 bucket...",
-    "sqs": "Select SQS queue...",
-    "dynamodb": "Select DynamoDB table...",
-    "secretsmanager": "Select secret...",
-    "kms": "Select KMS key...",
-    "sns": "Select SNS topic...",
-    "ssm": "Select SSM parameter...",
-    "logs": "Select log group...",
-    "ses": "Select SES identity...",
-    "ecr": "Select ECR repository...",
-}
-
-
-def _build_service_group_data(
-    service: str,
-    selected_levels: list[str] | set[str],
-    resources: list[str],
-    available_resources: list[dict[str, str]],
-) -> dict[str, Any]:
-    """Build a template-ready dict for a single service group with access-level toggles."""
-    try:
-        service_data = policy_sentry_iam_data.get_service_prefix_data(service)
-        display_name = service_data.get("service_name", service)
-    except Exception:
-        display_name = service
-
-    selected_set = set(selected_levels)
-    access_levels = []
-    for level in ACCESS_LEVELS:
-        access_levels.append({
-            "name": level,
-            "checked": level in selected_set,
-        })
-
-    # For S3, available resources are base bucket ARNs (e.g. arn:aws:s3:::my-bucket)
-    # but stored resources include the prefix (e.g. arn:aws:s3:::my-bucket/data/*).
-    # Use startswith matching so the bucket shows as "selected" when any prefixed resource exists.
-    if service == "s3":
-        marked_available = [
-            {**r, "selected": any(res == r["arn"] or res.startswith(r["arn"] + "/") for res in resources)}
-            for r in available_resources
-        ]
-    else:
-        selected_arns = set(resources)
-        marked_available = [
-            {**r, "selected": r["arn"] in selected_arns}
-            for r in available_resources
-        ]
-
-    return {
-        "service": service,
-        "display_name": display_name,
-        "resources": resources,
-        "available_resources": marked_available,
-        "resource_placeholder": RESOURCE_PLACEHOLDERS.get(service, "Select resource..."),
-        "access_levels": access_levels,
-        "has_checked_levels": bool(selected_set),
-        "selected_count": len(selected_set),
-    }
-
-
-def _group_statements_by_service(
-    statements: list[dict[str, Any]],
-    available_resources_by_service: dict[str, list[dict[str, str]]],
-) -> list[dict[str, Any]]:
-    """Merge multiple statements for the same service into one group."""
-    available = available_resources_by_service
-    grouped = {}
-    for statement in statements:
-        service_name = statement.get("service", "")
-        if not service_name:
-            continue
-        if service_name not in grouped:
-            grouped[service_name] = {
-                "access_levels": set(statement.get("access_levels", [])),
-                "resources": list(statement.get("resources", [])),
-            }
-        else:
-            grouped[service_name]["access_levels"].update(statement.get("access_levels", []))
-            existing = set(grouped[service_name]["resources"])
-            for resource in statement.get("resources", []):
-                if resource not in existing:
-                    grouped[service_name]["resources"].append(resource)
-                    existing.add(resource)
-
-    service_groups = []
-    for service_name, data in grouped.items():
-        group = _build_service_group_data(
-            service=service_name,
-            selected_levels=data["access_levels"],
-            resources=data["resources"],
-            available_resources=available.get(service_name, []),
-        )
-        service_groups.append(group)
-    return service_groups
-
-
-def _fetch_available_resources(app_permission_request: models.AppPermissionRequest) -> dict[str, list[dict[str, str]]]:
-    """Fetch available AWS resources for all services in a permission request (cache-backed)."""
-    services = [stmt.get("service") for stmt in (app_permission_request.statements or []) if stmt.get("service")]
-    if not services:
-        return {}
-    return permissions_service.get_resources_for_services(app_permission_request.environment, services)
 
 
 @login_required
@@ -140,29 +28,13 @@ def security_permissions_statements(request: HttpRequest, app_permission_request
         id=app_permission_request_id,
         app__organization=organization,
     )
-    available_resources = _fetch_available_resources(app_permission_request)
-    service_groups = _group_statements_by_service(app_permission_request.statements or [], available_resources)
+    available_resources = permissions_service.fetch_available_resources(app_permission_request)
+    service_groups = permissions_service.group_statements_by_service(app_permission_request.statements or [], available_resources)
     return render(
         request=request,
         template_name="devopshero_app/security/_permission_statements.html",
         context={"service_groups": service_groups, "app_permission_request": app_permission_request},
     )
-
-
-def _get_all_service_options() -> list[dict[str, str | bool]]:
-    """Return sorted list of all IAM services for the picker dropdown."""
-    iam_def = policy_sentry_iam_data.load_iam_definition()
-    options = []
-    for prefix, service_data in sorted(iam_def.items()):
-        if not isinstance(service_data, dict):
-            continue
-        service_name = service_data.get("service_name", prefix)
-        options.append({
-            "value": prefix,
-            "label": service_name,
-            "is_curated": prefix in CURATED_SERVICES,
-        })
-    return options
 
 
 @login_required
@@ -206,9 +78,9 @@ def security_permissions_editor(request: HttpRequest) -> HttpResponse:
         content_type=models.Message.ContentType.SYSTEM_TRIGGER,
     ).order_by("created_at")
 
-    available_resources = _fetch_available_resources(app_permission_request)
-    service_groups = _group_statements_by_service(app_permission_request.statements or [], available_resources)
-    service_options = _get_all_service_options()
+    available_resources = permissions_service.fetch_available_resources(app_permission_request)
+    service_groups = permissions_service.group_statements_by_service(app_permission_request.statements or [], available_resources)
+    service_options = permissions_service.get_all_service_options()
 
     context = base.get_app_shell_context(request=request, current_page="security")
     context.update({
@@ -262,8 +134,8 @@ def security_permissions_editor_cancel(request: HttpRequest, app_permission_requ
     )
     permissions_service.cancel(app_permission_request, app_permissions)
 
-    available_resources = _fetch_available_resources(app_permission_request)
-    service_groups = _group_statements_by_service(app_permission_request.statements or [], available_resources)
+    available_resources = permissions_service.fetch_available_resources(app_permission_request)
+    service_groups = permissions_service.group_statements_by_service(app_permission_request.statements or [], available_resources)
 
     return render(
         request=request,
@@ -285,29 +157,15 @@ def security_permissions_editor_update_statement(request: HttpRequest, app_permi
 
     action = request.POST.get("action", "")
     service = request.POST.get("service", "").strip()
-    arn = request.POST.get("arn", "").strip()
 
-    # For S3 dropdown selections, the ARN is a base bucket ARN (arn:aws:s3:::bucket).
-    # On add: combine with the prefix input to form the full resource ARN.
-    # On remove: remove all stored resources that belong to this bucket.
-    s3_prefix = request.POST.get("s3_prefix", "").strip()
-    if service == "s3" and action == "add_resource" and s3_prefix:
-        arn = f"{arn}/{s3_prefix}"
-    elif service == "s3" and action == "remove_resource":
-        base_arn = arn
-        for stmt in (app_permission_request.statements or []):
-            if stmt.get("service") == "s3":
-                stmt["resources"] = [r for r in stmt.get("resources", []) if not (r == base_arn or r.startswith(base_arn + "/"))]
-        app_permission_request.save(update_fields=["statements", "updated_at"])
-
-    if not (service == "s3" and action == "remove_resource"):
-        permissions_service.update_statements(
-            app_permission_request,
-            action=action,
-            service=service,
-            level=request.POST.get("level", "").strip(),
-            arn=arn,
-        )
+    permissions_service.apply_statement_action(
+        app_permission_request,
+        action=action,
+        service=service,
+        level=request.POST.get("level", "").strip(),
+        arn=request.POST.get("arn", "").strip(),
+        s3_prefix=request.POST.get("s3_prefix", "").strip(),
+    )
 
     if action == "remove_service":
         if not app_permission_request.statements:
@@ -318,8 +176,8 @@ def security_permissions_editor_update_statement(request: HttpRequest, app_permi
             )
         return HttpResponse()
 
-    available_resources = _fetch_available_resources(app_permission_request)
-    service_groups = _group_statements_by_service(app_permission_request.statements or [], available_resources)
+    available_resources = permissions_service.fetch_available_resources(app_permission_request)
+    service_groups = permissions_service.group_statements_by_service(app_permission_request.statements or [], available_resources)
     group = next((g for g in service_groups if g["service"] == service), None)
     if group is None:
         return HttpResponse(status=204)
@@ -352,7 +210,7 @@ def security_permissions_editor_service_group(request: HttpRequest, app_permissi
         return JsonResponse({"error": "Missing service parameter"}, status=400)
 
     available = permissions_service.get_resources_for_services(app_permission_request.environment, [service])
-    group = _build_service_group_data(
+    group = permissions_service.build_service_group_data(
         service=service,
         selected_levels=set(),
         resources=[],
@@ -406,7 +264,7 @@ def security_permissions_editor_refresh_resources(request: HttpRequest, app_perm
 
     services = [stmt.get("service") for stmt in (app_permission_request.statements or []) if stmt.get("service")]
     available_resources = permissions_service.refresh_resources_cache(app_permission_request.environment, services)
-    service_groups = _group_statements_by_service(app_permission_request.statements or [], available_resources)
+    service_groups = permissions_service.group_statements_by_service(app_permission_request.statements or [], available_resources)
 
     return render(
         request=request,

@@ -1,9 +1,10 @@
-"""Outside-the-sandbox broker for per-user third-party integrations.
+"""Outside-the-sandbox broker — the env's single relay to DOH.
 
-Runs as a supervisor-managed sidecar process. Pure composition root: it reads
-the environment contract, constructs the subsystems, wires them together, and
-runs the servers. All credential-change choreography lives in
-`credentials_service`; all HTTP parsing lives in `control_api`.
+Fronts per-user third-party integrations and the self-referential permissions
+editor (more DOH APIs later). Runs as a supervisor-managed sidecar process. Pure
+composition root: it reads the environment contract, constructs the subsystems,
+wires them together, and runs the servers. All credential-change choreography
+lives in `credentials_service`; all HTTP parsing lives in `control_api`.
 
 It starts:
 
@@ -11,10 +12,10 @@ It starts:
    HTTPS_PROXY pointed here and SSL_CERT_FILE pointed at the CA bundle created
    by `tls_intercept.TlsInterceptRuntime`.
 
-2. The integrations control API on 127.0.0.1:9951, reached same-origin by the
-   WebUI extension via Caddy's /__doh_broker/* route. This API owns
-   the unified browser-facing integration status surface and mounts the
-   MCP-aggregator management routes under /integrations.
+2. The control API on 127.0.0.1:9951, reached same-origin by the WebUI
+   extensions via Caddy's /__doh_broker/* route. This API mounts the
+   MCP-aggregator management routes under /integrations and the permissions
+   relay under /permissions.
 
 The aggregator's port 9952 is sandbox-only MCP traffic. Refresh tokens, DOH's
 OAuth client secrets, and the env bearer never enter the sandbox.
@@ -70,7 +71,7 @@ DEFAULT_PROCESS_COMPOSE_URL = "http://127.0.0.1:9956"
 _TRUE_ENV_VALUES = frozenset({"1", "true", "yes", "on"})
 _FALSE_ENV_VALUES = frozenset({"0", "false", "no", "off"})
 
-logger = logging.getLogger("integrations_broker")
+logger = logging.getLogger("doh_broker")
 
 
 class _AsyncioSslEofFilter(logging.Filter):
@@ -126,7 +127,7 @@ async def _run(
     runtime_dir = Path(_require_env(name="DOH_RUNTIME_DIR"))
     hermes_home = Path(_require_env(name="HERMES_HOME"))
     logger.info(
-        "starting integrations_broker for owner=%s env=%s against %s (proxy=%d, control=%d, mcp=%d, merge_enabled=%s)",
+        "starting doh_broker for owner=%s env=%s against %s (proxy=%d, control=%d, mcp=%d, merge_enabled=%s)",
         owner_username, env_slug, control_plane_url, proxy_port, control_port, mcp_port, merge_enabled,
     )
 
@@ -221,7 +222,7 @@ async def _run(
 
 
 def main() -> None:
-    logging.basicConfig(level=logging.INFO, format="[%(asctime)s] [integrations.%(name)s] %(message)s")
+    logging.basicConfig(level=logging.INFO, format="[%(asctime)s] [doh_broker.%(name)s] %(message)s")
     logging.getLogger("asyncio").addFilter(_AsyncioSslEofFilter())
     parser = argparse.ArgumentParser()
     parser.add_argument("--proxy-port", type=int, default=DEFAULT_PROXY_PORT)

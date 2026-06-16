@@ -21,6 +21,16 @@ from .security_permissions_editor import (
     security_permissions_editor_update_statement,
     security_permissions_statements,
 )
+from .permissions_api import (
+    permissions_draft,
+    permissions_statement,
+    permissions_description,
+    permissions_cancel,
+    permissions_apply,
+    permissions_refresh_resources,
+    permissions_resources,
+    permissions_service_catalog,
+)
 from .settings import (
     settings,
     settings_personal,
@@ -169,6 +179,14 @@ __all__ = [
     "security_permissions_editor_update_description",
     "security_permissions_editor_update_statement",
     "security_permissions_statements",
+    "permissions_draft",
+    "permissions_statement",
+    "permissions_description",
+    "permissions_cancel",
+    "permissions_apply",
+    "permissions_refresh_resources",
+    "permissions_resources",
+    "permissions_service_catalog",
     "settings",
     "settings_personal",
     "settings_organization",

@@ -8,7 +8,7 @@ This is the main entry point called by the job worker.
 import logging
 
 from devopshero_app import models
-from devopshero_app.services import permissions as permissions_service
+from devopshero_app.services import permissions_service
 from devopshero_app.services.infra_customer import iam_utils
 
 from . import tenant_consistency

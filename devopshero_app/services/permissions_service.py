@@ -1,6 +1,8 @@
 import logging
+from typing import Any
 
 from django.utils import timezone
+from policy_sentry.shared import iam_data as policy_sentry_iam_data
 
 from .. import models
 from .infra_customer import iam_utils
@@ -8,6 +10,23 @@ from .infra_customer import iam_utils
 logger = logging.getLogger(__name__)
 
 DOH_APP_PERMISSIONS_POLICY_NAME = "doh-app-permissions"
+
+CURATED_SERVICES = {"s3", "sqs", "dynamodb", "secretsmanager", "kms", "sns", "ssm", "logs", "ecs", "ecr", "lambda", "ses"}
+
+ACCESS_LEVELS = ["Read", "Write", "List", "Tagging", "Permissions management"]
+
+RESOURCE_PLACEHOLDERS = {
+    "s3": "Select S3 bucket...",
+    "sqs": "Select SQS queue...",
+    "dynamodb": "Select DynamoDB table...",
+    "secretsmanager": "Select secret...",
+    "kms": "Select KMS key...",
+    "sns": "Select SNS topic...",
+    "ssm": "Select SSM parameter...",
+    "logs": "Select log group...",
+    "ses": "Select SES identity...",
+    "ecr": "Select ECR repository...",
+}
 
 
 def get_or_create_app_permissions(app, environment) -> models.AppPermissions:
@@ -96,6 +115,28 @@ def update_statements(app_permission_request, *, action: str, service: str, leve
 
     app_permission_request.statements = statements
     app_permission_request.save(update_fields=["statements", "updated_at"])
+
+
+def apply_statement_action(app_permission_request, *, action: str, service: str, level: str, arn: str, s3_prefix: str):
+    """Mutate one statement, composing the S3 base-bucket ARN with its key prefix.
+
+    S3 dropdown selections carry a base bucket ARN (arn:aws:s3:::bucket). On add,
+    combine it with the prefix input to form the full resource ARN; on remove,
+    drop every stored resource that belongs to the bucket. All other services and
+    actions delegate to update_statements unchanged.
+    """
+    if service == "s3" and action == "add_resource" and s3_prefix:
+        arn = f"{arn}/{s3_prefix}"
+    elif service == "s3" and action == "remove_resource":
+        statements = app_permission_request.statements or []
+        for stmt in statements:
+            if stmt.get("service") == "s3":
+                stmt["resources"] = [r for r in stmt.get("resources", []) if not (r == arn or r.startswith(arn + "/"))]
+        app_permission_request.statements = statements
+        app_permission_request.save(update_fields=["statements", "updated_at"])
+        return
+
+    update_statements(app_permission_request, action=action, service=service, level=level, arn=arn)
 
 
 async def aupsert_statement(app_permission_request, service, access_levels, resources):
@@ -212,3 +253,103 @@ def refresh_resources_cache(environment, services):
         ignore_conflicts=True,
     )
     return fetched
+
+
+def build_service_group_data(
+    service: str,
+    selected_levels: list[str] | set[str],
+    resources: list[str],
+    available_resources: list[dict[str, str]],
+) -> dict[str, Any]:
+    """Build a render-ready dict for a single service group with access-level toggles."""
+    try:
+        service_data = policy_sentry_iam_data.get_service_prefix_data(service)
+        display_name = service_data.get("service_name", service)
+    except Exception:
+        display_name = service
+
+    selected_set = set(selected_levels)
+    access_levels = [{"name": level, "checked": level in selected_set} for level in ACCESS_LEVELS]
+
+    # For S3, available resources are base bucket ARNs (e.g. arn:aws:s3:::my-bucket)
+    # but stored resources include the prefix (e.g. arn:aws:s3:::my-bucket/data/*).
+    # Use startswith matching so the bucket shows as "selected" when any prefixed resource exists.
+    if service == "s3":
+        marked_available = [
+            {**r, "selected": any(res == r["arn"] or res.startswith(r["arn"] + "/") for res in resources)}
+            for r in available_resources
+        ]
+    else:
+        selected_arns = set(resources)
+        marked_available = [{**r, "selected": r["arn"] in selected_arns} for r in available_resources]
+
+    return {
+        "service": service,
+        "display_name": display_name,
+        "resources": resources,
+        "available_resources": marked_available,
+        "resource_placeholder": RESOURCE_PLACEHOLDERS.get(service, "Select resource..."),
+        "access_levels": access_levels,
+        "has_checked_levels": bool(selected_set),
+        "selected_count": len(selected_set),
+    }
+
+
+def group_statements_by_service(
+    statements: list[dict[str, Any]],
+    available_resources_by_service: dict[str, list[dict[str, str]]],
+) -> list[dict[str, Any]]:
+    """Merge multiple statements for the same service into one render-ready group."""
+    available = available_resources_by_service
+    grouped = {}
+    for statement in statements:
+        service_name = statement.get("service", "")
+        if not service_name:
+            continue
+        if service_name not in grouped:
+            grouped[service_name] = {
+                "access_levels": set(statement.get("access_levels", [])),
+                "resources": list(statement.get("resources", [])),
+            }
+        else:
+            grouped[service_name]["access_levels"].update(statement.get("access_levels", []))
+            existing = set(grouped[service_name]["resources"])
+            for resource in statement.get("resources", []):
+                if resource not in existing:
+                    grouped[service_name]["resources"].append(resource)
+                    existing.add(resource)
+
+    service_groups = []
+    for service_name, data in grouped.items():
+        group = build_service_group_data(
+            service=service_name,
+            selected_levels=data["access_levels"],
+            resources=data["resources"],
+            available_resources=available.get(service_name, []),
+        )
+        service_groups.append(group)
+    return service_groups
+
+
+def fetch_available_resources(app_permission_request) -> dict[str, list[dict[str, str]]]:
+    """Fetch available AWS resources for all services in a permission request (cache-backed)."""
+    services = [stmt.get("service") for stmt in (app_permission_request.statements or []) if stmt.get("service")]
+    if not services:
+        return {}
+    return get_resources_for_services(app_permission_request.environment, services)
+
+
+def get_all_service_options() -> list[dict[str, str | bool]]:
+    """Return the sorted list of all IAM services for the service picker."""
+    iam_def = policy_sentry_iam_data.load_iam_definition()
+    options = []
+    for prefix, service_data in sorted(iam_def.items()):
+        if not isinstance(service_data, dict):
+            continue
+        service_name = service_data.get("service_name", prefix)
+        options.append({
+            "value": prefix,
+            "label": service_name,
+            "is_curated": prefix in CURATED_SERVICES,
+        })
+    return options

@@ -440,10 +440,10 @@ class TestPermissionsEditorEndpoints(TestCase):
 
         # Mock AWS calls so the view doesn't try to assume roles during tests.
         with patch(
-            "devopshero_app.services.permissions.iam_utils.read_app_permissions_policy",
+            "devopshero_app.services.permissions_service.iam_utils.read_app_permissions_policy",
             return_value=[],
         ), patch(
-            "devopshero_app.services.permissions.iam_utils.list_resources_for_services",
+            "devopshero_app.services.permissions_service.iam_utils.list_resources_for_services",
             return_value={},
         ):
             self.client.force_login(self.approver_user)
