@@ -10,7 +10,7 @@ from django.utils.text import slugify
 from django.views.decorators.http import require_POST
 
 from devopshero_app.models import App, Deployment, Repository, ResourceTag, Workspace
-from devopshero_app.services import abac
+from devopshero_app.services import abac_service
 
 from . import abac_view_checks
 from . import base
@@ -45,7 +45,7 @@ def workspaces(request: HttpRequest) -> HttpResponse:
     workspace_list = Workspace.objects.filter(
         organization=request.user.current_organization,
     ).prefetch_related(apps_prefetch).order_by("name")
-    workspace_list = abac.filter_permitted_resources(
+    workspace_list = abac_service.filter_permitted_resources(
         request.user.current_organization, request.user, workspace_list, "workspace", "workspace:view",
     )
 
@@ -105,8 +105,8 @@ def workspace_detail(request: HttpRequest, workspace_slug: str) -> HttpResponse:
     ).order_by("full_name")
 
     tags = ResourceTag.objects.filter(workspace=workspace).order_by("key", "value")
-    can_edit = abac.check_action(request.user.current_organization, request.user, workspace, "workspace", "workspace:edit")
-    can_admin = abac.check_action(request.user.current_organization, request.user, workspace, "workspace", "workspace:admin")
+    can_edit = abac_service.check_action(request.user.current_organization, request.user, workspace, "workspace", "workspace:edit")
+    can_admin = abac_service.check_action(request.user.current_organization, request.user, workspace, "workspace", "workspace:admin")
 
     deployments = Deployment.objects.filter(
         app__workspace=workspace,
@@ -123,7 +123,7 @@ def workspace_detail(request: HttpRequest, workspace_slug: str) -> HttpResponse:
     context["can_edit"] = can_edit
     context["can_admin"] = can_admin
     context["url_base"] = f"/workspaces/{workspace.slug}/tags/"
-    context["suggested_keys"], context["suggested_values"] = abac.get_resource_tag_suggestions(request.user.current_organization, "workspace")
+    context["suggested_keys"], context["suggested_values"] = abac_service.get_resource_tag_suggestions(request.user.current_organization, "workspace")
 
     return render(request, "devopshero_app/workspaces/workspace_detail.html", context=context)
 
@@ -183,7 +183,7 @@ def workspace_tag_add(request: HttpRequest, workspace_slug: str) -> HttpResponse
     url_base = f"/workspaces/{workspace.slug}/tags/"
     return render(request, "devopshero_app/partials/_kv_tag_editor.html", {
         "items": tags, "can_edit": True, "url_base": url_base, "hx_target": "#workspace-tags", "empty_text": "No tags",
-        **dict(zip(("suggested_keys", "suggested_values"), abac.get_resource_tag_suggestions(org, "workspace"))),
+        **dict(zip(("suggested_keys", "suggested_values"), abac_service.get_resource_tag_suggestions(org, "workspace"))),
     })
 
 
@@ -204,7 +204,7 @@ def workspace_tag_remove(request: HttpRequest, workspace_slug: str, tag_id: UUID
     url_base = f"/workspaces/{workspace.slug}/tags/"
     return render(request, "devopshero_app/partials/_kv_tag_editor.html", {
         "items": tags, "can_edit": True, "url_base": url_base, "hx_target": "#workspace-tags", "empty_text": "No tags",
-        **dict(zip(("suggested_keys", "suggested_values"), abac.get_resource_tag_suggestions(org, "workspace"))),
+        **dict(zip(("suggested_keys", "suggested_values"), abac_service.get_resource_tag_suggestions(org, "workspace"))),
     })
 
 
@@ -235,7 +235,7 @@ def workspace_tags_save(request: HttpRequest, workspace_slug: str) -> HttpRespon
             )
 
     tags = ResourceTag.objects.filter(workspace=workspace).order_by("key", "value")
-    suggested_keys, suggested_values = abac.get_resource_tag_suggestions(org, "workspace")
+    suggested_keys, suggested_values = abac_service.get_resource_tag_suggestions(org, "workspace")
     return render(request, "devopshero_app/partials/_security_tags_section.html", {
         "can_admin": True,
         "tags_title": "Workspace Tags",

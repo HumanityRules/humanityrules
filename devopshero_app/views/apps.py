@@ -13,7 +13,7 @@ from django.urls import reverse
 from django.views.decorators.http import require_GET, require_POST
 
 from devopshero_app.models import App, AppRemovalJob, Deployment, DeploymentBlueprint, ResourceTag
-from devopshero_app.services import abac
+from devopshero_app.services import abac_service
 from devopshero_app.services.cost import panel as cost_panel
 
 from . import abac_view_checks
@@ -209,8 +209,8 @@ def build_app_detail_context(request: HttpRequest, app: App) -> dict[str, Any]:
     # Tags
     direct_tags = ResourceTag.objects.filter(app=app).order_by("key", "value")
     inherited_tags = ResourceTag.objects.filter(workspace=app.workspace).order_by("key", "value")
-    can_edit = abac.check_action(request.user.current_organization, request.user, app.workspace, "workspace", "workspace:edit")
-    can_admin = abac.check_action(request.user.current_organization, request.user, app.workspace, "workspace", "workspace:admin")
+    can_edit = abac_service.check_action(request.user.current_organization, request.user, app.workspace, "workspace", "workspace:edit")
+    can_admin = abac_service.check_action(request.user.current_organization, request.user, app.workspace, "workspace", "workspace:admin")
 
     context["app"] = app
     context["deployments"] = deployments
@@ -226,7 +226,7 @@ def build_app_detail_context(request: HttpRequest, app: App) -> dict[str, Any]:
     context["is_pending_removal"] = is_pending_removal
     context["can_remove"] = can_edit and not is_pending_removal and not app_is_live(app)
     context["url_base"] = f"/apps/{app.slug}/tags/"
-    context["suggested_keys"], context["suggested_values"] = abac.get_resource_tag_suggestions(org, "app")
+    context["suggested_keys"], context["suggested_values"] = abac_service.get_resource_tag_suggestions(org, "app")
 
     return context
 
@@ -462,7 +462,7 @@ def app_tag_add(request: HttpRequest, app_slug: str) -> HttpResponse:
     url_base = f"/apps/{app.slug}/tags/"
     return render(request, "devopshero_app/apps/_app_tags.html", {
         "direct_tags": direct_tags, "inherited_tags": inherited_tags, "can_admin": True, "url_base": url_base,
-        **dict(zip(("suggested_keys", "suggested_values"), abac.get_resource_tag_suggestions(org, "app"))),
+        **dict(zip(("suggested_keys", "suggested_values"), abac_service.get_resource_tag_suggestions(org, "app"))),
     })
 
 
@@ -484,7 +484,7 @@ def app_tag_remove(request: HttpRequest, app_slug: str, tag_id: UUID) -> HttpRes
     url_base = f"/apps/{app.slug}/tags/"
     return render(request, "devopshero_app/apps/_app_tags.html", {
         "direct_tags": direct_tags, "inherited_tags": inherited_tags, "can_admin": True, "url_base": url_base,
-        **dict(zip(("suggested_keys", "suggested_values"), abac.get_resource_tag_suggestions(org, "app"))),
+        **dict(zip(("suggested_keys", "suggested_values"), abac_service.get_resource_tag_suggestions(org, "app"))),
     })
 
 
@@ -516,7 +516,7 @@ def app_tags_save(request: HttpRequest, app_slug: str) -> HttpResponse:
 
     tags = ResourceTag.objects.filter(app=app).order_by("key", "value")
     inherited_tags = ResourceTag.objects.filter(workspace=app.workspace).order_by("key", "value")
-    suggested_keys, suggested_values = abac.get_resource_tag_suggestions(org, "app")
+    suggested_keys, suggested_values = abac_service.get_resource_tag_suggestions(org, "app")
     return render(request, "devopshero_app/partials/_security_tags_section.html", {
         "can_admin": True,
         "tags_title": "App Tags",
@@ -594,7 +594,7 @@ def app_cost_panel(request: HttpRequest, app_slug: str) -> HttpResponse:
     """Render the cost-chart fragment for ``app_slug`` (org-scoped), enqueuing a recompute."""
     organization = request.user.current_organization
     app = get_object_or_404(App.objects.select_related("workspace"), slug=app_slug, organization=organization)
-    if not abac.check_action(organization, request.user, app.workspace, "workspace", "workspace:view"):
+    if not abac_service.check_action(organization, request.user, app.workspace, "workspace", "workspace:view"):
         return HttpResponse(status=403)
     # Only a real page view (the shell's initial load) enqueues a recompute. The self-poll sends
     # ?await=1 and stays read-only, so polling can't spawn an endless chain of refresh jobs.

@@ -13,7 +13,7 @@ from django.utils.http import url_has_allowed_host_and_scheme
 from workos import WorkOSClient
 
 from ..models import Organization, OrganizationMembership, User
-from ..services import abac
+from ..services import abac_service
 
 logger = logging.getLogger(__name__)
 
@@ -288,7 +288,7 @@ def oidc_callback(request):
             and userinfo["email"].lower() == org.bootstrap_admin_email.lower()
             and not OrganizationMembership.objects.filter(user=existing, organization=org).exists()
         ):
-            abac.bootstrap_organization(organization=org, admin_user=existing)
+            abac_service.bootstrap_organization(organization=org, admin_user=existing)
             org.bootstrap_admin_email = ""
             org.save(update_fields=["bootstrap_admin_email"])
         login(request, existing)
@@ -305,11 +305,11 @@ def oidc_callback(request):
         current_organization=org,
     )
     if org.bootstrap_admin_email and userinfo["email"].lower() == org.bootstrap_admin_email.lower():
-        abac.bootstrap_organization(organization=org, admin_user=user)
+        abac_service.bootstrap_organization(organization=org, admin_user=user)
         org.bootstrap_admin_email = ""
         org.save(update_fields=["bootstrap_admin_email"])
     else:
-        abac.materialize_membership(
+        abac_service.materialize_membership(
             organization=org, user=user, role=org.default_org_role,
         )
     login(request, user)

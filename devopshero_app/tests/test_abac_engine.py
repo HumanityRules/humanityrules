@@ -1,4 +1,4 @@
-"""Tests for the ABAC policy evaluation engine (devopshero_app/services/abac.py)."""
+"""Tests for the ABAC policy evaluation engine (devopshero_app/services/abac_service.py)."""
 
 from django.db.models import QuerySet
 from django.test import TestCase
@@ -21,8 +21,8 @@ from devopshero_app.models import (
 )
 from django.core.exceptions import ValidationError
 
-from devopshero_app.services import abac
-from devopshero_app.services.abac import _conditions_match as _raw_conditions_match
+from devopshero_app.services import abac_service
+from devopshero_app.services.abac_service import _conditions_match as _raw_conditions_match
 
 
 def _conditions_match(conditions: list[dict], self_side: set[tuple[str, str]]) -> bool:
@@ -49,14 +49,14 @@ class TestGetEffectiveAttributes(TestCase):
         )
 
     def test_no_attributes_returns_only_authenticated(self) -> None:
-        attrs = abac.get_effective_attributes(organization=self.org, user=self.user)
+        attrs = abac_service.get_effective_attributes(organization=self.org, user=self.user)
         self.assertEqual(attrs, [("authenticated", "true", "system")])
 
     def test_direct_attributes_have_direct_source(self) -> None:
         IdentityAttribute.objects.create(
             organization=self.org, user=self.user, key="role", value="developer",
         )
-        attrs = abac.get_effective_attributes(organization=self.org, user=self.user)
+        attrs = abac_service.get_effective_attributes(organization=self.org, user=self.user)
         self.assertIn(("authenticated", "true", "system"), attrs)
         self.assertIn(("role", "developer", "direct"), attrs)
 
@@ -65,7 +65,7 @@ class TestGetEffectiveAttributes(TestCase):
         GroupMembership.objects.create(group=group, user=self.user)
         GroupAttribute.objects.create(group=group, key="team", value="backend")
 
-        attrs = abac.get_effective_attributes(organization=self.org, user=self.user)
+        attrs = abac_service.get_effective_attributes(organization=self.org, user=self.user)
         self.assertIn(("team", "backend", "group:Engineers"), attrs)
 
     def test_multiple_groups_returns_union(self) -> None:
@@ -76,7 +76,7 @@ class TestGetEffectiveAttributes(TestCase):
         GroupAttribute.objects.create(group=g1, key="team", value="frontend")
         GroupAttribute.objects.create(group=g2, key="team", value="backend")
 
-        attrs = abac.get_effective_attributes(organization=self.org, user=self.user)
+        attrs = abac_service.get_effective_attributes(organization=self.org, user=self.user)
         self.assertIn(("team", "frontend", "group:Frontend"), attrs)
         self.assertIn(("team", "backend", "group:Backend"), attrs)
 
@@ -88,7 +88,7 @@ class TestGetEffectiveAttributes(TestCase):
         GroupMembership.objects.create(group=group, user=self.user)
         GroupAttribute.objects.create(group=group, key="team", value="data")
 
-        attrs = abac.get_effective_attributes(organization=self.org, user=self.user)
+        attrs = abac_service.get_effective_attributes(organization=self.org, user=self.user)
         self.assertIn(("team", "platform", "direct"), attrs)
         self.assertIn(("team", "data", "group:DataTeam"), attrs)
 
@@ -129,7 +129,7 @@ class TestGetEffectiveTags(TestCase):
             organization=self.org, resource_type="app", app=app,
             key="tier", value="production",
         )
-        tags = abac.get_effective_tags(organization=self.org, resource=app, resource_type="app")
+        tags = abac_service.get_effective_tags(organization=self.org, resource=app, resource_type="app")
         direct_tags = [(k, v, s) for k, v, s in tags if s == "direct"]
         self.assertIn(("tier", "production", "direct"), direct_tags)
 
@@ -140,7 +140,7 @@ class TestGetEffectiveTags(TestCase):
         )
         app = self._make_app(name="finapp", slug="finapp")
 
-        tags = abac.get_effective_tags(organization=self.org, resource=app, resource_type="app")
+        tags = abac_service.get_effective_tags(organization=self.org, resource=app, resource_type="app")
         inherited = [(k, v, s) for k, v, s in tags if s.startswith("inherited:")]
         self.assertIn(("domain", "finance", f"inherited:{self.workspace.name}"), inherited)
 
@@ -155,7 +155,7 @@ class TestGetEffectiveTags(TestCase):
             key="tier", value="production",
         )
 
-        tags = abac.get_effective_tags(organization=self.org, resource=app, resource_type="app")
+        tags = abac_service.get_effective_tags(organization=self.org, resource=app, resource_type="app")
         self.assertIn(("tier", "production", "direct"), tags)
         self.assertIn(("domain", "finance", f"inherited:{self.workspace.name}"), tags)
 
@@ -164,7 +164,7 @@ class TestGetEffectiveTags(TestCase):
             organization=self.org, resource_type="workspace", workspace=self.workspace,
             key="domain", value="platform",
         )
-        tags = abac.get_effective_tags(organization=self.org, resource=self.workspace, resource_type="workspace")
+        tags = abac_service.get_effective_tags(organization=self.org, resource=self.workspace, resource_type="workspace")
         self.assertTrue(all(source == "direct" for _, _, source in tags))
         self.assertIn(("domain", "platform", "direct"), tags)
 
@@ -178,7 +178,7 @@ class TestGetEffectiveTags(TestCase):
             key="tier", value="staging",
         )
 
-        tags = abac.get_effective_tags(organization=self.org, resource=env, resource_type="environment")
+        tags = abac_service.get_effective_tags(organization=self.org, resource=env, resource_type="environment")
         self.assertTrue(all(source == "direct" for _, _, source in tags))
         self.assertIn(("tier", "staging", "direct"), tags)
 
@@ -194,7 +194,7 @@ class TestGetEffectiveTags(TestCase):
             key="injected", value="malicious",
         )
 
-        tags = abac.get_effective_tags(organization=self.org, resource=self.workspace, resource_type="workspace")
+        tags = abac_service.get_effective_tags(organization=self.org, resource=self.workspace, resource_type="workspace")
         keys = [k for k, _, _ in tags]
         self.assertIn("domain", keys)
         self.assertNotIn("injected", keys)
@@ -216,7 +216,7 @@ class TestGetEffectiveTags(TestCase):
             key="injected-ws", value="bad",
         )
 
-        tags = abac.get_effective_tags(organization=self.org, resource=app, resource_type="app")
+        tags = abac_service.get_effective_tags(organization=self.org, resource=app, resource_type="app")
         keys = [k for k, _, _ in tags]
         self.assertIn("tier", keys)
         self.assertNotIn("injected-app", keys)
@@ -290,29 +290,29 @@ class TestConditionsMatch(TestCase):
 class TestValidatePolicyConditions(TestCase):
 
     def test_sole_wildcard_identity_is_valid(self) -> None:
-        abac.validate_policy_conditions(
+        abac_service.validate_policy_conditions(
             identity_conditions=[{"key": "*", "value": "*"}],
             resource_conditions=[{"key": "domain", "value": "finance"}],
         )
 
     def test_sole_wildcard_resource_is_valid(self) -> None:
-        abac.validate_policy_conditions(
+        abac_service.validate_policy_conditions(
             identity_conditions=[{"key": "role", "value": "developer"}],
             resource_conditions=[{"key": "*", "value": "*"}],
         )
 
     def test_both_wildcard_is_valid(self) -> None:
-        abac.validate_policy_conditions(
+        abac_service.validate_policy_conditions(
             identity_conditions=[{"key": "*", "value": "*"}],
             resource_conditions=[{"key": "*", "value": "*"}],
         )
 
     def test_empty_conditions_are_valid(self) -> None:
-        abac.validate_policy_conditions(identity_conditions=[], resource_conditions=[])
+        abac_service.validate_policy_conditions(identity_conditions=[], resource_conditions=[])
 
     def test_mixed_wildcard_identity_raises(self) -> None:
         with self.assertRaises(ValidationError) as cm:
-            abac.validate_policy_conditions(
+            abac_service.validate_policy_conditions(
                 identity_conditions=[{"key": "*", "value": "*"}, {"key": "team", "value": "finance"}],
                 resource_conditions=[{"key": "domain", "value": "finance"}],
             )
@@ -320,14 +320,14 @@ class TestValidatePolicyConditions(TestCase):
 
     def test_mixed_wildcard_resource_raises(self) -> None:
         with self.assertRaises(ValidationError) as cm:
-            abac.validate_policy_conditions(
+            abac_service.validate_policy_conditions(
                 identity_conditions=[{"key": "role", "value": "developer"}],
                 resource_conditions=[{"key": "*", "value": "*"}, {"key": "tier", "value": "production"}],
             )
         self.assertIn("Resource", str(cm.exception))
 
     def test_multiple_non_wildcard_conditions_valid(self) -> None:
-        abac.validate_policy_conditions(
+        abac_service.validate_policy_conditions(
             identity_conditions=[{"key": "team", "value": "finance"}, {"key": "role", "value": "developer"}],
             resource_conditions=[{"key": "domain", "value": "finance"}, {"key": "tier", "value": "production"}],
         )
@@ -364,7 +364,7 @@ class TestEvaluatePolicies(TestCase):
             resource_conditions=[{"key": "domain", "value": "engineering"}],
             actions=["workspace:view"],
         )
-        result = abac.evaluate_policies(
+        result = abac_service.evaluate_policies(
             organization=self.org, user=self.user,
             resource=self.workspace, resource_type="workspace",
         )
@@ -378,7 +378,7 @@ class TestEvaluatePolicies(TestCase):
             resource_conditions=[{"key": "domain", "value": "engineering"}],
             actions=["workspace:view"],
         )
-        result = abac.evaluate_policies(
+        result = abac_service.evaluate_policies(
             organization=self.org, user=self.user,
             resource=self.workspace, resource_type="workspace",
         )
@@ -392,7 +392,7 @@ class TestEvaluatePolicies(TestCase):
             resource_conditions=[{"key": "domain", "value": "finance"}],
             actions=["workspace:view"],
         )
-        result = abac.evaluate_policies(
+        result = abac_service.evaluate_policies(
             organization=self.org, user=self.user,
             resource=self.workspace, resource_type="workspace",
         )
@@ -413,7 +413,7 @@ class TestEvaluatePolicies(TestCase):
             resource_conditions=[{"key": "domain", "value": "engineering"}],
             actions=["workspace:edit"],
         )
-        result = abac.evaluate_policies(
+        result = abac_service.evaluate_policies(
             organization=self.org, user=self.user,
             resource=self.workspace, resource_type="workspace",
         )
@@ -428,7 +428,7 @@ class TestEvaluatePolicies(TestCase):
             resource_conditions=[{"key": "domain", "value": "engineering"}],
             actions=["workspace:admin"],
         )
-        result = abac.evaluate_policies(
+        result = abac_service.evaluate_policies(
             organization=self.org, user=self.user,
             resource=self.workspace, resource_type="workspace",
         )
@@ -453,7 +453,7 @@ class TestEvaluatePolicies(TestCase):
             resource_conditions=[{"key": "tier", "value": "staging"}],
             actions=["environment:admin"],
         )
-        result = abac.evaluate_policies(
+        result = abac_service.evaluate_policies(
             organization=self.org, user=self.user,
             resource=env, resource_type="environment",
         )
@@ -477,7 +477,7 @@ class TestEvaluatePolicies(TestCase):
             resource_conditions=[{"key": "domain", "value": "engineering"}],
             actions=["!workspace:view"],
         )
-        result = abac.evaluate_policies(
+        result = abac_service.evaluate_policies(
             organization=self.org, user=self.user,
             resource=self.workspace, resource_type="workspace",
         )
@@ -498,7 +498,7 @@ class TestEvaluatePolicies(TestCase):
             resource_conditions=[{"key": "domain", "value": "engineering"}],
             actions=["!workspace:view"],
         )
-        result = abac.evaluate_policies(
+        result = abac_service.evaluate_policies(
             organization=self.org, user=self.user,
             resource=self.workspace, resource_type="workspace",
         )
@@ -507,7 +507,7 @@ class TestEvaluatePolicies(TestCase):
         self.assertNotIn("workspace:view", result)
 
     def test_no_policies_returns_empty(self) -> None:
-        result = abac.evaluate_policies(
+        result = abac_service.evaluate_policies(
             organization=self.org, user=self.user,
             resource=self.workspace, resource_type="workspace",
         )
@@ -524,7 +524,7 @@ class TestEvaluatePolicies(TestCase):
             resource_conditions=[{"key": "domain", "value": "engineering"}],
             actions=["workspace:view"],
         )
-        result = abac.evaluate_policies(
+        result = abac_service.evaluate_policies(
             organization=self.org, user=bare_user,
             resource=self.workspace, resource_type="workspace",
         )
@@ -541,7 +541,7 @@ class TestEvaluatePolicies(TestCase):
             resource_conditions=[{"key": "*", "value": "*"}],
             actions=["workspace:view"],
         )
-        result = abac.evaluate_policies(
+        result = abac_service.evaluate_policies(
             organization=self.org, user=self.user,
             resource=bare_ws, resource_type="workspace",
         )
@@ -559,7 +559,7 @@ class TestEvaluatePolicies(TestCase):
             resource_conditions=[{"key": "domain", "value": "engineering"}],
             actions=["workspace:view"],
         )
-        result = abac.evaluate_policies(
+        result = abac_service.evaluate_policies(
             organization=self.org, user=bare_user,
             resource=self.workspace, resource_type="workspace",
         )
@@ -577,7 +577,7 @@ class TestEvaluatePolicies(TestCase):
             resource_conditions=[],
             actions=["workspace:view"],
         )
-        result = abac.evaluate_policies(
+        result = abac_service.evaluate_policies(
             organization=self.org, user=self.user,
             resource=bare_ws, resource_type="workspace",
         )
@@ -595,7 +595,7 @@ class TestEvaluatePolicies(TestCase):
             resource_conditions=[{"key": "domain", "value": "engineering"}],
             actions=["workspace:view"],
         )
-        result = abac.evaluate_policies(
+        result = abac_service.evaluate_policies(
             organization=self.org, user=bare_user,
             resource=self.workspace, resource_type="workspace",
         )
@@ -622,7 +622,7 @@ class TestEvaluatePolicies(TestCase):
             resource_conditions=[{"key": "domain", "value": "engineering"}],
             actions=["!workspace:admin"],
         )
-        result = abac.evaluate_policies(
+        result = abac_service.evaluate_policies(
             organization=self.org, user=self.user,
             resource=self.workspace, resource_type="workspace",
         )
@@ -639,7 +639,7 @@ class TestEvaluatePolicies(TestCase):
             resource_conditions=[{"key": "domain", "value": "engineering"}],
             actions=["!workspace:view", "!workspace:edit"],
         )
-        result = abac.evaluate_policies(
+        result = abac_service.evaluate_policies(
             organization=self.org, user=self.user,
             resource=self.workspace, resource_type="workspace",
         )
@@ -670,7 +670,7 @@ class TestEvaluatePoliciesUnscoped(TestCase):
             resource_conditions=[{"key": "*", "value": "*"}],
             actions=["workspace:edit"],
         )
-        result = abac.evaluate_policies_unscoped(
+        result = abac_service.evaluate_policies_unscoped(
             organization=self.org, user=self.user, resource_type="workspace",
         )
         self.assertIn("workspace:edit", result)
@@ -683,7 +683,7 @@ class TestEvaluatePoliciesUnscoped(TestCase):
             resource_conditions=[{"key": "domain", "value": "engineering"}],
             actions=["workspace:view"],
         )
-        result = abac.evaluate_policies_unscoped(
+        result = abac_service.evaluate_policies_unscoped(
             organization=self.org, user=self.user, resource_type="workspace",
         )
         self.assertNotIn("workspace:view", result)
@@ -696,7 +696,7 @@ class TestEvaluatePoliciesUnscoped(TestCase):
             resource_conditions=[{"key": "*", "value": "*"}],
             actions=["workspace:admin"],
         )
-        result = abac.evaluate_policies_unscoped(
+        result = abac_service.evaluate_policies_unscoped(
             organization=self.org, user=self.user, resource_type="workspace",
         )
         self.assertEqual(result, {"workspace:admin", "workspace:view", "workspace:edit"})
@@ -714,7 +714,7 @@ class TestEvaluatePoliciesUnscoped(TestCase):
             resource_conditions=[],
             actions=["workspace:view"],
         )
-        result = abac.evaluate_policies_unscoped(
+        result = abac_service.evaluate_policies_unscoped(
             organization=self.org, user=self.user, resource_type="workspace",
         )
         self.assertNotIn("workspace:view", result)
@@ -771,7 +771,7 @@ class TestFilterPermittedResources(TestCase):
             actions=["workspace:view"],
         )
         qs = self._all_workspaces()
-        result = abac.filter_permitted_resources(
+        result = abac_service.filter_permitted_resources(
             organization=self.org, user=self.user,
             queryset=qs, resource_type="workspace", action="workspace:view",
         )
@@ -786,7 +786,7 @@ class TestFilterPermittedResources(TestCase):
             actions=["workspace:view"],
         )
         qs = self._all_workspaces()
-        result = abac.filter_permitted_resources(
+        result = abac_service.filter_permitted_resources(
             organization=self.org, user=self.user,
             queryset=qs, resource_type="workspace", action="workspace:view",
         )
@@ -804,7 +804,7 @@ class TestFilterPermittedResources(TestCase):
             actions=["workspace:view"],
         )
         qs = self._all_workspaces()
-        result = abac.filter_permitted_resources(
+        result = abac_service.filter_permitted_resources(
             organization=self.org, user=bare_user,
             queryset=qs, resource_type="workspace", action="workspace:view",
         )
@@ -827,7 +827,7 @@ class TestFilterPermittedResources(TestCase):
         )
         qs = self._all_workspaces()
 
-        view_result = abac.filter_permitted_resources(
+        view_result = abac_service.filter_permitted_resources(
             organization=self.org, user=self.user,
             queryset=qs, resource_type="workspace", action="workspace:view",
         )
@@ -836,7 +836,7 @@ class TestFilterPermittedResources(TestCase):
             set(qs.values_list("pk", flat=True)),
         )
 
-        edit_result = abac.filter_permitted_resources(
+        edit_result = abac_service.filter_permitted_resources(
             organization=self.org, user=self.user,
             queryset=qs, resource_type="workspace", action="workspace:edit",
         )
@@ -859,7 +859,7 @@ class TestFilterPermittedResources(TestCase):
             actions=["!workspace:view"],
         )
         qs = self._all_workspaces()
-        result = abac.filter_permitted_resources(
+        result = abac_service.filter_permitted_resources(
             organization=self.org, user=self.user,
             queryset=qs, resource_type="workspace", action="workspace:view",
         )
@@ -885,7 +885,7 @@ class TestFilterPermittedResources(TestCase):
             actions=["!workspace:view"],
         )
         qs = self._all_workspaces()
-        result = abac.filter_permitted_resources(
+        result = abac_service.filter_permitted_resources(
             organization=self.org, user=self.user,
             queryset=qs, resource_type="workspace", action="workspace:view",
         )
@@ -917,7 +917,7 @@ class TestFilterPermittedResources(TestCase):
             actions=["workspace:admin"],
         )
         qs = self._all_workspaces()
-        result = abac.filter_permitted_resources(
+        result = abac_service.filter_permitted_resources(
             organization=self.org, user=self.user,
             queryset=qs, resource_type="workspace", action="workspace:edit",
         )
@@ -946,7 +946,7 @@ class TestFilterPermittedResources(TestCase):
         )
         qs = self._all_workspaces()
 
-        view_result = abac.filter_permitted_resources(
+        view_result = abac_service.filter_permitted_resources(
             organization=self.org, user=self.user,
             queryset=qs, resource_type="workspace", action="workspace:view",
         )
@@ -955,7 +955,7 @@ class TestFilterPermittedResources(TestCase):
             set(qs.values_list("pk", flat=True)),
         )
 
-        edit_result = abac.filter_permitted_resources(
+        edit_result = abac_service.filter_permitted_resources(
             organization=self.org, user=self.user,
             queryset=qs, resource_type="workspace", action="workspace:edit",
         )
@@ -1005,7 +1005,7 @@ class TestCrossOrgIsolation(TestCase):
         )
         mixed_qs = Workspace.objects.filter(pk__in=[self.ws_a.pk, self.ws_b.pk])
         with self.assertRaises(ValueError) as cm:
-            abac.filter_permitted_resources(
+            abac_service.filter_permitted_resources(
                 organization=self.org_a, user=self.user_a,
                 queryset=mixed_qs, resource_type="workspace", action="workspace:view",
             )
@@ -1021,7 +1021,7 @@ class TestCrossOrgIsolation(TestCase):
             actions=["workspace:view"],
         )
         scoped_qs = Workspace.objects.filter(pk=self.ws_a.pk)
-        result = abac.filter_permitted_resources(
+        result = abac_service.filter_permitted_resources(
             organization=self.org_a, user=self.user_a,
             queryset=scoped_qs, resource_type="workspace", action="workspace:view",
         )
@@ -1036,7 +1036,7 @@ class TestCrossOrgIsolation(TestCase):
             resource_conditions=[{"key": "domain", "value": "engineering"}],
             actions=["workspace:view"],
         )
-        result = abac.evaluate_policies(
+        result = abac_service.evaluate_policies(
             organization=self.org_a, user=self.user_a,
             resource=self.ws_a, resource_type="workspace",
         )
@@ -1055,7 +1055,7 @@ class TestCrossOrgIsolation(TestCase):
             resource_conditions=[{"key": "secret", "value": "granted"}],
             actions=["workspace:admin"],
         )
-        result = abac.evaluate_policies(
+        result = abac_service.evaluate_policies(
             organization=self.org_a, user=self.user_a,
             resource=self.ws_a, resource_type="workspace",
         )
@@ -1064,7 +1064,7 @@ class TestCrossOrgIsolation(TestCase):
     def test_evaluate_policies_raises_on_resource_org_mismatch(self) -> None:
         """Passing a resource from a different org is a caller bug — must raise."""
         with self.assertRaises(ValueError) as cm:
-            abac.evaluate_policies(
+            abac_service.evaluate_policies(
                 organization=self.org_a, user=self.user_a,
                 resource=self.ws_b, resource_type="workspace",
             )
@@ -1073,7 +1073,7 @@ class TestCrossOrgIsolation(TestCase):
     def test_check_action_raises_on_resource_org_mismatch(self) -> None:
         """check_action inherits the resource-org assertion from evaluate_policies."""
         with self.assertRaises(ValueError):
-            abac.check_action(
+            abac_service.check_action(
                 organization=self.org_a, user=self.user_a,
                 resource=self.ws_b, resource_type="workspace", action="workspace:view",
             )
@@ -1081,7 +1081,7 @@ class TestCrossOrgIsolation(TestCase):
     def test_get_effective_tags_raises_on_resource_org_mismatch(self) -> None:
         """get_effective_tags rejects a resource from a foreign org."""
         with self.assertRaises(ValueError):
-            abac.get_effective_tags(
+            abac_service.get_effective_tags(
                 organization=self.org_a, resource=self.ws_b, resource_type="workspace",
             )
 
@@ -1106,7 +1106,7 @@ class TestCrossOrgIsolationEndToEnd(TestCase):
         self.user = User.objects.create_user(
             username="cross_org_user", password="testpass", current_organization=self.org_a,
         )
-        abac.bootstrap_organization(organization=self.org_a, admin_user=self.user)
+        abac_service.bootstrap_organization(organization=self.org_a, admin_user=self.user)
 
         self.ws_b = Workspace.objects.create(organization=self.org_b, name="WS-B", slug="ws-b")
         ResourceTag.objects.create(
@@ -1116,9 +1116,9 @@ class TestCrossOrgIsolationEndToEnd(TestCase):
 
     def test_org_a_admin_gets_no_access_evaluating_org_b_workspace(self) -> None:
         """Fully bootstrapped admin in org A gets empty set when evaluating org B's workspace."""
-        self.assertTrue(abac.is_org_admin(organization=self.org_a, user=self.user))
+        self.assertTrue(abac_service.is_org_admin(organization=self.org_a, user=self.user))
 
-        result = abac.evaluate_policies(
+        result = abac_service.evaluate_policies(
             organization=self.org_b, user=self.user,
             resource=self.ws_b, resource_type="workspace",
         )
@@ -1137,7 +1137,7 @@ class TestCrossOrgIsolationEndToEnd(TestCase):
             organization=self.org_a, user=self.user, key="role", value="developer",
         )
 
-        result = abac.evaluate_policies(
+        result = abac_service.evaluate_policies(
             organization=self.org_b, user=self.user,
             resource=self.ws_b, resource_type="workspace",
         )
@@ -1145,10 +1145,10 @@ class TestCrossOrgIsolationEndToEnd(TestCase):
 
     def test_filter_permitted_resources_returns_empty_for_cross_org_user(self) -> None:
         """filter_permitted_resources with properly-scoped org B queryset returns nothing for org A admin."""
-        self.assertTrue(abac.is_org_admin(organization=self.org_a, user=self.user))
+        self.assertTrue(abac_service.is_org_admin(organization=self.org_a, user=self.user))
 
         org_b_qs = Workspace.objects.filter(organization=self.org_b)
-        result = abac.filter_permitted_resources(
+        result = abac_service.filter_permitted_resources(
             organization=self.org_b, user=self.user,
             queryset=org_b_qs, resource_type="workspace", action="workspace:view",
         )
@@ -1172,16 +1172,16 @@ class TestIsOrgAdmin(TestCase):
         IdentityAttribute.objects.create(
             organization=self.org, user=self.user, key="org-role", value="admin",
         )
-        self.assertTrue(abac.is_org_admin(organization=self.org, user=self.user))
+        self.assertTrue(abac_service.is_org_admin(organization=self.org, user=self.user))
 
     def test_group_inherited_admin(self) -> None:
         group = Group.objects.create(organization=self.org, name="Admins")
         GroupMembership.objects.create(group=group, user=self.user)
         GroupAttribute.objects.create(group=group, key="org-role", value="admin")
-        self.assertTrue(abac.is_org_admin(organization=self.org, user=self.user))
+        self.assertTrue(abac_service.is_org_admin(organization=self.org, user=self.user))
 
     def test_no_admin_attribute(self) -> None:
-        self.assertFalse(abac.is_org_admin(organization=self.org, user=self.user))
+        self.assertFalse(abac_service.is_org_admin(organization=self.org, user=self.user))
 
     def test_admin_in_one_org_not_admin_in_another(self) -> None:
         """org-role=admin in org A must not leak into org B."""
@@ -1189,8 +1189,8 @@ class TestIsOrgAdmin(TestCase):
         IdentityAttribute.objects.create(
             organization=self.org, user=self.user, key="org-role", value="admin",
         )
-        self.assertTrue(abac.is_org_admin(organization=self.org, user=self.user))
-        self.assertFalse(abac.is_org_admin(organization=org_b, user=self.user))
+        self.assertTrue(abac_service.is_org_admin(organization=self.org, user=self.user))
+        self.assertFalse(abac_service.is_org_admin(organization=org_b, user=self.user))
 
 
 # ---------------------------------------------------------------------------
@@ -1212,8 +1212,8 @@ class TestCrossOrgAttributeIsolation(TestCase):
         IdentityAttribute.objects.create(
             organization=self.org_a, user=self.user, key="role", value="developer",
         )
-        attrs_a = abac.get_effective_attributes(organization=self.org_a, user=self.user)
-        attrs_b = abac.get_effective_attributes(organization=self.org_b, user=self.user)
+        attrs_a = abac_service.get_effective_attributes(organization=self.org_a, user=self.user)
+        attrs_b = abac_service.get_effective_attributes(organization=self.org_b, user=self.user)
 
         self.assertIn(("role", "developer", "direct"), attrs_a)
         self.assertNotIn(("role", "developer", "direct"), attrs_b)
@@ -1223,16 +1223,16 @@ class TestCrossOrgAttributeIsolation(TestCase):
         GroupMembership.objects.create(group=group, user=self.user)
         GroupAttribute.objects.create(group=group, key="team", value="backend")
 
-        attrs_a = abac.get_effective_attributes(organization=self.org_a, user=self.user)
-        attrs_b = abac.get_effective_attributes(organization=self.org_b, user=self.user)
+        attrs_a = abac_service.get_effective_attributes(organization=self.org_a, user=self.user)
+        attrs_b = abac_service.get_effective_attributes(organization=self.org_b, user=self.user)
 
         self.assertIn(("team", "backend", "group:Engineers"), attrs_a)
         self.assertNotIn(("team", "backend", "group:Engineers"), attrs_b)
 
     def test_system_attribute_present_in_both_orgs(self) -> None:
         """authenticated=true is context-free and appears regardless of org."""
-        attrs_a = abac.get_effective_attributes(organization=self.org_a, user=self.user)
-        attrs_b = abac.get_effective_attributes(organization=self.org_b, user=self.user)
+        attrs_a = abac_service.get_effective_attributes(organization=self.org_a, user=self.user)
+        attrs_b = abac_service.get_effective_attributes(organization=self.org_b, user=self.user)
 
         self.assertIn(("authenticated", "true", "system"), attrs_a)
         self.assertIn(("authenticated", "true", "system"), attrs_b)
@@ -1252,7 +1252,7 @@ class TestBootstrapOrganization(TestCase):
         )
 
     def test_creates_admin_attribute(self) -> None:
-        abac.bootstrap_organization(organization=self.org, admin_user=self.admin_user)
+        abac_service.bootstrap_organization(organization=self.org, admin_user=self.admin_user)
         self.assertTrue(
             IdentityAttribute.objects.filter(
                 organization=self.org, user=self.admin_user, key="org-role", value="admin",
@@ -1260,7 +1260,7 @@ class TestBootstrapOrganization(TestCase):
         )
 
     def test_creates_expected_seed_policies(self) -> None:
-        abac.bootstrap_organization(organization=self.org, admin_user=self.admin_user)
+        abac_service.bootstrap_organization(organization=self.org, admin_user=self.admin_user)
         seed_policies = Policy.objects.filter(organization=self.org, is_system=True)
         # 3 admin (ws/env/app) + 2 member (ws/env) + 2 viewer (ws/env) + 1 PA owner.
         self.assertEqual(seed_policies.count(), 8)
@@ -1269,7 +1269,7 @@ class TestBootstrapOrganization(TestCase):
         self.assertEqual(resource_types, {"workspace", "environment", "app"})
 
     def test_seed_policy_actions_admin(self) -> None:
-        abac.bootstrap_organization(organization=self.org, admin_user=self.admin_user)
+        abac_service.bootstrap_organization(organization=self.org, admin_user=self.admin_user)
         admin_condition = [{"key": "org-role", "value": "admin"}]
         ws = Policy.objects.get(organization=self.org, identity_conditions=admin_condition, resource_type="workspace")
         env = Policy.objects.get(organization=self.org, identity_conditions=admin_condition, resource_type="environment")
@@ -1279,7 +1279,7 @@ class TestBootstrapOrganization(TestCase):
         self.assertEqual(app.actions, ["app:use"])
 
     def test_seed_policy_actions_member(self) -> None:
-        abac.bootstrap_organization(organization=self.org, admin_user=self.admin_user)
+        abac_service.bootstrap_organization(organization=self.org, admin_user=self.admin_user)
         member_condition = [{"key": "org-role", "value": "member"}]
         ws = Policy.objects.get(organization=self.org, identity_conditions=member_condition, resource_type="workspace")
         env = Policy.objects.get(organization=self.org, identity_conditions=member_condition, resource_type="environment")
@@ -1294,7 +1294,7 @@ class TestBootstrapOrganization(TestCase):
         )
 
     def test_seed_policy_actions_viewer(self) -> None:
-        abac.bootstrap_organization(organization=self.org, admin_user=self.admin_user)
+        abac_service.bootstrap_organization(organization=self.org, admin_user=self.admin_user)
         viewer_condition = [{"key": "org-role", "value": "viewer"}]
         ws = Policy.objects.get(organization=self.org, identity_conditions=viewer_condition, resource_type="workspace")
         env = Policy.objects.get(organization=self.org, identity_conditions=viewer_condition, resource_type="environment")
@@ -1307,7 +1307,7 @@ class TestBootstrapOrganization(TestCase):
         )
 
     def test_pa_owner_policy_is_seeded(self) -> None:
-        abac.bootstrap_organization(organization=self.org, admin_user=self.admin_user)
+        abac_service.bootstrap_organization(organization=self.org, admin_user=self.admin_user)
         pa = Policy.objects.get(
             organization=self.org, name="Personal Assistant: owner access",
         )
@@ -1317,8 +1317,8 @@ class TestBootstrapOrganization(TestCase):
         self.assertEqual(pa.actions, ["app:use"])
 
     def test_idempotent(self) -> None:
-        abac.bootstrap_organization(organization=self.org, admin_user=self.admin_user)
-        abac.bootstrap_organization(organization=self.org, admin_user=self.admin_user)
+        abac_service.bootstrap_organization(organization=self.org, admin_user=self.admin_user)
+        abac_service.bootstrap_organization(organization=self.org, admin_user=self.admin_user)
 
         self.assertEqual(
             IdentityAttribute.objects.filter(
@@ -1376,7 +1376,7 @@ class TestCreateDefaultAppPolicy(TestCase):
 
     def test_idempotent(self) -> None:
         app = self._make_app(name="My Dashboard", slug="my-dashboard")
-        abac.create_default_app_policy(app)
+        abac_service.create_default_app_policy(app)
 
         self.assertEqual(
             ResourceTag.objects.filter(
@@ -1510,7 +1510,7 @@ class TestTeamOnboardingScenario(TestCase):
         self.admin = User.objects.create_user(
             username="onboard_admin", password="testpass", current_organization=self.org,
         )
-        abac.bootstrap_organization(organization=self.org, admin_user=self.admin)
+        abac_service.bootstrap_organization(organization=self.org, admin_user=self.admin)
 
         self.group = Group.objects.create(organization=self.org, name="Data Platform Team")
         GroupAttribute.objects.create(group=self.group, key="team", value="data-platform")
@@ -1546,7 +1546,7 @@ class TestTeamOnboardingScenario(TestCase):
 
     def test_group_members_can_view_workspace(self) -> None:
         for user in [self.alice, self.bob]:
-            result = abac.evaluate_policies(
+            result = abac_service.evaluate_policies(
                 organization=self.org, user=user,
                 resource=self.workspace, resource_type="workspace",
             )
@@ -1554,7 +1554,7 @@ class TestTeamOnboardingScenario(TestCase):
             self.assertIn("workspace:edit", result, f"{user.username} should have workspace:edit")
 
     def test_outsider_cannot_access_workspace(self) -> None:
-        result = abac.evaluate_policies(
+        result = abac_service.evaluate_policies(
             organization=self.org, user=self.outsider,
             resource=self.workspace, resource_type="workspace",
         )
@@ -1563,7 +1563,7 @@ class TestTeamOnboardingScenario(TestCase):
 
     def test_outsider_excluded_from_filtered_queryset(self) -> None:
         qs = Workspace.objects.filter(pk=self.workspace.pk)
-        result = abac.filter_permitted_resources(
+        result = abac_service.filter_permitted_resources(
             organization=self.org, user=self.outsider,
             queryset=qs, resource_type="workspace", action="workspace:view",
         )
@@ -1573,7 +1573,7 @@ class TestTeamOnboardingScenario(TestCase):
         carol = User.objects.create_user(
             username="onboard_carol", password="testpass", current_organization=self.org,
         )
-        result_before = abac.evaluate_policies(
+        result_before = abac_service.evaluate_policies(
             organization=self.org, user=carol,
             resource=self.workspace, resource_type="workspace",
         )
@@ -1581,7 +1581,7 @@ class TestTeamOnboardingScenario(TestCase):
 
         GroupMembership.objects.create(group=self.group, user=carol)
 
-        result_after = abac.evaluate_policies(
+        result_after = abac_service.evaluate_policies(
             organization=self.org, user=carol,
             resource=self.workspace, resource_type="workspace",
         )
@@ -1591,7 +1591,7 @@ class TestTeamOnboardingScenario(TestCase):
     def test_filter_returns_workspace_for_members_only(self) -> None:
         qs = Workspace.objects.filter(pk=self.workspace.pk)
         for user in [self.alice, self.bob]:
-            result = abac.filter_permitted_resources(
+            result = abac_service.filter_permitted_resources(
                 organization=self.org, user=user,
                 queryset=qs, resource_type="workspace", action="workspace:view",
             )
@@ -1665,32 +1665,32 @@ class TestDenyOverrideScenario(TestCase):
         )
 
     def test_contractor_developer_denied_deploy(self) -> None:
-        result = abac.evaluate_policies(
+        result = abac_service.evaluate_policies(
             organization=self.org, user=self.contractor_dev,
             resource=self.staging, resource_type="environment",
         )
         self.assertNotIn("environment:deploy", result)
 
     def test_employee_developer_can_deploy(self) -> None:
-        result = abac.evaluate_policies(
+        result = abac_service.evaluate_policies(
             organization=self.org, user=self.employee_dev,
             resource=self.staging, resource_type="environment",
         )
         self.assertIn("environment:deploy", result)
 
     def test_check_action_reflects_deny_override(self) -> None:
-        self.assertFalse(abac.check_action(
+        self.assertFalse(abac_service.check_action(
             organization=self.org, user=self.contractor_dev,
             resource=self.staging, resource_type="environment", action="environment:deploy",
         ))
-        self.assertTrue(abac.check_action(
+        self.assertTrue(abac_service.check_action(
             organization=self.org, user=self.employee_dev,
             resource=self.staging, resource_type="environment", action="environment:deploy",
         ))
 
     def test_filter_excludes_staging_for_contractor(self) -> None:
         qs = Environment.objects.filter(pk=self.staging.pk)
-        result = abac.filter_permitted_resources(
+        result = abac_service.filter_permitted_resources(
             organization=self.org, user=self.contractor_dev,
             queryset=qs, resource_type="environment", action="environment:deploy",
         )
@@ -1698,7 +1698,7 @@ class TestDenyOverrideScenario(TestCase):
 
     def test_filter_includes_staging_for_employee(self) -> None:
         qs = Environment.objects.filter(pk=self.staging.pk)
-        result = abac.filter_permitted_resources(
+        result = abac_service.filter_permitted_resources(
             organization=self.org, user=self.employee_dev,
             queryset=qs, resource_type="environment", action="environment:deploy",
         )
@@ -1764,34 +1764,34 @@ class TestTagInheritanceConsistency(TestCase):
         )
 
     def test_app_inherits_workspace_tag(self) -> None:
-        tags = abac.get_effective_tags(
+        tags = abac_service.get_effective_tags(
             organization=self.org, resource=self.app, resource_type="app",
         )
         inherited_keys = {k for k, _, s in tags if s.startswith("inherited:")}
         self.assertIn("domain", inherited_keys)
 
     def test_app_accessible_via_inherited_tag(self) -> None:
-        result = abac.evaluate_policies(
+        result = abac_service.evaluate_policies(
             organization=self.org, user=self.user,
             resource=self.app, resource_type="app",
         )
         self.assertIn("app:use", result)
 
     def test_removing_workspace_tag_revokes_app_access(self) -> None:
-        self.assertIn("app:use", abac.evaluate_policies(
+        self.assertIn("app:use", abac_service.evaluate_policies(
             organization=self.org, user=self.user,
             resource=self.app, resource_type="app",
         ))
 
         self.ws_tag.delete()
 
-        tags_after = abac.get_effective_tags(
+        tags_after = abac_service.get_effective_tags(
             organization=self.org, resource=self.app, resource_type="app",
         )
         inherited_domain = [(k, v) for k, v, s in tags_after if k == "domain" and s.startswith("inherited:")]
         self.assertEqual(inherited_domain, [])
 
-        result = abac.evaluate_policies(
+        result = abac_service.evaluate_policies(
             organization=self.org, user=self.user,
             resource=self.app, resource_type="app",
         )
@@ -1806,7 +1806,7 @@ class TestTagInheritanceConsistency(TestCase):
 
         self.ws_tag.delete()
 
-        result = abac.evaluate_policies(
+        result = abac_service.evaluate_policies(
             organization=self.org, user=self.user,
             resource=self.app, resource_type="app",
         )
@@ -1815,7 +1815,7 @@ class TestTagInheritanceConsistency(TestCase):
     def test_filter_reflects_tag_inheritance_change(self) -> None:
         qs = App.objects.filter(pk=self.app.pk)
 
-        result_before = abac.filter_permitted_resources(
+        result_before = abac_service.filter_permitted_resources(
             organization=self.org, user=self.user,
             queryset=qs, resource_type="app", action="app:use",
         )
@@ -1823,7 +1823,7 @@ class TestTagInheritanceConsistency(TestCase):
 
         self.ws_tag.delete()
 
-        result_after = abac.filter_permitted_resources(
+        result_after = abac_service.filter_permitted_resources(
             organization=self.org, user=self.user,
             queryset=qs, resource_type="app", action="app:use",
         )
@@ -1865,7 +1865,7 @@ class TestEdgeCases(TestCase):
             resource_conditions=[{"key": "domain", "value": "engineering"}],
             actions=[],
         )
-        result = abac.evaluate_policies(
+        result = abac_service.evaluate_policies(
             organization=self.org, user=self.user,
             resource=self.workspace, resource_type="workspace",
         )
@@ -1880,7 +1880,7 @@ class TestEdgeCases(TestCase):
             resource_conditions=[{"key": "domain", "value": "engineering"}],
             actions=["workspace:view"],
         )
-        result = abac.evaluate_policies(
+        result = abac_service.evaluate_policies(
             organization=self.org, user=self.user,
             resource=self.workspace, resource_type="workspace",
         )
@@ -1895,7 +1895,7 @@ class TestEdgeCases(TestCase):
             resource_conditions=[{"key": "domain", "value": "engineering"}],
             actions=["workspace:edit"],
         )
-        result = abac.evaluate_policies(
+        result = abac_service.evaluate_policies(
             organization=self.org, user=self.user,
             resource=self.workspace, resource_type="workspace",
         )
@@ -1910,7 +1910,7 @@ class TestEdgeCases(TestCase):
             resource_conditions=[{"key": "domain", "value": "engineering"}],
             actions=["workspace:view"],
         )
-        result = abac.evaluate_policies(
+        result = abac_service.evaluate_policies(
             organization=self.org, user=self.user,
             resource=self.workspace, resource_type="workspace",
         )
@@ -1929,29 +1929,29 @@ class TestSuggestionPalette(TestCase):
         self.user = User.objects.create_user(username="suggest_user", password="testpass", current_organization=self.org)
 
     def test_identity_palette_keys_included(self) -> None:
-        keys, _ = abac.get_identity_attribute_suggestions(self.org)
-        for expected in abac.IDENTITY_SUGGESTIONS:
+        keys, _ = abac_service.get_identity_attribute_suggestions(self.org)
+        for expected in abac_service.IDENTITY_SUGGESTIONS:
             self.assertIn(expected, keys)
 
     def test_identity_palette_pairs_included(self) -> None:
-        _, pairs = abac.get_identity_attribute_suggestions(self.org)
-        expected_keys, expected_pairs = abac._expand_suggestions(abac.IDENTITY_SUGGESTIONS)
+        _, pairs = abac_service.get_identity_attribute_suggestions(self.org)
+        expected_keys, expected_pairs = abac_service._expand_suggestions(abac_service.IDENTITY_SUGGESTIONS)
         for expected_pair in expected_pairs:
             self.assertIn(expected_pair, pairs)
 
     def test_system_attributes_excluded_by_default(self) -> None:
-        keys, pairs = abac.get_identity_attribute_suggestions(self.org)
+        keys, pairs = abac_service.get_identity_attribute_suggestions(self.org)
         self.assertNotIn("authenticated", keys)
         self.assertNotIn(("authenticated", "true"), pairs)
 
     def test_system_attributes_included_with_flag(self) -> None:
-        keys, pairs = abac.get_identity_attribute_suggestions(self.org, include_system=True)
+        keys, pairs = abac_service.get_identity_attribute_suggestions(self.org, include_system=True)
         self.assertIn("authenticated", keys)
         self.assertIn(("authenticated", "true"), pairs)
 
     def test_identity_includes_attribute_keys(self) -> None:
         IdentityAttribute.objects.create(organization=self.org, user=self.user, key="custom-key", value="x")
-        keys, pairs = abac.get_identity_attribute_suggestions(self.org)
+        keys, pairs = abac_service.get_identity_attribute_suggestions(self.org)
         self.assertIn("custom-key", keys)
         self.assertIn(("custom-key", "x"), pairs)
 
@@ -1960,7 +1960,7 @@ class TestSuggestionPalette(TestCase):
         ResourceTag.objects.create(
             organization=self.org, resource_type="workspace", workspace=workspace, key="infra-key", value="x",
         )
-        keys, _ = abac.get_identity_attribute_suggestions(self.org)
+        keys, _ = abac_service.get_identity_attribute_suggestions(self.org)
         self.assertNotIn("infra-key", keys)
 
     def test_tag_includes_resource_tag_keys_for_matching_type(self) -> None:
@@ -1968,7 +1968,7 @@ class TestSuggestionPalette(TestCase):
         ResourceTag.objects.create(
             organization=self.org, resource_type="workspace", workspace=workspace, key="infra-key", value="x",
         )
-        keys, pairs = abac.get_resource_tag_suggestions(self.org, "workspace")
+        keys, pairs = abac_service.get_resource_tag_suggestions(self.org, "workspace")
         self.assertIn("infra-key", keys)
         self.assertIn(("infra-key", "x"), pairs)
 
@@ -1977,7 +1977,7 @@ class TestSuggestionPalette(TestCase):
         ResourceTag.objects.create(
             organization=self.org, resource_type="workspace", workspace=workspace, key="infra-key", value="x",
         )
-        keys, pairs = abac.get_resource_tag_suggestions(self.org, "environment")
+        keys, pairs = abac_service.get_resource_tag_suggestions(self.org, "environment")
         self.assertNotIn("infra-key", keys)
         self.assertNotIn(("infra-key", "x"), pairs)
 
@@ -1986,23 +1986,23 @@ class TestSuggestionPalette(TestCase):
         ResourceTag.objects.create(
             organization=self.org, resource_type="workspace", workspace=workspace, key="infra-key", value="x",
         )
-        keys, pairs = abac.get_resource_tag_suggestions(self.org)
+        keys, pairs = abac_service.get_resource_tag_suggestions(self.org)
         self.assertIn("infra-key", keys)
         self.assertIn(("infra-key", "x"), pairs)
 
     def test_tag_per_type_seed_suggestions(self) -> None:
-        keys, pairs = abac.get_resource_tag_suggestions(self.org, "environment")
+        keys, pairs = abac_service.get_resource_tag_suggestions(self.org, "environment")
         self.assertIn("stage", keys)
         self.assertIn(("stage", "production"), pairs)
         self.assertNotIn("project", keys)
 
     def test_tag_excludes_identity_attribute_keys(self) -> None:
         IdentityAttribute.objects.create(organization=self.org, user=self.user, key="custom-key", value="x")
-        keys, _ = abac.get_resource_tag_suggestions(self.org)
+        keys, _ = abac_service.get_resource_tag_suggestions(self.org)
         self.assertNotIn("custom-key", keys)
 
     def test_results_are_sorted(self) -> None:
-        keys, pairs = abac.get_identity_attribute_suggestions(self.org)
+        keys, pairs = abac_service.get_identity_attribute_suggestions(self.org)
         self.assertEqual(keys, sorted(keys))
         self.assertEqual(pairs, sorted(pairs))
 
@@ -2015,20 +2015,20 @@ class TestSuggestionPalette(TestCase):
 class TestSelfReferentialValidation(TestCase):
 
     def test_resource_ref_in_identity_value_is_valid(self) -> None:
-        abac.validate_policy_conditions(
+        abac_service.validate_policy_conditions(
             identity_conditions=[{"key": "username", "value": "$resource.owner"}],
             resource_conditions=[{"key": "app-type", "value": "personal-assistant"}],
         )
 
     def test_identity_ref_in_resource_value_is_valid(self) -> None:
-        abac.validate_policy_conditions(
+        abac_service.validate_policy_conditions(
             identity_conditions=[{"key": "username", "value": "alice"}],
             resource_conditions=[{"key": "owner", "value": "$identity.username"}],
         )
 
     def test_identity_ref_in_identity_value_raises(self) -> None:
         with self.assertRaises(ValidationError) as cm:
-            abac.validate_policy_conditions(
+            abac_service.validate_policy_conditions(
                 identity_conditions=[{"key": "username", "value": "$identity.email"}],
                 resource_conditions=[],
             )
@@ -2036,7 +2036,7 @@ class TestSelfReferentialValidation(TestCase):
 
     def test_resource_ref_in_resource_value_raises(self) -> None:
         with self.assertRaises(ValidationError) as cm:
-            abac.validate_policy_conditions(
+            abac_service.validate_policy_conditions(
                 identity_conditions=[],
                 resource_conditions=[{"key": "owner", "value": "$resource.other"}],
             )
@@ -2044,7 +2044,7 @@ class TestSelfReferentialValidation(TestCase):
 
     def test_reference_in_key_is_rejected(self) -> None:
         with self.assertRaises(ValidationError):
-            abac.validate_policy_conditions(
+            abac_service.validate_policy_conditions(
                 identity_conditions=[{"key": "$resource.owner", "value": "alice"}],
                 resource_conditions=[],
             )
@@ -2101,14 +2101,14 @@ class TestSelfReferentialEvaluation(TestCase):
         )
 
     def test_owner_is_granted_app_use(self) -> None:
-        allowed = abac.evaluate_policies(
+        allowed = abac_service.evaluate_policies(
             organization=self.org, user=self.owner,
             resource=self.pa_app, resource_type="app",
         )
         self.assertIn("app:use", allowed)
 
     def test_non_owner_is_denied(self) -> None:
-        allowed = abac.evaluate_policies(
+        allowed = abac_service.evaluate_policies(
             organization=self.org, user=self.stranger,
             resource=self.pa_app, resource_type="app",
         )
@@ -2118,7 +2118,7 @@ class TestSelfReferentialEvaluation(TestCase):
         ResourceTag.objects.filter(
             organization=self.org, app=self.pa_app, key="owner",
         ).delete()
-        allowed = abac.evaluate_policies(
+        allowed = abac_service.evaluate_policies(
             organization=self.org, user=self.owner,
             resource=self.pa_app, resource_type="app",
         )
@@ -2128,7 +2128,7 @@ class TestSelfReferentialEvaluation(TestCase):
         IdentityAttribute.objects.filter(
             organization=self.org, user=self.owner, key="username",
         ).delete()
-        allowed = abac.evaluate_policies(
+        allowed = abac_service.evaluate_policies(
             organization=self.org, user=self.owner,
             resource=self.pa_app, resource_type="app",
         )
@@ -2158,11 +2158,11 @@ class TestSelfReferentialEvaluation(TestCase):
             organization=self.org, user=self.stranger,
             key="app-type", value="personal-assistant",
         )
-        owner_allowed = abac.evaluate_policies(
+        owner_allowed = abac_service.evaluate_policies(
             organization=self.org, user=self.owner,
             resource=self.pa_app, resource_type="app",
         )
-        stranger_allowed = abac.evaluate_policies(
+        stranger_allowed = abac_service.evaluate_policies(
             organization=self.org, user=self.stranger,
             resource=self.pa_app, resource_type="app",
         )
@@ -2188,13 +2188,13 @@ class TestSelfReferentialEvaluation(TestCase):
             organization=self.org, resource_type="app", app=other_app,
             key="owner", value="alice",
         )
-        visible_for_owner = abac.filter_permitted_resources(
+        visible_for_owner = abac_service.filter_permitted_resources(
             organization=self.org, user=self.owner,
             queryset=App.objects.filter(organization=self.org),
             resource_type="app", action="app:use",
         )
         self.assertEqual(list(visible_for_owner.values_list("slug", flat=True)), ["vmendi-hermes"])
-        visible_for_stranger = abac.filter_permitted_resources(
+        visible_for_stranger = abac_service.filter_permitted_resources(
             organization=self.org, user=self.stranger,
             queryset=App.objects.filter(organization=self.org),
             resource_type="app", action="app:use",

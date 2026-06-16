@@ -15,7 +15,7 @@ from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_POST
 
 from ..models import App, DeploymentBlueprint, User
-from ..services import abac
+from ..services import abac_service
 from . import env_bearer_auth
 
 logger = logging.getLogger(__name__)
@@ -91,7 +91,7 @@ def pdp_evaluate(request: HttpRequest) -> JsonResponse:
         )
         return JsonResponse({"decision": "deny", "reason": "user-not-found"})
 
-    allowed = abac.evaluate_policies(
+    allowed = abac_service.evaluate_policies(
         organization=organization, user=user, resource=app, resource_type="app",
     )
     if "app:use" in allowed:

@@ -19,7 +19,7 @@ from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_POST
 
 from devopshero_app.models import App, AppPermissionRequest, Environment, User
-from devopshero_app.services import abac
+from devopshero_app.services import abac_service
 from devopshero_app.services import permissions_service
 from devopshero_app.views.integrations import broker_request_context
 
@@ -204,7 +204,7 @@ def permissions_apply(request: HttpRequest) -> JsonResponse:
     if app_permission_request is None:
         return JsonResponse({"error": "permission request not found"}, status=404)
 
-    allowed = abac.check_action(
+    allowed = abac_service.check_action(
         organization=deployment.environment.aws_account.organization,
         user=deployment.owner_user,
         resource=deployment.environment,

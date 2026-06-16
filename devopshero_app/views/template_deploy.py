@@ -15,7 +15,7 @@ from django.shortcuts import get_object_or_404, render, redirect
 from django.utils.text import slugify
 
 from devopshero_app import models
-from devopshero_app.services import abac
+from devopshero_app.services import abac_service
 from devopshero_app.services.app_templates import template_deploy_service
 from devopshero_app.views import base
 
@@ -133,7 +133,7 @@ def _owner_options_for(request: HttpRequest, org: models.Organization) -> list[d
     Org admins may deploy a PA on behalf of any member of the organization.
     Everyone else is locked to themselves.
     """
-    if abac.is_org_admin(organization=org, user=request.user):
+    if abac_service.is_org_admin(organization=org, user=request.user):
         memberships = models.OrganizationMembership.objects.filter(
             organization=org,
         ).select_related("user").order_by("user__username")
@@ -174,12 +174,12 @@ def template_deploy_form(request: HttpRequest, template_slug: str) -> HttpRespon
         return render(request, "devopshero_app/app_shell.html", context=context)
 
     workspaces = models.Workspace.objects.filter(organization=org)
-    workspaces = abac.filter_permitted_resources(
+    workspaces = abac_service.filter_permitted_resources(
         org, request.user, workspaces, "workspace", "workspace:edit",
     )
 
     environments = models.Environment.objects.filter(aws_account__organization=org, status=models.Environment.Status.READY)
-    environments = abac.filter_permitted_resources(
+    environments = abac_service.filter_permitted_resources(
         org, request.user, environments, "environment", "environment:deploy",
     )
 
@@ -196,7 +196,7 @@ def template_deploy_form(request: HttpRequest, template_slug: str) -> HttpRespon
     # Non-admins are locked to themselves; the dropdown is visible but has only
     # one option. Pre-select it so submission works without extra clicks.
     default_owner = request.user.username if requires_owner else ""
-    owner_locked = requires_owner and not abac.is_org_admin(organization=org, user=request.user)
+    owner_locked = requires_owner and not abac_service.is_org_admin(organization=org, user=request.user)
 
     default_app_name = _compute_default_app_name(
         template=template, org=org, owner_username=default_owner or None,
@@ -267,7 +267,7 @@ def _handle_deploy(request: HttpRequest, template: models.AppTemplate, org: mode
     requires_owner = _template_requires_owner(template)
     owner_username: str | None = None
     if requires_owner:
-        is_admin = abac.is_org_admin(organization=org, user=request.user)
+        is_admin = abac_service.is_org_admin(organization=org, user=request.user)
         if is_admin:
             if not submitted_owner:
                 errors.append("Owner is required.")
@@ -307,13 +307,13 @@ def _handle_deploy(request: HttpRequest, template: models.AppTemplate, org: mode
 
     if errors:
         workspaces = models.Workspace.objects.filter(organization=org)
-        workspaces = abac.filter_permitted_resources(
+        workspaces = abac_service.filter_permitted_resources(
             org, request.user, workspaces, "workspace", "workspace:edit",
         )
         environments = models.Environment.objects.filter(
             aws_account__organization=org, status=models.Environment.Status.READY,
         )
-        environments = abac.filter_permitted_resources(
+        environments = abac_service.filter_permitted_resources(
             org, request.user, environments, "environment", "environment:deploy",
         )
         workspace_options = _workspace_options(workspaces)
@@ -339,7 +339,7 @@ def _handle_deploy(request: HttpRequest, template: models.AppTemplate, org: mode
         context["owner_options"] = owner_options
         context["selected_owner_id"] = submitted_owner
         context["selected_owner_label"] = _selected_label(owner_options, submitted_owner, "Select an owner")
-        context["owner_locked"] = requires_owner and not abac.is_org_admin(organization=org, user=request.user)
+        context["owner_locked"] = requires_owner and not abac_service.is_org_admin(organization=org, user=request.user)
         context["owner_prefill_map"] = {}
         return render(request, "devopshero_app/deploy/template_deploy_form.html", context=context)
 

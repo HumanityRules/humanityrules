@@ -3,13 +3,13 @@ from django.http import HttpResponseForbidden
 from django.templatetags.static import static
 
 from ..models import OrganizationMembership
-from ..services import abac
+from ..services import abac_service
 
 
 def require_org_admin(request):
     """Return a 403 response if the user is not an org admin, or None if allowed."""
     org = request.user.current_organization
-    if abac.is_org_admin(organization=org, user=request.user):
+    if abac_service.is_org_admin(organization=org, user=request.user):
         return None
     return HttpResponseForbidden("You do not have permission to access this page.")
 
@@ -24,7 +24,7 @@ def get_app_shell_context(request, current_page):
     """
     user = request.user
     current_org = user.current_organization
-    user_is_org_admin = abac.is_org_admin(organization=current_org, user=user)
+    user_is_org_admin = abac_service.is_org_admin(organization=current_org, user=user)
 
     # Get user's organizations via memberships
     memberships = OrganizationMembership.objects.filter(user=user).select_related('organization')

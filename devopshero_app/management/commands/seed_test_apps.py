@@ -9,7 +9,7 @@ Usage:
 
 from django.core.management.base import BaseCommand, CommandError
 
-from devopshero_app.services import abac
+from devopshero_app.services import abac_service
 from devopshero_app.models import (
     AWSAccount,
     App,
@@ -324,7 +324,7 @@ class Command(BaseCommand):
             Workspace.objects.filter(organization=org, slug="default").delete()
         self.stdout.write(f"  Created org: {org.name}")
 
-        abac.bootstrap_organization(organization=org, admin_user=user)
+        abac_service.bootstrap_organization(organization=org, admin_user=user)
         self.stdout.write(f"    Membership: {user.email} as admin (bootstrapped)")
 
         for ws_data in org_data["workspaces"]:

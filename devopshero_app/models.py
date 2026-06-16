@@ -1709,8 +1709,8 @@ class Policy(models.Model):
         verbose_name_plural = "Policies"
 
     def clean(self) -> None:
-        from devopshero_app.services import abac
-        abac.validate_policy_conditions(
+        from devopshero_app.services import abac_service
+        abac_service.validate_policy_conditions(
             identity_conditions=self.identity_conditions or [],
             resource_conditions=self.resource_conditions or [],
         )
@@ -1967,8 +1967,8 @@ def create_default_workspace_tag(
 ) -> None:
     """Create a workspace-name tag when a new Workspace is created."""
     if created:
-        from devopshero_app.services import abac
-        abac.create_default_workspace_tag(instance)
+        from devopshero_app.services import abac_service
+        abac_service.create_default_workspace_tag(instance)
 
 
 @receiver(post_save, sender=Environment)
@@ -1980,8 +1980,8 @@ def create_default_environment_tag(
 ) -> None:
     """Create an environment-name tag when a new Environment is created."""
     if created:
-        from devopshero_app.services import abac
-        abac.create_default_environment_tag(instance)
+        from devopshero_app.services import abac_service
+        abac_service.create_default_environment_tag(instance)
 
 
 @receiver(post_save, sender=App)
@@ -1993,5 +1993,5 @@ def create_default_app_policy(
 ) -> None:
     """Create a default app:use policy and app-name tag when a new App is created."""
     if created:
-        from devopshero_app.services.abac import create_default_app_policy as _create_policy
+        from devopshero_app.services.abac_service import create_default_app_policy as _create_policy
         _create_policy(instance)

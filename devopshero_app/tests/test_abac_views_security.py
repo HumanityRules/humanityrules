@@ -27,7 +27,7 @@ from devopshero_app.models import (
     User,
     Workspace,
 )
-from devopshero_app.services import abac
+from devopshero_app.services import abac_service
 
 HTMX = {"HTTP_HX_REQUEST": "true"}
 
@@ -45,7 +45,7 @@ class TestSecuritySettingsEndpoints(TestCase):
 
         self.admin_user = User.objects.create_user(username="sec_admin", password="x", current_organization=self.org)
         OrganizationMembership.objects.create(organization=self.org, user=self.admin_user, role=OrganizationMembership.Role.ADMIN)
-        abac.bootstrap_organization(organization=self.org, admin_user=self.admin_user)
+        abac_service.bootstrap_organization(organization=self.org, admin_user=self.admin_user)
 
         self.regular_user = User.objects.create_user(username="sec_regular", password="x", current_organization=self.org)
         OrganizationMembership.objects.create(organization=self.org, user=self.regular_user, role=OrganizationMembership.Role.MEMBER)

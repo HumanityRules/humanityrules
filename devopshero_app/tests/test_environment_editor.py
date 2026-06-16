@@ -4,7 +4,7 @@ from django.test import TestCase
 from django.urls import reverse
 
 import devopshero_app.models as models
-from devopshero_app.services import abac
+from devopshero_app.services import abac_service
 
 HTMX = {"HTTP_HX_REQUEST": "true"}
 
@@ -59,7 +59,7 @@ class TestEnvironmentEditor(TestCase):
             user=self.admin_user,
             role=models.OrganizationMembership.Role.ADMIN,
         )
-        abac.bootstrap_organization(organization=self.organization, admin_user=self.admin_user)
+        abac_service.bootstrap_organization(organization=self.organization, admin_user=self.admin_user)
 
         self.viewer_user = models.User.objects.create_user(
             username="environment-editor-viewer",

@@ -5,7 +5,7 @@ from django.shortcuts import render, redirect
 from django.utils.text import slugify
 
 from ..models import Organization, OrganizationInvite, User
-from ..services import abac
+from ..services import abac_service
 from . import invites as invites_views
 
 
@@ -81,7 +81,7 @@ def onboarding(request: HttpRequest) -> HttpResponse:
                     current_organization=org,
                 )
 
-                abac.bootstrap_organization(organization=org, admin_user=user)
+                abac_service.bootstrap_organization(organization=org, admin_user=user)
 
             # Clear session data and log in
             del request.session["pending_workos_user"]

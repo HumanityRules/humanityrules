@@ -276,7 +276,7 @@ class TestCostPanelView(_CostFixtureMixin, TestCase):
         self.client.force_login(self.user)
 
     def test_panel_renders_and_enqueues_refresh(self) -> None:
-        with patch("devopshero_app.views.apps.abac.check_action", return_value=True):
+        with patch("devopshero_app.views.apps.abac_service.check_action", return_value=True):
             response = self.client.get(f"/apps/{self.app.slug}/cost-panel/")
         self.assertEqual(response.status_code, 200)
         self.assertIn(b"Last 24h", response.content)
@@ -284,12 +284,12 @@ class TestCostPanelView(_CostFixtureMixin, TestCase):
 
     def test_poll_request_does_not_enqueue(self) -> None:
         # The self-poll (?await=1) is read-only; it must never create a refresh job.
-        with patch("devopshero_app.views.apps.abac.check_action", return_value=True):
+        with patch("devopshero_app.views.apps.abac_service.check_action", return_value=True):
             response = self.client.get(f"/apps/{self.app.slug}/cost-panel/?await=1")
         self.assertEqual(response.status_code, 200)
         self.assertEqual(CostRefreshJob.objects.filter(app=self.app).count(), 0)
 
     def test_panel_denied_without_view_permission(self) -> None:
-        with patch("devopshero_app.views.apps.abac.check_action", return_value=False):
+        with patch("devopshero_app.views.apps.abac_service.check_action", return_value=False):
             response = self.client.get(f"/apps/{self.app.slug}/cost-panel/")
         self.assertEqual(response.status_code, 403)
