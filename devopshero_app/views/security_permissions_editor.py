@@ -28,8 +28,9 @@ def security_permissions_statements(request: HttpRequest, app_permission_request
         id=app_permission_request_id,
         app__organization=organization,
     )
+    permissions_service.ensure_statement_sids(app_permission_request)
     available_resources = permissions_service.fetch_available_resources(app_permission_request)
-    service_groups = permissions_service.group_statements_by_service(app_permission_request.statements or [], available_resources)
+    service_groups = permissions_service.build_statement_groups(app_permission_request.statements or [], available_resources)
     return render(
         request=request,
         template_name="devopshero_app/security/_permission_statements.html",
@@ -60,6 +61,7 @@ def security_permissions_editor(request: HttpRequest) -> HttpResponse:
 
     app_permissions = permissions_service.get_or_create_app_permissions(app=app, environment=environment)
     app_permission_request = permissions_service.get_or_create_draft(app=app, environment=environment, user=request.user, app_permissions=app_permissions)
+    permissions_service.ensure_statement_sids(app_permission_request)
 
     conversation = models.Conversation.objects.filter(
         context_app_permission_request=app_permission_request,
@@ -79,7 +81,7 @@ def security_permissions_editor(request: HttpRequest) -> HttpResponse:
     ).order_by("created_at")
 
     available_resources = permissions_service.fetch_available_resources(app_permission_request)
-    service_groups = permissions_service.group_statements_by_service(app_permission_request.statements or [], available_resources)
+    service_groups = permissions_service.build_statement_groups(app_permission_request.statements or [], available_resources)
     service_options = permissions_service.get_all_service_options()
 
     context = base.get_app_shell_context(request=request, current_page="security")
@@ -92,7 +94,7 @@ def security_permissions_editor(request: HttpRequest) -> HttpResponse:
         "service_groups": service_groups,
         "service_options_json": json.dumps(service_options),
         "security_querystring": urlencode(query={"context_app": app_slug, "context_environment": environment_slug}),
-        "has_changes": app_permission_request.statements != app_permissions.statements,
+        "has_changes": not permissions_service.statements_equal(app_permission_request.statements, app_permissions.statements),
     })
 
     return render(request=request, template_name="devopshero_app/security/security_permissions_editor.html", context=context)
@@ -135,7 +137,7 @@ def security_permissions_editor_cancel(request: HttpRequest, app_permission_requ
     permissions_service.cancel(app_permission_request, app_permissions)
 
     available_resources = permissions_service.fetch_available_resources(app_permission_request)
-    service_groups = permissions_service.group_statements_by_service(app_permission_request.statements or [], available_resources)
+    service_groups = permissions_service.build_statement_groups(app_permission_request.statements or [], available_resources)
 
     return render(
         request=request,
@@ -157,11 +159,13 @@ def security_permissions_editor_update_statement(request: HttpRequest, app_permi
 
     action = request.POST.get("action", "")
     service = request.POST.get("service", "").strip()
+    statement_id = request.POST.get("statement_id", "").strip()
 
-    permissions_service.apply_statement_action(
+    affected_sid = permissions_service.apply_statement_action(
         app_permission_request,
         action=action,
         service=service,
+        statement_id=statement_id,
         level=request.POST.get("level", "").strip(),
         arn=request.POST.get("arn", "").strip(),
         s3_prefix=request.POST.get("s3_prefix", "").strip(),
@@ -177,8 +181,8 @@ def security_permissions_editor_update_statement(request: HttpRequest, app_permi
         return HttpResponse()
 
     available_resources = permissions_service.fetch_available_resources(app_permission_request)
-    service_groups = permissions_service.group_statements_by_service(app_permission_request.statements or [], available_resources)
-    group = next((g for g in service_groups if g["service"] == service), None)
+    service_groups = permissions_service.build_statement_groups(app_permission_request.statements or [], available_resources)
+    group = next((g for g in service_groups if g["sid"] == affected_sid), None)
     if group is None:
         return HttpResponse(status=204)
 
@@ -211,6 +215,7 @@ def security_permissions_editor_service_group(request: HttpRequest, app_permissi
 
     available = permissions_service.get_resources_for_services(app_permission_request.environment, [service])
     group = permissions_service.build_service_group_data(
+        sid=permissions_service.new_statement_sid(),
         service=service,
         selected_levels=set(),
         resources=[],
@@ -264,7 +269,7 @@ def security_permissions_editor_refresh_resources(request: HttpRequest, app_perm
 
     services = [stmt.get("service") for stmt in (app_permission_request.statements or []) if stmt.get("service")]
     available_resources = permissions_service.refresh_resources_cache(app_permission_request.environment, services)
-    service_groups = permissions_service.group_statements_by_service(app_permission_request.statements or [], available_resources)
+    service_groups = permissions_service.build_statement_groups(app_permission_request.statements or [], available_resources)
 
     return render(
         request=request,

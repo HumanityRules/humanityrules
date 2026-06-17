@@ -10,8 +10,10 @@ import hashlib
 import json
 from unittest.mock import patch
 
+from asgiref.sync import async_to_sync
 from django.test import TestCase
 
+from devopshero_app.services import permissions_service
 from devopshero_app.models import (
     AWSAccount,
     App,
@@ -167,14 +169,60 @@ class TestPermissionsApi(TestCase):
         self.assertEqual(r1.status_code, 200)
         groups = r1.json()["service_groups"]
         self.assertEqual([g["service"] for g in groups], ["s3"])
+        sid = groups[0]["sid"]
+        self.assertTrue(sid)
 
-        r2 = self._post("/api/permissions/draft/statement", {**self._identity(), "request_id": rid, "action": "add_level", "service": "s3", "level": "Read"}, bearer=self.raw_token)
+        r2 = self._post("/api/permissions/draft/statement", {**self._identity(), "request_id": rid, "action": "add_level", "service": "s3", "statement_id": sid, "level": "Read"}, bearer=self.raw_token)
         self.assertEqual(r2.status_code, 200)
         body = r2.json()
         self.assertTrue(body["has_changes"])
-        s3 = next(g for g in body["service_groups"] if g["service"] == "s3")
-        read = next(l for l in s3["access_levels"] if l["name"] == "Read")
+        s3 = next(g for g in body["service_groups"] if g["sid"] == sid)
+        read = next(lvl for lvl in s3["access_levels"] if lvl["name"] == "Read")
         self.assertTrue(read["checked"])
+
+    def test_agent_upsert_keys_by_service_and_resources(self) -> None:
+        apr = AppPermissionRequest.objects.create(
+            app=self.app, environment=self.env, status=AppPermissionRequest.Status.DRAFT,
+        )
+        table_arn = "arn:aws:dynamodb:us-east-1:111122223333:table/Orders"
+        # Distinct resource sets → two statements; same resource set → merge levels.
+        async_to_sync(permissions_service.aupsert_statement)(apr, "dynamodb", ["List"], ["*"])
+        async_to_sync(permissions_service.aupsert_statement)(apr, "dynamodb", ["Read"], [table_arn])
+        async_to_sync(permissions_service.aupsert_statement)(apr, "dynamodb", ["Write"], ["*"])
+
+        apr.refresh_from_db()
+        statements = apr.statements
+        self.assertEqual(len(statements), 2)
+        star = next(s for s in statements if s["resources"] == ["*"])
+        self.assertEqual(sorted(star["access_levels"]), ["List", "Write"])
+        table = next(s for s in statements if s["resources"] == [table_arn])
+        self.assertEqual(table["access_levels"], ["Read"])
+        self.assertTrue(all(s.get("sid") for s in statements))
+
+    def test_two_statements_same_service_hold_distinct_scopes(self) -> None:
+        draft = self._open_draft()
+        rid = draft["request_id"]
+
+        g1 = self._post("/api/permissions/draft/statement", {**self._identity(), "request_id": rid, "action": "add_service", "service": "dynamodb"}, bearer=self.raw_token).json()["service_groups"]
+        sid1 = g1[0]["sid"]
+        groups = self._post("/api/permissions/draft/statement", {**self._identity(), "request_id": rid, "action": "add_service", "service": "dynamodb"}, bearer=self.raw_token).json()["service_groups"]
+        self.assertEqual(len(groups), 2)
+        sid2 = next(g["sid"] for g in groups if g["sid"] != sid1)
+
+        # List on the first statement, Read on the second — independent scopes.
+        self._post("/api/permissions/draft/statement", {**self._identity(), "request_id": rid, "action": "add_level", "service": "dynamodb", "statement_id": sid1, "level": "List"}, bearer=self.raw_token)
+        self._post("/api/permissions/draft/statement", {**self._identity(), "request_id": rid, "action": "add_resource", "service": "dynamodb", "statement_id": sid1, "arn": "*"}, bearer=self.raw_token)
+        self._post("/api/permissions/draft/statement", {**self._identity(), "request_id": rid, "action": "add_level", "service": "dynamodb", "statement_id": sid2, "level": "Read"}, bearer=self.raw_token)
+        body = self._post("/api/permissions/draft/statement", {**self._identity(), "request_id": rid, "action": "add_resource", "service": "dynamodb", "statement_id": sid2, "arn": "arn:aws:dynamodb:us-east-1:111122223333:table/Orders"}, bearer=self.raw_token).json()
+
+        statements = AppPermissionRequest.objects.get(id=rid).statements
+        self.assertEqual(len(statements), 2)
+        by_sid = {s["sid"]: s for s in statements}
+        self.assertEqual(by_sid[sid1]["access_levels"], ["List"])
+        self.assertEqual(by_sid[sid1]["resources"], ["*"])
+        self.assertEqual(by_sid[sid2]["access_levels"], ["Read"])
+        self.assertEqual(by_sid[sid2]["resources"], ["arn:aws:dynamodb:us-east-1:111122223333:table/Orders"])
+        self.assertEqual(len(body["service_groups"]), 2)
 
     def test_statement_on_non_draft_returns_409(self) -> None:
         draft = self._open_draft()

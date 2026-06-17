@@ -68,9 +68,9 @@ def _get_scoped_request(deployment: _Deployment, request_id: object) -> AppPermi
 
 
 def _serialize_service_groups(app_permission_request: AppPermissionRequest) -> list[dict]:
-    """Render-ready service groups for the request's current statements (cache-backed)."""
+    """Render-ready statement groups for the request's current statements (cache-backed)."""
     available = permissions_service.fetch_available_resources(app_permission_request)
-    return permissions_service.group_statements_by_service(app_permission_request.statements or [], available)
+    return permissions_service.build_statement_groups(app_permission_request.statements or [], available)
 
 
 def _serialize_draft(app_permission_request: AppPermissionRequest, deployment: _Deployment, app_permissions: object) -> dict:
@@ -80,7 +80,7 @@ def _serialize_draft(app_permission_request: AppPermissionRequest, deployment: _
         "status": app_permission_request.status,
         "status_message": app_permission_request.status_message,
         "description": app_permission_request.description,
-        "has_changes": app_permission_request.statements != app_permissions.statements,
+        "has_changes": not permissions_service.statements_equal(app_permission_request.statements, app_permissions.statements),
         "updated_at": app_permission_request.updated_at.isoformat(),
         "app": {"slug": deployment.app.slug, "name": deployment.app.name},
         "environment": {
@@ -119,6 +119,9 @@ def permissions_draft(request: HttpRequest) -> JsonResponse:
             user=deployment.owner_user, app_permissions=app_permissions,
         )
 
+    if app_permission_request.status == AppPermissionRequest.Status.DRAFT:
+        permissions_service.ensure_statement_sids(app_permission_request)
+
     return JsonResponse(_serialize_draft(
         app_permission_request=app_permission_request, deployment=deployment, app_permissions=app_permissions,
     ))
@@ -141,6 +144,7 @@ def permissions_statement(request: HttpRequest) -> JsonResponse:
         app_permission_request,
         action=str(deployment.payload.get("action", "")),
         service=str(deployment.payload.get("service", "")).strip(),
+        statement_id=str(deployment.payload.get("statement_id", "")).strip(),
         level=str(deployment.payload.get("level", "")).strip(),
         arn=str(deployment.payload.get("arn", "")).strip(),
         s3_prefix=str(deployment.payload.get("s3_prefix", "")).strip(),
@@ -150,7 +154,7 @@ def permissions_statement(request: HttpRequest) -> JsonResponse:
     )
     return JsonResponse({
         "service_groups": _serialize_service_groups(app_permission_request),
-        "has_changes": app_permission_request.statements != app_permissions.statements,
+        "has_changes": not permissions_service.statements_equal(app_permission_request.statements, app_permissions.statements),
         "updated_at": app_permission_request.updated_at.isoformat(),
     })
 
@@ -231,7 +235,7 @@ def permissions_refresh_resources(request: HttpRequest) -> JsonResponse:
     services = [stmt.get("service") for stmt in (app_permission_request.statements or []) if stmt.get("service")]
     available = permissions_service.refresh_resources_cache(deployment.environment, services)
     return JsonResponse({
-        "service_groups": permissions_service.group_statements_by_service(app_permission_request.statements or [], available),
+        "service_groups": permissions_service.build_statement_groups(app_permission_request.statements or [], available),
     })
 
 

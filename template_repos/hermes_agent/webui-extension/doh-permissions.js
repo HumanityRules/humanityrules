@@ -104,25 +104,29 @@
     }
   }
 
-  function toggleLevel(service, level, checked) {
-    mutateStatement({ action: checked ? 'add_level' : 'remove_level', service, level });
+  // Mutations on an existing statement are keyed by its `sid` (statement_id): a
+  // service can appear in more than one statement (e.g. List on * and Read on
+  // specific tables), so the service name alone no longer identifies one. Only
+  // add_service omits it — it always appends a fresh statement.
+  function toggleLevel(sid, service, level, checked) {
+    mutateStatement({ action: checked ? 'add_level' : 'remove_level', service, statement_id: sid, level });
   }
 
-  function addResource(service, arn, s3Prefix) {
+  function addResource(sid, service, arn, s3Prefix) {
     if (!arn) return;
-    mutateStatement({ action: 'add_resource', service, arn, s3_prefix: s3Prefix || '' });
+    mutateStatement({ action: 'add_resource', service, statement_id: sid, arn, s3_prefix: s3Prefix || '' });
   }
 
-  function removeResource(service, arn) {
-    mutateStatement({ action: 'remove_resource', service, arn });
+  function removeResource(sid, service, arn) {
+    mutateStatement({ action: 'remove_resource', service, statement_id: sid, arn });
   }
 
   function addService(service) {
     if (service) mutateStatement({ action: 'add_service', service });
   }
 
-  function removeService(service) {
-    mutateStatement({ action: 'remove_service', service });
+  function removeService(sid, service) {
+    mutateStatement({ action: 'remove_service', service, statement_id: sid });
   }
 
   async function doCancel() {
@@ -202,7 +206,7 @@
       elem('label', { class: 'doh-perm-level' }, [
         elem('input', {
           type: 'checkbox', checked: l.checked,
-          onchange: (e) => toggleLevel(group.service, l.name, e.target.checked),
+          onchange: (e) => toggleLevel(group.sid, group.service, l.name, e.target.checked),
         }),
         l.name,
       ])
@@ -213,7 +217,7 @@
     const chips = (group.resources || []).map((arn) =>
       elem('span', { class: 'doh-perm-chip' }, [
         arn,
-        elem('button', { type: 'button', class: 'doh-perm-chip-x', title: 'Remove', onclick: () => removeResource(group.service, arn) }, ['×']),
+        elem('button', { type: 'button', class: 'doh-perm-chip-x', title: 'Remove', onclick: () => removeResource(group.sid, group.service, arn) }, ['×']),
       ])
     );
     const chipsRow = chips.length
@@ -231,7 +235,7 @@
     const addBtn = elem('button', {
       type: 'button', class: 'doh-perm-btn doh-perm-btn-primary',
       disabled: !select.value,
-      onclick: () => addResource(group.service, select.value, prefixInput ? prefixInput.value.trim() : ''),
+      onclick: () => addResource(group.sid, group.service, select.value, prefixInput ? prefixInput.value.trim() : ''),
     }, ['Add']);
     // Add is the required final step, so it stays disabled (and visibly muted)
     // until a resource is picked — at which point it lights up as the primary
@@ -251,7 +255,7 @@
           elem('span', { class: 'doh-perm-service-name' }, [group.display_name || group.service]),
           elem('code', { class: 'doh-perm-service-prefix' }, [group.service]),
         ]),
-        elem('button', { type: 'button', class: 'doh-perm-btn doh-perm-btn-ghost', onclick: () => removeService(group.service) }, ['Remove service']),
+        elem('button', { type: 'button', class: 'doh-perm-btn doh-perm-btn-ghost', onclick: () => removeService(group.sid, group.service) }, ['Remove service']),
       ]),
       renderLevels(group),
       renderResources(group),
