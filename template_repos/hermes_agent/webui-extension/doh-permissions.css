@@ -1,27 +1,12 @@
-/* DOH Permissions editor — full-width rail destination.
+/* DOH Permissions editor — Settings → Permissions pane.
    See doh-permissions.js. Colors use the WebUI's CSS variables. */
-
-/* Plug into upstream's main-view switching contract:
-   - hide #mainPermissions by default
-   - reveal it when <main> has `showing-permissions`
-   - force-hide #mainChat in the same state (upstream default-shows it). */
-main.main > #mainPermissions { display: none; }
-main.main.showing-permissions > #mainPermissions { display: flex; }
-main.main.showing-permissions > #mainChat { display: none !important; }
-
-.doh-perm-page {
-  flex: 1;
-  min-height: 0;
-  overflow-y: auto;
-  background: var(--bg);
-}
 
 .doh-perm-root { display: block; }
 
-.doh-perm-page-inner {
-  max-width: 920px;
-  margin: 0 auto;
-  padding: 28px 24px 80px;
+#settingsPanePermissions .doh-perm-page-inner {
+  max-width: none;
+  margin: 0;
+  padding: 0 0 40px;
 }
 
 /* Header */
@@ -238,6 +223,3 @@ main.main.showing-permissions > #mainChat { display: none !important; }
 }
 
 .doh-perm-empty { color: var(--muted); font-size: 13px; padding: 8px 0; }
-
-/* Sidebar pane (visible while Permissions owns the main view) */
-.doh-perm-side-note { padding: 12px 14px; color: var(--muted); font-size: 12px; }

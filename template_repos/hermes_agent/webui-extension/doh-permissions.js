@@ -1,7 +1,7 @@
 // DOH WebUI extension. Loaded per Hermes' docs/EXTENSIONS.md via the
 // HERMES_WEBUI_EXTENSION_* env vars exported in webui.sh.
 //
-// Adds a full-width "Permissions" rail destination: the self-referential IAM
+// Adds a Settings → Permissions section (after System): the self-referential IAM
 // task-role permissions editor for THIS Hermes deployment. The target
 // (app, environment) is implicit — DOH resolves it from the deployment identity
 // behind the broker, so no app/env is ever named here. All calls go same-origin
@@ -10,8 +10,6 @@
 //
 // Phase 1 is editor-only and the panel is the sole writer, so a mutation returns
 // fresh state and we re-render from it — no cross-process refresh problem yet.
-// renderEditor() is container-agnostic (paints into a passed-in element) so the
-// phase-2 move into the sidebar is a one-line change of mount target.
 (() => {
   'use strict';
 
@@ -435,79 +433,106 @@
     render();
   }
 
-  // ── Mount (rail destination, mirrors doh-integrations.js) ────────────────────
+  // ── Mount (Settings section, immediately before System) ────────────────────
 
-  function ensureRailAndView() {
-    const sidebar = document.querySelector('.sidebar');
-    const sidebarNav = sidebar && sidebar.querySelector('.sidebar-nav');
-    const mainEl = document.querySelector('main.main');
-    const rail = document.querySelector('nav.rail');
-    if (!sidebar || !sidebarNav || !mainEl) return false;
-    if (document.getElementById('mainPermissions')) return true;
+  const UPSTREAM_SETTINGS_PANES = ['Conversation', 'Appearance', 'Preferences', 'Providers', 'Plugins', 'System'];
+  let _showingPermissions = false;
 
-    const onActivate = () => {
-      if (typeof window.switchPanel === 'function') window.switchPanel('permissions', { fromRailClick: true });
-    };
-    // Shield-check icon — permissions/governance.
-    const railIcon = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l7 3v5c0 4.5-3 7.5-7 9-4-1.5-7-4.5-7-9V6z"/><path d="M9 12l2 2 4-4"/></svg>';
-    const navIcon = railIcon.replace(/width="20" height="20"/, 'width="18" height="18"').replace(/stroke-width="1.5"/, 'stroke-width="2"');
+  function isSettingsPanelActive() {
+    return !!document.querySelector('#panelSettings.active')
+      || !!document.querySelector('[data-panel="settings"].active');
+  }
 
-    if (rail && !document.getElementById('dohPermissionsRailBtn')) {
-      const railBtn = elem('button', {
-        type: 'button', class: 'rail-btn nav-tab has-tooltip', id: 'dohPermissionsRailBtn',
-        'aria-label': 'Permissions', dataset: { panel: 'permissions', tooltip: 'Permissions' }, onclick: onActivate,
-      });
-      railBtn.innerHTML = railIcon;
-      const spacer = rail.querySelector('.rail-spacer');
-      if (spacer) rail.insertBefore(railBtn, spacer);
-      else rail.appendChild(railBtn);
+  function activatePermissionsSection() {
+    document.querySelectorAll('#settingsMenu .side-menu-item').forEach((it) => {
+      it.classList.toggle('active', it.dataset.settingsSection === 'permissions');
+    });
+    UPSTREAM_SETTINGS_PANES.forEach((cap) => {
+      const pane = document.getElementById('settingsPane' + cap);
+      if (pane) pane.classList.remove('active');
+    });
+    const permPane = document.getElementById('settingsPanePermissions');
+    if (permPane) permPane.classList.add('active');
+  }
+
+  async function showPermissionsSection() {
+    _showingPermissions = true;
+    // Only switch panels when Settings is not already open. switchPanel('settings')
+    // always calls loadSettingsPanel(), which async-restores _settingsSection
+    // (Appearance) and was clobbering Permissions right after we painted it.
+    if (!isSettingsPanelActive() && typeof window.switchPanel === 'function') {
+      await window.switchPanel('settings');
     }
+    activatePermissionsSection();
+    refreshAndRender();
+  }
 
-    if (!document.getElementById('dohPermissionsTab')) {
-      const navBtn = elem('button', {
-        type: 'button', class: 'nav-tab has-tooltip has-tooltip--bottom', id: 'dohPermissionsTab',
-        dataset: { panel: 'permissions', label: 'Permissions', tooltip: 'Permissions' }, onclick: onActivate,
-      });
-      navBtn.innerHTML = navIcon;
-      sidebarNav.appendChild(navBtn);
-    }
+  function ensureSettingsSection() {
+    const settingsMenu = document.getElementById('settingsMenu');
+    const settingsMain = document.querySelector('#mainSettings > .settings-main');
+    if (!settingsMenu || !settingsMain) return false;
+    if (document.getElementById('settingsPanePermissions')) return true;
 
-    // Full-width main-view destination. renderEditor paints into #dohPermissionsRoot
-    // (container-agnostic), so phase 2 only changes which element we pass in.
+    const menuIcon = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l7 3v5c0 4.5-3 7.5-7 9-4-1.5-7-4.5-7-9V6z"/><path d="M9 12l2 2 4-4"/></svg>';
+    const menuBtn = elem('button', {
+      type: 'button',
+      class: 'side-menu-item',
+      id: 'dohPermissionsSettingsItem',
+      dataset: { settingsSection: 'permissions' },
+      onclick: () => {
+        if (typeof window.switchSettingsSection === 'function') window.switchSettingsSection('permissions');
+      },
+    });
+    menuBtn.innerHTML = menuIcon + '<span>Permissions</span>';
+    const systemBtn = settingsMenu.querySelector('[data-settings-section="system"]');
+    if (systemBtn) settingsMenu.insertBefore(menuBtn, systemBtn);
+    else settingsMenu.appendChild(menuBtn);
+
     _rootEl = elem('div', { class: 'doh-perm-root', id: 'dohPermissionsRoot' });
-    const view = elem('section', { class: 'main-view doh-perm-page', id: 'mainPermissions' }, [_rootEl]);
-    mainEl.appendChild(view);
-
-    const sidebarPane = elem('div', { class: 'panel-view', id: 'panelPermissions' }, [
-      elem('div', { class: 'panel-head' }, [elem('span', null, ['Permissions'])]),
-      elem('div', { class: 'doh-perm-side-note' }, ['AWS permissions this agent requires. After applying your request, you will need to wait for approval.']),
-    ]);
-    const sidebarBottom = sidebar.querySelector('.sidebar-bottom');
-    if (sidebarBottom) sidebar.insertBefore(sidebarPane, sidebarBottom);
-    else sidebar.appendChild(sidebarPane);
+    const permPane = elem('div', { class: 'settings-pane', id: 'settingsPanePermissions' }, [_rootEl]);
+    const systemPane = document.getElementById('settingsPaneSystem');
+    if (systemPane) settingsMain.insertBefore(permPane, systemPane);
+    else settingsMain.appendChild(permPane);
     return true;
   }
 
-  // Chain on switchPanel: toggle `showing-permissions` on <main> after upstream
-  // runs (its loop only handles known panels), and render on activate. Not
-  // awaited — a sibling wrapper may be waiting on us to toggle its own class.
-  function wrapSwitchPanel() {
-    if (typeof window.switchPanel !== 'function') return;
-    if (window.__dohPermissionsWrapped) return;
-    window.__dohPermissionsWrapped = true;
-    const orig = window.switchPanel;
-    window.switchPanel = async function (name) {
-      const result = await orig.apply(this, arguments);
-      const mainEl = document.querySelector('main.main');
-      if (mainEl) mainEl.classList.toggle('showing-permissions', name === 'permissions');
-      if (name === 'permissions') refreshAndRender();
-      return result;
+  // Upstream switchSettingsSection() has a hardcoded allow-list, so route
+  // permissions through a wrapper (same pattern as the old Integrations pane).
+  function wrapSwitchSettingsSection() {
+    if (typeof window.switchSettingsSection !== 'function') return;
+    if (window.__dohPermissionsSettingsWrapped) return;
+    window.__dohPermissionsSettingsWrapped = true;
+    const orig = window.switchSettingsSection;
+    window.switchSettingsSection = async function (name) {
+      if (name === 'permissions') {
+        await showPermissionsSection();
+        return;
+      }
+      _showingPermissions = false;
+      const permPane = document.getElementById('settingsPanePermissions');
+      if (permPane) permPane.classList.remove('active');
+      return orig.apply(this, arguments);
+    };
+  }
+
+  // loadSettingsPanel() finishes with switchSettingsSection(_settingsSection)
+  // (Appearance). If the user opened Permissions while that fetch was still
+  // in flight, restore Permissions after the panel hydrate completes.
+  function wrapLoadSettingsPanel() {
+    if (typeof window.loadSettingsPanel !== 'function') return;
+    if (window.__dohPermissionsLoadWrapped) return;
+    window.__dohPermissionsLoadWrapped = true;
+    const orig = window.loadSettingsPanel;
+    window.loadSettingsPanel = async function () {
+      await orig.apply(this, arguments);
+      if (_showingPermissions) activatePermissionsSection();
     };
   }
 
   function init() {
-    if (!ensureRailAndView()) { requestAnimationFrame(init); return; }
-    wrapSwitchPanel();
+    if (!ensureSettingsSection()) { requestAnimationFrame(init); return; }
+    wrapSwitchSettingsSection();
+    wrapLoadSettingsPanel();
   }
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
