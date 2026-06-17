@@ -34,10 +34,14 @@ PANEL (browser)  ──/__doh_broker/permissions/*──► Caddy ─┐
 AGENT (sandbox)  ──127.0.0.1:9951/permissions/*──────────┘                                    (phase 2)
 ```
 
-- **The panel** (a Hermes WebUI extension, browser JS) reaches the broker
-  same-origin via the existing `/__doh_broker/*` reverse-proxy route — the same
-  one the integrations panel uses (`patches-webui/07-doh-broker-proxy.patch`).
-  No new proxy patch is needed; permissions is just a new path group.
+- **The panel** (a Hermes WebUI extension, browser JS —
+  `template_repos/hermes_agent/webui-extension/doh-permissions.js`) reaches the
+  broker same-origin via the existing `/__doh_broker/*` reverse-proxy route — the
+  same one the integrations panel uses (`patches-webui/07-doh-broker-proxy.patch`).
+  No new proxy patch is needed; permissions is just a new path group. **This file
+  is the sole browser consumer of the contract below — any change to the
+  service_group / statement-mutation shape must update it (it has no automated
+  test).**
 - **The agent** (phase 2, in the nono sandbox) reaches the same control_api
   directly at `127.0.0.1:9951` — loopback, reachable because `NO_PROXY` includes
   `127.0.0.1` and the broker control port is exempt from the HTTPS proxy
@@ -69,18 +73,22 @@ DOH resolves it from the deployment identity.
 
 ### Object shapes
 
-A **statement** (unchanged from `permissions.py`):
+A **statement** (from `permissions_service.py`). `sid` is a stable per-statement id;
+a service may appear in more than one statement, each holding a distinct
+access-level/resource scope (e.g. `List` on `*` and `Read` on specific tables). `sid`
+is internal to DOH and is stripped before the policy reaches AWS:
 
 ```json
-{ "service": "<service>", "effect": "Allow",
+{ "sid": "<hex id>", "service": "<service>", "effect": "Allow",
   "access_levels": ["Read", "Write"],
   "resources": ["arn:aws:<service>:..."] }
 ```
 
-A **service_group** (render-ready, from `_build_service_group_data`):
+A **service_group** (render-ready, from `build_service_group_data` — one per statement,
+so the list may contain repeated `service` values distinguished by `sid`):
 
 ```json
-{ "service": "<service>", "display_name": "<Service display name>",
+{ "sid": "<hex id>", "service": "<service>", "display_name": "<Service display name>",
   "access_levels": [{"name": "Read", "checked": true}, {"name": "Write", "checked": false}, "..."],
   "resources": ["arn:aws:<service>:..."],
   "available_resources": [{"arn": "arn:aws:<service>:...", "label": "<resource label>", "selected": true}, "..."],
@@ -109,10 +117,13 @@ A **service_group** (render-ready, from `_build_service_group_data`):
 
    ```json
    { "action": "add_level|remove_level|add_service|remove_service|add_resource|remove_resource",
-     "service": "<service>", "level": "Read", "arn": "arn:aws:<service>:..." }
+     "service": "<service>", "statement_id": "<sid>", "level": "Read", "arn": "arn:aws:<service>:..." }
    ```
 
-   Returns `{ "service_groups": [...], "has_changes": true, "updated_at": "..." }`.
+   `add_service` always creates a new statement (so a service can be added more than
+   once) and ignores `statement_id`; every other action targets the statement named by
+   `statement_id` (the `sid` from a service_group). Returns
+   `{ "service_groups": [...], "has_changes": true, "updated_at": "..." }`.
    `409` if status ≠ `draft`.
 
 3. **Description** — `PUT /permissions/draft/<request_id>/description`

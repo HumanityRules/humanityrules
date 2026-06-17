@@ -192,21 +192,15 @@ document.addEventListener('click', (e) => {
 
 pickerSearch?.addEventListener('input', () => renderPickerList(pickerSearch.value));
 
-// Service selection → POST add_service to server
+// Service selection → POST add_service to server.
+// A service may appear more than once: each click appends a new statement group
+// (one IAM statement), so distinct scopes — e.g. List on * and Read on specific
+// tables — can be expressed for the same service.
 pickerList?.addEventListener('click', (e) => {
     const item = e.target.closest('.service-picker-item');
     if (!item) return;
     const service = item.dataset.service;
     pickerDropdown.classList.add('hidden');
-
-    // Highlight if already exists
-    const existing = document.querySelector(`.service-group[data-service="${service}"]`);
-    if (existing) {
-        existing.scrollIntoView({ behavior: 'smooth', block: 'center' });
-        existing.classList.add('ring-2', 'ring-indigo-500');
-        setTimeout(() => existing.classList.remove('ring-2', 'ring-indigo-500'), 1500);
-        return;
-    }
 
     // Remove empty-state placeholder before appending
     document.getElementById('statements-empty')?.remove();

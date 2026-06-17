@@ -461,3 +461,123 @@ class TestPermissionsEditorEndpoints(TestCase):
         self.assertEqual(conversations.count(), 2)
         user_ids = set(conversations.values_list("user_id", flat=True))
         self.assertEqual(user_ids, {self.approver_user.id, self.non_approver_user.id})
+
+
+class TestPermissionsEditorStatementRendering(TestCase):
+    """Exercise the HTML editor's update-statement endpoint end-to-end.
+
+    Unlike the JSON API (which returns dicts), this path renders
+    _permission_service_group.html / _permission_statements.html, so these tests
+    catch template errors, sid-keyed DOM/HTMX wiring, S3 sid-scoping, and the
+    remove-service empty-state — none of which the JSON suite touches.
+    """
+
+    def setUp(self) -> None:
+        self.org = Organization.objects.create(name="PSR Org", slug="psr-org")
+        self.aws_account = AWSAccount.objects.create(organization=self.org, name="AWS")
+        self.repo = Repository.objects.create(
+            organization=self.org, provider="github", name="repo",
+            full_name="org/repo", clone_url="https://github.com/org/repo.git",
+        )
+        self.workspace = Workspace.objects.create(organization=self.org, name="WS", slug="psr-ws")
+        self.app = App.objects.create(
+            organization=self.org, workspace=self.workspace, repository=self.repo,
+            name="PSRApp", slug="psrapp", app_type="web", build_strategy="dockerfile",
+            branch="main", container_port=8000, health_check_path="/health",
+        )
+        self.env = Environment.objects.create(
+            aws_account=self.aws_account, name="Production", slug="psr-prod", aws_region="us-east-1",
+        )
+        self.user = User.objects.create_user(username="psr_user", password="x", current_organization=self.org)
+        OrganizationMembership.objects.create(organization=self.org, user=self.user, role=OrganizationMembership.Role.MEMBER)
+        self.client.force_login(self.user)
+
+        self._aws_patch = patch(
+            "devopshero_app.services.permissions_service.iam_utils.list_resources_for_services", return_value={},
+        )
+        self._aws_patch.start()
+        self.addCleanup(self._aws_patch.stop)
+
+    def _make_draft(self, statements: list[dict]) -> AppPermissionRequest:
+        return AppPermissionRequest.objects.create(
+            app=self.app, environment=self.env, statements=statements,
+            status=AppPermissionRequest.Status.DRAFT,
+        )
+
+    def _post(self, apr: AppPermissionRequest, data: dict) -> object:
+        return self.client.post(f"/security/permissions/{apr.id}/update-statement/", data=data, **HTMX)
+
+    def _sids(self, apr: AppPermissionRequest) -> list[str]:
+        apr.refresh_from_db()
+        return [s["sid"] for s in apr.statements]
+
+    def test_add_service_renders_card_keyed_by_sid(self) -> None:
+        apr = self._make_draft([])
+        response = self._post(apr, {"action": "add_service", "service": "dynamodb"})
+        self.assertEqual(response.status_code, 200)
+        sids = self._sids(apr)
+        self.assertEqual(len(sids), 1)
+        # Template actually rendered, keyed by the new statement's sid.
+        self.assertIn(f"service-group-{sids[0]}", response.content.decode())
+
+    def test_add_service_twice_renders_two_cards(self) -> None:
+        apr = self._make_draft([])
+        self._post(apr, {"action": "add_service", "service": "dynamodb"})
+        self._post(apr, {"action": "add_service", "service": "dynamodb"})
+        sids = self._sids(apr)
+        self.assertEqual(len(sids), 2)
+        self.assertNotEqual(sids[0], sids[1])
+
+        # The SSE-refetch partial renders both cards.
+        statements_page = self.client.get(f"/security/permissions/{apr.id}/statements/", **HTMX)
+        self.assertEqual(statements_page.status_code, 200)
+        html = statements_page.content.decode()
+        self.assertIn(f"service-group-{sids[0]}", html)
+        self.assertIn(f"service-group-{sids[1]}", html)
+
+    def test_add_level_targets_statement_by_sid(self) -> None:
+        apr = self._make_draft([{"sid": "fixed-sid-1", "service": "dynamodb", "access_levels": [], "resources": []}])
+        response = self._post(apr, {"action": "add_level", "service": "dynamodb", "statement_id": "fixed-sid-1", "level": "Read"})
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("access-levels-fixed-sid-1", response.content.decode())
+        apr.refresh_from_db()
+        self.assertEqual(apr.statements[0]["access_levels"], ["Read"])
+
+    def test_s3_prefix_composition_and_scoped_removal(self) -> None:
+        apr = self._make_draft([{"sid": "s3a", "service": "s3", "access_levels": ["Read"], "resources": []}])
+        self._post(apr, {"action": "add_resource", "service": "s3", "statement_id": "s3a", "arn": "arn:aws:s3:::my-bucket", "s3_prefix": "data/*"})
+        apr.refresh_from_db()
+        self.assertEqual(apr.statements[0]["resources"], ["arn:aws:s3:::my-bucket/data/*"])
+
+        # Removing by the base bucket ARN drops the prefixed resource on that statement.
+        self._post(apr, {"action": "remove_resource", "service": "s3", "statement_id": "s3a", "arn": "arn:aws:s3:::my-bucket"})
+        apr.refresh_from_db()
+        self.assertEqual(apr.statements[0]["resources"], [])
+
+    def test_s3_removal_is_scoped_to_one_statement(self) -> None:
+        # Two S3 statements; removing a bucket from one must not touch the other.
+        apr = self._make_draft([
+            {"sid": "s3a", "service": "s3", "access_levels": ["Read"], "resources": ["arn:aws:s3:::bucket-a/*"]},
+            {"sid": "s3b", "service": "s3", "access_levels": ["Read"], "resources": ["arn:aws:s3:::bucket-b/*"]},
+        ])
+        self._post(apr, {"action": "remove_resource", "service": "s3", "statement_id": "s3a", "arn": "arn:aws:s3:::bucket-a"})
+        apr.refresh_from_db()
+        by_sid = {s["sid"]: s for s in apr.statements}
+        self.assertEqual(by_sid["s3a"]["resources"], [])
+        self.assertEqual(by_sid["s3b"]["resources"], ["arn:aws:s3:::bucket-b/*"])
+
+    def test_remove_service_last_statement_renders_empty_state(self) -> None:
+        apr = self._make_draft([{"sid": "only", "service": "dynamodb", "access_levels": [], "resources": []}])
+        response = self._post(apr, {"action": "remove_service", "service": "dynamodb", "statement_id": "only"})
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("statements-empty", response.content.decode())
+        apr.refresh_from_db()
+        self.assertEqual(apr.statements, [])
+
+    def test_remove_service_keeps_sibling_same_service_statement(self) -> None:
+        apr = self._make_draft([
+            {"sid": "keep", "service": "dynamodb", "access_levels": ["List"], "resources": ["*"]},
+            {"sid": "drop", "service": "dynamodb", "access_levels": ["Read"], "resources": []},
+        ])
+        self._post(apr, {"action": "remove_service", "service": "dynamodb", "statement_id": "drop"})
+        self.assertEqual(self._sids(apr), ["keep"])

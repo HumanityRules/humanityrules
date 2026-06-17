@@ -1,4 +1,6 @@
+import copy
 import logging
+import uuid
 from typing import Any
 
 from django.utils import timezone
@@ -27,6 +29,36 @@ RESOURCE_PLACEHOLDERS = {
     "ses": "Select SES identity...",
     "ecr": "Select ECR repository...",
 }
+
+
+def new_statement_sid() -> str:
+    """Generate a stable per-statement id used to target a statement in the UI and API."""
+    return uuid.uuid4().hex
+
+
+def _ensure_sids(statements: list[dict[str, Any]]) -> bool:
+    """Assign a sid to any statement missing one. Returns True if any were added."""
+    changed = False
+    for statement in statements:
+        if not statement.get("sid"):
+            statement["sid"] = new_statement_sid()
+            changed = True
+    return changed
+
+
+def ensure_statement_sids(app_permission_request) -> None:
+    """Backfill stable sids onto the request's statements, persisting only if something changed."""
+    statements = app_permission_request.statements or []
+    if _ensure_sids(statements):
+        app_permission_request.statements = statements
+        app_permission_request.save(update_fields=["statements", "updated_at"])
+
+
+def statements_equal(left: list[dict[str, Any]] | None, right: list[dict[str, Any]] | None) -> bool:
+    """Compare two statement lists, ignoring the internal sid key (which never reaches AWS)."""
+    def _strip(statements: list[dict[str, Any]] | None) -> list[dict[str, Any]]:
+        return [{k: v for k, v in stmt.items() if k != "sid"} for stmt in (statements or [])]
+    return _strip(left) == _strip(right)
 
 
 def get_or_create_app_permissions(app, environment) -> models.AppPermissions:
@@ -65,97 +97,108 @@ def get_or_create_draft(app, environment, user, app_permissions) -> models.AppPe
     if existing:
         return existing
 
+    statements = copy.deepcopy(app_permissions.statements or [])
+    _ensure_sids(statements)
     return models.AppPermissionRequest.objects.create(
         app=app,
         environment=environment,
-        statements=app_permissions.statements,
+        statements=statements,
         status=models.AppPermissionRequest.Status.DRAFT,
         created_by=user,
     )
 
 
-def update_statements(app_permission_request, *, action: str, service: str, level: str = "", arn: str = ""):
-    """Mutate a single aspect of an AppPermissionRequest's statements and save."""
-    statements = app_permission_request.statements or []
+def update_statements(app_permission_request, *, action: str, service: str, statement_id: str, level: str, arn: str) -> str:
+    """Mutate one statement (identified by statement_id) and save. Returns the affected statement's sid.
 
-    def _find_or_create_service(svc):
-        for stmt in statements:
-            if stmt.get("service") == svc:
-                return stmt
-        new_stmt = {"service": svc, "effect": "Allow", "access_levels": [], "resources": []}
-        statements.append(new_stmt)
-        return new_stmt
+    `add_service` always appends a fresh statement — multiple statements may share a service,
+    each holding a distinct access-level/resource scope. Every other action targets the
+    statement whose sid matches `statement_id`.
+    """
+    statements = app_permission_request.statements or []
+    _ensure_sids(statements)
+
+    def _find(sid: str) -> dict[str, Any] | None:
+        return next((stmt for stmt in statements if stmt.get("sid") == sid), None)
+
+    affected_sid = statement_id
 
     if action == "add_service" and service:
-        _find_or_create_service(service)
+        new_stmt = {"sid": new_statement_sid(), "service": service, "effect": "Allow", "access_levels": [], "resources": []}
+        statements.append(new_stmt)
+        affected_sid = new_stmt["sid"]
 
-    elif action == "remove_service" and service:
-        app_permission_request.statements = [s for s in statements if s.get("service") != service]
-        statements = app_permission_request.statements
+    elif action == "remove_service" and statement_id:
+        statements = [s for s in statements if s.get("sid") != statement_id]
 
-    elif action == "add_level" and service and level:
-        stmt = _find_or_create_service(service)
-        if level not in stmt.get("access_levels", []):
+    elif action == "add_level" and statement_id and level:
+        stmt = _find(statement_id)
+        if stmt is not None and level not in stmt.get("access_levels", []):
             stmt.setdefault("access_levels", []).append(level)
 
-    elif action == "remove_level" and service and level:
-        for stmt in statements:
-            if stmt.get("service") == service:
-                stmt["access_levels"] = [l for l in stmt.get("access_levels", []) if l != level]
+    elif action == "remove_level" and statement_id and level:
+        stmt = _find(statement_id)
+        if stmt is not None:
+            stmt["access_levels"] = [lvl for lvl in stmt.get("access_levels", []) if lvl != level]
 
-    elif action == "add_resource" and service and arn:
-        stmt = _find_or_create_service(service)
-        if arn not in stmt.get("resources", []):
+    elif action == "add_resource" and statement_id and arn:
+        stmt = _find(statement_id)
+        if stmt is not None and arn not in stmt.get("resources", []):
             stmt.setdefault("resources", []).append(arn)
 
-    elif action == "remove_resource" and service and arn:
-        for stmt in statements:
-            if stmt.get("service") == service:
-                stmt["resources"] = [r for r in stmt.get("resources", []) if r != arn]
+    elif action == "remove_resource" and statement_id and arn:
+        stmt = _find(statement_id)
+        if stmt is not None:
+            stmt["resources"] = [r for r in stmt.get("resources", []) if r != arn]
 
     app_permission_request.statements = statements
     app_permission_request.save(update_fields=["statements", "updated_at"])
+    return affected_sid
 
 
-def apply_statement_action(app_permission_request, *, action: str, service: str, level: str, arn: str, s3_prefix: str):
-    """Mutate one statement, composing the S3 base-bucket ARN with its key prefix.
+def apply_statement_action(app_permission_request, *, action: str, service: str, statement_id: str, level: str, arn: str, s3_prefix: str) -> str:
+    """Mutate one statement (by statement_id), composing the S3 base-bucket ARN with its key prefix.
 
     S3 dropdown selections carry a base bucket ARN (arn:aws:s3:::bucket). On add,
     combine it with the prefix input to form the full resource ARN; on remove,
-    drop every stored resource that belongs to the bucket. All other services and
-    actions delegate to update_statements unchanged.
+    drop every stored resource on that statement that belongs to the bucket. All other
+    services and actions delegate to update_statements unchanged. Returns the affected sid.
     """
     if service == "s3" and action == "add_resource" and s3_prefix:
         arn = f"{arn}/{s3_prefix}"
     elif service == "s3" and action == "remove_resource":
         statements = app_permission_request.statements or []
+        _ensure_sids(statements)
         for stmt in statements:
-            if stmt.get("service") == "s3":
+            if stmt.get("sid") == statement_id:
                 stmt["resources"] = [r for r in stmt.get("resources", []) if not (r == arn or r.startswith(arn + "/"))]
         app_permission_request.statements = statements
         app_permission_request.save(update_fields=["statements", "updated_at"])
-        return
+        return statement_id
 
-    update_statements(app_permission_request, action=action, service=service, level=level, arn=arn)
+    return update_statements(app_permission_request, action=action, service=service, statement_id=statement_id, level=level, arn=arn)
 
 
 async def aupsert_statement(app_permission_request, service, access_levels, resources):
-    """Merge access_levels and resources into the statement for `service`, creating it if absent."""
+    """Merge access_levels into the `service` statement whose resource set matches `resources`.
+
+    Keyed by (service, resources): if a statement for `service` already covers exactly this
+    resource set, its access levels are merged in; otherwise a new statement is appended. This
+    lets the agent express distinct scopes for one service (e.g. List on * vs Read on tableA/B).
+    """
     statements = app_permission_request.statements or []
-    existing = None
-    for stmt in statements:
-        if stmt.get("service") == service:
-            existing = stmt
-            break
+    _ensure_sids(statements)
+    target_resources = set(resources)
+    existing = next(
+        (stmt for stmt in statements if stmt.get("service") == service and set(stmt.get("resources", [])) == target_resources),
+        None,
+    )
     if existing is None:
-        existing = {"service": service, "effect": "Allow", "access_levels": [], "resources": []}
+        existing = {"sid": new_statement_sid(), "service": service, "effect": "Allow", "access_levels": [], "resources": list(resources)}
         statements.append(existing)
     for level in access_levels:
         if level not in existing["access_levels"]:
             existing["access_levels"].append(level)
-    for arn in resources:
-        if arn not in existing["resources"]:
-            existing["resources"].append(arn)
     app_permission_request.statements = statements
     await app_permission_request.asave(update_fields=["statements", "updated_at"])
 
@@ -188,7 +231,9 @@ def approve(app_permission_request):
 
 def cancel(app_permission_request, app_permissions):
     """Reset the draft's statements back to the AppPermissions baseline."""
-    app_permission_request.statements = app_permissions.statements
+    statements = copy.deepcopy(app_permissions.statements or [])
+    _ensure_sids(statements)
+    app_permission_request.statements = statements
     app_permission_request.save(update_fields=["statements", "updated_at"])
 
 
@@ -263,21 +308,6 @@ def _service_display_name(service: str) -> str:
         return service
 
 
-def _merge_statements_by_service(statements: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
-    """Merge statements sharing a service into {service: {access_levels: set, resources: list}}."""
-    grouped: dict[str, dict[str, Any]] = {}
-    for statement in statements:
-        service = statement.get("service", "")
-        if not service:
-            continue
-        entry = grouped.setdefault(service, {"access_levels": set(), "resources": []})
-        entry["access_levels"].update(statement.get("access_levels", []))
-        for resource in statement.get("resources", []):
-            if resource not in entry["resources"]:
-                entry["resources"].append(resource)
-    return grouped
-
-
 def _arn_resource_suffix(arn: str) -> str:
     """Return the resource portion of an ARN (e.g. a bucket or queue name)."""
     parts = arn.split(":", 5)
@@ -299,25 +329,34 @@ def _resource_lines_for_summary(*, service: str, resources: list[str]) -> list[d
 
 
 def summarize_statements_for_display(statements: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Build a read-only summary of permission statements for the Security hub accordion."""
+    """Build a read-only summary of permission statements for the Security hub accordion.
+
+    One summary per statement (no cross-statement merge), so distinct same-service scopes
+    stay separate.
+    """
     summaries: list[dict[str, Any]] = []
-    for service, data in _merge_statements_by_service(statements).items():
+    for statement in statements:
+        service = statement.get("service", "")
+        if not service:
+            continue
         summaries.append({
             "service": service,
             "display_name": _service_display_name(service),
-            "access_levels": sorted(data["access_levels"]),
-            "resource_lines": _resource_lines_for_summary(service=service, resources=data["resources"]),
+            "access_levels": sorted(statement.get("access_levels", [])),
+            "resource_lines": _resource_lines_for_summary(service=service, resources=statement.get("resources", [])),
         })
     return summaries
 
 
 def build_service_group_data(
+    *,
+    sid: str,
     service: str,
     selected_levels: list[str] | set[str],
     resources: list[str],
     available_resources: list[dict[str, str]],
 ) -> dict[str, Any]:
-    """Build a render-ready dict for a single service group with access-level toggles."""
+    """Build a render-ready dict for a single statement's group with access-level toggles."""
     display_name = _service_display_name(service)
 
     selected_set = set(selected_levels)
@@ -336,6 +375,7 @@ def build_service_group_data(
         marked_available = [{**r, "selected": r["arn"] in selected_arns} for r in available_resources]
 
     return {
+        "sid": sid,
         "service": service,
         "display_name": display_name,
         "resources": resources,
@@ -347,21 +387,24 @@ def build_service_group_data(
     }
 
 
-def group_statements_by_service(
+def build_statement_groups(
     statements: list[dict[str, Any]],
     available_resources_by_service: dict[str, list[dict[str, str]]],
 ) -> list[dict[str, Any]]:
-    """Merge multiple statements for the same service into one render-ready group."""
-    service_groups = []
-    for service_name, data in _merge_statements_by_service(statements).items():
-        group = build_service_group_data(
-            service=service_name,
-            selected_levels=data["access_levels"],
-            resources=data["resources"],
-            available_resources=available_resources_by_service.get(service_name, []),
-        )
-        service_groups.append(group)
-    return service_groups
+    """Build one render-ready group per statement (no cross-statement merge), keyed by sid."""
+    groups = []
+    for statement in statements:
+        service = statement.get("service", "")
+        if not service:
+            continue
+        groups.append(build_service_group_data(
+            sid=statement.get("sid", ""),
+            service=service,
+            selected_levels=statement.get("access_levels", []),
+            resources=statement.get("resources", []),
+            available_resources=available_resources_by_service.get(service, []),
+        ))
+    return groups
 
 
 def fetch_available_resources(app_permission_request) -> dict[str, list[dict[str, str]]]:

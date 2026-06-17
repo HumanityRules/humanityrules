@@ -974,8 +974,10 @@ def create_devopshero_mcp_server(conversation: Conversation):
         "update_permission_draft",
         (
             "Add or update a permission statement in the draft policy. "
-            "Merges the given access levels and resource ARNs into the statement for the specified service, "
-            "creating the statement if it doesn't exist. "
+            "A statement is identified by its (service, resource ARNs) pair: if a statement for this "
+            "service already covers exactly the given resources, the access levels are merged into it; "
+            "otherwise a new statement is created. Call this multiple times with different resource sets "
+            "to grant distinct scopes for one service (e.g. 'List' on '*' and 'Read' on specific table ARNs). "
             "Optionally provide a description that explains why these permissions are needed — "
             "it will be appended to any existing description the user has already written. "
             "Use this tool proactively when you identify missing permissions from source code analysis, "
