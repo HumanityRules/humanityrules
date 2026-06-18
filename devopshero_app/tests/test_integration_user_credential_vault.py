@@ -257,6 +257,14 @@ class TestSetupSession(_CredentialVaultTestBase):
         self.assertEqual(body["schema"]["status"], "not_connected")
         self.assertEqual(body["schema"]["fields"][0]["name"], "api_key")
 
+    def test_browseruse_setup_session_returns_generic_vault_schema(self) -> None:
+        status, body = self._post_setup_session_for_provider(provider=IntegrationUserCredential.Provider.BROWSERUSE)
+
+        self.assertEqual(status, 200)
+        self.assertEqual(body["schema"]["provider"], "browseruse")
+        self.assertEqual(body["schema"]["status"], "not_connected")
+        self.assertEqual(body["schema"]["fields"][0]["name"], "api_key")
+
     def test_setup_session_canonicalizes_origin_for_browser_submit(self) -> None:
         payload = self._setup_payload()
         payload["public_origin"] = "https://user@Hermes.Dev.Example.Com:443/settings"
@@ -719,3 +727,29 @@ class TestCredentialSubmit(_CredentialVaultTestBase):
         self.assertEqual(response.status_code, 400)
         self.assertEqual(response.json()["error"], provider_anthropic.ANTHROPIC_INVALID_KEY_MESSAGE)
         self.assertFalse(IntegrationUserCredential.objects.exists())
+
+    def test_submit_saves_browseruse_credential_without_validation(self) -> None:
+        _status, session = self._post_setup_session_for_provider(provider=IntegrationUserCredential.Provider.BROWSERUSE)
+
+        response = self.client.post(
+            "/api/integrations/credentials/submit",
+            data=json.dumps({
+                "submit_token": session["submit_token"],
+                "credentials": {"api_key": "bu-real"},
+                "config": {},
+            }),
+            content_type="text/plain",
+            HTTP_ORIGIN="https://hermes.dev.example.com",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        credential = IntegrationUserCredential.objects.get(
+            owner_user=self.user,
+            environment=self.env,
+            app_slug="hermes",
+            provider=IntegrationUserCredential.Provider.BROWSERUSE,
+        )
+        self.assertEqual(credential.credentials["api_key"], "bu-real")
+        self.assertEqual(credential.config, {})
+        # Store-only: no upstream validation, so no validated_at stamp.
+        self.assertNotIn("validated_at", credential.metadata)

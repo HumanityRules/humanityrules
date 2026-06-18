@@ -14,7 +14,7 @@ down:
   flow, refresh by upstream token exchange, disconnect deletes the row +
   best-effort upstream `revoke`.
 - VAULT (`provider_openrouter`, `provider_openai`, `provider_anthropic`,
-  `provider_slack`, `provider_telegram`): connect via the browser-direct
+  `provider_browseruse`, `provider_slack`, `provider_telegram`): connect via the browser-direct
   setup-session surface (`schema` + `save_credentials`), refresh is a DB read,
   disconnect just deletes the row. The connect UX is either a credential paste
   form (the default) or, when `schema()` returns `mode=link_poll`, an external
@@ -43,6 +43,7 @@ from types import ModuleType
 from devopshero_app.models import IntegrationUserCredential
 from devopshero_app.views.integrations import (
     provider_anthropic,
+    provider_browseruse,
     provider_github,
     provider_google,
     provider_nous,
@@ -82,6 +83,7 @@ _SPECS = [
     ProviderSpec(provider=IntegrationUserCredential.Provider.OPENAI, kind=ProviderKind.VAULT, module=provider_openai),
     ProviderSpec(provider=IntegrationUserCredential.Provider.ANTHROPIC, kind=ProviderKind.VAULT, module=provider_anthropic),
     ProviderSpec(provider=IntegrationUserCredential.Provider.X, kind=ProviderKind.OAUTH, module=provider_x),
+    ProviderSpec(provider=IntegrationUserCredential.Provider.BROWSERUSE, kind=ProviderKind.VAULT, module=provider_browseruse),
 ]
 
 # Keyed by the provider slug. The keys are `Provider` enum members, which are
