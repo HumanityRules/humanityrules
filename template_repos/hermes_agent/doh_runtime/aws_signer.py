@@ -100,7 +100,16 @@ def _build_handler(cfg: PortConfig, session: Session, pool: urllib3.HTTPSConnect
                     data=body,
                     headers=outbound_headers,
                 )
-                credentials = session.get_credentials()
+                # get_credentials() returns None when nothing is resolvable, but
+                # a bad/absent AWS_PROFILE raises ProfileNotFound — treat both as
+                # "no creds" and 500 cleanly instead of letting the handler throw
+                # (which would reset the connection).
+                try:
+                    credentials = session.get_credentials()
+                except Exception as exc:
+                    logger.error("AWS credential resolution failed on port=%d: %s", cfg.port, exc)
+                    self.send_error(500, "no AWS credentials available")
+                    return
                 if credentials is None:
                     self.send_error(500, "no AWS credentials available")
                     return
@@ -176,8 +185,21 @@ def main():
     )
 
     session = Session()
-    if session.get_credentials() is None:
-        raise SystemExit("no AWS credentials available — aws-signer requires a task role")
+    # Start degraded rather than aborting when no creds are resolvable: the
+    # process still binds every port so supervisor's wait_for_port passes and
+    # the rest of Hermes boots (e.g. a WebUI-connected non-Bedrock provider, or
+    # a dev box with no AWS profile). AWS-backed tools then 500 per request
+    # (see Handler._proxy) until creds appear — get_credentials() is re-resolved
+    # each request, so this self-heals when a task role attaches. A bad/absent
+    # AWS_PROFILE raises ProfileNotFound rather than returning None, so catch
+    # broadly. logged at error level so the degraded state is obvious in logs.
+    try:
+        if session.get_credentials() is None:
+            logger.error("no AWS credentials at startup — running degraded; "
+                         "AWS-backed tools (Bedrock/S3/...) will 500 until creds appear")
+    except Exception as exc:
+        logger.error("AWS credential resolution failed (%s) — running degraded; "
+                     "AWS-backed tools (Bedrock/S3/...) will 500 until creds appear", exc)
 
     # SigV4 signing_name != endpoint service name for Bedrock: both
     # bedrock.* and bedrock-runtime.* are scoped to "bedrock" in the
