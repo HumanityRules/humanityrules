@@ -18,7 +18,7 @@ import types
 import unittest
 from collections.abc import Callable
 from contextlib import AbstractContextManager
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, call, patch
 
 import httpx
 
@@ -1281,6 +1281,10 @@ class TestControlIntegrations(unittest.IsolatedAsyncioTestCase):
             broker.tls_intercept,
             "fetch_provider_tokens_batch",
             side_effect=[google_connected, absent_for_every_slug],
+        ), patch.object(
+            credentials_service,
+            "_run_provider_auth_marker",
+            return_value=True,
         ):
             await self.tls_intercept_runtime.refresh_slug(slug="google")
             self.assertIn("google", self.tls_intercept_runtime._token_store._cache)
@@ -2054,11 +2058,60 @@ class TestCredentialsServiceChoreography(unittest.IsolatedAsyncioTestCase):
             credentials_service,
             "_post_process_compose_restart",
             return_value=(200, "ok"),
-        ) as restart_mock:
+        ) as restart_mock, patch.object(
+            credentials_service,
+            "_run_provider_auth_marker",
+            return_value=True,
+        ) as auth_marker_mock:
             await service.credentials_invalidate(slug="openai-codex")
 
         self.assertFalse(models_cache.exists())
         restart_mock.assert_not_called()
+        auth_marker_mock.assert_called_once_with(
+            provider="openai-codex",
+            action="connect",
+            webui_python=pathlib.Path("/nonexistent/webui-python"),
+            runtime_dir=pathlib.Path("/nonexistent/doh-runtime"),
+            hermes_home=pathlib.Path("/nonexistent/hermes-home"),
+        )
+
+    async def test_codex_invalidate_disconnects_auth_marker_when_absent(self) -> None:
+        """A successful refresh that says disconnected must clear WebUI's local marker."""
+        service = self._make_service()
+        self.webui_state_dir.mkdir(parents=True)
+        models_cache = self.webui_state_dir / "models_cache.json"
+        models_cache.write_text("stale", encoding="utf-8")
+
+        with patch.object(
+            broker.tls_intercept,
+            "fetch_provider_tokens_batch",
+            return_value=_batched(slug="openai-codex", result=broker.tls_intercept.RefreshResult(
+                outcome=broker.tls_intercept.REFRESH_OUTCOME_ABSENT,
+                secrets=None,
+                expires_in=None,
+                config={},
+                metadata={},
+            )),
+        ), patch.object(
+            credentials_service,
+            "_post_process_compose_restart",
+            return_value=(200, "ok"),
+        ) as restart_mock, patch.object(
+            credentials_service,
+            "_run_provider_auth_marker",
+            return_value=True,
+        ) as auth_marker_mock:
+            await service.credentials_invalidate(slug="openai-codex")
+
+        self.assertFalse(models_cache.exists())
+        restart_mock.assert_not_called()
+        auth_marker_mock.assert_called_once_with(
+            provider="openai-codex",
+            action="disconnect",
+            webui_python=pathlib.Path("/nonexistent/webui-python"),
+            runtime_dir=pathlib.Path("/nonexistent/doh-runtime"),
+            hermes_home=pathlib.Path("/nonexistent/hermes-home"),
+        )
 
     async def test_invalidate_all_uses_single_batched_call(self) -> None:
         """Explicit Refresh-all collapses to one DOH round-trip across every provider.
@@ -2086,12 +2139,35 @@ class TestCredentialsServiceChoreography(unittest.IsolatedAsyncioTestCase):
             credentials_service,
             "_post_process_compose_restart",
             return_value=(200, "ok"),
-        ):
+        ), patch.object(
+            credentials_service,
+            "_run_provider_auth_marker",
+            return_value=True,
+        ) as auth_marker_mock:
             await service.refresh_all_integrations()
 
         self.assertEqual(batch_mock.call_count, 1)
         called_slugs = batch_mock.call_args.kwargs["slugs"]
         self.assertEqual(set(called_slugs), set(tls_providers.TLS_INTERCEPT_PROVIDERS))
+        self.assertEqual(
+            auth_marker_mock.call_args_list,
+            [
+                call(
+                    provider="nous",
+                    action="disconnect",
+                    webui_python=pathlib.Path("/nonexistent/webui-python"),
+                    runtime_dir=pathlib.Path("/nonexistent/doh-runtime"),
+                    hermes_home=pathlib.Path("/nonexistent/hermes-home"),
+                ),
+                call(
+                    provider="openai-codex",
+                    action="disconnect",
+                    webui_python=pathlib.Path("/nonexistent/webui-python"),
+                    runtime_dir=pathlib.Path("/nonexistent/doh-runtime"),
+                    hermes_home=pathlib.Path("/nonexistent/hermes-home"),
+                ),
+            ],
+        )
 
 
 class TestTransientRefreshGuards(unittest.IsolatedAsyncioTestCase):
@@ -2200,9 +2276,62 @@ class TestTransientRefreshGuards(unittest.IsolatedAsyncioTestCase):
             broker.tls_intercept,
             "fetch_provider_tokens_batch",
             return_value=refreshed_results,
+        ), patch.object(
+            credentials_service,
+            "_run_provider_auth_marker",
+            return_value=True,
         ):
             await service.bootstrap()
 
         text = self.env_path.read_text(encoding="utf-8")
         self.assertIn("TELEGRAM_BOT_TOKEN=000000:DOH_PLACEHOLDER", text)
         self.assertIn("TELEGRAM_ALLOWED_USERS=123", text)
+
+    async def test_bootstrap_success_applies_connected_codex_auth_marker(self) -> None:
+        """A pre-existing DOH-side Codex connection must appear in WebUI's picker after boot."""
+        service = self._make_service()
+        refreshed_results = {
+            slug: broker.tls_intercept.RefreshResult(
+                outcome=broker.tls_intercept.REFRESH_OUTCOME_ABSENT,
+                secrets=None, expires_in=None, config={}, metadata={},
+            )
+            for slug in tls_providers.TLS_INTERCEPT_PROVIDERS
+        }
+        refreshed_results["openai-codex"] = broker.tls_intercept.RefreshResult(
+            outcome=broker.tls_intercept.REFRESH_OUTCOME_HAS_TOKEN,
+            secrets={"access_token": "codex-access", "chatgpt_account_id": "account-id"},
+            expires_in=3600,
+            config={},
+            metadata={},
+        )
+
+        with patch.object(
+            broker.tls_intercept,
+            "fetch_provider_tokens_batch",
+            return_value=refreshed_results,
+        ), patch.object(
+            credentials_service,
+            "_run_provider_auth_marker",
+            return_value=True,
+        ) as auth_marker_mock:
+            await service.bootstrap()
+
+        self.assertEqual(
+            auth_marker_mock.call_args_list,
+            [
+                call(
+                    provider="nous",
+                    action="disconnect",
+                    webui_python=pathlib.Path("/nonexistent/webui-python"),
+                    runtime_dir=pathlib.Path("/nonexistent/doh-runtime"),
+                    hermes_home=pathlib.Path("/nonexistent/hermes-home"),
+                ),
+                call(
+                    provider="openai-codex",
+                    action="connect",
+                    webui_python=pathlib.Path("/nonexistent/webui-python"),
+                    runtime_dir=pathlib.Path("/nonexistent/doh-runtime"),
+                    hermes_home=pathlib.Path("/nonexistent/hermes-home"),
+                ),
+            ],
+        )
