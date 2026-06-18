@@ -202,6 +202,8 @@ streaming:
 
 plugins:
   disabled:
+  - browser/browserbase
+  - browser-firecrawl
   - dashboard_auth/basic
   - dashboard_auth/nous
   - dashboard_auth/self_hosted
@@ -222,6 +224,7 @@ plugins:
   - video_gen/xai
   - web/brave_free
   - web/exa
+  - web-firecrawl
   - web/parallel
   - web/searxng
 
