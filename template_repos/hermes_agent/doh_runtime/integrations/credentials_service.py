@@ -74,7 +74,7 @@ class CredentialsService:
         self._last_refresh_all_ts: float = 0.0
 
     async def bootstrap(self) -> None:
-        """At broker startup: refresh every provider, then render the env file once.
+        """At broker startup: refresh every provider, then project local runtime state once.
 
         A failed refresh (DOH unreachable, e.g. a 503 mid-deploy) is fatal: the
         broker exits before opening its control port, supervisor.sh tears the
@@ -86,6 +86,10 @@ class CredentialsService:
             logger.error("FATAL: bootstrap refresh against DOH failed; exiting so ECS restarts the task")
             sys.exit(1)
         await self._render_gateway_env_file()
+        specs_in_scope = tuple(self._providers.values())
+        await self._sync_auth_markers(specs_in_scope=specs_in_scope)
+        if any(spec.affects_model_picker for spec in specs_in_scope):
+            await asyncio.to_thread(_delete_webui_models_cache, webui_state_dir=self._webui_state_dir)
 
     async def complete_device_flow(self, provider: str, tokens: dict) -> bool:
         """Persist a provider device-flow token payload to DOH, then refresh TLS state.
@@ -215,6 +219,7 @@ class CredentialsService:
         """
         env_changed = await self._render_gateway_env_file()
         specs_in_scope = self._specs_in_scope(slug=slug)
+        await self._sync_auth_markers(specs_in_scope=specs_in_scope)
         if any(spec.affects_model_picker for spec in specs_in_scope):
             await asyncio.to_thread(_delete_webui_models_cache, webui_state_dir=self._webui_state_dir)
         if not env_changed:
@@ -232,6 +237,21 @@ class CredentialsService:
                     f"please redeploy the app to apply the new credentials"
                 )
             logger.info("%s restart kicked off after invalidate(slug=%s)", process_name, slug)
+
+    async def _sync_auth_markers(self, specs_in_scope: tuple[tls_providers.TlsProviderSpec, ...]) -> None:
+        """Mirror broker-connected state into local marker auth stores."""
+        marker_slugs = {spec.slug for spec in specs_in_scope if spec.slug in AUTH_MARKER_PROVIDERS}
+        if not marker_slugs:
+            return
+        status_items = await self._tls_intercept_runtime.status_items()
+        connected_slugs = {
+            str(item.get("slug"))
+            for item in status_items
+            if item.get("status") == tls_intercept.STATUS_CONNECTED
+        }
+        for provider in sorted(marker_slugs):
+            action = "connect" if provider in connected_slugs else "disconnect"
+            await self._apply_auth_marker(provider=provider, action=action)
 
     async def _render_gateway_env_file(self) -> bool:
         """Write the DOH-managed profile env block from current cache state."""
