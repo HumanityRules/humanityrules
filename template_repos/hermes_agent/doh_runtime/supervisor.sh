@@ -217,6 +217,14 @@ run_in_nono() {
             # `git clone https://github.com/...` fails verification of the
             # broker's MITM leaf cert with "certificate signer not trusted".
             "GIT_SSL_CAINFO=${INTEGRATIONS_BROKER_CA_DIR}/bundle.pem"
+            # Python requests (used by the browser_use provider and other agent
+            # tools) ignores SSL_CERT_FILE — it verifies against certifi unless
+            # REQUESTS_CA_BUNDLE/CURL_CA_BUNDLE point at our CA. Without this,
+            # requests to intercepted hosts (e.g. api.browser-use.com) fail with
+            # CERTIFICATE_VERIFY_FAILED on the broker's MITM leaf, and the
+            # browser tool then falls back to a (missing) local browser.
+            "REQUESTS_CA_BUNDLE=${INTEGRATIONS_BROKER_CA_DIR}/bundle.pem"
+            "CURL_CA_BUNDLE=${INTEGRATIONS_BROKER_CA_DIR}/bundle.pem"
         )
     fi
 

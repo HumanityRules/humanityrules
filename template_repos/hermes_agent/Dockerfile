@@ -15,6 +15,10 @@ ARG CADDY_VERSION=2.11.3
 ARG PROCESS_COMPOSE_VERSION=1.110.0
 ARG TTYD_VERSION=1.7.7
 ARG GH_CLI_VERSION=2.92.0
+# Node LTS ("Krypton") for the browser tool's agent-browser CLI. agent-browser
+# requires Node >= 24, so this must stay on the 24.x line.
+ARG NODE_VERSION=24.17.0
+ARG AGENT_BROWSER_VERSION=0.28.0
 ARG HERMES_AGENT_EXTRAS=messaging,matrix,cron,cli,dev,tts-premium,slack,pty,honcho,mcp,sms,acp,voice,google,bedrock,web
 
 # Runtime layout: /opt/doh and /opt/hermes are image-owned and refreshed into
@@ -190,6 +194,42 @@ RUN mkdir -p "${HOMEBREW_PREFIX}/bin" \
     && "${HOMEBREW_PREFIX}/bin/brew" --version
 
 USER root
+
+# Node LTS ("Krypton") under /opt/doh. Image-owned: re-synced from the image on
+# every boot and excluded from the EFS checkpoint (persistent-root-runner.sh
+# lists /opt/doh in IMAGE_OWNED_DIRS). node/npm/npx are symlinked into
+# $DOH_BIN_DIR, already on the agent's PATH. Kept in its own layer, separate
+# from agent-browser below, so either can be dropped independently.
+RUN arch="$(dpkg --print-architecture)" \
+    && node_arch="$([ "$arch" = "amd64" ] && echo "x64" || echo "arm64")" \
+    && curl -fsSL -o /tmp/node.tar.gz \
+        "https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-linux-${node_arch}.tar.gz" \
+    && mkdir -p "$DOH_ROOT/node" \
+    && tar -xzf /tmp/node.tar.gz -C "$DOH_ROOT/node" --strip-components=1 \
+    && ln -sf "$DOH_ROOT/node/bin/node" "$DOH_BIN_DIR/node" \
+    && ln -sf "$DOH_ROOT/node/bin/npm" "$DOH_BIN_DIR/npm" \
+    && ln -sf "$DOH_ROOT/node/bin/npx" "$DOH_BIN_DIR/npx" \
+    && node --version && npm --version \
+    && rm -f /tmp/node.tar.gz
+
+# agent-browser CLI for the browser tool (drives both local and cloud/Browser Use
+# backends). Depends on the Node layer above (requires Node >= 24, and npm to
+# install). npm resolves its global prefix to /opt/doh/node via node's realpath,
+# so the package + bin land under /opt/doh; the bin is symlinked into
+# $DOH_BIN_DIR. agent-browser bundles prebuilt CLIs for ~7 platforms (~11MB
+# each) — keep only the glibc binary for the build arch plus the small JS
+# launcher and drop the rest. Clear npm's download cache (~/.npm) so it neither
+# bloats the image nor lands in the EFS checkpoint. Drop this whole layer to
+# remove agent-browser while leaving Node in place.
+RUN arch="$(dpkg --print-architecture)" \
+    && node_arch="$([ "$arch" = "amd64" ] && echo "x64" || echo "arm64")" \
+    && npm install -g "agent-browser@${AGENT_BROWSER_VERSION}" \
+    && ln -sf "$DOH_ROOT/node/bin/agent-browser" "$DOH_BIN_DIR/agent-browser" \
+    && find "$DOH_ROOT/node/lib/node_modules/agent-browser/bin" -maxdepth 1 -type f \
+        -name "agent-browser-*" ! -name "agent-browser-linux-${node_arch}" -delete \
+    && agent-browser --version \
+    && npm cache clean --force \
+    && rm -rf /root/.npm
 
 # DOH-owned source below this line. Keep these COPY layers last so edits to
 # doh_runtime/, webui-extension/, and skills/ reuse the cached dependency

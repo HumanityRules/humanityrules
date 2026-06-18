@@ -41,8 +41,11 @@ browser:
   inactivity_timeout: 120
   command_timeout: 30
   record_sessions: false
-  allow_private_urls: false
-  cloud_provider: local
+  allow_private_urls: true
+  # cloud_provider intentionally omitted: with no value, the agent auto-detects a
+  # cloud browser from connected credentials (e.g. BROWSER_USE_API_KEY injected by
+  # the browseruse connector) and uses the local browser otherwise. Pinning a
+  # value here disables that auto-detect
 
 checkpoints:
   enabled: true

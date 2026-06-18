@@ -338,6 +338,31 @@ TLS_INTERCEPT_PROVIDER_SPECS = (
         category="model_provider",
     ),
     TlsProviderSpec(
+        slug="browseruse",
+        label="Browser Use",
+        # Browser Use's cloud-browser API surface. The agent's browser_use
+        # provider talks to api.browser-use.com; browser-use.com (marketing/UI)
+        # is not an API host and is not intercepted.
+        hosts=("api.browser-use.com",),
+        logo_url="/extensions/browser-use.svg",
+        # Browser Use authenticates with the X-Browser-Use-API-Key header, not
+        # Authorization: Bearer — same shape as Anthropic's x-api-key.
+        credential_method=VaultApiKeyHeader(
+            header_name="X-Browser-Use-API-Key",
+            placeholder=DOH_PLACEHOLDER_VALUE,
+        ),
+        env_bindings=(
+            EnvBinding(env_var="BROWSER_USE_API_KEY", value=DOH_PLACEHOLDER_VALUE),
+        ),
+        # The agent reads BROWSER_USE_API_KEY at call time and the browser tool
+        # runs in agent turns served by either process (gateway for cron/platform
+        # turns, webui for in-process chat), so both must reload to pick up the
+        # placeholder. Connector, not a model provider: it doesn't change /api/models.
+        restart_gateway_after_save=True,
+        restart_webui_after_save=True,
+        category="connector",
+    ),
+    TlsProviderSpec(
         slug="x",
         label="X",
         # api.x.com serves the X API v2 (xurl's `/2/...` endpoints) and the
