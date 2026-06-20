@@ -36,7 +36,7 @@ stored only on DOH, never injected into customer containers).
 
 Everything downstream is unchanged: `VaultUrlRewrite` placeholder, the
 `TELEGRAM_BOT_TOKEN`/`TELEGRAM_ALLOWED_USERS` env bindings, and the restart
-contract in `docs/gateway_env_and_restart_design.md`.
+contract in `docs/integrations/gateway_env_and_restart_design.md`.
 
 ## The generic `link_poll` vault mode
 

@@ -9,7 +9,7 @@ the batched refresh endpoint (`token_refresh_batch.py`) calls `refresh_outcome`.
 Exposes the uniform vault-provider interface (`schema`, `save_credentials`,
 `refresh_outcome`) shared with `provider_telegram`.
 
-See docs/slack_integration_design.md for the ownership/privacy model.
+See docs/integrations/slack_integration_design.md for the ownership/privacy model.
 """
 
 import logging
@@ -376,7 +376,7 @@ def save_credentials(
     # Company-wide: anyone in an invited channel (SLACK_ALLOW_ALL_USERS=true).
     # Personal: owner-only via SLACK_ALLOWED_USERS=<resolved user_id>, no
     # allow-all. Note the gateway's pairing flow can still admit other users
-    # (it bypasses this allowlist) — see docs/slack_integration_design.md.
+    # (it bypasses this allowlist) — see docs/integrations/slack_integration_design.md.
     config = {"workspace_scope": mode, "app_name": _clean_app_name(str(config_payload.get("app_name", "") or ""))}
     metadata = existing.metadata if existing is not None else {}
     if bot_identity:
