@@ -64,8 +64,6 @@ infra_devopshero/cdk.json
 infra_devopshero/app.py
 
 # Other
-.beads/
 .claude/
 .cursor/
-.perles/
 .playwright-mcp/
