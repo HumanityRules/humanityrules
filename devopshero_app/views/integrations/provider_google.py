@@ -15,7 +15,7 @@ client_secret never cross the customer/DOH boundary; if Google has revoked
 the refresh_token the row is deleted and the outcome flips to `absent` so the
 WebUI prompts a reconnect.
 
-See `docs/integrations_broker_design.md`.
+See `docs/integrations/integrations_broker_design.md`.
 """
 
 import logging

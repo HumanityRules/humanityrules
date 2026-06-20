@@ -34,7 +34,7 @@ Datadog's own steer for hosted brokers is the `DD_API_KEY` /
 `DD_APPLICATION_KEY` header fallback ("for example, on a server" in the
 setup docs).
 
-Full investigation in docs/dcr_candidates/datadog.md.
+Full investigation in docs/integrations/dcr_candidates/datadog.md.
 ═════════════════════════════════════════════════════════════════════════════
 
 Datadog's first-party MCP exposes ~110 tools across 18 toolsets. The toolset

@@ -17,7 +17,7 @@ on the wire to chatgpt.com (credential model A1: the account id never enters
 the sandbox). If OpenAI has revoked the refresh_token the row is deleted and
 the outcome flips to `absent`.
 
-See `docs/device_flow_integration_design.md`.
+See `docs/integrations/device_flow_integration_design.md`.
 """
 
 import logging

@@ -9,9 +9,10 @@ from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
-CONNECTORS_FILE = REPO_ROOT / "docs" / "merge_connectors.txt"
-OUTPUT_FILE = REPO_ROOT / "docs" / "merge_connectors_ranked.md"
+REPO_ROOT = Path(__file__).resolve().parents[2]
+INTEGRATIONS_DIR = REPO_ROOT / "docs" / "integrations"
+CONNECTORS_FILE = INTEGRATIONS_DIR / "merge_connectors.txt"
+OUTPUT_FILE = INTEGRATIONS_DIR / "merge_connectors_ranked.md"
 COMPOSIO_FILE = Path(
     "/Users/vmendi/.cursor/projects/Users-vmendi-websites-devopshero/agent-tools/a1c22224-d2d4-4ed2-846c-b33628c40b2e.txt"
 )

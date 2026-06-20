@@ -209,7 +209,7 @@ Format: rank · slug · display name · composite · tier · signal percentiles
 - Public/no-auth APIs (weather, wikipedia, pubmed) score on technographics
   only — useful but not typical SaaS integrations.
 - Re-run periodically; MCP registry and G2 counts drift quickly.
-- Regenerate with `python3 docs/_build_merge_connector_rankings.py`.
+- Regenerate with `uv run docs/integrations/_build_merge_connector_rankings.py`.
 
 ## Sources
 

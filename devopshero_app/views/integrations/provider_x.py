@@ -20,7 +20,7 @@ docs.x.com), so this can't just reuse `provider_google`:
 X access tokens are opaque (not JWTs), so expiry comes from the response's
 `expires_in` (2h), not a token claim.
 
-See `docs/integrations_broker_design.md`.
+See `docs/integrations/integrations_broker_design.md`.
 """
 
 import base64

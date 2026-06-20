@@ -121,7 +121,7 @@ bootstrap_gateway_process() {
     # The gateway process: Hermes's headless cron ticker + loopback API
     # server, plus any messaging-platform bindings activated by env vars
     # the broker writes into ${HERMES_HOME}/.env (see
-    # docs/gateway_env_and_restart_design.md).
+    # docs/integrations/gateway_env_and_restart_design.md).
     #
     # Goes through system process-compose so the broker can hot-restart it
     # via REST when vault credentials change without bouncing the whole
