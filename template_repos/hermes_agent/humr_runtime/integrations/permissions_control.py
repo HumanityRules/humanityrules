@@ -1,7 +1,7 @@
 """Browser-facing relay for the self-referential permissions editor.
 
 Pure transport: each route parses the WebUI's `/__humr_broker/permissions/*`
-request, forwards it to HUMR's `/api/permissions/*` via `DohClient` (which attaches
+request, forwards it to HUMR's `/api/permissions/*` via `HumrClient` (which attaches
 the env bearer and the deployment's owner/app identity), and serializes the
 reply. No bearer, no authorization decision, and no target `(app, environment)`
 ever lives here — HUMR resolves all of that from the bearer + identity.
@@ -17,7 +17,7 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 from starlette.routing import Route
 
-from humr_client import DohClient
+from humr_client import HumrClient
 
 logger = logging.getLogger("permissions_control")
 
@@ -35,7 +35,7 @@ async def _read_json_body(request: Request) -> dict:
     return body if isinstance(body, dict) else {}
 
 
-def routes(prefix: str, humr_client: DohClient) -> list[Route]:
+def routes(prefix: str, humr_client: HumrClient) -> list[Route]:
     """Build the `/permissions/*` relay routes mounted under the unified control router."""
 
     async def _relay(path: str, payload: dict) -> Response:

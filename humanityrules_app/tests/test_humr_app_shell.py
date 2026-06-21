@@ -47,7 +47,7 @@ def _app(template: AppTemplate | None) -> App:
     )
 
 
-class DohAppShellContainerResolutionTests(TestCase):
+class HumrAppShellContainerResolutionTests(TestCase):
 
     def test_legacy_app_defaults_to_app_slug(self) -> None:
         app = _app(template=None)

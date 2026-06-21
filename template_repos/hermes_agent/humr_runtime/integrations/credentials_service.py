@@ -23,7 +23,7 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
-from humr_client import DohClient
+from humr_client import HumrClient
 from mcp_aggregator import MCPAggregator
 import tls_intercept
 import tls_providers
@@ -50,7 +50,7 @@ class CredentialsService:
 
     def __init__(
         self,
-        humr_client: DohClient,
+        humr_client: HumrClient,
         tls_intercept_runtime: tls_intercept.TlsInterceptRuntime,
         mcp_aggregator: MCPAggregator,
         providers: dict[str, tls_providers.TlsProviderSpec],

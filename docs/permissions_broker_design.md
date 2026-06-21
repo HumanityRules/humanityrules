@@ -48,7 +48,7 @@ AGENT (sandbox)  ──127.0.0.1:9951/permissions/*─────────�
   (`humr_runtime/supervisor.sh`).
 - **control_api stays pure transport.** Its handlers parse and forward; they hold
   no per-request secret and make no authorization decision. The broker's
-  `DohClient` attaches the env bearer on the outbound call.
+  `HumrClient` attaches the env bearer on the outbound call.
 - **HUMR is the brain.** It validates the env bearer, derives `(app, environment)`
   from the deployment's identity, scopes everything to the org, and enforces the
   ABAC `environment:approve` check on Apply. Neither the browser nor the agent
@@ -193,7 +193,7 @@ extension-owned container IDs, additive, reversible.
   editor is untouched. HUMR owns auth, target resolution, ABAC, and the async
   Apply job (`permissions_apply_executor`).
 - **Broker (`humr_broker`)** — new `/permissions/*` routes on control_api, pure
-  transport, relaying to HUMR with the env bearer via `DohClient`.
+  transport, relaying to HUMR with the env bearer via `HumrClient`.
 - **WebUI extension** — `humr-permissions.js/.css`, the client-rendered editor.
 
 ## Phasing

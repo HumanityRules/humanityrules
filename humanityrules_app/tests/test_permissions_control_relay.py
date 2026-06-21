@@ -2,8 +2,8 @@
 
 The relay runs inside the customer-env Hermes container (not Django). It is pure
 transport: it folds the browser path-param/query into a JSON payload and forwards
-to HUMR via DohClient.post_json, attaching no bearer and making no decision. We
-load the module directly and drive its routes with a stub DohClient + Starlette
+to HUMR via HumrClient.post_json, attaching no bearer and making no decision. We
+load the module directly and drive its routes with a stub HumrClient + Starlette
 TestClient, without standing up the broker's asyncio servers.
 """
 
@@ -35,7 +35,7 @@ def _load_permissions_control() -> types.ModuleType:
 permissions_control = _load_permissions_control()
 
 
-class _StubDohClient:
+class _StubHumrClient:
     """Records post_json calls and returns a canned (status, body)."""
 
     def __init__(self) -> None:
@@ -49,12 +49,12 @@ class _StubDohClient:
 
 class TestPermissionsControlRelay(unittest.TestCase):
 
-    def _client(self, humr_client: _StubDohClient) -> TestClient:
+    def _client(self, humr_client: _StubHumrClient) -> TestClient:
         app = Starlette(routes=permissions_control.routes(prefix="/permissions", humr_client=humr_client))
         return TestClient(app)
 
     def test_draft_open_forwards_empty_payload(self) -> None:
-        stub = _StubDohClient()
+        stub = _StubHumrClient()
         with self._client(stub) as client:
             resp = client.get("/permissions/draft")
         self.assertEqual(resp.status_code, 200)
@@ -62,14 +62,14 @@ class TestPermissionsControlRelay(unittest.TestCase):
         self.assertEqual(stub.calls[0]["payload"], {})
 
     def test_draft_poll_forwards_request_id_from_query(self) -> None:
-        stub = _StubDohClient()
+        stub = _StubHumrClient()
         with self._client(stub) as client:
             client.get("/permissions/draft", params={"request_id": "R1"})
         self.assertEqual(stub.calls[0]["path"], "/api/permissions/draft")
         self.assertEqual(stub.calls[0]["payload"], {"request_id": "R1"})
 
     def test_statement_folds_path_request_id_into_body(self) -> None:
-        stub = _StubDohClient()
+        stub = _StubHumrClient()
         with self._client(stub) as client:
             client.post("/permissions/draft/R1/statement", json={"action": "add_service", "service": "s3"})
         self.assertEqual(stub.calls[0]["path"], "/api/permissions/draft/statement")
@@ -78,21 +78,21 @@ class TestPermissionsControlRelay(unittest.TestCase):
         )
 
     def test_apply_forwards_only_request_id(self) -> None:
-        stub = _StubDohClient()
+        stub = _StubHumrClient()
         with self._client(stub) as client:
             client.post("/permissions/draft/R9/apply")
         self.assertEqual(stub.calls[0]["path"], "/api/permissions/draft/apply")
         self.assertEqual(stub.calls[0]["payload"], {"request_id": "R9"})
 
     def test_resources_forwards_service_from_query(self) -> None:
-        stub = _StubDohClient()
+        stub = _StubHumrClient()
         with self._client(stub) as client:
             client.get("/permissions/resources", params={"service": "sqs"})
         self.assertEqual(stub.calls[0]["path"], "/api/permissions/resources")
         self.assertEqual(stub.calls[0]["payload"], {"service": "sqs"})
 
     def test_status_and_body_pass_through_verbatim(self) -> None:
-        stub = _StubDohClient()
+        stub = _StubHumrClient()
         stub.response = (409, {"error": "permission request is not a draft"})
         with self._client(stub) as client:
             resp = client.post("/permissions/draft/R1/statement", json={"action": "add_service", "service": "s3"})

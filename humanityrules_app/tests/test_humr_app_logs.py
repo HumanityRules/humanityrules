@@ -6,7 +6,7 @@ from django.test import SimpleTestCase
 from humanityrules_app.management.commands import humr_app_logs
 
 
-class DohAppLogsContainerOptionTests(SimpleTestCase):
+class HumrAppLogsContainerOptionTests(SimpleTestCase):
 
     def test_policy_proxy_option_maps_to_policy_proxy_container(self) -> None:
         requested_container = humr_app_logs._requested_container(

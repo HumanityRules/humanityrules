@@ -36,7 +36,7 @@ def _hash(raw: str) -> str:
 
 TELEGRAM_MANAGER_SETTINGS = {
     "TELEGRAM_MANAGER_BOT_TOKEN": "999999:MANAGER_SECRET",
-    "TELEGRAM_MANAGER_BOT_USERNAME": "DohManagerBot",
+    "TELEGRAM_MANAGER_BOT_USERNAME": "HumrManagerBot",
 }
 
 
@@ -200,7 +200,7 @@ class TestSetupSession(_CredentialVaultTestBase):
         # encodes via the builder call.
         self.assertTrue(schema["qr_data_uri"].startswith("data:image/svg+xml"))
         qr_builder.assert_called_once_with(
-            link_url=f"https://t.me/newbot/DohManagerBot/{bot_username}?name=Hermes",
+            link_url=f"https://t.me/newbot/HumrManagerBot/{bot_username}?name=Hermes",
         )
 
     def test_setup_session_without_manager_bot_reports_unconfigured(self) -> None:

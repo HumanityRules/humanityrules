@@ -1,6 +1,6 @@
 """Outbound JSON client for HUMR's per-env integration endpoints.
 
-One `DohClient` instance, built by the broker at startup, owns the
+One `HumrClient` instance, built by the broker at startup, owns the
 control-plane URL, the env bearer, and the owner/app identity that every
 per-env integration endpoint requires. Everything in the broker that talks
 to HUMR (token refresh, device-flow completion, disconnect, vault setup
@@ -15,7 +15,7 @@ import httpx
 logger = logging.getLogger("humr_client")
 
 
-class DohClient:
+class HumrClient:
     """Async JSON client bound to one env bearer and one owner/app identity."""
 
     def __init__(self, control_plane_url: str, bearer: str, owner_username: str, app_slug: str) -> None:

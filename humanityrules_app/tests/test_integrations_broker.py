@@ -87,9 +87,9 @@ import humr_client  # noqa: E402
 import tls_providers  # noqa: E402
 
 
-def _make_humr_client() -> humr_client.DohClient:
-    """Build a DohClient with the fixed test identity."""
-    return humr_client.DohClient(
+def _make_humr_client() -> humr_client.HumrClient:
+    """Build a HumrClient with the fixed test identity."""
+    return humr_client.HumrClient(
         control_plane_url="https://humr.example",
         bearer="env-bearer",
         owner_username="vmendi",
@@ -1391,8 +1391,8 @@ class TestControlIntegrations(unittest.IsolatedAsyncioTestCase):
     async def test_vault_setup_session_requests_submit_token_from_humr(self) -> None:
         """POST /integrations/tls_intercept/{provider}/setup-session asks HUMR for a submit token.
 
-        The owner/app identity rides inside DohClient.post_json (see
-        TestDohClient), so the service only supplies the provider fields.
+        The owner/app identity rides inside HumrClient.post_json (see
+        TestHumrClient), so the service only supplies the provider fields.
         """
         from starlette.testclient import TestClient
 
@@ -1546,8 +1546,8 @@ def _patched_humr_httpx_client(handler: Callable[[httpx.Request], httpx.Response
     return patch.object(humr_client.httpx, "AsyncClient", make_client)
 
 
-class TestDohClient(unittest.IsolatedAsyncioTestCase):
-    """DohClient owns the bearer and merges the owner/app identity into every payload."""
+class TestHumrClient(unittest.IsolatedAsyncioTestCase):
+    """HumrClient owns the bearer and merges the owner/app identity into every payload."""
 
     async def test_post_json_merges_identity_and_sends_bearer(self) -> None:
         import json as _json

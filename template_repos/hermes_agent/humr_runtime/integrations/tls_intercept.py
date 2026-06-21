@@ -25,7 +25,7 @@ from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 
-from humr_client import DohClient
+from humr_client import HumrClient
 import tls_providers
 
 
@@ -110,7 +110,7 @@ class _TokenCacheEntry:
         return self.expires_at > now
 
 
-async def fetch_provider_tokens_batch(humr_client: DohClient, slugs: list[str]) -> dict[str, RefreshResult]:
+async def fetch_provider_tokens_batch(humr_client: HumrClient, slugs: list[str]) -> dict[str, RefreshResult]:
     """Refresh many provider tokens in one POST to HUMR; returns a slug→RefreshResult map.
 
     HUMR's `/api/integrations/tokens` is the broker's only refresh path —
@@ -240,7 +240,7 @@ class _TokenStore:
     lock together.
     """
 
-    def __init__(self, providers: dict[str, tls_providers.TlsProviderSpec], humr_client: DohClient, refresh_lead_seconds: int) -> None:
+    def __init__(self, providers: dict[str, tls_providers.TlsProviderSpec], humr_client: HumrClient, refresh_lead_seconds: int) -> None:
         self._providers = providers
         self._host_to_provider = tls_providers.build_host_to_provider(providers=providers)
         self._humr_client = humr_client
@@ -413,7 +413,7 @@ class TlsInterceptRuntime:
     into this runtime — never the other way around.
     """
 
-    def __init__(self, providers: dict[str, tls_providers.TlsProviderSpec], humr_client: DohClient, refresh_lead_seconds: int, ca_dir: Path, private_dir: Path) -> None:
+    def __init__(self, providers: dict[str, tls_providers.TlsProviderSpec], humr_client: HumrClient, refresh_lead_seconds: int, ca_dir: Path, private_dir: Path) -> None:
         self._token_store = _TokenStore(
             providers=providers,
             humr_client=humr_client,

@@ -53,7 +53,7 @@ import uvicorn
 import control_api
 from credentials_service import CredentialsService
 import device_flow
-from humr_client import DohClient
+from humr_client import HumrClient
 from mcp_aggregator import MCPAggregator
 import tls_intercept
 import tls_providers
@@ -131,7 +131,7 @@ async def _run(
         owner_username, env_slug, control_plane_url, proxy_port, control_port, mcp_port, merge_enabled,
     )
 
-    humr_client = DohClient(
+    humr_client = HumrClient(
         control_plane_url=control_plane_url,
         bearer=bearer,
         owner_username=owner_username,
