@@ -13,7 +13,7 @@
 #
 # Examples (ECS-exec into prod):
 #   ./prod_manage.sh doh_query Environment
-#   ./prod_manage.sh doh_control create-env --aws-account "DevOps Hero AWS Account" --name default --region us-east-1 --hosted-zone devopshero.co --provision
+#   ./prod_manage.sh doh_control create-env --aws-account "DevOps Hero AWS Account" --name default --region us-east-1 --hosted-zone humanityrules.io --provision
 #   ./prod_manage.sh shell
 #   ./prod_manage.sh dbshell
 #

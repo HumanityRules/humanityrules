@@ -1,11 +1,11 @@
 ---
 name: prod-controlplane-debug
-description: Debug DOH's own production control plane (devopshero.ai). Use when the DOH platform itself is broken — its ECS service, ALB, CloudFormation stacks, or CloudWatch logs. NOT for customer app issues — use the customer-debug skill for that.
+description: Debug DOH's own production control plane (humanityrules.io). Use when the DOH platform itself is broken — its ECS service, ALB, CloudFormation stacks, or CloudWatch logs. NOT for customer app issues — use the customer-debug skill for that.
 ---
 
 # Debug DOH Control Plane Production Infrastructure
 
-For investigating production issues with DOH's own control plane (devopshero.ai) — the platform itself, not customer apps.
+For investigating production issues with DOH's own control plane (humanityrules.io) — the platform itself, not customer apps.
 
 **This skill is for DOH's own AWS account and infrastructure.** If a customer app is crashing or failing to deploy, that happens in the customer's AWS account — see the `customer-debug` skill instead.
 

@@ -261,7 +261,7 @@ def _execute_action(repo_path: Path, repository: Repository, action: str, parame
         command = [
             "git",
             "-c", "user.name=DevOps Hero",
-            "-c", "user.email=bot@devopshero.com",
+            "-c", "user.email=bot@humanityrules.io",
             "commit", "-m", normalized_commit_message,
         ]
         result = _run_git_command(repo_path=repo_path, command=command, token=token)

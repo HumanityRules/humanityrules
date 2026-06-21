@@ -59,7 +59,7 @@ def policy_proxy_config() -> config_mod.PolicyProxyConfig:
         env_domain="doh-sandbox.dohsandbox.com",
         auth_base_url="https://auth.doh-sandbox.dohsandbox.com",
         jwks_url="https://auth.doh-sandbox.dohsandbox.com/.well-known/jwks.json",
-        pdp_url="https://devopshero.ai/api/pdp/evaluate",
+        pdp_url="https://humanityrules.io/api/pdp/evaluate",
         env_bearer_token="t" * 64,
         upstream_host="127.0.0.1",
         upstream_port=8787,

@@ -52,7 +52,7 @@ Operations that modify state for environments and deployments.
     --aws-account "DevOps Hero AWS Account" \
     --name default \
     --region us-east-1 \
-    --hosted-zone devopshero.co
+    --hosted-zone humanityrules.io
 
 # Tear down environment
 ./prod_manage.sh doh_control teardown-env \

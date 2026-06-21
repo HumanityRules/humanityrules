@@ -107,7 +107,7 @@ JWKS handling:
 
 ## DOH PDP Endpoint
 
-Endpoint: `POST https://devopshero.ai/api/pdp/evaluate`
+Endpoint: `POST https://humanityrules.io/api/pdp/evaluate`
 
 Request:
 

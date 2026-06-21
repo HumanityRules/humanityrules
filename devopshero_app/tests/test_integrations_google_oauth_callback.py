@@ -22,7 +22,7 @@ VALID_WEB_CONFIG = {
     "token_uri": "https://oauth2.googleapis.com/token",
     "redirect_uris": [
         "http://testserver/integrations/user/google/callback/",
-        "https://devopshero.ai/integrations/user/google/callback/",
+        "https://humanityrules.io/integrations/user/google/callback/",
     ],
 }
 

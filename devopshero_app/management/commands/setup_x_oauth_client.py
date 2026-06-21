@@ -5,7 +5,7 @@ Usage:
     uv run manage.py setup_x_oauth_client \
         --client-id YOUR_CLIENT_ID \
         --client-secret YOUR_CLIENT_SECRET \
-        --redirect-uri https://devopshero.ai/integrations/user/x/callback \
+        --redirect-uri https://humanityrules.io/integrations/user/x/callback \
         --redirect-uri https://<ngrok-host>/integrations/user/x/callback
 
 Unlike Google (which hands you a downloadable JSON), X gives you a bare Client ID
