@@ -1,6 +1,6 @@
 {
   "AWSTemplateFormatVersion": "2010-09-09",
-  "Description": "CloudFormation template to securely connect your AWS account to HumanityRules.\n",
+  "Description": "CloudFormation template to securely connect your AWS account to Humanity Rules.\n",
   "Parameters": {
     "ExternalId": {
       "Type": "String",
@@ -9,7 +9,7 @@
   },
   "Outputs": {
     "RoleArn": {
-      "Description": "The ARN of the IAM role created for HumanityRules",
+      "Description": "The ARN of the IAM role created for Humanity Rules",
       "Value": { "Fn::GetAtt": ["HumanityRulesRole", "Arn"] }
     },
     "AccountId": {
