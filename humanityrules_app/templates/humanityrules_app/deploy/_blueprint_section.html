@@ -1,0 +1,94 @@
+<div class="rounded-lg border border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-800/60">
+    <div class="flex items-center justify-between px-4 py-3 bg-gray-50 dark:bg-gray-800 rounded-t-lg">
+        <h2 class="text-sm font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">Deployment Blueprint</h2>
+        <div class="flex items-baseline gap-3">
+            {% if blueprint %}
+            {% include "humanityrules_app/partials/_status_pill.html" with status=blueprint.status label=blueprint.get_status_display only %}
+            {% else %}
+            <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-500 dark:bg-gray-700 dark:text-gray-400">
+                Pending
+            </span>
+            {% endif %}
+        </div>
+    </div>
+    <div class="border-t border-gray-200 dark:border-gray-700 px-4 py-3">
+        {% if blueprint %}
+        <dl class="grid gap-x-4 gap-y-2 text-sm" style="grid-template-columns: 25% 75%;">
+            <dt class="text-gray-500 dark:text-gray-400">Environment</dt>
+            <dd class="text-gray-900 dark:text-white font-medium">{{ blueprint.environment.name }}</dd>
+            <dt class="text-gray-500 dark:text-gray-400">Branch</dt>
+            <dd class="text-gray-900 dark:text-white">{{ blueprint_effective_values.branch }}</dd>
+            <dt class="text-gray-500 dark:text-gray-400">CPU</dt>
+            <dd class="text-gray-900 dark:text-white">{{ blueprint_effective_values.cpu_display }}</dd>
+            <dt class="text-gray-500 dark:text-gray-400">Memory</dt>
+            <dd class="text-gray-900 dark:text-white">{{ blueprint.memory }} MiB</dd>
+            <dt class="text-gray-500 dark:text-gray-400">Subdomain</dt>
+            <dd class="text-gray-900 dark:text-white">{{ blueprint_effective_values.subdomain }}</dd>
+            {% if blueprint_effective_values.url %}
+            <dt class="text-gray-500 dark:text-gray-400">URL</dt>
+            <dd class="text-gray-900 dark:text-white break-all">
+                {{ blueprint_effective_values.url }}
+            </dd>
+            {% endif %}
+            {% if blueprint.datastore %}
+            <dt class="text-gray-500 dark:text-gray-400">Datastore</dt>
+            <dd class="text-gray-900 dark:text-white">{{ blueprint.datastore.name }}</dd>
+            {% endif %}
+            {% for container in blueprint.containers %}
+            {% if container.environment_variables %}
+            <dt class="text-gray-500 dark:text-gray-400">{{ container.name }} env vars</dt>
+            <dd class="text-gray-900 dark:text-white">
+                <ul class="space-y-0.5 text-xs font-mono">
+                    {% for var in container.environment_variables %}
+                    <li>
+                        <span class="text-gray-500 dark:text-gray-400">{{ var.name }}</span>
+                        <span class="text-gray-300 dark:text-gray-600">=</span>
+                        <span class="break-all">{{ var.value }}</span>
+                    </li>
+                    {% endfor %}
+                </ul>
+            </dd>
+            {% endif %}
+            {% if container.app_secrets %}
+            <dt class="text-gray-500 dark:text-gray-400">{{ container.name }} secrets</dt>
+            <dd class="text-gray-900 dark:text-white">
+                <ul class="space-y-0.5 text-xs font-mono">
+                    {% for key, val in container.app_secrets.items %}
+                    <li>
+                        <span class="text-gray-500 dark:text-gray-400">{{ key }}</span>
+                        <span class="text-gray-300 dark:text-gray-600">=</span>
+                        <span class="text-gray-400 dark:text-gray-500">••••••••</span>
+                    </li>
+                    {% endfor %}
+                </ul>
+            </dd>
+            {% endif %}
+            {% endfor %}
+            {% if blueprint.status_message %}
+            <dt class="text-gray-500 dark:text-gray-400">Status</dt>
+            <dd class="text-gray-900 dark:text-white">{{ blueprint.status_message }}</dd>
+            {% endif %}
+        </dl>
+        {% if blueprint.status == 'active' %}
+        <div class="mt-4 rounded-md border border-green-200 bg-green-50 px-3 py-2 text-sm text-green-800 dark:border-green-500/30 dark:bg-green-500/10 dark:text-green-200">
+            Deployment active. <a href="{% url 'app_detail' app_slug=app.slug %}"
+                hx-get="{% url 'app_detail' app_slug=app.slug %}"
+                hx-target="#main-content"
+                hx-swap="innerHTML"
+                hx-push-url="true"
+                class="font-medium underline">Open app details</a>.
+        </div>
+        {% endif %}
+        {% else %}
+        <p class="text-sm text-gray-400 dark:text-gray-500">The agent will configure the blueprint after defining the app and selecting an environment.</p>
+        {% endif %}
+    </div>
+    {% if blueprint.status == 'deploying' and app %}
+    <div class="sr-only"
+         hx-get="{% url 'deployment_editor_blueprint_section' app_slug=app.slug %}"
+         hx-trigger="load delay:5s"
+         hx-target="#blueprint-section"
+         hx-swap="innerHTML"
+         aria-hidden="true"></div>
+    {% endif %}
+</div>

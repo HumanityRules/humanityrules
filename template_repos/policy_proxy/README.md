@@ -46,4 +46,4 @@ uv run pytest
 
 ## Publishing
 
-The policy-proxy image is published to ECR per environment — `doh/{env_slug}/policy-proxy:{version}` — from the DOH deploy pipeline on first policy-proxy deploy. See `devopshero_app/services/infra_customer/` for the push plumbing.
+The policy-proxy image is published to ECR per environment — `doh/{env_slug}/policy-proxy:{version}` — from the DOH deploy pipeline on first policy-proxy deploy. See `humanityrules_app/services/infra_customer/` for the push plumbing.

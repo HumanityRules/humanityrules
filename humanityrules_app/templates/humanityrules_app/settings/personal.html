@@ -1,0 +1,43 @@
+{% extends "humanityrules_app/settings/settings.html" %}
+
+{% block settings_content %}
+<div class="max-w-2xl space-y-8">
+
+    <section>
+        <h2 class="text-base font-semibold text-gray-900 dark:text-white mb-1">Profile</h2>
+        <p class="text-sm text-gray-500 dark:text-gray-400 mb-4">Your name and email address as registered with DevOps Hero.</p>
+        <dl class="divide-y divide-gray-100 dark:divide-white/10 rounded-lg border border-gray-200 dark:border-white/10">
+            <div class="px-4 py-3 sm:grid sm:grid-cols-3 sm:gap-4">
+                <dt class="text-sm font-medium text-gray-500 dark:text-gray-400">Full name</dt>
+                <dd class="mt-1 text-sm text-gray-900 dark:text-white sm:col-span-2 sm:mt-0">
+                    {% if user.first_name or user.last_name %}
+                        {{ user.first_name }} {{ user.last_name }}
+                    {% else %}
+                        <span class="text-gray-400 dark:text-gray-500 italic">Not set</span>
+                    {% endif %}
+                </dd>
+            </div>
+            <div class="px-4 py-3 sm:grid sm:grid-cols-3 sm:gap-4">
+                <dt class="text-sm font-medium text-gray-500 dark:text-gray-400">Email</dt>
+                <dd class="mt-1 text-sm text-gray-900 dark:text-white sm:col-span-2 sm:mt-0">{{ user.email }}</dd>
+            </div>
+            <div class="px-4 py-3 sm:grid sm:grid-cols-3 sm:gap-4">
+                <dt class="text-sm font-medium text-gray-500 dark:text-gray-400">Username</dt>
+                <dd class="mt-1 text-sm text-gray-900 dark:text-white sm:col-span-2 sm:mt-0">{{ user.username }}</dd>
+            </div>
+        </dl>
+    </section>
+
+    <section>
+        <h2 class="text-base font-semibold text-gray-900 dark:text-white mb-1">Current Organization</h2>
+        <p class="text-sm text-gray-500 dark:text-gray-400 mb-4">The organization you are currently working in.</p>
+        <dl class="divide-y divide-gray-100 dark:divide-white/10 rounded-lg border border-gray-200 dark:border-white/10">
+            <div class="px-4 py-3 sm:grid sm:grid-cols-3 sm:gap-4">
+                <dt class="text-sm font-medium text-gray-500 dark:text-gray-400">Organization</dt>
+                <dd class="mt-1 text-sm text-gray-900 dark:text-white sm:col-span-2 sm:mt-0">{{ user.current_organization.name }}</dd>
+            </div>
+        </dl>
+    </section>
+
+</div>
+{% endblock %}

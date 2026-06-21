@@ -215,5 +215,5 @@ The policy proxy does not assume a specific app; it reads its `app_id` and `list
 ## Open Items
 
 - **Hermes WebUI header contract.** The exact upstream-auth header names and whether Hermes WebUI supports them out of the box (or needs a patch) is unresolved. Deferred.
-- **Self-referential conditions in the engine.** The ABAC evaluation engine (`devopshero_app/services/abac.py`) already exists and is used elsewhere, but the `$identity.<key> = $resource.<key>` condition form introduced in `authorization_design_abac.md` needs to be added. Small extension — a new clause type plus evaluator branch.
+- **Self-referential conditions in the engine.** The ABAC evaluation engine (`humanityrules_app/services/abac.py`) already exists and is used elsewhere, but the `$identity.<key> = $resource.<key>` condition form introduced in `authorization_design_abac.md` needs to be added. Small extension — a new clause type plus evaluator branch.
 - **PDP HTTP endpoint.** The in-process engine exists; wrapping it as the `POST /api/pdp/evaluate` endpoint with shared-env-token auth and the request/response shape above is new work.

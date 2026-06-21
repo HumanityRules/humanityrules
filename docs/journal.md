@@ -308,7 +308,7 @@ A user installed `hermes-hud` (a prebuilt SPA bundle) via the webapps mechanism 
 
 **Two non-blocking snags found during E2E, worth filing.**
 
-1. **`cdk.out/manifest.json` race between concurrent workers.** First redeploy failed mid-flight with "No stacks match the name(s) doh-default-hermes-vmendi-subhost-a-app". Cause: the unscoped main worker (the user's own `run_job_worker` from a separate terminal) claimed an unrelated `hermes-vmendi00` deploy at the same time and ran `app.synth()` against `cdk_utils.CDK_OUT_DIR` — a fixed global path under `devopshero_app/services/infra_customer/cdk.out/`. The synth overwrote `manifest.json`, so when my labelled worker reached `deploy_from_assembly(stack_names=[<app-stack>])` minutes later, CDK CLI couldn't find the stack in the manifest and failed cleanly. The labelled-worker design avoids this within a worktree, but not against the global main worker. A per-deploy `outdir` (or a process-wide synth lock) would fix it; for now operators need to ensure only one worker is active for deploys that can race.
+1. **`cdk.out/manifest.json` race between concurrent workers.** First redeploy failed mid-flight with "No stacks match the name(s) doh-default-hermes-vmendi-subhost-a-app". Cause: the unscoped main worker (the user's own `run_job_worker` from a separate terminal) claimed an unrelated `hermes-vmendi00` deploy at the same time and ran `app.synth()` against `cdk_utils.CDK_OUT_DIR` — a fixed global path under `humanityrules_app/services/infra_customer/cdk.out/`. The synth overwrote `manifest.json`, so when my labelled worker reached `deploy_from_assembly(stack_names=[<app-stack>])` minutes later, CDK CLI couldn't find the stack in the manifest and failed cleanly. The labelled-worker design avoids this within a worktree, but not against the global main worker. A per-deploy `outdir` (or a process-wide synth lock) would fix it; for now operators need to ensure only one worker is active for deploys that can race.
 
 2. **`doh_app_exec` runs as root *outside* the nono sandbox, where `/workspace/` is an empty mountpoint.** I tried to validate the new routing by `webapps create hello` via `doh_app_exec --container hermes`, and was confused that the CLI was claiming port 4000 (collision with `__admin`) and the generated routes.caddy was wrong. Tail of the thread: the persistent root is mounted *inside* nono — the agent (running as `hermeswebui` inside the sandbox) sees `/workspace/.config/process-compose/process-compose.yaml` correctly populated with `__admin` and `system.gateway`; root outside nono sees the bind-mount target, an empty `/workspace/`. The path visible to root from outside nono is `/hermes-persistent-root/workspace/` — that's where the real state lives. End-to-end validation of "agent creates webapp → subdomain works" therefore needs to run *from the agent's chat*, not from `doh_app_exec`. (The Caddy routing layer was validated independently with explicit `X-Forwarded-Host` headers; `__admin`'s actual route block in the persistent state confirms the route generator's subhost output too, since it's the same code path.)
 
@@ -348,7 +348,7 @@ A previous commit (`03ca6c0`, since refined to `1be3208`) fixed an unscoped user
 
 **Strategy framing.** Three layered defenses, cheapest-first: (1) custom ORM manager that requires explicit `.scoped(org)` to avoid raising; (2) Semgrep CI rule flagging `.filter(id=)` / `.get(id=)` on tenant-owned models that lacks an `organization=` sibling; (3) Postgres RLS as the floor that catches raw SQL and anything that goes around the ORM. Independently of those, do a one-time manual audit of the hot paths, stratified by risk. We did the audit (Tier 1 = views) this session; the rest sits behind future-flag-protected work.
 
-**The fixes (commit `43d5e3e`).** Three sites in `devopshero_app/views/`, all the same family — collapse client-supplied identifier resolution into a single atomic scoped lookup:
+**The fixes (commit `43d5e3e`).** Three sites in `humanityrules_app/views/`, all the same family — collapse client-supplied identifier resolution into a single atomic scoped lookup:
 
 - **`integrations/{google,github}_oauth.py::_resolve_env_by_rd`** — was iterating *every* `Environment` in the system, matching by hostname suffix on `shared_alb_hosted_zone`. A logged-in DOH user could pass an `rd` whose host belonged to a stranger org's env, and the OAuth start would happily stash credentials against that env. Token-retrieval paths (commit `1be3208`) already membership-checked, so the credential was unreachable, but it polluted the target env and confused audit. Helper now takes `user` and filters `Environment.objects.filter(aws_account__organization__memberships__user=user)`. Severity downgraded from MEDIUM to LOW after re-evaluating in light of the retrieval-side fix.
 
@@ -516,14 +516,14 @@ App-to-app navigation inside the same env never re-touches the control plane: co
 
 ### Components
 
-- **Control-plane key custody.** Two new settings in `devopshero_site/settings.py`: `DOH_ENV_SESSION_JWT_PRIVATE_KEY` (PEM, `\n`-unescaped, same pattern as `GITHUB_APP_PRIVATE_KEY`) and `DOH_ENV_SESSION_JWT_KID` (string, leaves a hook for rotation).
-- **Three new control-plane endpoints** in `devopshero_app/views/auth_env_sso.py` — `GET /auth/env-start`, `GET /auth/env-callback`, `GET /.well-known/jwks.json`. State-JWT carries `{rd, env_slug, nonce, iat, exp}` so the callback re-derives the destination from a *signed* claim, not query params. Session JWT carries `aud=<env_domain>` (the env's globally unique DNS zone) so cross-env replay is blocked at the sidecar verifier (`audience=cfg.env_domain` in `jwt.decode`). **Not** `env_slug` — slugs are only unique per AWS account (`Environment.unique_together = (aws_account, slug)`), so two envs in different accounts could share `slug='prod'` and a token minted for one would verify in the other under one central JWKS.
+- **Control-plane key custody.** Two new settings in `humanityrules_site/settings.py`: `DOH_ENV_SESSION_JWT_PRIVATE_KEY` (PEM, `\n`-unescaped, same pattern as `GITHUB_APP_PRIVATE_KEY`) and `DOH_ENV_SESSION_JWT_KID` (string, leaves a hook for rotation).
+- **Three new control-plane endpoints** in `humanityrules_app/views/auth_env_sso.py` — `GET /auth/env-start`, `GET /auth/env-callback`, `GET /.well-known/jwks.json`. State-JWT carries `{rd, env_slug, nonce, iat, exp}` so the callback re-derives the destination from a *signed* claim, not query params. Session JWT carries `aud=<env_domain>` (the env's globally unique DNS zone) so cross-env replay is blocked at the sidecar verifier (`audience=cfg.env_domain` in `jwt.decode`). **Not** `env_slug` — slugs are only unique per AWS account (`Environment.unique_together = (aws_account, slug)`), so two envs in different accounts could share `slug='prod'` and a token minted for one would verify in the other under one central JWKS.
 - **Org dispatch.** `env_start` resolves the env from `rd`'s host (longest-suffix match against `Environment.shared_alb_hosted_zone`), then dispatches by `env.aws_account.organization.auth_provider`: WorkOS-org users hit AuthKit (`provider="authkit"`), OIDC-org users hit `org.oidc_issuer_url + "/v1/authorize"`. Same JWT minted from either branch, distinguished by a `provider` claim.
 - **`/__doh_session_install` on the sidecar.** Single-purpose endpoint that verifies the URL-borne token via JWKS, validates `rd` is inside `cfg.env_domain`, sets `doh_session=<token>; Domain=.<env_domain>; HttpOnly; Secure; SameSite=Lax; Max-Age=<exp-now>`, and 302s to `rd`. `Cache-Control: no-store` and `Referrer-Policy: no-referrer` to keep the URL-borne JWT out of caches and Referer headers.
 
 ### What got deleted
 
-- `devopshero_app/services/infra_customer/auth_service.py` (entire CDK stack for the auth Fargate service).
+- `humanityrules_app/services/infra_customer/auth_service.py` (entire CDK stack for the auth Fargate service).
 - `template_repos/policy_proxy/policy_proxy/auth.py` (PKCE state machine, OAuth code exchange, JWT minting — all centralized now).
 - `secrets_utils.ensure_env_policy_proxy_auth_config_exists` and the per-env keypair generator (`_generate_rsa_keypair_pem`).
 - `template_repos/policy_proxy/policy_proxy/main.py`'s `DOH_ROLE` dispatch — the binary is sidecar-only now.
@@ -540,7 +540,7 @@ App-to-app navigation inside the same env never re-touches the control plane: co
 ### Tests
 
 - `template_repos/policy_proxy/tests/test_session_install.py` (folded into `test_app_flow.py`): valid-token install → 302 + Set-Cookie; bad signature → 401; `aud` mismatch → 401; `rd` outside env-domain → 400.
-- `devopshero_app/tests/test_auth_env_sso.py` (new, 15 tests): `rd` validation; longest-zone match (`x.staging.prod.workos-customer.com` resolves to the deeper `staging.prod.workos-customer.com` env, not the parent `prod.workos-customer.com`); state-JWT round-trip; expired-state rejection; `state.env_slug` must match the env resolved from `rd` (defense in depth — both are signed); WorkOS branch via mocked `authenticate_with_code`; OIDC branch via mocked `_exchange_oidc_code`; JWKS shape + cache header.
+- `humanityrules_app/tests/test_auth_env_sso.py` (new, 15 tests): `rd` validation; longest-zone match (`x.staging.prod.workos-customer.com` resolves to the deeper `staging.prod.workos-customer.com` env, not the parent `prod.workos-customer.com`); state-JWT round-trip; expired-state rejection; `state.env_slug` must match the env resolved from `rd` (defense in depth — both are signed); WorkOS branch via mocked `authenticate_with_code`; OIDC branch via mocked `_exchange_oidc_code`; JWKS shape + cache header.
 - `policy_proxy/tests/test_jwt_verify.py` rewritten to call `verify_session_jwt(env_domain=...)` and added `aud_mismatch`, `missing_aud`, and a `same_slug_different_domain_does_not_replay` regression that explicitly reproduces the cross-account-same-slug scenario.
 - `test_auth_env_sso.py::test_session_audience_is_env_domain_not_slug` builds two envs in different AWS accounts that share `slug='workos-prod'` with different `shared_alb_hosted_zone`s and asserts a token minted for one fails `audience=` verification against the other.
 - `template_repos/policy_proxy/tests/test_auth.py` and `test_auth_workos.py` deleted — they covered the per-env minting code that's gone.
@@ -661,7 +661,7 @@ The bring-up tested with a freshly-deployed Hermes that had no other in-flight g
 
 Built a per-user GitHub integration for the Hermes Personal Assistant, parallel to the existing Google Workspace one. End users connect *their own* GitHub account from the WebUI integrations pane; inside the sandbox `git clone/push`, `gh repo list`, `gh pr create`, etc. just work, attributed to the connected user, with **no real token ever entering the sandbox**.
 
-This is distinct from the org-scoped GitHub App install used by the DOH control plane (`devopshero_app/views/github.py`) for repo discovery and deploy-time `git_ops`. Same App registration on github.com, same `client_id`/`client_secret` — but a different OAuth path (user-to-server, with the App's "Expire user authorization tokens" feature ON, yielding 8h access tokens + 6mo rotating refresh tokens).
+This is distinct from the org-scoped GitHub App install used by the DOH control plane (`humanityrules_app/views/github.py`) for repo discovery and deploy-time `git_ops`. Same App registration on github.com, same `client_id`/`client_secret` — but a different OAuth path (user-to-server, with the App's "Expire user authorization tokens" feature ON, yielding 8h access tokens + 6mo rotating refresh tokens).
 
 ### Architecture (what got added)
 
@@ -669,9 +669,9 @@ Five layers, mirroring the Google design beat-for-beat:
 
 1. **DOH model + migration** — added `IntegrationUserGrant.Provider.GITHUB`. Migration 0058. The unique constraint stays `(user, environment, provider)` — same user connecting from two different envs gets two grants, deliberately (per-env Hermes deployments stay isolated).
 
-2. **DOH OAuth views** (`devopshero_app/views/integrations/github_oauth.py`) — start/callback/disconnect, mirror of `google_oauth.py`. The `_redirect_uri` is built from `request.build_absolute_uri()`, so the GitHub App's Callback URL list only needs DOH control-plane hosts (e.g. `devopshero.ai`, `devopshero.ngrok.io`), **not** per-customer hosts. The user-facing `rd` is the customer Hermes WebUI host; it's validated by hostname suffix against `Environment.shared_alb_hosted_zone`.
+2. **DOH OAuth views** (`humanityrules_app/views/integrations/github_oauth.py`) — start/callback/disconnect, mirror of `google_oauth.py`. The `_redirect_uri` is built from `request.build_absolute_uri()`, so the GitHub App's Callback URL list only needs DOH control-plane hosts (e.g. `devopshero.ai`, `devopshero.ngrok.io`), **not** per-customer hosts. The user-facing `rd` is the customer Hermes WebUI host; it's validated by hostname suffix against `Environment.shared_alb_hosted_zone`.
 
-3. **DOH token-refresh endpoint** (`devopshero_app/views/integrations/github_token_refresh.py`) — env-bearer-authed POST that exchanges the stored refresh_token for an 8h access token. Two GitHub-specific quirks the implementation guards against:
+3. **DOH token-refresh endpoint** (`humanityrules_app/views/integrations/github_token_refresh.py`) — env-bearer-authed POST that exchanges the stored refresh_token for an 8h access token. Two GitHub-specific quirks the implementation guards against:
     - GitHub returns **HTTP 200 with an error body** when the refresh_token is no longer valid (not a 4xx). Codes treated as revoked: `bad_refresh_token`, `bad_credentials`, `unauthorized_client`, `invalid_grant`.
     - GitHub **always rotates the refresh_token on every refresh** (Google only sometimes does). Persisting the new value is load-bearing — without it the next refresh would fail.
 
@@ -1117,9 +1117,9 @@ The user wanted the docker-variant templates gone but the code retained as refer
 - **Data migration `0057_remove_hermes_docker_templates.py`** to delete the orphan AppTemplate rows. Discovered along the way that `seed_app_templates` only does `update_or_create` and never deletes — so without this migration, removing entries from the seed file just leaves stranded DB rows that still show up in `doh_query` and in any UI that lists templates without `is_active` filtering. The migration is the canonical cleanup; reverse is a no-op (revive via seed if ever needed).
 - **Reference file** at `template_repos/deprecated/seed_app_templates_excerpt.py`: verbatim snapshot of the removed helpers and template dicts, with a header docstring stating it's reference-only, not imported, and naming the three symbols (`_HERMES_LLM_VARS`, `_HERMES_TAVILY_VAR`, `_HERMES_POLICY_PROXY_CONTAINER`) that still live in the active seed module — so a reader who picks this up later knows why `python -c 'import ...'` would fail. AST-parsed to confirm syntactic validity. The two embedded references inside (`_HERMES_CONTAINER_BASE.source_repo_path` and the `_DOCKER_DIND_CONTAINER` build comment) were updated to point at the new `deprecated/...` paths so the snapshot mirrors today's filesystem.
 - **Deleted three test files** (`test_template_deploy_owner_field.py`, `test_multi_container_app_config.py`, `test_ecs_compute_modes.py`) per the user's explicit "remove them literally" preference. These exercised general logic (Owner field on PA deploy forms, multi-container AppTemplate→AppConfig projection, ECS compute modes) using docker-template fixtures; I flagged the coverage loss as a regression risk and the user accepted. **Cleaned** `test_bedrock_platform_capabilities.py` separately: removed `test_hermes_templates_enable_docker_backed_tools` outright (the assertions were exclusively about the DinD container shape), and simplified `test_hermes_templates_do_not_declare_bedrock_access_key_secrets` from a 3-template loop to a single-template call (`test_hermes_template_does_not_declare_bedrock_access_key_secrets`) over `HERMES_PERSONAL_TEMPLATE`.
-- **Doc references intentionally left alone**: `infra_devopshero/prod_manage.sh` and `.agents/skills/prod-manage/SKILL.md` both have `--source-dir template_repos/doh_dind` *examples*. I initially updated them to point at the new `deprecated/` path; the user reverted that — the examples are illustrative of the `doh_build_prebuilt_image` CLI shape, not a current live build target, and rewriting them to chase the move would be churn for no functional benefit. The comment in `devopshero_app/services/infra_customer/appconfig.py` citing doh-dind as a long-`stop_timeout` example is left alone for the same reason: still pedagogically useful, no active container depends on it.
+- **Doc references intentionally left alone**: `infra_devopshero/prod_manage.sh` and `.agents/skills/prod-manage/SKILL.md` both have `--source-dir template_repos/doh_dind` *examples*. I initially updated them to point at the new `deprecated/` path; the user reverted that — the examples are illustrative of the `doh_build_prebuilt_image` CLI shape, not a current live build target, and rewriting them to chase the move would be churn for no functional benefit. The comment in `humanityrules_app/services/infra_customer/appconfig.py` citing doh-dind as a long-`stop_timeout` example is left alone for the same reason: still pedagogically useful, no active container depends on it.
 
-**Verification of Part 2**: stashed my changes to establish a baseline, ran the full suite (`uv run manage.py test devopshero_app`), saw 12 errors in `test_integrations_broker` and `test_mcp_aggregator_state_change`. Restored changes, re-ran — same 12 errors, none new. Confirmed pre-existing and unrelated. The migration applies cleanly (orphan rows go from 4 to 2), re-seed is idempotent (the deleted rows don't come back). Migration state needed a `migrate ... 0056` + `migrate` cycle after the stash dance because reversing-while-stashed leaves the DB row in an applied state without re-running the SQL.
+**Verification of Part 2**: stashed my changes to establish a baseline, ran the full suite (`uv run manage.py test humanityrules_app`), saw 12 errors in `test_integrations_broker` and `test_mcp_aggregator_state_change`. Restored changes, re-ran — same 12 errors, none new. Confirmed pre-existing and unrelated. The migration applies cleanly (orphan rows go from 4 to 2), re-seed is idempotent (the deleted rows don't come back). Migration state needed a `migrate ... 0056` + `migrate` cycle after the stash dance because reversing-while-stashed leaves the DB row in an applied state without re-running the SQL.
 
 **Key points:**
 - Avoid hardcoding paths that are already exposed as `ENV` vars — `${DOH_BIN_DIR}:${PATH}` reads better than the inline `/opt/doh/bin:...:/bin` and inherits future base-image PATH changes for free.
@@ -1352,7 +1352,7 @@ Final shape: `tls_intercept.py` owns the full TLS-intercept subsystem. Static pr
 - **The broker now has a better abstraction boundary.** Earlier, `integrations_broker.py` carried process orchestration, control routing, TLS proxying, cert minting, host routing, token cache, and status serialization. After the refactor, it only holds an opaque TLS runtime plus the MCP aggregator. That makes the process lifecycle easier to read.
 - **Tests moved with the behavior.** The existing broker test file still covers the load-bearing primitives, but now calls the primitives through `broker.tls_intercept`. The control-app test constructs `TlsInterceptRuntime`, and token-cache tests target the private store directly because those are unit tests for behavior inside the mechanism.
 - **Local test environment still lacks `fastmcp`.** The broker import path pulls in `mcp_aggregator`, which imports `fastmcp` in the Hermes runtime but not in the Django uv env. The test fixture now stubs only `mcp_aggregator.MCPAggregator` when `fastmcp` is missing, keeping these broker/TLS tests runnable locally without changing production code.
-- **Verification passed.** Ran `uv run python -m py_compile` across the touched Python files, `git diff --check`, and `uv run manage.py test devopshero_app.tests.test_integrations_broker` (19 tests).
+- **Verification passed.** Ran `uv run python -m py_compile` across the touched Python files, `git diff --check`, and `uv run manage.py test humanityrules_app.tests.test_integrations_broker` (19 tests).
 
 ## 2026-05-16 16:08 - [Integrations] Replaced Hermes broker's timer-driven Google token refresh with lazy-on-demand
 
@@ -1372,7 +1372,7 @@ User asked whether the broker's ~60-min Google refresh loop could be replaced wi
 
 **Verification:**
 
-- Pre-existing test file `devopshero_app/tests/test_integrations_broker.py` can't be loaded by Django's test runner because `mcp_aggregator` imports `fastmcp` which only ships in the Hermes container, not the Django venv. Same on `main`; not introduced here. Worked around with a `sys.modules['mcp_aggregator']` stub for a self-contained smoke test that exercised: lazy first fetch, cache hit across hosts in the same provider, refresh on near-expiry, unknown host short-circuits without a fetch, `not_connected` caches no token, and 20 concurrent first-callers single-flight to one fetch. All pass.
+- Pre-existing test file `humanityrules_app/tests/test_integrations_broker.py` can't be loaded by Django's test runner because `mcp_aggregator` imports `fastmcp` which only ships in the Hermes container, not the Django venv. Same on `main`; not introduced here. Worked around with a `sys.modules['mcp_aggregator']` stub for a self-contained smoke test that exercised: lazy first fetch, cache hit across hosts in the same provider, refresh on near-expiry, unknown host short-circuits without a fetch, `not_connected` caches no token, and 20 concurrent first-callers single-flight to one fetch. All pass.
 - Updated test file to match new shape — replaced `TestControlKick` with `TestControlIntegrations` (asserts GET refreshes), added `TestLazyTokenForHost` for the lazy-cache scenarios, updated outcome-classification tests to the new `status` values.
 
 **Cleanup:**
@@ -1450,7 +1450,7 @@ A series of small, user-led tightenings to the integrations aggregator after the
 
 **Decoupled the broker from Merge entirely.** The unified `/__doh_broker/integrations` fan-out in the broker called `aggregator.merge_backend.handle_connectors(request)` directly, reaching through a public property to invoke a Merge-specific handler. Replaced with a new `aggregator.status_items(request)` that returns a flat `list[dict]` of ready-to-render cards — one entry per DCR provider plus one per Merge-managed connector. The aggregator already knew about both kinds of providers, so it owns the assembly. Broker now does `items.extend(await aggregator.status_items(request=request))` and stops knowing Merge or Notion or PostHog exist as concepts. The `merge_backend` property and the old `handle_status` Response wrapper both went away. JSON encode/decode round-trip between aggregator and broker also gone.
 
-**Moved `sys.path.insert` from the production broker module to the test fixture.** `integrations_broker.py` had `sys.path.insert(0, str(Path(__file__).resolve().parent))` at module top so `import mcp_aggregator` would resolve. User flagged it as cognitive load: anyone reading the file had to evaluate and dismiss the line. Production path (supervisor.sh runs the broker as a script) already gets `/opt/doh/runtime/` on sys.path automatically. The only execution context that needs the manual insertion is `devopshero_app/tests/test_integrations_broker.py`, which loads the broker via `importlib.util.spec_from_file_location` from outside the runtime dir. Moved the insertion into that fixture's `_load_broker_module()` helper. Broker module is now clean.
+**Moved `sys.path.insert` from the production broker module to the test fixture.** `integrations_broker.py` had `sys.path.insert(0, str(Path(__file__).resolve().parent))` at module top so `import mcp_aggregator` would resolve. User flagged it as cognitive load: anyone reading the file had to evaluate and dismiss the line. Production path (supervisor.sh runs the broker as a script) already gets `/opt/doh/runtime/` on sys.path automatically. The only execution context that needs the manual insertion is `humanityrules_app/tests/test_integrations_broker.py`, which loads the broker via `importlib.util.spec_from_file_location` from outside the runtime dir. Moved the insertion into that fixture's `_load_broker_module()` helper. Broker module is now clean.
 
 **Moved `mcp_aggregator` import out of the deferred position.** Was inside `_run()` to defer heavy imports until the broker actually started. User asked why; investigation showed there's no concrete reason — the broker is the only entrypoint, deferring just shifts the failure point from line 1 to line 937. Hoisted to the top with the other imports; dropped the three string forward-ref type annotations (`aggregator: "mcp_aggregator.MCPAggregator"`) to plain references. Cleaned up three pre-existing ruff F401/F841 warnings in the broker (unused `socket`, `time`, `has_cl`) while we were touching the file.
 
@@ -1710,7 +1710,7 @@ Pure cleanup pass. The `template_repos/hermes_agent/` directory had grown organi
 
 **Nono profile flattened into `doh_runtime/`.** Before: `hermes-nono-profile.json` at root, copied to `/opt/doh/nono/hermes-nono-profile.json`, referenced from `supervisor.sh:211` as `${DOH_ROOT}/nono/hermes-nono-profile.json`. The dedicated `/opt/doh/nono/` subdir held exactly one file. Flattened to `/opt/doh/runtime/hermes-nono-profile.json` (peer of supervisor.sh), referenced via `${DOH_RUNTIME_DIR}/hermes-nono-profile.json`. Removes one COPY line and one image directory. Mild cost: `doh_runtime/` is now a slight grab-bag of file types (shell, python, json) rather than purely "scripts the supervisor invokes." Acceptable — the dir's identity is "files that live at /opt/doh/runtime", not "files of a particular type."
 
-**Tests caught the only live cross-reference.** `devopshero_app/tests/test_integrations_broker.py` loads `integrations_broker.py` by absolute file path via `importlib.util.spec_from_file_location`, so the test had to be updated when the file moved. No other live code in the repo referenced the old paths — only `docs/` mentions, which are historical. The relative `import mcp_aggregator` inside `integrations_broker.py` keeps working because it does `sys.path.insert(0, str(Path(__file__).resolve().parent))` before the import.
+**Tests caught the only live cross-reference.** `humanityrules_app/tests/test_integrations_broker.py` loads `integrations_broker.py` by absolute file path via `importlib.util.spec_from_file_location`, so the test had to be updated when the file moved. No other live code in the repo referenced the old paths — only `docs/` mentions, which are historical. The relative `import mcp_aggregator` inside `integrations_broker.py` keeps working because it does `sys.path.insert(0, str(Path(__file__).resolve().parent))` before the import.
 
 **Key points:**
 - The "source dir = image destination" invariant is the right organizing principle for image-content repos. It means the directory tree is the manifest — Dockerfile becomes a transport mechanism rather than the source of truth for "what goes where." Adding a new runtime script is now `git add doh_runtime/foo.sh` with no Dockerfile churn.
@@ -1974,7 +1974,7 @@ The stale comments from the refresher/status-file era were cleaned up at the sam
 
 **Conversation:** [2026-05-10-1800-8c06cced.md](conversations/2026-05-10-1800-8c06cced.md)
 
-Expanded `GOOGLE_SCOPES` in `devopshero_app/views/integrations/google_oauth.py` from a Gmail-read-only set (`gmail.readonly` + `openid` + `email`) to a broader read-only Tier 1: added `calendar.readonly`, `drive.readonly`, `contacts.readonly`, `spreadsheets.readonly`, `documents.readonly`. Motivation: the integrations broker already proxies all six Google service hostnames (Gmail, Calendar, Drive, Docs, Sheets, People) and the `gws` CLI in the hermes_agent skill exposes commands against each of them, but the OAuth grant only carried `gmail.readonly` — so every non-Gmail call would have 403'd. Tier 1 = "read-only assistant": can summarize calendar, find/read docs/sheets, look up contacts. No write scopes.
+Expanded `GOOGLE_SCOPES` in `humanityrules_app/views/integrations/google_oauth.py` from a Gmail-read-only set (`gmail.readonly` + `openid` + `email`) to a broader read-only Tier 1: added `calendar.readonly`, `drive.readonly`, `contacts.readonly`, `spreadsheets.readonly`, `documents.readonly`. Motivation: the integrations broker already proxies all six Google service hostnames (Gmail, Calendar, Drive, Docs, Sheets, People) and the `gws` CLI in the hermes_agent skill exposes commands against each of them, but the OAuth grant only carried `gmail.readonly` — so every non-Gmail call would have 403'd. Tier 1 = "read-only assistant": can summarize calendar, find/read docs/sheets, look up contacts. No write scopes.
 
 **Tier framework established.** Conversation produced an explicit 5-tier escalation ladder for Google scopes, ordered by blast radius and verification burden: Tier 0 (today's `gmail.readonly`), Tier 1 (read-only across all wired services — what we picked), Tier 2 (+ `gmail.send`), Tier 3 (full read-write on Gmail/Calendar/Sheets), Tier 4 (Drive/Docs write — which I recommended skipping in favor of `drive.file` + picker flow because full `drive` scope is Google's most-scrutinized). Worth reaching for this ladder any time the scope question comes up again, or when extending to Slack/Notion/Linear where similar decisions apply.
 
@@ -1982,7 +1982,7 @@ Expanded `GOOGLE_SCOPES` in `devopshero_app/views/integrations/google_oauth.py` 
 
 **Load-bearing non-code considerations captured in the session but not yet acted on.** (1) Existing grants from before this change still only carry `gmail.readonly` — users who connected Google before today will need to re-consent. No migration code yet; a re-consent flow (revoke + reconnect, or "upgrade permissions" button) is a follow-up. (2) Google Cloud Console OAuth consent screen configuration must be updated to include the new scopes, or Google blocks the consent screen for sensitive/restricted scopes. (3) We were already in restricted-scope territory via `gmail.readonly`, so the other sensitive-tier reads (`calendar`, `drive`, `docs`, `sheets`, `contacts`) should be additive to the same verification flow, but Google re-reviews on scope changes.
 
-**Tests still green with no modification.** Existing tests at `devopshero_app/tests/test_integrations_google_oauth_start.py:94` use `assertIn("https://www.googleapis.com/auth/gmail.readonly", params["scope"][0])` rather than equality, so the broader scope string still passes. Same for callback tests that use `assertIn("gmail.readonly", row.scope)`. 33/33 tests passed after the change. No explicit test pins the full Tier 1 scope set — candidate follow-up if we want regression coverage on "we asked for what we think we asked for."
+**Tests still green with no modification.** Existing tests at `humanityrules_app/tests/test_integrations_google_oauth_start.py:94` use `assertIn("https://www.googleapis.com/auth/gmail.readonly", params["scope"][0])` rather than equality, so the broader scope string still passes. Same for callback tests that use `assertIn("gmail.readonly", row.scope)`. 33/33 tests passed after the change. No explicit test pins the full Tier 1 scope set — candidate follow-up if we want regression coverage on "we asked for what we think we asked for."
 
 **Key points:**
 - Final `GOOGLE_SCOPES`: `gmail.readonly`, `calendar.readonly`, `drive.readonly`, `contacts.readonly`, `spreadsheets.readonly`, `documents.readonly`, `openid`, `email`. All read-only, all sensitive-tier with Gmail restricted.
@@ -2019,7 +2019,7 @@ Removed `email/himalaya` from the Hermes skill allowlist in `template_repos/herm
 
 **Conversation:** [2026-05-10-1641-aa40be69.md](conversations/2026-05-10-1641-aa40be69.md)
 
-Renamed the three integration-related models so they share an `Integration` prefix and cluster together alphabetically in the Django admin sidebar, in `from devopshero_app.models import …` lists, and in any future model browser. `UserThirdPartyIntegration` → `IntegrationUserGrant`, `GitProviderIntegration` → `IntegrationGitProvider`, and `IntegrationConfig` was kept as-is (already in the cluster) but gained an explicit `Meta.verbose_name = "Integration Config"` / `verbose_name_plural = "Integration Configs"` so all three render with parallel capitalization in the admin (no more "Integration configs" lowercase-c, auto-derived). End state: admin sidebar shows **Integration Configs**, **Integration Git Providers**, **Integration User Grants** in that alphabetical order, side by side.
+Renamed the three integration-related models so they share an `Integration` prefix and cluster together alphabetically in the Django admin sidebar, in `from humanityrules_app.models import …` lists, and in any future model browser. `UserThirdPartyIntegration` → `IntegrationUserGrant`, `GitProviderIntegration` → `IntegrationGitProvider`, and `IntegrationConfig` was kept as-is (already in the cluster) but gained an explicit `Meta.verbose_name = "Integration Config"` / `verbose_name_plural = "Integration Configs"` so all three render with parallel capitalization in the admin (no more "Integration configs" lowercase-c, auto-derived). End state: admin sidebar shows **Integration Configs**, **Integration Git Providers**, **Integration User Grants** in that alphabetical order, side by side.
 
 **The rename started with a worse proposal and got better through pushback.** User opened with "rename `IntegrationConfig` → `ThirdPartyIntegration` and `UserThirdPartyIntegration` → `ThirdPartyIntegrationUser`, I'm seeking homogeneity." I pushed back on both: (1) `ThirdPartyIntegration` is misleading because the *config* row is the OAuth client setup, not an integration — the actual live integration is the user's grant, so collapsing both into "ThirdPartyIntegration" loses the setup-vs-grant distinction and collides semantically with `GitProviderIntegration`; (2) `ThirdPartyIntegrationUser` reverses Django's `<Owner><Thing>` convention used everywhere else in the codebase (`OrganizationMembership`, `GroupMembership`, `UserAttribute`) — `<Thing>User` reads as "a User specialized for X," not "a user's X." Suggested three alternatives. User picked **Option B (strong shared `Integration…` prefix with semantically accurate names)** and pushed it further: extend to `GitProviderIntegration` too, so all three sort together. Final names landed after one more iteration where I pushed back on `IntegrationProvider` (their first suggestion for the config row) — too ambiguous, collides with the `provider` field and the existing `Provider` enums on three different models — and we kept `IntegrationConfig` instead. One fewer rename, more descriptive name preserved.
 
@@ -2233,7 +2233,7 @@ Finished the container-side plumbing for per-user Google access tokens. A Hermes
 
 **Google-side config is opaque after creation.** User pointed out that the JSON downloaded from Google Cloud Console is only downloadable at OAuth client creation time — later redirect-URI edits in the Google console don't update the JSON. We confirmed this doesn't actually matter for auth (Google validates against its current live list, not what's in our JSON), but it does matter for DOH's `web["redirect_uris"]` field — that's what we send to Google, and it has to be one that Google accepts. The fix was to edit the stored `IntegrationConfig.config["redirect_uris"]` directly in the local DB via a shell snippet, plus implement the host-aware picker above.
 
-**`doh_seed_env_bearer` management command.** New command under `devopshero_app/management/commands/`. Mints (or rotates) an `EnvironmentBearerToken` row with a *chosen* raw value. The normal prod path (`ensure_env_bearer_token_exists`) generates a random raw token, writes it to customer Secrets Manager, and stores only the hash on DOH — the raw is lost to DOH's perspective. For local Layer-2 smoke testing we need the reverse: we pick a raw token, DOH hashes+stores it, and we use that same raw in the refresher's env. Used `doh_seed_env_bearer --env default --token local-dev-bearer-token` to bootstrap the smoke run. After the real deploy, `ensure_env_bearer_token_exists` rotates the bearer to a random value in both the DB and CH Sandbox's `devopshero/default/shared-secrets`; the command stays for future Layer-2 runs.
+**`doh_seed_env_bearer` management command.** New command under `humanityrules_app/management/commands/`. Mints (or rotates) an `EnvironmentBearerToken` row with a *chosen* raw value. The normal prod path (`ensure_env_bearer_token_exists`) generates a random raw token, writes it to customer Secrets Manager, and stores only the hash on DOH — the raw is lost to DOH's perspective. For local Layer-2 smoke testing we need the reverse: we pick a raw token, DOH hashes+stores it, and we use that same raw in the refresher's env. Used `doh_seed_env_bearer --env default --token local-dev-bearer-token` to bootstrap the smoke run. After the real deploy, `ensure_env_bearer_token_exists` rotates the bearer to a random value in both the DB and CH Sandbox's `devopshero/default/shared-secrets`; the command stays for future Layer-2 runs.
 
 **Two bugs caught and fixed during the deploy verification:**
 
@@ -2343,7 +2343,7 @@ Tradeoff: slim strips the Debian toolchain (no `gcc`, no `Python.h`, no node). H
 
 **Migration:** existing deployed sessions keep their current snapshot and base (the restore path loads whatever is in EFS regardless of `TOOL_IMAGE_BASE`). Only fresh deploys or sessions with no EFS snapshot pick up the new base. `TOOL_IMAGE_BASE` is only consulted by `doh_dind/entrypoint.sh` as the fallback when no snapshot exists.
 
-Changed in two places: `template_repos/hermes_agent/docker-compose.yaml` (local dev) and `devopshero_app/management/commands/seed_app_templates.py` (prod task template). Old value commented out in both, not deleted, to document the origin.
+Changed in two places: `template_repos/hermes_agent/docker-compose.yaml` (local dev) and `humanityrules_app/management/commands/seed_app_templates.py` (prod task template). Old value commented out in both, not deleted, to document the origin.
 
 **Key points:**
 
@@ -2495,9 +2495,9 @@ Verification did matter here. Full `docker build` succeeded; ran the built image
 
 Symptom: logging into `hermes-vmendi01.dohsandbox.com` through the per-env Okta auth service and getting "you do not have access to this application" even though the ResourceTags (`owner=vmendi@gmail.com`, `app-type=personal-assistant`, `app-name=hermes-vmendi01`) and the seed `Org admins: app usage` policy (wildcard resource, `app:use`) are all in place. The hermes deployment itself was clean — the access failure lived one layer down.
 
-Traced the request path: the per-env policy-proxy auth service mints a session JWT carrying `{sub, email}` from Okta, the sidecar sends `{oidc_sub, username}` to DOH's PDP at `/api/pdp/evaluate`, and the PDP does a hard lookup `User.objects.filter(oidc_sub=oidc_sub).first()` (`devopshero_app/views/pdp.py:97`). That lookup was missing — my user row had `workos_user_id` populated (original WorkOS onboarding path) but `oidc_sub=NULL`, so the PDP returned `deny reason=user-not-found` and the proxy renders the generic access-denied page. The rule matching was never reached. Patched my row in prod by back-filling `oidc_sub` with the Okta sub pulled from `/devopshero/production/ecs` log stream `devopshero-production-auth` (`auth callback ok env=… sub=00u1238lznaj1cjpm698 email=vmendi@gmail.com`).
+Traced the request path: the per-env policy-proxy auth service mints a session JWT carrying `{sub, email}` from Okta, the sidecar sends `{oidc_sub, username}` to DOH's PDP at `/api/pdp/evaluate`, and the PDP does a hard lookup `User.objects.filter(oidc_sub=oidc_sub).first()` (`humanityrules_app/views/pdp.py:97`). That lookup was missing — my user row had `workos_user_id` populated (original WorkOS onboarding path) but `oidc_sub=NULL`, so the PDP returned `deny reason=user-not-found` and the proxy renders the generic access-denied page. The rule matching was never reached. Patched my row in prod by back-filling `oidc_sub` with the Okta sub pulled from `/devopshero/production/ecs` log stream `devopshero-production-auth` (`auth callback ok env=… sub=00u1238lznaj1cjpm698 email=vmendi@gmail.com`).
 
-Root cause was a structural gap, not an operator mistake. `oidc_sub` is written in exactly one place: the `User.DoesNotExist` branch of `oidc_callback` at `devopshero_app/views/auth.py:201`, which only fires when a brand-new user first logs into DOH via `/oidc/login/?org=<slug>`. There is no code path that populates `oidc_sub` for a pre-existing WorkOS-onboarded user who later adds Okta — even if that user had dutifully logged out of WorkOS and gone through `/oidc/login/`, the `get(oidc_sub=…)` would have missed and the `DoesNotExist` branch would have tried to `create_user(username=email, …)`, colliding with the existing WorkOS row on the unique `username`. The operator-facing advice of "re-login via `/oidc/login/`" wasn't actually self-healing.
+Root cause was a structural gap, not an operator mistake. `oidc_sub` is written in exactly one place: the `User.DoesNotExist` branch of `oidc_callback` at `humanityrules_app/views/auth.py:201`, which only fires when a brand-new user first logs into DOH via `/oidc/login/?org=<slug>`. There is no code path that populates `oidc_sub` for a pre-existing WorkOS-onboarded user who later adds Okta — even if that user had dutifully logged out of WorkOS and gone through `/oidc/login/`, the `get(oidc_sub=…)` would have missed and the `DoesNotExist` branch would have tried to `create_user(username=email, …)`, colliding with the existing WorkOS row on the unique `username`. The operator-facing advice of "re-login via `/oidc/login/`" wasn't actually self-healing.
 
 Fix scope deliberately narrow. Added a second lookup branch to `oidc_callback` only — not the PDP. Rationale: the PDP fix only matters when there are DOH users whose sole touchpoint is a proxied app (i.e. real personal-assistant end-users who never log into the DOH control plane), and pre-beta that doesn't exist. For every current use case — me, F&F dogfooding — the operator hits `/oidc/login/` once per new Okta-migrated org, which is enough to cover the back-fill. Business decision deferred on the PDP side until a real customer rollout forces it.
 
@@ -2987,7 +2987,7 @@ providers:
 
 Single-quoting the keys is load-bearing: Haiku's inference-profile ID ends in `:0`, which YAML would otherwise parse as a mapping value (the key would become `us.anthropic.claude-haiku-4-5-20251001-v1` with value `0`, which is not what we want and definitely not a valid Bedrock identifier). Verified via `yaml.safe_load` that the keys round-trip exactly.
 
-Model IDs were cross-checked against `devopshero_app/services/agent/llm_client.py:18-24` — the canonical registry used by the control plane's own agent. Confirmed:
+Model IDs were cross-checked against `humanityrules_app/services/agent/llm_client.py:18-24` — the canonical registry used by the control plane's own agent. Confirmed:
 
 - **Opus 4.7** → `us.anthropic.claude-opus-4-7` (short form)
 - **Sonnet 4.6** → `us.anthropic.claude-sonnet-4-6` (short form, no `v1:0` suffix)
@@ -3016,7 +3016,7 @@ The inconsistency — Opus and Sonnet use the short form while Haiku still uses 
 - Fix requires both sides: populate `providers.bedrock.models` in `config.yaml`, AND patch the WebUI to actually use the dict values as labels instead of dropping them.
 - Introduced `patches-webui/` as a sibling to `patches/` for WebUI-specific patches. Applied at **image build time** (not boot) because the WebUI lives in ephemeral image layers, unlike the agent which lives on EFS. `__pycache__` eviction after patching is load-bearing.
 - First patch `01-provider-model-labels.patch` — three-line delta that makes the config-driven `providers.<pid>.models` dict form carry labels through to the dropdown. Belongs upstream eventually; filed as a known-to-drop patch in the README.
-- Model IDs cross-referenced against `devopshero_app/services/agent/llm_client.py` (the control-plane's own Bedrock client registry). Opus 4.7 + Sonnet 4.6 use the new short form; Haiku 4.5 still uses the dated `-20251001-v1:0` form because AWS hasn't shipped a short version. Quoting keys in YAML is mandatory because of the `:0` suffix.
+- Model IDs cross-referenced against `humanityrules_app/services/agent/llm_client.py` (the control-plane's own Bedrock client registry). Opus 4.7 + Sonnet 4.6 use the new short form; Haiku 4.5 still uses the dated `-20251001-v1:0` form because AWS hasn't shipped a short version. Quoting keys in YAML is mandatory because of the `:0` suffix.
 - Template substitution trap: sed's `/__PROVIDERS_BLOCK__/` pattern also matched the comment-header listing of variable names. Removed the listing to avoid the footgun; the comment didn't pay for itself.
 - Deliberately did not implement runtime patch application, per-deployment model list overrides, or the same infrastructure for non-Bedrock providers. All are speculative wins against current needs.
 
@@ -3040,7 +3040,7 @@ The Hermes config and README now describe the stop-but-not-remove model directly
 - The stopped-container lifecycle is acceptable as long as the snapshotter commits on `die` and periodically saves the local image archive.
 - Kept `TERMINAL_LIFETIME_SECONDS=86400` explicit and added a test assertion because that env var prevents the ordinary idle reaper from being the normal recycle path.
 - Updated the Bedrock platform capability test to match the current prebuilt DinD template: `doh-dind` image source, `docker-persistence` EFS mount, no inline dockerd command, and the Hermes terminal lifetime env.
-- Verified with `uv run manage.py test devopshero_app.tests.test_bedrock_platform_capabilities`, `uv run python template_repos/hermes_agent/patches/apply.py /tmp/hermes-agent-apply-test`, and `git diff --check`.
+- Verified with `uv run manage.py test humanityrules_app.tests.test_bedrock_platform_capabilities`, `uv run python template_repos/hermes_agent/patches/apply.py /tmp/hermes-agent-apply-test`, and `git diff --check`.
 
 ## 2026-04-28 16:12 - [Deployment] Bump Hermes WebUI to 0.50.236 and Hermes Agent to v2026.4.23
 
@@ -3173,16 +3173,16 @@ The keep-it-simple test the conversation arrived at: *what failure mode would I 
 
 **Conversation:** [2026-04-27-2229-8207d57a.md](conversations/2026-04-27-2229-8207d57a.md)
 
-Repo housekeeping: `policy_proxy/` was a top-level directory at repo root, peer to `devopshero_app/`, `infra_devopshero/`, `lambdas/`. It is now `template_repos/policy_proxy/`, peer to `template_repos/doh_dind/`, `template_repos/hermes_agent/`, `template_repos/openclaw_agent/`. Pure relocation — no behavioral change in build, deploy, or runtime.
+Repo housekeeping: `policy_proxy/` was a top-level directory at repo root, peer to `humanityrules_app/`, `infra_devopshero/`, `lambdas/`. It is now `template_repos/policy_proxy/`, peer to `template_repos/doh_dind/`, `template_repos/hermes_agent/`, `template_repos/openclaw_agent/`. Pure relocation — no behavioral change in build, deploy, or runtime.
 
 **The framing question.** "Should `policy_proxy/` live under `template_repos/`?" turns on what `template_repos/` actually means today. The original intent (per migration `0033_add_app_template.py` and `settings.TEMPLATE_REPOS_DIR`) was "AppTemplate-backed source repos that DOH clones via `file://` at customer-app deploy time and pushes to per-app ECR." `hermes_agent/` and `openclaw_agent/` fit that exactly. But `doh_dind/` already broke the strict reading: it's a DOH-owned utility image, *not* AppTemplate-driven, built out-of-band via `manage.py doh_build_prebuilt_image --source-dir template_repos/doh_dind …` and referenced by tag from a sidecar entry on AppTemplates. Once `doh_dind/` is in `template_repos/`, the directory's *de facto* meaning is "DOH-owned container source trees that ship into customer accounts." `policy_proxy/` is exactly that shape — built per-env, pushed to `doh/{env_slug}/policy-proxy:{POLICY_PROXY_IMAGE_VERSION}`, lives outside the AppTemplate clone path entirely (its presence is signaled by `image_source="policy_proxy"` on a container entry, which `appconfig.py` and `deploy_app.py` resolve directly). So categorically: same bucket as `doh_dind/`, belongs in the same directory.
 
-**Why having it at repo root was actively misleading.** Repo-root peers like `devopshero_app/`, `infra_devopshero/`, `lambdas/` are top-level platform components — the Django app, the control-plane CDK, the Lambda functions. Putting `policy_proxy/` next to those overstates what it is: it's a small FastAPI proxy that ships *into* customer ECS tasks alongside other co-deployed images. Putting it next to `doh_dind/` accurately reflects that role.
+**Why having it at repo root was actively misleading.** Repo-root peers like `humanityrules_app/`, `infra_devopshero/`, `lambdas/` are top-level platform components — the Django app, the control-plane CDK, the Lambda functions. Putting `policy_proxy/` next to those overstates what it is: it's a small FastAPI proxy that ships *into* customer ECS tasks alongside other co-deployed images. Putting it next to `doh_dind/` accurately reflects that role.
 
 **Mechanical changes (small surface area).**
 
 - `git mv policy_proxy template_repos/policy_proxy` — 19 file renames, history preserved. `git mv` also dragged the untracked `.venv/`, `.pytest_cache/`, `.DS_Store` along physically; those got deleted in a follow-up since they're gitignored anyway and reproducible from `uv.lock`.
-- `devopshero_app/services/infra_customer/deploy_app.py:38`: `POLICY_PROXY_SOURCE_DIR = Path(__file__).resolve().parents[3] / "policy_proxy"` → `… / "template_repos" / "policy_proxy"`. Stuck with the `parents[3]`-relative pattern instead of swapping in `settings.TEMPLATE_REPOS_DIR / "policy_proxy"` — the existing constants in this file don't import Django settings at module load, and consistency beat symmetry. (Also: `settings.TEMPLATE_REPOS_DIR` is semantically the AppTemplate clone root; `policy_proxy` is not cloned through that path, so the symmetry would be misleading anyway.)
+- `humanityrules_app/services/infra_customer/deploy_app.py:38`: `POLICY_PROXY_SOURCE_DIR = Path(__file__).resolve().parents[3] / "policy_proxy"` → `… / "template_repos" / "policy_proxy"`. Stuck with the `parents[3]`-relative pattern instead of swapping in `settings.TEMPLATE_REPOS_DIR / "policy_proxy"` — the existing constants in this file don't import Django settings at module load, and consistency beat symmetry. (Also: `settings.TEMPLATE_REPOS_DIR` is semantically the AppTemplate clone root; `policy_proxy` is not cloned through that path, so the symmetry would be misleading anyway.)
 - `template_repos/policy_proxy/README.md`: two `cd policy_proxy` snippets in the local-dev section retargeted to `cd template_repos/policy_proxy`.
 
 **What deliberately stayed unchanged.**
@@ -3270,7 +3270,7 @@ Left both as-is for now. The CLI is the right venue for "I know what I'm doing, 
 
 **Conversation:** [2026-04-27-2017-2bdda279.md](conversations/2026-04-27-2017-2bdda279.md)
 
-The "rename deferred" follow-up flagged in this morning's [DinD orphan-reap fix entry](#2026-04-27-1631---deployment-persist-hermes-tool-container-state-across-task-restarts-via-dind-side-efs-snapshots): `doh_control retry-app-deployment` had a misleading name *and* mismatched semantics. Renamed to `redeploy-app` and rebuilt the implementation so it matches `app_deployment_redeploy` in `devopshero_app/views/apps.py` exactly. No backward-compat alias.
+The "rename deferred" follow-up flagged in this morning's [DinD orphan-reap fix entry](#2026-04-27-1631---deployment-persist-hermes-tool-container-state-across-task-restarts-via-dind-side-efs-snapshots): `doh_control retry-app-deployment` had a misleading name *and* mismatched semantics. Renamed to `redeploy-app` and rebuilt the implementation so it matches `app_deployment_redeploy` in `humanityrules_app/views/apps.py` exactly. No backward-compat alias.
 
 **Why the old command was wrong (not just badly named):**
 
@@ -3639,7 +3639,7 @@ Deferred cleanup from the multi-container AppTemplate refactor (see 2026-04-22 2
 
 **What did NOT move.** The `AuthLambdaStack` keeps its name — "auth lambda" is still accurate (OIDC callback + JWT minting), and it's used *by* the policy proxy rather than being part of it. `lambdas/pdp_mock/` stays — it mocks a PDP, not a sidecar. Journal entries and `docs/conversations/*` — historical record, rewriting would be lossy and misleading (the work described there happened under the old name). Generic "sibling container" uses of the word "sidecar" in CDK comments (e.g. "sibling containers (sidecars, MCP servers, etc.) have no database contract") — correct usage of the industry term, independent of our platform feature.
 
-**Migration editing in place vs. stacking a rename migration.** User was explicit that this is greenfield, no apps running, no need to preserve compatibility. That unlocks editing 0038/0039 in place (dropped the `sidecar_enabled` field from 0038 entirely, renamed `SidecarToken` → `PolicyProxyToken` + `sidecar_token` related_name in 0039). The alternative — stacking a new `0048_rename_sidecar_to_policy_proxy.py` — would have carried the old name forward in the migration graph forever and required a `RenameField` + `RenameModel` sequence, for no actual benefit since there's no real DB to migrate. For a dev DB that already applied the original 0038/0039, `migrate devopshero_app zero && migrate` reseats the graph cleanly. Pre-beta env teardown + recreate is the plan for the AWS side.
+**Migration editing in place vs. stacking a rename migration.** User was explicit that this is greenfield, no apps running, no need to preserve compatibility. That unlocks editing 0038/0039 in place (dropped the `sidecar_enabled` field from 0038 entirely, renamed `SidecarToken` → `PolicyProxyToken` + `sidecar_token` related_name in 0039). The alternative — stacking a new `0048_rename_sidecar_to_policy_proxy.py` — would have carried the old name forward in the migration graph forever and required a `RenameField` + `RenameModel` sequence, for no actual benefit since there's no real DB to migrate. For a dev DB that already applied the original 0038/0039, `migrate humanityrules_app zero && migrate` reseats the graph cleanly. Pre-beta env teardown + recreate is the plan for the AWS side.
 
 **Tests.** 362 passing total after the refactor: 314 Django (management commands, PDP endpoint, ABAC engine, compute modes, Bedrock capabilities, template deploy, env secrets), 27 policy_proxy unit tests, 13 auth-lambda tests, 8 pdp-mock tests. One real bug surfaced (the `_primary_build_container` issue above); the rest were fixture updates for the renamed identifiers.
 
@@ -3816,7 +3816,7 @@ Customer apps behind the sidecar proxy were dropping connections mid-session wit
 
 Fix was to construct the client with `httpx.Timeout(connect=10.0, read=None, write=10.0, pool=10.0)`. `read=None` is the one that matters: streaming responses must be allowed to go quiet without the proxy interpreting it as a dead connection. `connect`, `write`, and `pool` stay finite so an unreachable upstream or a saturated pool still fails fast. The usual concern with `read=None` — a silently dead but TCP-alive upstream hanging forever — is best addressed with TCP keepalive or an application-level heartbeat, not a read timeout; the upstream already sends SSE keepalives so we're covered.
 
-Second gotcha: the sidecar image is built and pushed by the customer app deploy pipeline (`devopshero_app/services/infra_customer/deploy_app.py`), but tagged with a hardcoded version constant `SIDECAR_IMAGE_VERSION`. ECR push is idempotent by tag, so a redeploy without a version bump would quietly re-use the old image. Bumped the constant to `0.1.1` so the next redeploy of each affected app picks up the fix.
+Second gotcha: the sidecar image is built and pushed by the customer app deploy pipeline (`humanityrules_app/services/infra_customer/deploy_app.py`), but tagged with a hardcoded version constant `SIDECAR_IMAGE_VERSION`. ECR push is idempotent by tag, so a redeploy without a version bump would quietly re-use the old image. Bumped the constant to `0.1.1` so the next redeploy of each affected app picks up the fix.
 
 **Key points:**
 
@@ -3865,8 +3865,8 @@ Validation added:
 
 Commands run:
 
-- `uv run manage.py test devopshero_app.tests.test_bedrock_platform_capabilities devopshero_app.tests.test_multi_container_app_config devopshero_app.tests.test_template_deploy_owner_field`
-- `uv run manage.py test devopshero_app.tests.test_env_sidecar_secrets`
+- `uv run manage.py test humanityrules_app.tests.test_bedrock_platform_capabilities humanityrules_app.tests.test_multi_container_app_config humanityrules_app.tests.test_template_deploy_owner_field`
+- `uv run manage.py test humanityrules_app.tests.test_env_sidecar_secrets`
 - `uv run manage.py makemigrations --check --dry-run`
 - `git diff --check`
 
@@ -4164,7 +4164,7 @@ The app detail page has two stacked sections: "Deployed to Environments" (one su
 
 ### Root cause
 
-`_build_deployed_environment_rows()` in `devopshero_app/views/apps.py` picks the deployment to display per blueprint using a priority `Case` expression, ordered by `(status_priority, -created_at)`:
+`_build_deployed_environment_rows()` in `humanityrules_app/views/apps.py` picks the deployment to display per blueprint using a priority `Case` expression, ordered by `(status_priority, -created_at)`:
 
 ```python
 When(status__in=Deployment.IN_PROGRESS_STATUSES, then=Value(0)),
@@ -4368,7 +4368,7 @@ ABAC policy rows (`Policy`) for an org can drift after experiments in the Securi
 
 **Conversation:** [2026-04-19-1822-1bdc74aa.md](conversations/2026-04-19-1822-1bdc74aa.md)
 
-`sidecar_e2e_test` (landed over the last few days) was the first code path to provision stacks that aren't part of the original "VPC + EFS + builder + cluster" quartet — specifically `devopshero-{env}-auth-lambda` and `devopshero-{env}-pdp-mock`, both of which wire themselves into the env's shared ALB (a reserved listener-rule priority) and create a Route53 alias record. The hardcoded list in `deploy_base.teardown()` at `devopshero_app/services/infra_customer/deploy_base.py:684` was never updated, so any teardown would have orphaned those two stacks plus their listener rules and DNS records. `auth-lambda` in particular is created by *any* sidecar-enabled app deploy (not just the test), so this was a live gap, not a test-only one.
+`sidecar_e2e_test` (landed over the last few days) was the first code path to provision stacks that aren't part of the original "VPC + EFS + builder + cluster" quartet — specifically `devopshero-{env}-auth-lambda` and `devopshero-{env}-pdp-mock`, both of which wire themselves into the env's shared ALB (a reserved listener-rule priority) and create a Route53 alias record. The hardcoded list in `deploy_base.teardown()` at `humanityrules_app/services/infra_customer/deploy_base.py:684` was never updated, so any teardown would have orphaned those two stacks plus their listener rules and DNS records. `auth-lambda` in particular is created by *any* sidecar-enabled app deploy (not just the test), so this was a live gap, not a test-only one.
 
 ### Options considered
 
@@ -4466,7 +4466,7 @@ First real end-to-end validation of the OIDC / Okta login path against a real Ok
 - **`auth_provider` is not exclusive.** The field is only read in `oidc_login` (auth.py:83) to filter which orgs the OIDC entrypoint accepts. `auth_callback` (WorkOS) never reads it — it looks up purely by `workos_user_id`. So flipping an org to OIDC does *not* break WorkOS for users already linked to it. A user can effectively have two providers if both ID fields are populated on their row. Worth calling out in the doc — customers piloting Okta don't need a hard cutover.
 - **Redirect URI on localhost.** The doc only shows the prod redirect (`https://devopshero.ai/oidc/callback/`). On the laptop it must be `http://127.0.0.1:8000/oidc/callback/` (or `localhost` — must match the browser host exactly, with trailing slash, http not https). Okta does exact-string matching and returned a clear "redirect_uri parameter must be a Login redirect URI" error.
 - **Callback blows up on username collision** (auth.py:191). `oidc_callback` keys on `oidc_sub`, and when the lookup misses it unconditionally `create_user(username=email, ...)`. If a user with that email already exists (e.g. legacy WorkOS row), `username` UNIQUE fires. There is no email-fallback and no onboarding gate — unlike `auth_callback` which routes unknown WorkOS users through `/onboarding/`. For any future real customer piloting Okta whose employees' emails happen to collide with pre-existing DOH usernames, this will crash. Worth a proper fix: either an email-fallback link, or route to an onboarding page that merges identities.
-- **`oidc_sub` wasn't exposed in Django admin.** `devopshero_app/admin.py:38-50` only surfaced `workos_user_id`. Added `oidc_sub` to `list_display`, `search_fields`, and both `fieldsets` / `add_fieldsets` ("OIDC" section). That gave a UI path to paste the sub onto the existing vmendi user row — after which retrying the login lands on the existing superuser and the callback's `update` path (auth.py:184-187) refreshes email/first/last from Okta.
+- **`oidc_sub` wasn't exposed in Django admin.** `humanityrules_app/admin.py:38-50` only surfaced `workos_user_id`. Added `oidc_sub` to `list_display`, `search_fields`, and both `fieldsets` / `add_fieldsets` ("OIDC" section). That gave a UI path to paste the sub onto the existing vmendi user row — after which retrying the login lands on the existing superuser and the callback's `update` path (auth.py:184-187) refreshes email/first/last from Okta.
 
 **Resolution path for this specific test:**
 
@@ -4491,13 +4491,13 @@ A local OIDC-callback flow hit a legitimate `UNIQUE constraint failed` error on 
 
 Root cause: inconsistent DEBUG-gating across the three PostHog integration points.
 
-- `devopshero_app/apps.py:29` — client init: gated on `posthog_key and not settings.DEBUG`. ✅
-- `devopshero_app/context_processors.py:10` — template config: gated on `not api_key or settings.DEBUG`. ✅
-- `devopshero_site/settings.py:87` — middleware registration: **only** gated on `POSTHOG_API_KEY`. ❌
+- `humanityrules_app/apps.py:29` — client init: gated on `posthog_key and not settings.DEBUG`. ✅
+- `humanityrules_app/context_processors.py:10` — template config: gated on `not api_key or settings.DEBUG`. ✅
+- `humanityrules_site/settings.py:87` — middleware registration: **only** gated on `POSTHOG_API_KEY`. ❌
 
 In local dev, `.env` has a real `POSTHOG_API_KEY` (so infra and prod work), so on dev boxes the middleware was being added to `MIDDLEWARE` but the default client was never set (because `apps.py` correctly skipped init in DEBUG). First unhandled exception → middleware tries to report it → PostHog's lazy `setup()` rechecks the module-level `api_key` var (unset) and raises. The secondary exception masks the real one in the debug page.
 
-Fix: one-line change in `devopshero_site/settings.py:87` to `if POSTHOG_API_KEY and not DEBUG:`. All three sites now agree: PostHog is fully off in DEBUG.
+Fix: one-line change in `humanityrules_site/settings.py:87` to `if POSTHOG_API_KEY and not DEBUG:`. All three sites now agree: PostHog is fully off in DEBUG.
 
 **Key points:**
 
@@ -4561,7 +4561,7 @@ Two related changes from one debugging session on `hermes-slack07` (CH Sandbox, 
 
 1. **Missing `patch` binary in the hermes-agent image.** The overlay/unified-diff refactor from earlier this morning added `apply.py`, which shells out to GNU `patch`. The base image `ghcr.io/nesquena/hermes-webui:latest` doesn't include `patch` — our Dockerfile only `apt-get install`s `git`. First container boot → `FileNotFoundError: [Errno 2] No such file or directory: 'patch'` from `subprocess.run` in `apply.py:61` → entrypoint exits non-zero (`set -e`) → task stops with `EssentialContainerExited`. ECS restarts it, same crash, forever. Fix: add `patch` to the apt-get list in `template_repos/hermes_agent/Dockerfile:6`. I missed it during verification because I ran apply.py on my Mac, where `patch` is part of the base system.
 
-2. **Enabled the ECS deployment circuit breaker on customer app services.** Without it, a crash-looping task leaves the CFN stack waiting on `AWS::ECS::Service` for the full ~3h CFN stabilization timeout — `hermes-slack07` was on track for exactly that. Added `circuit_breaker=ecs.DeploymentCircuitBreaker(enable=True, rollback=True)` to the `FargateService` in `devopshero_app/services/infra_customer/deploy_app.py:518`. Now the deployment trips after ~3-6 min on first-deploy failures.
+2. **Enabled the ECS deployment circuit breaker on customer app services.** Without it, a crash-looping task leaves the CFN stack waiting on `AWS::ECS::Service` for the full ~3h CFN stabilization timeout — `hermes-slack07` was on track for exactly that. Added `circuit_breaker=ecs.DeploymentCircuitBreaker(enable=True, rollback=True)` to the `FargateService` in `humanityrules_app/services/infra_customer/deploy_app.py:518`. Now the deployment trips after ~3-6 min on first-deploy failures.
 
 **AWS doc deep-dive (verified with WebFetch, not memory):**
 
@@ -4872,7 +4872,7 @@ When deploying template apps (Hermes, OpenClaw), each new app gets its own Secre
 
 **Conversation:** [2026-04-14-2002-ebec1f37.md](conversations/2026-04-14-2002-ebec1f37.md)
 
-Customer Secrets Manager utilities already exposed `list_secrets` and `purge_deleted_secrets` (boto3 session in, metadata out; purge uses `DeleteSecret` with `ForceDeleteWithoutRecovery=True` for secrets already in scheduled-deletion state). The old `python -m devopshero_app.services.infra_customer.secrets_utils` entry point duplicated Django setup, `.env` loading, and account resolution.
+Customer Secrets Manager utilities already exposed `list_secrets` and `purge_deleted_secrets` (boto3 session in, metadata out; purge uses `DeleteSecret` with `ForceDeleteWithoutRecovery=True` for secrets already in scheduled-deletion state). The old `python -m humanityrules_app.services.infra_customer.secrets_utils` entry point duplicated Django setup, `.env` loading, and account resolution.
 
 **Decision:** Add `manage.py doh_secrets` with subcommands `list` and `purge-deleted`, matching patterns from `doh_efs_browse` (credentials from Django settings, `iam_utils.get_assumed_role_session`, connected `AWSAccount` only). Then remove `main()` and `__name__ == "__main__"` from `secrets_utils.py` so the management command is the single supported operator workflow. Documented the command in the manage-commands skill.
 
@@ -5541,7 +5541,7 @@ Session covered two UI changes in the agent chat: consistent full-width agent co
 **Tool-call title overflow:** Long tool titles (e.g. "Read: src/ai_detector/lib/.../stripe_webhook_controller") were overflowing the details summary row and clipping without ellipsis, and the duration badge (e.g. "123ms") could be pushed off. The fix was to reserve space for the timing on the right and let the title text shrink and truncate. In `_message_tool_call.html`, `_streaming_tool_start.html`, and `_streaming_tool_result.html` the summary row was changed from `justify-between` with a single flexible left div to `gap-3` with: (1) a left group with `min-w-0 flex-1` containing the icons and a new wrapper div around the tool name and optional param, and (2) a `shrink-0` duration span. The wrapper has `min-w-0 flex-1 overflow-hidden` so it can shrink. When there is a main param for the title (e.g. file path), the display name (e.g. "Read: ") is `shrink-0` and the param span has `truncate`; when there is no param, the display name span has `truncate`. Icons were given `shrink-0` so they never compress. A `title` attribute on the wrapper shows the full tool name + param on hover. No max-width percentage was added to the text; the flex layout and `truncate` ensure the text clips within the remaining space while the timing stays visible.
 
 **Key points:**
-- Agent chat width is controlled by Tailwind `max-w-[80%]` or `max-w-[100%]` on the outer message wrapper in chat partials under `devopshero_app/templates/devopshero_app/chat/`. The compiled utility lives in `tailwindtheme_app/static/css/dist/styles.css`.
+- Agent chat width is controlled by Tailwind `max-w-[80%]` or `max-w-[100%]` on the outer message wrapper in chat partials under `humanityrules_app/templates/humanityrules_app/chat/`. The compiled utility lives in `tailwindtheme_app/static/css/dist/styles.css`.
 - For consistent full-width agent content, update both persisted messages (`_message.html` for agent role) and all streaming partials that render agent output (streaming start, tool start/result, question); leave thinking/error/unavailable at 80% if desired.
 - Tool-call header overflow is fixed by making the summary a flex row with a shrinkable middle (title + param) and a non-shrinking timing slot. Use `min-w-0` on flex children that should shrink and `truncate` on the text node that may overflow; add `title` for full text on hover.
 
@@ -5730,7 +5730,7 @@ We changed the deployment agent so it saves the app and blueprint drafts as soon
 We improved the deployment editor left-panel blueprint section so branch and subdomain show actual resolved values instead of "(default)", restored the previously lost conflict-aware subdomain resolution, and added full-URL and CPU vCPU display.
 
 **Effective values (shared helper):**
-- Added `devopshero_app/services/deployment_blueprint_effective_values.py` as the single place that resolves display and runtime values for a blueprint: branch (blank → `repository.default_branch`), subdomain (blank → `app.slug` with conflict handling), and derived `url` and `cpu_display`.
+- Added `humanityrules_app/services/deployment_blueprint_effective_values.py` as the single place that resolves display and runtime values for a blueprint: branch (blank → `repository.default_branch`), subdomain (blank → `app.slug` with conflict handling), and derived `url` and `cpu_display`.
 - View (`_build_blueprint_section_context`), `save_blueprint`, and `deploy_blueprint` all use this helper so the panel and tool/deploy behavior stay in sync. We initially showed "Inherited from repository default branch" / "Inherited from app slug" then simplified to just the resolved value per user preference.
 
 **Subdomain conflict resolution (restored):**
@@ -5808,10 +5808,10 @@ Renamed the two-panel deploy UI from "deployment workspace" to "deployment edito
 
 The rename touched every layer consistently:
 
-- Renamed `devopshero_app/views/deployment_workspace.py` → `deployment_editor.py`, with all four view functions updated (`deployment_editor`, `deployment_editor_new`, `deployment_editor_app_section`, `deployment_editor_blueprint_section`).
-- Renamed `devopshero_app/templates/devopshero_app/deploy/deployment_workspace.html` → `deployment_editor.html`. Also renamed the JS helper function inside from `reloadWorkspace` to `reloadEditor`.
-- Updated `devopshero_app/urls.py` — all four URL names now use `deployment_editor*`.
-- Updated `devopshero_app/views/__init__.py` — import and `__all__` both updated.
+- Renamed `humanityrules_app/views/deployment_workspace.py` → `deployment_editor.py`, with all four view functions updated (`deployment_editor`, `deployment_editor_new`, `deployment_editor_app_section`, `deployment_editor_blueprint_section`).
+- Renamed `humanityrules_app/templates/humanityrules_app/deploy/deployment_workspace.html` → `deployment_editor.html`. Also renamed the JS helper function inside from `reloadWorkspace` to `reloadEditor`.
+- Updated `humanityrules_app/urls.py` — all four URL names now use `deployment_editor*`.
+- Updated `humanityrules_app/views/__init__.py` — import and `__all__` both updated.
 - Updated all template call sites: `app_detail.html` (New Deployment button) and `workspaces/_repo_picker_modal.html` (repo picker link).
 - Updated `docs/app_deployment_blueprint_spec.md` — all prose references updated to "deployment editor". Left historical mentions in `docs/journal.md` and `docs/conversations/` intact.
 
@@ -5846,7 +5846,7 @@ The deployment summary in the simple-dashboard deploy conversation rendered with
 
 **Root cause:** The LLM sent the summary with single newlines between lines (e.g. `**Build:** Dockerfile → port 8501\n**Health check:** ...`). The stored `Message.content` in the database contained those `\n` characters verbatim — `_persist_text_message` in `agent_service.py` saves content as-is. The chat UI renders markdown with `marked.parse()` and had `marked.setOptions({ gfm: true, breaks: false })`. In standard Markdown (and with `breaks: false`), a single newline is a "soft line break" and is collapsed to a space, so those lines were merged into one paragraph.
 
-**Fix:** In `devopshero_app/templates/devopshero_app/chat/_chat_panel.html`, set `breaks: true` so that single newlines are rendered as `<br>` and visible line breaks. The same `renderMarkdown` path is used for both stored messages (on load via `renderStoredMarkdown`) and streamed text (via `handleTextDelta` / `finalizeStreamingRender`), so existing and future agent messages with single-newline formatting (e.g. deployment summaries, lists of items) now display with one line per item.
+**Fix:** In `humanityrules_app/templates/humanityrules_app/chat/_chat_panel.html`, set `breaks: true` so that single newlines are rendered as `<br>` and visible line breaks. The same `renderMarkdown` path is used for both stored messages (on load via `renderStoredMarkdown`) and streamed text (via `handleTextDelta` / `finalizeStreamingRender`), so existing and future agent messages with single-newline formatting (e.g. deployment summaries, lists of items) now display with one line per item.
 
 **Key points:**
 - Agent markdown is persisted verbatim; no newlines were lost in SSE or DB
@@ -5899,7 +5899,7 @@ Simplified the SSE-notify → DOM event flow so the server sends a single final 
 
 Any exception (e.g. Http404 for a missing Environment) was being masked by a second exception: PostHog's `process_exception` middleware called `capture_exception()`, which triggered lazy `setup()` and raised `ValueError("API key is required")` when no API key was configured. Locally, `POSTHOG_API_KEY` is unset and `_init_posthog()` in `apps.py` correctly skips initializing the client (when `DEBUG` or no key), but the middleware was always registered, so exception handling still hit the middleware and tried to use an uninitialized PostHog.
 
-**Fix:** Register PostHog middleware only when PostHog is configured. In `devopshero_site/settings.py`, moved `POSTHOG_API_KEY`, `POSTHOG_HOST`, and `POSTHOG_PROXY_HOST` above the `MIDDLEWARE` list, then made the middleware conditional: `if POSTHOG_API_KEY: MIDDLEWARE.append("posthog.integrations.django.PosthogContextMiddleware")`. Removed the duplicate PostHog config block that was lower in the file. Without the key, the middleware is never added, so its `process_exception` never runs and the original exception (e.g. 404) is returned as expected.
+**Fix:** Register PostHog middleware only when PostHog is configured. In `humanityrules_site/settings.py`, moved `POSTHOG_API_KEY`, `POSTHOG_HOST`, and `POSTHOG_PROXY_HOST` above the `MIDDLEWARE` list, then made the middleware conditional: `if POSTHOG_API_KEY: MIDDLEWARE.append("posthog.integrations.django.PosthogContextMiddleware")`. Removed the duplicate PostHog config block that was lower in the file. Without the key, the middleware is never added, so its `process_exception` never runs and the original exception (e.g. 404) is returned as expected.
 
 **Key points:**
 - Middleware runs for every request/exception; if it depends on optional config, register it only when that config is present
@@ -6355,14 +6355,14 @@ Decided against user-org membership assertions on `evaluate_policies_unscoped` a
 
 Implemented the first automated test suite for the project — 58 tests covering the full ABAC policy evaluation engine (Section 1 of `docs/abac_test_plan.md`). The ABAC engine is security-critical, so it was the right place to start.
 
-Replaced the empty `devopshero_app/tests.py` stub with a `tests/` package to accommodate the multi-section test plan. Seven test classes cover: effective attributes, effective tags, condition matching, policy evaluation, unscoped evaluation, resource filtering, org admin check, policy condition validation, and cross-org tag isolation.
+Replaced the empty `humanityrules_app/tests.py` stub with a `tests/` package to accommodate the multi-section test plan. Seven test classes cover: effective attributes, effective tags, condition matching, policy evaluation, unscoped evaluation, resource filtering, org admin check, policy condition validation, and cross-org tag isolation.
 
 Writing the tests uncovered a real bug in `filter_permitted_resources`: the wildcard optimization shortcut (lines 242-259) was short-circuiting without considering tag-scoped deny policies. If a user had a wildcard grant (e.g., org admin's seed policy granting `workspace:view` on all resources) and a tag-scoped deny existed (e.g., deny `!workspace:view` on `domain=finance`), the deny was silently ignored because the optimization only collected grants/denials from wildcard policies. The fix adds a `has_scoped_denials` check — if any matching policy has non-wildcard resource conditions with deny actions, the optimization is skipped and per-resource evaluation runs instead, where all policies are correctly evaluated together.
 
 Also discovered and documented a behavioral inconsistency between `evaluate_policies` and `evaluate_policies_unscoped` with empty conditions: `evaluate_policies` treats `resource_conditions=[]` as vacuously true (matches everything via `_conditions_match([], set)` → `all()` on empty iterable), while `evaluate_policies_unscoped` treats it as non-matching (it checks `_is_wildcard([])` which returns `False`). The database schema prevents `None` values (JSONField has NOT NULL), so this only applies to empty lists. Tests now pin both behaviors.
 
 **Key points:**
-- First test suite in the project — structured as `devopshero_app/tests/` package for multi-section expansion
+- First test suite in the project — structured as `humanityrules_app/tests/` package for multi-section expansion
 - Bug found and fixed: `filter_permitted_resources` wildcard optimization ignored tag-scoped deny policies, breaking the deny-override semantics that `evaluate_policies` correctly implemented
 - Empty conditions `[]` behave differently across functions — pinned with tests rather than "fixed" since the inconsistency may be intentional (unscoped evaluation is specifically for "can user create?" checks where explicit wildcards are expected)
 - All 58 tests run against SQLite in-memory in ~6 seconds — pure engine logic, no HTTP
@@ -6421,7 +6421,7 @@ Added 3 new tabs to settings navigation. All require `require_org_admin`. People
 
 **Key points:**
 - Django 6.0 `CheckConstraint` uses `condition=` not `check=` — the old parameter name raises `TypeError`
-- Leftover RBAC tables from a previous design attempt (`devopshero_app_group`, `devopshero_app_approlebinding`, etc.) had to be manually dropped from SQLite before the migration could run
+- Leftover RBAC tables from a previous design attempt (`humanityrules_app_group`, `humanityrules_app_approlebinding`, etc.) had to be manually dropped from SQLite before the migration could run
 - Action hierarchy expansion happens after grant collection but before deny removal — so denying `workspace:view` blocks view even if `workspace:admin` is granted (deny-overrides)
 - `filter_permitted_resources()` short-circuits on wildcard-resource policies to avoid N+1 tag lookups on list views
 - Policy editor form uses Alpine.js for dynamic condition add/remove and serializes to hidden JSON fields on submit — no raw JSON editing for users
@@ -6603,7 +6603,7 @@ The implementation went through several design iterations, each simplifying the 
 
 **Python import gotcha with `__init__.py`:**
 
-`views/__init__.py` does `from .security import security` which creates an attribute `security` on the package bound to the view *function*. This shadows the `security` *module*. Every import form that resolves through the package namespace (`from . import security`, `import devopshero_app.views.security as x`) gets the function, not the module. Even `import X.Y.Z as alias` walks the attribute chain and hits the shadowed name. The only reliable ways to get the module are `importlib.import_module` or `sys.modules` — both ugly. We settled on `from .security import render_statements_oob_html` (importing the function directly by name).
+`views/__init__.py` does `from .security import security` which creates an attribute `security` on the package bound to the view *function*. This shadows the `security` *module*. Every import form that resolves through the package namespace (`from . import security`, `import humanityrules_app.views.security as x`) gets the function, not the module. Even `import X.Y.Z as alias` walks the attribute chain and hits the shadowed name. The only reliable ways to get the module are `importlib.import_module` or `sys.modules` — both ugly. We settled on `from .security import render_statements_oob_html` (importing the function directly by name).
 
 **Async/sync boundary:**
 
@@ -6728,7 +6728,7 @@ The previous implementation used a plain HTML `<select>` for resource selection,
 The final design went through several rounds of refinement. Initially the resource chips were placed inside the trigger box (matching Access Levels exactly), but ARNs are much longer than access level names like "Read" or "Write", so chips were moved back below the dropdown as a separate list. The dropdown initially had a separate search input at the top and a separate manual ARN input at the bottom — these were merged into a single input that doubles as the trigger, the filter, and the ARN entry point. The placeholder dynamically switches between "Select resource..." (closed) and "Filter or paste resource ARN..." (open) using Alpine's `:placeholder` binding.
 
 **Key points:**
-- Created `devopshero_app/templatetags/aws_filters.py` with an `arn_short_name` filter that extracts the resource portion of an ARN (everything after the 5th colon). This shows `my-bucket/*` instead of the full ARN in chips, while preserving the resource type prefix (e.g. `table/my-table` for DynamoDB) which matters when a service has multiple resource types. Initial implementation incorrectly split on `/` which stripped bucket names from S3 ARNs like `arn:aws:s3:::my-bucket/*` → `*`.
+- Created `humanityrules_app/templatetags/aws_filters.py` with an `arn_short_name` filter that extracts the resource portion of an ARN (everything after the 5th colon). This shows `my-bucket/*` instead of the full ARN in chips, while preserving the resource type prefix (e.g. `table/my-table` for DynamoDB) which matters when a service has multiple resource types. Initial implementation incorrectly split on `/` which stripped bucket names from S3 ARNs like `arn:aws:s3:::my-bucket/*` → `*`.
 - The combobox input serves triple duty: (1) clicking it opens the dropdown via `@focus="open = true"`, (2) typing filters the resource list via Alpine `x-show` with `data-filter` attributes for case-insensitive contains matching, (3) pasting an ARN starting with `arn:` reveals an inline emerald Add button via `x-show="search.startsWith('arn:')"`. Enter key also submits but only when the value starts with `arn:` (htmx trigger condition).
 - The `x-data="{ open: false, search: '' }"` scope lives on the wrapper div outside the HTMX swap target `#resources-{service}`, so Alpine state (dropdown open, search text) survives fragment swaps — consistent with the pattern established for Access Levels and documented in AGENTS.md.
 - Added `autocomplete="off"` to suppress browser autocomplete popups that interfered with the custom dropdown. Added Escape key handler to close dropdown, clear search, and blur the input. Added a heavy custom shadow (`shadow-[0_10px_50px_-5px_rgba(0,0,0,0.5)]`) to visually lift the dropdown from the page surface.
@@ -7693,8 +7693,8 @@ Implemented environment teardown functionality that deletes all infrastructure a
 PostHog analytics (frontend and backend) is now disabled whenever `DEBUG=True`, so local development never sends events or initializes the SDK even if `POSTHOG_API_KEY` is set in `.env`.
 
 **Changes:**
-- **`devopshero_app/apps.py`** — `_init_posthog()` runs only when `posthog_key and not settings.DEBUG`. The Python SDK (exception autocapture) is not initialized in DEBUG mode.
-- **`devopshero_app/context_processors.py`** — `posthog_context()` returns `{'posthog_config_json': None}` when `not api_key or settings.DEBUG`, so the base template does not render the PostHog script tag and no client-side tracking runs.
+- **`humanityrules_app/apps.py`** — `_init_posthog()` runs only when `posthog_key and not settings.DEBUG`. The Python SDK (exception autocapture) is not initialized in DEBUG mode.
+- **`humanityrules_app/context_processors.py`** — `posthog_context()` returns `{'posthog_config_json': None}` when `not api_key or settings.DEBUG`, so the base template does not render the PostHog script tag and no client-side tracking runs.
 
 **Key points:**
 - Activation still requires `POSTHOG_API_KEY`; DEBUG is an additional gate. Production (DEBUG=False) with the key set continues to use PostHog as before.
@@ -8108,7 +8108,7 @@ User asked me to query the database directly. This revealed the actual problem: 
 
 **Root cause:**
 
-When multiple environment provisioning jobs run concurrently, both `EnvironmentLogContext` instances attach their handlers to the same root logger (`devopshero_app`). When any code logs a message, ALL attached handlers receive it and write to their respective environments.
+When multiple environment provisioning jobs run concurrently, both `EnvironmentLogContext` instances attach their handlers to the same root logger (`humanityrules_app`). When any code logs a message, ALL attached handlers receive it and write to their respective environments.
 
 ```
 Job A (staging) enters context → adds Handler A to logger
@@ -8645,10 +8645,10 @@ Updated the `prod-manage` skill to document `doh_query` and warn against using `
 
 **Conversation:** [2026-01-28-1833-3e29ca4b.md](conversations/2026-01-28-1833-3e29ca4b.md)
 
-Renamed the `devopshero_app/services/github/` directory to `devopshero_app/services/gitproviders/` in preparation for supporting multiple git providers. The existing code handles GitHub App integration (OAuth flow, installation tokens, repository sync, cloning), and the new naming reflects that this module will be the home for all git provider integrations.
+Renamed the `humanityrules_app/services/github/` directory to `humanityrules_app/services/gitproviders/` in preparation for supporting multiple git providers. The existing code handles GitHub App integration (OAuth flow, installation tokens, repository sync, cloning), and the new naming reflects that this module will be the home for all git provider integrations.
 
 **Changes made:**
-- `git mv devopshero_app/services/github devopshero_app/services/gitproviders`
+- `git mv humanityrules_app/services/github humanityrules_app/services/gitproviders`
 - Updated 5 import statements across the codebase:
   - `services/agent/agent_service.py` — imports `repo_service` for cloning repos into agent sandbox
   - `services/agent/mcp_tools.py` — imports `repo_service` for MCP tool repo access
@@ -8822,7 +8822,7 @@ DATABASES = {"default": dj_database_url.parse(DATABASE_URL, conn_max_age=0)}
 
 **Logging gap discovered:**
 
-CloudWatch logs showed HTTP 500 responses but no stack traces. The logging configuration only captures `devopshero_app` logs, not Django exceptions or the root logger. Exceptions are captured by PostHog middleware but not printed to CloudWatch. This should be addressed separately to improve production debugging.
+CloudWatch logs showed HTTP 500 responses but no stack traces. The logging configuration only captures `humanityrules_app` logs, not Django exceptions or the root logger. Exceptions are captured by PostHog middleware but not printed to CloudWatch. This should be addressed separately to improve production debugging.
 
 **Alternative solutions considered (not implemented):**
 
@@ -9028,7 +9028,7 @@ The old view passed `is_authenticated` context explicitly:
 ```python
 context = {
     "is_authenticated": request.user.is_authenticated,
-    "site_logo_url": static('devopshero_app/devops-hero-logo-large.png'),
+    "site_logo_url": static('humanityrules_app/devops-hero-logo-large.png'),
 }
 ```
 
@@ -9305,7 +9305,7 @@ Converted the React/TypeScript landing page (built with Bolt.new in `tmp/project
 
 **Template structure decision — partials over monolithic:**
 
-Created a `templates/devopshero_app/landing/` folder with 9 files:
+Created a `templates/humanityrules_app/landing/` folder with 9 files:
 - `landing_page.html` — main template that includes all partials, loads fonts, contains all JS
 - `_header.html`, `_hero.html`, `_problem.html`, `_solution.html`, `_features.html`, `_personas.html`, `_cta.html`, `_footer.html`
 
@@ -9677,7 +9677,7 @@ Added `ensure_superuser` management command to automatically promote a configure
 **ECS Exec alternative (requires Session Manager Plugin):**
 ```bash
 aws ecs execute-command --cluster doh-prod-cluster --task <TASK_ARN> --container devopshero --interactive \
-  --command "uv run python manage.py shell -c \"from devopshero_app.models import User; u = User.objects.get(email='user@example.com'); u.is_staff=True; u.is_superuser=True; u.save()\""
+  --command "uv run python manage.py shell -c \"from humanityrules_app.models import User; u = User.objects.get(email='user@example.com'); u.is_staff=True; u.is_superuser=True; u.save()\""
 ```
 
 
@@ -9921,7 +9921,7 @@ SSE request → subscribes to event queue from that task
 Client disconnect → SSE dies, agent continues
 ```
 
-Created `devopshero_app/services/agent/agent_runner.py` with:
+Created `humanityrules_app/services/agent/agent_runner.py` with:
 - **`AgentRunner`** dataclass: holds task, event queue, client_connected flag
 - **`_runners`** dict: in-memory registry keyed by conversation_id
 - **`ensure_agent_running()`**: spawns runner if needed, uses double-checked locking
@@ -9955,8 +9955,8 @@ Also simplified: single DB query using `request.auser()` + `organization_id` FK 
 
 ### Files
 
-- **New**: `devopshero_app/services/agent/agent_runner.py`
-- **Modified**: `devopshero_app/views/chat.py` — SSE becomes queue consumer
+- **New**: `humanityrules_app/services/agent/agent_runner.py`
+- **Modified**: `humanityrules_app/views/chat.py` — SSE becomes queue consumer
 
 
 ## 2026-01-24 - SSE Client Disconnection Logging
@@ -9988,7 +9988,7 @@ Implemented automatic conversation title generation after the first agent respon
 
 ### LLM Client Service
 
-Created `devopshero_app/services/llm/` for lightweight LLM calls (separate from Claude Agent SDK):
+Created `humanityrules_app/services/llm/` for lightweight LLM calls (separate from Claude Agent SDK):
 - `llm_client.py` — Client factory supporting both Anthropic API and Bedrock, mirroring agent_client.py config
 - `title_generator.py` — Generates titles using Haiku with user message, agent response, and context
 
@@ -10229,8 +10229,8 @@ python manage.py doh_deploy --base --account "CH Sandbox" --env prod
 
 ### Changes
 
-- **Added** `devopshero_app/management/commands/doh_deploy.py`
-- **Deleted** `devopshero_app/services/infra_customer/deploy.py`
+- **Added** `humanityrules_app/management/commands/doh_deploy.py`
+- **Deleted** `humanityrules_app/services/infra_customer/deploy.py`
 - **Simplified** `iam_utils.py` — Removed `load_credentials_from_env()`, now only contains `get_assumed_role_session()`
 
 
@@ -10431,9 +10431,9 @@ The agent looks for Secrets Manager access patterns during repository analysis (
 
 ## 2026-01-20 - Moved infra_customer Inside Django App
 
-Moved `infra_customer/` from project root to `devopshero_app/services/infra_customer/`. This eliminates the `sys.path.insert()` hack that was documented in the previous "sys.path Manipulation: Why It's Needed" entry.
+Moved `infra_customer/` from project root to `humanityrules_app/services/infra_customer/`. This eliminates the `sys.path.insert()` hack that was documented in the previous "sys.path Manipulation: Why It's Needed" entry.
 
-The infrastructure code is now a proper Python package importable as `from devopshero_app.services import infra_customer`. Internal imports within the package use relative imports (`from . import deploy_app`).
+The infrastructure code is now a proper Python package importable as `from humanityrules_app.services import infra_customer`. Internal imports within the package use relative imports (`from . import deploy_app`).
 
 ## 2026-01-20 - Improved Tool Display Titles for Grep/Glob
 
@@ -10621,22 +10621,22 @@ The asyncio approach would require `run_in_executor` for CPU-bound CDK operation
 
 ### sys.path Manipulation: Why It's Needed
 
-The `infra_customer/` directory is a **sibling** of `devopshero_app/`, not a child:
+The `infra_customer/` directory is a **sibling** of `humanityrules_app/`, not a child:
 
 ```
 devopshero/
-├── devopshero_app/          ← Django app, in INSTALLED_APPS, on sys.path
+├── humanityrules_app/          ← Django app, in INSTALLED_APPS, on sys.path
 │   └── services/deployment/ ← Needs to import from infra_customer
 ├── infra_customer/          ← NOT a Django app, NOT on sys.path
 │   ├── deploy_app.py
 │   └── appconfig.py
 ```
 
-Django puts the project root on `sys.path`, making `devopshero_app` and its children importable. But `infra_customer` is a sibling — Python doesn't search sibling directories. Adding `__init__.py` to `infra_customer` doesn't help because the directory itself isn't discoverable.
+Django puts the project root on `sys.path`, making `humanityrules_app` and its children importable. But `infra_customer` is a sibling — Python doesn't search sibling directories. Adding `__init__.py` to `infra_customer` doesn't help because the directory itself isn't discoverable.
 
 The `sys.path.insert(0, infra_customer_path)` hack makes it work. Alternatives (documented in code):
 1. Make `infra_customer` a proper package (`pyproject.toml` + `uv pip install -e`)
-2. Move `infra_customer` inside `devopshero_app`
+2. Move `infra_customer` inside `humanityrules_app`
 
 For now, the hack is contained in one place and works. Revisit if it causes problems.
 
@@ -11016,7 +11016,7 @@ Built an LLM-powered sub-agent that analyzes repositories to detect language, fr
 **Test harness:** Validates against 8 reference apps (django_postgres_app, fastapi_app, nextjs_app, phoenix_app, etc.). Uses `query()` function for simple single-shot invocation.
 
 ```bash
-uv run python -m devopshero_app.services.agent.repo_analysis.test_repo_analysis --app fastapi_app
+uv run python -m humanityrules_app.services.agent.repo_analysis.test_repo_analysis --app fastapi_app
 ```
 
 ## 2026-01-13 - Chat Input History
@@ -11149,9 +11149,9 @@ Text accumulates in a local variable. On tool call or completion, accumulated te
 - Tool result: `<div id="tool-{id}" hx-swap-oob="outerHTML">...</div>` (replaces spinner with result)
 
 **Key files:**
-- `devopshero_app/views/chat.py` — Endpoints + SSE formatting
-- `devopshero_app/services/agent/agent_service.py` — Agent generator
-- `devopshero_app/templates/devopshero_app/chat/chat_view.html` — Client JS
+- `humanityrules_app/views/chat.py` — Endpoints + SSE formatting
+- `humanityrules_app/services/agent/agent_service.py` — Agent generator
+- `humanityrules_app/templates/humanityrules_app/chat/chat_view.html` — Client JS
 
 ---
 
@@ -11160,7 +11160,7 @@ Text accumulates in a local variable. On tool call or completion, accumulated te
 **Decision:** Removed the `ask_user` MCP tool and related `AskUserQuestion` handling to simplify the codebase before adding new features.
 
 **What was removed:**
-- `devopshero_app/services/agent/tools/ask_user.py` — The tool implementation (128 lines)
+- `humanityrules_app/services/agent/tools/ask_user.py` — The tool implementation (128 lines)
 - `_convert_ask_user_question_to_choice()` in agent_service.py — Converted Claude Code's built-in AskUserQuestion to CHOICE messages
 - `_extract_deferred_choice()` in agent_service.py — Extracted deferred choice data from tool results
 - All special-case handling for ask_user in the message processing loop
@@ -11387,7 +11387,7 @@ The deployment agent supports two Claude backends with automatic selection:
 
 Bedrock auto-discovers AWS credentials from CLI/environment. No default region—must be explicitly configured.
 
-**Key files:** `devopshero_app/services/agent/client.py`
+**Key files:** `humanityrules_app/services/agent/client.py`
 
 ---
 
@@ -12585,7 +12585,7 @@ Completed the AWS account connection flow by implementing the backend API endpoi
 
 #### Backend Callback Endpoint (`/api/aws/install-account-callback`)
 
-Created `devopshero_app/views/api.py` with the endpoint that:
+Created `humanityrules_app/views/api.py` with the endpoint that:
 - Validates Bearer token authentication
 - Validates `external_id` is a proper UUID (prevents Django 500 errors)
 - Finds the `AWSAccount` record by `external_id`

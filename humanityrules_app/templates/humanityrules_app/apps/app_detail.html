@@ -1,0 +1,162 @@
+<div id="app-detail-{{ app.id }}"
+     class="max-w-5xl">
+    <div class="flex items-center justify-between mb-6">
+        <div class="flex-1">
+            {% url 'workspaces' as workspaces_url %}
+            {% url 'workspace_detail' workspace_slug=app.workspace.slug as workspace_url %}
+            {% include "humanityrules_app/partials/_breadcrumb.html" with p1_label="Workspaces" p1_url=workspaces_url p2_label=app.workspace.name p2_url=workspace_url current=app.name %}
+        </div>
+        {% if can_edit and not is_pending_removal %}
+        <div class="shrink-0 flex items-center gap-2">
+            <a href="{% url 'deployment_editor' app_slug=app.slug %}"
+               hx-get="{% url 'deployment_editor' app_slug=app.slug %}"
+               hx-target="#main-content"
+               hx-swap="innerHTML"
+               hx-push-url="true"
+               class="rounded-lg bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-700">Deployment</a>
+            {% if can_remove %}
+            <button type="button"
+                    hx-get="{% url 'app_remove_confirm' app_slug=app.slug %}"
+                    hx-target="#modal-container"
+                    hx-swap="innerHTML"
+                    class="rounded-lg bg-white dark:bg-gray-800 px-3 py-1.5 text-sm font-medium text-red-700 dark:text-red-400 ring-1 ring-inset ring-red-300 dark:ring-red-500/30 hover:bg-red-50 dark:hover:bg-red-500/10">Remove App</button>
+            {% endif %}
+        </div>
+        {% endif %}
+    </div>
+    {% if is_pending_removal %}
+    <div class="mb-6 rounded-lg border border-amber-300 dark:border-amber-500/30 bg-amber-50 dark:bg-amber-500/10 px-4 py-3 text-sm text-amber-800 dark:text-amber-200">
+        <span class="font-medium">Removing this app…</span>
+        Cleanup is in progress.
+    </div>
+    {% endif %}
+    {# App details and tags side by side #}
+    <div class="grid grid-cols-1 sm:grid-cols-2 gap-6 mb-6">
+        <div class="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-4">
+            <dl class="grid grid-cols-3 text-sm">
+                <div class="min-w-0">
+                    <dt class="text-gray-500 dark:text-gray-400">App Type</dt>
+                    <dd class="mt-1 font-medium text-gray-900 dark:text-white">{{ app.get_app_type_display }}</dd>
+                </div>
+                <div class="min-w-0">
+                    <dt class="text-gray-500 dark:text-gray-400">Created</dt>
+                    <dd class="mt-1 font-medium text-gray-900 dark:text-white">{{ app.created_at|date:"M j, Y" }}</dd>
+                </div>
+                <div class="min-w-0">
+                    <dt class="text-gray-500 dark:text-gray-400">Created By</dt>
+                    <dd class="mt-1 font-medium text-gray-900 dark:text-white truncate"
+                        {% if app.created_by.email %}title="{{ app.created_by.email }}"{% endif %}>{{ app.created_by.email|default:"—" }}</dd>
+                </div>
+            </dl>
+        </div>
+        {% include "humanityrules_app/partials/_security_tags_section.html" with tags_title="App Tags" items=direct_tags empty_text="No direct tags" %}
+    </div>
+    {# Source & Build sections side by side #}
+    <div class="grid gap-6 sm:grid-cols-2 mb-6">
+        {# Source section #}
+        <div class="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-4">
+            <h2 class="text-base font-semibold text-gray-900 dark:text-white mb-4">Source</h2>
+            <dl class="space-y-3 text-sm">
+                <div>
+                    <dt class="text-gray-500 dark:text-gray-400">Repository</dt>
+                    <dd class="mt-1 font-medium text-gray-900 dark:text-white">{{ app.repository.full_name }}</dd>
+                </div>
+                <div>
+                    <dt class="text-gray-500 dark:text-gray-400">Branch</dt>
+                    <dd class="mt-1 font-medium text-gray-900 dark:text-white">{{ app.branch }}</dd>
+                </div>
+                <div>
+                    <dt class="text-gray-500 dark:text-gray-400">Subpath</dt>
+                    <dd class="mt-1 font-medium text-gray-900 dark:text-white font-mono text-xs">{{ app.repo_subpath|default:"—" }}</dd>
+                </div>
+            </dl>
+        </div>
+
+        {# Build section #}
+        <div class="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-4">
+            <h2 class="text-base font-semibold text-gray-900 dark:text-white mb-4">Build</h2>
+            <dl class="space-y-3 text-sm">
+                <div>
+                    <dt class="text-gray-500 dark:text-gray-400">Strategy</dt>
+                    <dd class="mt-1 font-medium text-gray-900 dark:text-white">{{ app.get_build_strategy_display }}</dd>
+                </div>
+                <div>
+                    <dt class="text-gray-500 dark:text-gray-400">Dockerfile</dt>
+                    <dd class="mt-1 font-medium text-gray-900 dark:text-white font-mono text-xs">{{ app.dockerfile_path|default:"—" }}</dd>
+                </div>
+            </dl>
+        </div>
+    </div>
+
+    {# Container section #}
+    <div class="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-4 mb-6">
+        <h2 class="text-base font-semibold text-gray-900 dark:text-white mb-4">Container</h2>
+        <dl class="grid grid-cols-2 gap-4 sm:grid-cols-3 text-sm">
+            <div>
+                <dt class="text-gray-500 dark:text-gray-400">Port</dt>
+                <dd class="mt-1 font-medium text-gray-900 dark:text-white">{{ app.container_port }}</dd>
+            </div>
+            <div>
+                <dt class="text-gray-500 dark:text-gray-400">Health Check Path</dt>
+                <dd class="mt-1 font-medium text-gray-900 dark:text-white font-mono text-xs">{{ app.health_check_path|default:"—" }}</dd>
+            </div>
+            <div>
+                <dt class="text-gray-500 dark:text-gray-400">Health Check Command</dt>
+                <dd class="mt-1 font-medium text-gray-900 dark:text-white font-mono text-xs">{{ app.health_check_command|default:"—" }}</dd>
+            </div>
+        </dl>
+    </div>
+
+    {# Deployed to Environments section #}
+    <div class="mb-6">
+        <h2 class="text-lg font-semibold text-gray-900 dark:text-white mb-4">Deployed to Environments</h2>
+        {% if environment_rows %}
+        <div class="overflow-x-auto bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg">
+            <table class="min-w-full">
+                <tbody class="[&_tr:not(:last-child)>td]:border-b [&_tr:not(:last-child)>td]:border-gray-200 dark:[&_tr:not(:last-child)>td]:border-gray-700">
+                    {% for row in environment_rows %}
+                        {% include "humanityrules_app/apps/_app_blueprint_row.html" with blueprint=row.blueprint current_deployment=row.current_deployment %}
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% else %}
+        <div class="bg-gray-50 dark:bg-gray-800/50 border border-gray-200 dark:border-gray-700 border-dashed rounded-lg p-4 text-center">
+            <p class="text-sm text-gray-500 dark:text-gray-400">No deployments yet.</p>
+        </div>
+        {% endif %}
+    </div>
+
+    {# Cost section — self-loads via HTMX; build_app_detail_context stays untouched #}
+    {% include "humanityrules_app/apps/_app_cost_panel.html" %}
+
+    {# Deployments section #}
+    <div>
+        <h2 class="text-lg font-semibold text-gray-900 dark:text-white mb-4">Recent Deployments</h2>
+        {% if deployments %}
+        <div id="deployments-list" class="overflow-x-auto bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg">
+            <table class="min-w-full table-auto">
+                <colgroup>
+                    <col class="w-full">
+                    <col>
+                    <col>
+                </colgroup>
+                <thead class="sr-only">
+                    <tr>
+                        <th class="px-4 py-3 text-left">Deployment</th>
+                        <th class="px-4 py-3 text-center">Status</th>
+                        <th class="px-4 py-3 text-center">Updated</th>
+                    </tr>
+                </thead>
+                <tbody class="[&_tr:not(:last-child)>td]:border-b [&_tr:not(:last-child)>td]:border-gray-200 dark:[&_tr:not(:last-child)>td]:border-gray-700">
+                    {% for deployment in deployments %}
+                        {% include "humanityrules_app/apps/_app_deployment_row.html" with mode="app_history" %}
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% else %}
+        {% include "humanityrules_app/apps/_app_deployments_empty.html" %}
+        {% endif %}
+    </div>
+</div>

@@ -1,0 +1,125 @@
+<tr x-data="{ open: false }" id="blueprint-{{ blueprint.id }}">
+    <td class="p-0">
+        <div id="blueprint-inner-{{ blueprint.id }}">
+            {% partial blueprint_row_content %}
+        </div>
+    </td>
+</tr>
+
+{% partialdef blueprint_row_content %}
+<div {% if current_deployment.is_transient %}
+     hx-get="{% url 'blueprint_row_status' blueprint_id=blueprint.id %}"
+     hx-trigger="load delay:10s"
+     hx-target="#blueprint-inner-{{ blueprint.id }}"
+     hx-swap="innerHTML"
+     {% endif %}>
+    <div class="flex items-center">
+        <div class="flex-1 min-w-0 px-4 py-3">
+            <h3 class="text-sm font-medium text-gray-900 dark:text-white"><span class="text-xs text-gray-400 dark:text-gray-500">Environment:</span> <a href="{% url 'environment_detail' environment_id=blueprint.environment.id %}" hx-get="{% url 'environment_detail' environment_id=blueprint.environment.id %}" hx-target="#main-content" hx-swap="innerHTML" hx-push-url="true" class="text-indigo-600 dark:text-indigo-400 hover:underline">{{ blueprint.environment.name }}</a></h3>
+            <p class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                <span class="text-gray-400 dark:text-gray-500">Account:</span> {{ blueprint.environment.aws_account.name }} · <span class="text-gray-400 dark:text-gray-500">Region:</span> {{ blueprint.environment.aws_region }}
+            </p>
+            <p class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                <span class="text-gray-400 dark:text-gray-500">Ref:</span> {{ current_deployment.git_ref }}{% if current_deployment.git_commit_sha %} · {{ current_deployment.git_commit_sha|slice:":7" }}{% endif %}
+            </p>
+            {% if current_deployment.service_url %}
+            <p class="mt-1 text-xs text-indigo-600 dark:text-indigo-400 truncate">
+                <a href="{{ current_deployment.service_url }}" target="_blank" rel="noopener noreferrer" class="hover:underline">{{ current_deployment.service_url }}</a>
+            </p>
+            {% endif %}
+            <div class="mt-3 flex flex-wrap items-center">
+                <button @click="open = !open" type="button"
+                        class="inline-flex items-center gap-1 text-xs text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300">
+                    <svg class="h-3 w-3 shrink-0 transition-transform duration-150" :class="{ 'rotate-90': open }" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7" />
+                    </svg>
+                    <span>Config</span>
+                </button>
+                <span x-show="!open" class="inline-flex items-center gap-1.5 ml-1 text-xs">
+                    {% if blueprint.datastore %}
+                    <span class="inline-flex items-center rounded bg-gray-100 dark:bg-gray-700 px-1.5 py-0.5 text-[10px] font-medium text-gray-600 dark:text-gray-300">{{ blueprint.datastore.name }}</span>
+                    {% endif %}
+                    <span class="inline-flex items-center rounded bg-gray-100 dark:bg-gray-700 px-1.5 py-0.5 text-[10px] font-medium text-gray-600 dark:text-gray-300">{{ blueprint.containers|length }} container{{ blueprint.containers|length|pluralize }}</span>
+                </span>
+                <div x-show="open" x-cloak
+                     x-transition:enter="transition ease-out duration-150"
+                     x-transition:enter-start="opacity-0"
+                     x-transition:enter-end="opacity-100"
+                     class="mt-2 w-full rounded-md border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/60 px-3 py-2">
+                    <dl class="grid gap-x-4 gap-y-1.5 text-xs" style="grid-template-columns: auto 1fr;">
+                        {% if blueprint.datastore %}
+                        <dt class="text-gray-500 dark:text-gray-400">Datastore</dt>
+                        <dd class="text-gray-900 dark:text-white font-medium">{{ blueprint.datastore.name }}</dd>
+                        {% endif %}
+                        {% for container in blueprint.containers %}
+                        <dt class="text-gray-500 dark:text-gray-400 pt-0.5">{{ container.name }} env</dt>
+                        <dd class="text-gray-900 dark:text-white">
+                            {% if container.environment_variables %}
+                            <ul class="space-y-0.5 font-mono text-[11px]">
+                                {% for var in container.environment_variables %}
+                                <li>
+                                    <span class="text-gray-500 dark:text-gray-400">{{ var.name }}</span><span class="text-gray-300 dark:text-gray-600">=</span><span class="break-all">{{ var.value }}</span>
+                                </li>
+                                {% endfor %}
+                            </ul>
+                            {% else %}
+                            <span class="text-gray-400 dark:text-gray-500 italic">None</span>
+                            {% endif %}
+                        </dd>
+                        <dt class="text-gray-500 dark:text-gray-400 pt-0.5">{{ container.name }} secrets</dt>
+                        <dd class="text-gray-900 dark:text-white">
+                            {% if container.app_secrets %}
+                            <ul class="space-y-0.5 font-mono text-[11px]">
+                                {% for key, val in container.app_secrets.items %}
+                                <li>
+                                    <span class="text-gray-500 dark:text-gray-400">{{ key }}</span><span class="text-gray-300 dark:text-gray-600">=</span><span class="text-gray-400 dark:text-gray-500">••••••••</span>
+                                </li>
+                                {% endfor %}
+                            </ul>
+                            {% else %}
+                            <span class="text-gray-400 dark:text-gray-500 italic">None</span>
+                            {% endif %}
+                        </dd>
+                        {% endfor %}
+                    </dl>
+                </div>
+            </div>
+        </div>
+        <div class="shrink-0 px-2 py-3 text-center whitespace-nowrap">
+            {% include "humanityrules_app/partials/_status_pill.html" with status=current_deployment.status label=current_deployment.get_status_display only %}
+        </div>
+        <div class="shrink-0 px-2 py-3 text-center">
+            <span class="text-xs leading-4 whitespace-nowrap text-gray-500 dark:text-gray-400">{{ current_deployment.created_at|timesince }} ago</span>
+        </div>
+        <div class="shrink-0 px-4 py-3 whitespace-nowrap">
+            <div class="flex min-w-0 flex-col items-start gap-1">
+                {% if app.status == 'pending_removal' %}
+                <span class="text-xs text-gray-300 dark:text-gray-600 w-full text-left">&mdash;&mdash;&mdash;</span>
+                {% elif current_deployment.status == 'succeeded' or current_deployment.status == 'failed' or current_deployment.status == 'torn_down' %}
+                <button hx-post="{% url 'app_deployment_redeploy' app_slug=app.slug deployment_id=current_deployment.id %}"
+                        hx-target="#main-content"
+                        hx-swap="innerHTML"
+                        class="text-xs text-indigo-600 dark:text-indigo-400 hover:underline">Redeploy</button>
+                {% if current_deployment.status == 'succeeded' %}
+                <a href="{% url 'security_permissions_editor' %}?context_app={{ app.slug }}&context_environment={{ blueprint.environment.slug }}"
+                   hx-get="{% url 'security_permissions_editor' %}?context_app={{ app.slug }}&context_environment={{ blueprint.environment.slug }}"
+                   hx-target="#main-content"
+                   hx-swap="innerHTML"
+                   hx-push-url="true"
+                   class="text-xs text-indigo-600 dark:text-indigo-400 hover:underline">Permissions</a>
+                {% endif %}
+                {% if current_deployment.status == 'succeeded' or current_deployment.status == 'failed' %}
+                <button type="button"
+                        hx-get="{% url 'app_teardown_confirm' app_slug=app.slug deployment_id=current_deployment.id %}?render=app_detail"
+                        hx-target="#modal-container"
+                        hx-swap="innerHTML"
+                        class="text-xs text-indigo-600 dark:text-indigo-400 hover:underline">Tear Down</button>
+                {% endif %}
+                {% else %}
+                <span class="text-xs text-gray-300 dark:text-gray-600 w-full text-left">&mdash;&mdash;&mdash;</span>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+{% endpartialdef %}

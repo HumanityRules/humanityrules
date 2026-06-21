@@ -1,0 +1,83 @@
+{% if error_message %}
+<div class="max-w-2xl py-12">
+    <div class="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 dark:border-amber-500/40 dark:bg-amber-500/10 dark:text-amber-200">
+        {{ error_message }}
+    </div>
+</div>
+{% else %}
+<div class="flex h-full flex-col" style="height: calc(100vh - 8rem);">
+    <div class="flex items-start justify-between border-b border-gray-200 px-6 py-3 dark:border-gray-700">
+        <div>
+            {% url 'workspaces' as workspaces_url %}
+            {% url 'workspace_detail' workspace_slug=workspace.slug as workspace_url %}
+            {% if app %}
+            {% include "humanityrules_app/partials/_breadcrumb.html" with p1_label="Workspaces" p1_url=workspaces_url p2_label=workspace.name p2_url=workspace_url current=app.name %}
+            {% else %}
+            {% include "humanityrules_app/partials/_breadcrumb.html" with p1_label="Workspaces" p1_url=workspaces_url p2_label=workspace.name p2_url=workspace_url current="New App" %}
+            {% endif %}
+            <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
+                {% if app %}Define the app and its deployment blueprint. The blueprint is the environment-specific deployable state for this app.{% endif %}
+            </p>
+        </div>
+        {% if app %}
+        <button type="button"
+                onclick="var mc = document.getElementById('modal-container'); mc.innerHTML = document.getElementById('reset-confirm-tpl').innerHTML; htmx.process(mc);"
+                class="shrink-0 self-center rounded-lg bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-700">
+            Reset Conversation
+        </button>
+        {% endif %}
+    </div>
+
+    <div class="flex flex-1 overflow-hidden">
+        {# LEFT PANEL: App & Blueprint config #}
+        <div class="w-2/5 overflow-y-auto border-r border-gray-200 dark:border-gray-700 dark-scrollbar">
+            <div class="space-y-6 p-5">
+                {# App section #}
+                <div id="app-section"
+                    {% if app %}
+                    hx-get="{% url 'deployment_editor_app_section' app_slug=app.slug %}"
+                    hx-trigger="doh:app-changed-{{ app.id }} from:document"
+                    hx-swap="innerHTML"
+                    {% endif %}>
+                    {% include "humanityrules_app/deploy/_app_section.html" %}
+                </div>
+
+                {# Blueprint section #}
+                <div id="blueprint-section"
+                    {% if app %}
+                    hx-get="{% url 'deployment_editor_blueprint_section' app_slug=app.slug %}"
+                    hx-trigger="doh:blueprint-changed-{{ app.id }} from:document"
+                    hx-swap="innerHTML"
+                    {% endif %}>
+                    {% include "humanityrules_app/deploy/_blueprint_section.html" %}
+                </div>
+            </div>
+        </div>
+
+        {# RIGHT PANEL: Agent Chat #}
+        <div class="flex w-3/5 flex-col">
+            {% include "humanityrules_app/chat/_chat_panel.html" %}
+        </div>
+    </div>
+</div>
+
+{% if app %}
+{% url 'deployment_editor_reset' app_slug=app.slug as deployment_editor_reset_url %}
+<template id="reset-confirm-tpl">
+    {% include "humanityrules_app/partials/_confirm_modal.html" with modal_title="Reset Conversation" modal_message="Start a new conversation? This will close the current conversation and discard any draft blueprint." confirm_url=deployment_editor_reset_url confirm_label="Reset Conversation" %}
+</template>
+{% endif %}
+
+<script type="module">
+function reloadEditor(url) {
+    htmx.ajax('GET', url, { target: '#main-content', swap: 'innerHTML' });
+    history.pushState({}, '', url);
+}
+
+document.addEventListener('doh:app-created', (e) => {
+    if (e.detail.slug) {
+        reloadEditor(`/deploy/${e.detail.slug}/`);
+    }
+});
+</script>
+{% endif %}

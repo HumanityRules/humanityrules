@@ -10,7 +10,7 @@
             "request": "launch",
             "module": "uvicorn",
             "args": [
-                "devopshero_site.asgi:application",
+                "humanityrules_site.asgi:application",
                 "--host", "127.0.0.1",
                 "--port", "8000",
                 "--timeout-graceful-shutdown", "0",
@@ -24,10 +24,10 @@
             "name": "Test: Repo Analysis",
             "type": "debugpy",
             "request": "launch",
-            "module": "devopshero_app.services.agent.repo_analysis.test_repo_analysis",
+            "module": "humanityrules_app.services.agent.repo_analysis.test_repo_analysis",
             "args": ["--app", "fastapi_app"],
             "env": {
-                "DJANGO_SETTINGS_MODULE": "devopshero_site.settings"
+                "DJANGO_SETTINGS_MODULE": "humanityrules_site.settings"
             },
             "console": "integratedTerminal"
         },
@@ -35,10 +35,10 @@
             "name": "Test: Main Agent",
             "type": "debugpy",
             "request": "launch",
-            "module": "devopshero_app.services.agent.test_main_agent",
+            "module": "humanityrules_app.services.agent.test_main_agent",
             "args": ["--repl", "--conversation-id", "019bc7e3-f78f-74bc-9490-003bd8264dab", "--db-run", "local/test_db/my_test.sqlite3", "--no-copy"],
             "env": {
-                "DJANGO_SETTINGS_MODULE": "devopshero_site.settings"
+                "DJANGO_SETTINGS_MODULE": "humanityrules_site.settings"
             },
             "console": "integratedTerminal"
         },

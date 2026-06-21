@@ -45,7 +45,7 @@ How this project was created:
 ```bash
 uv init .
 uv add django==6.0
-uv run django-admin startproject devopshero_site .
-uv run manage.py startapp devopshero_app
+uv run django-admin startproject humanityrules_site .
+uv run manage.py startapp humanityrules_app
 uv run manage.py migrate
 ```

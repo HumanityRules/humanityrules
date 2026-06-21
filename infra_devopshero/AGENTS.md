@@ -1,6 +1,6 @@
 # DevOps Hero Control Plane Infrastructure
 
-This directory contains the CDK infrastructure for the DevOps Hero control plane — the app that runs at humanityrules.io. This is distinct from `devopshero_app/services/infra_customer/`, which deploys customer apps to their AWS accounts.
+This directory contains the CDK infrastructure for the DevOps Hero control plane — the app that runs at humanityrules.io. This is distinct from `humanityrules_app/services/infra_customer/`, which deploys customer apps to their AWS accounts.
 
 
 ## AWS Credentials Setup

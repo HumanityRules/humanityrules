@@ -1,0 +1,14 @@
+{# Inherited workspace tags (always read-only) #}
+<div class="flex flex-wrap gap-2 mb-2">
+    {% for tag in inherited_tags %}
+    <span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-400">
+        {{ tag.key }}={{ tag.value }}
+        <span class="text-[10px] text-gray-400 dark:text-gray-500">inherited</span>
+    </span>
+    {% empty %}
+    <span class="text-xs text-gray-400 dark:text-gray-500">No inherited tags</span>
+    {% endfor %}
+</div>
+
+{# Direct app tags (editable with display/edit toggle) #}
+{% include "humanityrules_app/partials/_kv_tag_editor.html" with items=direct_tags url_base=url_base hx_target="#app-tags" can_edit=can_admin empty_text="No direct tags" %}

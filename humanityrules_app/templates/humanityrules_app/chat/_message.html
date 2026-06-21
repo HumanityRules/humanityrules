@@ -1,0 +1,62 @@
+{# Main message wrapper - dispatches to appropriate content type partial #}
+
+<div class="flex {% if message.role == 'user' %}justify-end{% else %}justify-start{% endif %} mb-4"
+     id="message-{{ message.id }}">
+
+    {% if message.role == 'user' %}
+    {# User message - right aligned #}
+    <div class="max-w-[80%] bg-indigo-600 text-white rounded-2xl rounded-br-md px-4 py-3">
+        <p class="whitespace-pre-wrap">{{ message.content }}</p>
+    </div>
+
+    {% elif message.role == 'agent' %}
+    {# Agent message - left aligned with icon #}
+    <div class="flex items-start space-x-3 w-full max-w-[100%]">
+        <div class="flex-shrink-0 w-8 h-8 bg-indigo-100 dark:bg-indigo-900 rounded-full flex items-center justify-center">
+            <svg class="w-5 h-5 text-indigo-600 dark:text-indigo-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+            </svg>
+        </div>
+        <div class="{% if message.content_type == 'tool_call' %}w-full{% else %}bg-gray-100 dark:bg-gray-800 rounded-2xl rounded-tl-md px-4 py-3{% endif %} min-w-0 flex-1">
+            {% partial message_dispatcher %}
+        </div>
+    </div>
+
+    {% elif message.role == 'system' %}
+    {# System message - centered, subtle styling #}
+    <div class="w-full">
+        {% partial message_dispatcher %}
+    </div>
+    {% endif %}
+</div>
+
+{% partialdef message_dispatcher %}
+{% if message.content_type == 'text' %}
+    {% include "humanityrules_app/chat/_message_text.html" %}
+
+{% elif message.content_type == 'markdown' %}
+    {% include "humanityrules_app/chat/_message_markdown.html" %}
+
+{% elif message.content_type == 'code' %}
+    {% include "humanityrules_app/chat/_message_code.html" %}
+
+{% elif message.content_type == 'progress' %}
+    {% include "humanityrules_app/chat/_message_progress.html" %}
+
+{% elif message.content_type == 'choice' %}
+    {% include "humanityrules_app/chat/_message_choice.html" %}
+
+{% elif message.content_type == 'deployment_log' %}
+    {% include "humanityrules_app/chat/_message_deployment_log.html" %}
+
+{% elif message.content_type == 'error' %}
+    {% include "humanityrules_app/chat/_message_error.html" %}
+
+{% elif message.content_type == 'tool_call' %}
+    {% include "humanityrules_app/chat/_message_tool_call.html" %}
+
+{% else %}
+    {# Fallback for unknown content types #}
+    <p class="text-gray-900 dark:text-gray-100 whitespace-pre-wrap">{{ message.content }}</p>
+{% endif %}
+{% endpartialdef %}

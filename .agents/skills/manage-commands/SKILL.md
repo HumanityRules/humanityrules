@@ -5,7 +5,7 @@ description: Understand and use available DOH's management commands, used to man
 
 # Django Management Commands
 
-All custom commands live in `devopshero_app/management/commands/`.
+All custom commands live in `humanityrules_app/management/commands/`.
 
 **To get detailed usage for any command**, read the first 30 lines of its file — every command has a module-level docstring with usage examples and instructions at the top.
 

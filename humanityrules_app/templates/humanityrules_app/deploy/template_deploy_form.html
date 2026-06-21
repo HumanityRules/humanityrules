@@ -1,0 +1,215 @@
+<div class="max-w-3xl">
+    <div class="mb-6">
+        <nav class="text-sm text-gray-500 dark:text-gray-400 mb-2">
+            <a href="{% url 'template_deploy_picker' %}"
+               hx-get="{% url 'template_deploy_picker' %}"
+               hx-target="#main-content"
+               hx-swap="innerHTML"
+               hx-push-url="true"
+               class="hover:text-gray-700 dark:hover:text-gray-200">Templates</a>
+            <span class="mx-1">/</span>
+            <span class="text-gray-900 dark:text-white">{{ template.name }}</span>
+        </nav>
+        <div class="flex items-start gap-3">
+            <span class="text-3xl" role="img">{{ template.icon }}</span>
+            <div>
+                <h1 class="text-2xl font-bold text-gray-900 dark:text-white">{{ template.name }}</h1>
+                <p class="mt-1 text-sm text-gray-600 dark:text-gray-400">{{ template.description }}</p>
+            </div>
+        </div>
+    </div>
+
+    {% if errors %}
+    <div class="mb-6 rounded-lg border border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-900/20 p-4">
+        <ul class="text-sm text-red-700 dark:text-red-400 space-y-1">
+            {% for error in errors %}
+            <li>{{ error }}</li>
+            {% endfor %}
+        </ul>
+    </div>
+    {% endif %}
+
+    <form method="post" class="space-y-5">
+        {% csrf_token %}
+
+        <div>
+            <label for="app_name" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">App Name</label>
+            <input type="text"
+                   id="app_name"
+                   name="app_name"
+                   value="{{ default_app_name }}"
+                   required
+                   class="block w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2 text-sm text-gray-900 dark:text-white placeholder-gray-400 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500">
+            <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">A unique name for this app in your organization. Used as the URL slug.</p>
+        </div>
+
+        <div>
+            <label for="workspace_id" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Workspace</label>
+            {% include "humanityrules_app/partials/_dropdown_select.html#dropdown_select" with dropdown_id="workspace_id" dropdown_name="workspace_id" dropdown_value=selected_workspace_id dropdown_selected_label=selected_workspace_label dropdown_options=workspace_options %}
+            <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">The workspace this app belongs to (governance boundary).</p>
+        </div>
+
+        <div>
+            <label for="environment_id" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Environment</label>
+            {% include "humanityrules_app/partials/_dropdown_select.html#dropdown_select" with dropdown_id="environment_id" dropdown_name="environment_id" dropdown_value=selected_environment_id dropdown_selected_label=selected_environment_label dropdown_options=environment_options %}
+            <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">Where the app will run. Only ready environments are shown.</p>
+        </div>
+
+        <div>
+            <label for="compute_mode" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Compute</label>
+            {% include "humanityrules_app/partials/_dropdown_select.html#dropdown_select" with dropdown_id="compute_mode" dropdown_name="compute_mode" dropdown_value=selected_compute_mode dropdown_selected_label=selected_compute_mode_label dropdown_options=compute_mode_options %}
+            <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">Fargate is serverless ECS. EC2 capacity uses customer-owned ECS container instances.</p>
+        </div>
+
+        {% if requires_owner %}
+        <div>
+            <label for="owner_id" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Owner</label>
+            {% if owner_locked %}
+                <input type="hidden" name="owner_id" value="{{ selected_owner_id }}">
+                <div class="block w-full rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50 px-3 py-2 text-sm text-gray-600 dark:text-gray-400">
+                    {{ selected_owner_label }}
+                </div>
+                <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">This personal assistant will be reachable only by you.</p>
+            {% else %}
+                {% include "humanityrules_app/partials/_dropdown_select.html#dropdown_select" with dropdown_id="owner_id" dropdown_name="owner_id" dropdown_value=selected_owner_id dropdown_selected_label=selected_owner_label dropdown_options=owner_options %}
+                <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">The user this personal assistant belongs to. Only they — plus org admins — can access it.</p>
+                {{ owner_prefill_map|json_script:"owner-prefill-map" }}
+                <script>
+                (function () {
+                    const ownerEl = document.getElementById("owner_id");
+                    const appNameEl = document.getElementById("app_name");
+                    const mapEl = document.getElementById("owner-prefill-map");
+                    if (!ownerEl || !appNameEl || !mapEl) return;
+                    const prefillMap = JSON.parse(mapEl.textContent);
+                    ownerEl.addEventListener("change", function (e) {
+                        const next = prefillMap[e.target.value];
+                        if (next !== undefined) appNameEl.value = next;
+                    });
+                })();
+                </script>
+            {% endif %}
+        </div>
+        {% endif %}
+
+        {% if variable_groups %}
+        <div class="space-y-3">
+            <h3 class="text-sm font-medium text-gray-700 dark:text-gray-300">Variables</h3>
+            {% for group in variable_groups %}
+            <details class="group rounded-lg border border-gray-200 dark:border-gray-700" {% if group.expanded %}open{% endif %}>
+                <summary class="flex cursor-pointer items-center justify-between px-4 py-3 text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800/50 rounded-lg">
+                    <span class="flex items-center gap-2">
+                        {{ group.name }}
+                        <span class="text-xs font-normal text-gray-400 dark:text-gray-500">({{ group.variables|length }})</span>
+                    </span>
+                    <svg class="h-4 w-4 text-gray-400 transition-transform group-open:rotate-180" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
+                    </svg>
+                </summary>
+                <div class="space-y-4 border-t border-gray-200 dark:border-gray-700 px-4 py-4">
+                    {% for var in group.variables %}
+                    <div>
+                        <label for="var_{{ var.name }}" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                            {{ var.name }}
+                            {% if var.required %}<span class="text-red-500">*</span>{% endif %}
+                            <span class="ml-1 text-xs font-normal text-gray-400 dark:text-gray-500">({{ var.category }})</span>
+                        </label>
+                        <input type="{% if var.category == 'secret' %}password{% else %}text{% endif %}"
+                               id="var_{{ var.name }}"
+                               name="var_{{ var.name }}"
+                               value="{{ var.input_value|default_if_none:'' }}"
+                               {% if var.required %}required{% endif %}
+                               autocomplete="off"
+                               class="block w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2 text-sm text-gray-900 dark:text-white placeholder-gray-400 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500">
+                        {% if var.description %}
+                        <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ var.description }}</p>
+                        {% endif %}
+                    </div>
+                    {% endfor %}
+                </div>
+            </details>
+            {% endfor %}
+        </div>
+        {% endif %}
+
+        <div class="rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50 p-4">
+            <h3 class="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Configuration Summary</h3>
+            <dl class="grid grid-cols-2 gap-x-4 gap-y-1.5 text-xs">
+                <div class="flex">
+                    <dt class="text-gray-500 dark:text-gray-400 w-24">CPU</dt>
+                    <dd class="text-gray-700 dark:text-gray-300">{{ template.cpu }} units</dd>
+                </div>
+                <div class="flex">
+                    <dt class="text-gray-500 dark:text-gray-400 w-24">Memory</dt>
+                    <dd class="text-gray-700 dark:text-gray-300">{{ template.memory }} MiB</dd>
+                </div>
+            </dl>
+
+            <h4 class="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wide mt-4 mb-2">Containers</h4>
+            <ul class="space-y-2">
+                {% for c in template.containers %}
+                <li class="rounded border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800/60 p-2">
+                    <div class="flex items-center gap-2 mb-1">
+                        <span class="font-mono text-xs font-medium text-gray-900 dark:text-white">{{ c.name }}</span>
+                        {% if c.image_source == "prebuilt" %}
+                        <span class="inline-flex items-center rounded bg-amber-100 dark:bg-amber-500/20 px-1.5 py-0.5 text-[10px] font-medium text-amber-700 dark:text-amber-300">prebuilt</span>
+                        {% elif c.image_source == "registry" %}
+                        <span class="inline-flex items-center rounded bg-purple-100 dark:bg-purple-500/20 px-1.5 py-0.5 text-[10px] font-medium text-purple-700 dark:text-purple-300">registry</span>
+                        {% elif c.image_source == "dockerfile" %}
+                        <span class="inline-flex items-center rounded bg-sky-100 dark:bg-sky-500/20 px-1.5 py-0.5 text-[10px] font-medium text-sky-700 dark:text-sky-300">dockerfile</span>
+                        {% endif %}
+                        {% if c.name == template.alb_target_container %}
+                        <span class="inline-flex items-center rounded bg-green-100 dark:bg-green-500/20 px-1.5 py-0.5 text-[10px] font-medium text-green-700 dark:text-green-300">ALB target</span>
+                        {% endif %}
+                        {% if c.efs_mount %}
+                        <span class="inline-flex items-center rounded bg-gray-100 dark:bg-gray-700 px-1.5 py-0.5 text-[10px] font-medium text-gray-600 dark:text-gray-300">EFS</span>
+                        {% endif %}
+                    </div>
+                    <dl class="space-y-1 text-xs mt-2">
+                        <div class="flex">
+                            <dt class="text-gray-500 dark:text-gray-400 w-20">Port</dt>
+                            <dd class="text-gray-700 dark:text-gray-300 font-mono">{{ c.container_port }}</dd>
+                        </div>
+                        {% if c.health_check_path %}
+                        <div class="flex">
+                            <dt class="text-gray-500 dark:text-gray-400 w-20">Health</dt>
+                            <dd class="text-gray-700 dark:text-gray-300 font-mono">{{ c.health_check_path }}</dd>
+                        </div>
+                        {% endif %}
+                        {% if c.image_source == "dockerfile" %}
+                        <div class="flex">
+                            <dt class="text-gray-500 dark:text-gray-400 w-20">Source</dt>
+                            <dd class="text-gray-700 dark:text-gray-300 font-mono">template_repos/{{ c.source_repo_path }}/{{ c.dockerfile_path }}</dd>
+                        </div>
+                        {% elif c.image_source == "prebuilt" %}
+                        <div class="flex">
+                            <dt class="text-gray-500 dark:text-gray-400 w-20">Image</dt>
+                            <dd class="text-gray-700 dark:text-gray-300 font-mono">doh/{env}/{{ c.ecr_repo }}:{{ c.version }}</dd>
+                        </div>
+                        {% elif c.image_source == "registry" %}
+                        <div class="flex">
+                            <dt class="text-gray-500 dark:text-gray-400 w-20">Image</dt>
+                            <dd class="text-gray-700 dark:text-gray-300 font-mono">{{ c.registry_image }}</dd>
+                        </div>
+                        {% endif %}
+                    </dl>
+                </li>
+                {% endfor %}
+            </ul>
+        </div>
+
+        <div class="flex justify-end pt-2">
+            <a href="{% url 'template_deploy_picker' %}"
+               hx-get="{% url 'template_deploy_picker' %}"
+               hx-target="#main-content"
+               hx-swap="innerHTML"
+               hx-push-url="true"
+               class="mr-3 rounded-lg px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
+                Cancel
+            </a>
+            <button type="submit"
+                    class="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 transition-colors">
+                Deploy
+            </button>
+        </div>
+    </form>
+</div>

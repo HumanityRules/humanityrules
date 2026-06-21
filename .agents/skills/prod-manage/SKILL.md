@@ -157,11 +157,11 @@ For local-exec mode (commands in `LOCAL_EXEC_COMMANDS`), the script:
 Examples that all work:
 
 ```bash
-./prod_manage.sh shell -c "from devopshero_app.models import Repository; print(Repository.objects.get(id='abc'))"
+./prod_manage.sh shell -c "from humanityrules_app.models import Repository; print(Repository.objects.get(id='abc'))"
 
 ./prod_manage.sh shell -c "import json; print(json.dumps({'a': 1, 'b': [\"two\", 'three']}))"
 
-./prod_manage.sh shell -c "from devopshero_app.models import User
+./prod_manage.sh shell -c "from humanityrules_app.models import User
 for u in User.objects.filter(email__icontains='example.com'):
     print(u.email)"
 ```
