@@ -213,7 +213,7 @@ def sync_repositories(organization: Organization, integration: IntegrationGitPro
 
 def get_app_installation_url() -> str:
     """Get the URL for installing the GitHub App on a new GitHub org."""
-    return "https://github.com/apps/devops-hero-app/installations/new"
+    return "https://github.com/apps/humanity-rules-app/installations/new"
 
 
 def get_oauth_authorize_url(state: str) -> str:
