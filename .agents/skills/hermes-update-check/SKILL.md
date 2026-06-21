@@ -25,12 +25,12 @@ commit via a git submodule.
 
 So the WebUI has **two things that must agree**: the base image tag
 (`WEBUI_BASE_VERSION` ARG) and the fork branch the submodule points at. The fork
-branch commits `.doh-upstream-version`, and `build/check-vendor.sh` fails the build
+branch commits `.humr-upstream-version`, and `build/check-vendor.sh` fails the build
 if it doesn't equal the base tag. A WebUI bump moves **both** in lockstep.
 
 Rebasing happens in the workbench clones at `hermes-vendor-work/<repo>` — the only
 checkouts with full history (the submodules are shallow). There, `origin` is upstream
-and `doh` is the mirror.
+and `humr` is the mirror.
 
 ## Bumping
 
@@ -43,8 +43,8 @@ and `doh` is the mirror.
      pin must match the lazy path, NOT the `pyproject.toml` extra, which can disagree).
    - WebUI: model list handling, access logs, Bedrock live discovery, reasoning/thinking
      events, streaming perf, request-gating middleware (see landmines).
-4. **Land it:** push the rebased `humr/v<new>` branch + the new upstream tag to `doh`;
-   for WebUI update `.doh-upstream-version` and `WEBUI_BASE_VERSION` together; check out
+4. **Land it:** push the rebased `humr/v<new>` branch + the new upstream tag to `humr`;
+   for WebUI update `.humr-upstream-version` and `WEBUI_BASE_VERSION` together; check out
    `humr/v<new>` in the submodule and commit the gitlink via `build/vendor-commit.sh`
    (not a blind `git add -A` — it can ship an unintended pin bump).
 

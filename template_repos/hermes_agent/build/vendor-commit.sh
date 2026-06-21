@@ -53,7 +53,7 @@ git -C "$sub" add -A
 git -C "$sub" commit -m "$msg"
 
 echo "==> pushing fork branch to mirror BEFORE bumping the pin (avoids unfetchable SHA)"
-git -C "$sub" push doh "$branch" 2>/dev/null || git -C "$sub" push origin "$branch"
+git -C "$sub" push humr "$branch" 2>/dev/null || git -C "$sub" push origin "$branch"
 
 echo "==> bumping the superproject gitlink"
 git -C "$REPO_ROOT" add "$sub"
