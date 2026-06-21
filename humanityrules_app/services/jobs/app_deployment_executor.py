@@ -27,8 +27,8 @@ def _get_aws_session(deployment: models.Deployment):
     aws_account = deployment.environment.aws_account
 
     return infra_customer.iam_utils.get_assumed_role_session(
-        access_key=settings.DOH_AWS_ACCESS_KEY,
-        secret_key=settings.DOH_AWS_SECRET_KEY,
+        access_key=settings.HUMR_AWS_ACCESS_KEY,
+        secret_key=settings.HUMR_AWS_SECRET_KEY,
         account_id=aws_account.aws_account_id,
         external_id=str(aws_account.external_id),
         region=deployment.environment.aws_region,
@@ -106,7 +106,7 @@ def run_deployment(deployment_id: str) -> bool:
             deployment.save()
             return False
 
-        if settings.DOH_DEBUG_DEPLOYMENTS:
+        if settings.HUMR_DEBUG_DEPLOYMENTS:
             return app_deployment_debug_simulator.run_debug_deployment(deployment=deployment, blueprint=blueprint)
 
         # Update status to BUILDING

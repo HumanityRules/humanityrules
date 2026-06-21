@@ -10,8 +10,8 @@ Usage:
 Output is two values to paste into the operator's .env, then sync to Secrets
 Manager via infra_devopshero/sync_secrets.py:
 
-    DOH_ENV_SESSION_JWT_PRIVATE_KEY=<PEM, newline-escaped>
-    DOH_ENV_SESSION_JWT_KID=env-sso-YYYY-MM-DD
+    HUMR_ENV_SESSION_JWT_PRIVATE_KEY=<PEM, newline-escaped>
+    HUMR_ENV_SESSION_JWT_KID=env-sso-YYYY-MM-DD
 
 The PEM is printed with literal \\n separators so it round-trips through .env
 files (settings.py un-escapes \\n -> newline at load time, same pattern as
@@ -47,8 +47,8 @@ class Command(BaseCommand):
         self.stdout.write("# Generated env-SSO signing keypair.")
         self.stdout.write("# Paste these two lines into .env, then run infra_devopshero/sync_secrets.py.")
         self.stdout.write("")
-        self.stdout.write(f"DOH_ENV_SESSION_JWT_PRIVATE_KEY={escaped_pem}")
-        self.stdout.write(f"DOH_ENV_SESSION_JWT_KID={kid}")
+        self.stdout.write(f"HUMR_ENV_SESSION_JWT_PRIVATE_KEY={escaped_pem}")
+        self.stdout.write(f"HUMR_ENV_SESSION_JWT_KID={kid}")
         self.stdout.write("")
         self.stdout.write("# Public key (informational only — published by /.well-known/jwks.json):")
         for line in public_pem.decode("ascii").splitlines():

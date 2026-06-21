@@ -151,7 +151,7 @@ def list_secrets(session: boto3.Session, include_deleted: bool) -> list[dict]:
 # ---------------------------------------------------------------------------
 
 
-SHARED_SECRETS_KEY_DOH_ENV_BEARER = "DOH_ENV_BEARER"
+SHARED_SECRETS_KEY_HUMR_ENV_BEARER = "HUMR_ENV_BEARER"
 
 
 def _secret_exists(sm_client, secret_name: str) -> bool:
@@ -209,7 +209,7 @@ def _create_or_merge_secret(
 
 
 def ensure_env_bearer_token_exists(session: boto3.Session, env) -> str:
-    """Ensure DOH_ENV_BEARER exists both in shared-secrets and as an EnvironmentBearerToken row.
+    """Ensure HUMR_ENV_BEARER exists both in shared-secrets and as an EnvironmentBearerToken row.
 
     Returns the ARN of the shared-secrets entry. *env* is a Django Environment
     instance — passed in rather than imported so this module stays free of
@@ -225,7 +225,7 @@ def ensure_env_bearer_token_exists(session: boto3.Session, env) -> str:
 
     existing_row = EnvironmentBearerToken.objects.filter(environment=env).first()
     existing_secret = get_shared_secrets(session=session, env_slug=env_slug) if _secret_exists(sm_client, secret_name) else None
-    has_token_in_secret = bool(existing_secret and existing_secret.get(SHARED_SECRETS_KEY_DOH_ENV_BEARER))
+    has_token_in_secret = bool(existing_secret and existing_secret.get(SHARED_SECRETS_KEY_HUMR_ENV_BEARER))
 
     # Happy path: both sides already present → trust them, no-op.
     if existing_row is not None and has_token_in_secret:
@@ -236,7 +236,7 @@ def ensure_env_bearer_token_exists(session: boto3.Session, env) -> str:
     token_hash = hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
     values = dict(existing_secret or {})
-    values[SHARED_SECRETS_KEY_DOH_ENV_BEARER] = raw
+    values[SHARED_SECRETS_KEY_HUMR_ENV_BEARER] = raw
     arn = _create_or_merge_secret(
         sm_client=sm_client,
         secret_name=secret_name,

@@ -16,7 +16,7 @@ app that uses the fargate_web_efs stack profile.
 Requires:
     - AWS CLI v2
     - AWS Session Manager Plugin (brew install --cask session-manager-plugin)
-    - DOH_AWS_ACCESS_KEY and DOH_AWS_SECRET_KEY in .env
+    - HUMR_AWS_ACCESS_KEY and HUMR_AWS_SECRET_KEY in .env
 """
 
 import json

@@ -3,9 +3,9 @@
 The sidecar verifies session JWTs via the central JWKS, calls the PDP, and
 proxies authorized traffic to a local upstream container.
 
-Required env: DOH_APP_ID, DOH_ENV_SLUG, DOH_ENV_DOMAIN, DOH_AUTH_BASE_URL,
-DOH_JWKS_URL, DOH_PDP_URL, DOH_ENV_BEARER, DOH_UPSTREAM_HOST, DOH_UPSTREAM_PORT,
-DOH_LISTEN_PORT.
+Required env: HUMR_APP_ID, HUMR_ENV_SLUG, HUMR_ENV_DOMAIN, HUMR_AUTH_BASE_URL,
+HUMR_JWKS_URL, HUMR_PDP_URL, HUMR_ENV_BEARER, HUMR_UPSTREAM_HOST, HUMR_UPSTREAM_PORT,
+HUMR_LISTEN_PORT.
 """
 
 import os
@@ -45,15 +45,15 @@ def _int_env(name: str, default: int) -> int:
 def load_proxy_config_from_env() -> PolicyProxyConfig:
     """Load sidecar config from the process environment."""
     return PolicyProxyConfig(
-        app_id=_required("DOH_APP_ID"),
-        env_slug=_required("DOH_ENV_SLUG"),
-        env_domain=_required("DOH_ENV_DOMAIN"),
-        auth_base_url=_required("DOH_AUTH_BASE_URL").rstrip("/"),
-        jwks_url=_required("DOH_JWKS_URL"),
-        pdp_url=_required("DOH_PDP_URL"),
-        env_bearer_token=_required("DOH_ENV_BEARER"),
-        upstream_host=_required("DOH_UPSTREAM_HOST"),
-        upstream_port=int(_required("DOH_UPSTREAM_PORT")),
-        listen_port=int(_required("DOH_LISTEN_PORT")),
-        pdp_cache_ttl_seconds=_int_env(name="DOH_PDP_CACHE_TTL_SECONDS", default=600),
+        app_id=_required("HUMR_APP_ID"),
+        env_slug=_required("HUMR_ENV_SLUG"),
+        env_domain=_required("HUMR_ENV_DOMAIN"),
+        auth_base_url=_required("HUMR_AUTH_BASE_URL").rstrip("/"),
+        jwks_url=_required("HUMR_JWKS_URL"),
+        pdp_url=_required("HUMR_PDP_URL"),
+        env_bearer_token=_required("HUMR_ENV_BEARER"),
+        upstream_host=_required("HUMR_UPSTREAM_HOST"),
+        upstream_port=int(_required("HUMR_UPSTREAM_PORT")),
+        listen_port=int(_required("HUMR_LISTEN_PORT")),
+        pdp_cache_ttl_seconds=_int_env(name="HUMR_PDP_CACHE_TTL_SECONDS", default=600),
     )

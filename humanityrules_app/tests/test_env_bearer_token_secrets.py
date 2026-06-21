@@ -88,7 +88,7 @@ class TestEnsureEnvBearerToken(EnvBearerTestBase):
 
         # Secrets Manager side.
         secret = json.loads(fake.store["devopshero/staging/shared-secrets"]["SecretString"])
-        raw_token = secret["DOH_ENV_BEARER"]
+        raw_token = secret["HUMR_ENV_BEARER"]
         self.assertEqual(len(raw_token), 64)
 
         # DB side.
@@ -103,7 +103,7 @@ class TestEnsureEnvBearerToken(EnvBearerTestBase):
             Name="devopshero/staging/shared-secrets",
             Description="seed",
             SecretString=json.dumps({
-                "DOH_ENV_BEARER": "pre-existing-raw-token-of-reasonable-length-0123456789012345",
+                "HUMR_ENV_BEARER": "pre-existing-raw-token-of-reasonable-length-0123456789012345",
                 "OTHER_KEY": "keep-me",
             }),
         )
@@ -127,7 +127,7 @@ class TestEnsureEnvBearerToken(EnvBearerTestBase):
         secrets_utils.ensure_env_bearer_token_exists(session=session, env=self.env)
 
         secret = json.loads(fake.store["devopshero/staging/shared-secrets"]["SecretString"])
-        raw = secret["DOH_ENV_BEARER"]
+        raw = secret["HUMR_ENV_BEARER"]
         new_hash = EnvironmentBearerToken.objects.get(environment=self.env).token_hash
         self.assertEqual(new_hash, hashlib.sha256(raw.encode()).hexdigest())
         self.assertNotEqual(new_hash, "stale-hash")
@@ -145,7 +145,7 @@ class TestEnsureEnvBearerToken(EnvBearerTestBase):
 
         secret = json.loads(fake.store["devopshero/staging/shared-secrets"]["SecretString"])
         self.assertEqual(secret["SOMETHING_ELSE"], "keep-me")
-        self.assertIn("DOH_ENV_BEARER", secret)
+        self.assertIn("HUMR_ENV_BEARER", secret)
 
 
 # -----------------------------------------------------------------------------

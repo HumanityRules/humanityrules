@@ -71,6 +71,6 @@ Edit files under `../hermes_agent/webui-extension/` while `docker compose up --w
 
 ```bash
 cd local_policy_proxy
-DOH_UPSTREAM_HOST=127.0.0.1 DOH_UPSTREAM_PORT=8787 DOH_LISTEN_PORT=8788 \
+HUMR_UPSTREAM_HOST=127.0.0.1 HUMR_UPSTREAM_PORT=8787 HUMR_LISTEN_PORT=8788 \
   pip install -r requirements.txt && python -m local_policy_proxy.main
 ```

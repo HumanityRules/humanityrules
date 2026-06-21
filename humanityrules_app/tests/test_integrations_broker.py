@@ -101,16 +101,16 @@ class TestEnvironmentFlags(unittest.TestCase):
 
     def test_merge_flag_defaults_enabled_when_absent(self) -> None:
         with patch.dict(broker.os.environ, {}, clear=True):
-            self.assertTrue(broker._env_flag_enabled(name="DOH_MERGE_INTEGRATION_ENABLED", default=True))
+            self.assertTrue(broker._env_flag_enabled(name="HUMR_MERGE_INTEGRATION_ENABLED", default=True))
 
     def test_merge_flag_false_values_disable(self) -> None:
         for value in ("0", "false", "no", "off", "FALSE"):
-            with patch.dict(broker.os.environ, {"DOH_MERGE_INTEGRATION_ENABLED": value}, clear=True):
-                self.assertFalse(broker._env_flag_enabled(name="DOH_MERGE_INTEGRATION_ENABLED", default=True))
+            with patch.dict(broker.os.environ, {"HUMR_MERGE_INTEGRATION_ENABLED": value}, clear=True):
+                self.assertFalse(broker._env_flag_enabled(name="HUMR_MERGE_INTEGRATION_ENABLED", default=True))
 
     def test_merge_flag_invalid_falls_back_to_default(self) -> None:
-        with patch.dict(broker.os.environ, {"DOH_MERGE_INTEGRATION_ENABLED": "wat"}, clear=True):
-            self.assertTrue(broker._env_flag_enabled(name="DOH_MERGE_INTEGRATION_ENABLED", default=True))
+        with patch.dict(broker.os.environ, {"HUMR_MERGE_INTEGRATION_ENABLED": "wat"}, clear=True):
+            self.assertTrue(broker._env_flag_enabled(name="HUMR_MERGE_INTEGRATION_ENABLED", default=True))
 
 
 def _make_token_store() -> broker.tls_intercept._TokenStore:
@@ -233,7 +233,7 @@ class TestRewriteAuthorization(unittest.TestCase):
                 (b"authorization", b"Bearer placeholder"),
                 (b"content-type", b"application/json"),
             ],
-            path_with_query="/bot000000:DOH_PLACEHOLDER/getUpdates?timeout=20",
+            path_with_query="/bot000000:HUMR_PLACEHOLDER/getUpdates?timeout=20",
             secrets={"bot_token": "123456:REAL"},
             provider=provider,
             upstream_host="api.telegram.org",
@@ -247,7 +247,7 @@ class TestRewriteAuthorization(unittest.TestCase):
         provider = tls_providers.TLS_INTERCEPT_PROVIDERS["telegram"]
         _headers, path = broker.tls_intercept._rewrite_request_for_provider(
             headers=[(b"host", b"api.telegram.org")],
-            path_with_query="/file/bot000000:DOH_PLACEHOLDER/documents/file.txt",
+            path_with_query="/file/bot000000:HUMR_PLACEHOLDER/documents/file.txt",
             secrets={"bot_token": "123456:REAL"},
             provider=provider,
             upstream_host="api.telegram.org",
@@ -265,7 +265,7 @@ class TestRewriteAuthorization(unittest.TestCase):
         with self.assertRaisesRegex(broker.tls_intercept._SecretSelectionError, "placeholder"):
             broker.tls_intercept._rewrite_request_for_provider(
                 headers=[(b"host", b"api.telegram.org")],
-                path_with_query="/bot000000%3ADOH_PLACEHOLDER/sendMessage",
+                path_with_query="/bot000000%3AHUMR_PLACEHOLDER/sendMessage",
                 secrets={"bot_token": "123456:REAL"},
                 provider=provider,
                 upstream_host="api.telegram.org",
@@ -275,7 +275,7 @@ class TestRewriteAuthorization(unittest.TestCase):
         """A request bearing the app-token placeholder gets the real app token."""
         provider = tls_providers.TLS_INTERCEPT_PROVIDERS["slack"]
         headers, path = broker.tls_intercept._rewrite_request_for_provider(
-            headers=[(b"host", b"slack.com"), (b"authorization", b"Bearer xapp-DOH_PLACEHOLDER")],
+            headers=[(b"host", b"slack.com"), (b"authorization", b"Bearer xapp-HUMR_PLACEHOLDER")],
             path_with_query="/api/apps.connections.open",
             secrets={"app_token": "xapp-REAL", "bot_token": "xoxb-REAL"},
             provider=provider,
@@ -288,7 +288,7 @@ class TestRewriteAuthorization(unittest.TestCase):
         """A request bearing the bot-token placeholder gets the real bot token."""
         provider = tls_providers.TLS_INTERCEPT_PROVIDERS["slack"]
         headers, _path = broker.tls_intercept._rewrite_request_for_provider(
-            headers=[(b"host", b"slack.com"), (b"authorization", b"Bearer xoxb-DOH_PLACEHOLDER")],
+            headers=[(b"host", b"slack.com"), (b"authorization", b"Bearer xoxb-HUMR_PLACEHOLDER")],
             path_with_query="/api/chat.postMessage",
             secrets={"app_token": "xapp-REAL", "bot_token": "xoxb-REAL"},
             provider=provider,
@@ -311,7 +311,7 @@ class TestRewriteAuthorization(unittest.TestCase):
     def test_openrouter_placeholder_bearer_is_rewritten(self) -> None:
         provider = tls_providers.TLS_INTERCEPT_PROVIDERS["openrouter"]
         headers, path = broker.tls_intercept._rewrite_request_for_provider(
-            headers=[(b"host", b"openrouter.ai"), (b"authorization", b"Bearer DOH_PLACEHOLDER")],
+            headers=[(b"host", b"openrouter.ai"), (b"authorization", b"Bearer HUMR_PLACEHOLDER")],
             path_with_query="/api/v1/chat/completions",
             secrets={"api_key": "sk-or-v1-real"},
             provider=provider,
@@ -323,7 +323,7 @@ class TestRewriteAuthorization(unittest.TestCase):
     def test_nous_placeholder_bearer_is_rewritten(self) -> None:
         provider = tls_providers.TLS_INTERCEPT_PROVIDERS["nous"]
         headers, path = broker.tls_intercept._rewrite_request_for_provider(
-            headers=[(b"host", b"inference-api.nousresearch.com"), (b"authorization", b"Bearer DOH_PLACEHOLDER")],
+            headers=[(b"host", b"inference-api.nousresearch.com"), (b"authorization", b"Bearer HUMR_PLACEHOLDER")],
             path_with_query="/v1/chat/completions",
             secrets={"access_token": "nous-access"},
             provider=provider,
@@ -335,7 +335,7 @@ class TestRewriteAuthorization(unittest.TestCase):
     def test_openai_placeholder_bearer_is_rewritten(self) -> None:
         provider = tls_providers.TLS_INTERCEPT_PROVIDERS["openai-api"]
         headers, path = broker.tls_intercept._rewrite_request_for_provider(
-            headers=[(b"host", b"api.openai.com"), (b"authorization", b"Bearer DOH_PLACEHOLDER")],
+            headers=[(b"host", b"api.openai.com"), (b"authorization", b"Bearer HUMR_PLACEHOLDER")],
             path_with_query="/v1/chat/completions",
             secrets={"api_key": "sk-real"},
             provider=provider,
@@ -349,7 +349,7 @@ class TestRewriteAuthorization(unittest.TestCase):
         headers, path = broker.tls_intercept._rewrite_request_for_provider(
             headers=[
                 (b"host", b"api.anthropic.com"),
-                (b"x-api-key", b"DOH_PLACEHOLDER"),
+                (b"x-api-key", b"HUMR_PLACEHOLDER"),
                 (b"anthropic-version", b"2023-06-01"),
             ],
             path_with_query="/v1/messages",
@@ -403,7 +403,7 @@ class TestAnonymousRequestClassification(unittest.TestCase):
     def test_openrouter_placeholder_bearer_addresses_doh_credential(self) -> None:
         self.assertTrue(self._classify(
             slug="openrouter",
-            headers=[(b"authorization", b"Bearer DOH_PLACEHOLDER")],
+            headers=[(b"authorization", b"Bearer HUMR_PLACEHOLDER")],
             path="/api/v1/chat/completions",
         ))
 
@@ -432,7 +432,7 @@ class TestAnonymousRequestClassification(unittest.TestCase):
     def test_anthropic_placeholder_x_api_key_addresses_doh_credential(self) -> None:
         self.assertTrue(self._classify(
             slug="anthropic",
-            headers=[(b"x-api-key", b"DOH_PLACEHOLDER")],
+            headers=[(b"x-api-key", b"HUMR_PLACEHOLDER")],
             path="/v1/messages",
         ))
 
@@ -466,7 +466,7 @@ class TestAnonymousRequestClassification(unittest.TestCase):
         self.assertTrue(self._classify(
             slug="telegram",
             headers=[(b"host", b"api.telegram.org")],
-            path="/bot000000:DOH_PLACEHOLDER/getUpdates",
+            path="/bot000000:HUMR_PLACEHOLDER/getUpdates",
         ))
 
     def test_telegram_path_without_placeholder_is_rejected(self) -> None:
@@ -1782,8 +1782,8 @@ class TestGatewayEnvRender(unittest.TestCase):
         """Env bindings render static placeholders plus list config."""
         snapshot = [(self._slack_provider(), {"allowed_users": ["U1", "U2"], "home_channel": "DOWNER"})]
         block = credentials_service._render_managed_block(snapshot=snapshot)
-        self.assertIn("SLACK_APP_TOKEN=xapp-DOH_PLACEHOLDER", block)
-        self.assertIn("SLACK_BOT_TOKEN=xoxb-DOH_PLACEHOLDER", block)
+        self.assertIn("SLACK_APP_TOKEN=xapp-HUMR_PLACEHOLDER", block)
+        self.assertIn("SLACK_BOT_TOKEN=xoxb-HUMR_PLACEHOLDER", block)
         self.assertIn("SLACK_ALLOWED_USERS=U1,U2", block)
         # Personal mode resolves the owner DM as the home channel.
         self.assertIn("SLACK_HOME_CHANNEL=DOWNER", block)
@@ -1807,7 +1807,7 @@ class TestGatewayEnvRender(unittest.TestCase):
         block = credentials_service._render_managed_block(snapshot=snapshot)
         self.assertIn(credentials_service.GATEWAY_ENV_BLOCK_BEGIN, block)
         self.assertIn(credentials_service.GATEWAY_ENV_BLOCK_END, block)
-        self.assertIn("TELEGRAM_BOT_TOKEN=000000:DOH_PLACEHOLDER", block)
+        self.assertIn("TELEGRAM_BOT_TOKEN=000000:HUMR_PLACEHOLDER", block)
         self.assertIn("TELEGRAM_ALLOWED_USERS=42,7", block)
 
     def test_empty_snapshot_renders_empty_block(self) -> None:
@@ -1824,29 +1824,29 @@ class TestGatewayEnvRender(unittest.TestCase):
         """GitHub env appears only through the connected-provider snapshot."""
         snapshot = [(self._github_provider(), {})]
         block = credentials_service._render_managed_block(snapshot=snapshot)
-        self.assertIn("GITHUB_TOKEN=DOH_PLACEHOLDER", block)
+        self.assertIn("GITHUB_TOKEN=HUMR_PLACEHOLDER", block)
         self.assertNotIn("COPILOT_GITHUB_TOKEN", block)
 
     def test_connected_openrouter_renders_api_key_placeholder(self) -> None:
         snapshot = [(self._openrouter_provider(), {})]
         block = credentials_service._render_managed_block(snapshot=snapshot)
-        self.assertIn("OPENROUTER_API_KEY=DOH_PLACEHOLDER", block)
+        self.assertIn("OPENROUTER_API_KEY=HUMR_PLACEHOLDER", block)
 
     def test_connected_openai_renders_api_key_placeholder(self) -> None:
         snapshot = [(self._openai_provider(), {})]
         block = credentials_service._render_managed_block(snapshot=snapshot)
-        self.assertIn("OPENAI_API_KEY=DOH_PLACEHOLDER", block)
+        self.assertIn("OPENAI_API_KEY=HUMR_PLACEHOLDER", block)
 
     def test_connected_anthropic_renders_api_key_placeholder(self) -> None:
         snapshot = [(self._anthropic_provider(), {})]
         block = credentials_service._render_managed_block(snapshot=snapshot)
-        self.assertIn("ANTHROPIC_API_KEY=DOH_PLACEHOLDER", block)
+        self.assertIn("ANTHROPIC_API_KEY=HUMR_PLACEHOLDER", block)
 
     def test_missing_list_config_skips_binding(self) -> None:
         """A connected provider without the optional list field omits its env var."""
         snapshot = [(self._telegram_provider(), {})]
         block = credentials_service._render_managed_block(snapshot=snapshot)
-        self.assertIn("TELEGRAM_BOT_TOKEN=000000:DOH_PLACEHOLDER", block)
+        self.assertIn("TELEGRAM_BOT_TOKEN=000000:HUMR_PLACEHOLDER", block)
         self.assertNotIn("TELEGRAM_ALLOWED_USERS", block)
 
     def test_write_preserves_outside_lines_and_replaces_managed_block(self) -> None:
@@ -1870,7 +1870,7 @@ class TestGatewayEnvRender(unittest.TestCase):
         self.assertIn("USER_KEY=keep-me", text)
         self.assertIn("ANOTHER=also-keep", text)
         self.assertNotIn("STALE_VAR=old-value", text)
-        self.assertIn("TELEGRAM_BOT_TOKEN=000000:DOH_PLACEHOLDER", text)
+        self.assertIn("TELEGRAM_BOT_TOKEN=000000:HUMR_PLACEHOLDER", text)
         self.assertIn("TELEGRAM_ALLOWED_USERS=1", text)
 
     def test_write_empty_block_strips_sentinels_entirely(self) -> None:
@@ -1880,7 +1880,7 @@ class TestGatewayEnvRender(unittest.TestCase):
             env_path.write_text(
                 "USER_KEY=keep-me\n"
                 f"{credentials_service.GATEWAY_ENV_BLOCK_BEGIN}\n"
-                "TELEGRAM_BOT_TOKEN=000000:DOH_PLACEHOLDER\n"
+                "TELEGRAM_BOT_TOKEN=000000:HUMR_PLACEHOLDER\n"
                 f"{credentials_service.GATEWAY_ENV_BLOCK_END}\n",
                 encoding="utf-8",
             )
@@ -2000,7 +2000,7 @@ class TestCredentialsServiceChoreography(unittest.IsolatedAsyncioTestCase):
             await service.credentials_invalidate(slug="github")
 
         text = self.env_path.read_text(encoding="utf-8")
-        self.assertIn("GITHUB_TOKEN=DOH_PLACEHOLDER", text)
+        self.assertIn("GITHUB_TOKEN=HUMR_PLACEHOLDER", text)
         self.assertNotIn("COPILOT_GITHUB_TOKEN", text)
         self.assertTrue(models_cache.exists())
         restart_mock.assert_called_once_with(
@@ -2030,7 +2030,7 @@ class TestCredentialsServiceChoreography(unittest.IsolatedAsyncioTestCase):
             await service.credentials_invalidate(slug="openrouter")
 
         text = self.env_path.read_text(encoding="utf-8")
-        self.assertIn("OPENROUTER_API_KEY=DOH_PLACEHOLDER", text)
+        self.assertIn("OPENROUTER_API_KEY=HUMR_PLACEHOLDER", text)
         self.assertFalse(models_cache.exists())
         self.assertEqual(
             [call.kwargs["process_name"] for call in restart_mock.call_args_list],
@@ -2284,7 +2284,7 @@ class TestTransientRefreshGuards(unittest.IsolatedAsyncioTestCase):
             await service.bootstrap()
 
         text = self.env_path.read_text(encoding="utf-8")
-        self.assertIn("TELEGRAM_BOT_TOKEN=000000:DOH_PLACEHOLDER", text)
+        self.assertIn("TELEGRAM_BOT_TOKEN=000000:HUMR_PLACEHOLDER", text)
         self.assertIn("TELEGRAM_ALLOWED_USERS=123", text)
 
     async def test_bootstrap_success_applies_connected_codex_auth_marker(self) -> None:

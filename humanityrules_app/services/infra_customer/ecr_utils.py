@@ -118,8 +118,8 @@ def build_and_push_docker_image(
     """
     Build Docker image and push to ECR.
 
-    Uses local Docker in development (DOH_USE_REMOTE_BUILDER unset) or
-    remote EC2 builder in production (DOH_USE_REMOTE_BUILDER=1).
+    Uses local Docker in development (HUMR_USE_REMOTE_BUILDER unset) or
+    remote EC2 builder in production (HUMR_USE_REMOTE_BUILDER=1).
 
     Args:
         session: Boto3 session with credentials for the target account
@@ -148,7 +148,7 @@ def build_and_push_docker_image(
     image_uri = f"{account_id}.dkr.ecr.{region}.amazonaws.com/{ecr_repo_name}:{image_tag}"
 
     # Choose build method based on environment
-    if os.environ.get("DOH_USE_REMOTE_BUILDER") == "1":
+    if os.environ.get("HUMR_USE_REMOTE_BUILDER") == "1":
         logger.info("Using remote EC2 builder")
         return _build_and_push_remote(
             session=session,
@@ -170,14 +170,14 @@ def test_docker_build(session: boto3.Session, env_slug: str, source_path: Path) 
     """
     Test a Dockerfile by running docker build only (no push).
 
-    Uses local Docker in development (DOH_USE_REMOTE_BUILDER unset) or
-    remote EC2 builder in production (DOH_USE_REMOTE_BUILDER=1).
+    Uses local Docker in development (HUMR_USE_REMOTE_BUILDER unset) or
+    remote EC2 builder in production (HUMR_USE_REMOTE_BUILDER=1).
 
     Returns (success, build_output) tuple.
     """
     logger.info("Running test Docker build for %(source_path)s", {"source_path": str(source_path)})
 
-    if os.environ.get("DOH_USE_REMOTE_BUILDER") == "1":
+    if os.environ.get("HUMR_USE_REMOTE_BUILDER") == "1":
         logger.info("Using remote EC2 builder for test build")
         return _test_build_remote(session=session, env_slug=env_slug, source_path=source_path)
     else:

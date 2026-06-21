@@ -20,7 +20,7 @@ from stacks.cdn_stack import CdnStack
 
 # Configuration
 DOMAIN_NAME = "humanityrules.io"
-AWS_ACCOUNT = os.environ.get("DOH_AWS_ACCOUNT_ID", "555553041615")
+AWS_ACCOUNT = os.environ.get("HUMR_AWS_ACCOUNT_ID", "555553041615")
 AWS_REGION = "us-east-1"
 
 # Environment for stacks that need explicit account/region (e.g., Route53 lookups)

@@ -1,7 +1,7 @@
 """Tiny in-memory PDP decision cache.
 
 Keyed on (provider, sub). Each policy-proxy container serves exactly one app
-(DOH_APP_ID is baked in at deploy time), and v1 has no route-level policy
+(HUMR_APP_ID is baked in at deploy time), and v1 has no route-level policy
 overrides, so expanding the key with app_id or request path would just waste
 memory. Add path-keying here when route overrides land; app_id will never be
 needed as long as one-proxy-per-app holds.

@@ -24,10 +24,10 @@ export HERMES_WEBUI_PORT=8789
 # All AWS access flows through the aws_signer proxy on 9901-9907 instead.
 export AWS_EC2_METADATA_DISABLED=true
 
-: "${DOH_BIN_DIR:?DOH_BIN_DIR must be set}"
-: "${DOH_ROOT:?DOH_ROOT must be set}"
-: "${DOH_RUN_DIR:?DOH_RUN_DIR must be set}"
-: "${DOH_RUNTIME_DIR:?DOH_RUNTIME_DIR must be set}"
+: "${HUMR_BIN_DIR:?HUMR_BIN_DIR must be set}"
+: "${HUMR_ROOT:?HUMR_ROOT must be set}"
+: "${HUMR_RUN_DIR:?HUMR_RUN_DIR must be set}"
+: "${HUMR_RUNTIME_DIR:?HUMR_RUNTIME_DIR must be set}"
 : "${HERMES_CONFIG_TEMPLATE:?HERMES_CONFIG_TEMPLATE must be set}"
 : "${HERMES_HOME:?HERMES_HOME must be set}"
 : "${HERMES_WEBUI_AGENT_DIR:?HERMES_WEBUI_AGENT_DIR must be set}"
@@ -39,8 +39,8 @@ export AWS_EC2_METADATA_DISABLED=true
 : "${HERMES_WEBUI_STATE_DIR:?HERMES_WEBUI_STATE_DIR must be set}"
 : "${HOMEBREW_PREFIX:?HOMEBREW_PREFIX must be set}"
 
-INTEGRATIONS_BROKER_CA_DIR="${DOH_RUN_DIR}/integrations-broker/ca"
-INTEGRATIONS_BROKER_PRIVATE_DIR="${DOH_RUN_DIR}/integrations-broker/private"
+INTEGRATIONS_BROKER_CA_DIR="${HUMR_RUN_DIR}/integrations-broker/ca"
+INTEGRATIONS_BROKER_PRIVATE_DIR="${HUMR_RUN_DIR}/integrations-broker/private"
 INTEGRATIONS_BROKER_PROXY_PORT=9950
 INTEGRATIONS_BROKER_CONTROL_PORT=9951
 MCP_AGGREGATOR_PORT=9952
@@ -65,8 +65,8 @@ cleanup() {
 trap cleanup EXIT INT TERM
 
 require_llm_config() {
-    if [ -z "${DOH_LLM_PROVIDER:-}" ] || [ -z "${DOH_LLM_MODEL:-}" ]; then
-        die "DOH_LLM_PROVIDER and DOH_LLM_MODEL must be set"
+    if [ -z "${HUMR_LLM_PROVIDER:-}" ] || [ -z "${HUMR_LLM_MODEL:-}" ]; then
+        die "HUMR_LLM_PROVIDER and HUMR_LLM_MODEL must be set"
     fi
 }
 
@@ -99,7 +99,7 @@ wait_for_port() {
 
 start_aws_signer() {
     # DOH-owned streaming SigV4 proxy
-    "$HERMES_WEBUI_PYTHON" "${DOH_RUNTIME_DIR}/aws_signer.py" --region "$AWS_DEFAULT_REGION" &
+    "$HERMES_WEBUI_PYTHON" "${HUMR_RUNTIME_DIR}/aws_signer.py" --region "$AWS_DEFAULT_REGION" &
     AWS_SIGNER_PID=$!
     wait_for_port "$AWS_STS_PORT"             "$AWS_SIGNER_PID" "aws-signer"
     wait_for_port "$AWS_BEDROCK_PORT"         "$AWS_SIGNER_PID" "aws-signer"
@@ -116,14 +116,14 @@ start_doh_broker() {
     # local dev), so skip silently — but nono-managed clients will then
     # call Google without HTTPS_PROXY set and get ENOTCONN, which is the
     # expected local-dev behavior.
-    if [ -z "${DOH_ENV_BEARER:-}" ] || [ -z "${DOH_OWNER_USERNAME:-}" ] || [ -z "${DOH_APP_SLUG:-}" ] || [ -z "${DOH_CONTROL_PLANE_URL:-}" ]; then
-        echo "[supervisor] DOH_ENV_BEARER / DOH_OWNER_USERNAME / DOH_APP_SLUG / DOH_CONTROL_PLANE_URL not set; skipping doh broker"
+    if [ -z "${HUMR_ENV_BEARER:-}" ] || [ -z "${HUMR_OWNER_USERNAME:-}" ] || [ -z "${HUMR_APP_SLUG:-}" ] || [ -z "${HUMR_CONTROL_PLANE_URL:-}" ]; then
+        echo "[supervisor] HUMR_ENV_BEARER / HUMR_OWNER_USERNAME / HUMR_APP_SLUG / HUMR_CONTROL_PLANE_URL not set; skipping doh broker"
         return
     fi
     mkdir -p "$INTEGRATIONS_BROKER_CA_DIR" "$INTEGRATIONS_BROKER_PRIVATE_DIR"
     chmod 700 "$INTEGRATIONS_BROKER_PRIVATE_DIR"
-    PYTHONPATH="${DOH_RUNTIME_DIR}/integrations" \
-    "$HERMES_WEBUI_PYTHON" "${DOH_RUNTIME_DIR}/integrations/doh_broker.py" \
+    PYTHONPATH="${HUMR_RUNTIME_DIR}/integrations" \
+    "$HERMES_WEBUI_PYTHON" "${HUMR_RUNTIME_DIR}/integrations/doh_broker.py" \
         --proxy-port "$INTEGRATIONS_BROKER_PROXY_PORT" \
         --control-port "$INTEGRATIONS_BROKER_CONTROL_PORT" \
         --mcp-port "$MCP_AGGREGATOR_PORT" \
@@ -137,20 +137,20 @@ start_doh_broker() {
 }
 
 render_hermes_config() {
-    local doh_llm_base_url="${DOH_LLM_BASE_URL:-}"
-    local doh_aux_provider="${DOH_AUX_PROVIDER:-$DOH_LLM_PROVIDER}"
-    local doh_aux_model="${DOH_AUX_MODEL:-$DOH_LLM_MODEL}"
-    local doh_aux_base_url="${DOH_AUX_BASE_URL:-}"
+    local doh_llm_base_url="${HUMR_LLM_BASE_URL:-}"
+    local doh_aux_provider="${HUMR_AUX_PROVIDER:-$HUMR_LLM_PROVIDER}"
+    local doh_aux_model="${HUMR_AUX_MODEL:-$HUMR_LLM_MODEL}"
+    local doh_aux_base_url="${HUMR_AUX_BASE_URL:-}"
     local providers_block_file
 
-    if [ "$DOH_LLM_PROVIDER" = "bedrock" ]; then
+    if [ "$HUMR_LLM_PROVIDER" = "bedrock" ]; then
         doh_llm_base_url="https://bedrock-runtime.${AWS_DEFAULT_REGION}.amazonaws.com"
     fi
 
     mkdir -p "$HERMES_HOME"
 
     providers_block_file=$(mktemp)
-    if [ "$DOH_LLM_PROVIDER" = "bedrock" ]; then
+    if [ "$HUMR_LLM_PROVIDER" = "bedrock" ]; then
         cat > "$providers_block_file" <<'EOF'
 providers:
   only_configured: false
@@ -165,8 +165,8 @@ EOF
     fi
 
     sed \
-        -e "s|__CONFIG_PROVIDER__|${DOH_LLM_PROVIDER}|g" \
-        -e "s|__MODEL__|${DOH_LLM_MODEL}|g" \
+        -e "s|__CONFIG_PROVIDER__|${HUMR_LLM_PROVIDER}|g" \
+        -e "s|__MODEL__|${HUMR_LLM_MODEL}|g" \
         -e "s|__BASE_URL__|${doh_llm_base_url}|g" \
         -e "s|__AUX_PROVIDER__|${doh_aux_provider}|g" \
         -e "s|__AUX_MODEL__|${doh_aux_model}|g" \
@@ -176,7 +176,7 @@ EOF
         "$HERMES_CONFIG_TEMPLATE" > "$HERMES_HOME/config.yaml"
     rm -f "$providers_block_file"
 
-    if [ "$DOH_LLM_PROVIDER" = "bedrock" ]; then
+    if [ "$HUMR_LLM_PROVIDER" = "bedrock" ]; then
         cat >> "$HERMES_HOME/config.yaml" <<EOF
 
 bedrock:
@@ -192,7 +192,7 @@ ensure_workspace_ownership() {
 }
 
 run_in_nono() {
-    local nono_args=(run --profile "${DOH_RUNTIME_DIR}/hermes-nono-profile.json")
+    local nono_args=(run --profile "${HUMR_RUNTIME_DIR}/hermes-nono-profile.json")
 
     if [ -n "${TAVILY_API_KEY:-}" ]; then
         # Tavily uses JSON payload, which nono doesn't support in its credential injection mechanism. 
@@ -228,7 +228,7 @@ run_in_nono() {
         )
     fi
 
-    local doh_login_path="${HERMES_WEBUI_DEFAULT_WORKSPACE}/.venv/bin:${HERMES_WEBUI_DIR}/venv/bin:${DOH_BIN_DIR}:${HOMEBREW_PREFIX}/bin:${HOMEBREW_PREFIX}/sbin:/usr/local/bin:/usr/local/sbin:/usr/bin:/usr/sbin:/bin:/sbin"
+    local doh_login_path="${HERMES_WEBUI_DEFAULT_WORKSPACE}/.venv/bin:${HERMES_WEBUI_DIR}/venv/bin:${HUMR_BIN_DIR}:${HOMEBREW_PREFIX}/bin:${HOMEBREW_PREFIX}/sbin:/usr/local/bin:/usr/local/sbin:/usr/bin:/usr/sbin:/bin:/sbin"
 
     # Drop privileges to hermeswebui before launching the sandbox so the LLM,
     # terminal, and execute_code all run as UID 1024. Combined with nono's
@@ -245,14 +245,14 @@ run_in_nono() {
     #
     # Only env vars set/transformed here go through /usr/bin/env. Plain
     # pass-throughs (AWS_DEFAULT_REGION, AWS_EC2_METADATA_DISABLED,
-    # HERMES_WEBUI_HOST, HERMES_WEBUI_PORT, DOH_CONTROL_PLANE_URL, ...)
+    # HERMES_WEBUI_HOST, HERMES_WEBUI_PORT, HUMR_CONTROL_PLANE_URL, ...)
     # trickle via nono's allow_vars instead — exported earlier in this script
     # or inherited from the ECS task definition.
-    runuser -u hermeswebui -- "$DOH_BIN_DIR/nono" "${nono_args[@]}" -- /usr/bin/env \
+    runuser -u hermeswebui -- "$HUMR_BIN_DIR/nono" "${nono_args[@]}" -- /usr/bin/env \
         ANTHROPIC_BEDROCK_BASE_URL="http://127.0.0.1:${AWS_BEDROCK_RUNTIME_PORT}" \
         HOME="$HERMES_WEBUI_DEFAULT_WORKSPACE" \
         VIRTUAL_ENV="${HERMES_WEBUI_DEFAULT_WORKSPACE}/.venv" \
-        DOH_LOGIN_PATH="$doh_login_path" \
+        HUMR_LOGIN_PATH="$doh_login_path" \
         PATH="$doh_login_path" \
         NO_PROXY=127.0.0.1,localhost \
         "${broker_env[@]}" \

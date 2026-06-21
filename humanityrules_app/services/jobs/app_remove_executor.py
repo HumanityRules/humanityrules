@@ -87,8 +87,8 @@ def _get_env_session(environment: models.Environment):
     """Assume the DevOpsHero role in the environment's customer AWS account."""
     aws_account = environment.aws_account
     return iam_utils.get_assumed_role_session(
-        access_key=settings.DOH_AWS_ACCESS_KEY,
-        secret_key=settings.DOH_AWS_SECRET_KEY,
+        access_key=settings.HUMR_AWS_ACCESS_KEY,
+        secret_key=settings.HUMR_AWS_SECRET_KEY,
         account_id=aws_account.aws_account_id,
         external_id=str(aws_account.external_id),
         region=environment.aws_region,

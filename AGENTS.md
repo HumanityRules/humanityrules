@@ -8,7 +8,7 @@
 - **Cloud:** AWS-first (ECS/Fargate, CloudFormation/CDK). Additional cloud providers will follow.
 - **Stage:** Pre-beta. Repositioning from the earlier "DevOps Hero" internal-app-deployment framing; the same platform architecture (ABAC, approval workflows, Fargate deployment, secrets management) maps directly onto governed AI assistants.
 
-**Internal codename: DOH / DevOps Hero.** The code, infrastructure, and environment variables still use the `devopshero` and `DOH_` identifiers throughout — treat these as the internal name. 
+**Internal codename: DOH / DevOps Hero.** The code, infrastructure, and environment variables still use the `devopshero` and `HUMR_` identifiers throughout — treat these as the internal name. 
 
 **"Humanity Rules" (abbreviated "HUMR") is the public/product identity; never expose "DevOps Hero" or "DOH" to end users.**
 

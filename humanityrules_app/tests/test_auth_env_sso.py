@@ -33,8 +33,8 @@ _TEST_KID = "test-kid"
 
 def _settings_overrides() -> dict:
     return {
-        "DOH_ENV_SESSION_JWT_PRIVATE_KEY": _PRIVATE_PEM.decode("ascii"),
-        "DOH_ENV_SESSION_JWT_KID": _TEST_KID,
+        "HUMR_ENV_SESSION_JWT_PRIVATE_KEY": _PRIVATE_PEM.decode("ascii"),
+        "HUMR_ENV_SESSION_JWT_KID": _TEST_KID,
         "WORKOS_API_KEY": "test-workos-key",
         "WORKOS_CLIENT_ID": "test-workos-client",
     }

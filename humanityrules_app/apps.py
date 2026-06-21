@@ -67,7 +67,7 @@ class HumanityrulesAppConfig(AppConfig):
 
     def _init_job_worker(self):
         """Start the job worker for web server processes only."""
-        if not settings.DOH_RUN_JOB_WORKER:
+        if not settings.HUMR_RUN_JOB_WORKER:
             return
 
         if _is_management_command():

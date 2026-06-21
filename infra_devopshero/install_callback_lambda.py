@@ -34,8 +34,8 @@ def handler(event, context):
         external_id = props.get("ExternalId")
         stack_region = props.get("StackRegion")
 
-        api_endpoint = os.environ.get("DOH_API_ENDPOINT")
-        api_secret = os.environ.get("DOH_API_SECRET_KEY")
+        api_endpoint = os.environ.get("HUMR_API_ENDPOINT")
+        api_secret = os.environ.get("HUMR_API_SECRET_KEY")
 
         # Prepare payload for DevOpsHero backend
         payload = {
@@ -66,7 +66,7 @@ def handler(event, context):
             if response.status >= 400:
                 raise Exception(f"Backend API returned {response.status}")
         else:
-            logger.error("No DOH_API_ENDPOINT configured, skipping backend callback")
+            logger.error("No HUMR_API_ENDPOINT configured, skipping backend callback")
 
         # Send SUCCESS response back to CloudFormation
         send_cfn_response(

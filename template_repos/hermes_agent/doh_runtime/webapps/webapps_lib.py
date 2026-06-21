@@ -85,7 +85,7 @@ SLUG_PATTERN = re.compile(r"^(?:__)?[a-z][a-z0-9-]{0,30}[a-z0-9]$")
 INTERNAL_SLUG_PREFIX = "__"
 SYSTEM_SLUG_PREFIX = "system."
 
-PUBLIC_HOSTNAME_ENV = "DOH_PUBLIC_HOSTNAME"
+PUBLIC_HOSTNAME_ENV = "HUMR_PUBLIC_HOSTNAME"
 
 
 def die(msg: str, code: int = 1) -> None:
@@ -216,7 +216,7 @@ def matcher_name(slug: str) -> str:
 def public_hostname() -> str:
     """Read the agent's public hostname from the env-bearer overlay var.
 
-    `DOH_PUBLIC_HOSTNAME` is allow-listed in the nono profile and injected
+    `HUMR_PUBLIC_HOSTNAME` is allow-listed in the nono profile and injected
     by CDK at task-definition build time (see deploy_app.py).
     """
     host = os.environ.get(PUBLIC_HOSTNAME_ENV)

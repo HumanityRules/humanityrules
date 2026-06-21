@@ -90,7 +90,7 @@ def integrations_org_aws_accounts_add(request: HttpRequest) -> HttpResponse:
 def aws_install_account_callback(request: HttpRequest) -> JsonResponse:
     """Receive callbacks from the DevOpsHero install Lambda after CloudFormation stack changes."""
     auth_header = request.headers.get("Authorization", "")
-    expected_token = f"Bearer {settings.DOH_API_SECRET_KEY}"
+    expected_token = f"Bearer {settings.HUMR_API_SECRET_KEY}"
 
     if auth_header != expected_token:
         logger.error("AWS callback received with invalid authorization")

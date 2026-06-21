@@ -24,10 +24,10 @@ ARG HERMES_AGENT_EXTRAS=messaging,matrix,cron,cli,dev,tts-premium,slack,pty,honc
 # Runtime layout: /opt/doh and /opt/hermes are image-owned and refreshed into
 # the persistent root on every start. /workspace is user-owned persistent state;
 # /run/doh is ephemeral runtime state inside the task.
-ENV DOH_ROOT=/opt/doh
-ENV DOH_BIN_DIR=/opt/doh/bin
-ENV DOH_RUNTIME_DIR=/opt/doh/runtime
-ENV DOH_RUN_DIR=/run/doh
+ENV HUMR_ROOT=/opt/doh
+ENV HUMR_BIN_DIR=/opt/doh/bin
+ENV HUMR_RUNTIME_DIR=/opt/doh/runtime
+ENV HUMR_RUN_DIR=/run/doh
 ENV HERMES_ROOT=/opt/hermes
 ENV HERMES_CONFIG_TEMPLATE=/opt/hermes/config.yaml.template
 ENV HERMES_WEBUI_DIR=/opt/hermes/webui
@@ -45,44 +45,44 @@ ENV HOMEBREW_PREFIX=/home/linuxbrew/.linuxbrew
 ENV HOMEBREW_NO_ANALYTICS=1
 ENV HOMEBREW_NO_AUTO_UPDATE=1
 ENV HOMEBREW_INSTALL_FROM_API=1
-ENV PATH=${DOH_BIN_DIR}:${PATH}
+ENV PATH=${HUMR_BIN_DIR}:${PATH}
 
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,target=/var/lib/apt,sharing=locked \
-    mkdir -p "$DOH_BIN_DIR" \
+    mkdir -p "$HUMR_BIN_DIR" \
     && apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates curl file git libdbus-1-3 procps rsync unzip zstd \
     && arch="$(dpkg --print-architecture)" \
     && curl -fsSL -o /tmp/nono.deb \
         "https://github.com/always-further/nono/releases/download/v${NONO_VERSION}/nono-cli_${NONO_VERSION}_${arch}.deb" \
     && apt-get install -y --no-install-recommends /tmp/nono.deb \
-    && cp /usr/bin/nono "$DOH_BIN_DIR/nono" \
+    && cp /usr/bin/nono "$HUMR_BIN_DIR/nono" \
     && aws_arch="$(uname -m)" \
     && curl -fsSL -o /tmp/awscliv2.zip "https://awscli.amazonaws.com/awscli-exe-linux-${aws_arch}.zip" \
     && unzip -q /tmp/awscliv2.zip -d /tmp \
-    && /tmp/aws/install --bin-dir "$DOH_BIN_DIR" --install-dir "$DOH_ROOT/aws-cli" \
+    && /tmp/aws/install --bin-dir "$HUMR_BIN_DIR" --install-dir "$HUMR_ROOT/aws-cli" \
     && gws_tar="google-workspace-cli-${aws_arch}-unknown-linux-gnu.tar.gz" \
     && curl -fsSL -o /tmp/gws.tar.gz \
         "https://github.com/googleworkspace/cli/releases/download/v${GWS_VERSION}/${gws_tar}" \
-    && tar -xzf /tmp/gws.tar.gz -C "$DOH_BIN_DIR" \
-    && chmod +x "$DOH_BIN_DIR/gws" \
+    && tar -xzf /tmp/gws.tar.gz -C "$HUMR_BIN_DIR" \
+    && chmod +x "$HUMR_BIN_DIR/gws" \
     && curl -fsSL -o /tmp/caddy.tar.gz \
         "https://github.com/caddyserver/caddy/releases/download/v${CADDY_VERSION}/caddy_${CADDY_VERSION}_linux_${arch}.tar.gz" \
-    && tar -xzf /tmp/caddy.tar.gz -C "$DOH_BIN_DIR" caddy \
-    && chmod +x "$DOH_BIN_DIR/caddy" \
+    && tar -xzf /tmp/caddy.tar.gz -C "$HUMR_BIN_DIR" caddy \
+    && chmod +x "$HUMR_BIN_DIR/caddy" \
     && curl -fsSL -o /tmp/process-compose.tar.gz \
         "https://github.com/F1bonacc1/process-compose/releases/download/v${PROCESS_COMPOSE_VERSION}/process-compose_linux_${arch}.tar.gz" \
-    && tar -xzf /tmp/process-compose.tar.gz -C "$DOH_BIN_DIR" process-compose \
-    && chmod +x "$DOH_BIN_DIR/process-compose" \
-    && curl -fsSL -o "$DOH_BIN_DIR/ttyd" \
+    && tar -xzf /tmp/process-compose.tar.gz -C "$HUMR_BIN_DIR" process-compose \
+    && chmod +x "$HUMR_BIN_DIR/process-compose" \
+    && curl -fsSL -o "$HUMR_BIN_DIR/ttyd" \
         "https://github.com/tsl0922/ttyd/releases/download/${TTYD_VERSION}/ttyd.${aws_arch}" \
-    && chmod +x "$DOH_BIN_DIR/ttyd" \
+    && chmod +x "$HUMR_BIN_DIR/ttyd" \
     && gh_arch="$([ "$arch" = "arm64" ] && echo "arm64" || echo "amd64")" \
     && curl -fsSL -o /tmp/gh.tar.gz \
         "https://github.com/cli/cli/releases/download/v${GH_CLI_VERSION}/gh_${GH_CLI_VERSION}_linux_${gh_arch}.tar.gz" \
     && tar -xzf /tmp/gh.tar.gz -C /tmp \
-    && cp "/tmp/gh_${GH_CLI_VERSION}_linux_${gh_arch}/bin/gh" "$DOH_BIN_DIR/gh" \
-    && chmod +x "$DOH_BIN_DIR/gh" \
+    && cp "/tmp/gh_${GH_CLI_VERSION}_linux_${gh_arch}/bin/gh" "$HUMR_BIN_DIR/gh" \
+    && chmod +x "$HUMR_BIN_DIR/gh" \
     && rm -rf "/tmp/gh.tar.gz" "/tmp/gh_${GH_CLI_VERSION}_linux_${gh_arch}" \
     && sed -i 's|http://deb.debian.org|https://deb.debian.org|g' /etc/apt/sources.list.d/debian.sources \
     && rm -f /tmp/nono.deb /tmp/gws.tar.gz /tmp/caddy.tar.gz /tmp/process-compose.tar.gz \
@@ -91,12 +91,12 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
 # Ensure the sandbox's intended PATH survives login-shell resets. Debian's
 # /etc/profile rewrites PATH from scratch for non-root uids; Hermes' terminal
 # session snapshot uses `bash -l`, so this drop-in restores the supervisor's
-# DOH_LOGIN_PATH after /etc/profile runs. The fallback (used when a login
+# HUMR_LOGIN_PATH after /etc/profile runs. The fallback (used when a login
 # shell isn't descended from supervisor.sh — e.g. ECS Exec sessions debugging
 # the container) keeps Hermes CLI, brew, doh-bin, and system bins reachable so
 # basic tools still work.
 RUN { \
-      echo 'export PATH="${DOH_LOGIN_PATH:-/opt/hermes/webui/venv/bin:/opt/doh/bin:${HOMEBREW_PREFIX}/bin:${HOMEBREW_PREFIX}/sbin:/usr/local/bin:/usr/local/sbin:/usr/bin:/usr/sbin:/bin:/sbin}"'; \
+      echo 'export PATH="${HUMR_LOGIN_PATH:-/opt/hermes/webui/venv/bin:/opt/doh/bin:${HOMEBREW_PREFIX}/bin:${HOMEBREW_PREFIX}/sbin:/usr/local/bin:/usr/local/sbin:/usr/bin:/usr/sbin:/bin:/sbin}"'; \
     } > /etc/profile.d/doh-bin.sh
 
 COPY --chmod=755 build/prune-skills.sh /tmp/prune-skills.sh
@@ -147,7 +147,7 @@ EOF
 
 WORKDIR /
 
-RUN mkdir -p /uv_cache "$HERMES_WEBUI_DIR" "$HERMES_HOME" "$HERMES_WEBUI_DEFAULT_WORKSPACE" "$HERMES_PERSISTENT_ROOT" "$HERMES_CHECKPOINT_ROOT" "$DOH_RUN_DIR" \
+RUN mkdir -p /uv_cache "$HERMES_WEBUI_DIR" "$HERMES_HOME" "$HERMES_WEBUI_DEFAULT_WORKSPACE" "$HERMES_PERSISTENT_ROOT" "$HERMES_CHECKPOINT_ROOT" "$HUMR_RUN_DIR" \
     && rsync -a /apptoo/ "$HERMES_WEBUI_DIR/" \
     && rm -rf /app /apptoo \
     && chown -R hermeswebui:hermeswebui /uv_cache "$HERMES_ROOT" "$HERMES_HOME" "$HERMES_WEBUI_DEFAULT_WORKSPACE"
@@ -198,17 +198,17 @@ USER root
 # Node LTS ("Krypton") under /opt/doh. Image-owned: re-synced from the image on
 # every boot and excluded from the EFS checkpoint (persistent-root-runner.sh
 # lists /opt/doh in IMAGE_OWNED_DIRS). node/npm/npx are symlinked into
-# $DOH_BIN_DIR, already on the agent's PATH. Kept in its own layer, separate
+# $HUMR_BIN_DIR, already on the agent's PATH. Kept in its own layer, separate
 # from agent-browser below, so either can be dropped independently.
 RUN arch="$(dpkg --print-architecture)" \
     && node_arch="$([ "$arch" = "amd64" ] && echo "x64" || echo "arm64")" \
     && curl -fsSL -o /tmp/node.tar.gz \
         "https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-linux-${node_arch}.tar.gz" \
-    && mkdir -p "$DOH_ROOT/node" \
-    && tar -xzf /tmp/node.tar.gz -C "$DOH_ROOT/node" --strip-components=1 \
-    && ln -sf "$DOH_ROOT/node/bin/node" "$DOH_BIN_DIR/node" \
-    && ln -sf "$DOH_ROOT/node/bin/npm" "$DOH_BIN_DIR/npm" \
-    && ln -sf "$DOH_ROOT/node/bin/npx" "$DOH_BIN_DIR/npx" \
+    && mkdir -p "$HUMR_ROOT/node" \
+    && tar -xzf /tmp/node.tar.gz -C "$HUMR_ROOT/node" --strip-components=1 \
+    && ln -sf "$HUMR_ROOT/node/bin/node" "$HUMR_BIN_DIR/node" \
+    && ln -sf "$HUMR_ROOT/node/bin/npm" "$HUMR_BIN_DIR/npm" \
+    && ln -sf "$HUMR_ROOT/node/bin/npx" "$HUMR_BIN_DIR/npx" \
     && node --version && npm --version \
     && rm -f /tmp/node.tar.gz
 
@@ -216,7 +216,7 @@ RUN arch="$(dpkg --print-architecture)" \
 # backends). Depends on the Node layer above (requires Node >= 24, and npm to
 # install). npm resolves its global prefix to /opt/doh/node via node's realpath,
 # so the package + bin land under /opt/doh; the bin is symlinked into
-# $DOH_BIN_DIR. agent-browser bundles prebuilt CLIs for ~7 platforms (~11MB
+# $HUMR_BIN_DIR. agent-browser bundles prebuilt CLIs for ~7 platforms (~11MB
 # each) — keep only the glibc binary for the build arch plus the small JS
 # launcher and drop the rest. Clear npm's download cache (~/.npm) so it neither
 # bloats the image nor lands in the EFS checkpoint. Drop this whole layer to
@@ -224,8 +224,8 @@ RUN arch="$(dpkg --print-architecture)" \
 RUN arch="$(dpkg --print-architecture)" \
     && node_arch="$([ "$arch" = "amd64" ] && echo "x64" || echo "arm64")" \
     && npm install -g "agent-browser@${AGENT_BROWSER_VERSION}" \
-    && ln -sf "$DOH_ROOT/node/bin/agent-browser" "$DOH_BIN_DIR/agent-browser" \
-    && find "$DOH_ROOT/node/lib/node_modules/agent-browser/bin" -maxdepth 1 -type f \
+    && ln -sf "$HUMR_ROOT/node/bin/agent-browser" "$HUMR_BIN_DIR/agent-browser" \
+    && find "$HUMR_ROOT/node/lib/node_modules/agent-browser/bin" -maxdepth 1 -type f \
         -name "agent-browser-*" ! -name "agent-browser-linux-${node_arch}" -delete \
     && agent-browser --version \
     && npm cache clean --force \

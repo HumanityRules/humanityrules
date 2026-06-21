@@ -6,8 +6,8 @@ A tiny reverse proxy that sits in front of apps deployed by DevOps Hero and enfo
 
 1. Reads the `doh_session` cookie.
 2. If missing or invalid, 302s to `https://humanityrules.io/auth/env-start?rd=<current-url>` for the OAuth dance. The control plane mints a session JWT and bounces back to `/__doh_session_install?token=...&rd=...`, which sets the env-scoped cookie and redirects the browser to `rd`.
-3. Verifies the JWT against the central JWKS (fetched from `/.well-known/jwks.json`, cached 15 min). The `aud` claim must match `DOH_ENV_DOMAIN` to block cross-env replay (the env's DNS zone is globally unique; `DOH_ENV_SLUG` is only unique per AWS account).
-4. POSTs to DOH's PDP endpoint with `{app_id, provider, sub, username, path}` and `Authorization: Bearer <DOH_ENV_BEARER>`.
+3. Verifies the JWT against the central JWKS (fetched from `/.well-known/jwks.json`, cached 15 min). The `aud` claim must match `HUMR_ENV_DOMAIN` to block cross-env replay (the env's DNS zone is globally unique; `HUMR_ENV_SLUG` is only unique per AWS account).
+4. POSTs to DOH's PDP endpoint with `{app_id, provider, sub, username, path}` and `Authorization: Bearer <HUMR_ENV_BEARER>`.
 5. On `allow`, proxies to the app container on localhost, injecting trusted identity headers.
 6. On `deny`, returns a 403 with a short message.
 
@@ -19,16 +19,16 @@ requests still receive the `302` directly.
 
 | Var | Example | Purpose |
 | --- | --- | --- |
-| `DOH_APP_ID` | `vmendi-hermes` | App slug, sent in the PDP request. |
-| `DOH_ENV_SLUG` | `doh-sandbox` | For log lines only. |
-| `DOH_ENV_DOMAIN` | `doh-sandbox.dohsandbox.com` | Parent domain the session cookie is scoped to. |
-| `DOH_AUTH_BASE_URL` | `https://humanityrules.io` | Control-plane base URL; the sidecar bounces unauthenticated requests to `<base>/auth/env-start`. |
-| `DOH_JWKS_URL` | `https://humanityrules.io/.well-known/jwks.json` | Central JWKS endpoint for verifying session JWTs. |
-| `DOH_PDP_URL` | `https://humanityrules.io/api/pdp/evaluate` | Central authorization endpoint. |
-| `DOH_ENV_BEARER` | 64 random chars | Environment bearer token. From Secrets Manager. Used by any env component calling the DOH control plane. |
-| `DOH_UPSTREAM_HOST` | `127.0.0.1` | The app container. |
-| `DOH_UPSTREAM_PORT` | `8787` | The app container's port. |
-| `DOH_LISTEN_PORT` | `8443` | Port the policy proxy listens on. ALB routes here. |
+| `HUMR_APP_ID` | `vmendi-hermes` | App slug, sent in the PDP request. |
+| `HUMR_ENV_SLUG` | `doh-sandbox` | For log lines only. |
+| `HUMR_ENV_DOMAIN` | `doh-sandbox.dohsandbox.com` | Parent domain the session cookie is scoped to. |
+| `HUMR_AUTH_BASE_URL` | `https://humanityrules.io` | Control-plane base URL; the sidecar bounces unauthenticated requests to `<base>/auth/env-start`. |
+| `HUMR_JWKS_URL` | `https://humanityrules.io/.well-known/jwks.json` | Central JWKS endpoint for verifying session JWTs. |
+| `HUMR_PDP_URL` | `https://humanityrules.io/api/pdp/evaluate` | Central authorization endpoint. |
+| `HUMR_ENV_BEARER` | 64 random chars | Environment bearer token. From Secrets Manager. Used by any env component calling the DOH control plane. |
+| `HUMR_UPSTREAM_HOST` | `127.0.0.1` | The app container. |
+| `HUMR_UPSTREAM_PORT` | `8787` | The app container's port. |
+| `HUMR_LISTEN_PORT` | `8443` | Port the policy proxy listens on. ALB routes here. |
 
 ## Local development
 

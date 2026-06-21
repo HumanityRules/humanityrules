@@ -11,7 +11,7 @@ from .infra_customer import iam_utils
 
 logger = logging.getLogger(__name__)
 
-DOH_APP_PERMISSIONS_POLICY_NAME = "doh-app-permissions"
+HUMR_APP_PERMISSIONS_POLICY_NAME = "doh-app-permissions"
 
 CURATED_SERVICES = {"s3", "sqs", "dynamodb", "secretsmanager", "kms", "sns", "ssm", "logs", "ecs", "ecr", "lambda", "ses"}
 
@@ -73,7 +73,7 @@ def get_or_create_app_permissions(app, environment) -> models.AppPermissions:
 
     try:
         statements = iam_utils.read_app_permissions_policy(
-            environment=environment, app=app, policy_name=DOH_APP_PERMISSIONS_POLICY_NAME,
+            environment=environment, app=app, policy_name=HUMR_APP_PERMISSIONS_POLICY_NAME,
         )
     except Exception:
         logger.exception("Failed to seed AppPermissions from AWS for %s/%s", app.slug, environment.slug)

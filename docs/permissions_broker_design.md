@@ -8,7 +8,7 @@ role** without any DOH credential entering the sandbox.
 
 - **This editor is self-referential.** It edits permissions for *this* Hermes
   deployment's own task role — the `(app, environment)` is fixed and implicit,
-  resolved by the broker from its own identity (`DOH_APP_SLUG` + the env-scoped
+  resolved by the broker from its own identity (`HUMR_APP_SLUG` + the env-scoped
   bearer). There is exactly one `AppPermissionRequest` of interest.
 - **Full breadth.** All curated services plus the full IAM service catalog, the
   five access levels (`Read`, `Write`, `List`, `Tagging`, `Permissions

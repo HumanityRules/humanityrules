@@ -1,8 +1,8 @@
 """Tests for the env-bearer overlay in deploy_app.AppStack.
 
-Verifies that containers needing env-bearer receive the DOH_ENV_BEARER
-secret and the DOH_ENV_SLUG / DOH_CONTROL_PLANE_URL / DOH_OWNER_USERNAME /
-DOH_PUBLIC_HOSTNAME plain vars, and that other containers in the same task
+Verifies that containers needing env-bearer receive the HUMR_ENV_BEARER
+secret and the HUMR_ENV_SLUG / HUMR_CONTROL_PLANE_URL / HUMR_OWNER_USERNAME /
+HUMR_PUBLIC_HOSTNAME plain vars, and that other containers in the same task
 do not.
 """
 
@@ -95,13 +95,13 @@ class TestEnvBearerOverlay(SimpleTestCase):
 
         hermes = _container_defs_by_name(template)["hermes"]
         env = {e["Name"]: e["Value"] for e in hermes.get("Environment", [])}
-        self.assertEqual(env.get("DOH_ENV_SLUG"), "staging")
-        self.assertEqual(env.get("DOH_OWNER_USERNAME"), "vmendi")
-        self.assertTrue(env.get("DOH_CONTROL_PLANE_URL", "").startswith("https://"))
-        # No shared_alb_hosted_zone passed → no DOH_PUBLIC_HOSTNAME (path-based routing).
-        self.assertNotIn("DOH_PUBLIC_HOSTNAME", env)
+        self.assertEqual(env.get("HUMR_ENV_SLUG"), "staging")
+        self.assertEqual(env.get("HUMR_OWNER_USERNAME"), "vmendi")
+        self.assertTrue(env.get("HUMR_CONTROL_PLANE_URL", "").startswith("https://"))
+        # No shared_alb_hosted_zone passed → no HUMR_PUBLIC_HOSTNAME (path-based routing).
+        self.assertNotIn("HUMR_PUBLIC_HOSTNAME", env)
         secret_names = {s["Name"] for s in hermes.get("Secrets", [])}
-        self.assertIn("DOH_ENV_BEARER", secret_names)
+        self.assertIn("HUMR_ENV_BEARER", secret_names)
 
     def test_public_hostname_overlay_when_alb_hosted_zone_set(self) -> None:
         template = _render(
@@ -122,7 +122,7 @@ class TestEnvBearerOverlay(SimpleTestCase):
         hermes = _container_defs_by_name(template)["hermes"]
         env = {e["Name"]: e["Value"] for e in hermes.get("Environment", [])}
         # subdomain="my-app" + zone "example.com" → "my-app.example.com".
-        self.assertEqual(env.get("DOH_PUBLIC_HOSTNAME"), "my-app.example.com")
+        self.assertEqual(env.get("HUMR_PUBLIC_HOSTNAME"), "my-app.example.com")
 
     def test_no_owner_username_omits_the_env_var(self) -> None:
         template = _render(
@@ -141,10 +141,10 @@ class TestEnvBearerOverlay(SimpleTestCase):
 
         container = _container_defs_by_name(template)["policy-proxy"]
         env = {e["Name"]: e["Value"] for e in container.get("Environment", [])}
-        self.assertEqual(env.get("DOH_ENV_SLUG"), "staging")
-        self.assertNotIn("DOH_OWNER_USERNAME", env)
+        self.assertEqual(env.get("HUMR_ENV_SLUG"), "staging")
+        self.assertNotIn("HUMR_OWNER_USERNAME", env)
         secret_names = {s["Name"] for s in container.get("Secrets", [])}
-        self.assertIn("DOH_ENV_BEARER", secret_names)
+        self.assertIn("HUMR_ENV_BEARER", secret_names)
 
     def test_policy_proxy_container_gets_bearer_without_requires_flag(self) -> None:
         template = _render(
@@ -169,16 +169,16 @@ class TestEnvBearerOverlay(SimpleTestCase):
         containers = _container_defs_by_name(template)
         proxy = containers["policy-proxy"]
         proxy_env = {e["Name"]: e["Value"] for e in proxy.get("Environment", [])}
-        self.assertEqual(proxy_env.get("DOH_ENV_SLUG"), "staging")
-        self.assertEqual(proxy_env.get("DOH_OWNER_USERNAME"), "vmendi")
+        self.assertEqual(proxy_env.get("HUMR_ENV_SLUG"), "staging")
+        self.assertEqual(proxy_env.get("HUMR_OWNER_USERNAME"), "vmendi")
         proxy_secret_names = {s["Name"] for s in proxy.get("Secrets", [])}
-        self.assertIn("DOH_ENV_BEARER", proxy_secret_names)
+        self.assertIn("HUMR_ENV_BEARER", proxy_secret_names)
 
         hermes = containers["hermes"]
         hermes_env = {e["Name"]: e["Value"] for e in hermes.get("Environment", [])}
-        self.assertNotIn("DOH_ENV_SLUG", hermes_env)
+        self.assertNotIn("HUMR_ENV_SLUG", hermes_env)
         hermes_secret_names = {s["Name"] for s in hermes.get("Secrets", [])}
-        self.assertNotIn("DOH_ENV_BEARER", hermes_secret_names)
+        self.assertNotIn("HUMR_ENV_BEARER", hermes_secret_names)
 
     def test_container_without_flag_gets_no_overlay(self) -> None:
         template = _render(
@@ -204,8 +204,8 @@ class TestEnvBearerOverlay(SimpleTestCase):
 
         dind = _container_defs_by_name(template)["docker-dind"]
         env = {e["Name"]: e["Value"] for e in dind.get("Environment", [])}
-        self.assertNotIn("DOH_ENV_SLUG", env)
-        self.assertNotIn("DOH_OWNER_USERNAME", env)
-        self.assertNotIn("DOH_CONTROL_PLANE_URL", env)
+        self.assertNotIn("HUMR_ENV_SLUG", env)
+        self.assertNotIn("HUMR_OWNER_USERNAME", env)
+        self.assertNotIn("HUMR_CONTROL_PLANE_URL", env)
         secret_names = {s["Name"] for s in dind.get("Secrets", [])}
-        self.assertNotIn("DOH_ENV_BEARER", secret_names)
+        self.assertNotIn("HUMR_ENV_BEARER", secret_names)

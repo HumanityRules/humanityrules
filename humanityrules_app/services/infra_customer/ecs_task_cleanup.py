@@ -60,7 +60,7 @@ def load_env():
         sys.exit(1)
     load_dotenv(env_path)
     
-    required_vars = ["DOH_AWS_ACCESS_KEY", "DOH_AWS_SECRET_KEY"]
+    required_vars = ["HUMR_AWS_ACCESS_KEY", "HUMR_AWS_SECRET_KEY"]
     missing = [var for var in required_vars if not os.getenv(var)]
     if missing:
         print(f"❌ Missing environment variables: {', '.join(missing)}")
@@ -336,8 +336,8 @@ def main():
     load_env()
     
     session = iam_utils.get_assumed_role_session(
-        access_key=os.getenv("DOH_AWS_ACCESS_KEY"),
-        secret_key=os.getenv("DOH_AWS_SECRET_KEY"),
+        access_key=os.getenv("HUMR_AWS_ACCESS_KEY"),
+        secret_key=os.getenv("HUMR_AWS_SECRET_KEY"),
         account_id=TARGET_ACCOUNT_ID,
         external_id=TARGET_EXTERNAL_ID,
         region=TARGET_REGION,

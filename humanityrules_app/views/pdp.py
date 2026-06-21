@@ -2,7 +2,7 @@
 Policy Decision Point (PDP) endpoint — called by policy proxies inside customer
 environments to authorize each request. See docs/policy_proxy_design.md.
 
-Auth: env bearer token from the env's shared-secrets (DOH_ENV_BEARER). The
+Auth: env bearer token from the env's shared-secrets (HUMR_ENV_BEARER). The
 token identifies the Environment; the environment's organization then scopes
 the ABAC lookup.
 """

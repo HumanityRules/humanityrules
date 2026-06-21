@@ -17,7 +17,7 @@ those env vars from `${HERMES_HOME}/.env` via its existing
 
 The token's *content* doesn't matter on the wire to api.telegram.org:
 the broker's TLS-intercept proxy rewrites the placeholder
-`000000:DOH_PLACEHOLDER` → real token on every request. The gateway
+`000000:HUMR_PLACEHOLDER` → real token on every request. The gateway
 sees the placeholder forever; only its *presence* matters.
 
 ## The end result
@@ -31,7 +31,7 @@ the change requires it.
 HERMES_DEBUG=1                                    ← user/onboarding lines preserved
 
 # === DOH-MANAGED-INTEGRATIONS BEGIN ===
-TELEGRAM_BOT_TOKEN=000000:DOH_PLACEHOLDER
+TELEGRAM_BOT_TOKEN=000000:HUMR_PLACEHOLDER
 TELEGRAM_ALLOWED_USERS=1,2,3
 # === DOH-MANAGED-INTEGRATIONS END ===
 ```
@@ -48,10 +48,10 @@ Telegram:
 
 ```python
 credential_method=VaultUrlRewrite(
-    placeholder="000000:DOH_PLACEHOLDER",
+    placeholder="000000:HUMR_PLACEHOLDER",
 ),
 env_bindings=(
-    EnvBinding(env_var="TELEGRAM_BOT_TOKEN", value="000000:DOH_PLACEHOLDER"),
+    EnvBinding(env_var="TELEGRAM_BOT_TOKEN", value="000000:HUMR_PLACEHOLDER"),
     EnvBinding(env_var="TELEGRAM_ALLOWED_USERS", config_key="allowed_users", list_separator=","),
 )
 ```

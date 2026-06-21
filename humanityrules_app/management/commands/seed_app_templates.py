@@ -125,7 +125,7 @@ OPENCLAW_TEMPLATE = {
 
 _HERMES_LLM_VARS = [
     {
-        "name": "DOH_LLM_PROVIDER",
+        "name": "HUMR_LLM_PROVIDER",
         "group": "Main LLM",
         "category": "config",
         "description": "Hermes provider name: bedrock, custom, anthropic, openrouter, or nous",
@@ -136,7 +136,7 @@ _HERMES_LLM_VARS = [
         "user_editable": True,
     },
     {
-        "name": "DOH_LLM_MODEL",
+        "name": "HUMR_LLM_MODEL",
         "group": "Main LLM",
         "category": "config",
         "description": "LLM model identifier (e.g. us.anthropic.claude-opus-4-7, us.anthropic.claude-sonnet-4-6, gpt-5.4-mini)",
@@ -147,7 +147,7 @@ _HERMES_LLM_VARS = [
         "user_editable": True,
     },
     {
-        "name": "DOH_LLM_BASE_URL",
+        "name": "HUMR_LLM_BASE_URL",
         "group": "Main LLM",
         "category": "config",
         "description": "Provider API base URL (required for custom provider, auto-derived for bedrock and nous, empty otherwise)",
@@ -158,7 +158,7 @@ _HERMES_LLM_VARS = [
         "user_editable": True,
     },
     {
-        "name": "DOH_AUX_PROVIDER",
+        "name": "HUMR_AUX_PROVIDER",
         "group": "Auxiliary LLM",
         "category": "config",
         "description": "Auxiliary LLM provider for vision, compression, session_search, skills_hub, approval, mcp, flush_memories, web_extract (defaults to main provider when unset)",
@@ -169,7 +169,7 @@ _HERMES_LLM_VARS = [
         "user_editable": True,
     },
     {
-        "name": "DOH_AUX_MODEL",
+        "name": "HUMR_AUX_MODEL",
         "group": "Auxiliary LLM",
         "category": "config",
         "description": "Auxiliary LLM model — cheaper/faster than main (e.g. us.anthropic.claude-sonnet-4-6, gpt-5.4-mini)",
@@ -180,7 +180,7 @@ _HERMES_LLM_VARS = [
         "user_editable": True,
     },
     {
-        "name": "DOH_AUX_BASE_URL",
+        "name": "HUMR_AUX_BASE_URL",
         "group": "Auxiliary LLM",
         "category": "config",
         "description": "Auxiliary provider API base URL (required for custom, auto-derived for bedrock, empty otherwise)",
@@ -294,7 +294,7 @@ HERMES_PERSONAL_TEMPLATE = {
             "health_check_grace_period": 60,
             "efs_mounts": ["checkpoint"],
             "environment": {
-                "DOH_MERGE_INTEGRATION_ENABLED": "true",
+                "HUMR_MERGE_INTEGRATION_ENABLED": "true",
             },
             "host_mounts": [
                 {

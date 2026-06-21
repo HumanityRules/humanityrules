@@ -30,7 +30,7 @@ _ORIGIN_LIKE_HEADERS = frozenset({"origin", "referer"})
 
 
 def _host_for_caddy(host: str) -> str:
-    """Strip the port from Host so Caddy matches DOH_PUBLIC_HOSTNAME (e.g. localhost)."""
+    """Strip the port from Host so Caddy matches HUMR_PUBLIC_HOSTNAME (e.g. localhost)."""
     if not host:
         return host
     if host.startswith("["):
@@ -44,7 +44,7 @@ def _host_for_caddy(host: str) -> str:
 
 
 def _strip_port_from_url(value: str) -> str:
-    """Drop explicit :port from http(s) URLs so WebUI CSRF matches DOH_PUBLIC_HOSTNAME."""
+    """Drop explicit :port from http(s) URLs so WebUI CSRF matches HUMR_PUBLIC_HOSTNAME."""
     parsed = urlparse(value)
     if parsed.scheme not in ("http", "https") or not parsed.hostname or parsed.port is None:
         return value

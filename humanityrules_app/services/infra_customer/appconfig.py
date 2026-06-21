@@ -41,7 +41,7 @@ class ImageSource(StrEnum):
     # task triggers env-level provisioning (ECR stack, auth Lambda, per-env
     # auth config secret) and forces the proxy to be the ALB target. Fields
     # consumed: upstream_container (name of the sibling the proxy fronts;
-    # resolved into DOH_UPSTREAM_HOST=127.0.0.1 + DOH_UPSTREAM_PORT env vars).
+    # resolved into HUMR_UPSTREAM_HOST=127.0.0.1 + HUMR_UPSTREAM_PORT env vars).
     POLICY_PROXY = "policy_proxy"
 
 
@@ -246,8 +246,8 @@ class ContainerConfig:
     cpu_reservation: int | None = None
 
     # Opt this container in to the DOH control-plane bearer overlay:
-    # DOH_ENV_BEARER (from shared-secrets), DOH_ENV_SLUG, DOH_APP_SLUG, and
-    # DOH_OWNER_USERNAME (if the owning App has an owner tag). Any env-resident
+    # HUMR_ENV_BEARER (from shared-secrets), HUMR_ENV_SLUG, HUMR_APP_SLUG, and
+    # HUMR_OWNER_USERNAME (if the owning App has an owner tag). Any env-resident
     # component that calls the DOH control plane sets this — Hermes integrations
     # today; future env-resident services later. Policy-proxy containers receive
     # the overlay implicitly from image_source=policy_proxy, so templates do not
@@ -315,7 +315,7 @@ class AppConfig:
     serialize_task_replacement: bool = False
 
     # Owner's username (from the App's `owner` ResourceTag) when the app has
-    # one, else None. Injected into env-bearer containers as DOH_OWNER_USERNAME so
+    # one, else None. Injected into env-bearer containers as HUMR_OWNER_USERNAME so
     # they can identify themselves to DOH's control plane on behalf of this
     # user. None for apps without an owner tag (typical multi-user apps).
     owner_username: str | None = None

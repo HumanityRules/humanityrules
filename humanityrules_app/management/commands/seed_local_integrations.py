@@ -1,7 +1,7 @@
 """Seed the DB rows the local Hermes compose stack needs for integrations.
 
 The integrations broker (`integrations_broker.py`) only starts when supervisor
-sees DOH_CONTROL_PLANE_URL / DOH_ENV_BEARER / DOH_OWNER_USERNAME / DOH_APP_SLUG.
+sees HUMR_CONTROL_PLANE_URL / HUMR_ENV_BEARER / HUMR_OWNER_USERNAME / HUMR_APP_SLUG.
 Locally those point the broker at the laptop's Django (via the devopshero.ngrok.io
 tunnel) and identify it as one existing App owned by one existing user.
 
@@ -59,7 +59,7 @@ class Command(BaseCommand):
         parser.add_argument("--owner-username", required=True, help="Username that owns --app-slug (e.g. 'vmendi@gmail.com').")
         parser.add_argument("--env-slug", default=DEFAULT_ENV_SLUG, help=f"Environment slug to create (default '{DEFAULT_ENV_SLUG}').")
         parser.add_argument("--hosted-zone", default=DEFAULT_HOSTED_ZONE, help=f"shared_alb_hosted_zone; must suffix-match the WebUI host (default '{DEFAULT_HOSTED_ZONE}').")
-        parser.add_argument("--bearer", default=DEFAULT_BEARER, help=f"Raw bearer to export as DOH_ENV_BEARER (default '{DEFAULT_BEARER}').")
+        parser.add_argument("--bearer", default=DEFAULT_BEARER, help=f"Raw bearer to export as HUMR_ENV_BEARER (default '{DEFAULT_BEARER}').")
         parser.add_argument("--region", default="us-east-1", help="aws_region for the env row (cosmetic locally; default 'us-east-1').")
         parser.add_argument(
             "--template",
@@ -235,7 +235,7 @@ class Command(BaseCommand):
         return target
 
     def _mint_bearer(self, env: Environment, raw: str) -> None:
-        """Store only the SHA-256 hash on DOH; the raw value goes in the container's DOH_ENV_BEARER."""
+        """Store only the SHA-256 hash on DOH; the raw value goes in the container's HUMR_ENV_BEARER."""
         token_hash = hashlib.sha256(raw.encode("utf-8")).hexdigest()
         _, created = EnvironmentBearerToken.objects.update_or_create(
             environment=env,
@@ -249,9 +249,9 @@ class Command(BaseCommand):
         self.stdout.write("")
         self.stdout.write("Set these in template_repos/hermes_agent_local/.env:")
         self.stdout.write("")
-        self.stdout.write("  DOH_CONTROL_PLANE_URL=https://devopshero.ngrok.io")
-        self.stdout.write(f"  DOH_ENV_BEARER={raw}")
-        self.stdout.write(f"  DOH_OWNER_USERNAME={owner_username}")
-        self.stdout.write(f"  DOH_APP_SLUG={app_slug}")
+        self.stdout.write("  HUMR_CONTROL_PLANE_URL=https://devopshero.ngrok.io")
+        self.stdout.write(f"  HUMR_ENV_BEARER={raw}")
+        self.stdout.write(f"  HUMR_OWNER_USERNAME={owner_username}")
+        self.stdout.write(f"  HUMR_APP_SLUG={app_slug}")
         self.stdout.write("")
         self.stdout.write("Then: cd template_repos/hermes_agent_local && docker compose up --build")
