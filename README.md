@@ -1,6 +1,6 @@
 # Humanity Rules
 
-Enterprise platform for deploying governed AI personal assistants inside your company’s own cloud (AWS VPC) — curated skills, sandboxed execution, ABAC permissions, SSO, approval workflows, and full audit trails. Built on the open-source Hermes agent and Hermes WebUI.
+Enterprise platform for deploying governed AI assistants inside your company’s own cloud (AWS VPC) — curated skills, sandboxed execution, ABAC permissions, SSO, approval workflows, and full audit trails. Built on the open-source Hermes agent and Hermes WebUI.
 
 
 ## Setup

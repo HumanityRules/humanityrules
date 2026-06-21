@@ -1,12 +1,12 @@
 # Project synopsis
 
-**Humanity Rules** is an enterprise platform for deploying governed AI personal assistants inside a company’s own cloud (AWS VPC). Every employee gets a real AI agent with tool execution, persistent memory, and multi-channel access (Slack, web, a personal URL), running isolated and always-on in the company’s own account.
+**Humanity Rules** is an enterprise platform for deploying governed AI assistants inside a company’s own cloud (AWS VPC). Every employee gets a real AI agent with tool execution, persistent memory, and multi-channel access (Slack, web, a personal URL), running isolated and always-on in the company’s own account.
 
 - **The Problem:** AI agents today run client-side, on employees’ laptops, creating a security and governance nightmare. The company can’t see or control what employees do with them, credentials and data leak through unvetted plugins/MCP servers, and the setup locks the company into a single lab’s model and harness. Agents running on third-party accounts instead of the company’s own cloud are not acceptable for regulation and audit.
 - **The Solution:** Deploy each employee’s assistant into the company’s VPC with governance built in from the start: curated, security-audited skills; model-provider control (e.g., Bedrock, so nothing leaves the VPC); sandboxed execution; tight ABAC permissions; Okta/SSO auth; approval workflows; and full audit trails.
 - **The moat:** Not the model, not the harness — the enterprise delivery platform. We sell trust: a curated, centrally controlled, audited ecosystem of agentic tools with sensible security defaults that are easy to configure.
 - **Cloud:** AWS-first (ECS/Fargate, CloudFormation/CDK). Additional cloud providers will follow.
-- **Stage:** Pre-beta. Repositioning from the earlier "DevOps Hero" internal-app-deployment framing; the same platform architecture (ABAC, approval workflows, Fargate deployment, secrets management) maps directly onto governed personal assistants.
+- **Stage:** Pre-beta. Repositioning from the earlier "DevOps Hero" internal-app-deployment framing; the same platform architecture (ABAC, approval workflows, Fargate deployment, secrets management) maps directly onto governed AI assistants.
 
 **Internal codename: DOH / DevOps Hero.** The code, infrastructure, and environment variables still use the `devopshero` and `DOH_` identifiers throughout — treat these as the internal name. 
 
