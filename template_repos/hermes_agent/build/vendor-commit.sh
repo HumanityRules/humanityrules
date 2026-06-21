@@ -5,7 +5,7 @@
 # Hermes. Committing that edit correctly spans TWO repos, with three easy ways to
 # get it wrong:
 #   1. Detached HEAD: a fresh `submodule update` leaves the submodule at the
-#      pinned commit, NOT on doh/v*. Commits made there are orphans.
+#      pinned commit, NOT on humr/v*. Commits made there are orphans.
 #   2. Push-before-pin: you can commit a superproject gitlink pointing at a
 #      commit that only exists on your laptop. Local + prod builds (COPY . .)
 #      still work, but a fresh clone / re-init can't fetch the SHA. Silent.
@@ -33,13 +33,13 @@ if [ "${1:-}" = "-m" ]; then shift; msg=${1:?missing message after -m}; shift ||
 
 branch=$(git -C "$sub" rev-parse --abbrev-ref HEAD)
 if [ "$branch" = "HEAD" ]; then
-    echo "FATAL: $sub is in detached HEAD (at the pinned commit), not on a doh/v* branch." >&2
+    echo "FATAL: $sub is in detached HEAD (at the pinned commit), not on a humr/v* branch." >&2
     echo "  Check out the fork branch first, e.g.:" >&2
-    echo "    git -C $sub checkout \$(git -C $sub for-each-ref --format='%(refname:short)' 'refs/heads/doh/*' | head -1)" >&2
+    echo "    git -C $sub checkout \$(git -C $sub for-each-ref --format='%(refname:short)' 'refs/heads/humr/*' | head -1)" >&2
     exit 1
 fi
-case "$branch" in doh/*) ;; *)
-    echo "FATAL: $sub is on '$branch', expected a doh/* fork branch. Refusing to commit." >&2
+case "$branch" in humr/*) ;; *)
+    echo "FATAL: $sub is on '$branch', expected a humr/* fork branch. Refusing to commit." >&2
     exit 1 ;;
 esac
 

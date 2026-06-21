@@ -104,7 +104,7 @@ COPY --chmod=755 build/check-vendor.sh /tmp/check-vendor.sh
 COPY --chmod=755 build/overlay-webui.sh /tmp/overlay-webui.sh
 
 # Vendored Hermes agent fork (git submodule at vendor/hermes-agent). It carries
-# HUMR changes as commits on its doh/v* branch, so we copy it straight into place.
+# HUMR changes as commits on its humr/v* branch, so we copy it straight into place.
 # The submodule's .git pointer is kept out of the build context by .dockerignore
 # (**/.git). Docker layer caching makes a same-pin rebuild a cache hit.
 COPY vendor/hermes-agent ${HERMES_WEBUI_AGENT_DIR}/
