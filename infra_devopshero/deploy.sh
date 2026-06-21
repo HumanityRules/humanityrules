@@ -57,35 +57,31 @@ echo "Deploying CDK Stacks"
 echo "========================================"
 
 echo ""
-echo "1/7: Deploying Certificate Stack (ACM)..."
+echo "1/6: Deploying Certificate Stack (ACM)..."
 echo "     This may take a few minutes for DNS validation."
 cdk deploy doh-prod-cert --require-approval never
 
 echo ""
-echo "2/7: Deploying VPC and Storage Stacks..."
+echo "2/6: Deploying VPC and Storage Stacks..."
 cdk deploy doh-prod-vpc doh-prod-storage --require-approval never
 
 echo ""
-echo "3/7: Deploying Lambda Stack..."
+echo "3/6: Deploying Lambda Stack..."
 cdk deploy doh-prod-lambda --require-approval never
 
 echo ""
-echo "4/7: Deploying Cluster and Database Stacks..."
+echo "4/6: Deploying Cluster and Database Stacks..."
 echo "     Aurora Serverless v2 may take 10-15 minutes."
 cdk deploy doh-prod-cluster doh-prod-database --require-approval never
 
 echo ""
-echo "5/7: Deploying App Stack (ECR + ECS)..."
+echo "5/6: Deploying App Stack (ECR + ECS)..."
 cdk deploy doh-prod-app --require-approval never
 
 echo ""
-echo "6/7: Deploying CDN Stack (CloudFront + Route53)..."
+echo "6/6: Deploying CDN Stack (CloudFront + Route53)..."
 echo "     CloudFront distribution may take 10-15 minutes to deploy."
 cdk deploy doh-prod-cdn --require-approval never
-
-echo ""
-echo "7/7: Deploying Redirect Stack (devopshero.co -> devopshero.ai)..."
-cdk deploy doh-prod-redirect --require-approval never
 
 echo ""
 echo "========================================"
@@ -136,7 +132,7 @@ echo "Deployment Complete!"
 echo "========================================"
 echo ""
 echo "Your app is now available at:"
-echo "  https://devopshero.ai"
+echo "  https://humanityrules.io"
 echo ""
 echo "CloudFront distribution may take additional time to propagate globally."
 echo ""

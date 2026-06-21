@@ -41,7 +41,7 @@ class LambdaStack(Stack):
         )
 
         # Get API endpoint and secret from environment (set during deployment)
-        api_endpoint = os.environ.get("DOH_API_ENDPOINT", "https://devopshero.ai")
+        api_endpoint = os.environ.get("DOH_API_ENDPOINT", "https://humanityrules.io")
         api_secret_key = os.environ.get("DOH_API_SECRET_KEY", "")
 
         # Lambda function with inline code
