@@ -8,7 +8,7 @@ token store, and cert minter that consume this catalog live in
 
 To add a provider that uses an existing credential method, append a
 `TlsProviderSpec` to `TLS_INTERCEPT_PROVIDER_SPECS` — no mechanism change
-needed. A new credential method also needs `_request_addresses_doh_credential`
+needed. A new credential method also needs `_request_addresses_humr_credential`
 and `_rewrite_request_for_provider` branches in `tls_intercept`.
 """
 

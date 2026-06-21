@@ -13,7 +13,7 @@ reverse: you *pick* a raw token, DOH hashes and stores it, and you use that
 same raw value in your local refresher's ``HUMR_ENV_BEARER`` env var.
 
 Usage:
-    uv run manage.py doh_seed_env_bearer --env default --token local-dev-bearer-token
+    uv run manage.py humr_seed_env_bearer --env default --token local-dev-bearer-token
 
 If ``--token`` is omitted, a 64-char random token is generated and printed.
 """

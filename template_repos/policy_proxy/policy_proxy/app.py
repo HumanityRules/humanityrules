@@ -3,9 +3,9 @@
 The sidecar verifies the session cookie via the central JWKS, runs PDP, and
 proxies authorized traffic to the upstream container.
 
-It also exposes ``/__doh_session_install``, the landing path the control plane
+It also exposes ``/__humr_session_install``, the landing path the control plane
 redirects browsers to after a successful IdP dance: it verifies the session
-JWT minted upstream, sets the ``doh_session`` cookie scoped to the env domain,
+JWT minted upstream, sets the ``humr_session`` cookie scoped to the env domain,
 and bounces the browser to the original ``rd`` URL.
 """
 
@@ -31,7 +31,7 @@ logger = logging.getLogger(__name__)
 
 JWKS_CACHE_TTL_SECONDS = 15 * 60
 INTERNAL_PATH_PREFIX = "/__policy_proxy"
-SESSION_INSTALL_PATH = "/__doh_session_install"
+SESSION_INSTALL_PATH = "/__humr_session_install"
 AUTH_URL_HEADER = "X-DOH-Auth-URL"
 MIN_COOKIE_TTL_SECONDS = 60
 

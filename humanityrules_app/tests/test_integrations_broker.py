@@ -1,4 +1,4 @@
-"""Tests for doh_broker.py.
+"""Tests for humr_broker.py.
 
 The broker runs inside the customer-env Hermes container (not Django), but
 its correctness is load-bearing for the WebUI extension's Integrations pane
@@ -54,7 +54,7 @@ def _install_mcp_aggregator_stub_if_needed() -> None:
 
 
 def _load_broker_module() -> types.ModuleType:
-    """Load template_repos/hermes_agent/doh_runtime/integrations/doh_broker.py as a module.
+    """Load template_repos/hermes_agent/humr_runtime/integrations/humr_broker.py as a module.
 
     The broker imports its sibling modules by bare name. When supervisor.sh runs
     the broker in production, PYTHONPATH includes /opt/doh/runtime/integrations.
@@ -63,8 +63,8 @@ def _load_broker_module() -> types.ModuleType:
     triggers the bare imports.
     """
     repo_root = pathlib.Path(__file__).resolve().parents[2]
-    integrations_dir = repo_root / "template_repos" / "hermes_agent" / "doh_runtime" / "integrations"
-    script_path = integrations_dir / "doh_broker.py"
+    integrations_dir = repo_root / "template_repos" / "hermes_agent" / "humr_runtime" / "integrations"
+    script_path = integrations_dir / "humr_broker.py"
     if str(integrations_dir) not in sys.path:
         sys.path.insert(0, str(integrations_dir))
     _install_mcp_aggregator_stub_if_needed()
@@ -83,13 +83,13 @@ broker = _load_broker_module()
 # Loading the broker put the integrations dir on sys.path and imported the
 # sibling modules; bind the ones the tests patch/construct directly.
 import credentials_service  # noqa: E402
-import doh_client  # noqa: E402
+import humr_client  # noqa: E402
 import tls_providers  # noqa: E402
 
 
-def _make_doh_client() -> doh_client.DohClient:
+def _make_humr_client() -> humr_client.DohClient:
     """Build a DohClient with the fixed test identity."""
-    return doh_client.DohClient(
+    return humr_client.DohClient(
         control_plane_url="https://doh.example",
         bearer="env-bearer",
         owner_username="vmendi",
@@ -117,7 +117,7 @@ def _make_token_store() -> broker.tls_intercept._TokenStore:
     """Create a fresh TLS token store for isolated broker tests."""
     return broker.tls_intercept._TokenStore(
         providers=tls_providers.TLS_INTERCEPT_PROVIDERS,
-        doh_client=_make_doh_client(),
+        humr_client=_make_humr_client(),
         refresh_lead_seconds=broker.tls_intercept.REFRESH_LEAD_SECONDS,
     )
 
@@ -126,7 +126,7 @@ def _make_tls_intercept_runtime(ca_dir: pathlib.Path, private_dir: pathlib.Path)
     """Create a fresh TLS-intercept runtime for control-app tests."""
     return broker.tls_intercept.TlsInterceptRuntime(
         providers=tls_providers.TLS_INTERCEPT_PROVIDERS,
-        doh_client=_make_doh_client(),
+        humr_client=_make_humr_client(),
         refresh_lead_seconds=broker.tls_intercept.REFRESH_LEAD_SECONDS,
         ca_dir=ca_dir,
         private_dir=private_dir,
@@ -386,7 +386,7 @@ class TestAnonymousRequestClassification(unittest.TestCase):
     """
 
     def _classify(self, *, slug: str, headers: list[tuple[bytes, bytes]], path: str) -> bool:
-        return broker.tls_intercept._request_addresses_doh_credential(
+        return broker.tls_intercept._request_addresses_humr_credential(
             headers=headers,
             path_with_query=path,
             provider=tls_providers.TLS_INTERCEPT_PROVIDERS[slug],
@@ -400,7 +400,7 @@ class TestAnonymousRequestClassification(unittest.TestCase):
             path="/api/v1/models",
         ))
 
-    def test_openrouter_placeholder_bearer_addresses_doh_credential(self) -> None:
+    def test_openrouter_placeholder_bearer_addresses_humr_credential(self) -> None:
         self.assertTrue(self._classify(
             slug="openrouter",
             headers=[(b"authorization", b"Bearer HUMR_PLACEHOLDER")],
@@ -429,7 +429,7 @@ class TestAnonymousRequestClassification(unittest.TestCase):
             path="/v1/models",
         ))
 
-    def test_anthropic_placeholder_x_api_key_addresses_doh_credential(self) -> None:
+    def test_anthropic_placeholder_x_api_key_addresses_humr_credential(self) -> None:
         self.assertTrue(self._classify(
             slug="anthropic",
             headers=[(b"x-api-key", b"HUMR_PLACEHOLDER")],
@@ -453,7 +453,7 @@ class TestAnonymousRequestClassification(unittest.TestCase):
                 path="/v1/messages",
             )
 
-    def test_oauth_providers_address_doh_credential_even_without_authorization(self) -> None:
+    def test_oauth_providers_address_humr_credential_even_without_authorization(self) -> None:
         """OAuth-style requests are implicitly ours — the proxy injects unconditionally."""
         for slug in ("google", "github", "nous", "openai-codex"):
             self.assertTrue(self._classify(
@@ -462,7 +462,7 @@ class TestAnonymousRequestClassification(unittest.TestCase):
                 path="/anything",
             ))
 
-    def test_telegram_placeholder_path_addresses_doh_credential(self) -> None:
+    def test_telegram_placeholder_path_addresses_humr_credential(self) -> None:
         self.assertTrue(self._classify(
             slug="telegram",
             headers=[(b"host", b"api.telegram.org")],
@@ -855,9 +855,9 @@ def _make_control_parts(
     webui_state_dir: pathlib.Path,
 ) -> types.SimpleNamespace:
     """Wire a control app + CredentialsService the way the broker does at startup."""
-    client = _make_doh_client()
+    client = _make_humr_client()
     service = credentials_service.CredentialsService(
-        doh_client=client,
+        humr_client=client,
         tls_intercept_runtime=tls_intercept_runtime,
         mcp_aggregator=aggregator,
         providers=tls_providers.TLS_INTERCEPT_PROVIDERS,
@@ -874,10 +874,10 @@ def _make_control_parts(
         tls_intercept_runtime=tls_intercept_runtime,
         oauth_device_flow=device_stub,
         credentials_service=service,
-        doh_client=client,
+        humr_client=client,
         env_slug="default",
     )
-    return types.SimpleNamespace(app=app, service=service, doh_client=client, device_flow=device_stub)
+    return types.SimpleNamespace(app=app, service=service, humr_client=client, device_flow=device_stub)
 
 
 def _make_credentials_service(
@@ -887,7 +887,7 @@ def _make_credentials_service(
 ) -> credentials_service.CredentialsService:
     """Build a CredentialsService over a stub aggregator for choreography tests."""
     return credentials_service.CredentialsService(
-        doh_client=_make_doh_client(),
+        humr_client=_make_humr_client(),
         tls_intercept_runtime=tls_intercept_runtime,
         mcp_aggregator=_ready_stub_aggregator(),
         providers=tls_providers.TLS_INTERCEPT_PROVIDERS,
@@ -1083,7 +1083,7 @@ class TestControlIntegrations(unittest.IsolatedAsyncioTestCase):
         started = asyncio.Event()
         delayed = asyncio.Event()
 
-        async def first_stale(doh_client: object, slugs: list[str]) -> object:
+        async def first_stale(humr_client: object, slugs: list[str]) -> object:
             fetch_calls.append("first")
             started.set()
             await asyncio.wait_for(delayed.wait(), timeout=5)
@@ -1093,7 +1093,7 @@ class TestControlIntegrations(unittest.IsolatedAsyncioTestCase):
                 config={}, metadata={},
             ))
 
-        async def second_absent(doh_client: object, slugs: list[str]) -> object:
+        async def second_absent(humr_client: object, slugs: list[str]) -> object:
             fetch_calls.append("second")
             return _batched(slug="google", result=broker.tls_intercept.RefreshResult(
                 outcome=broker.tls_intercept.REFRESH_OUTCOME_ABSENT,
@@ -1144,7 +1144,7 @@ class TestControlIntegrations(unittest.IsolatedAsyncioTestCase):
         delayed = asyncio.Event()
         started = asyncio.Event()
 
-        async def parked_has_token(doh_client: object, slugs: list[str]) -> object:
+        async def parked_has_token(humr_client: object, slugs: list[str]) -> object:
             started.set()
             await asyncio.wait_for(delayed.wait(), timeout=5)
             return {
@@ -1399,7 +1399,7 @@ class TestControlIntegrations(unittest.IsolatedAsyncioTestCase):
         parts = self._control_parts(aggregator=_ready_stub_aggregator())
 
         with patch.object(
-            parts.doh_client,
+            parts.humr_client,
             "post_json",
             return_value=(200, {"submit_token": "signed-token"}),
         ) as post_mock:
@@ -1423,7 +1423,7 @@ class TestControlIntegrations(unittest.IsolatedAsyncioTestCase):
 
         parts = self._control_parts(aggregator=_ready_stub_aggregator())
 
-        with patch.object(parts.doh_client, "post_json", return_value=(200, {"ok": True})) as post_mock:
+        with patch.object(parts.humr_client, "post_json", return_value=(200, {"ok": True})) as post_mock:
             with patch.object(parts.service, "credentials_invalidate", new_callable=AsyncMock) as invalidate_mock:
                 with patch.object(
                     parts.service._tls_intercept_runtime,
@@ -1448,7 +1448,7 @@ class TestControlIntegrations(unittest.IsolatedAsyncioTestCase):
 
         parts = self._control_parts(aggregator=_ready_stub_aggregator())
 
-        with patch.object(parts.doh_client, "post_json", return_value=(200, {"ok": True})) as post_mock:
+        with patch.object(parts.humr_client, "post_json", return_value=(200, {"ok": True})) as post_mock:
             with patch.object(parts.service, "credentials_invalidate", new_callable=AsyncMock) as invalidate_mock:
                 with TestClient(parts.app) as client:
                     resp = client.post("/integrations/tls_intercept/github/disconnect")
@@ -1532,9 +1532,9 @@ class TestLazyTokenForHost(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("google", self.token_store._cache)
 
 
-def _patched_doh_httpx_client(handler: Callable[[httpx.Request], httpx.Response], timeouts: list[int]) -> AbstractContextManager:
-    """Patch doh_client's httpx.AsyncClient with a MockTransport-backed factory; records each client timeout."""
-    # `doh_client.httpx` is the global httpx module, so the factory must hold
+def _patched_humr_httpx_client(handler: Callable[[httpx.Request], httpx.Response], timeouts: list[int]) -> AbstractContextManager:
+    """Patch humr_client's httpx.AsyncClient with a MockTransport-backed factory; records each client timeout."""
+    # `humr_client.httpx` is the global httpx module, so the factory must hold
     # the real class — referencing `httpx.AsyncClient` inside it would resolve
     # to the patched attribute (itself).
     real_async_client = httpx.AsyncClient
@@ -1543,7 +1543,7 @@ def _patched_doh_httpx_client(handler: Callable[[httpx.Request], httpx.Response]
         timeouts.append(timeout)
         return real_async_client(transport=httpx.MockTransport(handler), timeout=timeout)
 
-    return patch.object(doh_client.httpx, "AsyncClient", make_client)
+    return patch.object(humr_client.httpx, "AsyncClient", make_client)
 
 
 class TestDohClient(unittest.IsolatedAsyncioTestCase):
@@ -1558,8 +1558,8 @@ class TestDohClient(unittest.IsolatedAsyncioTestCase):
             captured["request"] = request
             return httpx.Response(status_code=200, json={"ok": True})
 
-        with _patched_doh_httpx_client(handler=handler, timeouts=timeouts):
-            status, payload = await _make_doh_client().post_json(
+        with _patched_humr_httpx_client(handler=handler, timeouts=timeouts):
+            status, payload = await _make_humr_client().post_json(
                 path="/api/integrations/credentials/disconnect",
                 payload={"provider": "telegram"},
                 timeout_seconds=30,
@@ -1580,8 +1580,8 @@ class TestDohClient(unittest.IsolatedAsyncioTestCase):
         def handler(request: httpx.Request) -> httpx.Response:
             raise httpx.ConnectError("connection refused")
 
-        with _patched_doh_httpx_client(handler=handler, timeouts=[]):
-            status, payload = await _make_doh_client().post_json(path="/api/x", payload={}, timeout_seconds=30)
+        with _patched_humr_httpx_client(handler=handler, timeouts=[]):
+            status, payload = await _make_humr_client().post_json(path="/api/x", payload={}, timeout_seconds=30)
         self.assertEqual(status, 502)
         self.assertIn("error", payload)
 
@@ -1590,8 +1590,8 @@ class TestDohClient(unittest.IsolatedAsyncioTestCase):
         def handler(request: httpx.Request) -> httpx.Response:
             return httpx.Response(status_code=200, content=b"<html>not json</html>")
 
-        with _patched_doh_httpx_client(handler=handler, timeouts=[]):
-            status, payload = await _make_doh_client().post_json(path="/api/x", payload={}, timeout_seconds=30)
+        with _patched_humr_httpx_client(handler=handler, timeouts=[]):
+            status, payload = await _make_humr_client().post_json(path="/api/x", payload={}, timeout_seconds=30)
         self.assertEqual(status, 502)
         self.assertEqual(payload, {"error": "control plane request failed"})
 
@@ -1600,8 +1600,8 @@ class TestDohClient(unittest.IsolatedAsyncioTestCase):
         def handler(request: httpx.Request) -> httpx.Response:
             return httpx.Response(status_code=503, content=b"<html>maintenance</html>")
 
-        with _patched_doh_httpx_client(handler=handler, timeouts=[]):
-            status, payload = await _make_doh_client().post_json(path="/api/x", payload={}, timeout_seconds=30)
+        with _patched_humr_httpx_client(handler=handler, timeouts=[]):
+            status, payload = await _make_humr_client().post_json(path="/api/x", payload={}, timeout_seconds=30)
         self.assertEqual(status, 503)
         self.assertEqual(payload, {"error": "control plane returned HTTP 503"})
 
@@ -1613,9 +1613,9 @@ class TestFetchProviderTokensBatch(unittest.IsolatedAsyncioTestCase):
         def handler(request: httpx.Request) -> httpx.Response:
             return httpx.Response(status_code=200, json=payload)
 
-        with _patched_doh_httpx_client(handler=handler, timeouts=[]):
+        with _patched_humr_httpx_client(handler=handler, timeouts=[]):
             return await broker.tls_intercept.fetch_provider_tokens_batch(
-                doh_client=_make_doh_client(),
+                humr_client=_make_humr_client(),
                 slugs=["google", "github", "telegram"],
             )
 
@@ -1650,12 +1650,12 @@ class TestFetchProviderTokensBatch(unittest.IsolatedAsyncioTestCase):
                     "secrets": {"bot_token": "123:REAL"},
                     "expires_in": 3600,
                     "config": {"allowed_users": ["42", "7"]},
-                    "metadata": {"bot_username": "doh_bot"},
+                    "metadata": {"bot_username": "humr_bot"},
                 },
             },
         })
         self.assertEqual(results["telegram"].config, {"allowed_users": ["42", "7"]})
-        self.assertEqual(results["telegram"].metadata, {"bot_username": "doh_bot"})
+        self.assertEqual(results["telegram"].metadata, {"bot_username": "humr_bot"})
 
     async def test_slug_missing_from_response_is_transient(self) -> None:
         """A partial server response must NOT clear the broker's cache for the missing slug."""
@@ -1687,9 +1687,9 @@ class TestFetchProviderTokensBatch(unittest.IsolatedAsyncioTestCase):
         def handler(request: httpx.Request) -> httpx.Response:
             raise httpx.ConnectError("connection refused")
 
-        with _patched_doh_httpx_client(handler=handler, timeouts=[]):
+        with _patched_humr_httpx_client(handler=handler, timeouts=[]):
             results = await broker.tls_intercept.fetch_provider_tokens_batch(
-                doh_client=_make_doh_client(),
+                humr_client=_make_humr_client(),
                 slugs=["google", "github", "telegram"],
             )
         for slug in ("google", "github", "telegram"):
@@ -1699,9 +1699,9 @@ class TestFetchProviderTokensBatch(unittest.IsolatedAsyncioTestCase):
         def handler(request: httpx.Request) -> httpx.Response:
             return httpx.Response(status_code=500, content=b"x")
 
-        with _patched_doh_httpx_client(handler=handler, timeouts=[]):
+        with _patched_humr_httpx_client(handler=handler, timeouts=[]):
             results = await broker.tls_intercept.fetch_provider_tokens_batch(
-                doh_client=_make_doh_client(),
+                humr_client=_make_humr_client(),
                 slugs=["google", "github"],
             )
         self.assertEqual(results["google"].outcome, broker.tls_intercept.REFRESH_OUTCOME_TRANSIENT)
@@ -2209,7 +2209,7 @@ class TestTransientRefreshGuards(unittest.IsolatedAsyncioTestCase):
             for slug in tls_providers.TLS_INTERCEPT_PROVIDERS
         }
 
-    async def test_refresh_all_reports_doh_reachability(self) -> None:
+    async def test_refresh_all_reports_humr_reachability(self) -> None:
         tls_intercept_runtime = self._make_runtime()
         with patch.object(broker.tls_intercept, "fetch_provider_tokens_batch", return_value=self._transient_for_every_slug()):
             self.assertFalse(await tls_intercept_runtime.refresh_all())

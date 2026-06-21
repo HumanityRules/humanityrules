@@ -3,7 +3,7 @@
 //
 // Adds an "Integrations" tab to the WebUI's main left sidebar nav, rendering
 // per-provider cards from the integrations broker's unified control API. The
-// broker is reached same-origin via the Caddy /__doh_broker/* route.
+// broker is reached same-origin via the Caddy /__humr_broker/* route.
 // Connect / Disconnect for TLS-
 // intercept providers (Google, GitHub) are top-level navigations to DOH's control
 // plane for Connect; Disconnect goes through the broker so the Integrations pane
@@ -11,7 +11,7 @@
 (() => {
   'use strict';
 
-  const INTEGRATIONS_URL = '/__doh_broker/integrations';
+  const INTEGRATIONS_URL = '/__humr_broker/integrations';
   const VAULT_NETWORK_ERROR = (
     'Could not reach the DevOps Hero vault. Try again. ' +
     'If this keeps happening, ask an admin to check this Hermes deployment.'
@@ -72,7 +72,7 @@
       // providers, restarts the gateway). Cooldown 429 short-circuits before
       // the TLS side runs, so repeated clicks while the cooldown is active
       // can't keep kicking the gateway.
-      const response = await fetch('/__doh_broker/integrations/refresh_all', {
+      const response = await fetch('/__humr_broker/integrations/refresh_all', {
         method: 'POST',
         cache: 'no-store',
       });
@@ -113,15 +113,15 @@
   // (top-level navigation to DOH). Disconnect goes through the broker.
   function buildTlsConnectUrl(payload, slug, returnTo) {
     const rd = encodeURIComponent(returnTo);
-    return payload.doh_control_plane_url.replace(/\/$/, '') + '/integrations/user/' + slug + '/start/?rd=' + rd + '&app_slug=' + encodeURIComponent(payload.app_slug || '');
+    return payload.humr_control_plane_url.replace(/\/$/, '') + '/integrations/user/' + slug + '/start/?rd=' + rd + '&app_slug=' + encodeURIComponent(payload.app_slug || '');
   }
 
   function tlsInterceptBrokerPath(slug, action) {
-    return '/__doh_broker/integrations/tls_intercept/' + encodeURIComponent(slug) + '/' + action;
+    return '/__humr_broker/integrations/tls_intercept/' + encodeURIComponent(slug) + '/' + action;
   }
 
   function mcpBrokerPath(slug, action) {
-    return '/__doh_broker/integrations/mcp/' + encodeURIComponent(slug) + '/' + action;
+    return '/__humr_broker/integrations/mcp/' + encodeURIComponent(slug) + '/' + action;
   }
 
   function buildMcpConnectUrl(slug) {
@@ -407,7 +407,7 @@
     // showMergeExplainerModal(item, async () => {
     let resp;
     try {
-      resp = await fetch('/__doh_broker/integrations/merge/link-token', {
+      resp = await fetch('/__humr_broker/integrations/merge/link-token', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ connector_slug: item.slug }),
@@ -445,7 +445,7 @@
       }
       try {
         const r = await fetch(
-          '/__doh_broker/integrations/merge/connector-status?connector_slug=' + encodeURIComponent(item.slug),
+          '/__humr_broker/integrations/merge/connector-status?connector_slug=' + encodeURIComponent(item.slug),
           { cache: 'no-store' },
         );
         if (r.ok) {
@@ -472,7 +472,7 @@
     if (isConnected) {
       const disconnectBtn = disconnectButton(provider, () => runDisconnect(provider, async () => {
         if (isMergeConnector) {
-          await fetch('/__doh_broker/integrations/merge/disconnect', {
+          await fetch('/__humr_broker/integrations/merge/disconnect', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ connector_slug: item.slug }),
@@ -1378,7 +1378,7 @@
 
   // Tell the broker to drop one provider's cached TLS-intercept token after a
   // known connect/disconnect/config change (vault save, OAuth-return sentinel).
-  // The explicit-Refresh-all path goes through /__doh_broker/integrations/refresh_all
+  // The explicit-Refresh-all path goes through /__humr_broker/integrations/refresh_all
   // instead, which fans out catalog reload + all-providers TLS invalidate.
   // Per-provider: POST .../tls_intercept/{slug}/invalidate.
   //

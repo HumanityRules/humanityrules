@@ -1,6 +1,6 @@
 """Tests for the bearer-auth /api/permissions/* endpoints (the Hermes editor).
 
-The env-resident doh_broker relays the WebUI's calls here. These exercise the
+The env-resident humr_broker relays the WebUI's calls here. These exercise the
 JSON twin of the session-auth HTML editor: target resolution from the bearer +
 identity, statement mutation, the draft/apply lifecycle, and ABAC on Apply.
 AWS-touching iam_utils calls are mocked so the suite is hermetic.

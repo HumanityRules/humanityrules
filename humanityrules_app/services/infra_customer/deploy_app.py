@@ -1522,7 +1522,7 @@ def deploy(
         msg = (
             "Missing prebuilt images in ECR:\n  - "
             + "\n  - ".join(missing)
-            + "\nBuild each with:\n  uv run manage.py doh_build_prebuilt_image "
+            + "\nBuild each with:\n  uv run manage.py humr_build_prebuilt_image "
             "--account <acct> [--env <env>] --source-dir <path> --ecr-repo <repo> --tag <tag>"
         )
         logger.error(msg)

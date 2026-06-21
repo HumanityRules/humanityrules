@@ -4,20 +4,20 @@ Open an interactive shell on a customer EC2 container instance via SSM Session M
 For inspecting the EC2 *host* that runs ECS tasks — kernel, Docker / containerd
 state, host bind-mount directories (e.g. /var/lib/humr/hermes-roots/),
 disk space, journal logs. This is NOT for getting inside an app container —
-use doh_app_shell or doh_app_exec for that.
+use humr_app_shell or humr_app_exec for that.
 
 Usage:
     # Default: shell into the sole running container instance in the ASG.
-    uv run manage.py doh_node_shell --account "Humanity Rules Sandbox" --env default
+    uv run manage.py humr_node_shell --account "Humanity Rules Sandbox" --env default
 
     # List every container instance with its current tasks, then exit.
-    uv run manage.py doh_node_shell --account "Humanity Rules Sandbox" --env default --list
+    uv run manage.py humr_node_shell --account "Humanity Rules Sandbox" --env default --list
 
     # Shell into whichever instance is currently hosting an app's RUNNING task.
-    uv run manage.py doh_node_shell --account "Humanity Rules Sandbox" --env default --app hermes-vmendi00
+    uv run manage.py humr_node_shell --account "Humanity Rules Sandbox" --env default --app hermes-vmendi00
 
     # Shell into a specific instance (override autodetection).
-    uv run manage.py doh_node_shell --account "Humanity Rules Sandbox" --env default --instance-id i-0abc...
+    uv run manage.py humr_node_shell --account "Humanity Rules Sandbox" --env default --instance-id i-0abc...
 
 Notes:
     - You log in as 'ssm-user'. Use `sudo` for privileged paths like

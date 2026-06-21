@@ -26,7 +26,7 @@ class ImageSource(StrEnum):
     DOCKERFILE = "dockerfile"
 
     # Image already exists in the per-env ECR namespace (doh/{env_slug}/{repo})
-    # and was pushed out-of-band by `doh_build_prebuilt_image`. The deploy does
+    # and was pushed out-of-band by `humr_build_prebuilt_image`. The deploy does
     # not build — a missing image is a hard-fail. Fields consumed:
     # prebuilt_ecr_repo, prebuilt_version.
     PREBUILT = "prebuilt"

@@ -187,7 +187,7 @@ class TestEnvCallback(EnvSsoTestBase):
             )
         self.assertEqual(response.status_code, 302)
         location = response["Location"]
-        self.assertTrue(location.startswith("https://app.prod.workos-customer.com/__doh_session_install?"))
+        self.assertTrue(location.startswith("https://app.prod.workos-customer.com/__humr_session_install?"))
 
         # Extract token from the install URL and verify it round-trips. The audience
         # must be the env's globally unique DNS zone, not the env_slug — slugs are

@@ -1,13 +1,13 @@
 """
 Run a bash script non-interactively in a deployed customer app container and
-return clean stdout/stderr/exit_code. For an interactive shell, use doh_app_shell.
+return clean stdout/stderr/exit_code. For an interactive shell, use humr_app_shell.
 
 Usage:
-    uv run manage.py doh_app_exec --account "Humanity Rules Sandbox" --app my-app --as hermeswebui <<'EOF'
+    uv run manage.py humr_app_exec --account "Humanity Rules Sandbox" --app my-app --as hermeswebui <<'EOF'
     /app/venv/bin/python -c "from tools.mcp_tool import discover_mcp_tools; print(discover_mcp_tools())"
     EOF
 
-    uv run manage.py doh_app_exec --account "Humanity Rules Sandbox" --app my-app --script-file probe.sh --format json
+    uv run manage.py humr_app_exec --account "Humanity Rules Sandbox" --app my-app --script-file probe.sh --format json
 
 Flags: --as USER, --timeout SECONDS, --cwd PATH, --set KEY=VALUE, --format text|json, --ignore-exit.
 
@@ -27,7 +27,7 @@ from django.core.management.base import BaseCommand, CommandError
 from humanityrules_app.models import App
 
 from . import _aws_account_resolver
-from . import doh_app_shell
+from . import humr_app_shell
 
 
 _MAX_OUTPUT_BYTES = 1_048_576
@@ -42,7 +42,7 @@ def _build_wrapper_script(user_script_b64: str, run_as: str | None, timeout: int
     env_exports = "".join(f"export {k}={_sh_quote(v)}; " for k, v in env_vars.items())
     cwd_cmd = f"cd {_sh_quote(cwd)} && " if cwd else ""
 
-    inner = f"{env_exports}{cwd_cmd}bash /tmp/doh_exec_script.sh"
+    inner = f"{env_exports}{cwd_cmd}bash /tmp/humr_exec_script.sh"
     if timeout is not None:
         inner = f"timeout --preserve-status {int(timeout)}s {inner}"
     if run_as is not None:
@@ -53,8 +53,8 @@ def _build_wrapper_script(user_script_b64: str, run_as: str | None, timeout: int
     # Process substitution (`> >(sed ...)`) is async and can't be waited on.
     return f"""
 set +e
-echo '{user_script_b64}' | base64 -d > /tmp/doh_exec_script.sh
-chmod +x /tmp/doh_exec_script.sh
+echo '{user_script_b64}' | base64 -d > /tmp/humr_exec_script.sh
+chmod +x /tmp/humr_exec_script.sh
 FIFO_O=$(mktemp -u)
 FIFO_E=$(mktemp -u)
 mkfifo "$FIFO_O" "$FIFO_E"
@@ -66,7 +66,7 @@ echo {_SENTINEL_BEGIN}
 ( {inner} ) > "$FIFO_O" 2> "$FIFO_E"
 _RC=$?
 wait "$PID_O" "$PID_E"
-rm -f "$FIFO_O" "$FIFO_E" /tmp/doh_exec_script.sh
+rm -f "$FIFO_O" "$FIFO_E" /tmp/humr_exec_script.sh
 echo "{_SENTINEL_END} RC=$_RC"
 """.strip()
 
@@ -220,7 +220,7 @@ class Command(BaseCommand):
         parser.add_argument(
             "--ignore-exit",
             action="store_true",
-            help="Don't propagate the inner script's exit code to doh_app_exec's own exit code.",
+            help="Don't propagate the inner script's exit code to humr_app_exec's own exit code.",
         )
 
     def handle(self, *args, **options) -> None:
@@ -228,7 +228,7 @@ class Command(BaseCommand):
 
         target = _aws_account_resolver.resolve_aws_target(options=options)
         if target.aws_account is None:
-            raise CommandError("doh_app_exec requires DB mode (--account/--env); raw mode is not supported.")
+            raise CommandError("humr_app_exec requires DB mode (--account/--env); raw mode is not supported.")
         aws_account = target.aws_account
         session = target.session
         env_slug = target.env_slug
@@ -243,7 +243,7 @@ class Command(BaseCommand):
 
         cluster_name = f"humr-{env_slug}-cluster"
         service_name = f"doh-{env_slug}-{app.slug}"
-        container_name = doh_app_shell._resolve_ecs_container_name(
+        container_name = humr_app_shell._resolve_ecs_container_name(
             app=app, requested_container=options.get("container"),
         )
 
@@ -259,10 +259,10 @@ class Command(BaseCommand):
         task_id = task_arn.split("/")[-1]
 
         # Wait only briefly; this command targets already-healthy tasks.
-        doh_app_shell._wait_for_task_running(
+        humr_app_shell._wait_for_task_running(
             ecs_client=ecs_client, cluster=cluster_name, task_arn=task_arn, stdout=self.stderr,
         )
-        doh_app_shell._wait_for_exec_agent(
+        humr_app_shell._wait_for_exec_agent(
             ecs_client=ecs_client, cluster=cluster_name, task_arn=task_arn,
             container_name=container_name, stdout=self.stderr,
         )
@@ -319,7 +319,7 @@ class Command(BaseCommand):
         if sys.stdin.isatty():
             raise CommandError(
                 "No script provided. Pipe a script on stdin or pass --script-file. "
-                "For an interactive shell, use `doh_app_shell` instead."
+                "For an interactive shell, use `humr_app_shell` instead."
             )
         return sys.stdin.read()
 

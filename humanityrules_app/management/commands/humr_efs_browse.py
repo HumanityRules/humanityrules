@@ -2,9 +2,9 @@
 Browse EFS filesystem in a customer environment via ECS Exec.
 
 Usage:
-    uv run manage.py doh_efs_browse --account "Humanity Rules Sandbox"
-    uv run manage.py doh_efs_browse --account "Humanity Rules Sandbox" --env prod
-    uv run manage.py doh_efs_browse --account "Humanity Rules Sandbox" --org "Humanity Rules"
+    uv run manage.py humr_efs_browse --account "Humanity Rules Sandbox"
+    uv run manage.py humr_efs_browse --account "Humanity Rules Sandbox" --env prod
+    uv run manage.py humr_efs_browse --account "Humanity Rules Sandbox" --org "Humanity Rules"
 
 Spins up a temporary Fargate task with the root EFS volume mounted (no access
 point, so you see all app data), then opens an interactive bash shell via ECS
@@ -46,7 +46,7 @@ class Command(BaseCommand):
     def handle(self, *args, **options):
         target = resolve_aws_target(options=options)
         if target.aws_account is None:
-            raise CommandError("doh_efs_browse requires DB mode (--account/--env); raw mode is not supported.")
+            raise CommandError("humr_efs_browse requires DB mode (--account/--env); raw mode is not supported.")
         aws_account = target.aws_account
         session = target.session
         env_slug = target.env_slug

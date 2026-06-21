@@ -13,7 +13,7 @@ It starts:
    by `tls_intercept.TlsInterceptRuntime`.
 
 2. The control API on 127.0.0.1:9951, reached same-origin by the WebUI
-   extensions via Caddy's /__doh_broker/* route. This API mounts the
+   extensions via Caddy's /__humr_broker/* route. This API mounts the
    MCP-aggregator management routes under /integrations and the permissions
    relay under /permissions.
 
@@ -53,7 +53,7 @@ import uvicorn
 import control_api
 from credentials_service import CredentialsService
 import device_flow
-from doh_client import DohClient
+from humr_client import DohClient
 from mcp_aggregator import MCPAggregator
 import tls_intercept
 import tls_providers
@@ -71,7 +71,7 @@ DEFAULT_PROCESS_COMPOSE_URL = "http://127.0.0.1:9956"
 _TRUE_ENV_VALUES = frozenset({"1", "true", "yes", "on"})
 _FALSE_ENV_VALUES = frozenset({"0", "false", "no", "off"})
 
-logger = logging.getLogger("doh_broker")
+logger = logging.getLogger("humr_broker")
 
 
 class _AsyncioSslEofFilter(logging.Filter):
@@ -127,11 +127,11 @@ async def _run(
     runtime_dir = Path(_require_env(name="HUMR_RUNTIME_DIR"))
     hermes_home = Path(_require_env(name="HERMES_HOME"))
     logger.info(
-        "starting doh_broker for owner=%s env=%s against %s (proxy=%d, control=%d, mcp=%d, merge_enabled=%s)",
+        "starting humr_broker for owner=%s env=%s against %s (proxy=%d, control=%d, mcp=%d, merge_enabled=%s)",
         owner_username, env_slug, control_plane_url, proxy_port, control_port, mcp_port, merge_enabled,
     )
 
-    doh_client = DohClient(
+    humr_client = DohClient(
         control_plane_url=control_plane_url,
         bearer=bearer,
         owner_username=owner_username,
@@ -139,7 +139,7 @@ async def _run(
     )
     tls_intercept_runtime = tls_intercept.TlsInterceptRuntime(
         providers=tls_providers.TLS_INTERCEPT_PROVIDERS,
-        doh_client=doh_client,
+        humr_client=humr_client,
         refresh_lead_seconds=tls_intercept.REFRESH_LEAD_SECONDS,
         ca_dir=ca_dir,
         private_dir=private_dir,
@@ -151,15 +151,15 @@ async def _run(
         port=mcp_port,
         persistent_dir=mcp_persistent_dir,
         public_base_url=public_base_url,
-        doh_control_plane_url=control_plane_url,
-        doh_env_bearer=bearer,
-        doh_app_slug=app_slug,
-        doh_owner_username=owner_username,
+        humr_control_plane_url=control_plane_url,
+        humr_env_bearer=bearer,
+        humr_app_slug=app_slug,
+        humr_owner_username=owner_username,
         merge_enabled=merge_enabled,
     )
 
     credentials_service = CredentialsService(
-        doh_client=doh_client,
+        humr_client=humr_client,
         tls_intercept_runtime=tls_intercept_runtime,
         mcp_aggregator=mcp_aggregator,
         providers=tls_providers.TLS_INTERCEPT_PROVIDERS,
@@ -192,7 +192,7 @@ async def _run(
         tls_intercept_runtime=tls_intercept_runtime,
         oauth_device_flow=oauth_device_flow,
         credentials_service=credentials_service,
-        doh_client=doh_client,
+        humr_client=humr_client,
         env_slug=env_slug,
     )
     control_uvicorn_config = uvicorn.Config(
@@ -222,7 +222,7 @@ async def _run(
 
 
 def main() -> None:
-    logging.basicConfig(level=logging.INFO, format="[%(asctime)s] [doh_broker.%(name)s] %(message)s")
+    logging.basicConfig(level=logging.INFO, format="[%(asctime)s] [humr_broker.%(name)s] %(message)s")
     logging.getLogger("asyncio").addFilter(_AsyncioSslEofFilter())
     parser = argparse.ArgumentParser()
     parser.add_argument("--proxy-port", type=int, default=DEFAULT_PROXY_PORT)

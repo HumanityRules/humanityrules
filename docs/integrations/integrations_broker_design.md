@@ -67,7 +67,7 @@ Starlette/uvicorn server. One unified URL space for **all** browser-facing integ
 - **`GET /integrations/mcp/<provider>/oauth/start`**, **`GET /integrations/mcp/<provider>/oauth/callback`**, **`POST /integrations/mcp/<provider>/disconnect`** — MCP-aggregator OAuth flow (Notion). The aggregator owns the handlers; the broker mounts them via `MCPAggregator.routes(prefix="/integrations")`.
 - **`GET /integrations/merge/connector-status`**, **`POST /integrations/merge/link-token`**, **`POST /integrations/merge/disconnect`** — Merge passthroughs that forward to DOH with the env bearer attached. See `merge_integration_design.md`.
 
-Reached from the browser same-origin via a WebUI reverse-proxy patch (`patches-webui/07-doh-broker-proxy.patch`) that forwards `/__doh_broker/*` to `127.0.0.1:9951`. Deliberately bypasses the WebUI's CSRF gate — the broker is loopback-only and the endpoints are stateless.
+Reached from the browser same-origin via a WebUI reverse-proxy patch (`patches-webui/07-doh-broker-proxy.patch`) that forwards `/__humr_broker/*` to `127.0.0.1:9951`. Deliberately bypasses the WebUI's CSRF gate — the broker is loopback-only and the endpoints are stateless.
 
 The `/__mcp_aggregator/*` URL space that earlier holds Notion's OAuth was retired during the unification — port 9952 is now sandbox-only MCP transport.
 
@@ -101,7 +101,7 @@ Refresh cadence is ~55 minutes when connected. `POST /integrations/refresh` is t
 │  │                                    │            (broker)        │
 │  └────────────────────────────────────┘            │               │
 │                                                    │               │
-│   WebUI :8787 ─── /__doh_broker/* ─reverse-proxy─► 127.0.0.1:9951  │
+│   WebUI :8787 ─── /__humr_broker/* ─reverse-proxy─► 127.0.0.1:9951  │
 │                                                    │               │
 │                                                    ▼               │
 │                           integrations_broker.py (supervisor child)│

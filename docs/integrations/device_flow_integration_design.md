@@ -47,7 +47,7 @@ Device flow is OpenAI's bespoke `deviceauth` JSON API, **not** RFC 8628 / `oauth
 - `provider_openai_codex.py`: OAUTH-kind provider. `refresh_outcome` exchanges the stored refresh_token (`grant_type=refresh_token`, public `client_id`, no secret) and returns two secrets — `access_token` + `chatgpt_account_id` (JWT claim, no verification). `revoke` is a no-op (no revocation endpoint for this public client). Registered in `provider_registry.py`; enum member added to `IntegrationUserCredential.Provider` (migration 0063).
 - `provider_device.py`: generic device completion endpoint `POST /api/integrations/credentials/{provider}/device-complete` (env-bearer). Dispatches through `provider_registry`; `provider_openai_codex.store_device_credentials` validates the broker-forwarded access token has `chatgpt_account_id`, then stores the refresh token. Disconnect reuses the unified handler.
 
-## Broker (`doh_runtime/`)
+## Broker (`humr_runtime/`)
 
 - `device_flow.py`: provider-keyed device handshakes + minutes-long polling as background asyncio tasks. Codex is one adapter in the registry; Nous Portal is another. Exposed on the 9951 control API as `{provider}/device/{start,status,cancel}`. On success POSTs the token payload to DOH (`{provider}/device-complete`) and drops that provider's TLS cache.
 - `tls_intercept.py`: `OAuthHeaderMultiInject` credential method (`connect_mode="device"`) — swaps the bearer via the existing `_rewrite_authorization`, then injects named extra headers via `_inject_headers` (which can't be spoofed — it overrides any client-sent value). Cloudflare headers pass through untouched (the rewrite only ever touches Authorization/Host/proxy + the named header). `TlsProviderSpec(slug="openai-codex", hosts=("chatgpt.com",))`.

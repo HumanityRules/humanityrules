@@ -5,7 +5,7 @@
 // task-role permissions editor for THIS Hermes deployment. The target
 // (app, environment) is implicit — DOH resolves it from the deployment identity
 // behind the broker, so no app/env is ever named here. All calls go same-origin
-// to the doh_broker control API via the Caddy /__doh_broker/permissions/* route;
+// to the humr_broker control API via the Caddy /__humr_broker/permissions/* route;
 // the env bearer and AWS creds never enter the sandbox.
 //
 // Phase 1 is editor-only and the panel is the sole writer, so a mutation returns
@@ -13,7 +13,7 @@
 (() => {
   'use strict';
 
-  const PERMISSIONS_URL = '/__doh_broker/permissions';
+  const PERMISSIONS_URL = '/__humr_broker/permissions';
   const APPLY_POLL_MS = 2000;
   const DESCRIPTION_DEBOUNCE_MS = 600;
 

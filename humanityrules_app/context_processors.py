@@ -20,7 +20,7 @@ def posthog_context(request):
         }
 
     # Use reverse proxy if configured (bypasses ad blockers)
-    # Proxy paths: /doh-ph/* for API, /doh-ph-static/* for static assets
+    # Proxy paths: /humr-ph/* for API, /humr-ph-static/* for static assets
     proxy_host = getattr(settings, 'POSTHOG_PROXY_HOST', None)
     api_host = proxy_host if proxy_host else getattr(settings, 'POSTHOG_HOST', 'https://us.i.posthog.com')
 

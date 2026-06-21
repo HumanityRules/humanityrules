@@ -65,7 +65,7 @@ services:
       watch:
         # Rebuild + recreate on save. Paths are relative to this compose file.
         # Late Dockerfile COPY layers make these rebuilds fast (~1s).
-        - path: ../hermes_agent/doh_runtime
+        - path: ../hermes_agent/humr_runtime
           action: rebuild
         - path: ../hermes_agent/webui-extension
           action: rebuild

@@ -1,9 +1,9 @@
-"""Tests for doh_app_shell container-name resolution."""
+"""Tests for humr_app_shell container-name resolution."""
 
 from django.core.management.base import CommandError
 from django.test import TestCase
 
-from humanityrules_app.management.commands import doh_app_shell
+from humanityrules_app.management.commands import humr_app_shell
 from humanityrules_app.models import App, AppTemplate, Organization, Repository, Workspace
 
 
@@ -52,7 +52,7 @@ class DohAppShellContainerResolutionTests(TestCase):
     def test_legacy_app_defaults_to_app_slug(self) -> None:
         app = _app(template=None)
 
-        container_name = doh_app_shell._resolve_ecs_container_name(app=app, requested_container=None)
+        container_name = humr_app_shell._resolve_ecs_container_name(app=app, requested_container=None)
 
         self.assertEqual(container_name, "my-app")
 
@@ -64,7 +64,7 @@ class DohAppShellContainerResolutionTests(TestCase):
         )
         app = _app(template=template)
 
-        container_name = doh_app_shell._resolve_ecs_container_name(app=app, requested_container=None)
+        container_name = humr_app_shell._resolve_ecs_container_name(app=app, requested_container=None)
 
         self.assertEqual(container_name, "my-app-app")
 
@@ -76,7 +76,7 @@ class DohAppShellContainerResolutionTests(TestCase):
         )
         app = _app(template=template)
 
-        container_name = doh_app_shell._resolve_ecs_container_name(app=app, requested_container=None)
+        container_name = humr_app_shell._resolve_ecs_container_name(app=app, requested_container=None)
 
         self.assertEqual(container_name, "my-app-hermes")
 
@@ -88,7 +88,7 @@ class DohAppShellContainerResolutionTests(TestCase):
         )
         app = _app(template=template)
 
-        container_name = doh_app_shell._resolve_ecs_container_name(app=app, requested_container="sidecar-mcp")
+        container_name = humr_app_shell._resolve_ecs_container_name(app=app, requested_container="sidecar-mcp")
 
         self.assertEqual(container_name, "my-app-sidecar-mcp")
 
@@ -103,7 +103,7 @@ class DohAppShellContainerResolutionTests(TestCase):
         )
         app = _app(template=template)
 
-        container_name = doh_app_shell._resolve_ecs_container_name(app=app, requested_container="policy-proxy")
+        container_name = humr_app_shell._resolve_ecs_container_name(app=app, requested_container="policy-proxy")
 
         self.assertEqual(container_name, "my-app-policy-proxy")
 
@@ -115,7 +115,7 @@ class DohAppShellContainerResolutionTests(TestCase):
         )
         app = _app(template=template)
 
-        container_name = doh_app_shell._resolve_ecs_container_name(app=app, requested_container="my-app-hermes")
+        container_name = humr_app_shell._resolve_ecs_container_name(app=app, requested_container="my-app-hermes")
 
         self.assertEqual(container_name, "my-app-hermes")
 
@@ -128,4 +128,4 @@ class DohAppShellContainerResolutionTests(TestCase):
         app = _app(template=template)
 
         with self.assertRaises(CommandError):
-            doh_app_shell._resolve_ecs_container_name(app=app, requested_container="missing")
+            humr_app_shell._resolve_ecs_container_name(app=app, requested_container="missing")

@@ -95,7 +95,7 @@ class _CallbackTestBase(TestCase):
 
 class TestIntegrationsGoogleCallbackHappyPath(_CallbackTestBase):
 
-    def test_persists_row_on_doh_and_redirects(self) -> None:
+    def test_persists_row_on_humr_and_redirects(self) -> None:
         self._seed_session(
             state="stst",
             rd="https://hermes.dev.example.com/settings/connections",

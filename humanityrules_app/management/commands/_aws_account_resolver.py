@@ -17,7 +17,7 @@ Two modes:
 
 The two modes are mutually exclusive — pass one set or the other, not both.
 
-Commands that need `aws_account.organization` (e.g. `doh_app_*` for App lookup)
+Commands that need `aws_account.organization` (e.g. `humr_app_*` for App lookup)
 are inherently DB-mode-only: in raw mode `target.aws_account` and
 `target.environment` are None.
 """

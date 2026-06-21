@@ -6,7 +6,7 @@
 ## How these connectors work
 
 The Integrations page lists 83 entries. Querying the broker API behind it
-(`GET /__doh_broker/integrations`) classifies them by `kind`:
+(`GET /__humr_broker/integrations`) classifies them by `kind`:
 
 | `kind`            | `category`       | count | notes |
 |-------------------|------------------|-------|-------|
@@ -18,7 +18,7 @@ The Integrations page lists 83 entries. Querying the broker API behind it
 ### The merge.dev connect flow
 
 Clicking **Connect** on a `merge_connector` card calls
-`POST /__doh_broker/integrations/merge/link-token` with `{"connector_slug": "<slug>"}`.
+`POST /__humr_broker/integrations/merge/link-token` with `{"connector_slug": "<slug>"}`.
 The broker returns a `magic_link_url` of the form
 `https://ah-api.merge.dev/magic-link/<token>/` and opens it in a new tab.
 
@@ -191,9 +191,9 @@ plus the two edge cases discovered:
 
 ## Method / reproducibility
 
-- Connector inventory: `GET http://localhost:8788/__doh_broker/integrations` → 71 items with
+- Connector inventory: `GET http://localhost:8788/__humr_broker/integrations` → 71 items with
   `kind == "merge_connector"`.
-- Magic links minted via `POST http://localhost:8788/__doh_broker/integrations/merge/link-token`
+- Magic links minted via `POST http://localhost:8788/__humr_broker/integrations/merge/link-token`
   with body `{"connector_slug": "<slug>"}` → returns `{magic_link_url, link_token}`.
 - Each magic link opened at `https://ah-api.merge.dev/magic-link/<token>/` and the Merge Link
   widget (cross-origin `ah-cdn.merge.dev` iframe) inspected visually. Multi-step (F) flows were

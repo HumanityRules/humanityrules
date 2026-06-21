@@ -2,7 +2,7 @@
 Utilities for managing application secrets in AWS Secrets Manager.
 
 For listing secrets or purging secrets scheduled for deletion in a customer account,
-use the Django management command: ``uv run manage.py doh_secrets``.
+use the Django management command: ``uv run manage.py humr_secrets``.
 """
 
 import hashlib

@@ -215,7 +215,7 @@ class TestConnectedProvidersReturnHasToken(_BatchTokensEndpointTestBase):
             provider=IntegrationUserCredential.Provider.TELEGRAM,
             credentials={"bot_token": "123456:REAL"},
             config={"allowed_users": ["42", "7"]},
-            metadata={"bot_id": 123456, "bot_username": "doh_bot"},
+            metadata={"bot_id": 123456, "bot_username": "humr_bot"},
         )
 
         status, body = self._post(
@@ -228,7 +228,7 @@ class TestConnectedProvidersReturnHasToken(_BatchTokensEndpointTestBase):
         self.assertEqual(tg["outcome"], "has_token")
         self.assertEqual(tg["secrets"], {"bot_token": "123456:REAL"})
         self.assertEqual(tg["config"], {"allowed_users": ["42", "7"]})
-        self.assertEqual(tg["metadata"], {"bot_id": 123456, "bot_username": "doh_bot"})
+        self.assertEqual(tg["metadata"], {"bot_id": 123456, "bot_username": "humr_bot"})
 
     def test_openrouter_has_token_carries_api_key(self) -> None:
         IntegrationUserCredential.objects.create(

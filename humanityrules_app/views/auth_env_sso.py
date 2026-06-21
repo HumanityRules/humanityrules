@@ -8,7 +8,7 @@
 - ``GET /auth/env-callback?code=...&state=...`` — IdP redirect target.
   We exchange the code with the IdP, extract identity, mint a session
   JWT signed with the central RS256 key, and 302 the browser back to
-  the env at ``<rd-host>/__doh_session_install?token=...&rd=...``.
+  the env at ``<rd-host>/__humr_session_install?token=...&rd=...``.
 - ``GET /.well-known/jwks.json`` — public-key publication. Per-env
   sidecars cache this JWKS and verify session JWTs locally.
 
@@ -286,7 +286,7 @@ def env_callback(request: HttpRequest) -> HttpResponse:
 
     rd_host = urlparse(rd).hostname or ""
     install_url = (
-        f"https://{rd_host}/__doh_session_install?"
+        f"https://{rd_host}/__humr_session_install?"
         f"token={quote(session_jwt, safe='')}&rd={quote(rd, safe='')}"
     )
     logger.info("env-sso callback ok env=%s provider=%s -> %s", env.slug, org.auth_provider, rd)

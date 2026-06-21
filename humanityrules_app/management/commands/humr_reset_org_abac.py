@@ -6,11 +6,11 @@ policies), then create_default_app_policy for each app (non-policy-proxy apps
 get Default open-access policies).
 
 Usage:
-    uv run manage.py doh_reset_org_abac --org humr
-    uv run manage.py doh_reset_org_abac --org "Humanity Rules" --admin-email user@example.com
+    uv run manage.py humr_reset_org_abac --org humr
+    uv run manage.py humr_reset_org_abac --org "Humanity Rules" --admin-email user@example.com
 
 Production:
-    ./prod_manage.sh doh_reset_org_abac --org humr
+    ./prod_manage.sh humr_reset_org_abac --org humr
 """
 
 from django.core.management.base import BaseCommand, CommandError

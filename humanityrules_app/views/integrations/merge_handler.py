@@ -7,7 +7,7 @@ HUMR_ENV_BEARER. DOH validates the bearer, derives `origin_user_id` from the
 authenticated env's owner + app slug, attaches the Merge API key, and
 forwards.
 
-`origin_user_id = f"doh_{owner.pk}_{app_slug}"`. Per-app, not per-user. Same
+`origin_user_id = f"humr_{owner.pk}_{app_slug}"`. Per-app, not per-user. Same
 user destroying/recreating the same slug keeps integrations; a different user
 taking over the slug starts fresh.
 """
@@ -46,7 +46,7 @@ _DUPLICATE_USER_UUID_RE = re.compile(
 
 
 def _origin_user_id(*, user: User, app_slug: str) -> str:
-    return f"doh_{user.pk}_{app_slug}"
+    return f"humr_{user.pk}_{app_slug}"
 
 
 def _resolve_caller(request: HttpRequest) -> tuple[App, User] | JsonResponse:

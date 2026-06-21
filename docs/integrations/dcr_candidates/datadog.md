@@ -24,7 +24,7 @@ Verified 2026-05-16 by independent reproduction.
 
 **What we tried.** Standard DCR + PKCE flow against `mcp.datadoghq.com`:
 
-1. POST to `registration_endpoint` with `redirect_uris = ["https://hermes-datadog-test.chsandbox.com/__doh_broker/integrations/datadog/oauth/callback"]` → **201 Created**, our redirect URI echoed back verbatim in the response.
+1. POST to `registration_endpoint` with `redirect_uris = ["https://hermes-datadog-test.chsandbox.com/__humr_broker/integrations/datadog/oauth/callback"]` → **201 Created**, our redirect URI echoed back verbatim in the response.
 2. GET `/api/unstable/mcp-server/authorize` with `client_id=<the registered id>` and that exact `redirect_uri` → **400 "Invalid redirect_uri"** (plain text, no `error_description`).
 
 **The allowlist (independently reproduced).** Same DCR-then-authorize loop with
@@ -38,7 +38,7 @@ response status:
 - `https://claude.ai/...` (any path) → **302**
 - `https://app.datadoghq.com/...` → **302**
 - Everything else, including arbitrary paths on our own host (`/cb`,
-  `/oauth/callback`, the full `__doh_broker/...` path) → **400 Invalid redirect_uri**
+  `/oauth/callback`, the full `__humr_broker/...` path) → **400 Invalid redirect_uri**
 
 The decision is purely host-based on the URI; the path doesn't matter. The
 OIDC `application_type` parameter (`web` vs `native` vs absent) does not

@@ -101,7 +101,7 @@ def _install_stubs_if_needed() -> None:
 
 
 def _load_runtime_module(name: str) -> types.ModuleType:
-    """Load template_repos/hermes_agent/doh_runtime/integrations/<name>.py as a top-level module.
+    """Load template_repos/hermes_agent/humr_runtime/integrations/<name>.py as a top-level module.
 
     Mirrors the load-by-bare-name behaviour of supervisor.sh / production. We
     add the integrations dir to sys.path so peer modules (`mcp_top_level_tools`,
@@ -113,7 +113,7 @@ def _load_runtime_module(name: str) -> types.ModuleType:
     any cached entry so we always exec the real runtime file.
     """
     repo_root = pathlib.Path(__file__).resolve().parents[2]
-    integrations_dir = repo_root / "template_repos" / "hermes_agent" / "doh_runtime" / "integrations"
+    integrations_dir = repo_root / "template_repos" / "hermes_agent" / "humr_runtime" / "integrations"
     if str(integrations_dir) not in sys.path:
         sys.path.insert(0, str(integrations_dir))
     sys.modules.pop(name, None)
@@ -196,10 +196,10 @@ class TestAggregatorMergeDisabled(unittest.IsolatedAsyncioTestCase):
             port=9952,
             persistent_dir=pathlib.Path(self.tempdir.name),
             public_base_url="https://hermes.example",
-            doh_control_plane_url="https://doh.example",
-            doh_env_bearer="b",
-            doh_app_slug="hermes-test",
-            doh_owner_username="vmendi",
+            humr_control_plane_url="https://doh.example",
+            humr_env_bearer="b",
+            humr_app_slug="hermes-test",
+            humr_owner_username="vmendi",
             merge_enabled=False,
         )
 
@@ -228,10 +228,10 @@ class TestAggregatorRouteNamespaces(unittest.IsolatedAsyncioTestCase):
             port=9952,
             persistent_dir=pathlib.Path(self.tempdir.name),
             public_base_url="https://hermes.example",
-            doh_control_plane_url="https://doh.example",
-            doh_env_bearer="b",
-            doh_app_slug="hermes-test",
-            doh_owner_username="vmendi",
+            humr_control_plane_url="https://doh.example",
+            humr_env_bearer="b",
+            humr_app_slug="hermes-test",
+            humr_owner_username="vmendi",
             merge_enabled=True,
         )
 
@@ -525,10 +525,10 @@ class TestMergeBackendStateHooks(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self) -> None:
         self.hook = AsyncMock()
         self.merge = mcp_merge_backend.MergeBackend(
-            doh_control_plane_url="https://doh.example",
-            doh_env_bearer="b",
-            doh_app_slug="hermes-test",
-            doh_owner_username="vmendi",
+            humr_control_plane_url="https://doh.example",
+            humr_env_bearer="b",
+            humr_app_slug="hermes-test",
+            humr_owner_username="vmendi",
             excluded_connector_slugs=frozenset({"posthog"}),
             on_config_change=self.hook,
         )

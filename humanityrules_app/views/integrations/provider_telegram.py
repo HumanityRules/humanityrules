@@ -82,7 +82,7 @@ def _suggest_bot_username(app_slug: str) -> str:
     """
     prefix = re.sub(r"[^a-z0-9_]+", "_", app_slug.lower()).strip("_")[:_USERNAME_PREFIX_MAX_LEN].strip("_")
     if not prefix or not prefix[0].isalpha():
-        prefix = f"doh_{prefix}".strip("_")
+        prefix = f"humr_{prefix}".strip("_")
     return f"{prefix}_{secrets.token_hex(3)}_bot"
 
 

@@ -9,7 +9,7 @@ AWS-account + Environment metadata.
 This dispatcher:
 
 1. Parses --account, --env (and optional --org) from the original command.
-2. Calls `./prod_manage.sh doh_query ... --format json` to fetch the four AWS
+2. Calls `./prod_manage.sh humr_query ... --format json` to fetch the four AWS
    values from prod's DB (account_id, external_id, region, slug).
 3. Re-invokes the same Django management command LOCALLY via `uv run manage.py`,
    replacing --account/--env/--org with the equivalent raw-mode args
@@ -60,7 +60,7 @@ def main() -> None:
 
     print(
         f"[prod_dispatch] {command}: resolving --account={known.account!r} "
-        f"--env={known.env!r} via prod_manage.sh doh_query ...",
+        f"--env={known.env!r} via prod_manage.sh humr_query ...",
         file=sys.stderr,
     )
     target = _resolve_target(account=known.account, org=known.org, env=known.env)
@@ -86,7 +86,7 @@ def main() -> None:
 
 
 def _resolve_target(account: str, org: str | None, env: str) -> dict:
-    """Fetch the four AWS target values from prod's DB via prod_manage.sh doh_query."""
+    """Fetch the four AWS target values from prod's DB via prod_manage.sh humr_query."""
     if account.isdigit() and len(account) == 12:
         acct_filters = [f"aws_account_id={account}"]
     else:
@@ -94,7 +94,7 @@ def _resolve_target(account: str, org: str | None, env: str) -> dict:
     if org:
         acct_filters.append(f"organization__slug={org}")
 
-    acct_rows = _doh_query(
+    acct_rows = _humr_query(
         model="AWSAccount",
         fields=["aws_account_id", "external_id", "name"],
         filters=acct_filters,
@@ -110,7 +110,7 @@ def _resolve_target(account: str, org: str | None, env: str) -> dict:
     aws_account_id = acct_rows[0]["aws_account_id"]
     external_id = acct_rows[0]["external_id"]
 
-    env_rows = _doh_query(
+    env_rows = _humr_query(
         model="Environment",
         fields=["slug", "aws_region"],
         filters=[f"aws_account__aws_account_id={aws_account_id}", f"slug={env}"],
@@ -128,9 +128,9 @@ def _resolve_target(account: str, org: str | None, env: str) -> dict:
     }
 
 
-def _doh_query(model: str, fields: list[str], filters: list[str]) -> list[dict]:
-    """Run prod_manage.sh doh_query --format json and parse the embedded JSON line."""
-    cmd = [str(PROD_MANAGE_SH), "doh_query", model, *fields, "--format", "json"]
+def _humr_query(model: str, fields: list[str], filters: list[str]) -> list[dict]:
+    """Run prod_manage.sh humr_query --format json and parse the embedded JSON line."""
+    cmd = [str(PROD_MANAGE_SH), "humr_query", model, *fields, "--format", "json"]
     for f in filters:
         cmd.extend(["--filter", f])
 
