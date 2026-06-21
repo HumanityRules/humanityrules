@@ -39,7 +39,7 @@ This doc records **decisions and pointers**, not values. It deliberately omits t
 
 ## Non-obvious facts (from AWS docs + a real record)
 
-**Real log record** (`/devopshero/bedrock-invocations`, content logging disabled):
+**Real log record** (`/humr/bedrock-invocations`, content logging disabled):
 
 ```json
 {

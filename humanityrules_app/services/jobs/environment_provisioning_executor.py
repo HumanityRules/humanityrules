@@ -35,8 +35,8 @@ def _sync_outputs_from_cloudformation(session, environment: models.Environment) 
     """Populate environment.vpc_id and environment.cluster_arn from CloudFormation stack outputs."""
     try:
         cf_client = session.client("cloudformation")
-        vpc_stack_name = environment.vpc_stack_name or f"devopshero-{environment.slug}-vpc"
-        cluster_stack_name = environment.cluster_stack_name or f"devopshero-{environment.slug}-cluster"
+        vpc_stack_name = environment.vpc_stack_name or f"humr-{environment.slug}-vpc"
+        cluster_stack_name = environment.cluster_stack_name or f"humr-{environment.slug}-cluster"
         vpc_id = cloudformation_utils.get_stack_output(cf_client, stack_name=vpc_stack_name, output_key="VpcId")
         cluster_arn = cloudformation_utils.get_stack_output(cf_client, stack_name=cluster_stack_name, output_key="ClusterArn")
         if vpc_id:

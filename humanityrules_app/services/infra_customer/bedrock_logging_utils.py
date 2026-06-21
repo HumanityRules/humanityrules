@@ -22,9 +22,9 @@ logger = logging.getLogger(__name__)
 
 # Shared, env-agnostic resource names. The log group is regional (one per Region, same name); the
 # IAM role is account-global and serves every Region via wildcard conditions.
-LOG_GROUP_NAME = "/devopshero/bedrock-invocations"
+LOG_GROUP_NAME = "/humr/bedrock-invocations"
 LOG_STREAM_NAME = "aws/bedrock/modelinvocations"
-ROLE_NAME = "devopshero-bedrock-logging-role"
+ROLE_NAME = "humr-bedrock-logging-role"
 LOG_GROUP_RETENTION_DAYS = 30
 
 # Bedrock validates that it can assume the supplied role when the configuration is set. A freshly

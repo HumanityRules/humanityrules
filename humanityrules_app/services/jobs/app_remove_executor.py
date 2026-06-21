@@ -185,7 +185,7 @@ def run_removal(job_id: str) -> bool:
                 session = _get_env_session(env)
                 secrets_utils.delete_secrets_matching_prefix(
                     session=session,
-                    subprefix=f"devopshero/{env.slug}/{app.slug}/",
+                    subprefix=f"humr/{env.slug}/{app.slug}/",
                     dry_run=False,
                     force_immediate=True,
                 )
@@ -273,16 +273,16 @@ def _run_efs_cleanup_task(env: models.Environment, app_slug: str) -> tuple[bool,
 
     account_id = env.aws_account.aws_account_id
     region = env.aws_region
-    role_name = f"devopshero-{env.slug}-efs-remover-role"
-    task_family = f"devopshero-{env.slug}-app-efs-remove"
-    cluster_name = f"devopshero-{env.slug}-cluster"
+    role_name = f"humr-{env.slug}-efs-remover-role"
+    task_family = f"humr-{env.slug}-app-efs-remove"
+    cluster_name = f"humr-{env.slug}-cluster"
     efs_filesystem_arn = (
         f"arn:aws:elasticfilesystem:{region}:{account_id}:file-system/{infra['efs_fs_id']}"
     )
     exec_role_arn = (
-        f"arn:aws:iam::{account_id}:role/devopshero-{env.slug}-task-execution-role"
+        f"arn:aws:iam::{account_id}:role/humr-{env.slug}-task-execution-role"
     )
-    log_group = f"/devopshero/{env.slug}/ecs"
+    log_group = f"/humr/{env.slug}/ecs"
 
     task_def_arn = None
     task_arn = None
@@ -341,8 +341,8 @@ def _run_efs_cleanup_task(env: models.Environment, app_slug: str) -> tuple[bool,
 
 
 def _get_infra_info(cf_client, env_slug: str) -> dict[str, str]:
-    vpc_stack = f"devopshero-{env_slug}-vpc"
-    efs_stack = f"devopshero-{env_slug}-efs"
+    vpc_stack = f"humr-{env_slug}-vpc"
+    efs_stack = f"humr-{env_slug}-efs"
     lookups = {
         "efs_fs_id": (efs_stack, "EfsFileSystemId"),
         "efs_sg": (efs_stack, "EfsSecurityGroupId"),
@@ -376,7 +376,7 @@ def _ensure_remover_role(iam_client, role_name: str, efs_filesystem_arn: str) ->
             RoleName=role_name,
             AssumeRolePolicyDocument=trust_policy,
             Description="One-shot EFS cleanup task role",
-            Tags=[{"Key": "devopshero:purpose", "Value": "efs-remove"}],
+            Tags=[{"Key": "humr:purpose", "Value": "efs-remove"}],
         )
         role_arn = resp["Role"]["Arn"]
 
@@ -477,7 +477,7 @@ def _wait_for_stopped(ecs_client, cluster: str, task_arn: str) -> tuple[bool, st
 # ---------------------------------------------------------------------------
 #
 # When a template declares per-container host_mounts (e.g., hermes_agent at
-# /var/lib/devopshero/hermes-roots/{app_slug}), the underlying directory survives
+# /var/lib/humr/hermes-roots/{app_slug}), the underlying directory survives
 # task teardown — it lives on the EC2 container instance's EBS volume, not in any
 # AWS-managed filesystem. ECS may have scheduled the task across several instances
 # over its lifetime, so we broadcast a `rm -rf` to every instance in the env's ECS
@@ -491,7 +491,7 @@ def _wait_for_stopped(ecs_client, cluster: str, task_arn: str) -> tuple[bool, st
 
 # Only allow rm -rf under this top-level prefix. Belt-and-suspenders guard against
 # a future template typo emitting a host path outside the DOH-owned area.
-SSM_HOST_PATH_ALLOWED_PREFIX = "/var/lib/devopshero/"
+SSM_HOST_PATH_ALLOWED_PREFIX = "/var/lib/humr/"
 SSM_COMMAND_TIMEOUT_SECONDS = 300
 SSM_POLL_INTERVAL_SECONDS = 5
 SSM_MAX_WAIT_ITERATIONS = 60  # 60 * 5s = 5 min
@@ -535,7 +535,7 @@ def _run_host_path_cleanup_ssm(
     session = _get_env_session(env)
     ssm_client = session.client("ssm")
 
-    asg_name = f"devopshero-{env.slug}-ecs-container-instances"
+    asg_name = f"humr-{env.slug}-ecs-container-instances"
     quoted_paths = " ".join(f"'{p}'" for p in host_paths)
     command_script = (
         "set -e; "
@@ -551,7 +551,7 @@ def _run_host_path_cleanup_ssm(
             Targets=[{"Key": "tag:aws:autoscaling:groupName", "Values": [asg_name]}],
             Parameters={"commands": [command_script]},
             TimeoutSeconds=SSM_COMMAND_TIMEOUT_SECONDS,
-            Comment=f"devopshero host-path cleanup for app {app_slug}",
+            Comment=f"humr host-path cleanup for app {app_slug}",
         )
     except ClientError as e:
         logger.exception("SSM SendCommand failed")

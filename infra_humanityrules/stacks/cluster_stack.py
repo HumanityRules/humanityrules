@@ -21,7 +21,7 @@ class ClusterStack(Stack):
         self.cluster = ecs.Cluster(
             self,
             "EcsCluster",
-            cluster_name="doh-prod-cluster",
+            cluster_name="humr-prod-cluster",
             vpc=vpc,
             container_insights_v2=ecs.ContainerInsights.ENHANCED,
         )
@@ -30,14 +30,14 @@ class ClusterStack(Stack):
         self.task_execution_role = iam.Role(
             self,
             "TaskExecutionRole",
-            role_name="doh-prod-task-execution-role",
+            role_name="humr-prod-task-execution-role",
             assumed_by=iam.ServicePrincipal("ecs-tasks.amazonaws.com"),
             managed_policies=[iam.ManagedPolicy.from_aws_managed_policy_name("service-role/AmazonECSTaskExecutionRolePolicy")],
         )
         # Allow ECS to inject secrets as env vars
         self.task_execution_role.add_to_policy(iam.PolicyStatement(
             actions=["secretsmanager:GetSecretValue"],
-            resources=[f"arn:aws:secretsmanager:{Aws.REGION}:{Aws.ACCOUNT_ID}:secret:devopshero/*"],
+            resources=[f"arn:aws:secretsmanager:{Aws.REGION}:{Aws.ACCOUNT_ID}:secret:humr/*"],
         ))
         # Grant ECR pull permissions
         ecr_repository.grant_pull(self.task_execution_role)
@@ -46,7 +46,7 @@ class ClusterStack(Stack):
         self.log_group = logs.LogGroup(
             self,
             "EcsLogGroup",
-            log_group_name="/devopshero/prod/ecs",
+            log_group_name="/humr/prod/ecs",
             retention=logs.RetentionDays.ONE_MONTH,
             removal_policy=RemovalPolicy.DESTROY,
         )
@@ -70,7 +70,7 @@ class ClusterStack(Stack):
         self.alb = elbv2.ApplicationLoadBalancer(
             self,
             "Alb",
-            load_balancer_name="doh-prod-alb",
+            load_balancer_name="humr-prod-alb",
             vpc=vpc,
             internet_facing=True,
             security_group=self.alb_security_group,
@@ -90,10 +90,10 @@ class ClusterStack(Stack):
             ),
         )
 
-        CfnOutput(self, "ClusterArn", value=self.cluster.cluster_arn, export_name="doh-prod-cluster-arn")
-        CfnOutput(self, "ClusterName", value=self.cluster.cluster_name, export_name="doh-prod-cluster-name")
-        CfnOutput(self, "AlbArn", value=self.alb.load_balancer_arn, export_name="doh-prod-alb-arn")
-        CfnOutput(self, "AlbDns", value=self.alb.load_balancer_dns_name, export_name="doh-prod-alb-dns")
-        CfnOutput(self, "HttpsListenerArn", value=self.https_listener.listener_arn, export_name="doh-prod-https-listener-arn")
-        CfnOutput(self, "TaskExecutionRoleArn", value=self.task_execution_role.role_arn, export_name="doh-prod-task-execution-role-arn")
-        CfnOutput(self, "LogGroupName", value=self.log_group.log_group_name, export_name="doh-prod-ecs-log-group")
+        CfnOutput(self, "ClusterArn", value=self.cluster.cluster_arn, export_name="humr-prod-cluster-arn")
+        CfnOutput(self, "ClusterName", value=self.cluster.cluster_name, export_name="humr-prod-cluster-name")
+        CfnOutput(self, "AlbArn", value=self.alb.load_balancer_arn, export_name="humr-prod-alb-arn")
+        CfnOutput(self, "AlbDns", value=self.alb.load_balancer_dns_name, export_name="humr-prod-alb-dns")
+        CfnOutput(self, "HttpsListenerArn", value=self.https_listener.listener_arn, export_name="humr-prod-https-listener-arn")
+        CfnOutput(self, "TaskExecutionRoleArn", value=self.task_execution_role.role_arn, export_name="humr-prod-task-execution-role-arn")
+        CfnOutput(self, "LogGroupName", value=self.log_group.log_group_name, export_name="humr-prod-ecs-log-group")

@@ -45,7 +45,7 @@ Follow this general approach (adapt as needed):
    **Secrets Manager SDK patterns** — Apps that explicitly call AWS Secrets Manager:
    - GetSecretValue API calls
    - Config providers that load secrets at startup
-   - Secret path patterns (devopshero/{env}/{app}/secrets, etc.)
+   - Secret path patterns (humr/{env}/{app}/secrets, etc.)
 
    **Important**: Put ALL sensitive values in `secrets.fields`, NOT in `env.required`. Non-sensitive config (PORT, DEBUG, NODE_ENV, LOG_LEVEL, hostnames, feature flags) stays in `env`. Include every secret field even if comments say "optional" — that means the feature is optional, not the field.
 
@@ -145,7 +145,7 @@ When you have gathered enough evidence, output your findings as a JSON object in
   - **required** — Environment variables the app needs to run
   - **optional** — Environment variables that are optional
 - **secrets** — All sensitive values the app needs (null only if zero secrets detected)
-  - **secret_path** — Path pattern if app uses Secrets Manager SDK (e.g., "devopshero/{env}/{app}/secrets"); null for env-var-based secrets
+  - **secret_path** — Path pattern if app uses Secrets Manager SDK (e.g., "humr/{env}/{app}/secrets"); null for env-var-based secrets
   - **fields** — ALL secret fields: API keys, tokens, passwords, signing keys, etc. Each has name, purpose, and default_behavior. Do NOT put these in `env.required` — they belong here.
 - **caveats** — Warnings, concerns, missing pieces, or things the user should know
 - **evidence** — Evidence items for major claims (framework, run command, port, dependencies)

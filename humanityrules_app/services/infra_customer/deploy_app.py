@@ -81,7 +81,7 @@ def _resolve_control_plane_url() -> str:
     setting.
     """
     from django.conf import settings
-    return "https://humanityrules.io" if not settings.DEBUG else "https://devopshero.ngrok.io"
+    return "https://humanityrules.io" if not settings.DEBUG else "https://humanityrules.ngrok.io"
 
 
 def _resolve_pdp_url() -> str:
@@ -221,7 +221,7 @@ def _missing_prebuilt_images(
 def _environment_has_ec2_capacity_provider(session: boto3.Session, env_slug: str) -> bool:
     """Return True when the environment cluster is associated with the EC2 capacity provider."""
     ecs_client = session.client("ecs")
-    cluster_name = f"devopshero-{env_slug}-cluster"
+    cluster_name = f"humr-{env_slug}-cluster"
     capacity_provider_name = deploy_base.ec2_capacity_provider_name(env_slug=env_slug)
     response = ecs_client.describe_clusters(clusters=[cluster_name])
     clusters = response.get("clusters", [])
@@ -331,7 +331,7 @@ class PolicyProxyEcrStack(Stack):
         CfnOutput(
             self, "PolicyProxyEcrRepositoryUri",
             value=self.repository.repository_uri,
-            export_name=f"devopshero-{env_slug}-policy-proxy-ecr-uri",
+            export_name=f"humr-{env_slug}-policy-proxy-ecr-uri",
         )
 
 
@@ -438,7 +438,7 @@ class AuroraClusterStack(Stack):
             raise ValueError(f"Unsupported deployment mode: {deployment.mode}")
 
         cluster_identifier = f"{resource_prefix}-aurora"[:63]
-        secret_name = f"devopshero/{env_slug}/{app_config.app_name}/aurora/credentials"
+        secret_name = f"humr/{env_slug}/{app_config.app_name}/aurora/credentials"
 
         self.cluster = rds.DatabaseCluster(
             self, "AuroraCluster",
@@ -465,7 +465,7 @@ class AuroraClusterStack(Stack):
         self.port = str(self.cluster.cluster_endpoint.port)
         self.secret_arn = self.cluster.secret.secret_arn
 
-        connection_secret_name = f"devopshero/{env_slug}/{app_config.app_name}/aurora/connection"
+        connection_secret_name = f"humr/{env_slug}/{app_config.app_name}/aurora/connection"
         self.connection_secret = self._create_connection_secret(
             connection_secret_name=connection_secret_name,
             engine_family=database_config.engine.family,
@@ -682,7 +682,7 @@ class AppStack(Stack):
         if app_config.app_secrets:
             task_role.add_to_policy(iam.PolicyStatement(
                 actions=["secretsmanager:GetSecretValue"],
-                resources=[f"arn:aws:secretsmanager:{Aws.REGION}:{Aws.ACCOUNT_ID}:secret:devopshero/{env_slug}/{app_config.app_name}/*"],
+                resources=[f"arn:aws:secretsmanager:{Aws.REGION}:{Aws.ACCOUNT_ID}:secret:humr/{env_slug}/{app_config.app_name}/*"],
             ))
         if database_connection_secret:
             task_role.add_to_policy(iam.PolicyStatement(
@@ -757,7 +757,7 @@ class AppStack(Stack):
         app_secret_resource: secretsmanager.ISecret | None = None
         if app_config.app_secrets:
             app_secret_resource = secretsmanager.Secret.from_secret_name_v2(
-                self, "AppSecret", f"devopshero/{env_slug}/{app_config.app_name}/secrets",
+                self, "AppSecret", f"humr/{env_slug}/{app_config.app_name}/secrets",
             )
 
         if app_config.compute_mode == "fargate" and any(c.privileged for c in app_config.containers):
@@ -1178,7 +1178,7 @@ class AppStack(Stack):
         eventual-consistency race is dodged on the common shutdown path.
         """
         priority = _compute_listener_rule_priority(subdomain)
-        prefix = f"devopshero-{env_slug}"
+        prefix = f"humr-{env_slug}"
 
         shared_alb_dns = Fn.import_value(f"{prefix}-shared-alb-dns")
 
@@ -1333,8 +1333,8 @@ def deploy(
     cloudformation_utils.cleanup_rollback_complete_stacks(cf_client, app_stack_names)
 
     # Verify infrastructure exists
-    vpc_stack_name = f"devopshero-{env_slug}-vpc"
-    cluster_stack_name = f"devopshero-{env_slug}-cluster"
+    vpc_stack_name = f"humr-{env_slug}-vpc"
+    cluster_stack_name = f"humr-{env_slug}-cluster"
 
     if not cloudformation_utils.stack_exists(cf_client, vpc_stack_name):
         msg = f"Base layer not deployed. VPC stack '{vpc_stack_name}' not found"
@@ -1348,7 +1348,7 @@ def deploy(
         capacity_provider_name = deploy_base.ec2_capacity_provider_name(env_slug=env_slug)
         msg = (
             f"EC2 compute requested, but capacity provider '{capacity_provider_name}' is not associated with "
-            f"cluster 'devopshero-{env_slug}-cluster'. Redeploy the environment base infrastructure first."
+            f"cluster 'humr-{env_slug}-cluster'. Redeploy the environment base infrastructure first."
         )
         logger.error(msg)
         return DeployResult(success=False, error=msg, service_url="", alb_dns="")
@@ -1406,7 +1406,7 @@ def deploy(
     if policy_proxy_needed:
         policy_proxy_ecr_stack = PolicyProxyEcrStack(
             cdk_app,
-            f"devopshero-{env_slug}-policy-proxy-ecr",
+            f"humr-{env_slug}-policy-proxy-ecr",
             env_slug=env_slug,
         )
 
@@ -1473,7 +1473,7 @@ def deploy(
     if policy_proxy_needed:
         if not cdk_utils.deploy_from_assembly(
             assembly_dir=assembly_dir, session=session,
-            stack_names=[f"devopshero-{env_slug}-policy-proxy-ecr"],
+            stack_names=[f"humr-{env_slug}-policy-proxy-ecr"],
         ):
             logger.error("CDK deployment failed (policy-proxy-ecr)")
             return DeployResult(success=False, error="CDK deployment failed (policy-proxy-ecr)", service_url="", alb_dns="")

@@ -28,7 +28,7 @@ VALID_X_CONFIG = {
     "token_uri": "https://api.x.com/2/oauth2/token",
     "redirect_uris": [
         "http://testserver/integrations/user/x/callback/",
-        "https://devopshero.ngrok.ai/integrations/user/x/callback/",
+        "https://humanityrules.ngrok.io/integrations/user/x/callback/",
     ],
 }
 

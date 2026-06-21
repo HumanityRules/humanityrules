@@ -17,7 +17,7 @@ class DatabaseStack(Stack):
             self,
             "AuroraSecurityGroup",
             vpc=vpc,
-            security_group_name="doh-prod-aurora-sg",
+            security_group_name="humr-prod-aurora-sg",
             description="Security group for Aurora - allows PostgreSQL from VPC",
             allow_all_outbound=True,
         )
@@ -43,9 +43,9 @@ class DatabaseStack(Stack):
             self,
             "AuroraCluster",
             engine=rds.DatabaseClusterEngine.aurora_postgres(version=rds.AuroraPostgresEngineVersion.VER_16_4),
-            cluster_identifier="doh-prod-aurora",
-            default_database_name="devopshero",
-            credentials=rds.Credentials.from_generated_secret("dbadmin", secret_name="devopshero/prod/aurora/credentials"),
+            cluster_identifier="humr-prod-aurora",
+            default_database_name="humr",
+            credentials=rds.Credentials.from_generated_secret("dbadmin", secret_name="humr/prod/aurora/credentials"),
             vpc=vpc,
             subnet_group=subnet_group,
             security_groups=[self.security_group],
@@ -64,7 +64,7 @@ class DatabaseStack(Stack):
         # The app will construct DATABASE_URL from the individual fields
         self.database_secret = self.cluster.secret
 
-        CfnOutput(self, "ClusterEndpoint", value=self.cluster.cluster_endpoint.hostname, export_name="doh-prod-aurora-endpoint")
-        CfnOutput(self, "ClusterPort", value=str(self.cluster.cluster_endpoint.port), export_name="doh-prod-aurora-port")
-        CfnOutput(self, "DatabaseName", value="devopshero", export_name="doh-prod-aurora-database")
-        CfnOutput(self, "SecretArn", value=self.cluster.secret.secret_arn if self.cluster.secret else "", export_name="doh-prod-aurora-secret-arn")
+        CfnOutput(self, "ClusterEndpoint", value=self.cluster.cluster_endpoint.hostname, export_name="humr-prod-aurora-endpoint")
+        CfnOutput(self, "ClusterPort", value=str(self.cluster.cluster_endpoint.port), export_name="humr-prod-aurora-port")
+        CfnOutput(self, "DatabaseName", value="humr", export_name="humr-prod-aurora-database")
+        CfnOutput(self, "SecretArn", value=self.cluster.secret.secret_arn if self.cluster.secret else "", export_name="humr-prod-aurora-secret-arn")

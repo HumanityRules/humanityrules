@@ -41,7 +41,7 @@ ALLOWED_HOSTS = ["*"]
 SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
 
 CSRF_TRUSTED_ORIGINS = [
-    "https://devopshero.ngrok.io",
+    "https://humanityrules.ngrok.io",
     "https://humanityrules.io",
     "https://*.humanityrules.io"
 ]
@@ -116,7 +116,7 @@ if DATABASE_HOST:
     DATABASE_USER = os.environ.get("DATABASE_USERNAME", "")
     DATABASE_PASS = os.environ.get("DATABASE_PASSWORD", "")
     DATABASE_PORT = os.environ.get("DATABASE_PORT", "5432")
-    DATABASE_NAME = os.environ.get("DATABASE_NAME", "devopshero")
+    DATABASE_NAME = os.environ.get("DATABASE_NAME", "humr")
     DATABASE_URL = f"postgresql://{DATABASE_USER}:{DATABASE_PASS}@{DATABASE_HOST}:{DATABASE_PORT}/{DATABASE_NAME}"
     # Use psycopg3's connection pool instead of CONN_MAX_AGE for ASGI compatibility.
     # Pool is recommended for async Django; CONN_MAX_AGE causes connection leaks in async contexts.

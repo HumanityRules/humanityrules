@@ -8,7 +8,7 @@ This directory contains the CDK infrastructure for the DevOps Hero control plane
 **CRITICAL**: Before running any CDK or AWS CLI commands, load the DOH AWS credentials from `.env`:
 
 ```bash
-# From infra_devopshero/ directory
+# From infra_humanityrules/ directory
 source ../scripts/load_aws_env.sh   # If this script exists
 
 # Or manually export (deploy.sh does this automatically):
@@ -38,7 +38,7 @@ Eight CDK stacks deployed in dependency order:
 7. **app_stack** — ECS service with migration init container, task definition, secrets
 8. **cdn_stack** — CloudFront distribution, Route53 A records
 
-All stacks use `doh-prod-` prefix for resource names.
+All stacks use `humr-prod-` prefix for resource names.
 
 
 ## Common Operations
@@ -46,7 +46,7 @@ All stacks use `doh-prod-` prefix for resource names.
 ### Full Deployment (First Time or Full Rebuild)
 
 ```bash
-cd infra_devopshero
+cd infra_humanityrules
 ./deploy.sh
 ```
 
@@ -61,7 +61,7 @@ This script:
 ### Deploy Code Changes Only (Most Common)
 
 ```bash
-cd infra_devopshero
+cd infra_humanityrules
 ./deploy_app.sh                 # App only (~2-3 min)
 ./deploy_app.sh --sync-secrets  # Sync secrets first, then deploy
 ```
@@ -72,17 +72,17 @@ This skips CDK stack deployment and only builds/pushes the Docker image and trig
 
 Secrets are synced from `.env` to AWS Secrets Manager. The mapping is defined in `sync_secrets.py`:
 
-- `devopshero/prod/django` — DJANGO_SECRET_KEY, DJANGO_SUPERUSER_EMAIL
-- `devopshero/prod/workos` — WORKOS_CLIENT_ID, WORKOS_API_KEY
-- `devopshero/prod/github` — GitHub App credentials
-- `devopshero/prod/bedrock` — Bedrock credentials for AI features
-- `devopshero/prod/api` — HUMR_API_SECRET_KEY
-- `devopshero/prod/telegram` — TELEGRAM_MANAGER_BOT_TOKEN, TELEGRAM_MANAGER_BOT_USERNAME
+- `humr/prod/django` — DJANGO_SECRET_KEY, DJANGO_SUPERUSER_EMAIL
+- `humr/prod/workos` — WORKOS_CLIENT_ID, WORKOS_API_KEY
+- `humr/prod/github` — GitHub App credentials
+- `humr/prod/bedrock` — Bedrock credentials for AI features
+- `humr/prod/api` — HUMR_API_SECRET_KEY
+- `humr/prod/telegram` — TELEGRAM_MANAGER_BOT_TOKEN, TELEGRAM_MANAGER_BOT_USERNAME
 
 **To update secrets:**
 
 ```bash
-cd infra_devopshero
+cd infra_humanityrules
 uv run python sync_secrets.py          # Sync all secrets
 uv run python sync_secrets.py --dry-run # Preview changes
 ```
@@ -92,8 +92,8 @@ uv run python sync_secrets.py --dry-run # Preview changes
 ### Deploy Single Stack
 
 ```bash
-cd infra_devopshero
-./deploy_stack.sh doh-prod-storage
+cd infra_humanityrules
+./deploy_stack.sh humr-prod-storage
 ```
 
 This script loads AWS credentials from `.env` and deploys the specified stack.
@@ -101,22 +101,22 @@ This script loads AWS credentials from `.env` and deploys the specified stack.
 ### View CDK Diff
 
 ```bash
-cdk diff doh-prod-app
+cdk diff humr-prod-app
 ```
 
 ### Debugging Production
 
-**Log group:** `/devopshero/prod/ecs`
+**Log group:** `/humr/prod/ecs`
 
 **Stream prefixes:**
-- `devopshero/devopshero/` — App container logs
+- `humr/humr/` — App container logs
 - `migrate/migrate/` — Migration init container logs
 
 **List recent log streams (find latest task):**
 
 ```bash
 aws logs describe-log-streams \
-  --log-group-name "/devopshero/prod/ecs" \
+  --log-group-name "/humr/prod/ecs" \
   --order-by LastEventTime \
   --descending \
   --limit 5 \
@@ -129,8 +129,8 @@ aws logs describe-log-streams \
 ```bash
 # Replace STREAM_NAME with actual stream from above
 aws logs get-log-events \
-  --log-group-name "/devopshero/prod/ecs" \
-  --log-stream-name "devopshero/devopshero/TASK_ID" \
+  --log-group-name "/humr/prod/ecs" \
+  --log-stream-name "humr/humr/TASK_ID" \
   --limit 100 \
   --query 'events[*].message' \
   --output text
@@ -140,8 +140,8 @@ aws logs get-log-events \
 
 ```bash
 aws logs get-log-events \
-  --log-group-name "/devopshero/prod/ecs" \
-  --log-stream-name "devopshero/devopshero/TASK_ID" \
+  --log-group-name "/humr/prod/ecs" \
+  --log-stream-name "humr/humr/TASK_ID" \
   --limit 100 \
   --query 'events[*].message' \
   --output text | grep -iE 'error|exception|worker'
@@ -151,21 +151,21 @@ aws logs get-log-events \
 
 ```bash
 # Everything (app + migration + any sidecar)
-aws logs tail /devopshero/prod/ecs --follow
+aws logs tail /humr/prod/ecs --follow
 
 # App container only (stream prefix scoping)
-aws logs tail /devopshero/prod/ecs --follow --log-stream-name-prefix devopshero
+aws logs tail /humr/prod/ecs --follow --log-stream-name-prefix humr
 
 # Migration container only
-aws logs tail /devopshero/prod/ecs --follow --log-stream-name-prefix migrate
+aws logs tail /humr/prod/ecs --follow --log-stream-name-prefix migrate
 
 # Filter on message content (NOT stream name)
-aws logs tail /devopshero/prod/ecs --follow --filter-pattern '?ERROR ?Exception ?Traceback'
+aws logs tail /humr/prod/ecs --follow --filter-pattern '?ERROR ?Exception ?Traceback'
 ```
 
 `--filter-pattern` matches log message body, not stream names. To scope by
 container, use `--log-stream-name-prefix`. The streams are
-`devopshero/devopshero/<task>` and `migrate/migrate/<task>`.
+`humr/humr/<task>` and `migrate/migrate/<task>`.
 
 There's also a wrapper that handles credential loading and defaults to
 `--follow`: `./tail_prod.sh [aws-logs-tail-flags...]` (pass `--no-follow` for a
@@ -177,10 +177,10 @@ Requires the AWS Session Manager Plugin (already installed and in PATH).
 
 ```bash
 # Find running task
-TASK_ARN=$(aws ecs list-tasks --cluster doh-prod-cluster --service-name doh-prod-app --query 'taskArns[0]' --output text)
+TASK_ARN=$(aws ecs list-tasks --cluster humr-prod-cluster --service-name humr-prod-app --query 'taskArns[0]' --output text)
 
 # Execute command
-aws ecs execute-command --cluster doh-prod-cluster --task ${TASK_ARN} --container devopshero --interactive --command "/bin/bash"
+aws ecs execute-command --cluster humr-prod-cluster --task ${TASK_ARN} --container humr --interactive --command "/bin/bash"
 ```
 
 
@@ -193,12 +193,12 @@ When customers connect their AWS account to DevOps Hero:
 3. **CloudFormation creates**:
    - IAM role with trust policy for DOH account (555553041615)
    - ExternalId for confused deputy protection
-4. **Custom Resource triggers Lambda** (`doh-prod-install-callback`)
+4. **Custom Resource triggers Lambda** (`humr-prod-install-callback`)
 5. **Lambda POSTs to DOH backend** (`/api/aws/install-account-callback`)
 6. **DOH backend stores** the role ARN and external ID
 
 **Key files:**
-- `cf_install_template.json` — CloudFormation template customers run (uploaded to `devopshero-public` S3 bucket via `BucketDeployment`)
+- `cf_install_template.json` — CloudFormation template customers run (uploaded to `humr-public` S3 bucket via `BucketDeployment`)
 - `install_callback_lambda.py` — Lambda handler code (deployed inline via CDK)
 
 

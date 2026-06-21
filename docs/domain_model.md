@@ -369,10 +369,10 @@ Apps use shared ALB with host-based routing:
 - Subdomain defaults to app slug, auto-suffixed with `-{env_slug}` if another app on the same hosted zone already uses that subdomain
 
 ### AWS Resource Naming
-- **Base infrastructure** — `devopshero-{env_slug}-*` (VPC, cluster, execution role)
+- **Base infrastructure** — `humr-{env_slug}-*` (VPC, cluster, execution role)
 - **App resources** — `doh-{env_slug}-{app_slug}-*` (ALB target group, ECS service, task role)
 - **ECR path** — `doh/{env_slug}/{app_slug}`
-- **Secrets Manager** — `devopshero/{env_slug}/{app_slug}/secrets` (and `devopshero/{env_slug}/{app_slug}/aurora/*` for apps with a database)
+- **Secrets Manager** — `humr/{env_slug}/{app_slug}/secrets` (and `humr/{env_slug}/{app_slug}/aurora/*` for apps with a database)
 
 ### Compute Substrate
 - v1 supports ECS/Fargate only

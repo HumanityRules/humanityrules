@@ -3,11 +3,11 @@ set -e
 
 # Deploy a single CDK stack
 # Usage: ./deploy_stack.sh <stack-name>
-# Example: ./deploy_stack.sh doh-prod-storage
+# Example: ./deploy_stack.sh humr-prod-storage
 
 if [ -z "$1" ]; then
     echo "Usage: ./deploy_stack.sh <stack-name>"
-    echo "Example: ./deploy_stack.sh doh-prod-storage"
+    echo "Example: ./deploy_stack.sh humr-prod-storage"
     exit 1
 fi
 

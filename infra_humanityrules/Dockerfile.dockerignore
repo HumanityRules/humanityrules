@@ -1,8 +1,8 @@
-# Per-Dockerfile ignore for `infra_devopshero/Dockerfile`, picked up by BuildKit
+# Per-Dockerfile ignore for `infra_humanityrules/Dockerfile`, picked up by BuildKit
 # because of the `Dockerfile.dockerignore` filename (must sit next to the Dockerfile
 # and use this exact `<dockerfile-name>.dockerignore` form). Patterns are evaluated
 # relative to the build context, which is the project root (see deploy_app.sh:
-# `docker build -f infra_devopshero/Dockerfile -t devopshero:latest .`).
+# `docker build -f infra_humanityrules/Dockerfile -t humr:latest .`).
 
 # Git. `**/.git` (not bare `.git`, which only matches the context root) so the
 # control-plane image's `COPY . .` excludes the nested submodule `.git` pointer
@@ -57,11 +57,11 @@ tests/
 test_*.py
 
 # CDK infrastructure (not needed in container)
-infra_devopshero/stacks/
-infra_devopshero/*.sh
-infra_devopshero/*.json
-infra_devopshero/cdk.json
-infra_devopshero/app.py
+infra_humanityrules/stacks/
+infra_humanityrules/*.sh
+infra_humanityrules/*.json
+infra_humanityrules/cdk.json
+infra_humanityrules/app.py
 
 # Other
 .claude/

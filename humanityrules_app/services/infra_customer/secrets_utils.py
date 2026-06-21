@@ -36,7 +36,7 @@ def _resolve_secret_value(key: str, value: str | None, shared_secrets: dict[str,
 
 def get_shared_secrets(session: boto3.Session, env_slug: str) -> dict[str, str]:
     """Read the environment's shared secrets from Secrets Manager. Returns {} if none exist."""
-    secret_name = f"devopshero/{env_slug}/shared-secrets"
+    secret_name = f"humr/{env_slug}/shared-secrets"
     sm_client = session.client("secretsmanager")
     try:
         response = sm_client.get_secret_value(SecretId=secret_name)
@@ -69,7 +69,7 @@ def ensure_app_secrets_exist(session: boto3.Session, env_slug: str, app_config: 
     if not app_config.app_secrets:
         return
 
-    secret_name = f"devopshero/{env_slug}/{app_config.app_name}/secrets"
+    secret_name = f"humr/{env_slug}/{app_config.app_name}/secrets"
     sm_client = session.client("secretsmanager")
     
     # Check if secret already exists
@@ -220,7 +220,7 @@ def ensure_env_bearer_token_exists(session: boto3.Session, env) -> str:
     from humanityrules_app.models import EnvironmentBearerToken
 
     env_slug = env.slug
-    secret_name = f"devopshero/{env_slug}/shared-secrets"
+    secret_name = f"humr/{env_slug}/shared-secrets"
     sm_client = session.client("secretsmanager")
 
     existing_row = EnvironmentBearerToken.objects.filter(environment=env).first()

@@ -29,7 +29,7 @@ env_us_east_1 = Environment(account=AWS_ACCOUNT, region=AWS_REGION)
 app = App()
 
 # Stack naming prefix
-prefix = "doh-prod"
+prefix = "humr-prod"
 
 # 1. Certificate Stack (must be us-east-1 for CloudFront)
 cert_stack = CertStack(

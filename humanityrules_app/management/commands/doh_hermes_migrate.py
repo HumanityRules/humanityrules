@@ -12,7 +12,7 @@ The five-phase pattern (each phase is idempotent and can be rerun on its own):
                  The dest hermes container must be stopped (`--stop-dest`)
                  before this — otherwise its persistent-root-runner.sh will
                  overwrite our staged tar on SIGTERM.
-  3. host-clear  rm -rf /var/lib/devopshero/hermes-roots/<app> on the dest EC2
+  3. host-clear  rm -rf /var/lib/humr/hermes-roots/<app> on the dest EC2
                  instance, so the runner sees an empty persistent root and
                  restores from the staged checkpoint.
   4. finalize    Scale the dest ECS service back to 1 and wait for the runner's
@@ -263,7 +263,7 @@ class Command(BaseCommand):
 
         # Find source running task.
         ecs = ctx.source.session.client("ecs")
-        cluster = f"devopshero-{ctx.source.env_slug}-cluster"
+        cluster = f"humr-{ctx.source.env_slug}-cluster"
         service = f"doh-{ctx.source.env_slug}-{ctx.app}"
         container = f"{ctx.app}{HERMES_CONTAINER_SUFFIX}"
         task = self._find_running_task(ecs=ecs, cluster=cluster, service=service)
@@ -308,7 +308,7 @@ class Command(BaseCommand):
             raise CommandError("State file missing bucket/sha/comp_size — run `upload` first.")
 
         ecs = ctx.dest.session.client("ecs")
-        cluster = f"devopshero-{ctx.dest.env_slug}-cluster"
+        cluster = f"humr-{ctx.dest.env_slug}-cluster"
         service = f"doh-{ctx.dest.env_slug}-{ctx.app}"
 
         if ctx.stop_dest:
@@ -328,7 +328,7 @@ class Command(BaseCommand):
     def _phase_host_clear(self, ctx: MigrationContext):
         ssm = ctx.dest.session.client("ssm")
         ecs = ctx.dest.session.client("ecs")
-        cluster = f"devopshero-{ctx.dest.env_slug}-cluster"
+        cluster = f"humr-{ctx.dest.env_slug}-cluster"
         ci_arns = ecs.list_container_instances(cluster=cluster)["containerInstanceArns"]
         if not ci_arns:
             raise CommandError("No container instances in dest cluster.")
@@ -336,7 +336,7 @@ class Command(BaseCommand):
         instance_ids = [c["ec2InstanceId"] for c in cis if c["status"] == "ACTIVE"]
         if not instance_ids:
             raise CommandError("No ACTIVE container instances in dest cluster.")
-        target_dir = f"/var/lib/devopshero/hermes-roots/{ctx.app}"
+        target_dir = f"/var/lib/humr/hermes-roots/{ctx.app}"
         script = f"set -e; echo === before ===; ls -la {target_dir} 2>/dev/null || echo MISSING; rm -rf {target_dir}; mkdir -p {target_dir}; echo === after ===; ls -la {target_dir}"
 
         for inst in instance_ids:
@@ -361,7 +361,7 @@ class Command(BaseCommand):
         state = self._read_state(ctx=ctx)
         prev = state.get("prev_desired", 1)
         ecs = ctx.dest.session.client("ecs")
-        cluster = f"devopshero-{ctx.dest.env_slug}-cluster"
+        cluster = f"humr-{ctx.dest.env_slug}-cluster"
         service = f"doh-{ctx.dest.env_slug}-{ctx.app}"
         self.stdout.write(f"  scaling dest service to desiredCount={prev}")
         ecs.update_service(cluster=cluster, service=service, desiredCount=prev)
@@ -371,7 +371,7 @@ class Command(BaseCommand):
 
     def _phase_verify(self, ctx: MigrationContext):
         ecs = ctx.dest.session.client("ecs")
-        cluster = f"devopshero-{ctx.dest.env_slug}-cluster"
+        cluster = f"humr-{ctx.dest.env_slug}-cluster"
         service = f"doh-{ctx.dest.env_slug}-{ctx.app}"
         container = f"{ctx.app}{HERMES_CONTAINER_SUFFIX}"
         task = self._find_running_task(ecs=ecs, cluster=cluster, service=service)
@@ -400,7 +400,7 @@ class Command(BaseCommand):
 
         # Stager role lives in dest account.
         iam = ctx.dest.session.client("iam")
-        role_name = f"devopshero-{ctx.dest.env_slug}-checkpoint-stager-role"
+        role_name = f"humr-{ctx.dest.env_slug}-checkpoint-stager-role"
         try:
             for p in iam.list_role_policies(RoleName=role_name)["PolicyNames"]:
                 iam.delete_role_policy(RoleName=role_name, PolicyName=p)
@@ -487,11 +487,11 @@ class Command(BaseCommand):
         cf = sess.client("cloudformation")
 
         env_slug = ctx.dest.env_slug
-        cluster = f"devopshero-{env_slug}-cluster"
-        log_group = f"/devopshero/{env_slug}/ecs"
-        exec_role = f"arn:aws:iam::{ctx.dest.aws_account_id}:role/devopshero-{env_slug}-task-execution-role"
-        family = f"devopshero-{env_slug}-checkpoint-stager"
-        role_name = f"devopshero-{env_slug}-checkpoint-stager-role"
+        cluster = f"humr-{env_slug}-cluster"
+        log_group = f"/humr/{env_slug}/ecs"
+        exec_role = f"arn:aws:iam::{ctx.dest.aws_account_id}:role/humr-{env_slug}-task-execution-role"
+        family = f"humr-{env_slug}-checkpoint-stager"
+        role_name = f"humr-{env_slug}-checkpoint-stager-role"
 
         infra = self._lookup_infra(cf=cf, env_slug=env_slug)
         efs_arn = f"arn:aws:elasticfilesystem:{ctx.dest.aws_region}:{ctx.dest.aws_account_id}:file-system/{infra['efs_fs_id']}"
@@ -584,8 +584,8 @@ class Command(BaseCommand):
                 pass
 
     def _lookup_infra(self, cf, env_slug: str) -> dict:
-        vpc_stack = f"devopshero-{env_slug}-vpc"
-        efs_stack = f"devopshero-{env_slug}-efs"
+        vpc_stack = f"humr-{env_slug}-vpc"
+        efs_stack = f"humr-{env_slug}-efs"
         keys = {
             "efs_fs_id": (efs_stack, "EfsFileSystemId"),
             "efs_sg":    (efs_stack, "EfsSecurityGroupId"),
@@ -618,7 +618,7 @@ class Command(BaseCommand):
                 RoleName=role_name,
                 AssumeRolePolicyDocument=trust,
                 Description="One-shot stager: download S3 -> EFS for hermes migration",
-                Tags=[{"Key": "devopshero:purpose", "Value": "checkpoint-stager"}])
+                Tags=[{"Key": "humr:purpose", "Value": "checkpoint-stager"}])
             arn = r["Role"]["Arn"]
         iam.put_role_policy(RoleName=role_name, PolicyName="ssm",
             PolicyDocument=json.dumps({"Version": "2012-10-17", "Statement": [{
@@ -676,7 +676,7 @@ class Command(BaseCommand):
     def _wait_for_restore_complete(self, ctx: MigrationContext, cluster: str, service: str, timeout: int = 900):
         logs = ctx.dest.session.client("logs")
         ecs = ctx.dest.session.client("ecs")
-        log_group = f"/devopshero/{ctx.dest.env_slug}/ecs"
+        log_group = f"/humr/{ctx.dest.env_slug}/ecs"
         container = f"{ctx.app}{HERMES_CONTAINER_SUFFIX}"
         start = time.monotonic()
         task_arn = None

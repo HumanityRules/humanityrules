@@ -241,7 +241,7 @@ class Command(BaseCommand):
         except App.DoesNotExist:
             raise CommandError(f"No app with slug '{options['app']}' in organization '{aws_account.organization.name}'.")
 
-        cluster_name = f"devopshero-{env_slug}-cluster"
+        cluster_name = f"humr-{env_slug}-cluster"
         service_name = f"doh-{env_slug}-{app.slug}"
         container_name = doh_app_shell._resolve_ecs_container_name(
             app=app, requested_container=options.get("container"),

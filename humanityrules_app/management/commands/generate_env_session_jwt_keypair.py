@@ -8,7 +8,7 @@ Usage:
     uv run manage.py generate_env_session_jwt_keypair
 
 Output is two values to paste into the operator's .env, then sync to Secrets
-Manager via infra_devopshero/sync_secrets.py:
+Manager via infra_humanityrules/sync_secrets.py:
 
     HUMR_ENV_SESSION_JWT_PRIVATE_KEY=<PEM, newline-escaped>
     HUMR_ENV_SESSION_JWT_KID=env-sso-YYYY-MM-DD
@@ -45,7 +45,7 @@ class Command(BaseCommand):
         escaped_pem = private_pem.decode("ascii").replace("\n", "\\n")
 
         self.stdout.write("# Generated env-SSO signing keypair.")
-        self.stdout.write("# Paste these two lines into .env, then run infra_devopshero/sync_secrets.py.")
+        self.stdout.write("# Paste these two lines into .env, then run infra_humanityrules/sync_secrets.py.")
         self.stdout.write("")
         self.stdout.write(f"HUMR_ENV_SESSION_JWT_PRIVATE_KEY={escaped_pem}")
         self.stdout.write(f"HUMR_ENV_SESSION_JWT_KID={kid}")

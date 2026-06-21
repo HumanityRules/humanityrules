@@ -167,9 +167,9 @@ class Command(BaseCommand):
         except App.DoesNotExist:
             raise CommandError(f"No app with slug '{app_slug}' in organization '{aws_account.organization.name}'.")
 
-        cluster_name = f"devopshero-{env_slug}-cluster"
+        cluster_name = f"humr-{env_slug}-cluster"
         service_name = f"doh-{env_slug}-{app_slug}"
-        log_group = f"/devopshero/{env_slug}/ecs"
+        log_group = f"/humr/{env_slug}/ecs"
         container_name = doh_app_shell._resolve_ecs_container_name(
             app=app,
             requested_container=_requested_container(options=options),

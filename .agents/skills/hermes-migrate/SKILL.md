@@ -12,7 +12,7 @@ The migration is a five-phase pipeline driven by the `doh_hermes_migrate` manage
 A hermes app's state lives in two places:
 
 - **EFS checkpoint**: `/hermes-checkpoint/rootfs.tar.zst` — written on SIGTERM, read on boot.
-- **Host bind-mount**: `/var/lib/devopshero/hermes-roots/<app>` on the EC2 container instance — the live persistent root.
+- **Host bind-mount**: `/var/lib/humr/hermes-roots/<app>` on the EC2 container instance — the live persistent root.
 
 `persistent-root-runner.sh` writes a fresh checkpoint on SIGTERM. So if you stage a tar onto the dest EFS while the dest container is running and then stop it, the runner will overwrite your tar. The pipeline avoids that by stopping dest first, then staging via a temporary Fargate task that does **not** run the hermes image.
 
@@ -30,7 +30,7 @@ Ask the user only if missing — never grill. Reasonable defaults are noted.
 
 - Both source and dest hermes services exist and use the `hermes_agent` template (`grep HUMR_APP_TEMPLATE`-style check, or just check that `/hermes-checkpoint` and `/hermes-persistent-root` mounts exist in the dest task definition).
 - Source service has 1 RUNNING task. If it's at desiredCount=0, ask before scaling up — the user may have stopped it deliberately.
-- Free disk on dest EC2 instance: `df -h /var/lib/devopshero` via `doh_node_shell` — restoring needs roughly 2-3x the compressed tar size in free space.
+- Free disk on dest EC2 instance: `df -h /var/lib/humr` via `doh_node_shell` — restoring needs roughly 2-3x the compressed tar size in free space.
 - If the dest persistent root has user data the user might care about, surface its size + last-mtime and confirm before proceeding.
 
 ## Driving the command
@@ -79,7 +79,7 @@ If source and dest are in different AWS accounts:
 
 1. **upload** — ECS-exec into the source hermes container; `tar --zstd ... | aws s3 cp - s3://bucket/rootfs.tar.zst`. Source STS creds are forwarded into the inner shell. Captures sha256 + raw size + compressed size.
 2. **stage** — Scales dest service to 0 and waits for tasks to drain. Creates a one-shot Fargate task in the dest env (image `public.ecr.aws/aws-cli/aws-cli`, with `entryPoint=["/bin/sh","-c"]`) that mounts dest EFS root, downloads the object, verifies sha + size, atomic-mvs into `/efs/deployments/<app>/checkpoint/rootfs.tar.zst`.
-3. **host-clear** — `rm -rf /var/lib/devopshero/hermes-roots/<app>` on every ACTIVE container instance in the dest cluster, via `AWS-RunShellScript` SSM document. *Why this is non-optional:* `persistent-root-runner.sh` only restores from the checkpoint when the host bind-mount is empty (`is_empty_dir` branch). If we leave dest's old root in place, the runner takes the `reuse` branch and never reads our staged tar — the migration silently no-ops.
+3. **host-clear** — `rm -rf /var/lib/humr/hermes-roots/<app>` on every ACTIVE container instance in the dest cluster, via `AWS-RunShellScript` SSM document. *Why this is non-optional:* `persistent-root-runner.sh` only restores from the checkpoint when the host bind-mount is empty (`is_empty_dir` branch). If we leave dest's old root in place, the runner takes the `reuse` branch and never reads our staged tar — the migration silently no-ops.
 4. **finalize** — Scales dest service back to its previous desiredCount and watches the log stream until it sees `[persistent-root] Restore complete`.
 5. **verify** — ECS-exec into the new dest task, `du -sh` on `/hermes-persistent-root/{workspace,home/linuxbrew}`, plus `df -h` and `ls /hermes-checkpoint/`. Compare sizes against what the user expected from source.
 
@@ -95,6 +95,6 @@ If source and dest are in different AWS accounts:
 ## What you should *not* do
 
 - Don't try to be clever and stage the tar via the dest hermes container's `/hermes-checkpoint` mount. The runner will overwrite it on shutdown. Always use the temporary Fargate task.
-- Don't `rm -rf /var/lib/devopshero` — only the per-app subdirectory.
+- Don't `rm -rf /var/lib/humr` — only the per-app subdirectory.
 - Don't skip `--i-know-this-overwrites-dest`: surface to the user that dest data will be lost and get explicit assent.
 - Don't run `cleanup` automatically — keep the bridge bucket for a few hours in case the user spots a problem.

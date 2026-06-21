@@ -58,9 +58,9 @@ class Command(BaseCommand):
 
         infra = _get_infra_info(cf_client=cf_client, env_slug=env_slug, stdout=self.stdout)
 
-        cluster_name = f"devopshero-{env_slug}-cluster"
-        role_name = f"devopshero-{env_slug}-efs-browser-role"
-        task_family = f"devopshero-{env_slug}-efs-browser"
+        cluster_name = f"humr-{env_slug}-cluster"
+        role_name = f"humr-{env_slug}-efs-browser-role"
+        task_family = f"humr-{env_slug}-efs-browser"
 
         task_arn = None
         task_def_arn = None
@@ -76,14 +76,14 @@ class Command(BaseCommand):
             self.stdout.write("Waiting for IAM role propagation...")
             time.sleep(10)
 
-            exec_role_arn = f"arn:aws:iam::{aws_account.aws_account_id}:role/devopshero-{env_slug}-task-execution-role"
+            exec_role_arn = f"arn:aws:iam::{aws_account.aws_account_id}:role/humr-{env_slug}-task-execution-role"
             task_def_arn = _register_task_definition(
                 ecs_client=ecs_client,
                 family=task_family,
                 task_role_arn=task_role_arn,
                 execution_role_arn=exec_role_arn,
                 efs_fs_id=infra["efs_fs_id"],
-                log_group=f"/devopshero/{env_slug}/ecs",
+                log_group=f"/humr/{env_slug}/ecs",
                 region=region,
                 stdout=self.stdout,
             )
@@ -123,8 +123,8 @@ class Command(BaseCommand):
 
 def _get_infra_info(cf_client, env_slug: str, stdout) -> dict[str, str]:
     """Fetch EFS, VPC, and security group IDs from CloudFormation stack outputs."""
-    vpc_stack = f"devopshero-{env_slug}-vpc"
-    efs_stack = f"devopshero-{env_slug}-efs"
+    vpc_stack = f"humr-{env_slug}-vpc"
+    efs_stack = f"humr-{env_slug}-efs"
 
     lookups = {
         "efs_fs_id": (efs_stack, "EfsFileSystemId"),
@@ -166,7 +166,7 @@ def _ensure_task_role(iam_client, role_name: str, efs_filesystem_arn: str, stdou
             RoleName=role_name,
             AssumeRolePolicyDocument=trust_policy,
             Description="EFS browser task role for ECS Exec",
-            Tags=[{"Key": "devopshero:purpose", "Value": "efs-browser"}],
+            Tags=[{"Key": "humr:purpose", "Value": "efs-browser"}],
         )
         role_arn = resp["Role"]["Arn"]
 

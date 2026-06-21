@@ -50,7 +50,7 @@ from humanityrules_app.services.agent import llm_client, title_generator
 from . import agent_build_prompt
 from .agent_client import get_claude_env
 from .mcp_tools import (
-    create_devopshero_mcp_server,
+    create_humanityrules_mcp_server,
     ENVIRONMENT_ALLOWED_TOOLS,
     PERMISSIONS_ALLOWED_TOOLS,
     TOOL_NAMES,
@@ -299,7 +299,7 @@ class MainAgent:
             cwd=str(self._sandbox_paths.src_path),
             sandbox=sandbox_settings,
             agents=agents,
-            mcp_servers={"devopshero": create_devopshero_mcp_server(conversation)},
+            mcp_servers={"humanityrules": create_humanityrules_mcp_server(conversation)},
             tools=builtin_tools,
             allowed_tools=allowed_tools,
             disallowed_tools=blocked_agents,

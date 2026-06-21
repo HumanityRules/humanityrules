@@ -14,7 +14,7 @@ INTEGRATIONS_DIR = REPO_ROOT / "docs" / "integrations"
 CONNECTORS_FILE = INTEGRATIONS_DIR / "merge_connectors.txt"
 OUTPUT_FILE = INTEGRATIONS_DIR / "merge_connectors_ranked.md"
 COMPOSIO_FILE = Path(
-    "/Users/vmendi/.cursor/projects/Users-vmendi-websites-devopshero/agent-tools/a1c22224-d2d4-4ed2-846c-b33628c40b2e.txt"
+    "/Users/vmendi/.cursor/projects/Users-vmendi-websites-humr/agent-tools/a1c22224-d2d4-4ed2-846c-b33628c40b2e.txt"
 )
 
 # ── Signal 3: MCP ecosystem (Smithery uses, official vendor MCP, PulseMCP presence) ──

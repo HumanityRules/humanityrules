@@ -17,7 +17,7 @@ from humanityrules_app.services.infra_customer.appconfig import (
 )
 
 
-SHARED_SECRETS_ARN = "arn:aws:secretsmanager:us-east-1:123456789012:secret:devopshero/staging/shared-secrets-abcdef"
+SHARED_SECRETS_ARN = "arn:aws:secretsmanager:us-east-1:123456789012:secret:humr/staging/shared-secrets-abcdef"
 
 
 def _render(

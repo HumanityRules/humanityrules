@@ -62,7 +62,7 @@ class Command(BaseCommand):
         )
         teardown_app.add_argument(
             "--delete-secrets", action="store_true",
-            help="With --remove-app: also delete devopshero/{env}/{app}/* AWS Secrets Manager secrets in every env.",
+            help="With --remove-app: also delete humr/{env}/{app}/* AWS Secrets Manager secrets in every env.",
         )
         teardown_app.add_argument(
             "--delete-persistent-data", action="store_true",
@@ -637,7 +637,7 @@ class Command(BaseCommand):
             return
 
         aws_account = environment.aws_account
-        cluster_name = f"devopshero-{environment.slug}-cluster"
+        cluster_name = f"humr-{environment.slug}-cluster"
         service_name = f"doh-{environment.slug}-{app.slug}"
 
         session = iam_utils.get_assumed_role_session(

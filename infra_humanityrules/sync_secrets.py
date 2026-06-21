@@ -19,43 +19,43 @@ from dotenv import dotenv_values
 
 # Secret definitions: maps AWS secret name to the env vars it should contain
 SECRET_DEFINITIONS = {
-    "devopshero/prod/django": [
+    "humr/prod/django": [
         "DJANGO_SECRET_KEY",
         "DJANGO_SUPERUSER_EMAIL",
     ],
-    "devopshero/prod/workos": [
+    "humr/prod/workos": [
         "WORKOS_CLIENT_ID",
         "WORKOS_API_KEY",
     ],
-    "devopshero/prod/github": [
+    "humr/prod/github": [
         "GITHUB_APP_ID",
         "GITHUB_APP_CLIENT_ID",
         "GITHUB_APP_CLIENT_SECRET",
         "GITHUB_APP_PRIVATE_KEY",
         "GITHUB_WEBHOOK_SECRET",
     ],
-    "devopshero/prod/bedrock": [
+    "humr/prod/bedrock": [
         "AWS_BEDROCK_REGION",
         "AWS_BEDROCK_ACCESS_KEY_ID",
         "AWS_BEDROCK_SECRET_ACCESS_KEY",
     ],
-    "devopshero/prod/api": [
+    "humr/prod/api": [
         "HUMR_API_SECRET_KEY",
     ],
-    "devopshero/prod/posthog": [
+    "humr/prod/posthog": [
         "POSTHOG_API_KEY",
         "POSTHOG_HOST",
         "POSTHOG_PROXY_HOST",
     ],
-    "devopshero/prod/env-sso": [
+    "humr/prod/env-sso": [
         "HUMR_ENV_SESSION_JWT_PRIVATE_KEY",
         "HUMR_ENV_SESSION_JWT_KID",
     ],
-    "devopshero/prod/merge": [
+    "humr/prod/merge": [
         "MERGE_AGENT_HANDLER_API_KEY",
         "MERGE_TOOL_PACK_ID",
     ],
-    "devopshero/prod/telegram": [
+    "humr/prod/telegram": [
         "TELEGRAM_MANAGER_BOT_TOKEN",
         "TELEGRAM_MANAGER_BOT_USERNAME",
     ],

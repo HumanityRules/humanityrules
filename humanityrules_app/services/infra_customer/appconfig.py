@@ -294,7 +294,7 @@ class AppConfig:
     # Task-level shared-bag app secrets. Computed as the collision-checked
     # union of every container's app_secrets (same field across containers
     # must declare identical values; mismatch raises at build time).
-    # Stored in Secrets Manager at devopshero/{env_slug}/{app_name}/secrets
+    # Stored in Secrets Manager at humr/{env_slug}/{app_name}/secrets
     # and selectively projected into each container's env.
     app_secrets: dict[str, str | None] | None = None
 

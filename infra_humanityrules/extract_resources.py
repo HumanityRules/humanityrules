@@ -6,14 +6,14 @@ from pathlib import Path
 
 
 def find_infra_dir() -> Path:
-    """Walk up from current file until we find infra_devopshero/."""
+    """Walk up from current file until we find infra_humanityrules/."""
     path = Path(__file__).resolve().parent
     while path != path.parent:
-        candidate = path / "infra_devopshero"
+        candidate = path / "infra_humanityrules"
         if candidate.is_dir():
             return candidate
         path = path.parent
-    raise RuntimeError("Could not find infra_devopshero/")
+    raise RuntimeError("Could not find infra_humanityrules/")
 
 
 def extract_resources() -> dict:

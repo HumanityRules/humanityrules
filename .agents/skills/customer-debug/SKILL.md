@@ -10,11 +10,11 @@ For investigating issues with apps deployed into customer AWS accounts — ECS t
 **Localhost by default.** Unless the user explicitly says "in production," assume the DOH control plane is running locally and the customer exists in the local DB:
 
 - **Localhost:** `uv run manage.py <command> ...` — queries the local DB, uses credentials from `.env`
-- **Production:** `cd infra_devopshero && ./prod_manage.sh <command> ...` — runs the same command on the production ECS container, queries the production DB
+- **Production:** `cd infra_humanityrules && ./prod_manage.sh <command> ...` — runs the same command on the production ECS container, queries the production DB
 
 All commands below work identically in both modes — just swap the prefix.
 
-Customer accounts are accessed via IAM role assumption. The `.env` file in the project root has `HUMR_AWS_ACCESS_KEY` and `HUMR_AWS_SECRET_KEY` — these are DOH's control plane IAM credentials, loaded into `django.conf.settings`. They're used to STS-assume `arn:aws:iam::{account_id}:role/devopshero-{external_id}` in the customer account. All management commands handle this internally via `iam_utils.get_assumed_role_session()`. The `account_id` and `external_id` come from the `AWSAccount` model in the DB.
+Customer accounts are accessed via IAM role assumption. The `.env` file in the project root has `HUMR_AWS_ACCESS_KEY` and `HUMR_AWS_SECRET_KEY` — these are DOH's control plane IAM credentials, loaded into `django.conf.settings`. They're used to STS-assume `arn:aws:iam::{account_id}:role/humr-{external_id}` in the customer account. All management commands handle this internally via `iam_utils.get_assumed_role_session()`. The `account_id` and `external_id` come from the `AWSAccount` model in the DB.
 
 
 ## Step 1: Gather Context from the DB
@@ -44,7 +44,7 @@ export AWS_DEFAULT_REGION="us-east-1"
 
 # Assume the customer role (substitute account_id and external_id from doh_query)
 CREDS=$(aws sts assume-role \
-  --role-arn "arn:aws:iam::<account_id>:role/devopshero-<external_id>" \
+  --role-arn "arn:aws:iam::<account_id>:role/humr-<external_id>" \
   --role-session-name "debug-session" \
   --external-id "<external_id>" \
   --query 'Credentials.[AccessKeyId,SecretAccessKey,SessionToken]' \
@@ -55,8 +55,8 @@ export AWS_SECRET_ACCESS_KEY=$(echo $CREDS | awk '{print $2}')
 export AWS_SESSION_TOKEN=$(echo $CREDS | awk '{print $3}')
 
 # Now use AWS CLI normally — you're in the customer account
-aws ecs list-tasks --cluster devopshero-default-cluster
-aws logs describe-log-streams --log-group-name /devopshero/default/ecs --order-by LastEventTime --descending --limit 5
+aws ecs list-tasks --cluster humr-default-cluster
+aws logs describe-log-streams --log-group-name /humr/default/ecs --order-by LastEventTime --descending --limit 5
 ```
 
 
@@ -64,10 +64,10 @@ aws logs describe-log-streams --log-group-name /devopshero/default/ecs --order-b
 
 All names are deterministic from `env_slug` and `app_slug`:
 
-- **Cluster:** `devopshero-{env_slug}-cluster`
+- **Cluster:** `humr-{env_slug}-cluster`
 - **ECS service:** `doh-{env_slug}-{app_slug}`
 - **Container name:** `{app_slug}`
-- **Log group:** `/devopshero/{env_slug}/ecs`
+- **Log group:** `/humr/{env_slug}/ecs`
 - **Log stream:** `{app_slug}/{app_slug}/{ecs_task_id}`
 - **Task role:** `doh-{env_slug}-{app_slug}-task-role`
 - **CDK stack:** `doh-{env_slug}-{app_slug}-app-cdk`

@@ -40,7 +40,7 @@ class CdnStack(Stack):
         posthog_cache_policy = cloudfront.CachePolicy(
             self,
             "PosthogCachePolicy",
-            cache_policy_name="doh-prod-posthog-cache",
+            cache_policy_name="humr-prod-posthog-cache",
             comment="Cache policy for PostHog proxy - forwards auth headers",
             header_behavior=cloudfront.CacheHeaderBehavior.allow_list("Authorization", "Origin"),
             query_string_behavior=cloudfront.CacheQueryStringBehavior.all(),
@@ -55,7 +55,7 @@ class CdnStack(Stack):
         posthog_origin_request_policy = cloudfront.OriginRequestPolicy(
             self,
             "PosthogOriginRequestPolicy",
-            origin_request_policy_name="doh-prod-posthog-origin-request",
+            origin_request_policy_name="humr-prod-posthog-origin-request",
             comment="Origin request policy for PostHog proxy",
             header_behavior=cloudfront.OriginRequestHeaderBehavior.allow_list("Origin"),
             query_string_behavior=cloudfront.OriginRequestQueryStringBehavior.all(),
@@ -66,7 +66,7 @@ class CdnStack(Stack):
         posthog_rewrite_function = cloudfront.Function(
             self,
             "PosthogRewriteFunction",
-            function_name="doh-prod-posthog-rewrite",
+            function_name="humr-prod-posthog-rewrite",
             comment="Strips /doh-ph prefix from PostHog proxy requests",
             code=cloudfront.FunctionCode.from_inline("""
 function handler(event) {
@@ -83,7 +83,7 @@ function handler(event) {
         posthog_static_rewrite_function = cloudfront.Function(
             self,
             "PosthogStaticRewriteFunction",
-            function_name="doh-prod-posthog-static-rewrite",
+            function_name="humr-prod-posthog-static-rewrite",
             comment="Rewrites /doh-ph-static/* to /static/* for PostHog assets",
             code=cloudfront.FunctionCode.from_inline("""
 function handler(event) {
@@ -180,6 +180,6 @@ function handler(event) {
             target=route53.RecordTarget.from_alias(targets.CloudFrontTarget(self.distribution)),
         )
 
-        CfnOutput(self, "DistributionId", value=self.distribution.distribution_id, export_name="doh-prod-distribution-id")
-        CfnOutput(self, "DistributionDomainName", value=self.distribution.distribution_domain_name, export_name="doh-prod-distribution-domain")
-        CfnOutput(self, "AppUrl", value=f"https://{domain_name}", export_name="doh-prod-app-url")
+        CfnOutput(self, "DistributionId", value=self.distribution.distribution_id, export_name="humr-prod-distribution-id")
+        CfnOutput(self, "DistributionDomainName", value=self.distribution.distribution_domain_name, export_name="humr-prod-distribution-domain")
+        CfnOutput(self, "AppUrl", value=f"https://{domain_name}", export_name="humr-prod-app-url")
