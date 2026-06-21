@@ -1,10 +1,10 @@
 [submodule "template_repos/hermes_agent/vendor/hermes-agent"]
 	path = template_repos/hermes_agent/vendor/hermes-agent
-	url = git@github.com:DevOpsHeroAI/hermes-agent.git
+	url = git@github.com:HumanityRules/hermes-agent.git
 	branch = doh/v2026.6.5
 	shallow = true
 [submodule "template_repos/hermes_agent/vendor/hermes-webui"]
 	path = template_repos/hermes_agent/vendor/hermes-webui
-	url = git@github.com:DevOpsHeroAI/hermes-webui.git
+	url = git@github.com:HumanityRules/hermes-webui.git
 	branch = doh/v0.51.293
 	shallow = true
