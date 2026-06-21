@@ -1523,7 +1523,7 @@ class AppRemovalJob(models.Model):
     # If True, the executor first tears down every live deployment of this app
     # (calling app_deployment_teardown_executor.run_teardown inline) before
     # running the cleanup + DB cascade delete. Set by the CLI's
-    # `doh_control teardown-app --remove-app` flow; the UI's "Remove App"
+    # `humr_control teardown-app --remove-app` flow; the UI's "Remove App"
     # button leaves this False because it only enables when the app is already
     # not live.
     teardown_first = models.BooleanField(default=False)

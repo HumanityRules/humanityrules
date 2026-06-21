@@ -1,4 +1,4 @@
-"""Tests for the doh_broker permissions relay (permissions_control.py).
+"""Tests for the humr_broker permissions relay (permissions_control.py).
 
 The relay runs inside the customer-env Hermes container (not Django). It is pure
 transport: it folds the browser path-param/query into a JSON payload and forwards
@@ -20,7 +20,7 @@ from starlette.testclient import TestClient
 def _load_permissions_control() -> types.ModuleType:
     """Load template_repos/.../integrations/permissions_control.py with its dir on sys.path."""
     repo_root = pathlib.Path(__file__).resolve().parents[2]
-    integrations_dir = repo_root / "template_repos" / "hermes_agent" / "doh_runtime" / "integrations"
+    integrations_dir = repo_root / "template_repos" / "hermes_agent" / "humr_runtime" / "integrations"
     if str(integrations_dir) not in sys.path:
         sys.path.insert(0, str(integrations_dir))
     spec = importlib.util.spec_from_file_location(
@@ -49,8 +49,8 @@ class _StubDohClient:
 
 class TestPermissionsControlRelay(unittest.TestCase):
 
-    def _client(self, doh_client: _StubDohClient) -> TestClient:
-        app = Starlette(routes=permissions_control.routes(prefix="/permissions", doh_client=doh_client))
+    def _client(self, humr_client: _StubDohClient) -> TestClient:
+        app = Starlette(routes=permissions_control.routes(prefix="/permissions", humr_client=humr_client))
         return TestClient(app)
 
     def test_draft_open_forwards_empty_payload(self) -> None:

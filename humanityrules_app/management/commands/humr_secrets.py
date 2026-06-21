@@ -3,20 +3,20 @@ List or permanently purge customer Secrets Manager secrets (cross-account),
 and manage shared environment secrets.
 
 Usage:
-    uv run manage.py doh_secrets list --account "CH Sandbox"
-    uv run manage.py doh_secrets list --account "CH Sandbox" --include-deleted
-    uv run manage.py doh_secrets purge-deleted --account "CH Sandbox" --dry-run
-    uv run manage.py doh_secrets purge-deleted --account "CH Sandbox"
+    uv run manage.py humr_secrets list --account "CH Sandbox"
+    uv run manage.py humr_secrets list --account "CH Sandbox" --include-deleted
+    uv run manage.py humr_secrets purge-deleted --account "CH Sandbox" --dry-run
+    uv run manage.py humr_secrets purge-deleted --account "CH Sandbox"
 
-    uv run manage.py doh_secrets shared-list --account "CH Sandbox" --env default
-    uv run manage.py doh_secrets shared-set --account "CH Sandbox" --env default OPENAI_API_KEY=sk-xxx TAVILY_API_KEY=tvly-xxx
-    uv run manage.py doh_secrets shared-set-from-env --account "CH Sandbox" --env default --file ./.env OPENAI_API_KEY TAVILY_API_KEY
-    uv run manage.py doh_secrets shared-set-from-env --account "CH Sandbox" --env default --file ./.env  # auto-detect all uncommented, non-empty keys
-    uv run manage.py doh_secrets shared-delete --account "CH Sandbox" --env default OPENAI_API_KEY TAVILY_API_KEY
+    uv run manage.py humr_secrets shared-list --account "CH Sandbox" --env default
+    uv run manage.py humr_secrets shared-set --account "CH Sandbox" --env default OPENAI_API_KEY=sk-xxx TAVILY_API_KEY=tvly-xxx
+    uv run manage.py humr_secrets shared-set-from-env --account "CH Sandbox" --env default --file ./.env OPENAI_API_KEY TAVILY_API_KEY
+    uv run manage.py humr_secrets shared-set-from-env --account "CH Sandbox" --env default --file ./.env  # auto-detect all uncommented, non-empty keys
+    uv run manage.py humr_secrets shared-delete --account "CH Sandbox" --env default OPENAI_API_KEY TAVILY_API_KEY
 
-    uv run manage.py doh_secrets delete-by-prefix --account "CH Sandbox" --subprefix humr/default/old-app
-    uv run manage.py doh_secrets delete-by-prefix --account "CH Sandbox" --subprefix humr/default/old-app --dry-run
-    uv run manage.py doh_secrets delete-by-prefix --account "CH Sandbox" --subprefix humr/default/old-app --force
+    uv run manage.py humr_secrets delete-by-prefix --account "CH Sandbox" --subprefix humr/default/old-app
+    uv run manage.py humr_secrets delete-by-prefix --account "CH Sandbox" --subprefix humr/default/old-app --dry-run
+    uv run manage.py humr_secrets delete-by-prefix --account "CH Sandbox" --subprefix humr/default/old-app --force
 
 All subcommands accept --org <name-or-slug> to disambiguate when multiple
 organizations share the same account name (e.g. --org "Course Hero" or --org course-hero).
@@ -43,7 +43,7 @@ Subcommands:
 
 Requires HUMR_AWS_ACCESS_KEY and HUMR_AWS_SECRET_KEY (via Django settings).
 
-For production: ./prod_manage.sh doh_secrets <subcommand> ...
+For production: ./prod_manage.sh humr_secrets <subcommand> ...
 """
 
 import json

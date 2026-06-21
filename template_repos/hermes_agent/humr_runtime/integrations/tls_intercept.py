@@ -25,7 +25,7 @@ from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 
-from doh_client import DohClient
+from humr_client import DohClient
 import tls_providers
 
 
@@ -110,7 +110,7 @@ class _TokenCacheEntry:
         return self.expires_at > now
 
 
-async def fetch_provider_tokens_batch(doh_client: DohClient, slugs: list[str]) -> dict[str, RefreshResult]:
+async def fetch_provider_tokens_batch(humr_client: DohClient, slugs: list[str]) -> dict[str, RefreshResult]:
     """Refresh many provider tokens in one POST to DOH; returns a slug→RefreshResult map.
 
     DOH's `/api/integrations/tokens` is the broker's only refresh path —
@@ -129,7 +129,7 @@ async def fetch_provider_tokens_batch(doh_client: DohClient, slugs: list[str]) -
     # here is ~5s + a small slack budget for marshalling — 7s. Still
     # well inside supervisor's 10s wait_for_port budget on broker
     # bootstrap.
-    status, payload = await doh_client.post_json(
+    status, payload = await humr_client.post_json(
         path="/api/integrations/tokens",
         payload={"providers": list(slugs)},
         timeout_seconds=7,
@@ -240,10 +240,10 @@ class _TokenStore:
     lock together.
     """
 
-    def __init__(self, providers: dict[str, tls_providers.TlsProviderSpec], doh_client: DohClient, refresh_lead_seconds: int) -> None:
+    def __init__(self, providers: dict[str, tls_providers.TlsProviderSpec], humr_client: DohClient, refresh_lead_seconds: int) -> None:
         self._providers = providers
         self._host_to_provider = tls_providers.build_host_to_provider(providers=providers)
-        self._doh_client = doh_client
+        self._humr_client = humr_client
         self._refresh_lead_seconds = refresh_lead_seconds
         self._lock = asyncio.Lock()
         self._cache: dict[str, _TokenCacheEntry] = {}
@@ -370,7 +370,7 @@ class _TokenStore:
         """
         if not slugs:
             return True
-        results = await fetch_provider_tokens_batch(doh_client=self._doh_client, slugs=slugs)
+        results = await fetch_provider_tokens_batch(humr_client=self._humr_client, slugs=slugs)
         for slug in slugs:
             self._apply_locked(provider=self._providers[slug], result=results[slug])
         return any(result.outcome != REFRESH_OUTCOME_TRANSIENT for result in results.values())
@@ -413,10 +413,10 @@ class TlsInterceptRuntime:
     into this runtime — never the other way around.
     """
 
-    def __init__(self, providers: dict[str, tls_providers.TlsProviderSpec], doh_client: DohClient, refresh_lead_seconds: int, ca_dir: Path, private_dir: Path) -> None:
+    def __init__(self, providers: dict[str, tls_providers.TlsProviderSpec], humr_client: DohClient, refresh_lead_seconds: int, ca_dir: Path, private_dir: Path) -> None:
         self._token_store = _TokenStore(
             providers=providers,
-            doh_client=doh_client,
+            humr_client=humr_client,
             refresh_lead_seconds=refresh_lead_seconds,
         )
         self._cert_minter = _CertMinter(ca_dir=ca_dir, private_dir=private_dir)
@@ -689,7 +689,7 @@ async def _intercept_and_forward(
             path_with_query = request_line.decode("iso-8859-1").split(" ", 2)[1]
             body = await _read_body(reader=tls_reader, headers=headers)
             try:
-                addresses_doh_credential = _request_addresses_doh_credential(
+                addresses_humr_credential = _request_addresses_humr_credential(
                     headers=headers,
                     path_with_query=path_with_query,
                     provider=provider,
@@ -702,7 +702,7 @@ async def _intercept_and_forward(
                     message=f"{provider.slug}: {exc}",
                 )
                 return
-            if addresses_doh_credential:
+            if addresses_humr_credential:
                 secrets = await token_store.secrets_for_host(host=host)
                 if secrets is None:
                     await _send_provider_not_connected(writer=tls_writer, provider=provider)
@@ -747,7 +747,7 @@ async def _intercept_and_forward(
             # request through the proxy hits the refreshed token. Anonymous
             # pass-through 401s must not evict: they never used our token,
             # so the cached entry is not implicated.
-            if upstream_status == 401 and addresses_doh_credential:
+            if upstream_status == 401 and addresses_humr_credential:
                 await token_store.invalidate(slug=provider.slug)
                 logger.info("evicted %s token cache after upstream 401 from %s", provider.slug, host)
             if not keep_alive:
@@ -876,7 +876,7 @@ def _strip_bearer_prefix(value: bytes) -> str:
     return text
 
 
-def _request_addresses_doh_credential(headers: list[tuple[bytes, bytes]], path_with_query: str, provider: tls_providers.TlsProviderSpec) -> bool:
+def _request_addresses_humr_credential(headers: list[tuple[bytes, bytes]], path_with_query: str, provider: tls_providers.TlsProviderSpec) -> bool:
     """Decide whether a request asks for DOH's credential or is anonymous public traffic.
 
     True routes through the token store + rewrite path. OAuth-style methods

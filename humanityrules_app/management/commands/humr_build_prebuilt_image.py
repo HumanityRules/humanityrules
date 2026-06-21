@@ -7,7 +7,7 @@ entry point that creates the ECR repo (if missing), builds a Dockerfile from
 --source-dir, and pushes the result into that repo.
 
 Usage:
-    uv run manage.py doh_build_prebuilt_image \\
+    uv run manage.py humr_build_prebuilt_image \\
         --account "CH Sandbox" \\
         --env default \\
         --source-dir ../learneo-mcp \\
@@ -118,7 +118,7 @@ class Command(BaseCommand):
         ecr_client.create_repository(
             repositoryName=repository_name,
             imageScanningConfiguration={"scanOnPush": True},
-            tags=[{"Key": "ManagedBy", "Value": "doh_build_prebuilt_image"}],
+            tags=[{"Key": "ManagedBy", "Value": "humr_build_prebuilt_image"}],
         )
         ecr_utils.apply_keep_last_n_lifecycle_policy(
             ecr_client=ecr_client,

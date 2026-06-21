@@ -21,7 +21,7 @@ Changes to the Hermes agent often require running the full deploy → container-
 
 If you are making a change that requires verification, **ask** the developer if he wants you to run end-to-end verification.
 
-When you need an instance of a Hermes agent to run your verification, deploy it anew from AppTemplate by using the management command `doh_control deploy-app-template`. **Always pass `--label <unique-tag>`** so your verification is scoped to its own job worker (see below).
+When you need an instance of a Hermes agent to run your verification, deploy it anew from AppTemplate by using the management command `humr_control deploy-app-template`. **Always pass `--label <unique-tag>`** so your verification is scoped to its own job worker (see below).
 
 ## How we verify
 
@@ -31,8 +31,8 @@ When you need an instance of a Hermes agent to run your verification, deploy it 
 
 1. Pick a unique label for your verification run (e.g. `vmendi-A`, your worktree branch name, etc.).
 2. In your worktree, start a labelled worker: `uv run manage.py run_job_worker --label <your-label>`. This worker only claims work for Apps stamped with that exact label.
-3. Pass the *same* label to `deploy-app-template`: `doh_control deploy-app-template ... --label <your-label>`. This stamps the new App's `label` so only your worker picks up its deploy/redeploy/permission-apply/teardown/removal jobs.
-4. Other `doh_control` subcommands (`redeploy-app`, `teardown-app`, etc.) need no `--label`; they read it transitively from the App.
+3. Pass the *same* label to `deploy-app-template`: `humr_control deploy-app-template ... --label <your-label>`. This stamps the new App's `label` so only your worker picks up its deploy/redeploy/permission-apply/teardown/removal jobs.
+4. Other `humr_control` subcommands (`redeploy-app`, `teardown-app`, etc.) need no `--label`; they read it transitively from the App.
 
 The unscoped main worker (no `--label`) keeps running and serves UI traffic + env-level jobs. Leave it alone.
 
@@ -40,7 +40,7 @@ The unscoped main worker (no `--label`) keeps running and serves UI traffic + en
 
 **AppTemplate reseeding:** If you update the AppTemplate, don't forget to call seed_app_templates so that they are updated in the database.
 
-**AWS signer service list:** When adding or removing a supported AWS service in `doh_runtime/aws_signer.py` or the child AWS config in `doh_runtime/sandbox_seed.py`, update `skills/development/aws-cli/SKILL.md`'s signer services list in the same change.
+**AWS signer service list:** When adding or removing a supported AWS service in `humr_runtime/aws_signer.py` or the child AWS config in `humr_runtime/sandbox_seed.py`, update `skills/development/aws-cli/SKILL.md`'s signer services list in the same change.
 
 ## Test environment
 

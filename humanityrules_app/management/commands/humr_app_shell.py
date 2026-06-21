@@ -2,14 +2,14 @@
 Open an interactive shell in a deployed customer app container via ECS Exec.
 
 ECS Exec uses the SSM Session Manager plugin under the hood (same tooling as
-doh_efs_browse). This command connects to an existing ECS task for the app
+humr_efs_browse). This command connects to an existing ECS task for the app
 service — it does not start a temporary task.
 
 Usage:
-    uv run manage.py doh_app_shell --account "CH Sandbox" --app my-app-slug
-    uv run manage.py doh_app_shell --account "CH Sandbox" --env prod --app my-app-slug
-    uv run manage.py doh_app_shell --account "CH Sandbox" --app my-app-slug --container hermes
-    uv run manage.py doh_app_shell --account "CH Sandbox" --org "Course Hero" --app my-app-slug
+    uv run manage.py humr_app_shell --account "CH Sandbox" --app my-app-slug
+    uv run manage.py humr_app_shell --account "CH Sandbox" --env prod --app my-app-slug
+    uv run manage.py humr_app_shell --account "CH Sandbox" --app my-app-slug --container hermes
+    uv run manage.py humr_app_shell --account "CH Sandbox" --org "Course Hero" --app my-app-slug
 
 Requires:
     - AWS CLI v2
@@ -204,7 +204,7 @@ class Command(BaseCommand):
 
         target = resolve_aws_target(options=options)
         if target.aws_account is None:
-            raise CommandError("doh_app_shell requires DB mode (--account/--env); raw mode is not supported.")
+            raise CommandError("humr_app_shell requires DB mode (--account/--env); raw mode is not supported.")
         aws_account = target.aws_account
         session = target.session
         env_slug = target.env_slug

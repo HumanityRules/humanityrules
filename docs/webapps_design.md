@@ -253,7 +253,7 @@ This buys three things:
 
 **Reserved-prefix convention.** The slug regex (`webapps_lib.SLUG_PATTERN`) accepts an optional `__` prefix. There is **no enforcement** in the CLI — a `__` slug is a Python-dunder-style hint that "this is platform internal," not a hard reservation. The bootstrap (`webapps create __admin --if-missing --bootstrap-enabled` in `webui.sh`) wins the cold-start race and registers the slug; subsequent agent attempts to create the same slug collide on the existing entry and error, which is the same behavior as any other slug collision. The skill's Don'ts tell the agent not to touch `__*` slugs.
 
-**Source layout.** `template_repos/hermes_agent/doh_runtime/admin/` (no "webapps" in the name — scope will grow). `__main__.py` reads `WEBAPP_PORT` from the env (set by the supervisor like for any webapp) and serves `server.py`'s FastAPI `app` on `127.0.0.1:$WEBAPP_PORT`. Boot order in `webui.sh`: `webapps create __admin --if-missing --bootstrap-enabled` writes an enabled webapps YAML entry and route before the daemon starts; system entries are seeded separately; both process-compose daemons start; WebUI health gates Caddy startup. The `--if-missing` flag is idempotent; on a redeploy where `__admin` is already in the YAML, the bootstrap is a no-op.
+**Source layout.** `template_repos/hermes_agent/humr_runtime/admin/` (no "webapps" in the name — scope will grow). `__main__.py` reads `WEBAPP_PORT` from the env (set by the supervisor like for any webapp) and serves `server.py`'s FastAPI `app` on `127.0.0.1:$WEBAPP_PORT`. Boot order in `webui.sh`: `webapps create __admin --if-missing --bootstrap-enabled` writes an enabled webapps YAML entry and route before the daemon starts; system entries are seeded separately; both process-compose daemons start; WebUI health gates Caddy startup. The `--if-missing` flag is idempotent; on a redeploy where `__admin` is already in the YAML, the bootstrap is a no-op.
 
 **v1 surface.** Read-only:
 
@@ -274,14 +274,14 @@ No mutation endpoints: start/stop/restart/delete stay on the CLI. The panel poll
 
 ## Files of interest
 
-- **`template_repos/hermes_agent/doh_runtime/Caddyfile`** — the static config Caddy loads at boot.
-- **`template_repos/hermes_agent/doh_runtime/webapps`** — the CLI. Thin shim over `webapps_lib.py`.
-- **`template_repos/hermes_agent/doh_runtime/webapps_lib.py`** — shared helpers (slug pattern, YAML I/O, route generation, process-compose RPC). Imported by both the CLI and the admin webapp.
-- **`template_repos/hermes_agent/doh_runtime/admin/`** — the `__admin` FastAPI webapp (`server.py` + `__main__.py`).
+- **`template_repos/hermes_agent/humr_runtime/Caddyfile`** — the static config Caddy loads at boot.
+- **`template_repos/hermes_agent/humr_runtime/webapps`** — the CLI. Thin shim over `webapps_lib.py`.
+- **`template_repos/hermes_agent/humr_runtime/webapps_lib.py`** — shared helpers (slug pattern, YAML I/O, route generation, process-compose RPC). Imported by both the CLI and the admin webapp.
+- **`template_repos/hermes_agent/humr_runtime/admin/`** — the `__admin` FastAPI webapp (`server.py` + `__main__.py`).
 - **`template_repos/hermes_agent/webui-extension/doh-webapps.{js,css}`** — the Web Apps sidebar panel.
-- **`template_repos/hermes_agent/doh_runtime/webui.sh`** — launches Caddy + process-compose + WebUI inside nono, bootstraps `__admin`, propagates failures.
-- **`template_repos/hermes_agent/doh_runtime/supervisor.sh`** — exports `HERMES_WEBUI_PORT=8789` so WebUI clears port 8787 for Caddy.
-- **`template_repos/hermes_agent/doh_runtime/hermes-nono-profile.json`** — port allow-lists, binary read-allows, `HUMR_PUBLIC_HOSTNAME` allow_vars entry.
+- **`template_repos/hermes_agent/humr_runtime/webui.sh`** — launches Caddy + process-compose + WebUI inside nono, bootstraps `__admin`, propagates failures.
+- **`template_repos/hermes_agent/humr_runtime/supervisor.sh`** — exports `HERMES_WEBUI_PORT=8789` so WebUI clears port 8787 for Caddy.
+- **`template_repos/hermes_agent/humr_runtime/hermes-nono-profile.json`** — port allow-lists, binary read-allows, `HUMR_PUBLIC_HOSTNAME` allow_vars entry.
 - **`template_repos/hermes_agent/Dockerfile`** — downloads Caddy + process-compose binaries; symlinks the CLI onto PATH.
 - **`template_repos/hermes_agent/skills/webapps/SKILL.md`** — agent-facing contract, worked example, Don'ts.
 - **`humanityrules_app/services/infra_customer/deploy_app.py`** — injects `HUMR_PUBLIC_HOSTNAME` into the env-bearer overlay; provisions per-agent wildcard cert + Route 53 record + ALB host condition when `AppConfig.enable_subhosting` is True.

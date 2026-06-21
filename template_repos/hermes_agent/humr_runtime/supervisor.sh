@@ -110,7 +110,7 @@ start_aws_signer() {
     wait_for_port "$AWS_DYNAMODB_PORT"        "$AWS_SIGNER_PID" "aws-signer"
 }
 
-start_doh_broker() {
+start_humr_broker() {
     # Only when deploy_app.py's env-bearer overlay supplied the required
     # identity. Missing any of them = not a personal-assistant deploy (e.g.
     # local dev), so skip silently — but nono-managed clients will then
@@ -123,7 +123,7 @@ start_doh_broker() {
     mkdir -p "$INTEGRATIONS_BROKER_CA_DIR" "$INTEGRATIONS_BROKER_PRIVATE_DIR"
     chmod 700 "$INTEGRATIONS_BROKER_PRIVATE_DIR"
     PYTHONPATH="${HUMR_RUNTIME_DIR}/integrations" \
-    "$HERMES_WEBUI_PYTHON" "${HUMR_RUNTIME_DIR}/integrations/doh_broker.py" \
+    "$HERMES_WEBUI_PYTHON" "${HUMR_RUNTIME_DIR}/integrations/humr_broker.py" \
         --proxy-port "$INTEGRATIONS_BROKER_PROXY_PORT" \
         --control-port "$INTEGRATIONS_BROKER_CONTROL_PORT" \
         --mcp-port "$MCP_AGGREGATOR_PORT" \
@@ -137,14 +137,14 @@ start_doh_broker() {
 }
 
 render_hermes_config() {
-    local doh_llm_base_url="${HUMR_LLM_BASE_URL:-}"
-    local doh_aux_provider="${HUMR_AUX_PROVIDER:-$HUMR_LLM_PROVIDER}"
-    local doh_aux_model="${HUMR_AUX_MODEL:-$HUMR_LLM_MODEL}"
-    local doh_aux_base_url="${HUMR_AUX_BASE_URL:-}"
+    local humr_llm_base_url="${HUMR_LLM_BASE_URL:-}"
+    local humr_aux_provider="${HUMR_AUX_PROVIDER:-$HUMR_LLM_PROVIDER}"
+    local humr_aux_model="${HUMR_AUX_MODEL:-$HUMR_LLM_MODEL}"
+    local humr_aux_base_url="${HUMR_AUX_BASE_URL:-}"
     local providers_block_file
 
     if [ "$HUMR_LLM_PROVIDER" = "bedrock" ]; then
-        doh_llm_base_url="https://bedrock-runtime.${AWS_DEFAULT_REGION}.amazonaws.com"
+        humr_llm_base_url="https://bedrock-runtime.${AWS_DEFAULT_REGION}.amazonaws.com"
     fi
 
     mkdir -p "$HERMES_HOME"
@@ -167,10 +167,10 @@ EOF
     sed \
         -e "s|__CONFIG_PROVIDER__|${HUMR_LLM_PROVIDER}|g" \
         -e "s|__MODEL__|${HUMR_LLM_MODEL}|g" \
-        -e "s|__BASE_URL__|${doh_llm_base_url}|g" \
-        -e "s|__AUX_PROVIDER__|${doh_aux_provider}|g" \
-        -e "s|__AUX_MODEL__|${doh_aux_model}|g" \
-        -e "s|__AUX_BASE_URL__|${doh_aux_base_url}|g" \
+        -e "s|__BASE_URL__|${humr_llm_base_url}|g" \
+        -e "s|__AUX_PROVIDER__|${humr_aux_provider}|g" \
+        -e "s|__AUX_MODEL__|${humr_aux_model}|g" \
+        -e "s|__AUX_BASE_URL__|${humr_aux_base_url}|g" \
         -e "/__PROVIDERS_BLOCK__/r ${providers_block_file}" \
         -e "/__PROVIDERS_BLOCK__/d" \
         "$HERMES_CONFIG_TEMPLATE" > "$HERMES_HOME/config.yaml"
@@ -228,7 +228,7 @@ run_in_nono() {
         )
     fi
 
-    local doh_login_path="${HERMES_WEBUI_DEFAULT_WORKSPACE}/.venv/bin:${HERMES_WEBUI_DIR}/venv/bin:${HUMR_BIN_DIR}:${HOMEBREW_PREFIX}/bin:${HOMEBREW_PREFIX}/sbin:/usr/local/bin:/usr/local/sbin:/usr/bin:/usr/sbin:/bin:/sbin"
+    local humr_login_path="${HERMES_WEBUI_DEFAULT_WORKSPACE}/.venv/bin:${HERMES_WEBUI_DIR}/venv/bin:${HUMR_BIN_DIR}:${HOMEBREW_PREFIX}/bin:${HOMEBREW_PREFIX}/sbin:/usr/local/bin:/usr/local/sbin:/usr/bin:/usr/sbin:/bin:/sbin"
 
     # Drop privileges to hermeswebui before launching the sandbox so the LLM,
     # terminal, and execute_code all run as UID 1024. Combined with nono's
@@ -252,8 +252,8 @@ run_in_nono() {
         ANTHROPIC_BEDROCK_BASE_URL="http://127.0.0.1:${AWS_BEDROCK_RUNTIME_PORT}" \
         HOME="$HERMES_WEBUI_DEFAULT_WORKSPACE" \
         VIRTUAL_ENV="${HERMES_WEBUI_DEFAULT_WORKSPACE}/.venv" \
-        HUMR_LOGIN_PATH="$doh_login_path" \
-        PATH="$doh_login_path" \
+        HUMR_LOGIN_PATH="$humr_login_path" \
+        PATH="$humr_login_path" \
         NO_PROXY=127.0.0.1,localhost \
         "${broker_env[@]}" \
         "$@"
@@ -268,7 +268,7 @@ main() {
     # root so the LLM can never read their /proc/<pid>/environ.
     render_hermes_config
     start_aws_signer
-    start_doh_broker
+    start_humr_broker
     ensure_workspace_ownership
 
     # === Stage 2: launch the sandbox. supervisor stays root (it owns the

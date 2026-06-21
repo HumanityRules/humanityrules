@@ -1,4 +1,4 @@
-"""JWT verification for the doh_session cookie, backed by PyJWKClient."""
+"""JWT verification for the humr_session cookie, backed by PyJWKClient."""
 
 import logging
 from dataclasses import dataclass
@@ -7,7 +7,7 @@ import jwt
 
 logger = logging.getLogger(__name__)
 
-SESSION_COOKIE_NAME = "doh_session"
+SESSION_COOKIE_NAME = "humr_session"
 # Expected signing algorithms. Keeping this tight prevents "alg=none" downgrade.
 ACCEPTED_ALGORITHMS = ["RS256", "EdDSA"]
 # JWT clock skew tolerance, seconds. ECS task clocks are usually tight; this is

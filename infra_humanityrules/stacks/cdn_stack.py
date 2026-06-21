@@ -62,34 +62,34 @@ class CdnStack(Stack):
             cookie_behavior=cloudfront.OriginRequestCookieBehavior.none(),
         )
 
-        # CloudFront Function to strip /doh-ph prefix from URI
+        # CloudFront Function to strip /humr-ph prefix from URI
         posthog_rewrite_function = cloudfront.Function(
             self,
             "PosthogRewriteFunction",
             function_name="humr-prod-posthog-rewrite",
-            comment="Strips /doh-ph prefix from PostHog proxy requests",
+            comment="Strips /humr-ph prefix from PostHog proxy requests",
             code=cloudfront.FunctionCode.from_inline("""
 function handler(event) {
     var request = event.request;
-    // Strip /doh-ph prefix: /doh-ph/batch -> /batch
-    request.uri = request.uri.replace(/^\\/doh-ph/, '');
+    // Strip /humr-ph prefix: /humr-ph/batch -> /batch
+    request.uri = request.uri.replace(/^\\/humr-ph/, '');
     if (request.uri === '') request.uri = '/';
     return request;
 }
 """),
         )
 
-        # CloudFront Function to rewrite /doh-ph-static/* to /static/*
+        # CloudFront Function to rewrite /humr-ph-static/* to /static/*
         posthog_static_rewrite_function = cloudfront.Function(
             self,
             "PosthogStaticRewriteFunction",
             function_name="humr-prod-posthog-static-rewrite",
-            comment="Rewrites /doh-ph-static/* to /static/* for PostHog assets",
+            comment="Rewrites /humr-ph-static/* to /static/* for PostHog assets",
             code=cloudfront.FunctionCode.from_inline("""
 function handler(event) {
     var request = event.request;
-    // Rewrite /doh-ph-static/* to /static/*: /doh-ph-static/array.js -> /static/array.js
-    request.uri = request.uri.replace(/^\\/doh-ph-static/, '/static');
+    // Rewrite /humr-ph-static/* to /static/*: /humr-ph-static/array.js -> /static/array.js
+    request.uri = request.uri.replace(/^\\/humr-ph-static/, '/static');
     return request;
 }
 """),
@@ -121,8 +121,8 @@ function handler(event) {
                     origin_request_policy=cloudfront.OriginRequestPolicy.ALL_VIEWER,
                     compress=True,
                 ),
-                # PostHog API proxy: /doh-ph/* -> us.i.posthog.com/*
-                "/doh-ph/*": cloudfront.BehaviorOptions(
+                # PostHog API proxy: /humr-ph/* -> us.i.posthog.com/*
+                "/humr-ph/*": cloudfront.BehaviorOptions(
                     origin=posthog_api_origin,
                     viewer_protocol_policy=cloudfront.ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
                     allowed_methods=cloudfront.AllowedMethods.ALLOW_ALL,
@@ -138,8 +138,8 @@ function handler(event) {
                     ],
                     compress=True,
                 ),
-                # PostHog static assets proxy: /doh-ph-static/* -> us-assets.i.posthog.com/static/*
-                "/doh-ph-static/*": cloudfront.BehaviorOptions(
+                # PostHog static assets proxy: /humr-ph-static/* -> us-assets.i.posthog.com/static/*
+                "/humr-ph-static/*": cloudfront.BehaviorOptions(
                     origin=posthog_assets_origin,
                     viewer_protocol_policy=cloudfront.ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
                     allowed_methods=cloudfront.AllowedMethods.ALLOW_GET_HEAD,

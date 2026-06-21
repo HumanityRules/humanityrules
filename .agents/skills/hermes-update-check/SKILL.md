@@ -68,7 +68,7 @@ browser→proxy→Caddy→WebUI path before declaring it safe.
   the 4xx*, that's the real bug.
 - **New env vars must be allowlisted twice.** The WebUI runs inside the nono sandbox. A new
   `HERMES_WEBUI_*` (or any) env var needs BOTH a Dockerfile `ENV` AND an entry in
-  `doh_runtime/hermes-nono-profile.json` `allow_vars` — the sandbox silently strips
+  `humr_runtime/hermes-nono-profile.json` `allow_vars` — the sandbox silently strips
   anything not on the allowlist, so a Dockerfile-only ENV has no effect on `server.py`.
   (`/proc/<pid>/environ` reads are unreliable here; confirm with `nono run --profile … --
   env | grep VAR` or a behavioral test.)

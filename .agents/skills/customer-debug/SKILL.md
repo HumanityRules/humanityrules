@@ -19,17 +19,17 @@ Customer accounts are accessed via IAM role assumption. The `.env` file in the p
 
 ## Step 1: Gather Context from the DB
 
-Always start by querying the DB with `doh_query` (see the `manage-commands` skill) to understand what you're dealing with. Key models: `AWSAccount` (get `aws_account_id` and `external_id`), `Environment` (get `slug` and `aws_region`), `App`, `Deployment`, `DeploymentLog`.
+Always start by querying the DB with `humr_query` (see the `manage-commands` skill) to understand what you're dealing with. Key models: `AWSAccount` (get `aws_account_id` and `external_id`), `Environment` (get `slug` and `aws_region`), `App`, `Deployment`, `DeploymentLog`.
 
 
 ## Step 2: Access the Customer's AWS Account
 
-Check the `manage-commands` skill first — commands like `doh_app_shell`, `doh_app_exec`, `doh_app_logs`, and `doh_efs_browse` handle the assume-role dance internally.
+Check the `manage-commands` skill first — commands like `humr_app_shell`, `humr_app_exec`, `humr_app_logs`, and `humr_efs_browse` handle the assume-role dance internally.
 
-For non-interactive probes, use `doh_app_exec` (stdin script, structured output, `--as <user>`):
+For non-interactive probes, use `humr_app_exec` (stdin script, structured output, `--as <user>`):
 
 ```bash
-uv run manage.py doh_app_exec --account "CH Sandbox" --env default --app my-app --as hermeswebui --format json <<'EOF'
+uv run manage.py humr_app_exec --account "CH Sandbox" --env default --app my-app --as hermeswebui --format json <<'EOF'
 /app/venv/bin/python -c "..."
 EOF
 ```
@@ -42,7 +42,7 @@ export AWS_ACCESS_KEY_ID=$(grep -E '^HUMR_AWS_ACCESS_KEY=' .env | cut -d'=' -f2-
 export AWS_SECRET_ACCESS_KEY=$(grep -E '^HUMR_AWS_SECRET_KEY=' .env | cut -d'=' -f2-)
 export AWS_DEFAULT_REGION="us-east-1"
 
-# Assume the customer role (substitute account_id and external_id from doh_query)
+# Assume the customer role (substitute account_id and external_id from humr_query)
 CREDS=$(aws sts assume-role \
   --role-arn "arn:aws:iam::<account_id>:role/humr-<external_id>" \
   --role-session-name "debug-session" \

@@ -45,7 +45,7 @@ This mirrors the Google integration's earlier-resolved problem: Google's OAuth `
 │        X-Doh-App-Slug: <slug>              │
 │        X-Doh-Owner-Username: <username>    │
 │                                            │
-│  /__doh_broker/integrations/merge/* on :9951│
+│  /__humr_broker/integrations/merge/* on :9951│
 │    link-token, connector-status, connectors,│
 │    disconnect — all forward to DOH         │
 └──────────────────┬─────────────────────────┘
@@ -56,7 +56,7 @@ This mirrors the Google integration's earlier-resolved problem: Google's OAuth `
 │  /api/integrations/merge/*                 │
 │    validates HUMR_ENV_BEARER                │
 │    derives origin_user_id =                │
-│      f"doh_{user.pk}_{app_slug}"           │
+│      f"humr_{user.pk}_{app_slug}"           │
 │    attaches MERGE_AGENT_HANDLER_API_KEY    │
 │    forwards to Merge                       │
 │                                            │
@@ -71,7 +71,7 @@ This mirrors the Google integration's earlier-resolved problem: Google's OAuth `
 
 Three internet hops on the customer side (sandbox→aggregator is loopback, sub-ms). The DOH hop is the price of keeping the Merge API key off customer infrastructure. Same trade-off Google's design already makes for token refresh.
 
-## Identity: `origin_user_id = f"doh_{user.pk}_{app_slug}"`
+## Identity: `origin_user_id = f"humr_{user.pk}_{app_slug}"`
 
 Per-Hermes-app, not per-DOH-user. Each agent gets its own connector credentials.
 

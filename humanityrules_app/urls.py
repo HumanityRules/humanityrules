@@ -140,7 +140,7 @@ urlpatterns = [
     path("integrations/user/x/start/", views.integrations_user_x_start, name="integrations_user_x_start"),
     path("integrations/user/x/callback/", views.integrations_user_x_callback, name="integrations_user_x_callback"),
     # Connect is the browser OAuth round-trip above (start → provider → callback).
-    # Disconnect is broker-only: the Hermes WebUI POSTs to /__doh_broker/integrations/tls_intercept/{slug}/disconnect,
+    # Disconnect is broker-only: the Hermes WebUI POSTs to /__humr_broker/integrations/tls_intercept/{slug}/disconnect,
     # which forwards here with the env bearer — see the disconnect handler under api/integrations below.
 
     # API endpoints (view implementations live under views/integrations/ or views/pdp.py)
@@ -171,7 +171,7 @@ urlpatterns = [
     path("api/integrations/merge/disconnect", views.integrations_merge_disconnect, name="integrations_merge_disconnect"),
     path("api/integrations/merge/mcp", views.integrations_merge_mcp, name="integrations_merge_mcp"),
 
-    #  - Permissions editor (self-referential): the env-resident doh_broker relays the Hermes WebUI's
+    #  - Permissions editor (self-referential): the env-resident humr_broker relays the Hermes WebUI's
     #    /permissions/* calls here with the env bearer. Target (app, environment) is resolved from the
     #    bearer + owner_username/app_slug body, never a parameter. See docs/permissions_broker_design.md.
     path("api/permissions/draft", views.permissions_draft, name="permissions_draft"),

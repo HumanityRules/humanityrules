@@ -19,7 +19,7 @@ class that composes everything. Per-service code lives elsewhere:
     Merge passthroughs alongside the DCR OAuth ones.
 
 The integrations_broker mounts the aggregator's routes under its unified
-/__doh_broker/* router. The aggregator owns its URL surface, the broker owns
+/__humr_broker/* router. The aggregator owns its URL surface, the broker owns
 the mount point.
 """
 
@@ -133,19 +133,19 @@ class MCPAggregator:
         port: int,
         persistent_dir: Path,
         public_base_url: str | None,
-        doh_control_plane_url: str,
-        doh_env_bearer: str,
-        doh_app_slug: str,
-        doh_owner_username: str,
+        humr_control_plane_url: str,
+        humr_env_bearer: str,
+        humr_app_slug: str,
+        humr_owner_username: str,
         merge_enabled: bool,
     ) -> None:
         self._port = port
         self._persistent_dir = persistent_dir
         self._public_base_url = public_base_url.rstrip("/") if public_base_url else None
-        self._doh_control_plane_url = doh_control_plane_url.rstrip("/")
-        self._doh_env_bearer = doh_env_bearer
-        self._doh_app_slug = doh_app_slug
-        self._doh_owner_username = doh_owner_username
+        self._humr_control_plane_url = humr_control_plane_url.rstrip("/")
+        self._humr_env_bearer = humr_env_bearer
+        self._humr_app_slug = humr_app_slug
+        self._humr_owner_username = humr_owner_username
         self._mcp = FastMCP(name="doh-mcp-aggregator")
         self._oauth_states: dict[str, _OAuthState] = {}
         self._pending_oauth: dict[str, dict] = {}
@@ -167,10 +167,10 @@ class MCPAggregator:
         if merge_enabled:
             merge_excluded = frozenset(set(DCR_CONNECTORS_BY_SLUG.keys()) | {"github", "slack", "x"})
             self._merge_backend = MergeBackend(
-                doh_control_plane_url=self._doh_control_plane_url,
-                doh_env_bearer=self._doh_env_bearer,
-                doh_app_slug=self._doh_app_slug,
-                doh_owner_username=self._doh_owner_username,
+                humr_control_plane_url=self._humr_control_plane_url,
+                humr_env_bearer=self._humr_env_bearer,
+                humr_app_slug=self._humr_app_slug,
+                humr_owner_username=self._humr_owner_username,
                 excluded_connector_slugs=merge_excluded,
                 on_config_change=self._on_state_change,
             )
@@ -251,7 +251,7 @@ class MCPAggregator:
         return {"ok": True, "tools": len(self._catalog_store.entries), "connectors": len(connectors)}
 
     def routes(self, prefix: str) -> list[Route]:
-        """Routes for the integrations_broker to mount under its unified /__doh_broker/* router.
+        """Routes for the integrations_broker to mount under its unified /__humr_broker/* router.
 
         Merge owns its own routes under merge_backend.routes(prefix=...); the aggregator
         composes both URL surfaces into one list so the broker mounts them in one shot.
@@ -335,7 +335,7 @@ class MCPAggregator:
             return Response(content="origin query param required on first connect", status_code=400)
         if not self._public_base_url:
             self._public_base_url = origin
-        redirect_uri = origin + f"/__doh_broker/integrations/mcp/{provider}/oauth/callback"
+        redirect_uri = origin + f"/__humr_broker/integrations/mcp/{provider}/oauth/callback"
         oauth = self._oauth_states[provider]
 
         metadata = await self._fetch_oauth_metadata(url=spec.oauth_metadata_url)

@@ -232,14 +232,14 @@ RUN arch="$(dpkg --print-architecture)" \
     && rm -rf /root/.npm
 
 # DOH-owned source below this line. Keep these COPY layers last so edits to
-# doh_runtime/, webui-extension/, and skills/ reuse the cached dependency
+# humr_runtime/, webui-extension/, and skills/ reuse the cached dependency
 # layers above instead of re-running uv pip install and Linuxbrew bootstrap.
 COPY skills/ /opt/hermes/agent/skills/
 COPY SOUL.md /opt/hermes/SOUL.md
 COPY config.yaml.template /opt/hermes/config.yaml.template
-COPY doh_runtime /opt/doh/runtime
+COPY humr_runtime /opt/doh/runtime
 
-# Expose the webapps CLI on PATH. Source-of-truth lives in doh_runtime/ so the
+# Expose the webapps CLI on PATH. Source-of-truth lives in humr_runtime/ so the
 # whole runtime tree COPYs together; the symlink lets the agent type `webapps`.
 RUN chmod +x /opt/doh/runtime/webapps/webapps \
     && ln -sf /opt/doh/runtime/webapps/webapps /opt/doh/bin/webapps

@@ -12,16 +12,16 @@ All custom commands live in `humanityrules_app/management/commands/`.
 
 ## Command Reference
 
-- **doh_query** — Ad-hoc model queries (fields, filters, ordering). Preferred over `shell -c` for plain reads (formatted table, JSON output, no Python).
-- **doh_control** — Control plane ops: provision/teardown environments; deploy from AppTemplate (`deploy-app-template`), redeploy, teardown, and remove apps (`teardown-app --remove-app` for full cleanup including secrets/persistent-data/policies).
-- **doh_efs_browse** — Browse EFS filesystem via ECS Exec (interactive shell in customer environment).
-- **doh_app_logs** — Fetch CloudWatch logs for a customer app (works for running and crashed/stopped tasks), by account + env + app slug.
-- **doh_app_shell** — Interactive shell in a deployed customer app *container* (ECS Exec / SSM). For humans.
-- **doh_app_exec** — Non-interactive script execution in a customer app *container*. Script on stdin or `--script-file`; supports `--as USER`, `--timeout`, `--cwd`, `--set KEY=VALUE`, `--format json`. Prefer over `doh_app_shell --command` for scripted probes.
-- **doh_node_shell** — Interactive shell on the customer EC2 *host* (container instance) via SSM Session Manager. Use for host-level inspection — kernel, Docker/containerd, host bind-mount dirs (e.g. `/var/lib/humr/hermes-roots/`), disk space. Not for container internals (use `doh_app_shell`). Supports `--list` (inventory of instances + tasks), `--app <slug>` (auto-pick the instance running an app), `--instance-id <id>`.
-- **doh_hermes_migrate** — Migrate a `hermes_agent` app's persistent-root state from one DOH env to another (same- or cross-account). Five phases (`upload,stage,host-clear,finalize,verify`) with `cleanup` opt-in. See the `hermes-migrate` skill for the full workflow.
-- **doh_secrets** — Manage customer Secrets Manager secrets: list, purge, and shared environment secrets (shared-list/shared-set/shared-delete). All subcommands take --account and optional --org (name or slug).
-- **doh_reset_org_abac** — Full factory reset of ABAC Policy rows for one organization (`--org` slug or name; optional `--admin-email`). Deletes all org policies, re-runs seed bootstrap, recreates default per-app open-access policies.
+- **humr_query** — Ad-hoc model queries (fields, filters, ordering). Preferred over `shell -c` for plain reads (formatted table, JSON output, no Python).
+- **humr_control** — Control plane ops: provision/teardown environments; deploy from AppTemplate (`deploy-app-template`), redeploy, teardown, and remove apps (`teardown-app --remove-app` for full cleanup including secrets/persistent-data/policies).
+- **humr_efs_browse** — Browse EFS filesystem via ECS Exec (interactive shell in customer environment).
+- **humr_app_logs** — Fetch CloudWatch logs for a customer app (works for running and crashed/stopped tasks), by account + env + app slug.
+- **humr_app_shell** — Interactive shell in a deployed customer app *container* (ECS Exec / SSM). For humans.
+- **humr_app_exec** — Non-interactive script execution in a customer app *container*. Script on stdin or `--script-file`; supports `--as USER`, `--timeout`, `--cwd`, `--set KEY=VALUE`, `--format json`. Prefer over `humr_app_shell --command` for scripted probes.
+- **humr_node_shell** — Interactive shell on the customer EC2 *host* (container instance) via SSM Session Manager. Use for host-level inspection — kernel, Docker/containerd, host bind-mount dirs (e.g. `/var/lib/humr/hermes-roots/`), disk space. Not for container internals (use `humr_app_shell`). Supports `--list` (inventory of instances + tasks), `--app <slug>` (auto-pick the instance running an app), `--instance-id <id>`.
+- **humr_hermes_migrate** — Migrate a `hermes_agent` app's persistent-root state from one DOH env to another (same- or cross-account). Five phases (`upload,stage,host-clear,finalize,verify`) with `cleanup` opt-in. See the `hermes-migrate` skill for the full workflow.
+- **humr_secrets** — Manage customer Secrets Manager secrets: list, purge, and shared environment secrets (shared-list/shared-set/shared-delete). All subcommands take --account and optional --org (name or slug).
+- **humr_reset_org_abac** — Full factory reset of ABAC Policy rows for one organization (`--org` slug or name; optional `--admin-email`). Deletes all org policies, re-runs seed bootstrap, recreates default per-app open-access policies.
 - **run_job_worker** — Background job worker for deployments and environment provisioning.
 - **seed_test_apps** — Seed orgs, workspaces, environments, and apps for UI testing.
 - **seed_test_groups** — Seed test groups with attributes for ABAC testing.
@@ -47,5 +47,5 @@ Via `infra_humanityrules/prod_manage.sh` (runs on the ECS container). See the `p
 ```bash
 cd infra_humanityrules
 ./prod_manage.sh <command> [args...]
-# e.g. ./prod_manage.sh doh_query Deployment status --filter status=failed --limit 10
+# e.g. ./prod_manage.sh humr_query Deployment status --filter status=failed --limit 10
 ```

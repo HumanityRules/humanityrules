@@ -6,14 +6,14 @@ tasks first, then falls back to stopped tasks. Use --stopped to skip straight
 to stopped tasks (useful when the app is crash-looping).
 
 Usage:
-    uv run manage.py doh_app_logs --account "CH Sandbox" --app my-app-slug
-    uv run manage.py doh_app_logs --account "CH Sandbox" --app my-app-slug --stopped
-    uv run manage.py doh_app_logs --account "CH Sandbox" --app my-app-slug --container docker-dind
-    uv run manage.py doh_app_logs --account "CH Sandbox" --env prod --app my-app-slug --limit 200
-    uv run manage.py doh_app_logs --account "CH Sandbox" --app my-app-slug --head
-    uv run manage.py doh_app_logs --account "CH Sandbox" --app my-app-slug --all
-    uv run manage.py doh_app_logs --account "CH Sandbox" --app my-app-slug --org "Course Hero"
-    uv run manage.py doh_app_logs --account "CH Sandbox" --app my-app-slug --follow
+    uv run manage.py humr_app_logs --account "CH Sandbox" --app my-app-slug
+    uv run manage.py humr_app_logs --account "CH Sandbox" --app my-app-slug --stopped
+    uv run manage.py humr_app_logs --account "CH Sandbox" --app my-app-slug --container docker-dind
+    uv run manage.py humr_app_logs --account "CH Sandbox" --env prod --app my-app-slug --limit 200
+    uv run manage.py humr_app_logs --account "CH Sandbox" --app my-app-slug --head
+    uv run manage.py humr_app_logs --account "CH Sandbox" --app my-app-slug --all
+    uv run manage.py humr_app_logs --account "CH Sandbox" --app my-app-slug --org "Course Hero"
+    uv run manage.py humr_app_logs --account "CH Sandbox" --app my-app-slug --follow
 
 Requires HUMR_AWS_ACCESS_KEY and HUMR_AWS_SECRET_KEY in .env
 """
@@ -24,7 +24,7 @@ from django.core.management.base import BaseCommand, CommandError
 
 from humanityrules_app.models import App
 
-from . import doh_app_shell
+from . import humr_app_shell
 from ._aws_account_resolver import add_aws_target_args, resolve_aws_target
 
 
@@ -154,7 +154,7 @@ class Command(BaseCommand):
 
         target = resolve_aws_target(options=options)
         if target.aws_account is None:
-            raise CommandError("doh_app_logs requires DB mode (--account/--env); raw mode is not supported.")
+            raise CommandError("humr_app_logs requires DB mode (--account/--env); raw mode is not supported.")
         aws_account = target.aws_account
         session = target.session
         env_slug = target.env_slug
@@ -170,7 +170,7 @@ class Command(BaseCommand):
         cluster_name = f"humr-{env_slug}-cluster"
         service_name = f"doh-{env_slug}-{app_slug}"
         log_group = f"/humr/{env_slug}/ecs"
-        container_name = doh_app_shell._resolve_ecs_container_name(
+        container_name = humr_app_shell._resolve_ecs_container_name(
             app=app,
             requested_container=_requested_container(options=options),
         )

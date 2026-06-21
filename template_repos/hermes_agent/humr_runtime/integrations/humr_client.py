@@ -12,7 +12,7 @@ import logging
 import httpx
 
 
-logger = logging.getLogger("doh_client")
+logger = logging.getLogger("humr_client")
 
 
 class DohClient:

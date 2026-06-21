@@ -29,14 +29,14 @@ Two callers, one relay, one brain. The only thing that differs between phases is
 the *first hop*:
 
 ```
-PANEL (browser)  ──/__doh_broker/permissions/*──► Caddy ─┐
+PANEL (browser)  ──/__humr_broker/permissions/*──► Caddy ─┐
                                                           ├─► control_api (127.0.0.1:9951) ──► DOH /api/permissions/*
 AGENT (sandbox)  ──127.0.0.1:9951/permissions/*──────────┘                                    (phase 2)
 ```
 
 - **The panel** (a Hermes WebUI extension, browser JS —
   `template_repos/hermes_agent/webui-extension/doh-permissions.js`) reaches the
-  broker same-origin via the existing `/__doh_broker/*` reverse-proxy route — the
+  broker same-origin via the existing `/__humr_broker/*` reverse-proxy route — the
   same one the integrations panel uses (`patches-webui/07-doh-broker-proxy.patch`).
   No new proxy patch is needed; permissions is just a new path group. **This file
   is the sole browser consumer of the contract below — any change to the
@@ -45,7 +45,7 @@ AGENT (sandbox)  ──127.0.0.1:9951/permissions/*─────────�
 - **The agent** (phase 2, in the nono sandbox) reaches the same control_api
   directly at `127.0.0.1:9951` — loopback, reachable because `NO_PROXY` includes
   `127.0.0.1` and the broker control port is exempt from the HTTPS proxy
-  (`doh_runtime/supervisor.sh`).
+  (`humr_runtime/supervisor.sh`).
 - **control_api stays pure transport.** Its handlers parse and forward; they hold
   no per-request secret and make no authorization decision. The broker's
   `DohClient` attaches the env bearer on the outbound call.
@@ -54,19 +54,19 @@ AGENT (sandbox)  ──127.0.0.1:9951/permissions/*─────────�
   ABAC `environment:approve` check on Apply. Neither the browser nor the agent
   ever holds the bearer.
 
-## The rename: `integrations_broker` → `doh_broker`
+## The rename: `integrations_broker` → `humr_broker`
 
 The env-resident broker is no longer integrations-only — it now also fronts the
 permissions API, and more DOH APIs later. The runtime component
-(`doh_runtime/integrations/integrations_broker.py` and the integrations-centric
-naming around `control_api.py`) is renamed to `doh_broker` to reflect that it is
+(`humr_runtime/integrations/integrations_broker.py` and the integrations-centric
+naming around `control_api.py`) is renamed to `humr_broker` to reflect that it is
 the single env→DOH relay, not an integrations-specific one. The URL prefix is
-already `/__doh_broker/*`, so this is a code-naming alignment, not a routing
+already `/__humr_broker/*`, so this is a code-naming alignment, not a routing
 change.
 
 ## JSON contract — `/permissions/*`
 
-One logical surface; the panel calls it under `/__doh_broker/permissions`, the
+One logical surface; the panel calls it under `/__humr_broker/permissions`, the
 agent (phase 2) under `127.0.0.1:9951/permissions`, both relayed to DOH
 `/api/permissions/*`. The target `(app, environment)` is **never** a parameter —
 DOH resolves it from the deployment identity.
@@ -171,7 +171,7 @@ so the list may contain repeated `service` values distinguished by `sid`):
 ## The panel (phase 1)
 
 A new WebUI extension (`doh-permissions.js` / `.css`), wired through
-`HERMES_WEBUI_EXTENSION_*` in `doh_runtime/webui.sh` alongside the integrations
+`HERMES_WEBUI_EXTENSION_*` in `humr_runtime/webui.sh` alongside the integrations
 and webapps extensions. It follows `vendor/hermes-webui/docs/EXTENSIONS.md`:
 extension-owned container IDs, additive, reversible.
 
@@ -192,16 +192,16 @@ extension-owned container IDs, additive, reversible.
   `services/permissions.py` and the existing models. The session-auth Django HTML
   editor is untouched. DOH owns auth, target resolution, ABAC, and the async
   Apply job (`permissions_apply_executor`).
-- **Broker (`doh_broker`)** — new `/permissions/*` routes on control_api, pure
+- **Broker (`humr_broker`)** — new `/permissions/*` routes on control_api, pure
   transport, relaying to DOH with the env bearer via `DohClient`.
 - **WebUI extension** — `doh-permissions.js/.css`, the client-rendered editor.
 
 ## Phasing
 
 **Phase 1 (this doc's primary scope):**
-1. Rename `integrations_broker` → `doh_broker`.
+1. Rename `integrations_broker` → `humr_broker`.
 2. DOH `/api/permissions/*` endpoints (JSON, bearer-auth), reusing the service layer.
-3. `doh_broker` control_api `/permissions/*` routes (pure transport).
+3. `humr_broker` control_api `/permissions/*` routes (pure transport).
 4. `doh-permissions.js/.css` extension, full-width destination, container-agnostic.
 
 **Phase 2 (deferred):**

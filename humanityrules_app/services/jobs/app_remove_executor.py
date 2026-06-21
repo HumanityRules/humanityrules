@@ -292,7 +292,7 @@ def _run_efs_cleanup_task(env: models.Environment, app_slug: str) -> tuple[bool,
             role_name=role_name,
             efs_filesystem_arn=efs_filesystem_arn,
         )
-        # IAM role propagation — matches the sleep in doh_efs_browse
+        # IAM role propagation — matches the sleep in humr_efs_browse
         time.sleep(10)
 
         task_def_arn = _register_remover_task_definition(

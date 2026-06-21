@@ -23,7 +23,7 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
-from doh_client import DohClient
+from humr_client import DohClient
 from mcp_aggregator import MCPAggregator
 import tls_intercept
 import tls_providers
@@ -50,7 +50,7 @@ class CredentialsService:
 
     def __init__(
         self,
-        doh_client: DohClient,
+        humr_client: DohClient,
         tls_intercept_runtime: tls_intercept.TlsInterceptRuntime,
         mcp_aggregator: MCPAggregator,
         providers: dict[str, tls_providers.TlsProviderSpec],
@@ -61,7 +61,7 @@ class CredentialsService:
         runtime_dir: Path,
         hermes_home: Path,
     ) -> None:
-        self._doh_client = doh_client
+        self._humr_client = humr_client
         self._tls_intercept_runtime = tls_intercept_runtime
         self._mcp_aggregator = mcp_aggregator
         self._providers = providers
@@ -97,7 +97,7 @@ class CredentialsService:
         Passed to `device_flow` as its `submit_tokens` hook — the device flow
         itself never learns about DOH or the TLS cache.
         """
-        status, _ = await self._doh_client.post_json(
+        status, _ = await self._humr_client.post_json(
             path=f"/api/integrations/credentials/{provider}/device-complete",
             payload=dict(tokens),
             timeout_seconds=30,
@@ -118,7 +118,7 @@ class CredentialsService:
         success we drop only this provider's cached token; any process restart
         is selected from the provider spec inside `credentials_invalidate`.
         """
-        status, payload = await self._doh_client.post_json(
+        status, payload = await self._humr_client.post_json(
             path="/api/integrations/credentials/disconnect",
             payload={"provider": provider},
             timeout_seconds=30,
@@ -134,7 +134,7 @@ class CredentialsService:
 
     async def credentials_setup_session(self, provider: str, public_origin: str) -> tuple[int, dict]:
         """Ask DOH for a vault setup-session submit token; returns DOH's `(status, payload)`."""
-        return await self._doh_client.post_json(
+        return await self._humr_client.post_json(
             path="/api/integrations/credentials/setup-session",
             payload={"provider": provider, "public_origin": public_origin},
             timeout_seconds=30,
@@ -198,10 +198,10 @@ class CredentialsService:
         `slug=None` (explicit Refresh-all) does fan out to every provider.
         """
         if slug is None:
-            doh_reachable = await self._tls_intercept_runtime.refresh_all()
+            humr_reachable = await self._tls_intercept_runtime.refresh_all()
         else:
-            doh_reachable = await self._tls_intercept_runtime.refresh_slug(slug=slug)
-        if not doh_reachable:
+            humr_reachable = await self._tls_intercept_runtime.refresh_slug(slug=slug)
+        if not humr_reachable:
             # Rendering from a cache that missed its refresh would strip
             # integrations from the gateway env; keep file and processes as-is.
             logger.error("refresh after invalidate(slug=%s) failed transiently; managed env left untouched", slug)

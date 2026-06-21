@@ -4,8 +4,8 @@ A tiny reverse proxy that sits in front of apps deployed by DevOps Hero and enfo
 
 ## What it does, per request
 
-1. Reads the `doh_session` cookie.
-2. If missing or invalid, 302s to `https://humanityrules.io/auth/env-start?rd=<current-url>` for the OAuth dance. The control plane mints a session JWT and bounces back to `/__doh_session_install?token=...&rd=...`, which sets the env-scoped cookie and redirects the browser to `rd`.
+1. Reads the `humr_session` cookie.
+2. If missing or invalid, 302s to `https://humanityrules.io/auth/env-start?rd=<current-url>` for the OAuth dance. The control plane mints a session JWT and bounces back to `/__humr_session_install?token=...&rd=...`, which sets the env-scoped cookie and redirects the browser to `rd`.
 3. Verifies the JWT against the central JWKS (fetched from `/.well-known/jwks.json`, cached 15 min). The `aud` claim must match `HUMR_ENV_DOMAIN` to block cross-env replay (the env's DNS zone is globally unique; `HUMR_ENV_SLUG` is only unique per AWS account).
 4. POSTs to DOH's PDP endpoint with `{app_id, provider, sub, username, path}` and `Authorization: Bearer <HUMR_ENV_BEARER>`.
 5. On `allow`, proxies to the app container on localhost, injecting trusted identity headers.

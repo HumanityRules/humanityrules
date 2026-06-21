@@ -5,7 +5,7 @@ description: Copy a hermes_agent app's persistent-root state from a source DOH e
 
 # Migrate a Hermes Agent app between environments
 
-The migration is a five-phase pipeline driven by the `doh_hermes_migrate` management command. Your job is to gather inputs, sanity-check them, then drive the command and report results.
+The migration is a five-phase pipeline driven by the `humr_hermes_migrate` management command. Your job is to gather inputs, sanity-check them, then drive the command and report results.
 
 ## Why this is non-trivial
 
@@ -24,13 +24,13 @@ Ask the user only if missing — never grill. Reasonable defaults are noted.
 2. **Source env** (required) — name + env slug (e.g., `CH Sandbox` + `default`).
 3. **Dest env** (required) — name + env slug.
 4. **Same AWS account?** — default **yes**. Only ask if the user hasn't said either way and the env names hint otherwise. If yes, accept a single `--account`. If no, you'll pass `--source-account` and `--dest-account` separately, and the command will create the bridge bucket in the source account with a cross-account read policy for the dest account's root.
-5. **Local-DB knowledge.** If either env isn't in the local control plane's DB (typical for prod-controlplane-managed envs), use raw mode for that side (`--source-aws-*` / `--dest-aws-*`). Find the four values via `doh_query` against the *other* control plane (or by reading the env's CloudFormation stacks).
+5. **Local-DB knowledge.** If either env isn't in the local control plane's DB (typical for prod-controlplane-managed envs), use raw mode for that side (`--source-aws-*` / `--dest-aws-*`). Find the four values via `humr_query` against the *other* control plane (or by reading the env's CloudFormation stacks).
 
 ## Pre-flight checks (do these silently before running)
 
 - Both source and dest hermes services exist and use the `hermes_agent` template (`grep HUMR_APP_TEMPLATE`-style check, or just check that `/hermes-checkpoint` and `/hermes-persistent-root` mounts exist in the dest task definition).
 - Source service has 1 RUNNING task. If it's at desiredCount=0, ask before scaling up — the user may have stopped it deliberately.
-- Free disk on dest EC2 instance: `df -h /var/lib/humr` via `doh_node_shell` — restoring needs roughly 2-3x the compressed tar size in free space.
+- Free disk on dest EC2 instance: `df -h /var/lib/humr` via `humr_node_shell` — restoring needs roughly 2-3x the compressed tar size in free space.
 - If the dest persistent root has user data the user might care about, surface its size + last-mtime and confirm before proceeding.
 
 ## Driving the command
@@ -38,7 +38,7 @@ Ask the user only if missing — never grill. Reasonable defaults are noted.
 The default phase chain is `upload,stage,host-clear,finalize,verify`. Run it as one invocation:
 
 ```bash
-uv run manage.py doh_hermes_migrate \
+uv run manage.py humr_hermes_migrate \
     --account "<account>" \
     --source-env <src-slug> --dest-env <dst-slug> \
     --app <app-slug> \
@@ -48,7 +48,7 @@ uv run manage.py doh_hermes_migrate \
 Cross-account variant:
 
 ```bash
-uv run manage.py doh_hermes_migrate \
+uv run manage.py humr_hermes_migrate \
     --source-account "<src-account>" --source-env <src-slug> \
     --dest-account "<dst-account>" --dest-env <dst-slug> \
     --app <app-slug> \
@@ -89,7 +89,7 @@ If source and dest are in different AWS accounts:
 - **upload trailer parse fails / SHA missing**: the source SSM channel was disconnected mid-stream. Rerun `--phases upload`; the bucket is reused via state file.
 - **stager `command not found: aws`**: someone changed `STAGER_IMAGE` to a base image that doesn't have awscli — keep `public.ecr.aws/aws-cli/aws-cli`.
 - **`sha != expected` in stager logs**: source-side tar was non-deterministic (live writes), or the upload was truncated. Rerun the whole pipeline; SQLite WAL during tar is the most likely source of mismatch — tell the user to quiesce the source if they hit this twice.
-- **`Restore complete` never appears**: dest's persistent root wasn't actually empty (host-clear ran on wrong instance, or there are multiple container instances). Rerun `--phases host-clear` and check `--list` from `doh_node_shell`.
+- **`Restore complete` never appears**: dest's persistent root wasn't actually empty (host-clear ran on wrong instance, or there are multiple container instances). Rerun `--phases host-clear` and check `--list` from `humr_node_shell`.
 - **CrossAccount AccessDenied on s3:GetObject**: the bridge bucket was created before the cross-account flag was set. Delete the bucket (or rerun upload with `--bridge-bucket <new-name>`) and try again.
 
 ## What you should *not* do

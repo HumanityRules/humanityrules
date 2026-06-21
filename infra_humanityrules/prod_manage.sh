@@ -12,20 +12,20 @@
 #   ./prod_manage.sh <command> [args...]
 #
 # Examples (ECS-exec into prod):
-#   ./prod_manage.sh doh_query Environment
-#   ./prod_manage.sh doh_control create-env --aws-account "DevOps Hero AWS Account" --name default --region us-east-1 --hosted-zone humanityrules.io --provision
+#   ./prod_manage.sh humr_query Environment
+#   ./prod_manage.sh humr_control create-env --aws-account "DevOps Hero AWS Account" --name default --region us-east-1 --hosted-zone humanityrules.io --provision
 #   ./prod_manage.sh shell
 #   ./prod_manage.sh dbshell
 #
 # Examples (local-exec, target resolved from prod):
-#   ./prod_manage.sh doh_build_prebuilt_image --account "Course Hero Sandbox" --env production --source-dir template_repos/doh_dind --ecr-repo doh-dind --tag 0.2.5
+#   ./prod_manage.sh humr_build_prebuilt_image --account "Course Hero Sandbox" --env production --source-dir template_repos/humr_dind --ecr-repo doh-dind --tag 0.2.5
 #
 set -e
 
 # Commands that must run on the operator's local machine but need target
 # metadata (account_id, external_id, region, env_slug) sourced from prod's DB.
 # Add more as their use cases arise.
-LOCAL_EXEC_COMMANDS=("doh_build_prebuilt_image")
+LOCAL_EXEC_COMMANDS=("humr_build_prebuilt_image")
 
 is_local_exec() {
     local cmd="$1"
@@ -39,12 +39,12 @@ if [ $# -eq 0 ]; then
     echo "Usage: ./prod_manage.sh <command> [args...]"
     echo ""
     echo "Examples (ECS-exec):"
-    echo "  ./prod_manage.sh doh_query Environment"
-    echo "  ./prod_manage.sh doh_control create-env --aws-account \"Name\" --name default --region us-east-1"
+    echo "  ./prod_manage.sh humr_query Environment"
+    echo "  ./prod_manage.sh humr_control create-env --aws-account \"Name\" --name default --region us-east-1"
     echo "  ./prod_manage.sh shell"
     echo ""
     echo "Examples (local-exec, target resolved from prod):"
-    echo "  ./prod_manage.sh doh_build_prebuilt_image --account \"Course Hero Sandbox\" --env production --source-dir template_repos/doh_dind --ecr-repo doh-dind --tag 0.2.5"
+    echo "  ./prod_manage.sh humr_build_prebuilt_image --account \"Course Hero Sandbox\" --env production --source-dir template_repos/humr_dind --ecr-repo doh-dind --tag 0.2.5"
     exit 1
 fi
 
@@ -122,7 +122,7 @@ echo "---"
 # would wire the inner shell's stdin to the closed end of the base64 pipe and
 # every interactive command (`shell`, `dbshell`, anything reading stdin) would
 # die instantly with `Cannot perform start session: EOF`.
-# Customer-account commands (doh_app_shell, doh_app_logs, …) assume roles via
+# Customer-account commands (humr_app_shell, humr_app_logs, …) assume roles via
 # HUMR_AWS_* creds. The prod container has no .env file — forward from the
 # operator's laptop so Django settings pick them up inside ECS exec.
 FULL_CMD="HUMR_AWS_ACCESS_KEY=$(printf '%q' "$HUMR_AWS_ACCESS_KEY") HUMR_AWS_SECRET_KEY=$(printf '%q' "$HUMR_AWS_SECRET_KEY") uv run python manage.py"

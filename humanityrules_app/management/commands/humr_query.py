@@ -1,33 +1,33 @@
 """
-Management command for ad-hoc model queries. Works against the local database, but can also be used on production via ./prod_manage.sh doh_query <args>.
+Management command for ad-hoc model queries. Works against the local database, but can also be used on production via ./prod_manage.sh humr_query <args>.
 
 Usage:
-    uv run manage.py doh_query <Model> [field1 field2 ...] [--filter key=value] [--limit N] [--format pipe|json]
+    uv run manage.py humr_query <Model> [field1 field2 ...] [--filter key=value] [--limit N] [--format pipe|json]
 
-For production, use ./prod_manage.sh doh_query <args> instead.
+For production, use ./prod_manage.sh humr_query <args> instead.
 
 Common queries:
 
   Infrastructure:
-    doh_query Organization slug name
-    doh_query AWSAccount name aws_account_id status
-    doh_query Environment name slug aws_region status
+    humr_query Organization slug name
+    humr_query AWSAccount name aws_account_id status
+    humr_query Environment name slug aws_region status
 
   Apps and deployments:
-    doh_query App name slug app_type build_strategy
-    doh_query Deployment id status created_at --order created_at --desc --limit 10
-    doh_query Deployment status --filter status=failed --limit 10
-    doh_query DeploymentLog level source message --filter deployment_id=123 --order created_at --desc
+    humr_query App name slug app_type build_strategy
+    humr_query Deployment id status created_at --order created_at --desc --limit 10
+    humr_query Deployment status --filter status=failed --limit 10
+    humr_query DeploymentLog level source message --filter deployment_id=123 --order created_at --desc
 
   Repositories:
-    doh_query Repository full_name default_branch
-    doh_query Repository full_name --filter full_name__icontains=dashboard
+    humr_query Repository full_name default_branch
+    humr_query Repository full_name --filter full_name__icontains=dashboard
 
   Utilities:
-    doh_query <Model> --describe   # Show available fields for any model
+    humr_query <Model> --describe   # Show available fields for any model
 
   Machine-readable output (used by tooling like prod_manage.sh dispatcher):
-    doh_query AWSAccount aws_account_id external_id --filter name="Course Hero Sandbox" --format json
+    humr_query AWSAccount aws_account_id external_id --filter name="Course Hero Sandbox" --format json
 """
 
 import json

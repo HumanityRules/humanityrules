@@ -14,10 +14,10 @@ from unittest.mock import patch
 
 def _runtime_dir() -> pathlib.Path:
     repo_root = pathlib.Path(__file__).resolve().parents[2]
-    return repo_root / "template_repos" / "hermes_agent" / "doh_runtime" / "webapps"
+    return repo_root / "template_repos" / "hermes_agent" / "humr_runtime" / "webapps"
 
 
-def _doh_runtime_dir() -> pathlib.Path:
+def _humr_runtime_dir() -> pathlib.Path:
     return _runtime_dir().parent
 
 
@@ -124,7 +124,7 @@ class TestHermesWebappsRuntimeContract(unittest.TestCase):
         )
 
     def test_webui_starts_process_compose_with_explicit_internal_log_files(self) -> None:
-        script = (_doh_runtime_dir() / "webui.sh").read_text()
+        script = (_humr_runtime_dir() / "webui.sh").read_text()
 
         self.assertIn('--log-file "${PROCESS_COMPOSE_ROOT}/system/process-compose.log"', script)
         self.assertIn('--log-file "${PROCESS_COMPOSE_ROOT}/webapps/process-compose.log"', script)

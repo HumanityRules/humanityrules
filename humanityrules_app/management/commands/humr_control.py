@@ -2,21 +2,21 @@
 Control plane operations for environment provisioning and app deployments.
 
 Usage:
-    uv run manage.py doh_control create-env --aws-account "Name" --name default --region us-east-1 --hosted-zone example.com
-    uv run manage.py doh_control teardown-env --slug default --aws-account "Name"
-    uv run manage.py doh_control teardown-app --app ai-detector-and-humanizer
-    uv run manage.py doh_control teardown-app --app foo --remove-app --delete-secrets --delete-persistent-data --delete-policies
-    uv run manage.py doh_control deploy-app-template --template hermes-agent --org acme-corp --workspace default --env default --app-name hermes-vmendi
-    uv run manage.py doh_control redeploy-env --slug default --aws-account "Name"
-    uv run manage.py doh_control redeploy-app --app simple-dashboard
-    uv run manage.py doh_control redeploy-app --app simple-dashboard --env default
-    uv run manage.py doh_control redeploy-app --app simple-dashboard --deployment <uuid>
-    uv run manage.py doh_control restart-task --app hermes-vmendi01
-    uv run manage.py doh_control restart-task --app hermes-vmendi01 --env default
+    uv run manage.py humr_control create-env --aws-account "Name" --name default --region us-east-1 --hosted-zone example.com
+    uv run manage.py humr_control teardown-env --slug default --aws-account "Name"
+    uv run manage.py humr_control teardown-app --app ai-detector-and-humanizer
+    uv run manage.py humr_control teardown-app --app foo --remove-app --delete-secrets --delete-persistent-data --delete-policies
+    uv run manage.py humr_control deploy-app-template --template hermes-agent --org acme-corp --workspace default --env default --app-name hermes-vmendi
+    uv run manage.py humr_control redeploy-env --slug default --aws-account "Name"
+    uv run manage.py humr_control redeploy-app --app simple-dashboard
+    uv run manage.py humr_control redeploy-app --app simple-dashboard --env default
+    uv run manage.py humr_control redeploy-app --app simple-dashboard --deployment <uuid>
+    uv run manage.py humr_control restart-task --app hermes-vmendi01
+    uv run manage.py humr_control restart-task --app hermes-vmendi01 --env default
 
-For production, use ./prod_manage.sh doh_control <operation> instead.
+For production, use ./prod_manage.sh humr_control <operation> instead.
 
-For querying data, use doh_query instead.
+For querying data, use humr_query instead.
 """
 
 from datetime import datetime
@@ -217,7 +217,7 @@ class Command(BaseCommand):
             aws_region=region,
             shared_alb_hosted_zone=hosted_zone,
             status=models.Environment.Status.PENDING,
-            status_message="Created via doh_control command",
+            status_message="Created via humr_control command",
         )
 
         self.stdout.write(self.style.SUCCESS(f"\nCreated environment: {env.name} ({env.slug})"))
@@ -283,7 +283,7 @@ class Command(BaseCommand):
 
         old_status = env.status
         env.status = models.Environment.Status.PENDING
-        env.status_message = f"Redeploy triggered via doh_control (was: {old_status})"
+        env.status_message = f"Redeploy triggered via humr_control (was: {old_status})"
         env.save(update_fields=["status", "status_message", "updated_at"])
 
         self.stdout.write(self.style.SUCCESS(f"\nEnvironment '{slug}' queued for redeploy"))
@@ -387,7 +387,7 @@ class Command(BaseCommand):
         old_label = app.label
         with transaction.atomic():
             deployment.status = models.Deployment.Status.TEARDOWN_PENDING
-            deployment.status_message = "Teardown triggered via doh_control"
+            deployment.status_message = "Teardown triggered via humr_control"
             deployment.save(update_fields=["status", "status_message", "updated_at"])
             # Clear App.label so the unscoped main worker picks up the teardown.
             # The label scopes verification-time work to a specific run_job_worker;
@@ -425,7 +425,7 @@ class Command(BaseCommand):
                 delete_policies=delete_policies,
                 teardown_first=True,
                 created_by=None,
-                status_message="Queued via doh_control teardown-app --remove-app",
+                status_message="Queued via humr_control teardown-app --remove-app",
             )
             app.status = models.App.Status.PENDING_REMOVAL
             # Clear App.label so the unscoped main worker picks up the removal.
@@ -520,7 +520,7 @@ class Command(BaseCommand):
             git_ref=git_ref,
             image_tag=image_tag,
             status=models.Deployment.Status.PENDING,
-            status_message="Redeploy triggered via doh_control",
+            status_message="Redeploy triggered via humr_control",
             created_by=created_by,
         )
 
@@ -675,7 +675,7 @@ class Command(BaseCommand):
                 ecs_client.stop_task(
                     cluster=cluster_name,
                     task=task_arn,
-                    reason="Restart requested via doh_control restart-task",
+                    reason="Restart requested via humr_control restart-task",
                 )
                 self.stdout.write(f"    Stopped: {task_id}")
             except ClientError as e:

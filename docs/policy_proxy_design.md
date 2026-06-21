@@ -68,7 +68,7 @@ JWT shape (session cookie):
 - TTL: 1 hour. On expiry, policy proxy redirects back through the auth flow; Okta typically short-circuits the login silently.
 - No attributes in the cookie. Authorization is resolved per-request against DOH, which always sees the current attribute state.
 - Signed with the env's private key from Secrets Manager.
-- Set as `Set-Cookie: doh_session=<jwt>; Domain=.<env-domain>; Secure; HttpOnly; SameSite=Lax; Path=/`. Parent-domain scope means all policy-proxy'd apps in the env read it with one login.
+- Set as `Set-Cookie: humr_session=<jwt>; Domain=.<env-domain>; Secure; HttpOnly; SameSite=Lax; Path=/`. Parent-domain scope means all policy-proxy'd apps in the env read it with one login.
 
 Redirect validation:
 
@@ -87,7 +87,7 @@ Request flow:
 
 1. Request arrives at the policy proxy.
 2. If the path is an internal policy proxy path (e.g. `/__policy_proxy/healthz`), handle locally.
-3. Read the `doh_session` cookie. If missing or invalid (bad signature, expired), 302 to `https://auth.<env-domain>/start?rd=<current-url>`.
+3. Read the `humr_session` cookie. If missing or invalid (bad signature, expired), 302 to `https://auth.<env-domain>/start?rd=<current-url>`.
 4. Verify JWT signature against the cached JWKS. Extract `sub`, `username`.
 5. Look up `(oidc_sub, app_id, path-pattern)` in the decision cache.
 6. On cache miss, call the DOH PDP (see below). Cache the result with a 600 s TTL.
@@ -189,7 +189,7 @@ Slack gateway:
 `HERMES_WEBUI_PASSWORD`:
 
 - Dropped from the Personal template's runtime variables. With no env var set, the upstream WebUI's own password auth is disabled (`api/auth.py` reads it directly from process env; empty/unset → `is_auth_enabled()` returns False). The policy proxy is the only gate. The Slack template still sets it, since that deployment isn't behind the policy proxy.
-- Complemented by `HERMES_WEBUI_HOST=127.0.0.1` in `template_repos/hermes_agent/doh_runtime/supervisor.sh` so the WebUI binds loopback-only on :8789. Both containers share the task ENI in Fargate awsvpc; without this override the upstream image default `0.0.0.0` would leave the WebUI reachable on the task ENI.
+- Complemented by `HERMES_WEBUI_HOST=127.0.0.1` in `template_repos/hermes_agent/humr_runtime/supervisor.sh` so the WebUI binds loopback-only on :8789. Both containers share the task ENI in Fargate awsvpc; without this override the upstream image default `0.0.0.0` would leave the WebUI reachable on the task ENI.
 
 
 ## Opt-in Wiring

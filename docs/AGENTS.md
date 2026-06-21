@@ -10,7 +10,7 @@ The main developer documentation lives in the docs/ subdirectory. **When creatin
 
 - **`docs/integrations/AGENTS.md`** — Index for Hermes agent third-party integrations (OAuth broker, MCP, Merge, Slack, Telegram, device-flow providers). Open when working on the integrations sub-system.
 
-- **`docs/permissions_broker_design.md`** — How the IAM task-role permissions editor moves from the DOH UI into the Hermes WebUI as a self-referential editor (this deployment requests permissions for its own task role), the `/permissions/*` JSON contract over the renamed `doh_broker`, and the phase split (phase 1 = editor pane only; phase 2 = agent tools + skill + sidebar/chat layout). Open when working on the Hermes permissions editor, the broker rename, or the permissions API.
+- **`docs/permissions_broker_design.md`** — How the IAM task-role permissions editor moves from the DOH UI into the Hermes WebUI as a self-referential editor (this deployment requests permissions for its own task role), the `/permissions/*` JSON contract over the renamed `humr_broker`, and the phase split (phase 1 = editor pane only; phase 2 = agent tools + skill + sidebar/chat layout). Open when working on the Hermes permissions editor, the broker rename, or the permissions API.
 
 - **`docs/domain_model.md`** — Core domain concepts and entity relationships. Defines Workspace, App, Environment, Datastore, Deployment, etc entities with their attributes and how they relate. Read this when implementing features that touch the domain model or when clarifying entity boundaries.
 

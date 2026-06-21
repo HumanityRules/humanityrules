@@ -67,24 +67,24 @@ class MergeBackend:
     def __init__(
         self,
         *,
-        doh_control_plane_url: str,
-        doh_env_bearer: str,
-        doh_app_slug: str,
-        doh_owner_username: str,
+        humr_control_plane_url: str,
+        humr_env_bearer: str,
+        humr_app_slug: str,
+        humr_owner_username: str,
         excluded_connector_slugs: frozenset[str],
         on_config_change: Callable[[str, str, mcp_top_level_tools.StateTransition], Awaitable[None]],
     ) -> None:
-        self._doh_control_plane_url = doh_control_plane_url
-        self._doh_env_bearer = doh_env_bearer
-        self._doh_app_slug = doh_app_slug
-        self._doh_owner_username = doh_owner_username
+        self._humr_control_plane_url = humr_control_plane_url
+        self._humr_env_bearer = humr_env_bearer
+        self._humr_app_slug = humr_app_slug
+        self._humr_owner_username = humr_owner_username
         self._excluded_connector_slugs = excluded_connector_slugs
-        self._mcp_url = doh_control_plane_url + "/api/integrations/merge/mcp"
-        self._status_url = doh_control_plane_url + "/api/integrations/merge/connector-status"
+        self._mcp_url = humr_control_plane_url + "/api/integrations/merge/mcp"
+        self._status_url = humr_control_plane_url + "/api/integrations/merge/connector-status"
         self._headers = {
-            "Authorization": f"Bearer {doh_env_bearer}",
-            "X-Doh-App-Slug": doh_app_slug,
-            "X-Doh-Owner-Username": doh_owner_username,
+            "Authorization": f"Bearer {humr_env_bearer}",
+            "X-Doh-App-Slug": humr_app_slug,
+            "X-Doh-Owner-Username": humr_owner_username,
         }
         self._status_cache: dict[str, tuple[str, float]] = {}
         self._status_lock = asyncio.Lock()
@@ -218,12 +218,12 @@ class MergeBackend:
         try:
             async with httpx.AsyncClient(timeout=30) as client:
                 resp = await client.post(
-                    url=f"{self._doh_control_plane_url}/api/integrations/merge/ensure-registered-user",
+                    url=f"{self._humr_control_plane_url}/api/integrations/merge/ensure-registered-user",
                     headers={
-                        "Authorization": f"Bearer {self._doh_env_bearer}",
+                        "Authorization": f"Bearer {self._humr_env_bearer}",
                         "Content-Type": "application/json",
                     },
-                    json={"app_slug": self._doh_app_slug, "owner_username": self._doh_owner_username},
+                    json={"app_slug": self._humr_app_slug, "owner_username": self._humr_owner_username},
                 )
             if resp.status_code != 200:
                 logger.error("merge ensure-registered-user at boot returned %d: %s", resp.status_code, resp.text[:300])
@@ -235,7 +235,7 @@ class MergeBackend:
     # ── Browser-facing passthrough routes ─────────────────────────────
 
     def routes(self, prefix: str) -> list[Route]:
-        """Routes the integrations_broker mounts under /__doh_broker/<prefix>/merge/*.
+        """Routes the integrations_broker mounts under /__humr_broker/<prefix>/merge/*.
 
         DOH owns the Merge API key — these handlers forward to DOH with bearer
         + identity injected and stream the response back to the WebUI.
@@ -312,9 +312,9 @@ class MergeBackend:
         for GET, into the JSON body for POST. Callers provide only the
         operation-specific fields.
         """
-        url = f"{self._doh_control_plane_url}{path}"
-        headers = {"Authorization": f"Bearer {self._doh_env_bearer}"}
-        identity = {"app_slug": self._doh_app_slug, "owner_username": self._doh_owner_username}
+        url = f"{self._humr_control_plane_url}{path}"
+        headers = {"Authorization": f"Bearer {self._humr_env_bearer}"}
+        identity = {"app_slug": self._humr_app_slug, "owner_username": self._humr_owner_username}
         try:
             async with httpx.AsyncClient(timeout=30) as client:
                 if method == "GET":

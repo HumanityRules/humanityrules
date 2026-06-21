@@ -1,7 +1,7 @@
 """Browser-facing control API (127.0.0.1:9951).
 
-Starlette app mounted by `doh_broker` and reached same-origin from the WebUI
-via Caddy's /__doh_broker/* route. Unifies TLS-intercept provider management,
+Starlette app mounted by `humr_broker` and reached same-origin from the WebUI
+via Caddy's /__humr_broker/* route. Unifies TLS-intercept provider management,
 MCP-aggregator OAuth routes, and Merge passthroughs under /integrations, and the
 self-referential permissions editor under /permissions.
 
@@ -20,7 +20,7 @@ from starlette.routing import Route
 
 from credentials_service import CredentialsService
 import device_flow
-from doh_client import DohClient
+from humr_client import DohClient
 from mcp_aggregator import MCPAggregator
 import permissions_control
 import tls_intercept
@@ -31,25 +31,25 @@ logger = logging.getLogger("control_api")
 async def _handle_unified_status(
     mcp_aggregator: MCPAggregator,
     tls_intercept_runtime: tls_intercept.TlsInterceptRuntime,
-    doh_client: DohClient,
+    humr_client: DohClient,
     env_slug: str,
 ) -> Response:
     """Flat list combining TLS-intercept providers and MCP-aggregator items.
 
     Reads cached TLS-intercept entries; refresh happens lazily (proxy hot
     path or near expiry). Callers that need fresh state must POST
-    /__doh_broker/integrations/tls_intercept/{provider}/invalidate for one provider
-    (e.g. after a Disconnect on DOH) or /__doh_broker/integrations/refresh_all
+    /__humr_broker/integrations/tls_intercept/{provider}/invalidate for one provider
+    (e.g. after a Disconnect on DOH) or /__humr_broker/integrations/refresh_all
     for the explicit-Refresh path (MCP catalog reload + all-providers TLS
     invalidate in one shot).
     """
     items = await tls_intercept_runtime.status_items()
     items.extend(await mcp_aggregator.status_items())
     return JSONResponse(content={
-        "doh_control_plane_url": doh_client.control_plane_url,
+        "humr_control_plane_url": humr_client.control_plane_url,
         "env_slug": env_slug,
-        "owner_username": doh_client.owner_username,
-        "app_slug": doh_client.app_slug,
+        "owner_username": humr_client.owner_username,
+        "app_slug": humr_client.app_slug,
         "items": items,
     })
 
@@ -63,15 +63,15 @@ def build_control_app(
     tls_intercept_runtime: tls_intercept.TlsInterceptRuntime,
     oauth_device_flow: device_flow.OAuthDeviceFlow,
     credentials_service: CredentialsService,
-    doh_client: DohClient,
+    humr_client: DohClient,
     env_slug: str,
 ) -> Starlette:
-    """Wire the unified /__doh_broker/* router for browser-facing integration management."""
+    """Wire the unified /__humr_broker/* router for browser-facing integration management."""
     async def status_route(request: Request) -> Response:
         return await _handle_unified_status(
             mcp_aggregator=mcp_aggregator,
             tls_intercept_runtime=tls_intercept_runtime,
-            doh_client=doh_client,
+            humr_client=humr_client,
             env_slug=env_slug,
         )
 
@@ -144,6 +144,6 @@ def build_control_app(
         Route(path=f"{tls}/device/status", endpoint=device_status_route, methods=["GET"]),
         Route(path=f"{tls}/device/cancel", endpoint=device_cancel_route, methods=["POST"]),
         *mcp_aggregator.routes(prefix="/integrations"),
-        *permissions_control.routes(prefix="/permissions", doh_client=doh_client),
+        *permissions_control.routes(prefix="/permissions", humr_client=humr_client),
     ]
     return Starlette(routes=routes)
