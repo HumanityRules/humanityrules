@@ -7,9 +7,9 @@ Secrets Manager.
 
 The normal prod path is ``ensure_env_bearer_token_exists``, which generates a
 random raw token, writes it into the env's ``shared-secrets``, and stores
-only the hash on DOH. That path is great for prod but annoying for local
+only the hash on HUMR. That path is great for prod but annoying for local
 testing because the raw token lives only in AWS. This command does the
-reverse: you *pick* a raw token, DOH hashes and stores it, and you use that
+reverse: you *pick* a raw token, HUMR hashes and stores it, and you use that
 same raw value in your local refresher's ``HUMR_ENV_BEARER`` env var.
 
 Usage:

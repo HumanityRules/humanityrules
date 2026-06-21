@@ -1,4 +1,4 @@
-# Local Hermes stack — same image as DOH deploys, without the control plane.
+# Local Hermes stack — same image as HUMR deploys, without the control plane.
 #
 #   cd template_repos/hermes_agent_local
 #   cp .env.example .env   # optional
@@ -11,7 +11,7 @@
 # Hermes Caddy/WebUI ports are not published to the host; reach them through
 # local_policy_proxy (bundled here) or docker exec.
 #
-# `docker compose up --watch` rebuilds the Hermes image when DOH source changes (~1s
+# `docker compose up --watch` rebuilds the Hermes image when HUMR source changes (~1s
 # with layer cache), recreates the container, and the persistent-root runner
 # rsyncs the new /opt/doh tree on start — reliable, no bind-mount clobber.
 #

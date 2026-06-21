@@ -1,4 +1,4 @@
-"""DevOps Hero CDK Infrastructure Stacks."""
+"""Humanity Rules CDK Infrastructure Stacks."""
 
 from stacks.cert_stack import CertStack
 from stacks.vpc_stack import VpcStack

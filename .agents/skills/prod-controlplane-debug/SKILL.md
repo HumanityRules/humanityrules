@@ -1,13 +1,13 @@
 ---
 name: prod-controlplane-debug
-description: Debug DOH's own production control plane (humanityrules.io). Use when the DOH platform itself is broken — its ECS service, ALB, CloudFormation stacks, or CloudWatch logs. NOT for customer app issues — use the customer-debug skill for that.
+description: Debug HUMR's own production control plane (humanityrules.io). Use when the HUMR platform itself is broken — its ECS service, ALB, CloudFormation stacks, or CloudWatch logs. NOT for customer app issues — use the customer-debug skill for that.
 ---
 
-# Debug DOH Control Plane Production Infrastructure
+# Debug HUMR Control Plane Production Infrastructure
 
-For investigating production issues with DOH's own control plane (humanityrules.io) — the platform itself, not customer apps.
+For investigating production issues with HUMR's own control plane (humanityrules.io) — the platform itself, not customer apps.
 
-**This skill is for DOH's own AWS account and infrastructure.** If a customer app is crashing or failing to deploy, that happens in the customer's AWS account — see the `customer-debug` skill instead.
+**This skill is for HUMR's own AWS account and infrastructure.** If a customer app is crashing or failing to deploy, that happens in the customer's AWS account — see the `customer-debug` skill instead.
 
 ## AWS Credentials
 
@@ -111,7 +111,7 @@ aws elbv2 describe-target-health \
 ## CloudFormation Stacks
 
 ```bash
-# List DOH stacks
+# List HUMR stacks
 aws cloudformation list-stacks \
   --stack-status-filter CREATE_COMPLETE UPDATE_COMPLETE \
   --query 'StackSummaries[?starts_with(StackName,`humr-prod`)].StackName'

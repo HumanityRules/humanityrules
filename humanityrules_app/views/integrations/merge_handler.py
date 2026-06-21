@@ -1,9 +1,9 @@
-"""Env-resident-component → DOH endpoints for Merge.dev Agent Handler.
+"""Env-resident-component → HUMR endpoints for Merge.dev Agent Handler.
 
-The Merge tenant-wide API key lives on DOH only — never inside the customer's
+The Merge tenant-wide API key lives on HUMR only — never inside the customer's
 Hermes container. Env-resident callers (the integrations broker / MCP
 aggregator) reach Merge through these endpoints, authenticating with their
-HUMR_ENV_BEARER. DOH validates the bearer, derives `origin_user_id` from the
+HUMR_ENV_BEARER. HUMR validates the bearer, derives `origin_user_id` from the
 authenticated env's owner + app slug, attaches the Merge API key, and
 forwards.
 
@@ -109,7 +109,7 @@ def _resolve_caller(request: HttpRequest) -> tuple[App, User] | JsonResponse:
 def _api_key_or_500() -> str | JsonResponse:
     api_key = settings.MERGE_AGENT_HANDLER_API_KEY
     if not api_key:
-        logger.error("MERGE_AGENT_HANDLER_API_KEY is not configured on DOH")
+        logger.error("MERGE_AGENT_HANDLER_API_KEY is not configured on HUMR")
         return JsonResponse({"error": "merge integration not configured"}, status=500)
     return api_key
 
@@ -117,7 +117,7 @@ def _api_key_or_500() -> str | JsonResponse:
 def _tool_pack_or_500() -> str | JsonResponse:
     pack_id = settings.MERGE_TOOL_PACK_ID
     if not pack_id:
-        logger.error("MERGE_TOOL_PACK_ID is not configured on DOH")
+        logger.error("MERGE_TOOL_PACK_ID is not configured on HUMR")
         return JsonResponse({"error": "merge tool pack not configured"}, status=500)
     return pack_id
 
@@ -411,9 +411,9 @@ def integrations_merge_mcp(request: HttpRequest) -> StreamingHttpResponse | Json
     Forwards POST (JSON-RPC), GET (SSE listening stream), DELETE (session
     terminate) verbatim — the three client-side methods MCP Streamable HTTP
     defines. POST-only would push fastmcp into its 405-fallback path and
-    emit two GET retries + one DELETE per session as DOH WARN log noise.
+    emit two GET retries + one DELETE per session as HUMR WARN log noise.
 
-    DOH derives tool_pack_id and registered_user_id from authenticated state;
+    HUMR derives tool_pack_id and registered_user_id from authenticated state;
     the broker has no way to influence which Merge target this hits.
     """
     if request.method not in ("POST", "GET", "DELETE"):

@@ -1,6 +1,6 @@
 """X (Twitter) per-user integration: OAuth 2.0 connect + token refresh.
 
-A near-clone of `provider_google`: the authenticated DOH user starts at
+A near-clone of `provider_google`: the authenticated HUMR user starts at
 `/integrations/user/x/start/?rd=<URL>`, consents at X, and lands back at
 `/integrations/user/x/callback/`, which persists the refresh_token as an
 IntegrationUserCredential row. The broker swaps a placeholder Bearer for a
@@ -174,7 +174,7 @@ def _exchange_x_code(web: dict, code: str, redirect_uri: str, code_verifier: str
 
 @login_required
 def integrations_user_x_callback(request: HttpRequest) -> HttpResponse:
-    """Exchange X's auth code, persist refresh_token on DOH, 302 back to `rd`."""
+    """Exchange X's auth code, persist refresh_token on HUMR, 302 back to `rd`."""
     if request.GET.get("error"):
         logger.error("x oauth callback error=%s", request.GET.get("error"))
         return HttpResponseBadRequest(f"X OAuth error: {request.GET['error']}")

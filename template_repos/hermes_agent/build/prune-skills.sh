@@ -1,5 +1,5 @@
 #!/bin/bash
-# Curate the bundled Hermes skill set. Only the DOH-approved skills listed in
+# Curate the bundled Hermes skill set. Only the HUMR-approved skills listed in
 # this script survive in the image; every other upstream bundled skill is
 # removed at build time.
 set -euo pipefail

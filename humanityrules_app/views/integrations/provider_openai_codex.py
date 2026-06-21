@@ -3,10 +3,10 @@
 Unlike the redirect-dance OAuth providers (Google, GitHub), Codex connects via
 OpenAI's device flow run *by the env-resident broker* (see
 `humr_runtime/integrations/integrations_broker.py`). The broker drives the device handshake,
-then POSTs the resulting refresh_token to DOH at
+then POSTs the resulting refresh_token to HUMR at
 `/api/integrations/credentials/openai-codex/device-complete`, which stores it
 as an IntegrationUserCredential row. No browser redirect, no callback of ours,
-no DOH-held client secret — Codex's client is a public OAuth client.
+no HUMR-held client secret — Codex's client is a public OAuth client.
 
 Refresh (`refresh_outcome`): exchanges the stored refresh_token at
 `auth.openai.com/oauth/token` (grant_type=refresh_token, public client_id, no
@@ -160,7 +160,7 @@ def refresh_outcome(environment: Environment, owner_user: User, app_slug: str) -
 def revoke(refresh_token: str) -> None:
     """No-op: OpenAI's ChatGPT OAuth client exposes no token-revocation endpoint.
 
-    Disconnect deletes the DOH-side row, which is the load-bearing step; there
+    Disconnect deletes the HUMR-side row, which is the load-bearing step; there
     is no upstream revoke to call for this public client. Kept for the OAuth
     provider interface (the unified disconnect handler calls `revoke` for every
     OAuth provider).

@@ -19,7 +19,7 @@ class ImageSource(StrEnum):
     the codebase dispatches on these members.
     """
 
-    # DOH builds the image from source during the deploy. The source tree lives
+    # HUMR builds the image from source during the deploy. The source tree lives
     # under template_repos/ (or the customer's cloned repo) and is pushed to
     # the per-app ECR repo `{c.ecr_repo_name}:{image_tag}`. Fields consumed:
     # source_repo_path, dockerfile_path, ecr_repo_name.
@@ -209,7 +209,7 @@ class ContainerConfig:
     user: str | None = None
 
     # Optional override for the container's CMD (the image's ENTRYPOINT is preserved).
-    # Useful for prebuilt images whose default CMD doesn't match how DOH wants to
+    # Useful for prebuilt images whose default CMD doesn't match how HUMR wants to
     # run them — e.g. learneo-mcp defaults to stdio but the sidecar integration
     # needs ["--http", "--port", "7777", "--host", "127.0.0.1"].
     command: list[str] | None = None
@@ -245,10 +245,10 @@ class ContainerConfig:
     # burst to the full node when neighbors are idle.
     cpu_reservation: int | None = None
 
-    # Opt this container in to the DOH control-plane bearer overlay:
+    # Opt this container in to the HUMR control-plane bearer overlay:
     # HUMR_ENV_BEARER (from shared-secrets), HUMR_ENV_SLUG, HUMR_APP_SLUG, and
     # HUMR_OWNER_USERNAME (if the owning App has an owner tag). Any env-resident
-    # component that calls the DOH control plane sets this — Hermes integrations
+    # component that calls the HUMR control plane sets this — Hermes integrations
     # today; future env-resident services later. Policy-proxy containers receive
     # the overlay implicitly from image_source=policy_proxy, so templates do not
     # need to set this knob for them. The IAM grant to read shared-secrets is
@@ -316,7 +316,7 @@ class AppConfig:
 
     # Owner's username (from the App's `owner` ResourceTag) when the app has
     # one, else None. Injected into env-bearer containers as HUMR_OWNER_USERNAME so
-    # they can identify themselves to DOH's control plane on behalf of this
+    # they can identify themselves to HUMR's control plane on behalf of this
     # user. None for apps without an owner tag (typical multi-user apps).
     owner_username: str | None = None
 
@@ -329,11 +329,11 @@ class AppConfig:
     enable_subhosting: bool = False
 
     def container_needs_env_bearer(self, container: ContainerConfig) -> bool:
-        """True if this container should receive the DOH control-plane bearer overlay."""
+        """True if this container should receive the HUMR control-plane bearer overlay."""
         return container.requires_env_bearer or container.image_source == ImageSource.POLICY_PROXY
 
     def needs_env_bearer(self) -> bool:
-        """True if any container in the task needs the DOH control-plane bearer overlay."""
+        """True if any container in the task needs the HUMR control-plane bearer overlay."""
         return any(self.container_needs_env_bearer(container=c) for c in self.containers)
 
     def alb_target(self) -> ContainerConfig | None:

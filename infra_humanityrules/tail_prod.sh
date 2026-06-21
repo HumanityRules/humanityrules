@@ -1,6 +1,6 @@
 #!/bin/bash
 #
-# Tail the DOH prod ECS log group (/humr/prod/ecs).
+# Tail the HUMR prod ECS log group (/humr/prod/ecs).
 #
 # Usage:
 #   ./tail_prod.sh [aws-logs-tail-flags...]

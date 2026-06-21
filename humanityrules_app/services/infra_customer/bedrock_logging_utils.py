@@ -3,7 +3,7 @@
 Model invocation logging is an account + Region-level singleton configured through the Bedrock
 control-plane API — there is no native CloudFormation resource for it. Because the configuration
 is account/Region-scoped rather than per-environment, the CloudWatch log group and the IAM role
-Bedrock assumes are shared across every DevOpsHero environment in the account: they use fixed,
+Bedrock assumes are shared across every HumanityRules environment in the account: they use fixed,
 env-agnostic names and are created idempotently on each environment deploy. Resources are left in
 place on environment teardown (there is no account-offboarding hook to remove them, and sibling
 environments may still rely on them).

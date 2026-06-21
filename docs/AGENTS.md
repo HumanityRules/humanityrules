@@ -10,13 +10,13 @@ The main developer documentation lives in the docs/ subdirectory. **When creatin
 
 - **`docs/integrations/AGENTS.md`** — Index for Hermes agent third-party integrations (OAuth broker, MCP, Merge, Slack, Telegram, device-flow providers). Open when working on the integrations sub-system.
 
-- **`docs/permissions_broker_design.md`** — How the IAM task-role permissions editor moves from the DOH UI into the Hermes WebUI as a self-referential editor (this deployment requests permissions for its own task role), the `/permissions/*` JSON contract over the renamed `humr_broker`, and the phase split (phase 1 = editor pane only; phase 2 = agent tools + skill + sidebar/chat layout). Open when working on the Hermes permissions editor, the broker rename, or the permissions API.
+- **`docs/permissions_broker_design.md`** — How the IAM task-role permissions editor moves from the HUMR UI into the Hermes WebUI as a self-referential editor (this deployment requests permissions for its own task role), the `/permissions/*` JSON contract over the renamed `humr_broker`, and the phase split (phase 1 = editor pane only; phase 2 = agent tools + skill + sidebar/chat layout). Open when working on the Hermes permissions editor, the broker rename, or the permissions API.
 
 - **`docs/domain_model.md`** — Core domain concepts and entity relationships. Defines Workspace, App, Environment, Datastore, Deployment, etc entities with their attributes and how they relate. Read this when implementing features that touch the domain model or when clarifying entity boundaries.
 
 - **`docs/okta_oidc_setup.md`** — Step-by-step guide for onboarding customers who use Okta for SSO (OIDC login instead of WorkOS). Open when setting up a new Okta/OIDC customer org or debugging OIDC login/redirect/issuer issues.
 
-- **`docs/policy_proxy_design.md`** — Runtime design for the policy proxy that enforces SSO + ABAC in front of deployed apps. Covers the per-env auth Lambda (Okta OAuth, JWT minting, JWKS), the policy-proxy container (JWT verification, per-request PDP calls with caching), the DOH PDP endpoint contract, and the Personal Assistant specifics (owner tag, global self-referential policy). Open when working on the policy proxy, the auth Lambda, or the PDP endpoint.
+- **`docs/policy_proxy_design.md`** — Runtime design for the policy proxy that enforces SSO + ABAC in front of deployed apps. Covers the per-env auth Lambda (Okta OAuth, JWT minting, JWKS), the policy-proxy container (JWT verification, per-request PDP calls with caching), the HUMR PDP endpoint contract, and the Personal Assistant specifics (owner tag, global self-referential policy). Open when working on the policy proxy, the auth Lambda, or the PDP endpoint.
 
 - **`docs/ui_live_update_contract.md`** — The current live-update contract for HTMX polling, chat-scoped SSE invalidation, and widget fragment refresh patterns. Open when adding or changing live-refresh behavior.
 

@@ -1,5 +1,5 @@
 #!/opt/hermes/webui/venv/bin/python3
-"""DOH webapps CLI: register, manage, and route user-built web apps.
+"""HUMR webapps CLI: register, manage, and route user-built web apps.
 
 Source of truth:
 /workspace/.config/process-compose/webapps/process-compose.yaml. Caddy routes

@@ -30,10 +30,10 @@ the change requires it.
 ```
 HERMES_DEBUG=1                                    ← user/onboarding lines preserved
 
-# === DOH-MANAGED-INTEGRATIONS BEGIN ===
+# === HUMR-MANAGED-INTEGRATIONS BEGIN ===
 TELEGRAM_BOT_TOKEN=000000:HUMR_PLACEHOLDER
 TELEGRAM_ALLOWED_USERS=1,2,3
-# === DOH-MANAGED-INTEGRATIONS END ===
+# === HUMR-MANAGED-INTEGRATIONS END ===
 ```
 
 The broker rewrites only the lines between sentinels; everything outside
@@ -97,7 +97,7 @@ it; the gateway either picks up the platform binding or boots without it.
 
 ### Process supervision: split system and webapps projects
 
-DOH-supervised processes inside nono are split across two
+HUMR-supervised processes inside nono are split across two
 process-compose daemons:
 
 1. `127.0.0.1:9956` reads
@@ -114,7 +114,7 @@ webapps YAML.
 Naming:
 
 - `__<slug>` — platform-internal webapps (today: `__admin`).
-- `system.<slug>` — DOH-managed system processes (today:
+- `system.<slug>` — HUMR-managed system processes (today:
   `system.gateway`).
 - Everything else — user webapps.
 
@@ -138,7 +138,7 @@ seeing.
 supervisor (root, outside nono):
   start aws_signer
   start integrations_broker
-    ├─ broker fetches DOH state for all providers
+    ├─ broker fetches HUMR state for all providers
     ├─ broker writes ${HERMES_HOME}/.env managed block
     └─ broker opens control port  ← supervisor's wait_for_port unblocks
   launch nono → webui.sh

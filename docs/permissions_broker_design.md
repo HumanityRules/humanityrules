@@ -1,8 +1,8 @@
 # Permissions Editor in Hermes — Design
 
-How the IAM task-role permissions editor moves from the DOH web UI into the Hermes
+How the IAM task-role permissions editor moves from the HUMR web UI into the Hermes
 WebUI, so a Hermes agent deployment can request AWS permissions **for its own task
-role** without any DOH credential entering the sandbox.
+role** without any HUMR credential entering the sandbox.
 
 ## Scope
 
@@ -12,9 +12,9 @@ role** without any DOH credential entering the sandbox.
   bearer). There is exactly one `AppPermissionRequest` of interest.
 - **Full breadth.** All curated services plus the full IAM service catalog, the
   five access levels (`Read`, `Write`, `List`, `Tagging`, `Permissions
-  management`), and per-service resource pickers — the same breadth as the DOH
+  management`), and per-service resource pickers — the same breadth as the HUMR
   editor.
-- **The DOH editor stays.** `humanityrules_app/views/security_permissions_editor.py`
+- **The HUMR editor stays.** `humanityrules_app/views/security_permissions_editor.py`
   remains the operator tool for editing *any* app's permissions. This is a new,
   narrower surface, not a migration. Both UIs sit on the same service layer
   (`humanityrules_app/services/permissions.py`) and models (`AppPermissions`,
@@ -30,7 +30,7 @@ the *first hop*:
 
 ```
 PANEL (browser)  ──/__humr_broker/permissions/*──► Caddy ─┐
-                                                          ├─► control_api (127.0.0.1:9951) ──► DOH /api/permissions/*
+                                                          ├─► control_api (127.0.0.1:9951) ──► HUMR /api/permissions/*
 AGENT (sandbox)  ──127.0.0.1:9951/permissions/*──────────┘                                    (phase 2)
 ```
 
@@ -49,7 +49,7 @@ AGENT (sandbox)  ──127.0.0.1:9951/permissions/*─────────�
 - **control_api stays pure transport.** Its handlers parse and forward; they hold
   no per-request secret and make no authorization decision. The broker's
   `DohClient` attaches the env bearer on the outbound call.
-- **DOH is the brain.** It validates the env bearer, derives `(app, environment)`
+- **HUMR is the brain.** It validates the env bearer, derives `(app, environment)`
   from the deployment's identity, scopes everything to the org, and enforces the
   ABAC `environment:approve` check on Apply. Neither the browser nor the agent
   ever holds the bearer.
@@ -57,26 +57,26 @@ AGENT (sandbox)  ──127.0.0.1:9951/permissions/*─────────�
 ## The rename: `integrations_broker` → `humr_broker`
 
 The env-resident broker is no longer integrations-only — it now also fronts the
-permissions API, and more DOH APIs later. The runtime component
+permissions API, and more HUMR APIs later. The runtime component
 (`humr_runtime/integrations/integrations_broker.py` and the integrations-centric
 naming around `control_api.py`) is renamed to `humr_broker` to reflect that it is
-the single env→DOH relay, not an integrations-specific one. The URL prefix is
+the single env→HUMR relay, not an integrations-specific one. The URL prefix is
 already `/__humr_broker/*`, so this is a code-naming alignment, not a routing
 change.
 
 ## JSON contract — `/permissions/*`
 
 One logical surface; the panel calls it under `/__humr_broker/permissions`, the
-agent (phase 2) under `127.0.0.1:9951/permissions`, both relayed to DOH
+agent (phase 2) under `127.0.0.1:9951/permissions`, both relayed to HUMR
 `/api/permissions/*`. The target `(app, environment)` is **never** a parameter —
-DOH resolves it from the deployment identity.
+HUMR resolves it from the deployment identity.
 
 ### Object shapes
 
 A **statement** (from `permissions_service.py`). `sid` is a stable per-statement id;
 a service may appear in more than one statement, each holding a distinct
 access-level/resource scope (e.g. `List` on `*` and `Read` on specific tables). `sid`
-is internal to DOH and is stripped before the policy reaches AWS:
+is internal to HUMR and is stripped before the policy reaches AWS:
 
 ```json
 { "sid": "<hex id>", "service": "<service>", "effect": "Allow",
@@ -112,7 +112,7 @@ so the list may contain repeated `service` values distinguished by `sid`):
 
 2. **Mutate a statement** — `POST /permissions/draft/<request_id>/statement`
    Action-based, verbatim from `security_permissions_editor_update_statement`.
-   DOH's per-service resource handling (e.g. composing a resource ARN from a base
+   HUMR's per-service resource handling (e.g. composing a resource ARN from a base
    ARN plus a path/prefix) is preserved server-side:
 
    ```json
@@ -134,7 +134,7 @@ so the list may contain repeated `service` values distinguished by `sid`):
    `{ "service_groups": [...], "has_changes": false }`.
 
 5. **Apply** — `POST /permissions/draft/<request_id>/apply`
-   ABAC `environment:approve` enforced on DOH →
+   ABAC `environment:approve` enforced on HUMR →
    `{ "status": "approved_pending_apply", "request_id": "..." }`.
    Apply is async (job worker → `applying` → `applied`/`failed`).
 
@@ -188,19 +188,19 @@ extension-owned container IDs, additive, reversible.
 
 ## What lives where
 
-- **DOH** — new `/api/permissions/*` endpoints (bearer-auth, JSON), reusing
+- **HUMR** — new `/api/permissions/*` endpoints (bearer-auth, JSON), reusing
   `services/permissions.py` and the existing models. The session-auth Django HTML
-  editor is untouched. DOH owns auth, target resolution, ABAC, and the async
+  editor is untouched. HUMR owns auth, target resolution, ABAC, and the async
   Apply job (`permissions_apply_executor`).
 - **Broker (`humr_broker`)** — new `/permissions/*` routes on control_api, pure
-  transport, relaying to DOH with the env bearer via `DohClient`.
+  transport, relaying to HUMR with the env bearer via `DohClient`.
 - **WebUI extension** — `doh-permissions.js/.css`, the client-rendered editor.
 
 ## Phasing
 
 **Phase 1 (this doc's primary scope):**
 1. Rename `integrations_broker` → `humr_broker`.
-2. DOH `/api/permissions/*` endpoints (JSON, bearer-auth), reusing the service layer.
+2. HUMR `/api/permissions/*` endpoints (JSON, bearer-auth), reusing the service layer.
 3. `humr_broker` control_api `/permissions/*` routes (pure transport).
 4. `doh-permissions.js/.css` extension, full-width destination, container-agnostic.
 
@@ -210,7 +210,7 @@ extension-owned container IDs, additive, reversible.
   FK binding is gone) as native Hermes plugin tools that call the broker; a skill
   carries the least-privilege reasoning/workflow the old PERMISSIONS-mode system
   prompt held. Apply/cancel stay human-only. All tools route agent → broker →
-  DOH; the sandbox never holds the bearer or AWS creds.
+  HUMR; the sandbox never holds the bearer or AWS creds.
 - **Layout move.** Editor → `#panelPermissions` sidebar, the dedicated permissions
   conversation → main view. Because a panel named `permissions` is not in
   upstream's main-view-panel set, `switchPanel` keeps `#mainChat` in the main view

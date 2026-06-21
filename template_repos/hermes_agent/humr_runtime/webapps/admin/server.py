@@ -1,4 +1,4 @@
-"""DOH `__admin` webapp: read-only JSON API for the WebUI sidebar.
+"""HUMR `__admin` webapp: read-only JSON API for the WebUI sidebar.
 
 Served at /webapps/__admin/ via the same Caddy → process-compose path as user
 webapps. v1 surface is webapps list/detail/logs; the slug name (no "webapps")
@@ -25,7 +25,7 @@ from webapps_lib import (
     process_compose_state_for,
 )
 
-app = FastAPI(title="DOH Admin API")
+app = FastAPI(title="HUMR Admin API")
 
 
 @app.get("/api/webapps")

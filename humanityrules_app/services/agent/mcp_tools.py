@@ -794,11 +794,11 @@ def create_humanityrules_mcp_server(conversation: Conversation):
     @tool(
         "git_ops",
         (
-            "Run git operations in the conversation sandbox using DOH-managed repository credentials. "
+            "Run git operations in the conversation sandbox using HUMR-managed repository credentials. "
             "Supports: status, diff, log, create_branch, stage_files, commit, push_branch, "
             "create_pull_request, update_pull_request, get_pull_request, and get_remote_info. "
             "For GitHub push and PR actions, authentication uses the repository's GitHub App "
-            "installation token from DOH data, not local machine credentials."
+            "installation token from HUMR data, not local machine credentials."
         ),
         {
             "type": "object",

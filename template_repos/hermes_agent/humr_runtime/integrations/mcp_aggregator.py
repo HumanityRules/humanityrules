@@ -154,12 +154,12 @@ class MCPAggregator:
         self._catalog_store = mcp_top_level_tools.CatalogStore()
         self._refresh_lock = asyncio.Lock()
 
-        # Merge (relayed via DOH, not DCR) first when enabled, then one Backend per connector spec.
+        # Merge (relayed via HUMR, not DCR) first when enabled, then one Backend per connector spec.
         # Each spec.make_backend gets its own subdir under persistent_dir for any
         # extra state the connector wants to keep (e.g. PostHog's session config).
         # Native connectors win over same-slug Merge connectors in the catalog
         # and browser integrations list. TLS-intercept providers (github, slack,
-        # x) are also "native" in this sense — DOH manages their auth directly,
+        # x) are also "native" in this sense — HUMR manages their auth directly,
         # so the equivalent Merge connector would just duplicate the surface and
         # confuse the agent.
         self._merge_backend: MergeBackend | None = None
@@ -439,7 +439,7 @@ class MCPAggregator:
 
     async def _register_client(self, registration_endpoint: str, redirect_uri: str, provider_label: str, scope: str | None = None) -> dict | None:
         body: dict = {
-            "client_name": f"DOH Hermes - {provider_label}",
+            "client_name": f"HUMR Hermes - {provider_label}",
             "redirect_uris": [redirect_uri],
             "grant_types": ["authorization_code", "refresh_token"],
             "response_types": ["code"],

@@ -98,7 +98,7 @@ wait_for_port() {
 }
 
 start_aws_signer() {
-    # DOH-owned streaming SigV4 proxy
+    # HUMR-owned streaming SigV4 proxy
     "$HERMES_WEBUI_PYTHON" "${HUMR_RUNTIME_DIR}/aws_signer.py" --region "$AWS_DEFAULT_REGION" &
     AWS_SIGNER_PID=$!
     wait_for_port "$AWS_STS_PORT"             "$AWS_SIGNER_PID" "aws-signer"

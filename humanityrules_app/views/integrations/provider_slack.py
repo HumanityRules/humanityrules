@@ -37,7 +37,7 @@ APP_TOKEN_RE = re.compile(r"^xapp-[A-Za-z0-9-]+$")
 # display_information.name is <=35 chars (any character); bot_user.display_name
 # is <=80 chars restricted to [a-z0-9._-]. The operator's single "App name"
 # entry feeds both, sanitized per field. The default is the deploying app's
-# template name (App.source_template.name), set in the DOH control plane.
+# template name (App.source_template.name), set in the HUMR control plane.
 SLACK_APP_NAME_MAX_LEN = 35
 SLACK_BOT_NAME_MAX_LEN = 80
 SLACK_DEFAULT_APP_NAME = "Slackbot"
@@ -142,7 +142,7 @@ def schema(existing: IntegrationUserCredential | None, app: App | None, owner_us
     mode = MODE_COMPANY_WIDE
     metadata = {}
     app_name = _default_app_name(app)
-    # Prefill the owner-email field with the deploying user's DOH email so the
+    # Prefill the owner-email field with the deploying user's HUMR email so the
     # common case (the owner connecting their own DMs) is one keystroke. Personal
     # mode resolves it to a Slack user_id at save (see save_credentials).
     owner_email = owner_user.email if owner_user is not None else ""
@@ -162,7 +162,7 @@ def schema(existing: IntegrationUserCredential | None, app: App | None, owner_us
         owner_name = metadata.get("owner_name", "")
         # An owner is already bound: blank the email field so a name-only
         # reconfigure keeps that owner rather than silently rebinding to the
-        # DOH email (which may differ from the bound Slack account).
+        # HUMR email (which may differ from the bound Slack account).
         if metadata.get("owner_user_id"):
             owner_email = ""
     return {
@@ -170,7 +170,7 @@ def schema(existing: IntegrationUserCredential | None, app: App | None, owner_us
         "label": "Slack",
         "status": "connected" if existing is not None else "not_connected",
         "metadata": metadata,
-        "message": "Tokens are sent directly to the DevOps Hero vault. Your Hermes agent never receives or stores them.",
+        "message": "Tokens are sent directly to the Humanity Rules vault. Your Hermes agent never receives or stores them.",
         "restart_required_after_save": True,
         "selected_mode": mode,
         "app_name": app_name,

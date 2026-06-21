@@ -1,11 +1,11 @@
-// DOH WebUI extension. Loaded per Hermes' docs/EXTENSIONS.md via the
+// HUMR WebUI extension. Loaded per Hermes' docs/EXTENSIONS.md via the
 // HERMES_WEBUI_EXTENSION_* env vars exported in webui.sh.
 //
 // Adds an "Integrations" tab to the WebUI's main left sidebar nav, rendering
 // per-provider cards from the integrations broker's unified control API. The
 // broker is reached same-origin via the Caddy /__humr_broker/* route.
 // Connect / Disconnect for TLS-
-// intercept providers (Google, GitHub) are top-level navigations to DOH's control
+// intercept providers (Google, GitHub) are top-level navigations to HUMR's control
 // plane for Connect; Disconnect goes through the broker so the Integrations pane
 // stays open. MCP-aggregator providers (Notion) flow entirely through the broker.
 (() => {
@@ -13,7 +13,7 @@
 
   const INTEGRATIONS_URL = '/__humr_broker/integrations';
   const VAULT_NETWORK_ERROR = (
-    'Could not reach the DevOps Hero vault. Try again. ' +
+    'Could not reach the Humanity Rules vault. Try again. ' +
     'If this keeps happening, ask an admin to check this Hermes deployment.'
   );
   let _current = null;
@@ -68,7 +68,7 @@
     }
     try {
       // One round-trip: the broker reloads the MCP catalog AND invalidates the
-      // all-providers TLS cache (which refetches from DOH and, for vault
+      // all-providers TLS cache (which refetches from HUMR and, for vault
       // providers, restarts the gateway). Cooldown 429 short-circuits before
       // the TLS side runs, so repeated clicks while the cooldown is active
       // can't keep kicking the gateway.
@@ -110,7 +110,7 @@
   }
 
   // TLS-intercept providers expose /integrations/user/<slug>/start/ for Connect
-  // (top-level navigation to DOH). Disconnect goes through the broker.
+  // (top-level navigation to HUMR). Disconnect goes through the broker.
   function buildTlsConnectUrl(payload, slug, returnTo) {
     const rd = encodeURIComponent(returnTo);
     return payload.humr_control_plane_url.replace(/\/$/, '') + '/integrations/user/' + slug + '/start/?rd=' + rd + '&app_slug=' + encodeURIComponent(payload.app_slug || '');
@@ -395,7 +395,7 @@
     const modal = elem('div', { class: 'doh-modal doh-transition-modal' }, [
       elem('div', { class: 'doh-transition-spinner' }),
       elem('div', { class: 'doh-modal-title' }, [title]),
-      elem('div', { class: 'doh-modal-body' }, ['Syncing status with DevOps Hero. This will only take a moment.']),
+      elem('div', { class: 'doh-modal-body' }, ['Syncing status with Humanity Rules. This will only take a moment.']),
     ]);
     backdrop.appendChild(modal);
     document.body.appendChild(backdrop);
@@ -699,7 +699,7 @@
   }
 
   // Post-save/connect sequence shared by the vault form modals and the
-  // link+poll modal: the credential is already stored on DOH, so invalidate
+  // link+poll modal: the credential is already stored on HUMR, so invalidate
   // the broker cache (which rewrites the gateway env and restarts the
   // gateway), swap the action row to a Close button, and refresh the cards.
   // `verb` is 'Saved' or 'Connected' depending on how the credential landed.
@@ -732,7 +732,7 @@
     }
   }
 
-  // Wire a vault form's submit: POST to DOH, then run the shared apply
+  // Wire a vault form's submit: POST to HUMR, then run the shared apply
   // sequence. Shared by the generic and Slack renderers so the
   // save/restart/refresh flow is single-sourced.
   function wireVaultSubmit(opts) {
@@ -790,7 +790,7 @@
     wireVaultSubmit({ form, session, item, saveBtn, actions, errorBox, successBox, close });
     const modal = elem('div', { class: 'doh-modal doh-vault-modal' }, [
       elem('div', { class: 'doh-modal-title' }, [(schema.status === 'connected' ? 'Configure ' : 'Connect ') + (schema.label || item.label)]),
-      elem('div', { class: 'doh-modal-body' }, [schema.message || 'Credentials are sent directly to the DevOps Hero vault.']),
+      elem('div', { class: 'doh-modal-body' }, [schema.message || 'Credentials are sent directly to the Humanity Rules vault.']),
       errorBox,
       successBox,
       form,
@@ -803,13 +803,13 @@
   // ── Link+poll vault flow ──────────────────────────────────────────
   // Vault providers whose credential is created in an external app (e.g.
   // Telegram managed bots) return `schema.mode === 'link_poll'`: the modal
-  // shows a QR code the user scans with their phone, and we poll DOH's
+  // shows a QR code the user scans with their phone, and we poll HUMR's
   // setup-poll endpoint with the session token until the provider reports
-  // the credential as connected. The DOH side then already holds the
+  // the credential as connected. The HUMR side then already holds the
   // secret — nothing is typed or pasted here, and no desktop app is needed.
 
   // 1s keeps detection feeling instant after the user confirms in Telegram;
-  // each poll is one getUpdates on the DOH side, and sessions cap at 30 min.
+  // each poll is one getUpdates on the HUMR side, and sessions cap at 30 min.
   const LINK_POLL_MS = 1000;
 
   function showLinkPollConnectModal(item, session, onClose) {
@@ -1046,7 +1046,7 @@
 
     // Owner email (personal mode only). Named so submitVaultForm routes it into
     // `config`; the backend resolves it to a Slack user_id at save and never
-    // persists the address. Prefilled with the deploying user's DOH email.
+    // persists the address. Prefilled with the deploying user's HUMR email.
     const ownerEmailInput = elem('input', {
       class: 'doh-vault-input',
       name: 'owner_email',
@@ -1168,7 +1168,7 @@
 
     const modal = elem('div', { class: 'doh-modal doh-vault-modal' }, [
       elem('div', { class: 'doh-modal-title' }, [(schema.status === 'connected' ? 'Configure ' : 'Connect ') + (schema.label || item.label)]),
-      elem('div', { class: 'doh-modal-body' }, [schema.message || 'Tokens are sent directly to the DevOps Hero vault.']),
+      elem('div', { class: 'doh-modal-body' }, [schema.message || 'Tokens are sent directly to the Humanity Rules vault.']),
       errorBox,
       successBox,
       form,
@@ -1565,7 +1565,7 @@
 
     const sentinel = consumeReturnSentinel();
     if (sentinel) {
-      // User just came back from DOH's start/disconnect via a full page load.
+      // User just came back from HUMR's start/disconnect via a full page load.
       // Show the dialog first thing so it covers everything (incl. the panel-
       // switch animation), then do all the work behind it:
       //   1. switch to our panel + render (WebUI is up, so logos load) and WAIT

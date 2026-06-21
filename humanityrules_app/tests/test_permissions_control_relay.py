@@ -2,7 +2,7 @@
 
 The relay runs inside the customer-env Hermes container (not Django). It is pure
 transport: it folds the browser path-param/query into a JSON payload and forwards
-to DOH via DohClient.post_json, attaching no bearer and making no decision. We
+to HUMR via DohClient.post_json, attaching no bearer and making no decision. We
 load the module directly and drive its routes with a stub DohClient + Starlette
 TestClient, without standing up the broker's asyncio servers.
 """

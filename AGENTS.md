@@ -6,13 +6,11 @@
 - **The Solution:** Deploy each employee’s assistant into the company’s VPC with governance built in from the start: curated, security-audited skills; model-provider control (e.g., Bedrock, so nothing leaves the VPC); sandboxed execution; tight ABAC permissions; Okta/SSO auth; approval workflows; and full audit trails.
 - **The moat:** Not the model, not the harness — the enterprise delivery platform. We sell trust: a curated, centrally controlled, audited ecosystem of agentic tools with sensible security defaults that are easy to configure.
 - **Cloud:** AWS-first (ECS/Fargate, CloudFormation/CDK). Additional cloud providers will follow.
-- **Stage:** Pre-beta. Repositioning from the earlier "DevOps Hero" internal-app-deployment framing; the same platform architecture (ABAC, approval workflows, Fargate deployment, secrets management) maps directly onto governed AI assistants.
+- **Stage:** Pre-beta. The platform architecture (ABAC, approval workflows, Fargate deployment, secrets management) maps directly onto governed AI assistants.
 
-**Internal codename: DOH / DevOps Hero.** The code, infrastructure, and environment variables still use the `devopshero` and `HUMR_` identifiers throughout — treat these as the internal name. 
+**"Humanity Rules" (abbreviated "HUMR") is the product identity, used everywhere.** The code, infrastructure, and environment variables use the `humanityrules` / `humr` / `HUMR_` identifiers throughout (AWS resource names use the short `humr`; Python packages use the full `humanityrules`).
 
-**"Humanity Rules" (abbreviated "HUMR") is the public/product identity; never expose "DevOps Hero" or "DOH" to end users.**
-
-HUMR uses the open-source Hermes agent as the agentic harness, and the Hermes WebUI as the UI for users. The Hermes agent that HUMR deploys is located at template_repos/hermes_agent/. HUMR deploys using DOH's templates deploy mechanism.
+HUMR uses the open-source Hermes agent as the agentic harness, and the Hermes WebUI as the UI for users. The Hermes agent that HUMR deploys is located at template_repos/hermes_agent/. HUMR deploys using its own templates deploy mechanism.
 
 
 # Running Python Commands

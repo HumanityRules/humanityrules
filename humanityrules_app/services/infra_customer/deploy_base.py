@@ -1,5 +1,5 @@
 """
-Deploy shared DevOpsHero infrastructure (VPC, ECS cluster, shared ALB, EFS) using AWS CDK.
+Deploy shared HumanityRules infrastructure (VPC, ECS cluster, shared ALB, EFS) using AWS CDK.
 """
 
 from dataclasses import dataclass
@@ -165,7 +165,7 @@ def import_environment_infrastructure(scope: Construct, env_slug: str, shared_al
 
 class VpcStack(Stack):
     """
-    DevOpsHero VPC Stack - Public subnets for NAT Gateway, private subnets for Fargate tasks.
+    HumanityRules VPC Stack - Public subnets for NAT Gateway, private subnets for Fargate tasks.
     """
 
     def __init__(
@@ -223,7 +223,7 @@ class VpcStack(Stack):
 
 class EcsClusterStack(Stack):
     """
-    DevOpsHero ECS Cluster Stack - Fargate cluster, IAM roles, and shared ALB for app deployments.
+    HumanityRules ECS Cluster Stack - Fargate cluster, IAM roles, and shared ALB for app deployments.
     """
 
     def __init__(
@@ -456,7 +456,7 @@ class EcsClusterStack(Stack):
 
 class BuilderStack(Stack):
     """
-    DevOpsHero Builder Stack - EC2 instance for Docker builds with auto-stop watchdog.
+    HumanityRules Builder Stack - EC2 instance for Docker builds with auto-stop watchdog.
 
     The instance is placed in a private subnet (uses NAT for outbound) with no inbound rules.
     SSM is used for remote access (no SSH keys needed). Docker cache persists on the root EBS

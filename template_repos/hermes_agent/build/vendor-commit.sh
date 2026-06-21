@@ -1,5 +1,5 @@
 #!/bin/bash
-# Record a DOH change to a vendored Hermes fork as one atomic, correct unit.
+# Record a HUMR change to a vendored Hermes fork as one atomic, correct unit.
 #
 # Editing files under vendor/hermes-agent or vendor/hermes-webui is how we change
 # Hermes. Committing that edit correctly spans TWO repos, with three easy ways to

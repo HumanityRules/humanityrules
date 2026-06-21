@@ -1,13 +1,13 @@
 # Authorization Design: ABAC
 
-This document describes the ABAC (Attribute-Based Access Control) authorization system for DevOps Hero.
+This document describes the ABAC (Attribute-Based Access Control) authorization system for Humanity Rules.
 
 All concepts in this document — policies, identity attributes, resource tags, groups, and grants — are organization-scoped. A policy in one organization never affects resources or identities in another.
 
 The same two authorization domains apply:
 
-- **Platform access** — who can manage workspaces, deploy apps, administer infrastructure on the DOH platform
-- **App access** — who can use the deployed internal tools (the apps DOH deploys into customer VPCs)
+- **Platform access** — who can manage workspaces, deploy apps, administer infrastructure on the HUMR platform
+- **App access** — who can use the deployed internal tools (the apps HUMR deploys into customer VPCs)
 
 
 ## Why ABAC
@@ -21,10 +21,10 @@ We believe we can build a UI that makes ABAC as approachable as explicit binding
 
 ## Three Layers
 
-ABAC in DOH is built from three layers:
+ABAC in HUMR is built from three layers:
 
-- **Identity attributes** — Key-value pairs on people. Describe who they are: department, job function, custom labels. Managed within DOH.
-- **Resource tags** — Key-value pairs on resources. Describe what the resource is: `sensitivity:high`, `domain:finance`, `tier:production`. Applied by resource owners through the DOH UI.
+- **Identity attributes** — Key-value pairs on people. Describe who they are: department, job function, custom labels. Managed within HUMR.
+- **Resource tags** — Key-value pairs on resources. Describe what the resource is: `sensitivity:high`, `domain:finance`, `tier:production`. Applied by resource owners through the HUMR UI.
 - **Policies** — Rules that map (identity attributes + resource tags) to allowed actions. The single place where access decisions live.
 
 Access is never granted directly to a person on a resource. Access is always derived: if your attributes match a policy, and the resource's tags match the same policy, you get the actions that policy allows.
@@ -45,13 +45,13 @@ A single person might carry all four of these simultaneously. All of their attri
 
 An identity's effective attributes are the union of:
 
-- **System attributes** — Automatically applied by DOH based on the identity's state (see below).
+- **System attributes** — Automatically applied by HUMR based on the identity's state (see below).
 - **Direct attributes** — Assigned to the person explicitly by an org admin.
 - **Group-inherited attributes** — Coming from groups the person belongs to (see Groups below).
 
 ### System Attributes
 
-Some attributes are applied automatically by DOH and cannot be manually assigned or removed. These allow policies to reference fundamental identity properties:
+Some attributes are applied automatically by HUMR and cannot be manually assigned or removed. These allow policies to reference fundamental identity properties:
 
 - `authenticated:true` — Applied to any identity that has completed SSO authentication. This is the primary way to write policies that apply to "any logged-in user."
 
@@ -61,7 +61,7 @@ All attribute sources are equal for policy evaluation. The UI must distinguish b
 
 ### Bootstrapping
 
-When a new organization is created, DOH bootstraps the ABAC system:
+When a new organization is created, HUMR bootstraps the ABAC system:
 
 1. Assigns `org-role = admin` as a direct attribute to the organization creator.
 2. Creates seed policies that grant all platform actions to identities with `org-role = admin` on resource condition `*` (all resources). These are normal policies — the org admin can edit or delete them (at their own risk).
@@ -92,7 +92,7 @@ Example:
 
 ### Attribute Management
 
-Attributes (both on identities and on groups) are managed manually within DOH by org admins. There is no attribute taxonomy enforced by the system — admins create whatever keys and values make sense for their organization.
+Attributes (both on identities and on groups) are managed manually within HUMR by org admins. There is no attribute taxonomy enforced by the system — admins create whatever keys and values make sense for their organization.
 
 ### App-Only Identities
 
@@ -156,7 +156,7 @@ Some actions are supersets of others (as noted above). When a policy grants `wor
 
 ### Platform Visibility vs. App Access
 
-`app:use` is exclusively a runtime action evaluated by the policy proxy. It controls who can open and use the deployed application, not who can see the app listed in the DOH platform.
+`app:use` is exclusively a runtime action evaluated by the policy proxy. It controls who can open and use the deployed application, not who can see the app listed in the HUMR platform.
 
 Currently, platform visibility of apps and datastores is derived from `workspace:view` on the parent workspace. If a user has `workspace:view`, they can see all apps and datastores within that workspace on the dashboard and workspace detail pages. There is no `app:view` action — visibility is all-or-nothing at the workspace level.
 
@@ -384,12 +384,12 @@ The flow remains the same:
 1. Developer creates an `AppPermissionRequest` in draft status
 2. Permissions agent provides blast radius assessment
 3. Approver reviews and approves (status becomes `approved_pending_apply`)
-4. DOH applies the IAM policy changes (status becomes `applied`)
+4. HUMR applies the IAM policy changes (status becomes `applied`)
 
 
 ## Access Explainer
 
-ABAC policies are harder to reason about than explicit bindings. To compensate, DOH provides an access explainer — a tool that answers "why does (or doesn't) this identity have access to this resource?"
+ABAC policies are harder to reason about than explicit bindings. To compensate, HUMR provides an access explainer — a tool that answers "why does (or doesn't) this identity have access to this resource?"
 
 ### Capabilities
 
@@ -549,7 +549,7 @@ Scenario — Acme hires a data team and wants to give them their own workspace:
 
 ## Deferred Features
 
-- **IdP sync** — Sync identity attributes from corporate IdPs (Okta, Azure AD, Rippling) via WorkOS directory sync (SCIM). Synced attributes would be read-only in the DOH UI. Requires a mapping configuration UI to translate provider-specific fields to DOH attribute keys.
+- **IdP sync** — Sync identity attributes from corporate IdPs (Okta, Azure AD, Rippling) via WorkOS directory sync (SCIM). Synced attributes would be read-only in the HUMR UI. Requires a mapping configuration UI to translate provider-specific fields to HUMR attribute keys.
 - **Tag key registry** — A controlled vocabulary of allowed tag keys, managed by org admins, to prevent drift and typos. Start freeform for now.
 - **Policy versioning** — Audit log of policy changes with the ability to view and restore previous versions.
 - **Bulk group membership import** — CSV import of members into groups, for organizations too large for manual member-by-member assignment before IdP sync is available.

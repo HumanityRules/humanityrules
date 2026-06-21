@@ -1,6 +1,6 @@
 ---
 name: manage-commands
-description: Understand and use available DOH's management commands, used to manage the plaform, and to troubleshoot, debug, or run tests. If you are trying to diagnose, debug, or verify your work, you probably need this skill.
+description: Understand and use available HUMR's management commands, used to manage the plaform, and to troubleshoot, debug, or run tests. If you are trying to diagnose, debug, or verify your work, you probably need this skill.
 ---
 
 # Django Management Commands
@@ -19,7 +19,7 @@ All custom commands live in `humanityrules_app/management/commands/`.
 - **humr_app_shell** — Interactive shell in a deployed customer app *container* (ECS Exec / SSM). For humans.
 - **humr_app_exec** — Non-interactive script execution in a customer app *container*. Script on stdin or `--script-file`; supports `--as USER`, `--timeout`, `--cwd`, `--set KEY=VALUE`, `--format json`. Prefer over `humr_app_shell --command` for scripted probes.
 - **humr_node_shell** — Interactive shell on the customer EC2 *host* (container instance) via SSM Session Manager. Use for host-level inspection — kernel, Docker/containerd, host bind-mount dirs (e.g. `/var/lib/humr/hermes-roots/`), disk space. Not for container internals (use `humr_app_shell`). Supports `--list` (inventory of instances + tasks), `--app <slug>` (auto-pick the instance running an app), `--instance-id <id>`.
-- **humr_hermes_migrate** — Migrate a `hermes_agent` app's persistent-root state from one DOH env to another (same- or cross-account). Five phases (`upload,stage,host-clear,finalize,verify`) with `cleanup` opt-in. See the `hermes-migrate` skill for the full workflow.
+- **humr_hermes_migrate** — Migrate a `hermes_agent` app's persistent-root state from one HUMR env to another (same- or cross-account). Five phases (`upload,stage,host-clear,finalize,verify`) with `cleanup` opt-in. See the `hermes-migrate` skill for the full workflow.
 - **humr_secrets** — Manage customer Secrets Manager secrets: list, purge, and shared environment secrets (shared-list/shared-set/shared-delete). All subcommands take --account and optional --org (name or slug).
 - **humr_reset_org_abac** — Full factory reset of ABAC Policy rows for one organization (`--org` slug or name; optional `--admin-email`). Deletes all org policies, re-runs seed bootstrap, recreates default per-app open-access policies.
 - **run_job_worker** — Background job worker for deployments and environment provisioning.

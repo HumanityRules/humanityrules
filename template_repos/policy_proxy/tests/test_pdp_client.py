@@ -1,4 +1,4 @@
-"""Tests for pdp.evaluate against a mocked DOH endpoint."""
+"""Tests for pdp.evaluate against a mocked HUMR endpoint."""
 
 import httpx
 import pytest

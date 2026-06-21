@@ -1,4 +1,4 @@
-"""CDN Stack for DevOps Hero - CloudFront and Route53."""
+"""CDN Stack for Humanity Rules - CloudFront and Route53."""
 
 from aws_cdk import CfnOutput, Duration, Stack
 from aws_cdk import aws_certificatemanager as acm
@@ -11,7 +11,7 @@ from constructs import Construct
 
 
 class CdnStack(Stack):
-    """CloudFront distribution and Route53 records for DevOps Hero."""
+    """CloudFront distribution and Route53 records for Humanity Rules."""
 
     def __init__(
         self,
@@ -159,7 +159,7 @@ function handler(event) {
             price_class=cloudfront.PriceClass.PRICE_CLASS_100,  # US, Canada, Europe only (cheapest)
             http_version=cloudfront.HttpVersion.HTTP2_AND_3,
             enable_logging=False,  # Can enable later if needed
-            comment="DevOps Hero Production CDN",
+            comment="Humanity Rules Production CDN",
         )
 
         # Route53 A record for apex domain (humanityrules.io)

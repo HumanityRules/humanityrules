@@ -22,7 +22,7 @@ Usage:
 Notes:
     - You log in as 'ssm-user'. Use `sudo` for privileged paths like
       /var/lib/humr/hermes-roots/.
-    - Permissions: the customer's DevOpsHero assumed role needs ssm:StartSession;
+    - Permissions: the customer's HumanityRules assumed role needs ssm:StartSession;
       the container instance role already attaches AmazonSSMManagedInstanceCore
       (see EcsClusterStack in deploy_base.py), so the SSM agent is present.
 

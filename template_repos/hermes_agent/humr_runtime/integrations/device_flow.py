@@ -320,7 +320,7 @@ class OAuthDeviceFlow:
             pass
 
     async def _run_poll(self, provider: DeviceProvider, session: DeviceSession) -> None:
-        """Poll for provider approval, submit tokens to DOH, and record terminal state."""
+        """Poll for provider approval, submit tokens to HUMR, and record terminal state."""
         try:
             tokens = await provider.poll_tokens(session=session)
             refresh_token = tokens.get("refresh_token", "")
@@ -344,7 +344,7 @@ class OAuthDeviceFlow:
 
 
 def build_default_device_flow(submit_tokens: Callable[[str, dict], Awaitable[bool]]) -> OAuthDeviceFlow:
-    """Build the device-flow registry for DOH-managed OAuth providers."""
+    """Build the device-flow registry for HUMR-managed OAuth providers."""
     providers: dict[str, DeviceProvider] = {
         CODEX_PROVIDER_SLUG: CodexDeviceProvider(client_id=CODEX_OAUTH_CLIENT_ID),
         NOUS_PROVIDER_SLUG: NousDeviceProvider(

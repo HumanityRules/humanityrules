@@ -5,7 +5,7 @@ Google Sheets, Google Slides, Google Tasks, gmail.
 ########################################################################################################################
 
 Merge.dev Tool Pack connectors (96 total)
-Source: GET /api/integrations/merge/connectors via DOH relay
+Source: GET /api/integrations/merge/connectors via HUMR relay
 Fetched: 2026-06-08 from hermes-agent-local (docker compose)
 Format: slug<TAB>display_name
 

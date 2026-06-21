@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Seed a `system.<name>` entry into the system process-compose YAML.
 
-System processes (e.g. `system.gateway`) are DOH-managed and live in a
+System processes (e.g. `system.gateway`) are HUMR-managed and live in a
 separate process-compose project from webapps. This keeps webapp CRUD reloads
 from touching the WebUI or gateway supervisor.
 

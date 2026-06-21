@@ -1,4 +1,4 @@
-"""Store DOH's X (Twitter) OAuth 2.0 client credentials in IntegrationConfig.
+"""Store HUMR's X (Twitter) OAuth 2.0 client credentials in IntegrationConfig.
 
 Usage:
 
@@ -15,7 +15,7 @@ and token endpoints are fixed, so we synthesize the same `config` shape
 `provider_x` reads — matching Google's stored `web` object — from these flags.
 
 The redirect URIs must byte-match the callback URLs registered in the X console;
-pass one `--redirect-uri` per host DOH is reachable at (prod + ngrok for dev).
+pass one `--redirect-uri` per host HUMR is reachable at (prod + ngrok for dev).
 
 Re-running with new values updates the row in place (rotation).
 """
@@ -33,7 +33,7 @@ X_TOKEN_URI = "https://api.x.com/2/oauth2/token"
 
 
 class Command(BaseCommand):
-    help = "Load DOH's X OAuth 2.0 client (Client ID + Secret) into IntegrationConfig."
+    help = "Load HUMR's X OAuth 2.0 client (Client ID + Secret) into IntegrationConfig."
 
     def add_arguments(self, parser) -> None:
         parser.add_argument("--client-id", required=True, help="OAuth 2.0 Client ID from the X developer console.")

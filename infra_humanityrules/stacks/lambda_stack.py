@@ -1,4 +1,4 @@
-"""Lambda Stack for DevOps Hero - Install callback Lambda."""
+"""Lambda Stack for Humanity Rules - Install callback Lambda."""
 
 import os
 from pathlib import Path
@@ -12,7 +12,7 @@ from constructs import Construct
 
 
 class LambdaStack(Stack):
-    """Install callback Lambda that notifies the DevOps Hero backend when customers deploy."""
+    """Install callback Lambda that notifies the Humanity Rules backend when customers deploy."""
 
     def __init__(self, scope: Construct, construct_id: str, private_bucket: s3.IBucket, **kwargs) -> None:
         super().__init__(scope, construct_id, **kwargs)

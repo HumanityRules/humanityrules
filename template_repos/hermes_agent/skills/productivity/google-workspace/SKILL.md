@@ -21,7 +21,7 @@ the current short-lived access token before forwarding to Google. You
 pass a placeholder; the broker replaces it.
 
 If Google isn't connected, the broker returns a 503 with a clear message:
-"google integration not connected in DOH — connect it from the Integrations
+"google integration not connected in HUMR — connect it from the Integrations
 pane." Surface that to the user verbatim.
 
 ## References
@@ -100,7 +100,7 @@ All commands return JSON. Parse with `jq` or read directly. Key fields:
 
 ## Troubleshooting
 
-- **503 "google integration not connected in DOH"** — the user hasn't connected Google yet (or disconnected it). Ask them to connect from the Integrations pane.
+- **503 "google integration not connected in HUMR"** — the user hasn't connected Google yet (or disconnected it). Ask them to connect from the Integrations pane.
 - **`HttpError 403: Insufficient Permission`** — missing API scope. User needs to reconnect with the needed scopes.
 - **`HttpError 403: Access Not Configured`** — Google API not enabled. Surface to the user; they need to get it enabled.
 - **`invalid_grant`** — refresh token revoked at Google's end. The Integrations pane will show Google as not connected; user needs to reconnect.

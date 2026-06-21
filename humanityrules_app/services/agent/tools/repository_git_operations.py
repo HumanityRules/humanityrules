@@ -1,5 +1,5 @@
 """
-Tool for repository git operations via DOH-managed credentials.
+Tool for repository git operations via HUMR-managed credentials.
 
 This centralizes git write operations (branching, commit, push, PR creation)
 behind GitHub App installation auth instead of local machine credentials.
@@ -260,7 +260,7 @@ def _execute_action(repo_path: Path, repository: Repository, action: str, parame
         normalized_commit_message = _normalize_multiline_text(text=commit_message)
         command = [
             "git",
-            "-c", "user.name=DevOps Hero",
+            "-c", "user.name=Humanity Rules",
             "-c", "user.email=bot@humanityrules.io",
             "commit", "-m", normalized_commit_message,
         ]
@@ -377,7 +377,7 @@ def _execute_action(repo_path: Path, repository: Repository, action: str, parame
 
 
 async def run_git_operation(conversation_id, repository: Repository, action: str, parameters: dict[str, Any]) -> GitOperationResult:
-    """Run one git action in the conversation sandbox using DOH-managed auth."""
+    """Run one git action in the conversation sandbox using HUMR-managed auth."""
     sandbox_paths = get_sandbox_paths(conversation_id=conversation_id)
     repo_path = sandbox_paths.src_path
 

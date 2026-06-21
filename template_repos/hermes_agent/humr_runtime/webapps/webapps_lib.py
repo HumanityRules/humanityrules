@@ -15,7 +15,7 @@ Platform-internal slugs (those starting with `__`, e.g. `__admin`) stay at
 their APIs without CORS surgery.
 
 `webapps/` holds user-facing artifacts (their projects, their logs);
-`.config/` holds DOH supervision config (the process-compose YAML, the caddy
+`.config/` holds HUMR supervision config (the process-compose YAML, the caddy
 routes). Both live under $HOME=/workspace so the sandbox owns them.
 """
 from __future__ import annotations
@@ -193,7 +193,7 @@ def validate_slug(slug: str) -> None:
     if slug.startswith(SYSTEM_SLUG_PREFIX):
         die(
             f"invalid slug {slug!r}: the {SYSTEM_SLUG_PREFIX!r} prefix is reserved "
-            "for DOH-managed system processes; pick another name"
+            "for HUMR-managed system processes; pick another name"
         )
     if not SLUG_PATTERN.match(slug):
         die(

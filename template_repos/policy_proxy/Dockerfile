@@ -1,4 +1,4 @@
-# DOH Policy Proxy — enforces SSO + ABAC in front of app containers.
+# HUMR Policy Proxy — enforces SSO + ABAC in front of app containers.
 FROM python:3.14-slim-bookworm
 
 WORKDIR /app

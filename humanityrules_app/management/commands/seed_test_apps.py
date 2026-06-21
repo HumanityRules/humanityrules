@@ -43,7 +43,7 @@ MOCK_ORGS = [
             {
                 "name": "Production AWS",
                 "aws_account_id": "111222333444",
-                "role_arn": "arn:aws:iam::111222333444:role/DevOpsHeroRole",
+                "role_arn": "arn:aws:iam::111222333444:role/HumanityRulesRole",
                 "status": AWSAccount.Status.CONNECTED,
                 "environments": [
                     {"name": "production", "slug": "production", "aws_region": "us-east-1", "status": Environment.Status.READY},
@@ -177,7 +177,7 @@ MOCK_ORGS = [
             {
                 "name": "Clearwater Cloud",
                 "aws_account_id": "555666777888",
-                "role_arn": "arn:aws:iam::555666777888:role/DevOpsHeroRole",
+                "role_arn": "arn:aws:iam::555666777888:role/HumanityRulesRole",
                 "status": AWSAccount.Status.CONNECTED,
                 "environments": [
                     {"name": "prod", "slug": "prod", "aws_region": "eu-west-1", "status": Environment.Status.READY},

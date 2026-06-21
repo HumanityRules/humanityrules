@@ -197,7 +197,7 @@ GITHUB_APP_CLIENT_SECRET = os.environ.get("GITHUB_APP_CLIENT_SECRET")
 GITHUB_APP_PRIVATE_KEY = os.environ.get("GITHUB_APP_PRIVATE_KEY", "").replace("\\n", "\n")
 GITHUB_WEBHOOK_SECRET = os.environ.get("GITHUB_WEBHOOK_SECRET")
 
-# DevOpsHero API Configuration
+# HumanityRules API Configuration
 HUMR_API_SECRET_KEY = os.environ.get("HUMR_API_SECRET_KEY")
 
 # Central RS256 keypair for env-SSO session JWTs. The control plane mints session
@@ -206,17 +206,17 @@ HUMR_ENV_SESSION_JWT_PRIVATE_KEY = os.environ.get("HUMR_ENV_SESSION_JWT_PRIVATE_
 HUMR_ENV_SESSION_JWT_KID = os.environ.get("HUMR_ENV_SESSION_JWT_KID")
 
 # Merge.dev Agent Handler — single tenant-wide API key + Tool Pack.
-# Stored only on DOH; never injected into customer-deployed Hermes containers.
+# Stored only on HUMR; never injected into customer-deployed Hermes containers.
 MERGE_AGENT_HANDLER_API_KEY = os.environ.get("MERGE_AGENT_HANDLER_API_KEY")
 MERGE_TOOL_PACK_ID = os.environ.get("MERGE_TOOL_PACK_ID")
 
 # Telegram manager bot (BotFather "Bot Management Mode"): creates and manages
 # per-app bots on behalf of users via t.me/newbot deep links, so they never
-# touch a token. Stored only on DOH; never injected into customer containers.
+# touch a token. Stored only on HUMR; never injected into customer containers.
 TELEGRAM_MANAGER_BOT_TOKEN = os.environ.get("TELEGRAM_MANAGER_BOT_TOKEN")
 TELEGRAM_MANAGER_BOT_USERNAME = os.environ.get("TELEGRAM_MANAGER_BOT_USERNAME")
 
-# DevOpsHero AWS Control Plane Credentials (for assuming roles in customer accounts)
+# HumanityRules AWS Control Plane Credentials (for assuming roles in customer accounts)
 HUMR_AWS_ACCESS_KEY = os.environ.get("HUMR_AWS_ACCESS_KEY")
 HUMR_AWS_SECRET_KEY = os.environ.get("HUMR_AWS_SECRET_KEY")
 

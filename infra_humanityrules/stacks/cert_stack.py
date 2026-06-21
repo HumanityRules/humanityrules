@@ -1,4 +1,4 @@
-"""ACM Certificate Stack for DevOps Hero."""
+"""ACM Certificate Stack for Humanity Rules."""
 
 from aws_cdk import CfnOutput, Stack
 from aws_cdk import aws_certificatemanager as acm

@@ -18,7 +18,7 @@ job_worker, which polls PENDING, leaves it alone — no CloudFormation), mints
 an EnvironmentBearerToken with a known raw value, and ensures a DB-only App
 stub (App row + owner tag) for the local compose container to impersonate.
 No AWS deployment or Blueprint is created — the running docker-compose stack
-*is* the app; DOH only needs the identity rows for integrations auth.
+*is* the app; HUMR only needs the identity rows for integrations auth.
 
 Usage:
     uv run manage.py seed_local_integrations \\
@@ -235,7 +235,7 @@ class Command(BaseCommand):
         return target
 
     def _mint_bearer(self, env: Environment, raw: str) -> None:
-        """Store only the SHA-256 hash on DOH; the raw value goes in the container's HUMR_ENV_BEARER."""
+        """Store only the SHA-256 hash on HUMR; the raw value goes in the container's HUMR_ENV_BEARER."""
         token_hash = hashlib.sha256(raw.encode("utf-8")).hexdigest()
         _, created = EnvironmentBearerToken.objects.update_or_create(
             environment=env,

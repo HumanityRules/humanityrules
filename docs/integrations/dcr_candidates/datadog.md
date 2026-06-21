@@ -134,7 +134,7 @@ today. Re-enabling is one line in `connectors/__init__.py`.
 2. Confirm whether the allowlist is per-host or per-host-pattern — if Datadog
    only takes exact hosts, every customer-facing Hermes hostname needs to
    exist on their list. If so, we may need to relay through a single
-   DOH-controlled redirect host and forward the code back to the customer
+   HUMR-controlled redirect host and forward the code back to the customer
    container, similar to how Merge's relay works for tokens.
 3. Re-test the full DCR + PKCE flow end-to-end once allowlisted.
 

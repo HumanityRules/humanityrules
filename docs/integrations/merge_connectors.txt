@@ -1,5 +1,5 @@
 Merge.dev Tool Pack connectors (151 total)
-Source: GET /api/v1/tool-packs/{tool_pack_id}/connectors/ via DOH relay
+Source: GET /api/v1/tool-packs/{tool_pack_id}/connectors/ via HUMR relay
 Fetched: 2026-06-07 from hermes-agent-local (docker compose)
 Format: slug<TAB>display_name
 

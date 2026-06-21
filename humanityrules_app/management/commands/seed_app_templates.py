@@ -327,7 +327,7 @@ HERMES_PERSONAL_TEMPLATE = {
                 _HERMES_LLM_VARS + _HERMES_AWS_DEFAULT_REGION_VAR + _HERMES_TAVILY_VAR
             ),
             # Supervisor process (outside the nono sandbox) refreshes provider
-            # access tokens by POSTing to DOH /api/integrations/tokens.
+            # access tokens by POSTing to HUMR /api/integrations/tokens.
             "requires_env_bearer": True,
         },
         # Policy proxy is tiny (httpx + starlette); 256 MiB is plenty. Must

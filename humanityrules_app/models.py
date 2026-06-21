@@ -133,7 +133,7 @@ class OrganizationMembership(models.Model):
 
 class OrganizationInvite(models.Model):
     """
-    Email-based invitation to join an Organization on the DOH control plane.
+    Email-based invitation to join an Organization on the HUMR control plane.
 
     Issued by an org admin, consumed by the invitee at /invite/<token>/. Once
     accepted, the row is preserved (with `accepted_at` set) for audit. Email
@@ -188,7 +188,7 @@ class OrganizationInvite(models.Model):
 class AWSAccount(models.Model):
     """
     Represents an AWS account connected to an organization.
-    DevOpsHero uses CloudFormation to create an IAM role with AssumeRole access.
+    HumanityRules uses CloudFormation to create an IAM role with AssumeRole access.
     """
     class Status(models.TextChoices):
         PENDING = "pending", "Pending"  # Waiting for CloudFormation stack deployment
@@ -221,7 +221,7 @@ class AWSAccount(models.Model):
     role_arn = models.CharField(
         max_length=2048,
         blank=True,
-        help_text="IAM role ARN that DevOpsHero assumes for deployments",
+        help_text="IAM role ARN that HumanityRules assumes for deployments",
     )
     status = models.CharField(
         max_length=20,
@@ -258,7 +258,7 @@ class AWSAccount(models.Model):
     def get_cloudformation_url(self) -> str:
         """Generate the AWS CloudFormation quick-create URL for this account."""
         params = {
-            "stackName": f"DevOpsHero-{self.id.hex[:8]}",
+            "stackName": f"HumanityRules-{self.id.hex[:8]}",
             "templateURL": "https://humr-public.s3.us-east-1.amazonaws.com/cf_install_template.json",
             "param_ExternalId": str(self.external_id),
         }
@@ -661,7 +661,7 @@ class AppTemplate(models.Model):
     #     "efs_mounts": ["home", "workspace"],  # names from efs_config.mounts
     #     "host_mounts": [{"source_path": "/var/lib/...", "container_path": "/mnt"}],
     #     "linux_capabilities": ["SYS_ADMIN"],
-    #     "environment": {NAME: value, ...},     # DOH-managed platform constants
+    #     "environment": {NAME: value, ...},     # HUMR-managed platform constants
     #     "configurable_variables": [ ... {name, category, value, user_editable, ...} ... ],
     #   }
     containers = models.JSONField(default=list)
@@ -1723,10 +1723,10 @@ class EnvironmentBearerToken(models.Model):
     """
     Per-environment bearer token used by components running inside a customer
     env (policy proxies, Hermes, future env-resident services) to authenticate
-    calls to DOH's control plane. One active token per environment; the raw
+    calls to HUMR's control plane. One active token per environment; the raw
     token lives in the customer's AWS Secrets Manager
     (humr/{env-slug}/shared-secrets, key HUMR_ENV_BEARER). Only the hash
-    is stored here so DOH can authenticate incoming control-plane calls
+    is stored here so HUMR can authenticate incoming control-plane calls
     without ever seeing the raw value after issue.
     """
     id = models.UUIDField(primary_key=True, default=uuid.uuid7, editable=False)
@@ -1747,7 +1747,7 @@ class EnvironmentBearerToken(models.Model):
 
 
 class IntegrationConfig(models.Model):
-    """DOH-global config for a third-party integration provider.
+    """HUMR-global config for a third-party integration provider.
 
     One row per provider. `config` holds the provider-specific payload as-is —
     e.g. for Google, the contents of the `web` object from the OAuth client

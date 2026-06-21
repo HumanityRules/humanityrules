@@ -207,7 +207,7 @@ def _connect_nous_auth_marker(auth: object) -> None:
         "agent_key_reused": False,
         "agent_key_obtained_at": now,
     }
-    auth.persist_nous_credentials(creds=state, label="DevOps Hero")
+    auth.persist_nous_credentials(creds=state, label="Humanity Rules")
     if hasattr(auth, "invalidate_nous_auth_status_cache"):
         auth.invalidate_nous_auth_status_cache()
     print(f"[provider-marker] wrote nous placeholder block to {auth.get_hermes_home() / 'auth.json'}")
@@ -231,7 +231,7 @@ def _disconnect_auth_marker(auth: object, provider: str) -> None:
 
 
 def run_auth_marker(*, action: str, provider: str) -> int:
-    """Add or remove a DOH-managed provider block in auth.json."""
+    """Add or remove a HUMR-managed provider block in auth.json."""
     try:
         from hermes_cli import auth  # pyright: ignore[reportMissingImports]
     except Exception as exc:  # pragma: no cover - import wiring is environment-specific
@@ -270,7 +270,7 @@ def _configured_model_provider(config_path: Path) -> str | None:
 
 
 def seed_provider_placeholder(hermes_home: Path) -> int:
-    """Seed a placeholder auth marker when a DOH-managed provider is the default backend."""
+    """Seed a placeholder auth marker when a HUMR-managed provider is the default backend."""
     provider = _configured_model_provider(config_path=hermes_home / "config.yaml")
     if provider not in SUPPORTED_AUTH_MARKER_PROVIDERS:
         return 0

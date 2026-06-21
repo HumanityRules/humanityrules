@@ -1,5 +1,5 @@
 """
-Fetch CloudWatch logs for a customer app deployed via DOH.
+Fetch CloudWatch logs for a customer app deployed via HUMR.
 
 Works for both running and crashed/stopped tasks. By default tries running
 tasks first, then falls back to stopped tasks. Use --stopped to skip straight

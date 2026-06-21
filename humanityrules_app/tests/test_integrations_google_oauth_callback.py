@@ -1,4 +1,4 @@
-"""Tests for /integrations/user/google/callback/ — persists refresh_token on DOH."""
+"""Tests for /integrations/user/google/callback/ — persists refresh_token on HUMR."""
 
 from unittest.mock import MagicMock, patch
 
@@ -245,7 +245,7 @@ class TestIntegrationsGoogleCallbackRejections(_CallbackTestBase):
         self.assertFalse(IntegrationUserCredential.objects.exists())
 
     def test_rejects_when_google_returns_no_refresh_token(self) -> None:
-        """Without a refresh_token in the response, DOH can't serve access tokens later."""
+        """Without a refresh_token in the response, HUMR can't serve access tokens later."""
         self._seed_session(state="stst", rd="https://hermes.dev.example.com/x",
                            env_id=str(self.env.id), app_slug="hermes", owner_username="vmendi")
         body_without_refresh = {

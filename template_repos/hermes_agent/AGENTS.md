@@ -1,6 +1,6 @@
 # Vendored Hermes forks (`vendor/`)
 
-The Hermes agent and WebUI are vendored as **git submodules** under `vendor/hermes-agent` and `vendor/hermes-webui`, pinned to our `doh/v*` fork branches in the private `DevOpsHeroAI/hermes-{agent,webui}` mirrors. DOH changes to Hermes are **commits on those fork branches**. The Dockerfile copies the agent verbatim and overlays the webui fork onto the base image's `/apptoo` (see `build/overlay-webui.sh`).
+The Hermes agent and WebUI are vendored as **git submodules** under `vendor/hermes-agent` and `vendor/hermes-webui`, pinned to our `doh/v*` fork branches in the private `HumanityRules/hermes-{agent,webui}` mirrors. HUMR changes to Hermes are **commits on those fork branches**. The Dockerfile copies the agent verbatim and overlays the webui fork onto the base image's `/apptoo` (see `build/overlay-webui.sh`).
 
 **Materialize before building.** A fresh checkout leaves the submodules empty; an empty submodule COPYs into the image as an empty dir with no error. Run once:
 

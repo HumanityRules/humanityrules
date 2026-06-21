@@ -25,7 +25,7 @@ follows, bookmarks, lists, mutes, blocks, media), so no action is scope-gated �
 a connected user can do anything the API offers.
 
 If X isn't connected, the broker (not X) replies 503:
-`x integration not connected in DOH — connect it from the Integrations pane.`
+`x integration not connected in HUMR — connect it from the Integrations pane.`
 Surface it verbatim and stop — the user connects the X card themselves; you
 can't do it for them.
 

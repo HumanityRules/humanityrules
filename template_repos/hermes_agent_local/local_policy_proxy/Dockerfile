@@ -1,4 +1,4 @@
-# DOH local policy proxy — dev-only X-Forwarded-Host shim for Hermes compose.
+# HUMR local policy proxy — dev-only X-Forwarded-Host shim for Hermes compose.
 FROM python:3.14-slim-bookworm
 
 WORKDIR /app

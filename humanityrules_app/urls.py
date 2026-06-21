@@ -160,10 +160,10 @@ urlpatterns = [
     #  - disconnect: one handler for every provider kind — deletes the IntegrationUserCredential row and, for
     #    OAuth providers, best-effort revokes upstream. The broker posts all disconnects here.
     path("api/integrations/credentials/disconnect", views.integrations_credential_disconnect, name="integrations_credential_disconnect"),
-    #  - device-complete: the broker posts device-flow refresh tokens here after the user approves; DOH validates + stores them
+    #  - device-complete: the broker posts device-flow refresh tokens here after the user approves; HUMR validates + stores them
     path("api/integrations/credentials/<slug:provider>/device-complete", views.integrations_device_complete, name="integrations_device_complete"),
 
-    #  - Merge.dev Agent Handler: env-resident components (Hermes broker / MCP aggregator) reach Merge through these. Tenant-wide Merge API key lives only on DOH.
+    #  - Merge.dev Agent Handler: env-resident components (Hermes broker / MCP aggregator) reach Merge through these. Tenant-wide Merge API key lives only on HUMR.
     path("api/integrations/merge/ensure-registered-user", views.integrations_merge_ensure_registered_user, name="integrations_merge_ensure_registered_user"),
     path("api/integrations/merge/link-token", views.integrations_merge_link_token, name="integrations_merge_link_token"),
     path("api/integrations/merge/connectors", views.integrations_merge_connectors, name="integrations_merge_connectors"),

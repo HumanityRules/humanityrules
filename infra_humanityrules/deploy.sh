@@ -1,7 +1,7 @@
 #!/bin/bash
 set -e
 
-# DevOps Hero Production Infrastructure Deployment Script
+# Humanity Rules Production Infrastructure Deployment Script
 # 
 # Prerequisites:
 # - CDK CLI installed (npm install -g aws-cdk)
@@ -17,14 +17,14 @@ if [ -f "../.env" ]; then
     export HUMR_API_ENDPOINT=$(grep -E '^HUMR_API_ENDPOINT=' ../.env | cut -d'=' -f2-)
 fi
 
-# Map DOH variables to AWS CLI expected names
+# Map HUMR variables to AWS CLI expected names
 export AWS_ACCESS_KEY_ID="${HUMR_AWS_ACCESS_KEY}"
 export AWS_SECRET_ACCESS_KEY="${HUMR_AWS_SECRET_KEY}"
 export AWS_DEFAULT_REGION="us-east-1"
 export AWS_ACCOUNT_ID="${HUMR_AWS_ACCOUNT_ID:-555553041615}"
 
 echo "========================================"
-echo "DevOps Hero Production Deployment"
+echo "Humanity Rules Production Deployment"
 echo "========================================"
 echo "AWS Account: ${AWS_ACCOUNT_ID}"
 echo "AWS Region: ${AWS_DEFAULT_REGION}"

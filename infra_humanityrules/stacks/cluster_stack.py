@@ -1,4 +1,4 @@
-"""Cluster Stack for DevOps Hero - ECS Cluster and ALB."""
+"""Cluster Stack for Humanity Rules - ECS Cluster and ALB."""
 
 from aws_cdk import Aws, CfnOutput, RemovalPolicy, Stack
 from aws_cdk import aws_certificatemanager as acm
@@ -12,7 +12,7 @@ from constructs import Construct
 
 
 class ClusterStack(Stack):
-    """ECS Fargate cluster with ALB for DevOps Hero."""
+    """ECS Fargate cluster with ALB for Humanity Rules."""
 
     def __init__(self, scope: Construct, construct_id: str, vpc: ec2.IVpc, ecr_repository: ecr.IRepository, certificate: acm.ICertificate, **kwargs) -> None:
         super().__init__(scope, construct_id, **kwargs)

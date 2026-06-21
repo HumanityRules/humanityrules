@@ -1,9 +1,9 @@
-// DOH WebUI extension. Loaded per Hermes' docs/EXTENSIONS.md via the
+// HUMR WebUI extension. Loaded per Hermes' docs/EXTENSIONS.md via the
 // HERMES_WEBUI_EXTENSION_* env vars exported in webui.sh.
 //
 // Adds a Settings → Permissions section (after System): the self-referential IAM
 // task-role permissions editor for THIS Hermes deployment. The target
-// (app, environment) is implicit — DOH resolves it from the deployment identity
+// (app, environment) is implicit — HUMR resolves it from the deployment identity
 // behind the broker, so no app/env is ever named here. All calls go same-origin
 // to the humr_broker control API via the Caddy /__humr_broker/permissions/* route;
 // the env bearer and AWS creds never enter the sandbox.
