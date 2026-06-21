@@ -1,22 +1,18 @@
 # Project synopsis
 
-**DevOps Hero** (DOH) is an AI-native, deployment platform for internal apps. It lets anyone in the company who can vibe-code an app deploy it to the company’s AWS infrastructure in minutes — with governance, compliance, and security built in from the start.
+**Humanity Rules** is an enterprise platform for deploying governed AI personal assistants inside a company’s own cloud (AWS VPC). Every employee gets a real AI agent with tool execution, persistent memory, and multi-channel access (Slack, web, a personal URL), running isolated and always-on in the company’s own account.
 
-- **The Problem:** Vibe-coding has made building internal apps dramatically faster, but deploying them inside a company’s infrastructure is still a weeks-long bottleneck. Permissions, SSO, networking, approval chains, audit readiness — the gap between "it works on my laptop" and "people in the company can use it" kills momentum and buries good ideas.
-- **The Solution:** An AI-native deployment platform that handles the entire journey from code to production. The AI drives the deployment process: it configures infrastructure, sets up least-privilege IAM permissions, wires up networking, and guides users through approval workflows — all inside the company’s own AWS account.
-- **Two equal pillars:**
-    - **Fast self-serve deployment:** Deploy directly to your company’s VPC without writing Terraform, YAML, or opening tickets. The AI handles infrastructure provisioning, networking, and configuration.
-    - **Built-in governance:** Approval chains, audit trails, least-privilege IAM, and policy enforcement are automatic — not bolted on after the fact. DevOps, security, and compliance teams get the control and visibility they need without being a bottleneck.
-- **Target Audience:** Anyone in the company capable of vibe-coding an app — engineers, data scientists, operations staff, business analysts. The platform makes it possible for them to quickly deploy and share their work with the company, while keeping the DevOps team, the CIO, the CISO, and the auditors happy.
-- **Cloud:** AWS-first (ECS/Fargate, CloudFormation/CDK). Additional cloud providers may follow.
-- **Stage:** Pre-beta. Features are paused while we validate the core idea with potential customers. Ideal Customer Profile is being defined through discovery conversations.
+- **The Problem:** AI agents today run client-side, on employees’ laptops, creating a security and governance nightmare. The company can’t see or control what employees do with them, credentials and data leak through unvetted plugins/MCP servers, and the setup locks the company into a single lab’s model and harness. Agents running on third-party accounts instead of the company’s own cloud are not acceptable for regulation and audit.
+- **The Solution:** Deploy each employee’s assistant into the company’s VPC with governance built in from the start: curated, security-audited skills; model-provider control (e.g., Bedrock, so nothing leaves the VPC); sandboxed execution; tight ABAC permissions; Okta/SSO auth; approval workflows; and full audit trails.
+- **The moat:** Not the model, not the harness — the enterprise delivery platform. We sell trust: a curated, centrally controlled, audited ecosystem of agentic tools with sensible security defaults that are easy to configure.
+- **Cloud:** AWS-first (ECS/Fargate, CloudFormation/CDK). Additional cloud providers will follow.
+- **Stage:** Pre-beta. Repositioning from the earlier "DevOps Hero" internal-app-deployment framing; the same platform architecture (ABAC, approval workflows, Fargate deployment, secrets management) maps directly onto governed personal assistants.
 
-With DevOps Hero, ship; let bots assist.
-Because your code deserves to be running in production, not stuck on your laptop.
+**Internal codename: DOH / DevOps Hero.** The code, infrastructure, and environment variables still use the `devopshero` and `DOH_` identifiers throughout — treat these as the internal name. 
 
-Built with ❤️ to make deployment accessible to everyone.
+**"Humanity Rules" (abbreviated "HUR") is the public/product identity; never expose "DevOps Hero" or "DOH" to end users.**
 
-We abbreviate the name of DevOps Hero as DOH.
+HUR uses the open-source Hermes agent as the agentic harness, and the Hermes WebUI as the UI for users. The Hermes agent that HUR deploys is located at template_repos/hermes_agent/. HUR deploys using DOH's templates deploy mechanism.
 
 
 # Running Python Commands
