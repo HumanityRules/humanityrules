@@ -16,7 +16,7 @@ class CertStack(Stack):
         self.hosted_zone = route53.HostedZone.from_lookup(self, "HostedZone", domain_name=domain_name)
 
         # Create wildcard certificate with DNS validation
-        # Covers both apex (devopshero.ai) and all subdomains (*.devopshero.ai)
+        # Covers both apex (humanityrules.io) and all subdomains (*.humanityrules.io)
         self.certificate = acm.Certificate(
             self,
             "WildcardCertificate",

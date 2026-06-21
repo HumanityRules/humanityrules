@@ -24,7 +24,7 @@ Environment contract (set by deploy_app.py's env-bearer overlay):
 - DOH_ENV_BEARER        — bearer for DOH's per-env integration endpoints.
 - DOH_OWNER_USERNAME    — whose grants this container is for.
 - DOH_APP_SLUG          — logical app key for app-scoped credentials.
-- DOH_CONTROL_PLANE_URL — base URL for DOH (e.g. https://devopshero.ai).
+- DOH_CONTROL_PLANE_URL — base URL for DOH (e.g. https://humanityrules.io).
 - DOH_ENV_SLUG          — env slug, for logging only.
 - DOH_MERGE_INTEGRATION_ENABLED — optional; false disables all Merge.dev connectors.
 

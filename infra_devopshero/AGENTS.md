@@ -1,6 +1,6 @@
 # DevOps Hero Control Plane Infrastructure
 
-This directory contains the CDK infrastructure for the DevOps Hero control plane — the app that runs at devopshero.ai. This is distinct from `devopshero_app/services/infra_customer/`, which deploys customer apps to their AWS accounts.
+This directory contains the CDK infrastructure for the DevOps Hero control plane — the app that runs at humanityrules.io. This is distinct from `devopshero_app/services/infra_customer/`, which deploys customer apps to their AWS accounts.
 
 
 ## AWS Credentials Setup
@@ -29,7 +29,7 @@ The `.env` file has `DOH_AWS_*` prefixed variables (not `AWS_*`) to avoid confli
 
 Eight CDK stacks deployed in dependency order:
 
-1. **cert_stack** — ACM wildcard certificate for `devopshero.ai` and `*.devopshero.ai` (must be us-east-1 for CloudFront)
+1. **cert_stack** — ACM wildcard certificate for `humanityrules.io` and `*.humanityrules.io` (must be us-east-1 for CloudFront)
 2. **vpc_stack** — VPC with public/private subnets across 2 AZs, single NAT gateway
 3. **storage_stack** — S3 buckets (public for CF templates, private for internal assets), ECR repository
 4. **lambda_stack** — Install callback Lambda (handles customer AWS account connection)

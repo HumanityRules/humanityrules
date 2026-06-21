@@ -16,7 +16,7 @@ Ask the customer's Okta admin for:
 - Their **Okta domain** (e.g. `acme.okta.com` or `dev-12345678.okta.com`)
 
 You'll give them back:
-- A **sign-in redirect URI** to configure in their Okta app (https://devopshero.ai/oidc/callback/）
+- A **sign-in redirect URI** to configure in their Okta app (https://humanityrules.io/oidc/callback/）
 
 ## Step-by-step
 
@@ -28,7 +28,7 @@ Tell the customer (or their Okta admin) to do this:
 2. Choose **OIDC - OpenID Connect** and **Web Application**, click Next
 3. Set the **Sign-in redirect URI** to:
    ```
-   https://devopshero.ai/oidc/callback/
+   https://humanityrules.io/oidc/callback/
    ```
 4. Under **Assignments**, assign the users/groups who should have access
 5. Save the app — Okta will show a **Client ID** and **Client Secret**
@@ -88,7 +88,7 @@ uv run manage.py setup_oidc_org \
 ### 5. Give the customer their login URL
 
 ```
-https://devopshero.ai/oidc/login/?org=acme
+https://humanityrules.io/oidc/login/?org=acme
 ```
 
 This is the only URL they need. The bootstrap admin's first login will fully initialize the org (seed ABAC policies + admin role). Subsequent users are auto-created with the default role (viewer).

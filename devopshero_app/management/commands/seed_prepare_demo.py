@@ -36,7 +36,7 @@ from devopshero_app.models import (
 
 
 MERIDIAN_SLUG = "meridian-systems"
-HOSTED_ZONE = "meridian.devopshero.com"
+HOSTED_ZONE = "meridian.humanityrules.io"
 SEED_EMAIL_DOMAIN = "meridiansystems.com"
 
 BRANCH_TO_ENV_SLUG = {
@@ -118,7 +118,7 @@ APP_DEPLOY_CONFIGS = {
         "subdomain": "compass-account-api",
         "env_vars": [
             {"name": "DATABASE_URL", "value": "postgresql://portal_db:5432/portal"},
-            {"name": "CORS_ORIGINS", "value": "https://horizon-portal.meridian.devopshero.com"},
+            {"name": "CORS_ORIGINS", "value": "https://horizon-portal.meridian.humanityrules.io"},
         ],
         "secrets": {"DB_PASSWORD": "xxxxx", "JWT_SECRET": "xxxxx"},
         "commit_message": "feat: add account deactivation endpoint",
@@ -132,7 +132,7 @@ APP_DEPLOY_CONFIGS = {
         "branch": "staging",
         "subdomain": "horizon-portal",
         "env_vars": [
-            {"name": "NEXT_PUBLIC_API_URL", "value": "https://compass-account-api.meridian.devopshero.com"},
+            {"name": "NEXT_PUBLIC_API_URL", "value": "https://compass-account-api.meridian.humanityrules.io"},
         ],
         "secrets": None,
         "commit_message": "feat: add dark mode toggle",

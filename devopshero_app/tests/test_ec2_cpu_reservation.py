@@ -42,7 +42,7 @@ def _render_ec2(containers: list[ContainerConfig], cpu: int, alb_target_containe
         shared_alb_hosted_zone=None,
         shared_hosted_zone_id=None,
         env_bearer_shared_secrets_arn=SHARED_SECRETS_ARN,
-        auth_base_url="https://devopshero.ai",
+        auth_base_url="https://humanityrules.io",
     )
     return Template.from_stack(stack)
 

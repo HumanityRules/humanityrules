@@ -20,7 +20,7 @@ async def test_allow_response_parsed() -> None:
     async with httpx.AsyncClient(transport=transport) as client:
         decision = await pdp_mod.evaluate(
             http_client=client,
-            pdp_url="https://devopshero.ai/api/pdp/evaluate",
+            pdp_url="https://humanityrules.io/api/pdp/evaluate",
             env_bearer_token="token-abc",
             app_id="vmendi-hermes",
             provider="oidc",
@@ -47,7 +47,7 @@ async def test_deny_response_parsed() -> None:
     async with httpx.AsyncClient(transport=transport) as client:
         decision = await pdp_mod.evaluate(
             http_client=client,
-            pdp_url="https://devopshero.ai/api/pdp/evaluate",
+            pdp_url="https://humanityrules.io/api/pdp/evaluate",
             env_bearer_token="t",
             app_id="x", provider="oidc", sub="y", username="z", path="/",
         )
@@ -64,7 +64,7 @@ async def test_non_200_returns_none() -> None:
     async with httpx.AsyncClient(transport=transport) as client:
         decision = await pdp_mod.evaluate(
             http_client=client,
-            pdp_url="https://devopshero.ai/api/pdp/evaluate",
+            pdp_url="https://humanityrules.io/api/pdp/evaluate",
             env_bearer_token="t",
             app_id="x", provider="oidc", sub="y", username="z", path="/",
         )
@@ -80,7 +80,7 @@ async def test_connection_error_returns_none() -> None:
     async with httpx.AsyncClient(transport=transport) as client:
         decision = await pdp_mod.evaluate(
             http_client=client,
-            pdp_url="https://devopshero.ai/api/pdp/evaluate",
+            pdp_url="https://humanityrules.io/api/pdp/evaluate",
             env_bearer_token="t",
             app_id="x", provider="oidc", sub="y", username="z", path="/",
         )

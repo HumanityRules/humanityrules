@@ -20,7 +20,7 @@ VALID_WEB_PAYLOAD = {
         "token_uri": "https://oauth2.googleapis.com/token",
         "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
         "client_secret": "csecret",
-        "redirect_uris": ["https://devopshero.ai/integrations/user/google/callback/"],
+        "redirect_uris": ["https://humanityrules.io/integrations/user/google/callback/"],
     }
 }
 
@@ -41,7 +41,7 @@ class TestSetupGoogleOauthClient(TestCase):
         row = IntegrationConfig.objects.get(provider=IntegrationConfig.Provider.GOOGLE)
         self.assertEqual(row.config["client_id"], "cid-123.apps.googleusercontent.com")
         self.assertEqual(row.config["client_secret"], "csecret")
-        self.assertIn("https://devopshero.ai/integrations/user/google/callback/", row.config["redirect_uris"])
+        self.assertIn("https://humanityrules.io/integrations/user/google/callback/", row.config["redirect_uris"])
 
     def test_rerunning_updates_in_place(self) -> None:
         with TemporaryDirectory() as tmp:

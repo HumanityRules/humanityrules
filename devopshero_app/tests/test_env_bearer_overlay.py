@@ -46,7 +46,7 @@ def _render(
         shared_alb_hosted_zone=shared_alb_hosted_zone,
         shared_hosted_zone_id=None,
         env_bearer_shared_secrets_arn=SHARED_SECRETS_ARN,
-        auth_base_url="https://devopshero.ai",
+        auth_base_url="https://humanityrules.io",
     )
     return Template.from_stack(stack)
 

@@ -162,7 +162,7 @@ function handler(event) {
             comment="DevOps Hero Production CDN",
         )
 
-        # Route53 A record for apex domain (devopshero.ai)
+        # Route53 A record for apex domain (humanityrules.io)
         route53.ARecord(
             self,
             "ApexARecord",
@@ -171,7 +171,7 @@ function handler(event) {
             target=route53.RecordTarget.from_alias(targets.CloudFrontTarget(self.distribution)),
         )
 
-        # Route53 A record for wildcard (*.devopshero.ai)
+        # Route53 A record for wildcard (*.humanityrules.io)
         route53.ARecord(
             self,
             "WildcardARecord",
