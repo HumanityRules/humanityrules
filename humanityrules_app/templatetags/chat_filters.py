@@ -48,7 +48,7 @@ def json_pretty(value: Any) -> str:
 # Mapping from MCP tool names to custom result templates.
 # Tools not in this dict get the generic JSON dump.
 TOOL_RESULT_TEMPLATES = {
-    "mcp__devopshero__test_docker_build": "humanityrules_app/chat/tool_results/_test_docker_build.html",
+    "mcp__humanityrules__test_docker_build": "humanityrules_app/chat/tool_results/_test_docker_build.html",
 }
 
 @register.filter

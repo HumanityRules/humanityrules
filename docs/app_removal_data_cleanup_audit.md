@@ -22,7 +22,7 @@ Three independent booleans (UI shows them as separate checkboxes in
 2. **`delete_secrets`** — calls
    `secrets_utils.delete_secrets_matching_prefix` against the customer
    account's AWS Secrets Manager, scoped to
-   `devopshero/{env_slug}/{app_slug}/`. These are per-app secrets injected
+   `humr/{env_slug}/{app_slug}/`. These are per-app secrets injected
    at deploy time (DB passwords from the AppTemplate `secrets` block, etc.).
 
 3. **`delete_policies`** — wipes ABAC `Policy` rows referencing the app slug

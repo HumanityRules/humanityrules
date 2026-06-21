@@ -56,13 +56,13 @@ def get_assumed_role_session(
         sts_client = boto3.client("sts", region_name=region)
 
     # The role ARN follows the pattern from cf_install_template.json
-    role_arn = f"arn:aws:iam::{account_id}:role/devopshero-{external_id}"
+    role_arn = f"arn:aws:iam::{account_id}:role/humr-{external_id}"
 
     print(f"🔑 Assuming role: {role_arn}")
 
     response = sts_client.assume_role(
         RoleArn=role_arn,
-        RoleSessionName="devopshero-deployment",
+        RoleSessionName="humr-deployment",
         ExternalId=external_id,
         DurationSeconds=3600,  # 1 hour
     )

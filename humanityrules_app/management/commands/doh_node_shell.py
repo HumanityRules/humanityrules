@@ -2,7 +2,7 @@
 Open an interactive shell on a customer EC2 container instance via SSM Session Manager.
 
 For inspecting the EC2 *host* that runs ECS tasks — kernel, Docker / containerd
-state, host bind-mount directories (e.g. /var/lib/devopshero/hermes-roots/),
+state, host bind-mount directories (e.g. /var/lib/humr/hermes-roots/),
 disk space, journal logs. This is NOT for getting inside an app container —
 use doh_app_shell or doh_app_exec for that.
 
@@ -21,7 +21,7 @@ Usage:
 
 Notes:
     - You log in as 'ssm-user'. Use `sudo` for privileged paths like
-      /var/lib/devopshero/hermes-roots/.
+      /var/lib/humr/hermes-roots/.
     - Permissions: the customer's DevOpsHero assumed role needs ssm:StartSession;
       the container instance role already attaches AmazonSSMManagedInstanceCore
       (see EcsClusterStack in deploy_base.py), so the SSM agent is present.
@@ -42,11 +42,11 @@ from ._aws_account_resolver import add_aws_target_args, resolve_aws_target
 
 def _asg_name(env_slug: str) -> str:
     """The ASG name CDK emits for the env's container instances."""
-    return f"devopshero-{env_slug}-ecs-container-instances"
+    return f"humr-{env_slug}-ecs-container-instances"
 
 
 def _cluster_name(env_slug: str) -> str:
-    return f"devopshero-{env_slug}-cluster"
+    return f"humr-{env_slug}-cluster"
 
 
 def _list_running_asg_instance_ids(session, env_slug: str) -> list[str]:
@@ -218,6 +218,6 @@ class Command(BaseCommand):
         self.stdout.write("")
         self.stdout.write(self.style.SUCCESS(
             "Connecting via SSM Session Manager. You'll land as ssm-user — use 'sudo' for "
-            "/var/lib/devopshero/*. Type 'exit' to disconnect.\n"
+            "/var/lib/humr/*. Type 'exit' to disconnect.\n"
         ))
         _run_session(session=session, instance_id=instance_id, region=region)

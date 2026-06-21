@@ -119,7 +119,7 @@ If you modified or created any files (Dockerfile, health check endpoint, configu
 submit them via a pull request before deploying. The deployment executor re-clones the repository fresh
 from GitHub — changes made only in the sandbox will not be deployed.
 
-- Use the `devopshero/` branch prefix (e.g., `devopshero/add-dockerfile`).
+- Use the `humr/` branch prefix (e.g., `humr/add-dockerfile`).
 - Use `git_ops` for git branch/commit/push/PR actions instead of raw Bash git commands.
 - After creating the PR, present the PR link to the user.
 - Format the PR link as HTML so it opens in a new tab.

@@ -48,8 +48,8 @@ class TestEnvironmentSetupFlow(TestCase):
         self.assertTrue(result.created)
         self.assertEqual(environment.status, models.Environment.Status.DRAFT)
         self.assertEqual(environment.shared_alb_hosted_zone, "example.com")
-        self.assertEqual(environment.vpc_stack_name, "devopshero-default-vpc")
-        self.assertEqual(environment.cluster_stack_name, "devopshero-default-cluster")
+        self.assertEqual(environment.vpc_stack_name, "humr-default-vpc")
+        self.assertEqual(environment.cluster_stack_name, "humr-default-cluster")
 
     def test_provision_environment_moves_saved_draft_to_pending(self) -> None:
         async_to_sync(agent_tools.save_environment)(
@@ -98,7 +98,7 @@ class TestEnvironmentSetupFlow(TestCase):
         event = agent_service.AgentStreamEvent(
             type="tool_result",
             data={
-                "name": "mcp__devopshero__save_environment",
+                "name": "mcp__humanityrules__save_environment",
                 "result": {
                     "id": "env-123",
                     "created": True,

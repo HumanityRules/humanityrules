@@ -32,8 +32,8 @@ Three pieces, all living inside the customer's AWS account except the PDP:
 
 Two secrets are provisioned when an environment is created:
 
-- **Policy-proxy JWT keypair** — RSA or EdDSA. Private half kept by the auth service. Public half served at `https://auth.<env-domain>/.well-known/jwks.json`. Stored in Secrets Manager at `devopshero/{env-slug}/policy-proxy-auth-config` under the `jwt_key` key (alongside `oidc_config`, which carries the Okta app credentials for the same service).
-- **Environment bearer token** — random 64-char bearer token. Stored in the shared-per-env secret `devopshero/{env-slug}/shared-secrets` under key `HUMR_ENV_BEARER`. Any env-resident component that calls DOH's control plane (policy proxies today; Hermes and other future services) reads it and sends it on every call. Rotated by redeploying the env's policy proxies.
+- **Policy-proxy JWT keypair** — RSA or EdDSA. Private half kept by the auth service. Public half served at `https://auth.<env-domain>/.well-known/jwks.json`. Stored in Secrets Manager at `humr/{env-slug}/policy-proxy-auth-config` under the `jwt_key` key (alongside `oidc_config`, which carries the Okta app credentials for the same service).
+- **Environment bearer token** — random 64-char bearer token. Stored in the shared-per-env secret `humr/{env-slug}/shared-secrets` under key `HUMR_ENV_BEARER`. Any env-resident component that calls DOH's control plane (policy proxies today; Hermes and other future services) reads it and sends it on every call. Rotated by redeploying the env's policy proxies.
 
 Both are auto-generated at env bootstrap. No manual provisioning.
 

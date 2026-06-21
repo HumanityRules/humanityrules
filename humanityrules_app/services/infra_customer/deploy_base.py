@@ -31,7 +31,7 @@ logger = logging.getLogger(__name__)
 
 def ec2_capacity_provider_name(env_slug: str) -> str:
     """Deterministic ECS EC2 capacity provider name for an environment."""
-    return f"devopshero-{env_slug}-ec2-capacity"
+    return f"humr-{env_slug}-ec2-capacity"
 
 
 # =============================================================================
@@ -75,7 +75,7 @@ def import_environment_infrastructure(scope: Construct, env_slug: str, shared_al
     Returns:
         EnvironmentInfrastructure with all imported resources.
     """
-    prefix = f"devopshero-{env_slug}"
+    prefix = f"humr-{env_slug}"
 
     # Import VPC with full subnet configuration
     public_rt = Fn.import_value(f"{prefix}-public-rt")
@@ -183,7 +183,7 @@ class VpcStack(Stack):
         self.vpc = ec2.Vpc(
             self,
             "Vpc",
-            vpc_name=f"devopshero-{env_slug}-vpc",
+            vpc_name=f"humr-{env_slug}-vpc",
             ip_addresses=ec2.IpAddresses.cidr(vpc_cidr),
             max_azs=2,
             nat_gateways=1,
@@ -196,7 +196,7 @@ class VpcStack(Stack):
         self.default_security_group = ec2.SecurityGroup(
             self, "DefaultSecurityGroup",
             vpc=self.vpc,
-            security_group_name=f"devopshero-{env_slug}-default-sg",
+            security_group_name=f"humr-{env_slug}-default-sg",
             description="Default security group - allows VPC inbound and all outbound",
             allow_all_outbound=True,
         )
@@ -205,7 +205,7 @@ class VpcStack(Stack):
         )
 
         # Export names include env_slug for environment isolation
-        prefix = f"devopshero-{env_slug}"
+        prefix = f"humr-{env_slug}"
         CfnOutput(self, "VpcId", value=self.vpc.vpc_id, export_name=f"{prefix}-vpc-id")
         CfnOutput(self, "VpcCidr", value=self.vpc.vpc_cidr_block, export_name=f"{prefix}-vpc-cidr")
         CfnOutput(self, "PublicSubnet1Id", value=self.vpc.public_subnets[0].subnet_id, export_name=f"{prefix}-public-subnet-1")
@@ -239,7 +239,7 @@ class EcsClusterStack(Stack):
     ) -> None:
         super().__init__(scope, construct_id, **kwargs)
 
-        prefix = f"devopshero-{env_slug}"
+        prefix = f"humr-{env_slug}"
 
         ecs_cluster_name = f"{prefix}-cluster"
 
@@ -270,7 +270,7 @@ class EcsClusterStack(Stack):
         container_instance_user_data = ec2.UserData.for_linux()
         container_instance_user_data.add_commands(
             "set -euxo pipefail",
-            "KERNEL_MARKER=/var/lib/devopshero/kernel6.18-installed",
+            "KERNEL_MARKER=/var/lib/humr/kernel6.18-installed",
             "mkdir -p /etc/ecs \"$(dirname \"$KERNEL_MARKER\")\"",
             f"grep -qxF 'ECS_CLUSTER={ecs_cluster_name}' /etc/ecs/ecs.config 2>/dev/null || "
             f"echo 'ECS_CLUSTER={ecs_cluster_name}' >> /etc/ecs/ecs.config",
@@ -334,13 +334,13 @@ class EcsClusterStack(Stack):
         # Allow ECS to inject secrets as env vars (e.g., Aurora credentials)
         self.task_execution_role.add_to_policy(iam.PolicyStatement(
             actions=["secretsmanager:GetSecretValue"],
-            resources=[f"arn:aws:secretsmanager:{Aws.REGION}:{Aws.ACCOUNT_ID}:secret:devopshero/*"],
+            resources=[f"arn:aws:secretsmanager:{Aws.REGION}:{Aws.ACCOUNT_ID}:secret:humr/*"],
         ))
 
         # Log Group
         self.log_group = logs.LogGroup(
             self, "EcsLogGroup",
-            log_group_name=f"/devopshero/{env_slug}/ecs",
+            log_group_name=f"/humr/{env_slug}/ecs",
             retention=logs.RetentionDays.ONE_MONTH,
             removal_policy=RemovalPolicy.DESTROY,
         )
@@ -526,7 +526,7 @@ touch /tmp/builder_ready
     ) -> None:
         super().__init__(scope, construct_id, **kwargs)
 
-        prefix = f"devopshero-{env_slug}"
+        prefix = f"humr-{env_slug}"
 
         # IAM Role for EC2 instance
         self.instance_role = iam.Role(
@@ -594,7 +594,7 @@ touch /tmp/builder_ready
 
         # Tag for environment identification (used by ec2_builder_utils to find the instance)
         from aws_cdk import Tags
-        Tags.of(self.instance).add("devopshero:environment", env_slug)
+        Tags.of(self.instance).add("humr:environment", env_slug)
 
         # Exports
         CfnOutput(self, "BuilderInstanceId", value=self.instance.instance_id, export_name=f"{prefix}-builder-instance-id")
@@ -620,7 +620,7 @@ class EfsStack(Stack):
     ) -> None:
         super().__init__(scope, construct_id, **kwargs)
 
-        prefix = f"devopshero-{env_slug}"
+        prefix = f"humr-{env_slug}"
 
         self.security_group = ec2.SecurityGroup(
             self, "EfsSecurityGroup",
@@ -659,7 +659,7 @@ def get_or_create_vpc_cidr(session: boto3.Session, env_slug: str) -> str:
     """Get existing VPC CIDR or find an available one."""
     cf_client = session.client("cloudformation")
 
-    vpc_stack_name = f"devopshero-{env_slug}-vpc"
+    vpc_stack_name = f"humr-{env_slug}-vpc"
     if cloudformation_utils.stack_exists(cf_client, vpc_stack_name):
         logger.info("VPC stack '%(stack_name)s' already exists, getting existing CIDR", {"stack_name": vpc_stack_name})
         vpc_cidr = cloudformation_utils.get_stack_output(cf_client, vpc_stack_name, "VpcCidr")
@@ -702,10 +702,10 @@ def deploy(
     logger.info("Deploying shared infrastructure for environment '%(env_slug)s'", {"env_slug": env_slug})
 
     cf_client = session.client("cloudformation")
-    vpc_stack_name = f"devopshero-{env_slug}-vpc"
-    cluster_stack_name = f"devopshero-{env_slug}-cluster"
-    builder_stack_name = f"devopshero-{env_slug}-builder"
-    efs_stack_name = f"devopshero-{env_slug}-efs"
+    vpc_stack_name = f"humr-{env_slug}-vpc"
+    cluster_stack_name = f"humr-{env_slug}-cluster"
+    builder_stack_name = f"humr-{env_slug}-builder"
+    efs_stack_name = f"humr-{env_slug}-efs"
 
     cloudformation_utils.cleanup_rollback_complete_stacks(cf_client, [vpc_stack_name, cluster_stack_name, builder_stack_name, efs_stack_name])
 
@@ -770,7 +770,7 @@ def teardown(session: boto3.Session, env_slug: str) -> bool:
     """
     Delete every CloudFormation stack owned by the given environment.
 
-    Stacks are discovered dynamically by name prefix (``devopshero-{env_slug}-``)
+    Stacks are discovered dynamically by name prefix (``humr-{env_slug}-``)
     rather than from a hardcoded list, so any stack added later (auth-service,
     policy-proxy-ecr, ...) is torn down as long as it follows the naming
     convention. Deletion runs in rounds because CloudFormation blocks deletion
@@ -778,7 +778,7 @@ def teardown(session: boto3.Session, env_slug: str) -> bool:
     is currently leaf, which unblocks the next round.
     """
     cf_client = session.client("cloudformation")
-    prefix = f"devopshero-{env_slug}-"
+    prefix = f"humr-{env_slug}-"
 
     logger.info("Tearing down infrastructure for environment '%(env_slug)s'", {"env_slug": env_slug})
 

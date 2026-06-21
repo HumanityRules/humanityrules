@@ -1,5 +1,5 @@
 # Generated manually: rename AppRemovalJob.delete_efs_data -> delete_persistent_data.
-# The flag now also covers EC2 host bind-mount data (e.g., /var/lib/devopshero/hermes-roots/{app_slug}),
+# The flag now also covers EC2 host bind-mount data (e.g., /var/lib/humr/hermes-roots/{app_slug}),
 # not just EFS app data, so the broader name reflects the broader semantics.
 
 from django.db import migrations

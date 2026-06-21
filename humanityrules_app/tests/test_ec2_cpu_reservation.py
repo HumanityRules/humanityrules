@@ -17,7 +17,7 @@ def _task_definition_properties(template: Template) -> dict:
     raise AssertionError("No ECS::TaskDefinition resource found in stack")
 
 
-SHARED_SECRETS_ARN = "arn:aws:secretsmanager:us-east-1:123456789012:secret:devopshero/staging/shared-secrets-abcdef"
+SHARED_SECRETS_ARN = "arn:aws:secretsmanager:us-east-1:123456789012:secret:humr/staging/shared-secrets-abcdef"
 
 
 def _render_ec2(containers: list[ContainerConfig], cpu: int, alb_target_container: str) -> Template:

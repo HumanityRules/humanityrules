@@ -21,7 +21,7 @@ class StorageStack(Stack):
         self.public_bucket = s3.Bucket(
             self,
             "PublicBucket",
-            bucket_name="devopshero-public",
+            bucket_name="humr-public",
             versioned=True,
             block_public_access=s3.BlockPublicAccess(
                 block_public_acls=False,
@@ -56,7 +56,7 @@ class StorageStack(Stack):
         self.private_bucket = s3.Bucket(
             self,
             "PrivateBucket",
-            bucket_name="devopshero-private",
+            bucket_name="humr-private",
             versioned=True,
             encryption=s3.BucketEncryption.S3_MANAGED,
             block_public_access=s3.BlockPublicAccess.BLOCK_ALL,
@@ -67,7 +67,7 @@ class StorageStack(Stack):
         self.ecr_repository = ecr.Repository(
             self,
             "EcrRepository",
-            repository_name="devopshero",
+            repository_name="humr",
             image_scan_on_push=True,
             removal_policy=RemovalPolicy.DESTROY,
             empty_on_delete=True,
@@ -80,7 +80,7 @@ class StorageStack(Stack):
             self,
             "EfsSecurityGroup",
             vpc=vpc,
-            security_group_name="doh-prod-efs-sg",
+            security_group_name="humr-prod-efs-sg",
             description="Security group for EFS mount targets",
             allow_all_outbound=False,
         )
@@ -93,7 +93,7 @@ class StorageStack(Stack):
         self.claude_efs = efs.FileSystem(
             self,
             "ClaudeEfs",
-            file_system_name="doh-prod-claude-sessions",
+            file_system_name="humr-prod-claude-sessions",
             vpc=vpc,
             security_group=self.efs_security_group,
             performance_mode=efs.PerformanceMode.GENERAL_PURPOSE,
@@ -114,10 +114,10 @@ class StorageStack(Stack):
             posix_user=efs.PosixUser(uid="1000", gid="1000"),
         )
 
-        CfnOutput(self, "EfsFileSystemId", value=self.claude_efs.file_system_id, export_name="doh-prod-efs-id")
-        CfnOutput(self, "PublicBucketName", value=self.public_bucket.bucket_name, export_name="doh-prod-public-bucket")
-        CfnOutput(self, "PublicBucketUrl", value=f"https://{self.public_bucket.bucket_name}.s3.amazonaws.com", export_name="doh-prod-public-bucket-url")
-        CfnOutput(self, "PrivateBucketName", value=self.private_bucket.bucket_name, export_name="doh-prod-private-bucket")
-        CfnOutput(self, "PrivateBucketArn", value=self.private_bucket.bucket_arn, export_name="doh-prod-private-bucket-arn")
-        CfnOutput(self, "EcrRepositoryUri", value=self.ecr_repository.repository_uri, export_name="doh-prod-ecr-uri")
-        CfnOutput(self, "EcrRepositoryArn", value=self.ecr_repository.repository_arn, export_name="doh-prod-ecr-arn")
+        CfnOutput(self, "EfsFileSystemId", value=self.claude_efs.file_system_id, export_name="humr-prod-efs-id")
+        CfnOutput(self, "PublicBucketName", value=self.public_bucket.bucket_name, export_name="humr-prod-public-bucket")
+        CfnOutput(self, "PublicBucketUrl", value=f"https://{self.public_bucket.bucket_name}.s3.amazonaws.com", export_name="humr-prod-public-bucket-url")
+        CfnOutput(self, "PrivateBucketName", value=self.private_bucket.bucket_name, export_name="humr-prod-private-bucket")
+        CfnOutput(self, "PrivateBucketArn", value=self.private_bucket.bucket_arn, export_name="humr-prod-private-bucket-arn")
+        CfnOutput(self, "EcrRepositoryUri", value=self.ecr_repository.repository_uri, export_name="humr-prod-ecr-uri")
+        CfnOutput(self, "EcrRepositoryArn", value=self.ecr_repository.repository_arn, export_name="humr-prod-ecr-arn")

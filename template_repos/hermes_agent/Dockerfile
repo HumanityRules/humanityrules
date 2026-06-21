@@ -175,7 +175,7 @@ RUN --mount=type=cache,target=/uv_cache,uid=1024,gid=1024 \
     && touch "$HERMES_WEBUI_DIR/venv/.deps_installed"
 
 # Empty user venv shared by terminal and execute_code's project mode. Lives on
-# the persistent root: rsynced into /var/lib/devopshero/hermes-roots/{slug} on
+# the persistent root: rsynced into /var/lib/humr/hermes-roots/{slug} on
 # first boot and preserved across redeploys, so the agent's installs (pip,
 # apt-get) survive container restarts. --seed installs pip/setuptools/wheel
 # into the venv's bin/ so `which pip` resolves to the venv's own launcher,

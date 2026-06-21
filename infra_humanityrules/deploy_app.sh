@@ -53,7 +53,7 @@ if [ "$SYNC_SECRETS" = true ]; then
 fi
 
 # Get ECR repository URI
-ECR_URI=$(aws ecr describe-repositories --repository-names devopshero --query 'repositories[0].repositoryUri' --output text)
+ECR_URI=$(aws ecr describe-repositories --repository-names humr --query 'repositories[0].repositoryUri' --output text)
 echo "ECR Repository: ${ECR_URI}"
 
 # Login to ECR
@@ -64,28 +64,28 @@ aws ecr get-login-password --region ${AWS_DEFAULT_REGION} | docker login --usern
 echo ""
 echo "Building Docker image..."
 cd ..
-docker build -f infra_devopshero/Dockerfile -t devopshero:latest .
+docker build -f infra_humanityrules/Dockerfile -t humr:latest .
 
 echo ""
 echo "Pushing to ECR..."
-docker tag devopshero:latest ${ECR_URI}:latest
+docker tag humr:latest ${ECR_URI}:latest
 docker push ${ECR_URI}:latest
 
-cd infra_devopshero
+cd infra_humanityrules
 
 # Trigger ECS deployment
 echo ""
 echo "Triggering ECS service update..."
 aws ecs update-service \
-    --cluster doh-prod-cluster \
-    --service doh-prod-app \
+    --cluster humr-prod-cluster \
+    --service humr-prod-app \
     --force-new-deployment \
     --desired-count 1 > /dev/null
 
 echo "Waiting for service to stabilize..."
 aws ecs wait services-stable \
-    --cluster doh-prod-cluster \
-    --services doh-prod-app
+    --cluster humr-prod-cluster \
+    --services humr-prod-app
 
 echo ""
 echo "========================================"

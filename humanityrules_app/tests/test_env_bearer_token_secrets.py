@@ -87,7 +87,7 @@ class TestEnsureEnvBearerToken(EnvBearerTestBase):
         self.assertTrue(arn.endswith("shared-secrets-AAAA"))
 
         # Secrets Manager side.
-        secret = json.loads(fake.store["devopshero/staging/shared-secrets"]["SecretString"])
+        secret = json.loads(fake.store["humr/staging/shared-secrets"]["SecretString"])
         raw_token = secret["HUMR_ENV_BEARER"]
         self.assertEqual(len(raw_token), 64)
 
@@ -100,7 +100,7 @@ class TestEnsureEnvBearerToken(EnvBearerTestBase):
         fake = FakeSecretsManager()
         session = _session_with(fake)
         fake.create_secret(
-            Name="devopshero/staging/shared-secrets",
+            Name="humr/staging/shared-secrets",
             Description="seed",
             SecretString=json.dumps({
                 "HUMR_ENV_BEARER": "pre-existing-raw-token-of-reasonable-length-0123456789012345",
@@ -109,12 +109,12 @@ class TestEnsureEnvBearerToken(EnvBearerTestBase):
         )
         EnvironmentBearerToken.objects.create(environment=self.env, token_hash="does-not-match-but-we-dont-check-here")
 
-        original_secret = fake.store["devopshero/staging/shared-secrets"]["SecretString"]
+        original_secret = fake.store["humr/staging/shared-secrets"]["SecretString"]
         original_hash = EnvironmentBearerToken.objects.get(environment=self.env).token_hash
 
         arn = secrets_utils.ensure_env_bearer_token_exists(session=session, env=self.env)
         self.assertIn("shared-secrets", arn)
-        self.assertEqual(fake.store["devopshero/staging/shared-secrets"]["SecretString"], original_secret)
+        self.assertEqual(fake.store["humr/staging/shared-secrets"]["SecretString"], original_secret)
         self.assertEqual(EnvironmentBearerToken.objects.get(environment=self.env).token_hash, original_hash)
 
     def test_regenerates_when_row_exists_but_secret_missing(self) -> None:
@@ -126,7 +126,7 @@ class TestEnsureEnvBearerToken(EnvBearerTestBase):
 
         secrets_utils.ensure_env_bearer_token_exists(session=session, env=self.env)
 
-        secret = json.loads(fake.store["devopshero/staging/shared-secrets"]["SecretString"])
+        secret = json.loads(fake.store["humr/staging/shared-secrets"]["SecretString"])
         raw = secret["HUMR_ENV_BEARER"]
         new_hash = EnvironmentBearerToken.objects.get(environment=self.env).token_hash
         self.assertEqual(new_hash, hashlib.sha256(raw.encode()).hexdigest())
@@ -136,14 +136,14 @@ class TestEnsureEnvBearerToken(EnvBearerTestBase):
         fake = FakeSecretsManager()
         session = _session_with(fake)
         fake.create_secret(
-            Name="devopshero/staging/shared-secrets",
+            Name="humr/staging/shared-secrets",
             Description="seed",
             SecretString=json.dumps({"SOMETHING_ELSE": "keep-me"}),
         )
 
         secrets_utils.ensure_env_bearer_token_exists(session=session, env=self.env)
 
-        secret = json.loads(fake.store["devopshero/staging/shared-secrets"]["SecretString"])
+        secret = json.loads(fake.store["humr/staging/shared-secrets"]["SecretString"])
         self.assertEqual(secret["SOMETHING_ELSE"], "keep-me")
         self.assertIn("HUMR_ENV_BEARER", secret)
 
@@ -161,7 +161,7 @@ class TestEnsureEnvPolicyProxySecrets(EnvBearerTestBase):
 
         result = secrets_utils.ensure_env_policy_proxy_secrets_exist(session=session, env=self.env)
         self.assertIn("shared_secrets_arn", result)
-        self.assertIn("devopshero/staging/shared-secrets", fake.store)
+        self.assertIn("humr/staging/shared-secrets", fake.store)
 
         # Side effect: the EnvironmentBearerToken row exists too.
         self.assertTrue(EnvironmentBearerToken.objects.filter(environment=self.env).exists())
@@ -207,8 +207,8 @@ class TestEnsureAppSecretsExist(TestCase):
             session=session, env_slug="staging", app_config=app_config, shared_secrets={},
         )
 
-        self.assertIn("devopshero/staging/simple-dashboard/secrets", fake.store)
-        payload = json.loads(fake.store["devopshero/staging/simple-dashboard/secrets"]["SecretString"])
+        self.assertIn("humr/staging/simple-dashboard/secrets", fake.store)
+        payload = json.loads(fake.store["humr/staging/simple-dashboard/secrets"]["SecretString"])
         self.assertEqual(payload["slack_token"], "literal-token")
         self.assertEqual(len(payload["secret_key_base"]), 64)
 
@@ -216,7 +216,7 @@ class TestEnsureAppSecretsExist(TestCase):
         fake = FakeSecretsManager()
         session = _session_with(fake)
         fake.create_secret(
-            Name="devopshero/staging/simple-dashboard/secrets",
+            Name="humr/staging/simple-dashboard/secrets",
             Description="seed",
             SecretString=json.dumps({"slack_token": "existing-value"}),
         )
@@ -226,7 +226,7 @@ class TestEnsureAppSecretsExist(TestCase):
             session=session, env_slug="staging", app_config=app_config, shared_secrets={},
         )
 
-        payload = json.loads(fake.store["devopshero/staging/simple-dashboard/secrets"]["SecretString"])
+        payload = json.loads(fake.store["humr/staging/simple-dashboard/secrets"]["SecretString"])
         self.assertEqual(payload["slack_token"], "existing-value")
         self.assertEqual(len(payload["secret_key_base"]), 64)
 
@@ -240,7 +240,7 @@ class TestEnsureAppSecretsExist(TestCase):
             shared_secrets={"OPENAI_API_KEY": "sk-from-shared"},
         )
 
-        payload = json.loads(fake.store["devopshero/staging/simple-dashboard/secrets"]["SecretString"])
+        payload = json.loads(fake.store["humr/staging/simple-dashboard/secrets"]["SecretString"])
         self.assertEqual(payload["OPENAI_API_KEY"], "sk-from-shared")
 
     def test_heals_empty_existing_value_from_shared_secrets(self) -> None:
@@ -250,7 +250,7 @@ class TestEnsureAppSecretsExist(TestCase):
         fake = FakeSecretsManager()
         session = _session_with(fake)
         fake.create_secret(
-            Name="devopshero/staging/simple-dashboard/secrets",
+            Name="humr/staging/simple-dashboard/secrets",
             Description="seed",
             SecretString=json.dumps({"AWS_BEDROCK_ACCESS_KEY_ID": "", "HERMES_WEBUI_PASSWORD": "kept"}),
         )
@@ -261,7 +261,7 @@ class TestEnsureAppSecretsExist(TestCase):
             shared_secrets={"AWS_BEDROCK_ACCESS_KEY_ID": "AKIA-from-shared"},
         )
 
-        payload = json.loads(fake.store["devopshero/staging/simple-dashboard/secrets"]["SecretString"])
+        payload = json.loads(fake.store["humr/staging/simple-dashboard/secrets"]["SecretString"])
         self.assertEqual(payload["AWS_BEDROCK_ACCESS_KEY_ID"], "AKIA-from-shared")
         # Non-empty existing value is preserved even when shared has no entry.
         self.assertEqual(payload["HERMES_WEBUI_PASSWORD"], "kept")

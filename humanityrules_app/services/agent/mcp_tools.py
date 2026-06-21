@@ -3,7 +3,7 @@ MCP tools for the Claude Agent SDK.
 
 This module wraps our domain-specific tools as MCP tools using the
 @tool decorator from claude-agent-sdk. Tools receive the conversation
-via closure from create_devopshero_mcp_server().
+via closure from create_humanityrules_mcp_server().
 """
 
 import asyncio
@@ -92,35 +92,35 @@ def _mcp_response(data: Any) -> dict[str, Any]:
 
 
 # Mapping from full MCP tool names to human-friendly display names.
-# MCP tools are namespaced (e.g., 'mcp__devopshero__list_aws_accounts') to avoid
+# MCP tools are namespaced (e.g., 'mcp__humanityrules__list_aws_accounts') to avoid
 # collisions between servers, but we want clean names for UI display.
 TOOL_DISPLAY_NAMES = {
     # Platform tools
-    "mcp__devopshero__list_aws_accounts": "List AWS Accounts",
-    "mcp__devopshero__list_hosted_zones": "List Hosted Zones",
-    "mcp__devopshero__list_environments": "List Environments",
-    "mcp__devopshero__initiate_aws_connection": "Initiate AWS Connection",
-    "mcp__devopshero__save_environment": "Save Environment",
-    "mcp__devopshero__provision_environment": "Provision Environment",
-    "mcp__devopshero__get_environment_status": "Get Environment Status",
-    "mcp__devopshero__list_repositories": "List Repositories",
-    "mcp__devopshero__scan_repository": "Scan Repository",
+    "mcp__humanityrules__list_aws_accounts": "List AWS Accounts",
+    "mcp__humanityrules__list_hosted_zones": "List Hosted Zones",
+    "mcp__humanityrules__list_environments": "List Environments",
+    "mcp__humanityrules__initiate_aws_connection": "Initiate AWS Connection",
+    "mcp__humanityrules__save_environment": "Save Environment",
+    "mcp__humanityrules__provision_environment": "Provision Environment",
+    "mcp__humanityrules__get_environment_status": "Get Environment Status",
+    "mcp__humanityrules__list_repositories": "List Repositories",
+    "mcp__humanityrules__scan_repository": "Scan Repository",
     # Workspace tools
-    "mcp__devopshero__list_apps": "List Apps",
-    "mcp__devopshero__create_datastore": "Create Datastore",
-    "mcp__devopshero__save_app": "Save App",
-    "mcp__devopshero__save_blueprint": "Save Blueprint",
-    "mcp__devopshero__deploy_blueprint": "Deploy Blueprint",
-    "mcp__devopshero__get_deployment_status": "Get Deployment Status",
-    "mcp__devopshero__teardown_deployment": "Teardown Deployment",
-    "mcp__devopshero__test_docker_build": "Test Docker Build",
-    "mcp__devopshero__git_ops": "Git Ops",
+    "mcp__humanityrules__list_apps": "List Apps",
+    "mcp__humanityrules__create_datastore": "Create Datastore",
+    "mcp__humanityrules__save_app": "Save App",
+    "mcp__humanityrules__save_blueprint": "Save Blueprint",
+    "mcp__humanityrules__deploy_blueprint": "Deploy Blueprint",
+    "mcp__humanityrules__get_deployment_status": "Get Deployment Status",
+    "mcp__humanityrules__teardown_deployment": "Teardown Deployment",
+    "mcp__humanityrules__test_docker_build": "Test Docker Build",
+    "mcp__humanityrules__git_ops": "Git Ops",
     # Permissions
-    "mcp__devopshero__query_app_logs": "Query App Logs",
-    "mcp__devopshero__lookup_access_denied_events": "Lookup Access Denied Events",
-    "mcp__devopshero__update_permission_draft": "Update Permission Draft",
+    "mcp__humanityrules__query_app_logs": "Query App Logs",
+    "mcp__humanityrules__lookup_access_denied_events": "Lookup Access Denied Events",
+    "mcp__humanityrules__update_permission_draft": "Update Permission Draft",
     # Utility
-    "mcp__devopshero__wait": "Wait",
+    "mcp__humanityrules__wait": "Wait",
 }
 def get_tool_display_name(full_name: str, parameters: dict | None) -> str:
     """Get the human-friendly display name for an MCP tool."""
@@ -134,22 +134,22 @@ def get_tool_display_name(full_name: str, parameters: dict | None) -> str:
 
 # Mapping from tool names to their "main" parameter for display in titles.
 TOOL_INPUT_PARAMS_FOR_TITLE = {
-    "mcp__devopshero__initiate_aws_connection": "account_name",
-    "mcp__devopshero__list_hosted_zones": "aws_account_uuid",
-    "mcp__devopshero__list_environments": "aws_account_uuid",
-    "mcp__devopshero__save_environment": "environment_name",
-    "mcp__devopshero__get_environment_status": "environment_id",
-    "mcp__devopshero__scan_repository": "repository_id",
-    "mcp__devopshero__create_datastore": "name",
-    "mcp__devopshero__save_app": "name",
-    "mcp__devopshero__save_blueprint": "environment_slug",
-    "mcp__devopshero__get_deployment_status": "deployment_id",
-    "mcp__devopshero__teardown_deployment": "app_id",
-    "mcp__devopshero__git_ops": "action",
-    "mcp__devopshero__query_app_logs": "time_window_hours",
-    "mcp__devopshero__lookup_access_denied_events": "time_window_hours",
-    "mcp__devopshero__update_permission_draft": "service",
-    "mcp__devopshero__wait": "seconds",
+    "mcp__humanityrules__initiate_aws_connection": "account_name",
+    "mcp__humanityrules__list_hosted_zones": "aws_account_uuid",
+    "mcp__humanityrules__list_environments": "aws_account_uuid",
+    "mcp__humanityrules__save_environment": "environment_name",
+    "mcp__humanityrules__get_environment_status": "environment_id",
+    "mcp__humanityrules__scan_repository": "repository_id",
+    "mcp__humanityrules__create_datastore": "name",
+    "mcp__humanityrules__save_app": "name",
+    "mcp__humanityrules__save_blueprint": "environment_slug",
+    "mcp__humanityrules__get_deployment_status": "deployment_id",
+    "mcp__humanityrules__teardown_deployment": "app_id",
+    "mcp__humanityrules__git_ops": "action",
+    "mcp__humanityrules__query_app_logs": "time_window_hours",
+    "mcp__humanityrules__lookup_access_denied_events": "time_window_hours",
+    "mcp__humanityrules__update_permission_draft": "service",
+    "mcp__humanityrules__wait": "seconds",
     # External/Claude Agent SDK tools
     "Read": "file_path",
     "Edit": "file_path",
@@ -187,7 +187,7 @@ def _format_input_param_title(tool_name: str, param_value: Any) -> str:
     if "wait" in tool_name:
         return f"{param_value}s"
 
-    if tool_name in ("mcp__devopshero__query_app_logs", "mcp__devopshero__lookup_access_denied_events"):
+    if tool_name in ("mcp__humanityrules__query_app_logs", "mcp__humanityrules__lookup_access_denied_events"):
         return f"Last {param_value} hours"
 
     return value_str
@@ -274,7 +274,7 @@ def sanitize_paths_for_display(obj: Any) -> Any:
 # =============================================================================
 
 
-def create_devopshero_mcp_server(conversation: Conversation):
+def create_humanityrules_mcp_server(conversation: Conversation):
     """Create an MCP server with tools scoped to a conversation via closures."""
 
     # =========================================================================
@@ -1044,7 +1044,7 @@ def create_devopshero_mcp_server(conversation: Conversation):
     # =========================================================================
 
     server = create_sdk_mcp_server(
-        name="devopshero",
+        name="humanityrules",
         version="1.0.0",
         tools=[
             # Platform tools
@@ -1081,45 +1081,45 @@ def create_devopshero_mcp_server(conversation: Conversation):
 # Tool names for use in allowed_tools configuration
 TOOL_NAMES = [
     # Platform tools
-    "mcp__devopshero__list_aws_accounts",
-    "mcp__devopshero__list_hosted_zones",
-    "mcp__devopshero__list_environments",
-    "mcp__devopshero__initiate_aws_connection",
-    "mcp__devopshero__save_environment",
-    "mcp__devopshero__provision_environment",
-    "mcp__devopshero__get_environment_status",
-    "mcp__devopshero__list_repositories",
+    "mcp__humanityrules__list_aws_accounts",
+    "mcp__humanityrules__list_hosted_zones",
+    "mcp__humanityrules__list_environments",
+    "mcp__humanityrules__initiate_aws_connection",
+    "mcp__humanityrules__save_environment",
+    "mcp__humanityrules__provision_environment",
+    "mcp__humanityrules__get_environment_status",
+    "mcp__humanityrules__list_repositories",
     # Workspace tools
-    "mcp__devopshero__list_apps",
-    "mcp__devopshero__create_datastore",
-    "mcp__devopshero__save_app",
-    "mcp__devopshero__save_blueprint",
-    "mcp__devopshero__deploy_blueprint",
-    "mcp__devopshero__get_deployment_status",
-    "mcp__devopshero__teardown_deployment",
-    "mcp__devopshero__test_docker_build",
-    "mcp__devopshero__git_ops",
-    "mcp__devopshero__query_app_logs",
+    "mcp__humanityrules__list_apps",
+    "mcp__humanityrules__create_datastore",
+    "mcp__humanityrules__save_app",
+    "mcp__humanityrules__save_blueprint",
+    "mcp__humanityrules__deploy_blueprint",
+    "mcp__humanityrules__get_deployment_status",
+    "mcp__humanityrules__teardown_deployment",
+    "mcp__humanityrules__test_docker_build",
+    "mcp__humanityrules__git_ops",
+    "mcp__humanityrules__query_app_logs",
     # Utility
-    "mcp__devopshero__wait",
+    "mcp__humanityrules__wait",
 ]
 
 
 # Subset of MCP tools allowed in ENVIRONMENT_SETUP mode
 ENVIRONMENT_ALLOWED_TOOLS = [
-    "mcp__devopshero__list_hosted_zones",
-    "mcp__devopshero__list_environments",
-    "mcp__devopshero__save_environment",
-    "mcp__devopshero__provision_environment",
-    "mcp__devopshero__get_environment_status",
-    "mcp__devopshero__wait",
+    "mcp__humanityrules__list_hosted_zones",
+    "mcp__humanityrules__list_environments",
+    "mcp__humanityrules__save_environment",
+    "mcp__humanityrules__provision_environment",
+    "mcp__humanityrules__get_environment_status",
+    "mcp__humanityrules__wait",
 ]
 
 
 # Subset of MCP tools allowed in PERMISSIONS mode
 PERMISSIONS_ALLOWED_TOOLS = [
-    "mcp__devopshero__query_app_logs",
-    "mcp__devopshero__lookup_access_denied_events",
-    "mcp__devopshero__update_permission_draft",
-    "mcp__devopshero__wait",
+    "mcp__humanityrules__query_app_logs",
+    "mcp__humanityrules__lookup_access_denied_events",
+    "mcp__humanityrules__update_permission_draft",
+    "mcp__humanityrules__wait",
 ]

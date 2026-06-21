@@ -26,32 +26,32 @@ export AWS_DEFAULT_REGION="us-east-1"
 ```bash
 # Check service status
 aws ecs describe-services \
-  --cluster doh-prod-cluster \
-  --services doh-prod-app \
+  --cluster humr-prod-cluster \
+  --services humr-prod-app \
   --query 'services[0].{status:status,running:runningCount,desired:desiredCount,pending:pendingCount}'
 
 # List recent tasks (running and stopped)
-aws ecs list-tasks --cluster doh-prod-cluster --service-name doh-prod-app
+aws ecs list-tasks --cluster humr-prod-cluster --service-name humr-prod-app
 
 # Describe a task (get stop reason if failed)
 aws ecs describe-tasks \
-  --cluster doh-prod-cluster \
+  --cluster humr-prod-cluster \
   --tasks <task-arn> \
   --query 'tasks[0].{status:lastStatus,stopCode:stopCode,stopReason:stoppedReason}'
 ```
 
 ## CloudWatch Logs
 
-**Log group:** `/devopshero/prod/ecs`
+**Log group:** `/humr/prod/ecs`
 
 **Stream prefixes:**
-- `devopshero/devopshero/` — App container logs
+- `humr/humr/` — App container logs
 - `migrate/migrate/` — Migration init container logs
 
 ```bash
 # List recent log streams (find latest task)
 aws logs describe-log-streams \
-  --log-group-name "/devopshero/prod/ecs" \
+  --log-group-name "/humr/prod/ecs" \
   --order-by LastEventTime \
   --descending \
   --limit 5 \
@@ -60,35 +60,35 @@ aws logs describe-log-streams \
 
 # Get logs from a specific stream
 aws logs get-log-events \
-  --log-group-name "/devopshero/prod/ecs" \
-  --log-stream-name "devopshero/devopshero/<TASK_ID>" \
+  --log-group-name "/humr/prod/ecs" \
+  --log-stream-name "humr/humr/<TASK_ID>" \
   --limit 100 \
   --query 'events[*].message' \
   --output text
 
 # Filter for errors
 aws logs get-log-events \
-  --log-group-name "/devopshero/prod/ecs" \
-  --log-stream-name "devopshero/devopshero/<TASK_ID>" \
+  --log-group-name "/humr/prod/ecs" \
+  --log-stream-name "humr/humr/<TASK_ID>" \
   --limit 100 \
   --query 'events[*].message' \
   --output text | grep -iE 'error|exception|traceback'
 
 # Tail logs in real-time
-aws logs tail /devopshero/prod/ecs --follow --filter-pattern devopshero
+aws logs tail /humr/prod/ecs --follow --filter-pattern humr
 ```
 
 ## ECS Exec (Shell Access)
 
 ```bash
 # Find running task
-TASK_ARN=$(aws ecs list-tasks --cluster doh-prod-cluster --service-name doh-prod-app --query 'taskArns[0]' --output text)
+TASK_ARN=$(aws ecs list-tasks --cluster humr-prod-cluster --service-name humr-prod-app --query 'taskArns[0]' --output text)
 
 # Get a shell
 aws ecs execute-command \
-  --cluster doh-prod-cluster \
+  --cluster humr-prod-cluster \
   --task ${TASK_ARN} \
-  --container devopshero \
+  --container humr \
   --interactive \
   --command "/bin/bash"
 ```
@@ -98,7 +98,7 @@ aws ecs execute-command \
 ```bash
 # Get target group ARN
 TG_ARN=$(aws elbv2 describe-target-groups \
-  --names doh-prod-app-tg \
+  --names humr-prod-app-tg \
   --query 'TargetGroups[0].TargetGroupArn' \
   --output text)
 
@@ -114,16 +114,16 @@ aws elbv2 describe-target-health \
 # List DOH stacks
 aws cloudformation list-stacks \
   --stack-status-filter CREATE_COMPLETE UPDATE_COMPLETE \
-  --query 'StackSummaries[?starts_with(StackName,`doh-prod`)].StackName'
+  --query 'StackSummaries[?starts_with(StackName,`humr-prod`)].StackName'
 
 # Check stack status
 aws cloudformation describe-stacks \
-  --stack-name doh-prod-app \
+  --stack-name humr-prod-app \
   --query 'Stacks[0].{status:StackStatus,reason:StackStatusReason}'
 
 # View recent stack events (for debugging failed deployments)
 aws cloudformation describe-stack-events \
-  --stack-name doh-prod-app \
+  --stack-name humr-prod-app \
   --query 'StackEvents[0:10].{time:Timestamp,status:ResourceStatus,resource:LogicalResourceId,reason:ResourceStatusReason}' \
   --output table
 ```
@@ -133,11 +133,11 @@ aws cloudformation describe-stack-events \
 Run this script to extract current resource names from CDK source:
 
 ```bash
-python infra_devopshero/extract_resources.py
+python infra_humanityrules/extract_resources.py
 ```
 
 Key resources:
-- **Cluster:** `doh-prod-cluster`
-- **Service:** `doh-prod-app`
-- **Log group:** `/devopshero/prod/ecs`
-- **Target group:** `doh-prod-app-tg`
+- **Cluster:** `humr-prod-cluster`
+- **Service:** `humr-prod-app`
+- **Log group:** `/humr/prod/ecs`
+- **Target group:** `humr-prod-app-tg`

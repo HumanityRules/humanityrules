@@ -2,7 +2,7 @@
 
 The integrations broker (`integrations_broker.py`) only starts when supervisor
 sees HUMR_CONTROL_PLANE_URL / HUMR_ENV_BEARER / HUMR_OWNER_USERNAME / HUMR_APP_SLUG.
-Locally those point the broker at the laptop's Django (via the devopshero.ngrok.io
+Locally those point the broker at the laptop's Django (via the humanityrules.ngrok.io
 tunnel) and identify it as one existing App owned by one existing user.
 
 Two control-plane checks then have to pass for "Connect Google" to work:
@@ -249,7 +249,7 @@ class Command(BaseCommand):
         self.stdout.write("")
         self.stdout.write("Set these in template_repos/hermes_agent_local/.env:")
         self.stdout.write("")
-        self.stdout.write("  HUMR_CONTROL_PLANE_URL=https://devopshero.ngrok.io")
+        self.stdout.write("  HUMR_CONTROL_PLANE_URL=https://humanityrules.ngrok.io")
         self.stdout.write(f"  HUMR_ENV_BEARER={raw}")
         self.stdout.write(f"  HUMR_OWNER_USERNAME={owner_username}")
         self.stdout.write(f"  HUMR_APP_SLUG={app_slug}")

@@ -73,31 +73,31 @@ export AWS_DEFAULT_REGION="us-east-1"
 #
 # We poll up to 3 minutes for a task that has:
 #   - lastStatus=RUNNING
-#   - healthStatus=HEALTHY  (devopshero container has a real curl health check)
+#   - healthStatus=HEALTHY  (humr container has a real curl health check)
 #   - ExecuteCommandAgent.lastStatus=RUNNING
 # When more than one matches (rolling deploy window), prefer the newest by
 # startedAt so we attach to the new task, not the one about to be killed.
 TASK_ARN=""
 DEADLINE=$(( $(date +%s) + 180 ))
-echo "Waiting for a ready task in doh-prod-app..."
+echo "Waiting for a ready task in humr-prod-app..."
 while :; do
     TASK_ARNS=$(aws ecs list-tasks \
-        --cluster doh-prod-cluster \
-        --service-name doh-prod-app \
+        --cluster humr-prod-cluster \
+        --service-name humr-prod-app \
         --desired-status RUNNING \
         --query 'taskArns' \
         --output text)
     if [ -n "$TASK_ARNS" ] && [ "$TASK_ARNS" != "None" ]; then
         # Of all matching tasks, pick the newest one that's fully ready.
         TASK_ARN=$(aws ecs describe-tasks \
-            --cluster doh-prod-cluster \
+            --cluster humr-prod-cluster \
             --tasks $TASK_ARNS \
-            --query 'reverse(sort_by(tasks[?lastStatus==`RUNNING` && healthStatus==`HEALTHY` && (containers[?name==`devopshero`] | [0].managedAgents[?name==`ExecuteCommandAgent`] | [0].lastStatus) == `RUNNING`], &startedAt))[0].taskArn' \
+            --query 'reverse(sort_by(tasks[?lastStatus==`RUNNING` && healthStatus==`HEALTHY` && (containers[?name==`humr`] | [0].managedAgents[?name==`ExecuteCommandAgent`] | [0].lastStatus) == `RUNNING`], &startedAt))[0].taskArn' \
             --output text)
         [ -n "$TASK_ARN" ] && [ "$TASK_ARN" != "None" ] && break
     fi
     if [ "$(date +%s)" -ge "$DEADLINE" ]; then
-        echo "Error: no ready task in doh-prod-app within 180s"
+        echo "Error: no ready task in humr-prod-app within 180s"
         echo "       (need lastStatus=RUNNING + healthStatus=HEALTHY + ExecuteCommandAgent=RUNNING)"
         exit 1
     fi
@@ -142,9 +142,9 @@ B64=$(printf '%s' "$FULL_CMD" | base64 | tr -d '\n')
 # on `script` argument order, so we branch on `uname`.
 run_aws_exec() {
     aws ecs execute-command \
-        --cluster doh-prod-cluster \
+        --cluster humr-prod-cluster \
         --task "${TASK_ARN}" \
-        --container devopshero \
+        --container humr \
         --interactive \
         --command "bash -c 'eval \"\$(echo $B64 | base64 -d)\"'"
 }
@@ -156,9 +156,9 @@ else
     # (no nested shell-quoting concerns).
     AWS_CMD=(
         aws ecs execute-command
-        --cluster doh-prod-cluster
+        --cluster humr-prod-cluster
         --task "${TASK_ARN}"
-        --container devopshero
+        --container humr
         --interactive
         --command "bash -c 'eval \"\$(echo $B64 | base64 -d)\"'"
     )

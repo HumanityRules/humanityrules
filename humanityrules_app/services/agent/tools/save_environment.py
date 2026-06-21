@@ -20,7 +20,7 @@ EDITABLE_ENVIRONMENT_STATUSES = [
 
 def _build_stack_name(slug: str, stack_kind: str) -> str:
     """Build the CloudFormation stack name for an environment resource."""
-    return f"devopshero-{slug}-{stack_kind}"
+    return f"humr-{slug}-{stack_kind}"
 
 
 def _normalize_hosted_zone_name(hosted_zone_name: str) -> str:

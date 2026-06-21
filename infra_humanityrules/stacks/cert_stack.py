@@ -25,5 +25,5 @@ class CertStack(Stack):
             validation=acm.CertificateValidation.from_dns(self.hosted_zone),
         )
 
-        CfnOutput(self, "CertificateArn", value=self.certificate.certificate_arn, export_name="doh-prod-cert-arn")
-        CfnOutput(self, "HostedZoneId", value=self.hosted_zone.hosted_zone_id, export_name="doh-prod-hosted-zone-id")
+        CfnOutput(self, "CertificateArn", value=self.certificate.certificate_arn, export_name="humr-prod-cert-arn")
+        CfnOutput(self, "HostedZoneId", value=self.hosted_zone.hosted_zone_id, export_name="humr-prod-hosted-zone-id")

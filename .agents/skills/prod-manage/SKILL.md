@@ -5,14 +5,14 @@ description: Run Django management commands on the production ECS container. Use
 
 # Production Management
 
-Run Django management commands against production via `infra_devopshero/prod_manage.sh`. Most commands ECS-exec into the prod app container (DB ops, control-plane). A few **local-execution** commands run on the operator's machine but resolve their target from prod's DB — the script dispatches transparently.
+Run Django management commands against production via `infra_humanityrules/prod_manage.sh`. Most commands ECS-exec into the prod app container (DB ops, control-plane). A few **local-execution** commands run on the operator's machine but resolve their target from prod's DB — the script dispatches transparently.
 
 For a list of all available commands and what they do, see the `manage-commands` skill. This skill focuses on prod-specific execution details and examples.
 
 ## Usage
 
 ```bash
-cd infra_devopshero
+cd infra_humanityrules
 ./prod_manage.sh <command> [args...]
 ```
 
@@ -141,7 +141,7 @@ Any Django management command works:
 
 For ECS-exec mode (default), the script:
 1. Loads AWS credentials from `../.env`
-2. Finds the running ECS task for `doh-prod-app`
+2. Finds the running ECS task for `humr-prod-app`
 3. Runs `aws ecs execute-command` with the management command
 
 For local-exec mode (commands in `LOCAL_EXEC_COMMANDS`), the script:

@@ -38,13 +38,13 @@ class AppStack(Stack):
         task_role = iam.Role(
             self,
             "TaskRole",
-            role_name="doh-prod-task-role",
+            role_name="humr-prod-task-role",
             assumed_by=iam.ServicePrincipal("ecs-tasks.amazonaws.com"),
         )
         # Grant access to app secrets
         task_role.add_to_policy(iam.PolicyStatement(
             actions=["secretsmanager:GetSecretValue"],
-            resources=[f"arn:aws:secretsmanager:{Aws.REGION}:{Aws.ACCOUNT_ID}:secret:devopshero/*"],
+            resources=[f"arn:aws:secretsmanager:{Aws.REGION}:{Aws.ACCOUNT_ID}:secret:humr/*"],
         ))
         # Grant access to Bedrock for AI features
         task_role.add_to_policy(iam.PolicyStatement(
@@ -55,7 +55,7 @@ class AppStack(Stack):
         # Security: Customer roles have trust policies requiring our account + ExternalId
         task_role.add_to_policy(iam.PolicyStatement(
             actions=["sts:AssumeRole"],
-            resources=["arn:aws:iam::*:role/devopshero-*"],
+            resources=["arn:aws:iam::*:role/humr-*"],
         ))
         # Grant permission to mount EFS with IAM authorization
         task_role.add_to_policy(iam.PolicyStatement(
@@ -72,7 +72,7 @@ class AppStack(Stack):
         task_definition = ecs.FargateTaskDefinition(
             self,
             "TaskDefinition",
-            family="doh-prod-app",
+            family="humr-prod-app",
             cpu=2048,
             memory_limit_mib=4096,
             execution_role=task_execution_role,
@@ -97,15 +97,15 @@ class AppStack(Stack):
         )
 
         # Secret references (created once, shared between containers)
-        django_secret = secretsmanager.Secret.from_secret_name_v2(self, "DjangoSecret", "devopshero/prod/django")
-        workos_secret = secretsmanager.Secret.from_secret_name_v2(self, "WorkosSecret", "devopshero/prod/workos")
-        github_secret = secretsmanager.Secret.from_secret_name_v2(self, "GithubSecret", "devopshero/prod/github")
-        bedrock_secret = secretsmanager.Secret.from_secret_name_v2(self, "BedrockSecret", "devopshero/prod/bedrock")
-        api_secret = secretsmanager.Secret.from_secret_name_v2(self, "ApiSecret", "devopshero/prod/api")
-        posthog_secret = secretsmanager.Secret.from_secret_name_v2(self, "PosthogSecret", "devopshero/prod/posthog")
-        env_sso_secret = secretsmanager.Secret.from_secret_name_v2(self, "EnvSsoSecret", "devopshero/prod/env-sso")
-        merge_secret = secretsmanager.Secret.from_secret_name_v2(self, "MergeSecret", "devopshero/prod/merge")
-        telegram_secret = secretsmanager.Secret.from_secret_name_v2(self, "TelegramSecret", "devopshero/prod/telegram")
+        django_secret = secretsmanager.Secret.from_secret_name_v2(self, "DjangoSecret", "humr/prod/django")
+        workos_secret = secretsmanager.Secret.from_secret_name_v2(self, "WorkosSecret", "humr/prod/workos")
+        github_secret = secretsmanager.Secret.from_secret_name_v2(self, "GithubSecret", "humr/prod/github")
+        bedrock_secret = secretsmanager.Secret.from_secret_name_v2(self, "BedrockSecret", "humr/prod/bedrock")
+        api_secret = secretsmanager.Secret.from_secret_name_v2(self, "ApiSecret", "humr/prod/api")
+        posthog_secret = secretsmanager.Secret.from_secret_name_v2(self, "PosthogSecret", "humr/prod/posthog")
+        env_sso_secret = secretsmanager.Secret.from_secret_name_v2(self, "EnvSsoSecret", "humr/prod/env-sso")
+        merge_secret = secretsmanager.Secret.from_secret_name_v2(self, "MergeSecret", "humr/prod/merge")
+        telegram_secret = secretsmanager.Secret.from_secret_name_v2(self, "TelegramSecret", "humr/prod/telegram")
 
         # All secrets needed by the app (shared between migration and app containers)
         app_secrets = {
@@ -158,9 +158,9 @@ class AppStack(Stack):
         # App container
         app_container = task_definition.add_container(
             "AppContainer",
-            container_name="devopshero",
+            container_name="humr",
             image=ecs.ContainerImage.from_ecr_repository(ecr_repository, tag="latest"),
-            logging=ecs.LogDrivers.aws_logs(stream_prefix="devopshero", log_group=log_group),
+            logging=ecs.LogDrivers.aws_logs(stream_prefix="humr", log_group=log_group),
             environment={
                 "DJANGO_DEBUG": "0",
                 "HUMR_RUN_JOB_WORKER": "1",
@@ -203,7 +203,7 @@ class AppStack(Stack):
             self,
             "EcsSecurityGroup",
             vpc=vpc,
-            security_group_name="doh-prod-ecs-sg",
+            security_group_name="humr-prod-ecs-sg",
             description="Security group for ECS tasks",
             allow_all_outbound=True,
         )
@@ -217,7 +217,7 @@ class AppStack(Stack):
         target_group = elbv2.ApplicationTargetGroup(
             self,
             "TargetGroup",
-            target_group_name="doh-prod-app-tg",
+            target_group_name="humr-prod-app-tg",
             vpc=vpc,
             port=8000,
             protocol=elbv2.ApplicationProtocol.HTTP,
@@ -249,7 +249,7 @@ class AppStack(Stack):
         self.service = ecs.FargateService(
             self,
             "EcsService",
-            service_name="doh-prod-app",
+            service_name="humr-prod-app",
             cluster=cluster,
             task_definition=task_definition,
             desired_count=0,  # Start at 0, scaled up after image push
@@ -262,5 +262,5 @@ class AppStack(Stack):
         )
         self.service.attach_to_application_target_group(target_group)
 
-        CfnOutput(self, "ServiceArn", value=self.service.service_arn, export_name="doh-prod-service-arn")
-        CfnOutput(self, "ServiceName", value=self.service.service_name, export_name="doh-prod-service-name")
+        CfnOutput(self, "ServiceArn", value=self.service.service_arn, export_name="humr-prod-service-arn")
+        CfnOutput(self, "ServiceName", value=self.service.service_name, export_name="humr-prod-service-name")

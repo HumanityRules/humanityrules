@@ -1,6 +1,6 @@
 #!/bin/bash
 #
-# Tail the DOH prod ECS log group (/devopshero/prod/ecs).
+# Tail the DOH prod ECS log group (/humr/prod/ecs).
 #
 # Usage:
 #   ./tail_prod.sh [aws-logs-tail-flags...]
@@ -11,7 +11,7 @@
 #
 # Examples:
 #   ./tail_prod.sh                                              # all containers, live
-#   ./tail_prod.sh --log-stream-name-prefix devopshero          # app container only
+#   ./tail_prod.sh --log-stream-name-prefix humr          # app container only
 #   ./tail_prod.sh --log-stream-name-prefix migrate             # migration container only
 #   ./tail_prod.sh --since 5m                                   # last 5 min, then follow
 #   ./tail_prod.sh --filter-pattern '?ERROR ?Exception ?Traceback'
@@ -22,7 +22,7 @@
 #
 set -e
 
-LOG_GROUP="/devopshero/prod/ecs"
+LOG_GROUP="/humr/prod/ecs"
 
 if [ -f "../.env" ]; then
     export HUMR_AWS_ACCESS_KEY=$(grep -E '^HUMR_AWS_ACCESS_KEY=' ../.env | cut -d'=' -f2-)

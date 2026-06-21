@@ -23,7 +23,7 @@ Usage:
     uv run python ecs_task_cleanup.py --execute
     
     # Only clean up families matching a prefix
-    uv run python ecs_task_cleanup.py --prefix "devopshero-" --execute
+    uv run python ecs_task_cleanup.py --prefix "humr-" --execute
 
     # Delete ALL unused task definitions (no prefix filter, no retention)
     # This deregisters every revision not actively used by a service or running task.
@@ -74,7 +74,7 @@ def list_task_definition_families(
     """
     List all task definition families matching the given prefix.
     
-    Returns a list of family names (e.g., ["devopshero-simple-dashboard", ...])
+    Returns a list of family names (e.g., ["humr-simple-dashboard", ...])
     """
     families = []
     paginator = ecs_client.get_paginator("list_task_definition_families")
@@ -320,13 +320,13 @@ def main():
     )
     parser.add_argument(
         "--prefix",
-        default="devopshero-",
-        help="Only process families starting with this prefix (default: devopshero-)",
+        default="humr-",
+        help="Only process families starting with this prefix (default: humr-)",
     )
     parser.add_argument(
         "--cluster",
-        default="devopshero-cluster",
-        help="ECS cluster name to check for in-use task definitions (default: devopshero-cluster)",
+        default="humr-cluster",
+        help="ECS cluster name to check for in-use task definitions (default: humr-cluster)",
     )
     args = parser.parse_args()
     

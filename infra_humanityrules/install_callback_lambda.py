@@ -92,7 +92,7 @@ def send_cfn_response(url, event, status, data):
     """
     physical_id = event.get("PhysicalResourceId")
     if not physical_id:
-        physical_id = f"devopshero-install-{event['ResourceProperties'].get('AwsAccount', 'unknown')}"
+        physical_id = f"humr-install-{event['ResourceProperties'].get('AwsAccount', 'unknown')}"
 
     body = json.dumps(
         {

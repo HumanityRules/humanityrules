@@ -14,9 +14,9 @@ Usage:
     uv run manage.py doh_secrets shared-set-from-env --account "CH Sandbox" --env default --file ./.env  # auto-detect all uncommented, non-empty keys
     uv run manage.py doh_secrets shared-delete --account "CH Sandbox" --env default OPENAI_API_KEY TAVILY_API_KEY
 
-    uv run manage.py doh_secrets delete-by-prefix --account "CH Sandbox" --subprefix devopshero/default/old-app
-    uv run manage.py doh_secrets delete-by-prefix --account "CH Sandbox" --subprefix devopshero/default/old-app --dry-run
-    uv run manage.py doh_secrets delete-by-prefix --account "CH Sandbox" --subprefix devopshero/default/old-app --force
+    uv run manage.py doh_secrets delete-by-prefix --account "CH Sandbox" --subprefix humr/default/old-app
+    uv run manage.py doh_secrets delete-by-prefix --account "CH Sandbox" --subprefix humr/default/old-app --dry-run
+    uv run manage.py doh_secrets delete-by-prefix --account "CH Sandbox" --subprefix humr/default/old-app --force
 
 All subcommands accept --org <name-or-slug> to disambiguate when multiple
 organizations share the same account name (e.g. --org "Course Hero" or --org course-hero).
@@ -29,7 +29,7 @@ are already scheduled for deletion (skips the recovery window).
 with a 7-day recovery window; pass `--force` for immediate permanent deletion.
 
 `shared-*` subcommands manage the per-environment shared secrets store
-(devopshero/{env-slug}/shared-secrets). Values set here are automatically
+(humr/{env-slug}/shared-secrets). Values set here are automatically
 used as defaults for empty-placeholder secrets when deploying apps.
 
 Subcommands:
@@ -210,7 +210,7 @@ class Command(BaseCommand):
 
     def _run_shared_list(self, session, env_slug: str, reveal: bool) -> None:
         shared = secrets_utils.get_shared_secrets(session=session, env_slug=env_slug)
-        secret_name = f"devopshero/{env_slug}/shared-secrets"
+        secret_name = f"humr/{env_slug}/shared-secrets"
 
         if not shared:
             self.stdout.write(f"No shared secrets found for environment '{env_slug}'.")
@@ -236,7 +236,7 @@ class Command(BaseCommand):
                 raise CommandError(f"Empty key in '{pair}'.")
             new_values[key] = value
 
-        secret_name = f"devopshero/{env_slug}/shared-secrets"
+        secret_name = f"humr/{env_slug}/shared-secrets"
         sm_client = session.client("secretsmanager")
 
         shared = secrets_utils.get_shared_secrets(session=session, env_slug=env_slug)
@@ -255,7 +255,7 @@ class Command(BaseCommand):
         self.stdout.write(self.style.SUCCESS(f"Set {len(new_values)} key(s) in '{secret_name}'."))
 
     def _run_shared_delete(self, session, env_slug: str, keys: list[str]) -> None:
-        secret_name = f"devopshero/{env_slug}/shared-secrets"
+        secret_name = f"humr/{env_slug}/shared-secrets"
 
         shared = secrets_utils.get_shared_secrets(session=session, env_slug=env_slug)
         if not shared:

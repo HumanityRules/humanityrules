@@ -259,7 +259,7 @@ class AWSAccount(models.Model):
         """Generate the AWS CloudFormation quick-create URL for this account."""
         params = {
             "stackName": f"DevOpsHero-{self.id.hex[:8]}",
-            "templateURL": "https://devopshero-public.s3.us-east-1.amazonaws.com/cf_install_template.json",
+            "templateURL": "https://humr-public.s3.us-east-1.amazonaws.com/cf_install_template.json",
             "param_ExternalId": str(self.external_id),
         }
         base_url = "https://us-east-1.console.aws.amazon.com/cloudformation/home"
@@ -1725,7 +1725,7 @@ class EnvironmentBearerToken(models.Model):
     env (policy proxies, Hermes, future env-resident services) to authenticate
     calls to DOH's control plane. One active token per environment; the raw
     token lives in the customer's AWS Secrets Manager
-    (devopshero/{env-slug}/shared-secrets, key HUMR_ENV_BEARER). Only the hash
+    (humr/{env-slug}/shared-secrets, key HUMR_ENV_BEARER). Only the hash
     is stored here so DOH can authenticate incoming control-plane calls
     without ever seeing the raw value after issue.
     """

@@ -8,7 +8,7 @@ from django.test import SimpleTestCase
 import humanityrules_app.services.infra_customer.bedrock_logging_utils as bedrock_logging_utils
 
 ACCOUNT_ID = "123456789012"
-ROLE_ARN = "arn:aws:iam::123456789012:role/devopshero-bedrock-logging-role"
+ROLE_ARN = "arn:aws:iam::123456789012:role/humr-bedrock-logging-role"
 
 
 def _client_error(code: str) -> ClientError:

@@ -19,12 +19,12 @@ logger = logging.getLogger(__name__)
 
 
 def get_builder_instance_id(session: boto3.Session, env_slug: str) -> str | None:
-    """Find builder instance by tag devopshero:environment={env_slug}."""
+    """Find builder instance by tag humr:environment={env_slug}."""
     ec2_client = session.client("ec2")
 
     response = ec2_client.describe_instances(
         Filters=[
-            {"Name": "tag:devopshero:environment", "Values": [env_slug]},
+            {"Name": "tag:humr:environment", "Values": [env_slug]},
             {"Name": "instance-state-name", "Values": ["pending", "running", "stopping", "stopped"]},
         ],
     )

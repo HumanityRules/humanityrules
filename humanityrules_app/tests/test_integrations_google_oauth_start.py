@@ -221,7 +221,7 @@ class TestIntegrationsGoogleStart(TestCase):
             "redirect_uris": [
                 "https://humanityrules.io/integrations/user/google/callback/",
                 "http://testserver/integrations/user/google/callback/",
-                "https://devopshero.ngrok.io/integrations/user/google/callback/",
+                "https://humanityrules.ngrok.io/integrations/user/google/callback/",
             ],
         }
         self.google_config.save()

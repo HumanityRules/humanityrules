@@ -26,7 +26,7 @@ class LambdaStack(Stack):
         lambda_role = iam.Role(
             self,
             "InstallCallbackLambdaRole",
-            role_name="doh-prod-install-callback-lambda-role",
+            role_name="humr-prod-install-callback-lambda-role",
             assumed_by=iam.ServicePrincipal("lambda.amazonaws.com"),
             managed_policies=[iam.ManagedPolicy.from_aws_managed_policy_name("service-role/AWSLambdaBasicExecutionRole")],
         )
@@ -35,7 +35,7 @@ class LambdaStack(Stack):
         log_group = logs.LogGroup(
             self,
             "InstallCallbackLogGroup",
-            log_group_name="/aws/lambda/doh-prod-install-callback",
+            log_group_name="/aws/lambda/humr-prod-install-callback",
             retention=logs.RetentionDays.TWO_YEARS,
             removal_policy=RemovalPolicy.DESTROY,
         )
@@ -48,7 +48,7 @@ class LambdaStack(Stack):
         self.lambda_function = lambda_.Function(
             self,
             "InstallCallbackLambda",
-            function_name="doh-prod-install-callback",
+            function_name="humr-prod-install-callback",
             description="Handles CloudFormation Custom Resource callbacks when customers connect their AWS accounts",
             runtime=lambda_.Runtime.PYTHON_3_12,
             handler="index.handler",
@@ -70,5 +70,5 @@ class LambdaStack(Stack):
             action="lambda:InvokeFunction",
         )
 
-        CfnOutput(self, "LambdaArn", value=self.lambda_function.function_arn, export_name="doh-prod-install-callback-lambda-arn")
-        CfnOutput(self, "LambdaName", value=self.lambda_function.function_name, export_name="doh-prod-install-callback-lambda-name")
+        CfnOutput(self, "LambdaArn", value=self.lambda_function.function_arn, export_name="humr-prod-install-callback-lambda-arn")
+        CfnOutput(self, "LambdaName", value=self.lambda_function.function_name, export_name="humr-prod-install-callback-lambda-name")

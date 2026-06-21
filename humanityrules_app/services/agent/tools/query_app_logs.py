@@ -200,7 +200,7 @@ async def query_app_logs(
 
     env = apr.environment
     app = apr.app
-    log_group = f"/devopshero/{env.slug}/ecs"
+    log_group = f"/humr/{env.slug}/ecs"
     stream_prefix = app.slug
 
     now = datetime.now(tz=timezone.utc)

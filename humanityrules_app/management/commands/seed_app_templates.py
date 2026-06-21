@@ -298,7 +298,7 @@ HERMES_PERSONAL_TEMPLATE = {
             },
             "host_mounts": [
                 {
-                    "source_path": "/var/lib/devopshero/hermes-roots/{app_slug}",
+                    "source_path": "/var/lib/humr/hermes-roots/{app_slug}",
                     "container_path": "/hermes-persistent-root",
                 },
             ],

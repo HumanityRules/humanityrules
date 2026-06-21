@@ -389,20 +389,20 @@ def _format_sse_event(event: agent_service.AgentStreamEvent, show_costs: bool) -
         result = _format_sse(event_name="sse-tool-result", data=_render_streaming_tool_result(event.data))
         if not isinstance(tool_result, dict):
             return result
-        if tool_name == "mcp__devopshero__update_permission_draft":
+        if tool_name == "mcp__humanityrules__update_permission_draft":
             result += _format_sse_notify(f"permissions-changed-{tool_result['app_permission_request_id']}")
-        if tool_name == "mcp__devopshero__save_app":
+        if tool_name == "mcp__humanityrules__save_app":
             if tool_result.get("created"):
                 result += _format_sse_notify("app-created", slug=tool_result.get("slug", ""))
             else:
                 result += _format_sse_notify(f"app-changed-{tool_result['id']}")
-        if tool_name == "mcp__devopshero__save_environment":
+        if tool_name == "mcp__humanityrules__save_environment":
             if tool_result.get("created"):
                 result += _format_sse_notify("environment-created", environment_id=tool_result.get("id", ""))
             result += _format_sse_notify(f"environment-changed-{tool_result['id']}")
-        if tool_name == "mcp__devopshero__provision_environment":
+        if tool_name == "mcp__humanityrules__provision_environment":
             result += _format_sse_notify(f"environment-changed-{tool_result['id']}")
-        if tool_name in ("mcp__devopshero__save_blueprint", "mcp__devopshero__deploy_blueprint"):
+        if tool_name in ("mcp__humanityrules__save_blueprint", "mcp__humanityrules__deploy_blueprint"):
             result += _format_sse_notify(f"blueprint-changed-{tool_result['app_id']}")
         return result
     elif event.type == "complete":

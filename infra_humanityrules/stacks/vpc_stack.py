@@ -16,7 +16,7 @@ class VpcStack(Stack):
         self.vpc = ec2.Vpc(
             self,
             "Vpc",
-            vpc_name="doh-prod-vpc",
+            vpc_name="humr-prod-vpc",
             ip_addresses=ec2.IpAddresses.cidr("10.0.0.0/16"),
             max_azs=2,
             nat_gateways=1,
@@ -31,7 +31,7 @@ class VpcStack(Stack):
             self,
             "DefaultSecurityGroup",
             vpc=self.vpc,
-            security_group_name="doh-prod-default-sg",
+            security_group_name="humr-prod-default-sg",
             description="Default security group - allows VPC inbound and all outbound",
             allow_all_outbound=True,
         )
@@ -41,6 +41,6 @@ class VpcStack(Stack):
             description="Allow all traffic from within VPC",
         )
 
-        CfnOutput(self, "VpcId", value=self.vpc.vpc_id, export_name="doh-prod-vpc-id")
-        CfnOutput(self, "VpcCidr", value=self.vpc.vpc_cidr_block, export_name="doh-prod-vpc-cidr")
-        CfnOutput(self, "DefaultSecurityGroupId", value=self.default_security_group.security_group_id, export_name="doh-prod-default-sg-id")
+        CfnOutput(self, "VpcId", value=self.vpc.vpc_id, export_name="humr-prod-vpc-id")
+        CfnOutput(self, "VpcCidr", value=self.vpc.vpc_cidr_block, export_name="humr-prod-vpc-cidr")
+        CfnOutput(self, "DefaultSecurityGroupId", value=self.default_security_group.security_group_id, export_name="humr-prod-default-sg-id")

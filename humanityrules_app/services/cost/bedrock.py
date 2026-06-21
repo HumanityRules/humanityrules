@@ -1,6 +1,6 @@
 """Bedrock cost source: CloudWatch Logs Insights over the shared invocation log group.
 
-The log group ``/devopshero/bedrock-invocations`` is account+Region-shared across every DOH
+The log group ``/humr/bedrock-invocations`` is account+Region-shared across every DOH
 environment, so each query is filtered to this app's ECS task role(s). One Insights query does the
 server-side aggregation (sum the four token buckets, grouped by day and model); we then price each
 group via ``pricing.bedrock``. Billing is by **source Region** (where the logs land = the env's
