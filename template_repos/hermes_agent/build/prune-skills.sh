@@ -5,7 +5,7 @@
 set -euo pipefail
 
 BUNDLED=${1:?Usage: prune-skills.sh <bundled-skills-dir>}
-KEEP_MARKER=.doh-keep
+KEEP_MARKER=.humr-keep
 
 [ -d "$BUNDLED" ] || { echo "FATAL: bundled skills dir '$BUNDLED' missing" >&2; exit 1; }
 

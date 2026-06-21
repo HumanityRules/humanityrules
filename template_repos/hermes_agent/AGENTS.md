@@ -7,13 +7,13 @@ The Hermes agent and WebUI are vendored as **git submodules** under `vendor/herm
     git submodule update --init template_repos/hermes_agent/vendor/hermes-agent
     git submodule update --init template_repos/hermes_agent/vendor/hermes-webui
 
-`build/check-vendor.sh` is a build-time fail-fast guard for this, and also asserts the webui fork was rebased onto the same upstream version as the base image (`FROM ...hermes-webui:<WEBUI_BASE_VERSION>` vs `.doh-upstream-version`).
+`build/check-vendor.sh` is a build-time fail-fast guard for this, and also asserts the webui fork was rebased onto the same upstream version as the base image (`FROM ...hermes-webui:<WEBUI_BASE_VERSION>` vs `.humr-upstream-version`).
 
 **To change the agent or webui:** edit the files under `vendor/<repo>` (the edit is picked up by local builds immediately, uncommitted). To record it, use `build/vendor-commit.sh <agent|webui> -m "msg"` — it commits on the `humr/v*` branch, pushes to the mirror, *then* bumps the superproject gitlink, in that order. Do not hand-roll this: committing a gitlink that points at an unpushed commit produces a SHA that fresh clones can't fetch.
 
 **Gitlink hygiene.** After testing inside a submodule, `git status` in the superproject shows `modified: vendor/... (new commits)` or `(modified content)`. A blind `git add -A` on `main` would ship an unintended pin bump or an uncommitted vendor change. Only stage `vendor/<repo>` via `vendor-commit.sh`, or deliberately after the fork commit is pushed.
 
-**Version bump:** rebase the `humr/v*` branch onto the new upstream tag, update `.doh-upstream-version` (webui), push, then `git -C vendor/<repo> checkout humr/vNEW` and commit the gitlink. See the `hermes-update-check` skill.
+**Version bump:** rebase the `humr/v*` branch onto the new upstream tag, update `.humr-upstream-version` (webui), push, then `git -C vendor/<repo> checkout humr/vNEW` and commit the gitlink. See the `hermes-update-check` skill.
 
 # End-to-End Verification
 

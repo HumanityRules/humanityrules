@@ -14,13 +14,13 @@
 #                       (tests/, .env*, __pycache__, *.pyc); mirroring it keeps
 #                       /apptoo identical to what an upstream image build emits.
 #   --exclude api/_version.py      build-stamped, not in git -- must survive.
-#   --exclude .git/.doh-upstream-version   not WebUI source.
+#   --exclude .git/.humr-upstream-version   not WebUI source.
 set -euo pipefail
 
 SRC=${1:?usage: overlay-webui.sh <webui-src-dir> <dest-apptoo-dir>}
 DEST=${2:?missing dest dir}
 
-excludes=(--exclude='.git' --exclude='.doh-upstream-version' --exclude='api/_version.py')
+excludes=(--exclude='.git' --exclude='.humr-upstream-version' --exclude='api/_version.py')
 if [ -f "$SRC/.dockerignore" ]; then
     excludes+=(--exclude-from="$SRC/.dockerignore")
 fi

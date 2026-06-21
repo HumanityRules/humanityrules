@@ -32,13 +32,13 @@ die() {
 [ -f "$WEBUI_SRC/server.py" ]      || die "webui submodule missing ($WEBUI_SRC/server.py not found)"
 [ -f "$WEBUI_SRC/requirements.txt" ] || die "webui submodule incomplete ($WEBUI_SRC/requirements.txt not found)"
 
-actual_version=$(cat "$WEBUI_SRC/.doh-upstream-version" 2>/dev/null || echo "<missing>")
+actual_version=$(cat "$WEBUI_SRC/.humr-upstream-version" 2>/dev/null || echo "<missing>")
 if [ "$actual_version" != "$EXPECTED_VERSION" ]; then
     echo "FATAL: webui fork/base version mismatch." >&2
     echo "  Base image (FROM): $EXPECTED_VERSION" >&2
-    echo "  Fork pinned to:     $actual_version (vendor/hermes-webui/.doh-upstream-version)" >&2
+    echo "  Fork pinned to:     $actual_version (vendor/hermes-webui/.humr-upstream-version)" >&2
     echo "  Rebase the humr/v* branch onto the matching upstream tag and update" >&2
-    echo "  .doh-upstream-version, or set --build-arg WEBUI_BASE_VERSION to match." >&2
+    echo "  .humr-upstream-version, or set --build-arg WEBUI_BASE_VERSION to match." >&2
     exit 1
 fi
 
