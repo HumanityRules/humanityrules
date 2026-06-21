@@ -10,8 +10,8 @@ RUN pip install --no-cache-dir --require-hashes -r requirements.txt || pip insta
 COPY policy_proxy ./policy_proxy
 
 # Expose the policy proxy's listen port. The actual port is driven by
-# DOH_LISTEN_PORT at runtime and must match the ALB target group config.
+# HUMR_LISTEN_PORT at runtime and must match the ALB target group config.
 EXPOSE 8443
 
-# Uvicorn reads DOH_LISTEN_PORT and binds to 0.0.0.0 on it.
+# Uvicorn reads HUMR_LISTEN_PORT and binds to 0.0.0.0 on it.
 ENTRYPOINT ["python", "-m", "policy_proxy.main"]

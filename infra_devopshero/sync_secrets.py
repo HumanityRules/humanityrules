@@ -40,7 +40,7 @@ SECRET_DEFINITIONS = {
         "AWS_BEDROCK_SECRET_ACCESS_KEY",
     ],
     "devopshero/prod/api": [
-        "DOH_API_SECRET_KEY",
+        "HUMR_API_SECRET_KEY",
     ],
     "devopshero/prod/posthog": [
         "POSTHOG_API_KEY",
@@ -48,8 +48,8 @@ SECRET_DEFINITIONS = {
         "POSTHOG_PROXY_HOST",
     ],
     "devopshero/prod/env-sso": [
-        "DOH_ENV_SESSION_JWT_PRIVATE_KEY",
-        "DOH_ENV_SESSION_JWT_KID",
+        "HUMR_ENV_SESSION_JWT_PRIVATE_KEY",
+        "HUMR_ENV_SESSION_JWT_KID",
     ],
     "devopshero/prod/merge": [
         "MERGE_AGENT_HANDLER_API_KEY",
@@ -76,8 +76,8 @@ def get_secrets_client(env_values: dict[str, str]) -> boto3.client:
     return boto3.client(
         "secretsmanager",
         region_name="us-east-1",
-        aws_access_key_id=env_values.get("DOH_AWS_ACCESS_KEY"),
-        aws_secret_access_key=env_values.get("DOH_AWS_SECRET_KEY"),
+        aws_access_key_id=env_values.get("HUMR_AWS_ACCESS_KEY"),
+        aws_secret_access_key=env_values.get("HUMR_AWS_SECRET_KEY"),
     )
 
 

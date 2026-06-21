@@ -3,7 +3,7 @@
 The Merge tenant-wide API key lives on DOH only — never inside the customer's
 Hermes container. Env-resident callers (the integrations broker / MCP
 aggregator) reach Merge through these endpoints, authenticating with their
-DOH_ENV_BEARER. DOH validates the bearer, derives `origin_user_id` from the
+HUMR_ENV_BEARER. DOH validates the bearer, derives `origin_user_id` from the
 authenticated env's owner + app slug, attaches the Merge API key, and
 forwards.
 

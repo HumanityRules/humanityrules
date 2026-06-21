@@ -21,7 +21,7 @@ def _required(name: str) -> str:
 def load_config_from_env() -> LocalPolicyProxyConfig:
     """Load config from the process environment."""
     return LocalPolicyProxyConfig(
-        upstream_host=_required("DOH_UPSTREAM_HOST"),
-        upstream_port=int(_required("DOH_UPSTREAM_PORT")),
-        listen_port=int(_required("DOH_LISTEN_PORT")),
+        upstream_host=_required("HUMR_UPSTREAM_HOST"),
+        upstream_port=int(_required("HUMR_UPSTREAM_PORT")),
+        listen_port=int(_required("HUMR_LISTEN_PORT")),
     )

@@ -12,17 +12,17 @@ This directory contains the CDK infrastructure for the DevOps Hero control plane
 source ../scripts/load_aws_env.sh   # If this script exists
 
 # Or manually export (deploy.sh does this automatically):
-export DOH_AWS_ACCESS_KEY=$(grep -E '^DOH_AWS_ACCESS_KEY=' ../.env | cut -d'=' -f2-)
-export DOH_AWS_SECRET_KEY=$(grep -E '^DOH_AWS_SECRET_KEY=' ../.env | cut -d'=' -f2-)
-export DOH_AWS_ACCOUNT_ID=$(grep -E '^DOH_AWS_ACCOUNT_ID=' ../.env | cut -d'=' -f2-)
+export HUMR_AWS_ACCESS_KEY=$(grep -E '^HUMR_AWS_ACCESS_KEY=' ../.env | cut -d'=' -f2-)
+export HUMR_AWS_SECRET_KEY=$(grep -E '^HUMR_AWS_SECRET_KEY=' ../.env | cut -d'=' -f2-)
+export HUMR_AWS_ACCOUNT_ID=$(grep -E '^HUMR_AWS_ACCOUNT_ID=' ../.env | cut -d'=' -f2-)
 
 # Map to AWS CLI expected names
-export AWS_ACCESS_KEY_ID="${DOH_AWS_ACCESS_KEY}"
-export AWS_SECRET_ACCESS_KEY="${DOH_AWS_SECRET_KEY}"
+export AWS_ACCESS_KEY_ID="${HUMR_AWS_ACCESS_KEY}"
+export AWS_SECRET_ACCESS_KEY="${HUMR_AWS_SECRET_KEY}"
 export AWS_DEFAULT_REGION="us-east-1"
 ```
 
-The `.env` file has `DOH_AWS_*` prefixed variables (not `AWS_*`) to avoid conflicts with other AWS credentials the user might have. The `deploy.sh` script handles this mapping automatically.
+The `.env` file has `HUMR_AWS_*` prefixed variables (not `AWS_*`) to avoid conflicts with other AWS credentials the user might have. The `deploy.sh` script handles this mapping automatically.
 
 
 ## Stack Architecture
@@ -51,7 +51,7 @@ cd infra_devopshero
 ```
 
 This script:
-1. Loads DOH_AWS credentials from `.env`
+1. Loads HUMR_AWS credentials from `.env`
 2. Bootstraps CDK if needed
 3. Syncs secrets to AWS Secrets Manager via `sync_secrets.py`
 4. Deploys all CDK stacks in dependency order
@@ -76,7 +76,7 @@ Secrets are synced from `.env` to AWS Secrets Manager. The mapping is defined in
 - `devopshero/prod/workos` — WORKOS_CLIENT_ID, WORKOS_API_KEY
 - `devopshero/prod/github` — GitHub App credentials
 - `devopshero/prod/bedrock` — Bedrock credentials for AI features
-- `devopshero/prod/api` — DOH_API_SECRET_KEY
+- `devopshero/prod/api` — HUMR_API_SECRET_KEY
 - `devopshero/prod/telegram` — TELEGRAM_MANAGER_BOT_TOKEN, TELEGRAM_MANAGER_BOT_USERNAME
 
 **To update secrets:**

@@ -32,8 +32,8 @@ from . import doh_app_shell
 
 _MAX_OUTPUT_BYTES = 1_048_576
 
-_SENTINEL_BEGIN = "___DOH_EXEC_BEGIN___"
-_SENTINEL_END = "___DOH_EXEC_END___"
+_SENTINEL_BEGIN = "___HUMR_EXEC_BEGIN___"
+_SENTINEL_END = "___HUMR_EXEC_END___"
 _RC_LINE_RE = re.compile(rf"^{re.escape(_SENTINEL_END)} RC=(-?\d+)$")
 
 
@@ -292,7 +292,7 @@ class Command(BaseCommand):
 
         # Escape hatch when a probe's output looks wrong — inspect what SSM
         # actually returned before the sentinel parser split it.
-        if os.environ.get("DOH_APP_EXEC_DEBUG"):
+        if os.environ.get("HUMR_APP_EXEC_DEBUG"):
             self.stderr.write("=== RAW OUTPUT ===")
             self.stderr.write(raw_output)
             self.stderr.write("=== END RAW ===")

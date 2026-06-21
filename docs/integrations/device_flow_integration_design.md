@@ -5,7 +5,7 @@ must stay outside the sandbox. This started with ChatGPT-subscription Codex auth
 and now also covers Nous Portal. Companion to `integrations_broker_design.md`
 for TLS-intercept mechanics.
 
-Status: implemented (backend + WebUI device dialog). Not yet wired: deploy-time selection of `DOH_LLM_PROVIDER=openai-codex` (a deploy_app.py concern, not in this repo).
+Status: implemented (backend + WebUI device dialog). Not yet wired: deploy-time selection of `HUMR_LLM_PROVIDER=openai-codex` (a deploy_app.py concern, not in this repo).
 
 ## Decisions
 
@@ -13,7 +13,7 @@ Status: implemented (backend + WebUI device dialog). Not yet wired: deploy-time 
 - **Credential model A: TLS-intercept.** Sandbox holds a placeholder; broker swaps the real token on the wire to `chatgpt.com`. Refresh token never enters the sandbox.
 - **Device flow, not redirect.** Codex uses OpenAI's first-party public client on an Auth0 tenant we don't administer, so we can't register a `humanityrules.io` callback. Device flow needs no callback of ours.
 - **Broker polls, DOH stores.** The minutes-long poll loop fits the always-on broker, not stateless Django. On success the broker hands the refresh token to DOH, which owns storage, refresh, revoke, and cross-app reuse. Cost: refresh token transits broker memory once (acceptable — broker is outside the sandbox).
-- **Provider selection: set `DOH_LLM_PROVIDER=openai-codex`.** Hermes ships this provider and the Responses dialect natively; no agent code needed.
+- **Provider selection: set `HUMR_LLM_PROVIDER=openai-codex`.** Hermes ships this provider and the Responses dialect natively; no agent code needed.
 - **Broker injects `ChatGPT-Account-ID`** (not a JWT-shaped placeholder). Account-id never enters the sandbox; placeholder stays a plain non-JWT sentinel.
 
 ## Wire contract

@@ -19,7 +19,7 @@ from typing import ClassVar, Literal
 # Authorization header encodings used by OAuthHeader providers.
 AUTH_FORMAT_BEARER = "bearer"
 AUTH_FORMAT_BASIC_X_ACCESS_TOKEN = "basic_x_access_token"
-DOH_PLACEHOLDER_VALUE = "DOH_PLACEHOLDER"
+HUMR_PLACEHOLDER_VALUE = "HUMR_PLACEHOLDER"
 ConnectMode = Literal["oauth", "device", "vault"]
 # Which integrations-panel section a provider renders under.
 Category = Literal["model_provider", "connector"]
@@ -209,7 +209,7 @@ TLS_INTERCEPT_PROVIDER_SPECS = (
         logo_url="/extensions/github.svg",
         credential_method=OAuthHeader(auth_format=AUTH_FORMAT_BASIC_X_ACCESS_TOKEN),
         env_bindings=(
-            EnvBinding(env_var="GITHUB_TOKEN", value=DOH_PLACEHOLDER_VALUE),
+            EnvBinding(env_var="GITHUB_TOKEN", value=HUMR_PLACEHOLDER_VALUE),
         ),
         restart_gateway_after_save=False,
         restart_webui_after_save=True,
@@ -221,10 +221,10 @@ TLS_INTERCEPT_PROVIDER_SPECS = (
         hosts=("api.telegram.org",),
         logo_url="/extensions/telegram.svg",
         credential_method=VaultUrlRewrite(
-            placeholder="000000:DOH_PLACEHOLDER",
+            placeholder="000000:HUMR_PLACEHOLDER",
         ),
         env_bindings=(
-            EnvBinding(env_var="TELEGRAM_BOT_TOKEN", value="000000:DOH_PLACEHOLDER"),
+            EnvBinding(env_var="TELEGRAM_BOT_TOKEN", value="000000:HUMR_PLACEHOLDER"),
             EnvBinding(env_var="TELEGRAM_ALLOWED_USERS", config_key="allowed_users", list_separator=","),
         ),
         restart_gateway_after_save=True,
@@ -242,13 +242,13 @@ TLS_INTERCEPT_PROVIDER_SPECS = (
         logo_url="/extensions/slack.svg",
         credential_method=VaultHeaderInject(
             placeholders={
-                "app_token": "xapp-DOH_PLACEHOLDER",
-                "bot_token": "xoxb-DOH_PLACEHOLDER",
+                "app_token": "xapp-HUMR_PLACEHOLDER",
+                "bot_token": "xoxb-HUMR_PLACEHOLDER",
             },
         ),
         env_bindings=(
-            EnvBinding(env_var="SLACK_APP_TOKEN", value="xapp-DOH_PLACEHOLDER"),
-            EnvBinding(env_var="SLACK_BOT_TOKEN", value="xoxb-DOH_PLACEHOLDER"),
+            EnvBinding(env_var="SLACK_APP_TOKEN", value="xapp-HUMR_PLACEHOLDER"),
+            EnvBinding(env_var="SLACK_BOT_TOKEN", value="xoxb-HUMR_PLACEHOLDER"),
             # The gateway denies users by default. Company-wide mode sets
             # allow_all_users in config (→ SLACK_ALLOW_ALL_USERS=true);
             # personal mode instead sets allowed_users (owner only). Each
@@ -294,10 +294,10 @@ TLS_INTERCEPT_PROVIDER_SPECS = (
         hosts=("openrouter.ai",),
         logo_url="/extensions/openrouter.svg",
         credential_method=VaultHeaderInject(
-            placeholders={"api_key": DOH_PLACEHOLDER_VALUE},
+            placeholders={"api_key": HUMR_PLACEHOLDER_VALUE},
         ),
         env_bindings=(
-            EnvBinding(env_var="OPENROUTER_API_KEY", value=DOH_PLACEHOLDER_VALUE),
+            EnvBinding(env_var="OPENROUTER_API_KEY", value=HUMR_PLACEHOLDER_VALUE),
         ),
         restart_gateway_after_save=True,
         restart_webui_after_save=True,
@@ -311,10 +311,10 @@ TLS_INTERCEPT_PROVIDER_SPECS = (
         hosts=("api.openai.com",),
         logo_url="/extensions/openai.svg",
         credential_method=VaultHeaderInject(
-            placeholders={"api_key": DOH_PLACEHOLDER_VALUE},
+            placeholders={"api_key": HUMR_PLACEHOLDER_VALUE},
         ),
         env_bindings=(
-            EnvBinding(env_var="OPENAI_API_KEY", value=DOH_PLACEHOLDER_VALUE),
+            EnvBinding(env_var="OPENAI_API_KEY", value=HUMR_PLACEHOLDER_VALUE),
         ),
         restart_gateway_after_save=True,
         restart_webui_after_save=True,
@@ -328,10 +328,10 @@ TLS_INTERCEPT_PROVIDER_SPECS = (
         # Anthropic authenticates with x-api-key, not Authorization: Bearer.
         credential_method=VaultApiKeyHeader(
             header_name="x-api-key",
-            placeholder=DOH_PLACEHOLDER_VALUE,
+            placeholder=HUMR_PLACEHOLDER_VALUE,
         ),
         env_bindings=(
-            EnvBinding(env_var="ANTHROPIC_API_KEY", value=DOH_PLACEHOLDER_VALUE),
+            EnvBinding(env_var="ANTHROPIC_API_KEY", value=HUMR_PLACEHOLDER_VALUE),
         ),
         restart_gateway_after_save=True,
         restart_webui_after_save=True,
@@ -349,10 +349,10 @@ TLS_INTERCEPT_PROVIDER_SPECS = (
         # Authorization: Bearer — same shape as Anthropic's x-api-key.
         credential_method=VaultApiKeyHeader(
             header_name="X-Browser-Use-API-Key",
-            placeholder=DOH_PLACEHOLDER_VALUE,
+            placeholder=HUMR_PLACEHOLDER_VALUE,
         ),
         env_bindings=(
-            EnvBinding(env_var="BROWSER_USE_API_KEY", value=DOH_PLACEHOLDER_VALUE),
+            EnvBinding(env_var="BROWSER_USE_API_KEY", value=HUMR_PLACEHOLDER_VALUE),
         ),
         # The agent reads BROWSER_USE_API_KEY at call time and the browser tool
         # runs in agent turns served by either process (gateway for cron/platform

@@ -28,7 +28,7 @@ Ask the user only if missing — never grill. Reasonable defaults are noted.
 
 ## Pre-flight checks (do these silently before running)
 
-- Both source and dest hermes services exist and use the `hermes_agent` template (`grep DOH_APP_TEMPLATE`-style check, or just check that `/hermes-checkpoint` and `/hermes-persistent-root` mounts exist in the dest task definition).
+- Both source and dest hermes services exist and use the `hermes_agent` template (`grep HUMR_APP_TEMPLATE`-style check, or just check that `/hermes-checkpoint` and `/hermes-persistent-root` mounts exist in the dest task definition).
 - Source service has 1 RUNNING task. If it's at desiredCount=0, ask before scaling up — the user may have stopped it deliberately.
 - Free disk on dest EC2 instance: `df -h /var/lib/devopshero` via `doh_node_shell` — restoring needs roughly 2-3x the compressed tar size in free space.
 - If the dest persistent root has user data the user might care about, surface its size + last-mtime and confirm before proceeding.

@@ -50,7 +50,7 @@ def run_apply(app_permission_request_id: str) -> bool:
         iam_utils.write_app_permissions_policy(
             environment=apr.environment,
             app=apr.app,
-            policy_name=permissions_service.DOH_APP_PERMISSIONS_POLICY_NAME,
+            policy_name=permissions_service.HUMR_APP_PERMISSIONS_POLICY_NAME,
             statements=apr.statements,
         )
     except Exception as e:

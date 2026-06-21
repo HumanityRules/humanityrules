@@ -123,7 +123,7 @@ The aggregator owns the OAuth handlers (DCR, callback, status, disconnect) but t
 
 `GET /__doh_broker/integrations` returns a unified flat list of all integrations (TLS-intercept providers like Google + MCP-aggregator providers like Notion + Merge per-connector cards), each tagged with a `kind` discriminator the WebUI uses to dispatch the right click handlers.
 
-The aggregator also exposes a second kind of upstream — `auth_kind="doh_relay"` — used for Merge.dev: instead of holding OAuth tokens directly, the ProxyProvider's `client_factory` builds a `StreamableHttpTransport` pointed at a DOH relay endpoint with `DOH_ENV_BEARER` + identity headers attached. See `merge_integration_design.md`.
+The aggregator also exposes a second kind of upstream — `auth_kind="doh_relay"` — used for Merge.dev: instead of holding OAuth tokens directly, the ProxyProvider's `client_factory` builds a `StreamableHttpTransport` pointed at a DOH relay endpoint with `HUMR_ENV_BEARER` + identity headers attached. See `merge_integration_design.md`.
 
 ## Nono profile changes
 

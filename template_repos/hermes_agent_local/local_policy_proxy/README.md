@@ -8,9 +8,9 @@ Production `policy_proxy` verifies SSO, runs PDP, and sets `X-Forwarded-Host` be
 
 | Var | Example | Purpose |
 | --- | --- | --- |
-| `DOH_UPSTREAM_HOST` | `hermes` | Compose service name for the Hermes container |
-| `DOH_UPSTREAM_PORT` | `8787` | Caddy inside Hermes |
-| `DOH_LISTEN_PORT` | `8788` | Port browsers hit locally |
+| `HUMR_UPSTREAM_HOST` | `hermes` | Compose service name for the Hermes container |
+| `HUMR_UPSTREAM_PORT` | `8787` | Caddy inside Hermes |
+| `HUMR_LISTEN_PORT` | `8788` | Port browsers hit locally |
 
 ## With Hermes compose
 

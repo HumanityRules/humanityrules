@@ -14,7 +14,7 @@ For investigating issues with apps deployed into customer AWS accounts — ECS t
 
 All commands below work identically in both modes — just swap the prefix.
 
-Customer accounts are accessed via IAM role assumption. The `.env` file in the project root has `DOH_AWS_ACCESS_KEY` and `DOH_AWS_SECRET_KEY` — these are DOH's control plane IAM credentials, loaded into `django.conf.settings`. They're used to STS-assume `arn:aws:iam::{account_id}:role/devopshero-{external_id}` in the customer account. All management commands handle this internally via `iam_utils.get_assumed_role_session()`. The `account_id` and `external_id` come from the `AWSAccount` model in the DB.
+Customer accounts are accessed via IAM role assumption. The `.env` file in the project root has `HUMR_AWS_ACCESS_KEY` and `HUMR_AWS_SECRET_KEY` — these are DOH's control plane IAM credentials, loaded into `django.conf.settings`. They're used to STS-assume `arn:aws:iam::{account_id}:role/devopshero-{external_id}` in the customer account. All management commands handle this internally via `iam_utils.get_assumed_role_session()`. The `account_id` and `external_id` come from the `AWSAccount` model in the DB.
 
 
 ## Step 1: Gather Context from the DB
@@ -38,8 +38,8 @@ For ad-hoc AWS CLI calls not covered by existing commands, assume the customer r
 
 ```bash
 # Load DOH control plane credentials
-export AWS_ACCESS_KEY_ID=$(grep -E '^DOH_AWS_ACCESS_KEY=' .env | cut -d'=' -f2-)
-export AWS_SECRET_ACCESS_KEY=$(grep -E '^DOH_AWS_SECRET_KEY=' .env | cut -d'=' -f2-)
+export AWS_ACCESS_KEY_ID=$(grep -E '^HUMR_AWS_ACCESS_KEY=' .env | cut -d'=' -f2-)
+export AWS_SECRET_ACCESS_KEY=$(grep -E '^HUMR_AWS_SECRET_KEY=' .env | cut -d'=' -f2-)
 export AWS_DEFAULT_REGION="us-east-1"
 
 # Assume the customer role (substitute account_id and external_id from doh_query)

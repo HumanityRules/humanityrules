@@ -134,8 +134,8 @@ def resolve_aws_target(options: dict) -> ResolvedAwsTarget:
 
 def _build_session(aws_account_id: str, external_id: str, region: str) -> boto3.Session:
     """Build an assumed-role boto3 session for the given account/region."""
-    access_key = settings.DOH_AWS_ACCESS_KEY
-    secret_key = settings.DOH_AWS_SECRET_KEY
+    access_key = settings.HUMR_AWS_ACCESS_KEY
+    secret_key = settings.HUMR_AWS_SECRET_KEY
     if not access_key or not secret_key:
         # Prod ECS tasks have no .env; use the task role (see app_stack task_role).
         access_key = None

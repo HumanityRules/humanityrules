@@ -19,7 +19,7 @@ Merge's API key authorizes operations across **every** Registered User in our Me
 
 The Hermes container runs in the **customer's** AWS account. A customer admin with `ecs:ExecuteCommand` can read `/proc/<pid>/environ` on any process in the container, including the broker sidecar. So the Merge API key cannot live there.
 
-This mirrors the Google integration's earlier-resolved problem: Google's OAuth `client_secret` is a tenant-wide secret too. The solution is the same — keep the secret on DOH's control plane, and have the broker reach Merge through DOH-side endpoints authenticated with `DOH_ENV_BEARER`.
+This mirrors the Google integration's earlier-resolved problem: Google's OAuth `client_secret` is a tenant-wide secret too. The solution is the same — keep the secret on DOH's control plane, and have the broker reach Merge through DOH-side endpoints authenticated with `HUMR_ENV_BEARER`.
 
 ## Architecture
 
@@ -38,10 +38,10 @@ This mirrors the Google integration's earlier-resolved problem: Google's OAuth `
 │  /mcp on :9952 (FastMCP aggregator)        │
 │    Notion ProxyProvider — direct OAuth     │
 │    Merge  ProxyProvider — DOH-relayed:     │
-│      url = $DOH_CONTROL_PLANE/api/         │
+│      url = $HUMR_CONTROL_PLANE/api/         │
 │            integrations/merge/mcp          │
 │      headers:                              │
-│        Authorization: Bearer DOH_ENV_BEARER│
+│        Authorization: Bearer HUMR_ENV_BEARER│
 │        X-Doh-App-Slug: <slug>              │
 │        X-Doh-Owner-Username: <username>    │
 │                                            │
@@ -54,7 +54,7 @@ This mirrors the Google integration's earlier-resolved problem: Google's OAuth `
 ┌─ DOH control plane ────────────────────────┐
 │                                            │
 │  /api/integrations/merge/*                 │
-│    validates DOH_ENV_BEARER                │
+│    validates HUMR_ENV_BEARER                │
 │    derives origin_user_id =                │
 │      f"doh_{user.pk}_{app_slug}"           │
 │    attaches MERGE_AGENT_HANDLER_API_KEY    │
@@ -145,7 +145,7 @@ We use one Merge Tool Pack for all DOH customers. Cross-tenant security comes fr
 
 ## What the broker's env contract gains
 
-One new variable: `DOH_APP_SLUG`, injected by `deploy_app.py`'s env-bearer overlay alongside the existing `DOH_OWNER_USERNAME`, `DOH_ENV_BEARER`, etc. Used to construct the `X-Doh-App-Slug` header on every Merge-bound call.
+One new variable: `HUMR_APP_SLUG`, injected by `deploy_app.py`'s env-bearer overlay alongside the existing `HUMR_OWNER_USERNAME`, `HUMR_ENV_BEARER`, etc. Used to construct the `X-Doh-App-Slug` header on every Merge-bound call.
 
 No new secrets in the customer container.
 

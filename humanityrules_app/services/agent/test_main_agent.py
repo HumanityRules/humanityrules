@@ -76,7 +76,7 @@ def _copy_sqlite_db(base_path: Path, run_path: Path) -> None:
 
 def _setup_django(db_path: Path) -> None:
     os.environ.setdefault("DJANGO_SETTINGS_MODULE", "humanityrules_site.settings")
-    os.environ["DOH_DB_PATH"] = str(db_path)
+    os.environ["HUMR_DB_PATH"] = str(db_path)
     import django
 
     django.setup()

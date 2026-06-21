@@ -284,7 +284,7 @@ def _owner_username_for_app(app: App) -> str | None:
 
     The owner tag is set by the Personal Assistant deploy flow (see
     docs/policy_proxy_design.md). It's the identity DOH injects into env-bearer
-    containers as DOH_OWNER_USERNAME so they can speak to the DOH control plane on
+    containers as HUMR_OWNER_USERNAME so they can speak to the DOH control plane on
     behalf of this user.
     """
     row = ResourceTag.objects.filter(

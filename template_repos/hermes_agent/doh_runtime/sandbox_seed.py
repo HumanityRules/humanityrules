@@ -25,7 +25,7 @@ AWS_S3_PORT = 9905
 AWS_S3TABLES_PORT = 9906
 AWS_DYNAMODB_PORT = 9907
 
-AUTH_MARKER_SENTINEL = "DOH_PLACEHOLDER"
+AUTH_MARKER_SENTINEL = "HUMR_PLACEHOLDER"
 CODEX_PROVIDER = "openai-codex"
 NOUS_PROVIDER = "nous"
 NOUS_PORTAL_BASE_URL = "https://portal.nousresearch.com"
@@ -122,7 +122,7 @@ def configure_github_git_helper() -> None:
             "--global",
             "--replace-all",
             "credential.https://github.com.helper",
-            "!f(){ echo username=x-access-token; echo password=DOH_PLACEHOLDER; }; f",
+            "!f(){ echo username=x-access-token; echo password=HUMR_PLACEHOLDER; }; f",
         ],
         check=True,
     )

@@ -54,12 +54,12 @@ fi
 
 # Load AWS credentials from .env
 if [ -f "../.env" ]; then
-    export DOH_AWS_ACCESS_KEY=$(grep -E '^DOH_AWS_ACCESS_KEY=' ../.env | cut -d'=' -f2-)
-    export DOH_AWS_SECRET_KEY=$(grep -E '^DOH_AWS_SECRET_KEY=' ../.env | cut -d'=' -f2-)
+    export HUMR_AWS_ACCESS_KEY=$(grep -E '^HUMR_AWS_ACCESS_KEY=' ../.env | cut -d'=' -f2-)
+    export HUMR_AWS_SECRET_KEY=$(grep -E '^HUMR_AWS_SECRET_KEY=' ../.env | cut -d'=' -f2-)
 fi
 
-export AWS_ACCESS_KEY_ID="${DOH_AWS_ACCESS_KEY}"
-export AWS_SECRET_ACCESS_KEY="${DOH_AWS_SECRET_KEY}"
+export AWS_ACCESS_KEY_ID="${HUMR_AWS_ACCESS_KEY}"
+export AWS_SECRET_ACCESS_KEY="${HUMR_AWS_SECRET_KEY}"
 export AWS_DEFAULT_REGION="us-east-1"
 
 # Find a task that's actually ready for ECS exec.
@@ -123,9 +123,9 @@ echo "---"
 # every interactive command (`shell`, `dbshell`, anything reading stdin) would
 # die instantly with `Cannot perform start session: EOF`.
 # Customer-account commands (doh_app_shell, doh_app_logs, …) assume roles via
-# DOH_AWS_* creds. The prod container has no .env file — forward from the
+# HUMR_AWS_* creds. The prod container has no .env file — forward from the
 # operator's laptop so Django settings pick them up inside ECS exec.
-FULL_CMD="DOH_AWS_ACCESS_KEY=$(printf '%q' "$DOH_AWS_ACCESS_KEY") DOH_AWS_SECRET_KEY=$(printf '%q' "$DOH_AWS_SECRET_KEY") uv run python manage.py"
+FULL_CMD="HUMR_AWS_ACCESS_KEY=$(printf '%q' "$HUMR_AWS_ACCESS_KEY") HUMR_AWS_SECRET_KEY=$(printf '%q' "$HUMR_AWS_SECRET_KEY") uv run python manage.py"
 for arg in "$@"; do
     FULL_CMD+=" $(printf '%q' "$arg")"
 done

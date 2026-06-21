@@ -10,7 +10,7 @@ random raw token, writes it into the env's ``shared-secrets``, and stores
 only the hash on DOH. That path is great for prod but annoying for local
 testing because the raw token lives only in AWS. This command does the
 reverse: you *pick* a raw token, DOH hashes and stores it, and you use that
-same raw value in your local refresher's ``DOH_ENV_BEARER`` env var.
+same raw value in your local refresher's ``HUMR_ENV_BEARER`` env var.
 
 Usage:
     uv run manage.py doh_seed_env_bearer --env default --token local-dev-bearer-token
@@ -61,5 +61,5 @@ class Command(BaseCommand):
             f"{action} EnvironmentBearerToken for env='{env_slug}'"
         ))
         self.stdout.write("")
-        self.stdout.write(f"  Raw token (export as DOH_ENV_BEARER): {raw}")
+        self.stdout.write(f"  Raw token (export as HUMR_ENV_BEARER): {raw}")
         self.stdout.write(f"  Hash stored in DB:                   {token_hash}")

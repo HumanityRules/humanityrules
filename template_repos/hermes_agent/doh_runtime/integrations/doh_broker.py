@@ -21,14 +21,14 @@ The aggregator's port 9952 is sandbox-only MCP traffic. Refresh tokens, DOH's
 OAuth client secrets, and the env bearer never enter the sandbox.
 
 Environment contract (set by deploy_app.py's env-bearer overlay):
-- DOH_ENV_BEARER        — bearer for DOH's per-env integration endpoints.
-- DOH_OWNER_USERNAME    — whose grants this container is for.
-- DOH_APP_SLUG          — logical app key for app-scoped credentials.
-- DOH_CONTROL_PLANE_URL — base URL for DOH (e.g. https://humanityrules.io).
-- DOH_ENV_SLUG          — env slug, for logging only.
-- DOH_MERGE_INTEGRATION_ENABLED — optional; false disables all Merge.dev connectors.
+- HUMR_ENV_BEARER        — bearer for DOH's per-env integration endpoints.
+- HUMR_OWNER_USERNAME    — whose grants this container is for.
+- HUMR_APP_SLUG          — logical app key for app-scoped credentials.
+- HUMR_CONTROL_PLANE_URL — base URL for DOH (e.g. https://humanityrules.io).
+- HUMR_ENV_SLUG          — env slug, for logging only.
+- HUMR_MERGE_INTEGRATION_ENABLED — optional; false disables all Merge.dev connectors.
 
-Also required, set by the Dockerfile: HERMES_WEBUI_PYTHON, DOH_RUNTIME_DIR, and
+Also required, set by the Dockerfile: HERMES_WEBUI_PYTHON, HUMR_RUNTIME_DIR, and
 HERMES_HOME — passed to CredentialsService so it can run provider auth markers
 as the gateway user.
 
@@ -117,14 +117,14 @@ async def _run(
     webui_state_dir: Path,
     process_compose_url: str,
 ) -> None:
-    control_plane_url = _require_env(name="DOH_CONTROL_PLANE_URL")
-    bearer = _require_env(name="DOH_ENV_BEARER")
-    owner_username = _require_env(name="DOH_OWNER_USERNAME")
-    app_slug = _require_env(name="DOH_APP_SLUG")
-    env_slug = os.environ.get("DOH_ENV_SLUG", "")
-    merge_enabled = _env_flag_enabled(name="DOH_MERGE_INTEGRATION_ENABLED", default=True)
+    control_plane_url = _require_env(name="HUMR_CONTROL_PLANE_URL")
+    bearer = _require_env(name="HUMR_ENV_BEARER")
+    owner_username = _require_env(name="HUMR_OWNER_USERNAME")
+    app_slug = _require_env(name="HUMR_APP_SLUG")
+    env_slug = os.environ.get("HUMR_ENV_SLUG", "")
+    merge_enabled = _env_flag_enabled(name="HUMR_MERGE_INTEGRATION_ENABLED", default=True)
     webui_python = Path(_require_env(name="HERMES_WEBUI_PYTHON"))
-    runtime_dir = Path(_require_env(name="DOH_RUNTIME_DIR"))
+    runtime_dir = Path(_require_env(name="HUMR_RUNTIME_DIR"))
     hermes_home = Path(_require_env(name="HERMES_HOME"))
     logger.info(
         "starting doh_broker for owner=%s env=%s against %s (proxy=%d, control=%d, mcp=%d, merge_enabled=%s)",
@@ -145,7 +145,7 @@ async def _run(
         private_dir=private_dir,
     )
 
-    public_base_url = os.environ.get("DOH_APP_PUBLIC_URL")
+    public_base_url = os.environ.get("HUMR_APP_PUBLIC_URL")
     mcp_persistent_dir.mkdir(parents=True, exist_ok=True)
     mcp_aggregator = MCPAggregator(
         port=mcp_port,

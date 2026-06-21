@@ -134,7 +134,7 @@ elif os.environ.get("DATABASE_URL"):
     DATABASES["default"]["OPTIONS"] = {"pool": {"min_size": 4, "max_size": 200}}
 else:
     # Local dev: SQLite
-    DB_PATH = os.environ.get("DOH_DB_PATH")
+    DB_PATH = os.environ.get("HUMR_DB_PATH")
     DATABASES = {
         "default": {
             "ENGINE": "django.db.backends.sqlite3",
@@ -198,12 +198,12 @@ GITHUB_APP_PRIVATE_KEY = os.environ.get("GITHUB_APP_PRIVATE_KEY", "").replace("\
 GITHUB_WEBHOOK_SECRET = os.environ.get("GITHUB_WEBHOOK_SECRET")
 
 # DevOpsHero API Configuration
-DOH_API_SECRET_KEY = os.environ.get("DOH_API_SECRET_KEY")
+HUMR_API_SECRET_KEY = os.environ.get("HUMR_API_SECRET_KEY")
 
 # Central RS256 keypair for env-SSO session JWTs. The control plane mints session
 # tokens here; per-env policy-proxy sidecars verify them via /.well-known/jwks.json.
-DOH_ENV_SESSION_JWT_PRIVATE_KEY = os.environ.get("DOH_ENV_SESSION_JWT_PRIVATE_KEY", "").replace("\\n", "\n")
-DOH_ENV_SESSION_JWT_KID = os.environ.get("DOH_ENV_SESSION_JWT_KID")
+HUMR_ENV_SESSION_JWT_PRIVATE_KEY = os.environ.get("HUMR_ENV_SESSION_JWT_PRIVATE_KEY", "").replace("\\n", "\n")
+HUMR_ENV_SESSION_JWT_KID = os.environ.get("HUMR_ENV_SESSION_JWT_KID")
 
 # Merge.dev Agent Handler — single tenant-wide API key + Tool Pack.
 # Stored only on DOH; never injected into customer-deployed Hermes containers.
@@ -217,14 +217,14 @@ TELEGRAM_MANAGER_BOT_TOKEN = os.environ.get("TELEGRAM_MANAGER_BOT_TOKEN")
 TELEGRAM_MANAGER_BOT_USERNAME = os.environ.get("TELEGRAM_MANAGER_BOT_USERNAME")
 
 # DevOpsHero AWS Control Plane Credentials (for assuming roles in customer accounts)
-DOH_AWS_ACCESS_KEY = os.environ.get("DOH_AWS_ACCESS_KEY")
-DOH_AWS_SECRET_KEY = os.environ.get("DOH_AWS_SECRET_KEY")
+HUMR_AWS_ACCESS_KEY = os.environ.get("HUMR_AWS_ACCESS_KEY")
+HUMR_AWS_SECRET_KEY = os.environ.get("HUMR_AWS_SECRET_KEY")
 
-# Job Worker - enable with DOH_RUN_JOB_WORKER=1
-DOH_RUN_JOB_WORKER = os.environ.get("DOH_RUN_JOB_WORKER") == "1"
+# Job Worker - enable with HUMR_RUN_JOB_WORKER=1
+HUMR_RUN_JOB_WORKER = os.environ.get("HUMR_RUN_JOB_WORKER") == "1"
 
 # Local-only debug deployment mode - simulated success after ~10 seconds with no repo clone or AWS calls
-DOH_DEBUG_DEPLOYMENTS = DEBUG and os.environ.get("DOH_DEBUG_DEPLOYMENTS") == "1"
+HUMR_DEBUG_DEPLOYMENTS = DEBUG and os.environ.get("HUMR_DEBUG_DEPLOYMENTS") == "1"
 
 # Claude Agent Configuration
 # Priority: ANTHROPIC_API_KEY > AWS_BEDROCK_REGION

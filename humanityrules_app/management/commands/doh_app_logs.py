@@ -15,7 +15,7 @@ Usage:
     uv run manage.py doh_app_logs --account "CH Sandbox" --app my-app-slug --org "Course Hero"
     uv run manage.py doh_app_logs --account "CH Sandbox" --app my-app-slug --follow
 
-Requires DOH_AWS_ACCESS_KEY and DOH_AWS_SECRET_KEY in .env
+Requires HUMR_AWS_ACCESS_KEY and HUMR_AWS_SECRET_KEY in .env
 """
 
 import time

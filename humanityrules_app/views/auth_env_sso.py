@@ -81,16 +81,16 @@ def _public_pem_from_private(private_pem: bytes) -> bytes:
 
 
 def _signing_key_pem() -> bytes:
-    pem = settings.DOH_ENV_SESSION_JWT_PRIVATE_KEY
+    pem = settings.HUMR_ENV_SESSION_JWT_PRIVATE_KEY
     if not pem:
-        raise RuntimeError("DOH_ENV_SESSION_JWT_PRIVATE_KEY is not configured")
+        raise RuntimeError("HUMR_ENV_SESSION_JWT_PRIVATE_KEY is not configured")
     return pem.encode("utf-8")
 
 
 def _signing_kid() -> str:
-    kid = settings.DOH_ENV_SESSION_JWT_KID
+    kid = settings.HUMR_ENV_SESSION_JWT_KID
     if not kid:
-        raise RuntimeError("DOH_ENV_SESSION_JWT_KID is not configured")
+        raise RuntimeError("HUMR_ENV_SESSION_JWT_KID is not configured")
     return kid
 
 

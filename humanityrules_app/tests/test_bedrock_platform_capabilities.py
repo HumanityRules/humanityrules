@@ -22,8 +22,8 @@ def _app_config(provider: str, platform_capabilities: list[str]) -> AppConfig:
                 ecr_repo_name="doh/staging/my-hermes-hermes",
                 container_port=8787,
                 environment_variables=[
-                    {"name": "DOH_LLM_PROVIDER", "value": provider},
-                    {"name": "DOH_LLM_MODEL", "value": "us.anthropic.claude-opus-4-7"},
+                    {"name": "HUMR_LLM_PROVIDER", "value": provider},
+                    {"name": "HUMR_LLM_MODEL", "value": "us.anthropic.claude-opus-4-7"},
                 ],
             ),
         ],

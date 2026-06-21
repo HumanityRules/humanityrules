@@ -41,8 +41,8 @@ class LambdaStack(Stack):
         )
 
         # Get API endpoint and secret from environment (set during deployment)
-        api_endpoint = os.environ.get("DOH_API_ENDPOINT", "https://humanityrules.io")
-        api_secret_key = os.environ.get("DOH_API_SECRET_KEY", "")
+        api_endpoint = os.environ.get("HUMR_API_ENDPOINT", "https://humanityrules.io")
+        api_secret_key = os.environ.get("HUMR_API_SECRET_KEY", "")
 
         # Lambda function with inline code
         self.lambda_function = lambda_.Function(
@@ -57,8 +57,8 @@ class LambdaStack(Stack):
             timeout=Duration.seconds(30),
             memory_size=128,
             environment={
-                "DOH_API_ENDPOINT": api_endpoint,
-                "DOH_API_SECRET_KEY": api_secret_key,
+                "HUMR_API_ENDPOINT": api_endpoint,
+                "HUMR_API_SECRET_KEY": api_secret_key,
             },
             log_group=log_group,
         )

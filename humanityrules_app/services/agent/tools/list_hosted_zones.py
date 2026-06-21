@@ -29,8 +29,8 @@ class HostedZoneSummary:
 def _get_hosted_zones_sync(aws_account: AWSAccount) -> list[dict]:
     """Synchronous function to get hosted zones from AWS."""
     session = infra_customer.iam_utils.get_assumed_role_session(
-        access_key=settings.DOH_AWS_ACCESS_KEY,
-        secret_key=settings.DOH_AWS_SECRET_KEY,
+        access_key=settings.HUMR_AWS_ACCESS_KEY,
+        secret_key=settings.HUMR_AWS_SECRET_KEY,
         account_id=aws_account.aws_account_id,
         external_id=str(aws_account.external_id),
         region="us-east-1",  # Route53 is a global service

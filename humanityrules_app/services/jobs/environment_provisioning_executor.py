@@ -23,8 +23,8 @@ def _get_aws_session(environment: models.Environment):
     aws_account = environment.aws_account
 
     return infra_customer.iam_utils.get_assumed_role_session(
-        access_key=settings.DOH_AWS_ACCESS_KEY,
-        secret_key=settings.DOH_AWS_SECRET_KEY,
+        access_key=settings.HUMR_AWS_ACCESS_KEY,
+        secret_key=settings.HUMR_AWS_SECRET_KEY,
         account_id=aws_account.aws_account_id,
         external_id=str(aws_account.external_id),
         region=environment.aws_region,

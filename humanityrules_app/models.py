@@ -1725,7 +1725,7 @@ class EnvironmentBearerToken(models.Model):
     env (policy proxies, Hermes, future env-resident services) to authenticate
     calls to DOH's control plane. One active token per environment; the raw
     token lives in the customer's AWS Secrets Manager
-    (devopshero/{env-slug}/shared-secrets, key DOH_ENV_BEARER). Only the hash
+    (devopshero/{env-slug}/shared-secrets, key HUMR_ENV_BEARER). Only the hash
     is stored here so DOH can authenticate incoming control-plane calls
     without ever seeing the raw value after issue.
     """

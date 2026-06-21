@@ -64,7 +64,7 @@ class TestAppDeploymentExecutor(TestCase):
             mode=models.Conversation.Mode.APP_DEPLOYMENT,
         )
 
-    @override_settings(DOH_DEBUG_DEPLOYMENTS=True, DOH_RUN_JOB_WORKER=True)
+    @override_settings(HUMR_DEBUG_DEPLOYMENTS=True, HUMR_RUN_JOB_WORKER=True)
     def test_run_deployment_debug_mode_succeeds_without_external_calls(self) -> None:
         async_to_sync(agent_tools.save_blueprint)(
             conversation=self.conversation,

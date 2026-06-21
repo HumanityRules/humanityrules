@@ -9,7 +9,7 @@ import humanityrules_app.services.agent.tools as agent_tools
 import humanityrules_app.services.deployment_blueprint_effective_values as deployment_blueprint_effective_values
 
 
-@override_settings(DOH_DEBUG_DEPLOYMENTS=False)
+@override_settings(HUMR_DEBUG_DEPLOYMENTS=False)
 class TestDeploymentBlueprintEffectiveValues(TestCase):
     """Verify effective blueprint values resolve consistently across UI and tool paths."""
 

@@ -85,9 +85,9 @@ def _resolve_control_plane_url() -> str:
 
 
 def _resolve_pdp_url() -> str:
-    """Resolve the PDP URL the policy proxy should call. DOH_PDP_URL wins if set."""
+    """Resolve the PDP URL the policy proxy should call. HUMR_PDP_URL wins if set."""
     import os
-    explicit = os.environ.get("DOH_PDP_URL")
+    explicit = os.environ.get("HUMR_PDP_URL")
     if explicit:
         return explicit
     return f"{_resolve_control_plane_url()}/api/pdp/evaluate"
@@ -182,7 +182,7 @@ def _uses_bedrock_runtime(app_config: appconfig.AppConfig) -> bool:
 
     for c in app_config.containers:
         for env_var in c.environment_variables:
-            if env_var.get("name") in {"DOH_LLM_PROVIDER", "DOH_AUX_PROVIDER"}:
+            if env_var.get("name") in {"HUMR_LLM_PROVIDER", "HUMR_AUX_PROVIDER"}:
                 if str(env_var.get("value", "")).lower() == "bedrock":
                     return True
     return False
@@ -623,7 +623,7 @@ class AppStack(Stack):
             )
 
         # Every container that needs the env-bearer overlay requires the env's
-        # shared-secrets ARN (to mount DOH_ENV_BEARER via ECS secret injection).
+        # shared-secrets ARN (to mount HUMR_ENV_BEARER via ECS secret injection).
         # Policy-proxy containers need the same bearer implicitly, plus
         # auth_base_url + upstream wiring. Validate preconditions before
         # building resources.
@@ -690,7 +690,7 @@ class AppStack(Stack):
                 resources=[database_connection_secret.secret_arn],
             ))
         if app_config.needs_env_bearer():
-            # Containers needing env-bearer read DOH_ENV_BEARER from the env's
+            # Containers needing env-bearer read HUMR_ENV_BEARER from the env's
             # shared-secrets entry via ECS secret injection.
             task_role.add_to_policy(iam.PolicyStatement(
                 actions=["secretsmanager:GetSecretValue"],
@@ -859,8 +859,8 @@ class AppStack(Stack):
         # 1. Env-bearer overlay — applied to every container that needs the
         #    env bearer: explicit requires_env_bearer=True, or a policy-proxy
         #    container.
-        #    Provides DOH_ENV_BEARER (from shared-secrets), DOH_ENV_SLUG,
-        #    DOH_CONTROL_PLANE_URL, DOH_APP_SLUG, and DOH_OWNER_USERNAME when
+        #    Provides HUMR_ENV_BEARER (from shared-secrets), HUMR_ENV_SLUG,
+        #    HUMR_CONTROL_PLANE_URL, HUMR_APP_SLUG, and HUMR_OWNER_USERNAME when
         #    the app has an owner tag. Any env-resident component that calls
         #    DOH's control plane gets this.
         # 2. Policy-proxy-specific overlay — applied only to the policy-proxy
@@ -872,17 +872,17 @@ class AppStack(Stack):
                 self, "EnvBearerSharedSecret", env_bearer_shared_secrets_arn,
             )
             env_bearer_environment_overlay = {
-                "DOH_ENV_SLUG": env_slug,
-                "DOH_CONTROL_PLANE_URL": _resolve_control_plane_url(),
-                "DOH_APP_SLUG": app_config.app_name,
+                "HUMR_ENV_SLUG": env_slug,
+                "HUMR_CONTROL_PLANE_URL": _resolve_control_plane_url(),
+                "HUMR_APP_SLUG": app_config.app_name,
             }
             if app_config.owner_username:
-                env_bearer_environment_overlay["DOH_OWNER_USERNAME"] = app_config.owner_username
+                env_bearer_environment_overlay["HUMR_OWNER_USERNAME"] = app_config.owner_username
             if shared_alb_hosted_zone:
-                env_bearer_environment_overlay["DOH_PUBLIC_HOSTNAME"] = f"{subdomain}.{shared_alb_hosted_zone}"
+                env_bearer_environment_overlay["HUMR_PUBLIC_HOSTNAME"] = f"{subdomain}.{shared_alb_hosted_zone}"
             env_bearer_secret_overlay = {
-                "DOH_ENV_BEARER": ecs.Secret.from_secrets_manager(
-                    env_bearer_shared_secret, field="DOH_ENV_BEARER",
+                "HUMR_ENV_BEARER": ecs.Secret.from_secrets_manager(
+                    env_bearer_shared_secret, field="HUMR_ENV_BEARER",
                 ),
             }
 
@@ -890,14 +890,14 @@ class AppStack(Stack):
         if policy_proxy is not None:
             assert upstream is not None  # enforced above
             policy_proxy_environment_overlay = {
-                "DOH_APP_ID": app_config.app_name,
-                "DOH_ENV_DOMAIN": shared_alb_hosted_zone or "",
-                "DOH_AUTH_BASE_URL": auth_base_url,
-                "DOH_JWKS_URL": f"{auth_base_url.rstrip('/')}/.well-known/jwks.json",
-                "DOH_PDP_URL": _resolve_pdp_url(),
-                "DOH_UPSTREAM_HOST": "127.0.0.1",
-                "DOH_UPSTREAM_PORT": str(upstream.container_port),
-                "DOH_LISTEN_PORT": str(policy_proxy.container_port),
+                "HUMR_APP_ID": app_config.app_name,
+                "HUMR_ENV_DOMAIN": shared_alb_hosted_zone or "",
+                "HUMR_AUTH_BASE_URL": auth_base_url,
+                "HUMR_JWKS_URL": f"{auth_base_url.rstrip('/')}/.well-known/jwks.json",
+                "HUMR_PDP_URL": _resolve_pdp_url(),
+                "HUMR_UPSTREAM_HOST": "127.0.0.1",
+                "HUMR_UPSTREAM_PORT": str(upstream.container_port),
+                "HUMR_LISTEN_PORT": str(policy_proxy.container_port),
             }
 
         # Add each configured container to the task definition.
@@ -924,7 +924,7 @@ class AppStack(Stack):
 
             # Secrets: the container's declared fields from the shared app_secrets bag,
             # plus database_connection_secret pieces on the ALB-target container only,
-            # plus DOH_ENV_BEARER on any container that needs it.
+            # plus HUMR_ENV_BEARER on any container that needs it.
             secrets: dict[str, ecs.Secret] = {}
             if app_secret_resource is not None and c.app_secrets:
                 for field_name in c.app_secrets:

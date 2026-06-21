@@ -41,7 +41,7 @@ Subcommands:
     shared-set-from-env   Create or update keys from a local .env file (--file, KEY names)
     shared-delete         Remove keys from environment shared secrets
 
-Requires DOH_AWS_ACCESS_KEY and DOH_AWS_SECRET_KEY (via Django settings).
+Requires HUMR_AWS_ACCESS_KEY and HUMR_AWS_SECRET_KEY (via Django settings).
 
 For production: ./prod_manage.sh doh_secrets <subcommand> ...
 """
@@ -142,10 +142,10 @@ class Command(BaseCommand):
         shared_del_cmd.add_argument("keys", nargs="+", metavar="KEY", help="Key names to remove")
 
     def handle(self, *args, **options):
-        access_key = settings.DOH_AWS_ACCESS_KEY
-        secret_key = settings.DOH_AWS_SECRET_KEY
+        access_key = settings.HUMR_AWS_ACCESS_KEY
+        secret_key = settings.HUMR_AWS_SECRET_KEY
         if not access_key or not secret_key:
-            raise CommandError("Missing DOH_AWS_ACCESS_KEY and/or DOH_AWS_SECRET_KEY in environment")
+            raise CommandError("Missing HUMR_AWS_ACCESS_KEY and/or HUMR_AWS_SECRET_KEY in environment")
 
         operation = options["operation"]
         aws_account = _get_connected_aws_account(identifier=options["account"], org_slug=options.get("org"))
