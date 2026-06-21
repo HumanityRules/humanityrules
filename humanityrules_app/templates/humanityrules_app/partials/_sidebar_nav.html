@@ -1,0 +1,68 @@
+{% comment %}
+Sidebar navigation content.
+Expected context:
+  - navigation_items: List of nav items (name, url, icon, is_active)
+  - user_organizations: List of user's organizations (id, name)
+  - current_organization: Currently selected organization (id, name) - always set
+  - site_logo_url: URL for company logo
+{% endcomment %}
+
+{% partialdef navigation_item %}
+<li>
+  <a href="{{ item.url }}" 
+     hx-get="{{ item.url }}"
+     hx-target="#main-content"
+     hx-swap="innerHTML transition:true"
+     hx-push-url="true"
+     class="nav-link group flex gap-x-3 rounded-md p-2 text-sm/6 font-semibold {% if item.is_active %}bg-white/5 text-white{% else %}text-gray-400 hover:bg-white/5 hover:text-white{% endif %}"
+     data-nav-url="{{ item.url }}">
+    {% include "humanityrules_app/partials/icons/"|add:item.icon|add:".html" %}
+    {{ item.name }}
+  </a>
+</li>
+{% endpartialdef navigation_item %}
+
+
+<div class="flex h-16 shrink-0 items-center">
+  <a href="/">
+    <img src="{{ site_logo_url }}" alt="{{ site_name }}" class="mt-4 h-14 w-auto" />
+  </a>
+</div>
+<nav class="flex flex-1 flex-col select-none">
+  <ul role="list" class="flex flex-1 flex-col gap-y-7">
+    <!-- Organizations section -->
+    <li>
+      <div class="text-xs/6 font-semibold text-gray-400">Your organizations</div>
+      <form hx-post="{% url 'switch_organization' %}" hx-trigger="change from:#org-select" hx-swap="none">
+        {% csrf_token %}
+        {% include "humanityrules_app/partials/_dropdown_select.html#dropdown_select" with dropdown_id="org-select" dropdown_name="organization" dropdown_value=current_organization.id dropdown_selected_label=current_organization.name dropdown_options=user_organizations dropdown_class="mt-2 -mx-2" %}
+      </form>
+    </li>
+    
+    <!-- Main navigation -->
+    <li class="mt-2">
+      <ul role="list" class="-mx-2 space-y-1">
+        {% for item in navigation_items %}
+          {% partial navigation_item %}
+        {% endfor %}
+      </ul>
+    </li>
+  </ul>
+</nav>
+
+<script>
+if (!window._navHighlightInit) {
+    window._navHighlightInit = true;
+    function updateNavHighlight() {
+        document.querySelectorAll('.nav-link').forEach(link => {
+            const isActive = location.pathname.split('/')[1] === link.dataset.navUrl.split('/')[1];
+            link.classList.toggle('bg-white/5', isActive);
+            link.classList.toggle('text-white', isActive);
+            link.classList.toggle('text-gray-400', !isActive);
+        });
+    }
+    document.body.addEventListener('htmx:pushedIntoHistory', updateNavHighlight);
+    window.addEventListener('popstate', updateNavHighlight);
+}
+</script>
+

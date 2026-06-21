@@ -14,10 +14,10 @@ role** without any DOH credential entering the sandbox.
   five access levels (`Read`, `Write`, `List`, `Tagging`, `Permissions
   management`), and per-service resource pickers — the same breadth as the DOH
   editor.
-- **The DOH editor stays.** `devopshero_app/views/security_permissions_editor.py`
+- **The DOH editor stays.** `humanityrules_app/views/security_permissions_editor.py`
   remains the operator tool for editing *any* app's permissions. This is a new,
   narrower surface, not a migration. Both UIs sit on the same service layer
-  (`devopshero_app/services/permissions.py`) and models (`AppPermissions`,
+  (`humanityrules_app/services/permissions.py`) and models (`AppPermissions`,
   `AppPermissionRequest`).
 - **Phase 1 = editor only, no agent.** We port the editor pane verbatim
   (behavior, not the two-pane layout) and ship it standalone. The agent + skill

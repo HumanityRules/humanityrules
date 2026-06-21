@@ -41,7 +41,7 @@ These rows key on `(owner_user, environment, app_slug, provider)` where
 `app_slug` is a plain `SlugField`, **not a foreign key to `App`**. So
 `app.delete()` does not cascade them, and the `app_remove_executor` never
 queries `IntegrationUserCredential`. Verified by grep: zero references in
-`devopshero_app/services/`.
+`humanityrules_app/services/`.
 
 **Net consequence:** removing an app today leaves user OAuth refresh tokens
 and Telegram bot tokens orphaned in DOH's database forever. If a future app
@@ -106,5 +106,5 @@ Three categories, but only two are exposed:
 - [ ] Decide on flag consolidation vs. rename.
 - [ ] Update `_app_remove_confirm_modal.html` accordingly.
 - [ ] Add a regression test in
-  `devopshero_app/tests/` that creates an `IntegrationUserCredential` then
+  `humanityrules_app/tests/` that creates an `IntegrationUserCredential` then
   removes the app and asserts the row is gone.

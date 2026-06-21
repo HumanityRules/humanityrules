@@ -45,7 +45,7 @@ cmd = [
     sys.executable,
     "-m",
     "uvicorn",
-    "devopshero_site.asgi:application",
+    "humanityrules_site.asgi:application",
     "--reload",
     "--host",
     "127.0.0.1",

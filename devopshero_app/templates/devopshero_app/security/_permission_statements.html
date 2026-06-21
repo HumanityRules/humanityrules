@@ -1,9 +1,0 @@
-<div id="permission-statements-container" class="space-y-6"{% if oob %} hx-swap-oob="innerHTML"{% endif %}>
-    {% for group in service_groups %}
-        {% include "devopshero_app/security/_permission_service_group.html" with group=group %}
-    {% empty %}
-    <div id="statements-empty" class="rounded-lg border border-dashed border-gray-300 p-6 text-center text-sm text-gray-500 dark:border-gray-600 dark:text-gray-400">
-        No policy statements yet. Add a service or ask the agent.
-    </div>
-    {% endfor %}
-</div>

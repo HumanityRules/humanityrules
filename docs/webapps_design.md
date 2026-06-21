@@ -284,6 +284,6 @@ No mutation endpoints: start/stop/restart/delete stay on the CLI. The panel poll
 - **`template_repos/hermes_agent/doh_runtime/hermes-nono-profile.json`** — port allow-lists, binary read-allows, `DOH_PUBLIC_HOSTNAME` allow_vars entry.
 - **`template_repos/hermes_agent/Dockerfile`** — downloads Caddy + process-compose binaries; symlinks the CLI onto PATH.
 - **`template_repos/hermes_agent/skills/webapps/SKILL.md`** — agent-facing contract, worked example, Don'ts.
-- **`devopshero_app/services/infra_customer/deploy_app.py`** — injects `DOH_PUBLIC_HOSTNAME` into the env-bearer overlay; provisions per-agent wildcard cert + Route 53 record + ALB host condition when `AppConfig.enable_subhosting` is True.
-- **`devopshero_app/services/infra_customer/appconfig.py`** — `AppConfig.enable_subhosting` field gating the wildcard-infra provisioning.
-- **`devopshero_app/models.py`** — `AppTemplate.enable_subhosting` flag stored on the template; `app_config_builder.py` projects it into AppConfig at build time.
+- **`humanityrules_app/services/infra_customer/deploy_app.py`** — injects `DOH_PUBLIC_HOSTNAME` into the env-bearer overlay; provisions per-agent wildcard cert + Route 53 record + ALB host condition when `AppConfig.enable_subhosting` is True.
+- **`humanityrules_app/services/infra_customer/appconfig.py`** — `AppConfig.enable_subhosting` field gating the wildcard-infra provisioning.
+- **`humanityrules_app/models.py`** — `AppTemplate.enable_subhosting` flag stored on the template; `app_config_builder.py` projects it into AppConfig at build time.

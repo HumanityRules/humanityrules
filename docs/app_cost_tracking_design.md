@@ -1,12 +1,12 @@
 # App Cost Tracking — Design
 
-**Status:** implemented 2026-06-15 in `devopshero_app/services/cost/`; tests in `devopshero_app/tests/test_cost_subsystem.py`. Live end-to-end verification against a real account is the remaining step.
+**Status:** implemented 2026-06-15 in `humanityrules_app/services/cost/`; tests in `humanityrules_app/tests/test_cost_subsystem.py`. Live end-to-end verification against a real account is the remaining step.
 **Scope:** per-day, per-app **Bedrock invocation cost** on the app-detail page, built as a generic cost subsystem so other cost sources (Fargate, data transfer, …) plug in later without touching the model, view, chart, or job.
 
 **Implementation notes (where reality extended this doc):**
 - **Job model:** the worker only runs claimable model rows, so a `CostRefreshJob` model was added (status lifecycle, claimed by `app__label` in `job_worker._worker_loop`). The HTMX poll terminates on its status.
 - **Pricing:** the 4.x rates are **not** machine-fetchable (the pricing page is JS-only; the bulk + Query Price List APIs carry only Claude 2/3). Rates were captured by hand from the pricing page (US East (Ohio), 2026-06-15) into `bedrock_pricing.py` as **both tiers' absolute rates** (`global` and `geo`), not a derived ratio. Cache-write uses the 5-minute-TTL column (logs don't expose TTL). To refresh: re-copy the two pricing-page tables.
-- **Layout — keep the Django glue conventional.** An earlier cut built `services/cost/` as a *simulated app* (its own `models.py` with `Meta.app_label`, `views.py`, `urls.py`, `templates/`), which forced a re-import in central `models.py`, a `TEMPLATES['DIRS']` entry, an `include()`, and function-local imports to dodge a cycle. That was reverted as over-complex: models live in central `devopshero_app/models.py`, the view in `views/apps.py`, the URL in `urls.py`, templates under `templates/devopshero_app/apps/`. `services/cost/` now holds **only** the logic, flat (no `sources/` or `pricing/` subpackages).
+- **Layout — keep the Django glue conventional.** An earlier cut built `services/cost/` as a *simulated app* (its own `models.py` with `Meta.app_label`, `views.py`, `urls.py`, `templates/`), which forced a re-import in central `models.py`, a `TEMPLATES['DIRS']` entry, an `include()`, and function-local imports to dodge a cycle. That was reverted as over-complex: models live in central `humanityrules_app/models.py`, the view in `views/apps.py`, the URL in `urls.py`, templates under `templates/humanityrules_app/apps/`. `services/cost/` now holds **only** the logic, flat (no `sources/` or `pricing/` subpackages).
 - **`CostSource`** gained `rolling_24h_usd(app)` alongside `collect(...)` so the rolling figure stays source-owned while `cost_refresh` keeps it distinct from the day bins.
 
 This doc records **decisions and pointers**, not values. It deliberately omits two kinds of detail: (a) mechanics you can regenerate — Django/HTMX/boto3/CloudWatch-Insights, ARN anatomy; and (b) **volatile external specifics — prices, rate ratios, percentages, exact API field/enum sets — which must be fetched from the Sources below at implementation time, never trusted from memory or from this doc.** An earlier draft hardcoded pricing multipliers and was wrong; that is the failure mode this rule exists to prevent.
@@ -17,7 +17,7 @@ This doc records **decisions and pointers**, not values. It deliberately omits t
 
 1. **Job-worker dispatch/status API — not yet inspected.** Find how background jobs are enqueued and polled (the `App.label` / `run_job_worker` path) before wiring `cost/jobs.py` and the HTMX poll's done-condition.
 2. **Pricing — fetch from the pricing page; trust no number in this doc.** Bedrock prices are **absolute per-category amounts** (input, output, cache-write, cache-read), *not* a base price with multipliers — pull all categories per model directly from the pricing page (Sources). Take whatever categories it lists; do not import first-party-Anthropic-API constructs (e.g. cache-TTL tiers). Get the geographic-vs-`global.` price relationship from the pricing page + the global-cross-Region-inference doc. **Do not hardcode any ratio or percentage** — that is exactly the error this doc was rewritten to prevent.
-3. **Model location convention.** `AppDailyCost` in `cost/models.py` with `Meta.app_label="devopshero_app"` (chosen for isolation) vs. the repo's single central `models.py`. migrations land in `devopshero_app/migrations/` either way.
+3. **Model location convention.** `AppDailyCost` in `cost/models.py` with `Meta.app_label="humanityrules_app"` (chosen for isolation) vs. the repo's single central `models.py`. migrations land in `humanityrules_app/migrations/` either way.
 
 ### Sources to fetch at implementation time (consult, don't memorize)
 
@@ -92,11 +92,11 @@ Per pull: recompute **today** + **yesterday** (absorbs Bedrock delivery lag) + a
 ## Package layout
 
 ```
-devopshero_app/
+humanityrules_app/
   models.py                       # AppDailyCost, CostRefreshJob (with the rest of the app's tables)
   urls.py                         # apps/<slug>/cost-panel/ → views.app_cost_panel
   views/apps.py                   # app_cost_panel — HTMX fragment endpoint (enqueue + render)
-  templates/devopshero_app/apps/  # _app_cost_panel.html, _app_cost_chart.html (inline SVG bars, no JS chart lib)
+  templates/humanityrules_app/apps/  # _app_cost_panel.html, _app_cost_chart.html (inline SVG bars, no JS chart lib)
   services/cost/                  # the self-contained logic, flat:
     __init__.py                   # package overview only
     cost_source.py                # CostSource protocol + DailyCostRow dataclass
@@ -124,10 +124,10 @@ All pricing/token knowledge stays inside `bedrock.py` + `bedrock_pricing.py`; th
 
 ## Seams into existing code (the only touches)
 
-1. **`templates/devopshero_app/apps/app_detail.html`** — one `{% include "devopshero_app/apps/_app_cost_panel.html" %}`. The panel **self-loads** via HTMX, so `build_app_detail_context` is **unchanged**.
+1. **`templates/humanityrules_app/apps/app_detail.html`** — one `{% include "humanityrules_app/apps/_app_cost_panel.html" %}`. The panel **self-loads** via HTMX, so `build_app_detail_context` is **unchanged**.
 2. **`urls.py`** — one `path(...)` for the cost-panel fragment; the view sits in `views/apps.py` (`app_cost_panel`).
 3. **Job worker** — `job_worker._run_cost_refresh_thread` calls `cost_refresh.run_refresh(job_id)`.
-4. **Migration** — the `AppDailyCost` / `CostRefreshJob` tables under `devopshero_app/migrations/`.
+4. **Migration** — the `AppDailyCost` / `CostRefreshJob` tables under `humanityrules_app/migrations/`.
 
 ## Payoff
 

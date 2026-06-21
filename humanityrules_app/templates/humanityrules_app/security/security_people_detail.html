@@ -1,0 +1,16 @@
+{% extends "humanityrules_app/security/security.html" %}
+
+{% block security_content %}
+<div>
+    <div class="mb-6">
+        <h2 class="text-lg font-semibold text-gray-900 dark:text-white">{{ member.email }}</h2>
+        {% if member.first_name or member.last_name %}
+        <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">{{ member.first_name }} {{ member.last_name }}</p>
+        {% endif %}
+    </div>
+
+    <div id="people-attributes">
+        {% include "humanityrules_app/security/_people_attributes.html" %}
+    </div>
+</div>
+{% endblock %}

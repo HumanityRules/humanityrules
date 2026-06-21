@@ -1,0 +1,100 @@
+{% extends "humanityrules_app/integrations/integrations.html" %}
+
+{% block integrations_content %}
+<div class="px-8">
+    <div class="flex items-center">
+        <div class="flex-auto">
+            <h1 class="text-base font-semibold text-gray-900 dark:text-white">AWS Accounts</h1>
+            <p class="mt-2 text-sm text-gray-700 dark:text-gray-300">Manage the AWS accounts where DevOpsHero will deploy your applications.</p>
+        </div>
+        {% if aws_accounts %}
+        <div class="ml-16 flex-none">
+            <button type="button"
+                    hx-get="{% url 'integrations_org_aws_accounts_add' %}"
+                    hx-target="#modal-container"
+                    hx-swap="innerHTML"
+                    class="block rounded-md bg-indigo-600 px-3 py-2 text-center text-sm font-semibold text-white shadow-xs hover:bg-indigo-500 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600 dark:bg-indigo-500 dark:hover:bg-indigo-400 dark:focus-visible:outline-indigo-500">
+                Add AWS Account
+            </button>
+        </div>
+        {% endif %}
+    </div>
+    <div class="mt-8 flow-root">
+        <div class="-mx-8 -my-2 overflow-x-auto">
+            <div class="inline-block min-w-full py-2 align-middle px-8">
+                {% if aws_accounts %}
+                <table class="relative min-w-full divide-y divide-gray-300 dark:divide-white/15">
+                    <thead>
+                        <tr>
+                            <th scope="col" class="py-3.5 pr-3 text-left text-sm font-semibold text-gray-900 dark:text-white">Name</th>
+                            <th scope="col" class="px-3 py-3.5 text-left text-sm font-semibold text-gray-900 dark:text-white">AWS Account ID</th>
+                            <th scope="col" class="px-3 py-3.5 text-left text-sm font-semibold text-gray-900 dark:text-white">Status</th>
+                            <th scope="col" class="px-3 py-3.5 text-left text-sm font-semibold text-gray-900 dark:text-white">Created</th>
+                            <th scope="col" class="py-3.5 pl-3">
+                                <span class="sr-only">Actions</span>
+                            </th>
+                        </tr>
+                    </thead>
+                    <tbody class="divide-y divide-gray-200 dark:divide-white/10">
+                        {% for account in aws_accounts %}
+                        <tr>
+                            <td class="py-4 pr-3 text-sm font-medium whitespace-nowrap text-gray-900 dark:text-white">{{ account.name }}</td>
+                            <td class="px-3 py-4 text-sm whitespace-nowrap text-gray-500 dark:text-gray-400">
+                                {% if account.aws_account_id %}
+                                    <code class="text-xs bg-gray-100 dark:bg-white/10 px-1.5 py-0.5 rounded">{{ account.aws_account_id }}</code>
+                                {% else %}
+                                    <span class="text-gray-400 dark:text-gray-500">—</span>
+                                {% endif %}
+                            </td>
+                            <td class="px-3 py-4 text-sm whitespace-nowrap">
+                                {% if account.status == 'connected' %}
+                                    <span class="inline-flex items-center rounded-full bg-green-100 px-2 py-1 text-xs font-medium text-green-700 dark:bg-green-500/10 dark:text-green-400">
+                                        <svg class="mr-1 h-1.5 w-1.5 fill-green-500 dark:fill-green-400" viewBox="0 0 6 6"><circle cx="3" cy="3" r="3"/></svg>
+                                        Connected
+                                    </span>
+                                {% elif account.status == 'pending' %}
+                                    <span class="inline-flex items-center rounded-full bg-yellow-100 px-2 py-1 text-xs font-medium text-yellow-700 dark:bg-yellow-500/10 dark:text-yellow-400">
+                                        <svg class="mr-1 h-1.5 w-1.5 fill-yellow-500 dark:fill-yellow-400" viewBox="0 0 6 6"><circle cx="3" cy="3" r="3"/></svg>
+                                        Pending
+                                    </span>
+                                {% else %}
+                                    <span class="inline-flex items-center rounded-full bg-red-100 px-2 py-1 text-xs font-medium text-red-700 dark:bg-red-500/10 dark:text-red-400">
+                                        <svg class="mr-1 h-1.5 w-1.5 fill-red-500 dark:fill-red-400" viewBox="0 0 6 6"><circle cx="3" cy="3" r="3"/></svg>
+                                        Error
+                                    </span>
+                                {% endif %}
+                            </td>
+                            <td class="px-3 py-4 text-sm whitespace-nowrap text-gray-500 dark:text-gray-400">{{ account.created_at|date:"M d, Y" }}</td>
+                            <td class="py-4 pl-3 text-right text-sm font-medium whitespace-nowrap">
+                                <a href="#" class="text-indigo-600 hover:text-indigo-900 dark:text-indigo-400 dark:hover:text-indigo-300">Edit<span class="sr-only">, {{ account.name }}</span></a>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+                {% else %}
+                <div class="text-center py-12">
+                    <svg class="mx-auto h-12 w-12 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M2.25 15a4.5 4.5 0 004.5 4.5H18a3.75 3.75 0 001.332-7.257 3 3 0 00-3.758-3.848 5.25 5.25 0 00-10.233 2.33A4.502 4.502 0 002.25 15z" />
+                    </svg>
+                    <h3 class="mt-2 text-sm font-semibold text-gray-900 dark:text-white">No AWS accounts</h3>
+                    <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">Get started by connecting your first AWS account.</p>
+                    <div class="mt-6">
+                        <button type="button"
+                                hx-get="{% url 'integrations_org_aws_accounts_add' %}"
+                                hx-target="#modal-container"
+                                hx-swap="innerHTML"
+                                class="inline-flex items-center rounded-md bg-indigo-600 px-3 py-2 text-sm font-semibold text-white shadow-xs hover:bg-indigo-500 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600 dark:bg-indigo-500 dark:hover:bg-indigo-400">
+                            <svg class="-ml-0.5 mr-1.5 h-5 w-5" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+                                <path d="M10.75 4.75a.75.75 0 00-1.5 0v4.5h-4.5a.75.75 0 000 1.5h4.5v4.5a.75.75 0 001.5 0v-4.5h4.5a.75.75 0 000-1.5h-4.5v-4.5z" />
+                            </svg>
+                            Add AWS Account
+                        </button>
+                    </div>
+                </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

@@ -17,7 +17,7 @@ For `curl` testing, create a session directly and use it as a cookie:
 ```bash
 uv run manage.py shell -c "
 from django.contrib.sessions.backends.db import SessionStore
-from devopshero_app.models import User
+from humanityrules_app.models import User
 u = User.objects.get(email='vmendi@gmail.com')
 s = SessionStore()
 s['_auth_user_id'] = str(u.pk)

@@ -1,0 +1,244 @@
+{% if error_message %}
+<div class="max-w-2xl py-12">
+    <div class="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 dark:border-amber-500/40 dark:bg-amber-500/10 dark:text-amber-200">
+        {{ error_message }}
+    </div>
+</div>
+{% else %}
+<div class="flex h-full flex-col" style="height: calc(100vh - 8rem);">
+    <div class="border-b border-gray-200 px-6 py-3 dark:border-gray-700">
+        {% url 'security_hub' as security_hub_url %}
+        {% with permissions_title="Permissions — "|add:app.name|add:" / "|add:environment.name %}
+        {% if security_querystring %}{% with security_url=security_hub_url|add:"?"|add:security_querystring %}
+        {% include "humanityrules_app/partials/_breadcrumb.html" with p1_label="Security" p1_url=security_url current=permissions_title %}
+        {% endwith %}{% else %}
+        {% include "humanityrules_app/partials/_breadcrumb.html" with p1_label="Security" p1_url=security_hub_url current=permissions_title %}
+        {% endif %}
+        {% endwith %}
+        {% if app_permission_request.status != "draft" %}
+        <span class="inline-flex items-center rounded-full bg-indigo-100 px-2.5 py-0.5 text-xs font-medium text-indigo-800 dark:bg-indigo-900 dark:text-indigo-200 mt-1">
+            {{ app_permission_request.get_status_display }}
+        </span>
+        {% endif %}
+        <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">
+            Edit IAM task-role policies for this deployment.
+        </p>
+    </div>
+
+    {# Two-panel body #}
+    <div class="flex flex-1 overflow-hidden">
+        {# LEFT PANEL: Policy Editor #}
+        <div class="w-1/2 overflow-y-auto border-r border-gray-200 dark:border-gray-700 dark-scrollbar">
+            <div class="p-5">
+                <div class="flex items-center justify-between">
+                    <h2 class="text-sm font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">Policy statements</h2>
+                    <div class="flex items-center gap-2">
+                    {# Refresh AWS resources button #}
+                    <button type="button"
+                            class="refresh-resources-btn inline-flex items-center gap-1.5 rounded-md border border-gray-300 px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:text-gray-300 dark:hover:bg-gray-800"
+                            hx-post="{% url 'security_permissions_editor_refresh_resources' app_permission_request_id=app_permission_request.id %}"
+                            hx-target="#statements-container"
+                            hx-swap="innerHTML"
+                            hx-disabled-elt="this">
+                        <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.992 0 3.181 3.183a8.25 8.25 0 0 0 13.803-3.7M4.031 9.865a8.25 8.25 0 0 1 13.803-3.7l3.181 3.182M21.015 4.356v4.992"/>
+                        </svg>
+                        Refresh AWS resources
+                    </button>
+                    {# Add service button + picker dropdown #}
+                    <div class="relative" id="service-picker-wrapper">
+                        <button type="button" id="add-service-btn"
+                                class="rounded-md border border-indigo-200 px-3 py-1.5 text-xs font-medium text-indigo-700 hover:bg-indigo-50 dark:border-indigo-500/40 dark:text-indigo-300 dark:hover:bg-indigo-500/10">
+                            + Add service
+                        </button>
+                        <div id="service-picker-dropdown" class="hidden absolute right-0 top-full z-50 mt-1 w-72 rounded-lg border border-gray-200 bg-white shadow-lg dark:border-gray-700 dark:bg-gray-900">
+                            <div class="p-2">
+                                <input type="text" id="service-picker-search" placeholder="Search services..."
+                                       class="w-full rounded-md border border-gray-300 bg-white px-3 py-1.5 text-sm placeholder-gray-400 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 dark:border-gray-600 dark:bg-gray-800 dark:text-white dark:placeholder-gray-500">
+                            </div>
+                            <div id="service-picker-list" class="max-h-64 overflow-y-auto px-1 pb-2">
+                                {# Populated by JS #}
+                            </div>
+                        </div>
+                    </div>
+                    </div>
+                </div>
+
+                {# Statements container - updated via htmx POSTs and SSE OOB swaps #}
+                <div class="mt-4" id="statements-container">
+                    {% include "humanityrules_app/security/_permission_statements.html" %}
+                </div>
+
+                {# Description #}
+                <div class="mt-6 rounded-lg border border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-800/60">
+                    <details open class="group">
+                        <summary class="flex items-center justify-between px-4 py-3 cursor-pointer list-none [&::-webkit-details-marker]:hidden select-none bg-gray-50 dark:bg-gray-800 rounded-t-lg">
+                            <div class="flex items-center space-x-2">
+                                <svg class="w-4 h-4 text-gray-400 transition-transform duration-200 group-open:rotate-90" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
+                                </svg>
+                                <span class="text-sm font-semibold text-gray-900 dark:text-white">Description</span>
+                            </div>
+                        </summary>
+                        <div class="border-t border-gray-200 dark:border-gray-700 px-4 py-3">
+                            <div id="description-container">
+                                <textarea name="description" rows="3"
+                                          placeholder="Describe why these permission changes are needed..."
+                                          class="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 placeholder-gray-400 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 dark:border-gray-600 dark:bg-gray-900 dark:text-white dark:placeholder-gray-500"
+                                          hx-post="{% url 'security_permissions_editor_update_description' app_permission_request_id=app_permission_request.id %}"
+                                          hx-trigger="input changed delay:1s"
+                                          hx-swap="none">{{ app_permission_request.description }}</textarea>
+                            </div>
+                        </div>
+                    </details>
+                </div>
+
+                {# Action buttons #}
+                <div class="mt-5 flex items-center justify-end gap-3">
+                    <button type="button" id="cancel-btn"
+                            class="rounded-md border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:text-gray-300 dark:hover:bg-gray-800 disabled:opacity-50 disabled:cursor-not-allowed"
+                            {% if not has_changes %}disabled{% endif %}
+                            hx-post="{% url 'security_permissions_editor_cancel' app_permission_request_id=app_permission_request.id %}"
+                            hx-target="#statements-container"
+                            hx-swap="innerHTML"
+                            hx-on::after-request="if(event.detail.successful) { this.disabled = true; document.getElementById('apply-btn').disabled = true; }">
+                        Cancel
+                    </button>
+                    <button type="button" id="apply-btn"
+                            class="rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed"
+                            {% if not has_changes %}disabled{% endif %}
+                            hx-post="{% url 'security_permissions_editor_apply' app_permission_request_id=app_permission_request.id %}"
+                            hx-swap="none"
+                            hx-on::before-request="this.disabled = true; this.textContent = 'Submitting...'"
+                            hx-on::after-request="if(event.detail.successful) { this.textContent = 'Submitted'; this.className = this.className.replace('bg-indigo-600','bg-green-600').replace('hover:bg-indigo-500',''); } else { this.textContent = 'Failed'; this.className = this.className.replace('bg-indigo-600','bg-red-600').replace('hover:bg-indigo-500',''); }">
+                        Submit Request
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        {# RIGHT PANEL: Agent Chat #}
+        <div class="w-1/2 flex flex-col">
+            {% if conversation %}
+            {% include "humanityrules_app/chat/_chat_panel.html" %}
+            {% else %}
+            <div class="flex flex-1 items-center justify-center text-gray-500 dark:text-gray-400">
+                <p class="text-sm">No conversation linked to this session.</p>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+</div>
+
+<script id="service-options-data" type="application/json">{{ service_options_json|safe }}</script>
+
+<script type="module">
+/**
+ * Permissions editor — server-as-source-of-truth.
+ *
+ * All mutations (add/remove service, level, resource) POST to the server
+ * via htmx attributes on the template elements. Agent changes arrive as
+ * SSE notifications that trigger a refetch of the statements.
+ *
+ * JS only handles: service picker UI and resource dropdown population.
+ */
+
+const SERVICE_OPTIONS = JSON.parse(document.getElementById('service-options-data').textContent);
+const UPDATE_URL = "{% url 'security_permissions_editor_update_statement' app_permission_request_id=app_permission_request.id %}";
+const STATEMENTS_URL = "{% url 'security_permissions_statements' app_permission_request_id=app_permission_request.id %}";
+const DESCRIPTION_URL = "{% url 'security_permissions_editor_description' app_permission_request_id=app_permission_request.id %}";
+
+// ─── Service Picker ───────────────────────────────────────────────
+
+const pickerBtn = document.getElementById('add-service-btn');
+const pickerDropdown = document.getElementById('service-picker-dropdown');
+const pickerSearch = document.getElementById('service-picker-search');
+const pickerList = document.getElementById('service-picker-list');
+
+function renderPickerList(filter = '') {
+    const lower = filter.toLowerCase();
+    const curated = SERVICE_OPTIONS.filter(s => s.is_curated);
+    const matchFn = s => !lower || s.label.toLowerCase().includes(lower);
+    const curatedFiltered = curated.filter(matchFn);
+    const allFiltered = SERVICE_OPTIONS.filter(matchFn);
+
+    let html = '';
+    if (curatedFiltered.length > 0 && !lower) {
+        html += '<div class="px-2 pt-1 pb-0.5 text-xs font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500">Common</div>';
+        curatedFiltered.forEach(s => {
+            html += `<button type="button" data-service="${s.value}" class="service-picker-item w-full text-left rounded-md px-2 py-1.5 text-sm text-gray-700 hover:bg-indigo-50 hover:text-indigo-700 dark:text-gray-300 dark:hover:bg-indigo-500/10 dark:hover:text-indigo-300">${s.label}</button>`;
+        });
+        html += '<div class="my-1 border-t border-gray-100 dark:border-gray-700"></div>';
+    }
+    if (allFiltered.length > 0) {
+        if (!lower) html += '<div class="px-2 pt-1 pb-0.5 text-xs font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500">All services</div>';
+        allFiltered.forEach(s => {
+            html += `<button type="button" data-service="${s.value}" class="service-picker-item w-full text-left rounded-md px-2 py-1.5 text-sm text-gray-700 hover:bg-indigo-50 hover:text-indigo-700 dark:text-gray-300 dark:hover:bg-indigo-500/10 dark:hover:text-indigo-300">${s.label}</button>`;
+        });
+    }
+    if (!html) html = '<div class="px-2 py-3 text-center text-sm text-gray-400 dark:text-gray-500">No matching services</div>';
+    pickerList.innerHTML = html;
+}
+
+pickerBtn?.addEventListener('click', () => {
+    const isOpen = !pickerDropdown.classList.contains('hidden');
+    if (isOpen) { pickerDropdown.classList.add('hidden'); }
+    else { pickerDropdown.classList.remove('hidden'); pickerSearch.value = ''; renderPickerList(); pickerSearch.focus(); }
+});
+
+document.addEventListener('click', (e) => {
+    if (!document.getElementById('service-picker-wrapper')?.contains(e.target)) pickerDropdown?.classList.add('hidden');
+});
+
+pickerSearch?.addEventListener('input', () => renderPickerList(pickerSearch.value));
+
+// Service selection → POST add_service to server.
+// A service may appear more than once: each click appends a new statement group
+// (one IAM statement), so distinct scopes — e.g. List on * and Read on specific
+// tables — can be expressed for the same service.
+pickerList?.addEventListener('click', (e) => {
+    const item = e.target.closest('.service-picker-item');
+    if (!item) return;
+    const service = item.dataset.service;
+    pickerDropdown.classList.add('hidden');
+
+    // Remove empty-state placeholder before appending
+    document.getElementById('statements-empty')?.remove();
+
+    htmx.ajax('POST', UPDATE_URL, {
+        target: '#permission-statements-container',
+        swap: 'beforeend',
+        values: { action: 'add_service', service: service },
+    });
+});
+
+// ─── Show Cancel button after first mutation ─────────────────────
+document.body.addEventListener('htmx:afterRequest', (e) => {
+    if (e.detail.requestConfig?.path === UPDATE_URL && e.detail.successful) {
+        const cancel = document.getElementById('cancel-btn');
+        const apply = document.getElementById('apply-btn');
+        if (cancel) cancel.disabled = false;
+        if (apply) apply.disabled = false;
+    }
+});
+
+// ─── Refetch statements + description and enable buttons when agent updates the draft ────
+document.addEventListener('doh:permissions-changed-{{ app_permission_request.id }}', () => {
+    htmx.ajax('GET', STATEMENTS_URL, {
+        target: '#statements-container',
+        swap: 'innerHTML',
+    });
+    const textarea = document.querySelector('#description-container textarea');
+    if (textarea && document.activeElement !== textarea) {
+        fetch(DESCRIPTION_URL).then(r => r.text()).then(text => {
+            if (document.activeElement !== textarea) textarea.value = text;
+        });
+    }
+    const cancel = document.getElementById('cancel-btn');
+    const apply = document.getElementById('apply-btn');
+    if (cancel) cancel.disabled = false;
+    if (apply) apply.disabled = false;
+});
+
+</script>
+{% endif %}

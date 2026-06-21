@@ -44,4 +44,4 @@ USER appuser
 EXPOSE 8000
 
 # Run with uvicorn (ASGI server)
-CMD ["uv", "run", "uvicorn", "devopshero_site.asgi:application", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["uv", "run", "uvicorn", "humanityrules_site.asgi:application", "--host", "0.0.0.0", "--port", "8000"]

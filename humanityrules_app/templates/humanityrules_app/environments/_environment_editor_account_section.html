@@ -1,0 +1,16 @@
+<div class="rounded-lg border border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-800/60">
+    <div class="flex items-center justify-between rounded-t-lg bg-gray-50 px-4 py-3 dark:bg-gray-800">
+        <h2 class="text-sm font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">AWS Account</h2>
+        {% include "humanityrules_app/partials/_status_pill.html" with status=aws_account.status label=aws_account.get_status_display only %}
+    </div>
+    <div class="border-t border-gray-200 px-4 py-3 dark:border-gray-700">
+        <dl class="grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
+            <dt class="text-gray-500 dark:text-gray-400">Name</dt>
+            <dd class="font-medium text-gray-900 dark:text-white">{{ aws_account.name }}</dd>
+            <dt class="text-gray-500 dark:text-gray-400">AWS Account ID</dt>
+            <dd class="font-mono text-gray-900 dark:text-white text-xs">{{ aws_account.aws_account_id|default:"Pending connection" }}</dd>
+            <dt class="text-gray-500 dark:text-gray-400">Connection</dt>
+            <dd class="text-gray-900 dark:text-white">{{ aws_account.get_status_display }}</dd>
+        </dl>
+    </div>
+</div>
