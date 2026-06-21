@@ -10,9 +10,9 @@
 
 **Internal codename: DOH / DevOps Hero.** The code, infrastructure, and environment variables still use the `devopshero` and `DOH_` identifiers throughout — treat these as the internal name. 
 
-**"Humanity Rules" (abbreviated "HUR") is the public/product identity; never expose "DevOps Hero" or "DOH" to end users.**
+**"Humanity Rules" (abbreviated "HUMR") is the public/product identity; never expose "DevOps Hero" or "DOH" to end users.**
 
-HUR uses the open-source Hermes agent as the agentic harness, and the Hermes WebUI as the UI for users. The Hermes agent that HUR deploys is located at template_repos/hermes_agent/. HUR deploys using DOH's templates deploy mechanism.
+HUMR uses the open-source Hermes agent as the agentic harness, and the Hermes WebUI as the UI for users. The Hermes agent that HUMR deploys is located at template_repos/hermes_agent/. HUMR deploys using DOH's templates deploy mechanism.
 
 
 # Running Python Commands
