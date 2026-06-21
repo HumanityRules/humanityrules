@@ -57,7 +57,7 @@ def _load_broker_module() -> types.ModuleType:
     """Load template_repos/hermes_agent/humr_runtime/integrations/humr_broker.py as a module.
 
     The broker imports its sibling modules by bare name. When supervisor.sh runs
-    the broker in production, PYTHONPATH includes /opt/doh/runtime/integrations.
+    the broker in production, PYTHONPATH includes /opt/humr/runtime/integrations.
     Under pytest we're loading via importlib from the Django repo root, so we
     have to put the integrations dir on sys.path ourselves before exec_module
     triggers the bare imports.
@@ -90,7 +90,7 @@ import tls_providers  # noqa: E402
 def _make_humr_client() -> humr_client.DohClient:
     """Build a DohClient with the fixed test identity."""
     return humr_client.DohClient(
-        control_plane_url="https://doh.example",
+        control_plane_url="https://humr.example",
         bearer="env-bearer",
         owner_username="vmendi",
         app_slug="hermes",
@@ -865,7 +865,7 @@ def _make_control_parts(
         webui_state_dir=webui_state_dir,
         process_compose_url="http://127.0.0.1:9999",
         webui_python=pathlib.Path("/nonexistent/webui-python"),
-        runtime_dir=pathlib.Path("/nonexistent/doh-runtime"),
+        runtime_dir=pathlib.Path("/nonexistent/humr-runtime"),
         hermes_home=pathlib.Path("/nonexistent/hermes-home"),
     )
     device_stub = _StubDeviceFlow()
@@ -895,7 +895,7 @@ def _make_credentials_service(
         webui_state_dir=webui_state_dir,
         process_compose_url="http://127.0.0.1:9999",
         webui_python=pathlib.Path("/nonexistent/webui-python"),
-        runtime_dir=pathlib.Path("/nonexistent/doh-runtime"),
+        runtime_dir=pathlib.Path("/nonexistent/humr-runtime"),
         hermes_home=pathlib.Path("/nonexistent/hermes-home"),
     )
 
@@ -919,7 +919,7 @@ class TestControlIntegrations(unittest.IsolatedAsyncioTestCase):
             webui_state_dir=self.webui_state_dir,
         )
 
-    async def test_get_integrations_reads_cache_without_calling_doh(self) -> None:
+    async def test_get_integrations_reads_cache_without_calling_humr(self) -> None:
         """Status reads never call HUMR; connected items come from the pre-warmed cache."""
         from starlette.testclient import TestClient
 
@@ -1388,7 +1388,7 @@ class TestControlIntegrations(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(device_stub.statused, ["nous"])
         self.assertEqual(device_stub.cancelled, ["nous"])
 
-    async def test_vault_setup_session_requests_submit_token_from_doh(self) -> None:
+    async def test_vault_setup_session_requests_submit_token_from_humr(self) -> None:
         """POST /integrations/tls_intercept/{provider}/setup-session asks HUMR for a submit token.
 
         The owner/app identity rides inside DohClient.post_json (see
@@ -1569,7 +1569,7 @@ class TestDohClient(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(payload, {"ok": True})
         self.assertEqual(timeouts, [30])
         request = captured["request"]
-        self.assertEqual(str(request.url), "https://doh.example/api/integrations/credentials/disconnect")
+        self.assertEqual(str(request.url), "https://humr.example/api/integrations/credentials/disconnect")
         self.assertEqual(request.headers["Authorization"], "Bearer env-bearer")
         self.assertEqual(
             _json.loads(request.content.decode("utf-8")),
@@ -2071,7 +2071,7 @@ class TestCredentialsServiceChoreography(unittest.IsolatedAsyncioTestCase):
             provider="openai-codex",
             action="connect",
             webui_python=pathlib.Path("/nonexistent/webui-python"),
-            runtime_dir=pathlib.Path("/nonexistent/doh-runtime"),
+            runtime_dir=pathlib.Path("/nonexistent/humr-runtime"),
             hermes_home=pathlib.Path("/nonexistent/hermes-home"),
         )
 
@@ -2109,7 +2109,7 @@ class TestCredentialsServiceChoreography(unittest.IsolatedAsyncioTestCase):
             provider="openai-codex",
             action="disconnect",
             webui_python=pathlib.Path("/nonexistent/webui-python"),
-            runtime_dir=pathlib.Path("/nonexistent/doh-runtime"),
+            runtime_dir=pathlib.Path("/nonexistent/humr-runtime"),
             hermes_home=pathlib.Path("/nonexistent/hermes-home"),
         )
 
@@ -2156,14 +2156,14 @@ class TestCredentialsServiceChoreography(unittest.IsolatedAsyncioTestCase):
                     provider="nous",
                     action="disconnect",
                     webui_python=pathlib.Path("/nonexistent/webui-python"),
-                    runtime_dir=pathlib.Path("/nonexistent/doh-runtime"),
+                    runtime_dir=pathlib.Path("/nonexistent/humr-runtime"),
                     hermes_home=pathlib.Path("/nonexistent/hermes-home"),
                 ),
                 call(
                     provider="openai-codex",
                     action="disconnect",
                     webui_python=pathlib.Path("/nonexistent/webui-python"),
-                    runtime_dir=pathlib.Path("/nonexistent/doh-runtime"),
+                    runtime_dir=pathlib.Path("/nonexistent/humr-runtime"),
                     hermes_home=pathlib.Path("/nonexistent/hermes-home"),
                 ),
             ],
@@ -2323,14 +2323,14 @@ class TestTransientRefreshGuards(unittest.IsolatedAsyncioTestCase):
                     provider="nous",
                     action="disconnect",
                     webui_python=pathlib.Path("/nonexistent/webui-python"),
-                    runtime_dir=pathlib.Path("/nonexistent/doh-runtime"),
+                    runtime_dir=pathlib.Path("/nonexistent/humr-runtime"),
                     hermes_home=pathlib.Path("/nonexistent/hermes-home"),
                 ),
                 call(
                     provider="openai-codex",
                     action="connect",
                     webui_python=pathlib.Path("/nonexistent/webui-python"),
-                    runtime_dir=pathlib.Path("/nonexistent/doh-runtime"),
+                    runtime_dir=pathlib.Path("/nonexistent/humr-runtime"),
                     hermes_home=pathlib.Path("/nonexistent/hermes-home"),
                 ),
             ],

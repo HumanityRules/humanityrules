@@ -7,7 +7,7 @@ CHECKPOINT_ARCHIVE_NAME="rootfs.tar.zst"
 RUNTIME_PID=""
 TERMINATION_REQUESTED=0
 IMAGE_OWNED_DIRS=(
-    /opt/doh
+    /opt/humr
     /opt/hermes
 )
 
@@ -27,7 +27,7 @@ format_duration_ms() {
 }
 
 persistent_root_initialized() {
-    [ -f "${HERMES_PERSISTENT_ROOT}/.doh-hermes-persistent-root" ]
+    [ -f "${HERMES_PERSISTENT_ROOT}/.humr-hermes-persistent-root" ]
 }
 
 checkpoint_archive_path() {
@@ -78,11 +78,11 @@ prepare_runtime_filesystem() {
     copy_runtime_file /etc/hosts
     copy_runtime_file /etc/hostname
     # HUMR-owned login-shell PATH drop-in. Without refreshing this on every
-    # boot, edits to /etc/profile.d/doh-bin.sh in the image (e.g. PATH
+    # boot, edits to /etc/profile.d/humr-bin.sh in the image (e.g. PATH
     # additions) would never reach existing persistent roots — the file is
     # outside IMAGE_OWNED_DIRS by design (we don't want to clobber the rest
     # of /etc).
-    copy_runtime_file /etc/profile.d/doh-bin.sh
+    copy_runtime_file /etc/profile.d/humr-bin.sh
 }
 
 sync_image_owned_dirs() {
@@ -121,7 +121,7 @@ initialize_persistent_root() {
         --exclude="${root_exclude}/***" \
         --exclude="${checkpoint_exclude}/***" \
         --exclude="/dev/***" \
-        --exclude="/opt/doh/***" \
+        --exclude="/opt/humr/***" \
         --exclude="/opt/hermes/***" \
         --exclude="/proc/***" \
         --exclude="/run/***" \
@@ -129,7 +129,7 @@ initialize_persistent_root() {
         --exclude="/tmp/***" \
         / "${HERMES_PERSISTENT_ROOT}/"
     prepare_runtime_filesystem
-    touch "${HERMES_PERSISTENT_ROOT}/.doh-hermes-persistent-root"
+    touch "${HERMES_PERSISTENT_ROOT}/.humr-hermes-persistent-root"
 
     end_ms="$(now_ms)"
     duration_ms="$((end_ms - start_ms))"
@@ -165,7 +165,7 @@ restore_persistent_root_from_checkpoint() {
         --acls \
         || die "failed to restore persistent root from ${archive}"
     prepare_runtime_filesystem
-    touch "${HERMES_PERSISTENT_ROOT}/.doh-hermes-persistent-root"
+    touch "${HERMES_PERSISTENT_ROOT}/.humr-hermes-persistent-root"
 
     end_ms="$(now_ms)"
     duration_ms="$((end_ms - start_ms))"
@@ -225,7 +225,7 @@ checkpoint_persistent_root() {
         --exclude="./run" \
         --exclude="./sys" \
         --exclude="./tmp" \
-        --exclude="./opt/doh" \
+        --exclude="./opt/humr" \
         --exclude="./opt/hermes" \
         . \
         || die "failed to write checkpoint archive ${tmp_archive}"

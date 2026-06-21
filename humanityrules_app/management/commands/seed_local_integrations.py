@@ -179,7 +179,7 @@ class Command(BaseCommand):
             raise CommandError(f"No Workspace slug={workspace_slug!r} in org {org.name!r}.")
 
         primary = self._primary_build_container(template=template)
-        clone_url = f"doh-template://{primary['source_repo_path']}"
+        clone_url = f"humr-template://{primary['source_repo_path']}"
         repo, _created = Repository.objects.get_or_create(
             organization=org,
             full_name=f"template/{template.slug}",

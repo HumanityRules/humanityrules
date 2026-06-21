@@ -140,7 +140,7 @@ async def lookup_access_denied_events(
 
     env = apr.environment
     app = apr.app
-    task_role_name = f"doh-{env.slug}-{app.slug}-task-role"[:64]
+    task_role_name = f"humr-{env.slug}-{app.slug}-task-role"[:64]
 
     now = datetime.now(tz=timezone.utc)
     start_time = now - timedelta(hours=time_window_hours)

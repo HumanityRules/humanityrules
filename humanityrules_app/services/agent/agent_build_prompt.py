@@ -155,7 +155,7 @@ async def _build_permissions_prompt(conversation: Conversation) -> str:
 
         app = apr.app
         env = apr.environment
-        task_role_name = f"doh-{env.slug}-{app.slug}-task-role"[:64]
+        task_role_name = f"humr-{env.slug}-{app.slug}-task-role"[:64]
 
         context_lines = [
             "<conversation_context>",

@@ -184,7 +184,7 @@ def _make_app_config(app_secrets: dict[str, str | None] | None) -> AppConfig:
                 image_source="dockerfile",
                 source_repo_path="simple-dashboard",
                 dockerfile_path="Dockerfile",
-                ecr_repo_name="doh/staging/simple-dashboard-app",
+                ecr_repo_name="humr/staging/simple-dashboard-app",
                 container_port=8000,
                 health_check_path="/health",
                 app_secrets=dict(app_secrets or {}),

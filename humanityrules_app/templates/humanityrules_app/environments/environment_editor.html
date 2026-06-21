@@ -37,7 +37,7 @@
                 <div id="environment-setup-section"
                     {% if environment %}
                     hx-get="{% url 'environment_editor_environment_section' environment_id=environment.id %}"
-                    hx-trigger="doh:environment-changed-{{ environment.id }} from:document"
+                    hx-trigger="humr:environment-changed-{{ environment.id }} from:document"
                     hx-swap="innerHTML"
                     {% endif %}>
                     {% include "humanityrules_app/environments/_environment_editor_setup_section.html" %}
@@ -64,7 +64,7 @@ function reloadEditor(url) {
     history.pushState({}, '', url);
 }
 
-document.addEventListener('doh:environment-created', (e) => {
+document.addEventListener('humr:environment-created', (e) => {
     if (e.detail.environment_id) {
         reloadEditor(`/environments/${e.detail.environment_id}/setup/`);
     }

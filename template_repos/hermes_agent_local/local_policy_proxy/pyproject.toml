@@ -1,5 +1,5 @@
 [project]
-name = "doh-local-policy-proxy"
+name = "humr-local-policy-proxy"
 version = "0.1.0"
 description = "Dev-only forwarder that sets X-Forwarded-Host for local Hermes compose."
 requires-python = ">=3.11"

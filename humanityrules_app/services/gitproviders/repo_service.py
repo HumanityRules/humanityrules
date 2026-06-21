@@ -41,8 +41,8 @@ def clone_repository(repository: Repository, branch: str, target_dir: Path) -> N
     # Template-backed apps: resolve against the *worker's* TEMPLATE_REPOS_DIR,
     # so git worktrees build from their own template_repos/ instead of the
     # main checkout that originally created the app.
-    if clone_url.startswith("doh-template://"):
-        rel_path = clone_url[len("doh-template://"):]
+    if clone_url.startswith("humr-template://"):
+        rel_path = clone_url[len("humr-template://"):]
         source_path = settings.TEMPLATE_REPOS_DIR / rel_path
         if not source_path.exists():
             raise ValueError(f"Template repository path does not exist: {source_path}")

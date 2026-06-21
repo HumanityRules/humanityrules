@@ -91,7 +91,7 @@ STAGER_IMAGE = "public.ecr.aws/aws-cli/aws-cli:latest"
 # tar exclusions matching persistent-root-runner.sh + nested mount-points
 TAR_EXCLUDES = (
     './dev', './proc', './run', './sys', './tmp',
-    './opt/doh', './opt/hermes',
+    './opt/humr', './opt/hermes',
     './hermes-persistent-root', './hermes-checkpoint',
 )
 
@@ -264,7 +264,7 @@ class Command(BaseCommand):
         # Find source running task.
         ecs = ctx.source.session.client("ecs")
         cluster = f"humr-{ctx.source.env_slug}-cluster"
-        service = f"doh-{ctx.source.env_slug}-{ctx.app}"
+        service = f"humr-{ctx.source.env_slug}-{ctx.app}"
         container = f"{ctx.app}{HERMES_CONTAINER_SUFFIX}"
         task = self._find_running_task(ecs=ecs, cluster=cluster, service=service)
         self.stdout.write(f"  source task: {task}")
@@ -309,7 +309,7 @@ class Command(BaseCommand):
 
         ecs = ctx.dest.session.client("ecs")
         cluster = f"humr-{ctx.dest.env_slug}-cluster"
-        service = f"doh-{ctx.dest.env_slug}-{ctx.app}"
+        service = f"humr-{ctx.dest.env_slug}-{ctx.app}"
 
         if ctx.stop_dest:
             svc = ecs.describe_services(cluster=cluster, services=[service])["services"][0]
@@ -362,7 +362,7 @@ class Command(BaseCommand):
         prev = state.get("prev_desired", 1)
         ecs = ctx.dest.session.client("ecs")
         cluster = f"humr-{ctx.dest.env_slug}-cluster"
-        service = f"doh-{ctx.dest.env_slug}-{ctx.app}"
+        service = f"humr-{ctx.dest.env_slug}-{ctx.app}"
         self.stdout.write(f"  scaling dest service to desiredCount={prev}")
         ecs.update_service(cluster=cluster, service=service, desiredCount=prev)
         self._wait_for_restore_complete(ctx=ctx, cluster=cluster, service=service)
@@ -372,7 +372,7 @@ class Command(BaseCommand):
     def _phase_verify(self, ctx: MigrationContext):
         ecs = ctx.dest.session.client("ecs")
         cluster = f"humr-{ctx.dest.env_slug}-cluster"
-        service = f"doh-{ctx.dest.env_slug}-{ctx.app}"
+        service = f"humr-{ctx.dest.env_slug}-{ctx.app}"
         container = f"{ctx.app}{HERMES_CONTAINER_SUFFIX}"
         task = self._find_running_task(ecs=ecs, cluster=cluster, service=service)
         inner = (

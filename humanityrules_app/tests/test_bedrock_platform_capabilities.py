@@ -19,7 +19,7 @@ def _app_config(provider: str, platform_capabilities: list[str]) -> AppConfig:
             ContainerConfig(
                 name="hermes",
                 image_source="dockerfile",
-                ecr_repo_name="doh/staging/my-hermes-hermes",
+                ecr_repo_name="humr/staging/my-hermes-hermes",
                 container_port=8787,
                 environment_variables=[
                     {"name": "HUMR_LLM_PROVIDER", "value": provider},
@@ -39,7 +39,7 @@ def _bedrock_actions_from_stack(app_config: AppConfig) -> list[str]:
         app_config=app_config,
         image_tag="test",
         env_slug="staging",
-        resource_prefix="doh-staging-my-hermes",
+        resource_prefix="humr-staging-my-hermes",
         subdomain="my-hermes",
         database_connection_secret=None,
         shared_alb_hosted_zone=None,

@@ -40,7 +40,7 @@ from email.mime.text import MIMEText
 # Sentinel token sent to the broker. The broker swaps the Authorization
 # header before forwarding to Google. If the user hasn't connected Google,
 # the broker returns 503 with a clear message that gws surfaces verbatim.
-_BROKER_PLACEHOLDER_TOKEN = "doh-broker-placeholder"
+_BROKER_PLACEHOLDER_TOKEN = "humr-broker-placeholder"
 
 
 def _gws_binary() -> str:

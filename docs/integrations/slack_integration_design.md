@@ -58,7 +58,7 @@ The chosen name is persisted in the Slack `config["app_name"]` so it
 repopulates on reopen (the template default only seeds the first connect). The
 name lives **inside the manifest JSON** the operator clicks, so the WebUI
 re-encodes the prefill URL on every keystroke. Sanitization is mirrored in
-Python (`provider_slack.py`) and JS (`doh-integrations.js`) so the live link
+Python (`provider_slack.py`) and JS (`humr-integrations.js`) so the live link
 matches what the server bakes and stores.
 
 **The name only affects app *creation*.** Like any manifest change, renaming in

@@ -257,7 +257,7 @@ def get_stack_output(cf_client, stack_name: str, output_key: str) -> str | None:
 
 def get_app_urls(cf_client, app_name: str, env_slug: str, has_domain: bool) -> dict[str, str | None]:
     """Get the app URLs from CloudFormation stack outputs."""
-    stack_name = f"doh-{env_slug}-{app_name}-app"
+    stack_name = f"humr-{env_slug}-{app_name}-app"
 
     shared_alb_dns = get_stack_output(cf_client, stack_name=stack_name, output_key="SharedAlbDns")
     alb_url = f"http://{shared_alb_dns}" if shared_alb_dns else None

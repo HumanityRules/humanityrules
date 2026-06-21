@@ -36,7 +36,7 @@
                 <div id="app-section"
                     {% if app %}
                     hx-get="{% url 'deployment_editor_app_section' app_slug=app.slug %}"
-                    hx-trigger="doh:app-changed-{{ app.id }} from:document"
+                    hx-trigger="humr:app-changed-{{ app.id }} from:document"
                     hx-swap="innerHTML"
                     {% endif %}>
                     {% include "humanityrules_app/deploy/_app_section.html" %}
@@ -46,7 +46,7 @@
                 <div id="blueprint-section"
                     {% if app %}
                     hx-get="{% url 'deployment_editor_blueprint_section' app_slug=app.slug %}"
-                    hx-trigger="doh:blueprint-changed-{{ app.id }} from:document"
+                    hx-trigger="humr:blueprint-changed-{{ app.id }} from:document"
                     hx-swap="innerHTML"
                     {% endif %}>
                     {% include "humanityrules_app/deploy/_blueprint_section.html" %}
@@ -74,7 +74,7 @@ function reloadEditor(url) {
     history.pushState({}, '', url);
 }
 
-document.addEventListener('doh:app-created', (e) => {
+document.addEventListener('humr:app-created', (e) => {
     if (e.detail.slug) {
         reloadEditor(`/deploy/${e.detail.slug}/`);
     }

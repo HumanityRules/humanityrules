@@ -11,7 +11,7 @@ from .infra_customer import iam_utils
 
 logger = logging.getLogger(__name__)
 
-HUMR_APP_PERMISSIONS_POLICY_NAME = "doh-app-permissions"
+HUMR_APP_PERMISSIONS_POLICY_NAME = "humr-app-permissions"
 
 CURATED_SERVICES = {"s3", "sqs", "dynamodb", "secretsmanager", "kms", "sns", "ssm", "logs", "ecs", "ecr", "lambda", "ses"}
 

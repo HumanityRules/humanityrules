@@ -7,7 +7,7 @@ import jwt
 from policy_proxy import jwt_verify
 
 
-ENV_DOMAIN = "doh-sandbox.dohsandbox.com"
+ENV_DOMAIN = "humr-sandbox.humrsandbox.com"
 
 
 def test_valid_cookie_returns_identity(fake_jwks_client, jwt_minter) -> None:
@@ -85,7 +85,7 @@ def test_missing_kid_header_returns_none(rsa_keypair, fake_jwks_client) -> None:
 
 def test_aud_mismatch_returns_none(fake_jwks_client, jwt_minter) -> None:
     """Sibling-env replay: a token minted for one env-domain must NOT verify under another."""
-    token = jwt_minter(aud="other-env.dohsandbox.com")
+    token = jwt_minter(aud="other-env.humrsandbox.com")
     result = jwt_verify.verify_session_jwt(
         jwt_value=token, jwks_client=fake_jwks_client, env_domain=ENV_DOMAIN,
     )

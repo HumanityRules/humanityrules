@@ -1,7 +1,7 @@
 // HUMR WebUI extension — Web Apps panel.
 //
 // Reads from the platform-owned `__admin` webapp (FastAPI, served same-origin
-// at /webapps/__admin/api/). Mirrors doh-integrations.js: rail icon + sidebar
+// at /webapps/__admin/api/). Mirrors humr-integrations.js: rail icon + sidebar
 // summary panel + main view, polling every 3s while the panel is active.
 // Read-only in v1; mutations stay on the CLI.
 (() => {
@@ -58,9 +58,9 @@
   }
 
   function emptyStateNode() {
-    return elem('div', { class: 'doh-webapp-empty' }, [
-      elem('div', { class: 'doh-webapp-empty-title' }, ['No web apps yet']),
-      elem('p', { class: 'doh-webapp-empty-hint' }, [
+    return elem('div', { class: 'humr-webapp-empty' }, [
+      elem('div', { class: 'humr-webapp-empty-title' }, ['No web apps yet']),
+      elem('p', { class: 'humr-webapp-empty-hint' }, [
         'Web apps are created by talking to the agent in chat. For example, you can ask the agent: ',
         elem('span', null, ['Build me a San Francisco Weather dashboard webapp.']),
       ]),
@@ -68,7 +68,7 @@
   }
 
   function renderSummary(payload) {
-    const summary = document.getElementById('dohWebappsSummary');
+    const summary = document.getElementById('humrWebappsSummary');
     if (!summary) return;
     summary.innerHTML = '';
     if (!payload) {
@@ -79,9 +79,9 @@
     const running = items.filter((it) => it.status === 'Running' && it.is_ready === 'Ready').length;
     const total = items.length;
     if (total === 0) {
-      summary.appendChild(elem('div', { class: 'doh-webapp-summary-empty' }, [
-        elem('div', { class: 'doh-webapp-summary-empty-title' }, ['No web apps yet']),
-        elem('div', { class: 'doh-webapp-summary-empty-hint' }, [
+      summary.appendChild(elem('div', { class: 'humr-webapp-summary-empty' }, [
+        elem('div', { class: 'humr-webapp-summary-empty-title' }, ['No web apps yet']),
+        elem('div', { class: 'humr-webapp-summary-empty-hint' }, [
           'Ask the agent in chat to create one.',
         ]),
       ]));
@@ -91,43 +91,43 @@
   }
 
   function renderRow(item) {
-    const card = elem('div', { class: 'doh-webapp-card', dataset: { slug: item.slug } });
-    const head = elem('div', { class: 'doh-webapp-card-head' });
-    head.appendChild(elem('div', { class: 'doh-webapp-card-title' }, [item.slug]));
+    const card = elem('div', { class: 'humr-webapp-card', dataset: { slug: item.slug } });
+    const head = elem('div', { class: 'humr-webapp-card-head' });
+    head.appendChild(elem('div', { class: 'humr-webapp-card-title' }, [item.slug]));
 
     const statusKey = item.is_ready === 'Ready' ? 'ready' : (item.status || 'pending').toLowerCase();
     const statusText = item.is_ready === 'Ready' ? 'Ready' : statusLabelFor(item.status);
     head.appendChild(elem('div', {
-      class: 'doh-webapp-status',
+      class: 'humr-webapp-status',
       dataset: { status: statusKey },
     }, [statusText]));
     card.appendChild(head);
 
-    const meta = elem('div', { class: 'doh-webapp-meta' });
+    const meta = elem('div', { class: 'humr-webapp-meta' });
     if (item.port != null) {
-      meta.appendChild(elem('span', { class: 'doh-webapp-meta-item' }, ['port ' + item.port]));
+      meta.appendChild(elem('span', { class: 'humr-webapp-meta-item' }, ['port ' + item.port]));
     }
     if (item.restarts) {
-      meta.appendChild(elem('span', { class: 'doh-webapp-meta-item' }, [item.restarts + ' restarts']));
+      meta.appendChild(elem('span', { class: 'humr-webapp-meta-item' }, [item.restarts + ' restarts']));
     }
     if (item.is_internal) {
-      meta.appendChild(elem('span', { class: 'doh-webapp-meta-item doh-webapp-meta-internal' }, ['internal']));
+      meta.appendChild(elem('span', { class: 'humr-webapp-meta-item humr-webapp-meta-internal' }, ['internal']));
     }
     card.appendChild(meta);
 
     if (item.routed && item.url) {
       card.appendChild(elem('a', {
-        class: 'doh-webapp-url',
+        class: 'humr-webapp-url',
         href: item.url,
         target: '_blank',
         rel: 'noopener noreferrer',
       }, [item.url]));
     } else {
-      card.appendChild(elem('div', { class: 'doh-webapp-url doh-webapp-url-muted' }, ['(stopped)']));
+      card.appendChild(elem('div', { class: 'humr-webapp-url humr-webapp-url-muted' }, ['(stopped)']));
     }
 
     card.appendChild(elem('a', {
-      class: 'doh-webapp-logs-link',
+      class: 'humr-webapp-logs-link',
       href: logUrlFor(item.slug),
       target: '_blank',
       rel: 'noopener noreferrer',
@@ -138,12 +138,12 @@
   function renderPane(payload) {
     renderSummary(payload);
 
-    const list = document.getElementById('dohWebappsList');
+    const list = document.getElementById('humrWebappsList');
     if (!list) return;
     list.innerHTML = '';
 
     if (!payload) {
-      list.appendChild(elem('div', { class: 'doh-webapp-empty' }, [
+      list.appendChild(elem('div', { class: 'humr-webapp-empty' }, [
         'Web app status is unavailable. The platform admin webapp may not be running yet.',
       ]));
       return;
@@ -206,11 +206,11 @@
     const railIcon = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/></svg>';
     const navIcon = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/></svg>';
 
-    if (rail && !document.getElementById('dohWebappsRailBtn')) {
+    if (rail && !document.getElementById('humrWebappsRailBtn')) {
       const railBtn = elem('button', {
         type: 'button',
         class: 'rail-btn nav-tab has-tooltip',
-        id: 'dohWebappsRailBtn',
+        id: 'humrWebappsRailBtn',
         'aria-label': 'Web Apps',
         dataset: { panel: 'webapps', tooltip: 'Web Apps' },
         onclick: onActivate,
@@ -221,11 +221,11 @@
       else rail.appendChild(railBtn);
     }
 
-    if (!document.getElementById('dohWebappsTab')) {
+    if (!document.getElementById('humrWebappsTab')) {
       const navBtn = elem('button', {
         type: 'button',
         class: 'nav-tab has-tooltip has-tooltip--bottom',
-        id: 'dohWebappsTab',
+        id: 'humrWebappsTab',
         dataset: { panel: 'webapps', label: 'Web Apps', tooltip: 'Web Apps' },
         onclick: onActivate,
       });
@@ -233,15 +233,15 @@
       sidebarNav.appendChild(navBtn);
     }
 
-    const view = elem('section', { class: 'main-view doh-webapp-page', id: 'mainWebapps' }, [
-      elem('div', { class: 'doh-webapp-page-inner' }, [
-        elem('div', { class: 'doh-webapp-page-head' }, [
-          elem('div', { class: 'doh-webapp-page-title' }, ['Web Apps']),
-          elem('div', { class: 'doh-webapp-page-meta' }, [
+    const view = elem('section', { class: 'main-view humr-webapp-page', id: 'mainWebapps' }, [
+      elem('div', { class: 'humr-webapp-page-inner' }, [
+        elem('div', { class: 'humr-webapp-page-head' }, [
+          elem('div', { class: 'humr-webapp-page-title' }, ['Web Apps']),
+          elem('div', { class: 'humr-webapp-page-meta' }, [
             'Apps the agent built, each at its own subdomain (<slug>.<hostname>).',
           ]),
         ]),
-        elem('div', { class: 'doh-webapp-list', id: 'dohWebappsList' }),
+        elem('div', { class: 'humr-webapp-list', id: 'humrWebappsList' }),
       ]),
     ]);
     mainEl.appendChild(view);
@@ -250,7 +250,7 @@
       elem('div', { class: 'panel-head' }, [
         elem('span', null, ['Web Apps']),
       ]),
-      elem('div', { class: 'doh-webapp-summary', id: 'dohWebappsSummary' }, [
+      elem('div', { class: 'humr-webapp-summary', id: 'humrWebappsSummary' }, [
         'Loading…',
       ]),
     ]);
@@ -260,13 +260,13 @@
     return true;
   }
 
-  // doh-integrations.js already wraps switchPanel for its `showing-integrations`
+  // humr-integrations.js already wraps switchPanel for its `showing-integrations`
   // class. Wrap again here, chaining through the previous wrapper so both
   // panels coexist regardless of script load order.
   function wrapSwitchPanel() {
     if (typeof window.switchPanel !== 'function') return;
-    if (window.__dohWebappsWrapped) return;
-    window.__dohWebappsWrapped = true;
+    if (window.__humrWebappsWrapped) return;
+    window.__humrWebappsWrapped = true;
     const orig = window.switchPanel;
     window.switchPanel = async function (name) {
       const result = await orig.apply(this, arguments);

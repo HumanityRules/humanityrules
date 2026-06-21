@@ -168,7 +168,7 @@ class Command(BaseCommand):
             raise CommandError(f"No app with slug '{app_slug}' in organization '{aws_account.organization.name}'.")
 
         cluster_name = f"humr-{env_slug}-cluster"
-        service_name = f"doh-{env_slug}-{app_slug}"
+        service_name = f"humr-{env_slug}-{app_slug}"
         log_group = f"/humr/{env_slug}/ecs"
         container_name = humr_app_shell._resolve_ecs_container_name(
             app=app,

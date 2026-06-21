@@ -1,19 +1,19 @@
 /* HUMR WebUI extension — Web Apps page.
-   Parallel structure to doh-integrations.css; scoped to .doh-webapp-* so the
+   Parallel structure to humr-integrations.css; scoped to .humr-webapp-* so the
    two panels don't share base classes. */
 
 main.main > #mainWebapps { display: none; }
 main.main.showing-webapps > #mainWebapps { display: flex; }
 main.main.showing-webapps > #mainChat { display: none !important; }
 
-.doh-webapp-summary {
+.humr-webapp-summary {
   padding: 12px 14px;
   font-size: 12px;
   color: var(--muted);
   line-height: 1.5;
 }
 
-.doh-webapp-page {
+.humr-webapp-page {
   flex: 1;
   min-height: 0;
   min-width: 0;
@@ -22,7 +22,7 @@ main.main.showing-webapps > #mainChat { display: none !important; }
   overflow-y: auto;
 }
 
-.doh-webapp-page-inner {
+.humr-webapp-page-inner {
   width: min(900px, 100%);
   margin: 0 auto;
   padding: 28px 32px 48px;
@@ -31,7 +31,7 @@ main.main.showing-webapps > #mainChat { display: none !important; }
   gap: 18px;
 }
 
-.doh-webapp-page-head {
+.humr-webapp-page-head {
   display: flex;
   flex-direction: column;
   gap: 4px;
@@ -39,54 +39,54 @@ main.main.showing-webapps > #mainChat { display: none !important; }
   border-bottom: 1px solid var(--border);
 }
 
-.doh-webapp-page-title {
+.humr-webapp-page-title {
   font-size: 18px;
   font-weight: 600;
   color: var(--text);
   letter-spacing: -0.01em;
 }
 
-.doh-webapp-page-meta {
+.humr-webapp-page-meta {
   font-size: 12px;
   color: var(--muted);
   line-height: 1.5;
 }
 
-.doh-webapp-list {
+.humr-webapp-list {
   display: flex;
   flex-direction: column;
   gap: 10px;
 }
 
-.doh-webapp-empty {
+.humr-webapp-empty {
   color: var(--muted);
   font-size: 15px;
   padding: 16px 0;
   line-height: 1.5;
 }
 
-.doh-webapp-empty-title {
+.humr-webapp-empty-title {
   font-size: 16px;
   font-weight: 600;
   color: var(--text);
   margin-bottom: 6px;
 }
 
-.doh-webapp-empty-hint {
+.humr-webapp-empty-hint {
   margin: 0 0 4px;
 }
 
-.doh-webapp-summary-empty-title {
+.humr-webapp-summary-empty-title {
   font-weight: 500;
   color: var(--text);
   margin-bottom: 4px;
 }
 
-.doh-webapp-summary-empty-hint {
+.humr-webapp-summary-empty-hint {
   font-size: 11px;
 }
 
-.doh-webapp-card {
+.humr-webapp-card {
   border: 1px solid var(--border);
   border-radius: 8px;
   padding: 12px 14px;
@@ -96,21 +96,21 @@ main.main.showing-webapps > #mainChat { display: none !important; }
   gap: 6px;
 }
 
-.doh-webapp-card-head {
+.humr-webapp-card-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
 }
 
-.doh-webapp-card-title {
+.humr-webapp-card-title {
   font-size: 14px;
   font-weight: 600;
   color: var(--text);
   font-family: var(--mono, ui-monospace, SFMono-Regular, Menlo, monospace);
 }
 
-.doh-webapp-status {
+.humr-webapp-status {
   font-size: 11px;
   text-transform: uppercase;
   letter-spacing: 0.04em;
@@ -120,21 +120,21 @@ main.main.showing-webapps > #mainChat { display: none !important; }
   color: var(--muted);
 }
 
-.doh-webapp-status[data-status="ready"] {
+.humr-webapp-status[data-status="ready"] {
   color: #22c55e;
   border-color: rgba(34, 197, 94, 0.35);
 }
 
-.doh-webapp-status[data-status="error"] {
+.humr-webapp-status[data-status="error"] {
   color: #ef4444;
   border-color: rgba(239, 68, 68, 0.35);
 }
 
-.doh-webapp-status[data-status="completed"] {
+.humr-webapp-status[data-status="completed"] {
   color: var(--muted);
 }
 
-.doh-webapp-meta {
+.humr-webapp-meta {
   display: flex;
   flex-wrap: wrap;
   gap: 8px 14px;
@@ -142,11 +142,11 @@ main.main.showing-webapps > #mainChat { display: none !important; }
   color: var(--muted);
 }
 
-.doh-webapp-meta-item {
+.humr-webapp-meta-item {
   white-space: nowrap;
 }
 
-.doh-webapp-meta-internal {
+.humr-webapp-meta-internal {
   text-transform: uppercase;
   letter-spacing: 0.04em;
   font-size: 10px;
@@ -155,30 +155,30 @@ main.main.showing-webapps > #mainChat { display: none !important; }
   padding: 1px 6px;
 }
 
-.doh-webapp-url {
+.humr-webapp-url {
   font-size: 12px;
   color: var(--accent, #5aa9ff);
   text-decoration: none;
   word-break: break-all;
 }
 
-.doh-webapp-url:hover {
+.humr-webapp-url:hover {
   text-decoration: underline;
 }
 
-.doh-webapp-url-muted {
+.humr-webapp-url-muted {
   color: var(--muted);
   font-style: italic;
 }
 
-.doh-webapp-logs-link {
+.humr-webapp-logs-link {
   font-size: 12px;
   color: var(--muted);
   text-decoration: none;
   align-self: flex-start;
 }
 
-.doh-webapp-logs-link:hover {
+.humr-webapp-logs-link:hover {
   color: var(--accent, #5aa9ff);
   text-decoration: underline;
 }

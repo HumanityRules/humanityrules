@@ -638,7 +638,7 @@ class Command(BaseCommand):
 
         aws_account = environment.aws_account
         cluster_name = f"humr-{environment.slug}-cluster"
-        service_name = f"doh-{environment.slug}-{app.slug}"
+        service_name = f"humr-{environment.slug}-{app.slug}"
 
         session = iam_utils.get_assumed_role_session(
             access_key=settings.HUMR_AWS_ACCESS_KEY,

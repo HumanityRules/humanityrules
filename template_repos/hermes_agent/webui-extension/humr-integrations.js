@@ -58,8 +58,8 @@
 
   async function startRefreshCatalog() {
     if (_refreshInflight) return;
-    const btn = document.getElementById('dohIntegrationRefreshBtn');
-    const note = document.getElementById('dohIntegrationRefreshNote');
+    const btn = document.getElementById('humrIntegrationRefreshBtn');
+    const note = document.getElementById('humrIntegrationRefreshNote');
     if (note) { note.style.display = 'none'; note.textContent = ''; }
     _refreshInflight = true;
     if (btn) {
@@ -154,7 +154,7 @@
     const MAX_RETRIES = 10;
     let tries = 0;
     const img = elem('img', {
-      class: 'doh-integration-logo',
+      class: 'humr-integration-logo',
       src: url,
       alt: '',
       decoding: 'async',
@@ -176,8 +176,8 @@
   // WebUI restart: once the logos are in the browser cache, the later
   // re-render reuses them, so the restart can't blank them.
   function waitForLogos(timeoutMs) {
-    const list = document.getElementById('dohIntegrationList');
-    const imgs = list ? Array.from(list.querySelectorAll('.doh-integration-logo')) : [];
+    const list = document.getElementById('humrIntegrationList');
+    const imgs = list ? Array.from(list.querySelectorAll('.humr-integration-logo')) : [];
     const pending = imgs.filter((img) => !img.complete);
     if (pending.length === 0) return Promise.resolve();
     return new Promise((resolve) => {
@@ -195,7 +195,7 @@
   // WebUI-served asset (our own stylesheet) until it loads. Cache-busted so the
   // browser can't answer from a stale entry; capped by `timeoutMs`.
   function waitForWebui(timeoutMs) {
-    const probeUrl = '/extensions/doh-integrations.css';
+    const probeUrl = '/extensions/humr-integrations.css';
     const start = Date.now();
     return new Promise((resolve) => {
       const attempt = () => {
@@ -248,14 +248,14 @@
   // cards, or the "merge:"/"mcp:"-prefixed provider id for connector cards.
   function disconnectButton(key, onclick) {
     const pending = _disconnecting.has(key);
-    const props = { class: 'doh-integration-btn doh-integration-btn-secondary', onclick };
+    const props = { class: 'humr-integration-btn humr-integration-btn-secondary', onclick };
     if (pending) props.disabled = true;
     return elem('button', props, [pending ? 'Disconnecting…' : 'Disconnect']);
   }
 
   function configureButton(item, connectBtnForRevert) {
     const canConfigure = item.connect_mode === 'vault';
-    const props = { class: 'doh-integration-btn' };
+    const props = { class: 'humr-integration-btn' };
     if (canConfigure) {
       props.onclick = () => {
         const revert = connectBtnForRevert ? markConnecting(connectBtnForRevert) : undefined;
@@ -289,11 +289,11 @@
   // connectors). Each renderer fills in its own connected/not-connected body.
   function buildCardScaffold(item, providerKey) {
     const isConnected = item.status === 'connected';
-    const card = elem('div', { class: 'doh-integration-card', dataset: { provider: providerKey } });
-    const titleRow = elem('div', { class: 'doh-integration-card-title-row' });
+    const card = elem('div', { class: 'humr-integration-card', dataset: { provider: providerKey } });
+    const titleRow = elem('div', { class: 'humr-integration-card-title-row' });
     if (item.logo_url) titleRow.appendChild(logoImg(item.logo_url));
-    titleRow.appendChild(elem('div', { class: 'doh-integration-card-title' }, [item.label || item.slug]));
-    const statusPill = elem('div', { class: 'doh-integration-card-status', dataset: { status: item.status } }, [statusLabelFor(item.status)]);
+    titleRow.appendChild(elem('div', { class: 'humr-integration-card-title' }, [item.label || item.slug]));
+    const statusPill = elem('div', { class: 'humr-integration-card-status', dataset: { status: item.status } }, [statusLabelFor(item.status)]);
     return { card, titleRow, statusPill, isConnected };
   }
 
@@ -304,7 +304,7 @@
   // cancel/error and navigation flows simply let persist as the page leaves.
   function appendConnectFooter(card, titleRow, statusPill, item, onConnect) {
     const connectBtn = elem('button', {
-      class: 'doh-integration-btn',
+      class: 'humr-integration-btn',
       onclick: () => { onConnect(markConnecting(connectBtn)); },
     }, ['Connect']);
     if (item.status === 'not_connected') {
@@ -313,15 +313,15 @@
       // "Not connected" pill (Connect already says as much) and the empty
       // pinned-to-bottom body that left an awkward gap — no Configure either,
       // since there's nothing to configure before connecting.
-      connectBtn.classList.add('doh-integration-card-head-action');
-      card.appendChild(elem('div', { class: 'doh-integration-card-head' }, [titleRow, connectBtn]));
+      connectBtn.classList.add('humr-integration-card-head-action');
+      card.appendChild(elem('div', { class: 'humr-integration-card-head' }, [titleRow, connectBtn]));
       return;
     }
     // Other not-connected states (token expired, checking…) keep the
     // informative pill in the head and the action in the pinned footer body.
-    card.appendChild(elem('div', { class: 'doh-integration-card-head' }, [titleRow, statusPill]));
-    const body = elem('div', { class: 'doh-integration-card-body' });
-    const actions = elem('div', { class: 'doh-integration-actions doh-integration-actions-single' });
+    card.appendChild(elem('div', { class: 'humr-integration-card-head' }, [titleRow, statusPill]));
+    const body = elem('div', { class: 'humr-integration-card-body' });
+    const actions = elem('div', { class: 'humr-integration-actions humr-integration-actions-single' });
     actions.appendChild(connectBtn);
     body.appendChild(actions);
     card.appendChild(body);
@@ -330,21 +330,21 @@
   // ── Merge connector flow ──────────────────────────────────────────
 
   function showMergeExplainerModal(item, onContinue, onCancel) {
-    const backdrop = elem('div', { class: 'doh-modal-backdrop' });
+    const backdrop = elem('div', { class: 'humr-modal-backdrop' });
     const cancel = () => { backdrop.remove(); if (onCancel) onCancel(); };
-    const modal = elem('div', { class: 'doh-modal' }, [
-      elem('div', { class: 'doh-modal-title' }, ['Connect ' + item.label]),
-      elem('div', { class: 'doh-modal-body' }, [
+    const modal = elem('div', { class: 'humr-modal' }, [
+      elem('div', { class: 'humr-modal-title' }, ['Connect ' + item.label]),
+      elem('div', { class: 'humr-modal-body' }, [
         'You’ll authenticate in a new tab via Merge.dev, our secure integrations broker. ' +
         'Authentication happens directly with ' + item.label + '.'
       ]),
-      elem('div', { class: 'doh-modal-actions' }, [
+      elem('div', { class: 'humr-modal-actions' }, [
         elem('button', {
-          class: 'doh-integration-btn',
+          class: 'humr-integration-btn',
           onclick: cancel,
         }, ['Cancel']),
         elem('button', {
-          class: 'doh-integration-btn doh-integration-btn-primary',
+          class: 'humr-integration-btn humr-integration-btn-primary',
           onclick: () => { backdrop.remove(); onContinue(); },
         }, ['Continue']),
       ]),
@@ -355,16 +355,16 @@
   }
 
   function showMergeWaitingModal(item, onCancel) {
-    const backdrop = elem('div', { class: 'doh-modal-backdrop' });
-    const modal = elem('div', { class: 'doh-modal' }, [
-      elem('div', { class: 'doh-modal-title' }, ['Waiting for ' + item.label + '…']),
-      elem('div', { class: 'doh-modal-body' }, [
+    const backdrop = elem('div', { class: 'humr-modal-backdrop' });
+    const modal = elem('div', { class: 'humr-modal' }, [
+      elem('div', { class: 'humr-modal-title' }, ['Waiting for ' + item.label + '…']),
+      elem('div', { class: 'humr-modal-body' }, [
         'Complete authentication in the tab that just opened. When Merge confirms, ' +
         'this dialog closes automatically.',
       ]),
-      elem('div', { class: 'doh-modal-actions' }, [
+      elem('div', { class: 'humr-modal-actions' }, [
         elem('button', {
-          class: 'doh-integration-btn',
+          class: 'humr-integration-btn',
           onclick: () => { backdrop.remove(); onCancel(); },
         }, ['Cancel']),
       ]),
@@ -387,15 +387,15 @@
     // at this point, so the title stays provider-agnostic to avoid mis-casing
     // a brand name (e.g. "Github"). Only one transition is ever in flight.
     const title = (sentinel.transition === 'disconnected' ? 'Disconnecting' : 'Finishing connection') + '…';
-    // Transparent backdrop (doh-transition-backdrop): the dialog floats over
+    // Transparent backdrop (humr-transition-backdrop): the dialog floats over
     // the page, which stays visible behind it, and blocks interaction. We do
     // NOT re-render the page while the dialog is up, so nothing behind it
     // changes (no stale cards, no blank logos) until the WebUI is back.
-    const backdrop = elem('div', { class: 'doh-modal-backdrop doh-transition-backdrop' });
-    const modal = elem('div', { class: 'doh-modal doh-transition-modal' }, [
-      elem('div', { class: 'doh-transition-spinner' }),
-      elem('div', { class: 'doh-modal-title' }, [title]),
-      elem('div', { class: 'doh-modal-body' }, ['Syncing status with Humanity Rules. This will only take a moment.']),
+    const backdrop = elem('div', { class: 'humr-modal-backdrop humr-transition-backdrop' });
+    const modal = elem('div', { class: 'humr-modal humr-transition-modal' }, [
+      elem('div', { class: 'humr-transition-spinner' }),
+      elem('div', { class: 'humr-modal-title' }, [title]),
+      elem('div', { class: 'humr-modal-body' }, ['Syncing status with Humanity Rules. This will only take a moment.']),
     ]);
     backdrop.appendChild(modal);
     document.body.appendChild(backdrop);
@@ -482,9 +482,9 @@
         }
         await refreshAndRender();
       }));
-      card.appendChild(elem('div', { class: 'doh-integration-card-head' }, [titleRow, statusPill]));
-      const body = elem('div', { class: 'doh-integration-card-body' });
-      const actions = elem('div', { class: 'doh-integration-actions' });
+      card.appendChild(elem('div', { class: 'humr-integration-card-head' }, [titleRow, statusPill]));
+      const body = elem('div', { class: 'humr-integration-card-body' });
+      const actions = elem('div', { class: 'humr-integration-actions' });
       actions.appendChild(configureButton(item));
       actions.appendChild(disconnectBtn);
       body.appendChild(actions);
@@ -500,16 +500,16 @@
   }
 
   function fieldInputFor(field) {
-    const id = 'dohVaultField_' + field.name;
-    const wrapper = elem('label', { class: 'doh-vault-field', for: id });
-    wrapper.appendChild(elem('span', { class: 'doh-vault-field-label' }, [
+    const id = 'humrVaultField_' + field.name;
+    const wrapper = elem('label', { class: 'humr-vault-field', for: id });
+    wrapper.appendChild(elem('span', { class: 'humr-vault-field-label' }, [
       field.label + (field.required ? ' *' : ''),
     ]));
     let input;
     if (field.kind === 'textarea') {
       input = elem('textarea', {
         id,
-        class: 'doh-vault-input doh-vault-textarea',
+        class: 'humr-vault-input humr-vault-textarea',
         name: field.name,
         rows: '4',
       });
@@ -517,7 +517,7 @@
     } else {
       input = elem('input', {
         id,
-        class: 'doh-vault-input',
+        class: 'humr-vault-input',
         name: field.name,
         type: 'text',
         placeholder: field.placeholder || '',
@@ -526,7 +526,7 @@
     }
     input.dataset.kind = field.kind || 'text';
     wrapper.appendChild(input);
-    if (field.help) wrapper.appendChild(elem('span', { class: 'doh-vault-field-help' }, [field.help]));
+    if (field.help) wrapper.appendChild(elem('span', { class: 'humr-vault-field-help' }, [field.help]));
     return wrapper;
   }
 
@@ -720,7 +720,7 @@
       await refreshModelDropdownsIfProviderAffectsPicker(item);
     }
     actions.replaceChildren(elem('button', {
-      class: 'doh-integration-btn doh-integration-btn-primary',
+      class: 'humr-integration-btn humr-integration-btn-primary',
       type: 'button',
       onclick: close,
     }, ['Close']));
@@ -766,21 +766,21 @@
       return;
     }
     const schema = session.schema;
-    const backdrop = elem('div', { class: 'doh-modal-backdrop doh-vault-backdrop' });
+    const backdrop = elem('div', { class: 'humr-modal-backdrop humr-vault-backdrop' });
     const close = () => { backdrop.remove(); if (onClose) onClose(); };
-    const errorBox = elem('div', { class: 'doh-vault-error', style: { display: 'none' } });
-    const successBox = elem('div', { class: 'doh-vault-success', style: { display: 'none' } });
-    const form = elem('form', { class: 'doh-vault-form' });
+    const errorBox = elem('div', { class: 'humr-vault-error', style: { display: 'none' } });
+    const successBox = elem('div', { class: 'humr-vault-success', style: { display: 'none' } });
+    const form = elem('form', { class: 'humr-vault-form' });
     for (const field of schema.fields || []) {
       form.appendChild(fieldInputFor(field));
     }
     const saveBtn = elem('button', {
-      class: 'doh-integration-btn doh-integration-btn-primary',
+      class: 'humr-integration-btn humr-integration-btn-primary',
       type: 'submit',
     }, ['Save']);
-    const actions = elem('div', { class: 'doh-modal-actions' }, [
+    const actions = elem('div', { class: 'humr-modal-actions' }, [
       elem('button', {
-        class: 'doh-integration-btn',
+        class: 'humr-integration-btn',
         type: 'button',
         onclick: close,
       }, ['Cancel']),
@@ -788,9 +788,9 @@
     ]);
     form.appendChild(actions);
     wireVaultSubmit({ form, session, item, saveBtn, actions, errorBox, successBox, close });
-    const modal = elem('div', { class: 'doh-modal doh-vault-modal' }, [
-      elem('div', { class: 'doh-modal-title' }, [(schema.status === 'connected' ? 'Configure ' : 'Connect ') + (schema.label || item.label)]),
-      elem('div', { class: 'doh-modal-body' }, [schema.message || 'Credentials are sent directly to the Humanity Rules vault.']),
+    const modal = elem('div', { class: 'humr-modal humr-vault-modal' }, [
+      elem('div', { class: 'humr-modal-title' }, [(schema.status === 'connected' ? 'Configure ' : 'Connect ') + (schema.label || item.label)]),
+      elem('div', { class: 'humr-modal-body' }, [schema.message || 'Credentials are sent directly to the Humanity Rules vault.']),
       errorBox,
       successBox,
       form,
@@ -814,26 +814,26 @@
 
   function showLinkPollConnectModal(item, session, onClose) {
     const schema = session.schema;
-    const backdrop = elem('div', { class: 'doh-modal-backdrop doh-vault-backdrop' });
+    const backdrop = elem('div', { class: 'humr-modal-backdrop humr-vault-backdrop' });
     let stopped = false;
     const close = () => { stopped = true; backdrop.remove(); if (onClose) onClose(); };
 
-    const errorBox = elem('div', { class: 'doh-vault-error', style: { display: 'none' } });
-    const statusBox = elem('div', { class: 'doh-vault-success' }, [schema.pending_message || 'Waiting for confirmation…']);
-    const cancelBtn = elem('button', { class: 'doh-integration-btn', type: 'button', onclick: close }, ['Cancel']);
-    const actions = elem('div', { class: 'doh-modal-actions' }, [cancelBtn]);
+    const errorBox = elem('div', { class: 'humr-vault-error', style: { display: 'none' } });
+    const statusBox = elem('div', { class: 'humr-vault-success' }, [schema.pending_message || 'Waiting for confirmation…']);
+    const cancelBtn = elem('button', { class: 'humr-integration-btn', type: 'button', onclick: close }, ['Cancel']);
+    const actions = elem('div', { class: 'humr-modal-actions' }, [cancelBtn]);
 
     const children = [
-      elem('div', { class: 'doh-modal-title' }, ['Connect ' + (schema.label || item.label)]),
-      elem('div', { class: 'doh-modal-body' }, [schema.message || '']),
+      elem('div', { class: 'humr-modal-title' }, ['Connect ' + (schema.label || item.label)]),
+      elem('div', { class: 'humr-modal-body' }, [schema.message || '']),
     ];
     if (schema.qr_data_uri) {
-      children.push(elem('div', { class: 'doh-vault-qr-wrap' }, [
-        elem('img', { class: 'doh-vault-qr', src: schema.qr_data_uri, alt: 'QR code', decoding: 'async' }),
-        elem('div', { class: 'doh-vault-qr-caption' }, [schema.qr_caption || 'Scan with your phone']),
+      children.push(elem('div', { class: 'humr-vault-qr-wrap' }, [
+        elem('img', { class: 'humr-vault-qr', src: schema.qr_data_uri, alt: 'QR code', decoding: 'async' }),
+        elem('div', { class: 'humr-vault-qr-caption' }, [schema.qr_caption || 'Scan with your phone']),
       ]));
       if (schema.link_note) {
-        children.push(elem('div', { class: 'doh-vault-link-note' }, [schema.link_note]));
+        children.push(elem('div', { class: 'humr-vault-link-note' }, [schema.link_note]));
       }
       children.push(statusBox);
     } else {
@@ -843,7 +843,7 @@
       cancelBtn.textContent = 'Close';
     }
     children.push(errorBox, actions);
-    backdrop.appendChild(elem('div', { class: 'doh-modal doh-vault-modal' }, children));
+    backdrop.appendChild(elem('div', { class: 'humr-modal humr-vault-modal' }, children));
     backdrop.addEventListener('click', (e) => { if (e.target === backdrop) close(); });
     document.body.appendChild(backdrop);
 
@@ -910,7 +910,7 @@
   }
 
   function showDeviceModal(item, session, onClose) {
-    const backdrop = elem('div', { class: 'doh-modal-backdrop' });
+    const backdrop = elem('div', { class: 'humr-modal-backdrop' });
     let cancelled = false;
     const base = tlsInterceptBrokerPath(item.slug, 'device');
     const close = () => {
@@ -921,30 +921,30 @@
       if (onClose) onClose();
     };
 
-    const codeEl = elem('div', { class: 'doh-device-code' }, [session.user_code || '—']);
+    const codeEl = elem('div', { class: 'humr-device-code' }, [session.user_code || '—']);
     const link = elem('a', {
-      class: 'doh-device-oauth-link',
+      class: 'humr-device-oauth-link',
       href: session.verification_url,
       target: '_blank',
       rel: 'noopener',
     }, [session.verification_url]);
-    const statusBox = elem('div', { class: 'doh-vault-success' }, ['Waiting for you to approve in your browser…']);
-    const errorBox = elem('div', { class: 'doh-vault-error', style: { display: 'none' } });
-    const cancelBtn = elem('button', { class: 'doh-integration-btn', type: 'button', onclick: close }, ['Cancel']);
+    const statusBox = elem('div', { class: 'humr-vault-success' }, ['Waiting for you to approve in your browser…']);
+    const errorBox = elem('div', { class: 'humr-vault-error', style: { display: 'none' } });
+    const cancelBtn = elem('button', { class: 'humr-integration-btn', type: 'button', onclick: close }, ['Cancel']);
 
-    const modal = elem('div', { class: 'doh-modal' }, [
-      elem('div', { class: 'doh-modal-title' }, ['Connect ' + item.label]),
-      elem('div', { class: 'doh-modal-body doh-device-step-label' }, [
+    const modal = elem('div', { class: 'humr-modal' }, [
+      elem('div', { class: 'humr-modal-title' }, ['Connect ' + item.label]),
+      elem('div', { class: 'humr-modal-body humr-device-step-label' }, [
         'Open the link below and sign in:',
       ]),
-      elem('div', { class: 'doh-modal-body doh-device-step-content' }, [link]),
-      elem('div', { class: 'doh-modal-body doh-device-step-label' }, [
+      elem('div', { class: 'humr-modal-body humr-device-step-content' }, [link]),
+      elem('div', { class: 'humr-modal-body humr-device-step-label' }, [
         'After opening the link and signing in, enter this code:',
       ]),
       codeEl,
       statusBox,
       errorBox,
-      elem('div', { class: 'doh-modal-actions' }, [cancelBtn]),
+      elem('div', { class: 'humr-modal-actions' }, [cancelBtn]),
     ]);
     backdrop.appendChild(modal);
     document.body.appendChild(backdrop);
@@ -1013,11 +1013,11 @@
 
   function showSlackConfigModal(item, session, onClose) {
     const schema = session.schema;
-    const backdrop = elem('div', { class: 'doh-modal-backdrop doh-vault-backdrop' });
+    const backdrop = elem('div', { class: 'humr-modal-backdrop humr-vault-backdrop' });
     const close = () => { backdrop.remove(); if (onClose) onClose(); };
-    const errorBox = elem('div', { class: 'doh-vault-error', style: { display: 'none' } });
-    const successBox = elem('div', { class: 'doh-vault-success', style: { display: 'none' } });
-    const form = elem('form', { class: 'doh-vault-form' });
+    const errorBox = elem('div', { class: 'humr-vault-error', style: { display: 'none' } });
+    const successBox = elem('div', { class: 'humr-vault-success', style: { display: 'none' } });
+    const form = elem('form', { class: 'humr-vault-form' });
 
     // Never preselect a disabled mode: a stale credential could carry a mode
     // since turned off (the backend would then reject Save). Clamp to the
@@ -1036,7 +1036,7 @@
     // Defaults to the deploying app's template name; drives both Slack name
     // fields in the prefill manifest, so editing it rebuilds the link.
     const nameInput = elem('input', {
-      class: 'doh-vault-input',
+      class: 'humr-vault-input',
       name: 'app_name',
       type: 'text',
       maxlength: String(schema.app_name_max_len || SLACK_APP_NAME_MAX_LEN),
@@ -1048,7 +1048,7 @@
     // `config`; the backend resolves it to a Slack user_id at save and never
     // persists the address. Prefilled with the deploying user's HUMR email.
     const ownerEmailInput = elem('input', {
-      class: 'doh-vault-input',
+      class: 'humr-vault-input',
       name: 'owner_email',
       type: 'email',
       placeholder: 'you@company.com',
@@ -1061,10 +1061,10 @@
     const ownerHelp = schema.owner_name
       ? 'Currently replies to ' + schema.owner_name + '. Leave blank to keep them, or enter a different Slack email to change.'
       : 'The bot will reply only to this person. Use the email tied to your Slack account.';
-    const ownerEmailField = elem('label', { class: 'doh-vault-field' }, [
-      elem('span', { class: 'doh-vault-field-label' }, ['Your Slack email']),
+    const ownerEmailField = elem('label', { class: 'humr-vault-field' }, [
+      elem('span', { class: 'humr-vault-field-label' }, ['Your Slack email']),
       ownerEmailInput,
-      elem('span', { class: 'doh-vault-field-help' }, [ownerHelp]),
+      elem('span', { class: 'humr-vault-field-help' }, [ownerHelp]),
     ]);
     // Only personal mode collects an owner; show/hide as the mode changes.
     const syncOwnerEmail = () => {
@@ -1075,17 +1075,17 @@
     // where the gateway delivers cron/proactive output. Personal mode resolves
     // the owner's DM automatically, so this field is hidden there.
     const homeChannelInput = elem('input', {
-      class: 'doh-vault-input',
+      class: 'humr-vault-input',
       name: 'home_channel',
       type: 'text',
       placeholder: 'C0123456789',
       autocomplete: 'off',
     });
     homeChannelInput.value = schema.home_channel || '';
-    const homeChannelField = elem('label', { class: 'doh-vault-field' }, [
-      elem('span', { class: 'doh-vault-field-label' }, ['Home channel (optional)']),
+    const homeChannelField = elem('label', { class: 'humr-vault-field' }, [
+      elem('span', { class: 'humr-vault-field-label' }, ['Home channel (optional)']),
       homeChannelInput,
-      elem('span', { class: 'doh-vault-field-help' }, [
+      elem('span', { class: 'humr-vault-field-help' }, [
         'Channel ID where cron results and proactive messages are posted. Invite the bot to that channel first. Leave blank to set it later with !sethome in the channel.',
       ]),
     ]);
@@ -1097,7 +1097,7 @@
     // mode embeds a different manifest (scopes + subscriptions), and the name
     // is re-baked into both manifest name fields.
     const createLink = elem('a', {
-      class: 'doh-integration-btn doh-integration-btn-primary doh-slack-create-link',
+      class: 'humr-integration-btn humr-integration-btn-primary humr-slack-create-link',
       target: '_blank',
       rel: 'noopener noreferrer',
     }, ['Create Slack app ↗']);
@@ -1112,7 +1112,7 @@
     // every `[name]` input into credentials/config, so a named radio would
     // leak a bogus field. The chosen value flows only through `modeInput`.
     // Mutual exclusion is done in JS by unchecking siblings on change.
-    const modeChoices = elem('div', { class: 'doh-slack-modes' });
+    const modeChoices = elem('div', { class: 'humr-slack-modes' });
     const radios = [];
     for (const mode of schema.modes || []) {
       const radio = elem('input', { type: 'radio', value: mode.value });
@@ -1129,10 +1129,10 @@
       });
       radios.push(radio);
       const labelText = mode.label + (mode.enabled ? '' : ' (coming soon)');
-      modeChoices.appendChild(elem('label', { class: 'doh-slack-mode' }, [radio, elem('span', null, [labelText])]));
+      modeChoices.appendChild(elem('label', { class: 'humr-slack-mode' }, [radio, elem('span', null, [labelText])]));
     }
 
-    const steps = elem('ol', { class: 'doh-slack-steps' }, [
+    const steps = elem('ol', { class: 'humr-slack-steps' }, [
       elem('li', null, ['Click ', elem('b', null, ['Create Slack app']), ' and create it in your workspace.']),
       elem('li', null, ['On the app page, generate an ', elem('b', null, ['App-level token']), ' (scope connections:write).']),
       elem('li', null, [elem('b', null, ['Install']), ' the app to your workspace to get the ', elem('b', null, ['Bot token']), '.']),
@@ -1140,16 +1140,16 @@
     ]);
 
     form.appendChild(modeInput);
-    form.appendChild(elem('label', { class: 'doh-vault-field' }, [
-      elem('span', { class: 'doh-vault-field-label' }, ['App name']),
+    form.appendChild(elem('label', { class: 'humr-vault-field' }, [
+      elem('span', { class: 'humr-vault-field-label' }, ['App name']),
       nameInput,
-      elem('span', { class: 'doh-vault-field-help' }, ['Shown in Slack as the app and bot name. Defaults to your agent template.']),
+      elem('span', { class: 'humr-vault-field-help' }, ['Shown in Slack as the app and bot name. Defaults to your agent template.']),
     ]));
-    form.appendChild(elem('div', { class: 'doh-vault-field-label' }, ['Agent type']));
+    form.appendChild(elem('div', { class: 'humr-vault-field-label' }, ['Agent type']));
     form.appendChild(modeChoices);
     form.appendChild(ownerEmailField);
     form.appendChild(homeChannelField);
-    form.appendChild(elem('div', { class: 'doh-slack-create-row' }, [createLink]));
+    form.appendChild(elem('div', { class: 'humr-slack-create-row' }, [createLink]));
     form.appendChild(steps);
     for (const field of schema.fields || []) {
       form.appendChild(fieldInputFor(field));
@@ -1158,17 +1158,17 @@
     syncOwnerEmail();
     syncHomeChannel();
 
-    const saveBtn = elem('button', { class: 'doh-integration-btn doh-integration-btn-primary', type: 'submit' }, ['Save']);
-    const actions = elem('div', { class: 'doh-modal-actions' }, [
-      elem('button', { class: 'doh-integration-btn', type: 'button', onclick: close }, ['Cancel']),
+    const saveBtn = elem('button', { class: 'humr-integration-btn humr-integration-btn-primary', type: 'submit' }, ['Save']);
+    const actions = elem('div', { class: 'humr-modal-actions' }, [
+      elem('button', { class: 'humr-integration-btn', type: 'button', onclick: close }, ['Cancel']),
       saveBtn,
     ]);
     form.appendChild(actions);
     wireVaultSubmit({ form, session, item, saveBtn, actions, errorBox, successBox, close });
 
-    const modal = elem('div', { class: 'doh-modal doh-vault-modal' }, [
-      elem('div', { class: 'doh-modal-title' }, [(schema.status === 'connected' ? 'Configure ' : 'Connect ') + (schema.label || item.label)]),
-      elem('div', { class: 'doh-modal-body' }, [schema.message || 'Tokens are sent directly to the Humanity Rules vault.']),
+    const modal = elem('div', { class: 'humr-modal humr-vault-modal' }, [
+      elem('div', { class: 'humr-modal-title' }, [(schema.status === 'connected' ? 'Configure ' : 'Connect ') + (schema.label || item.label)]),
+      elem('div', { class: 'humr-modal-body' }, [schema.message || 'Tokens are sent directly to the Humanity Rules vault.']),
       errorBox,
       successBox,
       form,
@@ -1233,23 +1233,23 @@
     const { card, titleRow, statusPill, isConnected } = buildCardScaffold(item, item.slug);
 
     if (isConnected) {
-      card.appendChild(elem('div', { class: 'doh-integration-card-head' }, [titleRow, statusPill]));
-      const body = elem('div', { class: 'doh-integration-card-body' });
+      card.appendChild(elem('div', { class: 'humr-integration-card-head' }, [titleRow, statusPill]));
+      const body = elem('div', { class: 'humr-integration-card-body' });
       // Slack personal mode resolves an owner; only that provider sets it.
       const ownerName = item.metadata && item.metadata.owner_name;
       if (ownerName) {
-        body.appendChild(elem('div', { class: 'doh-integration-meta' }, ['Replies only to ' + ownerName]));
+        body.appendChild(elem('div', { class: 'humr-integration-meta' }, ['Replies only to ' + ownerName]));
       }
       if (item.last_refreshed_at) {
         body.appendChild(elem('div', {
-          class: 'doh-integration-meta doh-integration-meta-refresh',
+          class: 'humr-integration-meta humr-integration-meta-refresh',
           title: 'Last refreshed: ' + formatDate(item.last_refreshed_at),
         }, [
           'Last refreshed: ' + formatDate(item.last_refreshed_at),
         ]));
       }
       // Configure is always shown; only vault providers can open the config modal.
-      const actions = elem('div', { class: 'doh-integration-actions' });
+      const actions = elem('div', { class: 'humr-integration-actions' });
       actions.appendChild(configureButton(item));
       actions.appendChild(disconnectButton(item.slug, () => { disconnectTlsProvider(item); }));
       body.appendChild(actions);
@@ -1266,7 +1266,7 @@
   }
 
   function renderSummary(payload) {
-    const summary = document.getElementById('dohIntegrationSummary');
+    const summary = document.getElementById('humrIntegrationSummary');
     if (!summary) return;
     summary.innerHTML = '';
     if (!payload) {
@@ -1293,7 +1293,7 @@
 
   // Build a responsive card grid for `items`, or null if none render.
   function buildCardGrid(items, payload) {
-    const grid = elem('div', { class: 'doh-integration-grid' });
+    const grid = elem('div', { class: 'humr-integration-grid' });
     for (const item of items) {
       const card = renderCard(item, payload);
       if (card) grid.appendChild(card);
@@ -1305,11 +1305,11 @@
   // Sections always render their heading so users learn the two groups exist;
   // an empty section shows `emptyHint` instead of a grid.
   function appendSection(container, title, items, payload, emptyHint) {
-    const section = elem('div', { class: 'doh-integration-section' }, [
-      elem('div', { class: 'doh-integration-section-title' }, [title]),
+    const section = elem('div', { class: 'humr-integration-section' }, [
+      elem('div', { class: 'humr-integration-section-title' }, [title]),
     ]);
     const grid = buildCardGrid(items, payload);
-    section.appendChild(grid || elem('div', { class: 'doh-integration-empty' }, [emptyHint]));
+    section.appendChild(grid || elem('div', { class: 'humr-integration-empty' }, [emptyHint]));
     container.appendChild(section);
   }
 
@@ -1318,32 +1318,32 @@
   // none have cards, `emptyHint` shows instead. Used by "Not connected" to make
   // the Model Providers → Connectors ordering explicit rather than implied.
   function appendGroupedSection(container, title, subGroups, payload, emptyHint) {
-    const section = elem('div', { class: 'doh-integration-section' }, [
-      elem('div', { class: 'doh-integration-section-title' }, [title]),
+    const section = elem('div', { class: 'humr-integration-section' }, [
+      elem('div', { class: 'humr-integration-section-title' }, [title]),
     ]);
     let any = false;
     for (const sub of subGroups) {
       const grid = buildCardGrid(sub.items, payload);
       if (!grid) continue;
       any = true;
-      section.appendChild(elem('div', { class: 'doh-integration-section' }, [
-        elem('div', { class: 'doh-integration-subsection-title' }, [sub.title]),
+      section.appendChild(elem('div', { class: 'humr-integration-section' }, [
+        elem('div', { class: 'humr-integration-subsection-title' }, [sub.title]),
         grid,
       ]));
     }
-    if (!any) section.appendChild(elem('div', { class: 'doh-integration-empty' }, [emptyHint]));
+    if (!any) section.appendChild(elem('div', { class: 'humr-integration-empty' }, [emptyHint]));
     container.appendChild(section);
   }
 
   function renderPane(payload) {
     renderSummary(payload);
 
-    const list = document.getElementById('dohIntegrationList');
+    const list = document.getElementById('humrIntegrationList');
     if (!list) return;
     list.innerHTML = '';
 
     if (!payload) {
-      list.appendChild(elem('div', { class: 'doh-integration-empty' }, [
+      list.appendChild(elem('div', { class: 'humr-integration-empty' }, [
         'Integration status is unavailable. If this persists, the platform broker may not be running.',
       ]));
       return;
@@ -1445,11 +1445,11 @@
     const railIcon = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 2v6M15 2v6M6 8h12v4a6 6 0 0 1-12 0zM12 18v4"/></svg>';
     const navIcon = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 2v6M15 2v6M6 8h12v4a6 6 0 0 1-12 0zM12 18v4"/></svg>';
 
-    if (rail && !document.getElementById('dohIntegrationsRailBtn')) {
+    if (rail && !document.getElementById('humrIntegrationsRailBtn')) {
       const railBtn = elem('button', {
         type: 'button',
         class: 'rail-btn nav-tab has-tooltip',
-        id: 'dohIntegrationsRailBtn',
+        id: 'humrIntegrationsRailBtn',
         'aria-label': 'Integrations',
         dataset: { panel: 'integrations', tooltip: 'Integrations' },
         onclick: onActivate,
@@ -1462,11 +1462,11 @@
       else rail.appendChild(railBtn);
     }
 
-    if (!document.getElementById('dohIntegrationsTab')) {
+    if (!document.getElementById('humrIntegrationsTab')) {
       const navBtn = elem('button', {
         type: 'button',
         class: 'nav-tab has-tooltip has-tooltip--bottom',
-        id: 'dohIntegrationsTab',
+        id: 'humrIntegrationsTab',
         dataset: { panel: 'integrations', label: 'Integrations', tooltip: 'Integrations' },
         onclick: onActivate,
       });
@@ -1481,29 +1481,29 @@
     // `showing-integrations` on <main>; our CSS reveals this view and hides
     // `#mainChat` when the class is present.
     const refreshButton = elem('button', {
-      class: 'doh-integration-btn doh-integration-page-refresh-btn',
-      id: 'dohIntegrationRefreshBtn',
+      class: 'humr-integration-btn humr-integration-page-refresh-btn',
+      id: 'humrIntegrationRefreshBtn',
       type: 'button',
       onclick: startRefreshCatalog,
     }, ['Refresh']);
     const refreshNote = elem('div', {
-      class: 'doh-integration-page-refresh-note',
-      id: 'dohIntegrationRefreshNote',
+      class: 'humr-integration-page-refresh-note',
+      id: 'humrIntegrationRefreshNote',
       style: { display: 'none' },
     });
-    const view = elem('section', { class: 'main-view doh-integration-page', id: 'mainIntegrations' }, [
-      elem('div', { class: 'doh-integration-page-inner' }, [
-        elem('div', { class: 'doh-integration-page-head' }, [
-          elem('div', { class: 'doh-integration-page-head-row' }, [
-            elem('div', { class: 'doh-integration-page-title' }, ['Integrations']),
+    const view = elem('section', { class: 'main-view humr-integration-page', id: 'mainIntegrations' }, [
+      elem('div', { class: 'humr-integration-page-inner' }, [
+        elem('div', { class: 'humr-integration-page-head' }, [
+          elem('div', { class: 'humr-integration-page-head-row' }, [
+            elem('div', { class: 'humr-integration-page-title' }, ['Integrations']),
             refreshButton,
           ]),
-          elem('div', { class: 'doh-integration-page-meta' }, [
+          elem('div', { class: 'humr-integration-page-meta' }, [
             'Third-party accounts the agent can act on.',
           ]),
           refreshNote,
         ]),
-        elem('div', { class: 'doh-integration-list', id: 'dohIntegrationList' }),
+        elem('div', { class: 'humr-integration-list', id: 'humrIntegrationList' }),
       ]),
     ]);
     mainEl.appendChild(view);
@@ -1516,7 +1516,7 @@
       elem('div', { class: 'panel-head' }, [
         elem('span', null, ['Integrations']),
       ]),
-      elem('div', { class: 'doh-integration-summary', id: 'dohIntegrationSummary' }, [
+      elem('div', { class: 'humr-integration-summary', id: 'humrIntegrationSummary' }, [
         'Loading…',
       ]),
     ]);
@@ -1535,14 +1535,14 @@
   //      isn't sitting next to an empty/confusing sidebar drawer.
   //
   // The refresh fetch is intentionally NOT awaited: a sibling wrapper (e.g.
-  // doh-webapps.js) is waiting for us to return before it toggles its own
+  // humr-webapps.js) is waiting for us to return before it toggles its own
   // `showing-<panel>` class off, and a multi-second broker fetch in between
   // would leave both panels' classes set simultaneously, so both views would
   // render on top of each other until the fetch resolved.
   function wrapSwitchPanel() {
     if (typeof window.switchPanel !== 'function') return;
-    if (window.__dohPanelWrapped) return;
-    window.__dohPanelWrapped = true;
+    if (window.__humrPanelWrapped) return;
+    window.__humrPanelWrapped = true;
     const orig = window.switchPanel;
     window.switchPanel = async function (name) {
       const result = await orig.apply(this, arguments);

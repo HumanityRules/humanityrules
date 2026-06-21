@@ -13,7 +13,7 @@
 #
 # `docker compose up --watch` rebuilds the Hermes image when HUMR source changes (~1s
 # with layer cache), recreates the container, and the persistent-root runner
-# rsyncs the new /opt/doh tree on start — reliable, no bind-mount clobber.
+# rsyncs the new /opt/humr tree on start — reliable, no bind-mount clobber.
 #
 # Bedrock: mounts host ~/.aws and uses AWS_PROFILE (default bedrock_dev). Run
 # refresh-bedrock-creds.sh periodically, or bedrock-creds-launchagent.sh

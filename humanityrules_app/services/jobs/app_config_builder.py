@@ -169,7 +169,7 @@ def _build_container_config(
             **common,
             source_repo_path=template_container["source_repo_path"],
             dockerfile_path=template_container.get("dockerfile_path") or None,
-            ecr_repo_name=f"doh/{env_slug}/{app_name}-{name}",
+            ecr_repo_name=f"humr/{env_slug}/{app_name}-{name}",
         )
     if image_source == ImageSource.PREBUILT:
         return ContainerConfig(

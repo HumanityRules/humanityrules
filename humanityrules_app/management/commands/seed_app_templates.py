@@ -234,7 +234,7 @@ _HERMES_CHECKPOINT_EFS_CONFIG = {
 
 # Policy proxy: platform-owned SSO+ABAC gate that fronts the Hermes container.
 # image_source="policy_proxy" is resolved at deploy time to the per-env ECR
-# repo (doh/{env_slug}/policy-proxy:POLICY_PROXY_IMAGE_VERSION), and its
+# repo (humr/{env_slug}/policy-proxy:POLICY_PROXY_IMAGE_VERSION), and its
 # presence drives env-level provisioning (auth Lambda, per-env secrets).
 # Listens on hermes.container_port + 1 to keep the upstream port free.
 _HERMES_POLICY_PROXY_CONTAINER = {

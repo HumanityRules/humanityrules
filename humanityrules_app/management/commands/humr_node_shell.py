@@ -77,7 +77,7 @@ def _list_running_asg_instance_ids(session, env_slug: str) -> list[str]:
 def _find_instance_running_app(session, env_slug: str, app_slug: str) -> str | None:
     """Return the EC2 instance ID currently hosting the app's RUNNING task, or None."""
     cluster = _cluster_name(env_slug)
-    service = f"doh-{env_slug}-{app_slug}"
+    service = f"humr-{env_slug}-{app_slug}"
     ecs = session.client("ecs")
 
     task_arns = ecs.list_tasks(

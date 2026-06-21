@@ -146,7 +146,7 @@ class MCPAggregator:
         self._humr_env_bearer = humr_env_bearer
         self._humr_app_slug = humr_app_slug
         self._humr_owner_username = humr_owner_username
-        self._mcp = FastMCP(name="doh-mcp-aggregator")
+        self._mcp = FastMCP(name="humr-mcp-aggregator")
         self._oauth_states: dict[str, _OAuthState] = {}
         self._pending_oauth: dict[str, dict] = {}
         for spec in DCR_CONNECTORS:

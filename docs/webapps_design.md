@@ -103,7 +103,7 @@ webapps unregister <slug>
 webapps delete <slug> --yes
 ```
 
-`/opt/doh/runtime/webapps`, ~310 lines, shebang pinned to `/opt/hermes/webui/venv/bin/python3` (it imports pyyaml, which the system python doesn't have but the Hermes serving venv does). All YAML mutations are wrapped in `flock /workspace/.config/process-compose/webapps/.webapps.lock` so concurrent invocations don't tear writes. The CLI's `regenerate_routes(doc)` is called inside the lock on every mutation; it rewrites `routes.caddy` end-to-end from the YAML.
+`/opt/humr/runtime/webapps`, ~310 lines, shebang pinned to `/opt/hermes/webui/venv/bin/python3` (it imports pyyaml, which the system python doesn't have but the Hermes serving venv does). All YAML mutations are wrapped in `flock /workspace/.config/process-compose/webapps/.webapps.lock` so concurrent invocations don't tear writes. The CLI's `regenerate_routes(doc)` is called inside the lock on every mutation; it rewrites `routes.caddy` end-to-end from the YAML.
 
 **Key contract decisions:**
 
@@ -200,7 +200,7 @@ The hermes container runs inside a nono sandbox. Four additions to `hermes-nono-
 
 - **`network.listen_port`**: adds `8788` (technically owned by policy-proxy, but the shared netns means we'd see EADDRINUSE without it being allowlisted), `8789` (WebUI's new home), `9956` (system process-compose admin), `9957` (webapps process-compose admin), and `4000–4019` (user webapps). nono profile JSON uses `Vec<u16>`, no range syntax — the 20 ports are listed individually.
 - **`network.open_port`**: same set, plus the existing 9901–9904 / 9950–9952 for AWS signer + integrations broker.
-- **`filesystem.read_file`**: adds `/opt/doh/bin/{caddy,process-compose,webapps}` and `/opt/doh/runtime/{Caddyfile,webapps}` so the sandbox can exec them.
+- **`filesystem.read_file`**: adds `/opt/humr/bin/{caddy,process-compose,webapps}` and `/opt/humr/runtime/{Caddyfile,webapps}` so the sandbox can exec them.
 - **`environment.allow_vars`**: adds `HUMR_PUBLIC_HOSTNAME` so the CLI can print real URLs (see below).
 
 ## Public hostname injection
@@ -263,7 +263,7 @@ This buys three things:
 
 No mutation endpoints: start/stop/restart/delete stay on the CLI. The panel polls every 3s while active and stops when the user navigates away.
 
-**WebUI extension.** Hermes' `HERMES_WEBUI_EXTENSION_SCRIPT_URLS` accepts a comma-separated list (validated by `apptoo/api/extensions.py:_read_url_list`), so HUMR ships two parallel files: `doh-integrations.js` / `doh-integrations.css` and `doh-webapps.js` / `doh-webapps.css`. Both wrap the upstream `switchPanel` (chained, each with its own `__doh*Wrapped` flag) and contribute one rail icon + one sidebar pane + one main view. The webapps panel filters out `__*` slugs by default so the user sees only their own apps.
+**WebUI extension.** Hermes' `HERMES_WEBUI_EXTENSION_SCRIPT_URLS` accepts a comma-separated list (validated by `apptoo/api/extensions.py:_read_url_list`), so HUMR ships two parallel files: `humr-integrations.js` / `humr-integrations.css` and `humr-webapps.js` / `humr-webapps.css`. Both wrap the upstream `switchPanel` (chained, each with its own `__humr*Wrapped` flag) and contribute one rail icon + one sidebar pane + one main view. The webapps panel filters out `__*` slugs by default so the user sees only their own apps.
 
 ## Out of scope (v1)
 
@@ -278,7 +278,7 @@ No mutation endpoints: start/stop/restart/delete stay on the CLI. The panel poll
 - **`template_repos/hermes_agent/humr_runtime/webapps`** — the CLI. Thin shim over `webapps_lib.py`.
 - **`template_repos/hermes_agent/humr_runtime/webapps_lib.py`** — shared helpers (slug pattern, YAML I/O, route generation, process-compose RPC). Imported by both the CLI and the admin webapp.
 - **`template_repos/hermes_agent/humr_runtime/admin/`** — the `__admin` FastAPI webapp (`server.py` + `__main__.py`).
-- **`template_repos/hermes_agent/webui-extension/doh-webapps.{js,css}`** — the Web Apps sidebar panel.
+- **`template_repos/hermes_agent/webui-extension/humr-webapps.{js,css}`** — the Web Apps sidebar panel.
 - **`template_repos/hermes_agent/humr_runtime/webui.sh`** — launches Caddy + process-compose + WebUI inside nono, bootstraps `__admin`, propagates failures.
 - **`template_repos/hermes_agent/humr_runtime/supervisor.sh`** — exports `HERMES_WEBUI_PORT=8789` so WebUI clears port 8787 for Caddy.
 - **`template_repos/hermes_agent/humr_runtime/hermes-nono-profile.json`** — port allow-lists, binary read-allows, `HUMR_PUBLIC_HOSTNAME` allow_vars entry.

@@ -325,7 +325,7 @@ class MergeBackend:
                     resp = await client.request(method=method, url=url, headers=headers, json=body)
         except Exception as exc:
             logger.exception("merge passthrough %s %s failed", method, path)
-            return JSONResponse(content={"error": f"doh unreachable: {exc}"}, status_code=502)
+            return JSONResponse(content={"error": f"humr unreachable: {exc}"}, status_code=502)
         return Response(
             content=resp.content,
             status_code=resp.status_code,

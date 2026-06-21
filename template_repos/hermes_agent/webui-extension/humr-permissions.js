@@ -200,8 +200,8 @@
   }
 
   function renderLevels(group) {
-    return elem('div', { class: 'doh-perm-levels' }, group.access_levels.map((l) =>
-      elem('label', { class: 'doh-perm-level' }, [
+    return elem('div', { class: 'humr-perm-levels' }, group.access_levels.map((l) =>
+      elem('label', { class: 'humr-perm-level' }, [
         elem('input', {
           type: 'checkbox', checked: l.checked,
           onchange: (e) => toggleLevel(group.sid, group.service, l.name, e.target.checked),
@@ -213,25 +213,25 @@
 
   function renderResources(group) {
     const chips = (group.resources || []).map((arn) =>
-      elem('span', { class: 'doh-perm-chip' }, [
+      elem('span', { class: 'humr-perm-chip' }, [
         arn,
-        elem('button', { type: 'button', class: 'doh-perm-chip-x', title: 'Remove', onclick: () => removeResource(group.sid, group.service, arn) }, ['×']),
+        elem('button', { type: 'button', class: 'humr-perm-chip-x', title: 'Remove', onclick: () => removeResource(group.sid, group.service, arn) }, ['×']),
       ])
     );
     const chipsRow = chips.length
-      ? elem('div', { class: 'doh-perm-chips' }, chips)
-      : elem('div', { class: 'doh-perm-all-resources' }, ['All resources (*) — no resource restriction']);
+      ? elem('div', { class: 'humr-perm-chips' }, chips)
+      : elem('div', { class: 'humr-perm-all-resources' }, ['All resources (*) — no resource restriction']);
 
     const unselected = (group.available_resources || []).filter((r) => !r.selected);
-    const select = elem('select', { class: 'doh-perm-resource-select' }, [
+    const select = elem('select', { class: 'humr-perm-resource-select' }, [
       elem('option', { value: '' }, [group.resource_placeholder || 'Select resource...']),
       ...unselected.map((r) => elem('option', { value: r.arn }, [r.label || r.arn])),
     ]);
     const prefixInput = group.service === 's3'
-      ? elem('input', { class: 'doh-perm-s3-prefix', type: 'text', placeholder: 'key prefix (optional)' })
+      ? elem('input', { class: 'humr-perm-s3-prefix', type: 'text', placeholder: 'key prefix (optional)' })
       : null;
     const addBtn = elem('button', {
-      type: 'button', class: 'doh-perm-btn doh-perm-btn-primary',
+      type: 'button', class: 'humr-perm-btn humr-perm-btn-primary',
       disabled: !select.value,
       onclick: () => addResource(group.sid, group.service, select.value, prefixInput ? prefixInput.value.trim() : ''),
     }, ['Add']);
@@ -240,20 +240,20 @@
     // action next to the dropdown. The post-add re-render resets it.
     select.addEventListener('change', () => { addBtn.disabled = !select.value; });
 
-    return elem('div', { class: 'doh-perm-resources' }, [
+    return elem('div', { class: 'humr-perm-resources' }, [
       chipsRow,
-      elem('div', { class: 'doh-perm-add-resource' }, [select, prefixInput, addBtn]),
+      elem('div', { class: 'humr-perm-add-resource' }, [select, prefixInput, addBtn]),
     ]);
   }
 
   function renderGroup(group) {
-    return elem('div', { class: 'doh-perm-group' }, [
-      elem('div', { class: 'doh-perm-group-head' }, [
-        elem('div', { class: 'doh-perm-service' }, [
-          elem('span', { class: 'doh-perm-service-name' }, [group.display_name || group.service]),
-          elem('code', { class: 'doh-perm-service-prefix' }, [group.service]),
+    return elem('div', { class: 'humr-perm-group' }, [
+      elem('div', { class: 'humr-perm-group-head' }, [
+        elem('div', { class: 'humr-perm-service' }, [
+          elem('span', { class: 'humr-perm-service-name' }, [group.display_name || group.service]),
+          elem('code', { class: 'humr-perm-service-prefix' }, [group.service]),
         ]),
-        elem('button', { type: 'button', class: 'doh-perm-btn doh-perm-btn-ghost', onclick: () => removeService(group.sid, group.service) }, ['Remove service']),
+        elem('button', { type: 'button', class: 'humr-perm-btn humr-perm-btn-ghost', onclick: () => removeService(group.sid, group.service) }, ['Remove service']),
       ]),
       renderLevels(group),
       renderResources(group),
@@ -268,14 +268,14 @@
 
   function renderAddService() {
     const services = (_catalog && _catalog.services) || [];
-    const wrapper = elem('div', { class: 'doh-perm-add-service doh-perm-service-picker' });
+    const wrapper = elem('div', { class: 'humr-perm-add-service humr-perm-service-picker' });
     const input = elem('input', {
       type: 'text',
-      class: 'doh-perm-add-service-search',
+      class: 'humr-perm-add-service-search',
       placeholder: 'Search services…',
       autocomplete: 'off',
     });
-    const list = elem('div', { class: 'doh-perm-picker-list', style: { display: 'none' } });
+    const list = elem('div', { class: 'humr-perm-picker-list', style: { display: 'none' } });
 
     function paintList() {
       list.innerHTML = '';
@@ -285,11 +285,11 @@
 
       const addSection = (title, items) => {
         if (!items.length) return;
-        if (title) list.appendChild(elem('div', { class: 'doh-perm-picker-section' }, [title]));
+        if (title) list.appendChild(elem('div', { class: 'humr-perm-picker-section' }, [title]));
         for (const s of items) {
           list.appendChild(elem('button', {
             type: 'button',
-            class: 'doh-perm-picker-item',
+            class: 'humr-perm-picker-item',
             dataset: { service: s.value },
             onmousedown: (e) => {
               e.preventDefault();
@@ -303,11 +303,11 @@
 
       if (curatedFiltered.length && !query) {
         addSection('Curated', curatedFiltered);
-        list.appendChild(elem('div', { class: 'doh-perm-picker-divider' }));
+        list.appendChild(elem('div', { class: 'humr-perm-picker-divider' }));
       }
       if (allFiltered.length) addSection(query ? null : 'All services', allFiltered);
       if (!list.childNodes.length) {
-        list.appendChild(elem('div', { class: 'doh-perm-picker-empty' }, ['No matching services']));
+        list.appendChild(elem('div', { class: 'humr-perm-picker-empty' }, ['No matching services']));
       }
     }
 
@@ -346,52 +346,52 @@
       applied: 'Permissions applied.',
       failed: 'Apply failed.',
     }[status] || status;
-    const banner = elem('div', { class: `doh-perm-banner doh-perm-banner-${status}` }, [
-      elem('div', { class: 'doh-perm-banner-label' }, [label]),
-      _draft.status_message ? elem('div', { class: 'doh-perm-banner-msg' }, [_draft.status_message]) : null,
+    const banner = elem('div', { class: `humr-perm-banner humr-perm-banner-${status}` }, [
+      elem('div', { class: 'humr-perm-banner-label' }, [label]),
+      _draft.status_message ? elem('div', { class: 'humr-perm-banner-msg' }, [_draft.status_message]) : null,
     ]);
     if (status === 'applied' || status === 'failed') {
-      banner.appendChild(elem('button', { type: 'button', class: 'doh-perm-btn', onclick: startNewDraft }, ['Start a new draft']));
+      banner.appendChild(elem('button', { type: 'button', class: 'humr-perm-btn', onclick: startNewDraft }, ['Start a new draft']));
     }
     return banner;
   }
 
   function renderMetaRow(label, value) {
     if (!value) return null;
-    return elem('div', { class: 'doh-perm-meta-row' }, [
-      elem('span', { class: 'doh-perm-meta-label' }, [label]),
-      elem('span', { class: 'doh-perm-meta-value' }, [value]),
+    return elem('div', { class: 'humr-perm-meta-row' }, [
+      elem('span', { class: 'humr-perm-meta-label' }, [label]),
+      elem('span', { class: 'humr-perm-meta-value' }, [value]),
     ]);
   }
 
   function renderHeader() {
     const isDraft = _draft.status === 'draft';
-    const actions = elem('div', { class: 'doh-perm-actions' }, [
-      isDraft ? elem('button', { type: 'button', class: 'doh-perm-btn doh-perm-btn-ghost', onclick: doRefreshResources }, ['Refresh AWS resources']) : null,
-      isDraft && _draft.has_changes ? elem('button', { type: 'button', class: 'doh-perm-btn doh-perm-btn-ghost', onclick: doCancel }, ['Cancel changes']) : null,
-      isDraft ? elem('button', { type: 'button', class: 'doh-perm-btn doh-perm-btn-primary', disabled: !_draft.has_changes, onclick: doApply }, ['Apply']) : null,
+    const actions = elem('div', { class: 'humr-perm-actions' }, [
+      isDraft ? elem('button', { type: 'button', class: 'humr-perm-btn humr-perm-btn-ghost', onclick: doRefreshResources }, ['Refresh AWS resources']) : null,
+      isDraft && _draft.has_changes ? elem('button', { type: 'button', class: 'humr-perm-btn humr-perm-btn-ghost', onclick: doCancel }, ['Cancel changes']) : null,
+      isDraft ? elem('button', { type: 'button', class: 'humr-perm-btn humr-perm-btn-primary', disabled: !_draft.has_changes, onclick: doApply }, ['Apply']) : null,
     ]);
-    return elem('div', { class: 'doh-perm-head' }, [
-      elem('div', { class: 'doh-perm-head-row' }, [
-        elem('div', { class: 'doh-perm-title' }, ['Permissions']),
+    return elem('div', { class: 'humr-perm-head' }, [
+      elem('div', { class: 'humr-perm-head-row' }, [
+        elem('div', { class: 'humr-perm-title' }, ['Permissions']),
         actions,
       ]),
-      elem('div', { class: 'doh-perm-meta' }, [
+      elem('div', { class: 'humr-perm-meta' }, [
         renderMetaRow('Agent', _draft.app && _draft.app.name),
         renderMetaRow('Environment', _draft.environment && _draft.environment.slug),
         renderMetaRow('AWS account', _draft.environment && _draft.environment.aws_account),
       ]),
-      elem('div', { class: 'doh-perm-sub' }, ['AWS permissions this agent requires. After applying your request, you will need to wait for approval.']),
+      elem('div', { class: 'humr-perm-sub' }, ['AWS permissions this agent requires. After applying your request, you will need to wait for approval.']),
     ]);
   }
 
   function render() {
     if (!_rootEl) return;
     _rootEl.innerHTML = '';
-    _errorEl = elem('div', { class: 'doh-perm-error', style: { display: 'none' } });
+    _errorEl = elem('div', { class: 'humr-perm-error', style: { display: 'none' } });
 
     if (!_draft) {
-      _rootEl.appendChild(elem('div', { class: 'doh-perm-empty' }, ['Permissions editor is unavailable. If this persists, the platform broker may not be running.']));
+      _rootEl.appendChild(elem('div', { class: 'humr-perm-empty' }, ['Permissions editor is unavailable. If this persists, the platform broker may not be running.']));
       return;
     }
 
@@ -401,24 +401,24 @@
     // them and show just the status banner; for applied/failed it carries the
     // "Start a new draft" action.
     const isDraft = _draft.status === 'draft';
-    const body = elem('div', { class: 'doh-perm-body' }, [
+    const body = elem('div', { class: 'humr-perm-body' }, [
       _errorEl,
       renderStatusBanner(),
       ...(isDraft ? [
-        elem('div', { class: 'doh-perm-section-title' }, ['Services']),
+        elem('div', { class: 'humr-perm-section-title' }, ['Services']),
         ...(_draft.service_groups && _draft.service_groups.length
           ? _draft.service_groups.map(renderGroup)
-          : [elem('div', { class: 'doh-perm-empty' }, ['No services yet. Add one below.'])]),
+          : [elem('div', { class: 'humr-perm-empty' }, ['No services yet. Add one below.'])]),
         renderAddService(),
-        elem('div', { class: 'doh-perm-section-title' }, ['Rationale']),
+        elem('div', { class: 'humr-perm-section-title' }, ['Rationale']),
         elem('textarea', {
-          class: 'doh-perm-description', rows: '3',
+          class: 'humr-perm-description', rows: '3',
           placeholder: 'Why these permissions are needed (helps the approver).',
           oninput: (e) => onDescriptionInput(e.target.value),
         }, [_draft.description || '']),
       ] : []),
     ]);
-    _rootEl.appendChild(elem('div', { class: 'doh-perm-page-inner' }, [renderHeader(), body]));
+    _rootEl.appendChild(elem('div', { class: 'humr-perm-page-inner' }, [renderHeader(), body]));
   }
 
   async function refreshAndRender() {
@@ -477,7 +477,7 @@
     const menuBtn = elem('button', {
       type: 'button',
       class: 'side-menu-item',
-      id: 'dohPermissionsSettingsItem',
+      id: 'humrPermissionsSettingsItem',
       dataset: { settingsSection: 'permissions' },
       onclick: () => {
         if (typeof window.switchSettingsSection === 'function') window.switchSettingsSection('permissions');
@@ -488,7 +488,7 @@
     if (systemBtn) settingsMenu.insertBefore(menuBtn, systemBtn);
     else settingsMenu.appendChild(menuBtn);
 
-    _rootEl = elem('div', { class: 'doh-perm-root', id: 'dohPermissionsRoot' });
+    _rootEl = elem('div', { class: 'humr-perm-root', id: 'humrPermissionsRoot' });
     const permPane = elem('div', { class: 'settings-pane', id: 'settingsPanePermissions' }, [_rootEl]);
     const systemPane = document.getElementById('settingsPaneSystem');
     if (systemPane) settingsMain.insertBefore(permPane, systemPane);
@@ -500,8 +500,8 @@
   // permissions through a wrapper (same pattern as the old Integrations pane).
   function wrapSwitchSettingsSection() {
     if (typeof window.switchSettingsSection !== 'function') return;
-    if (window.__dohPermissionsSettingsWrapped) return;
-    window.__dohPermissionsSettingsWrapped = true;
+    if (window.__humrPermissionsSettingsWrapped) return;
+    window.__humrPermissionsSettingsWrapped = true;
     const orig = window.switchSettingsSection;
     window.switchSettingsSection = async function (name) {
       if (name === 'permissions') {
@@ -520,8 +520,8 @@
   // in flight, restore Permissions after the panel hydrate completes.
   function wrapLoadSettingsPanel() {
     if (typeof window.loadSettingsPanel !== 'function') return;
-    if (window.__dohPermissionsLoadWrapped) return;
-    window.__dohPermissionsLoadWrapped = true;
+    if (window.__humrPermissionsLoadWrapped) return;
+    window.__humrPermissionsLoadWrapped = true;
     const orig = window.loadSettingsPanel;
     window.loadSettingsPanel = async function () {
       await orig.apply(this, arguments);

@@ -36,7 +36,7 @@ def _render_ec2(containers: list[ContainerConfig], cpu: int, alb_target_containe
         ),
         image_tag="test",
         env_slug="staging",
-        resource_prefix="doh-staging-my-app",
+        resource_prefix="humr-staging-my-app",
         subdomain="my-app",
         database_connection_secret=None,
         shared_alb_hosted_zone=None,
@@ -57,7 +57,7 @@ class Ec2CpuReservationTests(SimpleTestCase):
                 ContainerConfig(
                     name="hermes",
                     image_source="dockerfile",
-                    ecr_repo_name="doh/staging/my-app-hermes",
+                    ecr_repo_name="humr/staging/my-app-hermes",
                     container_port=8787,
                     memory_limit_mib=4096,
                     memory_reservation_mib=2048,
@@ -88,7 +88,7 @@ class Ec2CpuReservationTests(SimpleTestCase):
                 ContainerConfig(
                     name="app",
                     image_source="dockerfile",
-                    ecr_repo_name="doh/staging/my-app-app",
+                    ecr_repo_name="humr/staging/my-app-app",
                     container_port=8080,
                     memory_limit_mib=512,
                 ),

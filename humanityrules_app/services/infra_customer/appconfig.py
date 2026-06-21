@@ -25,7 +25,7 @@ class ImageSource(StrEnum):
     # source_repo_path, dockerfile_path, ecr_repo_name.
     DOCKERFILE = "dockerfile"
 
-    # Image already exists in the per-env ECR namespace (doh/{env_slug}/{repo})
+    # Image already exists in the per-env ECR namespace (humr/{env_slug}/{repo})
     # and was pushed out-of-band by `humr_build_prebuilt_image`. The deploy does
     # not build — a missing image is a hard-fail. Fields consumed:
     # prebuilt_ecr_repo, prebuilt_version.
@@ -36,7 +36,7 @@ class ImageSource(StrEnum):
     REGISTRY = "registry"
 
     # Platform-owned SSO + ABAC proxy. Image resolves from the per-env
-    # doh/{env_slug}/policy-proxy repo (pushed by deploy_app at
+    # humr/{env_slug}/policy-proxy repo (pushed by deploy_app at
     # POLICY_PROXY_IMAGE_VERSION). Presence of any policy_proxy container in a
     # task triggers env-level provisioning (ECR stack, auth Lambda, per-env
     # auth config secret) and forces the proxy to be the ALB target. Fields
@@ -161,7 +161,7 @@ class ContainerConfig:
     dockerfile_path: str | None = None   # DOCKERFILE
     ecr_repo_name: str | None = None     # DOCKERFILE: per-app + per-container ECR repo
 
-    prebuilt_ecr_repo: str | None = None  # PREBUILT: within doh/{env_slug}/ namespace
+    prebuilt_ecr_repo: str | None = None  # PREBUILT: within humr/{env_slug}/ namespace
     prebuilt_version: str | None = None   # PREBUILT
 
     registry_image: str | None = None  # REGISTRY
@@ -221,7 +221,7 @@ class ContainerConfig:
 
     # Seconds ECS waits after SIGTERM before SIGKILLing the container. None
     # falls through to ECS's default (30s). Bump for containers that do real
-    # work in their SIGTERM handler (e.g. doh-dind snapshotting tool state
+    # work in their SIGTERM handler (e.g. humr-dind snapshotting tool state
     # to EFS, which can run 30-60s for a multi-GB rootfs).
     stop_timeout: int | None = None
 

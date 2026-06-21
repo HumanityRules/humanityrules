@@ -33,7 +33,7 @@ from . import route53_utils
 from . import secrets_utils
 
 
-# Policy-proxy image published once per env into doh/{env_slug}/policy-proxy:{tag}.
+# Policy-proxy image published once per env into humr/{env_slug}/policy-proxy:{tag}.
 # Pinned here rather than on AppConfig: the policy proxy is HUMR-owned, not
 # AppTemplate-driven, and a version bump is a platform operation.
 POLICY_PROXY_IMAGE_VERSION = "0.5.0"
@@ -67,8 +67,8 @@ BEDROCK_RUNTIME_ACTIONS = [
 
 
 def policy_proxy_ecr_repo_name(env_slug: str) -> str:
-    """Per-env ECR repo for the policy-proxy image: doh/{env_slug}/policy-proxy."""
-    return f"doh/{env_slug}/policy-proxy"
+    """Per-env ECR repo for the policy-proxy image: humr/{env_slug}/policy-proxy."""
+    return f"humr/{env_slug}/policy-proxy"
 
 
 def _resolve_control_plane_url() -> str:
@@ -203,7 +203,7 @@ def _missing_prebuilt_images(
     ecr_client = session.client("ecr")
     missing: list[str] = []
     for c in prebuilt_containers(app_config):
-        repo_name = f"doh/{env_slug}/{c.prebuilt_ecr_repo}"
+        repo_name = f"humr/{env_slug}/{c.prebuilt_ecr_repo}"
         try:
             ecr_client.describe_images(
                 repositoryName=repo_name,
@@ -246,7 +246,7 @@ def _container_image_uri(
         assert container.prebuilt_ecr_repo and container.prebuilt_version, (
             "prebuilt container must have prebuilt_ecr_repo + prebuilt_version"
         )
-        return f"{registry}/doh/{env_slug}/{container.prebuilt_ecr_repo}:{container.prebuilt_version}"
+        return f"{registry}/humr/{env_slug}/{container.prebuilt_ecr_repo}:{container.prebuilt_version}"
     if container.image_source == appconfig.ImageSource.REGISTRY:
         assert container.registry_image, "registry container must have registry_image"
         return container.registry_image
@@ -298,7 +298,7 @@ class EcrStack(Stack):
 class PolicyProxyEcrStack(Stack):
     """Per-env ECR repo for the HUMR policy-proxy image.
 
-    One repo per environment: doh/{env_slug}/policy-proxy. Shared by every app
+    One repo per environment: humr/{env_slug}/policy-proxy. Shared by every app
     in the env that runs behind a policy proxy. Created once per env on the
     first policy-proxy deploy and then imported from subsequent deploys.
     """
@@ -523,7 +523,7 @@ def _compute_listener_rule_priority(app_name: str) -> int:
 
 def cert_stack_name(env_slug: str, app_name: str) -> str:
     """Per-app wildcard cert stack name. Created only when enable_subhosting=True."""
-    return f"doh-{env_slug}-{app_name}-cert"
+    return f"humr-{env_slug}-{app_name}-cert"
 
 
 def subhosting_wildcard_cert_export_name(resource_prefix: str) -> str:
@@ -1063,7 +1063,7 @@ class AppStack(Stack):
 
         target_group = elbv2.ApplicationTargetGroup(
             self, "TargetGroup",
-            target_group_name=f"doh-{env_slug}-{app_config.app_name}"[:32].rstrip("-"),
+            target_group_name=f"humr-{env_slug}-{app_config.app_name}"[:32].rstrip("-"),
             vpc=self.environment_infra.vpc,
             port=target_port,
             protocol=elbv2.ApplicationProtocol.HTTP,
@@ -1320,8 +1320,8 @@ def deploy(
     """
     logger.info("Deploying app '%(app_name)s' to environment '%(env_slug)s'", {"app_name": app_config.app_name, "env_slug": env_slug})
 
-    # Resource prefix for consistent naming: doh-{env}-{app} (app slugs are per organization unique)
-    resource_prefix = f"doh-{env_slug}-{app_config.app_name}"
+    # Resource prefix for consistent naming: humr-{env}-{app} (app slugs are per organization unique)
+    resource_prefix = f"humr-{env_slug}-{app_config.app_name}"
 
     cf_client = session.client("cloudformation")
 
@@ -1600,7 +1600,7 @@ def teardown(
     """
     cf_client = session.client("cloudformation")
 
-    resource_prefix = f"doh-{env_slug}-{app_name}"
+    resource_prefix = f"humr-{env_slug}-{app_name}"
 
     # App-specific stacks in reverse dependency order
     stacks_to_delete = [f"{resource_prefix}-app"]

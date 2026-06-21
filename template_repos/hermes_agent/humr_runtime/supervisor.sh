@@ -117,7 +117,7 @@ start_humr_broker() {
     # call Google without HTTPS_PROXY set and get ENOTCONN, which is the
     # expected local-dev behavior.
     if [ -z "${HUMR_ENV_BEARER:-}" ] || [ -z "${HUMR_OWNER_USERNAME:-}" ] || [ -z "${HUMR_APP_SLUG:-}" ] || [ -z "${HUMR_CONTROL_PLANE_URL:-}" ]; then
-        echo "[supervisor] HUMR_ENV_BEARER / HUMR_OWNER_USERNAME / HUMR_APP_SLUG / HUMR_CONTROL_PLANE_URL not set; skipping doh broker"
+        echo "[supervisor] HUMR_ENV_BEARER / HUMR_OWNER_USERNAME / HUMR_APP_SLUG / HUMR_CONTROL_PLANE_URL not set; skipping humr broker"
         return
     fi
     mkdir -p "$INTEGRATIONS_BROKER_CA_DIR" "$INTEGRATIONS_BROKER_PRIVATE_DIR"

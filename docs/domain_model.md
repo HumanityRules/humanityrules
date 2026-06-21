@@ -359,7 +359,7 @@ A polling-based background worker that claims pending jobs using `SELECT ... FOR
 ### App Slug Uniqueness Rationale
 App slugs are unique per organization (not globally or per workspace) because:
 1. Organizations are tenant boundaries — prevents cross-tenant information leakage
-2. AWS resource names stay short: `doh/{env_slug}/{app_slug}` works since environments are per-account, accounts are per-org
+2. AWS resource names stay short: `humr/{env_slug}/{app_slug}` works since environments are per-account, accounts are per-org
 3. Org-scoped uniqueness avoids global leakage: with a global constraint, a user could infer another org's app via slug postfixes (e.g., `-1`). Within an org, collisions only reveal info to members who already share access.
 
 ### Domain and URL Resolution
@@ -370,8 +370,8 @@ Apps use shared ALB with host-based routing:
 
 ### AWS Resource Naming
 - **Base infrastructure** — `humr-{env_slug}-*` (VPC, cluster, execution role)
-- **App resources** — `doh-{env_slug}-{app_slug}-*` (ALB target group, ECS service, task role)
-- **ECR path** — `doh/{env_slug}/{app_slug}`
+- **App resources** — `humr-{env_slug}-{app_slug}-*` (ALB target group, ECS service, task role)
+- **ECR path** — `humr/{env_slug}/{app_slug}`
 - **Secrets Manager** — `humr/{env_slug}/{app_slug}/secrets` (and `humr/{env_slug}/{app_slug}/aurora/*` for apps with a database)
 
 ### Compute Substrate

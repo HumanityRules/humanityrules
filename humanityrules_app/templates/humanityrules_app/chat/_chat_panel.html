@@ -8,7 +8,7 @@
             <div>
                 <h1 id="conversation-title" class="text-lg font-semibold text-gray-900 dark:text-white"
                     hx-get="{% url 'chat_conversation_title' conversation_id=conversation.id %}"
-                    hx-trigger="doh:title-changed-{{ conversation.id }} from:document"
+                    hx-trigger="humr:title-changed-{{ conversation.id }} from:document"
                     hx-swap="innerHTML">
                     {{ conversation.title|default:"New Conversation" }}
                 </h1>
@@ -387,7 +387,7 @@ function handleNotify(data) {
         if (!payload.event) {
             return;
         }
-        document.dispatchEvent(new CustomEvent(`doh:${payload.event}`, { detail: payload }));
+        document.dispatchEvent(new CustomEvent(`humr:${payload.event}`, { detail: payload }));
     } catch (e) {
         console.error('Failed to parse sse-notify:', e);
     }
