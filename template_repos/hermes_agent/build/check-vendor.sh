@@ -37,7 +37,7 @@ if [ "$actual_version" != "$EXPECTED_VERSION" ]; then
     echo "FATAL: webui fork/base version mismatch." >&2
     echo "  Base image (FROM): $EXPECTED_VERSION" >&2
     echo "  Fork pinned to:     $actual_version (vendor/hermes-webui/.doh-upstream-version)" >&2
-    echo "  Rebase the doh/v* branch onto the matching upstream tag and update" >&2
+    echo "  Rebase the humr/v* branch onto the matching upstream tag and update" >&2
     echo "  .doh-upstream-version, or set --build-arg WEBUI_BASE_VERSION to match." >&2
     exit 1
 fi

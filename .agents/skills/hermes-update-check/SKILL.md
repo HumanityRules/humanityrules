@@ -1,6 +1,6 @@
 ---
 name: hermes-update-check
-description: Evaluate whether we can update the pinned Hermes Agent and Hermes WebUI versions by rebasing the HUMR fork branches (doh/v* in HumanityRules/hermes-agent and hermes-webui) onto a newer upstream release, which HUMR commits drop out as landed-upstream or need re-anchoring, and what upstream changes have landed since our pins. Use when the user asks about Hermes update status, whether our forks still carry needed changes, or what has improved upstream.
+description: Evaluate whether we can update the pinned Hermes Agent and Hermes WebUI versions by rebasing the HUMR fork branches (humr/v* in HumanityRules/hermes-agent and hermes-webui) onto a newer upstream release, which HUMR commits drop out as landed-upstream or need re-anchoring, and what upstream changes have landed since our pins. Use when the user asks about Hermes update status, whether our forks still carry needed changes, or what has improved upstream.
 ---
 
 # Hermes Update Check
@@ -11,14 +11,14 @@ traps a bump can spring.
 
 ## How HUMR's changes are carried
 
-Both components are **vendored forks**: a private mirror with a `doh/v<upstream-version>`
+Both components are **vendored forks**: a private mirror with a `humr/v<upstream-version>`
 branch = upstream-at-that-tag + HUMR commits on top. The monorepo points at a chosen
 commit via a git submodule.
 
 - **Agent** — submodule at `template_repos/hermes_agent/vendor/hermes-agent`, pinned to
-  `doh/v<ver>` in `HumanityRules/hermes-agent` (mirror of `NousResearch/hermes-agent`).
+  `humr/v<ver>` in `HumanityRules/hermes-agent` (mirror of `NousResearch/hermes-agent`).
   The Dockerfile COPYs it verbatim — no base image.
-- **WebUI** — submodule at `vendor/hermes-webui`, pinned to `doh/v<ver>` in
+- **WebUI** — submodule at `vendor/hermes-webui`, pinned to `humr/v<ver>` in
   `HumanityRules/hermes-webui` (mirror of `nesquena/hermes-webui`). The Dockerfile does
   `FROM ghcr.io/nesquena/hermes-webui:${WEBUI_BASE_VERSION}` and overlays the fork
   source onto `/apptoo` (`build/overlay-webui.sh`).
@@ -34,18 +34,18 @@ and `doh` is the mirror.
 
 ## Bumping
 
-1. **Pin** = the `doh/v<ver>` the submodule points at; for WebUI also the
+1. **Pin** = the `humr/v<ver>` the submodule points at; for WebUI also the
    `WEBUI_BASE_VERSION` ARG. Latest upstream: git tags (agent), container tags (webui).
-2. **Rebase** `doh/v<old>` onto the new tag in the workbench clone.
+2. **Rebase** `humr/v<old>` onto the new tag in the workbench clone.
 3. **Skim these areas** for behavior we depend on:
    - Agent: Bedrock path, `resolve_provider_client`, prompt caching, provider registry,
      `tools/lazy_deps.py` pins (esp. `provider.anthropic` — our Dockerfile `anthropic==`
      pin must match the lazy path, NOT the `pyproject.toml` extra, which can disagree).
    - WebUI: model list handling, access logs, Bedrock live discovery, reasoning/thinking
      events, streaming perf, request-gating middleware (see landmines).
-4. **Land it:** push the rebased `doh/v<new>` branch + the new upstream tag to `doh`;
+4. **Land it:** push the rebased `humr/v<new>` branch + the new upstream tag to `doh`;
    for WebUI update `.doh-upstream-version` and `WEBUI_BASE_VERSION` together; check out
-   `doh/v<new>` in the submodule and commit the gitlink via `build/vendor-commit.sh`
+   `humr/v<new>` in the submodule and commit the gitlink via `build/vendor-commit.sh`
    (not a blind `git add -A` — it can ship an unintended pin bump).
 
 ## Behavior-change landmines (a clean rebase is not a working bump)
