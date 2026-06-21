@@ -42,8 +42,8 @@ SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
 
 CSRF_TRUSTED_ORIGINS = [
     "https://devopshero.ngrok.io",
-    "https://devopshero.ai",
-    "https://*.devopshero.ai",
+    "https://humanityrules.io",
+    "https://*.humanityrules.io"
 ]
 
 

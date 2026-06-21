@@ -74,14 +74,14 @@ def policy_proxy_ecr_repo_name(env_slug: str) -> str:
 def _resolve_control_plane_url() -> str:
     """Resolve DOH's control-plane base URL (prod or dev ngrok tunnel).
 
-    In prod env-resident components call devopshero.ai directly. In local dev
+    In prod env-resident components call humanityrules.io directly. In local dev
     they live in a customer VPC and can't reach the laptop, so we point them
     at a reserved ngrok tunnel that forwards to localhost:8000. If someone
     else ever needs to deploy from their laptop, switch to a per-developer
     setting.
     """
     from django.conf import settings
-    return "https://devopshero.ai" if not settings.DEBUG else "https://devopshero.ngrok.io"
+    return "https://humanityrules.io" if not settings.DEBUG else "https://devopshero.ngrok.io"
 
 
 def _resolve_pdp_url() -> str:
