@@ -42,8 +42,8 @@ This mirrors the Google integration's earlier-resolved problem: Google's OAuth `
 │            integrations/merge/mcp          │
 │      headers:                              │
 │        Authorization: Bearer HUMR_ENV_BEARER│
-│        X-Doh-App-Slug: <slug>              │
-│        X-Doh-Owner-Username: <username>    │
+│        X-Humr-App-Slug: <slug>              │
+│        X-Humr-Owner-Username: <username>    │
 │                                            │
 │  /__humr_broker/integrations/merge/* on :9951│
 │    link-token, connector-status, connectors,│
@@ -94,7 +94,7 @@ All under `/api/integrations/merge/`:
 | `disconnect` | POST | Revoke credentials for one connector. |
 | `mcp` | POST | Streaming-HTTP MCP relay. |
 
-Identity (`app_slug`, `owner_username`) is read first from `X-Doh-App-Slug` / `X-Doh-Owner-Username` headers (the MCP relay path, where the body is the JSON-RPC payload), then from query string (GET) or JSON body (POST) for the other endpoints. Bearer always in `Authorization`.
+Identity (`app_slug`, `owner_username`) is read first from `X-Humr-App-Slug` / `X-Humr-Owner-Username` headers (the MCP relay path, where the body is the JSON-RPC payload), then from query string (GET) or JSON body (POST) for the other endpoints. Bearer always in `Authorization`.
 
 Each endpoint is a narrow, validated surface. None forwards arbitrary `{method, path, body}` to Merge. URL path components (`tool_pack_id`, `registered_user_id`) are constructed server-side from authenticated state, never injected by the caller.
 
@@ -145,7 +145,7 @@ We use one Merge Tool Pack for all HUMR customers. Cross-tenant security comes f
 
 ## What the broker's env contract gains
 
-One new variable: `HUMR_APP_SLUG`, injected by `deploy_app.py`'s env-bearer overlay alongside the existing `HUMR_OWNER_USERNAME`, `HUMR_ENV_BEARER`, etc. Used to construct the `X-Doh-App-Slug` header on every Merge-bound call.
+One new variable: `HUMR_APP_SLUG`, injected by `deploy_app.py`'s env-bearer overlay alongside the existing `HUMR_OWNER_USERNAME`, `HUMR_ENV_BEARER`, etc. Used to construct the `X-Humr-App-Slug` header on every Merge-bound call.
 
 No new secrets in the customer container.
 

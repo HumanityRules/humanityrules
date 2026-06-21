@@ -52,7 +52,7 @@ def _origin_user_id(*, user: User, app_slug: str) -> str:
 def _resolve_caller(request: HttpRequest) -> tuple[App, User] | JsonResponse:
     """Validate the bearer and resolve the (App, User) pair the call is for.
 
-    Identity is read first from `X-Doh-App-Slug` / `X-Doh-Owner-Username`
+    Identity is read first from `X-Humr-App-Slug` / `X-Humr-Owner-Username`
     headers (used by the MCP relay, where the body is the JSON-RPC payload),
     and falls back to query string / JSON body for the other endpoints.
     """
@@ -63,8 +63,8 @@ def _resolve_caller(request: HttpRequest) -> tuple[App, User] | JsonResponse:
     if environment is None:
         return JsonResponse({"error": "invalid bearer token"}, status=401)
 
-    app_slug = request.headers.get("X-Doh-App-Slug", "")
-    owner_username = request.headers.get("X-Doh-Owner-Username", "")
+    app_slug = request.headers.get("X-Humr-App-Slug", "")
+    owner_username = request.headers.get("X-Humr-Owner-Username", "")
     if not app_slug or not owner_username:
         if request.method == "GET":
             app_slug = app_slug or request.GET.get("app_slug", "")

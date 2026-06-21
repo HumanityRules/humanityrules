@@ -8,7 +8,7 @@ self-referential permissions editor under /permissions.
 Pure transport: every route parses the request, delegates to
 `credentials_service` (state changes) or reads cached status from the
 runtimes, and serializes the result. No credential choreography lives here,
-and no HUMR bearer — outbound HUMR calls happen inside the service's DohClient.
+and no HUMR bearer — outbound HUMR calls happen inside the service's HumrClient.
 """
 
 import logging
@@ -20,7 +20,7 @@ from starlette.routing import Route
 
 from credentials_service import CredentialsService
 import device_flow
-from humr_client import DohClient
+from humr_client import HumrClient
 from mcp_aggregator import MCPAggregator
 import permissions_control
 import tls_intercept
@@ -31,7 +31,7 @@ logger = logging.getLogger("control_api")
 async def _handle_unified_status(
     mcp_aggregator: MCPAggregator,
     tls_intercept_runtime: tls_intercept.TlsInterceptRuntime,
-    humr_client: DohClient,
+    humr_client: HumrClient,
     env_slug: str,
 ) -> Response:
     """Flat list combining TLS-intercept providers and MCP-aggregator items.
@@ -63,7 +63,7 @@ def build_control_app(
     tls_intercept_runtime: tls_intercept.TlsInterceptRuntime,
     oauth_device_flow: device_flow.OAuthDeviceFlow,
     credentials_service: CredentialsService,
-    humr_client: DohClient,
+    humr_client: HumrClient,
     env_slug: str,
 ) -> Starlette:
     """Wire the unified /__humr_broker/* router for browser-facing integration management."""

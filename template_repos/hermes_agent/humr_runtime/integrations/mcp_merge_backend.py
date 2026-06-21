@@ -83,8 +83,8 @@ class MergeBackend:
         self._status_url = humr_control_plane_url + "/api/integrations/merge/connector-status"
         self._headers = {
             "Authorization": f"Bearer {humr_env_bearer}",
-            "X-Doh-App-Slug": humr_app_slug,
-            "X-Doh-Owner-Username": humr_owner_username,
+            "X-Humr-App-Slug": humr_app_slug,
+            "X-Humr-Owner-Username": humr_owner_username,
         }
         self._status_cache: dict[str, tuple[str, float]] = {}
         self._status_lock = asyncio.Lock()
