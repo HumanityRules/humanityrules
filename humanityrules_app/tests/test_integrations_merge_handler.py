@@ -1,4 +1,4 @@
-"""Tests for DOH-side Merge Agent Handler identity scoping."""
+"""Tests for HUMR-side Merge Agent Handler identity scoping."""
 
 import hashlib
 import json

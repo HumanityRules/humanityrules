@@ -1,4 +1,4 @@
-"""App Stack for DevOps Hero - ECS Service."""
+"""App Stack for Humanity Rules - ECS Service."""
 
 from aws_cdk import Aws, CfnOutput, Duration, Stack
 from aws_cdk import aws_ec2 as ec2
@@ -13,7 +13,7 @@ from constructs import Construct
 
 
 class AppStack(Stack):
-    """ECS Fargate service for DevOps Hero Django app."""
+    """ECS Fargate service for Humanity Rules Django app."""
 
     def __init__(
         self,
@@ -51,7 +51,7 @@ class AppStack(Stack):
             actions=["bedrock:InvokeModel", "bedrock:InvokeModelWithResponseStream"],
             resources=["*"],
         ))
-        # Grant permission to assume customer-installed DevOpsHero roles (cross-account)
+        # Grant permission to assume customer-installed HumanityRules roles (cross-account)
         # Security: Customer roles have trust policies requiring our account + ExternalId
         task_role.add_to_policy(iam.PolicyStatement(
             actions=["sts:AssumeRole"],

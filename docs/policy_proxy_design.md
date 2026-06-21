@@ -1,6 +1,6 @@
 # Policy Proxy Design
 
-The policy proxy enforces authentication and ABAC authorization for apps deployed by DOH. It is the runtime counterpart to the ABAC model described in `authorization_design_abac.md` — it sits in front of each protected app, resolves the caller's identity via SSO, asks DOH's PDP for a decision, and either proxies or rejects the request.
+The policy proxy enforces authentication and ABAC authorization for apps deployed by HUMR. It is the runtime counterpart to the ABAC model described in `authorization_design_abac.md` — it sits in front of each protected app, resolves the caller's identity via SSO, asks HUMR's PDP for a decision, and either proxies or rejects the request.
 
 The first use case is the Personal Assistant (Hermes) deployment, where each employee gets a personalized URL (e.g. `vmendi-hermes.chsandbox.com`) and only the owner plus system admins may access it.
 
@@ -8,7 +8,7 @@ The first use case is the Personal Assistant (Hermes) deployment, where each emp
 ## Scope
 
 - Opt-in per AppTemplate. Default is off. When on, the deployed ECS task includes a policy proxy container in front of the app container.
-- Single shared policy proxy image published by DOH. AppTemplates do not embed their own copy.
+- Single shared policy proxy image published by HUMR. AppTemplates do not embed their own copy.
 - v1 target: Hermes PA. Design generalizes to any HTTP app behind ALB → ECS.
 
 Out of scope for v1:
@@ -24,8 +24,8 @@ Out of scope for v1:
 Three pieces, all living inside the customer's AWS account except the PDP:
 
 - **Auth Service** — one per environment. Singleton ECS Fargate service running the policy-proxy image in `HUMR_ROLE=auth` mode. Handles OAuth with the customer's Okta tenant, mints session JWTs. Fronted by the env ALB via a host-based listener rule (`auth.<env-domain>`).
-- **Policy Proxy container** — one per protected app instance, in the same ECS task as the app container. Verifies JWTs locally, calls the DOH PDP per request (with caching), proxies or rejects.
-- **DOH PDP endpoint** — on the DOH control plane. Evaluates ABAC policies. Called by policy proxies over HTTPS.
+- **Policy Proxy container** — one per protected app instance, in the same ECS task as the app container. Verifies JWTs locally, calls the HUMR PDP per request (with caching), proxies or rejects.
+- **HUMR PDP endpoint** — on the HUMR control plane. Evaluates ABAC policies. Called by policy proxies over HTTPS.
 
 
 ## Per-Environment Trust Anchors
@@ -33,7 +33,7 @@ Three pieces, all living inside the customer's AWS account except the PDP:
 Two secrets are provisioned when an environment is created:
 
 - **Policy-proxy JWT keypair** — RSA or EdDSA. Private half kept by the auth service. Public half served at `https://auth.<env-domain>/.well-known/jwks.json`. Stored in Secrets Manager at `humr/{env-slug}/policy-proxy-auth-config` under the `jwt_key` key (alongside `oidc_config`, which carries the Okta app credentials for the same service).
-- **Environment bearer token** — random 64-char bearer token. Stored in the shared-per-env secret `humr/{env-slug}/shared-secrets` under key `HUMR_ENV_BEARER`. Any env-resident component that calls DOH's control plane (policy proxies today; Hermes and other future services) reads it and sends it on every call. Rotated by redeploying the env's policy proxies.
+- **Environment bearer token** — random 64-char bearer token. Stored in the shared-per-env secret `humr/{env-slug}/shared-secrets` under key `HUMR_ENV_BEARER`. Any env-resident component that calls HUMR's control plane (policy proxies today; Hermes and other future services) reads it and sends it on every call. Rotated by redeploying the env's policy proxies.
 
 Both are auto-generated at env bootstrap. No manual provisioning.
 
@@ -66,7 +66,7 @@ JWT shape (session cookie):
 ```
 
 - TTL: 1 hour. On expiry, policy proxy redirects back through the auth flow; Okta typically short-circuits the login silently.
-- No attributes in the cookie. Authorization is resolved per-request against DOH, which always sees the current attribute state.
+- No attributes in the cookie. Authorization is resolved per-request against HUMR, which always sees the current attribute state.
 - Signed with the env's private key from Secrets Manager.
 - Set as `Set-Cookie: humr_session=<jwt>; Domain=.<env-domain>; Secure; HttpOnly; SameSite=Lax; Path=/`. Parent-domain scope means all policy-proxy'd apps in the env read it with one login.
 
@@ -79,8 +79,8 @@ Redirect validation:
 
 Runtime shape:
 
-- **Image:** published to ECR by DOH. Distribution shape (single DOH-owned ECR with cross-account pull vs per-customer-account mirror via the existing `build_and_push_docker_image` flow) is unresolved — see the implementation plan.
-- **Placement:** same ECS task as the app container. Policy Proxy listens on the task's public port; app container listens on localhost. Task definition is produced by DOH when the AppTemplate opts in.
+- **Image:** published to ECR by HUMR. Distribution shape (single HUMR-owned ECR with cross-account pull vs per-customer-account mirror via the existing `build_and_push_docker_image` flow) is unresolved — see the implementation plan.
+- **Placement:** same ECS task as the app container. Policy Proxy listens on the task's public port; app container listens on localhost. Task definition is produced by HUMR when the AppTemplate opts in.
 - **Opt-in flag:** AppTemplate declares `policy_proxy: true` (declared via a container entry) (or equivalent). Without it, the task is deployed without a policy proxy and retains its existing behavior.
 
 Request flow:
@@ -90,8 +90,8 @@ Request flow:
 3. Read the `humr_session` cookie. If missing or invalid (bad signature, expired), 302 to `https://auth.<env-domain>/start?rd=<current-url>`.
 4. Verify JWT signature against the cached JWKS. Extract `sub`, `username`.
 5. Look up `(oidc_sub, app_id, path-pattern)` in the decision cache.
-6. On cache miss, call the DOH PDP (see below). Cache the result with a 600 s TTL.
-7. On stale-on-error (DOH unreachable and cache entry expired), fail closed — return 503 with a short explanation. Existing sessions with warm cache entries keep working for the duration of their TTL.
+6. On cache miss, call the HUMR PDP (see below). Cache the result with a 600 s TTL.
+7. On stale-on-error (HUMR unreachable and cache entry expired), fail closed — return 503 with a short explanation. Existing sessions with warm cache entries keep working for the duration of their TTL.
 8. On allow, proxy to the app container on localhost. On deny, return a 403 with a message distinguishing "you are not the owner" from "the app does not exist."
 
 What the policy proxy forwards to the app:
@@ -105,7 +105,7 @@ JWKS handling:
 - Refreshed periodically (e.g. every 15 min) and on verification failure with an unknown `kid`.
 
 
-## DOH PDP Endpoint
+## HUMR PDP Endpoint
 
 Endpoint: `POST https://humanityrules.io/api/pdp/evaluate`
 
@@ -143,7 +143,7 @@ or:
 }
 ```
 
-DOH logic:
+HUMR logic:
 
 1. Resolve the token → env → list of apps in that env. Confirm `app_id` belongs to that env.
 2. Load the app's effective tags (direct + inherited from workspace).
@@ -165,7 +165,7 @@ Deploy-time wiring:
 - The "New Personal Assistant" deploy form includes an **Owner** field alongside Workspace and Environment:
   - Non-admins see it prefilled to `self` and locked — self-serve only.
   - Admins see a user search/dropdown and can deploy on behalf of another employee.
-- At deploy time, DOH sets the `owner` tag on the app to the owner's `username`, validated server-side against the User table. The form value is not trusted.
+- At deploy time, HUMR sets the `owner` tag on the app to the owner's `username`, validated server-side against the User table. The form value is not trusted.
 - The subdomain (`<slug>-hermes.<env-domain>`) is baked at deploy time and never changes, even if the user's `username` later changes.
 
 Authorization:
@@ -196,18 +196,18 @@ Slack gateway:
 
 AppTemplate-level flag (working name: `policy_proxy: true` (declared via a container entry)) controls:
 
-- Whether DOH produces a task definition with two containers (policy proxy + app) or one.
+- Whether HUMR produces a task definition with two containers (policy proxy + app) or one.
 - Whether the ALB listener rule routes to the policy proxy port (always the case when policy proxy is on).
 - Whether the deploy form adds the Owner field (currently only for `app-type = personal-assistant`; other policy-proxy'd templates do not need Owner).
 
-The policy proxy does not assume a specific app; it reads its `app_id` and `listen_port`/`upstream_port` from environment variables set by DOH at deploy time.
+The policy proxy does not assume a specific app; it reads its `app_id` and `listen_port`/`upstream_port` from environment variables set by HUMR at deploy time.
 
 
 ## Failure Modes Summary
 
 - **Okta down:** new logins fail. Existing JWTs keep working until `exp`.
 - **Auth Service down:** new logins fail. Existing JWTs keep working.
-- **DOH PDP down:** existing sessions with warm cache entries keep working for 60 s. Cache expiry → fail closed (503).
+- **HUMR PDP down:** existing sessions with warm cache entries keep working for 60 s. Cache expiry → fail closed (503).
 - **Policy Proxy crash:** ECS restarts the task. Cold start re-fetches JWKS; decision cache is empty until populated.
 - **JWT signing key compromise:** rotate by generating a new keypair in Secrets Manager, force a new auth-service deployment so it picks up the new key, policy proxies pick up the new public key via JWKS refresh. All existing sessions invalidated.
 

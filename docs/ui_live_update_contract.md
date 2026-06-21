@@ -1,6 +1,6 @@
 # UI Live Update Contract
 
-This document defines the current live-update pattern in DevOps Hero. The goal is simplicity: live updates should stay explicit, local, and easy to reason about.
+This document defines the current live-update pattern in Humanity Rules. The goal is simplicity: live updates should stay explicit, local, and easy to reason about.
 
 ## Core Rules
 

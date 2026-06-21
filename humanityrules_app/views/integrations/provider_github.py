@@ -1,10 +1,10 @@
 """GitHub per-user integration: OAuth connect + token refresh (runtime-scoped).
 
 Distinct from `org_github.py`, which handles the org-admin GitHub App
-*installation* flow used by the DOH control plane to enumerate repos. This
+*installation* flow used by the HUMR control plane to enumerate repos. This
 file is the per-user OAuth dance: an end user inside a Hermes WebUI clicks
 "Connect GitHub", consents at github.com, and a refresh_token is persisted
-on DOH as an IntegrationUserCredential row.
+on HUMR as an IntegrationUserCredential row.
 
 We reuse the existing GitHub App's `client_id`/`client_secret` because a
 GitHub App can issue user-to-server tokens via the same OAuth endpoints. The
@@ -71,7 +71,7 @@ def _redirect_uri(request: HttpRequest) -> str:
     """Build the absolute callback URL for this host.
 
     GitHub validates `redirect_uri` against the App's Callback URL list.
-    Each customer-facing DOH host where users may connect must be listed
+    Each customer-facing HUMR host where users may connect must be listed
     on the GitHub App's settings page.
     """
     return request.build_absolute_uri("/integrations/user/github/callback/")
@@ -202,7 +202,7 @@ def integrations_user_github_callback(request: HttpRequest) -> HttpResponse:
             env.slug, owner_username, bool(access_token), bool(refresh_token),
         )
         return HttpResponseBadRequest(
-            "GitHub did not return a refresh token. The DOH GitHub App must have "
+            "GitHub did not return a refresh token. The HUMR GitHub App must have "
             "'Expire user authorization tokens' enabled."
         )
 

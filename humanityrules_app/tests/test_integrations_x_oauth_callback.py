@@ -1,4 +1,4 @@
-"""Tests for /integrations/user/x/callback/ — persists refresh_token on DOH.
+"""Tests for /integrations/user/x/callback/ — persists refresh_token on HUMR.
 
 Mirrors the Google callback tests, but covers the two X-specific differences:
 PKCE (the session carries a `code_verifier` that must reach the token exchange)

@@ -2,8 +2,8 @@
 
 Owns the choreography that follows every credential change, regardless of
 which surface initiated it (device-flow completion, browser disconnect,
-vault save, explicit Refresh): persist/confirm the change with DOH, drop
-the TLS-intercept token cache, refresh it from DOH truth, re-render the
+vault save, explicit Refresh): persist/confirm the change with HUMR, drop
+the TLS-intercept token cache, refresh it from HUMR truth, re-render the
 gateway-managed env block, and kick whatever each provider spec declares
 (gateway/WebUI restart, models-cache drop, local auth markers).
 
@@ -31,9 +31,9 @@ import tls_providers
 
 GATEWAY_PROCESS_NAME = "system.gateway"
 WEBUI_PROCESS_NAME = "system.webui"
-# Sentinels around the DOH-managed lines in the gateway profile env file.
-GATEWAY_ENV_BLOCK_BEGIN = "# === DOH-MANAGED-INTEGRATIONS BEGIN ==="
-GATEWAY_ENV_BLOCK_END = "# === DOH-MANAGED-INTEGRATIONS END ==="
+# Sentinels around the HUMR-managed lines in the gateway profile env file.
+GATEWAY_ENV_BLOCK_BEGIN = "# === HUMR-MANAGED-INTEGRATIONS BEGIN ==="
+GATEWAY_ENV_BLOCK_END = "# === HUMR-MANAGED-INTEGRATIONS END ==="
 # Rate limit for the user-facing Refresh-all button. Policy, not correctness:
 # concurrent catalog reloads are serialized by the aggregator's own lock.
 REFRESH_COOLDOWN_SECONDS = 30
@@ -76,14 +76,14 @@ class CredentialsService:
     async def bootstrap(self) -> None:
         """At broker startup: refresh every provider, then project local runtime state once.
 
-        A failed refresh (DOH unreachable, e.g. a 503 mid-deploy) is fatal: the
+        A failed refresh (HUMR unreachable, e.g. a 503 mid-deploy) is fatal: the
         broker exits before opening its control port, supervisor.sh tears the
-        container down, and ECS restarts the task until DOH answers. Dying here
+        container down, and ECS restarts the task until HUMR answers. Dying here
         is what guarantees the gateway/WebUI children only ever launch with an
-        env rendered from live DOH state — no stale-env recovery path needed.
+        env rendered from live HUMR state — no stale-env recovery path needed.
         """
         if not await self._tls_intercept_runtime.refresh_all():
-            logger.error("FATAL: bootstrap refresh against DOH failed; exiting so ECS restarts the task")
+            logger.error("FATAL: bootstrap refresh against HUMR failed; exiting so ECS restarts the task")
             sys.exit(1)
         await self._render_gateway_env_file()
         specs_in_scope = tuple(self._providers.values())
@@ -92,10 +92,10 @@ class CredentialsService:
             await asyncio.to_thread(_delete_webui_models_cache, webui_state_dir=self._webui_state_dir)
 
     async def complete_device_flow(self, provider: str, tokens: dict) -> bool:
-        """Persist a provider device-flow token payload to DOH, then refresh TLS state.
+        """Persist a provider device-flow token payload to HUMR, then refresh TLS state.
 
         Passed to `device_flow` as its `submit_tokens` hook — the device flow
-        itself never learns about DOH or the TLS cache.
+        itself never learns about HUMR or the TLS cache.
         """
         status, _ = await self._humr_client.post_json(
             path=f"/api/integrations/credentials/{provider}/device-complete",
@@ -110,9 +110,9 @@ class CredentialsService:
         return True
 
     async def credentials_disconnect(self, provider: str) -> tuple[int, dict]:
-        """Disconnect any TLS-intercept provider (vault or OAuth); returns DOH's `(status, payload)`.
+        """Disconnect any TLS-intercept provider (vault or OAuth); returns HUMR's `(status, payload)`.
 
-        DOH's unified disconnect handler deletes the credential row and, for
+        HUMR's unified disconnect handler deletes the credential row and, for
         OAuth providers, best-effort revokes upstream — the provider kind is
         resolved server-side, so both kinds are forwarded identically. On
         success we drop only this provider's cached token; any process restart
@@ -133,7 +133,7 @@ class CredentialsService:
         return status, payload
 
     async def credentials_setup_session(self, provider: str, public_origin: str) -> tuple[int, dict]:
-        """Ask DOH for a vault setup-session submit token; returns DOH's `(status, payload)`."""
+        """Ask HUMR for a vault setup-session submit token; returns HUMR's `(status, payload)`."""
         return await self._humr_client.post_json(
             path="/api/integrations/credentials/setup-session",
             payload={"provider": provider, "public_origin": public_origin},
@@ -144,7 +144,7 @@ class CredentialsService:
         """Drop one provider's cached token after a known state change, then re-project.
 
         Raises RuntimeError when a required process restart (or models-cache
-        delete) failed; a transient DOH refresh failure is absorbed instead —
+        delete) failed; a transient HUMR refresh failure is absorbed instead —
         see `_refresh_and_apply`.
         """
         await self._tls_intercept_runtime.invalidate(slug=slug)
@@ -156,7 +156,7 @@ class CredentialsService:
         Returns the browser-facing `(status, payload)`. If a refresh ran
         within REFRESH_COOLDOWN_SECONDS we return 429 without firing either
         side — otherwise smashing the Refresh button would repeatedly trigger
-        the catalog reload and the invalidate choreography (DOH round-trip +
+        the catalog reload and the invalidate choreography (HUMR round-trip +
         gateway-env rewrite + gateway restart for vault providers). Once past
         the cooldown gate, the two sides run concurrently — they share no
         state and the slower of the two sets the round-trip latency.
@@ -190,11 +190,11 @@ class CredentialsService:
         return None
 
     async def _refresh_and_apply(self, slug: str | None) -> None:
-        """Refresh from DOH after an invalidate, then project the result onto disk/processes.
+        """Refresh from HUMR after an invalidate, then project the result onto disk/processes.
 
         When `slug` is set (a single provider was just connected/disconnected),
-        only that provider is re-fetched from DOH — refreshing every disconnected
-        provider on each connect would spam DOH with `no integration row` 404s.
+        only that provider is re-fetched from HUMR — refreshing every disconnected
+        provider on each connect would spam HUMR with `no integration row` 404s.
         `slug=None` (explicit Refresh-all) does fan out to every provider.
         """
         if slug is None:
@@ -214,7 +214,7 @@ class CredentialsService:
         Renders the managed env block, drops WebUI's models cache when the touched
         provider(s) can change /api/models, and restarts whatever processes the
         provider(s) declare when the env actually changed. Callers must only
-        invoke it after a refresh that reflected DOH truth. Raises on a failed
+        invoke it after a refresh that reflected HUMR truth. Raises on a failed
         process restart.
         """
         env_changed = await self._render_gateway_env_file()
@@ -254,7 +254,7 @@ class CredentialsService:
             await self._apply_auth_marker(provider=provider, action=action)
 
     async def _render_gateway_env_file(self) -> bool:
-        """Write the DOH-managed profile env block from current cache state."""
+        """Write the HUMR-managed profile env block from current cache state."""
         snapshot = await self._tls_intercept_runtime.gateway_env_snapshot()
         block = _render_managed_block(snapshot=snapshot)
         changed = await asyncio.to_thread(
@@ -343,7 +343,7 @@ def _render_managed_block(snapshot: list[tuple[tls_providers.TlsProviderSpec, di
 
 
 def _write_gateway_env_file(env_path: Path, managed_block: str) -> bool:
-    """Replace the DOH-managed block in `env_path` atomically.
+    """Replace the HUMR-managed block in `env_path` atomically.
 
     Lines outside the sentinels (user/onboarding-set keys) are preserved.
     Empty managed block strips the sentinels entirely. Returns true when the

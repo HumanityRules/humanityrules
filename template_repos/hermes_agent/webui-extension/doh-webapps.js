@@ -1,4 +1,4 @@
-// DOH WebUI extension — Web Apps panel.
+// HUMR WebUI extension — Web Apps panel.
 //
 // Reads from the platform-owned `__admin` webapp (FastAPI, served same-origin
 // at /webapps/__admin/api/). Mirrors doh-integrations.js: rail icon + sidebar

@@ -44,11 +44,11 @@ class OAuthHeaderMultiInject:
     """OAuth integration whose refresh returns several secrets: one bearer + extra headers.
 
     Like `OAuthHeader`, the credential rides request headers and needs no
-    restart on connect — but DOH returns more than one secret. `bearer_secret`
+    restart on connect — but HUMR returns more than one secret. `bearer_secret`
     names the one carried as `Authorization: Bearer`; `header_secrets` maps each
     remaining secret name to the HTTP header it's injected as.
 
-    Codex is the consumer: DOH mints an `access_token` (the bearer) and derives
+    Codex is the consumer: HUMR mints an `access_token` (the bearer) and derives
     `chatgpt_account_id` (the `ChatGPT-Account-ID` header) from it, and both must
     reach chatgpt.com on every request. Headers the sandbox already set that we
     don't name here (e.g. Codex's Cloudflare `originator` / `User-Agent`) pass
@@ -367,7 +367,7 @@ TLS_INTERCEPT_PROVIDER_SPECS = (
         label="X",
         # api.x.com serves the X API v2 (xurl's `/2/...` endpoints) and the
         # OAuth 2.0 token endpoint. The browser OAuth dance (x.com/i/oauth2/
-        # authorize) happens DOH-side, not from the sandbox, so x.com is not
+        # authorize) happens HUMR-side, not from the sandbox, so x.com is not
         # intercepted — only the bearer-carrying API host is.
         hosts=("api.x.com",),
         logo_url="/extensions/x.svg",

@@ -13,7 +13,7 @@ contained — its data model, mutation overrides, scope strings, and any synthet
 config tools all live there. Repeat code across connectors before reaching for
 abstractions; PostHog and Notion share little, and that's fine.
 
-Merge is NOT in this list — it uses a Magic Link flow through DOH's relay, not
+Merge is NOT in this list — it uses a Magic Link flow through HUMR's relay, not
 DCR/PKCE. See `MergeBackend` in `mcp_merge_backend.py`.
 """
 

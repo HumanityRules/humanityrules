@@ -340,7 +340,7 @@ def render_markdown(rows: list[ConnectorScore]) -> str:
         "# Merge connectors — popularity ranking",
         "",
         f"Ranked {len(rows)} connectors from `merge_connectors.txt` using five objective",
-        "external signals (no first-party DOH/Merge usage data). Generated {today}.",
+        "external signals (no first-party HUMR/Merge usage data). Generated {today}.",
         "",
         "## Purpose",
         "",

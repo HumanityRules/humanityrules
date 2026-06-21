@@ -1,4 +1,4 @@
-"""Storage Stack for DevOps Hero - S3 buckets, ECR repository, and EFS."""
+"""Storage Stack for Humanity Rules - S3 buckets, ECR repository, and EFS."""
 
 import os
 
@@ -12,7 +12,7 @@ from constructs import Construct
 
 
 class StorageStack(Stack):
-    """S3 buckets, ECR repository, and EFS for DevOps Hero."""
+    """S3 buckets, ECR repository, and EFS for Humanity Rules."""
 
     def __init__(self, scope: Construct, construct_id: str, vpc: ec2.IVpc, **kwargs) -> None:
         super().__init__(scope, construct_id, **kwargs)

@@ -37,7 +37,7 @@ def schema(existing: IntegrationUserCredential | None, app: App | None, owner_us
         "status": "connected" if existing is not None else "not_connected",
         "secret_configured": secret_configured,
         "metadata": metadata,
-        "message": "API keys are sent directly to the DevOps Hero vault. Your Hermes agent does not receive or store them.",
+        "message": "API keys are sent directly to the Humanity Rules vault. Your Hermes agent does not receive or store them.",
         "restart_required_after_save": True,
         "fields": [
             {

@@ -1,7 +1,7 @@
 # Merge connectors — popularity ranking
 
 Ranked 151 connectors from `merge_connectors.txt` using five objective
-external signals (no first-party DOH/Merge usage data). Generated 2026-06-08.
+external signals (no first-party HUMR/Merge usage data). Generated 2026-06-08.
 
 ## Purpose
 

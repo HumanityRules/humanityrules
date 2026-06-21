@@ -1,5 +1,5 @@
 """
-CLI harness for the main DevOps Hero agent.
+CLI harness for the main Humanity Rules agent.
 
 Usage:
   # Start a fresh conversation (default: mode=app_deployment, workspace=default, repo=vmendi/ai-detector-and-humanizer)
@@ -84,7 +84,7 @@ def _setup_django(db_path: Path) -> None:
 
 def _parse_args(project_root: Path) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="CLI harness for the DevOps Hero main agent."
+        description="CLI harness for the Humanity Rules main agent."
     )
     parser.add_argument(
         "--conversation-id",

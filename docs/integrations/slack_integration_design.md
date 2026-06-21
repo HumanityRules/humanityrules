@@ -12,20 +12,20 @@ Consequences:
   - `SLACK_APP_TOKEN` (`xapp-`) — app-level, opens the Socket Mode WebSocket. One per app.
   - `SLACK_BOT_TOKEN` (`xoxb-`) — bot, used for `chat.postMessage` and Web API calls. One per workspace install.
 - **One Slack app per integration**, created by the customer. The app-level token is one-per-app, so per-integration isolation (each gateway holds its own token pair, dials Slack independently) requires a dedicated app each.
-- **Marketplace / "Add to Slack" is not available** — Slack bars Socket Mode apps from the public Marketplace. There is no published-DOH-app model.
+- **Marketplace / "Add to Slack" is not available** — Slack bars Socket Mode apps from the public Marketplace. There is no published-HUMR-app model.
 
-## Why the customer creates the app (and DOH can't automate it)
+## Why the customer creates the app (and HUMR can't automate it)
 
 App creation is deliberately walled off from the OAuth/bot-token system:
 
 - The Manifest API (`apps.manifest.create`) needs an **app configuration token** (`xoxe-`), which is *unique to a user + workspace* and can only be minted **manually** on `api.slack.com/apps` (or rotated from an existing one). There is **no OAuth scope** that grants manifest access.
-- So an installed Marketplace app **cannot create or configure other apps**. DOH cannot pre-create a config token for a customer's workspace, and cannot provision the app on their behalf.
+- So an installed Marketplace app **cannot create or configure other apps**. HUMR cannot pre-create a config token for a customer's workspace, and cannot provision the app on their behalf.
 
 This is by design (a supply-chain guardrail): spawning apps with arbitrary scopes is a deliberate human act in the dashboard.
 
 ## Onboarding flow: prefill-URL manifest
 
-DOH's integrations panel renders a **manifest prefill URL**:
+HUMR's integrations panel renders a **manifest prefill URL**:
 
 ```
 https://api.slack.com/apps?new_app=1&manifest_json=<URL-encoded manifest>
@@ -36,9 +36,9 @@ The operator's steps (~4 guided clicks, no manual config — the manifest carrie
 1. Click the prefill link → Slack "Create New App" dialog opens **pre-populated** → pick workspace → **Create**.
 2. **Generate** the app-level token (`xapp-`, needs `connections:write`) — one button on Basic Information. (Only appears because the manifest sets `socket_mode_enabled: true`.)
 3. **Install to Workspace** → approve scopes → mints the bot token (`xoxb-`).
-4. Paste both tokens into DOH.
+4. Paste both tokens into HUMR.
 
-The two tokens come from two different actions (generate vs. install), so the DOH UI asks for both explicitly and should **verify on paste**: `apps.connections.open` for `xapp-`, `auth.test` for `xoxb-`.
+The two tokens come from two different actions (generate vs. install), so the HUMR UI asks for both explicitly and should **verify on paste**: `apps.connections.open` for `xapp-`, `auth.test` for `xoxb-`.
 
 ## App name (operator-editable, defaults to the template name)
 
@@ -50,7 +50,7 @@ entry drives both, sanitized per Slack's differing field rules:
 - `features.bot_user.display_name` (the bot as it posts in channels/DMs) — **≤80 chars**, restricted to `[a-z0-9._-]`; the name is lowercased and non-matching runs collapse to `-`.
 
 The **default** is the deploying app's template name — `App.source_template.name`
-(the `AppTemplate.name` chosen in the DOH control plane at deploy time, e.g.
+(the `AppTemplate.name` chosen in the HUMR control plane at deploy time, e.g.
 "Hermes Agent"). If there is no template (the `SET_NULL` edge case) or the
 operator clears the field, it falls back to `"Slackbot"` / `"slackbot"`.
 
@@ -62,7 +62,7 @@ Python (`provider_slack.py`) and JS (`doh-integrations.js`) so the live link
 matches what the server bakes and stores.
 
 **The name only affects app *creation*.** Like any manifest change, renaming in
-DOH does not touch an already-created Slack app (see "Changing the manifest…"
+HUMR does not touch an already-created Slack app (see "Changing the manifest…"
 below); an existing install must re-apply the manifest and reinstall to pick up
 a new name.
 
@@ -101,15 +101,15 @@ How each mode opens access (rendered into `/workspace/.hermes/.env` from the Sla
 
 ### Identity capture (personal mode)
 
-Collect the owner's **email** at config time (low friction, prefilled with the deploying user's DOH email) → resolve via `users.lookupByEmail` (needs **both** `users:read` and its extension `users:read.email` — Slack rejects a manifest carrying the extension without its base scope) → **store the resolved `user_id`** in `config["allowed_users"]`, never the email. Slack events identify senders by `user_id`; emails/display names change, IDs don't. The resolved name is stored in `metadata["owner_name"]` and shown back on the connected card ("Replies only to *Jane Doe*"). Resolution runs DOH-side (`provider_slack._resolve_owner_user_id`, an httpx call like `auth.test`). An email that isn't a member of that workspace (`users_not_found`) fails the save with a clear message.
+Collect the owner's **email** at config time (low friction, prefilled with the deploying user's HUMR email) → resolve via `users.lookupByEmail` (needs **both** `users:read` and its extension `users:read.email` — Slack rejects a manifest carrying the extension without its base scope) → **store the resolved `user_id`** in `config["allowed_users"]`, never the email. Slack events identify senders by `user_id`; emails/display names change, IDs don't. The resolved name is stored in `metadata["owner_name"]` and shown back on the connected card ("Replies only to *Jane Doe*"). Resolution runs HUMR-side (`provider_slack._resolve_owner_user_id`, an httpx call like `auth.test`). An email that isn't a member of that workspace (`users_not_found`) fails the save with a clear message.
 
-**Owner-freshness is coupled to token-freshness.** A resolved `user_id` is only valid against the workspace of the bot token that resolved it. So: a blank email on save **keeps** the bound owner (a name-only reconfigure), but submitting a **new bot token** *requires* re-entering the email — the old `user_id` may name a different person in the new token's workspace. And because the mode is baked into the Slack app's manifest (subscriptions + scopes), **switching modes requires creating a new Slack app and pasting fresh tokens**; DOH refuses to flip the stored mode against tokens kept from the old app, which would otherwise write (say) company-wide env over an app that only emits `message.im`.
+**Owner-freshness is coupled to token-freshness.** A resolved `user_id` is only valid against the workspace of the bot token that resolved it. So: a blank email on save **keeps** the bound owner (a name-only reconfigure), but submitting a **new bot token** *requires* re-entering the email — the old `user_id` may name a different person in the new token's workspace. And because the mode is baked into the Slack app's manifest (subscriptions + scopes), **switching modes requires creating a new Slack app and pasting fresh tokens**; HUMR refuses to flip the stored mode against tokens kept from the old app, which would otherwise write (say) company-wide env over an app that only emits `message.im`.
 
 ### Home channel (personal mode)
 
 The upstream gateway uses a per-platform **home channel** as the delivery target for cron output, scheduled jobs, and proactive/cross-platform messages (anything that isn't a direct reply to the user). When `SLACK_HOME_CHANNEL` is unset, the gateway prompts the user on their *first* message in any new session — *"No home channel is set for Slack… type /sethome…"* — which is noisy for a personal bot whose obvious home is the owner's own DM.
 
-So in personal mode DOH resolves it at connect time: right after `users.lookupByEmail` gives the owner's `user_id`, `provider_slack._open_owner_dm_channel` calls `conversations.open(users=<owner_id>)` with the bot token and stores the returned **DM channel id** (`D…`) in `config["home_channel"]`. The broker projects that into `SLACK_HOME_CHANNEL` via the provider's `EnvBinding` (`tls_intercept.py`), so the gateway boots with a home channel already set and never prompts. **Why the `D…` id and not the `U…` user_id:** `chat.postMessage(channel=<U…>)` lands in the user's *Slackbot* DM, not the bot's DM with them ([Slack docs](https://docs.slack.dev/messaging/sending-and-scheduling-messages)) — only the `D…` channel id targets the right conversation. Opening that DM needs the `im:write` scope, which is why the personal manifest carries it (`channel:write` is not required — `conversations.open` + `chat:write` suffice).
+So in personal mode HUMR resolves it at connect time: right after `users.lookupByEmail` gives the owner's `user_id`, `provider_slack._open_owner_dm_channel` calls `conversations.open(users=<owner_id>)` with the bot token and stores the returned **DM channel id** (`D…`) in `config["home_channel"]`. The broker projects that into `SLACK_HOME_CHANNEL` via the provider's `EnvBinding` (`tls_intercept.py`), so the gateway boots with a home channel already set and never prompts. **Why the `D…` id and not the `U…` user_id:** `chat.postMessage(channel=<U…>)` lands in the user's *Slackbot* DM, not the bot's DM with them ([Slack docs](https://docs.slack.dev/messaging/sending-and-scheduling-messages)) — only the `D…` channel id targets the right conversation. Opening that DM needs the `im:write` scope, which is why the personal manifest carries it (`channel:write` is not required — `conversations.open` + `chat:write` suffice).
 
 Home-channel freshness rides owner-freshness: a fresh email re-resolves both the `user_id` and the DM; a blank-email reconfigure keeps the previously-stored `home_channel`. **Existing personal apps created before this change** lack `im:write`; their next reconnect from the Personal manifest link adds the scope, and if a stale bot token hits `conversations.open` with `missing_scope` the save fails with a recreate-the-app message.
 

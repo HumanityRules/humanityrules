@@ -26,11 +26,11 @@ Three independent booleans (UI shows them as separate checkboxes in
    at deploy time (DB passwords from the AppTemplate `secrets` block, etc.).
 
 3. **`delete_policies`** — wipes ABAC `Policy` rows referencing the app slug
-   in the DOH control-plane DB.
+   in the HUMR control-plane DB.
 
 ## What is NOT cleaned up: `IntegrationUserCredential`
 
-`IntegrationUserCredential` rows live in the **DOH control-plane DB** and store:
+`IntegrationUserCredential` rows live in the **HUMR control-plane DB** and store:
 
 - Google OAuth refresh tokens
 - GitHub user-to-server tokens
@@ -44,7 +44,7 @@ queries `IntegrationUserCredential`. Verified by grep: zero references in
 `humanityrules_app/services/`.
 
 **Net consequence:** removing an app today leaves user OAuth refresh tokens
-and Telegram bot tokens orphaned in DOH's database forever. If a future app
+and Telegram bot tokens orphaned in HUMR's database forever. If a future app
 is created with the same slug under the same `(owner_user, environment)`
 tuple, those rows match again and the integration appears "magically
 connected" — surprising and almost certainly wrong.
@@ -60,8 +60,8 @@ Three categories, but only two are exposed:
 |---|---|---|---|
 | App data | EFS + host mounts (customer account) | Yes | `delete_persistent_data` |
 | Customer-account secrets | AWS Secrets Manager (customer account) | Yes | `delete_secrets` |
-| Control-plane integration credentials | DOH DB (`IntegrationUserCredential`) | **No** | — |
-| ABAC policies | DOH DB (`Policy`) | Yes | `delete_policies` |
+| Control-plane integration credentials | HUMR DB (`IntegrationUserCredential`) | **No** | — |
+| ABAC policies | HUMR DB (`Policy`) | Yes | `delete_policies` |
 
 ## Recommendations
 

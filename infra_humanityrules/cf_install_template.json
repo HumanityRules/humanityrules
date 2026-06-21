@@ -1,6 +1,6 @@
 {
   "AWSTemplateFormatVersion": "2010-09-09",
-  "Description": "CloudFormation template to securely connect your AWS account to DevOpsHero.\n",
+  "Description": "CloudFormation template to securely connect your AWS account to HumanityRules.\n",
   "Parameters": {
     "ExternalId": {
       "Type": "String",
@@ -9,8 +9,8 @@
   },
   "Outputs": {
     "RoleArn": {
-      "Description": "The ARN of the IAM role created for DevOpsHero",
-      "Value": { "Fn::GetAtt": ["DevOpsHeroRole", "Arn"] }
+      "Description": "The ARN of the IAM role created for HumanityRules",
+      "Value": { "Fn::GetAtt": ["HumanityRulesRole", "Arn"] }
     },
     "AccountId": {
       "Description": "Your AWS Account ID",
@@ -18,7 +18,7 @@
     }
   },
   "Resources": {
-    "DevOpsHeroRole": {
+    "HumanityRulesRole": {
       "Type": "AWS::IAM::Role",
       "Properties": {
         "RoleName": {
@@ -54,14 +54,14 @@
         "ManagedPolicyArns": ["arn:aws:iam::aws:policy/AdministratorAccess"]
       }
     },
-    "DevOpsHeroInstallCallback": {
-      "Type": "Custom::DevOpsHeroInstallCallback",
-      "DependsOn": "DevOpsHeroRole",
+    "HumanityRulesInstallCallback": {
+      "Type": "Custom::HumanityRulesInstallCallback",
+      "DependsOn": "HumanityRulesRole",
       "Properties": {
         "ServiceToken": "arn:aws:lambda:us-east-1:555553041615:function:humr-prod-install-callback",
         "AwsAccount": { "Ref": "AWS::AccountId" },
         "StackRegion": { "Ref": "AWS::Region" },
-        "RoleArn": { "Fn::GetAtt": ["DevOpsHeroRole", "Arn"] },
+        "RoleArn": { "Fn::GetAtt": ["HumanityRulesRole", "Arn"] },
         "ExternalId": { "Ref": "ExternalId" }
       }
     }

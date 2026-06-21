@@ -1,4 +1,4 @@
-# DOH webapps reverse proxy. See template_repos/hermes_agent/skills/development/webapps/.
+# HUMR webapps reverse proxy. See template_repos/hermes_agent/skills/development/webapps/.
 #
 # Caddy listens on 8787, behind policy-proxy (which terminates auth at 8788
 # in a sibling container in this task). Two routing shapes coexist:

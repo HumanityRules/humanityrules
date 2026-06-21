@@ -1,20 +1,20 @@
 ---
 name: customer-debug
-description: Debug customer app deployments in customer AWS accounts. Use when an app is crashing, a deployment failed, or you need to check ECS tasks, logs, or CloudFormation in a customer account (e.g., "Humanity Rules Sandbox"). NOT for DOH's own infrastructure — use prod-controlplane-debug for that.
+description: Debug customer app deployments in customer AWS accounts. Use when an app is crashing, a deployment failed, or you need to check ECS tasks, logs, or CloudFormation in a customer account (e.g., "Humanity Rules Sandbox"). NOT for HUMR's own infrastructure — use prod-controlplane-debug for that.
 ---
 
 # Debug Customer App Deployments
 
 For investigating issues with apps deployed into customer AWS accounts — ECS task crashes, deployment failures, container errors, CloudFormation stack issues.
 
-**Localhost by default.** Unless the user explicitly says "in production," assume the DOH control plane is running locally and the customer exists in the local DB:
+**Localhost by default.** Unless the user explicitly says "in production," assume the HUMR control plane is running locally and the customer exists in the local DB:
 
 - **Localhost:** `uv run manage.py <command> ...` — queries the local DB, uses credentials from `.env`
 - **Production:** `cd infra_humanityrules && ./prod_manage.sh <command> ...` — runs the same command on the production ECS container, queries the production DB
 
 All commands below work identically in both modes — just swap the prefix.
 
-Customer accounts are accessed via IAM role assumption. The `.env` file in the project root has `HUMR_AWS_ACCESS_KEY` and `HUMR_AWS_SECRET_KEY` — these are DOH's control plane IAM credentials, loaded into `django.conf.settings`. They're used to STS-assume `arn:aws:iam::{account_id}:role/humr-{external_id}` in the customer account. All management commands handle this internally via `iam_utils.get_assumed_role_session()`. The `account_id` and `external_id` come from the `AWSAccount` model in the DB.
+Customer accounts are accessed via IAM role assumption. The `.env` file in the project root has `HUMR_AWS_ACCESS_KEY` and `HUMR_AWS_SECRET_KEY` — these are HUMR's control plane IAM credentials, loaded into `django.conf.settings`. They're used to STS-assume `arn:aws:iam::{account_id}:role/humr-{external_id}` in the customer account. All management commands handle this internally via `iam_utils.get_assumed_role_session()`. The `account_id` and `external_id` come from the `AWSAccount` model in the DB.
 
 
 ## Step 1: Gather Context from the DB
@@ -37,7 +37,7 @@ EOF
 For ad-hoc AWS CLI calls not covered by existing commands, assume the customer role and export the temporary credentials. Use `account_id` and `external_id` from Step 1:
 
 ```bash
-# Load DOH control plane credentials
+# Load HUMR control plane credentials
 export AWS_ACCESS_KEY_ID=$(grep -E '^HUMR_AWS_ACCESS_KEY=' .env | cut -d'=' -f2-)
 export AWS_SECRET_ACCESS_KEY=$(grep -E '^HUMR_AWS_SECRET_KEY=' .env | cut -d'=' -f2-)
 export AWS_DEFAULT_REGION="us-east-1"

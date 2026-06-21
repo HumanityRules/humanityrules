@@ -1,6 +1,6 @@
 # Okta OIDC Setup Guide
 
-How to onboard a customer who uses Okta for SSO, so they can log in to DevOps Hero without going through WorkOS ($125/customer saved).
+How to onboard a customer who uses Okta for SSO, so they can log in to Humanity Rules without going through WorkOS ($125/customer saved).
 
 ## Background
 
@@ -57,7 +57,7 @@ https://acme.okta.com/oauth2/default
 
 The customer can send this along with the Client ID and Client Secret.
 
-### 4. Create the organization in DevOps Hero
+### 4. Create the organization in Humanity Rules
 
 Run the setup command (works on both local and prod):
 
@@ -93,7 +93,7 @@ https://humanityrules.io/oidc/login/?org=acme
 
 This is the only URL they need. The bootstrap admin's first login will fully initialize the org (seed ABAC policies + admin role). Subsequent users are auto-created with the default role (viewer).
 
-**If you (the operator) already have a DOH account via WorkOS** and want that same account to be the bootstrap admin, you must visit `/oidc/login/?org=<slug>` once after running `setup_oidc_org`. That first visit identity-links your existing row into the new org: it matches by `(org, email)`, back-fills `oidc_sub` on your user, runs the org bootstrap, and clears `bootstrap_admin_email`. If you skip this step, the Okta `sub` never gets written to your user, and any app-level Okta login (e.g. through a personal-assistant policy proxy) will fail with "you do not have access to this application" because the PDP can't find your user by sub.
+**If you (the operator) already have a HUMR account via WorkOS** and want that same account to be the bootstrap admin, you must visit `/oidc/login/?org=<slug>` once after running `setup_oidc_org`. That first visit identity-links your existing row into the new org: it matches by `(org, email)`, back-fills `oidc_sub` on your user, runs the org bootstrap, and clears `bootstrap_admin_email`. If you skip this step, the Okta `sub` never gets written to your user, and any app-level Okta login (e.g. through a personal-assistant policy proxy) will fail with "you do not have access to this application" because the PDP can't find your user by sub.
 
 ## Troubleshooting
 
@@ -107,7 +107,7 @@ This is the only URL they need. The bootstrap admin's first login will fully ini
 ## How it works (for the curious)
 
 ```
-Browser                    DevOps Hero                 Okta
+Browser                    Humanity Rules                 Okta
   |                            |                         |
   |  GET /oidc/login/?org=acme |                         |
   |--------------------------->|                         |

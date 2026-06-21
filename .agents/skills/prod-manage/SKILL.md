@@ -25,7 +25,7 @@ cd infra_humanityrules
 
 The operator never picks the mode — the same `--account NAME --env SLUG` UX works for both. Behind the scenes for local-exec the dispatcher converts those into raw-mode args (`--aws-account-id / --aws-external-id / --aws-region / --env-slug`) on the Django command, which all `add_aws_target_args`-using commands accept.
 
-## Local-exec example: build & push a DOH-owned image into a customer env
+## Local-exec example: build & push a HUMR-owned image into a customer env
 
 The image is pushed to `doh/{env_slug}/{ecr_repo}:{version}` in the customer's per-env ECR. The four target values are resolved from prod's DB.
 
@@ -40,7 +40,7 @@ The image is pushed to `doh/{env_slug}/{ecr_repo}:{version}` in the customer's p
 
 Output begins with `[prod_dispatch] resolving --account=… --env=… via prod_manage.sh humr_query …` then `[prod_dispatch] exec (cwd=…): uv run manage.py … --aws-account-id … --aws-external-id … --aws-region … --env-slug …`. After that the regular Django command output appears.
 
-If multiple AWSAccount rows match (same 12-digit account onboarded into multiple DOH organizations), the dispatcher errors with a list and asks for `--org`.
+If multiple AWSAccount rows match (same 12-digit account onboarded into multiple HUMR organizations), the dispatcher errors with a list and asks for `--org`.
 
 ## Control Plane Operations (`humr_control`)
 
@@ -49,7 +49,7 @@ Operations that modify state for environments and deployments.
 ```bash
 # Create environment (triggers provisioning)
 ./prod_manage.sh humr_control create-env \
-    --aws-account "DevOps Hero AWS Account" \
+    --aws-account "Humanity Rules AWS Account" \
     --name default \
     --region us-east-1 \
     --hosted-zone humanityrules.io
@@ -57,12 +57,12 @@ Operations that modify state for environments and deployments.
 # Tear down environment
 ./prod_manage.sh humr_control teardown-env \
     --slug default \
-    --aws-account "DevOps Hero AWS Account"
+    --aws-account "Humanity Rules AWS Account"
 
 # Re-queue an environment for provisioning
 ./prod_manage.sh humr_control redeploy-env \
     --slug default \
-    --aws-account "DevOps Hero AWS Account"
+    --aws-account "Humanity Rules AWS Account"
 
 # Tear down an app's deployment
 ./prod_manage.sh humr_control teardown-app --app ai-detector-and-humanizer

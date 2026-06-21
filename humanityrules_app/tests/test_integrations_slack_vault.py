@@ -141,7 +141,7 @@ class TestSlackSetupSession(_SlackVaultTestBase):
         mode_values = {m["value"]: m["enabled"] for m in schema["modes"]}
         self.assertTrue(mode_values[provider_slack.MODE_COMPANY_WIDE])
         self.assertTrue(mode_values[provider_slack.MODE_PERSONAL])
-        # The owner-email field is prefilled with the deploying user's DOH email.
+        # The owner-email field is prefilled with the deploying user's HUMR email.
         self.assertEqual(schema["owner_email"], self.user.email)
         company = schema["manifests"][provider_slack.MODE_COMPANY_WIDE]
         self.assertTrue(company["settings"]["socket_mode_enabled"])
@@ -366,7 +366,7 @@ class TestSlackSubmit(_SlackVaultTestBase):
         self.assertEqual(body["schema"]["owner_email"], "")
         self.assertEqual(body["schema"]["owner_name"], "Jane Doe")
         # Save with a blank email (e.g. just renaming) keeps the bound owner —
-        # no re-resolution, no silent rebind to the DOH email.
+        # no re-resolution, no silent rebind to the HUMR email.
         _status, session = self._post_setup_session()
         with patch("humanityrules_app.views.integrations.provider_slack._resolve_owner_user_id") as resolve:
             response = self.client.post(

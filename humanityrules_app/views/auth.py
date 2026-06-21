@@ -259,7 +259,7 @@ def oidc_callback(request):
         )
         return HttpResponseBadRequest("OIDC sub belongs to a different organization")
 
-    # Identity-linking path: an existing DOH user (typically WorkOS-onboarded)
+    # Identity-linking path: an existing HUMR user (typically WorkOS-onboarded)
     # hitting /oidc/login/ for the first time. Match on (org, email) and
     # back-fill oidc_sub so future logins take the canonical path.
     existing = _find_user_by_org_email(org=org, email=userinfo["email"])

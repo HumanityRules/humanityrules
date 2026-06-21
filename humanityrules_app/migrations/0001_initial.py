@@ -63,7 +63,7 @@ class Migration(migrations.Migration):
                 ('name', models.CharField(help_text="User-friendly name for this AWS account (e.g., 'Production', 'Staging')", max_length=255)),
                 ('aws_account_id', models.CharField(blank=True, help_text='The 12-digit AWS account ID (populated after verification)', max_length=12)),
                 ('external_id', models.UUIDField(default=uuid.uuid4, help_text='External ID for secure cross-account AssumeRole')),
-                ('role_arn', models.CharField(blank=True, help_text='IAM role ARN that DevOpsHero assumes for deployments', max_length=2048)),
+                ('role_arn', models.CharField(blank=True, help_text='IAM role ARN that HumanityRules assumes for deployments', max_length=2048)),
                 ('status', models.CharField(choices=[('pending', 'Pending'), ('connected', 'Connected'), ('error', 'Error')], default='pending', max_length=20)),
                 ('status_message', models.TextField(blank=True, help_text='Additional status information or error details')),
                 ('created_at', models.DateTimeField(auto_now_add=True)),

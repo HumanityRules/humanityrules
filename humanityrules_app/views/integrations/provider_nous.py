@@ -1,9 +1,9 @@
 """Nous Portal per-user integration: device-flow connect + token refresh.
 
 Nous connects via the upstream Hermes Portal device flow. The env-resident
-broker drives that flow, sends the resulting refresh token to DOH, and DOH
+broker drives that flow, sends the resulting refresh token to HUMR, and HUMR
 exchanges that stored refresh token for short-lived inference access tokens.
-The sandbox sees only the DOH placeholder; the TLS-intercept proxy injects the
+The sandbox sees only the HUMR placeholder; the TLS-intercept proxy injects the
 fresh bearer on requests to inference-api.nousresearch.com.
 """
 

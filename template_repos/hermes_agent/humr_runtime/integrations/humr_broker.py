@@ -1,7 +1,7 @@
-"""Outside-the-sandbox broker — the env's single relay to DOH.
+"""Outside-the-sandbox broker — the env's single relay to HUMR.
 
 Fronts per-user third-party integrations and the self-referential permissions
-editor (more DOH APIs later). Runs as a supervisor-managed sidecar process. Pure
+editor (more HUMR APIs later). Runs as a supervisor-managed sidecar process. Pure
 composition root: it reads the environment contract, constructs the subsystems,
 wires them together, and runs the servers. All credential-change choreography
 lives in `credentials_service`; all HTTP parsing lives in `control_api`.
@@ -17,14 +17,14 @@ It starts:
    MCP-aggregator management routes under /integrations and the permissions
    relay under /permissions.
 
-The aggregator's port 9952 is sandbox-only MCP traffic. Refresh tokens, DOH's
+The aggregator's port 9952 is sandbox-only MCP traffic. Refresh tokens, HUMR's
 OAuth client secrets, and the env bearer never enter the sandbox.
 
 Environment contract (set by deploy_app.py's env-bearer overlay):
-- HUMR_ENV_BEARER        — bearer for DOH's per-env integration endpoints.
+- HUMR_ENV_BEARER        — bearer for HUMR's per-env integration endpoints.
 - HUMR_OWNER_USERNAME    — whose grants this container is for.
 - HUMR_APP_SLUG          — logical app key for app-scoped credentials.
-- HUMR_CONTROL_PLANE_URL — base URL for DOH (e.g. https://humanityrules.io).
+- HUMR_CONTROL_PLANE_URL — base URL for HUMR (e.g. https://humanityrules.io).
 - HUMR_ENV_SLUG          — env slug, for logging only.
 - HUMR_MERGE_INTEGRATION_ENABLED — optional; false disables all Merge.dev connectors.
 
@@ -170,7 +170,7 @@ async def _run(
         runtime_dir=runtime_dir,
         hermes_home=hermes_home,
     )
-    # Render the managed profile env file from current DOH state before opening the
+    # Render the managed profile env file from current HUMR state before opening the
     # control port. supervisor.sh's wait_for_port on the control port doubles
     # as the synchronization point: by the time it returns, the file is on
     # disk and webui.sh can launch process-compose children with current env.

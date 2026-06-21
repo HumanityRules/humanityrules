@@ -1,6 +1,6 @@
 """Telegram managed-bot provider: link+poll connect via Telegram's Bot Management mode.
 
-Telegram bots are no longer connected by pasting a BotFather token. DOH owns a
+Telegram bots are no longer connected by pasting a BotFather token. HUMR owns a
 manager bot (BotFather "Bot Management Mode" — see settings
 `TELEGRAM_MANAGER_BOT_TOKEN` / `TELEGRAM_MANAGER_BOT_USERNAME`); `schema()`
 returns a `https://t.me/newbot/{manager}/{suggested_username}` deep link the
@@ -33,7 +33,7 @@ TELEGRAM_API_TIMEOUT_SECONDS = 5
 # Telegram bot tokens never expire on the provider side, so this is purely
 # the broker's cache lifetime.
 TELEGRAM_BROKER_CACHE_SECONDS = 60 * 60
-TELEGRAM_NOT_CONFIGURED_MESSAGE = "Telegram is not configured on this DevOps Hero deployment: the manager bot credentials are missing."
+TELEGRAM_NOT_CONFIGURED_MESSAGE = "Telegram is not configured on this Humanity Rules deployment: the manager bot credentials are missing."
 TELEGRAM_TOKEN_FETCH_FAILED_MESSAGE = "Telegram did not return your new bot's token. Please try again."
 # Telegram bot usernames are 5-32 chars of [A-Za-z0-9_] and must end in "bot";
 # the random suffix plus "_bot" leaves this much room for the app-slug prefix.
@@ -42,7 +42,7 @@ TELEGRAM_BOT_NAME_MAX_LEN = 64
 
 
 def _manager_bot_configured() -> bool:
-    """Return whether DOH's Telegram manager bot credentials are configured."""
+    """Return whether HUMR's Telegram manager bot credentials are configured."""
     return bool(settings.TELEGRAM_MANAGER_BOT_TOKEN and settings.TELEGRAM_MANAGER_BOT_USERNAME)
 
 
@@ -103,7 +103,7 @@ def schema(existing: IntegrationUserCredential | None, app: App | None, owner_us
             "mode": "form",
             "secret_configured": bool(existing.credentials.get("bot_token")),
             "metadata": existing.metadata,
-            "message": "Your Telegram bot is managed by DevOps Hero. Configure who is allowed to talk to it.",
+            "message": "Your Telegram bot is managed by Humanity Rules. Configure who is allowed to talk to it.",
             "restart_required_after_save": True,
             "fields": [
                 {
@@ -137,12 +137,12 @@ def schema(existing: IntegrationUserCredential | None, app: App | None, owner_us
         "status": "not_connected",
         "mode": "link_poll",
         "message": (
-            "DevOps Hero creates a Telegram bot."
+            "Humanity Rules creates a Telegram bot."
             "Scan the QR code with your phone and confirm the bot in Telegram."
         ),
         "qr_data_uri": _link_qr_data_uri(link_url=link_url),
         "qr_caption": "Scan with your phone’s camera or Telegram app",
-        "link_note": f"Keep the suggested @{suggested_username} username — it is how DevOps Hero recognizes your new bot.",
+        "link_note": f"Keep the suggested @{suggested_username} username — it is how Humanity Rules recognizes your new bot.",
         "pending_message": "Waiting for you to confirm in Telegram…",
         "restart_required_after_save": True,
         "signed_state": {"bot_username": suggested_username},
@@ -153,7 +153,7 @@ def schema(existing: IntegrationUserCredential | None, app: App | None, owner_us
 def _link_qr_data_uri(link_url: str) -> str:
     """Render the bot-creation link as an SVG QR data URI for the connect modal.
 
-    Generated on DOH so the WebUI extension stays dependency-free. Explicit
+    Generated on HUMR so the WebUI extension stays dependency-free. Explicit
     light background: the modal is dark-themed and a transparent QR would be
     unscannable there.
     """

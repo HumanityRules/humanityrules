@@ -1,5 +1,5 @@
 """
-CloudFormation utility functions for deploying DevOpsHero infrastructure to customer accounts.
+CloudFormation utility functions for deploying HumanityRules infrastructure to customer accounts.
 """
 
 import logging

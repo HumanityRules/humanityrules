@@ -1,6 +1,6 @@
-"""Shared request plumbing for broker-to-DOH integration endpoints.
+"""Shared request plumbing for broker-to-HUMR integration endpoints.
 
-The env-resident Hermes broker calls several DOH endpoints (batched token
+The env-resident Hermes broker calls several HUMR endpoints (batched token
 refresh, credential setup/submit, disconnect) with the same shape: an env
 bearer in the Authorization header and a JSON body naming an owner_username
 and app_slug. These helpers resolve and validate that shared envelope so each
@@ -34,7 +34,7 @@ def parse_json_body(request: HttpRequest) -> tuple[dict | None, JsonResponse | N
 
 
 def resolve_env_bearer_context(request: HttpRequest) -> tuple[Environment | None, JsonResponse | None]:
-    """Resolve the env bearer used by broker-to-DOH integration endpoints."""
+    """Resolve the env bearer used by broker-to-HUMR integration endpoints."""
     raw_token = env_bearer_auth.extract_bearer_token(request=request)
     if raw_token is None:
         return None, JsonResponse({"error": "missing bearer token"}, status=401)

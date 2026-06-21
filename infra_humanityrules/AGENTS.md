@@ -1,11 +1,11 @@
-# DevOps Hero Control Plane Infrastructure
+# Humanity Rules Control Plane Infrastructure
 
-This directory contains the CDK infrastructure for the DevOps Hero control plane — the app that runs at humanityrules.io. This is distinct from `humanityrules_app/services/infra_customer/`, which deploys customer apps to their AWS accounts.
+This directory contains the CDK infrastructure for the Humanity Rules control plane — the app that runs at humanityrules.io. This is distinct from `humanityrules_app/services/infra_customer/`, which deploys customer apps to their AWS accounts.
 
 
 ## AWS Credentials Setup
 
-**CRITICAL**: Before running any CDK or AWS CLI commands, load the DOH AWS credentials from `.env`:
+**CRITICAL**: Before running any CDK or AWS CLI commands, load the HUMR AWS credentials from `.env`:
 
 ```bash
 # From infra_humanityrules/ directory
@@ -186,16 +186,16 @@ aws ecs execute-command --cluster humr-prod-cluster --task ${TASK_ARN} --contain
 
 ## Customer AWS Account Connection Flow
 
-When customers connect their AWS account to DevOps Hero:
+When customers connect their AWS account to Humanity Rules:
 
 1. **Customer clicks "Connect AWS Account"** in the UI
 2. **Quick Create Stack link** opens AWS Console with `cf_install_template.json` from S3
 3. **CloudFormation creates**:
-   - IAM role with trust policy for DOH account (555553041615)
+   - IAM role with trust policy for HUMR account (555553041615)
    - ExternalId for confused deputy protection
 4. **Custom Resource triggers Lambda** (`humr-prod-install-callback`)
-5. **Lambda POSTs to DOH backend** (`/api/aws/install-account-callback`)
-6. **DOH backend stores** the role ARN and external ID
+5. **Lambda POSTs to HUMR backend** (`/api/aws/install-account-callback`)
+6. **HUMR backend stores** the role ARN and external ID
 
 **Key files:**
 - `cf_install_template.json` — CloudFormation template customers run (uploaded to `humr-public` S3 bucket via `BucketDeployment`)

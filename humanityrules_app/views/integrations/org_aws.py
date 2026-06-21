@@ -88,7 +88,7 @@ def integrations_org_aws_accounts_add(request: HttpRequest) -> HttpResponse:
 @csrf_exempt
 @require_POST
 def aws_install_account_callback(request: HttpRequest) -> JsonResponse:
-    """Receive callbacks from the DevOpsHero install Lambda after CloudFormation stack changes."""
+    """Receive callbacks from the HumanityRules install Lambda after CloudFormation stack changes."""
     auth_header = request.headers.get("Authorization", "")
     expected_token = f"Bearer {settings.HUMR_API_SECRET_KEY}"
 

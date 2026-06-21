@@ -4,9 +4,9 @@
 # The base image ships /apptoo as a clean `COPY . /apptoo` of upstream
 # hermes-webui at the pinned tag, plus exactly one generated file
 # (api/_version.py). So the fork tree IS /apptoo's source, and we rsync the
-# whole fork over /apptoo: unchanged files are no-ops, DOH-changed files win.
+# whole fork over /apptoo: unchanged files are no-ops, HUMR-changed files win.
 # Against a clean checkout this reproduces /apptoo byte for byte except the
-# DOH-changed files.
+# HUMR-changed files.
 #
 #   --delete            reconcile upstream deletions/renames (stale source can't
 #                       survive). Excluded paths are protected from deletion.

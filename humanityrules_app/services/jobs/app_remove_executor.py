@@ -84,7 +84,7 @@ CLEANUP_POLL_INTERVAL_SECONDS = 5
 
 
 def _get_env_session(environment: models.Environment):
-    """Assume the DevOpsHero role in the environment's customer AWS account."""
+    """Assume the HumanityRules role in the environment's customer AWS account."""
     aws_account = environment.aws_account
     return iam_utils.get_assumed_role_session(
         access_key=settings.HUMR_AWS_ACCESS_KEY,
@@ -485,12 +485,12 @@ def _wait_for_stopped(ecs_client, cluster: str, task_arn: str) -> tuple[bool, st
 # find no directory and exit 0 — idempotent.
 #
 # Permissions: the container instance role already attaches AmazonSSMManagedInstanceCore
-# (see deploy_base.py EcsClusterStack), so the agent is present. DOH's assumed role
+# (see deploy_base.py EcsClusterStack), so the agent is present. HUMR's assumed role
 # in the customer account needs ssm:SendCommand + ssm:GetCommandInvocation, which
-# the customer-side DevOpsHero admin role already provides.
+# the customer-side HumanityRules admin role already provides.
 
 # Only allow rm -rf under this top-level prefix. Belt-and-suspenders guard against
-# a future template typo emitting a host path outside the DOH-owned area.
+# a future template typo emitting a host path outside the HUMR-owned area.
 SSM_HOST_PATH_ALLOWED_PREFIX = "/var/lib/humr/"
 SSM_COMMAND_TIMEOUT_SECONDS = 300
 SSM_POLL_INTERVAL_SECONDS = 5

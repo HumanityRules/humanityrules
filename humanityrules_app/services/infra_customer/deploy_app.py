@@ -1,5 +1,5 @@
 """
-Deploy DevOpsHero apps (ECR, ALB, ECS service) using AWS CDK.
+Deploy HumanityRules apps (ECR, ALB, ECS service) using AWS CDK.
 """
 
 import logging
@@ -34,7 +34,7 @@ from . import secrets_utils
 
 
 # Policy-proxy image published once per env into doh/{env_slug}/policy-proxy:{tag}.
-# Pinned here rather than on AppConfig: the policy proxy is DOH-owned, not
+# Pinned here rather than on AppConfig: the policy proxy is HUMR-owned, not
 # AppTemplate-driven, and a version bump is a platform operation.
 POLICY_PROXY_IMAGE_VERSION = "0.5.0"
 POLICY_PROXY_SOURCE_DIR = Path(__file__).resolve().parents[3] / "template_repos" / "policy_proxy"
@@ -72,7 +72,7 @@ def policy_proxy_ecr_repo_name(env_slug: str) -> str:
 
 
 def _resolve_control_plane_url() -> str:
-    """Resolve DOH's control-plane base URL (prod or dev ngrok tunnel).
+    """Resolve HUMR's control-plane base URL (prod or dev ngrok tunnel).
 
     In prod env-resident components call humanityrules.io directly. In local dev
     they live in a customer VPC and can't reach the laptop, so we point them
@@ -166,7 +166,7 @@ def _container_dependency_condition(cond: str) -> ecs.ContainerDependencyConditi
 
 
 def dockerfile_containers(app_config: appconfig.AppConfig) -> list[appconfig.ContainerConfig]:
-    """Return the subset of containers that DOH builds from source at deploy time."""
+    """Return the subset of containers that HUMR builds from source at deploy time."""
     return [c for c in app_config.containers if c.image_source == appconfig.ImageSource.DOCKERFILE]
 
 
@@ -257,7 +257,7 @@ def _container_image_uri(
 
 class EcrStack(Stack):
     """
-    DevOpsHero ECR Stack — one ECR repo per dockerfile-built container in the app.
+    HumanityRules ECR Stack — one ECR repo per dockerfile-built container in the app.
 
     Containers with other ImageSource values (prebuilt, registry, policy_proxy)
     are not created here; see the ImageSource enum for where each is sourced.
@@ -296,7 +296,7 @@ class EcrStack(Stack):
 
 
 class PolicyProxyEcrStack(Stack):
-    """Per-env ECR repo for the DOH policy-proxy image.
+    """Per-env ECR repo for the HUMR policy-proxy image.
 
     One repo per environment: doh/{env_slug}/policy-proxy. Shared by every app
     in the env that runs behind a policy proxy. Created once per env on the
@@ -595,7 +595,7 @@ class CertStack(Stack):
 
 
 class AppStack(Stack):
-    """DevOpsHero App Stack - ECS Service with shared ALB routing."""
+    """HumanityRules App Stack - ECS Service with shared ALB routing."""
 
     def __init__(
         self,
@@ -862,7 +862,7 @@ class AppStack(Stack):
         #    Provides HUMR_ENV_BEARER (from shared-secrets), HUMR_ENV_SLUG,
         #    HUMR_CONTROL_PLANE_URL, HUMR_APP_SLUG, and HUMR_OWNER_USERNAME when
         #    the app has an owner tag. Any env-resident component that calls
-        #    DOH's control plane gets this.
+        #    HUMR's control plane gets this.
         # 2. Policy-proxy-specific overlay — applied only to the policy-proxy
         #    container. Carries JWT verification URL, upstream wiring, etc.
         env_bearer_environment_overlay: dict[str, str] = {}
@@ -1026,7 +1026,7 @@ class AppStack(Stack):
                     ),
                 )
 
-        # When DOH runs in production (DEBUG=False), use stable settings
+        # When HUMR runs in production (DEBUG=False), use stable settings
         # When developing locally (DEBUG=True), use aggressive settings for fast deploys
         from django.conf import settings
         if settings.DEBUG:
@@ -1370,7 +1370,7 @@ def deploy(
             logger.error("Could not find hosted zone ID for '%(hosted_zone)s', DNS record will not be created", {"hosted_zone": shared_alb_hosted_zone})
 
     # Env-bearer prerequisite: shared-secrets entry + EnvironmentBearerToken row.
-    # Any container in the app that needs the DOH control-plane bearer needs
+    # Any container in the app that needs the HUMR control-plane bearer needs
     # this. Idempotent; reused across apps sharing the env.
     policy_proxy_needed = app_config.policy_proxy_container() is not None
     env_bearer_needed = app_config.needs_env_bearer()
@@ -1478,7 +1478,7 @@ def deploy(
             logger.error("CDK deployment failed (policy-proxy-ecr)")
             return DeployResult(success=False, error="CDK deployment failed (policy-proxy-ecr)", service_url="", alb_dns="")
 
-        # Push the DOH-owned policy-proxy image into the per-env repo. This is
+        # Push the HUMR-owned policy-proxy image into the per-env repo. This is
         # idempotent: if the tag already exists in ECR the push is a no-op.
         logger.info("Building and pushing policy-proxy image (%s)", POLICY_PROXY_IMAGE_VERSION)
         policy_proxy_image_uri = ecr_utils.build_and_push_docker_image(

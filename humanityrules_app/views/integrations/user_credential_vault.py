@@ -1,4 +1,4 @@
-"""DOH-hosted vault endpoints for user-owned integration credentials."""
+"""HUMR-hosted vault endpoints for user-owned integration credentials."""
 
 import dataclasses
 import logging
@@ -94,7 +94,7 @@ def _setup_token_payload(
 @csrf_exempt
 @require_POST
 def integrations_credential_setup_session(request: HttpRequest) -> JsonResponse:
-    """Mint a short-lived browser-to-DOH credential submission session."""
+    """Mint a short-lived browser-to-HUMR credential submission session."""
     environment, auth_error = broker_request_context.resolve_env_bearer_context(request=request)
     if auth_error is not None:
         return auth_error
@@ -252,7 +252,7 @@ def _resolve_setup_context(request: HttpRequest, payload: dict) -> tuple[_SetupC
 @csrf_exempt
 @require_POST
 def integrations_credential_submit(request: HttpRequest) -> JsonResponse:
-    """Accept direct browser-to-DOH credential submissions for setup sessions."""
+    """Accept direct browser-to-HUMR credential submissions for setup sessions."""
     payload, parse_error = broker_request_context.parse_json_body(request=request)
     if parse_error is not None:
         return parse_error

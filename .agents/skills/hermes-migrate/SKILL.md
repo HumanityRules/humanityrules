@@ -1,6 +1,6 @@
 ---
 name: hermes-migrate
-description: Copy a hermes_agent app's persistent-root state from a source DOH environment to a destination DOH environment. Use when the user asks to migrate, clone, copy, or move a hermes app between envs (e.g., default -> sandbox, dev -> prod, or across AWS accounts).
+description: Copy a hermes_agent app's persistent-root state from a source HUMR environment to a destination HUMR environment. Use when the user asks to migrate, clone, copy, or move a hermes app between envs (e.g., default -> sandbox, dev -> prod, or across AWS accounts).
 ---
 
 # Migrate a Hermes Agent app between environments

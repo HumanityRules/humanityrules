@@ -22,7 +22,7 @@ Add entries to `docs/journal.md` documenting decisions, learnings, and architect
    - **Deployment** — Everything in customer accounts: environments, apps, datastores, VPCs, ECS, ALB
    - **DomainModel** — Core entities (workspaces, apps, datastores, environments), CRUD, relationships, refactors
    - **UI** — Shared frontend: base templates, navigation, design system, shared components
-   - **ControlPlane** — DOH's own infrastructure (EFS, Aurora, CloudFront, ALB)
+   - **ControlPlane** — HUMR's own infrastructure (EFS, Aurora, CloudFront, ALB)
    - **DevEx** — Developer tooling, scripts, CLI, local development
    - **Bugfix** — Bug fixes and debugging sessions
 

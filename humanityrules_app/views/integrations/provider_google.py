@@ -1,17 +1,17 @@
 """Google Workspace per-user integration: OAuth connect + token refresh.
 
-Connect (browser redirect dance): the authenticated DOH user starts at
+Connect (browser redirect dance): the authenticated HUMR user starts at
 `/integrations/user/google/start/?rd=<URL>` (where `rd` points at the Hermes
 WebUI in a customer env), consents at Google, and lands back at
 `/integrations/user/google/callback/`. The callback persists the
-refresh_token in DOH's DB as an IntegrationUserCredential row; no long-lived
+refresh_token in HUMR's DB as an IntegrationUserCredential row; no long-lived
 Google credentials cross into the customer env.
 
 Refresh (`refresh_outcome`): exchanges the stored refresh_token with Google
-using DOH's OAuth client_secret and returns a broker-shaped outcome dict. The
+using HUMR's OAuth client_secret and returns a broker-shaped outcome dict. The
 batched refresh endpoint (`token_refresh_batch.py`) calls this from a worker
-thread alongside the other providers. The refresh_token and DOH's
-client_secret never cross the customer/DOH boundary; if Google has revoked
+thread alongside the other providers. The refresh_token and HUMR's
+client_secret never cross the customer/HUMR boundary; if Google has revoked
 the refresh_token the row is deleted and the outcome flips to `absent` so the
 WebUI prompts a reconnect.
 
@@ -149,7 +149,7 @@ def _exchange_google_code(web: dict, code: str, redirect_uri: str) -> dict:
 
 @login_required
 def integrations_user_google_callback(request: HttpRequest) -> HttpResponse:
-    """Exchange Google's auth code, persist refresh_token on DOH, 302 back to `rd`."""
+    """Exchange Google's auth code, persist refresh_token on HUMR, 302 back to `rd`."""
     if request.GET.get("error"):
         logger.error("google oauth callback error=%s", request.GET.get("error"))
         return HttpResponseBadRequest(f"Google OAuth error: {request.GET['error']}")

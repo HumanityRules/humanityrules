@@ -1,10 +1,10 @@
 """Env bearer authentication for control-plane endpoints.
 
-Shared by every DOH endpoint that env-resident components call (PDP,
+Shared by every HUMR endpoint that env-resident components call (PDP,
 Google-token refresh, etc.). The caller sends `Authorization: Bearer
-<raw_token>`; DOH hashes it and looks up the matching
+<raw_token>`; HUMR hashes it and looks up the matching
 EnvironmentBearerToken row. The raw token lives only in the env's
-shared-secrets entry; DOH stores only the hash.
+shared-secrets entry; HUMR stores only the hash.
 """
 
 import hashlib

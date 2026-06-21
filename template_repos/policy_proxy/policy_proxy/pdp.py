@@ -1,4 +1,4 @@
-"""PDP client — calls DOH's /api/pdp/evaluate endpoint per request."""
+"""PDP client — calls HUMR's /api/pdp/evaluate endpoint per request."""
 
 import logging
 from dataclasses import dataclass
@@ -12,7 +12,7 @@ PDP_TIMEOUT_SECONDS = 3.0
 
 @dataclass(frozen=True)
 class PdpDecision:
-    """The shape DOH returns from /api/pdp/evaluate."""
+    """The shape HUMR returns from /api/pdp/evaluate."""
     decision: str  # "allow" or "deny"
     reason: str
 

@@ -24,9 +24,9 @@ import httpx
 
 
 def _batched(*, slug: str, result) -> dict:
-    """Build a fake one-slug DOH response map for mocking `fetch_provider_tokens_batch`.
+    """Build a fake one-slug HUMR response map for mocking `fetch_provider_tokens_batch`.
 
-    The broker only ever asks DOH about slugs it knows; in tests every
+    The broker only ever asks HUMR about slugs it knows; in tests every
     refresh path under inspection is single-provider, so one-key maps are
     enough.
     """
@@ -377,10 +377,10 @@ class TestRewriteAuthorization(unittest.TestCase):
 
 
 class TestAnonymousRequestClassification(unittest.TestCase):
-    """Credential-less vault-style requests pass through; everything else stays on the DOH path.
+    """Credential-less vault-style requests pass through; everything else stays on the HUMR path.
 
     The classifier runs before the token-store lookup, so an anonymous
-    request (False) must never cost a DOH refresh, a credentialed request
+    request (False) must never cost a HUMR refresh, a credentialed request
     (True) follows the rewrite path, and an unrecognized credential raises
     so BYO keys are never forwarded.
     """
@@ -901,7 +901,7 @@ def _make_credentials_service(
 
 
 class TestControlIntegrations(unittest.IsolatedAsyncioTestCase):
-    """/integrations renders from cache; it MUST NOT call DOH on the status path."""
+    """/integrations renders from cache; it MUST NOT call HUMR on the status path."""
 
     def setUp(self) -> None:
         self.tmp = tempfile.TemporaryDirectory()
@@ -920,7 +920,7 @@ class TestControlIntegrations(unittest.IsolatedAsyncioTestCase):
         )
 
     async def test_get_integrations_reads_cache_without_calling_doh(self) -> None:
-        """Status reads never call DOH; connected items come from the pre-warmed cache."""
+        """Status reads never call HUMR; connected items come from the pre-warmed cache."""
         from starlette.testclient import TestClient
 
         app = self._control_parts(aggregator=_ready_stub_aggregator()).app
@@ -949,7 +949,7 @@ class TestControlIntegrations(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(items_by_slug["google"]["status"], "connected")
         self.assertEqual(items_by_slug["github"]["status"], "not_connected")
         self.assertEqual(items_by_slug["telegram"]["status"], "not_connected")
-        # Three back-to-back GETs add zero DOH calls beyond the explicit pre-warm.
+        # Three back-to-back GETs add zero HUMR calls beyond the explicit pre-warm.
         self.assertEqual(fetch_mock.call_count, 1)
         self.assertEqual(resp2.json(), resp.json())
         self.assertEqual(resp3.json(), resp.json())
@@ -973,7 +973,7 @@ class TestControlIntegrations(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(items_by_slug["anthropic"]["affects_model_picker"])
 
     async def test_absent_provider_is_not_cached(self) -> None:
-        """An `absent` outcome from DOH must remove (not store) the cache entry."""
+        """An `absent` outcome from HUMR must remove (not store) the cache entry."""
         with patch.object(
             broker.tls_intercept,
             "fetch_provider_tokens_batch",
@@ -992,7 +992,7 @@ class TestControlIntegrations(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(items_by_slug["google"]["status"], "not_connected")
 
     async def test_refresh_slug_refetches_even_when_cache_is_fresh(self) -> None:
-        """Explicit refresh must hit DOH even when the cached token is still fresh."""
+        """Explicit refresh must hit HUMR even when the cached token is still fresh."""
         responses = [
             _batched(slug="google", result=broker.tls_intercept.RefreshResult(
                 outcome=broker.tls_intercept.REFRESH_OUTCOME_HAS_TOKEN,
@@ -1033,7 +1033,7 @@ class TestControlIntegrations(unittest.IsolatedAsyncioTestCase):
         """Refresh-ahead transient failure must NOT make the proxy say "not connected"
         when the cached token is unfresh (inside the lead window) but still un-expired.
 
-        Without this, a DOH hiccup during the final `refresh_lead_seconds` of
+        Without this, a HUMR hiccup during the final `refresh_lead_seconds` of
         an access_token's life would surface as "not connected" to the
         sandbox even though we hold a usable token. The proxy should keep
         serving the cached token for the rest of its expires_at window.
@@ -1066,7 +1066,7 @@ class TestControlIntegrations(unittest.IsolatedAsyncioTestCase):
 
         Without the store lock around fetch+apply, this sequence used to
         silently lose the invalidate:
-          1. Proxy hot path's `_ensure_fresh` starts the DOH refresh
+          1. Proxy hot path's `_ensure_fresh` starts the HUMR refresh
              fetch (slow).
           2. User clicks Disconnect → `invalidate(slug)` clears the cache.
           3. Proxy's in-flight fetch resolves and writes a (now stale)
@@ -1077,7 +1077,7 @@ class TestControlIntegrations(unittest.IsolatedAsyncioTestCase):
 
         Correct behavior: invalidate waits for the in-flight refresh, the
         stale write lands, invalidate pops it, and the service's refresh
-        starts from an empty cache and re-asks DOH.
+        starts from an empty cache and re-asks HUMR.
         """
         fetch_calls: list[str] = []
         started = asyncio.Event()
@@ -1119,7 +1119,7 @@ class TestControlIntegrations(unittest.IsolatedAsyncioTestCase):
             await invalidate_task
 
             # Service step: after a disconnect the service calls refresh. It
-            # must see an empty cache and re-ask DOH (second_absent fires here).
+            # must see an empty cache and re-ask HUMR (second_absent fires here).
             await store.refresh(slug="google")
 
         self.assertEqual(fetch_calls, ["first", "second"])
@@ -1130,7 +1130,7 @@ class TestControlIntegrations(unittest.IsolatedAsyncioTestCase):
 
         Pre-single-lock repro (fetch happens outside any lock, then per-slug
         locks taken to apply):
-          1. refresh_all() fetches outside the per-slug lock and parks at DOH.
+          1. refresh_all() fetches outside the per-slug lock and parks at HUMR.
           2. invalidate("google") clears the cache (its per-slug lock is free).
           3. refresh_all() resumes and applies its stale has_token result for
              google, undoing the invalidate.
@@ -1276,7 +1276,7 @@ class TestControlIntegrations(unittest.IsolatedAsyncioTestCase):
             for slug in tls_providers.TLS_INTERCEPT_PROVIDERS
         }
         # First call pre-warms google; the route's invalidate-all then refreshes
-        # every provider from DOH, which reports them all disconnected.
+        # every provider from HUMR, which reports them all disconnected.
         with patch.object(
             broker.tls_intercept,
             "fetch_provider_tokens_batch",
@@ -1389,7 +1389,7 @@ class TestControlIntegrations(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(device_stub.cancelled, ["nous"])
 
     async def test_vault_setup_session_requests_submit_token_from_doh(self) -> None:
-        """POST /integrations/tls_intercept/{provider}/setup-session asks DOH for a submit token.
+        """POST /integrations/tls_intercept/{provider}/setup-session asks HUMR for a submit token.
 
         The owner/app identity rides inside DohClient.post_json (see
         TestDohClient), so the service only supplies the provider fields.
@@ -1454,8 +1454,8 @@ class TestControlIntegrations(unittest.IsolatedAsyncioTestCase):
                     resp = client.post("/integrations/tls_intercept/github/disconnect")
 
         self.assertEqual(resp.status_code, 200)
-        # OAuth and vault disconnects now share one broker path and one DOH
-        # endpoint; DOH resolves the provider kind and revokes upstream for
+        # OAuth and vault disconnects now share one broker path and one HUMR
+        # endpoint; HUMR resolves the provider kind and revokes upstream for
         # OAuth providers server-side.
         post_mock.assert_called_once_with(
             path="/api/integrations/credentials/disconnect",
@@ -1516,7 +1516,7 @@ class TestLazyTokenForHost(unittest.IsolatedAsyncioTestCase):
             fetch_mock.assert_not_called()
 
     async def test_absent_outcome_leaves_cache_empty(self) -> None:
-        """An `absent` outcome from DOH yields no cache entry — disconnected = absent, not a sentinel."""
+        """An `absent` outcome from HUMR yields no cache entry — disconnected = absent, not a sentinel."""
         with patch.object(
             broker.tls_intercept,
             "fetch_provider_tokens_batch",
@@ -1607,7 +1607,7 @@ class TestDohClient(unittest.IsolatedAsyncioTestCase):
 
 
 class TestFetchProviderTokensBatch(unittest.IsolatedAsyncioTestCase):
-    """Parse DOH's `/api/integrations/tokens` response into a slug→RefreshResult map."""
+    """Parse HUMR's `/api/integrations/tokens` response into a slug→RefreshResult map."""
 
     async def _run_with_response(self, payload: dict) -> dict:
         def handler(request: httpx.Request) -> httpx.Response:
@@ -1755,7 +1755,7 @@ class TestRefreshAllBatchedApply(unittest.IsolatedAsyncioTestCase):
 
 
 class TestGatewayEnvRender(unittest.TestCase):
-    """Render the DOH-managed block from a token-store snapshot."""
+    """Render the HUMR-managed block from a token-store snapshot."""
 
     def _telegram_provider(self) -> "tls_providers.TlsProviderSpec":
         return tls_providers.TLS_INTERCEPT_PROVIDERS["telegram"]
@@ -1874,7 +1874,7 @@ class TestGatewayEnvRender(unittest.TestCase):
         self.assertIn("TELEGRAM_ALLOWED_USERS=1", text)
 
     def test_write_empty_block_strips_sentinels_entirely(self) -> None:
-        """Disconnect path: empty managed block leaves no DOH-managed sentinels."""
+        """Disconnect path: empty managed block leaves no HUMR-managed sentinels."""
         with tempfile.TemporaryDirectory() as tmp:
             env_path = pathlib.Path(tmp) / ".env"
             env_path.write_text(
@@ -1926,7 +1926,7 @@ class TestCredentialsServiceChoreography(unittest.IsolatedAsyncioTestCase):
     async def test_runtime_invalidate_is_pure_cache_drop(self) -> None:
         """The TLS runtime fans out no side effects on invalidate.
 
-        Credential-change choreography (DOH refresh, env render, process
+        Credential-change choreography (HUMR refresh, env render, process
         restarts) belongs to CredentialsService. Both the runtime's public
         invalidate and the proxy 401-eviction path (inner token store) only
         touch the cache, so a 401-eviction during normal traffic can never
@@ -1957,9 +1957,9 @@ class TestCredentialsServiceChoreography(unittest.IsolatedAsyncioTestCase):
     async def test_per_slug_invalidate_refreshes_only_that_slug(self) -> None:
         """Slug-targeted invalidate must NOT fan out to disconnected providers.
 
-        Connecting one provider used to spam DOH with `no integration row`
+        Connecting one provider used to spam HUMR with `no integration row`
         404s for every other (still disconnected) provider. The service
-        narrows to `refresh_slug(slug)` when a slug is named, so DOH only
+        narrows to `refresh_slug(slug)` when a slug is named, so HUMR only
         hears about the one that actually changed.
         """
         service = self._make_service()
@@ -1974,7 +1974,7 @@ class TestCredentialsServiceChoreography(unittest.IsolatedAsyncioTestCase):
         ) as fetch_mock:
             await service.credentials_invalidate(slug="google")
 
-        # Exactly one DOH round-trip and only for the named slug, not one per provider.
+        # Exactly one HUMR round-trip and only for the named slug, not one per provider.
         self.assertEqual(fetch_mock.call_count, 1)
         self.assertEqual(fetch_mock.call_args.kwargs["slugs"], ["google"])
 
@@ -2114,7 +2114,7 @@ class TestCredentialsServiceChoreography(unittest.IsolatedAsyncioTestCase):
         )
 
     async def test_invalidate_all_uses_single_batched_call(self) -> None:
-        """Explicit Refresh-all collapses to one DOH round-trip across every provider.
+        """Explicit Refresh-all collapses to one HUMR round-trip across every provider.
 
         The previous per-slug fan-out emitted one `INFO no integration row`
         Django log line per disconnected provider on every Refresh-all.
@@ -2171,9 +2171,9 @@ class TestCredentialsServiceChoreography(unittest.IsolatedAsyncioTestCase):
 
 
 class TestTransientRefreshGuards(unittest.IsolatedAsyncioTestCase):
-    """An all-transient DOH refresh must never clobber a good managed env block.
+    """An all-transient HUMR refresh must never clobber a good managed env block.
 
-    Regression: the broker booted while DOH returned 503, the bootstrap
+    Regression: the broker booted while HUMR returned 503, the bootstrap
     refresh left the cache empty, and the env render stripped every
     integration from the gateway env file — the gateway then ran with no
     platforms until the next connect.
@@ -2288,7 +2288,7 @@ class TestTransientRefreshGuards(unittest.IsolatedAsyncioTestCase):
         self.assertIn("TELEGRAM_ALLOWED_USERS=123", text)
 
     async def test_bootstrap_success_applies_connected_codex_auth_marker(self) -> None:
-        """A pre-existing DOH-side Codex connection must appear in WebUI's picker after boot."""
+        """A pre-existing HUMR-side Codex connection must appear in WebUI's picker after boot."""
         service = self._make_service()
         refreshed_results = {
             slug: broker.tls_intercept.RefreshResult(

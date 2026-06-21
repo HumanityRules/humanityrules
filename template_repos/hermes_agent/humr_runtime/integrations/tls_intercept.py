@@ -39,10 +39,10 @@ STATUS_CONNECTED = "connected"
 STATUS_NOT_CONNECTED = "not_connected"
 
 
-# Internal tags from DOH's refresh endpoint (distinct from browser
-# STATUS_* strings). For each requested slug, DOH returns one of:
+# Internal tags from HUMR's refresh endpoint (distinct from browser
+# STATUS_* strings). For each requested slug, HUMR returns one of:
 # - has_token:  a fresh secrets map (with expiry/config/metadata).
-# - absent:     user not connected, or DOH just deleted the row after
+# - absent:     user not connected, or HUMR just deleted the row after
 #               the upstream provider revoked the refresh_token.
 # - transient:  network error or other failure that must not overwrite
 #               a working cache entry.
@@ -65,7 +65,7 @@ def _primary_secret(secrets: dict[str, str]) -> str:
 
 @dataclass(frozen=True)
 class RefreshResult:
-    """Outcome for one provider in a DOH refresh response.
+    """Outcome for one provider in a HUMR refresh response.
 
     `secrets` is a name→value map (e.g. `{"access_token": "ya29…"}`), so a
     provider can carry more than one credential (Slack's bot + app token).
@@ -105,15 +105,15 @@ class _TokenCacheEntry:
         window, so we'd prefer to refresh) yet still usable (expires_at is
         in the future). The proxy hot path serves usable tokens when a
         refresh-ahead transiently failed — better than failing the
-        sandbox's request because DOH had a hiccup.
+        sandbox's request because HUMR had a hiccup.
         """
         return self.expires_at > now
 
 
 async def fetch_provider_tokens_batch(humr_client: DohClient, slugs: list[str]) -> dict[str, RefreshResult]:
-    """Refresh many provider tokens in one POST to DOH; returns a slug→RefreshResult map.
+    """Refresh many provider tokens in one POST to HUMR; returns a slug→RefreshResult map.
 
-    DOH's `/api/integrations/tokens` is the broker's only refresh path —
+    HUMR's `/api/integrations/tokens` is the broker's only refresh path —
     both Refresh-all/bootstrap and single-slug refresh (after a
     connect/disconnect) call this with the appropriate slug list. The
     endpoint returns `absent` as a normal entry rather than HTTP 404.
@@ -123,7 +123,7 @@ async def fetch_provider_tokens_batch(humr_client: DohClient, slugs: list[str]) 
     cache stays intact.
     """
     # In-VPC JSON POST to our own control plane; healthy P99 is tens
-    # of ms. DOH processes the providers in parallel server-side, so
+    # of ms. HUMR processes the providers in parallel server-side, so
     # wall-clock = max(per-provider upstream exchange) + DB / JSON
     # overhead. Each helper's upstream timeout is 5s, so the ceiling
     # here is ~5s + a small slack budget for marshalling — 7s. Still
@@ -135,7 +135,7 @@ async def fetch_provider_tokens_batch(humr_client: DohClient, slugs: list[str]) 
         timeout_seconds=7,
     )
     if not (200 <= status < 300):
-        logger.error("refresh against DOH failed (http %d)", status)
+        logger.error("refresh against HUMR failed (http %d)", status)
         return {slug: _transient_result() for slug in slugs}
 
     results_payload = payload.get("results")
@@ -146,7 +146,7 @@ async def fetch_provider_tokens_batch(humr_client: DohClient, slugs: list[str]) 
 
 
 def _refresh_result_from_entry(entry: object) -> RefreshResult:
-    """Translate one slug's entry in the DOH response into a RefreshResult."""
+    """Translate one slug's entry in the HUMR response into a RefreshResult."""
     if not isinstance(entry, dict):
         return _transient_result()
     outcome = entry.get("outcome")
@@ -234,7 +234,7 @@ class _TokenStore:
     gateway env snapshot, proxy hot-path single-flight refresh).
     Replaces the older per-slug `_refresh_locks` + `_cache_lock` pair —
     the additional cross-slug parallelism that bought us doesn't matter
-    in this broker (3 providers, low concurrent traffic, in-VPC DOH),
+    in this broker (3 providers, low concurrent traffic, in-VPC HUMR),
     and a single lock makes "a parked fetch wrote past an invalidate"
     structurally impossible: fetch and apply always run under the same
     lock together.
@@ -292,19 +292,19 @@ class _TokenStore:
             self._cache.clear()
 
     async def refresh(self, slug: str) -> bool:
-        """Refetch one provider from DOH even when the cache is fresh; False on transient DOH failure."""
+        """Refetch one provider from HUMR even when the cache is fresh; False on transient HUMR failure."""
         if slug not in self._providers:
             return True
         async with self._lock:
             return await self._refresh_locked(slugs=[slug])
 
     async def refresh_all(self) -> bool:
-        """Refetch every provider in one batched DOH round-trip; False on transient DOH failure."""
+        """Refetch every provider in one batched HUMR round-trip; False on transient HUMR failure."""
         async with self._lock:
             return await self._refresh_locked(slugs=list(self._providers))
 
     async def status_items(self) -> list[dict]:
-        """Render integration cards from the current cache; never calls DOH.
+        """Render integration cards from the current cache; never calls HUMR.
 
         Cache writes happen on three paths: boot bootstrap, the proxy hot
         path (`token_for_host` near-expiry refresh), and explicit user
@@ -323,7 +323,7 @@ class _TokenStore:
 
         Returns `(provider, config)` tuples for providers currently in
         the usable cache. The broker calls `refresh_all()` first when it
-        wants the cache aligned with DOH state.
+        wants the cache aligned with HUMR state.
         """
         async with self._lock:
             self._prune_expired_locked(now=time.monotonic())
@@ -338,12 +338,12 @@ class _TokenStore:
         Returns the cache entry to use for this request, or None when the
         provider is genuinely unavailable. Two cases to keep separate:
 
-        - **Refresh succeeded** (has_token/absent): the cache reflects DOH
+        - **Refresh succeeded** (has_token/absent): the cache reflects HUMR
           truth, so we return whatever's now in the cache.
         - **Refresh transient-failed**: the cache is untouched. If we had a
           prior entry that's still un-expired, hand it back — the proxy
           can use it for the rest of its expires_at window rather than
-          surfacing "not connected" to the sandbox because DOH hiccuped.
+          surfacing "not connected" to the sandbox because HUMR hiccuped.
           Only return None when even the prior token is past expiry.
         """
         now = time.monotonic()
@@ -355,7 +355,7 @@ class _TokenStore:
         return self._cache.get(provider.slug)
 
     async def _refresh_locked(self, slugs: list[str]) -> bool:
-        """Fetch the slugs in one DOH POST and apply each result. Caller holds `_lock`.
+        """Fetch the slugs in one HUMR POST and apply each result. Caller holds `_lock`.
 
         Holding the lock across both fetch and apply (rather than
         dropping it during the network call) is what prevents a parked
@@ -364,9 +364,9 @@ class _TokenStore:
         refresh per provider per token lifetime hits this path.
 
         Returns False when *every* slug came back transient — the
-        signature of a failed DOH round-trip — so callers can avoid
+        signature of a failed HUMR round-trip — so callers can avoid
         deriving state (e.g. the gateway env file) from a cache that
-        does not reflect DOH truth.
+        does not reflect HUMR truth.
         """
         if not slugs:
             return True
@@ -447,11 +447,11 @@ class TlsInterceptRuntime:
         await self._token_store.invalidate_all()
 
     async def refresh_slug(self, slug: str) -> bool:
-        """Force a single-provider refetch; False when the DOH round-trip failed transiently."""
+        """Force a single-provider refetch; False when the HUMR round-trip failed transiently."""
         return await self._token_store.refresh(slug=slug)
 
     async def refresh_all(self) -> bool:
-        """Force a refetch of every provider in one DOH round-trip; False on transient failure."""
+        """Force a refetch of every provider in one HUMR round-trip; False on transient failure."""
         return await self._token_store.refresh_all()
 
     async def gateway_env_snapshot(self) -> list[tuple[tls_providers.TlsProviderSpec, dict]]:
@@ -473,7 +473,7 @@ class _CertMinter:
         """Generate the CA and write bundle.pem. Called once at broker startup."""
         self._ca_key = rsa.generate_private_key(public_exponent=65537, key_size=4096)
         subject = issuer = x509.Name([
-            x509.NameAttribute(x509.NameOID.COMMON_NAME, "DOH Integrations Broker CA"),
+            x509.NameAttribute(x509.NameOID.COMMON_NAME, "HUMR Integrations Broker CA"),
         ])
         now = dt.datetime.now(dt.timezone.utc)
         ca_ski = x509.SubjectKeyIdentifier.from_public_key(self._ca_key.public_key())
@@ -512,7 +512,7 @@ class _CertMinter:
                 system_roots = candidate.read_bytes()
                 break
         if not system_roots:
-            logger.error("no system root bundle found; broker-trusted bundle will be DOH-only")
+            logger.error("no system root bundle found; broker-trusted bundle will be HUMR-only")
         bundle_path = self._ca_dir / "bundle.pem"
         bundle_path.write_bytes(our_pem + b"\n" + system_roots)
         os.chmod(bundle_path, 0o644)
@@ -741,7 +741,7 @@ async def _intercept_and_forward(
                 await _send_json_error(writer=tls_writer, status=502, message=f"broker upstream error: {exc}")
                 return
             # Treat upstream 401 as "the cached token is no longer valid":
-            # evict it so the next request refetches from DOH. Covers both
+            # evict it so the next request refetches from HUMR. Covers both
             # transient-after-rotation and user-revoked-on-provider-side.
             # We don't retry within this connection — the user's next
             # request through the proxy hits the refreshed token. Anonymous
@@ -763,7 +763,7 @@ async def _send_provider_not_connected(writer: asyncio.StreamWriter, provider: t
     await _send_json_error(
         writer=writer,
         status=503,
-        message=f"{provider.slug} integration not connected in DOH — connect it from the Integrations pane.",
+        message=f"{provider.slug} integration not connected in HUMR — connect it from the Integrations pane.",
     )
 
 
@@ -877,18 +877,18 @@ def _strip_bearer_prefix(value: bytes) -> str:
 
 
 def _request_addresses_humr_credential(headers: list[tuple[bytes, bytes]], path_with_query: str, provider: tls_providers.TlsProviderSpec) -> bool:
-    """Decide whether a request asks for DOH's credential or is anonymous public traffic.
+    """Decide whether a request asks for HUMR's credential or is anonymous public traffic.
 
     True routes through the token store + rewrite path. OAuth-style methods
     (OAuthHeader, OAuthHeaderMultiInject) are always True: their convention is
     inverted — the sandbox sends no marker and the proxy injects
-    unconditionally, so every request implicitly asks for DOH's credential.
+    unconditionally, so every request implicitly asks for HUMR's credential.
 
-    Vault-style methods mark DOH's slot with an explicit placeholder. False
+    Vault-style methods mark HUMR's slot with an explicit placeholder. False
     means every credential slot is empty — anonymous public traffic (e.g.
     OpenRouter's unauthenticated /api/v1/models) the proxy forwards as-is,
     without consulting the token store, so a disconnected provider does not
-    cost one DOH refresh per request. A credential that is neither empty nor
+    cost one HUMR refresh per request. A credential that is neither empty nor
     a recognized placeholder raises `_SecretSelectionError` (→ 400): BYO keys
     are neither injected-over nor silently forwarded.
     """
@@ -900,26 +900,26 @@ def _request_addresses_humr_credential(headers: list[tuple[bytes, bytes]], path_
         # anonymous surface: a path without the placeholder carries an
         # un-rewritable credential, never public traffic.
         if method.placeholder not in path_with_query:
-            raise _SecretSelectionError("request URL must contain the DOH placeholder")
+            raise _SecretSelectionError("request URL must contain the HUMR placeholder")
         return True
     if isinstance(method, tls_providers.VaultHeaderInject):
         incoming = next((v for n, v in headers if n.lower() == b"authorization"), None)
         if incoming is None:
             return False
         if method.secret_for_placeholder(_strip_bearer_prefix(incoming)) is None:
-            raise _SecretSelectionError("request Authorization did not carry a known DOH placeholder")
+            raise _SecretSelectionError("request Authorization did not carry a known HUMR placeholder")
         return True
     if isinstance(method, tls_providers.VaultApiKeyHeader):
         header_lower = method.header_name.lower().encode()
         incoming = next((v for n, v in headers if n.lower() == header_lower), None)
         if incoming is not None:
             if incoming.decode("iso-8859-1").strip() != method.placeholder:
-                raise _SecretSelectionError(f"request {method.header_name} did not carry the DOH placeholder")
+                raise _SecretSelectionError(f"request {method.header_name} did not carry the HUMR placeholder")
             return True
         # No api-key slot, but an Authorization header (e.g. a BYO OAuth
         # bearer) still counts as credentialed — refuse rather than forward.
         if any(n.lower() == b"authorization" for n, _v in headers):
-            raise _SecretSelectionError(f"request carried Authorization instead of the {method.header_name} DOH placeholder")
+            raise _SecretSelectionError(f"request carried Authorization instead of the {method.header_name} HUMR placeholder")
         return False
     raise ValueError(f"unknown credential_method: {method!r}")
 
@@ -949,7 +949,7 @@ def _inject_headers(headers: list[tuple[bytes, bytes]], extra: dict[bytes, bytes
     """Force `extra` header values, replacing any the client sent (case-insensitive).
 
     Used after `_rewrite_authorization` to add broker-owned headers (e.g.
-    `ChatGPT-Account-ID`) whose values come from DOH, not the sandbox. A header
+    `ChatGPT-Account-ID`) whose values come from HUMR, not the sandbox. A header
     the sandbox sent under the same name is dropped so the sandbox can't spoof
     it; every other client header (Codex's Cloudflare `originator`/`User-Agent`)
     is left as-is.
@@ -1052,7 +1052,7 @@ def _rewrite_request_for_provider(
     if isinstance(method, tls_providers.VaultUrlRewrite):
         token = _primary_secret(secrets)
         if method.placeholder not in path_with_query:
-            raise _SecretSelectionError("request URL must contain the DOH placeholder")
+            raise _SecretSelectionError("request URL must contain the HUMR placeholder")
         return (
             _strip_proxy_headers_and_set_host(headers=headers, upstream_host=upstream_host),
             path_with_query.replace(method.placeholder, token),
@@ -1064,7 +1064,7 @@ def _rewrite_request_for_provider(
         bearer = _strip_bearer_prefix(incoming) if incoming is not None else None
         secret_name = method.secret_for_placeholder(bearer) if bearer is not None else None
         if secret_name is None:
-            raise _SecretSelectionError("request Authorization did not carry a known DOH placeholder")
+            raise _SecretSelectionError("request Authorization did not carry a known HUMR placeholder")
         token = secrets.get(secret_name)
         if not token:
             raise _SecretSelectionError(f"no cached secret for {secret_name!r}")
@@ -1085,7 +1085,7 @@ def _rewrite_request_for_provider(
         incoming = next((v for n, v in headers if n.lower() == header_lower), None)
         incoming_value = incoming.decode("iso-8859-1").strip() if incoming is not None else None
         if incoming_value != method.placeholder:
-            raise _SecretSelectionError(f"request {method.header_name} did not carry the DOH placeholder")
+            raise _SecretSelectionError(f"request {method.header_name} did not carry the HUMR placeholder")
         token = _primary_secret(secrets)
         stripped = _strip_proxy_headers_and_set_host(headers=headers, upstream_host=upstream_host)
         return (

@@ -32,7 +32,7 @@ logger = logging.getLogger(__name__)
 JWKS_CACHE_TTL_SECONDS = 15 * 60
 INTERNAL_PATH_PREFIX = "/__policy_proxy"
 SESSION_INSTALL_PATH = "/__humr_session_install"
-AUTH_URL_HEADER = "X-DOH-Auth-URL"
+AUTH_URL_HEADER = "X-HUMR-Auth-URL"
 MIN_COOKIE_TTL_SECONDS = 60
 
 # WebSocket close codes used when we reject an upgrade.

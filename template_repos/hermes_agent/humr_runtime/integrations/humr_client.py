@@ -1,9 +1,9 @@
-"""Outbound JSON client for DOH's per-env integration endpoints.
+"""Outbound JSON client for HUMR's per-env integration endpoints.
 
 One `DohClient` instance, built by the broker at startup, owns the
 control-plane URL, the env bearer, and the owner/app identity that every
 per-env integration endpoint requires. Everything in the broker that talks
-to DOH (token refresh, device-flow completion, disconnect, vault setup
+to HUMR (token refresh, device-flow completion, disconnect, vault setup
 sessions) goes through it — the bearer never leaves this module.
 """
 
@@ -25,10 +25,10 @@ class DohClient:
         self._bearer = bearer
 
     async def post_json(self, path: str, payload: dict, timeout_seconds: int) -> tuple[int, dict]:
-        """POST JSON to DOH and return `(status, parsed body)`.
+        """POST JSON to HUMR and return `(status, parsed body)`.
 
         `owner_username` and `app_slug` are merged into every payload — all
-        of DOH's per-env integration endpoints take them. Transport failures
+        of HUMR's per-env integration endpoints take them. Transport failures
         and unparseable success bodies come back as a synthetic 502, and an
         unparseable error body keeps its real status with a fallback body,
         so callers only ever branch on the status code.

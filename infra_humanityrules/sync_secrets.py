@@ -117,7 +117,7 @@ def create_or_update_secret(client: boto3.client, secret_name: str, secret_value
         client.create_secret(
             Name=secret_name,
             SecretString=secret_string,
-            Description=f"DevOps Hero production secret: {secret_name}",
+            Description=f"Humanity Rules production secret: {secret_name}",
         )
         return "created"
 

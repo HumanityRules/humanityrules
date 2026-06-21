@@ -1,7 +1,7 @@
 """
-DevOpsHero Install Callback Lambda
+HumanityRules Install Callback Lambda
 
-CloudFormation Custom Resource handler that notifies the DevOpsHero backend
+CloudFormation Custom Resource handler that notifies the HumanityRules backend
 when customers deploy/update/delete the AWS account connection stack.
 """
 
@@ -20,7 +20,7 @@ http = urllib3.PoolManager()
 def handler(event, context):
     """
     CloudFormation Custom Resource handler.
-    Called when a customer deploys/updates/deletes the DevOpsHero stack.
+    Called when a customer deploys/updates/deletes the HumanityRules stack.
     """
     logger.info(f"Received event: {json.dumps(event)}")
     
@@ -37,7 +37,7 @@ def handler(event, context):
         api_endpoint = os.environ.get("HUMR_API_ENDPOINT")
         api_secret = os.environ.get("HUMR_API_SECRET_KEY")
 
-        # Prepare payload for DevOpsHero backend
+        # Prepare payload for HumanityRules backend
         payload = {
             "request_type": request_type,
             "aws_account": aws_account,
@@ -46,7 +46,7 @@ def handler(event, context):
             "stack_region": stack_region,
         }
 
-        # Call DevOpsHero backend API
+        # Call HumanityRules backend API
         if api_endpoint:
             callback_url = f"{api_endpoint}/api/aws/install-account-callback"
             headers = {

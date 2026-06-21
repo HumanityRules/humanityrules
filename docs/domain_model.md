@@ -87,7 +87,7 @@ Customer-owned AWS account connected via cross-account IAM role.
 - **name** — User-friendly name (e.g., "Production")
 - **aws_account_id** — 12-digit AWS account ID (populated after verification)
 - **external_id** — UUID for secure cross-account AssumeRole
-- **role_arn** — IAM role ARN that DevOpsHero assumes
+- **role_arn** — IAM role ARN that HumanityRules assumes
 - **status** — pending / connected / error
 - Unique constraint: (organization, name)
 

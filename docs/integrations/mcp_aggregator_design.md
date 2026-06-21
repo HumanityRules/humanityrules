@@ -113,7 +113,7 @@ A standard MCP server (Streamable HTTP on `127.0.0.1:9952/mcp`) that:
 
 ## What the aggregator exposes for the WebUI
 
-The aggregator owns the OAuth handlers (DCR, callback, status, disconnect) but they're mounted by the integrations_broker's unified Starlette router on `127.0.0.1:9951` under `/__humr_broker/integrations/`, alongside Google's TLS-intercept controls and Merge's DOH-relay passthroughs. Port 9952 is sandbox-only MCP transport; the browser never reaches it.
+The aggregator owns the OAuth handlers (DCR, callback, status, disconnect) but they're mounted by the integrations_broker's unified Starlette router on `127.0.0.1:9951` under `/__humr_broker/integrations/`, alongside Google's TLS-intercept controls and Merge's HUMR-relay passthroughs. Port 9952 is sandbox-only MCP transport; the browser never reaches it.
 
 `MCPAggregator.routes(prefix=...)` returns the Starlette routes the broker splats into its router:
 
@@ -123,7 +123,7 @@ The aggregator owns the OAuth handlers (DCR, callback, status, disconnect) but t
 
 `GET /__humr_broker/integrations` returns a unified flat list of all integrations (TLS-intercept providers like Google + MCP-aggregator providers like Notion + Merge per-connector cards), each tagged with a `kind` discriminator the WebUI uses to dispatch the right click handlers.
 
-The aggregator also exposes a second kind of upstream — `auth_kind="humr_relay"` — used for Merge.dev: instead of holding OAuth tokens directly, the ProxyProvider's `client_factory` builds a `StreamableHttpTransport` pointed at a DOH relay endpoint with `HUMR_ENV_BEARER` + identity headers attached. See `merge_integration_design.md`.
+The aggregator also exposes a second kind of upstream — `auth_kind="humr_relay"` — used for Merge.dev: instead of holding OAuth tokens directly, the ProxyProvider's `client_factory` builds a `StreamableHttpTransport` pointed at a HUMR relay endpoint with `HUMR_ENV_BEARER` + identity headers attached. See `merge_integration_design.md`.
 
 ## Nono profile changes
 
@@ -165,7 +165,7 @@ No new processes, no new ports, no new supervisor entries.
 
 ## Open questions
 
-- **Providers without DCR.** If a future MCP server doesn't support dynamic client registration, we'd need to pre-register an OAuth app and store the client_id/secret as DOH-managed config pushed to the env. The aggregator would read it from a config file instead of running DCR. Not needed for Notion.
+- **Providers without DCR.** If a future MCP server doesn't support dynamic client registration, we'd need to pre-register an OAuth app and store the client_id/secret as HUMR-managed config pushed to the env. The aggregator would read it from a config file instead of running DCR. Not needed for Notion.
 - **Multi-provider tool collisions.** If two MCP servers expose tools with the same name, Hermes's `mcp_<server>_<tool>` prefix prevents collisions as long as `mcp_servers:` keys are distinct. No action needed for v1.
 - **SSE streaming responses.** If Notion's MCP server uses `text/event-stream` for long-running tool results, the aggregator needs to stream through rather than buffer. FastMCP handles this if we use its client; verify with a real Notion call.
 - **Scope of Notion OAuth.** Confirm what scopes Notion requires/supports for MCP access. Likely workspace-level read/write.

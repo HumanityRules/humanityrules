@@ -1,6 +1,6 @@
 ---
 name: hermes-update-check
-description: Evaluate whether we can update the pinned Hermes Agent and Hermes WebUI versions by rebasing the DOH fork branches (doh/v* in DevOpsHeroAI/hermes-agent and hermes-webui) onto a newer upstream release, which DOH commits drop out as landed-upstream or need re-anchoring, and what upstream changes have landed since our pins. Use when the user asks about Hermes update status, whether our forks still carry needed changes, or what has improved upstream.
+description: Evaluate whether we can update the pinned Hermes Agent and Hermes WebUI versions by rebasing the HUMR fork branches (doh/v* in HumanityRules/hermes-agent and hermes-webui) onto a newer upstream release, which HUMR commits drop out as landed-upstream or need re-anchoring, and what upstream changes have landed since our pins. Use when the user asks about Hermes update status, whether our forks still carry needed changes, or what has improved upstream.
 ---
 
 # Hermes Update Check
@@ -9,17 +9,17 @@ Updating Hermes = rebasing our fork branch onto a newer upstream release, then m
 the submodule pin. This skill records where everything lives and the project-specific
 traps a bump can spring.
 
-## How DOH's changes are carried
+## How HUMR's changes are carried
 
 Both components are **vendored forks**: a private mirror with a `doh/v<upstream-version>`
-branch = upstream-at-that-tag + DOH commits on top. The monorepo points at a chosen
+branch = upstream-at-that-tag + HUMR commits on top. The monorepo points at a chosen
 commit via a git submodule.
 
 - **Agent** — submodule at `template_repos/hermes_agent/vendor/hermes-agent`, pinned to
-  `doh/v<ver>` in `DevOpsHeroAI/hermes-agent` (mirror of `NousResearch/hermes-agent`).
+  `doh/v<ver>` in `HumanityRules/hermes-agent` (mirror of `NousResearch/hermes-agent`).
   The Dockerfile COPYs it verbatim — no base image.
 - **WebUI** — submodule at `vendor/hermes-webui`, pinned to `doh/v<ver>` in
-  `DevOpsHeroAI/hermes-webui` (mirror of `nesquena/hermes-webui`). The Dockerfile does
+  `HumanityRules/hermes-webui` (mirror of `nesquena/hermes-webui`). The Dockerfile does
   `FROM ghcr.io/nesquena/hermes-webui:${WEBUI_BASE_VERSION}` and overlays the fork
   source onto `/apptoo` (`build/overlay-webui.sh`).
 
@@ -51,11 +51,11 @@ and `doh` is the mirror.
 ## Behavior-change landmines (a clean rebase is not a working bump)
 
 Rebase conflicts only surface code we touched. A bump also ships **new behavior** that
-breaks DOH's topology with zero conflicts — so boot the stack and exercise the real
+breaks HUMR's topology with zero conflicts — so boot the stack and exercise the real
 browser→proxy→Caddy→WebUI path before declaring it safe.
 
 - **New request-gating middleware.** Diff for newly-added `_check_csrf` / origin / Host /
-  auth gates on POST/PUT/PATCH. DOH's proxy rewrites `Host` to the loopback upstream and
+  auth gates on POST/PUT/PATCH. HUMR's proxy rewrites `Host` to the loopback upstream and
   carries the real host in `X-Forwarded-Host`, so any same-origin check that compares
   `Origin` vs `Host` will 403 unless opted out. (v0.51.267 #3642 added exactly this; fix =
   `HERMES_WEBUI_TRUST_FORWARDED_HOST=1`.) Grep the new-range changelog for
@@ -93,7 +93,7 @@ browser→proxy→Caddy→WebUI path before declaring it safe.
 - **A skill silently missing from the catalog.** `sync_skills()` copies image skills as the
   unprivileged agent user; a source file that isn't world-readable (stray 0600) makes
   `copytree` fail and the skill vanishes with only a `! Failed to copy` log line. The
-  Dockerfile normalizes modes after `COPY skills/`, but if you add DOH skills or a bundled
+  Dockerfile normalizes modes after `COPY skills/`, but if you add HUMR skills or a bundled
   file ships odd perms, confirm `find skills -type f ! -perm -044` is empty.
 
 ## Report

@@ -1,4 +1,4 @@
-"""Database Stack for DevOps Hero - Aurora Serverless v2 PostgreSQL."""
+"""Database Stack for Humanity Rules - Aurora Serverless v2 PostgreSQL."""
 
 from aws_cdk import CfnOutput, Duration, RemovalPolicy, Stack
 from aws_cdk import aws_ec2 as ec2
@@ -7,7 +7,7 @@ from constructs import Construct
 
 
 class DatabaseStack(Stack):
-    """Aurora Serverless v2 PostgreSQL database for DevOps Hero."""
+    """Aurora Serverless v2 PostgreSQL database for Humanity Rules."""
 
     def __init__(self, scope: Construct, construct_id: str, vpc: ec2.IVpc, **kwargs) -> None:
         super().__init__(scope, construct_id, **kwargs)

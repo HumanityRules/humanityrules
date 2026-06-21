@@ -1,14 +1,14 @@
 """Browser-facing relay for the self-referential permissions editor.
 
 Pure transport: each route parses the WebUI's `/__humr_broker/permissions/*`
-request, forwards it to DOH's `/api/permissions/*` via `DohClient` (which attaches
+request, forwards it to HUMR's `/api/permissions/*` via `DohClient` (which attaches
 the env bearer and the deployment's owner/app identity), and serializes the
 reply. No bearer, no authorization decision, and no target `(app, environment)`
-ever lives here — DOH resolves all of that from the bearer + identity.
+ever lives here — HUMR resolves all of that from the bearer + identity.
 
 Browser path-params (request_id) and query (request_id, service) are folded into
-the JSON payload because every DOH permissions endpoint is POST + body. The
-browser-facing verb and the DOH-facing verb need not match.
+the JSON payload because every HUMR permissions endpoint is POST + body. The
+browser-facing verb and the HUMR-facing verb need not match.
 """
 
 import logging
@@ -21,7 +21,7 @@ from humr_client import DohClient
 
 logger = logging.getLogger("permissions_control")
 
-# AWS resource listing happens synchronously inside several DOH endpoints
+# AWS resource listing happens synchronously inside several HUMR endpoints
 # (draft open, refresh-resources, resources), so allow generous headroom.
 PERMISSIONS_TIMEOUT_SECONDS = 60
 

@@ -1,4 +1,4 @@
-# Hermes Agent — DOH nono prototype configuration
+# Hermes Agent — HUMR nono prototype configuration
 
 model:
   default: __MODEL__

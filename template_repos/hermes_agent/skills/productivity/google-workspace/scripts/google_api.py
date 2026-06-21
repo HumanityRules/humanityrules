@@ -2,7 +2,7 @@
 """Google Workspace API CLI for Hermes agents with platform-managed auth.
 
 Auth is injected outside the sandbox: an integrations broker sits between
-this script and Google, terminating TLS with a DOH-signed leaf cert and
+this script and Google, terminating TLS with a HUMR-signed leaf cert and
 swapping the Authorization header for the current short-lived access token.
 Refresh tokens, OAuth client secrets, and even the access token never enter
 the sandbox — we send a sentinel Bearer value that the broker replaces.

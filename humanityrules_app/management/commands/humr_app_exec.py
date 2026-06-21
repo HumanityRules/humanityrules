@@ -11,7 +11,7 @@ Usage:
 
 Flags: --as USER, --timeout SECONDS, --cwd PATH, --set KEY=VALUE, --format text|json, --ignore-exit.
 
-Requires: AWS CLI v2 + AWS Session Manager Plugin + DOH creds in .env.
+Requires: AWS CLI v2 + AWS Session Manager Plugin + HUMR creds in .env.
 """
 
 import argparse

@@ -104,7 +104,7 @@ COPY --chmod=755 build/check-vendor.sh /tmp/check-vendor.sh
 COPY --chmod=755 build/overlay-webui.sh /tmp/overlay-webui.sh
 
 # Vendored Hermes agent fork (git submodule at vendor/hermes-agent). It carries
-# DOH changes as commits on its doh/v* branch, so we copy it straight into place.
+# HUMR changes as commits on its doh/v* branch, so we copy it straight into place.
 # The submodule's .git pointer is kept out of the build context by .dockerignore
 # (**/.git). Docker layer caching makes a same-pin rebuild a cache hit.
 COPY vendor/hermes-agent ${HERMES_WEBUI_AGENT_DIR}/
@@ -160,7 +160,7 @@ RUN mkdir -p /home/linuxbrew && chown hermeswebui:hermeswebui /home/linuxbrew
 USER hermeswebui
 
 # Build the image-owned WebUI/Hermes venv. Install the local Hermes Agent
-# project (${HERMES_WEBUI_AGENT_DIR}/pyproject.toml) with DOH-selected extras
+# project (${HERMES_WEBUI_AGENT_DIR}/pyproject.toml) with HUMR-selected extras
 # (${HERMES_AGENT_EXTRAS}) into this venv.
 RUN --mount=type=cache,target=/uv_cache,uid=1024,gid=1024 \
     cd "$HERMES_WEBUI_DIR" \
@@ -231,7 +231,7 @@ RUN arch="$(dpkg --print-architecture)" \
     && npm cache clean --force \
     && rm -rf /root/.npm
 
-# DOH-owned source below this line. Keep these COPY layers last so edits to
+# HUMR-owned source below this line. Keep these COPY layers last so edits to
 # humr_runtime/, webui-extension/, and skills/ reuse the cached dependency
 # layers above instead of re-running uv pip install and Linuxbrew bootstrap.
 COPY skills/ /opt/hermes/agent/skills/
@@ -244,7 +244,7 @@ COPY humr_runtime /opt/doh/runtime
 RUN chmod +x /opt/doh/runtime/webapps/webapps \
     && ln -sf /opt/doh/runtime/webapps/webapps /opt/doh/bin/webapps
 
-# DOH-owned WebUI extension bundle. Loaded by Hermes WebUI per docs/EXTENSIONS.md
+# HUMR-owned WebUI extension bundle. Loaded by Hermes WebUI per docs/EXTENSIONS.md
 # when the HERMES_WEBUI_EXTENSION_* env vars are set (see webui.sh).
 # The sandbox reads this directory so the WebUI can serve the extension bundle.
 COPY webui-extension /opt/doh/webui-extension

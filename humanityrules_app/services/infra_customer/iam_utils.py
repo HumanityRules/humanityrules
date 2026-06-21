@@ -36,7 +36,7 @@ def get_assumed_role_session(
     region: str,
 ) -> boto3.Session:
     """
-    Assume the DevOpsHero role in the target account and return a boto3 session.
+    Assume the HumanityRules role in the target account and return a boto3 session.
 
     If access_key/secret_key are provided, uses explicit credentials (local dev).
     If None, uses default credential chain (ECS task role in production).

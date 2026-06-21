@@ -1,7 +1,7 @@
 """Bearer-auth JSON endpoints for the self-referential Hermes permissions editor.
 
 The env-resident `humr_broker` relays the Hermes WebUI's `/permissions/*` calls
-here (env bearer + {owner_username, app_slug, ...} body). DOH owns auth, target
+here (env bearer + {owner_username, app_slug, ...} body). HUMR owns auth, target
 resolution, ABAC, and the async Apply job; the sandbox never holds the bearer.
 
 The target `(app, environment)` is never a request parameter — it is resolved

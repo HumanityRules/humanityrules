@@ -71,7 +71,7 @@ def _merge_container_environment(
 
     Precedence (low → high):
       1. template.environment    — platform-constant env vars, a plain {name: value} dict.
-         DOH-managed, never shown in the deploy form.
+         HUMR-managed, never shown in the deploy form.
       2. template.configurable_variables — per-deployment knobs materialized into
          {name, value} entries at deploy time (user values, defaults, or auto-generated).
       3. blueprint.environment_variables — the snapshot of (2) taken when the blueprint
@@ -283,8 +283,8 @@ def _owner_username_for_app(app: App) -> str | None:
     """Return the `owner` ResourceTag value for *app*, or None if the app has no owner tag.
 
     The owner tag is set by the Personal Assistant deploy flow (see
-    docs/policy_proxy_design.md). It's the identity DOH injects into env-bearer
-    containers as HUMR_OWNER_USERNAME so they can speak to the DOH control plane on
+    docs/policy_proxy_design.md). It's the identity HUMR injects into env-bearer
+    containers as HUMR_OWNER_USERNAME so they can speak to the HUMR control plane on
     behalf of this user.
     """
     row = ResourceTag.objects.filter(

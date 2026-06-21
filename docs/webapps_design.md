@@ -6,7 +6,7 @@ How a Hermes agent builds, runs, and serves user-built web apps (any language: P
 
 The user types into the agent: "build me a dashboard." The agent writes code, runs it, and tells the user *where to click*. That URL must be on the agent's **own** hostname tree (`https://...<agent-host>/...`) — anything entirely elsewhere means explaining "why does my dashboard live on a different host than my agent?"
 
-The realization that decides this design: DOH already controls Route 53, ACM, and the ALB for every customer environment, so the cost of giving each agent its own wildcard subdomain space is **once per agent at deploy time**, not per webapp. Once that's in place, host-keyed routing inside the container handles new webapps for free.
+The realization that decides this design: HUMR already controls Route 53, ACM, and the ALB for every customer environment, so the cost of giving each agent its own wildcard subdomain space is **once per agent at deploy time**, not per webapp. Once that's in place, host-keyed routing inside the container handles new webapps for free.
 
 ## The choice space
 
@@ -17,7 +17,7 @@ Two shapes ended up being seriously considered:
 
 **Choice: per-app subdomain.** The tax shape inverts: option (1) charges every webapp install, every framework adoption, every prebuilt-SPA case forever; option (2) charges once per agent and never again. The agent-side complexity collapses — Caddy distinguishes apps by Host header instead of stripping a path prefix, the skill loses its per-framework gotcha pages, and the system has no opinion about what an app does with its own URLs.
 
-The earlier design rejected this on the grounds of "propagating DNS, adding ALB listener rules per app." That framing was wrong once DOH owns the DNS+ACM+ALB triad: a single wildcard record/cert/rule covers all of an agent's webapps. Per-webapp cost is zero.
+The earlier design rejected this on the grounds of "propagating DNS, adding ALB listener rules per app." That framing was wrong once HUMR owns the DNS+ACM+ALB triad: a single wildcard record/cert/rule covers all of an agent's webapps. Per-webapp cost is zero.
 
 Below the routing-keyed-by decision, the Caddy-sidecar shape from the path-prefix design carries over verbatim. Native WS/SSE/streaming, single ~40MB binary, zero WebUI patches; data-path costs are negligible because Caddy is already optimal at `splice(2)`/HTTP/2 demux/WS upgrades. Earlier alternatives (fd-handoff via `SCM_RIGHTS`, eBPF sockmap, ASGI sub-app, WebUI middleware patch) all founder on HTTP/1.1 keep-alive + HTTP/2 multiplexing making L7 routing a per-*request* decision rather than per-*connection*.
 
@@ -61,7 +61,7 @@ Four things to notice:
 1. **System daemon (`127.0.0.1:9956`)** supervises `system.webui` and `system.gateway`. The integrations broker talks to this daemon when it needs to restart one system process after managed env changes.
 2. **Webapps daemon (`127.0.0.1:9957`)** supervises `__admin` and user webapps. The `webapps` CLI talks only to this daemon when it applies changes, so user webapp lifecycle commands never bounce WebUI or interrupt active chat streams.
 
-**State lives under `/workspace/`, split between user-facing artifacts and DOH supervision config:**
+**State lives under `/workspace/`, split between user-facing artifacts and HUMR supervision config:**
 
 ```
 /workspace/webapps/
@@ -82,7 +82,7 @@ Four things to notice:
 
 `webapps/process-compose.yaml` is the **only** source of truth for webapps. `routes.caddy` is fully derived from it: every CLI mutation rebuilds the file from scratch by walking the YAML's enabled processes. The port lives in one place — the process's `environment: [WEBAPP_PORT=<port>]` — and the route generator reads it from there. No shadow copies, no synchronization concerns.
 
-The split keeps `/workspace/webapps/` as a pure user-data directory (their projects, their logs) and parks DOH-internal supervision config under `/workspace/.config/` alongside other tools' state (Caddy already writes `.config/caddy/autosave.json` there). These paths are hermeswebui-owned so the sandbox can mutate them; the broker (root) can still read them from outside the sandbox if needed.
+The split keeps `/workspace/webapps/` as a pure user-data directory (their projects, their logs) and parks HUMR-internal supervision config under `/workspace/.config/` alongside other tools' state (Caddy already writes `.config/caddy/autosave.json` there). These paths are hermeswebui-owned so the sandbox can mutate them; the broker (root) can still read them from outside the sandbox if needed.
 
 `/workspace` is on the persistent root, so this layout survives container restarts. On cold start, each process-compose daemon reads its own YAML and restores supervision; Caddy boots with the existing `routes.caddy` (which the last CLI mutation left correct) and routes are back instantly. The old shared `/workspace/.config/process-compose/process-compose.yaml` path is not read or migrated.
 
@@ -248,7 +248,7 @@ The WebUI's "Web Apps" panel is a thin reader on top of a **platform-owned webap
 This buys three things:
 
 - **Zero new surface.** No Caddy admin allow-list, no second sidecar, no per-endpoint auth bypass. If the webapps mechanism breaks, the panel breaks too — and that's actually what we want during a regression: one symptom, one diagnosis.
-- **Room to grow.** The slug is `__admin`, not `__webapps`. The same FastAPI process can host future runtime-admin endpoints (logs viewer, runtime ops) without ever putting "DOH" in a URL or carving a second admin path.
+- **Room to grow.** The slug is `__admin`, not `__webapps`. The same FastAPI process can host future runtime-admin endpoints (logs viewer, runtime ops) without ever putting "HUMR" in a URL or carving a second admin path.
 - **Plain HTTP between browser and backend.** The WebUI extension is the only client; the API speaks ordinary JSON. No SSE, no WebSocket, no integrations broker.
 
 **Reserved-prefix convention.** The slug regex (`webapps_lib.SLUG_PATTERN`) accepts an optional `__` prefix. There is **no enforcement** in the CLI — a `__` slug is a Python-dunder-style hint that "this is platform internal," not a hard reservation. The bootstrap (`webapps create __admin --if-missing --bootstrap-enabled` in `webui.sh`) wins the cold-start race and registers the slug; subsequent agent attempts to create the same slug collide on the existing entry and error, which is the same behavior as any other slug collision. The skill's Don'ts tell the agent not to touch `__*` slugs.
@@ -263,7 +263,7 @@ This buys three things:
 
 No mutation endpoints: start/stop/restart/delete stay on the CLI. The panel polls every 3s while active and stops when the user navigates away.
 
-**WebUI extension.** Hermes' `HERMES_WEBUI_EXTENSION_SCRIPT_URLS` accepts a comma-separated list (validated by `apptoo/api/extensions.py:_read_url_list`), so DOH ships two parallel files: `doh-integrations.js` / `doh-integrations.css` and `doh-webapps.js` / `doh-webapps.css`. Both wrap the upstream `switchPanel` (chained, each with its own `__doh*Wrapped` flag) and contribute one rail icon + one sidebar pane + one main view. The webapps panel filters out `__*` slugs by default so the user sees only their own apps.
+**WebUI extension.** Hermes' `HERMES_WEBUI_EXTENSION_SCRIPT_URLS` accepts a comma-separated list (validated by `apptoo/api/extensions.py:_read_url_list`), so HUMR ships two parallel files: `doh-integrations.js` / `doh-integrations.css` and `doh-webapps.js` / `doh-webapps.css`. Both wrap the upstream `switchPanel` (chained, each with its own `__doh*Wrapped` flag) and contribute one rail icon + one sidebar pane + one main view. The webapps panel filters out `__*` slugs by default so the user sees only their own apps.
 
 ## Out of scope (v1)
 

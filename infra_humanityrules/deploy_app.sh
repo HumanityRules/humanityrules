@@ -1,7 +1,7 @@
 #!/bin/bash
 set -e
 
-# DevOps Hero App-Only Deployment Script
+# Humanity Rules App-Only Deployment Script
 #
 # Fast deployment for code changes only (no infrastructure changes).
 # Skips CDK stack deployment, builds Docker image, and triggers ECS update.
@@ -38,7 +38,7 @@ export AWS_SECRET_ACCESS_KEY="${HUMR_AWS_SECRET_KEY}"
 export AWS_DEFAULT_REGION="us-east-1"
 
 echo "========================================"
-echo "DevOps Hero App-Only Deployment"
+echo "Humanity Rules App-Only Deployment"
 echo "========================================"
 
 # Sync secrets if requested

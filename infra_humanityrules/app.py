@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""DevOps Hero Production Infrastructure CDK App."""
+"""Humanity Rules Production Infrastructure CDK App."""
 
 import os
 import sys

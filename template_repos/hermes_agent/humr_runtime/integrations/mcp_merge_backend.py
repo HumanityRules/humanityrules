@@ -1,4 +1,4 @@
-"""Merge.dev Agent Handler backend, talking through the DOH-side relay.
+"""Merge.dev Agent Handler backend, talking through the HUMR-side relay.
 
 Sibling to mcp_aggregator and connectors/. Lives outside connectors/ on purpose:
 Merge isn't a single-service DCR/PKCE connector. It's a Magic Link relay that
@@ -10,13 +10,13 @@ The aggregator owns the lifecycle:
 
   - Constructs MergeBackend in its `__init__`.
   - Calls MergeBackend.boot() once at startup (idempotent registration with
-    Merge via DOH).
+    Merge via HUMR).
   - Includes MergeBackend.routes(prefix=...) in its own `routes()` so the
     integrations_broker mounts the Merge passthrough endpoints alongside the
     DCR OAuth ones.
 
-The browser-facing handlers proxy POST/GET to DOH with the env bearer and
-identity (app_slug, owner_username) auto-injected. DOH owns the Merge API key
+The browser-facing handlers proxy POST/GET to HUMR with the env bearer and
+identity (app_slug, owner_username) auto-injected. HUMR owns the Merge API key
 and does the real work; we just relay.
 """
 
@@ -60,7 +60,7 @@ def _mutates_from_double_underscore_name(*, name: str) -> bool:
 
 
 class MergeBackend:
-    """Backend adapter for Merge.dev Agent Handler, relayed through DOH."""
+    """Backend adapter for Merge.dev Agent Handler, relayed through HUMR."""
 
     name = "merge"
 
@@ -214,7 +214,7 @@ class MergeBackend:
     # ── Lifecycle ─────────────────────────────────────────────────────
 
     async def boot(self) -> None:
-        """Idempotent boot-time registration with Merge via DOH passthrough."""
+        """Idempotent boot-time registration with Merge via HUMR passthrough."""
         try:
             async with httpx.AsyncClient(timeout=30) as client:
                 resp = await client.post(
@@ -237,7 +237,7 @@ class MergeBackend:
     def routes(self, prefix: str) -> list[Route]:
         """Routes the integrations_broker mounts under /__humr_broker/<prefix>/merge/*.
 
-        DOH owns the Merge API key — these handlers forward to DOH with bearer
+        HUMR owns the Merge API key — these handlers forward to HUMR with bearer
         + identity injected and stream the response back to the WebUI.
         """
         return [
@@ -306,7 +306,7 @@ class MergeBackend:
         json_body: dict | None = None,
         extra_query: dict | None = None,
     ) -> Response:
-        """Forward to DOH with the env bearer attached. DOH does the real work.
+        """Forward to HUMR with the env bearer attached. HUMR does the real work.
 
         app_slug and owner_username are auto-injected — into the query string
         for GET, into the JSON body for POST. Callers provide only the

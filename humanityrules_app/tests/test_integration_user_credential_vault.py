@@ -196,7 +196,7 @@ class TestSetupSession(_CredentialVaultTestBase):
         self.assertTrue(bot_username.startswith("hermes_"))
         self.assertTrue(bot_username.endswith("_bot"))
         # The creation deep link is delivered only as a QR (pre-rendered on
-        # DOH so the WebUI extension needs no QR library); verify what it
+        # HUMR so the WebUI extension needs no QR library); verify what it
         # encodes via the builder call.
         self.assertTrue(schema["qr_data_uri"].startswith("data:image/svg+xml"))
         qr_builder.assert_called_once_with(

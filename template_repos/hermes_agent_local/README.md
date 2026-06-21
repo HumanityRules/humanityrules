@@ -49,7 +49,7 @@ Requires `opsh` on `PATH` (HumanityRules OPS console) and a working `bedrock_dev
 
 ## Rebuilds, watch, and caching
 
-The Hermes Dockerfile keeps DOH-owned source (`humr_runtime/`, `webui-extension/`, `skills/`) in **late COPY layers** so routine edits reuse cached `uv pip install` and Linuxbrew layers instead of rebuilding them.
+The Hermes Dockerfile keeps HUMR-owned source (`humr_runtime/`, `webui-extension/`, `skills/`) in **late COPY layers** so routine edits reuse cached `uv pip install` and Linuxbrew layers instead of rebuilding them.
 
 **While developing**, leave `docker compose up --watch` running (add `--build` on first run or after Dockerfile changes). Unlike standalone `docker compose watch`, `up --watch` streams container logs like `docker compose up`. On save it rebuilds the Hermes image (~1s for source edits), recreates the container, and the persistent-root runner rsyncs the new `/opt/doh` tree on start — the reliable path (no bind mounts that get clobbered).
 

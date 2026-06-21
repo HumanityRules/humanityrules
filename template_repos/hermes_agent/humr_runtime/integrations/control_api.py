@@ -8,7 +8,7 @@ self-referential permissions editor under /permissions.
 Pure transport: every route parses the request, delegates to
 `credentials_service` (state changes) or reads cached status from the
 runtimes, and serializes the result. No credential choreography lives here,
-and no DOH bearer — outbound DOH calls happen inside the service's DohClient.
+and no HUMR bearer — outbound HUMR calls happen inside the service's DohClient.
 """
 
 import logging
@@ -39,7 +39,7 @@ async def _handle_unified_status(
     Reads cached TLS-intercept entries; refresh happens lazily (proxy hot
     path or near expiry). Callers that need fresh state must POST
     /__humr_broker/integrations/tls_intercept/{provider}/invalidate for one provider
-    (e.g. after a Disconnect on DOH) or /__humr_broker/integrations/refresh_all
+    (e.g. after a Disconnect on HUMR) or /__humr_broker/integrations/refresh_all
     for the explicit-Refresh path (MCP catalog reload + all-providers TLS
     invalidate in one shot).
     """
@@ -93,7 +93,7 @@ def build_control_app(
         return JSONResponse(content={"ok": True, "provider": provider})
 
     async def credentials_setup_session_route(request: Request) -> Response:
-        """Ask DOH for a vault setup-session submit token for this provider."""
+        """Ask HUMR for a vault setup-session submit token for this provider."""
         provider = request.path_params["provider"]
         public_origin = request.query_params.get("origin", "")
         status, payload = await credentials_service.credentials_setup_session(

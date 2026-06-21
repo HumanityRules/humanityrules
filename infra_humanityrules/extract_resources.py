@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Extract DOH production resource names from CDK source code."""
+"""Extract HUMR production resource names from CDK source code."""
 
 import re
 from pathlib import Path
@@ -61,7 +61,7 @@ def main():
     """Print resource names for debugging."""
     resources = extract_resources()
     
-    print("DOH Production Resources")
+    print("HUMR Production Resources")
     print("=" * 40)
     print(f"Stack prefix: {resources['stack_prefix']}")
     print(f"Stacks: {', '.join(resources['stacks'])}")

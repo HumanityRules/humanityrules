@@ -6,16 +6,16 @@ bot token, using Telegram's Bot Management mode
 
 ## The flow
 
-DOH owns one **manager bot** with BotFather "Bot Management Mode" enabled
+HUMR owns one **manager bot** with BotFather "Bot Management Mode" enabled
 (settings `TELEGRAM_MANAGER_BOT_TOKEN` / `TELEGRAM_MANAGER_BOT_USERNAME`;
-stored only on DOH, never injected into customer containers).
+stored only on HUMR, never injected into customer containers).
 
 1. **Connect** in the WebUI opens the standard vault setup-session, but
    `provider_telegram.schema()` returns `mode=link_poll` instead of a paste
    form: the creation deep link
    `https://t.me/newbot/{manager_username}/{suggested_username}?name={app_name}`
    (with a per-session random `suggested_username`, e.g. `myapp_a1b2c3_bot`)
-   delivered **only as a QR code** — a `qr_data_uri` SVG rendered on DOH
+   delivered **only as a QR code** — a `qr_data_uri` SVG rendered on HUMR
    with `segno`, so the WebUI extension stays dependency-free. QR-only is
    deliberate: a clickable link needs a desktop Telegram client and fails
    silently without one, while every Telegram user can scan with their phone.
@@ -65,7 +65,7 @@ the managed token.
 
 - `getUpdates` is called **without an offset**, so updates are never
   confirmed/consumed: concurrent connect sessions can't eat each other's
-  events, and DOH keeps no offset state. Telegram retains unconfirmed
+  events, and HUMR keeps no offset state. Telegram retains unconfirmed
   updates for 24h — far longer than a setup session.
 - Matching is by exact (case-insensitive) bot username. If the user edits
   the suggested username in Telegram's creation dialog, the session can't
