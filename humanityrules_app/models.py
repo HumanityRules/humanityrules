@@ -221,7 +221,7 @@ class AWSAccount(models.Model):
     role_arn = models.CharField(
         max_length=2048,
         blank=True,
-        help_text="IAM role ARN that HumanityRules assumes for deployments",
+        help_text="IAM role ARN that Humanity Rules assumes for deployments",
     )
     status = models.CharField(
         max_length=20,
