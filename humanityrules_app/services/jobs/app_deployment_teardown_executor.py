@@ -47,11 +47,11 @@ def _dockerfile_ecr_repo_names(deployment: models.Deployment) -> list[str]:
 
     if template and template.containers:
         return [
-            f"doh/{env_slug}/{app.slug}-{tc['name']}"
+            f"humr/{env_slug}/{app.slug}-{tc['name']}"
             for tc in template.containers
             if tc["image_source"] == "dockerfile"
         ]
-    return [f"doh/{env_slug}/{app.slug}"]
+    return [f"humr/{env_slug}/{app.slug}"]
 
 
 def run_teardown(deployment_id: str) -> bool:

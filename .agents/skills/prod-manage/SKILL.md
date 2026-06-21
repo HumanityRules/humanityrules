@@ -27,14 +27,14 @@ The operator never picks the mode — the same `--account NAME --env SLUG` UX wo
 
 ## Local-exec example: build & push a HUMR-owned image into a customer env
 
-The image is pushed to `doh/{env_slug}/{ecr_repo}:{version}` in the customer's per-env ECR. The four target values are resolved from prod's DB.
+The image is pushed to `humr/{env_slug}/{ecr_repo}:{version}` in the customer's per-env ECR. The four target values are resolved from prod's DB.
 
 ```bash
 ./prod_manage.sh humr_build_prebuilt_image \
     --account "Course Hero Sandbox" \
     --env production \
     --source-dir template_repos/humr_dind \
-    --ecr-repo doh-dind \
+    --ecr-repo humr-dind \
     --tag 0.2.5
 ```
 

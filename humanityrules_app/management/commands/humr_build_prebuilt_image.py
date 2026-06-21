@@ -2,7 +2,7 @@
 Build and push a pre-built Docker image into a customer's per-env ECR.
 
 AppTemplate containers with image_source="prebuilt" reference an image at
-doh/{env_slug}/{ecr_repo}:{version}. This command is the generic operator
+humr/{env_slug}/{ecr_repo}:{version}. This command is the generic operator
 entry point that creates the ECR repo (if missing), builds a Dockerfile from
 --source-dir, and pushes the result into that repo.
 
@@ -40,7 +40,7 @@ class Command(BaseCommand):
         parser.add_argument(
             "--ecr-repo",
             required=True,
-            help="Repo name within the doh/{env_slug}/ namespace (e.g. 'learneo-mcp')",
+            help="Repo name within the humr/{env_slug}/ namespace (e.g. 'learneo-mcp')",
         )
         parser.add_argument(
             "--tag",
@@ -69,7 +69,7 @@ class Command(BaseCommand):
         account_id = target.aws_account_id
         region = target.aws_region
 
-        repository_name = f"doh/{env_slug}/{ecr_repo_short}"
+        repository_name = f"humr/{env_slug}/{ecr_repo_short}"
         ecr_client = session.client("ecr")
 
         self._ensure_repo_exists(

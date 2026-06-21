@@ -20,8 +20,8 @@ requests still receive the `302` directly.
 | Var | Example | Purpose |
 | --- | --- | --- |
 | `HUMR_APP_ID` | `vmendi-hermes` | App slug, sent in the PDP request. |
-| `HUMR_ENV_SLUG` | `doh-sandbox` | For log lines only. |
-| `HUMR_ENV_DOMAIN` | `doh-sandbox.dohsandbox.com` | Parent domain the session cookie is scoped to. |
+| `HUMR_ENV_SLUG` | `humr-sandbox` | For log lines only. |
+| `HUMR_ENV_DOMAIN` | `humr-sandbox.humrsandbox.com` | Parent domain the session cookie is scoped to. |
 | `HUMR_AUTH_BASE_URL` | `https://humanityrules.io` | Control-plane base URL; the sidecar bounces unauthenticated requests to `<base>/auth/env-start`. |
 | `HUMR_JWKS_URL` | `https://humanityrules.io/.well-known/jwks.json` | Central JWKS endpoint for verifying session JWTs. |
 | `HUMR_PDP_URL` | `https://humanityrules.io/api/pdp/evaluate` | Central authorization endpoint. |
@@ -46,4 +46,4 @@ uv run pytest
 
 ## Publishing
 
-The policy-proxy image is published to ECR per environment — `doh/{env_slug}/policy-proxy:{version}` — from the HUMR deploy pipeline on first policy-proxy deploy. See `humanityrules_app/services/infra_customer/` for the push plumbing.
+The policy-proxy image is published to ECR per environment — `humr/{env_slug}/policy-proxy:{version}` — from the HUMR deploy pipeline on first policy-proxy deploy. See `humanityrules_app/services/infra_customer/` for the push plumbing.

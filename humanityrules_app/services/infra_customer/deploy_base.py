@@ -366,7 +366,7 @@ class EcsClusterStack(Stack):
         # Shared ALB - always created
         self.shared_alb = elbv2.ApplicationLoadBalancer(
             self, "SharedAlb",
-            load_balancer_name=f"doh-{env_slug}-shared"[:32],
+            load_balancer_name=f"humr-{env_slug}-shared"[:32],
             vpc=vpc,
             internet_facing=True,
             security_group=self.alb_security_group,
@@ -556,7 +556,7 @@ touch /tmp/builder_ready
                 "ecr:CompleteLayerUpload",
                 "ecr:PutImage",
             ],
-            resources=[f"arn:aws:ecr:{Aws.REGION}:{Aws.ACCOUNT_ID}:repository/doh/*"],
+            resources=[f"arn:aws:ecr:{Aws.REGION}:{Aws.ACCOUNT_ID}:repository/humr/*"],
         ))
 
         # Security Group - no inbound rules (SSM works outbound-only)

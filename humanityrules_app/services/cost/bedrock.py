@@ -163,7 +163,7 @@ def _deployed_environments(app: App) -> list[Environment]:
 
 def _task_role_name(environment: Environment, app: App) -> str:
     """The ECS task role name (forward mapping), matching how it is built on deploy. Truncated to 64."""
-    return f"doh-{environment.slug}-{app.slug}-task-role"[:64]
+    return f"humr-{environment.slug}-{app.slug}-task-role"[:64]
 
 
 def _run_insights(client, log_group: str, query_string: str, start_seconds: int, end_seconds: int) -> list[dict]:

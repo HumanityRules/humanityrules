@@ -1,5 +1,5 @@
 [project]
-name = "doh-policy-proxy"
+name = "humr-policy-proxy"
 version = "0.1.0"
 description = "Humanity Rules policy proxy — SSO + ABAC gate for deployed apps."
 requires-python = ">=3.11"

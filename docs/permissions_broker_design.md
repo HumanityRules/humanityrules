@@ -35,9 +35,9 @@ AGENT (sandbox)  ──127.0.0.1:9951/permissions/*─────────�
 ```
 
 - **The panel** (a Hermes WebUI extension, browser JS —
-  `template_repos/hermes_agent/webui-extension/doh-permissions.js`) reaches the
+  `template_repos/hermes_agent/webui-extension/humr-permissions.js`) reaches the
   broker same-origin via the existing `/__humr_broker/*` reverse-proxy route — the
-  same one the integrations panel uses (`patches-webui/07-doh-broker-proxy.patch`).
+  same one the integrations panel uses (`patches-webui/07-humr-broker-proxy.patch`).
   No new proxy patch is needed; permissions is just a new path group. **This file
   is the sole browser consumer of the contract below — any change to the
   service_group / statement-mutation shape must update it (it has no automated
@@ -170,13 +170,13 @@ so the list may contain repeated `service` values distinguished by `sid`):
 
 ## The panel (phase 1)
 
-A new WebUI extension (`doh-permissions.js` / `.css`), wired through
+A new WebUI extension (`humr-permissions.js` / `.css`), wired through
 `HERMES_WEBUI_EXTENSION_*` in `humr_runtime/webui.sh` alongside the integrations
 and webapps extensions. It follows `vendor/hermes-webui/docs/EXTENSIONS.md`:
 extension-owned container IDs, additive, reversible.
 
 - **Mounted full-width as its own rail destination**, the proven
-  `doh-integrations.js` pattern (rail button + `#mainPermissions` `.main-view` +
+  `humr-integrations.js` pattern (rail button + `#mainPermissions` `.main-view` +
   a `showing-permissions` class wrapper around `switchPanel`). Standalone, so it
   gets full width and sidesteps the sidebar-width question entirely for phase 1.
 - **Written as a container-agnostic render module** (renders into a passed-in
@@ -194,7 +194,7 @@ extension-owned container IDs, additive, reversible.
   Apply job (`permissions_apply_executor`).
 - **Broker (`humr_broker`)** — new `/permissions/*` routes on control_api, pure
   transport, relaying to HUMR with the env bearer via `DohClient`.
-- **WebUI extension** — `doh-permissions.js/.css`, the client-rendered editor.
+- **WebUI extension** — `humr-permissions.js/.css`, the client-rendered editor.
 
 ## Phasing
 
@@ -202,7 +202,7 @@ extension-owned container IDs, additive, reversible.
 1. Rename `integrations_broker` → `humr_broker`.
 2. HUMR `/api/permissions/*` endpoints (JSON, bearer-auth), reusing the service layer.
 3. `humr_broker` control_api `/permissions/*` routes (pure transport).
-4. `doh-permissions.js/.css` extension, full-width destination, container-agnostic.
+4. `humr-permissions.js/.css` extension, full-width destination, container-agnostic.
 
 **Phase 2 (deferred):**
 - **Agent tools + skill.** Port `update_permission_draft`, `query_app_logs`,

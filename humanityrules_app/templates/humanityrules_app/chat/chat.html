@@ -41,7 +41,7 @@
                         <div class="flex-1 min-w-0 space-y-0.5">
                             <h3 id="sidebar-title-{{ conv.id }}" class="text-sm font-medium text-gray-900 dark:text-white truncate"
                                 hx-get="{% url 'chat_conversation_title' conversation_id=conv.id %}"
-                                hx-trigger="doh:title-changed-{{ conv.id }} from:document"
+                                hx-trigger="humr:title-changed-{{ conv.id }} from:document"
                                 hx-swap="innerHTML">
                                 {{ conv.title|default:"New Conversation" }}
                             </h3>
@@ -51,7 +51,7 @@
                             {% if show_costs %}
                             <p id="sidebar-cost-{{ conv.id }}" class="text-xs text-gray-500 dark:text-gray-400"
                                hx-get="{% url 'chat_conversation_cost' conversation_id=conv.id %}"
-                               hx-trigger="doh:cost-changed-{{ conv.id }} from:document"
+                               hx-trigger="humr:cost-changed-{{ conv.id }} from:document"
                                hx-swap="innerHTML">{% if conv.total_cost %}<span class="text-gray-400 dark:text-gray-500">Agent Cost:</span> ${{ conv.total_cost|floatformat:4 }}{% endif %}</p>
                             {% endif %}
                             {% if conv.context_workspace or conv.context_repository or conv.context_aws_account or conv.context_environment %}

@@ -67,7 +67,7 @@ Starlette/uvicorn server. One unified URL space for **all** browser-facing integ
 - **`GET /integrations/mcp/<provider>/oauth/start`**, **`GET /integrations/mcp/<provider>/oauth/callback`**, **`POST /integrations/mcp/<provider>/disconnect`** — MCP-aggregator OAuth flow (Notion). The aggregator owns the handlers; the broker mounts them via `MCPAggregator.routes(prefix="/integrations")`.
 - **`GET /integrations/merge/connector-status`**, **`POST /integrations/merge/link-token`**, **`POST /integrations/merge/disconnect`** — Merge passthroughs that forward to HUMR with the env bearer attached. See `merge_integration_design.md`.
 
-Reached from the browser same-origin via a WebUI reverse-proxy patch (`patches-webui/07-doh-broker-proxy.patch`) that forwards `/__humr_broker/*` to `127.0.0.1:9951`. Deliberately bypasses the WebUI's CSRF gate — the broker is loopback-only and the endpoints are stateless.
+Reached from the browser same-origin via a WebUI reverse-proxy patch (`patches-webui/07-humr-broker-proxy.patch`) that forwards `/__humr_broker/*` to `127.0.0.1:9951`. Deliberately bypasses the WebUI's CSRF gate — the broker is loopback-only and the endpoints are stateless.
 
 The `/__mcp_aggregator/*` URL space that earlier holds Notion's OAuth was retired during the unification — port 9952 is now sandbox-only MCP transport.
 
@@ -86,7 +86,7 @@ Refresh cadence is ~55 minutes when connected. `POST /integrations/refresh` is t
 - **Env bearer token** — customer env secrets manager, with only the hash stored on HUMR. Pre-existing pattern, reused.
 - **Access tokens** — broker's in-memory `{host: token}` map. Never hits disk. Lost on container restart (recomputed within seconds from HUMR).
 - **Broker CA private key** — broker's process memory. Generated at startup, never persisted. A new container gets a new CA; the sandbox reboots with it and inherits the new `SSL_CERT_FILE` via supervisor env.
-- **Broker CA public cert** — `/opt/doh/ca/bundle.pem`, readable by the sandbox. Contains our CA cert plus system roots so the sandbox trusts both our MITM'd hosts and real internet hosts (HUMR-proxied or tunneled).
+- **Broker CA public cert** — `/opt/humr/ca/bundle.pem`, readable by the sandbox. Contains our CA cert plus system roots so the sandbox trusts both our MITM'd hosts and real internet hosts (HUMR-proxied or tunneled).
 
 ## Network topology inside the container
 
@@ -95,7 +95,7 @@ Refresh cadence is ~55 minutes when connected. `POST /integrations/refresh` is t
 │                                                                    │
 │  ┌─ nono sandbox ─────────────────────┐                            │
 │  │  HTTPS_PROXY=http://127.0.0.1:9950 │                            │
-│  │  SSL_CERT_FILE=/opt/doh/ca/...     │                            │
+│  │  SSL_CERT_FILE=/opt/humr/ca/...     │                            │
 │  │                                    │                            │
 │  │   agent → gws/curl → ─CONNECT─────►│───────► 127.0.0.1:9950     │
 │  │                                    │            (broker)        │
@@ -140,8 +140,8 @@ That dict alone drives: which hostnames get MITM'd vs tunneled; the `label` show
 ## Cert lifecycle
 
 - **CA generation**: at broker startup, an RSA-4096 CA key is generated in memory. The CA cert is valid for 5 years, with `BasicConstraints(ca=True, path_length=0)` and `KeyUsage(cert_sign, crl_sign)`. Subject Key Identifier is attached.
-- **Bundle write**: CA cert is concatenated with the system root bundle (from `/etc/ssl/certs/ca-certificates.crt`) and written to `/opt/doh/ca/bundle.pem`. Supervisor exports this as `SSL_CERT_FILE` inside the nono env. Sandbox TLS clients use this bundle for verification, which is why they trust both our MITM'd hosts and direct-tunneled real hosts (Tavily etc.).
-- **Leaf minting**: first `CONNECT` for a known hostname mints an RSA-2048 leaf, 2-year validity, with `SubjectAlternativeName=[DNS:<host>]`, `BasicConstraints(ca=False, critical)`, `KeyUsage(digital_signature, key_encipherment, critical)`, `ExtendedKeyUsage=[SERVER_AUTH]`, `SubjectKeyIdentifier`, and `AuthorityKeyIdentifier.from_issuer_public_key(CA)`. Cached in-memory by hostname. Leaf cert/key PEMs are written only as transient files under `/opt/doh/broker-private`, loaded into `ssl.SSLContext`, and immediately unlinked; that directory is not granted to the sandbox.
+- **Bundle write**: CA cert is concatenated with the system root bundle (from `/etc/ssl/certs/ca-certificates.crt`) and written to `/opt/humr/ca/bundle.pem`. Supervisor exports this as `SSL_CERT_FILE` inside the nono env. Sandbox TLS clients use this bundle for verification, which is why they trust both our MITM'd hosts and direct-tunneled real hosts (Tavily etc.).
+- **Leaf minting**: first `CONNECT` for a known hostname mints an RSA-2048 leaf, 2-year validity, with `SubjectAlternativeName=[DNS:<host>]`, `BasicConstraints(ca=False, critical)`, `KeyUsage(digital_signature, key_encipherment, critical)`, `ExtendedKeyUsage=[SERVER_AUTH]`, `SubjectKeyIdentifier`, and `AuthorityKeyIdentifier.from_issuer_public_key(CA)`. Cached in-memory by hostname. Leaf cert/key PEMs are written only as transient files under `/opt/humr/broker-private`, loaded into `ssl.SSLContext`, and immediately unlinked; that directory is not granted to the sandbox.
 - **Rotation**: a new container boot regenerates the CA and all leaves. The sandbox reboots with the container, so there's no "CA rotated under a live agent" corner.
 
 Python's cert validation (OpenSSL) rejects chains missing `SubjectKeyIdentifier` or `AuthorityKeyIdentifier`. Both must be attached — learned the hard way.

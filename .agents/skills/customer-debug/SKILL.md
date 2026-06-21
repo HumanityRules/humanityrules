@@ -65,10 +65,10 @@ aws logs describe-log-streams --log-group-name /humr/default/ecs --order-by Last
 All names are deterministic from `env_slug` and `app_slug`:
 
 - **Cluster:** `humr-{env_slug}-cluster`
-- **ECS service:** `doh-{env_slug}-{app_slug}`
+- **ECS service:** `humr-{env_slug}-{app_slug}`
 - **Container name:** `{app_slug}`
 - **Log group:** `/humr/{env_slug}/ecs`
 - **Log stream:** `{app_slug}/{app_slug}/{ecs_task_id}`
-- **Task role:** `doh-{env_slug}-{app_slug}-task-role`
-- **CDK stack:** `doh-{env_slug}-{app_slug}-app-cdk`
-- **Resource prefix:** `doh-{env_slug}-{app_slug}` (used for most resource names)
+- **Task role:** `humr-{env_slug}-{app_slug}-task-role`
+- **CDK stack:** `humr-{env_slug}-{app_slug}-app-cdk`
+- **Resource prefix:** `humr-{env_slug}-{app_slug}` (used for most resource names)

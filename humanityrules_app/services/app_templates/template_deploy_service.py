@@ -174,7 +174,7 @@ async def deploy_from_template(
             f"image_source=dockerfile; got {primary['image_source']}"
         )
 
-    clone_url = f"doh-template://{primary['source_repo_path']}"
+    clone_url = f"humr-template://{primary['source_repo_path']}"
 
     repo, _created = await models.Repository.objects.aget_or_create(
         organization=organization,

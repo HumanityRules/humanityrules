@@ -647,7 +647,7 @@ class AppTemplate(models.Model):
     #     "source_repo_path": "hermes_agent",
     #     "dockerfile_path": "Dockerfile",
     #     # image_source == "prebuilt":
-    #     "ecr_repo": "learneo-mcp",    # within doh/{env_slug}/ namespace
+    #     "ecr_repo": "learneo-mcp",    # within humr/{env_slug}/ namespace
     #     "version": "0.1.0",
     #     # image_source == "registry":
     #     "registry_image": "docker:26.1.0-dind",

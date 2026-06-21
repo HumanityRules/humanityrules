@@ -52,7 +52,7 @@ def test_missing_cookie_redirects_to_auth(policy_proxy_config, fake_jwks_client)
     location = response.headers["location"]
     parsed = urlparse(location)
     assert parsed.scheme == "https"
-    assert parsed.netloc == "auth.doh-sandbox.dohsandbox.com"
+    assert parsed.netloc == "auth.humr-sandbox.humrsandbox.com"
     assert parsed.path == "/auth/env-start"
     rd = parse_qs(parsed.query)["rd"][0]
     assert rd.endswith("/chat/new")
@@ -66,7 +66,7 @@ def test_missing_cookie_api_returns_401_with_auth_url(policy_proxy_config, fake_
         raise AssertionError("upstream should not be called")
 
     client = _mk_client(policy_proxy_config, fake_jwks_client, pdp, upstream)
-    referer = "https://vmendi-hermes.doh-sandbox.dohsandbox.com/"
+    referer = "https://vmendi-hermes.humr-sandbox.humrsandbox.com/"
     response = client.get(
         "/api/sessions",
         headers={
@@ -80,7 +80,7 @@ def test_missing_cookie_api_returns_401_with_auth_url(policy_proxy_config, fake_
     auth_url = response.headers[app_mod.AUTH_URL_HEADER]
     parsed = urlparse(auth_url)
     assert parsed.scheme == "https"
-    assert parsed.netloc == "auth.doh-sandbox.dohsandbox.com"
+    assert parsed.netloc == "auth.humr-sandbox.humrsandbox.com"
     assert parsed.path == "/auth/env-start"
     assert parse_qs(parsed.query)["rd"] == [referer]
 
@@ -170,7 +170,7 @@ def test_tampered_cookie_api_returns_401_with_auth_url(policy_proxy_config, fake
     token = jwt_minter()
     h, p, s = token.split(".")
     bad = f"{h}.{p}.{s[:-2]}XY"
-    referer = "https://vmendi-hermes.doh-sandbox.dohsandbox.com/"
+    referer = "https://vmendi-hermes.humr-sandbox.humrsandbox.com/"
 
     response = client.get(
         "/api/session",

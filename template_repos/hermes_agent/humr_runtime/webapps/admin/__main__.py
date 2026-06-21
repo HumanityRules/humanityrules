@@ -1,7 +1,7 @@
 import os
 import sys
 
-sys.path.insert(0, "/opt/doh/runtime/webapps")
+sys.path.insert(0, "/opt/humr/runtime/webapps")
 
 import uvicorn
 

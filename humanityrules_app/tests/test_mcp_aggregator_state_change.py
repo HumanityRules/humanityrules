@@ -196,7 +196,7 @@ class TestAggregatorMergeDisabled(unittest.IsolatedAsyncioTestCase):
             port=9952,
             persistent_dir=pathlib.Path(self.tempdir.name),
             public_base_url="https://hermes.example",
-            humr_control_plane_url="https://doh.example",
+            humr_control_plane_url="https://humr.example",
             humr_env_bearer="b",
             humr_app_slug="hermes-test",
             humr_owner_username="vmendi",
@@ -228,7 +228,7 @@ class TestAggregatorRouteNamespaces(unittest.IsolatedAsyncioTestCase):
             port=9952,
             persistent_dir=pathlib.Path(self.tempdir.name),
             public_base_url="https://hermes.example",
-            humr_control_plane_url="https://doh.example",
+            humr_control_plane_url="https://humr.example",
             humr_env_bearer="b",
             humr_app_slug="hermes-test",
             humr_owner_username="vmendi",
@@ -525,7 +525,7 @@ class TestMergeBackendStateHooks(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self) -> None:
         self.hook = AsyncMock()
         self.merge = mcp_merge_backend.MergeBackend(
-            humr_control_plane_url="https://doh.example",
+            humr_control_plane_url="https://humr.example",
             humr_env_bearer="b",
             humr_app_slug="hermes-test",
             humr_owner_username="vmendi",

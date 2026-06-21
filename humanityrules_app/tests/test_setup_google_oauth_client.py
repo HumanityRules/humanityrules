@@ -15,7 +15,7 @@ from humanityrules_app.models import IntegrationConfig
 VALID_WEB_PAYLOAD = {
     "web": {
         "client_id": "cid-123.apps.googleusercontent.com",
-        "project_id": "doh-hermes",
+        "project_id": "humr-hermes",
         "auth_uri": "https://accounts.google.com/o/oauth2/auth",
         "token_uri": "https://oauth2.googleapis.com/token",
         "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
@@ -75,7 +75,7 @@ class TestSetupGoogleOauthClient(TestCase):
         from tempfile import TemporaryDirectory
         from pathlib import Path
 
-        incomplete = {"web": {"client_id": "x", "redirect_uris": ["https://doh/cb"]}}
+        incomplete = {"web": {"client_id": "x", "redirect_uris": ["https://humr/cb"]}}
         with TemporaryDirectory() as tmp:
             path = self._write(Path(tmp), incomplete)
             with self.assertRaises(CommandError) as cm:

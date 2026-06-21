@@ -220,7 +220,7 @@ touch /home/ec2-user/last_build_activity
 echo "BUILD_SUCCESS"
 """
         else:
-            test_tag = f"doh-test-build:{build_id}"
+            test_tag = f"humr-test-build:{build_id}"
             build_script = f"""
 set -e
 cd {build_dir}

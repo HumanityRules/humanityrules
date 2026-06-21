@@ -223,7 +223,7 @@ document.body.addEventListener('htmx:afterRequest', (e) => {
 });
 
 // ─── Refetch statements + description and enable buttons when agent updates the draft ────
-document.addEventListener('doh:permissions-changed-{{ app_permission_request.id }}', () => {
+document.addEventListener('humr:permissions-changed-{{ app_permission_request.id }}', () => {
     htmx.ajax('GET', STATEMENTS_URL, {
         target: '#statements-container',
         swap: 'innerHTML',

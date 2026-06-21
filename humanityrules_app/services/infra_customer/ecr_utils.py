@@ -127,7 +127,7 @@ def build_and_push_docker_image(
         region: AWS region
         env_slug: Environment slug (needed to find EC2 builder in remote mode)
         app_name: Application name (for logging)
-        ecr_repo_name: ECR repository name (e.g., "doh/default/simple-dashboard")
+        ecr_repo_name: ECR repository name (e.g., "humr/default/simple-dashboard")
         app_source_path: Path to the app source directory containing Dockerfile
         image_tag: Docker image tag (e.g., "latest", "v1.0.0")
 
@@ -188,7 +188,7 @@ def test_docker_build(session: boto3.Session, env_slug: str, source_path: Path) 
 def _test_build_local(source_path: Path) -> tuple[bool, str]:
     """Test docker build locally — build only, no push."""
     import uuid
-    tag = f"doh-test-build:{uuid.uuid4().hex[:8]}"
+    tag = f"humr-test-build:{uuid.uuid4().hex[:8]}"
 
     process = subprocess.Popen(
         ["docker", "build", "--platform", "linux/arm64", "-t", tag, "."],

@@ -30,13 +30,13 @@ set -euo pipefail
 # here makes it visible to the gateway AND to every process-compose child
 # (webapps inherit the parent env), so webapps read it from $API_SERVER_KEY.
 export API_SERVER_ENABLED=true
-export API_SERVER_KEY=doh-loopback-gateway-key
+export API_SERVER_KEY=humr-loopback-gateway-key
 
 # Point the WebUI at our extension bundle. EXTENSIONS.md-compliant same-origin
 # URLs — the upstream static handler serves $HERMES_WEBUI_EXTENSION_DIR under
 # /extensions/.
-export HERMES_WEBUI_EXTENSION_SCRIPT_URLS="/extensions/doh-integrations.js,/extensions/doh-webapps.js,/extensions/doh-permissions.js"
-export HERMES_WEBUI_EXTENSION_STYLESHEET_URLS="/extensions/doh-integrations.css,/extensions/doh-webapps.css,/extensions/doh-permissions.css"
+export HERMES_WEBUI_EXTENSION_SCRIPT_URLS="/extensions/humr-integrations.js,/extensions/humr-webapps.js,/extensions/humr-permissions.js"
+export HERMES_WEBUI_EXTENSION_STYLESHEET_URLS="/extensions/humr-integrations.css,/extensions/humr-webapps.css,/extensions/humr-permissions.css"
 
 CADDY_PORT=8787
 SYSTEM_PROCESS_COMPOSE_PORT=9956

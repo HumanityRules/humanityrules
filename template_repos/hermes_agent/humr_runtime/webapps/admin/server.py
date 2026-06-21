@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import sys
 
-sys.path.insert(0, "/opt/doh/runtime/webapps")
+sys.path.insert(0, "/opt/humr/runtime/webapps")
 
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import PlainTextResponse

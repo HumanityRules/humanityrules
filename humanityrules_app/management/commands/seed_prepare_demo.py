@@ -185,7 +185,7 @@ def _fake_image_tag(app_slug: str) -> str:
 
 
 def _fake_image_uri(app_slug: str, env_slug: str) -> str:
-    return f"111222333444.dkr.ecr.us-east-1.amazonaws.com/doh/{env_slug}/{app_slug}:{_fake_image_tag(app_slug=app_slug)}"
+    return f"111222333444.dkr.ecr.us-east-1.amazonaws.com/humr/{env_slug}/{app_slug}:{_fake_image_tag(app_slug=app_slug)}"
 
 
 def _fake_service_url(subdomain: str) -> str:

@@ -204,7 +204,7 @@ def read_app_permissions_policy(environment, app, policy_name: str) -> list[dict
     Returns a list of statement dicts in our normalized format:
     [{"service": "s3", "access_levels": ["Read", "Write"], "resources": [...]}]
     """
-    resource_prefix = f"doh-{environment.slug}-{app.slug}"
+    resource_prefix = f"humr-{environment.slug}-{app.slug}"
     role_name = f"{resource_prefix}-task-role"[:64]
 
     try:
@@ -326,7 +326,7 @@ def write_app_permissions_policy(environment, app, policy_name: str, statements:
     Converts normalized statements to an IAM policy document and calls put_role_policy.
     If statements is empty, deletes the policy instead.
     """
-    resource_prefix = f"doh-{environment.slug}-{app.slug}"
+    resource_prefix = f"humr-{environment.slug}-{app.slug}"
     role_name = f"{resource_prefix}-task-role"[:64]
 
     session = _get_aws_session_for_environment(environment)

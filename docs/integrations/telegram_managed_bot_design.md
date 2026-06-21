@@ -53,7 +53,7 @@ shape (alongside paste forms and Slack's custom renderer):
 - `POST /api/integrations/credentials/poll` dispatches to the provider
   module's `poll_setup(owner_user, environment, app_slug, state)` →
   `({"status": "pending"} | {"status": "connected", ...}, error)`.
-- The WebUI's generic vault renderer (`doh-integrations.js`) dispatches
+- The WebUI's generic vault renderer (`humr-integrations.js`) dispatches
   `mode=link_poll` to a link+poll modal that polls until connected or the
   30-minute setup token expires.
 

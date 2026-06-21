@@ -16,7 +16,7 @@ import shutil
 import sys
 from pathlib import Path
 
-sys.path.insert(0, "/opt/doh/runtime/webapps")
+sys.path.insert(0, "/opt/humr/runtime/webapps")
 from webapps_lib import (
     DEFAULT_TIMEOUT_SECONDS,
     LOGS_DIR,

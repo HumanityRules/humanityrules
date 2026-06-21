@@ -19,7 +19,7 @@ Use chat SSE only on pages that already render the chat panel.
 
 - The browser opens an SSE connection through `chat_stream`.
 - `chat_stream` can emit `sse-notify` messages.
-- The chat panel turns those into `doh:*` document events.
+- The chat panel turns those into `humr:*` document events.
 - Other widgets on the same page can listen for those events and refetch their own fragment endpoints.
 
 This is an invalidation mechanism, not a general event bus.
@@ -40,7 +40,7 @@ Every live widget should follow this shape:
 
 - It has a stable wrapper element.
 - It has one fragment endpoint that returns the widget fragment.
-- It may listen for zero or more `doh:*` invalidation events.
+- It may listen for zero or more `humr:*` invalidation events.
 - It may self-poll only while the resource is transient.
 - The server decides whether polling continues by including or omitting the polling attributes in the returned fragment.
 

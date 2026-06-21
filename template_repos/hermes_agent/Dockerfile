@@ -21,13 +21,13 @@ ARG NODE_VERSION=24.17.0
 ARG AGENT_BROWSER_VERSION=0.28.0
 ARG HERMES_AGENT_EXTRAS=messaging,matrix,cron,cli,dev,tts-premium,slack,pty,honcho,mcp,sms,acp,voice,google,bedrock,web
 
-# Runtime layout: /opt/doh and /opt/hermes are image-owned and refreshed into
+# Runtime layout: /opt/humr and /opt/hermes are image-owned and refreshed into
 # the persistent root on every start. /workspace is user-owned persistent state;
-# /run/doh is ephemeral runtime state inside the task.
-ENV HUMR_ROOT=/opt/doh
-ENV HUMR_BIN_DIR=/opt/doh/bin
-ENV HUMR_RUNTIME_DIR=/opt/doh/runtime
-ENV HUMR_RUN_DIR=/run/doh
+# /run/humr is ephemeral runtime state inside the task.
+ENV HUMR_ROOT=/opt/humr
+ENV HUMR_BIN_DIR=/opt/humr/bin
+ENV HUMR_RUNTIME_DIR=/opt/humr/runtime
+ENV HUMR_RUN_DIR=/run/humr
 ENV HERMES_ROOT=/opt/hermes
 ENV HERMES_CONFIG_TEMPLATE=/opt/hermes/config.yaml.template
 ENV HERMES_WEBUI_DIR=/opt/hermes/webui
@@ -37,7 +37,7 @@ ENV HERMES_HOME=/workspace/.hermes
 ENV HERMES_WEBUI_STATE_DIR=/workspace/.hermes/webui-mvp
 ENV HERMES_WEBUI_DEFAULT_WORKSPACE=/workspace
 ENV HERMES_WEBUI_SKIP_ONBOARDING=1
-ENV HERMES_WEBUI_EXTENSION_DIR=/opt/doh/webui-extension
+ENV HERMES_WEBUI_EXTENSION_DIR=/opt/humr/webui-extension
 ENV HERMES_WEBUI_TRUST_FORWARDED_HOST=1
 ENV HERMES_PERSISTENT_ROOT=/hermes-persistent-root
 ENV HERMES_CHECKPOINT_ROOT=/hermes-checkpoint
@@ -93,11 +93,11 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
 # session snapshot uses `bash -l`, so this drop-in restores the supervisor's
 # HUMR_LOGIN_PATH after /etc/profile runs. The fallback (used when a login
 # shell isn't descended from supervisor.sh — e.g. ECS Exec sessions debugging
-# the container) keeps Hermes CLI, brew, doh-bin, and system bins reachable so
+# the container) keeps Hermes CLI, brew, humr-bin, and system bins reachable so
 # basic tools still work.
 RUN { \
-      echo 'export PATH="${HUMR_LOGIN_PATH:-/opt/hermes/webui/venv/bin:/opt/doh/bin:${HOMEBREW_PREFIX}/bin:${HOMEBREW_PREFIX}/sbin:/usr/local/bin:/usr/local/sbin:/usr/bin:/usr/sbin:/bin:/sbin}"'; \
-    } > /etc/profile.d/doh-bin.sh
+      echo 'export PATH="${HUMR_LOGIN_PATH:-/opt/hermes/webui/venv/bin:/opt/humr/bin:${HOMEBREW_PREFIX}/bin:${HOMEBREW_PREFIX}/sbin:/usr/local/bin:/usr/local/sbin:/usr/bin:/usr/sbin:/bin:/sbin}"'; \
+    } > /etc/profile.d/humr-bin.sh
 
 COPY --chmod=755 build/prune-skills.sh /tmp/prune-skills.sh
 COPY --chmod=755 build/check-vendor.sh /tmp/check-vendor.sh
@@ -195,9 +195,9 @@ RUN mkdir -p "${HOMEBREW_PREFIX}/bin" \
 
 USER root
 
-# Node LTS ("Krypton") under /opt/doh. Image-owned: re-synced from the image on
+# Node LTS ("Krypton") under /opt/humr. Image-owned: re-synced from the image on
 # every boot and excluded from the EFS checkpoint (persistent-root-runner.sh
-# lists /opt/doh in IMAGE_OWNED_DIRS). node/npm/npx are symlinked into
+# lists /opt/humr in IMAGE_OWNED_DIRS). node/npm/npx are symlinked into
 # $HUMR_BIN_DIR, already on the agent's PATH. Kept in its own layer, separate
 # from agent-browser below, so either can be dropped independently.
 RUN arch="$(dpkg --print-architecture)" \
@@ -214,8 +214,8 @@ RUN arch="$(dpkg --print-architecture)" \
 
 # agent-browser CLI for the browser tool (drives both local and cloud/Browser Use
 # backends). Depends on the Node layer above (requires Node >= 24, and npm to
-# install). npm resolves its global prefix to /opt/doh/node via node's realpath,
-# so the package + bin land under /opt/doh; the bin is symlinked into
+# install). npm resolves its global prefix to /opt/humr/node via node's realpath,
+# so the package + bin land under /opt/humr; the bin is symlinked into
 # $HUMR_BIN_DIR. agent-browser bundles prebuilt CLIs for ~7 platforms (~11MB
 # each) — keep only the glibc binary for the build arch plus the small JS
 # launcher and drop the rest. Clear npm's download cache (~/.npm) so it neither
@@ -237,17 +237,17 @@ RUN arch="$(dpkg --print-architecture)" \
 COPY skills/ /opt/hermes/agent/skills/
 COPY SOUL.md /opt/hermes/SOUL.md
 COPY config.yaml.template /opt/hermes/config.yaml.template
-COPY humr_runtime /opt/doh/runtime
+COPY humr_runtime /opt/humr/runtime
 
 # Expose the webapps CLI on PATH. Source-of-truth lives in humr_runtime/ so the
 # whole runtime tree COPYs together; the symlink lets the agent type `webapps`.
-RUN chmod +x /opt/doh/runtime/webapps/webapps \
-    && ln -sf /opt/doh/runtime/webapps/webapps /opt/doh/bin/webapps
+RUN chmod +x /opt/humr/runtime/webapps/webapps \
+    && ln -sf /opt/humr/runtime/webapps/webapps /opt/humr/bin/webapps
 
 # HUMR-owned WebUI extension bundle. Loaded by Hermes WebUI per docs/EXTENSIONS.md
 # when the HERMES_WEBUI_EXTENSION_* env vars are set (see webui.sh).
 # The sandbox reads this directory so the WebUI can serve the extension bundle.
-COPY webui-extension /opt/doh/webui-extension
+COPY webui-extension /opt/humr/webui-extension
 
 WORKDIR ${HERMES_WEBUI_DEFAULT_WORKSPACE}
 
@@ -256,5 +256,5 @@ EXPOSE 8787
 HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
     CMD curl -f http://localhost:8787/health || exit 1
 
-ENTRYPOINT ["/opt/doh/runtime/persistent-root-runner.sh"]
-CMD ["/opt/doh/runtime/supervisor.sh", "/opt/doh/runtime/webui.sh"]
+ENTRYPOINT ["/opt/humr/runtime/persistent-root-runner.sh"]
+CMD ["/opt/humr/runtime/supervisor.sh", "/opt/humr/runtime/webui.sh"]

@@ -31,7 +31,7 @@ def jwt_minter(rsa_keypair):
         provider: str = "oidc",
         exp_offset: int = 3600,
         kid: str = TEST_KID,
-        aud: str = "doh-sandbox.dohsandbox.com",
+        aud: str = "humr-sandbox.humrsandbox.com",
     ) -> str:
         now = int(time.time())
         claims = {
@@ -55,10 +55,10 @@ def jwt_minter(rsa_keypair):
 def policy_proxy_config() -> config_mod.PolicyProxyConfig:
     return config_mod.PolicyProxyConfig(
         app_id="vmendi-hermes",
-        env_slug="doh-sandbox",
-        env_domain="doh-sandbox.dohsandbox.com",
-        auth_base_url="https://auth.doh-sandbox.dohsandbox.com",
-        jwks_url="https://auth.doh-sandbox.dohsandbox.com/.well-known/jwks.json",
+        env_slug="humr-sandbox",
+        env_domain="humr-sandbox.humrsandbox.com",
+        auth_base_url="https://auth.humr-sandbox.humrsandbox.com",
+        jwks_url="https://auth.humr-sandbox.humrsandbox.com/.well-known/jwks.json",
         pdp_url="https://humanityrules.io/api/pdp/evaluate",
         env_bearer_token="t" * 64,
         upstream_host="127.0.0.1",

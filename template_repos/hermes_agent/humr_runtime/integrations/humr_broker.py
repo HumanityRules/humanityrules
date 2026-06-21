@@ -62,8 +62,8 @@ import tls_providers
 DEFAULT_PROXY_PORT = 9950
 DEFAULT_CONTROL_PORT = 9951
 DEFAULT_MCP_PORT = 9952
-DEFAULT_CA_DIR = Path("/run/doh/integrations-broker/ca")
-DEFAULT_PRIVATE_DIR = Path("/run/doh/integrations-broker/private")
+DEFAULT_CA_DIR = Path("/run/humr/integrations-broker/ca")
+DEFAULT_PRIVATE_DIR = Path("/run/humr/integrations-broker/private")
 DEFAULT_MCP_PERSISTENT_DIR = Path("/hermes-persistent-root/mcp-aggregator")
 DEFAULT_GATEWAY_ENV_PATH = Path("/workspace/.hermes/.env")
 DEFAULT_WEBUI_STATE_DIR = Path("/workspace/.hermes/webui-mvp")

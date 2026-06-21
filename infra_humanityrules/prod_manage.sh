@@ -18,7 +18,7 @@
 #   ./prod_manage.sh dbshell
 #
 # Examples (local-exec, target resolved from prod):
-#   ./prod_manage.sh humr_build_prebuilt_image --account "Course Hero Sandbox" --env production --source-dir template_repos/humr_dind --ecr-repo doh-dind --tag 0.2.5
+#   ./prod_manage.sh humr_build_prebuilt_image --account "Course Hero Sandbox" --env production --source-dir template_repos/humr_dind --ecr-repo humr-dind --tag 0.2.5
 #
 set -e
 
@@ -44,7 +44,7 @@ if [ $# -eq 0 ]; then
     echo "  ./prod_manage.sh shell"
     echo ""
     echo "Examples (local-exec, target resolved from prod):"
-    echo "  ./prod_manage.sh humr_build_prebuilt_image --account \"Course Hero Sandbox\" --env production --source-dir template_repos/humr_dind --ecr-repo doh-dind --tag 0.2.5"
+    echo "  ./prod_manage.sh humr_build_prebuilt_image --account \"Course Hero Sandbox\" --env production --source-dir template_repos/humr_dind --ecr-repo humr-dind --tag 0.2.5"
     exit 1
 fi
 

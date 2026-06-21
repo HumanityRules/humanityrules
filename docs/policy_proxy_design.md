@@ -48,7 +48,7 @@ Responsibilities:
 
 Runtime shape:
 
-- **Deployment:** Fargate service (1 task, 0.25 vCPU / 0.5 GB RAM, ARM64), running the same `doh/{env-slug}/policy-proxy` image as the sidecars but with `HUMR_ROLE=auth`. Fronted by the env's shared ALB via a host-based listener rule (`host-header = auth.<env-domain>` → forward → IP target group → container port 8443). ALB health check hits `/__policy_proxy/healthz`, which is served without auth.
+- **Deployment:** Fargate service (1 task, 0.25 vCPU / 0.5 GB RAM, ARM64), running the same `humr/{env-slug}/policy-proxy` image as the sidecars but with `HUMR_ROLE=auth`. Fronted by the env's shared ALB via a host-based listener rule (`host-header = auth.<env-domain>` → forward → IP target group → container port 8443). ALB health check hits `/__policy_proxy/healthz`, which is served without auth.
 - **Provisioning trigger:** lazy. Deployed on first policy-proxy-enabled app deploy in the env. Subsequent policy-proxy'd apps reuse it.
 - **Rolling deploys:** zero-downtime via `minHealthyPercent=100`, `maxHealthyPercent=200` — ECS brings up a new task and drains the old one before replacing it. Brief extra cost during deploys only.
 - **Okta configuration:** the Okta app for this env has exactly one registered redirect URI: `https://auth.<env-domain>/callback`. Per-user destination URLs are carried in `state`, not in the redirect URI — no per-user whitelist.

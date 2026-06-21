@@ -44,7 +44,7 @@ APP_CONFIGS = {
 
 def _build_ecr_repo_name(app_slug: str, env_slug: str) -> str:
     """Build ECR repository name (app slugs are unique per org, environments are per-account, no collision)."""
-    return f"doh/{env_slug}/{app_slug}"
+    return f"humr/{env_slug}/{app_slug}"
 
 
 def get_app_config(app_name: str, env_slug: str) -> appconfig.AppConfig:
