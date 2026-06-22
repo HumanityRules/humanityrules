@@ -1,7 +1,9 @@
+from django import forms
 from django.contrib import admin
 from django.contrib.auth.admin import UserAdmin as BaseUserAdmin
 from django.http import HttpRequest
 
+from humanityrules_app.views.integrations import provider_openrouter
 from humanityrules_app.models import (
     AWSAccount,
     App,
@@ -21,6 +23,7 @@ from humanityrules_app.models import (
     IdentityAttribute,
     IntegrationConfig,
     IntegrationGitProvider,
+    IntegrationSharedCredential,
     IntegrationUserCredential,
     LLMUsageLog,
     Message,
@@ -470,3 +473,55 @@ class IntegrationUserCredentialAdmin(admin.ModelAdmin):
     search_fields = ["owner_user__email", "owner_user__username", "environment__name", "environment__slug", "app_slug"]
     readonly_fields = ["id", "created_at", "updated_at", "last_refreshed_at"]
     autocomplete_fields = ["owner_user", "environment"]
+
+
+class IntegrationSharedCredentialForm(forms.ModelForm):
+    """Admin form that validates scope/target coherence and live-checks OpenRouter keys."""
+
+    class Meta:
+        model = IntegrationSharedCredential
+        fields = "__all__"
+
+    def clean(self) -> dict:
+        cleaned = super().clean()
+        scope = cleaned.get("scope")
+        target_user = cleaned.get("target_user")
+        target_workspace = cleaned.get("target_workspace")
+        if scope == IntegrationSharedCredential.Scope.USER:
+            if target_user is None:
+                raise forms.ValidationError({"target_user": "Required when scope is 'user'."})
+            if target_workspace is not None:
+                raise forms.ValidationError({"target_workspace": "Only set when scope is 'workspace'."})
+        elif scope == IntegrationSharedCredential.Scope.WORKSPACE:
+            if target_workspace is None:
+                raise forms.ValidationError({"target_workspace": "Required when scope is 'workspace'."})
+            if target_user is not None:
+                raise forms.ValidationError({"target_user": "Only set when scope is 'user'."})
+        elif scope == IntegrationSharedCredential.Scope.EVERYONE and (target_user is not None or target_workspace is not None):
+            raise forms.ValidationError("Scope 'everyone' must not set a target user or workspace.")
+
+        provider = cleaned.get("provider")
+        credentials = cleaned.get("credentials")
+        if provider == IntegrationUserCredential.Provider.OPENROUTER and isinstance(credentials, dict):
+            api_key = str(credentials.get("api_key", "") or "").strip()
+            if api_key:
+                metadata, error = provider_openrouter.validate_shared_key(api_key=api_key)
+                if error is not None:
+                    raise forms.ValidationError({"credentials": error})
+                cleaned["metadata"] = metadata
+        return cleaned
+
+
+@admin.register(IntegrationSharedCredential)
+class IntegrationSharedCredentialAdmin(admin.ModelAdmin):
+    form = IntegrationSharedCredentialForm
+    list_display = ["organization", "provider", "scope", "target_user", "target_workspace", "created_by", "created_at", "updated_at"]
+    list_filter = ["provider", "scope", "organization"]
+    search_fields = ["organization__name", "organization__slug", "target_user__email", "target_workspace__name"]
+    readonly_fields = ["id", "created_at", "updated_at", "metadata"]
+    autocomplete_fields = ["organization", "target_user", "target_workspace", "created_by"]
+
+    def save_model(self, request: HttpRequest, obj: IntegrationSharedCredential, form: forms.ModelForm, change: bool) -> None:
+        if obj.created_by_id is None:
+            obj.created_by = request.user
+        super().save_model(request, obj, form, change)

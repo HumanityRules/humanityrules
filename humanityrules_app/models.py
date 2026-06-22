@@ -1640,12 +1640,13 @@ class GroupAttribute(models.Model):
 
 
 class ResourceTag(models.Model):
-    """Tag on a resource (workspace, environment, or app). Exactly one FK must be set."""
+    """Tag on a resource (workspace, environment, app, or credential). Exactly one FK must be set."""
 
     class ResourceType(models.TextChoices):
         WORKSPACE = "workspace", "Workspace"
         ENVIRONMENT = "environment", "Environment"
         APP = "app", "App"
+        CREDENTIAL = "credential", "Credential"
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid7, editable=False)
     organization = models.ForeignKey(
@@ -1661,6 +1662,9 @@ class ResourceTag(models.Model):
     app = models.ForeignKey(
         App, on_delete=models.CASCADE, null=True, blank=True, related_name="tags",
     )
+    credential = models.ForeignKey(
+        "IntegrationSharedCredential", on_delete=models.CASCADE, null=True, blank=True, related_name="tags",
+    )
     key = models.CharField(max_length=100)
     value = models.CharField(max_length=255)
     created_at = models.DateTimeField(auto_now_add=True)
@@ -1669,9 +1673,10 @@ class ResourceTag(models.Model):
         constraints = [
             models.CheckConstraint(
                 condition=(
-                    models.Q(resource_type="workspace", workspace__isnull=False, environment__isnull=True, app__isnull=True)
-                    | models.Q(resource_type="environment", workspace__isnull=True, environment__isnull=False, app__isnull=True)
-                    | models.Q(resource_type="app", workspace__isnull=True, environment__isnull=True, app__isnull=False)
+                    models.Q(resource_type="workspace", workspace__isnull=False, environment__isnull=True, app__isnull=True, credential__isnull=True)
+                    | models.Q(resource_type="environment", workspace__isnull=True, environment__isnull=False, app__isnull=True, credential__isnull=True)
+                    | models.Q(resource_type="app", workspace__isnull=True, environment__isnull=True, app__isnull=False, credential__isnull=True)
+                    | models.Q(resource_type="credential", workspace__isnull=True, environment__isnull=True, app__isnull=True, credential__isnull=False)
                 ),
                 name="resource_tag_exactly_one_fk",
             ),
@@ -1688,6 +1693,7 @@ class Policy(models.Model):
         WORKSPACE = "workspace", "Workspace"
         ENVIRONMENT = "environment", "Environment"
         APP = "app", "App"
+        CREDENTIAL = "credential", "Credential"
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid7, editable=False)
     organization = models.ForeignKey(
@@ -1836,6 +1842,85 @@ class IntegrationUserCredential(models.Model):
 
     def __str__(self) -> str:
         return f"IntegrationUserCredential({self.owner_user.username}@{self.environment.slug}/{self.app_slug}:{self.provider})"
+
+
+class IntegrationSharedCredential(models.Model):
+    """An org-provisioned integration credential an admin shares with users.
+
+    The control plane stores one key here and an administrator chooses who
+    receives it (a user, a workspace, or everybody). Hermes brokers fetch it
+    automatically — when one applies it shadows the user's own pasted key
+    (organization wins). Authorization is full ABAC: this is the ``credential``
+    resource type with action ``credential:use``. The ``scope``/``target_*``
+    columns are the canonical write-model and seed the ResourceTags the engine
+    matches against (see ``abac_service.sync_shared_credential_tags``).
+    """
+
+    class Scope(models.TextChoices):
+        EVERYONE = "everyone", "Everyone"
+        USER = "user", "User"
+        WORKSPACE = "workspace", "Workspace"
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid7, editable=False)
+    organization = models.ForeignKey(
+        "Organization", on_delete=models.CASCADE, related_name="shared_integration_credentials",
+    )
+    provider = models.CharField(max_length=50, choices=IntegrationUserCredential.Provider.choices)
+    scope = models.CharField(max_length=20, choices=Scope.choices)
+    target_workspace = models.ForeignKey(
+        Workspace, on_delete=models.CASCADE, null=True, blank=True,
+        related_name="shared_integration_credentials",
+        help_text="Set only when scope=workspace; the workspace whose apps receive this credential.",
+    )
+    target_user = models.ForeignKey(
+        "User", on_delete=models.CASCADE, null=True, blank=True,
+        related_name="received_shared_credentials",
+        help_text="Set only when scope=user; the user whose apps receive this credential.",
+    )
+    credentials = models.JSONField(
+        default=dict,
+        help_text="Secret provider-owned values supplied by the administrator, such as API keys.",
+    )
+    config = models.JSONField(default=dict, help_text="Non-secret provider configuration.")
+    metadata = models.JSONField(default=dict, help_text="Derived display/status data such as validation timestamps.")
+    created_by = models.ForeignKey(
+        "User", on_delete=models.SET_NULL, null=True, blank=True, related_name="+",
+        help_text="The administrator who provisioned this shared credential.",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "Shared Integration Credential"
+        verbose_name_plural = "Shared Integration Credentials"
+        constraints = [
+            models.CheckConstraint(
+                condition=(
+                    models.Q(scope="everyone", target_workspace__isnull=True, target_user__isnull=True)
+                    | models.Q(scope="user", target_user__isnull=False, target_workspace__isnull=True)
+                    | models.Q(scope="workspace", target_workspace__isnull=False, target_user__isnull=True)
+                ),
+                name="shared_credential_scope_target_consistent",
+            ),
+            models.UniqueConstraint(
+                fields=["organization", "provider"],
+                condition=models.Q(scope="everyone"),
+                name="uniq_shared_credential_everyone_per_provider",
+            ),
+            models.UniqueConstraint(
+                fields=["organization", "provider", "target_user"],
+                condition=models.Q(scope="user"),
+                name="uniq_shared_credential_user_per_provider",
+            ),
+            models.UniqueConstraint(
+                fields=["organization", "provider", "target_workspace"],
+                condition=models.Q(scope="workspace"),
+                name="uniq_shared_credential_workspace_per_provider",
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return f"IntegrationSharedCredential({self.organization.slug}:{self.provider}:{self.scope})"
 
 
 # =============================================================================
@@ -2017,3 +2102,15 @@ def create_default_app_policy(
     if created:
         from humanityrules_app.services.abac_service import create_default_app_policy as _create_policy
         _create_policy(instance)
+
+
+@receiver(post_save, sender=IntegrationSharedCredential)
+def sync_shared_credential_tags(
+    sender: type[IntegrationSharedCredential],
+    instance: IntegrationSharedCredential,
+    created: bool,
+    **kwargs: object,
+) -> None:
+    """Re-seed the credential's ABAC tags whenever it is created or its scope/target changes."""
+    from humanityrules_app.services import abac_service
+    abac_service.sync_shared_credential_tags(instance)

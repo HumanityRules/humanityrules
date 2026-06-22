@@ -18,6 +18,7 @@ from humanityrules_app.models import (
     GroupAttribute,
     GroupMembership,
     IdentityAttribute,
+    IntegrationSharedCredential,
     Organization,
     OrganizationMembership,
     Policy,
@@ -27,10 +28,13 @@ from humanityrules_app.models import (
 )
 
 # A condition value may be a literal string or a cross-side reference of the
-# form "$identity.<key>" (valid on the resource-conditions side) or
-# "$resource.<key>" (valid on the identity-conditions side). The reference is
-# resolved at evaluation time against the opposite side's (key -> {values}) map.
-_REFERENCE_PATTERN = re.compile(r"^\$(identity|resource)\.([a-zA-Z0-9_\-]+)$")
+# form "$identity.<key>", "$resource.<key>", or "$app.<key>". A reference may
+# point at any side other than the one the condition lives on; it resolves at
+# evaluation time against that side's (key -> {values}) map. `$app` is the
+# requesting app's effective tags, supplied only on the credential path
+# (filter_permitted_credentials); it has no conditions list of its own and
+# fails closed when no app context is in hand.
+_REFERENCE_PATTERN = re.compile(r"^\$(identity|resource|app)\.([a-zA-Z0-9_\-]+)$")
 
 # ---------------------------------------------------------------------------
 # Action hierarchy: admin actions imply lower-level actions
@@ -78,9 +82,9 @@ def get_effective_attributes(organization: Organization, user: User) -> list[tup
 # Effective tags
 # ---------------------------------------------------------------------------
 
-def _assert_resource_belongs_to_org(organization: Organization, resource: App | Environment | Workspace, resource_type: str) -> None:
+def _assert_resource_belongs_to_org(organization: Organization, resource: App | Environment | Workspace | IntegrationSharedCredential, resource_type: str) -> None:
     """Raise if resource does not belong to the given organization."""
-    if resource_type in ("workspace", "app"):
+    if resource_type in ("workspace", "app", "credential"):
         actual_org_id = resource.organization_id
     elif resource_type == "environment":
         actual_org_id = resource.aws_account.organization_id
@@ -94,7 +98,7 @@ def _assert_resource_belongs_to_org(organization: Organization, resource: App | 
         )
 
 
-def get_effective_tags(organization: Organization, resource: App | Environment | Workspace, resource_type: str) -> list[tuple[str, str, str]]:
+def get_effective_tags(organization: Organization, resource: App | Environment | Workspace | IntegrationSharedCredential, resource_type: str) -> list[tuple[str, str, str]]:
     """
     Return list of (key, value, source) tuples for a resource.
     Apps inherit workspace tags (source="inherited:<WorkspaceName>").
@@ -113,6 +117,9 @@ def get_effective_tags(organization: Organization, resource: App | Environment |
     elif resource_type == "environment":
         for t in ResourceTag.objects.filter(organization=organization, environment=resource):
             tags.append((t.key, t.value, "direct"))
+    elif resource_type == "credential":
+        for t in ResourceTag.objects.filter(organization=organization, credential=resource):
+            tags.append((t.key, t.value, "direct"))
 
     return tags
 
@@ -125,12 +132,12 @@ def validate_policy_conditions(identity_conditions: list[dict], resource_conditi
     """Raise ValidationError if conditions are malformed."""
     _validate_no_mixed_wildcard(identity_conditions, "Identity")
     _validate_no_mixed_wildcard(resource_conditions, "Resource")
-    _validate_references(identity_conditions, allowed_side="resource", label="Identity")
-    _validate_references(resource_conditions, allowed_side="identity", label="Resource")
+    _validate_references(identity_conditions, self_side="identity", label="Identity")
+    _validate_references(resource_conditions, self_side="resource", label="Resource")
 
 
-def _validate_references(conditions: list[dict], allowed_side: str, label: str) -> None:
-    """Reject references on the wrong side or references on the condition's key field."""
+def _validate_references(conditions: list[dict], self_side: str, label: str) -> None:
+    """Reject references in the key field or references that point at the condition's own side."""
     for c in conditions:
         key = c.get("key")
         value = c.get("value")
@@ -143,10 +150,10 @@ def _validate_references(conditions: list[dict], allowed_side: str, label: str) 
         if ref is None:
             continue
         ref_side, _ = ref
-        if ref_side != allowed_side:
+        if ref_side == self_side:
             raise ValidationError(
-                f"{label} conditions: value reference {value!r} points at the wrong side. "
-                f"Only $({allowed_side}).<key> is valid here.",
+                f"{label} conditions: value reference {value!r} cannot point at its own side. "
+                f"Reference another side ($identity / $resource / $app).",
             )
 
 
@@ -180,21 +187,17 @@ def _parse_reference(value: str) -> tuple[str, str] | None:
 def _conditions_match(
     conditions: list[dict[str, str]],
     self_side: set[tuple[str, str]],
-    other_side_label: str,
-    other_side_map: dict[str, set[str]] | None,
+    other_sides: dict[str, dict[str, set[str]]],
 ) -> bool:
     """Check if all conditions match. Wildcard matches unconditionally.
 
-    A clause's value may be a cross-side reference like "$resource.<key>" (on
-    identity conditions) or "$identity.<key>" (on resource conditions). The
-    reference is resolved against *other_side_map*: the clause matches iff
-    ``(clause.key, v)`` is in *self_side* for some value v the referenced key
-    carries on the other side.
-
-    *other_side_label* is the side references are allowed to point at ("resource"
-    when evaluating identity conditions, "identity" when evaluating resource
-    conditions). References with the wrong side, and references at all when
-    *other_side_map* is None, cause the clause to fail closed.
+    A clause's value may be a cross-side reference like "$resource.<key>",
+    "$identity.<key>", or "$app.<key>". *other_sides* maps each referenceable
+    side label to its (key -> {values}) map. A reference resolves against
+    *other_sides[ref_side]*: the clause matches iff ``(clause.key, v)`` is in
+    *self_side* for some value v the referenced key carries on that side.
+    References to a side absent from *other_sides* — including the condition's
+    own side, which is never listed — fail closed.
     """
     if _is_wildcard(conditions):
         return True
@@ -207,9 +210,10 @@ def _conditions_match(
                 return False
             continue
         ref_side, ref_key = ref
-        if ref_side != other_side_label or other_side_map is None:
+        side_map = other_sides.get(ref_side)
+        if not side_map:
             return False
-        candidate_values = other_side_map.get(ref_key)
+        candidate_values = side_map.get(ref_key)
         if not candidate_values:
             return False
         if not any((key, v) in self_side for v in candidate_values):
@@ -259,14 +263,12 @@ def evaluate_policies(
         identity_match = _conditions_match(
             conditions=policy.identity_conditions or [],
             self_side=attr_set,
-            other_side_label="resource",
-            other_side_map=tag_map,
+            other_sides={"resource": tag_map},
         )
         resource_match = _conditions_match(
             conditions=policy.resource_conditions or [],
             self_side=tag_set,
-            other_side_label="identity",
-            other_side_map=attr_map,
+            other_sides={"identity": attr_map},
         )
 
         if identity_match and resource_match:
@@ -302,13 +304,12 @@ def evaluate_policies_unscoped(organization: Organization, user: User, resource_
     denials = set()
 
     for policy in policies:
-        # Unscoped evaluation has no resource in hand; $resource.* references
-        # on the identity side cannot resolve, so pass no other_side_map.
+        # Unscoped evaluation has no resource in hand; $resource.*/$app.*
+        # references on the identity side cannot resolve, so pass no other sides.
         identity_match = _conditions_match(
             conditions=policy.identity_conditions or [],
             self_side=attr_set,
-            other_side_label="resource",
-            other_side_map=None,
+            other_sides={},
         )
         resource_match = _is_wildcard(policy.resource_conditions or [])
 
@@ -394,8 +395,7 @@ def filter_permitted_resources(
         if _conditions_match(
             conditions=conds,
             self_side=attr_set,
-            other_side_label="resource",
-            other_side_map=None,
+            other_sides={},
         ):
             matching_policies.append(policy)
 
@@ -455,16 +455,14 @@ def filter_permitted_resources(
             identity_match = _conditions_match(
                 conditions=policy.identity_conditions or [],
                 self_side=attr_set,
-                other_side_label="resource",
-                other_side_map=tag_map,
+                other_sides={"resource": tag_map},
             )
             if not identity_match:
                 continue
             if not _conditions_match(
                 conditions=policy.resource_conditions or [],
                 self_side=tag_set,
-                other_side_label="identity",
-                other_side_map=attr_map,
+                other_sides={"identity": attr_map},
             ):
                 continue
             for a in (policy.actions or []):
@@ -483,6 +481,61 @@ def filter_permitted_resources(
             permitted_ids.append(resource.pk)
 
     return queryset.filter(pk__in=permitted_ids)
+
+
+def filter_permitted_credentials(
+    organization: Organization,
+    user: User,
+    app: App | None,
+    queryset: QuerySet[IntegrationSharedCredential],
+) -> list[IntegrationSharedCredential]:
+    """Return the shared credentials a (user, app) pair may use via credential:use.
+
+    The credential resource type is the only one whose policies reference the
+    requesting app (``$app.<tag>``), so it gets its own evaluation path that
+    supplies the app's effective tags as the ``app`` side. When *app* is None
+    (the broker could not resolve an App row for the request), ``$app.*``
+    references fail closed, so workspace-scoped credentials are skipped while
+    user- and everyone-scoped ones still resolve.
+    """
+    policies = list(Policy.objects.filter(organization=organization, resource_type="credential"))
+    if not policies:
+        return []
+
+    attr_set = {(k, v) for k, v, _ in get_effective_attributes(organization, user)}
+    attr_map = _build_side_map(attr_set)
+    app_map = (
+        _build_side_map({(k, v) for k, v, _ in get_effective_tags(organization, app, "app")})
+        if app is not None else {}
+    )
+
+    permitted = []
+    for credential in queryset:
+        tag_set = {(k, v) for k, v, _ in get_effective_tags(organization, credential, "credential")}
+        tag_map = _build_side_map(tag_set)
+        grants = set()
+        denials = set()
+        for policy in policies:
+            if not _conditions_match(
+                conditions=policy.identity_conditions or [],
+                self_side=attr_set,
+                other_sides={"resource": tag_map, "app": app_map},
+            ):
+                continue
+            if not _conditions_match(
+                conditions=policy.resource_conditions or [],
+                self_side=tag_set,
+                other_sides={"identity": attr_map, "app": app_map},
+            ):
+                continue
+            for action in (policy.actions or []):
+                if action.startswith("!"):
+                    denials.add(action[1:])
+                else:
+                    grants.add(action)
+        if "credential:use" in (grants - denials):
+            permitted.append(credential)
+    return permitted
 
 
 def is_org_admin(organization: Organization, user: User) -> bool:
@@ -643,6 +696,32 @@ def bootstrap_organization(organization: Organization, admin_user: User) -> None
             "resource_conditions": [{"key": "app-type", "value": "personal-assistant"}],
             "actions": ["app:use"],
         },
+        # Shared (org-provisioned) integration credentials. Three global,
+        # self-referential policies cover the three sharing scopes without a
+        # policy per credential. The workspace one uses $app: it grants
+        # credential:use when the credential's shared-workspace tag matches the
+        # requesting app's workspace-name tag (whose value is the workspace slug).
+        {
+            "name": "Shared credentials: everyone access",
+            "resource_type": "credential",
+            "identity_conditions": [{"key": "authenticated", "value": "true"}],
+            "resource_conditions": [{"key": "shared-scope", "value": "everyone"}],
+            "actions": ["credential:use"],
+        },
+        {
+            "name": "Shared credentials: targeted user access",
+            "resource_type": "credential",
+            "identity_conditions": [{"key": "username", "value": "$resource.shared-user"}],
+            "resource_conditions": [{"key": "shared-scope", "value": "user"}],
+            "actions": ["credential:use"],
+        },
+        {
+            "name": "Shared credentials: workspace access",
+            "resource_type": "credential",
+            "identity_conditions": [{"key": "authenticated", "value": "true"}],
+            "resource_conditions": [{"key": "shared-workspace", "value": "$app.workspace-name"}],
+            "actions": ["credential:use"],
+        },
     ]
 
     for seed in seed_policies:
@@ -717,6 +796,41 @@ def create_default_environment_tag(environment: Environment) -> None:
         key="environment-name",
         value=environment.slug,
     )
+
+
+def sync_shared_credential_tags(credential: IntegrationSharedCredential) -> None:
+    """Re-seed a shared credential's ABAC tags from its scope/target columns.
+
+    Called on every save (an admin can re-target a credential), so it clears
+    and rewrites rather than get_or_create. The workspace tag stores the
+    workspace slug to match ``$app.workspace-name`` (whose value is also the
+    slug); the user tag stores the immutable username.
+    """
+    org = credential.organization
+    ResourceTag.objects.filter(organization=org, credential=credential).delete()
+    ResourceTag.objects.create(
+        organization=org,
+        resource_type="credential",
+        credential=credential,
+        key="shared-scope",
+        value=credential.scope,
+    )
+    if credential.scope == IntegrationSharedCredential.Scope.USER and credential.target_user_id is not None:
+        ResourceTag.objects.create(
+            organization=org,
+            resource_type="credential",
+            credential=credential,
+            key="shared-user",
+            value=credential.target_user.username,
+        )
+    elif credential.scope == IntegrationSharedCredential.Scope.WORKSPACE and credential.target_workspace_id is not None:
+        ResourceTag.objects.create(
+            organization=org,
+            resource_type="credential",
+            credential=credential,
+            key="shared-workspace",
+            value=credential.target_workspace.slug,
+        )
 
 
 # ---------------------------------------------------------------------------

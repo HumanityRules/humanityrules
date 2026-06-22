@@ -27,8 +27,8 @@ from django.http import HttpRequest, JsonResponse
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_POST
 
-from humanityrules_app.models import Environment, User
-from humanityrules_app.views.integrations import broker_request_context, provider_registry
+from humanityrules_app.models import App, Environment, User
+from humanityrules_app.views.integrations import broker_request_context, provider_registry, shared_credential_resolver
 
 logger = logging.getLogger(__name__)
 
@@ -103,11 +103,34 @@ def integrations_tokens_batch(request: HttpRequest) -> JsonResponse:
             environment.slug, owner_username, app_slug, unknown_slugs,
         )
     results: dict[str, dict] = {slug: {"outcome": "absent"} for slug in unknown_slugs}
-    if specs_to_run:
-        with ThreadPoolExecutor(max_workers=len(specs_to_run)) as executor:
+
+    # Org-provisioned shared credentials win over the user's own pasted key.
+    # Resolve them first (DB-only, no upstream calls); whatever they cover drops
+    # out of the personal-refresh dispatch below. `app` may be None when app_slug
+    # names no App row — workspace-scoped shares then fail closed in the resolver.
+    organization = environment.aws_account.organization
+    app = App.objects.filter(organization=organization, slug=app_slug).first()
+    personal_specs = {}
+    for slug, spec in specs_to_run.items():
+        refresh_outcome_from_shared = getattr(spec.module, "refresh_outcome_from_shared", None)
+        shared = (
+            shared_credential_resolver.resolve(organization=organization, user=user, app=app, provider=slug)
+            if refresh_outcome_from_shared is not None else None
+        )
+        if shared is not None:
+            results[slug] = refresh_outcome_from_shared(shared)
+            logger.info(
+                "batched token refresh: shared credential used env=%s owner=%s app=%s provider=%s scope=%s",
+                environment.slug, owner_username, app_slug, slug, shared.scope,
+            )
+        else:
+            personal_specs[slug] = spec
+
+    if personal_specs:
+        with ThreadPoolExecutor(max_workers=len(personal_specs)) as executor:
             future_to_slug = {
                 executor.submit(_run_handler, spec.module.refresh_outcome, environment, user, app_slug): slug
-                for slug, spec in specs_to_run.items()
+                for slug, spec in personal_specs.items()
             }
             for future in future_to_slug:
                 slug = future_to_slug[future]

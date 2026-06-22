@@ -5,7 +5,7 @@ import logging
 import httpx
 from django.utils import timezone
 
-from humanityrules_app.models import App, Environment, IntegrationUserCredential, User
+from humanityrules_app.models import App, Environment, IntegrationSharedCredential, IntegrationUserCredential, User
 from humanityrules_app.views.integrations import provider_common
 
 logger = logging.getLogger(__name__)
@@ -145,3 +145,27 @@ def refresh_outcome(environment: Environment, owner_user: User, app_slug: str) -
         config=credential.config,
         metadata=credential.metadata,
     )
+
+
+def refresh_outcome_from_shared(credential: IntegrationSharedCredential) -> dict:
+    """Build the broker refresh outcome for an org-shared OpenRouter credential."""
+    api_key = credential.credentials.get("api_key", "")
+    if not api_key:
+        return provider_common.absent()
+    return provider_common.has_token(
+        secrets={"api_key": api_key},
+        expires_in=OPENROUTER_BROKER_CACHE_SECONDS,
+        config=credential.config,
+        metadata=credential.metadata,
+    )
+
+
+def validate_shared_key(api_key: str) -> tuple[dict | None, str | None]:
+    """Validate an admin-supplied OpenRouter key for org sharing; return (metadata, error)."""
+    api_key = (api_key or "").strip()
+    if not api_key:
+        return None, "api_key is required"
+    key_data, openrouter_error = _openrouter_current_key(api_key=api_key)
+    if openrouter_error is not None:
+        return None, openrouter_error
+    return _metadata_from_key_data(key_data=key_data), None
