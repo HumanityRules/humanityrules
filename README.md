@@ -33,9 +33,10 @@ uv run manage.py run_job_worker
 uv run manage.py makemigrations
 uv run manage.py migrate
 
-# Django admin (useful for debugging auth)
-uv run manage.py createsuperuser
-# Then visit /admin/
+# Django admin (/admin/) — separate from HumR org admin (ABAC).
+# WorkOS/OIDC login does not grant /admin/; promote an existing user first:
+DJANGO_SUPERUSER_EMAIL=you@example.com uv run manage.py ensure_superuser
+# Then visit /admin/ while logged in as that email (or /auth/dev-login/?next=/admin/ in DEBUG).
 ```
 
 ## Bootstrap (historical)
