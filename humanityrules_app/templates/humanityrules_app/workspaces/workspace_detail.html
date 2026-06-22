@@ -38,8 +38,7 @@
             {% for app in apps %}
             {% include "humanityrules_app/partials/_app_card.html" %}
             {% endfor %}
-            {# New App. With agent deployments off, template deploy is the only path, so skip the
-               source-picker modal and go straight to the template picker. #}
+            {# New App: when agent deployments are off, go straight to the template picker. #}
             {% if agent_deployments_enabled %}
             <button type="button"
                     onclick="document.getElementById('new-app-source-modal').classList.remove('hidden')"
