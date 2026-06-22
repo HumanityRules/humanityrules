@@ -30,6 +30,32 @@
         Cleanup is in progress.
     </div>
     {% endif %}
+
+    <div x-data="{ tab: '{{ initial_tab }}' }">
+        {% comment %} Tabs: Overview + the live deployment log. The log tab is disabled until there's
+        something to show, and opens by default ({{ initial_tab }}) while a deployment is in progress. {% endcomment %}
+        <div class="mb-6 border-b border-gray-200 dark:border-gray-700">
+            <nav class="-mb-px flex gap-6" aria-label="Tabs">
+                <button type="button"
+                        @click="tab = 'content'"
+                        :class="tab === 'content' ? 'border-indigo-500 text-indigo-600 dark:text-indigo-400' : 'border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300'"
+                        class="whitespace-nowrap border-b-2 px-1 py-3 text-sm font-medium">Overview</button>
+                {% if log_tab_enabled %}
+                <button type="button"
+                        @click="tab = 'logs'"
+                        hx-get="{% url 'app_deployment_log' app_slug=app.slug %}"
+                        hx-target="#deployment-log-region"
+                        hx-swap="innerHTML"
+                        :class="tab === 'logs' ? 'border-indigo-500 text-indigo-600 dark:text-indigo-400' : 'border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300'"
+                        class="whitespace-nowrap border-b-2 px-1 py-3 text-sm font-medium">Deployment Log</button>
+                {% else %}
+                <span class="cursor-not-allowed whitespace-nowrap border-b-2 border-transparent px-1 py-3 text-sm font-medium text-gray-300 dark:text-gray-600"
+                      title="No deployment logs yet">Deployment Log</span>
+                {% endif %}
+            </nav>
+        </div>
+
+        <div x-show="tab === 'content'"{% if initial_tab != 'content' %} style="display: none"{% endif %}>
     {# App details and tags side by side #}
     <div class="grid grid-cols-1 sm:grid-cols-2 gap-6 mb-6">
         <div class="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-4">
@@ -159,4 +185,31 @@
         {% include "humanityrules_app/apps/_app_deployments_empty.html" %}
         {% endif %}
     </div>
+        </div>{# end Overview panel #}
+
+        <div x-show="tab === 'logs'"{% if initial_tab != 'logs' %} style="display: none"{% endif %}>
+            {% comment %} Auto-tail lives here, not on the log fragment, because this element survives
+            the per-second poll swap while #deployment-log-console is rebuilt each time. Before the swap
+            we record whether the user was pinned to the bottom (within 40px); after, we re-pin only if
+            they were — otherwise we restore their exact scroll position, so manual scrolling isn't yanked.
+            When logs is the initial tab (a deploy is in flight) we also self-load the fragment on page
+            load, since no tab click happens to trigger the fetch. {% endcomment %}
+            <div id="deployment-log-region"
+                 {% if initial_tab == 'logs' %}
+                 hx-get="{% url 'app_deployment_log' app_slug=app.slug %}"
+                 hx-trigger="load"
+                 hx-swap="innerHTML"
+                 {% endif %}
+                 hx-on::before-swap="const c = this.querySelector('#deployment-log-console'); this._stick = !c || c.scrollHeight - c.scrollTop - c.clientHeight < 40; this._top = c ? c.scrollTop : 0;"
+                 hx-on::after-swap="const c = this.querySelector('#deployment-log-console'); if (c) c.scrollTop = this._stick ? c.scrollHeight : this._top;">
+                <div class="flex items-center justify-center gap-2 py-8 text-sm text-gray-500 dark:text-gray-400">
+                    <svg class="h-4 w-4 animate-spin" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.4 0 0 5.4 0 12h4z"></path>
+                    </svg>
+                    Loading deployment log…
+                </div>
+            </div>
+        </div>{# end Deployment Log panel #}
+    </div>{# end tabs #}
 </div>
