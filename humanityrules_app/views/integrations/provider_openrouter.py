@@ -135,11 +135,11 @@ def refresh_outcome(environment: Environment, owner_user: User, app_slug: str) -
         provider=IntegrationUserCredential.Provider.OPENROUTER,
     ).first()
     if credential is None:
-        return provider_common.absent()
+        return provider_common.absent_outcome()
     api_key = credential.credentials.get("api_key", "")
     if not api_key:
-        return provider_common.absent()
-    return provider_common.has_token(
+        return provider_common.absent_outcome()
+    return provider_common.has_token_outcome(
         secrets={"api_key": api_key},
         expires_in=OPENROUTER_BROKER_CACHE_SECONDS,
         config=credential.config,
@@ -151,8 +151,8 @@ def refresh_outcome_from_shared(credential: IntegrationSharedCredential) -> dict
     """Build the broker refresh outcome for an org-shared OpenRouter credential."""
     api_key = credential.credentials.get("api_key", "")
     if not api_key:
-        return provider_common.absent()
-    return provider_common.has_token(
+        return provider_common.absent_outcome()
+    return provider_common.has_token_outcome(
         secrets={"api_key": api_key},
         expires_in=OPENROUTER_BROKER_CACHE_SECONDS,
         config=credential.config,

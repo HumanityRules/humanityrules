@@ -236,7 +236,7 @@ def refresh_outcome(environment: Environment, owner_user: User, app_slug: str) -
     """
     if not settings.GITHUB_APP_CLIENT_ID or not settings.GITHUB_APP_CLIENT_SECRET:
         logger.error("github token refresh failed: GITHUB_APP_CLIENT_ID/SECRET not configured")
-        return provider_common.transient()
+        return provider_common.transient_outcome()
 
     integration = IntegrationUserCredential.objects.filter(
         owner_user=owner_user,
@@ -245,7 +245,7 @@ def refresh_outcome(environment: Environment, owner_user: User, app_slug: str) -
         provider=IntegrationUserCredential.Provider.GITHUB,
     ).first()
     if integration is None:
-        return provider_common.absent()
+        return provider_common.absent_outcome()
 
     old_refresh = integration.credentials.get("refresh_token", "")
     if not old_refresh:
@@ -253,7 +253,7 @@ def refresh_outcome(environment: Environment, owner_user: User, app_slug: str) -
             "github token refresh: row missing refresh_token env=%s owner=%s app=%s",
             environment.slug, owner_user.username, app_slug,
         )
-        return provider_common.absent()
+        return provider_common.absent_outcome()
     exchange_result = _exchange_refresh_token(refresh_token=old_refresh)
 
     # Whatever happens next, we must only mutate the row if its
@@ -274,7 +274,7 @@ def refresh_outcome(environment: Environment, owner_user: User, app_slug: str) -
                 "github token refresh: revoked by github, deleted row env=%s owner=%s app=%s",
                 environment.slug, owner_user.username, app_slug,
             )
-            return provider_common.absent()
+            return provider_common.absent_outcome()
         # Row already rotated by a concurrent refresh — surface as
         # transient so we don't overwrite the winner's cache; the next
         # call reads the winner's R2.
@@ -282,14 +282,14 @@ def refresh_outcome(environment: Environment, owner_user: User, app_slug: str) -
             "github token refresh: stale revoke (row rotated under us) env=%s owner=%s app=%s",
             environment.slug, owner_user.username, app_slug,
         )
-        return provider_common.transient()
+        return provider_common.transient_outcome()
 
     if exchange_result.error is not None:
         logger.error(
             "github token refresh failed env=%s owner=%s app=%s error=%s",
             environment.slug, owner_user.username, app_slug, exchange_result.error,
         )
-        return provider_common.transient()
+        return provider_common.transient_outcome()
 
     # Compare-and-swap update: only rotate if the row still holds R1. A
     # peer who also got back a successful rotation may have already
@@ -306,7 +306,7 @@ def refresh_outcome(environment: Environment, owner_user: User, app_slug: str) -
         updated_at=refreshed_at,
     )
 
-    return provider_common.has_token(
+    return provider_common.has_token_outcome(
         secrets={"access_token": exchange_result.response["access_token"]},
         expires_in=int(exchange_result.response.get("expires_in", 0)),
         config={},

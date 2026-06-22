@@ -467,12 +467,12 @@ def refresh_outcome(environment: Environment, owner_user: User, app_slug: str) -
         provider=IntegrationUserCredential.Provider.SLACK,
     ).first()
     if credential is None:
-        return provider_common.absent()
+        return provider_common.absent_outcome()
     app_token = credential.credentials.get("app_token", "")
     bot_token = credential.credentials.get("bot_token", "")
     if not app_token or not bot_token:
-        return provider_common.absent()
-    return provider_common.has_token(
+        return provider_common.absent_outcome()
+    return provider_common.has_token_outcome(
         secrets={"app_token": app_token, "bot_token": bot_token},
         expires_in=SLACK_BROKER_CACHE_SECONDS,
         config=credential.config,

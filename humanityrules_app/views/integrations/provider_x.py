@@ -266,7 +266,7 @@ def refresh_outcome(environment: Environment, owner_user: User, app_slug: str) -
         x_cfg = IntegrationConfig.objects.get(provider=IntegrationConfig.Provider.X)
     except IntegrationConfig.DoesNotExist:
         logger.error("x token refresh failed: IntegrationConfig(provider=x) missing")
-        return provider_common.transient()
+        return provider_common.transient_outcome()
 
     def build_secrets(access_token: str, response: dict) -> provider_common.RefreshSecrets:
         return provider_common.RefreshSecrets(
