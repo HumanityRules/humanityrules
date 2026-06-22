@@ -32,9 +32,10 @@ RESOURCE_TYPE_OPTIONS = [
     {"id": "workspace", "name": "Workspace"},
     {"id": "environment", "name": "Environment"},
     {"id": "app", "name": "App"},
+    {"id": "credential", "name": "Credential"},
 ]
 
-RESOURCE_TYPE_LABELS = {"workspace": "Workspace", "environment": "Environment", "app": "App"}
+RESOURCE_TYPE_LABELS = {"workspace": "Workspace", "environment": "Environment", "app": "App", "credential": "Credential"}
 
 
 def _add_resource_type_context(context: dict, policy: Policy | None) -> None:

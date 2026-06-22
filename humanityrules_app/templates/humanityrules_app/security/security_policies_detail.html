@@ -157,6 +157,30 @@
                     </div>
                 </template>
 
+                {# Credential actions #}
+                <template x-if="resourceType === 'credential'">
+                    <div class="inline-grid grid-cols-[auto_auto] gap-x-3 gap-y-2 items-center">
+                        <template x-for="action in ['credential:use']" :key="action">
+                            <div class="contents">
+                                <label class="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
+                                    <input type="checkbox" :value="action"
+                                           :checked="actionGrants.includes(action)"
+                                           @change="toggleAction(action, $event.target.checked)"
+                                           class="rounded border-gray-300 dark:border-gray-600 text-indigo-600">
+                                    <span x-text="action"></span>
+                                </label>
+                                <label class="flex items-center gap-1 text-xs text-red-600 dark:text-red-400">
+                                    <input type="checkbox"
+                                           :checked="actionDenials.includes(action)"
+                                           @change="toggleDeny(action, $event.target.checked)"
+                                           class="rounded border-red-300 dark:border-red-600 text-red-600">
+                                    deny
+                                </label>
+                            </div>
+                        </template>
+                    </div>
+                </template>
+
                 <template x-if="!resourceType">
                     <p class="text-sm text-gray-400 dark:text-gray-500">Select a resource type to see available actions.</p>
                 </template>
