@@ -1879,10 +1879,11 @@ class IntegrationSharedCredential(models.Model):
     )
     credentials = models.JSONField(
         default=dict,
+        blank=True,
         help_text="Secret provider-owned values supplied by the administrator, such as API keys.",
     )
-    config = models.JSONField(default=dict, help_text="Non-secret provider configuration.")
-    metadata = models.JSONField(default=dict, help_text="Derived display/status data such as validation timestamps.")
+    config = models.JSONField(default=dict, blank=True, help_text="Non-secret provider configuration.")
+    metadata = models.JSONField(default=dict, blank=True, help_text="Derived display/status data such as validation timestamps.")
     created_by = models.ForeignKey(
         "User", on_delete=models.SET_NULL, null=True, blank=True, related_name="+",
         help_text="The administrator who provisioned this shared credential.",
