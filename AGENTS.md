@@ -8,9 +8,13 @@
 - **Cloud:** AWS-first (ECS/Fargate, CloudFormation/CDK). Additional cloud providers will follow.
 - **Stage:** Pre-beta. The platform architecture (ABAC, approval workflows, Fargate deployment, secrets management) maps directly onto governed AI assistants.
 
-**"Humanity Rules" (abbreviated "HUMR") is the product identity, used everywhere.** The code, infrastructure, and environment variables use the `humanityrules` / `humr` / `HUMR_` identifiers throughout (AWS resource names use the short `humr`; Python packages use the full `humanityrules`).
+**"Humanity Rules" (abbreviated "HumR") is the product identity, used everywhere.** The code, infrastructure, and environment variables use the `humanityrules` / `humr` / `HUMR_` identifiers throughout (AWS resource names use the short `humr`; Python packages use the full `humanityrules`).
 
-HUMR uses the open-source Hermes agent as the agentic harness, and the Hermes WebUI as the UI for users. The Hermes agent that HUMR deploys is located at template_repos/hermes_agent/. HUMR deploys using its own templates deploy mechanism.
+HumR chooses the open-source Hermes agent as its agent harness, and the Hermes WebUI as the UI for users. 
+
+The Hermes agent that HumR deploys is located at template_repos/hermes_agent/. HumR deploys Hermes using the AppTemplate mechanism.
+
+HumR's control plane is called CP.
 
 
 # Running Python Commands
@@ -20,7 +24,7 @@ HUMR uses the open-source Hermes agent as the agentic harness, and the Hermes We
 
 # Writing Python Code
 
-**When authoring or modifying any `.py` file in this project, invoke the `python-style` skill.** It holds the project's Python style rules (function signatures, argument passing, imports, type hints, docstrings, Django async ORM, logging level, file naming). Loading it only when needed keeps this file lean.
+**When authoring or modifying any `.py` file in this project, invoke the `python-style` skill.** 
 
 
 # Multi-tenancy
@@ -45,7 +49,7 @@ See **`docs/AGENTS.md`** for the documentation index.
 
 # Journal
 
-**Do not write to `docs/journal.md` unless explicitly ordered.** The journal is updated only when the user asks (e.g., `/journal` or `/journal commit`). Never add entries proactively at the end of a task.
+**Do not write to `docs/journal.md` unless explicitly ordered.** The journal is updated only when the user asks (e.g., `/journal` or `/journal commit`).
 
 
 # Markdown formatting
