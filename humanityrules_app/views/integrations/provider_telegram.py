@@ -301,11 +301,11 @@ def refresh_outcome(environment: Environment, owner_user: User, app_slug: str) -
         provider=IntegrationUserCredential.Provider.TELEGRAM,
     ).first()
     if credential is None:
-        return provider_common.absent()
+        return provider_common.absent_outcome()
     bot_token = credential.credentials.get("bot_token", "")
     if not bot_token:
-        return provider_common.absent()
-    return provider_common.has_token(
+        return provider_common.absent_outcome()
+    return provider_common.has_token_outcome(
         secrets={"bot_token": bot_token},
         expires_in=TELEGRAM_BROKER_CACHE_SECONDS,
         config=credential.config,

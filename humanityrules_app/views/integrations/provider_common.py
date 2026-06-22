@@ -248,30 +248,30 @@ def run_refresh_exchange(
         provider=provider,
     ).first()
     if integration is None:
-        return absent()
+        return absent_outcome()
 
     refresh_token = integration.credentials.get("refresh_token", "")
     if not refresh_token:
         logger.error("%s token refresh: row missing refresh_token env=%s owner=%s app=%s", provider, environment.slug, owner_user.username, app_slug)
-        return absent()
+        return absent_outcome()
 
     exchange_result = exchange(refresh_token)
     if exchange_result.revoked:
         logger.info("%s token refresh: revoked upstream, deleting row env=%s owner=%s app=%s", provider, environment.slug, owner_user.username, app_slug)
         integration.delete()
-        return absent()
+        return absent_outcome()
     if exchange_result.error is not None:
         logger.error("%s token refresh failed env=%s owner=%s app=%s error=%s", provider, environment.slug, owner_user.username, app_slug, exchange_result.error)
-        return transient()
+        return transient_outcome()
 
     access_token = exchange_result.response.get("access_token", "")
     if not access_token:
         logger.error("%s token refresh: response missing access_token env=%s owner=%s app=%s", provider, environment.slug, owner_user.username, app_slug)
-        return transient()
+        return transient_outcome()
 
     built = build_secrets(access_token, exchange_result.response)
     if built is None:
-        return transient()
+        return transient_outcome()
 
     new_refresh = exchange_result.response.get("refresh_token")
     if new_refresh and new_refresh != refresh_token:
@@ -283,7 +283,7 @@ def run_refresh_exchange(
     integration.last_refreshed_at = now()
     integration.save(update_fields=update_fields)
 
-    return has_token(secrets=built.secrets, expires_in=built.expires_in, config={}, metadata={})
+    return has_token_outcome(secrets=built.secrets, expires_in=built.expires_in, config={}, metadata={})
 
 
 # --- Broker refresh-outcome contract -----------------------------------------
@@ -295,7 +295,7 @@ def run_refresh_exchange(
 # still-valid cached token.
 
 
-def has_token(secrets: dict, expires_in: int, config: dict, metadata: dict) -> dict:
+def has_token_outcome(secrets: dict, expires_in: int, config: dict, metadata: dict) -> dict:
     """Build the broker `has_token` outcome.
 
     OAuth providers pass empty `config`/`metadata` (the access token is the
@@ -310,11 +310,11 @@ def has_token(secrets: dict, expires_in: int, config: dict, metadata: dict) -> d
     }
 
 
-def absent() -> dict:
+def absent_outcome() -> dict:
     """Build the broker `absent` outcome: no connected credential row."""
     return {"outcome": "absent"}
 
 
-def transient() -> dict:
+def transient_outcome() -> dict:
     """Build the broker `transient` outcome: refresh failed; serve the cached token."""
     return {"outcome": "transient"}

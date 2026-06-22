@@ -95,11 +95,11 @@ def refresh_outcome(environment: Environment, owner_user: User, app_slug: str) -
         provider=IntegrationUserCredential.Provider.BROWSERUSE,
     ).first()
     if credential is None:
-        return provider_common.absent()
+        return provider_common.absent_outcome()
     api_key = credential.credentials.get("api_key", "")
     if not api_key:
-        return provider_common.absent()
-    return provider_common.has_token(
+        return provider_common.absent_outcome()
+    return provider_common.has_token_outcome(
         secrets={"api_key": api_key},
         expires_in=BROWSERUSE_BROKER_CACHE_SECONDS,
         config=credential.config,
