@@ -88,6 +88,12 @@ class TestSandboxProvisioning(TestCase):
         )
 
 
+@override_settings(
+    HUMR_SANDBOX_AWS_ACCOUNT_ID="",
+    HUMR_SANDBOX_EXTERNAL_ID="",
+    HUMR_SANDBOX_REGION="",
+    HUMR_SANDBOX_HOSTED_ZONE="",
+)
 class TestSandboxNotConfigured(TestCase):
     def test_org_creation_creates_no_sandbox_account_when_unconfigured(self) -> None:
         org = models.Organization.objects.create(name="Acme", slug="acme")
