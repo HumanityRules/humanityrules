@@ -16,14 +16,19 @@ from django.test import Client, TransactionTestCase, override_settings
 
 from humanityrules_app.models import (
     AWSAccount,
+    App,
     Environment,
     EnvironmentBearerToken,
     IntegrationConfig,
+    IntegrationSharedCredential,
     IntegrationUserCredential,
     Organization,
     OrganizationMembership,
+    Repository,
     User,
+    Workspace,
 )
+from humanityrules_app.services import abac_service
 
 
 def _hash(raw: str) -> str:
@@ -322,6 +327,79 @@ class TestConnectedProvidersReturnHasToken(_BatchTokensEndpointTestBase):
         post_mock.assert_called_once()
         cred = IntegrationUserCredential.objects.get(provider=IntegrationUserCredential.Provider.NOUS)
         self.assertEqual(cred.credentials["refresh_token"], "nous-refresh-new")
+
+
+class TestSharedCredentials(_BatchTokensEndpointTestBase):
+    """Org-provisioned shared credentials flow through the endpoint and win over personal keys."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        # Seed the three credential system policies + the user's username identity attribute.
+        abac_service.bootstrap_organization(organization=self.org, admin_user=self.user)
+        self.repo = Repository.objects.create(
+            organization=self.org, provider="github", name="hermes",
+            full_name="org/hermes", clone_url="https://github.com/org/hermes.git",
+        )
+        self.ws_eng = Workspace.objects.create(organization=self.org, name="Engineering", slug="engineering")
+        self.ws_sales = Workspace.objects.create(organization=self.org, name="Sales", slug="sales")
+        # The broker posts app_slug="hermes"; place that app in Engineering.
+        self.app = App.objects.create(
+            organization=self.org, workspace=self.ws_eng, repository=self.repo,
+            name="Hermes", slug="hermes", app_type="web",
+            build_strategy="dockerfile", branch="main", container_port=8000,
+            health_check_path="/health",
+        )
+
+    def _post_openrouter(self) -> dict:
+        status, body = self._post(
+            body={"owner_username": "vmendi", "app_slug": "hermes", "providers": ["openrouter"]},
+            token=self.raw_token,
+        )
+        self.assertEqual(status, 200)
+        return body["results"]["openrouter"]
+
+    def test_everyone_shared_key_returned(self) -> None:
+        IntegrationSharedCredential.objects.create(
+            organization=self.org, provider="openrouter", scope="everyone",
+            credentials={"api_key": "sk-or-SHARED"}, metadata={"label": "Org Default"},
+        )
+        result = self._post_openrouter()
+        self.assertEqual(result["outcome"], "has_token")
+        self.assertEqual(result["secrets"], {"api_key": "sk-or-SHARED"})
+        self.assertEqual(result["metadata"], {"label": "Org Default"})
+
+    def test_shared_overrides_personal_key(self) -> None:
+        IntegrationUserCredential.objects.create(
+            owner_user=self.user, environment=self.env, app_slug="hermes",
+            provider=IntegrationUserCredential.Provider.OPENROUTER,
+            credentials={"api_key": "sk-or-PERSONAL"},
+        )
+        IntegrationSharedCredential.objects.create(
+            organization=self.org, provider="openrouter", scope="everyone",
+            credentials={"api_key": "sk-or-SHARED"},
+        )
+        result = self._post_openrouter()
+        self.assertEqual(result["secrets"], {"api_key": "sk-or-SHARED"})
+
+    def test_workspace_shared_key_matches_app_workspace(self) -> None:
+        IntegrationSharedCredential.objects.create(
+            organization=self.org, provider="openrouter", scope="workspace",
+            target_workspace=self.ws_eng, credentials={"api_key": "sk-or-ENG"},
+        )
+        self.assertEqual(self._post_openrouter()["secrets"], {"api_key": "sk-or-ENG"})
+
+    def test_workspace_shared_key_for_other_workspace_falls_back_to_personal(self) -> None:
+        IntegrationSharedCredential.objects.create(
+            organization=self.org, provider="openrouter", scope="workspace",
+            target_workspace=self.ws_sales, credentials={"api_key": "sk-or-SALES"},
+        )
+        IntegrationUserCredential.objects.create(
+            owner_user=self.user, environment=self.env, app_slug="hermes",
+            provider=IntegrationUserCredential.Provider.OPENROUTER,
+            credentials={"api_key": "sk-or-PERSONAL"},
+        )
+        # The hermes app is in Engineering, not Sales, so the share does not apply.
+        self.assertEqual(self._post_openrouter()["secrets"], {"api_key": "sk-or-PERSONAL"})
 
 
 class TestMixedConnectedAndAbsent(_BatchTokensEndpointTestBase):

@@ -30,8 +30,7 @@ def _conditions_match(conditions: list[dict], self_side: set[tuple[str, str]]) -
     return _raw_conditions_match(
         conditions=conditions,
         self_side=self_side,
-        other_side_label="resource",
-        other_side_map=None,
+        other_sides={},
     )
 
 
@@ -1262,11 +1261,12 @@ class TestBootstrapOrganization(TestCase):
     def test_creates_expected_seed_policies(self) -> None:
         abac_service.bootstrap_organization(organization=self.org, admin_user=self.admin_user)
         seed_policies = Policy.objects.filter(organization=self.org, is_system=True)
-        # 3 admin (ws/env/app) + 2 member (ws/env) + 2 viewer (ws/env) + 1 PA owner.
-        self.assertEqual(seed_policies.count(), 8)
+        # 3 admin (ws/env/app) + 2 member (ws/env) + 2 viewer (ws/env) + 1 PA owner
+        # + 3 shared-credential (everyone/user/workspace).
+        self.assertEqual(seed_policies.count(), 11)
 
         resource_types = set(seed_policies.values_list("resource_type", flat=True))
-        self.assertEqual(resource_types, {"workspace", "environment", "app"})
+        self.assertEqual(resource_types, {"workspace", "environment", "app", "credential"})
 
     def test_seed_policy_actions_admin(self) -> None:
         abac_service.bootstrap_organization(organization=self.org, admin_user=self.admin_user)
@@ -1328,7 +1328,7 @@ class TestBootstrapOrganization(TestCase):
         )
         self.assertEqual(
             Policy.objects.filter(organization=self.org, is_system=True).count(),
-            8,
+            11,
         )
 
 
