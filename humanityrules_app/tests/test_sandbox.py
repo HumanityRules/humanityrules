@@ -4,10 +4,13 @@ from unittest.mock import patch
 
 from asgiref.sync import async_to_sync
 from django.test import TestCase, override_settings
+from django.urls import reverse
 
 import humanityrules_app.models as models
 import humanityrules_app.services.jobs.environment_teardown_executor as environment_teardown_executor
-from humanityrules_app.services import sandbox_service
+from humanityrules_app.services import abac_service, sandbox_service
+
+HTMX = {"HTTP_HX_REQUEST": "true"}
 
 SANDBOX_SETTINGS = {
     "HUMR_SANDBOX_AWS_ACCOUNT_ID": "555553041615",
@@ -158,3 +161,69 @@ class TestSandboxTeardownGuard(TestCase):
         self.assertTrue(ok)
         mock_teardown.assert_not_called()
         self.assertFalse(models.Environment.objects.filter(id=env.id).exists())
+
+
+@override_settings(**SANDBOX_SETTINGS)
+class TestSandboxEnvironmentTeardownUI(TestCase):
+    def setUp(self) -> None:
+        self.org = models.Organization.objects.create(name="Acme", slug="acme")
+        self.admin_user = models.User.objects.create_user(
+            username="sandbox_admin",
+            password="x",
+            current_organization=self.org,
+        )
+        models.OrganizationMembership.objects.create(
+            organization=self.org,
+            user=self.admin_user,
+            role=models.OrganizationMembership.Role.ADMIN,
+        )
+        abac_service.bootstrap_organization(organization=self.org, admin_user=self.admin_user)
+        self.sandbox_env = models.Environment.objects.select_related("aws_account").get(
+            aws_account__organization=self.org,
+            slug=sandbox_service.HUMR_SANDBOX_ENV_SLUG,
+        )
+        self.regular_account = models.AWSAccount.objects.create(
+            organization=self.org,
+            name="Own AWS",
+        )
+        self.regular_env = models.Environment.objects.create(
+            aws_account=self.regular_account,
+            name="Production",
+            slug="production",
+            aws_region="us-east-1",
+            status=models.Environment.Status.READY,
+        )
+
+    def test_sandbox_environment_detail_hides_teardown_button(self) -> None:
+        self.client.force_login(self.admin_user)
+        response = self.client.get(
+            reverse("environment_detail", kwargs={"environment_id": self.sandbox_env.id}),
+            **HTMX,
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertNotContains(response, "Tear Down")
+
+    def test_regular_environment_detail_shows_teardown_button(self) -> None:
+        self.client.force_login(self.admin_user)
+        response = self.client.get(
+            reverse("environment_detail", kwargs={"environment_id": self.regular_env.id}),
+            **HTMX,
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Tear Down")
+
+    def test_sandbox_environment_teardown_confirm_returns_403(self) -> None:
+        self.client.force_login(self.admin_user)
+        response = self.client.get(
+            reverse("environment_teardown_confirm", kwargs={"environment_id": self.sandbox_env.id}),
+        )
+        self.assertEqual(response.status_code, 403)
+
+    def test_sandbox_environment_teardown_returns_403(self) -> None:
+        self.client.force_login(self.admin_user)
+        response = self.client.post(
+            reverse("environment_teardown", kwargs={"environment_id": self.sandbox_env.id}),
+        )
+        self.assertEqual(response.status_code, 403)
+        self.sandbox_env.refresh_from_db()
+        self.assertEqual(self.sandbox_env.status, models.Environment.Status.READY)

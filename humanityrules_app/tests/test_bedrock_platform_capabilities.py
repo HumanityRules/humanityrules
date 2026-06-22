@@ -23,7 +23,7 @@ def _app_config(provider: str, platform_capabilities: list[str]) -> AppConfig:
                 container_port=8787,
                 environment_variables=[
                     {"name": "HUMR_LLM_PROVIDER", "value": provider},
-                    {"name": "HUMR_LLM_MODEL", "value": "us.anthropic.claude-opus-4-7"},
+                    {"name": "HUMR_LLM_MODEL", "value": "us.anthropic.claude-sonnet-4-6"},
                 ],
             ),
         ],

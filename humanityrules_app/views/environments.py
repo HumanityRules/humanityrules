@@ -30,6 +30,11 @@ def _get_environment_for_user(request: HttpRequest, environment_id: UUID) -> mod
     )
 
 
+def _is_environment_teardown_blocked(environment: models.Environment) -> bool:
+    """Shared sandbox infra must not be torn down from the UI."""
+    return environment.aws_account.is_humr_sandbox
+
+
 def populate_environment_entrypoint(environment: models.Environment, user_is_org_admin: bool) -> models.Environment:
     """Attach the primary navigation target for an environment card."""
     if user_is_org_admin and environment.status in SETUP_EDITOR_STATUSES:
@@ -132,6 +137,9 @@ def environment_teardown_confirm(request: HttpRequest, environment_id: UUID) -> 
     if denied:
         return denied
 
+    if _is_environment_teardown_blocked(environment=environment):
+        return HttpResponse(status=403)
+
     return render(request, "humanityrules_app/partials/_confirm_modal.html", {
         "modal_title": "Tear Down Environment",
         "modal_message": f'Are you sure you want to tear down "{environment.name}"? This will destroy all deployments in the environment and delete the underlying infrastructure (VPC, ECS cluster). This action cannot be undone.',
@@ -149,6 +157,9 @@ def environment_teardown(request: HttpRequest, environment_id: UUID) -> HttpResp
     denied = abac_view_checks.check_abac(request, environment, "environment", "environment:admin")
     if denied:
         return denied
+
+    if _is_environment_teardown_blocked(environment=environment):
+        return HttpResponse(status=403)
 
     teardownable_statuses = {
         models.Environment.Status.READY,

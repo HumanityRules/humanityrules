@@ -156,8 +156,8 @@ providers:
   only_configured: false
   bedrock:
     models:
-      'us.anthropic.claude-opus-4-7': "Opus 4.7"
       'us.anthropic.claude-sonnet-4-6': "Sonnet 4.6"
+      'us.anthropic.claude-opus-4-8': "Opus 4.8"
       'us.anthropic.claude-haiku-4-5-20251001-v1:0': "Haiku 4.5"
 EOF
     else
