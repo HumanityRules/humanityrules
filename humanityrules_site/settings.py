@@ -100,6 +100,7 @@ TEMPLATES = [
                 'django.contrib.auth.context_processors.auth',
                 'django.contrib.messages.context_processors.messages',
                 'humanityrules_app.context_processors.posthog_context',
+                'humanityrules_app.context_processors.feature_flags',
             ],
         },
     },
@@ -234,6 +235,13 @@ HUMR_SANDBOX_HOSTED_ZONE = os.environ.get("HUMR_SANDBOX_HOSTED_ZONE", "")
 
 # Job Worker - enable with HUMR_RUN_JOB_WORKER=1
 HUMR_RUN_JOB_WORKER = os.environ.get("HUMR_RUN_JOB_WORKER") == "1"
+
+# Agent-driven deployments. When False, users deploy only from templates: the agent
+# "Deployment" editor and the "From Repository" new-app flow are hidden in the UI and
+# blocked at the route level. The backend (deployment_editor views, agent_service,
+# blueprint models) is left intact — flip to True to fully restore the agent UI + routes.
+# See docs/agent_deployments_flag.md.
+AGENT_DEPLOYMENTS_ENABLED = False
 
 # Local-only debug deployment mode - simulated success after ~10 seconds with no repo clone or AWS calls
 HUMR_DEBUG_DEPLOYMENTS = DEBUG and os.environ.get("HUMR_DEBUG_DEPLOYMENTS") == "1"

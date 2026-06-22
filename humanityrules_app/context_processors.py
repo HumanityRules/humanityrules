@@ -2,6 +2,12 @@
 import json
 
 from django.conf import settings
+from django.http import HttpRequest
+
+
+def feature_flags(request: HttpRequest) -> dict[str, bool]:
+    """Expose feature flags to all templates."""
+    return {"agent_deployments_enabled": settings.AGENT_DEPLOYMENTS_ENABLED}
 
 
 def posthog_context(request):
