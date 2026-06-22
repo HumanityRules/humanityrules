@@ -10,6 +10,7 @@ from datetime import datetime
 
 from humanityrules_app.models import Conversation, Deployment, DeploymentBlueprint, DeploymentLog
 from humanityrules_app.services import deployment_blueprint_effective_values
+from humanityrules_app.services import sandbox_service
 
 
 @dataclass
@@ -45,7 +46,7 @@ async def deploy_blueprint(conversation: Conversation) -> DeployBlueprintResult:
         )
 
     blueprint = await DeploymentBlueprint.objects.select_related(
-        "app", "app__repository", "environment",
+        "app", "app__repository", "environment", "environment__aws_account",
     ).aget(
         id=conversation.context_deployment_blueprint_id,
         app__workspace__organization=conversation.organization,
@@ -66,6 +67,11 @@ async def deploy_blueprint(conversation: Conversation) -> DeployBlueprintResult:
             f"Blueprint already has an active deployment in progress "
             f"(status: {active_deployment.status}). Wait for it to complete."
         )
+
+    await sandbox_service.acheck_sandbox_app_name_available(
+        app=blueprint.app,
+        environment=blueprint.environment,
+    )
 
     effective_values = await deployment_blueprint_effective_values.aresolve_deployment_blueprint_effective_values(
         app=blueprint.app,

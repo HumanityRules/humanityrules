@@ -15,13 +15,18 @@ if [ -f "../.env" ]; then
     export HUMR_AWS_ACCOUNT_ID=$(grep -E '^HUMR_AWS_ACCOUNT_ID=' ../.env | cut -d'=' -f2-)
     export HUMR_API_SECRET_KEY=$(grep -E '^HUMR_API_SECRET_KEY=' ../.env | cut -d'=' -f2-)
     export HUMR_API_ENDPOINT=$(grep -E '^HUMR_API_ENDPOINT=' ../.env | cut -d'=' -f2-)
+    # Sandbox config — read by app.py at synth to gate the sandbox role + container wiring.
+    export HUMR_SANDBOX_AWS_ACCOUNT_ID=$(grep -E '^HUMR_SANDBOX_AWS_ACCOUNT_ID=' ../.env | cut -d'=' -f2-)
+    export HUMR_SANDBOX_EXTERNAL_ID=$(grep -E '^HUMR_SANDBOX_EXTERNAL_ID=' ../.env | cut -d'=' -f2-)
+    export HUMR_SANDBOX_REGION=$(grep -E '^HUMR_SANDBOX_REGION=' ../.env | cut -d'=' -f2-)
+    export HUMR_SANDBOX_HOSTED_ZONE=$(grep -E '^HUMR_SANDBOX_HOSTED_ZONE=' ../.env | cut -d'=' -f2-)
 fi
 
 # Map HUMR variables to AWS CLI expected names
 export AWS_ACCESS_KEY_ID="${HUMR_AWS_ACCESS_KEY}"
 export AWS_SECRET_ACCESS_KEY="${HUMR_AWS_SECRET_KEY}"
 export AWS_DEFAULT_REGION="us-east-1"
-export AWS_ACCOUNT_ID="${HUMR_AWS_ACCOUNT_ID:-555553041615}"
+export AWS_ACCOUNT_ID="${HUMR_AWS_ACCOUNT_ID}"
 
 echo "========================================"
 echo "Humanity Rules Production Deployment"
@@ -57,31 +62,41 @@ echo "Deploying CDK Stacks"
 echo "========================================"
 
 echo ""
-echo "1/6: Deploying Certificate Stack (ACM)..."
+echo "1/7: Deploying Certificate Stack (ACM)..."
 echo "     This may take a few minutes for DNS validation."
 cdk deploy humr-prod-cert --require-approval never
 
 echo ""
-echo "2/6: Deploying VPC and Storage Stacks..."
+echo "2/7: Deploying VPC and Storage Stacks..."
 cdk deploy humr-prod-vpc humr-prod-storage --require-approval never
 
 echo ""
-echo "3/6: Deploying Lambda Stack..."
+echo "3/7: Deploying Lambda Stack..."
 cdk deploy humr-prod-lambda --require-approval never
 
 echo ""
-echo "4/6: Deploying Cluster and Database Stacks..."
+echo "4/7: Deploying Cluster and Database Stacks..."
 echo "     Aurora Serverless v2 may take 10-15 minutes."
 cdk deploy humr-prod-cluster humr-prod-database --require-approval never
 
 echo ""
-echo "5/6: Deploying App Stack (ECR + ECS)..."
+echo "5/7: Deploying App Stack (ECR + ECS)..."
 cdk deploy humr-prod-app --require-approval never
 
 echo ""
-echo "6/6: Deploying CDN Stack (CloudFront + Route53)..."
+echo "6/7: Deploying CDN Stack (CloudFront + Route53)..."
 echo "     CloudFront distribution may take 10-15 minutes to deploy."
 cdk deploy humr-prod-cdn --require-approval never
+
+echo ""
+# Only when the sandbox is configured (matches app.py's SANDBOX_CFG.enabled gate);
+# otherwise the stack isn't synthesized and the deploy would fail.
+if [ -n "${HUMR_SANDBOX_EXTERNAL_ID}" ] && [ -n "${HUMR_SANDBOX_AWS_ACCOUNT_ID}" ]; then
+    echo "7/7: Deploying Sandbox Role Stack (shared-sandbox assume-role)..."
+    cdk deploy humr-prod-sandbox-role --require-approval never
+else
+    echo "7/7: Skipping Sandbox Stack (HUMR_SANDBOX_* not set)."
+fi
 
 echo ""
 echo "========================================"

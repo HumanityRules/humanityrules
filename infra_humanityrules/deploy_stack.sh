@@ -20,6 +20,11 @@ if [ -f "../.env" ]; then
     export HUMR_AWS_ACCOUNT_ID=$(grep -E '^HUMR_AWS_ACCOUNT_ID=' ../.env | cut -d'=' -f2-)
     export HUMR_API_SECRET_KEY=$(grep -E '^HUMR_API_SECRET_KEY=' ../.env | cut -d'=' -f2-)
     export HUMR_API_ENDPOINT=$(grep -E '^HUMR_API_ENDPOINT=' ../.env | cut -d'=' -f2-)
+    # Sandbox config — read by app.py at synth to gate the sandbox role + container wiring.
+    export HUMR_SANDBOX_AWS_ACCOUNT_ID=$(grep -E '^HUMR_SANDBOX_AWS_ACCOUNT_ID=' ../.env | cut -d'=' -f2-)
+    export HUMR_SANDBOX_EXTERNAL_ID=$(grep -E '^HUMR_SANDBOX_EXTERNAL_ID=' ../.env | cut -d'=' -f2-)
+    export HUMR_SANDBOX_REGION=$(grep -E '^HUMR_SANDBOX_REGION=' ../.env | cut -d'=' -f2-)
+    export HUMR_SANDBOX_HOSTED_ZONE=$(grep -E '^HUMR_SANDBOX_HOSTED_ZONE=' ../.env | cut -d'=' -f2-)
 fi
 
 # Map to AWS CLI expected names

@@ -17,11 +17,19 @@ from stacks.cluster_stack import ClusterStack
 from stacks.database_stack import DatabaseStack
 from stacks.app_stack import AppStack
 from stacks.cdn_stack import CdnStack
+from stacks.sandbox_stack import SandboxAwsAccountCfg, SandboxStack
 
 # Configuration
 DOMAIN_NAME = "humanityrules.io"
-AWS_ACCOUNT = os.environ.get("HUMR_AWS_ACCOUNT_ID", "555553041615")
+AWS_ACCOUNT = os.environ["HUMR_AWS_ACCOUNT_ID"]
 AWS_REGION = "us-east-1"
+# Shared sandbox: when configured, create the role the CP assumes to deploy into its own account.
+SANDBOX_CFG = SandboxAwsAccountCfg(
+    external_id=os.environ.get("HUMR_SANDBOX_EXTERNAL_ID", ""),
+    account_id=os.environ.get("HUMR_SANDBOX_AWS_ACCOUNT_ID", ""),
+    region=os.environ.get("HUMR_SANDBOX_REGION", ""),
+    hosted_zone=os.environ.get("HUMR_SANDBOX_HOSTED_ZONE", ""),
+)
 
 # Environment for stacks that need explicit account/region (e.g., Route53 lookups)
 env_us_east_1 = Environment(account=AWS_ACCOUNT, region=AWS_REGION)
@@ -101,6 +109,7 @@ app_stack = AppStack(
     database_secret=database_stack.database_secret,
     claude_efs=storage_stack.claude_efs,
     claude_efs_access_point=storage_stack.claude_efs_access_point,
+    sandbox_cfg=SANDBOX_CFG,
     env=env_us_east_1,
 )
 app_stack.add_dependency(storage_stack)
@@ -118,5 +127,15 @@ cdn_stack = CdnStack(
 )
 cdn_stack.add_dependency(cert_stack)
 cdn_stack.add_dependency(app_stack)
+
+# 9. Sandbox Stack (role the CP assumes to deploy into its own shared sandbox account).
+if SANDBOX_CFG.enabled:
+    SandboxStack(
+        app,
+        f"{prefix}-sandbox-role",
+        cp_account_id=AWS_ACCOUNT,
+        external_id=SANDBOX_CFG.external_id,
+        env=env_us_east_1,
+    )
 
 app.synth()

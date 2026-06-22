@@ -11,6 +11,8 @@ from aws_cdk import aws_logs as logs
 from aws_cdk import aws_secretsmanager as secretsmanager
 from constructs import Construct
 
+from stacks.sandbox_stack import SandboxAwsAccountCfg
+
 
 class AppStack(Stack):
     """ECS Fargate service for Humanity Rules Django app."""
@@ -30,6 +32,7 @@ class AppStack(Stack):
         database_secret: secretsmanager.ISecret,
         claude_efs: efs.IFileSystem,
         claude_efs_access_point: efs.IAccessPoint,
+        sandbox_cfg: SandboxAwsAccountCfg,
         **kwargs,
     ) -> None:
         super().__init__(scope, construct_id, **kwargs)
@@ -140,6 +143,20 @@ class AppStack(Stack):
             "TELEGRAM_MANAGER_BOT_USERNAME": ecs.Secret.from_secrets_manager(telegram_secret, field="TELEGRAM_MANAGER_BOT_USERNAME"),
         }
 
+        # Shared sandbox: wire the external id (secret) + plain config into both containers.
+        # Only when enabled, so non-sandbox deploys don't reference a missing secret.
+        sandbox_environment: dict[str, str] = {}
+        if sandbox_cfg.enabled:
+            sandbox_secret = secretsmanager.Secret.from_secret_name_v2(self, "SandboxSecret", "humr/prod/sandbox")
+            app_secrets["HUMR_SANDBOX_EXTERNAL_ID"] = ecs.Secret.from_secrets_manager(
+                sandbox_secret, field="HUMR_SANDBOX_EXTERNAL_ID",
+            )
+            sandbox_environment = {
+                "HUMR_SANDBOX_AWS_ACCOUNT_ID": sandbox_cfg.account_id,
+                "HUMR_SANDBOX_REGION": sandbox_cfg.region,
+                "HUMR_SANDBOX_HOSTED_ZONE": sandbox_cfg.hosted_zone,
+            }
+
         # Init container - runs Django migrations and ensures superuser before app starts
         migration_container = task_definition.add_container(
             "MigrationContainer",
@@ -149,9 +166,11 @@ class AppStack(Stack):
             essential=False,  # Task continues after this container exits
             command=[
                 "sh", "-c",
-                "uv run python manage.py migrate --noinput && uv run python manage.py ensure_superuser",
+                "uv run python manage.py migrate --noinput "
+                "&& uv run python manage.py ensure_superuser "
+                "&& uv run python manage.py humr_bootstrap_sandbox",
             ],
-            environment={"DJANGO_DEBUG": "0"},
+            environment={"DJANGO_DEBUG": "0", **sandbox_environment},
             secrets=app_secrets,
         )
 
@@ -170,6 +189,7 @@ class AppStack(Stack):
                 "CLAUDE_MODEL_GENERAL": "opus-4.6",
                 "CLAUDE_MODEL_ENVIRONMENT": "opus-4.6",
                 "CLAUDE_MODEL_APP_DEPLOYMENT": "opus-4.6",
+                **sandbox_environment,
             },
             secrets=app_secrets,
             health_check=ecs.HealthCheck(

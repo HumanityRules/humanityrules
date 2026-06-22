@@ -59,6 +59,10 @@ SECRET_DEFINITIONS = {
         "TELEGRAM_MANAGER_BOT_TOKEN",
         "TELEGRAM_MANAGER_BOT_USERNAME",
     ],
+    # Shared sandbox: skipped automatically when the key is absent from .env.
+    "humr/prod/sandbox": [
+        "HUMR_SANDBOX_EXTERNAL_ID",
+    ],
 }
 
 
