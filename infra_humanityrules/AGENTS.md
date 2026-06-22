@@ -207,7 +207,7 @@ When customers connect their AWS account to Humanity Rules:
 On every deployment:
 
 1. ECS starts new task
-2. **Migration container** runs `migrate --noinput && ensure_superuser`
+2. **Migration container** runs `migrate --noinput && ensure_superuser && seed_app_templates && humr_bootstrap_sandbox`
 3. Migration exits (code 0)
 4. **App container** starts (was blocked on migration SUCCESS dependency)
 5. Health check passes at `/health/`
