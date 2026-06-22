@@ -232,6 +232,13 @@ class AWSAccount(models.Model):
         blank=True,
         help_text="Additional status information or error details",
     )
+    is_humr_sandbox = models.BooleanField(
+        default=False,
+        help_text=(
+            "This row points at HumR's own shared sandbox account. Environments here "
+            "reuse shared base infra instead of provisioning their own."
+        ),
+    )
     created_by = models.ForeignKey(
         User,
         on_delete=models.SET_NULL,
@@ -1957,6 +1964,20 @@ def create_default_workspace(
             slug="default",
             description="Your starting workspace for apps and datastores. Rename or create additional workspaces to organize by team or project.",
         )
+
+
+@receiver(post_save, sender=Organization)
+def create_humr_sandbox_aws_account(
+    sender: type[Organization],
+    instance: Organization,
+    created: bool,
+    **kwargs: object,
+) -> None:
+    """Give a new Organization a connected 'Humanity Rules Sandbox' AWS account, if configured."""
+    if not created:
+        return
+    from humanityrules_app.services import sandbox_service
+    sandbox_service.ensure_org_sandbox(organization=instance)
 
 
 @receiver(post_save, sender=Workspace)

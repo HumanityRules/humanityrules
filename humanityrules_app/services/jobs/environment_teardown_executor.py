@@ -133,6 +133,18 @@ def run_environment_teardown(environment_id: str) -> bool:
                 environment.save(update_fields=["status", "status_message", "updated_at"])
                 return False
 
+            # Sandbox environments share one base infra across all orgs — never delete the
+            # shared base stacks. Just remove this org's deployment records and env row.
+            if environment.aws_account.is_humr_sandbox:
+                logger.info(
+                    "Sandbox environment '%(env_name)s': skipping shared base infra teardown",
+                    {"env_name": environment.name},
+                )
+                models.Deployment.objects.filter(environment=environment).delete()
+                models.DeploymentBlueprint.objects.filter(environment=environment).delete()
+                environment.delete()
+                return True
+
             # Step 2: Get AWS session and delete infrastructure stacks
             session = _get_aws_session(environment)
 

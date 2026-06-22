@@ -220,6 +220,18 @@ TELEGRAM_MANAGER_BOT_USERNAME = os.environ.get("TELEGRAM_MANAGER_BOT_USERNAME")
 HUMR_AWS_ACCESS_KEY = os.environ.get("HUMR_AWS_ACCESS_KEY")
 HUMR_AWS_SECRET_KEY = os.environ.get("HUMR_AWS_SECRET_KEY")
 
+# Humanity Rules Sandbox: HumR's own AWS account, offered to every org as a shared
+# demo target so prospects can try the product without connecting their own account.
+# When set, each new org auto-gets a connected "Humanity Rules Sandbox" AWS account
+# pointing here. All sandbox rows share one external_id, so the CP assumes a single
+# role in this account. Leave unset (local/test) to disable the feature.
+HUMR_SANDBOX_AWS_ACCOUNT_ID = os.environ.get("HUMR_SANDBOX_AWS_ACCOUNT_ID")
+HUMR_SANDBOX_EXTERNAL_ID = os.environ.get("HUMR_SANDBOX_EXTERNAL_ID")
+# Region + hosted zone of the one shared base infra (VPC/cluster/ALB/EFS), provisioned
+# once under env slug "sandbox". Every org's sandbox Environment adopts these.
+HUMR_SANDBOX_REGION = os.environ.get("HUMR_SANDBOX_REGION", "")
+HUMR_SANDBOX_HOSTED_ZONE = os.environ.get("HUMR_SANDBOX_HOSTED_ZONE", "")
+
 # Job Worker - enable with HUMR_RUN_JOB_WORKER=1
 HUMR_RUN_JOB_WORKER = os.environ.get("HUMR_RUN_JOB_WORKER") == "1"
 
