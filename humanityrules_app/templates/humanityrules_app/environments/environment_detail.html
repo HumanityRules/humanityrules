@@ -16,12 +16,14 @@
                 </a>
                 {% endif %}
                 {% if environment.status == 'ready' or environment.status == 'error' %}
+                {% if not environment.aws_account.is_humr_sandbox %}
                 <button hx-get="/environments/{{ environment.id }}/teardown-confirm/"
                         hx-target="#modal-container"
                         hx-swap="innerHTML"
                         class="px-3 py-1.5 text-sm font-medium text-red-600 dark:text-red-400 border border-red-300 dark:border-red-600 rounded-lg hover:bg-red-50 dark:hover:bg-red-500/10">
                     Tear Down
                 </button>
+                {% endif %}
                 {% endif %}
             </div>
             {% endif %}
