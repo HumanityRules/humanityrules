@@ -4,7 +4,7 @@ App detail, deployment ops (status polling, teardown, redeploy),
 and tag management — access derived from parent workspace.
 """
 
-from django.test import TestCase
+from django.test import TestCase, override_settings
 
 from humanityrules_app.models import (
     AWSAccount,
@@ -122,6 +122,7 @@ class TestAppEndpoints(TestCase):
         response = self.client.get("/apps/myapp/", **HTMX)
         self.assertEqual(response.status_code, 200)
 
+    @override_settings(AGENT_DEPLOYMENTS_ENABLED=True)
     def test_ws_editor_sees_deployment_button(self) -> None:
         self.client.force_login(self.ws_editor)
         response = self.client.get("/apps/myapp/", **HTMX)
@@ -288,8 +289,9 @@ class TestAppEndpoints(TestCase):
         response = self.client.get("/apps/myapp/", **HTMX)
         self.assertEqual(response.status_code, 403)
 
-    # --- Deployment Editor Entry Points (requires workspace:edit) ---
+    # --- Deployment Editor Entry Points (agent flow; requires AGENT_DEPLOYMENTS_ENABLED + workspace:edit) ---
 
+    @override_settings(AGENT_DEPLOYMENTS_ENABLED=True)
     def test_ws_editor_deployment_editor_creates_conversation_without_blueprint(self) -> None:
         self.client.force_login(self.ws_editor)
         response = self.client.get("/deploy/myapp/", **HTMX)
@@ -299,6 +301,7 @@ class TestAppEndpoints(TestCase):
         self.assertIsNone(conversation.context_deployment_blueprint_id)
         self.assertIsNone(response.context["blueprint"])
 
+    @override_settings(AGENT_DEPLOYMENTS_ENABLED=True)
     def test_ws_editor_deployment_editor_reuses_blueprint_conversation(self) -> None:
         self._set_open_blueprint_status(status=DeploymentBlueprint.Status.DRAFT)
         conversation = Conversation.objects.create(
@@ -319,6 +322,7 @@ class TestAppEndpoints(TestCase):
         conversation.refresh_from_db()
         self.assertEqual(conversation.status, Conversation.Status.ACTIVE)
 
+    @override_settings(AGENT_DEPLOYMENTS_ENABLED=True)
     def test_ws_editor_deployment_editor_shows_effective_branch_and_url_values(self) -> None:
         self.repo.default_branch = "master"
         self.repo.save()
@@ -343,6 +347,7 @@ class TestAppEndpoints(TestCase):
         self.assertNotContains(response, "Inherited from repository default branch")
         self.assertNotContains(response, "Inherited from app slug")
 
+    @override_settings(AGENT_DEPLOYMENTS_ENABLED=True)
     def test_ws_editor_deployment_editor_shows_explicit_url_value(self) -> None:
         self.env.shared_alb_hosted_zone = "example.com"
         self.env.save(update_fields=["shared_alb_hosted_zone", "updated_at"])
@@ -363,6 +368,7 @@ class TestAppEndpoints(TestCase):
         self.assertNotContains(response, "Inherited from repository default branch")
         self.assertNotContains(response, "Inherited from app slug")
 
+    @override_settings(AGENT_DEPLOYMENTS_ENABLED=True)
     def test_ws_editor_can_reset_deployment_with_draft_blueprint(self) -> None:
         self._set_open_blueprint_status(status=DeploymentBlueprint.Status.DRAFT)
         conversation = Conversation.objects.create(
@@ -387,16 +393,37 @@ class TestAppEndpoints(TestCase):
         self.assertNotEqual(new_conversation.id, conversation.id)
         self.assertEqual(new_conversation.context_app_id, self.app.id)
 
+    @override_settings(AGENT_DEPLOYMENTS_ENABLED=True)
     def test_ws_viewer_gets_403_on_deployment_editor(self) -> None:
         self.client.force_login(self.ws_viewer)
         response = self.client.get("/deploy/myapp/", **HTMX)
         self.assertEqual(response.status_code, 403)
 
+    @override_settings(AGENT_DEPLOYMENTS_ENABLED=True)
     def test_ws_viewer_gets_403_on_deployment_reset(self) -> None:
         self._set_open_blueprint_status(status=DeploymentBlueprint.Status.DRAFT)
         self.client.force_login(self.ws_viewer)
         response = self.client.post("/deploy/myapp/reset/", **HTMX)
         self.assertEqual(response.status_code, 403)
+
+    # --- Agent deployments disabled (default: AGENT_DEPLOYMENTS_ENABLED=False) ---
+
+    def test_deployment_button_hidden_when_agent_deployments_disabled(self) -> None:
+        self.client.force_login(self.ws_editor)
+        response = self.client.get("/apps/myapp/", **HTMX)
+        self.assertEqual(response.status_code, 200)
+        self.assertNotContains(response, "/deploy/myapp/")
+
+    def test_deployment_editor_404_when_agent_deployments_disabled(self) -> None:
+        self.client.force_login(self.ws_editor)
+        response = self.client.get("/deploy/myapp/", **HTMX)
+        self.assertEqual(response.status_code, 404)
+
+    def test_deployment_reset_404_when_agent_deployments_disabled(self) -> None:
+        self._set_open_blueprint_status(status=DeploymentBlueprint.Status.DRAFT)
+        self.client.force_login(self.ws_editor)
+        response = self.client.post("/deploy/myapp/reset/", **HTMX)
+        self.assertEqual(response.status_code, 404)
 
     # --- App Deployment Status Polling (requires workspace:view) ---
 

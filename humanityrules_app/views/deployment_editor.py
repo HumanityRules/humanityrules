@@ -165,6 +165,7 @@ def _get_or_create_existing_app_editor_conversation(
 
 
 @login_required
+@base.require_agent_deployments
 def deployment_editor_new(request: HttpRequest, workspace_slug: str, repo_id: UUID) -> HttpResponse:
     """Entry point for deploying a new app from a repository."""
     if not request.htmx:
@@ -216,6 +217,7 @@ def deployment_editor_new(request: HttpRequest, workspace_slug: str, repo_id: UU
 
 
 @login_required
+@base.require_agent_deployments
 def deployment_editor(request: HttpRequest, app_slug: str) -> HttpResponse:
     """Single entry point for the existing-app deployment editor."""
     if not request.htmx:
@@ -248,6 +250,7 @@ def deployment_editor(request: HttpRequest, app_slug: str) -> HttpResponse:
 
 
 @login_required
+@base.require_agent_deployments
 @require_POST
 def deployment_editor_reset(request: HttpRequest, app_slug: str) -> HttpResponse:
     """Close current conversation, discard draft if present, and start fresh."""
@@ -302,6 +305,7 @@ def deployment_editor_reset(request: HttpRequest, app_slug: str) -> HttpResponse
 
 
 @login_required
+@base.require_agent_deployments
 def deployment_editor_app_section(request: HttpRequest, app_slug: str) -> HttpResponse:
     """Return the app section partial for HTMX refresh in the editor."""
     app = _get_existing_app(request=request, app_slug=app_slug)
@@ -312,6 +316,7 @@ def deployment_editor_app_section(request: HttpRequest, app_slug: str) -> HttpRe
 
 
 @login_required
+@base.require_agent_deployments
 def deployment_editor_blueprint_section(request: HttpRequest, app_slug: str) -> HttpResponse:
     """Return the blueprint section partial for HTMX refresh in the editor."""
     app = _get_existing_app(request=request, app_slug=app_slug)
@@ -334,6 +339,7 @@ def deployment_editor_blueprint_section(request: HttpRequest, app_slug: str) -> 
 
 
 @login_required
+@base.require_agent_deployments
 @require_GET
 def deployment_editor_fork(request: HttpRequest, conversation_id) -> HttpResponse:
     """Fork a deployment conversation and redirect back into the deployment editor."""

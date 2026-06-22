@@ -88,6 +88,7 @@ def chat_new(request):
 
 
 @login_required
+@base.require_agent_deployments
 def chat_app_deploy(request, workspace_slug, repo_name, repo_owner=None):
     """Shortcut: create an APP_DEPLOYMENT conversation from human-readable URL segments."""
     from ..models import Repository, Workspace
