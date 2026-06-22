@@ -157,7 +157,7 @@ class AppStack(Stack):
                 "HUMR_SANDBOX_HOSTED_ZONE": sandbox_cfg.hosted_zone,
             }
 
-        # Init container - runs Django migrations and ensures superuser before app starts
+        # Init container - schema/bootstrap before app starts
         migration_container = task_definition.add_container(
             "MigrationContainer",
             container_name="migrate",
@@ -168,6 +168,7 @@ class AppStack(Stack):
                 "sh", "-c",
                 "uv run python manage.py migrate --noinput "
                 "&& uv run python manage.py ensure_superuser "
+                "&& uv run python manage.py seed_app_templates "
                 "&& uv run python manage.py humr_bootstrap_sandbox",
             ],
             environment={"DJANGO_DEBUG": "0", **sandbox_environment},
