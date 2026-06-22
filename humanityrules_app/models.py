@@ -1891,8 +1891,8 @@ class IntegrationSharedCredential(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
-        verbose_name = "Shared Integration Credential"
-        verbose_name_plural = "Shared Integration Credentials"
+        verbose_name = "Integration Shared Credential"
+        verbose_name_plural = "Integration Shared Credentials"
         constraints = [
             models.CheckConstraint(
                 condition=(
