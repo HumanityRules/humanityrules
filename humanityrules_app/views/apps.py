@@ -12,7 +12,7 @@ from django.shortcuts import get_object_or_404, render
 from django.urls import reverse
 from django.views.decorators.http import require_GET, require_POST
 
-from humanityrules_app.models import App, AppRemovalJob, Deployment, DeploymentBlueprint, ResourceTag
+from humanityrules_app.models import App, AppRemovalJob, Deployment, DeploymentBlueprint, DeploymentLog, ResourceTag
 from humanityrules_app.services import abac_service
 from humanityrules_app.services.cost import panel as cost_panel
 
@@ -24,6 +24,9 @@ OPEN_BLUEPRINT_STATUSES = (
     DeploymentBlueprint.Status.FAILED,
     DeploymentBlueprint.Status.DEPLOYING,
 )
+
+# Cap rendered log lines; the deployment-log fragment re-renders every second while polling.
+MAX_DEPLOYMENT_LOG_LINES = 1000
 
 def app_is_live(app: App) -> bool:
     """An app is 'live' if the latest deployment in any environment is not TORN_DOWN.
@@ -216,6 +219,14 @@ def build_app_detail_context(request: HttpRequest, app: App) -> dict[str, Any]:
     context["deployments"] = deployments
     context["environment_rows"] = environment_rows
     context["open_blueprint"] = open_blueprint
+    # Deployment Log tab: enabled once there's something to show (any logged deployment, or one
+    # currently in flight). When a deployment is in progress we open that tab by default, so a
+    # freshly started deploy lands straight on its live log instead of the Overview.
+    latest_deployment = deployments[0] if deployments else None
+    deploy_in_progress = latest_deployment is not None and latest_deployment.is_transient
+    has_logs = DeploymentLog.objects.filter(deployment__app=app).exists()
+    context["log_tab_enabled"] = has_logs or deploy_in_progress
+    context["initial_tab"] = "logs" if deploy_in_progress else "content"
     org = request.user.current_organization
     context["direct_tags"] = direct_tags
     context["inherited_tags"] = inherited_tags
@@ -300,6 +311,42 @@ def app_deployment_status(request: HttpRequest, app_slug: str, deployment_id: UU
     mode = request.GET.get("mode", "")
     context = {"app": app, "deployment": deployment, "mode": mode}
     return render(request, "humanityrules_app/apps/_app_deployment_row.html", context=context)
+
+
+@login_required
+@require_GET
+def app_deployment_log(request: HttpRequest, app_slug: str) -> HttpResponse:
+    """Render the most recent deployment's log fragment; self-polls every 1s while transient."""
+    app = _get_app_for_user(request, app_slug)
+
+    denied = abac_view_checks.check_abac(request, app.workspace, "workspace", "workspace:view")
+    if denied:
+        return denied
+
+    deployment = (
+        Deployment.objects.filter(app=app)
+        .select_related("environment", "environment__aws_account")
+        .order_by("-created_at")
+        .first()
+    )
+    logs: list[DeploymentLog] = []
+    truncated = False
+    if deployment is not None:
+        # Fetch newest-first so the cap keeps the tail, then reverse to chronological for display.
+        recent = list(
+            DeploymentLog.objects.filter(deployment=deployment).order_by("-created_at")[: MAX_DEPLOYMENT_LOG_LINES + 1]
+        )
+        truncated = len(recent) > MAX_DEPLOYMENT_LOG_LINES
+        logs = list(reversed(recent[:MAX_DEPLOYMENT_LOG_LINES]))
+
+    context = {
+        "app": app,
+        "deployment": deployment,
+        "logs": logs,
+        "truncated": truncated,
+        "max_lines": MAX_DEPLOYMENT_LOG_LINES,
+    }
+    return render(request, "humanityrules_app/apps/_app_deployment_log.html", context=context)
 
 
 @login_required
