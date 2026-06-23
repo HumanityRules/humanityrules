@@ -1,0 +1,58 @@
+{% comment %}
+Provisioning-log fragment for the environment-detail "Provisioning Log" tab. Shows the
+environment's provisioning/teardown log, colorized by source/level. Self-terminating HTMX
+poll: while the environment is transient it re-renders itself every second
+(hx-swap=outerHTML); once it settles the polling attributes are omitted and refreshing stops.
+See docs/ui_live_update_contract.md.
+{% endcomment %}
+<div id="provisioning-log-inner"
+     {% if environment.is_transient %}
+     hx-get="{% url 'environment_provisioning_log' environment_id=environment.id %}"
+     hx-trigger="load delay:1s"
+     hx-target="#provisioning-log-inner"
+     hx-swap="outerHTML"
+     {% endif %}>
+    <div class="flex flex-wrap items-center justify-between gap-2 mb-3">
+        <div class="min-w-0">
+            <h3 class="text-sm font-medium text-gray-900 dark:text-white truncate">
+                {{ environment.name }}
+                <span class="font-normal text-gray-400 dark:text-gray-500">· {{ environment.aws_region }}</span>
+            </h3>
+            <p class="mt-0.5 text-xs text-gray-500 dark:text-gray-400">Updated {{ environment.updated_at|timesince }} ago</p>
+        </div>
+        <div class="flex items-center gap-2 shrink-0">
+            {% if environment.is_transient %}
+            <span class="inline-flex items-center gap-1.5 text-xs font-medium text-green-600 dark:text-green-400">
+                <span class="relative flex h-2 w-2">
+                    <span class="absolute inline-flex h-full w-full animate-ping rounded-full bg-green-400 opacity-75"></span>
+                    <span class="relative inline-flex h-2 w-2 rounded-full bg-green-500"></span>
+                </span>
+                Live
+            </span>
+            {% endif %}
+            {% include "humanityrules_app/partials/_status_pill.html" with status=environment.status label=environment.get_status_display only %}
+        </div>
+    </div>
+
+    {% comment %} Fixed-height console: fills to ~viewport bottom. The 20rem offset ≈ the page
+    chrome above (header, tabs, this log header) plus <main>'s bottom padding; lines fill
+    top-down and overflow scrolls inside the box rather than growing the page. Auto-scroll on
+    refresh is handled by #provisioning-log-region (it survives the poll swap; this div doesn't). {% endcomment %}
+    <div id="provisioning-log-console"
+         style="height: calc(100dvh - 20rem)"
+         class="dark-scrollbar overflow-auto rounded-lg bg-gray-900 p-3 font-mono text-xs leading-relaxed ring-1 ring-gray-800 dark:bg-gray-950">
+        {% if truncated %}
+        <div class="mb-1 text-gray-500">… showing the last {{ max_lines }} lines …</div>
+        {% endif %}
+        {% for log in logs %}
+        <div class="flex gap-2 whitespace-pre-wrap break-words">
+            <span class="shrink-0 select-none text-gray-600">{{ log.created_at|date:"H:i:s" }}</span>
+            <span class="mt-px shrink-0 text-[10px] font-semibold uppercase tracking-wide
+                {% if log.source == 'cdk' %}text-indigo-400{% else %}text-amber-400{% endif %}">{{ log.source }}</span>
+            <span class="min-w-0 {% if log.level == 'error' %}text-red-400{% elif log.level == 'debug' %}text-gray-500{% else %}text-gray-200{% endif %}">{{ log.message }}</span>
+        </div>
+        {% empty %}
+        <div class="text-gray-500">No log entries yet…</div>
+        {% endfor %}
+    </div>
+</div>

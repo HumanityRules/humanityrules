@@ -1,0 +1,19 @@
+{% comment %}
+Environment status widget for the environment-detail Overview tab. Self-terminating poll
+(mechanism #2 in docs/ui_live_update_contract.md): while the environment is transient it
+re-renders every 5s (hx-swap=outerHTML); once it settles the polling attributes are omitted and
+refreshing stops. Poll responses also OOB-swap the header buttons (#environment-actions) so
+Retry/Tear Down appear the moment provisioning finishes. with_oob is set only on poll responses,
+never on the initial include (where the header renders the buttons in place).
+{% endcomment %}
+<span id="environment-status"
+      {% if environment.is_transient %}
+      hx-get="{% url 'environment_status' environment_id=environment.id %}"
+      hx-trigger="load delay:5s"
+      hx-swap="outerHTML"
+      {% endif %}>
+    {% include "humanityrules_app/partials/_status_pill.html" with status=environment.status label=environment.get_status_display only %}
+</span>
+{% if with_oob and user_is_org_admin %}
+{% include "humanityrules_app/environments/_environment_actions.html" with oob=True %}
+{% endif %}

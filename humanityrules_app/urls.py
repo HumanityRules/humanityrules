@@ -44,11 +44,15 @@ urlpatterns = [
 
     # Environments
     path("environments/", views.environments, name="environments"),
+    path("environments/setup/", views.environment_setup_form, name="environment_setup_form"),
     path("environments/new/", views.environment_editor_new, name="environment_editor_new"),
     path("environments/<uuid:environment_id>/setup/", views.environment_editor, name="environment_editor"),
     path("environments/<uuid:environment_id>/setup/section/", views.environment_editor_environment_section, name="environment_editor_environment_section"),
     path("environments/<uuid:environment_id>/setup/reset/", views.environment_editor_reset, name="environment_editor_reset"),
     path("environments/<uuid:environment_id>/", views.environment_detail, name="environment_detail"),
+    path("environments/<uuid:environment_id>/provisioning-log/", views.environment_provisioning_log, name="environment_provisioning_log"),
+    path("environments/<uuid:environment_id>/status/", views.environment_status, name="environment_status"),
+    path("environments/<uuid:environment_id>/retry/", views.environment_retry, name="environment_retry"),
     path("environments/<uuid:environment_id>/teardown-confirm/", views.environment_teardown_confirm, name="environment_teardown_confirm"),
     path("environments/<uuid:environment_id>/teardown/", views.environment_teardown, name="environment_teardown"),
     path("environments/<uuid:environment_id>/tags/add/", views.environment_tag_add, name="environment_tag_add"),

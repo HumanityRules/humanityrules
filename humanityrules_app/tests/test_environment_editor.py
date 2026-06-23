@@ -1,6 +1,6 @@
 """Tests for the environment setup editor views and entrypoints."""
 
-from django.test import TestCase
+from django.test import TestCase, override_settings
 from django.urls import reverse
 
 import humanityrules_app.models as models
@@ -9,8 +9,9 @@ from humanityrules_app.services import abac_service
 HTMX = {"HTTP_HX_REQUEST": "true"}
 
 
+@override_settings(AGENT_DEPLOYMENTS_ENABLED=True)
 class TestEnvironmentEditor(TestCase):
-    """Verify environment setup editor routing and lifecycle behavior."""
+    """Verify environment setup editor routing and lifecycle behavior (agent flow enabled)."""
 
     def setUp(self) -> None:
         self.organization = models.Organization.objects.create(name="Environment Editor Org", slug="environment-editor-org")
@@ -133,7 +134,9 @@ class TestEnvironmentEditor(TestCase):
             0,
         )
 
-    def test_admin_environment_cards_route_incomplete_envs_to_setup_editor(self) -> None:
+    def test_admin_environment_cards_route_to_detail(self) -> None:
+        # Cards always route to the detail page now — the agent editor is reached only from the
+        # New Environment entry point (the single gate), not from existing-environment cards.
         self.client.force_login(self.admin_user)
         response = self.client.get(reverse("environments"), **HTMX)
 
@@ -141,7 +144,7 @@ class TestEnvironmentEditor(TestCase):
         environments = {environment.id: environment for environment in response.context["environments"]}
         self.assertEqual(
             environments[self.env_draft.id].primary_url,
-            reverse("environment_editor", kwargs={"environment_id": self.env_draft.id}),
+            reverse("environment_detail", kwargs={"environment_id": self.env_draft.id}),
         )
         self.assertEqual(
             environments[self.env_ready.id].primary_url,

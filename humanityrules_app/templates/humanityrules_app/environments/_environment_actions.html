@@ -1,0 +1,26 @@
+{% comment %}
+Header action buttons for environment detail (Retry / Tear Down), gated on environment.status.
+Rendered in place on full load; re-rendered out-of-band (oob=True) by the status poll in
+_environment_status.html so the buttons appear/disappear the moment provisioning settles, without
+a reload. See docs/ui_live_update_contract.md.
+{% endcomment %}
+<div id="environment-actions"{% if oob %} hx-swap-oob="true"{% endif %} class="mb-3.5 flex items-center gap-3">
+    {% if environment.status == 'error' %}
+    <button hx-post="{% url 'environment_retry' environment_id=environment.id %}"
+            hx-target="#main-content"
+            hx-swap="innerHTML"
+            class="rounded-lg bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-700">
+        Retry Provisioning
+    </button>
+    {% endif %}
+    {% if environment.status == 'ready' or environment.status == 'error' %}
+    {% if not environment.aws_account.is_humr_sandbox %}
+    <button hx-get="/environments/{{ environment.id }}/teardown-confirm/"
+            hx-target="#modal-container"
+            hx-swap="innerHTML"
+            class="px-3 py-1.5 text-sm font-medium text-red-600 dark:text-red-400 border border-red-300 dark:border-red-600 rounded-lg hover:bg-red-50 dark:hover:bg-red-500/10">
+        Tear Down
+    </button>
+    {% endif %}
+    {% endif %}
+</div>
