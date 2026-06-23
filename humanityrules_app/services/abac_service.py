@@ -699,27 +699,27 @@ def bootstrap_organization(organization: Organization, admin_user: User) -> None
         # Shared (org-provisioned) integration credentials. Three global,
         # self-referential policies cover the three sharing scopes without a
         # policy per credential. The workspace one uses $app: it grants
-        # credential:use when the credential's shared-workspace tag matches the
+        # credential:use when the credential's shared-with-workspace tag matches the
         # requesting app's workspace-name tag (whose value is the workspace slug).
         {
             "name": "Shared credentials: everyone access",
             "resource_type": "credential",
             "identity_conditions": [{"key": "authenticated", "value": "true"}],
-            "resource_conditions": [{"key": "shared-scope", "value": "everyone"}],
+            "resource_conditions": [{"key": "sharing-scope", "value": "everyone"}],
             "actions": ["credential:use"],
         },
         {
             "name": "Shared credentials: targeted user access",
             "resource_type": "credential",
-            "identity_conditions": [{"key": "username", "value": "$resource.shared-user"}],
-            "resource_conditions": [{"key": "shared-scope", "value": "user"}],
+            "identity_conditions": [{"key": "username", "value": "$resource.shared-with-user"}],
+            "resource_conditions": [{"key": "sharing-scope", "value": "user"}],
             "actions": ["credential:use"],
         },
         {
             "name": "Shared credentials: workspace access",
             "resource_type": "credential",
             "identity_conditions": [{"key": "authenticated", "value": "true"}],
-            "resource_conditions": [{"key": "shared-workspace", "value": "$app.workspace-name"}],
+            "resource_conditions": [{"key": "shared-with-workspace", "value": "$app.workspace-name"}],
             "actions": ["credential:use"],
         },
     ]
@@ -812,7 +812,7 @@ def sync_shared_credential_tags(credential: IntegrationSharedCredential) -> None
         organization=org,
         resource_type="credential",
         credential=credential,
-        key="shared-scope",
+        key="sharing-scope",
         value=credential.scope,
     )
     if credential.scope == IntegrationSharedCredential.Scope.USER and credential.target_user_id is not None:
@@ -820,7 +820,7 @@ def sync_shared_credential_tags(credential: IntegrationSharedCredential) -> None
             organization=org,
             resource_type="credential",
             credential=credential,
-            key="shared-user",
+            key="shared-with-user",
             value=credential.target_user.username,
         )
     elif credential.scope == IntegrationSharedCredential.Scope.WORKSPACE and credential.target_workspace_id is not None:
@@ -828,7 +828,7 @@ def sync_shared_credential_tags(credential: IntegrationSharedCredential) -> None
             organization=org,
             resource_type="credential",
             credential=credential,
-            key="shared-workspace",
+            key="shared-with-workspace",
             value=credential.target_workspace.slug,
         )
 
@@ -871,7 +871,39 @@ RESOURCE_SUGGESTIONS: dict[str, dict[str, set[str]]] = {
     "environment": {
         "stage": {"production", "staging", "development"},
     },
-    "app": {},
+    "app": {
+        "app-type": {"personal-assistant"},
+        "owner": set(),
+    },
+    "credential": {
+        "sharing-scope": {"everyone", "user", "workspace"},
+        "shared-with-workspace": set(),
+        "shared-with-user": set(),
+    },
+}
+
+# Cross-reference values offered in the policy editor's resource-condition value
+# field, keyed by resource type -> {tag key -> {reference values}}. These are
+# policy constructs (resolved at evaluation time), NOT real tag values, so they
+# live here rather than in RESOURCE_SUGGESTIONS and never reach the per-resource
+# tag editors. Surfaced only via get_resource_tag_suggestions_by_type.
+RESOURCE_CONDITION_REFERENCE_SUGGESTIONS: dict[str, dict[str, set[str]]] = {
+    "credential": {
+        "shared-with-workspace": {"$app.workspace-name"},
+    },
+}
+
+# Cross-reference values offered in the policy editor's identity-condition value
+# field, keyed by resource type -> {identity key -> {reference values}}. Same
+# rationale as RESOURCE_CONDITION_REFERENCE_SUGGESTIONS, mirrored to the identity
+# side; surfaced only via get_identity_attribute_suggestions_by_type.
+IDENTITY_CONDITION_REFERENCE_SUGGESTIONS: dict[str, dict[str, set[str]]] = {
+    "credential": {
+        "username": {"$resource.shared-with-user"},
+    },
+    "app": {
+        "username": {"$resource.owner"},
+    },
 }
 
 # System attributes — not manually assignable, but valid in policy identity conditions
@@ -937,5 +969,55 @@ def get_resource_tag_suggestions(
     all_pairs = db_pairs | seed_pairs
     all_keys = {k for k, _ in all_pairs} | seed_keys
     return sorted(all_keys), sorted(all_pairs)
+
+
+def get_resource_tag_suggestions_by_type(org: Organization) -> tuple[list[tuple[str, str]], list[tuple[str, str, str]]]:
+    """Returns key and value suggestions tagged with the resource types they apply to.
+
+    For the policy editor, where one form spans every resource type: each key
+    suggestion is ``(key, types_csv)`` and each value suggestion is
+    ``(key, value, types_csv)``, where ``types_csv`` is a comma-joined sorted
+    list of the resource types that key/pair appears under. The editor shows
+    only the suggestions valid for the currently selected resource type.
+    """
+    key_types: dict[str, set[str]] = {}
+    pair_types: dict[tuple[str, str], set[str]] = {}
+    for resource_type in ResourceTag.ResourceType.values:
+        keys, pairs = get_resource_tag_suggestions(org=org, resource_type=resource_type)
+        for key in keys:
+            key_types.setdefault(key, set()).add(resource_type)
+        for key, value in pairs:
+            pair_types.setdefault((key, value), set()).add(resource_type)
+    for resource_type, references in RESOURCE_CONDITION_REFERENCE_SUGGESTIONS.items():
+        for key, values in references.items():
+            key_types.setdefault(key, set()).add(resource_type)
+            for value in values:
+                pair_types.setdefault((key, value), set()).add(resource_type)
+    keys_with_types = sorted((key, ",".join(sorted(types))) for key, types in key_types.items())
+    pairs_with_types = sorted((key, value, ",".join(sorted(types))) for (key, value), types in pair_types.items())
+    return keys_with_types, pairs_with_types
+
+
+def get_identity_attribute_suggestions_by_type(org: Organization) -> tuple[list[tuple[str, str]], list[tuple[str, str, str]]]:
+    """Identity-attribute suggestions tagged with applicable resource types, for the policy editor.
+
+    Mirrors get_resource_tag_suggestions_by_type for the identity-conditions
+    field. Ordinary identity attributes apply to every resource type (tagged with
+    all of them, so they always show); cross-references like
+    ``$resource.shared-with-user`` are tagged with only the resource type whose
+    policies use them, so they surface only for that type.
+    """
+    keys, pairs = get_identity_attribute_suggestions(org=org, include_system=True)
+    all_types = set(ResourceTag.ResourceType.values)
+    key_types: dict[str, set[str]] = {key: set(all_types) for key in keys}
+    pair_types: dict[tuple[str, str], set[str]] = {(key, value): set(all_types) for key, value in pairs}
+    for resource_type, references in IDENTITY_CONDITION_REFERENCE_SUGGESTIONS.items():
+        for key, values in references.items():
+            key_types.setdefault(key, set()).add(resource_type)
+            for value in values:
+                pair_types.setdefault((key, value), set()).add(resource_type)
+    keys_with_types = sorted((key, ",".join(sorted(types))) for key, types in key_types.items())
+    pairs_with_types = sorted((key, value, ",".join(sorted(types))) for (key, value), types in pair_types.items())
+    return keys_with_types, pairs_with_types
 
 

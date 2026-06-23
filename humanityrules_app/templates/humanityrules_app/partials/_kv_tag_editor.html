@@ -8,6 +8,11 @@
     add_label        — text for the add button (default "Add")
     suggested_keys   — key suggestion list for combobox
     suggested_values — value suggestion pairs for combobox
+    key_width        — Tailwind width class for the key field (default "w-36")
+    value_width      — Tailwind width class for the value field (default "w-44")
+    type_filter_model — optional Alpine expression (e.g. "resourceType"); when set,
+                       suggestions are filtered live by resource type (see
+                       _combobox_input.html for the required suggestion shapes).
 
   ── Editable chips (HTMX add/remove) ──────────────────────────
     items            — queryset/list with .key, .value, .id
@@ -26,12 +31,12 @@
 <div>
     <template x-for="(item, i) in {{ array_model }}" :key="i">
         <div class="flex items-center gap-2 mb-2">
-            <div class="w-36 min-w-0">
-            {% include "humanityrules_app/partials/_combobox_input.html" with suggestions=suggested_keys model="item.key" placeholder="key" clear_model="item.value" input_class="w-full px-2 py-1 text-sm border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800 text-gray-900 dark:text-white placeholder-gray-400 focus:outline-none focus:ring-0" %}
+            <div class="{{ key_width|default:"w-36" }} min-w-0">
+            {% include "humanityrules_app/partials/_combobox_input.html" with suggestions=suggested_keys model="item.key" placeholder="key" clear_model="item.value" type_filter_model=type_filter_model input_class="w-full px-2 py-1 text-sm border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800 text-gray-900 dark:text-white placeholder-gray-400 focus:outline-none focus:ring-0" %}
             </div>
             <span class="text-sm text-gray-400">=</span>
-            <div class="w-44 min-w-0">
-            {% include "humanityrules_app/partials/_combobox_input.html" with suggestions=suggested_values model="item.value" for_key_model="item.key" placeholder="value" input_class="w-full px-2 py-1 text-sm border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800 text-gray-900 dark:text-white placeholder-gray-400 focus:outline-none focus:ring-0" %}
+            <div class="{{ value_width|default:"w-44" }} min-w-0">
+            {% include "humanityrules_app/partials/_combobox_input.html" with suggestions=suggested_values model="item.value" for_key_model="item.key" placeholder="value" type_filter_model=type_filter_model input_class="w-full px-2 py-1 text-sm border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800 text-gray-900 dark:text-white placeholder-gray-400 focus:outline-none focus:ring-0" %}
             </div>
             <button type="button" @click="{{ array_model }}.splice(i, 1)"
                     class="text-red-500 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300">

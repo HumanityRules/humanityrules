@@ -28,7 +28,6 @@ from . import base
 
 
 RESOURCE_TYPE_OPTIONS = [
-    {"id": "", "name": "Select..."},
     {"id": "workspace", "name": "Workspace"},
     {"id": "environment", "name": "Environment"},
     {"id": "app", "name": "App"},
@@ -533,8 +532,8 @@ def security_policy_create(request: HttpRequest) -> HttpResponse:
         actions = json.loads(request.POST.get("actions", "[]"))
 
         def _render_create_form_error(error_message: str) -> HttpResponse:
-            existing_identity_keys, existing_identity_values = abac_service.get_identity_attribute_suggestions(org, include_system=True)
-            existing_tag_keys, existing_tag_values = abac_service.get_resource_tag_suggestions(org)
+            existing_identity_keys, existing_identity_values = abac_service.get_identity_attribute_suggestions_by_type(org)
+            existing_tag_keys, existing_tag_values = abac_service.get_resource_tag_suggestions_by_type(org)
             context = base.get_app_shell_context(request=request, current_page="security")
             context["active_tab"] = "policies"
             context["policy"] = None
@@ -581,8 +580,8 @@ def security_policy_create(request: HttpRequest) -> HttpResponse:
         return response
 
     # GET — show form
-    existing_identity_keys, existing_identity_values = abac_service.get_identity_attribute_suggestions(org, include_system=True)
-    existing_tag_keys, existing_tag_values = abac_service.get_resource_tag_suggestions(org)
+    existing_identity_keys, existing_identity_values = abac_service.get_identity_attribute_suggestions_by_type(org)
+    existing_tag_keys, existing_tag_values = abac_service.get_resource_tag_suggestions_by_type(org)
 
     context = base.get_app_shell_context(request=request, current_page="security")
     context["active_tab"] = "policies"
@@ -620,8 +619,8 @@ def security_policy_detail(request: HttpRequest, policy_id: UUID) -> HttpRespons
                 resource_conditions=resource_conditions,
             )
         except ValidationError as e:
-            existing_identity_keys, existing_identity_values = abac_service.get_identity_attribute_suggestions(org, include_system=True)
-            existing_tag_keys, existing_tag_values = abac_service.get_resource_tag_suggestions(org)
+            existing_identity_keys, existing_identity_values = abac_service.get_identity_attribute_suggestions_by_type(org)
+            existing_tag_keys, existing_tag_values = abac_service.get_resource_tag_suggestions_by_type(org)
             context = base.get_app_shell_context(request=request, current_page="security")
             context["active_tab"] = "policies"
             context["policy"] = policy
@@ -641,8 +640,8 @@ def security_policy_detail(request: HttpRequest, policy_id: UUID) -> HttpRespons
         try:
             policy.save()
         except IntegrityError:
-            existing_identity_keys, existing_identity_values = abac_service.get_identity_attribute_suggestions(org, include_system=True)
-            existing_tag_keys, existing_tag_values = abac_service.get_resource_tag_suggestions(org)
+            existing_identity_keys, existing_identity_values = abac_service.get_identity_attribute_suggestions_by_type(org)
+            existing_tag_keys, existing_tag_values = abac_service.get_resource_tag_suggestions_by_type(org)
             context = base.get_app_shell_context(request=request, current_page="security")
             context["active_tab"] = "policies"
             context["policy"] = policy
@@ -657,8 +656,8 @@ def security_policy_detail(request: HttpRequest, policy_id: UUID) -> HttpRespons
         response["HX-Redirect"] = "/security/policies/"
         return response
 
-    existing_identity_keys, existing_identity_values = abac_service.get_identity_attribute_suggestions(org, include_system=True)
-    existing_tag_keys, existing_tag_values = abac_service.get_resource_tag_suggestions(org)
+    existing_identity_keys, existing_identity_values = abac_service.get_identity_attribute_suggestions_by_type(org)
+    existing_tag_keys, existing_tag_values = abac_service.get_resource_tag_suggestions_by_type(org)
 
     context = base.get_app_shell_context(request=request, current_page="security")
     context["active_tab"] = "policies"

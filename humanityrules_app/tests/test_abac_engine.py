@@ -2006,6 +2006,85 @@ class TestSuggestionPalette(TestCase):
         self.assertEqual(keys, sorted(keys))
         self.assertEqual(pairs, sorted(pairs))
 
+    def test_by_type_tags_key_provenance(self) -> None:
+        workspace = Workspace.objects.get(organization=self.org, slug="default")
+        ResourceTag.objects.create(
+            organization=self.org, resource_type="workspace", workspace=workspace, key="infra-key", value="x",
+        )
+        keys, _ = abac_service.get_resource_tag_suggestions_by_type(self.org)
+        keys_map = dict(keys)
+        # A workspace DB tag is attributed to the workspace type only.
+        self.assertEqual(keys_map["infra-key"], "workspace")
+        # 'stage' is an environment-only seed; 'sharing-scope' a credential-only seed.
+        self.assertEqual(keys_map["stage"], "environment")
+        self.assertEqual(keys_map["sharing-scope"], "credential")
+
+    def test_by_type_tags_value_provenance(self) -> None:
+        keys, pairs = abac_service.get_resource_tag_suggestions_by_type(self.org)
+        pair_map = {(k, v): t for k, v, t in pairs}
+        self.assertEqual(pair_map[("stage", "production")], "environment")
+        self.assertEqual(pair_map[("sharing-scope", "everyone")], "credential")
+
+    def test_by_type_shared_key_lists_all_types(self) -> None:
+        # 'stage'='production' is an environment seed; adding it as a workspace
+        # DB tag makes the key/pair span two types, joined in the provenance CSV.
+        workspace = Workspace.objects.get(organization=self.org, slug="default")
+        ResourceTag.objects.create(
+            organization=self.org, resource_type="workspace", workspace=workspace, key="stage", value="production",
+        )
+        keys, pairs = abac_service.get_resource_tag_suggestions_by_type(self.org)
+        self.assertEqual(dict(keys)["stage"], "environment,workspace")
+        pair_map = {(k, v): t for k, v, t in pairs}
+        self.assertEqual(pair_map[("stage", "production")], "environment,workspace")
+
+    def test_by_type_results_are_sorted(self) -> None:
+        keys, pairs = abac_service.get_resource_tag_suggestions_by_type(self.org)
+        self.assertEqual(keys, sorted(keys))
+        self.assertEqual(pairs, sorted(pairs))
+
+    def test_by_type_offers_app_workspace_reference(self) -> None:
+        # The policy editor should suggest the $app cross-reference as the value
+        # for shared-with-workspace (the canonical workspace-access condition).
+        _, pairs = abac_service.get_resource_tag_suggestions_by_type(self.org)
+        pair_map = {(k, v): t for k, v, t in pairs}
+        self.assertEqual(pair_map[("shared-with-workspace", "$app.workspace-name")], "credential")
+
+    def test_tag_palette_excludes_policy_reference(self) -> None:
+        # The cross-reference must NOT leak into the per-resource tag editor.
+        _, pairs = abac_service.get_resource_tag_suggestions(self.org, "credential")
+        self.assertNotIn(("shared-with-workspace", "$app.workspace-name"), pairs)
+
+    def test_identity_by_type_offers_resource_reference(self) -> None:
+        # The identity-condition value field should suggest $resource.shared-with-user
+        # for the username key, gated to credential policies.
+        _, pairs = abac_service.get_identity_attribute_suggestions_by_type(self.org)
+        pair_map = {(k, v): t for k, v, t in pairs}
+        self.assertEqual(pair_map[("username", "$resource.shared-with-user")], "credential")
+
+    def test_identity_by_type_normal_attrs_apply_to_all_types(self) -> None:
+        # Ordinary identity attributes are not type-specific, so they are tagged
+        # with every resource type and always show.
+        keys, _ = abac_service.get_identity_attribute_suggestions_by_type(self.org)
+        self.assertEqual(dict(keys)["org-role"], "app,credential,environment,workspace")
+
+    def test_identity_by_type_results_are_sorted(self) -> None:
+        keys, pairs = abac_service.get_identity_attribute_suggestions_by_type(self.org)
+        self.assertEqual(keys, sorted(keys))
+        self.assertEqual(pairs, sorted(pairs))
+
+    def test_identity_by_type_offers_app_owner_reference(self) -> None:
+        # Symmetric to the credential case: the PA owner policy matches
+        # username = $resource.owner, gated to app policies.
+        _, pairs = abac_service.get_identity_attribute_suggestions_by_type(self.org)
+        pair_map = {(k, v): t for k, v, t in pairs}
+        self.assertEqual(pair_map[("username", "$resource.owner")], "app")
+
+    def test_app_resource_seed_suggestions(self) -> None:
+        keys, pairs = abac_service.get_resource_tag_suggestions(self.org, "app")
+        self.assertIn("app-type", keys)
+        self.assertIn(("app-type", "personal-assistant"), pairs)
+        self.assertIn("owner", keys)
+
 
 # ---------------------------------------------------------------------------
 # Self-referential conditions ($identity.<key> / $resource.<key>)
