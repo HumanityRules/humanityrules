@@ -5,7 +5,7 @@ import logging
 import httpx
 from django.utils import timezone
 
-from humanityrules_app.models import App, Environment, IntegrationUserCredential, User
+from humanityrules_app.models import App, Environment, IntegrationSharedCredential, IntegrationUserCredential, User
 from humanityrules_app.views.integrations import provider_common
 
 logger = logging.getLogger(__name__)
@@ -125,3 +125,27 @@ def refresh_outcome(environment: Environment, owner_user: User, app_slug: str) -
         config=credential.config,
         metadata=credential.metadata,
     )
+
+
+def refresh_outcome_from_shared(credential: IntegrationSharedCredential) -> dict:
+    """Build the broker refresh outcome for an org-shared OpenAI credential."""
+    api_key = credential.credentials.get("api_key", "")
+    if not api_key:
+        return provider_common.absent_outcome()
+    return provider_common.has_token_outcome(
+        secrets={"api_key": api_key},
+        expires_in=OPENAI_BROKER_CACHE_SECONDS,
+        config=credential.config,
+        metadata=credential.metadata,
+    )
+
+
+def validate_shared_key(api_key: str) -> tuple[dict | None, str | None]:
+    """Validate an admin-supplied OpenAI key for org sharing; return (metadata, error)."""
+    api_key = (api_key or "").strip()
+    if not api_key:
+        return None, "api_key is required"
+    ok, openai_error = _openai_validate_key(api_key=api_key)
+    if not ok:
+        return None, openai_error
+    return {"validated_at": timezone.now().isoformat()}, None
