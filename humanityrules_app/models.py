@@ -417,6 +417,17 @@ class Environment(models.Model):
         TEARDOWN_PENDING = "teardown_pending", "Teardown Pending"  # Queued for teardown
         TEARING_DOWN = "tearing_down", "Tearing Down"  # Teardown in progress
 
+    IN_PROGRESS_STATUSES = (
+        Status.PENDING,
+        Status.PROVISIONING,
+    )
+
+    TRANSIENT_STATUSES = (
+        *IN_PROGRESS_STATUSES,
+        Status.TEARDOWN_PENDING,
+        Status.TEARING_DOWN,
+    )
+
     id = models.UUIDField(
         primary_key=True,
         default=uuid.uuid7,
@@ -482,6 +493,11 @@ class Environment(models.Model):
 
     def __str__(self) -> str:
         return f"{self.name} ({self.aws_account.name})"
+
+    @property
+    def is_transient(self) -> bool:
+        """Status may change via background processing (provisioning or teardown)."""
+        return self.status in self.TRANSIENT_STATUSES
 
 
 class Workspace(models.Model):
