@@ -134,7 +134,9 @@ class BedrockPlatformCapabilityTests(SimpleTestCase):
         variable_names = {var["name"] for var in hermes["configurable_variables"]}
         self.assertNotIn("HERMES_WEBUI_PASSWORD", variable_names)
         self.assertIn("AWS_DEFAULT_REGION", variable_names)
-        self.assertIn("TAVILY_API_KEY", variable_names)
+        # Tavily is a HUMR-managed shared credential injected by the integrations
+        # broker, not a seeded per-app variable.
+        self.assertNotIn("TAVILY_API_KEY", variable_names)
         self.assertNotIn("AWS_REGION", variable_names)
         self.assertNotIn("AWS_BEDROCK_REGION", variable_names)
 

@@ -51,6 +51,7 @@ from humanityrules_app.views.integrations import (
     provider_openai_codex,
     provider_openrouter,
     provider_slack,
+    provider_tavily,
     provider_telegram,
     provider_x,
 )
@@ -84,6 +85,7 @@ _SPECS = [
     ProviderSpec(provider=IntegrationUserCredential.Provider.ANTHROPIC, kind=ProviderKind.VAULT, module=provider_anthropic),
     ProviderSpec(provider=IntegrationUserCredential.Provider.X, kind=ProviderKind.OAUTH, module=provider_x),
     ProviderSpec(provider=IntegrationUserCredential.Provider.BROWSERUSE, kind=ProviderKind.VAULT, module=provider_browseruse),
+    ProviderSpec(provider=IntegrationUserCredential.Provider.TAVILY, kind=ProviderKind.VAULT, module=provider_tavily),
 ]
 
 # Keyed by the provider slug. The keys are `Provider` enum members, which are

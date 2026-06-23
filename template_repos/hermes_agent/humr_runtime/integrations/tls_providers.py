@@ -377,6 +377,29 @@ TLS_INTERCEPT_PROVIDER_SPECS = (
         restart_webui_after_save=False,
         category="connector",
     ),
+    TlsProviderSpec(
+        slug="tavily",
+        label="Tavily",
+        # Tavily's web-search/extract/crawl API. A single shared key (no
+        # per-user OAuth); the agent authenticates with Authorization: Bearer,
+        # the same shape as OpenRouter/OpenAI, so the proxy swaps a placeholder
+        # bearer for the real key in flight.
+        hosts=("api.tavily.com",),
+        logo_url="/extensions/tavily.svg",
+        credential_method=VaultHeaderInject(
+            placeholders={"api_key": "tvly-HUMR_PLACEHOLDER"},
+        ),
+        env_bindings=(
+            EnvBinding(env_var="TAVILY_API_KEY", value="tvly-HUMR_PLACEHOLDER"),
+        ),
+        # web_search/web_extract read TAVILY_API_KEY at call time in agent turns
+        # served by either process (gateway for cron/platform turns, webui for
+        # chat), so both must reload to pick up the placeholder. Connector, not a
+        # model provider: it doesn't change /api/models.
+        restart_gateway_after_save=True,
+        restart_webui_after_save=True,
+        category="connector",
+    ),
 )
 
 

@@ -192,20 +192,6 @@ _HERMES_LLM_VARS = [
     },
 ]
 
-_HERMES_TAVILY_VAR = [
-    {
-        "name": "TAVILY_API_KEY",
-        "group": "API Keys",
-        "category": "secret",
-        "description": "Tavily API key for web search capability",
-        "required": False,
-        "auto_generate": False,
-        "default_value": None,
-        "value": "",
-        "user_editable": False,
-    },
-]
-
 _HERMES_AWS_DEFAULT_REGION_VAR = [
     {
         "name": "AWS_DEFAULT_REGION",
@@ -324,7 +310,7 @@ HERMES_PERSONAL_TEMPLATE = {
             "memory_reservation_mib": 2048,
             "memory_limit_mib": 4096,
             "configurable_variables": (
-                _HERMES_LLM_VARS + _HERMES_AWS_DEFAULT_REGION_VAR + _HERMES_TAVILY_VAR
+                _HERMES_LLM_VARS + _HERMES_AWS_DEFAULT_REGION_VAR
             ),
             # Supervisor process (outside the nono sandbox) refreshes provider
             # access tokens by POSTing to HUMR /api/integrations/tokens.

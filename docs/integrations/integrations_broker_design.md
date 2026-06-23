@@ -48,7 +48,7 @@ The sandbox is configured with `HTTPS_PROXY=http://127.0.0.1:9950` and `SSL_CERT
 For each CONNECT:
 
 - **Known host** (listed in the broker's `PROVIDERS` config): mint a leaf cert for that hostname on demand, signed by the broker's CA. Answer the CONNECT with `200 Connection established`, then run a TLS handshake with the sandbox client *as the server*. Parse the inbound HTTPS request, rewrite the `Authorization` header (and `Host`), open a fresh outbound TLS connection to the real upstream, replay the request, stream the response back.
-- **Unknown host** (e.g. `api.tavily.com`): opaque CONNECT tunnel. Bytes are forwarded both ways without inspection. The sandbox sees an end-to-end TLS session with the real upstream; the broker injects nothing.
+- **Unknown host** (any host in no provider's `hosts` list): opaque CONNECT tunnel. Bytes are forwarded both ways without inspection. The sandbox sees an end-to-end TLS session with the real upstream; the broker injects nothing.
 
 Sandbox TLS clients verify the leaf cert against the CA bundle (because the CA's public cert is in `SSL_CERT_FILE`). They see a valid chain, send the request normally, and never know a MITM is in-path.
 
@@ -140,7 +140,7 @@ That dict alone drives: which hostnames get MITM'd vs tunneled; the `label` show
 ## Cert lifecycle
 
 - **CA generation**: at broker startup, an RSA-4096 CA key is generated in memory. The CA cert is valid for 5 years, with `BasicConstraints(ca=True, path_length=0)` and `KeyUsage(cert_sign, crl_sign)`. Subject Key Identifier is attached.
-- **Bundle write**: CA cert is concatenated with the system root bundle (from `/etc/ssl/certs/ca-certificates.crt`) and written to `/opt/humr/ca/bundle.pem`. Supervisor exports this as `SSL_CERT_FILE` inside the nono env. Sandbox TLS clients use this bundle for verification, which is why they trust both our MITM'd hosts and direct-tunneled real hosts (Tavily etc.).
+- **Bundle write**: CA cert is concatenated with the system root bundle (from `/etc/ssl/certs/ca-certificates.crt`) and written to `/opt/humr/ca/bundle.pem`. Supervisor exports this as `SSL_CERT_FILE` inside the nono env. Sandbox TLS clients use this bundle for verification, which is why they trust both our MITM'd hosts and direct-tunneled real hosts (arbitrary third-party APIs the agent reaches that no provider claims).
 - **Leaf minting**: first `CONNECT` for a known hostname mints an RSA-2048 leaf, 2-year validity, with `SubjectAlternativeName=[DNS:<host>]`, `BasicConstraints(ca=False, critical)`, `KeyUsage(digital_signature, key_encipherment, critical)`, `ExtendedKeyUsage=[SERVER_AUTH]`, `SubjectKeyIdentifier`, and `AuthorityKeyIdentifier.from_issuer_public_key(CA)`. Cached in-memory by hostname. Leaf cert/key PEMs are written only as transient files under `/opt/humr/broker-private`, loaded into `ssl.SSLContext`, and immediately unlinked; that directory is not granted to the sandbox.
 - **Rotation**: a new container boot regenerates the CA and all leaves. The sandbox reboots with the container, so there's no "CA rotated under a live agent" corner.
 
@@ -159,7 +159,7 @@ Python's cert validation (OpenSSL) rejects chains missing `SubjectKeyIdentifier`
 
 Two changes from the pre-broker design:
 
-- **`allow_domain` dropped from 8 to 1.** Previously: Tavily + 7 `*.googleapis.com`. Now: just Tavily (which reaches its API as an opaque CONNECT tunnel through the broker). Future integrations add zero entries here — their hostnames go in the broker's `PROVIDERS.hosts` list instead.
+- **No `allow_domain`.** Every provider host — `*.googleapis.com`, `api.tavily.com`, and the rest — is reached through the broker proxy (`HTTPS_PROXY` → 9950), which MITMs known hosts and opaquely tunnels the rest. Adding an integration is a `TlsProviderSpec` (host + credential method), never an `allow_domain` entry.
 - **`allow_vars` adds `HTTPS_PROXY` and `SSL_CERT_FILE`.** `allow_vars` is nono's env-variable passthrough list; without these entries, nono would strip the values at sandbox entry and the proxy/trust wiring would be silently undone.
 - **`open_port` adds 9950 (proxy) and 9951 (control).** Both loopback; neither is publicly exposed by the task definition.
 

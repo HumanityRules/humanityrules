@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" fill="none" role="img" aria-label="Tavily">
+  <rect width="32" height="32" rx="7" fill="#1B1B1F"/>
+  <circle cx="14.5" cy="14.5" r="6.5" stroke="#3FB7C4" stroke-width="2.4"/>
+  <line x1="19.4" y1="19.4" x2="24.5" y2="24.5" stroke="#3FB7C4" stroke-width="2.4" stroke-linecap="round"/>
+</svg>
