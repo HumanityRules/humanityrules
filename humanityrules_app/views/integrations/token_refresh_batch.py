@@ -117,14 +117,26 @@ def integrations_tokens_batch(request: HttpRequest) -> JsonResponse:
             shared_credential_resolver.resolve(organization=organization, user=user, app=app, provider=slug)
             if refresh_outcome_from_shared is not None else None
         )
+        # A shared credential only wins when it actually carries a usable secret.
+        # An admin row saved without one resolves to `absent`; treating that as
+        # the final answer would pin the provider to `absent` org-wide and shadow
+        # every user's own pasted key. Fall through to the personal refresh
+        # instead, so a blank share can't silently disable the provider.
         if shared is not None:
-            results[slug] = refresh_outcome_from_shared(shared)
-            logger.info(
-                "batched token refresh: shared credential used env=%s owner=%s app=%s provider=%s scope=%s",
+            shared_outcome = refresh_outcome_from_shared(shared)
+            if shared_outcome.get("outcome") != "absent":
+                results[slug] = shared_outcome
+                logger.info(
+                    "batched token refresh: shared credential used env=%s owner=%s app=%s provider=%s scope=%s",
+                    environment.slug, owner_username, app_slug, slug, shared.scope,
+                )
+                continue
+            logger.error(
+                "batched token refresh: shared credential has no usable secret, falling back to personal "
+                "env=%s owner=%s app=%s provider=%s scope=%s",
                 environment.slug, owner_username, app_slug, slug, shared.scope,
             )
-        else:
-            personal_specs[slug] = spec
+        personal_specs[slug] = spec
 
     if personal_specs:
         with ThreadPoolExecutor(max_workers=len(personal_specs)) as executor:

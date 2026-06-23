@@ -401,6 +401,27 @@ class TestSharedCredentials(_BatchTokensEndpointTestBase):
         # The hermes app is in Engineering, not Sales, so the share does not apply.
         self.assertEqual(self._post_openrouter()["secrets"], {"api_key": "sk-or-PERSONAL"})
 
+    def test_shared_key_without_secret_falls_back_to_personal(self) -> None:
+        """A blank shared key must not shadow the user's own pasted key."""
+        IntegrationSharedCredential.objects.create(
+            organization=self.org, provider="openrouter", scope="everyone",
+            credentials={"api_key": ""},
+        )
+        IntegrationUserCredential.objects.create(
+            owner_user=self.user, environment=self.env, app_slug="hermes",
+            provider=IntegrationUserCredential.Provider.OPENROUTER,
+            credentials={"api_key": "sk-or-PERSONAL"},
+        )
+        result = self._post_openrouter()
+        self.assertEqual(result["outcome"], "has_token")
+        self.assertEqual(result["secrets"], {"api_key": "sk-or-PERSONAL"})
+
+    def test_shared_key_without_secret_and_no_personal_is_absent(self) -> None:
+        IntegrationSharedCredential.objects.create(
+            organization=self.org, provider="openrouter", scope="everyone", credentials={},
+        )
+        self.assertEqual(self._post_openrouter(), {"outcome": "absent"})
+
 
 class TestMixedConnectedAndAbsent(_BatchTokensEndpointTestBase):
 
