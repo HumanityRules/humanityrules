@@ -194,14 +194,6 @@ ensure_workspace_ownership() {
 run_in_nono() {
     local nono_args=(run --profile "${HUMR_RUNTIME_DIR}/hermes-nono-profile.json")
 
-    if [ -n "${TAVILY_API_KEY:-}" ]; then
-        # Tavily uses JSON payload, which nono doesn't support in its credential injection mechanism. 
-        # It is acceptable to pass it to Hermes because Hermes strips this particular env var in all 
-        # its tool calls (except web_search). We use "--env-credential-map" instead of allow_vars 
-        # in the nono profile because this makes explicit that this is a credential.
-        nono_args+=(--env-credential-map env://TAVILY_API_KEY TAVILY_API_KEY)
-    fi
-
     # HTTPS_PROXY + SSL_CERT_FILE route in-sandbox clients (gws, curl, etc.)
     # through the integrations broker, which injects per-user access tokens
     # and forwards to real upstreams. NO_PROXY keeps loopback direct so the

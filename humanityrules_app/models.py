@@ -1816,6 +1816,7 @@ class IntegrationUserCredential(models.Model):
         ANTHROPIC = "anthropic", "Anthropic"
         X = "x", "X"
         BROWSERUSE = "browseruse", "Browser Use"
+        TAVILY = "tavily", "Tavily"
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid7, editable=False)
     owner_user = models.ForeignKey(

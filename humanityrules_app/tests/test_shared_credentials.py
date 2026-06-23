@@ -20,6 +20,7 @@ from humanityrules_app.views.integrations import (
     provider_anthropic,
     provider_openai,
     provider_openrouter,
+    provider_tavily,
     shared_credential_resolver,
 )
 
@@ -184,12 +185,19 @@ class TestRefreshOutcomeFromShared(SharedCredentialTestBase):
         self.assertEqual(outcome["secrets"], {"api_key": "sk-ant-xyz"})
         self.assertEqual(outcome["expires_in"], provider_anthropic.ANTHROPIC_BROKER_CACHE_SECONDS)
 
+    def test_tavily_packages_has_token(self) -> None:
+        cred = self._cred(provider="tavily", api_key="tvly-xyz")
+        outcome = provider_tavily.refresh_outcome_from_shared(credential=cred)
+        self.assertEqual(outcome["outcome"], "has_token")
+        self.assertEqual(outcome["secrets"], {"api_key": "tvly-xyz"})
+        self.assertEqual(outcome["expires_in"], provider_tavily.TAVILY_BROKER_CACHE_SECONDS)
+
     def test_absent_when_key_missing(self) -> None:
         cred = IntegrationSharedCredential.objects.create(
             organization=self.org, provider="openrouter", scope="everyone", credentials={},
         )
         self.assertEqual(provider_openrouter.refresh_outcome_from_shared(credential=cred)["outcome"], "absent")
-        for module in (provider_openai, provider_anthropic):
+        for module in (provider_openai, provider_anthropic, provider_tavily):
             self.assertEqual(module.refresh_outcome_from_shared(credential=cred)["outcome"], "absent")
 
 
@@ -220,8 +228,14 @@ class TestValidateSharedKey(TestCase):
         self.assertIsNone(error)
         self.assertIn("validated_at", metadata)
 
+    def test_tavily_valid_key_returns_metadata(self) -> None:
+        with patch("humanityrules_app.views.integrations.provider_tavily.httpx.get", return_value=self._ok_response()):
+            metadata, error = provider_tavily.validate_shared_key(api_key="tvly-real")
+        self.assertIsNone(error)
+        self.assertIn("validated_at", metadata)
+
     def test_blank_key_rejected_without_network(self) -> None:
-        for module in (provider_openai, provider_anthropic, provider_openrouter):
+        for module in (provider_openai, provider_anthropic, provider_openrouter, provider_tavily):
             metadata, error = module.validate_shared_key(api_key="   ")
             self.assertIsNone(metadata)
             self.assertEqual(error, "api_key is required")
@@ -231,6 +245,12 @@ class TestValidateSharedKey(TestCase):
             metadata, error = provider_openai.validate_shared_key(api_key="sk-bad")
         self.assertIsNone(metadata)
         self.assertEqual(error, provider_openai.OPENAI_INVALID_KEY_MESSAGE)
+
+    def test_tavily_unauthorized_key_rejected(self) -> None:
+        with patch("humanityrules_app.views.integrations.provider_tavily.httpx.get", return_value=self._unauthorized_response()):
+            metadata, error = provider_tavily.validate_shared_key(api_key="tvly-bad")
+        self.assertIsNone(metadata)
+        self.assertEqual(error, provider_tavily.TAVILY_INVALID_KEY_MESSAGE)
 
 
 class TestAppReferenceValidation(TestCase):

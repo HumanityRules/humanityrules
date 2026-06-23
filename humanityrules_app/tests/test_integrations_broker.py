@@ -139,9 +139,12 @@ class TestHostToProviderRouting(unittest.TestCase):
         for host in tls_providers.TLS_INTERCEPT_PROVIDERS["google"].hosts:
             self.assertEqual(tls_providers.HOST_TO_TLS_PROVIDER[host], "google")
 
+    def test_tavily_host_routes_to_tavily(self) -> None:
+        self.assertEqual(tls_providers.HOST_TO_TLS_PROVIDER["api.tavily.com"], "tavily")
+
     def test_unknown_host_returns_none(self) -> None:
         store = _make_token_store()
-        self.assertIsNone(store.provider_for_host(host="api.tavily.com"))
+        self.assertIsNone(store.provider_for_host(host="api.notaprovider.com"))
         self.assertIsNone(store.provider_for_host(host="example.com"))
 
     def test_connect_host_routing_is_case_and_trailing_dot_insensitive(self) -> None:
@@ -1512,7 +1515,7 @@ class TestLazyTokenForHost(unittest.IsolatedAsyncioTestCase):
 
     async def test_unknown_host_returns_none_without_fetching(self) -> None:
         with patch.object(broker.tls_intercept, "fetch_provider_tokens_batch") as fetch_mock:
-            self.assertIsNone(await self.token_store.token_for_host(host="api.tavily.com"))
+            self.assertIsNone(await self.token_store.token_for_host(host="api.notaprovider.com"))
             fetch_mock.assert_not_called()
 
     async def test_absent_outcome_leaves_cache_empty(self) -> None:
