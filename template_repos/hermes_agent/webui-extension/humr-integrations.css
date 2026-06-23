@@ -221,6 +221,27 @@ main.main.showing-integrations > #mainChat { display: none !important; }
   text-overflow: ellipsis;
 }
 
+/* Read-only footer shown in place of the Configure/Disconnect actions when the
+   active credential is org-provided. Sits in the action-row slot (the body
+   pins it to the bottom), so org-shared cards align with their neighbors. */
+.humr-integration-org-shared {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border-radius: 6px;
+  border: 1px dashed var(--border2);
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.humr-integration-org-shared::before {
+  content: "🔒";
+  font-size: 11px;
+  line-height: 1;
+}
+
 /* Footer buttons share the card width equally so the action row reads as a
    balanced base. Buttons grow to fill but cap at an even split (flex: 1 1 0). */
 .humr-integration-actions {
