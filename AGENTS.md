@@ -10,9 +10,9 @@
 
 **"Humanity Rules" (abbreviated "HumR") is the product identity, used everywhere.** The code, infrastructure, and environment variables use the `humanityrules` / `humr` / `HUMR_` identifiers throughout (AWS resource names use the short `humr`; Python packages use the full `humanityrules`).
 
-HumR chooses the open-source Hermes agent as its agent harness, and the Hermes WebUI as the UI for users. 
+HumR chooses the open-source Hermes agent (abbreviated HA) as its agent harness, and the Hermes WebUI as the UI for users. 
 
-The Hermes agent that HumR deploys is located at template_repos/hermes_agent/. HumR deploys Hermes using the AppTemplate mechanism.
+The HA that HumR deploys is located at template_repos/hermes_agent/. HumR deploys Hermes using the AppTemplate mechanism.
 
 HumR's control plane is called CP.
 
