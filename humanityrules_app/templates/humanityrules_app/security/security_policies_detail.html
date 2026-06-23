@@ -55,7 +55,7 @@
                     Match any identity
                 </label>
                 <template x-if="!identityWildcard">
-                    {% include "humanityrules_app/partials/_kv_tag_editor.html" with array_model="identityConditions" suggested_keys=existing_identity_keys suggested_values=existing_identity_values add_label="Add condition" key_width="w-48" value_width="w-48" type_filter_model="resourceType" %}
+                    {% include "humanityrules_app/partials/_kv_tag_editor.html" with array_model="identityConditions" suggested_keys=existing_identity_keys suggested_values=existing_identity_values add_label="Add condition" key_width="w-56" value_width="w-56" type_filter_model="resourceType" %}
                 </template>
             </div>
 
@@ -80,7 +80,7 @@
                             Match any resource
                         </label>
                         <template x-if="!resourceWildcard">
-                            {% include "humanityrules_app/partials/_kv_tag_editor.html" with array_model="resourceConditions" suggested_keys=existing_tag_keys suggested_values=existing_tag_values add_label="Add condition" type_filter_model="resourceType" key_width="w-48" value_width="w-48" %}
+                            {% include "humanityrules_app/partials/_kv_tag_editor.html" with array_model="resourceConditions" suggested_keys=existing_tag_keys suggested_values=existing_tag_values add_label="Add condition" type_filter_model="resourceType" key_width="w-56" value_width="w-56" %}
                         </template>
                     </div>
                 </div>

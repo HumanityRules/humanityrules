@@ -31,6 +31,7 @@
     <input type="text"
            {% if name %}name="{{ name }}"{% endif %}
            x-model="{{ model }}"
+           x-ref="input"
            placeholder="{{ placeholder }}"
            autocomplete="off"
            {% if required %}required{% endif %}
@@ -40,8 +41,12 @@
            @keydown.escape="open = false; $el.blur()"
            class="{% if input_class %}{{ input_class }}{% else %}{{ width }} px-2 py-0.5 text-xs border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800 text-gray-900 dark:text-white placeholder-gray-400{% endif %} pr-5 focus:outline-none focus:ring-0 focus-visible:outline-none">
     {% if suggestions %}
-    <svg @click="open = !open" class="pointer-events-auto cursor-pointer absolute right-1 top-1/2 -translate-y-1/2 h-3 w-3 text-gray-400 transition-transform duration-200" :class="open && 'rotate-180'" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+    {# Right-side control morphs: chevron browses all when empty, clear (x) resets the field and reopens the full list. #}
+    <svg x-show="!{{ model }}" x-cloak @click="open = !open" class="pointer-events-auto cursor-pointer absolute right-1 top-1/2 -translate-y-1/2 h-3 w-3 text-gray-400 transition-transform duration-200" :class="open && 'rotate-180'" fill="none" stroke="currentColor" viewBox="0 0 24 24">
         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
+    </svg>
+    <svg x-show="!!{{ model }}" x-cloak @click="{{ model }} = ''{% if value_model %}; {{ value_model }} = ''{% endif %}{% if clear_model %}; {{ clear_model }} = ''{% endif %}; open = {% if for_key_model %}!!{{ for_key_model }}{% else %}true{% endif %}; $refs.input.focus()" class="pointer-events-auto cursor-pointer absolute right-1 top-1/2 -translate-y-1/2 h-3 w-3 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
     </svg>
     <div x-show="open {% if for_key_model %}&& !!{{ for_key_model }}{% endif %}" x-cloak x-transition.opacity.duration.50ms
          class="absolute z-50 min-w-full rounded-md border border-gray-200 bg-white shadow-lg dark:border-gray-600 dark:bg-gray-800 max-h-48 overflow-y-auto dark-scrollbar">
