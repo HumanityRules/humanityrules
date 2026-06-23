@@ -66,6 +66,22 @@
       btn.disabled = true;
       btn.textContent = 'Refreshing…';
     }
+    // _current is already populated (the pane renders on open), so we can tell
+    // up front whether this Refresh will rebuild the model picker. Gate on the
+    // catalog actually carrying a model provider so deployments with only non-
+    // model connectors skip the /api/models round-trip. When it will rebuild,
+    // hold the same full-screen dialog the connect-return path uses: refresh_all
+    // restarts the model gateway, and blocking interaction until the picker is
+    // rebuilt stops the user opening a new chat against the stale dropdown
+    // mid-rebuild — the very symptom this whole change fixes.
+    const affectsModels = !!(_current && Array.isArray(_current.items)
+      && _current.items.some((it) => it && it.affects_model_picker));
+    const modal = affectsModels
+      ? showTransitionModal({
+        title: 'Refreshing integrations…',
+        body: 'Syncing status and models with Humanity Rules. This will only take a moment.',
+      })
+      : null;
     try {
       // One round-trip: the broker reloads the MCP catalog AND invalidates the
       // all-providers TLS cache (which refetches from HUMR and, for vault
@@ -102,12 +118,9 @@
       // refreshModelDropdownsIfProviderAffectsPicker(); Refresh-all must do the
       // same, otherwise the model dropdown keeps its boot-time catalog (no
       // OpenRouter) until a full page reload even though the broker now reports
-      // the provider connected. Gate on the catalog actually carrying a model
-      // provider so deployments with only non-model connectors skip the
-      // /api/models round-trip. Covers connect AND disconnect (the rebuild
+      // the provider connected. Covers connect AND disconnect (the rebuild
       // re-reads /api/models, so a revoked shared key also drops out live).
-      if (_current && Array.isArray(_current.items)
-          && _current.items.some((it) => it && it.affects_model_picker)) {
+      if (affectsModels) {
         await refreshModelDropdownsIfProviderAffectsPicker({ affects_model_picker: true });
       }
     } catch (_) {
@@ -116,6 +129,7 @@
         note.style.display = '';
       }
     } finally {
+      if (modal) modal.remove();
       _refreshInflight = false;
       if (btn) {
         btn.disabled = false;
@@ -397,11 +411,17 @@
   // visible page and blocks interaction; init() removes it once the real
   // render completes and logos have reloaded. No Cancel: the round-trip is
   // short and there's nothing to abort.
-  function showTransitionModal(sentinel) {
-    // The catalog (with each provider's properly-cased label) isn't loaded yet
-    // at this point, so the title stays provider-agnostic to avoid mis-casing
-    // a brand name (e.g. "Github"). Only one transition is ever in flight.
-    const title = (sentinel.transition === 'disconnected' ? 'Disconnecting' : 'Finishing connection') + '…';
+  function showTransitionModal(opts) {
+    // On the connect-return path the catalog (with each provider's properly-
+    // cased label) isn't loaded yet, so the default title stays provider-
+    // agnostic to avoid mis-casing a brand name (e.g. "Github"). Callers that
+    // already know the wording (e.g. Refresh-all) pass an explicit title/body.
+    const title = (typeof opts.title === 'string')
+      ? opts.title
+      : ((opts.transition === 'disconnected' ? 'Disconnecting' : 'Finishing connection') + '…');
+    const body = (typeof opts.body === 'string')
+      ? opts.body
+      : 'Syncing status with Humanity Rules. This will only take a moment.';
     // Transparent backdrop (humr-transition-backdrop): the dialog floats over
     // the page, which stays visible behind it, and blocks interaction. We do
     // NOT re-render the page while the dialog is up, so nothing behind it
@@ -410,7 +430,7 @@
     const modal = elem('div', { class: 'humr-modal humr-transition-modal' }, [
       elem('div', { class: 'humr-transition-spinner' }),
       elem('div', { class: 'humr-modal-title' }, [title]),
-      elem('div', { class: 'humr-modal-body' }, ['Syncing status with Humanity Rules. This will only take a moment.']),
+      elem('div', { class: 'humr-modal-body' }, [body]),
     ]);
     backdrop.appendChild(modal);
     document.body.appendChild(backdrop);
