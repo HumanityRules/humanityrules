@@ -135,22 +135,33 @@ Backend is complete and tested:
   unchanged, so `$app` is currently surfaced only through the credential path.
 - `sync_shared_credential_tags` seeds `shared-scope` / `shared-user` / `shared-workspace`
   on every save (post_save signal).
-- `shared_credential_resolver.resolve` + `provider_openrouter.refresh_outcome_from_shared`, wired
-  into `integrations_tokens_batch` so shared credentials win over personal keys.
+- `shared_credential_resolver.resolve` + each vault provider's `refresh_outcome_from_shared`,
+  wired into `integrations_tokens_batch` so shared credentials win over personal keys.
 - Tests: `tests/test_shared_credentials.py` (engine path, tag seeding, resolver
   precedence, packaging, `$app` validation) and a `TestSharedCredentials` class in
   `tests/test_integrations_tokens_batch.py` (full HTTP path, org-wins override,
   workspace-via-`$app`).
 
-Input surface for v1 is the Django admin (`IntegrationSharedCredentialAdmin`), which
-validates scope/target coherence and live-checks OpenRouter keys via
-`provider_openrouter.validate_shared_key`.
+Shareable providers are the **vault key providers** — OpenRouter, OpenAI, and Anthropic.
+Each exposes `validate_shared_key(api_key) -> (metadata, error)` (admin-side live check) and
+`refresh_outcome_from_shared(credential) -> dict` (broker packaging). The broker dispatch,
+the admin form, and the org-admin UI all discover shareable providers by `getattr` on the
+registry, so the next key provider is just those two functions on its `provider_*` module.
+
+Input surfaces:
+
+- **Org-admin UI** (shipped): a "Provider Keys" tab at `/integrations/org/provider-keys/`,
+  gated by `base.require_org_admin` (`views/integrations/org_shared_keys.py` +
+  `templates/.../integrations/shared_keys.html` + `shared_key_form_modal.html`). Lists shares
+  with the secret never rendered; add/edit/delete via an htmx modal. Editing leaves the key
+  blank to keep the current secret; pasting a new one re-validates. Tests:
+  `tests/test_org_shared_keys.py`.
+- **Django admin** (`IntegrationSharedCredentialAdmin`): superuser fallback; validates
+  scope/target coherence and live-checks the key via the provider's `validate_shared_key`.
 
 Deferred (follow-ups):
 
-- Bespoke org-admin-gated security/integrations page (Django admin is superuser-gated,
-  not org-admin-gated).
 - User integrations panel showing an applicable share read-only ("Provided by your
   organization") and disabling the paste form.
 - Surfacing `$app` on `evaluate_policies` if a non-credential consumer needs it.
-- Secrets Manager storage; push-invalidation to brokers; non-OpenRouter providers.
+- Secrets Manager storage; push-invalidation to brokers; OAuth (non-vault) providers.

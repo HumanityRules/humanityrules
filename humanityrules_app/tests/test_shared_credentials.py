@@ -1,5 +1,7 @@
 """Tests for org-shared integration credentials: the $app ABAC path, tag seeding,
-the broker resolver's precedence, and OpenRouter shared packaging."""
+the broker resolver's precedence, and the vault providers' shared packaging."""
+
+from unittest.mock import MagicMock, patch
 
 from django.test import TestCase
 
@@ -14,7 +16,12 @@ from humanityrules_app.models import (
     Workspace,
 )
 from humanityrules_app.services import abac_service
-from humanityrules_app.views.integrations import provider_openrouter, shared_credential_resolver
+from humanityrules_app.views.integrations import (
+    provider_anthropic,
+    provider_openai,
+    provider_openrouter,
+    shared_credential_resolver,
+)
 
 
 class SharedCredentialTestBase(TestCase):
@@ -152,17 +159,78 @@ class TestResolveSharedCredential(SharedCredentialTestBase):
 
 class TestRefreshOutcomeFromShared(SharedCredentialTestBase):
 
+    def _cred(self, provider: str, api_key: str) -> IntegrationSharedCredential:
+        return IntegrationSharedCredential.objects.create(
+            organization=self.org, provider=provider, scope="everyone", credentials={"api_key": api_key},
+        )
+
     def test_packages_has_token(self) -> None:
         cred = self._make_cred("everyone", None, None, "sk-or-xyz")
         outcome = provider_openrouter.refresh_outcome_from_shared(credential=cred)
         self.assertEqual(outcome["outcome"], "has_token")
         self.assertEqual(outcome["secrets"], {"api_key": "sk-or-xyz"})
 
+    def test_openai_packages_has_token(self) -> None:
+        cred = self._cred(provider="openai-api", api_key="sk-openai")
+        outcome = provider_openai.refresh_outcome_from_shared(credential=cred)
+        self.assertEqual(outcome["outcome"], "has_token")
+        self.assertEqual(outcome["secrets"], {"api_key": "sk-openai"})
+        self.assertEqual(outcome["expires_in"], provider_openai.OPENAI_BROKER_CACHE_SECONDS)
+
+    def test_anthropic_packages_has_token(self) -> None:
+        cred = self._cred(provider="anthropic", api_key="sk-ant-xyz")
+        outcome = provider_anthropic.refresh_outcome_from_shared(credential=cred)
+        self.assertEqual(outcome["outcome"], "has_token")
+        self.assertEqual(outcome["secrets"], {"api_key": "sk-ant-xyz"})
+        self.assertEqual(outcome["expires_in"], provider_anthropic.ANTHROPIC_BROKER_CACHE_SECONDS)
+
     def test_absent_when_key_missing(self) -> None:
         cred = IntegrationSharedCredential.objects.create(
             organization=self.org, provider="openrouter", scope="everyone", credentials={},
         )
         self.assertEqual(provider_openrouter.refresh_outcome_from_shared(credential=cred)["outcome"], "absent")
+        for module in (provider_openai, provider_anthropic):
+            self.assertEqual(module.refresh_outcome_from_shared(credential=cred)["outcome"], "absent")
+
+
+class TestValidateSharedKey(TestCase):
+    """The admin-side live key check each vault provider exposes for org sharing."""
+
+    def _ok_response(self) -> MagicMock:
+        response = MagicMock()
+        response.status_code = 200
+        response.json.return_value = {"data": [{"id": "model"}]}
+        return response
+
+    def _unauthorized_response(self) -> MagicMock:
+        response = MagicMock()
+        response.status_code = 401
+        response.json.return_value = {"error": {"message": "bad key"}}
+        return response
+
+    def test_openai_valid_key_returns_metadata(self) -> None:
+        with patch("humanityrules_app.views.integrations.provider_openai.httpx.get", return_value=self._ok_response()):
+            metadata, error = provider_openai.validate_shared_key(api_key="sk-real")
+        self.assertIsNone(error)
+        self.assertIn("validated_at", metadata)
+
+    def test_anthropic_valid_key_returns_metadata(self) -> None:
+        with patch("humanityrules_app.views.integrations.provider_anthropic.httpx.get", return_value=self._ok_response()):
+            metadata, error = provider_anthropic.validate_shared_key(api_key="sk-ant-real")
+        self.assertIsNone(error)
+        self.assertIn("validated_at", metadata)
+
+    def test_blank_key_rejected_without_network(self) -> None:
+        for module in (provider_openai, provider_anthropic, provider_openrouter):
+            metadata, error = module.validate_shared_key(api_key="   ")
+            self.assertIsNone(metadata)
+            self.assertEqual(error, "api_key is required")
+
+    def test_openai_unauthorized_key_rejected(self) -> None:
+        with patch("humanityrules_app.views.integrations.provider_openai.httpx.get", return_value=self._unauthorized_response()):
+            metadata, error = provider_openai.validate_shared_key(api_key="sk-bad")
+        self.assertIsNone(metadata)
+        self.assertEqual(error, provider_openai.OPENAI_INVALID_KEY_MESSAGE)
 
 
 class TestAppReferenceValidation(TestCase):

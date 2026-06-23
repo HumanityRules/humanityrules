@@ -131,6 +131,13 @@ urlpatterns = [
     path("integrations/org/github/setup/", views.integrations_org_github_setup, name="integrations_org_github_setup"),
     path("integrations/org/github/select-installation/", views.integrations_org_github_select_installation, name="integrations_org_github_select_installation"),
 
+    # Shared provider keys: org admin provisions one key (OpenRouter/OpenAI/Anthropic)
+    # and shares it with everyone / a workspace / a user. Persists IntegrationSharedCredential.
+    path("integrations/org/provider-keys/", views.integrations_org_shared_keys, name="integrations_org_shared_keys"),
+    path("integrations/org/provider-keys/add/", views.integrations_org_shared_keys_add, name="integrations_org_shared_keys_add"),
+    path("integrations/org/provider-keys/<uuid:credential_id>/edit/", views.integrations_org_shared_keys_edit, name="integrations_org_shared_keys_edit"),
+    path("integrations/org/provider-keys/<uuid:credential_id>/delete/", views.integrations_org_shared_keys_delete, name="integrations_org_shared_keys_delete"),
+
     # Integrations — per-user (each user grants OAuth from inside a deployed app).
     # Persists IntegrationUserCredential keyed by (owner_user, environment, app_slug, provider).
     # No long-lived secrets ever reach the customer env.
