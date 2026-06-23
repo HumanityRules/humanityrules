@@ -3,7 +3,7 @@ from django.contrib import admin
 from django.contrib.auth.admin import UserAdmin as BaseUserAdmin
 from django.http import HttpRequest
 
-from humanityrules_app.views.integrations import provider_openrouter
+from humanityrules_app.views.integrations import provider_registry
 from humanityrules_app.models import (
     AWSAccount,
     App,
@@ -502,13 +502,17 @@ class IntegrationSharedCredentialForm(forms.ModelForm):
 
         provider = cleaned.get("provider")
         credentials = cleaned.get("credentials")
-        if provider == IntegrationUserCredential.Provider.OPENROUTER and isinstance(credentials, dict):
+        spec = provider_registry.get(provider=provider) if provider else None
+        validate_shared_key = getattr(spec.module, "validate_shared_key", None) if spec is not None else None
+        if validate_shared_key is not None and isinstance(credentials, dict):
+            # Require (and live-validate) a real key: a blank share resolves to
+            # `absent` at refresh time and would shadow every user's personal key
+            # org-wide. validate_shared_key rejects an empty key.
             api_key = str(credentials.get("api_key", "") or "").strip()
-            if api_key:
-                metadata, error = provider_openrouter.validate_shared_key(api_key=api_key)
-                if error is not None:
-                    raise forms.ValidationError({"credentials": error})
-                cleaned["metadata"] = metadata
+            metadata, error = validate_shared_key(api_key=api_key)
+            if error is not None:
+                raise forms.ValidationError({"credentials": error})
+            cleaned["metadata"] = metadata
         return cleaned
 
 
